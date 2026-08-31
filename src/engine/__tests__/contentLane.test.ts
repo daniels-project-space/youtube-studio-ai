@@ -30,6 +30,11 @@ const whiteboardPipeline: PipelineEntry[] = [
 
 assert.doesNotThrow(() => assertPipelineMatchesContentLane(whiteboard, whiteboardPipeline));
 assert.throws(
+  () => assertPipelineMatchesContentLane(whiteboard, [...whiteboardPipeline, { block: "whiteboard_scribe" }]),
+  /requires exactly one primary renderer whiteboard_scribe \(found 2\)/,
+  "a lane must retain exactly one final-renderer owner, not merely reject foreign renderers",
+);
+assert.throws(
   () => assertPipelineMatchesContentLane(whiteboard, whiteboardPipeline.filter((entry) => entry.block !== "qa_visual")),
   /requires qa_visual/,
   "every defined channel lane must retain the visual release gate",
@@ -88,6 +93,7 @@ assert(cinematic, "cinematic must have a canonical content lane");
 assert.doesNotThrow(() => assertPipelineMatchesContentLane(cinematic, [
   { block: "novita_render_images" },
   { block: "qa_assets" },
+  { block: "studio_ltx_adapter_resolve" },
   { block: "novita_render_video" },
   { block: "qa_shots" },
   { block: "timeline_assemble" },
@@ -99,6 +105,31 @@ assert.doesNotThrow(() => assertPipelineMatchesContentLane(cinematic, [
   { block: "timeline_assemble" },
   { block: "qa_visual" },
 ]), "the source-admitted Casefile handoff must be a valid cinematic Novita chain");
+assert.throws(
+  () => assertPipelineMatchesContentLane(cinematic, [
+    { block: "cinematic_case_sequence" },
+    { block: "qa_visual" },
+    { block: "gen_footage" },
+    { block: "timeline_assemble" },
+  ]),
+  /requires renderer owner gen_footage before final qa_visual/,
+  "final visual QA cannot review an unrendered Casefile master",
+);
+assert.throws(
+  () => assertPipelineMatchesContentLane(cinematic, [
+    { block: "cinematic_case_sequence" },
+    { block: "gen_footage" },
+    { block: "novita_render_images" },
+    { block: "qa_assets" },
+    { block: "studio_ltx_adapter_resolve" },
+    { block: "novita_render_video" },
+    { block: "qa_shots" },
+    { block: "timeline_assemble" },
+    { block: "qa_visual" },
+  ]),
+  /requires exactly one complete renderer chain \(found 2\)/,
+  "a cinematic pipeline must choose one complete final-pixel path rather than mix direct and Casefile renderers",
+);
 assert.throws(
   () => assertPipelineMatchesContentLane(cinematic, [
     { block: "gen_footage" },
@@ -118,6 +149,113 @@ assert.throws(
   /requires one renderer chain: novita_render_images \+ qa_assets \+ novita_render_video \+ qa_shots OR gen_footage/,
   "a partial direct Novita chain must remain rejected",
 );
+assert.throws(
+  () => assertPipelineMatchesContentLane(cinematic, [
+    { block: "novita_render_images" },
+    { block: "novita_render_video" },
+    { block: "qa_assets" },
+    { block: "qa_shots" },
+    { block: "timeline_assemble" },
+    { block: "qa_visual" },
+  ]),
+  /requires renderer chain order novita_render_images < qa_assets < novita_render_video < qa_shots/,
+  "a direct cinematic render path must keep asset QA before I2V and shot QA after it",
+);
+
+// The optional Visual Matter reference pack has a stricter shape than ordinary
+// renderer membership: it is a single cinematic QA-input pack planned from the
+// story spine, not a reusable image-conditioning stage.
+const cinematicReferencePipeline: PipelineEntry[] = [
+  { block: "story_spine" },
+  { block: "studio_asset_resolve" },
+  { block: "visual_matter" },
+  { block: "visual_matter_references" },
+  { block: "novita_render_images" },
+  { block: "qa_assets" },
+  { block: "studio_ltx_adapter_resolve" },
+  { block: "novita_render_video" },
+  { block: "qa_shots" },
+  { block: "timeline_assemble" },
+  { block: "qa_visual" },
+];
+assert.doesNotThrow(
+  () => assertPipelineMatchesContentLane(cinematic, cinematicReferencePipeline),
+  "the exact Visual Matter QA-reference composition must remain valid",
+);
+assert.throws(
+  () => assertPipelineMatchesContentLane(cinematic, cinematicReferencePipeline.map((entry) => {
+    if (entry.block === "visual_matter") {
+      return { ...entry, params: { visualTreatment: "clay_stop_motion" } };
+    }
+    if (entry.block === "studio_asset_resolve") {
+      return { ...entry, params: { treatment: "clay_stop_motion" } };
+    }
+    if (entry.block === "studio_ltx_adapter_resolve") {
+      return { ...entry, params: { treatment: "anime_inspired_2d" } };
+    }
+    return entry;
+  })),
+  /studio_ltx_adapter_resolve treatment must match visual_matter visualTreatment exactly/,
+  "a direct-LTX adapter lookup must not use a LoRA benchmarked for a different visual treatment",
+);
+
+const visualMatterReferenceNegativeCases: ReadonlyArray<{
+  readonly name: string;
+  readonly lane: NonNullable<typeof cinematic>;
+  readonly pipeline: readonly PipelineEntry[];
+  readonly expected: RegExp;
+}> = [
+  {
+    name: "non-cinematic content lane",
+    lane: narrated,
+    pipeline: [...narratedPipeline, { block: "visual_matter_references" }],
+    expected: /Visual Matter is cinematic_ai-only/,
+  },
+  {
+    name: "direct open-weight LTX 2.5 Novita adapter lookup outside the cinematic lane",
+    lane: narrated,
+    pipeline: [...narratedPipeline, { block: "studio_ltx_adapter_resolve" }],
+    expected: /Visual Matter is cinematic_ai-only/,
+  },
+  {
+    name: "duplicate pack",
+    lane: cinematic,
+    pipeline: [
+      ...cinematicReferencePipeline.slice(0, 4),
+      { block: "visual_matter_references" },
+      ...cinematicReferencePipeline.slice(4),
+    ],
+    expected: /exactly one visual_matter_references pack/,
+  },
+  {
+    name: "pack before its Visual Matter manifest",
+    lane: cinematic,
+    pipeline: [
+      cinematicReferencePipeline[0]!,
+      cinematicReferencePipeline[1]!,
+      cinematicReferencePipeline[3]!,
+      cinematicReferencePipeline[2]!,
+      ...cinematicReferencePipeline.slice(4),
+    ],
+    expected: /story_spine < studio_asset_resolve < visual_matter < visual_matter_references/,
+  },
+  {
+    name: "pack after shot QA",
+    lane: cinematic,
+    pipeline: [
+      ...cinematicReferencePipeline.filter((entry) => entry.block !== "visual_matter_references"),
+      { block: "visual_matter_references" },
+    ],
+    expected: /story_spine < studio_asset_resolve < visual_matter < visual_matter_references/,
+  },
+];
+for (const invalid of visualMatterReferenceNegativeCases) {
+  assert.throws(
+    () => assertPipelineMatchesContentLane(invalid.lane, invalid.pipeline),
+    invalid.expected,
+    `Visual Matter reference composition must reject ${invalid.name}`,
+  );
+}
 const designedCinematicBlocks = designPipeline({ family: "cinematic" }).pipeline.map((entry) => entry.block);
 for (const block of ["novita_render_images", "qa_assets", "novita_render_video", "qa_shots"]) {
   assert(
@@ -178,6 +316,14 @@ for (const family of Object.keys(FAMILIES) as Array<keyof typeof FAMILIES>) {
   const design = designPipeline({ family });
   assert.equal(design.contentLane.family, family);
   assert.doesNotThrow(() => assertPipelineMatchesContentLane(design.contentLane, design.pipeline));
+  assert.throws(
+    () => assertPipelineMatchesContentLane(
+      design.contentLane,
+      [...design.pipeline, { block: design.contentLane.primaryRenderer }],
+    ),
+    /requires exactly one (?:primary renderer|renderer owner)/,
+    `${family} must not accept a duplicate final renderer in its otherwise-valid generated graph`,
+  );
   assert.equal(
     design.pipeline.find((entry) => entry.block === "qa_visual")?.params?.audioQa,
     true,

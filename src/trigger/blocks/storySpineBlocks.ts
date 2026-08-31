@@ -1,11 +1,12 @@
 import type { Block } from "@/engine/types";
 import { getCutSheet, getStructure, getVisualBrief } from "@/engine/creative/brief";
-import { planStorySpine } from "@/engine/storySpine";
+import { planStorySpine, storySpineFingerprint } from "@/engine/storySpine";
 import { assertEditorialEvidencePacketNarrationAlignment } from "@/engine/editorialEvidenceNarration";
 import { resolveContentLane } from "@/engine/contentLane";
 import { assertCurriculumEpisodeSeedForStoryInput } from "@/engine/curriculumEpisodeSeed";
 import { buildEpisodeSpec } from "@/engine/qualityEvidence";
 import { measureHookWindow } from "@/lib/hookcraft";
+import { serializedProgramEpisodeContextForStage } from "@/trigger/serializedProgramEpisodeContext";
 
 export const storySpine: Block = {
   id: "story_spine",
@@ -24,6 +25,7 @@ export const storySpine: Block = {
     "dpVisualSpecs",
     "editorEdl",
     "storyCoverage",
+    "storySpineFingerprint",
     "episodeSpec",
   ],
   run: async (ctx) => {
@@ -46,6 +48,7 @@ export const storySpine: Block = {
       });
     }
     const duration = Number(ctx.store["narrationDurationSec"]);
+    const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "story_spine");
     const spine = planStorySpine({
       topic: String(ctx.store["topic"]),
       narrationDurationSec: duration,
@@ -53,6 +56,17 @@ export const storySpine: Block = {
       structure: getStructure(ctx.store),
       visualBrief: getVisualBrief(ctx.store) as Record<string, unknown> | undefined,
       styleDNA: (ctx.store["styleDNA"] as Record<string, unknown> | null | undefined) ?? null,
+      serializedEpisodeContinuity: serializedEpisodeContext
+        ? {
+            episodeNumber: serializedEpisodeContext.episodeNumber,
+            seriesTitle: serializedEpisodeContext.seriesTitle,
+            ...(serializedEpisodeContext.continuity.arcSummary
+              ? { arcSummary: serializedEpisodeContext.continuity.arcSummary }
+              : {}),
+            unresolvedThreads: serializedEpisodeContext.continuity.unresolvedThreads,
+            entities: serializedEpisodeContext.continuity.entities,
+          }
+        : undefined,
       generationProfile: ctx.params["generationProfile"] ?? "production",
       targetShotSec: Number(ctx.params["targetShotSec"] ?? 6),
     });
@@ -114,6 +128,9 @@ export const storySpine: Block = {
       dpVisualSpecs: spine.dpVisualSpecs,
       editorEdl,
       storyCoverage: spine.coverage,
+      // Retain the pre-render plan identity so final QA can prove it audited
+      // this exact Story Spine rather than a post-render reconstruction.
+      storySpineFingerprint: storySpineFingerprint(spine),
       episodeSpec,
     };
   },

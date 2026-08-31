@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import { registerAllBlocks } from "@/engine/blocks";
 import { generationProfile } from "@/engine/generationProfiles";
@@ -161,6 +162,35 @@ assert(
 assert(
   !("assetQaReport" in (video.optionalConsumes ?? {})),
   "the accepted keyframe QA receipt must never become optional",
+);
+assert(
+  "studioLtxCreativeAdapterSelectionsByShot" in (video.optionalConsumes ?? {}),
+  "novita_render_video must declare the immutable per-shot Studio adapter map when a serialized route emits one",
+);
+assert(
+  "narrativeShotControl" in (video.optionalConsumes ?? {}),
+  "a per-shot Studio adapter map must be cross-checked against the sealed narrative shot-control receipt",
+);
+const source = readFileSync(new URL("../novitaRenderBlocks.ts", import.meta.url), "utf8");
+assert.match(
+  source,
+  /studioLtxShotAdapterSelectionsFromUnknown\(\s*ctx\.store\["studioLtxCreativeAdapterSelectionsByShot"\]/,
+  "the renderer must parse the immutable per-shot adapter map before direct LTX work",
+);
+assert.match(
+  source,
+  /creativeAdapterForShot = scopedStudioAdapterByShot[\s\S]*scopedStudioAdapter\?\.selection[\s\S]*creativeAdapter/,
+  "the renderer must choose the exact per-shot selection rather than reapplying a character LoRA globally",
+);
+assert.match(
+  source,
+  /const renderedAdapterByShot = new Map\([\s\S]*shotsWithStills\.map\(\(shot\) => \[shot\.id, shot\.creativeAdapter\][\s\S]*?creativeAdapter: renderedAdapterByShot\.get\(shot\.id\)/,
+  "the durable render manifest must retain the exact adapter used for each initial LTX shot",
+);
+assert.match(
+  source,
+  /phase: "video",[\s\S]*?creativeAdapter: item\.creativeAdapter,[\s\S]*?renderVideo\(qualityRecoveryRenderCfg\(ctx, "video", profile, repair\.shot\)\)/,
+  "a video QA repair must replay the rejected clip's manifest-bound Studio adapter, not a mutable global parameter",
 );
 
 console.log("Novita video keyframe-admission binding tests passed");

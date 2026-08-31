@@ -1,4 +1,6 @@
 import type { ImageUsageSummary } from "@/lib/imageUsage";
+import type { RunExecutionLeaseFence } from "@/lib/runLease";
+import type { VisualArtifactAttempt } from "./visualArtifactAttemptLedger";
 
 /**
  * Core block-engine contract (MASTER-PLAN §D).
@@ -44,6 +46,8 @@ export interface StageContext {
   ownerId: string;
   runId: string;
   channelId: string;
+  /** Exact active execution generation for fenced durable side effects. */
+  executionLease?: RunExecutionLeaseFence;
   /** Per-channel R2 key prefix, e.g. `owner/<ownerId>/channel/<slug>/`. */
   keyPrefix: string;
   /** Block params from the channel's pipeline entry. */
@@ -71,6 +75,25 @@ export interface StageContext {
     reason?: string;
     requiredFuturePaidBlockIds?: readonly string[];
   }) => { reservedMaxCostUsd: number; blockIds: readonly string[] };
+  /**
+   * Remote-child-only fence for work that can outlive a local task checkpoint.
+   * Provider waves and creates use it as a hard reassertion; polling uses it
+   * as a short liveness heartbeat. It is absent in local/direct contexts.
+   */
+  assertRemoteChildExecutionLease?: (args?: {
+    reason?: "paid_wave" | "worker_create" | "poll";
+  }) => Promise<void>;
+  /**
+   * Exact durable identity of the remote child that owns this context. Direct
+   * provider adapters forward it to their own durable resource mutations so a
+   * pause between a client-side lease check and a provider create cannot let a
+   * superseded child spend under an old execution generation.
+   */
+  remoteChildFence?: {
+    leaseOwner: string;
+    executionLeaseToken: number;
+    dispatchKey: string;
+  };
   /** Exact provider-token spend observed in this block's runner scope so a
    * composite cost/checkpoint can include it without estimating or hiding it. */
   modelUsageCostUsd?: (kinds?: readonly CostModelUsageKind[]) => number;
@@ -82,6 +105,15 @@ export interface StageContext {
   /** Exact image-provider responses observed in this block's async-local
    * scope, including model route, output dimensions, and authoritative cost. */
   imageUsageAccounting?: () => ImageUsageSummary;
+  /**
+   * Append independently reviewed visual-candidate records to the existing
+   * durable artifact store. This is audit-only: records are not exposed as
+   * stage outputs and never influence release, retry, or budget decisions.
+   * A caller that will request a replacement must await this checkpoint first.
+   */
+  checkpointVisualArtifactAttempts?: (
+    attempts: readonly VisualArtifactAttempt[],
+  ) => Promise<readonly ArtifactRef[]>;
   /** Structured log sink; defaults to console in the local runner. */
   log: (msg: string, extra?: Record<string, unknown>) => void;
 }
@@ -186,4 +218,17 @@ export interface RunStageSink {
       createdAt: number;
     }>;
   }): Promise<void>;
+}
+
+/**
+ * Demand plan for restoring a completed stage on a fresh worker.
+ *
+ * The complete persisted patch always remains visible to the runner. This
+ * narrows only which local media artifacts need materialising on this worker;
+ * the storage boundary still verifies any omitted R2-backed local artifact so
+ * a retry cannot certify a missing durable output.
+ */
+export interface ResumeRehydrationRequest {
+  /** Output keys a later locally-executed block may read on this worker. */
+  neededOutputKeys?: ReadonlySet<string>;
 }

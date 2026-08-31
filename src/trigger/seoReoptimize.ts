@@ -4,10 +4,10 @@
  * performance ledger; this task finds the UNDERperformers and rewrites their title +
  * tags on YouTube (videos.update) to lift click-through — no re-upload, no re-render.
  *
- * Safe + cheap: only LLM calls (re-titling) + free Data API updates. Acts only on
- * settled videos (enough views), only the channel's weakest, and never re-touches a
- * video more than once per 30 days. Degrades to a no-op without Gemini / a linked
- * token / enough data.
+ * Containment: the legacy performance ledger cannot prove that an observation belongs
+ * to a particular published title/thumbnail package. Until the durable package-
+ * attribution contract exists, even explicitly approved runs stop before Gemini or
+ * YouTube calls and request manual reconciliation instead.
  */
 import { schedules, task } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -26,16 +26,40 @@ import { YOUTUBE_WRITE_SCOPES } from "@/lib/publishingPolicy";
 import { hasGeminiKey, geminiJson } from "@/lib/gemini";
 
 const MS_30D = 30 * 86_400_000;
-const MIN_VIEWS = 200; // enough impressions for CTR/retention to mean something
+const MIN_VIEWS = 200; // legacy ranking threshold; never package-confidence evidence
 const MAX_PER_CHANNEL = 3; // gentle — don't churn the whole library at once
 const score = (e: PerfEntry) => e.avgViewPct * 0.7 + (e.ctr ?? 0) * 0.3;
 
 type Logger = (m: string) => void;
 
-async function reoptimize(ownerId: string, log: Logger, approvedForMetadataChanges = false) {
+function unavailablePackageAttributionAdmission() {
+  // Deliberately fail closed. The current R2 ledger has no immutable package version,
+  // raw impressions, freshness boundary, or fully post-package observation. Do not
+  // substitute views/CTR or a run-stage title for this admission record.
+  return {
+    admitted: false as const,
+    action: "manual_reconciliation_required" as const,
+    reason: "verified_package_attribution_required" as const,
+    nextAction:
+      "Record or reconcile the published title/thumbnail package, then collect a fresh, fully post-package, confidence-qualified attribution observation before retrying.",
+  };
+}
+
+export async function reoptimize(
+  ownerId: string,
+  log: Logger,
+  approvedForMetadataChanges = false,
+) {
   if (!approvedForMetadataChanges) {
     log("seo-reopt: external metadata changes require explicit operator approval — skip");
     return { ok: true, skipped: "approval_required", updated: 0 };
+  }
+  const admission = unavailablePackageAttributionAdmission();
+  if (!admission.admitted) {
+    log(
+      `seo-reopt: blocked — ${admission.reason}; ${admission.nextAction}`,
+    );
+    return { ok: false, updated: 0, ...admission };
   }
   await bootstrapSecrets((m) => log(m));
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;

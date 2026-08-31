@@ -22,7 +22,35 @@ import {
   ShotRenderManifestSchema,
   validateQualifiedShotRender,
 } from "@/engine/renderArtifacts";
+import {
+  assertVisualSequenceArtifactManifest,
+  classifyVisualSequenceEvidenceRejection,
+  createVisualSequenceEvidenceOmission,
+  deriveVisualSequenceEvidenceLedger,
+  type VisualSequenceEvidenceOmission,
+  type VisualSequenceEvidenceLedger,
+} from "@/engine/visualSequenceContract";
+import {
+  deriveViewerPromiseProgression,
+  type ViewerPromiseProgressionOmission,
+  type ViewerPromiseProgressionReceipt,
+} from "@/engine/viewerPromiseProgression";
 import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
+import { certifiedFamilyAdmission } from "@/engine/certifiedFamilyAdmission";
+import {
+  ChannelProgramRouteRunSeedSchema,
+  channelProgramRouteRunSeedFingerprint,
+  parseChannelProgramRouteRunSeed,
+  type ChannelProgramRouteRunSeed,
+} from "@/engine/channelProgramRoute";
+import {
+  createReferenceQualityMechanicsLedger,
+  referenceQualityVisualReviewCriteriaForRoute,
+} from "@/engine/referenceQualityMechanicsRegistry";
+import {
+  selfContainedStoryPlanEvidenceFromReceipt,
+  selfContainedStoryVisualReviewLocksFromReceipt,
+} from "@/engine/selfContainedStoryQualityEvidence";
 import {
   DATA_STORY_MIN_SOURCED_NUMERIC_SENTENCES,
   hasNamedSourceAttribution,
@@ -32,6 +60,12 @@ import {
   assertSyntheticScenarioContract,
   syntheticScenarioWritingDirective,
 } from "@/engine/syntheticScenario";
+import {
+  assertScenarioVisualTreatmentThumbnailProvenance,
+  resolveScenarioVisualTreatmentForNewVisualArtifact,
+  resolveScenarioVisualTreatmentForRoute,
+  scenarioVisualTreatmentReviewCriteria,
+} from "@/engine/scenarioVisualTreatment";
 import {
   assertDataStorySourceLedger,
   dataStorySourceLedgerPrompt,
@@ -48,13 +82,17 @@ import {
   assessProductionEditorialAcceptance,
   buildQualityEvidence,
   EpisodeSpecSchema,
+  FINAL_MASTER_NARRATED_STORY_COVERAGE_SOURCE,
+  VALIDATED_STORY_SPINE_SOURCE,
 } from "@/engine/qualityEvidence";
 import {
   assertScriptApprovedForNarration,
   assertScriptCritiqueAccepted,
 } from "@/engine/scriptQualityGate";
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
+import { qaVisualReviewFrameLimits } from "@/engine/visualReviewBudget";
 import { visualMatterFromUnknown, visualMatterReviewLocks } from "@/engine/visualMatter";
+import { visualTreatmentReferenceCriteria } from "@/engine/visualTreatmentCatalog";
 import {
   CinematicCaseSequenceAdmissionReceiptSchema,
   CinematicCaseSequenceInputSchema,
@@ -63,6 +101,7 @@ import {
   cinematicCaseSequenceContentFingerprint,
 } from "@/engine/cinematicCaseSequence";
 import { assertSourceBoundNarrationAlignment } from "@/engine/sourceBoundStorySpine";
+import { StorySpineSchema } from "@/engine/storySpine";
 import {
   assertCinematicAssemblyRoute,
   assertCinematicSequenceRenderBinding,
@@ -71,8 +110,8 @@ import { createCinematicAssemblyHandoff } from "@/lib/assembly/cinematicHandoff"
 import { cinematicFinalMasterQaEvidence } from "@/engine/cinematicQaEvidence";
 import {
   assertCinematicFinalMasterAudioAesthetics,
-  assertCinematicFinalMasterQaAdmission,
   assertCinematicFinalMasterQaProfile,
+  cinematicFinalMasterQaVisualReviewPlan,
 } from "@/engine/cinematicFinalMasterQaAdmission";
 import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
 import {
@@ -90,11 +129,24 @@ import {
   proveOnScreenText,
   sha256OnScreenTextSource,
   TimedOnScreenTextCueSchema,
+  type OnScreenTextProof,
 } from "@/lib/onScreenTextProof";
+import { shiftFootageOnScreenTextCues } from "@/lib/footageOnScreenTextCues";
+import {
+  createShortsOpeningEvidence,
+  planShortsOpeningOnScreenTextEvidence,
+} from "@/engine/shortsOpeningEvidence";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
+import { renderSerializedProgramEpisodeContextForPrompt } from "@/lib/serializedProgramEpisodeContext";
+import { serializedProgramEpisodeContextForStage } from "@/trigger/serializedProgramEpisodeContext";
 import { parseJsonLoose } from "@/lib/gemini";
-import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
+import {
+  visionLocal,
+  VISION_GATE_MAX_TOKENS,
+  VISION_MAX_IMAGES_PER_REQUEST,
+} from "@/lib/vision";
 import { existsSync } from "node:fs";
+import { stat } from "node:fs/promises";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
 import { narrationPhysics } from "@/lib/voicecraft";
@@ -115,6 +167,18 @@ import {
   type FinalMasterNarrationSemanticEvidence,
 } from "@/lib/narrationTranscriptProof";
 import {
+  deriveFinalMasterNarratedStoryCoverage,
+  type DerivedFinalMasterNarratedStoryCoverage,
+} from "@/lib/finalMasterNarratedStoryCoverage";
+import {
+  assertPackageToOpeningPlanBinding,
+  createPackageToOpeningOmission,
+  createPackageToOpeningReceipt,
+  packageToOpeningOpeningCriterion,
+  type PackageToOpeningOmission,
+  type PackageToOpeningReceipt,
+} from "@/engine/packageToOpening";
+import {
   assertNarrationCueTimingEvidence,
   type NarrationCueTimingEvidence,
 } from "@/lib/narrationCueTiming";
@@ -126,7 +190,7 @@ import { sanitizeSpoken } from "@/lib/scriptGen";
 import { buildFootageQueries, castFootage, hasAnyFootageProvider, type FootageBrief } from "@/lib/footagecraft";
 import { searchWikimediaImage } from "@/lib/wikimedia";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
-import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
+import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity } from "@/lib/storage";
 import { assertSourceProofMediaClipBytes } from "@/lib/sourceProofMedia";
 import { buildChapters } from "@/lib/assemblyai";
 import {
@@ -144,7 +208,6 @@ import {
   measureAudio,
   measureNarrationMixCorrelation,
   normalizeAudioOnly,
-  grabFrame,
   kenBurns,
   burnCaptions,
   writeCaptionsAss,
@@ -158,11 +221,30 @@ import {
 } from "@/engine/creative/validate";
 import { getVisualBrief, getMusicBrief, getValidationSpec, getStructure, getCutSheet } from "@/engine/creative/brief";
 import {
+  createStudioAssetReleaseUsageReceipt,
+  createStudioLtxReleaseAdapterBinding,
+  studioAssetRecipeProjectionFromUnknown,
+  studioPostproductionRecipeProjectionFromUnknown,
+} from "@/engine/studioAssetLibrary";
+import {
+  createStudioAssetPromotionCandidates,
+  createStudioPostproductionPromotionCandidates,
+} from "@/engine/studioAssetPromotion";
+import {
+  createStudioTransitionDecisionReceipt,
+  studioPostproductionDecisionReceiptFromUnknown,
+} from "@/engine/studioPostproductionDecision";
+import {
+  recordStudioAssetPromotionCandidates,
+  recordStudioAssetReleaseUsage,
+} from "@/lib/studioAssetLibraryRuntime";
+import {
   channelVisualReviewProfile,
   reviewRender,
   visualRepairSignals,
   visualReviewFailureMessage,
   VisualReviewFailure,
+  type VisualReviewCreativeLock,
   type VisualReviewEvidence,
   type VisualReviewOverlay,
   type VisualReviewReferenceCriterion,
@@ -179,6 +261,20 @@ import {
   verifyFinalMasterReleaseEvidenceObjects,
   visualReviewReleaseReceiptKey,
 } from "@/lib/finalMasterReleaseCertificate";
+import { createFinalMasterVisualPacingBinding } from "@/lib/finalMasterVisualPacingBinding";
+import {
+  THIRD_PARTY_STOCK_EVIDENCE_VERSION,
+  ThirdPartyStockEvidenceReferenceSchema,
+  assertThirdPartyStockEvidenceManifest,
+  assertThirdPartyStockEvidenceMatchesFootageKeys,
+  assertThirdPartyStockEvidenceReferenceBinding,
+  createThirdPartyStockEvidenceReference,
+  parseThirdPartyStockEvidenceManifestBytes,
+  thirdPartyStockEvidenceManifestKey,
+  thirdPartyStockEvidenceManifestSha256,
+  type ThirdPartyStockEvidenceReference,
+} from "@/lib/thirdPartyStockEvidence";
+import { createFinalMasterQualityEvidenceBinding } from "@/lib/finalMasterQualityEvidenceBinding";
 import {
   createReferenceQualityEvidenceBridgeV2,
   createUnmeasuredReferenceQualityFinalMasterBinding,
@@ -197,7 +293,6 @@ function splitSentences(text: string): string[] {
     .filter((s) => s.length > 0);
 }
 import {
-  evaluateVisualFrames,
   evaluateThumbnail,
 
   evaluateSeo,
@@ -278,6 +373,52 @@ async function mapPool<T, R>(items: T[], limit: number, fn: (t: T, i: number) =>
   return out;
 }
 
+/**
+ * Read a sealed stock-evidence sidecar before an expensive compose or release.
+ * The raw source videos intentionally are not re-read here: their exact staged
+ * byte hashes and provider rights record live in this compact immutable JSON.
+ */
+async function loadThirdPartyStockEvidence(args: {
+  evidence: unknown;
+  consumer: string;
+  footageKeys?: readonly string[];
+}) {
+  const reference = ThirdPartyStockEvidenceReferenceSchema.parse(args.evidence);
+  let bytes: Uint8Array;
+  try {
+    bytes = await getObjectBytes(reference.manifestKey);
+  } catch (error) {
+    throw new Error(
+      `${args.consumer}: third-party stock evidence is unavailable (${reference.manifestKey}): ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const manifest = parseThirdPartyStockEvidenceManifestBytes(bytes);
+  assertThirdPartyStockEvidenceReferenceBinding({ reference, manifest });
+  if (args.footageKeys) {
+    assertThirdPartyStockEvidenceMatchesFootageKeys({ manifest, footageKeys: args.footageKeys });
+  }
+  return { reference, manifest };
+}
+
+/** Persist a run-scoped content-addressed copy; release retention keeps only it. */
+async function persistThirdPartyStockEvidence(args: {
+  ctx: StageContext;
+  manifest: unknown;
+}) {
+  const manifest = assertThirdPartyStockEvidenceManifest(args.manifest);
+  const manifestSha256 = thirdPartyStockEvidenceManifestSha256(manifest);
+  const manifestKey = thirdPartyStockEvidenceManifestKey(
+    args.ctx.keyPrefix,
+    args.ctx.runId,
+    manifestSha256,
+  );
+  await putObject(manifestKey, Buffer.from(JSON.stringify(manifest)), {
+    contentType: "application/json",
+  });
+  return createThirdPartyStockEvidenceReference({ manifestKey, manifest });
+}
+
 function str(ctx: StageContext, key: string): string {
   const v = ctx.store[key];
   if (typeof v !== "string" || v.length === 0) {
@@ -288,6 +429,35 @@ function str(ctx: StageContext, key: string): string {
 function opt(ctx: StageContext, key: string): string | undefined {
   const v = ctx.store[key];
   return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+
+function programRouteForNarratedBlock(
+  ctx: StageContext,
+  block: "script_gen" | "qa_script",
+): ChannelProgramRouteRunSeed | undefined {
+  const raw = ctx.store["channelProgramRoute"];
+  if (raw === undefined) return undefined;
+  const route = parseChannelProgramRouteRunSeed(raw);
+  if (!route.requiredBlocks.includes(block)) {
+    throw new Error(
+      `${block}: frozen channel program route ${route.routeKey} does not permit the narrated ${block} path`,
+    );
+  }
+  if (route.directives.claimMode === "certified_quiz_facts") {
+    throw new Error(`${block}: certified QuizYear routes must use their dedicated planner and critic blocks`);
+  }
+  return route;
+}
+
+function programRouteReviewDirective(route: ChannelProgramRouteRunSeed | undefined): string {
+  if (!route) return "";
+  return [
+    `SEALED CHANNEL PROGRAM ROUTE: ${route.routeKey} (${route.routeFingerprint}).`,
+    `Viewer job: ${route.directives.viewerJob}`,
+    `Claim mode: ${route.directives.claimMode}.`,
+    "Route critic requirements:",
+    ...route.directives.criticFocus.map((focus) => `- ${focus}`),
+  ].join("\n");
 }
 
 /**
@@ -376,6 +546,9 @@ export const scriptGen: Block = {
   produces: ["script", "narrationText"],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
+    const programRoute = programRouteForNarratedBlock(ctx, "script_gen");
+    const programRouteCritique = programRouteReviewDirective(programRoute);
+    const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "script_gen");
     const sourceGrounding = [
       hasSourceAttributedDataStoryParams(ctx.params)
         ? dataStorySourceLedgerPrompt(assertDataStorySourceLedger(ctx.store["dataStorySourceLedger"]))
@@ -391,8 +564,32 @@ export const scriptGen: Block = {
     // regenerating it (reuses the base's structure + research; only words change).
     const reuseScript = ctx.store["reuseScript"] as Script | undefined;
     if (reuseScript && Array.isArray(reuseScript.sections)) {
+      if (programRoute && reuseScript.programRouteFingerprint !== programRoute.routeFingerprint) {
+        throw new Error("script_gen: reused script does not match the frozen channel program route");
+      }
+      if (!programRoute && reuseScript.programRouteFingerprint !== undefined) {
+        throw new Error("script_gen: route-bound reused script cannot run without its frozen program route");
+      }
+      if (
+        serializedEpisodeContext &&
+        reuseScript.serializedProgramEpisodeContextFingerprint !== serializedEpisodeContext.fingerprint
+      ) {
+        throw new Error("script_gen: reused script does not match the immutable serialized episode context");
+      }
+      if (
+        !serializedEpisodeContext &&
+        reuseScript.serializedProgramEpisodeContextFingerprint !== undefined
+      ) {
+        throw new Error("script_gen: serialized-episode-bound reused script cannot run without its immutable context");
+      }
       const lang = ctx.params["language"] as string | undefined;
-      const translated = await translateScript(reuseScript, lang, ctx.log);
+      const translated = await translateScript(
+        reuseScript,
+        lang,
+        ctx.log,
+        programRoute,
+        serializedEpisodeContext?.fingerprint,
+      );
       ctx.log(`script_gen: reused + translated base script â†’ ${lang ?? "en"} (${translated.sections.length} sections)`);
       return { script: translated, narrationText: translated.narrationText };
     }
@@ -419,6 +616,11 @@ export const scriptGen: Block = {
       dataRich: ctx.params["dataRich"] as boolean | undefined,
       sourceAttributionRequired: ctx.params["sourceAttributionRequired"] === true,
       sourceGrounding,
+      serializedEpisodeContext: serializedEpisodeContext
+        ? renderSerializedProgramEpisodeContextForPrompt(serializedEpisodeContext)
+        : undefined,
+      serializedProgramEpisodeContextFingerprint: serializedEpisodeContext?.fingerprint,
+      programRoute,
       structure: getStructure(ctx.store),
       // The channel's locked narrative register (Style DNA) â€” outranks the
       // generic archetype tone in the prompt.
@@ -475,6 +677,7 @@ export const scriptGen: Block = {
                 ? ` CRITICAL: the cold open promised "${draft.hookLoop}" — flag it as an issue if the script ` +
                   `does not EXPLICITLY pay that promise off.`
                 : "") +
+              (programRouteCritique ? `\n${programRouteCritique}\nFAIL the draft if it violates any route critic requirement.` : "") +
               channelCritiqueBrief(scriptChannel) +
               ` Return STRICT JSON {"pass": boolean, "issues": string[]} â€” at most 5 ` +
               `issues, each under 140 characters.\n\n` +
@@ -513,6 +716,21 @@ export const scriptGen: Block = {
       });
     }
     const script = loop.value;
+    if (programRoute && script.programRouteFingerprint !== programRoute.routeFingerprint) {
+      throw new Error("script_gen: generated script lost its frozen channel program route binding");
+    }
+    if (
+      serializedEpisodeContext &&
+      script.serializedProgramEpisodeContextFingerprint !== serializedEpisodeContext.fingerprint
+    ) {
+      throw new Error("script_gen: generated script lost its immutable serialized episode context binding");
+    }
+    if (
+      !serializedEpisodeContext &&
+      script.serializedProgramEpisodeContextFingerprint !== undefined
+    ) {
+      throw new Error("script_gen: non-serialized script unexpectedly retained a serialized episode context binding");
+    }
     ctx.log(
       `script_gen: ${script.sections.length} sections, ~${script.estDurationSec}s ` +
       `(${loop.iterations} iter, ${loop.accepted ? "accepted" : "best-effort"})`,
@@ -690,6 +908,34 @@ export const qaScript: Block = {
   produces: ["scriptApproved"],
   run: async (ctx) => {
     const narration = str(ctx, "narrationText");
+    const programRoute = programRouteForNarratedBlock(ctx, "qa_script");
+    const programRouteCritique = programRouteReviewDirective(programRoute);
+    const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "qa_script");
+    const scriptForRoute = ctx.store["script"] as {
+      programRouteFingerprint?: unknown;
+      serializedProgramEpisodeContextFingerprint?: unknown;
+    } | undefined;
+    if (
+      programRoute &&
+      scriptForRoute?.programRouteFingerprint !== programRoute.routeFingerprint
+    ) {
+      throw new Error("qa_script FAILED: script does not match the frozen channel program route");
+    }
+    if (!programRoute && scriptForRoute?.programRouteFingerprint !== undefined) {
+      throw new Error("qa_script FAILED: route-bound script cannot be approved without its frozen program route");
+    }
+    if (
+      serializedEpisodeContext &&
+      scriptForRoute?.serializedProgramEpisodeContextFingerprint !== serializedEpisodeContext.fingerprint
+    ) {
+      throw new Error("qa_script FAILED: script does not match the immutable serialized episode context");
+    }
+    if (
+      !serializedEpisodeContext &&
+      scriptForRoute?.serializedProgramEpisodeContextFingerprint !== undefined
+    ) {
+      throw new Error("qa_script FAILED: serialized-episode-bound script cannot be approved without its immutable context");
+    }
     if (hasSourceAttributedDataStoryParams(ctx.params)) {
       assertDataStorySourceLedger(ctx.store["dataStorySourceLedger"], narration);
       const sourcedNumericSentences = splitSentences(narration)
@@ -723,6 +969,12 @@ export const qaScript: Block = {
           (hookLoop
             ? `THE HOOK'S CONTRACT: the cold open promised "${hookLoop}" — FAIL the script if it does not ` +
               `explicitly pay that promise off (a vague gesture at it is a fail). `
+            : "") +
+          (programRouteCritique
+            ? `${programRouteCritique}\nFAIL the script if it violates any route critic requirement. `
+            : "") +
+          (serializedEpisodeContext
+            ? `${renderSerializedProgramEpisodeContextForPrompt(serializedEpisodeContext)}\nFAIL the script if it breaks this episode's immutable continuity. `
             : "") +
           `Also verify a deliberate MIDPOINT RE-HOOK exists in the middle third (a pointed question to the ` +
           `viewer, a vivid concrete example, or a tonal shift) — flag its absence as an issue. ` +
@@ -1177,19 +1429,34 @@ export const narrationTts: Block = {
 export const stockFootage: Block = {
   id: "stock_footage",
   consumes: ["topic", "script"],
-  produces: ["footageClips", "footageKeys"],
+  produces: ["footageClips", "footageKeys", "thirdPartyStockEvidence"],
   run: async (ctx) => {
+    const topic = str(ctx, "topic");
+    const scenarioVisualTreatment = resolveScenarioVisualTreatmentForRoute({
+      treatment: ctx.store["scenarioVisualTreatment"],
+      route: ctx.store["channelProgramRoute"],
+      scenario: ctx.store["syntheticScenario"],
+      topic,
+      consumer: "stock_footage",
+    });
+    if (scenarioVisualTreatment) {
+      throw new Error(
+        "stock_footage: sealed fictional scenario treatment prohibits real-stock footage; " +
+          "use a treatment-aware illustrative renderer instead",
+      );
+    }
     // Upload the gated clips to run-scoped R2 keys alongside the local paths. This
     // is what lets timeline_assemble run on a SEPARATE large-2x worker (the P1→P2
     // render-split) — the render child rehydrates footageClips from footageKeys —
     // and it also makes this block resume-restorable instead of re-downloading.
-    const uploadFootageKeys = async (paths: string[]): Promise<string[]> => {
+    const uploadFootageKeys = async (paths: string[]): Promise<{ key: string; sha256: string }[]> => {
       // Parallel (pool of 4): the sequential loop over 100-160 clips added
       // minutes of pure upload wait per run. Order-preserving via mapPool.
       return mapPool(paths, 4, async (p, i) => {
         const key = `${ctx.keyPrefix}footage/run/${ctx.runId}/clip_${i}.mp4`;
-        await putObject(key, await readBytes(p), { contentType: "video/mp4" });
-        return key;
+        const bytes = await readBytes(p);
+        await putObject(key, bytes, { contentType: "video/mp4" });
+        return { key, sha256: createHash("sha256").update(bytes).digest("hex") };
       });
     };
     // RENDER-GROUP REUSE: a language sibling reuses the base render's footage from
@@ -1197,29 +1464,37 @@ export const stockFootage: Block = {
     // identical across languages; only narration/captions/text differ).
     const reuseKeys = ctx.store["reuseFootageKeys"] as string[] | undefined;
     if (reuseKeys?.length) {
+      const reuseEvidence = ctx.store["reuseThirdPartyStockEvidence"];
+      if (reuseEvidence === undefined) {
+        throw new Error(
+          "stock_footage(reuse): legacy footage bundle lacks third-party stock evidence; " +
+            "refusing to mint a new release from unproven reused footage",
+        );
+      }
+      const { manifest } = await loadThirdPartyStockEvidence({
+        evidence: reuseEvidence,
+        consumer: "stock_footage(reuse)",
+        footageKeys: reuseKeys,
+      });
       const tmp = await makeRunTempDir(ctx.runId);
-      const clips: string[] = [];
-      const okKeys: string[] = [];
-      for (let i = 0; i < reuseKeys.length; i++) {
+      const clips = await mapPool(reuseKeys, 4, async (key, i) => {
         try {
           const p = join(tmp, `reuse_${i}.mp4`);
-          await writeBytes(p, await getObjectBytes(reuseKeys[i]));
-          clips.push(p);
-          okKeys.push(reuseKeys[i]);
+          return await writeBytes(p, await getObjectBytes(key));
         } catch (e) {
-          ctx.log(`stock_footage(reuse): clip ${i} fetch failed: ${e instanceof Error ? e.message : e}`);
+          throw new Error(`stock_footage(reuse): clip ${i} fetch failed: ${e instanceof Error ? e.message : e}`);
         }
-      }
-      if (clips.length) {
-        ctx.log(`stock_footage: REUSED ${clips.length} footage clips from base render (no Pexels)`);
-        return { footageClips: clips, footageKeys: okKeys };
-      }
-      ctx.log("stock_footage(reuse): no clips fetched â€” falling back to fresh sourcing");
+      });
+      // The certificate retention namespace is this child run, not the base
+      // bundle. Copying the same immutable manifest is cheap and lets base-run
+      // cleanup proceed without losing a sibling's release evidence.
+      const thirdPartyStockEvidence = await persistThirdPartyStockEvidence({ ctx, manifest });
+      ctx.log(`stock_footage: REUSED ${clips.length} footage clips + sealed source evidence from base render`);
+      return { footageClips: clips, footageKeys: reuseKeys, thirdPartyStockEvidence };
     }
     if (!hasAnyFootageProvider()) {
       throw new Error("stock_footage: no footage provider configured (vault service 'pexels' at minimum)");
     }
-    const topic = str(ctx, "topic");
     const script = ctx.store["script"] as
       | { sections?: { heading?: string }[] }
       | undefined;
@@ -1315,8 +1590,7 @@ export const stockFootage: Block = {
       legacy: ctx.params["legacyFootage"] === true,
       log: (m) => ctx.log(m),
     });
-    const clips = cast.clips.map((c) => c.path);
-    if (clips.length === 0) throw new Error("stock_footage: no clips found for any query");
+    if (cast.clips.length === 0) throw new Error("stock_footage: no clips found for any query");
 
     // Persist the ids actually used (bounded) so they're never reused later.
     // IDEMPOTENT per run: a resume/heal that re-queries footage used to APPEND a
@@ -1342,11 +1616,53 @@ export const stockFootage: Block = {
     // the separate signature_clips block when the architect enabled it). Footage
     // SELECTION lives here; signature GENERATION is its own block.
     const sigClips = (ctx.store["signatureClips"] as string[] | undefined) ?? [];
+    const stagedInputs = [
+      ...sigClips.map((path) => ({
+        path,
+        origin: "studio_generated" as const,
+        sourceLabel: "signature_clip",
+      })),
+      ...cast.clips.map((clip) => ({
+        path: clip.path,
+        origin: "third_party_stock" as const,
+        source: clip.source,
+        acquiredAt: clip.acquiredAt,
+      })),
+    ];
+    const clips = stagedInputs.map((input) => input.path);
     if (sigClips.length) {
-      clips.unshift(...sigClips);
       ctx.log(`stock_footage: HYBRID — ${sigClips.length} signature clip(s) prepended`);
     }
-    return { footageClips: clips, footageKeys: await uploadFootageKeys(clips) };
+    const uploaded = await uploadFootageKeys(clips);
+    const manifest = {
+      version: THIRD_PARTY_STOCK_EVIDENCE_VERSION,
+      inputs: stagedInputs.map((input, ordinal) => {
+        const staged = uploaded[ordinal];
+        if (!staged) throw new Error(`stock_footage: upload result missing ordinal ${ordinal}`);
+        return input.origin === "third_party_stock"
+          ? {
+              ordinal,
+              footageKey: staged.key,
+              footageSha256: staged.sha256,
+              origin: input.origin,
+              source: input.source,
+              acquiredAt: input.acquiredAt,
+            }
+          : {
+              ordinal,
+              footageKey: staged.key,
+              footageSha256: staged.sha256,
+              origin: input.origin,
+              sourceLabel: input.sourceLabel,
+            };
+      }),
+    };
+    const thirdPartyStockEvidence = await persistThirdPartyStockEvidence({ ctx, manifest });
+    return {
+      footageClips: clips,
+      footageKeys: uploaded.map((item) => item.key),
+      thirdPartyStockEvidence,
+    };
   },
 };
 
@@ -1355,6 +1671,19 @@ export const entityImagery: Block = {
   consumes: ["narrationText"],
   produces: ["entityClips", "entityKeys", "attributions"],
   run: async (ctx) => {
+    const scenarioVisualTreatment = resolveScenarioVisualTreatmentForRoute({
+      treatment: ctx.store["scenarioVisualTreatment"],
+      route: ctx.store["channelProgramRoute"],
+      scenario: ctx.store["syntheticScenario"],
+      topic: ctx.store["topic"],
+      consumer: "entity_imagery",
+    });
+    if (scenarioVisualTreatment) {
+      throw new Error(
+        "entity_imagery: sealed fictional scenario treatment prohibits real-person/entity imagery; " +
+          "use a treatment-aware illustrative renderer instead",
+      );
+    }
     const clips: string[] = [];
     const attributions: string[] = []; // license ledger (Wikimedia credits)
     // Upload entity images to run-scoped R2 keys so the render child (P1→P2
@@ -1729,6 +2058,13 @@ export const quoteOverlaysBlock: Block = {
     const timings =
       (ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined) ?? [];
     const out: QuoteOverlaySpec[] = [];
+    const studioOverlayRecipe = studioPostproductionRecipeProjectionFromUnknown(
+      ctx.store["studioOverlayRecipeProjection"],
+      "overlay_template",
+    );
+    const studioPresentationDirection = studioOverlayRecipe.promptAddenda.length
+      ? `\nAPPROVED STUDIO PRESENTATION DIRECTION (appearance only; it may not change quote selection, words, attribution, timing, or accessibility): ${studioOverlayRecipe.promptAddenda.join(" ")}\n`
+      : "";
     if (!hasAnthropicKey() || timings.length === 0) {
       ctx.log("quote_overlays: skipping (no permitted text planner or no sentence timings)");
       return { quoteOverlays: out };
@@ -1760,7 +2096,9 @@ export const quoteOverlaysBlock: Block = {
           `Each pick MUST be a COMPLETE, MEANINGFUL SENTENCE (roughly 8-22 words) that stands on its own â€” ` +
           `NEVER a single word, a bare term, or a short fragment. ` +
           `For each chosen, list 1-3 important words to HIGHLIGHT in yellow (each must literally appear in that sentence). ` +
-          `Return STRICT JSON {"quotes":[{"index":number,"highlights":string[]}]}.\n\n` +
+          `Return STRICT JSON {"quotes":[{"index":number,"highlights":string[]}]}. ` +
+          studioPresentationDirection +
+          `\n` +
           indexed,
         maxTokens: 500,
         temperature: 0.4,
@@ -1955,7 +2293,7 @@ export const quoteOverlaysBlock: Block = {
     for (const c of spaced) {
       try {
         const path = join(tmp, `quote_${c.idx}.webm`);
-        await renderQuoteOverlay({ quote: c.display, highlights: c.highlights, outPath: path, durationSec: c.dur, width: W, height: H });
+        await renderQuoteOverlay({ quote: c.display, highlights: c.highlights, presentation: studioOverlayRecipe.quoteOverlayPreset ?? undefined, outPath: path, durationSec: c.dur, width: W, height: H });
         // RENDER-SPLIT CONTRACT: timeline_assemble runs on a SEPARATE worker, so
         // a local-only path is unreachable there — that was the root cause of the
         // "N quotes generated but 0 composited" heal treadmill (every heal re-ran
@@ -1996,14 +2334,68 @@ export const timelineAssemble: Block = {
     "overlaysDropped",
     "preOverlayKey",
     "preOverlayLocalPath",
+    "onScreenTextCues",
+    "studioPostproductionDecision",
   ],
   run: async (ctx) => {
+    const scenarioVisualTreatment = resolveScenarioVisualTreatmentForRoute({
+      treatment: ctx.store["scenarioVisualTreatment"],
+      route: ctx.store["channelProgramRoute"],
+      scenario: ctx.store["syntheticScenario"],
+      topic: ctx.store["topic"],
+      consumer: "timeline_assemble",
+    });
+    if (scenarioVisualTreatment) {
+      throw new Error(
+        "timeline_assemble: sealed fictional scenario treatment requires a renderer that proves " +
+          "illustrative non-real visuals and the per-scene disclosure; generic real-media assembly is not admitted",
+      );
+    }
     assertCinematicAssemblyRoute({
       useAssemblyEdl: ctx.params["useAssemblyEdl"],
       scenePlan: ctx.store["cinematicGeneratedScenePlan"],
       editDecisionList: ctx.store["cinematicEditDecisionList"],
       footageManifest: ctx.store["generatedFootageSceneManifest"],
     });
+    const configuredTransition = ctx.params["transitions"];
+    const explicitTransition = configuredTransition === "hardcut" || configuredTransition === "crossfade" || configuredTransition === "dip_to_black"
+      ? configuredTransition
+      : null;
+    const studioTransitionRecipe = studioPostproductionRecipeProjectionFromUnknown(
+      ctx.store["studioTransitionRecipeProjection"],
+      "transition_template",
+    );
+    // An explicitly configured channel transition always wins. Otherwise an
+    // approved compatible Studio template may select one of the three shared,
+    // render-tested title→body effects. It cannot change cut timing or add an
+    // arbitrary FFmpeg filter.
+    const assemblyTransition = explicitTransition ?? studioTransitionRecipe.transitionPreset ?? "crossfade";
+    const studioPostproductionDecision = createStudioTransitionDecisionReceipt({
+      frozenChannelModuleConfig: ctx.store["channelModuleConfig"],
+      explicitTransition,
+      studioTransitionPreset: studioTransitionRecipe.transitionPreset,
+      studioSourceEntryFingerprints: studioTransitionRecipe.sourceEntryFingerprints,
+    });
+    const withStudioPostproductionDecision = <T extends Record<string, unknown>>(patch: T) => ({
+      ...patch,
+      studioPostproductionDecision,
+    });
+    // Rights evidence is checked before either assembly path can start an
+    // expensive encode. It binds the selected stock input set, not a claim of
+    // exact on-screen EDL occurrence (the legacy assembler can drop a black
+    // segment, and an EDL usage receipt is intentionally out of this scope).
+    const thirdPartyStockEvidenceRaw = ctx.store["thirdPartyStockEvidence"];
+    if (thirdPartyStockEvidenceRaw !== undefined) {
+      const footageKeys = ctx.store["footageKeys"];
+      if (!Array.isArray(footageKeys) || footageKeys.some((key) => typeof key !== "string")) {
+        throw new Error("timeline_assemble: third-party stock evidence requires ordered footageKeys");
+      }
+      await loadThirdPartyStockEvidence({
+        evidence: thirdPartyStockEvidenceRaw,
+        consumer: "timeline_assemble",
+        footageKeys,
+      });
+    }
     // ========================================================================
     // ⚠️  USE_ASSEMBLY_EDL — DELIBERATELY-GATED, NOT-YET-VALIDATED CUTOVER PATH
     // ========================================================================
@@ -2045,21 +2437,22 @@ export const timelineAssemble: Block = {
       ctx.log(
         "timeline_assemble: useAssemblyEdl=true for this channel — composing through the standalone " +
           "Assembly EDL module (assembleViaEdl) instead of the legacy god-block path. " +
-          "UNVALIDATED CUTOVER: no real-render parity proof exists yet.",
+          "Render-tested only for the compatible narrated essay profiles; source-bound cinematic " +
+          "sequences remain on their exact clip-order assembler.",
       );
       const { assembleViaEdl } = await import("@/lib/assembly/cutover");
       const produced = await assembleViaEdl({
         // Copies, not the live bags: the adapter can never mutate this block's
         // readonly store or the frozen run params.
         store: { ...ctx.store },
-        params: { ...ctx.params },
+        params: { ...ctx.params, transitions: assemblyTransition },
         runId: ctx.runId,
         keyPrefix: ctx.keyPrefix,
       });
       // Spread widens the `AssembleProduces` interface (no index signature) into
       // a BlockPatch. All 11 declared `produces` keys are carried — the adapter's
       // key contract is pinned in src/lib/assembly/__tests__/cutover.test.ts.
-      return { ...produced };
+      return withStudioPostproductionDecision({ ...produced });
     }
 
     const footage = ctx.store["footageClips"] as string[] | undefined;
@@ -2159,6 +2552,13 @@ export const timelineAssemble: Block = {
       }
     }
     const introSec = introCardPath ? Number(ctx.store["introSec"] ?? 5) : 0;
+    // Generated LTX clips carry body-relative proof only after their
+    // deterministic name/evidence overlays actually rendered. Convert that
+    // proof here, where assembly knows the real intro duration, so final QA
+    // never evaluates the wrong frames.
+    const finalMasterFootageOnScreenTextCues = ctx.store["footageOnScreenTextCues"] === undefined
+      ? undefined
+      : shiftFootageOnScreenTextCues(ctx.store["footageOnScreenTextCues"], introSec);
     const tailSec = Number(ctx.params["tailSec"] ?? 3);
     const fadeOutSec = Number(ctx.params["fadeOutSec"] ?? 2);
     const audioFadeOutSec = Number(ctx.params["audioFadeOutSec"] ?? fadeOutSec);
@@ -2257,7 +2657,10 @@ export const timelineAssemble: Block = {
         ctx.log(`timeline_assemble: SURGICAL HEAL â€” re-finishing from pre-overlay (${preDur.toFixed(1)}s) instead of full rebuild. Hints: ${healHints.slice(0, 160)}`);
         // The pre-overlay video already contains the folded outro (it is the
         // compose output), so outroApplied mirrors the original build.
-        return await finishFromComposed(ctx, prePath, tmp, { W, H, introSec, videoSec: preDur, outroApplied: tailSec >= 2 });
+        const finished = await finishFromComposed(ctx, prePath, tmp, { W, H, introSec, videoSec: preDur, outroApplied: tailSec >= 2 });
+        return withStudioPostproductionDecision(finalMasterFootageOnScreenTextCues === undefined
+          ? finished
+          : { ...finished, onScreenTextCues: finalMasterFootageOnScreenTextCues });
       } catch (e) {
         ctx.log(`timeline_assemble: surgical heal unavailable (${e instanceof Error ? e.message : e}) â€” full rebuild`);
       }
@@ -2510,15 +2913,19 @@ export const timelineAssemble: Block = {
       bodyMusicVol: Number(ctx.params["bodyMusicVol"] ?? 0.1026),
       // slower, gentler duck into/out of the narration bed
       musicDuckRampSec: Number(ctx.params["musicDuckRampSec"] ?? 4),
+      transition: assemblyTransition,
       bodyAudioMode,
       outroCardPath,
       outroFadeInSec: 1.2,
     });
 
-    return await finishFromComposed(ctx, out, tmp, {
+    const finished = await finishFromComposed(ctx, out, tmp, {
       W, H, introSec, videoSec,
       outroApplied: Boolean(outroCardPath),
     });
+    return withStudioPostproductionDecision(finalMasterFootageOnScreenTextCues === undefined
+      ? finished
+      : { ...finished, onScreenTextCues: finalMasterFootageOnScreenTextCues });
   },
 };
 
@@ -2538,6 +2945,10 @@ async function finishFromComposed(
 ): Promise<Record<string, unknown>> {
   const { W, H, introSec, videoSec } = o;
   const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
+  const studioOverlayRecipe = studioPostproductionRecipeProjectionFromUnknown(
+    ctx.store["studioOverlayRecipeProjection"],
+    "overlay_template",
+  );
   const footage = (ctx.store["footageClips"] as string[] | undefined) ?? [];
   const tailSec = Number(ctx.params["tailSec"] ?? 3);
   const bodyEnd = Math.max(0, videoSec - tailSec);
@@ -2572,7 +2983,7 @@ async function finishFromComposed(
       if (!existsSync(s.path) && kind === "quote" && s.text) {
         try {
           const p = join(tmp, `ovl_rerender_${i}.webm`);
-          await renderQuoteOverlay({ quote: s.text, highlights: s.highlights ?? [], outPath: p, durationSec: s.durSec, width: s.width ?? W, height: s.height ?? H });
+          await renderQuoteOverlay({ quote: s.text, highlights: s.highlights ?? [], presentation: studioOverlayRecipe.quoteOverlayPreset ?? undefined, outPath: p, durationSec: s.durSec, width: s.width ?? W, height: s.height ?? H });
           s.path = p;
           ctx.log(`timeline_assemble: quote overlay re-rendered from spec on this worker`);
         } catch (e) {
@@ -2866,21 +3277,122 @@ export const qaVisual: Block = {
     "reviewReceiptFingerprint", "referenceCriteria", "referenceCriteriaComplete",
     "finalMasterSha256", "cinematicFinalMasterQaReceiptFingerprint",
     "finalMasterReleaseCertificate", "finalMasterReleaseCertificateReference", "finalMasterReleaseCertificateKey",
+    "packageToOpening", "packageToOpeningOmission",
   ],
   paid: true,
   persistStageOutputs: persistQaVisualStageOutputs,
   run: async (ctx) => {
+    // A legacy fictional route remains readable for audit, but must not mint
+    // a new QA/certificate path without the sealed visual treatment that
+    // binds its independently publishable thumbnail.
+    const scenarioVisualTreatment = resolveScenarioVisualTreatmentForNewVisualArtifact({
+      treatment: ctx.store["scenarioVisualTreatment"],
+      route: ctx.store["channelProgramRoute"],
+      scenario: ctx.store["syntheticScenario"],
+      disclosure: ctx.store["syntheticScenarioDisclosure"],
+      topic: typeof ctx.store["topic"] === "string"
+        ? ctx.store["topic"]
+        : typeof ctx.store["title"] === "string"
+          ? ctx.store["title"]
+          : undefined,
+      consumer: "qa_visual",
+      operation: "certify thumbnail QA",
+    });
+    // Fail before any paid final-master review when the independently
+    // publishable thumbnail cannot prove its fictional treatment. Reuse the
+    // exact fetched bytes below, rather than downloading/rechecking a second
+    // object after expensive QA has already run.
+    let treatmentBoundThumbnailBytes: Uint8Array | undefined;
+    if (scenarioVisualTreatment) {
+      const thumbnailKey = opt(ctx, "thumbnailKey");
+      if (!thumbnailKey) {
+        throw new Error("qa_visual: fictional scenario lacks a generated thumbnail for treatment provenance review");
+      }
+      treatmentBoundThumbnailBytes = await getObjectBytes(thumbnailKey);
+      assertScenarioVisualTreatmentThumbnailProvenance({
+        provenance: ctx.store["thumbnailScenarioVisualTreatmentProvenance"],
+        treatment: scenarioVisualTreatment,
+        thumbnailArtifactSha256: createHash("sha256")
+          .update(treatmentBoundThumbnailBytes)
+          .digest("hex"),
+        consumer: "qa_visual",
+      });
+    } else if (ctx.store["thumbnailScenarioVisualTreatmentProvenance"] !== undefined) {
+      throw new Error("qa_visual: non-fictional thumbnail carries scenario visual treatment provenance");
+    }
     const productionQa = ctx.params["qaProfile"] !== "draft";
+    const visualReviewFrameLimits = qaVisualReviewFrameLimits(ctx.params);
     let qaCost = qaVisualCost(ctx.params);
     const video = str(ctx, "videoLocalPath");
     const title = str(ctx, "title");
     const dur = Number(ctx.store["videoDurationSec"] ?? 0);
     const topic = opt(ctx, "topic") ?? title;
+    // Additive receipt binding only: keep the cost agent's wide-sample visual
+    // score and release-certificate fields untouched.
+    const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "qa_visual");
     const niche = opt(ctx, "niche");
     const contentLane = resolveContentLane({
       stored: ctx.params["contentLane"],
       pipeline: [],
     });
+    // A route is optional for historical invocations. When one is present,
+    // seal its exact identity into the final-QA binding rather than infer it
+    // from mutable channel fields later.
+    const rawProgramRoute = ctx.store["channelProgramRoute"];
+    const qualityEvidenceProgramRoute = rawProgramRoute === undefined
+      ? undefined
+      : parseChannelProgramRouteRunSeed(rawProgramRoute);
+    if (
+      qualityEvidenceProgramRoute &&
+      qualityEvidenceProgramRoute.contentLaneKey !== contentLane.key
+    ) {
+      throw new Error("qa_visual: sealed channel program route does not match the active content lane");
+    }
+    // Automatic releases already need a package/opening receipt at upload.
+    // Bind and phrase its opening promise BEFORE the one existing final-master
+    // visual-review pass, so the reviewer can attest it in the same sampled
+    // evidence rather than a later structural receipt pretending it was seen.
+    const automaticPackageOpeningRequired = productionQa && Boolean(
+      qualityEvidenceProgramRoute && certifiedFamilyAdmission(qualityEvidenceProgramRoute.family).automatic,
+    );
+    const packagePlanRawForOpening = ctx.store["packageToOpeningPlan"];
+    const boundPackagePlanForOpening = automaticPackageOpeningRequired
+      ? assertPackageToOpeningPlanBinding({
+          plan: packagePlanRawForOpening,
+          title,
+          thumbnailDescription: str(ctx, "thumbnailDescription"),
+          topic,
+          route: rawProgramRoute,
+          script: ctx.store["script"],
+          quizPlan: ctx.store["quizPlan"],
+          family: ctx.store["family"],
+          contentLane: ctx.store["contentLane"],
+        })
+      : undefined;
+    const automaticPackageOpeningCriterion = boundPackagePlanForOpening
+      ? packageToOpeningOpeningCriterion({
+          plan: boundPackagePlanForOpening,
+          topic,
+          script: ctx.store["script"],
+          quizPlan: ctx.store["quizPlan"],
+          family: ctx.store["family"],
+          contentLane: ctx.store["contentLane"],
+        })
+      : undefined;
+    if (scenarioVisualTreatment && ctx.store["syntheticScenarioDisclosure"] === undefined) {
+      throw new Error("qa_visual: fictional scenario lacks its verified opening disclosure receipt");
+    }
+    // A supplied receipt is a sealed pre-render plan, not proof that every
+    // beat survived the final master. Rebind it here to the current lane/topic
+    // and preserve it as plan-only provenance inside generic QA.
+    const selfContainedStoryPlanEvidence = ctx.store["selfContainedStoryReceipt"] === undefined
+      ? undefined
+      : selfContainedStoryPlanEvidenceFromReceipt({
+          receipt: ctx.store["selfContainedStoryReceipt"],
+          route: rawProgramRoute,
+          topic,
+          contentLaneKey: contentLane.key,
+        });
     // P1-1 / P1-17: the two per-channel inputs the quality loop was missing —
     // the operator's critic doctrine, and the lane's own quality calibration.
     const criticDoctrine = opt(ctx, "criticDoctrine");
@@ -2900,6 +3412,14 @@ export const qaVisual: Block = {
     const releaseReferenceQualityContract = productionQa
       ? requireFrozenReferenceQualityContract(qualityBar)
       : undefined;
+    const referenceQualityVisualCriteria =
+      productionQa && qualityEvidenceProgramRoute && releaseReferenceQualityContract
+        ? referenceQualityVisualReviewCriteriaForRoute({
+          route: qualityEvidenceProgramRoute,
+          selectedCapabilityKeys: ctx.store["channelSelectedCapabilityKeys"],
+          referenceQualityContract: releaseReferenceQualityContract,
+        })
+        : [];
     const qualityFloor = (dimensionIds: readonly string[], fallback: number): number => {
       if (!productionQa) return fallback;
       const target = Number(qualityBar?.target);
@@ -2933,6 +3453,55 @@ export const qaVisual: Block = {
     if ((p.width ?? 0) < 640 || (p.height ?? 0) < 360) {
       throw new Error(`qa_visual FAILED (resolution): ${p.width}x${p.height}`);
     }
+    // QuizShort does not reuse the generic Shorts label as a release shortcut.
+    // Its portrait route is an explicit supervised/private admission and must
+    // carry a render-declared opening hook that final QA can bind to the exact
+    // final-master OCR and review evidence below.
+    const isSupervisedQuizShort =
+      qualityEvidenceProgramRoute?.routeKey === "quizyear/portrait-supervised/v1";
+    if (
+      qualityEvidenceProgramRoute?.routeKey === "quizyear/portrait-supervised/v1" &&
+      qualityEvidenceProgramRoute.admission !== "supervised_private"
+    ) {
+      throw new Error("qa_visual: QuizShort route is missing its supervised-private admission");
+    }
+    if (isSupervisedQuizShort && (!productionQa || ctx.params["audioQa"] !== true)) {
+      throw new Error("qa_visual: QuizShort requires production visual QA and explicit audio QA");
+    }
+    const rawQuizShortOpeningHook = ctx.store["quizShortOpeningHook"];
+    if (!isSupervisedQuizShort && rawQuizShortOpeningHook !== undefined) {
+      throw new Error("qa_visual: quizShortOpeningHook is only valid for the supervised QuizShort route");
+    }
+    const quizShortOpeningHook = (() => {
+      if (!isSupervisedQuizShort) return undefined;
+      if (!rawQuizShortOpeningHook || typeof rawQuizShortOpeningHook !== "object") {
+        throw new Error("qa_visual: QuizShort requires a renderer-declared opening hook");
+      }
+      const hook = rawQuizShortOpeningHook as Record<string, unknown>;
+      const startSec = Number(hook["startSec"]);
+      const endSec = Number(hook["endSec"]);
+      const sampleSec = Number(hook["sampleSec"]);
+      const expectedText = typeof hook["expectedText"] === "string"
+        ? hook["expectedText"].trim()
+        : "";
+      if (
+        hook["version"] !== "quiz-short-opening-hook/v1" ||
+        hook["cueId"] !== "quiz-short-opening-hook" ||
+        !Number.isFinite(startSec) || !Number.isFinite(endSec) ||
+        !Number.isFinite(sampleSec) || startSec < 0 || endSec <= startSec ||
+        sampleSec < startSec || sampleSec > endSec ||
+        endSec > p.durationSec || !expectedText
+      ) {
+        throw new Error("qa_visual: QuizShort opening hook is malformed or falls outside the final master");
+      }
+      return {
+        cueId: "quiz-short-opening-hook" as const,
+        startSec,
+        endSec,
+        sampleSec,
+        expectedText,
+      };
+    })();
 
     // 2) Script â†” film length: narration sets the target for narrated archetypes.
     const target = Number(ctx.store["narrationDurationSec"] ?? dur) || dur;
@@ -2942,7 +3511,7 @@ export const qaVisual: Block = {
       throw new Error(`qa_visual FAILED (length): video ${p.durationSec}s vs target ${target}s`);
     }
 
-    // Detect the cinematic route before the overview vision call. A partial
+    // Detect the cinematic route before final visual review. A partial
     // cinematic handoff must not be able to hide behind qaProfile=draft and
     // spend on an advisory review before the stricter final-master contract
     // rejects it later in this block.
@@ -2954,28 +3523,7 @@ export const qaVisual: Block = {
       assertCinematicFinalMasterQaProfile(ctx.params["qaProfile"]);
     }
 
-    // 3) Video frames (vision, separate).
-    const vframes: string[] = [];
-    for (const frac of [0.2, 0.5, 0.8]) {
-      const f = join(tmp, `qa_v${Math.round(frac * 100)}.jpg`);
-      try {
-        await grabFrame(video, Math.max(0, dur * frac), f);
-        vframes.push(f);
-      } catch (e) {
-        if (productionQa) {
-          throw new Error(`qa_visual FAILED (required frame extraction @${frac}): ${e instanceof Error ? e.message : e}`);
-        }
-      }
-    }
-    if (productionQa && vframes.length !== 3) {
-      throw new Error(`qa_visual FAILED: required 3 overview frames, extracted ${vframes.length}`);
-    }
-    const video_ = await evaluateVisualFrames(vframes, { topic, niche });
-    if (productionQa && video_.skipped) {
-      throw new Error("qa_visual FAILED: required overview vision grader did not run");
-    }
-
-    // 3b) CHRONOLOGICAL RENDER WATCH. This is a sampled review, not a claim to
+    // 3) CHRONOLOGICAL RENDER WATCH. This is a sampled review, not a claim to
     // have watched every video frame. It catches defects spanning the sampled
     // timeline; the evidence ledger below records its coverage honestly.
     // AUDIO QA: Meta's audiobox-aesthetics scores production quality/enjoyment
@@ -3008,6 +3556,11 @@ export const qaVisual: Block = {
         audioAestheticScore,
       );
     }
+    if (isSupervisedQuizShort && audioAestheticScore === undefined) {
+      throw new Error(
+        "qa_visual: QuizShort requires a measured final-master audio-aesthetics result; loudness-only fallback cannot certify its release",
+      );
+    }
 
     const watchDna = ctx.store["styleDNA"] as
       | { recurringSubject?: string; setting?: string; motifs?: string[] }
@@ -3022,6 +3575,15 @@ export const qaVisual: Block = {
           : [];
       });
     const reviewOverlays: VisualReviewOverlay[] = [];
+    if (quizShortOpeningHook) {
+      reviewOverlays.push({
+        id: quizShortOpeningHook.cueId,
+        startSec: quizShortOpeningHook.startSec,
+        endSec: quizShortOpeningHook.endSec,
+        kind: "caption",
+        expected: "QuizShort opening question must be readable and visibly anchored before the first answer reveal",
+      });
+    }
     const rect = (value: unknown): [number, number, number, number] | undefined => {
       if (!Array.isArray(value) || value.length < 4) return undefined;
       const values = value.slice(0, 4).map(Number);
@@ -3079,6 +3641,7 @@ export const qaVisual: Block = {
     const channelReviewProfile = channelVisualReviewProfile({
       contentLaneKey: contentLane.key,
       primaryRenderer: contentLane.primaryRenderer,
+      requireSpecificLaneProfile: productionQa,
       channelName: opt(ctx, "channelName"),
       persona: opt(ctx, "persona"),
       styleGrammar: opt(ctx, "styleGrammar"),
@@ -3101,6 +3664,38 @@ export const qaVisual: Block = {
     });
     const visualMatter = visualMatterFromUnknown(ctx.store["visualMatterManifest"]);
     const visualMatterLocks = visualMatterReviewLocks(visualMatter);
+    // Every automatic self-contained panel must influence which final-master
+    // frame is inspected. Without this, a generic broad sample could miss a
+    // short comic panel or a whiteboard beat even though its sealed plan was
+    // retained. The locks remain sampled evidence, never visual-coverage
+    // overclaiming, and are derived only from the immutable plan + renderer
+    // timing contract already in this run.
+    let selfContainedStoryVisualLocks: readonly VisualReviewCreativeLock[] = [];
+    if (ctx.store["selfContainedStoryReceipt"] !== undefined) {
+      try {
+        selfContainedStoryVisualLocks = selfContainedStoryVisualReviewLocksFromReceipt({
+          receipt: ctx.store["selfContainedStoryReceipt"],
+          route: rawProgramRoute,
+          topic,
+          contentLaneKey: contentLane.key,
+          sentenceTimings: ctx.store["sentenceTimings"],
+          narrationStartSec: Number(ctx.store["narrationStartSec"]),
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (productionQa) {
+          throw new Error(`qa_visual: sealed self-contained visual plan cannot be mapped to final-master review: ${detail}`);
+        }
+        ctx.log(`qa_visual: self-contained visual plan review locks skipped in draft: ${detail}`);
+      }
+    }
+    // A selected treatment has to be explicitly assessed against every
+    // canonical treatment benchmark. Prompt/creative locks alone are not
+    // evidence that the final master retained clay, brick, anime, or drawn
+    // visual grammar.
+    const visualTreatmentCriteria = productionQa
+      ? visualTreatmentReferenceCriteria(visualMatter?.treatment)
+      : [];
     // Assembly checks this binding on its legacy path, but QA must re-check it
     // too: Assembly EDL cutover and future assemblers must never turn a
     // source-bound sequence into a final master without retaining every
@@ -3166,17 +3761,22 @@ export const qaVisual: Block = {
     ) {
       throw new Error("qa_visual FAILED: cinematic creative locks and edit decision list do not bind the same sequence");
     }
-    const cinematicFinalMasterQaAdmission = cinematicSequencePresent
-      ? assertCinematicFinalMasterQaAdmission({
+    const cinematicFinalMasterQaReviewPlan = cinematicSequencePresent
+      ? cinematicFinalMasterQaVisualReviewPlan({
           admission: ctx.store["cinematicFinalMasterQaAdmission"],
           creativeLocks: cinematicCreativeLocks,
           editDecisionList: cinematicEdl,
         })
       : undefined;
+    const cinematicFinalMasterQaAdmission = cinematicFinalMasterQaReviewPlan?.admission;
     // The exact lock/cut count was admitted before Novita rendered. Charge the
-    // same durable envelope here so the runner's stage ceiling and recorded
-    // QA spend cannot silently diverge on a resumed final-master review.
-    qaCost = qaVisualCost(ctx.params, cinematicFinalMasterQaAdmission?.reviewCostUsd);
+    // same sealed complete-focus envelope here so the runner's stage ceiling,
+    // recorded QA spend, and actual provider batch authority cannot diverge.
+    qaCost = qaVisualCost(
+      ctx.params,
+      cinematicFinalMasterQaAdmission?.reviewCostUsd,
+      cinematicFinalMasterQaReviewPlan?.completeFocusFrameCount,
+    );
     const cinematicBodyOffsetSec = ctx.store["introApplied"] === true && Number(ctx.store["introSec"]) > 0
       ? Number(ctx.store["introSec"])
       : 0;
@@ -3218,10 +3818,11 @@ export const qaVisual: Block = {
         ]
       : [];
     // The v5 visual reviewer can attest only what is visibly reviewable in
-    // final-master frames. Keep source-trace, audio, and originality claims out
-    // of this typed request: those require their own receipts and, where
-    // applicable, later human review. Ordinary channels receive no additional
-    // typed criteria and therefore retain their existing review behavior.
+    // final-master frames. Frozen reference contracts may add the one pacing
+    // mechanic that a chronological final-master review can genuinely observe.
+    // Keep source-trace, audio, originality, and thumbnail claims out of this
+    // typed request: those require their own receipts and, where applicable,
+    // later human review.
     const casefileCinematicReferenceCriteria: VisualReviewReferenceCriterion[] = casefileCinematicReference
       ? casefileCinematicReference.requirements.flatMap((requirement) => {
           if (requirement.id === "evidence-bearing-visual-rhythm") {
@@ -3247,6 +3848,19 @@ export const qaVisual: Block = {
       ...cinematicReceiptEvidence,
       ...casefileCinematicReferenceEvidence,
     ];
+    // Keep final visual QA bound to the same compact serial receipt without
+    // turning continuity prose into a new grader or broad-score policy. The
+    // title/topic are already reviewed elsewhere; this gives the existing
+    // reviewer the immutable episode order/fingerprint it must not contradict
+    // when episode identity is visibly represented in the final master.
+    const serializedVisualReviewContext = serializedEpisodeContext
+      ? [
+          `Immutable serial receipt ${serializedEpisodeContext.fingerprint.slice(0, 16)}: ` +
+            `episode ${serializedEpisodeContext.episodeNumber}` +
+            `${serializedEpisodeContext.seriesCount ? ` of ${serializedEpisodeContext.seriesCount}` : ""} ` +
+            `of ${serializedEpisodeContext.seriesTitle}; visible episode identity and narrative order must not contradict the sealed topic.`,
+        ].join(" ").slice(0, 360)
+      : "";
     const channelWorld = [
       watchDna?.recurringSubject
         ? [watchDna.recurringSubject, watchDna.setting, ...(watchDna.motifs ?? []).slice(0, 4)]
@@ -3258,7 +3872,17 @@ export const qaVisual: Block = {
       cinematicSequencePresent
         ? "source-bound faceless mannequin reconstruction; wardrobe, role, prop, camera, evidence, and cut rationale are locked per reviewed scene"
         : "",
+      serializedVisualReviewContext,
     ].filter(Boolean).join("; ") || undefined;
+    const reviewReferenceCriteria = [
+      ...casefileCinematicReferenceCriteria,
+      ...referenceQualityVisualCriteria,
+      ...visualTreatmentCriteria,
+      ...(automaticPackageOpeningCriterion ? [automaticPackageOpeningCriterion] : []),
+    ];
+    if (new Set(reviewReferenceCriteria.map((criterion) => criterion.id)).size !== reviewReferenceCriteria.length) {
+      throw new Error("qa_visual: duplicate reference-quality review criterion");
+    }
     const reviewIntent = {
       title,
       topic,
@@ -3273,18 +3897,29 @@ export const qaVisual: Block = {
         ? { criticDoctrine: channelReviewProfile.criticDoctrine }
         : {}),
       criticEmphasis: channelReviewProfile.criticEmphasis,
-      qualityCriteria: [...channelReviewProfile.qualityCriteria, ...casefileCinematicQualityCriteria],
+      qualityCriteria: [
+        ...channelReviewProfile.qualityCriteria,
+        ...casefileCinematicQualityCriteria,
+        ...(scenarioVisualTreatment
+          ? scenarioVisualTreatmentReviewCriteria(scenarioVisualTreatment)
+          : []),
+      ],
       transcriptCues,
       overlays: reviewOverlays,
-      creativeLocks: [...visualMatterLocks, ...cinematicReviewLocks],
+      creativeLocks: [
+        ...visualMatterLocks,
+        ...cinematicReviewLocks,
+        ...selfContainedStoryVisualLocks,
+      ],
       focusWindows: [...repairFocus, ...cinematicFocus],
-      ...(casefileCinematicReferenceCriteria.length
-        ? { referenceCriteria: casefileCinematicReferenceCriteria }
+      ...(reviewReferenceCriteria.length
+        ? { referenceCriteria: reviewReferenceCriteria }
         : {}),
     };
     // This is the visual release gate. It persists timestamped scene/cue/overlay
-    // evidence, reviews <=12-image chronological batches, then creates a dense
-    // 2-fps focus pass for suspect or previously repaired intervals.
+    // evidence, reviews provider-sized chronological batches, then creates a
+    // dense 2fps pass for the sealed cinematic windows and a capped re-watch
+    // for reactive defect/repair windows.
     // A release master is a file, not just a logical scene plan. Hash its
     // exact bytes before extracting final-review evidence so the persisted
     // frames, reviewer receipt, and later release certificate cannot be paired
@@ -3295,12 +3930,23 @@ export const qaVisual: Block = {
       keyPrefix: ctx.keyPrefix,
       sourceSha256: finalMasterSha256BeforeVisualReview,
       required: productionQa,
-      maxFrames: Number(ctx.params["visualReviewFrames"] ?? 48),
-      maxFocusFrames: Number(ctx.params["visualReviewFocusFrames"] ?? 24),
+      // Reuse the final review's broad chronological batches for the shared
+      // video score. Draft/probe runs retain advisory review behavior when a
+      // reviewer omits the optional field; production fails closed on it.
+      collectBroadQualityScore: true,
+      requireBroadQualityScore: productionQa,
+      maxFrames: visualReviewFrameLimits.broadFrames,
+      maxFocusFrames: visualReviewFrameLimits.focusFrames,
       // A source-bound cinematic sequence has an accepted receipt for every
       // planned join. Its final review must inspect every one at 2fps; the
-      // normal 24-frame repair cap would silently skip later cuts.
+      // ordinary cap still applies to untrusted reactive defect windows.
       requireCompleteFocusCoverage: cinematicSequencePresent,
+      ...(cinematicFinalMasterQaReviewPlan
+        ? {
+            completeFocusWindows: cinematicFocus,
+            expectedCompleteFocusFrameCount: cinematicFinalMasterQaReviewPlan.completeFocusFrameCount,
+          }
+        : {}),
       log: (message) => ctx.log(message),
     });
     // Close the final-master TOCTOU window opened by frame extraction and the
@@ -3314,6 +3960,22 @@ export const qaVisual: Block = {
     }
     if (productionQa && !visualReview.ran) {
       throw new Error("qa_visual FAILED: required evidence-backed visual reviewer did not run");
+    }
+    const video_: Verdict = visualReview.broadQualityScore
+      ? {
+          score: visualReview.broadQualityScore.score,
+          issues: visualReview.defects
+            .map((defect) => defect.observed)
+            .filter(Boolean)
+            .slice(0, 6),
+        }
+      : {
+          score: 0,
+          issues: ["Final visual review did not return a valid wide-sample quality score."],
+          skipped: true,
+        };
+    if (productionQa && video_.skipped) {
+      throw new Error("qa_visual FAILED: required final visual review did not return a wide-sample quality score");
     }
     // Generic evidence review catches defects across the whole master. A
     // source-bound cinematic sequence also needs a second, strict semantic
@@ -3399,7 +4061,8 @@ export const qaVisual: Block = {
       const tk = opt(ctx, "thumbnailKey");
       if (tk) {
         const tpath = join(tmp, "qa_thumb.jpg");
-        await writeBytes(tpath, await getObjectBytes(tk));
+        const thumbnailBytes = treatmentBoundThumbnailBytes ?? await getObjectBytes(tk);
+        await writeBytes(tpath, thumbnailBytes);
         thumbnail = await evaluateThumbnail(tpath, {
           title,
           persona: opt(ctx, "persona"),
@@ -3448,7 +4111,11 @@ export const qaVisual: Block = {
         ratio: Number(ratio.toFixed(2)),
         ok: lengthOk,
       },
-      video: video_,
+      video: {
+        ...video_,
+        source: "final-visual-review-wide-sample",
+        broadBatchCount: visualReview.broadQualityScore?.broadBatchCount,
+      },
       thumbnail,
       footage,
       seo,
@@ -3464,9 +4131,23 @@ export const qaVisual: Block = {
         reviewFingerprint: visualReview.reviewFingerprint,
         reviewReceiptVersion: visualReview.reviewReceiptVersion,
         reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+        broadQualityScore: visualReview.broadQualityScore,
         referenceCriteria: visualReview.referenceCriteria,
         referenceCriteriaComplete: visualReview.referenceCriteriaComplete,
       },
+      ...(serializedEpisodeContext
+        ? {
+            serializedProgramEpisodeContext: {
+              version: serializedEpisodeContext.version,
+              fingerprint: serializedEpisodeContext.fingerprint,
+              routeFingerprint: serializedEpisodeContext.routeFingerprint,
+              routeRunSeedFingerprint: serializedEpisodeContext.routeRunSeedFingerprint,
+              runId: serializedEpisodeContext.runId,
+              episodeNumber: serializedEpisodeContext.episodeNumber,
+              topic: serializedEpisodeContext.topic,
+            },
+          }
+        : {}),
     };
 
     // Hard-gate on egregious VISUAL defects (video frames + thumbnail). Footage
@@ -3478,9 +4159,9 @@ export const qaVisual: Block = {
     // Nano Banana scene plus deterministic typography, so the same visual bar
     // applies to every channel and every retry.
     if (!video_.skipped && video_.score < videoMinimum) {
-      // Three overview frames are retained as a cheap health signal, but they
-      // cannot overrule the evidence-backed chronological reviewer.
-      ctx.log(`qa_visual: LOW overview score ${video_.score}/10 (advisory; visual review is authoritative): ${video_.issues.slice(0, 2).join("; ")}`);
+      // The evidence-backed chronological review is authoritative. Its
+      // conservative broad-batch score remains a shared advisory health signal.
+      ctx.log(`qa_visual: LOW wide-sample final-review score ${video_.score}/10 (advisory; visual review is authoritative): ${video_.issues.slice(0, 2).join("; ")}`);
     }
     if (!thumbnail.skipped && thumbnail.score < thumbnailMinimum) {
       critical.push(`thumbnail score ${thumbnail.score} below ${thumbnailMinimum}: ${thumbnail.issues.slice(0, 2).join("; ")}`);
@@ -3584,6 +4265,7 @@ export const qaVisual: Block = {
       ? { success: true as const, data: [] as const }
       : TimedOnScreenTextCueSchema.array().safeParse(rawOnScreenTextCues);
     let onScreenTextEvidence: string[] = [];
+    let onScreenTextProof: OnScreenTextProof | undefined;
     if (!parsedOnScreenTextCues.success) {
       if (productionQa) {
         critical.push(
@@ -3598,6 +4280,7 @@ export const qaVisual: Block = {
           sourceSha256,
           cues: parsedOnScreenTextCues.data,
         });
+        onScreenTextProof = proof;
         const failed = proof.cues.filter((cue) => !cue.passed);
         onScreenTextEvidence = [
           `onScreenTextOcr=${proof.engine.name}/${proof.engine.version}`,
@@ -3731,9 +4414,30 @@ export const qaVisual: Block = {
       : undefined;
     const narrationKey = opt(ctx, "narrationKey");
     const expectsNarrationMixEvidence = narrationDuration >= 1.5 && Boolean(storedNarrationPath || narrationKey);
-    const narrationStartSec = ctx.store["introApplied"] === true
-      ? Math.max(0, Number(ctx.store["introSec"] ?? 0))
-      : 0;
+    // Self-contained renderers can declare an intentional visual pre-roll
+    // before their voice-only source begins. Bind it explicitly rather than
+    // assuming every narration starts at zero (or pretending it is a generic
+    // intro card); malformed renderer metadata fails closed in production.
+    const rawNarrationStartSec = ctx.store["narrationStartSec"];
+    const declaredNarrationStartSec = rawNarrationStartSec === undefined
+      ? undefined
+      : Number(rawNarrationStartSec);
+    if (
+      rawNarrationStartSec !== undefined &&
+      (!Number.isFinite(declaredNarrationStartSec) || declaredNarrationStartSec! < 0 || declaredNarrationStartSec! > dur)
+    ) {
+      if (productionQa) {
+        critical.push("narration start evidence is malformed or outside the final master duration");
+      }
+    }
+    const narrationStartSec = declaredNarrationStartSec !== undefined &&
+      Number.isFinite(declaredNarrationStartSec) &&
+      declaredNarrationStartSec >= 0 &&
+      declaredNarrationStartSec <= dur
+      ? declaredNarrationStartSec
+      : ctx.store["introApplied"] === true
+        ? Math.max(0, Number(ctx.store["introSec"] ?? 0))
+        : 0;
     let finalNarrationMix: { correlation: number | null; narrationStartSec: number } | undefined;
     let finalNarrationTranscript: { wordErrorRate: number; lexicalRecall: number; passed: boolean } | undefined;
     let finalMasterNarrationSemantic: FinalMasterNarrationSemanticEvidence | undefined;
@@ -3940,8 +4644,31 @@ export const qaVisual: Block = {
           `finalMasterNarrationWer=${finalMasterNarrationSemantic.finalMasterTranscript.assessment.wordErrorRate.toFixed(3)}`,
           `finalMasterNarrationRecall=${finalMasterNarrationSemantic.finalMasterTranscript.assessment.lexicalRecall.toFixed(3)}`,
           "finalMasterNarrationEvaluator=faster-whisper-small.en/offline-speech-semantic",
-        ]
+      ]
       : [];
+    // Whiteboard and motion-comic plans are intentionally retained as
+    // plan-scoped evidence. Their native renderers nevertheless expose exact
+    // TTS input, so production QA can prove that approved narration—not merely
+    // a renderer-chosen substitute—survived intelligibly into this master.
+    // This is deliberately not a panel/shot visual-realization claim.
+    if (productionQa && selfContainedStoryPlanEvidence?.narrationTextSha256) {
+      if (!finalMasterNarrationSemantic) {
+        critical.push(
+          "self-contained narrated plan lacks final-master narration-semantic evidence",
+        );
+      } else if (
+        finalMasterNarrationSemantic.narration.expectedTextSha256 !==
+        selfContainedStoryPlanEvidence.narrationTextSha256
+      ) {
+        critical.push(
+          "self-contained narrated plan does not match the exact narration audited in the final master",
+        );
+      } else {
+        narrationTranscriptEvidence.push(
+          "selfContainedNarrationPlan=bound-to-final-master-semantic-receipt",
+        );
+      }
+    }
     // 8) Critic (crew) VALIDATION SPEC â€” the per-video checklist this content must
     // pass. Deterministic assertions compare metrics we computed; vision ones are
     // judged on the sampled frames. A failed BLOCK-severity assertion fails QA;
@@ -3975,10 +4702,10 @@ export const qaVisual: Block = {
 
       // BATCHED vision judging: ALL vision assertions in ONE call (the
       // per-assertion loop cost up to 12 separate multi-image vision calls).
-      // visionLocal has a hard 12-image input cap. The review module already
+      // visionLocal has a hard provider-sized input cap. The review module already
       // batches the full evidence ledger; the critic gets a bounded subset
       // here instead of silently dropping unseen paths.
-      const judgeFrames = (visualReview.framePaths.length ? visualReview.framePaths : vframes).slice(0, 12);
+      const judgeFrames = visualReview.framePaths.slice(0, VISION_MAX_IMAGES_PER_REQUEST);
       let visionVerdicts: Map<string, boolean | null> | undefined;
       const visionAssertions = spec.assertions.filter((a) => a.check === "vision");
       if (judgeFrames.length && visionAssertions.length) {
@@ -4082,6 +4809,64 @@ export const qaVisual: Block = {
       storedEpisode.data.story.status === "measured"
       ? storedEpisode.data.story
       : undefined;
+    // Story Spine planning is intentionally pre-render evidence. Production
+    // release upgrades it only when the exact pre-render fingerprint can be
+    // re-bound to the final-master narration transcript. Other story models
+    // (self-contained panels and documentary Short strategy) do not enter this
+    // adapter and retain their own contracts.
+    const declaresStorySpine =
+      storedStory?.source === VALIDATED_STORY_SPINE_SOURCE ||
+      ctx.store["storySpineFingerprint"] !== undefined;
+    let finalMasterNarratedStoryCoverage:
+      | DerivedFinalMasterNarratedStoryCoverage
+      | undefined;
+    if (productionQa && declaresStorySpine) {
+      try {
+        if (!finalMasterNarrationSemantic || !finalMasterNarrationAudit || !narrationCueTiming) {
+          throw new Error("final-master narration semantic, transcript-audit, or cue-timing evidence is unavailable");
+        }
+        const storySpine = StorySpineSchema.parse({
+          version: "1.0.0",
+          timedScript: ctx.store["timedScript"],
+          narrativeBeats: ctx.store["narrativeBeats"],
+          continuityLedger: ctx.store["continuityLedger"],
+          shotList: ctx.store["shotList"],
+          dpVisualSpecs: ctx.store["dpVisualSpecs"],
+          editorEdl: ctx.store["editorEdl"],
+          coverage: ctx.store["storyCoverage"],
+        });
+        finalMasterNarratedStoryCoverage = deriveFinalMasterNarratedStoryCoverage({
+          storySpine,
+          expectedStorySpineFingerprint: ctx.store["storySpineFingerprint"],
+          sentenceTimings: ctx.store["sentenceTimings"],
+          narrationCueTiming,
+          finalMasterNarration: finalMasterNarrationSemantic,
+          narrationAudit: finalMasterNarrationAudit.audit,
+          keyPrefix: ctx.keyPrefix,
+          runId: ctx.runId,
+        });
+        if (
+          finalMasterNarratedStoryCoverage.receipt.coverage.coverageRatio < 0.95
+        ) {
+          critical.push(
+            "final-master narrated Story Spine coverage " +
+              `${finalMasterNarratedStoryCoverage.receipt.coverage.coverageRatio.toFixed(3)} is below required 0.950`,
+          );
+        }
+        ctx.log(
+          "qa_visual: final-master narrated Story Spine coverage " +
+            `${finalMasterNarratedStoryCoverage.receipt.coverage.coverageRatio.toFixed(3)} ` +
+            `(${finalMasterNarratedStoryCoverage.receipt.coverage.passingBeatCount}/` +
+            `${finalMasterNarratedStoryCoverage.receipt.coverage.totalBeatCount} beats calibrated; ` +
+            `${finalMasterNarratedStoryCoverage.receipt.receiptFingerprint.slice(0, 12)})`,
+        );
+      } catch (error) {
+        critical.push(
+          "final-master narrated Story Spine coverage unavailable: " +
+            (error instanceof Error ? error.message : String(error)),
+        );
+      }
+    }
     const temporalDynamismPassed = rv.temporalDynamism.verdict === "pass" || rv.temporalDynamism.verdict === "not_required";
     const visualPacingPassed = rv.visualPacing.verdict === "pass" || rv.visualPacing.verdict === "not_required";
     const temporalDynamismEvidence = [
@@ -4115,15 +4900,34 @@ export const qaVisual: Block = {
         topic,
         title,
         durationSec: p.durationSec,
-        story: storedStory
-          ? {
+        story: selfContainedStoryPlanEvidence
+          ? { plan: selfContainedStoryPlanEvidence }
+          : finalMasterNarratedStoryCoverage
+            ? {
+              source: FINAL_MASTER_NARRATED_STORY_COVERAGE_SOURCE,
+              beatCount: finalMasterNarratedStoryCoverage.receipt.storySpine.beatCount,
+              // This is the plan's shot count, bound to the same retained
+              // Story Spine. The receipt's coverage remains narration-semantic,
+              // never a visual-shot realization claim.
+              shotCount: finalMasterNarratedStoryCoverage.receipt.storySpine.shotCount,
+              coverageRatio: finalMasterNarratedStoryCoverage.receipt.coverage.coverageRatio,
+              measurementScope: "final_master",
+              measurementKind: "narration_semantic",
+              finalMasterNarratedStoryReceiptFingerprint:
+                finalMasterNarratedStoryCoverage.receipt.receiptFingerprint,
+            }
+          : storedStory
+            ? {
               source: storedStory.source,
               beatCount: storedStory.beatCount,
               shotCount: storedStory.shotCount,
               coverageRatio: storedStory.coverageRatio,
+              ...(storedStory.measurementScope === undefined
+                ? {}
+                : { measurementScope: storedStory.measurementScope }),
             }
-          : {
-              source: Array.isArray(ctx.store["shotList"]) ? "validated-story-spine/v1" : undefined,
+            : {
+              source: Array.isArray(ctx.store["shotList"]) ? VALIDATED_STORY_SPINE_SOURCE : undefined,
               beatCount: Array.isArray(ctx.store["narrativeBeats"]) ? ctx.store["narrativeBeats"].length : undefined,
               shotCount: Array.isArray(ctx.store["shotList"]) ? ctx.store["shotList"].length : undefined,
               coverageRatio: Number.isFinite(storyRatio) ? storyRatio : undefined,
@@ -4157,10 +4961,26 @@ export const qaVisual: Block = {
       visual: visualReview.ran
         ? {
             passed: visualReview.verdict === "pass",
+            // Production already requires the conservative wide-sample score.
+            // Bind its lane/QualityBar floor into QualityEvidence so the
+            // existing hard release gate can reject a visually weak master;
+            // draft probes deliberately retain their advisory-only behavior.
+            ...(productionQa && visualReview.broadQualityScore
+              ? {
+                  score: visualReview.broadQualityScore.score,
+                  minimumScore: videoMinimum,
+                }
+              : {}),
             evaluator: "scene/cue-aware evidence-backed visual review",
             evidence: [
               `frames=${visualReview.evidence.frames.length}`,
               `manifest=${visualReview.evidence.manifestKey ?? "not-persisted"}`,
+              ...(productionQa && visualReview.broadQualityScore
+                ? [
+                    `wideSampleQualityScore=${visualReview.broadQualityScore.score.toFixed(2)}`,
+                    `minimumScore=${videoMinimum.toFixed(2)}`,
+                  ]
+                : []),
               ...cinematicQualityEvidence,
               ...ltxEditIntegrityEvidence,
               ...adaptiveSceneEvidence,
@@ -4295,6 +5115,15 @@ export const qaVisual: Block = {
       | ReturnType<typeof createFinalMasterReleaseCertificateReference>
       | undefined;
     let finalMasterReleaseCertificateKey: string | undefined;
+    let visualSequenceEvidenceOmission:
+      | VisualSequenceEvidenceOmission
+      | undefined;
+    let viewerPromiseProgression:
+      | ViewerPromiseProgressionReceipt
+      | undefined;
+    let viewerPromiseProgressionOmission:
+      | ViewerPromiseProgressionOmission
+      | undefined;
     if (productionQa) {
     // Persist the complete post-review receipt before handing the master to
     // upload. `visualReview.persistEvidence` deliberately runs before the
@@ -4306,6 +5135,7 @@ export const qaVisual: Block = {
     if (
       visualReview.verdict !== "pass" ||
       !visualReview.referenceCriteriaComplete ||
+      !visualReview.broadQualityScore ||
       !visualReviewEvidenceManifestKey
     ) {
       throw new Error("qa_visual FAILED: final-master visual-review evidence was not durably persisted");
@@ -4313,6 +5143,11 @@ export const qaVisual: Block = {
     const visualReviewEvidenceFrameArtifacts = visualReview.evidence.frames.map((frame) => {
       const byteLength = frame.byteLength;
       if (
+        !frame.id ||
+        !frame.id.trim() ||
+        typeof frame.tSec !== "number" ||
+        !Number.isFinite(frame.tSec) ||
+        frame.tSec < 0 ||
         !frame.r2Key ||
         !frame.contentSha256 ||
         !/^[a-f0-9]{64}$/i.test(frame.contentSha256) ||
@@ -4323,6 +5158,8 @@ export const qaVisual: Block = {
         throw new Error("qa_visual FAILED: final-master visual-review frame evidence lacks a durable byte receipt");
       }
       return {
+        id: frame.id,
+        tSec: frame.tSec,
         r2Key: frame.r2Key,
         contentSha256: frame.contentSha256,
         byteLength,
@@ -4335,6 +5172,11 @@ export const qaVisual: Block = {
     const sortedVisualReviewEvidenceFrameArtifacts = [...visualReviewEvidenceFrameArtifacts]
       .sort((left, right) => left.r2Key.localeCompare(right.r2Key));
     const sortedVisualReviewEvidenceFrameKeys = sortedVisualReviewEvidenceFrameArtifacts.map((frame) => frame.r2Key);
+    // The visual-sequence ledger intentionally retains its established
+    // byte-only artifact boundary; Viewer Promise uses the full witness below.
+    const sortedVisualReviewEvidenceByteArtifacts = sortedVisualReviewEvidenceFrameArtifacts.map(
+      ({ r2Key, contentSha256, byteLength }) => ({ r2Key, contentSha256, byteLength }),
+    );
     const visualReviewReleaseReceipt = createVisualReviewReleaseReceipt({
       reviewFingerprint: visualReview.reviewFingerprint,
       reviewReceiptVersion: visualReview.reviewReceiptVersion,
@@ -4345,6 +5187,7 @@ export const qaVisual: Block = {
       focusWindows: visualReview.focusWindows,
       referenceCriteria: visualReview.referenceCriteria,
       referenceCriteriaComplete: visualReview.referenceCriteriaComplete,
+      broadQualityScore: visualReview.broadQualityScore,
       evidence: {
         source: {
           durationSec: visualReview.evidence.source.durationSec,
@@ -4375,6 +5218,13 @@ export const qaVisual: Block = {
         { contentType: "application/json" },
       );
     }
+    if (finalMasterNarratedStoryCoverage) {
+      await putObject(
+        finalMasterNarratedStoryCoverage.receipt.auditArtifact.r2Key,
+        finalMasterNarratedStoryCoverage.preparedAudit.bytes,
+        { contentType: "application/json" },
+      );
+    }
     const audioReceipts = [
       narrationPerformance,
       finalNarrationMix,
@@ -4394,8 +5244,40 @@ export const qaVisual: Block = {
           qualityAxis: qualityEvidence.axes.audio,
         }
       : undefined;
+    const shortsOpeningEvidence = (() => {
+      if (!quizShortOpeningHook) return undefined;
+      if (!onScreenTextProof || !onScreenTextProof.passed) {
+        throw new Error("qa_visual: QuizShort requires a passing final-master OCR proof for its opening hook");
+      }
+      const audioAxis = qualityEvidence.axes.audio;
+      if (
+        audioAxis.status !== "pass" ||
+        audioAxis.score === undefined ||
+        audioAxis.minimumScore === undefined ||
+        audioAxis.score < audioAxis.minimumScore
+      ) {
+        throw new Error("qa_visual: QuizShort requires a passing scored final-master audio QA axis");
+      }
+      return createShortsOpeningEvidence({
+        finalMaster: {
+          sha256: finalMasterSha256AfterVisualReview,
+          durationSec: p.durationSec,
+        },
+        review: visualReview,
+        visualReviewReleaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
+        openingText: planShortsOpeningOnScreenTextEvidence({
+          cueId: quizShortOpeningHook.cueId,
+          startSec: quizShortOpeningHook.startSec,
+          endSec: quizShortOpeningHook.endSec,
+          expectedText: quizShortOpeningHook.expectedText,
+          durationSec: p.durationSec,
+          source: "on_screen_hook",
+        }),
+        onScreenText: onScreenTextProof,
+      });
+    })();
     // V2 is deliberately not a generic "QA passed" upgrade. It is possible
-    // only for the two fixed narrated audio pairs, after both the visual
+    // only for fixed, family-specific narrated audio pairs, after both the visual
     // release receipt and the full final-master narration audit have been
     // persisted. Any absent/insufficient recipe keeps the honest v1 snapshot;
     // a candidate V2 receipt that is malformed or mismatched throws below.
@@ -4431,11 +5313,446 @@ export const qaVisual: Block = {
             visualReviewFingerprint: visualReview.reviewFingerprint,
             visualReviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
           });
+    const finalMasterQualityEvidence = createFinalMasterQualityEvidenceBinding({
+      finalMaster: {
+        sha256: finalMasterSha256AfterVisualReview,
+        durationSec: p.durationSec,
+      },
+      visualReview: {
+        reviewFingerprint: visualReviewReleaseReceipt.reviewFingerprint,
+        reviewReceiptVersion: visualReviewReleaseReceipt.reviewReceiptVersion,
+        reviewReceiptFingerprint: visualReviewReleaseReceipt.reviewReceiptFingerprint,
+        releaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
+      },
+      contentLane: {
+        key: contentLane.key,
+        renderer: contentLane.primaryRenderer,
+      },
+      ...(qualityEvidenceProgramRoute
+        ? {
+            programRoute: {
+              routeFingerprint: qualityEvidenceProgramRoute.routeFingerprint,
+              family: qualityEvidenceProgramRoute.family,
+              contentLaneKey: qualityEvidenceProgramRoute.contentLaneKey,
+              programBriefFingerprint: qualityEvidenceProgramRoute.programBriefFingerprint,
+              routeSeedFingerprint: channelProgramRouteRunSeedFingerprint(qualityEvidenceProgramRoute),
+            },
+          }
+        : {}),
+      qualityEvidence,
+    });
+    const finalMasterVisualPacing = createFinalMasterVisualPacingBinding({
+      finalMaster: {
+        sha256: finalMasterSha256AfterVisualReview,
+        durationSec: p.durationSec,
+      },
+      contentLane: {
+        key: contentLane.key,
+        renderer: contentLane.primaryRenderer,
+      },
+      visualReview: {
+        reviewFingerprint: visualReviewReleaseReceipt.reviewFingerprint,
+        reviewReceiptVersion: visualReviewReleaseReceipt.reviewReceiptVersion,
+        reviewReceiptFingerprint: visualReviewReleaseReceipt.reviewReceiptFingerprint,
+        releaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
+      },
+      qualityEvidence: {
+        bindingFingerprint: finalMasterQualityEvidence.bindingFingerprint,
+        qualityEvidenceFingerprint: finalMasterQualityEvidence.qualityEvidenceFingerprint,
+      },
+      visualPacing: rv.visualPacing,
+    });
+    // This optional ledger is provenance only. It consumes the already-sealed
+    // route, receipts, and frozen capability selection after final QA; it does
+    // not request another review or participate in the release decision.
+    const referenceQualityMechanics = qualityEvidenceProgramRoute
+      ? createReferenceQualityMechanicsLedger({
+          route: qualityEvidenceProgramRoute,
+          selectedCapabilityKeys: ctx.store["channelSelectedCapabilityKeys"],
+          finalMaster: {
+            sha256: finalMasterSha256AfterVisualReview,
+            durationSec: p.durationSec,
+          },
+          visualRelease: visualReviewReleaseReceipt,
+          referenceQualityBinding,
+          finalMasterQualityEvidenceBinding: finalMasterQualityEvidence,
+          narrationText: ctx.store["narrationText"],
+          dataStorySourceLedger: ctx.store["dataStorySourceLedger"],
+          syntheticScenario: ctx.store["syntheticScenario"],
+        })
+      : undefined;
+    const finalMasterByteLength = (await stat(video)).size;
+    if (!Number.isSafeInteger(finalMasterByteLength) || finalMasterByteLength < 1) {
+      throw new Error("qa_visual FAILED: final master has an invalid byte length");
+    }
+    // This is intentionally a pure observation over receipts already created
+    // by shared final QA. It must never request a reviewer/frame/R2 operation,
+    // add a QualityEvidence axis, or change this release decision.
+    if (qualityEvidenceProgramRoute) {
+      const viewerPromiseProgressionResolution = deriveViewerPromiseProgression({
+        route: qualityEvidenceProgramRoute,
+        contentLane,
+        finalMaster: {
+          sha256: finalMasterSha256AfterVisualReview,
+          durationSec: p.durationSec,
+        },
+        visualReview: {
+          reviewFingerprint: visualReviewReleaseReceipt.reviewFingerprint,
+          reviewReceiptVersion: visualReviewReleaseReceipt.reviewReceiptVersion,
+          reviewReceiptFingerprint: visualReviewReleaseReceipt.reviewReceiptFingerprint,
+          releaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
+          evidence: visualReview.evidence,
+        },
+        timedScript: ctx.store["timedScript"],
+        narrativeBeats: ctx.store["narrativeBeats"],
+        continuityLedger: ctx.store["continuityLedger"],
+        shotList: ctx.store["shotList"],
+        dpVisualSpecs: ctx.store["dpVisualSpecs"],
+        editorEdl: ctx.store["editorEdl"],
+        storyCoverage: ctx.store["storyCoverage"],
+        episodeGraph: ctx.store["episodeGraph"],
+        sentenceTimings: ctx.store["sentenceTimings"],
+        narrationCueTiming,
+        finalMasterNarration: finalMasterNarrationSemantic,
+      });
+      if (viewerPromiseProgressionResolution.status === "measured") {
+        viewerPromiseProgression = viewerPromiseProgressionResolution.receipt;
+      } else {
+        viewerPromiseProgressionOmission = viewerPromiseProgressionResolution.omission;
+        ctx.log(
+          "qa_visual: viewer-promise progression omitted (" +
+            viewerPromiseProgressionOmission.status +
+            "/" +
+            viewerPromiseProgressionOmission.reasonCode +
+            "); no release or readiness decision changed",
+        );
+      }
+    }
+    // This is intentionally optional provenance. Only pass a manifest through
+    // when its lane label matches the exact sequence adapter. A stale, absent,
+    // or unsupported artifact never changes the QA/release decision.
+    const rawVisualSequenceArtifactManifest = ctx.store["visualSequenceArtifactManifest"];
+    const hasExactStandardVisualSequenceInputs =
+      authoredShotManifest !== undefined &&
+      ctx.store["shotQaReport"] !== undefined &&
+      ctx.store["visualCoverage"] !== undefined;
+    const visualSequenceAdapter =
+      hasExactStandardVisualSequenceInputs
+        ? "standard_novita"
+        : cinematicBinding
+          ? "casefile_cinematic"
+          : "none";
+    const candidateArtifactManifest =
+      visualSequenceAdapter === "none"
+        ? undefined
+        : rawVisualSequenceArtifactManifest;
+    let validatedArtifactManifest: unknown | undefined;
+    let visualSequenceEvidence: VisualSequenceEvidenceLedger | undefined;
+    if (candidateArtifactManifest !== undefined) {
+      try {
+        // Structural validation happens before adapter derivation so a malformed
+        // optional manifest cannot be mislabeled as a base QA/receipt failure.
+        const artifactManifest = assertVisualSequenceArtifactManifest(
+          candidateArtifactManifest,
+        );
+        if (artifactManifest.source !== visualSequenceAdapter) {
+          visualSequenceEvidenceOmission = createVisualSequenceEvidenceOmission({
+            status: "rejected",
+            adapter: visualSequenceAdapter,
+            reasonCode: "artifact_manifest_source_mismatch",
+          });
+        } else {
+          validatedArtifactManifest = artifactManifest;
+        }
+      } catch {
+        visualSequenceEvidenceOmission = createVisualSequenceEvidenceOmission({
+          status: "rejected",
+          adapter: visualSequenceAdapter,
+          reasonCode: "artifact_manifest_invalid",
+        });
+      }
+    }
+    if (!visualSequenceEvidenceOmission) {
+      try {
+        const visualSequenceEvidenceResolution = deriveVisualSequenceEvidenceLedger({
+          ...(hasExactStandardVisualSequenceInputs
+            ? {
+                standardNovita: {
+                  shotRenderManifest: authoredShotManifest,
+                  shotQaReport: ctx.store["shotQaReport"],
+                  visualCoverage: ctx.store["visualCoverage"],
+                  ...(validatedArtifactManifest
+                    ? { artifactManifest: validatedArtifactManifest }
+                    : {}),
+                },
+              }
+            : {}),
+          ...(cinematicBinding
+            ? {
+                casefileCinematic: {
+                  scenePlan: cinematicBinding.scenePlan,
+                  editDecisionList: cinematicBinding.editDecisionList,
+                  footageManifest: cinematicBinding.footageManifest,
+                  narrationDurationSec: target,
+                  ...(validatedArtifactManifest
+                    ? { artifactManifest: validatedArtifactManifest }
+                    : {}),
+                },
+              }
+            : {}),
+          finalMaster: {
+            sha256: finalMasterSha256AfterVisualReview,
+            byteLength: finalMasterByteLength,
+            durationSec: p.durationSec,
+          },
+          visualReview: {
+            evidenceManifestKey: visualReviewEvidenceManifestKey,
+            reviewFingerprint: visualReviewReleaseReceipt.reviewFingerprint,
+            reviewReceiptVersion: visualReviewReleaseReceipt.reviewReceiptVersion,
+            reviewReceiptFingerprint: visualReviewReleaseReceipt.reviewReceiptFingerprint,
+            releaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
+            source: visualReviewReleaseReceipt.evidence.source,
+            frameArtifacts: sortedVisualReviewEvidenceByteArtifacts,
+          },
+        });
+        if (visualSequenceEvidenceResolution.status === "supported") {
+          visualSequenceEvidence = visualSequenceEvidenceResolution.ledger;
+        } else {
+          visualSequenceEvidenceOmission = createVisualSequenceEvidenceOmission({
+            status: "unsupported",
+            adapter:
+              visualSequenceEvidenceResolution.reason ===
+              "ambiguous_sequence_contract"
+                ? "ambiguous"
+                : "none",
+            reasonCode: visualSequenceEvidenceResolution.reason,
+          });
+        }
+      } catch (error) {
+        visualSequenceEvidenceOmission =
+          visualSequenceAdapter === "none"
+            ? createVisualSequenceEvidenceOmission({
+                status: "unsupported",
+                adapter: "none",
+                reasonCode: "no_supported_sequence_contract",
+              })
+            : createVisualSequenceEvidenceOmission({
+                status: "rejected",
+                adapter: visualSequenceAdapter,
+                reasonCode: classifyVisualSequenceEvidenceRejection(error),
+              });
+      }
+    }
+    if (visualSequenceEvidenceOmission) {
+      ctx.log(
+        "qa_visual: visual-sequence evidence omitted (" +
+          visualSequenceEvidenceOmission.status +
+          "/" +
+          visualSequenceEvidenceOmission.adapter +
+          "/" +
+          visualSequenceEvidenceOmission.reasonCode +
+          "); no release or readiness decision changed",
+      );
+    }
+    // Re-read the immutable selected-input manifest immediately before the
+    // certificate is minted. This is deliberately distinct from the
+    // pre-compose check: a stale/missing sidecar cannot be omitted from a
+    // production release after the master has been rendered.
+    let thirdPartyStockEvidence: ThirdPartyStockEvidenceReference | undefined;
+    const thirdPartyStockEvidenceRaw = ctx.store["thirdPartyStockEvidence"];
+    if (thirdPartyStockEvidenceRaw !== undefined) {
+      const footageKeys = ctx.store["footageKeys"];
+      if (!Array.isArray(footageKeys) || footageKeys.some((key) => typeof key !== "string")) {
+        throw new Error("qa_visual: third-party stock evidence requires ordered footageKeys");
+      }
+      thirdPartyStockEvidence = (
+        await loadThirdPartyStockEvidence({
+          evidence: thirdPartyStockEvidenceRaw,
+          consumer: "qa_visual",
+          footageKeys,
+        })
+      ).reference;
+    }
+    // The package plan is a non-paid, pre-thumbnail contract. Bind it to the
+    // exact current inputs and final thumbnail bytes here, after final-master
+    // evidence exists. Automatic routes additionally carry the existing
+    // reviewer's cited opening-anchor measurement; supervised/history paths
+    // retain honest structural-only evidence instead of fabricating it.
+    let packageToOpening: PackageToOpeningReceipt | undefined;
+    let packageToOpeningOmission: PackageToOpeningOmission | undefined;
+    const packagePlanRaw = ctx.store["packageToOpeningPlan"];
+    if (packagePlanRaw === undefined) {
+      packageToOpeningOmission = createPackageToOpeningOmission({
+        reasonCode: "legacy_package_plan_missing",
+      });
+    } else {
+      let planFingerprint: string | undefined;
+      try {
+        const packagePlan = boundPackagePlanForOpening ?? assertPackageToOpeningPlanBinding({
+          plan: packagePlanRaw,
+          title,
+          thumbnailDescription: str(ctx, "thumbnailDescription"),
+          topic,
+          route: ctx.store["channelProgramRoute"],
+          script: ctx.store["script"],
+          quizPlan: ctx.store["quizPlan"],
+          family: ctx.store["family"],
+          contentLane: ctx.store["contentLane"],
+        });
+        planFingerprint = packagePlan.planFingerprint;
+        const thumbnailKey = str(ctx, "thumbnailKey");
+        const thumbnailBytes = treatmentBoundThumbnailBytes ?? await getObjectBytes(thumbnailKey);
+        packageToOpening = createPackageToOpeningReceipt({
+          plan: packagePlan,
+          finalMaster: {
+            sha256: finalMasterSha256AfterVisualReview,
+            durationSec: p.durationSec,
+          },
+          thumbnail: {
+            r2Key: thumbnailKey,
+            sha256: createHash("sha256").update(thumbnailBytes).digest("hex"),
+            byteLength: thumbnailBytes.byteLength,
+          },
+          visualReview: {
+            reviewFingerprint: visualReview.reviewFingerprint,
+            reviewReceiptVersion: visualReview.reviewReceiptVersion,
+            reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+            releaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
+            evidenceFrameArtifacts: sortedVisualReviewEvidenceFrameArtifacts,
+            ...(automaticPackageOpeningCriterion
+              ? { referenceCriteria: visualReview.referenceCriteria }
+              : {}),
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        packageToOpeningOmission = createPackageToOpeningOmission({
+          reasonCode: /opening window|opening frame/i.test(message)
+            ? "opening_review_frame_unavailable"
+            : "package_binding_unavailable",
+          ...(planFingerprint ? { planFingerprint } : {}),
+        });
+        ctx.log(`qa_visual: package-to-opening omitted (${message})`);
+      }
+    }
+    // Bind an actual Studio-library selection for the direct open-weight LTX 2.5
+    // Novita worker into the release certificate.
+    // only after the exact shot manifest exists. A malformed/mismatched
+    // selection is a provenance failure, not an optional visual decoration.
+    const studioLtxAdapterBinding = createStudioLtxReleaseAdapterBinding({
+      shotRenderManifest: ctx.store["shotRenderManifest"],
+      globalSelection: ctx.store["studioLtxCreativeAdapterSelection"],
+      perShotSelections: ctx.store["studioLtxCreativeAdapterSelectionsByShot"],
+    });
+    const studioAssetReleaseUses: Array<{
+      assetEntryFingerprint: string;
+      moduleId: string;
+      projectionFingerprint: string;
+    }> = [];
+    const addStudioRecipeUses = (
+      moduleId: string,
+      projection: { readonly sourceEntryFingerprints: readonly string[]; readonly fingerprint: string },
+    ) => {
+      for (const assetEntryFingerprint of projection.sourceEntryFingerprints) {
+        studioAssetReleaseUses.push({ assetEntryFingerprint, moduleId, projectionFingerprint: projection.fingerprint });
+      }
+    };
+    addStudioRecipeUses(
+      "visual_matter",
+      studioAssetRecipeProjectionFromUnknown(ctx.store["studioAssetRecipeProjection"]),
+    );
+    addStudioRecipeUses(
+      "music",
+      studioPostproductionRecipeProjectionFromUnknown(ctx.store["studioAudioRecipeProjection"], "audio_recipe"),
+    );
+    // The assembler reports its successful final-master overlay counts. A
+    // selected recipe with zero surviving overlays is not release usage and
+    // must never become a misleading reuse signal.
+    if (Number(ctx.store["quotesApplied"] ?? 0) > 0) {
+      addStudioRecipeUses(
+        "quote_overlays",
+        studioPostproductionRecipeProjectionFromUnknown(ctx.store["studioOverlayRecipeProjection"], "overlay_template"),
+      );
+    }
+    if (Number(ctx.store["insertsApplied"] ?? 0) > 0) {
+      addStudioRecipeUses(
+        "visual_inserts",
+        studioPostproductionRecipeProjectionFromUnknown(
+          ctx.store["studioMotionGraphicsRecipeProjection"],
+          "motion_graphics_template",
+        ),
+      );
+    }
+    const studioPostproductionDecision = studioPostproductionDecisionReceiptFromUnknown(
+      ctx.store["studioPostproductionDecision"],
+    );
+    if (studioPostproductionDecision?.selectionSource === "studio_asset") {
+      for (const assetEntryFingerprint of studioPostproductionDecision.sourceEntryFingerprints) {
+        studioAssetReleaseUses.push({
+          assetEntryFingerprint,
+          moduleId: "timeline_assemble",
+          projectionFingerprint: studioPostproductionDecision.receiptFingerprint,
+        });
+      }
+    } else if (!studioPostproductionDecision) {
+      // Historical runs did not emit a selection receipt. Preserve their
+      // existing correlation-only behavior without treating new overridden
+      // projections as if they made it into the master.
+      addStudioRecipeUses(
+        "timeline_assemble",
+        studioPostproductionRecipeProjectionFromUnknown(ctx.store["studioTransitionRecipeProjection"], "transition_template"),
+      );
+    }
+    if (studioLtxAdapterBinding) {
+      for (const assetEntryFingerprint of studioLtxAdapterBinding.sourceEntryFingerprints) {
+        studioAssetReleaseUses.push({
+          assetEntryFingerprint,
+          moduleId: "novita_render_video",
+          projectionFingerprint: studioLtxAdapterBinding.fingerprint,
+        });
+      }
+    }
+    const studioAssetReleaseFamily = typeof ctx.params["family"] === "string"
+      ? ctx.params["family"].trim()
+      : typeof ctx.store["family"] === "string"
+        ? ctx.store["family"].trim()
+        : "";
+    const studioUsageVisualStatus = finalMasterQualityEvidence.qualityEvidence.axes.visual.status;
+    if (studioUsageVisualStatus === "fail") {
+      throw new Error("qa_visual: a failed visual axis cannot produce a Studio asset quality observation");
+    }
+    const studioAssetReleaseUsage = studioAssetReleaseUses.length
+      ? createStudioAssetReleaseUsageReceipt({
+          finalMaster: { sha256: finalMasterSha256AfterVisualReview, durationSec: p.durationSec },
+          family: studioAssetReleaseFamily,
+          contentLane: finalMasterQualityEvidence.contentLane.key,
+          ...(visualMatter?.treatment ? { treatment: visualMatter.treatment.key } : {}),
+          visualReview: {
+            reviewFingerprint: visualReview.reviewFingerprint,
+            reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+          },
+          qualityEvidence: {
+            bindingFingerprint: finalMasterQualityEvidence.bindingFingerprint,
+            qualityEvidenceFingerprint: finalMasterQualityEvidence.qualityEvidenceFingerprint,
+            hardGateReady: finalMasterQualityEvidence.qualityEvidence.release.hardGateReady,
+            calibrationComplete: finalMasterQualityEvidence.qualityEvidence.release.calibrationComplete,
+            visualStatus: studioUsageVisualStatus,
+            ...(finalMasterQualityEvidence.qualityEvidence.axes.visual.score === undefined
+              ? {}
+              : { visualScore: finalMasterQualityEvidence.qualityEvidence.axes.visual.score }),
+            ...(finalMasterQualityEvidence.qualityEvidence.axes.visual.minimumScore === undefined
+              ? {}
+              : { visualMinimumScore: finalMasterQualityEvidence.qualityEvidence.axes.visual.minimumScore }),
+          },
+          uses: studioAssetReleaseUses,
+        })
+      : undefined;
     const persistedFinalMasterReleaseCertificate = createFinalMasterReleaseCertificate({
       version: FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
       finalMaster: {
         r2Key: str(ctx, "videoKey"),
         sha256: finalMasterSha256AfterVisualReview,
+        byteLength: finalMasterByteLength,
         durationSec: p.durationSec,
       },
       visualReview: {
@@ -4448,7 +5765,32 @@ export const qaVisual: Block = {
         reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
         releaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
       },
+      ...(thirdPartyStockEvidence ? { thirdPartyStockEvidence } : {}),
+      ...(packageToOpening ? { packageToOpening } : {}),
+      ...(packageToOpeningOmission ? { packageToOpeningOmission } : {}),
+      ...(finalMasterNarratedStoryCoverage
+        ? { narratedStoryCoverage: finalMasterNarratedStoryCoverage.receipt }
+        : {}),
       referenceQuality: referenceQualityBinding,
+      ...(referenceQualityMechanics ? { referenceQualityMechanics } : {}),
+      qualityEvidence: finalMasterQualityEvidence,
+      visualPacing: finalMasterVisualPacing,
+      ...(scenarioVisualTreatment ? { scenarioVisualTreatment } : {}),
+      ...(viewerPromiseProgression ? { viewerPromiseProgression } : {}),
+      ...(viewerPromiseProgressionOmission
+        ? { viewerPromiseProgressionOmission }
+        : {}),
+      ...(qualityEvidenceProgramRoute &&
+      (viewerPromiseProgression || viewerPromiseProgressionOmission)
+        ? {
+            viewerPromiseProgressionRoute:
+              ChannelProgramRouteRunSeedSchema.parse(qualityEvidenceProgramRoute),
+          }
+        : {}),
+      ...(visualSequenceEvidence ? { visualSequenceEvidence } : {}),
+      ...(visualSequenceEvidenceOmission
+        ? { visualSequenceEvidenceOmission }
+        : {}),
       ...(cinematicFinalMasterQaReceipt && cinematicFinalMasterQaReceiptFingerprint
         ? {
             cinematic: {
@@ -4457,6 +5799,11 @@ export const qaVisual: Block = {
             },
           }
         : {}),
+      ...(onScreenTextProof ? { onScreenText: onScreenTextProof } : {}),
+      ...(shortsOpeningEvidence ? { shortsOpeningEvidence } : {}),
+      ...(studioLtxAdapterBinding ? { studioLtxAdapterBinding } : {}),
+      ...(studioAssetReleaseUsage ? { studioAssetReleaseUsage } : {}),
+      ...(studioPostproductionDecision ? { studioPostproductionDecisions: [studioPostproductionDecision] } : {}),
       ...(audioReceipts ? { audio: audioReceipts } : {}),
     });
     const persistedFinalMasterReleaseCertificateKey = finalMasterReleaseCertificateObjectKey(
@@ -4485,9 +5832,95 @@ export const qaVisual: Block = {
     await verifyFinalMasterReleaseEvidenceObjects({
       certificate: durableFinalMasterReleaseCertificate,
       getObjectBytes,
+      getObjectIntegrity,
     });
     if (await sha256ShotAnalysisSource(video) !== finalMasterSha256AfterVisualReview) {
       throw new Error("qa_visual FAILED: final master changed while its durable release evidence was being persisted");
+    }
+    if (studioAssetReleaseUsage) {
+      try {
+        await recordStudioAssetReleaseUsage({
+          client: convex(),
+          ownerId: ctx.ownerId,
+          channelId: ctx.channelId,
+          runId: ctx.runId,
+          certificateFingerprint: durableFinalMasterReleaseCertificate.certificateFingerprint,
+          usage: studioAssetReleaseUsage,
+        });
+      } catch (error) {
+        // The certificate already preserves the full immutable observation,
+        // so a temporary analytics-store outage must not invalidate a verified
+        // master. The exact receipt can be safely backfilled later.
+        ctx.log(`qa_visual: Studio asset release observation not recorded (${error instanceof Error ? error.message : String(error)})`);
+      }
+    }
+    // A passing final master can teach this owner a *pending*, channel-scoped
+    // recipe only when no approved Studio recipe was reused. It is deliberately
+    // outside release success: a temporary candidate-store failure cannot
+    // invalidate a verified video, and the candidate cannot affect another run
+    // until the owner approves it after this certificate is re-verified.
+    const candidateVisualScore = finalMasterQualityEvidence.qualityEvidence.axes.visual.score;
+    const candidateVisualMinimum = finalMasterQualityEvidence.qualityEvidence.axes.visual.minimumScore;
+    const candidateSourceProjection = studioAssetRecipeProjectionFromUnknown(ctx.store["studioAssetRecipeProjection"]);
+    if (
+      studioAssetReleaseFamily
+      && finalMasterQualityEvidence.qualityEvidence.release.hardGateReady
+      && finalMasterQualityEvidence.qualityEvidence.release.calibrationComplete
+      && typeof candidateVisualScore === "number"
+      && typeof candidateVisualMinimum === "number"
+      && candidateVisualScore >= candidateVisualMinimum
+    ) {
+      try {
+        const candidates = [
+          ...(visualMatter
+            ? createStudioAssetPromotionCandidates({
+          ownerId: ctx.ownerId,
+          channelId: ctx.channelId,
+          runId: ctx.runId,
+          family: studioAssetReleaseFamily,
+          contentLane: finalMasterQualityEvidence.contentLane.key,
+          finalMasterReleaseCertificateKey: persistedFinalMasterReleaseCertificateKey,
+          finalMasterReleaseCertificateFingerprint: durableFinalMasterReleaseCertificate.certificateFingerprint,
+          finalMasterSha256: finalMasterSha256AfterVisualReview,
+          qualityEvidenceFingerprint: finalMasterQualityEvidence.qualityEvidenceFingerprint,
+          visualReviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+          // QualityEvidence deliberately uses the canonical 0–10 scale; the
+          // Studio approval UI presents its historical 0–100 asset score.
+          visualQualityScore: candidateVisualScore * 10,
+          visualMinimumScore: candidateVisualMinimum * 10,
+          visualMatter,
+          sourceEntryFingerprints: candidateSourceProjection.sourceEntryFingerprints,
+              })
+            : []),
+          ...(studioPostproductionDecision
+            ? createStudioPostproductionPromotionCandidates({
+                ownerId: ctx.ownerId,
+                channelId: ctx.channelId,
+                runId: ctx.runId,
+                family: studioAssetReleaseFamily,
+                contentLane: finalMasterQualityEvidence.contentLane.key,
+                finalMasterReleaseCertificateKey: persistedFinalMasterReleaseCertificateKey,
+                finalMasterReleaseCertificateFingerprint: durableFinalMasterReleaseCertificate.certificateFingerprint,
+                finalMasterSha256: finalMasterSha256AfterVisualReview,
+                qualityEvidenceFingerprint: finalMasterQualityEvidence.qualityEvidenceFingerprint,
+                visualReviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+                visualQualityScore: candidateVisualScore * 10,
+                visualMinimumScore: candidateVisualMinimum * 10,
+                decision: studioPostproductionDecision,
+              })
+            : []),
+        ];
+        if (candidates.length) {
+          await recordStudioAssetPromotionCandidates({
+            client: convex(),
+            ownerId: ctx.ownerId,
+            candidates,
+          });
+          ctx.log(`qa_visual: saved ${candidates.length} pending channel-scoped Studio asset candidate(s)`);
+        }
+      } catch (error) {
+        ctx.log(`qa_visual: Studio asset candidate capture not recorded (${error instanceof Error ? error.message : String(error)})`);
+      }
     }
     finalMasterReleaseCertificate = durableFinalMasterReleaseCertificate;
     finalMasterReleaseCertificateKey = persistedFinalMasterReleaseCertificateKey;
@@ -4534,6 +5967,13 @@ export const qaVisual: Block = {
       qaPassed: true,
       qaReport: {
         ...report,
+        ...(visualSequenceEvidenceOmission
+          ? { visualSequenceEvidenceOmission }
+          : {}),
+        ...(viewerPromiseProgression ? { viewerPromiseProgression } : {}),
+        ...(viewerPromiseProgressionOmission
+          ? { viewerPromiseProgressionOmission }
+          : {}),
         visualReview: {
           ran: visualReview.ran,
           verdict: visualReview.verdict,
@@ -4544,6 +5984,7 @@ export const qaVisual: Block = {
           reviewFingerprint: visualReview.reviewFingerprint,
           reviewReceiptVersion: visualReview.reviewReceiptVersion,
           reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+          broadQualityScore: visualReview.broadQualityScore,
           referenceCriteria: stageReferenceCriteria,
           referenceCriteriaComplete: visualReview.referenceCriteriaComplete,
         },
@@ -4581,6 +6022,7 @@ export const qaVisual: Block = {
         focusWindowCount: visualReview.focusWindows.length,
         reviewReceiptVersion: visualReview.reviewReceiptVersion,
         reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+        broadQualityScore: visualReview.broadQualityScore,
         referenceCriteria: stageReferenceCriteria,
         referenceCriteriaComplete: visualReview.referenceCriteriaComplete,
       },

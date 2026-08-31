@@ -36,19 +36,31 @@ import {
   assertLtx25ControllerMediaMatchesWorkerProof,
   createLtx25BenchmarkOutputBinding,
 } from "./lib/ltx25BenchmarkOutputProvenance.mjs";
+import { createLtx25BenchmarkReviewBrief } from "./lib/ltx25BenchmarkReviewBrief.mjs";
 
 const LTX_MODEL = "Lightricks/LTX-2.5";
 const LTX_REVISION = "ce298b1259d61ce6c87e05154b9ad339b16f32a0";
+const LTX_RUNTIME_REPOSITORY = "Lightricks/LTX-2";
+const LTX_RUNTIME_REVISION = "fd4ded7f2d88d3da713abcdd4ad41ecc4a9314ca";
 const ZIMAGE_MODEL = "Tongyi-MAI/Z-Image-Turbo";
 const ZIMAGE_REVISION = "f332072aa78be7aecdf3ee76d5c247082da564a6";
 const PRODUCT_ID = "4090.16c96g.v2";
 const CLUSTER_ID = "us-ca-nas-2";
 const VOLUME_ID = "384d629d-839f-4224-abef-64dfc2d751bf";
 const BASE_IMAGE = "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385";
-const RUNTIME_BUNDLE_KEY = process.env.NOVITA_RUNTIME_BUNDLE_KEY
-  || "novita/runtime/ltx-2.5/ff616214c4a8901f003a1ef0815220d596f709eeb5027fb575b643a97e11c579.tar.gz";
-const RUNTIME_BUNDLE_SHA256 = process.env.NOVITA_RUNTIME_BUNDLE_SHA256
-  || "ff616214c4a8901f003a1ef0815220d596f709eeb5027fb575b643a97e11c579";
+const SEALED_RUNTIME_BUNDLE_KEY = "novita/runtime/ltx-2.5/ff616214c4a8901f003a1ef0815220d596f709eeb5027fb575b643a97e11c579.tar.gz";
+const SEALED_RUNTIME_BUNDLE_SHA256 = "ff616214c4a8901f003a1ef0815220d596f709eeb5027fb575b643a97e11c579";
+// A benchmark must never spend against a runtime which this sealed admission
+// contract would reject later. Keep legacy env names as an explicit equality
+// assertion only; do not treat them as mutable runtime configuration.
+if (
+  (process.env.NOVITA_RUNTIME_BUNDLE_KEY && process.env.NOVITA_RUNTIME_BUNDLE_KEY !== SEALED_RUNTIME_BUNDLE_KEY)
+  || (process.env.NOVITA_RUNTIME_BUNDLE_SHA256 && process.env.NOVITA_RUNTIME_BUNDLE_SHA256 !== SEALED_RUNTIME_BUNDLE_SHA256)
+) {
+  throw new Error("LTX benchmark runtime bundle overrides must exactly match the sealed native-720p x2 contract");
+}
+const RUNTIME_BUNDLE_KEY = SEALED_RUNTIME_BUNDLE_KEY;
+const RUNTIME_BUNDLE_SHA256 = SEALED_RUNTIME_BUNDLE_SHA256;
 const API = "https://api.novita.ai/gpu-instance/openapi/v1";
 const STAGE_MAX_USD = 0.68;
 const TOTAL_MAX_USD = 3;
@@ -256,7 +268,7 @@ const ltxManifestKey = process.argv[2];
 if (!/^novita\/model-manifests\/ltx-2\.5-[a-f0-9-]+\.json$/.test(ltxManifestKey || "")) {
   throw new Error("pass the admitted LTX 2.5 model manifest key");
 }
-if (!/^novita\/runtime\/ltx-2\.5\/[a-f0-9]{64}\.tar\.(?:zst|gz)$/.test(RUNTIME_BUNDLE_KEY)
+if (!/^novita\/runtime\/ltx-2\.5\/[a-f0-9]{64}\.tar\.gz$/.test(RUNTIME_BUNDLE_KEY)
   || !/^[a-f0-9]{64}$/.test(RUNTIME_BUNDLE_SHA256)) {
   throw new Error("runtime bundle must have an immutable LTX 2.5 R2 key and SHA-256 identity");
 }
@@ -671,6 +683,7 @@ async function main() {
   console.error(JSON.stringify({ event: "benchmark_stage", stage: "render_reference_images" }));
   await executePhase({ phase: "image", ...image, maxRuntimeSeconds: phaseMaxSeconds, workerOverlay });
   await assertArtifacts(image.manifest);
+  const imageArtifactKeyByJobId = new Map(image.manifest.jobs.map((job) => [job.id, job.artifact.key]));
 
   const videoJobs = await Promise.all(image.manifest.jobs.map(async (imageJob) => ({
     id: smokeScene.id,
@@ -682,15 +695,21 @@ async function main() {
   })));
   if (videoJobs.length !== 1) throw new Error("native-720p x2 smoke benchmark must launch exactly one LTX job");
   videoJobs.forEach(assertLtx25Native720X2SmokeJob);
-  const video = await buildPhaseManifest({ phase: "video", profile: videoProfile(), models: ltxModels, jobs: videoJobs, maxRuntimeSeconds: phaseMaxSeconds });
+  const sealedVideoProfile = videoProfile();
+  const video = await buildPhaseManifest({ phase: "video", profile: sealedVideoProfile, models: ltxModels, jobs: videoJobs, maxRuntimeSeconds: phaseMaxSeconds });
   console.error(JSON.stringify({ event: "benchmark_stage", stage: "render_ltx25_videos" }));
   const completion = await executePhase({ phase: "video", ...video, maxRuntimeSeconds: phaseMaxSeconds, workerOverlay });
   const videoArtifacts = await assertArtifacts(video.manifest);
   const videoOutputs = completion.videoOutputs || {};
   const outputRows = await Promise.all(video.manifest.jobs.map(async (job) => {
     const proof = videoOutputs[job.id];
+    const inputArtifactKey = imageArtifactKeyByJobId.get(job.id);
+    const inputSha256 = job.input?.sha256;
+    if (!inputArtifactKey || !/^[a-f0-9]{64}$/.test(inputSha256 || "")) {
+      throw new Error(`native-720p x2 smoke output ${job.id} lacks an image-phase source binding`);
+    }
     assertLtx25Native720X2SmokeProof(proof, {
-      initialSha256: job.input?.sha256,
+      initialSha256: inputSha256,
       ...(job.endInput?.sha256 ? { endSha256: job.endInput.sha256 } : {}),
     });
     const controllerProof = await createLtx25BenchmarkOutputBinding({ bytes: await objectBytes(job.artifact.key) });
@@ -698,16 +717,73 @@ async function main() {
       throw new Error(`controller download size does not match R2 artifact metadata for ${job.id}`);
     }
     assertLtx25ControllerMediaMatchesWorkerProof(controllerProof, proof);
-    return { id: job.id, key: job.artifact.key, url: await signedGet(job.artifact.key, 604_800), proof, controllerProof };
+    return {
+      id: job.id,
+      key: job.artifact.key,
+      url: await signedGet(job.artifact.key, 604_800),
+      inputArtifact: { key: inputArtifactKey, sha256: inputSha256 },
+      proof,
+      controllerProof,
+    };
   }));
-  await terminal.sealSuccess({
+  const unsignedReport = {
     contract: BENCHMARK_CONTRACT, ok: true, nonce, ltxModelManifestKey: ltxManifestKey,
     stageMaxUsd: STAGE_MAX_USD, spotRateUsdPerHour: spotRate, phaseMaxSeconds,
     zImage: { model: ZIMAGE_MODEL, revision: ZIMAGE_REVISION, volumeReceipt: zProbe },
-    ltx: { model: LTX_MODEL, revision: LTX_REVISION, pipeline: "distilled", stageOne: "1280x704", output: "2560x1408@25", frames: 17, quantization: "fp8-cast", offload: "cpu", maxSampledPeakVramMib: 22_000, workerOverlaySha256: workerOverlay.sha256 },
-    outputs: outputRows.map(({ id, key, proof, controllerProof }) => ({ id, key, proof, controllerProof })),
+    ltx: {
+      model: LTX_MODEL,
+      revision: LTX_REVISION,
+      runtimeRepository: LTX_RUNTIME_REPOSITORY,
+      runtimeRevision: LTX_RUNTIME_REVISION,
+      runtimeBundleKey: RUNTIME_BUNDLE_KEY,
+      runtimeBundleSha256: RUNTIME_BUNDLE_SHA256,
+      workerImage: BASE_IMAGE,
+      gpuSku: completion.gpuSku,
+      gpuCount: completion.gpuCount,
+      vramGb: 24,
+      checkpoint: sealedVideoProfile.checkpoint,
+      textEncoderCheckpoint: sealedVideoProfile.textEncoderCheckpoint,
+      videoVaeCheckpoint: sealedVideoProfile.videoVaeCheckpoint,
+      audioVaeCheckpoint: sealedVideoProfile.audioVaeCheckpoint,
+      spatialUpscalerCheckpoint: sealedVideoProfile.spatialUpscalerCheckpoint,
+      pipeline: sealedVideoProfile.pipeline,
+      stageOne: `${sealedVideoProfile.stageOneWidth}x${sealedVideoProfile.stageOneHeight}`,
+      output: `${sealedVideoProfile.width}x${sealedVideoProfile.height}@${sealedVideoProfile.fps}`,
+      frames: sealedVideoProfile.maxFrames,
+      steps: sealedVideoProfile.steps,
+      guidanceScale: sealedVideoProfile.guidanceScale,
+      precision: sealedVideoProfile.precision,
+      twoStageRefine: sealedVideoProfile.twoStageRefine,
+      spatialUpscaleFactor: sealedVideoProfile.spatialUpscaleFactor,
+      quantization: sealedVideoProfile.quantization,
+      offload: sealedVideoProfile.offload,
+      maxSampledPeakVramMib: sealedVideoProfile.maxSampledPeakVramMib,
+      workerOverlaySha256: workerOverlay.sha256,
+      videoManifestKey: video.manifestKey,
+      videoManifestSha256: video.manifest.manifestSha256,
+      videoProfileSha256: video.manifest.profileSha256,
+    },
+    outputs: outputRows.map(({ id, key, inputArtifact, proof, controllerProof }) => ({ id, key, inputArtifact, proof, controllerProof })),
+  };
+  // Write a pending review task before sealing the report. It contains the
+  // exact controller-observed output SHA but no verdict, receipt, or frames,
+  // so it can never bypass the later human visual-review sidecar.
+  const previewReport = {
+    ...unsignedReport,
+    status: "complete",
+    reportSha256: sha256(canonicalJson({ ...unsignedReport, status: "complete" })),
+  };
+  const reviewBrief = createLtx25BenchmarkReviewBrief({ reportKey: `${root}/report.json`, report: previewReport });
+  const reviewBriefKey = `${root}/review/brief.json`;
+  await putJson(reviewBriefKey, reviewBrief, {
+    "report-sha256": previewReport.reportSha256,
+    "review-status": reviewBrief.status,
   });
-  console.log(JSON.stringify({ event: "benchmark_complete", reportKey: `${root}/report.json`, outputs: outputRows }));
+  const report = await terminal.sealSuccess(unsignedReport);
+  if (report.reportSha256 !== reviewBrief.reportSha256) {
+    throw new Error("sealed LTX benchmark report digest does not match its pending review brief");
+  }
+  console.log(JSON.stringify({ event: "benchmark_complete", reportKey: `${root}/report.json`, reviewBriefKey, outputs: outputRows }));
 }
 
 let cleanupPromise;

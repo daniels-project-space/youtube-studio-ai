@@ -33,6 +33,29 @@ expectFamily("Guided breathwork for sleep and relaxation", "sleep");
 expectFamily("Hand-drawn whiteboard explainer for a science mechanism", "whiteboard");
 expectFamily("Vertical caption-led viral fact reels", "shorts");
 
+for (const [family, concept] of [
+  ["whiteboard", "Hand-drawn whiteboard explainer for a science mechanism"],
+  ["comic", "An illustrated graphic-novel history channel with motion-comic panels"],
+] as const) {
+  const preflight = formatPreflight(family, { concept });
+  assert.equal(preflight.productionReady, false, `${family} factual intent must not bypass source provenance`);
+  assert.deepEqual(
+    preflight.sourceRequirements,
+    ["reviewed factual evidence pack", "source-bound claim ledger"],
+    `${family} factual intent must request the durable evidence route rather than invent claims`,
+  );
+}
+assert.equal(
+  formatPreflight("whiteboard", { concept: "Original whiteboard logic puzzle stories" }).productionReady,
+  true,
+  "the source boundary must preserve automatic original whiteboard storytelling",
+);
+assert.equal(
+  formatPreflight("comic", { concept: "Original character-led motion-comic mini stories" }).productionReady,
+  true,
+  "the source boundary must preserve automatic original motion-comic storytelling",
+);
+
 // `channelTypes` are capability promises, not decorative catalog copy. The
 // deterministic advisor must discover the reusable families from the natural
 // language used to describe the opportunity, without a bespoke per-channel
@@ -63,6 +86,10 @@ assert.deepEqual(
 );
 assert.equal(factualIllustratedExplainer.preflight.creatorAdmission.mode, "registered_supervised_non_gemini");
 assert.equal(factualIllustratedExplainer.preflight.creatorAdmission.reviewHref, "/editorial-evidence");
+assert(
+  factualIllustratedExplainer.preflight.runtimeBlockers.some((blocker) => blocker.includes("does not authorize automatic production")),
+  "creator-level private-review admission must be a production-readiness blocker, not merely display metadata",
+);
 
 // These are additional uses of the existing supervised Casefile evidence chain,
 // not new automatic channel types or renderer claims.
@@ -147,7 +174,11 @@ assert.equal(
   undefined,
   "a Gemini-blocked family must not advertise another Gemini-blocked route as a production fallback",
 );
-assert.equal(cinematic.planning.ready, false, "the advisor must expose the missing non-Gemini cinematic planner");
+assert.equal(
+  cinematic.planning.ready,
+  true,
+  "the advisor must recognize the registered non-Gemini cinematic planner while keeping runtime qualification separate",
+);
 assert.equal(cinematic.runtime.ready, false, "the advisor must expose the unattested LTX runtime rather than hiding it behind a generic label");
 assert(
   cinematic.runtime.blockers.some((blocker) => blocker.includes("ltx_2_5_revision_not_benchmarked_on_rtx_4090")),
@@ -195,6 +226,10 @@ assert.equal(casefileCinematic.preflight.creatorAdmission.selectable, true);
 assert.equal(casefileCinematic.preflight.creatorAdmission.autonomous, false);
 assert.equal(casefileCinematic.preflight.creatorAdmission.privateReviewOnly, true);
 assert.equal(casefileCinematic.preflight.creatorAdmission.reviewHref, "/casefile");
+assert(
+  casefileCinematic.preflight.runtimeBlockers.some((blocker) => blocker.includes("does not authorize automatic production")),
+  "the final preflight blocker list must preserve the Casefile creator admission",
+);
 assert.equal(
   casefileCinematic.preflight.productionReady,
   false,
@@ -219,7 +254,12 @@ assert.deepEqual(
 );
 assert.equal(
   fictionalCinematic.creatorAdmission.mode,
-  "unregistered",
+  "registered_non_gemini",
+  "a fictional cinematic concept may use the shared channel foundation without inheriting Casefile evidence authority",
+);
+assert.equal(
+  fictionalCinematic.sourceRequirements.includes("source-first Case Packet"),
+  false,
   "the Casefile registration must not leak onto unrelated fictional cinematic concepts",
 );
 
@@ -281,10 +321,52 @@ const blockedLofi = recommendFormatDeterministically({ concept: "Lo-fi study bea
 assert.equal(blockedLofi.family, "music_loop", "the advisor must preserve the actual requested format");
 assert.equal(blockedLofi.available, false, "a blocked renderer must not become a fake production recommendation");
 assert.match(blockedLofi.reasoning, /no unrelated channel was substituted/i);
+assert.deepEqual(
+  blockedLofi.executableAlternatives,
+  [],
+  "a blocked lane without an audited automatic adaptation must not receive an unrelated runnable option",
+);
 assert.equal(
   blockedLofi.alternates.some((alternate) => alternate.family === "quizyear"),
   false,
   "a runnable but zero-signal QuizYear route is not an honest alternate to a blocked music channel",
+);
+
+const blockedCinematicRecommendation = recommendFormatDeterministically({
+  concept: "Cinematic true-crime reconstruction mini films",
+});
+assert.equal(blockedCinematicRecommendation.family, "cinematic");
+assert.equal(blockedCinematicRecommendation.available, false);
+assert.deepEqual(
+  blockedCinematicRecommendation.executableAlternatives.map((alternate) => alternate.family),
+  ["illustrated_explainer", "narrated_stock"],
+  "the creator should receive only explicit automatic adaptations when cinematic production is blocked",
+);
+for (const alternate of blockedCinematicRecommendation.executableAlternatives) {
+  assert.equal(alternate.selectable, true);
+  assert.equal(alternate.executable, true);
+  assert.equal(alternate.certifiedFamilyAdmission.automatic, true);
+  assert.equal(
+    formatPreflight(alternate.family, { concept: "Cinematic true-crime reconstruction mini films" }).productionReady,
+    true,
+    `${alternate.family} must pass its own exact creator preflight before it is offered as executable`,
+  );
+}
+
+const blockedComicRecommendation = recommendFormatDeterministically({
+  concept: "Illustrated graphic-novel history channel with motion-comic panels",
+});
+assert.equal(blockedComicRecommendation.family, "comic");
+assert.equal(blockedComicRecommendation.available, false);
+assert.deepEqual(
+  blockedComicRecommendation.executableAlternatives.map((alternate) => alternate.family),
+  ["narrated_stock"],
+  "a factual comic-history request must not silently bypass source provenance; its factual adaptation remains deliberate",
+);
+assert.equal(
+  formatPreflight("comic", { concept: "Illustrated graphic-novel history channel with motion-comic panels" }).productionReady,
+  false,
+  "creator preflight must refuse factual comic claims until their source evidence route exists",
 );
 
 const explicitHybrid = recommendFormatDeterministically({
@@ -362,6 +444,13 @@ assert(
     creatorSource.includes("supervisedAdmission ? activeReviewOnlyStages : preview") &&
     creatorSource.includes('!supervisedAdmission && (publishMode !== "draft" || toggles.crosspost)'),
   "a private-review family must expose only its registered review stages and cannot present publishing approval as an executable build",
+);
+assert(
+  creatorSource.includes("Certified automatic alternatives") &&
+    creatorSource.includes("certifiedExecutableFormatAlternatives") &&
+    creatorSource.includes("automaticFamilyCreatorReadiness(alternative.family).ready") &&
+    creatorSource.includes("nothing was substituted automatically"),
+  "a blocked recommendation must retain its identity while presenting only rechecked production-and-certified automatic alternatives as deliberate UI actions",
 );
 
 async function verifyPublicAsyncSelection(): Promise<void> {

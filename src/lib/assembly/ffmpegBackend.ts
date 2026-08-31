@@ -239,11 +239,11 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
         narrationPath = trimmedPath;
       }
 
-      // dip_to_black is NOT a dissolve: compose with a HARD cut at the title→body
-      // boundary (crossfadeSec 0), then a dedicated post pass fades DOWN to black
-      // and back UP across that boundary — a real, visible difference from the
-      // xfade crossfade. (crossfade/hardcut keep composeWithIntro's xfade/cut.)
-      const isDip = args.transition === "dip_to_black";
+      const transition = args.transition === "hardcut" || args.transition === "crossfade" || args.transition === "dip_to_black"
+        ? args.transition
+        : typeof args.crossfadeSec === "number" && args.crossfadeSec > 0
+          ? "crossfade"
+          : "hardcut";
       const composedPath = await composeWithIntro({
         introCardPath: args.introCardPath,
         loopBodyPath: args.bodyPath,
@@ -260,9 +260,8 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
         introMusicVol: args.introMusicVol,
         bodyMusicVol: args.bodyMusicVol,
         musicDuckRampSec: args.musicDuckRampSec,
-        // hardcut ⇒ 0 (composeWithIntro treats 0 as a hard cut); crossfade ⇒ 0.8s.
-        // dip_to_black ⇒ 0 here (we render the dip ourselves below, post-compose).
-        ...(isDip ? { crossfadeSec: 0 } : typeof args.crossfadeSec === "number" ? { crossfadeSec: args.crossfadeSec } : {}),
+        ...(typeof args.crossfadeSec === "number" ? { crossfadeSec: args.crossfadeSec } : {}),
+        transition,
         // OUTRO FOLDED IN — one encode, exactly like the god-block. The old EDL
         // behaviour (a post-hoc patchSegment pass) cost a second full-video x264
         // encode and produced non-CFR output (measured frame-count mismatch).
@@ -271,25 +270,7 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
           : {}),
       });
 
-      if (!isDip) return composedPath;
-
-      // ----- dip_to_black post pass -----
-      // Fade the VIDEO down to black ending at the boundary, then up from black after
-      // it. Boundary = introSec when there's a title card, else a short dip at t=0.
-      const dipSec = Math.min(0.6, Math.max(0.3, (args.crossfadeSec ?? 0.8) / 2));
-      const boundary = args.introCardPath ? Math.max(0, args.introSec) : dipSec;
-      const dipOut = await out("dipped.mp4");
-      const fadeOutSt = Math.max(0, boundary - dipSec).toFixed(3);
-      const fadeInSt = boundary.toFixed(3);
-      const vf = `fade=t=out:st=${fadeOutSt}:d=${dipSec.toFixed(3)}:color=black,fade=t=in:st=${fadeInSt}:d=${dipSec.toFixed(3)}:color=black`;
-      await execFileP(process.env.FFMPEG_BIN ?? "ffmpeg", [
-        "-y", "-i", composedPath,
-        "-vf", vf,
-        "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
-        "-c:a", "copy", "-movflags", "+faststart",
-        dipOut,
-      ]);
-      return dipOut;
+      return composedPath;
     },
 
     async patchOutro(basePath, outroCardPath, startSec, durSec, fmt): Promise<string> {

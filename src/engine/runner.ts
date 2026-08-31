@@ -16,6 +16,7 @@ import {
   type Block,
   type CostModelUsageKind,
   type ModelUsageCostSnapshot,
+  type ResumeRehydrationRequest,
   type RunStageSink,
   type StageContext,
   type StageStatus,
@@ -27,15 +28,19 @@ import { artifactContract, validateArtifact } from "./artifactSchemas";
 import {
   classifyExecutionError,
   executionRetryDelayMs,
+  type ExecutionRetryScope,
 } from "./executionErrors";
 import { configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
 import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
+import type { RunExecutionLeaseFence } from "@/lib/runLease";
 
 export interface RunPipelineOptions {
   ownerId: string;
   runId: string;
   channelId: string;
+  /** Active generation required by Trigger-originated durable side effects. */
+  executionLease?: RunExecutionLeaseFence;
   keyPrefix: string;
   budgetUsd: number;
   /** Per-block params keyed by block id (from pipeline entries). */
@@ -63,6 +68,7 @@ export interface RunPipelineOptions {
   rehydrate?: (
     block: string,
     outputs: Record<string, unknown>,
+    request?: ResumeRehydrationRequest,
   ) => Promise<{ ok: boolean; outputs: Record<string, unknown> }>;
   /** Default per-block retries on TRANSIENT errors (block param `retries` wins). */
   defaultRetries?: number;
@@ -78,15 +84,44 @@ export interface RunPipelineOptions {
     blockId: string,
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
+  /**
+   * Optional non-failure execution boundary. Once this exact sequential block
+   * has written its durable `ok` stage, the runner returns `awaiting_review`
+   * instead of starting any later block. A block that belongs to a parallel
+   * group is deliberately rejected: there is no safe "after this member"
+   * point while siblings can still be executing.
+   */
+  stopAfterBlockId?: string;
 }
 
-const PAID_STAGE_RECONCILIATION_MARKER = "PAID_STAGE_RECONCILIATION_REQUIRED";
+/**
+ * Durable error marker shared with remote-child dispatch. A stage carrying it
+ * may have accepted paid work whose exact receipt is not yet reconciled, so
+ * resume and self-heal must never replay it automatically.
+ */
+export const PAID_STAGE_RECONCILIATION_MARKER = "PAID_STAGE_RECONCILIATION_REQUIRED";
+
+/** Terminal runner state. `awaiting_review` is a successful, durable stop. */
+export type RunResultStatus = "completed" | "awaiting_review" | "failed";
 
 export interface RunResult {
   ok: boolean;
+  /** Explicitly distinguishes normal completion from an approved safe stop. */
+  status: RunResultStatus;
   store: Record<string, unknown>;
   failedBlock?: string;
   error?: string;
+  /** Present only when `status === "awaiting_review"`. */
+  stoppedAfterBlockId?: string;
+  /**
+   * A transient failure that must be re-entered by the durable task scheduler,
+   * not retried in-process while an external lease remains live.
+   */
+  retryDirective?: {
+    readonly scope: ExecutionRetryScope;
+    readonly code?: string;
+    readonly retryAfterMs?: number;
+  };
   /** Bounded visual-review repair signals preserved across the runner boundary. */
   visualRepair?: VisualRepairSignal[];
   /** Sum of every block's reported spend (USD). */
@@ -212,6 +247,13 @@ async function runBlockWithRetry(
       // place; otherwise leave the pipeline failed for persisted resume/heal.
       if ((additionalObservedCostFromError(err) ?? 0) > 0) throw err;
       const classification = classifyExecutionError(err);
+      if (classification.retryable && classification.retryScope === "durable_task") {
+        // A durable authority has told us exactly when work can become
+        // claimable. Holding this worker for that lease wastes infrastructure
+        // and can still expire before the next attempt; hand it to the task
+        // scheduler instead.
+        throw err;
+      }
       attempt++;
       if (attempt > retries || !classification.retryable) throw err;
       const backoff = executionRetryDelayMs(classification, attempt);
@@ -381,6 +423,42 @@ export async function runPipeline(
   const stages: { block: string; status: StageStatus }[] = [];
   let spentUsd = 0;
 
+  /**
+   * A review boundary is valid only at one known strictly-sequential entry.
+   * Validate it before loading a resume snapshot or starting any block so an
+   * unsafe request cannot accidentally advance provider work.
+   */
+  const requestedBoundary = opts.stopAfterBlockId?.trim();
+  let boundaryIndex: number | undefined;
+  if (opts.stopAfterBlockId !== undefined) {
+    const matchingIndexes = requestedBoundary
+      ? resolved.blocks
+          .map((block, index) => (block.id === requestedBoundary ? index : -1))
+          .filter((index) => index >= 0)
+      : [];
+    const boundaryError =
+      !requestedBoundary
+        ? "REVIEW_BOUNDARY_UNSAFE: stopAfterBlockId must be a non-empty block id"
+        : matchingIndexes.length !== 1
+          ? `REVIEW_BOUNDARY_UNSAFE: block "${requestedBoundary}" must occur exactly once in the resolved pipeline`
+          : GROUP_OF.has(requestedBoundary)
+            ? `REVIEW_BOUNDARY_UNSAFE: block "${requestedBoundary}" belongs to a parallel group and cannot be a review boundary`
+            : undefined;
+    if (boundaryError) {
+      log(boundaryError);
+      return {
+        ok: false,
+        status: "failed",
+        store,
+        failedBlock: requestedBoundary || undefined,
+        error: boundaryError,
+        costTotal: spentUsd,
+        stages,
+      };
+    }
+    boundaryIndex = matchingIndexes[0]!;
+  }
+
   // Resume: load already-completed blocks' persisted outputs (skip + restore).
   // Their recorded COSTS seed spentUsd so (a) the budget ceiling covers the
   // WHOLE run, not just this invocation (heal cycles previously reset it and
@@ -436,6 +514,104 @@ export async function runPipeline(
       throw e;
     }
   }
+
+  const declaredInputKeysAt = (blockIndex: number): Set<string> => {
+    const manifest = resolved.manifests[blockIndex];
+    const block = resolved.blocks[blockIndex];
+    if (!manifest || !block) {
+      throw new Error(`resolved block has no executable manifest at step ${blockIndex}`);
+    }
+    return new Set([
+      ...manifest.block.consumes,
+      ...Object.keys(manifest.consumes),
+      ...Object.keys(manifest.optionalConsumes),
+    ]);
+  };
+
+  /**
+   * A remote render task reconstructs its own declared inputs from durable
+   * stages, so the parent does not need to fetch those media files merely to
+   * dispatch it. Only later blocks that will execute locally on THIS worker
+   * require a local materialisation. The complete patch still stays in the
+   * store, and the rehydrator validates omitted R2-backed paths cheaply. A
+   * review boundary also cuts the demand plan there: do not download media for
+   * blocks this invocation is guaranteed not to start.
+   */
+  const localConsumerKeysAfter = (blockIndex: number): Set<string> => {
+    const needed = new Set<string>();
+    const lastExecutableIndex = boundaryIndex ?? resolved.blocks.length - 1;
+    for (let candidateIndex = blockIndex + 1; candidateIndex <= lastExecutableIndex; candidateIndex++) {
+      const candidate = resolved.blocks[candidateIndex]!;
+      if (completedMap[candidate.id]) continue;
+      if (opts.remoteBlocks?.has(candidate.id) && opts.runRemoteBlock) continue;
+      for (const key of declaredInputKeysAt(candidateIndex)) needed.add(key);
+    }
+    return needed;
+  };
+
+  /**
+   * A completed local stage normally needs no upstream bytes at all. If its
+   * own cache cannot be restored and an unpaid stage therefore falls back to
+   * execution, restore only its declared cached inputs immediately before that
+   * execution. This keeps the normal resume demand-driven while preserving the
+   * old full-rehydration guarantee for the rare fallback path.
+   */
+  const rehydrateCachedInputsForLocalFallback = async (
+    block: Block,
+    blockIndex: number,
+  ): Promise<void> => {
+    if (!opts.rehydrate) return;
+    const needed = declaredInputKeysAt(blockIndex);
+    if (needed.size === 0) return;
+
+    // Select the latest completed source for every input. Earlier producers
+    // must not overwrite a later stage's value while the fallback is healed.
+    const remaining = new Set(needed);
+    const sources: Array<{ index: number; keys: Set<string> }> = [];
+    for (let sourceIndex = blockIndex - 1; sourceIndex >= 0 && remaining.size > 0; sourceIndex--) {
+      const source = resolved.blocks[sourceIndex]!;
+      const sourceOutputs = completedMap[source.id];
+      if (!sourceOutputs) continue;
+      const supplied = new Set([...remaining].filter((key) => key in sourceOutputs));
+      if (supplied.size === 0) continue;
+      sources.push({ index: sourceIndex, keys: supplied });
+      for (const key of supplied) remaining.delete(key);
+    }
+
+    for (const { index, keys } of sources.reverse()) {
+      const source = resolved.blocks[index]!;
+      const sourceOutputs = completedMap[source.id]!;
+      // Preserve any path already materialised during this invocation. The
+      // restore boundary receives the complete source patch for its durable
+      // HEAD fence, but only the demanded keys are allowed to update the store.
+      const candidate = { ...sourceOutputs };
+      for (const key of keys) {
+        if (key in store) candidate[key] = store[key];
+        const base = key.replace(/(LocalPath|Url|Path)$/, "");
+        const siblingKeys = [
+          ...(base === key ? [] : [`${base}Key`]),
+          ...(key.endsWith("Clips") ? [`${key.replace(/Clips$/, "")}Keys`] : []),
+        ];
+        for (const sibling of siblingKeys) {
+          if (sibling in store) candidate[sibling] = store[sibling];
+        }
+      }
+      const restored = await opts.rehydrate(source.id, candidate, {
+        neededOutputKeys: keys,
+      });
+      if (!restored.ok) {
+        throw new Error(
+          `CACHED_INPUT_REHYDRATION_REQUIRED: cached upstream block "${source.id}" ` +
+          `cannot materialize declared input(s) ${[...keys].sort().join(", ")} ` +
+          `for fallback block "${block.id}"`,
+        );
+      }
+      const outputs = migrateCachedOutputsForResume(source.id, restored.outputs);
+      for (const key of keys) {
+        if (key in outputs) store[key] = outputs[key];
+      }
+    }
+  };
 
   const persistProducedArtifacts = async (
     manifest: ModuleManifest,
@@ -520,7 +696,13 @@ export async function runPipeline(
   const executeBlock = async (
     block: Block,
     blockIndex: number,
-  ): Promise<{ status: "ok" | "failed"; cost: number; error?: string; visualRepair?: VisualRepairSignal[] }> => {
+  ): Promise<{
+    status: "ok" | "failed";
+    cost: number;
+    error?: string;
+    visualRepair?: VisualRepairSignal[];
+    retryDirective?: RunResult["retryDirective"];
+  }> => {
     const manifest = resolved.manifests[blockIndex];
     if (!manifest) {
       throw new Error(`resolved block "${block.id}" has no executable manifest`);
@@ -532,16 +714,25 @@ export async function runPipeline(
     }
     const params = opts.paramsByBlock?.[block.id] ?? resolved.entries[blockIndex]?.params ?? {};
     const priorStage = priorStageMap.get(block.id);
-    // Remote child work is already keyed by Trigger's durable idempotency key;
-    // a parent retry must reattach to that child instead of deadlocking itself.
-    // Inline provider calls have no equivalent process-crash receipt, so they
-    // require explicit reconciliation when their persisted state is ambiguous.
+    // Remote child work is normally keyed by Trigger's durable idempotency key;
+    // a parent retry can reattach to that child instead of deadlocking itself.
+    // A remote child marked as requiring reconciliation is different: it may
+    // have accepted paid work, but the durable per-operation receipt ledger is
+    // not authoritative yet. The marker (currently emitted for DocuMotion)
+    // must fence replay exactly like an ambiguous inline paid stage. Keying
+    // this on the marker rather than a block name also makes the safety
+    // invariant hold if another remote paid child adopts the same protocol.
+    const remotePaidFailureNeedsReconciliation =
+      opts.remoteBlocks?.has(block.id) === true &&
+      priorStage?.status === "failed" &&
+      priorStage.error?.includes(PAID_STAGE_RECONCILIATION_MARKER) === true;
     const paidStageNeedsReconciliation =
       manifest.costAndLatency.paid &&
-      !opts.remoteBlocks?.has(block.id) &&
-      (priorStage?.status === "running" ||
-        (priorStage?.status === "failed" &&
-          priorStage.error?.includes(PAID_STAGE_RECONCILIATION_MARKER)));
+      (remotePaidFailureNeedsReconciliation ||
+        (!opts.remoteBlocks?.has(block.id) &&
+          (priorStage?.status === "running" ||
+            (priorStage?.status === "failed" &&
+              priorStage.error?.includes(PAID_STAGE_RECONCILIATION_MARKER)))));
     if (paidStageNeedsReconciliation) {
       const started = priorStage?.startedAt
         ? ` (started ${new Date(priorStage.startedAt).toISOString()})`
@@ -596,14 +787,18 @@ export async function runPipeline(
     // A confirmed-missing artifact may be regenerated only for an unpaid block;
     // completed paid work always requires explicit reconciliation/supersession.
     const cached = completedMap[block.id];
+    let cachedFallbackToLocalRun = false;
     if (cached && !opts.rehydrate) {
       if (manifest.costAndLatency.paid) {
         return await refusePaidCachedReplay("has no configured artifact rehydrator");
       }
       log(`block ${block.id}: cached outputs cannot be rehydrated — re-running unpaid block`);
+      cachedFallbackToLocalRun = true;
     } else if (cached && opts.rehydrate) {
       try {
-        const restored = await opts.rehydrate(block.id, { ...cached });
+        const restored = await opts.rehydrate(block.id, { ...cached }, {
+          neededOutputKeys: localConsumerKeysAfter(blockIndex),
+        });
         const outputs = migrateCachedOutputsForResume(block.id, restored.outputs);
         const { ok } = restored;
         if (ok) {
@@ -638,6 +833,7 @@ export async function runPipeline(
           return await refusePaidCachedReplay("has missing or non-rehydratable durable outputs");
         }
         log(`block ${block.id}: cached outputs not rehydratable — re-running unpaid block`);
+        cachedFallbackToLocalRun = true;
       } catch (e) {
         // A thrown rehydrate error means storage/auth/transport itself failed,
         // not that this artifact is known missing. Re-running a paid producer
@@ -748,12 +944,86 @@ export async function runPipeline(
     const inputRefs = Object.fromEntries(
       Object.entries(artifactRefs).filter(([key]) => allowedInputs.has(key)),
     );
+    const checkpointVisualArtifactAttempts: NonNullable<
+      StageContext["checkpointVisualArtifactAttempts"]
+    > = async (attempts) => {
+      if (attempts.length === 0) return [];
+      if (attempts.length > 64) {
+        throw new Error(
+          `visual artifact attempt checkpoint for "${block.id}" exceeds the 64-record batch limit`,
+        );
+      }
+      // Unlike normal block outputs, an attempt is an audit event rather than
+      // a store value. It must be durable before a caller requests another
+      // candidate, and it must not be advertised through artifactRefs.
+      if (!opts.sink.upsertArtifacts) {
+        throw new Error(
+          `visual artifact attempt checkpoint for "${block.id}" requires a durable artifact sink`,
+        );
+      }
+      const contract = artifactContract("visualArtifactAttempt");
+      if (contract.opaque || contract.persist !== "reference") {
+        throw new Error("visual artifact attempt contract must be a typed reference artifact");
+      }
+      const inputArtifactIds = [
+        ...new Set(Object.values(inputRefs).map((ref) => ref.artifactId)),
+      ].sort();
+      const optionalFallbackSnapshot = [...optionalFallbacks].sort();
+      const seenAttemptFingerprints = new Set<string>();
+      const createdAt = Date.now();
+      const artifacts = attempts.map((attempt) => {
+        const value = validateArtifact(contract, attempt);
+        const serialized = stableJson(value);
+        if (serialized.length > 100_000) {
+          // A summary would erase the exact rejected/accepted evidence that
+          // makes this checkpoint useful, so fail closed instead.
+          throw new Error("visual artifact attempt checkpoint exceeds durable payload limit");
+        }
+        const payloadHash = hashPayload(value);
+        if (seenAttemptFingerprints.has(payloadHash)) {
+          throw new Error("visual artifact attempt checkpoint repeats an identical attempt");
+        }
+        seenAttemptFingerprints.add(payloadHash);
+        const identityHash = hashPayload({
+          payloadHash,
+          inputArtifactIds,
+          moduleId: manifest.id,
+          moduleVersion: manifest.version,
+          artifactKey: "visualArtifactAttempt",
+        });
+        const artifact: ArtifactRef = {
+          artifactId: `${opts.runId}:${manifest.id}:visualArtifactAttempt:${identityHash.slice(0, 16)}`,
+          key: "visualArtifactAttempt",
+          type: contract.type,
+          schemaVersion: contract.version,
+          producerModule: manifest.id,
+          producerVersion: manifest.version,
+          payloadHash,
+        };
+        return {
+          artifact,
+          inputArtifactIds,
+          optionalFallbacks: optionalFallbackSnapshot,
+          persistence: "reference" as const,
+          payload: value,
+          createdAt,
+        };
+      });
+      await opts.sink.upsertArtifacts({
+        ownerId: opts.ownerId,
+        channelId: opts.channelId,
+        runId: opts.runId,
+        artifacts,
+      });
+      return artifacts.map((entry) => entry.artifact);
+    };
     const usageScope = createModelUsageScope();
     const imageUsageScope = createImageUsageScope();
     const ctx: StageContext = {
       ownerId: opts.ownerId,
       runId: opts.runId,
       channelId: opts.channelId,
+      ...(opts.executionLease ? { executionLease: opts.executionLease } : {}),
       keyPrefix: opts.keyPrefix,
       params,
       store: declaredArtifactStore(manifest, store, optionalFallbacks, log),
@@ -773,6 +1043,7 @@ export async function runPipeline(
           kinds === undefined ? undefined : new Set<CostModelUsageKind>(kinds),
         ),
       imageUsageAccounting: () => imageUsageScope.snapshot(),
+      checkpointVisualArtifactAttempts,
       log,
     };
 
@@ -802,6 +1073,12 @@ export async function runPipeline(
       return summary;
     };
     try {
+      if (
+        cachedFallbackToLocalRun &&
+        !(opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock)
+      ) {
+        await rehydrateCachedInputsForLocalFallback(block, blockIndex);
+      }
       const retries = normalizeRetryCount(params["retries"], opts.defaultRetries);
       let patch: Record<string, unknown>;
       if (opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock) {
@@ -816,7 +1093,9 @@ export async function runPipeline(
         // by timeline_assemble's own surgical heal) must not discard the real
         // render output that downstream blocks consume.
         if (opts.rehydrate) {
-          const r = await opts.rehydrate(block.id, { ...patch });
+          const r = await opts.rehydrate(block.id, { ...patch }, {
+            neededOutputKeys: localConsumerKeysAfter(blockIndex),
+          });
           patch = r.outputs;
           if (!r.ok) log(`remote block ${block.id}: partial rehydrate (downstream-consumed outputs restored; a heal-only sibling may be absent)`);
         }
@@ -902,20 +1181,39 @@ export async function runPipeline(
       });
       stages.push({ block: block.id, status: "failed" });
       log(`block failed: ${block.id}`, { error: message });
+      const classification = classifyExecutionError(err);
       return {
         status: "failed",
         cost: observedCost,
         error: message,
+        ...(classification.retryable && classification.retryScope === "durable_task"
+          ? {
+              retryDirective: {
+                scope: classification.retryScope,
+                ...(classification.code ? { code: classification.code } : {}),
+                ...(classification.retryAfterMs === undefined
+                  ? {}
+                  : { retryAfterMs: classification.retryAfterMs }),
+              },
+            }
+          : {}),
         ...(visualRepairFromError(err) ? { visualRepair: visualRepairFromError(err) } : {}),
       };
     }
   };
 
-  const fail = (block: string, error: string, visualRepair?: VisualRepairSignal[]): RunResult => ({
+  const fail = (
+    block: string,
+    error: string,
+    visualRepair?: VisualRepairSignal[],
+    retryDirective?: RunResult["retryDirective"],
+  ): RunResult => ({
     ok: false,
+    status: "failed",
     store,
     failedBlock: block,
     error,
+    ...(retryDirective ? { retryDirective } : {}),
     ...(visualRepair?.length ? { visualRepair } : {}),
     costTotal: spentUsd,
     stages,
@@ -950,7 +1248,12 @@ export async function runPipeline(
         const results = await Promise.all(group.map((b, offset) => executeBlock(b, i + offset)));
         for (let k = 0; k < group.length; k++) {
           if (results[k].status === "failed") {
-            return fail(group[k].id, results[k].error ?? "block failed", results[k].visualRepair);
+            return fail(
+              group[k].id,
+              results[k].error ?? "block failed",
+              results[k].visualRepair,
+              results[k].retryDirective,
+            );
           }
         }
         const ob = overBudget(group[group.length - 1].id);
@@ -961,11 +1264,24 @@ export async function runPipeline(
     }
 
     const res = await executeBlock(block, i);
-    if (res.status === "failed") return fail(block.id, res.error ?? "block failed", res.visualRepair);
+    if (res.status === "failed") {
+      return fail(block.id, res.error ?? "block failed", res.visualRepair, res.retryDirective);
+    }
     const ob = overBudget(block.id);
     if (ob) return ob;
+    if (requestedBoundary === block.id) {
+      log(`review boundary reached after durable stage: ${block.id}`);
+      return {
+        ok: true,
+        status: "awaiting_review",
+        stoppedAfterBlockId: block.id,
+        store,
+        costTotal: spentUsd,
+        stages,
+      };
+    }
     i++;
   }
 
-  return { ok: true, store, costTotal: spentUsd, stages };
+  return { ok: true, status: "completed", store, costTotal: spentUsd, stages };
 }

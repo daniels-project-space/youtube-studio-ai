@@ -31,14 +31,19 @@ export interface Archetype {
 const LOFI: PipelineEntry[] = [
   { block: "competitor_research" },
   { block: "topic_select" },
+  { block: "music_program_plan" },
   { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 5 } },
+  // Generate and seal the episode music before the visual loop. The current
+  // distilled LTX loop does not condition on it, but the ordering gives the
+  // future open-weight audio-to-video benchmark the exact mastered source
+  // without re-generating audio or creating a hidden dependency.
+  { block: "music", params: { provider: "suno" } },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
   // 10s i2v clip + 1.2s crossfade self-loop → the seam blends real moving frames
   // (not a near-frozen pop), which is the difference between a "real" seamless
   // lofi loop and an obvious AI one.
   { block: "loop_clips", params: { clipDurationSec: 10, visualStyle: "lofi", crossfadeSec: 2.5 } },
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
-  { block: "music", params: { provider: "suno" } },
   { block: "metadata" },
   { block: "assemble", params: { durationSec: 180, deblurIntro: true } }, // 3-min test; raise for production
   { block: "thumbnail_gen" },

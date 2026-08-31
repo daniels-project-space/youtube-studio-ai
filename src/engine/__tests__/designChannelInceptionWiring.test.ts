@@ -19,20 +19,90 @@ const showProfileCodec = readFileSync(join(root, "src/engine/channelShowProfileC
 assert.match(entrypoint, /executeDesignChannel\(payload/);
 assert.match(entrypoint, /maxAttempts:\s*3/);
 assert(!entrypoint.includes("generateChannelArt"), "the Trigger entrypoint must remain a thin retry shell");
-const canonicalProgramBriefGate = coordinator.indexOf("assertCanonicalChannelProgramBrief(payload.programBrief)");
+const canonicalProgramBriefGate = coordinator.indexOf(
+  "const programBrief = assertCanonicalChannelProgramBrief(payload.programBrief)",
+);
+const canonicalProgramRouteGate = coordinator.indexOf("resolvedProgramRoute = resolveChannelProgramRoute(programBrief)");
+const creatorIntentDiagnosisGate = coordinator.indexOf("deriveCreatorIntentDiagnosis({ programBrief, programRoute: resolvedProgramRoute })");
+const staticCertifiedGate = coordinator.indexOf("const certifiedAdmission = certifiedFamilyAdmission(payload.family);");
+const ownerAdmissionGate = coordinator.indexOf("const ownerId = admitProviderTaskOwner({");
+const reviewedRuntimeGate = coordinator.indexOf("resolveOwnerReviewedLtxRuntime({ client: convex, ownerId })");
 const directPreflightGate = coordinator.indexOf("formatPreflight(");
+const directCreatorAdmissionGate = coordinator.indexOf("!creatorPreflight.creatorAdmission.autonomous");
 const directCapabilityIntentGate = coordinator.indexOf("const programCapabilityIntent");
-const directReadinessGate = coordinator.indexOf("familyProductionReadiness(payload.family)");
+const directReadinessGate = coordinator.indexOf("familyProductionReadiness(payload.family, reviewedLtxRuntime.runtime)");
+const runtimeCertifiedGate = coordinator.indexOf(
+  "const runtimeCertifiedAdmission = certifiedFamilyAdmission(payload.family, reviewedLtxRuntime.runtime);",
+);
 const directConvexGate = coordinator.indexOf("new ConvexHttpClient(url)");
 assert(
   canonicalProgramBriefGate >= 0 &&
-    directPreflightGate > canonicalProgramBriefGate &&
+    canonicalProgramRouteGate > canonicalProgramBriefGate &&
+    creatorIntentDiagnosisGate > canonicalProgramRouteGate &&
+    staticCertifiedGate > creatorIntentDiagnosisGate &&
+    staticCertifiedGate < ownerAdmissionGate &&
+    ownerAdmissionGate < directConvexGate &&
+    directConvexGate < reviewedRuntimeGate &&
+    reviewedRuntimeGate < directPreflightGate &&
+    directCreatorAdmissionGate > directPreflightGate &&
+    directCreatorAdmissionGate < directCapabilityIntentGate &&
     directCapabilityIntentGate > directPreflightGate &&
     directCapabilityIntentGate < directReadinessGate &&
-    directCapabilityIntentGate < directConvexGate &&
-    directReadinessGate > canonicalProgramBriefGate &&
-    directConvexGate > canonicalProgramBriefGate,
-  "a direct Trigger execution must require the canonical program brief before readiness, Convex, or spend-capable work",
+    directReadinessGate < runtimeCertifiedGate &&
+    runtimeCertifiedGate > directPreflightGate,
+  "a direct Trigger execution must reject incomplete static admission before owner/Convex work, then use only reviewed runtime evidence for the final dynamic admission",
+);
+assert.match(coordinator, /assertChannelProgramRouteBinding\(\{\s*route: resolvedProgramRoute,\s*programBrief,/,
+  "a direct Trigger execution must bind its route to the canonical brief before compiler or persistence work");
+assert.match(coordinator, /assertCreatorIntentDiagnosisBinding\(\{[\s\S]*?diagnosis: payload\.creatorIntentDiagnosis,[\s\S]*?programRoute: resolvedProgramRoute/,
+  "a direct Trigger execution must bind a submitted diagnosis to the canonical brief and route before preflight");
+assert.match(coordinator, /programRouteForCompile\s*\?\s*\{\s*programRoute: programRouteForCompile\s*\}\s*:\s*\{\}\),[\s\S]*?!isRouteLessLegacyRetry && submittedCreatorIntentDiagnosis[\s\S]*?creatorIntentDiagnosis: submittedCreatorIntentDiagnosis/,
+  "the shared designer must pair a route-derived diagnosis with the sealed route, while route-less historical retries remain isolated from current-route admission");
+assert.match(coordinator, /new channel admission requires a sealed creator intent diagnosis/,
+  "a fresh direct Trigger payload cannot create a channel without the server-derived semantic receipt");
+assert.match(coordinator, /programRouteForCompile \? \{ programRoute: programRouteForCompile \} : \{\}/,
+  "the show profile must retain the sealed route beside the compiled baseline, while route-less historical retries stay isolated");
+assert.match(coordinator, /programRoute: structuredClone\(resolvedProgramRoute!\)/,
+  "a newly created channel identity must retain the route rather than rebuild it from task fields");
+assert.match(coordinator, /creatorIntentDiagnosis: structuredClone\(requestCreatorIntentDiagnosis!\)/,
+  "a newly created channel identity must retain the sealed diagnosis rather than recalculate it during a retry");
+assert.match(coordinator, /syntheticScenario: routeSyntheticScenario \?\? payload\.syntheticScenario/,
+  "the compiler may retain a historical route-less scenario only while the later exact-snapshot legacy gate is satisfied");
+assert.match(coordinator, /quizProfile: programRouteForCompile\?\.quizProfile \?\? payload\.quizProfile/,
+  "the compiler may retain a historical route-less QuizYear profile only while the later exact-snapshot legacy gate is satisfied");
+assert.match(
+  coordinator,
+  /if \(resolvedProgramRoute\) \{[\s\S]*?payload\.quizProfile !== undefined[\s\S]*?payload\.quizProfile !== resolvedProgramRoute\.quizProfile[\s\S]*?payload\.syntheticScenario !== undefined[\s\S]*?payload\.syntheticScenario\.profile !== resolvedProgramRoute\.syntheticScenarioProfile/,
+  "a route-bearing admission must reject payload siblings that differ from the canonical route",
+);
+const legacyIdentityLookup = coordinator.indexOf("const existingAtStart = await convex.query(api.channels.getChannelBySlug");
+const serializedSeriesGate = coordinator.indexOf("const payloadSuppliesSeries");
+const baselineCompile = coordinator.indexOf("const design = designPipeline(");
+assert(
+  legacyIdentityLookup >= 0 &&
+    serializedSeriesGate > legacyIdentityLookup &&
+    baselineCompile > serializedSeriesGate,
+  "the executor must inspect a durable identity before deciding whether legacy series fields may reach compilation",
+);
+assert.match(
+  coordinator,
+  /const programRouteForCompile = isRouteLessLegacyRetry \? undefined : resolvedProgramRoute/,
+  "a resolvable contemporary route must not be attached while replaying a route-less historical identity",
+);
+assert.match(
+  coordinator,
+  /if \(payloadSuppliesSeries && !isRouteLessLegacyRetry\) \{[\s\S]*?sealedSerializedProgram[\s\S]*?must match the sealed serialized program route/,
+  "new and route-bearing inputs must fail closed unless their raw series echo the sealed route",
+);
+assert.match(
+  coordinator,
+  /isRouteLessLegacyRetry && payload\.seriesTitle[\s\S]*?seriesCount: payload\.seriesCount/,
+  "only a durable route-less identity may feed legacy series fields into the historical compiler path",
+);
+assert.match(
+  coordinator,
+  /programRouteForCompile \? \{ programRoute: programRouteForCompile \} : \{\}/,
+  "the compiler must derive all non-legacy series settings from the sealed route rather than raw executor input",
 );
 assert.match(coordinator, /formatPreflight\(\s*programBrief\.family/);
 assert.match(coordinator, /briefToFormatSelectionInput\(programBrief/);
@@ -73,6 +143,10 @@ assert.doesNotMatch(coordinator, /groundingSignals\(convex, ownerId, identity\.n
   "Educational must query as educational, never its display label");
 assert.match(mutations, /assertProgramBriefIdentityMutation\(/);
 assert.match(mutations, /channel program brief is immutable once stored/);
+assert.match(mutations, /channel program route is immutable once stored/);
+assert.match(mutations, /creator intent diagnosis is immutable once stored/);
+assert.match(mutations, /requires a sealed creator intent diagnosis/);
+assert.match(mutations, /requires a sealed channel program route/);
 assert.match(mutations, /channel show profile is immutable once stored/);
 assert.match(mutations, /assertChannelShowProfileReceiptPipelineCompatibility\(/,
   "Convex persistence must retain selected capability obligations without importing renderer code");
@@ -86,6 +160,8 @@ assert.match(showProfileCodec, /channel show profile does not match the canonica
 assert.doesNotMatch(showProfileCodec, /from\s+["']@\/engine\/creative\/creativeCapabilityCatalog["']/,
   "the Convex receipt codec must not re-import the renderer-coupled rich catalog");
 assert.match(schema, /programBrief:\s*v\.optional\(/);
+assert.match(schema, /programRoute:\s*v\.optional\(v\.any\(\)\)/);
+assert.match(schema, /creatorIntentDiagnosis:\s*v\.optional\(v\.any\(\)\)/);
 assert.match(schema, /showProfile:\s*v\.optional\(/);
 assert.match(schema, /catalogFingerprint:\s*v\.string\(\)/);
 for (const [label, source] of [
@@ -97,6 +173,11 @@ for (const [label, source] of [
     /composition:\s*v\.optional\(\s*v\.object\(\s*\{[\s\S]*?definitionFingerprint:\s*v\.string\(\)[\s\S]*?qualityFocus:\s*v\.array\(v\.string\(\)\)[\s\S]*?fingerprint:\s*v\.string\(\)/,
     `${label} must admit the optional sealed composition receipt rather than reject a newly admitted data-story profile`,
   );
+  assert.match(
+    source,
+    /compositionBinding:\s*v\.optional\(v\.any\(\)\)/,
+    `${label} must retain a capability-plan binding rather than rejecting the new modular profile authority at persistence`,
+  );
 }
 assert(
   coordinator.indexOf("if (!design.available || !design.productionReady)") <
@@ -105,7 +186,7 @@ assert(
 );
 assert.match(
   newChannelUi,
-  /const selectable = f\.available && \(productionReady \|\| Boolean\(supervised\)\)/,
+  /const selectable = f\.available && !runtimeUnavailable && \(productionReady \|\| Boolean\(supervised\)\)/,
   "a production-blocked family may be selectable only for its explicitly supervised private-review intake",
 );
 assert.match(newChannelUi, /disabled=\{!selectable\}/);
@@ -207,7 +288,9 @@ assert.match(route, /cinematic channel creation requires a specific concept/,
   "factual and fictional cinematic requests must be distinguished before any inception provider work");
 assert.match(route, /privateReviewCapabilityOffers\(creatorPreflight\.creativeCapabilities\)/,
   "a Fern-style factual concept must resolve through the catalog-owned private-review admission");
-const privateReviewAdmissionGate = route.indexOf("if (privateReviewOffers.length)");
+const privateReviewAdmissionGate = route.indexOf(
+  "if (!reviewedDataStoryIntake && privateReviewOffers.length)",
+);
 const channelBuildCostAuthorityGate = route.indexOf("const costAuthority = channelBuildCostAuthority");
 const channelBuildDispatch = route.indexOf("return tasks.trigger(");
 assert(
@@ -286,14 +369,31 @@ assert(
     existingShowProfileGate < researchStage,
   "an existing retry must prove the exact sealed composition before it can mutate or research",
 );
+const routeLessLegacySnapshotGate = coordinator.indexOf("routeLessLegacyInceptionCanResume({");
+assert(
+  routeLessLegacySnapshotGate > existingShowProfileGate &&
+    routeLessLegacySnapshotGate < existingFamilyBackfill &&
+    routeLessLegacySnapshotGate < researchStage,
+  "a route-less historical retry must prove its exact snapshot before any mutation or inception work",
+);
 assert.match(coordinator, /showProfileFingerprint: channelShowProfileFingerprint\(args\.showProfile\)/,
   "pipeline certification must carry the composition receipt fingerprint");
 assert.match(coordinator, /channelInceptionSnapshotCanResume\(\{[\s\S]*?showProfile: requestShowProfile/,
   "an immutable inception snapshot cannot be reused for another profile");
+assert.match(coordinator, /channelInceptionSnapshotCanResume\(\{[\s\S]*?programRoute: requestProgramRoute/,
+  "an immutable inception snapshot cannot be reused for another route");
+assert.match(coordinator, /channelInceptionSnapshotCanResume\(\{[\s\S]*?creatorIntentDiagnosis: requestCreatorIntentDiagnosis/,
+  "an immutable inception snapshot cannot be reused under a different creator-intent diagnosis");
+assert.match(route, /deriveCreatorIntentDiagnosis\(\{[\s\S]*?programBrief,[\s\S]*?programRoute,/,
+  "the authenticated build route must derive the diagnosis server-side before approvals and Trigger dispatch");
+assert.match(route, /creator intent diagnoses are server-derived/,
+  "the authenticated build route must reject browser-supplied diagnosis receipts");
 assert.match(coordinator, /new channel inception requires a sealed channel show profile/);
+assert.match(coordinator, /a route-less historical channel may only resume its exact already-durable route-less snapshot/,
+  "legacy retries must prove their old snapshot rather than synthesizing a current route");
 
 const pipelineProfileGate = pipelineRunner.indexOf("assertChannelShowProfilePipelineCompatibility({");
-const pipelineRuntimeGate = pipelineRunner.indexOf("assertPipelineVideoRuntimeReady(entries)");
+const pipelineRuntimeGate = pipelineRunner.indexOf("assertPipelineVideoRuntimeReady(entries, reviewedLtxRuntime?.runtime)");
 assert(
   pipelineProfileGate >= 0 && pipelineProfileGate < pipelineRuntimeGate,
   "frozen pipeline execution must validate the sealed composition before runtime/provider preflight",

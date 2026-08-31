@@ -5,7 +5,11 @@ import { GOLDEN_MODULES, type GoldenModule } from "./golden";
 import type { ModuleManifest } from "./moduleManifest";
 
 export interface CatalogExecutionBinding {
-  kind: "pipeline-module" | "external-task" | "catalog-only";
+  /**
+   * `registered-private-release` keeps a locally registered post-QA block
+   * auditable without presenting it as a creator-admitted executable route.
+   */
+  kind: "pipeline-module" | "registered-private-release" | "external-task" | "catalog-only";
   executableIds: readonly string[];
   note?: string;
 }
@@ -129,6 +133,11 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   ),
   loreshort: { kind: "pipeline-module", executableIds: ["lore_short"] },
   "episode-graph": { kind: "pipeline-module", executableIds: ["episode_graph"] },
+  "self-contained-story": {
+    kind: "pipeline-module",
+    executableIds: ["self_contained_story_plan", "self_contained_story"],
+    note: "A bounded non-Google native-story planner followed by a provider-free renderer-handoff seal. It is required by the certified automatic whiteboard and motion-comic routes and Lore's benchmark-pending registered route; this binding owns the plan/seal ABI only and cannot independently select/admit a route, render media, or publish.",
+  },
   "learning-contract": { kind: "pipeline-module", executableIds: ["learning_contract"] },
   "children-show-bible": {
     kind: "pipeline-module",
@@ -167,6 +176,7 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
     // supplies the required Nano Banana cover image for every family.
     executableIds: [
       "synthetic_scenario",
+      "scenario_visual_treatment",
       "scenario_disclosure_gate",
       "scene_compiler",
     ],
@@ -187,13 +197,36 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
       "quiz_year",
     ],
   },
+  "quiz-short-private-release": {
+    kind: "registered-private-release",
+    executableIds: ["quiz_short_release"],
+    note: "Registered post-QA private-release block only. It remains catalog-owned for registry integrity and controlled pipeline validation, but no owner-facing intake admits it and it is not a standalone creator route, automatic resolver target, render path, spend path, or publication path.",
+  },
   "novita-render-farm": { kind: "pipeline-module", executableIds: ["novita_render_images", "novita_render_video"] },
   "imagecraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/imagecraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production image rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_images block) instead — same Z-Image family, different implementation and gate set." },
   "videocraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/videocraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production video rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_video block) instead — same LTX family, different implementation and gate set." },
   lofi: { kind: "pipeline-module", executableIds: ["scene_planner", "keyframes", "loop_clips", "upscale", "assemble"] },
   quiz: { kind: "catalog-only", executableIds: [], note: "Proof engine is not registered in the production runner." },
-  thumbnail: { kind: "pipeline-module", executableIds: ["thumbnail_gen"] },
+  thumbnail: {
+    kind: "pipeline-module",
+    executableIds: ["thumbnail_gen"],
+  },
+  "package-opening-proof": {
+    kind: "pipeline-module",
+    executableIds: ["package_to_opening_plan"],
+    note: "Production structural-evidence executable. It freezes the package before thumbnail work and binds the exact cover, final master, and a retained opening review frame during QA; it makes no semantic-equivalence or retention claim.",
+  },
   "topic-intel": { kind: "pipeline-module", executableIds: ["competitor_research", "topic_select"] },
+  "serialized-program-episode-context": {
+    kind: "pipeline-module",
+    executableIds: ["serialized_program_episode_context"],
+    note: "Route-owned, provider-free serial continuity bridge only. It reads one atomically completed episode-row receipt and validates the frozen route seed, run, series identity, and topic before existing consumers may use it; it cannot admit a family, invoke a provider, render, spend, or publish.",
+  },
+  "narrative-series-visual-controls": {
+    kind: "pipeline-module",
+    executableIds: ["narrative_series_visual_controls"],
+    note: "Provider-free serialized-story continuity bridge. It binds a sealed Series Plan, completed Episode Graph/Story Spine, and already-accepted character-adapter receipts into per-shot controls; it is absent from every current certified route and cannot train an adapter, invoke a renderer, spend, publish, or admit a family.",
+  },
   "show-bible": {
     kind: "pipeline-module",
     executableIds: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "story_spine"],
@@ -201,8 +234,39 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   script: { kind: "pipeline-module", executableIds: ["script_gen", "hook_craft"] },
   guard: { kind: "pipeline-module", executableIds: ["qa_script", "originality_gate", "compliance_check"] },
   narration: { kind: "pipeline-module", executableIds: ["narration_tts"] },
-  music: { kind: "pipeline-module", executableIds: ["music"] },
-  visuals: { kind: "pipeline-module", executableIds: ["stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter"] },
+  music: {
+    kind: "pipeline-module",
+    executableIds: ["music_program_plan", "music"],
+    note: "The provider-free original-music program seal is required by the automatic music-loop route and binds its topic, channel sound, loop visual direction, and instrumental-only rule before a paid music generation can begin.",
+  },
+  visuals: {
+    kind: "pipeline-module",
+    executableIds: [
+      "stock_footage",
+      "entity_imagery",
+      "gen_footage",
+      "signature_clips",
+      // Provider-free, owner-scoped resolver. It projects only approved
+      // camera/motion/prompt recipes before Visual Matter plans fresh work;
+      // adapters and IC-LoRA guide bytes never enter a generic prompt path.
+      "studio_asset_resolve",
+      // Post-keyframe-QA selection proof for the one direct LTX standard-LoRA
+      // path. The worker re-verifies its pinned manifest before spending.
+      "studio_ltx_adapter_resolve",
+      "visual_matter",
+      // Server-only, cinematic-only direct Z-Image text-to-image pack. Its
+      // byte-bound R2 outputs are QA comparison assets, not img2img inputs.
+      "visual_matter_references",
+    ],
+  },
+  // The library is a read-only evidence/control plane. Its separate resolver
+  // modules stay owned by the exact visual or presentation catalog entry; this
+  // card must not imply a second compiler-executable pipeline stage.
+  "studio-assets": {
+    kind: "catalog-only",
+    executableIds: [],
+    note: "Owner-scoped Studio Asset Library inventory. It records approved reusable recipes, adapters, and guides, but it does not itself render, train, spend, publish, or create an owner-facing promotion intake.",
+  },
   // Cinematic is the editorial composition of the Novita render-farm modules.
   // The render modules retain their single catalog owner below, so this entry
   // must not duplicate them or claim a separate executable ABI.
@@ -219,10 +283,19 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   motioncraft: { kind: "catalog-only", executableIds: [], note: "src/lib/motioncraft.ts (246 L) had zero pipeline importers — was never reachable from any executed path — and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). Of its four demonstrated tools, only the data_stats subset has a real successor: it is owned and duplicated by the wired Inserts module (src/trigger/blocks/insertBlocks.ts, catalog key \"inserts\"). The other three (geo_map's MapLibre/OSM renderer, hero_title's depth-cutout camera-through-photo, generative's p5.js background) have no like-for-like successor and are gone with the file; documotion.ts separately built its own, differently-implemented real-map and depth-cutout capabilities, but that is convergent design, not reuse of this code. See golden.ts's \"motioncraft\" catalog entry for detail." },
   "speech-tv": { kind: "catalog-only", executableIds: [], note: "Library exists (src/lib/remotionRender.ts:360 renderMotivationalSpeech) but has zero callers anywhere in src/trigger or src/engine — not reachable from the pipeline yet, only via a manual Remotion CLI render. A real capability gap, not a doc issue." },
   inserts: { kind: "pipeline-module", executableIds: ["visual_inserts"] },
-  layer: { kind: "pipeline-module", executableIds: ["intro_card", "quote_overlays", "captions"] },
+  // One owner-scoped resolver supplies approved presentation grammar to the
+  // sound, quote-card, and data-insert consumers. Each asset still declares
+  // its individual module id, so this catalog owner does not make a template
+  // portable across those three surfaces.
+  layer: { kind: "pipeline-module", executableIds: ["studio_postproduction_asset_resolve", "intro_card", "quote_overlays", "captions"], note: "The resolver can supply only approved module-specific audio, overlay, motion-graphics, and closed assembly-transition recipes; timing and source/story decisions stay owned by their original modules." },
   assemble: { kind: "pipeline-module", executableIds: ["timeline_assemble"] },
   metadata: { kind: "pipeline-module", executableIds: ["metadata"] },
-  verify: { kind: "pipeline-module", executableIds: ["qa_assets", "qa_shots", "short_scene_qa", "length_check", "qa_visual"] },
+  verify: { kind: "pipeline-module", executableIds: ["qa_assets", "qa_shots", "short_scene_qa", "length_check"] },
+  "final-master-story-coverage": {
+    kind: "pipeline-module",
+    executableIds: ["qa_visual"],
+    note: "Final-master QA executable. It binds the reviewed master, lane-calibrated visual score, narration-semantic Story Spine coverage, and certificate sidecars; it does not claim visual realization of every planned shot.",
+  },
   whiteboard: { kind: "pipeline-module", executableIds: ["whiteboard_scribe"] },
   comic: { kind: "pipeline-module", executableIds: ["motion_comic"] },
   ship: { kind: "pipeline-module", executableIds: ["upload_draft", "crosspost", "notify", "emit_bundle", "cleanup"] },
@@ -271,6 +344,13 @@ export const REFERENCE_EXECUTABLE_PROVENANCE: Readonly<
     referenceFile: "src/lib/thumbnailLab.ts",
     referenceSymbol: "renderCandidate",
   },
+  package_to_opening_plan: {
+    catalogKey: "package-opening-proof",
+    callerFile: "src/trigger/blocks/intelligenceBlocks.ts",
+    callerSymbol: "packageToOpeningPlan.run",
+    referenceFile: "src/engine/packageToOpening.ts",
+    referenceSymbol: "createPackageToOpeningPlan",
+  },
   whiteboard_scribe: {
     catalogKey: "whiteboard",
     callerFile: "src/trigger/blocks/whiteboardScribeBlocks.ts",
@@ -295,11 +375,72 @@ export function catalogExecutionBinding(key: string): CatalogExecutionBinding {
   };
 }
 
+/**
+ * UI-safe interpretation of a catalog binding. This deliberately says nothing
+ * about Golden promotion or automatic channel admission: those are separate,
+ * proof- and family-admission-gated decisions.
+ */
+export type CatalogExecutionAvailability =
+  | "composition-gated"
+  | "private-review-only"
+  | "outside-module-abi"
+  | "blocked";
+
+export interface CatalogExecutionAvailabilitySummary {
+  state: CatalogExecutionAvailability;
+  label: string;
+  detail: string;
+}
+
+export function catalogExecutionAvailability(
+  binding: CatalogExecutionBinding,
+): CatalogExecutionAvailabilitySummary {
+  switch (binding.kind) {
+    case "pipeline-module":
+      return {
+        state: "composition-gated",
+        label: "REGISTERED PIPELINE MODULE",
+        detail:
+          "Registered executable binding. It may appear only in an admitted pipeline; the binding alone does not grant automatic channel admission or Golden promotion.",
+      };
+    case "registered-private-release":
+      return {
+        state: "private-review-only",
+        label: "PRIVATE REVIEW ONLY",
+        detail:
+          "Registered for controlled private-review use. It has no owner-facing intake and cannot become an automatic creator route through registry presence.",
+      };
+    case "external-task":
+      return {
+        state: "outside-module-abi",
+        label: "EXTERNAL TASK",
+        detail:
+          "A registered task outside the module ABI. It is not a compiler-executable module or a Golden promotion by itself.",
+      };
+    case "catalog-only":
+      return {
+        state: "blocked",
+        label: "CATALOG ONLY · BLOCKED",
+        detail:
+          "No executable binding is registered. This catalog entry cannot be selected by the compiler or presented as an automatic route.",
+      };
+  }
+}
+
+/**
+ * A registered private-release block still needs one catalog owner so an
+ * explicitly controlled pipeline cannot bypass catalog audit. It is not,
+ * however, a creator-admitted executable binding.
+ */
+export function hasCatalogExecutableOwner(binding: CatalogExecutionBinding): boolean {
+  return binding.kind === "pipeline-module" || binding.kind === "registered-private-release";
+}
+
 function executableCatalogOwners(): ReadonlyMap<string, GoldenModule> {
   const modulesByKey = new Map(GOLDEN_MODULES.map((module) => [module.key, module]));
   const owners = new Map<string, GoldenModule>();
   for (const [catalogKey, binding] of Object.entries(CATALOG_EXECUTION_BINDINGS)) {
-    if (binding.kind !== "pipeline-module") continue;
+    if (!hasCatalogExecutableOwner(binding)) continue;
     const catalogModule = modulesByKey.get(catalogKey);
     if (!catalogModule) throw new Error(`execution binding references missing catalog module "${catalogKey}"`);
     for (const executableId of binding.executableIds) {

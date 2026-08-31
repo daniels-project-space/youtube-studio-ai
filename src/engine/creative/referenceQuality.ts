@@ -23,6 +23,8 @@ const COMMON_EVIDENCE = {
   causal: ["reviewer-confirmed-causal-beat-sheet"],
   sourceCoverage: ["claim-to-source-to-shot-coverage"],
   pacing: ["reviewer-confirmed-purposeful-change-map"],
+  visualModel: ["reviewer-confirmed-legible-visual-model"],
+  visualLanguage: ["reviewer-confirmed-stable-visual-language"],
   presentation: ["thumbnail-evidence", "originality-evidence"],
   audio: ["audio-intelligibility-or-continuity-evidence"],
 } as const;
@@ -41,6 +43,13 @@ const SOURCES: Record<string, ReferenceQualitySource> = {
     url: "https://www.youtube.com/watch?v=EPaBRegvkuQ",
     transferableMechanic: "A factual event arc that keeps explanation, uncertainty, and presentation disciplined.",
     prohibitedImitation: "Do not copy cases, scripts, visual identity, or unsupported reconstructions.",
+  },
+  wendover: {
+    id: "wendover",
+    label: "Wendover Productions",
+    url: "https://www.youtube.com/@Wendoverproductions",
+    transferableMechanic: "Frame one systems question, externalize constraints through maps or diagrams, and resolve it with a causal consequence.",
+    prohibitedImitation: "Do not copy topics, scripts, maps, visual identity, sourcing, narration, or packaging.",
   },
   kurzgesagt: {
     id: "kurzgesagt",
@@ -159,6 +168,15 @@ const EXPLAINER_REQUIREMENTS = (sourceIds: string[]): ReferenceQualityRequiremen
     sourceIds,
   ),
   requirement(
+    "legible-visual-model",
+    "presentation",
+    ["footage", "captions"],
+    "Keep the episode's central diagram, spatial model, or illustrated metaphor legible at the moment it carries the explanation; do not replace explanation with decorative motion.",
+    "reviewer-confirmed",
+    COMMON_EVIDENCE.visualModel,
+    sourceIds,
+  ),
+  requirement(
     "legible-model-and-package",
     "presentation",
     ["footage", "thumbnail", "captions"],
@@ -234,6 +252,15 @@ const FICTION_REQUIREMENTS = (sourceIds: string[]): ReferenceQualityRequirement[
     "Use deliberate wide/close contrast and story-led visual change rather than arbitrary camera movement.",
     "reviewer-confirmed",
     COMMON_EVIDENCE.pacing,
+    sourceIds,
+  ),
+  requirement(
+    "stable-visual-language",
+    "presentation",
+    ["identity", "footage", "motion"],
+    "Keep the original world, character treatment, framing language, and motion vocabulary coherent across the final master; a deliberate story transition may vary them, arbitrary drift may not.",
+    "reviewer-confirmed",
+    COMMON_EVIDENCE.visualLanguage,
     sourceIds,
   ),
   requirement(
@@ -415,13 +442,13 @@ const QUIZ_REQUIREMENTS = (sourceIds: string[]): ReferenceQualityRequirement[] =
 const PROFILES: Partial<Record<FamilyKey, ReferenceQualityContract>> = {
   documentary_collage_short: calibrated(
     "documentary_collage_short",
-    source("fern", "fascinatingHorror"),
-    CASEFILE_REQUIREMENTS(["fern", "fascinating-horror"]),
+    source("fern", "fascinatingHorror", "wendover"),
+    CASEFILE_REQUIREMENTS(["fern", "fascinating-horror", "wendover"]),
   ),
   narrated_stock: calibrated(
     "narrated_stock",
-    source("fern", "fascinatingHorror"),
-    CASEFILE_REQUIREMENTS(["fern", "fascinating-horror"]),
+    source("fern", "fascinatingHorror", "wendover"),
+    CASEFILE_REQUIREMENTS(["fern", "fascinating-horror", "wendover"]),
   ),
   illustrated_explainer: calibrated(
     "illustrated_explainer",

@@ -11,15 +11,16 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="page-header">
-      <div>
+    <header
+      className="page-header"
+      data-has-actions={actions ? "true" : "false"}
+    >
+      <div className="page-header-copy">
         <h1>{title}</h1>
-        {subtitle && (
-          <p>{subtitle}</p>
-        )}
+        {subtitle && <p>{subtitle}</p>}
       </div>
       {actions ? <div className="page-header-actions">{actions}</div> : null}
-    </div>
+    </header>
   );
 }
 

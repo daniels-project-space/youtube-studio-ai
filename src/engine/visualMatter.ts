@@ -10,6 +10,11 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 
+import type { StudioAssetRecipeProjection } from "@/engine/studioAssetLibrary";
+import {
+  assertVisualTreatmentPlan,
+  type VisualTreatmentPlan,
+} from "@/engine/visualTreatmentCatalog";
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
   ContinuityLedgerSchema,
@@ -19,6 +24,13 @@ import {
 } from "./storySpine";
 
 const text = z.string().min(1);
+
+/**
+ * A single shot may bind no more than this many durable reference anchors.
+ * Novita QA uses the same bound to reserve every required vision batch before
+ * it can buy a render repair.
+ */
+export const VISUAL_MATTER_MAX_REFERENCE_ASSETS_PER_SHOT = 10;
 
 export const VisualMatterAssetKindSchema = z.enum([
   "mood_board",
@@ -33,8 +45,18 @@ export const VisualMatterReferenceAssetSchema = z.object({
   label: text,
   prompt: text,
   shotId: z.string().min(1).optional(),
-  r2Key: z.string().min(1).optional(),
-  contentType: z.string().min(1).optional(),
+  /**
+   * `referenceAssets` are actual comparison pixels, not a plan to make
+   * pixels. Keep the object byte-bound so an adapter cannot claim an anchor
+   * that was never uploaded or swap it after the fact.
+   */
+  r2Key: z.string().min(1),
+  contentType: z.string().regex(/^image\/(?:png|jpeg|webp)$/i),
+  contentSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+  /** The exact Visual Matter plan from which this asset request was derived. */
+  sourceManifestRevision: z.string().regex(/^[a-f0-9]{64}$/i),
+  /** Binds id/kind/label/prompt/shot to the source plan before a provider runs. */
+  requestFingerprint: z.string().regex(/^[a-f0-9]{64}$/i),
   receipt: z.object({
     provider: text,
     model: text,
@@ -42,7 +64,7 @@ export const VisualMatterReferenceAssetSchema = z.object({
     requestSha256: z.string().regex(/^[a-f0-9]{64}$/i),
     responseSha256: z.string().regex(/^[a-f0-9]{64}$/i),
     costUsd: z.number().finite().nonnegative(),
-  }).passthrough().optional(),
+  }).passthrough(),
 }).strict();
 
 export const VisualMatterMoodBoardSchema = z.object({
@@ -76,8 +98,8 @@ export const VisualMatterStoryboardSchema = z.object({
   settingId: z.string().min(1).optional(),
   promptAddendum: text,
   motionAddendum: text,
-  acceptanceCriteria: z.array(text).min(3).max(8),
-  referenceAssetIds: z.array(text).max(10),
+  acceptanceCriteria: z.array(text).min(3).max(16),
+  referenceAssetIds: z.array(text).max(VISUAL_MATTER_MAX_REFERENCE_ASSETS_PER_SHOT),
 }).refine((frame) => frame.t1 > frame.t0, "storyboard frame must have a positive time window");
 
 export const VisualMatterReviewLockSchema = z.object({
@@ -85,8 +107,17 @@ export const VisualMatterReviewLockSchema = z.object({
   startSec: z.number().finite().nonnegative(),
   endSec: z.number().finite().positive(),
   expected: text,
-  acceptanceCriteria: z.array(text).min(3).max(8),
+  acceptanceCriteria: z.array(text).min(3).max(16),
 }).refine((lock) => lock.endSec > lock.startSec, "visual review lock must have a positive time window");
+
+/** A compact, sealed treatment projection; all detailed rules compile into the shot locks below. */
+const VisualMatterTreatmentSchema = z.object({
+  key: z.enum(["clay_stop_motion", "brick_built_stop_motion", "anime_inspired_2d", "drawn_illustrated_2d"]),
+  label: text,
+  planFingerprint: z.string().regex(/^[a-f0-9]{64}$/i),
+  requiredReferenceKinds: z.array(VisualMatterAssetKindSchema).min(1),
+  qaBenchmarkIds: z.array(text).min(1),
+}).strict();
 
 export const VisualMatterManifestSchema = z.object({
   version: z.literal("visual-matter/v1"),
@@ -100,8 +131,44 @@ export const VisualMatterManifestSchema = z.object({
   settings: z.array(VisualMatterSettingSchema).max(6),
   storyboard: z.array(VisualMatterStoryboardSchema).min(1),
   reviewLocks: z.array(VisualMatterReviewLockSchema).min(1),
+  /** Present only when a canonical treatment plan was explicitly selected. */
+  treatment: VisualMatterTreatmentSchema.optional(),
   referenceAssets: z.array(VisualMatterReferenceAssetSchema).max(16),
-}).strict();
+  /** Present only when actual, byte-bound reference pixels are attached. */
+  referencePackFingerprint: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
+}).strict().superRefine((manifest, context) => {
+  const hasReferenceAssets = manifest.referenceAssets.length > 0;
+  if (manifest.status === "anchored") {
+    if (!hasReferenceAssets) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["referenceAssets"],
+        message: "an anchored Visual Matter manifest requires actual reference assets",
+      });
+    }
+    if (!manifest.referencePackFingerprint) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["referencePackFingerprint"],
+        message: "an anchored Visual Matter manifest requires a reference-pack fingerprint",
+      });
+    } else if (manifest.referencePackFingerprint !== visualMatterReferencePackFingerprint(manifest)) {
+      context.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["referencePackFingerprint"],
+        message: "Visual Matter reference-pack fingerprint does not bind the attached assets",
+      });
+    }
+    return;
+  }
+  if (hasReferenceAssets || manifest.referencePackFingerprint) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["referenceAssets"],
+      message: "only an anchored Visual Matter manifest may carry reference assets",
+    });
+  }
+});
 
 export type VisualMatterManifest = z.infer<typeof VisualMatterManifestSchema>;
 export type VisualMatterReferenceAsset = z.infer<typeof VisualMatterReferenceAssetSchema>;
@@ -115,6 +182,10 @@ export interface PlanVisualMatterInput {
   narrativeBeats: unknown;
   shotList: unknown;
   dpVisualSpecs: unknown;
+  /** Approved Studio Library recipe text only—never paths, bytes, or raw guides. */
+  studioAssetRecipeProjection?: StudioAssetRecipeProjection;
+  /** Canonical treatment plan; revalidated before it can affect prompts or QA locks. */
+  visualTreatment?: VisualTreatmentPlan;
   maxCharacters?: number;
   maxSettings?: number;
 }
@@ -136,6 +207,58 @@ export interface VisualMatterShotDirective {
 
 function sha256(value: unknown): string {
   return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function requestIdentity(request: VisualMatterAssetRequest) {
+  return {
+    id: request.id,
+    kind: request.kind,
+    label: request.label,
+    prompt: request.prompt,
+    ...(request.shotId ? { shotId: request.shotId } : {}),
+  };
+}
+
+/** A provider-independent binding from one planned reference request to its source plan. */
+export function visualMatterAssetRequestFingerprint(
+  manifestRevision: string,
+  request: VisualMatterAssetRequest,
+): string {
+  return sha256({
+    version: "visual-matter-reference-request/v1",
+    manifestRevision,
+    request: requestIdentity(request),
+  });
+}
+
+/**
+ * The plan revision intentionally stays stable after pre-production assets
+ * arrive. This second fingerprint binds the concrete reference pack without
+ * pretending that planning text alone is image evidence.
+ */
+export function visualMatterReferencePackFingerprint(
+  manifest: Pick<VisualMatterManifest, "revision" | "referenceAssets">,
+): string {
+  return sha256({
+    version: "visual-matter-reference-pack/v1",
+    sourceManifestRevision: manifest.revision,
+    referenceAssets: [...manifest.referenceAssets]
+      .map((asset) => VisualMatterReferenceAssetSchema.parse(asset))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+  });
+}
+
+/** Verify bytes at the first real consumer boundary before they reach visual QA. */
+export function assertVisualMatterReferenceAssetBytes(
+  asset: VisualMatterReferenceAsset,
+  bytes: Uint8Array,
+): VisualMatterReferenceAsset {
+  const parsed = VisualMatterReferenceAssetSchema.parse(asset);
+  const actual = createHash("sha256").update(bytes).digest("hex");
+  if (actual !== parsed.contentSha256) {
+    throw new Error(`Visual Matter reference asset '${parsed.id}' bytes do not match its declared contentSha256`);
+  }
+  return parsed;
 }
 
 function strings(value: unknown): string[] {
@@ -179,6 +302,18 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
   const beats = z.array(NarrativeBeatSchema).min(1).parse(input.narrativeBeats);
   const shots = z.array(ShotPlanSchema).min(1).parse(input.shotList);
   const specs = z.array(DPVisualSpecSchema).min(1).parse(input.dpVisualSpecs);
+  const treatment = input.visualTreatment
+    ? assertVisualTreatmentPlan(input.visualTreatment)
+    : undefined;
+  const treatmentProjection = treatment
+    ? {
+      key: treatment.treatmentKey,
+      label: treatment.label,
+      planFingerprint: treatment.fingerprint,
+      requiredReferenceKinds: [...treatment.storyboard.requiredReferenceKinds],
+      qaBenchmarkIds: treatment.qaBenchmarks.map((benchmark) => benchmark.id),
+    }
+    : undefined;
   const specByShot = new Map(specs.map((spec) => [spec.shotId, spec]));
   if (specByShot.size !== shots.length || shots.some((shot) => !specByShot.has(shot.id))) {
     throw new Error("visual matter requires one DP visual spec for every story shot");
@@ -187,6 +322,16 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
 
   const dna = input.styleDNA ?? {};
   const visualBrief = input.visualBrief ?? {};
+  const studioRecipes = input.studioAssetRecipeProjection;
+  const cameraRecipe = studioRecipes?.cameraAddenda.length
+    ? clipped(studioRecipes.cameraAddenda.join(". "), 600)
+    : "";
+  const motionRecipe = studioRecipes?.motionAddenda.length
+    ? clipped(studioRecipes.motionAddenda.join(". "), 600)
+    : "";
+  const promptRecipe = studioRecipes?.promptAddenda.length
+    ? clipped(studioRecipes.promptAddenda.join(". "), 600)
+    : "";
   const palette = [...new Set([
     ...strings(dna["palette"]),
     ...ledger.palette,
@@ -197,12 +342,21 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
   const mood = stringAt(visualBrief, "mood") ?? stringAt(dna, "vibe") ??
     (colorGrade ? `${colorGrade} cinematic mood` : "intentional cinematic mood tied to the narration");
   const lighting = stringAt(dna, "lighting") ?? "motivated, coherent lighting that supports the story beat";
+  const treatmentComposition = treatment?.cinematography.compositionRules.join(" ") ?? "";
+  const treatmentMotion = treatment?.cinematography.motionRules.join(" ") ?? "";
+  const treatmentAvoid = treatment?.cinematography.avoid.join(", ") ?? "";
+  const treatmentStoryboard = treatment?.storyboard.framePlanningRules.join(" ") ?? "";
+  const treatmentAnimatic = treatment?.storyboard.animaticRules.join(" ") ?? "";
+  const treatmentLocks = treatment?.continuity.requiredLocks.join(", ") ?? "";
+  const treatmentDrift = treatment?.continuity.forbiddenDrift.join(", ") ?? "";
   const channelWorld = clipped([
     input.channelName ? `Channel: ${input.channelName}` : "",
     recurringSubject ? `Recurring subject: ${recurringSubject}` : "",
     setting ? `World: ${setting}` : "",
     colorGrade ? `Color grade: ${colorGrade}` : "",
     palette.length ? `Palette: ${palette.join(", ")}` : "",
+    promptRecipe ? `Approved Studio treatment: ${promptRecipe}` : "",
+    treatment ? `Selected visual treatment: ${treatment.label}. ${treatmentComposition}` : "",
     `Mood: ${mood}`,
   ].filter(Boolean).join(". ") || `A deliberate cinematic world for ${topic}`);
 
@@ -217,7 +371,8 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
       identityLock,
       stylePrompt: clipped(
         `Create a consistent cinematic character reference for ${entity.name}. ${identityLock} ` +
-        `${channelWorld}. Full figure, front/three-quarter/profile turnaround, neutral readable pose, ` +
+        `${channelWorld}. ${treatment ? `Treatment storyboard rule: ${treatmentStoryboard}. ` : ""}` +
+        `Full figure, front/three-quarter/profile turnaround, neutral readable pose, ` +
         `no typography, labels, captions, logos, or watermarks.`,
       ),
     };
@@ -240,6 +395,7 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
       continuityLock,
       stylePrompt: clipped(
         `Create a cinematic environment reference for ${location.name}. ${continuityLock} ${channelWorld}. ` +
+        `${treatment ? `Treatment composition rule: ${treatmentComposition}. ` : ""}` +
         `Show spatial logic, surfaces, depth, and practical light sources. No people unless needed for scale. ` +
         `No typography, labels, captions, logos, or watermarks.`,
       ),
@@ -255,6 +411,7 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
     lighting: clipped(lighting, 300),
     visualPrompt: clipped(
       `Create a cinematic mood board for “${topic}”. ${channelWorld}. ` +
+      `${treatment ? `Treatment reference requirement: ${treatment.storyboard.requiredReferenceKinds.join(", ")}. ` : ""}` +
       `Include atmosphere, material, light, framing, and color references that make the visual world unmistakable. ` +
       `It is a visual reference only: no readable typography, labels, captions, logos, or watermarks.`,
     ),
@@ -274,10 +431,14 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
       `Visual Matter lock for ${shot.id}: ${shot.literalContent}. ` +
       `Story purpose: ${beat?.purpose ?? shot.coveragePurpose}. Character lock: ${characterLock} ` +
       `Setting lock: ${settingLock} Mood: ${moodBoard.mood}. ` +
+      `${treatment ? `Treatment composition: ${treatmentComposition}. Storyboard rule: ${treatmentStoryboard}. ` : ""}` +
+      `${cameraRecipe ? `Approved camera grammar: ${cameraRecipe}. ` : ""}` +
       `Retain this exact story state; do not substitute generic beauty footage.`,
     );
     const motionAddendum = clipped(
       `Begin from the locked storyboard state and preserve identity, setting, wardrobe, props, palette, and lighting. ` +
+      `${treatment ? `Treatment motion: ${treatmentMotion}. Animatic rule: ${treatmentAnimatic}. ` : ""}` +
+      `${motionRecipe ? `Apply the approved motion grammar: ${motionRecipe}. ` : ""}` +
       `Only advance the action implied by “${shot.literalContent}”; no unmotivated morph, costume swap, location jump, or era drift.`,
     );
     const acceptanceCriteria = [
@@ -289,6 +450,19 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
         ? `The setting remains ${settingById.get(settingId)!.name}`
         : "The setting remains coherent with the established channel world",
       `Mood, lighting, palette, wardrobe, props, and era remain coherent: ${moodBoard.mood}`,
+      ...(treatment
+        ? [
+          `Treatment continuity locks remain intact: ${treatmentLocks}`,
+          `Treatment-specific drift is absent: ${treatmentDrift}`,
+          ...treatment.qaBenchmarks.map((benchmark) =>
+            `${treatment.label} ${benchmark.scope} QA (${benchmark.id}): ${benchmark.criterion} Fail if: ${benchmark.failureSignal}`,
+          ),
+          `Treatment exclusions are absent: ${treatmentAvoid}`,
+        ]
+        : []),
+      ...(studioRecipes?.sourceEntryFingerprints.length
+        ? ["Approved Studio recipe grammar is retained without adding unapproved visual material"]
+        : []),
       "No accidental text, logo, watermark, duplicate anatomy, broken geometry, or generic unrelated footage",
     ];
     return {
@@ -322,6 +496,8 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
     characters,
     settings,
     storyboard,
+    treatment: treatmentProjection,
+    studioRecipeProjectionFingerprint: studioRecipes?.fingerprint,
   });
 
   return VisualMatterManifestSchema.parse({
@@ -335,6 +511,7 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
     settings,
     storyboard,
     reviewLocks,
+    ...(treatmentProjection ? { treatment: treatmentProjection } : {}),
     referenceAssets: [],
   });
 }
@@ -391,21 +568,61 @@ export function attachVisualMatterReferenceAssets(
   manifest: VisualMatterManifest,
   assets: readonly VisualMatterReferenceAsset[],
 ): VisualMatterManifest {
+  if (manifest.status === "disabled") {
+    throw new Error("cannot attach reference assets to disabled Visual Matter");
+  }
+  if (manifest.status === "anchored") {
+    throw new Error("Visual Matter reference assets are immutable once anchored");
+  }
+  if (!assets.length) return manifest;
+
+  // This is the adapter boundary: it accepts only requests that the plan
+  // actually issued, with their unmodified prompt and shot association. A
+  // future provider cannot smuggle an arbitrary image into a story merely by
+  // naming it a mood board or character sheet.
+  const expectedById = new Map(
+    visualMatterAssetRequests(manifest, 12).map((request) => [request.id, request]),
+  );
   const unique = new Map<string, VisualMatterReferenceAsset>();
   for (const asset of assets) {
     if (unique.has(asset.id)) throw new Error(`visual matter reference asset '${asset.id}' was generated twice`);
-    unique.set(asset.id, VisualMatterReferenceAssetSchema.parse(asset));
+    const parsed = VisualMatterReferenceAssetSchema.parse(asset);
+    const expected = expectedById.get(parsed.id);
+    if (!expected) {
+      throw new Error(`visual matter reference asset '${parsed.id}' was not requested by the source plan`);
+    }
+    if (
+      parsed.kind !== expected.kind ||
+      parsed.label !== expected.label ||
+      parsed.prompt !== expected.prompt ||
+      parsed.shotId !== expected.shotId
+    ) {
+      throw new Error(`visual matter reference asset '${parsed.id}' does not match its planned request`);
+    }
+    if (parsed.sourceManifestRevision !== manifest.revision) {
+      throw new Error(`visual matter reference asset '${parsed.id}' belongs to a different source plan`);
+    }
+    const expectedFingerprint = visualMatterAssetRequestFingerprint(manifest.revision, expected);
+    if (parsed.requestFingerprint !== expectedFingerprint) {
+      throw new Error(`visual matter reference asset '${parsed.id}' has an invalid request fingerprint`);
+    }
+    unique.set(parsed.id, parsed);
   }
-  return VisualMatterManifestSchema.parse({
+  const referenceAssets = [...unique.values()].sort((left, right) => left.id.localeCompare(right.id));
+  const anchored = {
     ...manifest,
-    status: unique.size ? "anchored" : manifest.status,
+    status: "anchored" as const,
+    referenceAssets,
+  };
+  return VisualMatterManifestSchema.parse({
+    ...anchored,
     storyboard: manifest.storyboard.map((frame) => {
       const storyboardAssetId = `storyboard:${frame.shotId}`;
       return unique.has(storyboardAssetId) && !frame.referenceAssetIds.includes(storyboardAssetId)
         ? { ...frame, referenceAssetIds: [...frame.referenceAssetIds, storyboardAssetId] }
         : frame;
     }),
-    referenceAssets: [...unique.values()],
+    referencePackFingerprint: visualMatterReferencePackFingerprint(anchored),
   });
 }
 
@@ -447,7 +664,7 @@ export function visualMatterReferenceAssetsForShot(
   const byId = new Map(manifest.referenceAssets.map((asset) => [asset.id, asset]));
   return frame.referenceAssetIds
     .map((id) => byId.get(id))
-    .filter((asset): asset is VisualMatterReferenceAsset => Boolean(asset?.r2Key))
+    .filter((asset): asset is VisualMatterReferenceAsset => Boolean(asset))
     .sort((left, right) => {
       const leftPriority = left.shotId === shotId ? 0 : left.kind === "character_sheet" ? 1 : left.kind === "setting_sheet" ? 2 : 3;
       const rightPriority = right.shotId === shotId ? 0 : right.kind === "character_sheet" ? 1 : right.kind === "setting_sheet" ? 2 : 3;

@@ -54,8 +54,10 @@ import {
 } from "@/lib/cinematicProofAdmission";
 import {
   resolveLtxCreativeAdapters,
-  type ResolvedLtxCreativeAdapter,
+  LTX_CREATIVE_ADAPTER_STACK_VERSION,
+  type ResolvedLtxCreativeAdapterStack,
 } from "@/lib/ltxCreativeAdapter";
+import { applyLtxI2vPromptContract } from "@/lib/ltxI2vPrompt";
 import type {
   NovitaBillingReceipt,
   NovitaBridgeStatus,
@@ -169,6 +171,126 @@ interface DirectControlPlane {
   product: NovitaProductSummary;
   models: Array<Record<string, unknown>>;
   activeInstanceCount: number;
+}
+
+function workerWaveTerminalError(total: number, failures: readonly unknown[]): Error {
+  return new Error(
+    `Novita worker wave reached ${total} terminal outcome(s) with ${failures.length} failure(s): ${safeError(failures[0])}`,
+  );
+}
+
+async function renderNovitaWorkerWave(args: {
+  workers: readonly PreparedWorker[];
+  lifecycle: NonNullable<NovitaRenderCfg["lifecycle"]>;
+  control: DirectControlPlane;
+  convex: StudioConvexHttpClient;
+  beforeProviderSpend?: NovitaRenderCfg["beforeProviderSpend"];
+  remoteChildFence?: NovitaRenderCfg["remoteChildFence"];
+}): Promise<Array<{ manifestId: string; receipt: NovitaBillingReceipt }>> {
+  // Starting a bounded capacity wave remains concurrent. Only observation is
+  // serialized through the single durable wave checkpoint below.
+  const started = await Promise.allSettled(args.workers.map((worker) => startWorker({
+    worker,
+    lifecycle: args.lifecycle,
+    control: args.control,
+    convex: args.convex,
+    beforeProviderSpend: args.beforeProviderSpend,
+    remoteChildFence: args.remoteChildFence,
+  })));
+  const receipts = new Map<string, NovitaBillingReceipt>();
+  const failures: unknown[] = [];
+  const active: ActiveNovitaWorker[] = [];
+  for (let index = 0; index < started.length; index += 1) {
+    const result = started[index]!;
+    if (result.status === "rejected") {
+      failures.push(result.reason);
+      continue;
+    }
+    if (result.value.status === "completed") {
+      receipts.set(args.workers[index]!.manifestId, result.value.receipt);
+    } else {
+      active.push(result.value.active);
+    }
+  }
+
+  const finalized = new Set<ActiveNovitaWorker>();
+  const outcomes = new Map<ActiveNovitaWorker, NovitaWorkerTerminalOutcome>();
+  const settleWorkers = async (workers: readonly ActiveNovitaWorker[]) => {
+    await Promise.all(workers.map(async (activeWorker) => {
+      if (finalized.has(activeWorker)) return;
+      finalized.add(activeWorker);
+      const outcome = outcomes.get(activeWorker) ?? ({ failed: false } as const);
+      if (outcome.failed && !activeWorker.startupFailed) {
+        await markActiveWorkerFailed(activeWorker, outcome.error);
+      }
+      try {
+        const receipt = await closeActiveWorker(activeWorker, outcome);
+        receipts.set(activeWorker.worker.manifestId, receipt);
+      } catch (error) {
+        failures.push(error);
+      }
+    }));
+  };
+
+  let checkpointFailed = false;
+  let checkpointFailure: unknown;
+  const pollScope = args.workers.length === 1
+    ? args.workers[0]!.manifestId
+    : `wave-${hash(canonicalJson(args.workers.map((worker) => worker.manifestId).sort())).slice(0, 32)}`;
+  try {
+    await pollNovitaWorkerWave({
+      workers: active,
+      inspect: async (activeWorker) => {
+        if (activeWorker.startupFailed) {
+          outcomes.set(activeWorker, { failed: true, error: activeWorker.startupFailure });
+          return "complete";
+        }
+        try {
+          const state = await observeWorkerTick(
+            activeWorker.worker,
+            activeWorker.convex,
+            activeWorker.secret,
+            activeWorker.remoteChildFence,
+          );
+          if (state === "complete") outcomes.set(activeWorker, { failed: false });
+          return state;
+        } catch (error) {
+          outcomes.set(activeWorker, { failed: true, error });
+          return "complete";
+        }
+      },
+      settleTerminal: settleWorkers,
+      checkpoint: async ({ attempt }) => {
+        // Reassert the remote-child generation once for this durable wave
+        // checkpoint. A stale parent cannot keep any worker alive into the
+        // next poll, while every worker retains its own durable heartbeat.
+        await args.beforeProviderSpend?.({ reason: "poll" });
+        await waitForNovitaRenderPoll({
+          milliseconds: STATUS_POLL_MS,
+          idempotencyKey: `novita-direct:${pollScope}:poll:${attempt}`,
+        });
+      },
+    });
+  } catch (error) {
+    checkpointFailed = true;
+    checkpointFailure = error;
+  }
+
+  if (checkpointFailed) {
+    for (const activeWorker of active) {
+      if (!finalized.has(activeWorker)) {
+        outcomes.set(activeWorker, { failed: true, error: checkpointFailure });
+      }
+    }
+    await settleWorkers(active);
+  }
+
+  if (failures.length) throw workerWaveTerminalError(args.workers.length, failures);
+  return args.workers.map((worker) => {
+    const receipt = receipts.get(worker.manifestId);
+    if (!receipt) throw new Error(`Novita worker ${worker.workerName} did not reach a billing receipt`);
+    return { manifestId: worker.manifestId, receipt };
+  });
 }
 
 /**
@@ -352,7 +474,7 @@ function secondsToLtxFrames(seconds: number, fps: number): number {
 function makeRenderJobs(
   cfg: NovitaRenderCfg,
   phase: Phase,
-  adapters = new Map<string, ResolvedLtxCreativeAdapter>(),
+  adapters = new Map<string, ResolvedLtxCreativeAdapterStack>(),
 ): DirectRenderJob[] {
   const profile = cfg.profile;
   if (phase === "image") {
@@ -388,13 +510,15 @@ function makeRenderJobs(
     if (sealedNegativePrompt) {
       throw new NovitaAdmissionError(`LTX-2.5 distilled does not support a negative prompt for ${shot.id}`);
     }
-    const creativeAdapter = adapters.get(shot.id);
+    const creativeAdapterStack = adapters.get(shot.id);
+    const creativeAdapters = creativeAdapterStack?.adapters ?? [];
     const prompt = [
       renderPrompt(cfg, shot),
-      ...(creativeAdapter
-        ? [`[LTX creative adapter ${creativeAdapter.id}] Activate only with these calibrated trigger tokens: ${creativeAdapter.triggerTokens.join(", ")}.`]
-        : []),
+      ...creativeAdapters.map((adapter) => (
+        `[LTX creative adapter ${adapter.id}] Activate only with these calibrated trigger tokens: ${adapter.triggerTokens.join(", ")}.`
+      )),
     ].join("\n\n");
+    const workerAdapters = creativeAdapters.map(({ id, strength, triggerTokens }) => ({ id, strength, triggerTokens }));
     return {
       id: shot.id,
       shotId: shot.id,
@@ -414,7 +538,15 @@ function makeRenderJobs(
         timeoutSeconds: 5_400,
         stillKey: shot.stillKey,
         ...(shot.endStillKey ? { endStillKey: shot.endStillKey } : {}),
-        ...(creativeAdapter ? { creativeAdapter } : {}),
+        ...(creativeAdapterStack?.benchmark
+          ? {
+              creativeAdapterStack: {
+                version: LTX_CREATIVE_ADAPTER_STACK_VERSION,
+                adapters: workerAdapters,
+                benchmark: creativeAdapterStack.benchmark,
+              },
+            }
+          : workerAdapters[0] ? { creativeAdapter: workerAdapters[0] } : {}),
       },
     };
   });
@@ -999,6 +1131,7 @@ function reserveArgs(args: {
   worker: PreparedWorker;
   lifecycle: NonNullable<NovitaRenderCfg["lifecycle"]>;
   control: DirectControlPlane;
+  remoteChildFence?: NovitaRenderCfg["remoteChildFence"];
 }): Record<string, unknown> {
   const now = Date.now();
   return {
@@ -1022,6 +1155,7 @@ function reserveArgs(args: {
     requestedAt: now,
     bootDeadlineAt: Math.min(now + MAX_BOOT_WINDOW_MS, args.worker.expiresAt),
     absoluteDeadlineAt: args.worker.expiresAt,
+    ...(args.remoteChildFence ? { remoteChildFence: args.remoteChildFence } : {}),
   };
 }
 
@@ -1111,58 +1245,91 @@ async function restoreWorkerVideoCompletionEvidence(worker: PreparedWorker): Pro
   acceptWorkerVideoCompletionEvidence(worker, completion);
 }
 
-async function observeWorker(
+type NovitaWorkerPollState = "pending" | "complete";
+
+/**
+ * Inspect exactly one worker without yielding the Trigger task. The caller is
+ * deliberately responsible for the checkpoint: a capacity wave has one
+ * durable wait, rather than one unsupported parallel wait per GPU.
+ */
+async function observeWorkerTick(
   worker: PreparedWorker,
   convex: StudioConvexHttpClient,
   secret: string,
-): Promise<void> {
-  let attempt = 0;
-  for (;;) {
-    const completion = await readJsonIfPresent(worker.completionKey) as CompletionReport | undefined;
-    if (completion?.status === "done") {
-      const completed = completion.completedJobIds;
-      if (
-        completion.manifestId !== worker.manifestId
-        || !Array.isArray(completed)
-        || completed.length !== 1
-        || completed[0] !== worker.job.id
-        || completion.gpuSku !== NOVITA_REQUIRED_GPU_SKU
-        || completion.gpuCount !== NOVITA_REQUIRED_GPU_COUNT
-      ) {
-        throw new NovitaAdmissionError(`worker ${worker.workerName} returned an invalid completion attestation`);
-      }
-      if (worker.phase === "video") {
-        acceptWorkerVideoCompletionEvidence(worker, completion);
-      }
-      await leaseMutation<void>(convex, "heartbeat", {
-        secret,
-        workerName: worker.workerName,
-        status: "draining",
-        completionKey: worker.completionKey,
-        now: Date.now(),
-      });
-      return;
+  remoteChildFence?: NovitaRenderCfg["remoteChildFence"],
+): Promise<NovitaWorkerPollState> {
+  const completion = await readJsonIfPresent(worker.completionKey) as CompletionReport | undefined;
+  if (completion?.status === "done") {
+    const completed = completion.completedJobIds;
+    if (
+      completion.manifestId !== worker.manifestId
+      || !Array.isArray(completed)
+      || completed.length !== 1
+      || completed[0] !== worker.job.id
+      || completion.gpuSku !== NOVITA_REQUIRED_GPU_SKU
+      || completion.gpuCount !== NOVITA_REQUIRED_GPU_COUNT
+    ) {
+      throw new NovitaAdmissionError(`worker ${worker.workerName} returned an invalid completion attestation`);
     }
-    if (completion?.status === "failed" || completion?.status === "interrupted") {
-      throw new Error(`Novita worker ${worker.workerName} failed: ${String(completion.error ?? "unknown")}`);
+    if (worker.phase === "video") {
+      acceptWorkerVideoCompletionEvidence(worker, completion);
     }
-    const heartbeat = await readJsonIfPresent(worker.heartbeatKey) as CompletionReport | undefined;
-    if (heartbeat?.manifestId === worker.manifestId && heartbeat.status === "running") {
-      await leaseMutation<void>(convex, "heartbeat", {
-        secret,
-        workerName: worker.workerName,
-        status: "rendering",
-        now: Date.now(),
-      });
-    }
-    if (Date.now() >= worker.expiresAt) {
-      throw new Error(`Novita worker ${worker.workerName} exceeded its immutable two-hour lease`);
-    }
-    attempt += 1;
-    await waitForNovitaRenderPoll({
-      milliseconds: STATUS_POLL_MS,
-      idempotencyKey: `novita-direct:${worker.manifestId}:poll:${attempt}`,
+    await leaseMutation<void>(convex, "heartbeat", {
+      secret,
+      workerName: worker.workerName,
+      status: "draining",
+      completionKey: worker.completionKey,
+      now: Date.now(),
+      ...(remoteChildFence ? { remoteChildFence } : {}),
     });
+    return "complete";
+  }
+  if (completion?.status === "failed" || completion?.status === "interrupted") {
+    throw new Error(`Novita worker ${worker.workerName} failed: ${String(completion.error ?? "unknown")}`);
+  }
+  const heartbeat = await readJsonIfPresent(worker.heartbeatKey) as CompletionReport | undefined;
+  if (heartbeat?.manifestId === worker.manifestId && heartbeat.status === "running") {
+    await leaseMutation<void>(convex, "heartbeat", {
+      secret,
+      workerName: worker.workerName,
+      status: "rendering",
+      now: Date.now(),
+      ...(remoteChildFence ? { remoteChildFence } : {}),
+    });
+  }
+  if (Date.now() >= worker.expiresAt) {
+    throw new Error(`Novita worker ${worker.workerName} exceeded its immutable two-hour lease`);
+  }
+  return "pending";
+}
+
+/**
+ * One wave may create several GPUs in parallel, but Trigger only permits one
+ * checkpoint wait at a time. Inspect each live worker first, settle every
+ * terminal worker as a batch, then await one checkpoint for the remaining
+ * wave. The sequential inspection is intentional: no callback can overlap a
+ * prior checkpoint wait.
+ */
+export async function pollNovitaWorkerWave<T>(args: {
+  workers: readonly T[];
+  inspect: (worker: T) => Promise<NovitaWorkerPollState>;
+  settleTerminal?: (workers: readonly T[]) => Promise<void>;
+  checkpoint: (args: { attempt: number; pendingWorkers: number }) => Promise<void>;
+}): Promise<void> {
+  let pending = args.workers.map((worker, index) => ({ worker, index }));
+  let attempt = 0;
+  while (pending.length) {
+    const next: Array<{ worker: T; index: number }> = [];
+    const terminal: T[] = [];
+    for (const entry of pending) {
+      if (await args.inspect(entry.worker) === "pending") next.push(entry);
+      else terminal.push(entry.worker);
+    }
+    if (terminal.length) await args.settleTerminal?.(terminal);
+    pending = next;
+    if (!pending.length) return;
+    attempt += 1;
+    await args.checkpoint({ attempt, pendingWorkers: pending.length });
   }
 }
 
@@ -1224,12 +1391,14 @@ async function deleteWorker(args: {
   startedAt: number;
   hourlyRate: number;
   reason: string;
+  remoteChildFence?: NovitaRenderCfg["remoteChildFence"];
 }): Promise<NovitaBillingReceipt> {
   await leaseMutation<void>(args.convex, "requestDeletion", {
     secret: args.secret,
     workerName: args.worker.workerName,
     now: Date.now(),
     reason: args.reason,
+    ...(args.remoteChildFence ? { remoteChildFence: args.remoteChildFence } : {}),
   });
   try {
     await args.provider.deleteAndVerify(args.instanceId);
@@ -1244,6 +1413,7 @@ async function deleteWorker(args: {
       secret: args.secret,
       workerName: args.worker.workerName,
       now: Date.now(),
+      ...(args.remoteChildFence ? { remoteChildFence: args.remoteChildFence } : {}),
       billingReceipt: receipt,
     });
     return receipt;
@@ -1253,6 +1423,7 @@ async function deleteWorker(args: {
       workerName: args.worker.workerName,
       now: Date.now(),
       error: safeError(error),
+      ...(args.remoteChildFence ? { remoteChildFence: args.remoteChildFence } : {}),
     }).catch(() => undefined);
     throw new Error(`Novita worker ${args.worker.workerName} teardown was not verified: ${safeError(error)}`);
   }
@@ -1263,6 +1434,8 @@ async function recoverOrCreateInstance(args: {
   lease: ReservedLease;
   control: DirectControlPlane;
   convex: StudioConvexHttpClient;
+  beforeProviderSpend?: NovitaRenderCfg["beforeProviderSpend"];
+  remoteChildFence?: NovitaRenderCfg["remoteChildFence"];
 }): Promise<string> {
   const secret = args.control.config.internalSecret;
   if (args.lease.instanceId) return args.lease.instanceId;
@@ -1272,6 +1445,7 @@ async function recoverOrCreateInstance(args: {
     workerName: args.worker.workerName,
     attemptToken,
     now: Date.now(),
+    ...(args.remoteChildFence ? { remoteChildFence: args.remoteChildFence } : {}),
   });
   if (!claim.claimed) {
     if (claim.instanceId) return claim.instanceId;
@@ -1284,6 +1458,43 @@ async function recoverOrCreateInstance(args: {
     .find((instance) => instance.name === args.worker.workerName);
   let instanceId = existing?.id;
   if (!instanceId) {
+    // Finish every provider-free request preparation before the execution
+    // fence. If that fence rejects, this worker has neither a dispatched
+    // durable create intent nor a provider request to reconcile.
+    const runtimeBootstrapUrl = args.control.config.runtimeBundle
+      ? await prepareRuntimeBootstrap(args.control.config.runtimeBundle)
+      : undefined;
+    const createRequest = buildNovitaCreateWorkerRequest({
+      name: args.worker.workerName,
+      productId: args.control.product.id,
+      gpuSku: NOVITA_REQUIRED_GPU_SKU,
+      clusterId: args.control.volume.clusterId,
+      storageId: args.control.volume.storageId,
+      image: args.control.config.workerImage,
+      ...(args.control.config.imageAuthId ? { imageAuthId: args.control.config.imageAuthId } : {}),
+      publicImage: args.control.config.imageAccess !== "private-registry",
+      ...(args.control.config.runtimeBundle ? {
+        runtimeBundle: {
+          downloadUrl: await presignDownload(args.control.config.runtimeBundle.key, {
+            expiresIn: MANIFEST_URL_TTL_SECONDS,
+          }),
+          sha256: args.control.config.runtimeBundle.sha256,
+          archive: args.control.config.runtimeBundle.archive,
+          bootstrapUrl: runtimeBootstrapUrl!,
+        },
+      } : {}),
+      manifestUrl: await presignDownload(args.worker.manifestKey, { expiresIn: MANIFEST_URL_TTL_SECONDS }),
+      manifestSha256: args.worker.manifestSha256,
+      approval: {
+        admitted: true,
+        workerCount: 1,
+        waves: [[args.worker.job.id]],
+        estimatedUpperCostUsd: args.worker.maximumCostUsd,
+        maxBudgetUsd: args.worker.maximumCostUsd,
+        inventoryState: args.control.product.inventoryState,
+      },
+    });
+    await args.beforeProviderSpend?.({ reason: "worker_create" });
     // Commit this transition before dispatching the non-transactional provider
     // request. If its HTTP response is lost, the reaper must retain an
     // unverified lease until the deterministic-name instance can be found and
@@ -1293,42 +1504,9 @@ async function recoverOrCreateInstance(args: {
       workerName: args.worker.workerName,
       attemptToken,
       now: Date.now(),
+      ...(args.remoteChildFence ? { remoteChildFence: args.remoteChildFence } : {}),
     });
-    const runtimeBootstrapUrl = args.control.config.runtimeBundle
-      ? await prepareRuntimeBootstrap(args.control.config.runtimeBundle)
-      : undefined;
-    instanceId = await args.control.provider.createSpotWorker(
-      buildNovitaCreateWorkerRequest({
-        name: args.worker.workerName,
-        productId: args.control.product.id,
-        gpuSku: NOVITA_REQUIRED_GPU_SKU,
-        clusterId: args.control.volume.clusterId,
-        storageId: args.control.volume.storageId,
-        image: args.control.config.workerImage,
-        ...(args.control.config.imageAuthId ? { imageAuthId: args.control.config.imageAuthId } : {}),
-        publicImage: args.control.config.imageAccess !== "private-registry",
-        ...(args.control.config.runtimeBundle ? {
-          runtimeBundle: {
-            downloadUrl: await presignDownload(args.control.config.runtimeBundle.key, {
-              expiresIn: MANIFEST_URL_TTL_SECONDS,
-            }),
-            sha256: args.control.config.runtimeBundle.sha256,
-            archive: args.control.config.runtimeBundle.archive,
-            bootstrapUrl: runtimeBootstrapUrl!,
-          },
-        } : {}),
-        manifestUrl: await presignDownload(args.worker.manifestKey, { expiresIn: MANIFEST_URL_TTL_SECONDS }),
-        manifestSha256: args.worker.manifestSha256,
-        approval: {
-          admitted: true,
-          workerCount: 1,
-          waves: [[args.worker.job.id]],
-          estimatedUpperCostUsd: args.worker.maximumCostUsd,
-          maxBudgetUsd: args.worker.maximumCostUsd,
-          inventoryState: args.control.product.inventoryState,
-        },
-      }),
-    );
+    instanceId = await args.control.provider.createSpotWorker(createRequest);
   }
   await leaseMutation<void>(args.convex, "bindInstance", {
     secret,
@@ -1336,24 +1514,84 @@ async function recoverOrCreateInstance(args: {
     instanceId,
     attemptToken,
     now: Date.now(),
+    ...(args.remoteChildFence ? { remoteChildFence: args.remoteChildFence } : {}),
   });
   await leaseMutation<void>(args.convex, "heartbeat", {
     secret,
     workerName: args.worker.workerName,
     status: "booting",
     now: Date.now(),
+    ...(args.remoteChildFence ? { remoteChildFence: args.remoteChildFence } : {}),
   });
   return instanceId;
 }
 
-async function renderWorker(args: {
+interface ActiveNovitaWorker {
+  worker: PreparedWorker;
+  control: DirectControlPlane;
+  convex: StudioConvexHttpClient;
+  secret: string;
+  instanceId: string;
+  startedAt: number;
+  startupFailed: boolean;
+  startupFailure?: unknown;
+  remoteChildFence?: NovitaRenderCfg["remoteChildFence"];
+}
+
+type StartedNovitaWorker =
+  | { status: "completed"; receipt: NovitaBillingReceipt }
+  | { status: "active"; active: ActiveNovitaWorker };
+
+type NovitaWorkerTerminalOutcome =
+  | { failed: false }
+  | { failed: true; error: unknown };
+
+async function markActiveWorkerFailed(active: ActiveNovitaWorker, error: unknown): Promise<void> {
+  await leaseMutation<void>(active.convex, "markFailed", {
+    secret: active.secret,
+    workerName: active.worker.workerName,
+    now: Date.now(),
+    error: safeError(error),
+    ...(active.remoteChildFence ? { remoteChildFence: active.remoteChildFence } : {}),
+  }).catch(() => undefined);
+}
+
+async function closeActiveWorker(
+  active: ActiveNovitaWorker,
+  outcome: NovitaWorkerTerminalOutcome,
+): Promise<NovitaBillingReceipt> {
+  const receipt = await deleteWorker({
+    worker: active.worker,
+    provider: active.control.provider,
+    convex: active.convex,
+    secret: active.secret,
+    instanceId: active.instanceId,
+    startedAt: active.startedAt,
+    hourlyRate: active.control.product.spotPriceUsdPerHour,
+    reason: outcome.failed ? `render failed: ${safeError(outcome.error)}` : "render complete",
+    remoteChildFence: active.remoteChildFence,
+  });
+  if (outcome.failed) throw outcome.error;
+  if (!await artifactIsComplete(active.worker)) {
+    throw new Error(`Novita worker ${active.worker.workerName} closed without its required R2 artifact`);
+  }
+  return receipt;
+}
+
+async function startWorker(args: {
   worker: PreparedWorker;
   lifecycle: NonNullable<NovitaRenderCfg["lifecycle"]>;
   control: DirectControlPlane;
   convex: StudioConvexHttpClient;
-}): Promise<NovitaBillingReceipt> {
+  beforeProviderSpend?: NovitaRenderCfg["beforeProviderSpend"];
+  remoteChildFence?: NovitaRenderCfg["remoteChildFence"];
+}): Promise<StartedNovitaWorker> {
   const { worker, control, convex } = args;
   const secret = control.config.internalSecret;
+  // A durable worker reservation can block the recovered generation even
+  // without a provider POST. Fence it too, not only the later create, so a
+  // stale child cannot strand an otherwise valid retry behind its lease row.
+  await args.beforeProviderSpend?.({ reason: "worker_create" });
   const lease = await reserveLease(convex, reserveArgs(args));
   if (lease.status === "deletion_unverified") {
     throw new Error(`Novita worker ${worker.workerName} has unverified prior teardown; reaper must close it first`);
@@ -1364,17 +1602,20 @@ async function renderWorker(args: {
   if (lease.status === "deleted_verified") {
     if (await artifactIsComplete(worker)) {
       const stored = storedBillingReceipt(lease.billingReceipt);
-      if (stored) return stored;
+      if (stored) return { status: "completed", receipt: stored };
       // A reaper can verify deletion after a crashed controller. It deliberately
       // records only a teardown receipt, so retain a conservative lifecycle
       // estimate rather than reporting a false zero-cost render.
-      return lifecycleReceipt({
-        worker,
-        instanceId: "reaper-verified",
-        startedAt: lease.requestedAt,
-        endedAt: lease.deletedVerifiedAt ?? Date.now(),
-        hourlyRate: control.product.spotPriceUsdPerHour,
-      });
+      return {
+        status: "completed",
+        receipt: lifecycleReceipt({
+          worker,
+          instanceId: "reaper-verified",
+          startedAt: lease.requestedAt,
+          endedAt: lease.deletedVerifiedAt ?? Date.now(),
+          hourlyRate: control.product.spotPriceUsdPerHour,
+        }),
+      };
     }
     throw new Error(`Novita worker ${worker.workerName} was deleted before its required artifact was verified`);
   }
@@ -1384,6 +1625,7 @@ async function renderWorker(args: {
     workerName: worker.workerName,
     attemptToken: randomUUID(),
     now: Date.now(),
+    ...(args.remoteChildFence ? { remoteChildFence: args.remoteChildFence } : {}),
   });
   if (!execution.claimed) {
     // A duplicate Trigger retry is deliberately non-destructive. The durable
@@ -1408,18 +1650,20 @@ async function renderWorker(args: {
       startedAt: lease.instanceCreatedAt ?? lease.requestedAt,
       hourlyRate: control.product.spotPriceUsdPerHour,
       reason: "resuming automatic teardown requested by a prior attempt",
+      remoteChildFence: args.remoteChildFence,
     });
     if (!await artifactIsComplete(worker)) {
       throw new Error(`Novita worker ${worker.workerName} closed while its required R2 artifact remained incomplete`);
     }
-    return receipt;
+    return { status: "completed", receipt };
   }
 
   let instanceId: string | undefined;
   // A resumed controller must never report only its own retry tail as total
   // GPU usage. The durable lease anchor is intentionally conservative.
   const startedAt = lease.instanceCreatedAt ?? lease.requestedAt;
-  let renderError: unknown;
+  let startupFailure: unknown;
+  let startupFailed = false;
   try {
     // Recheck the exact SKU immediately before every paid create. A normal
     // availability signal never authorizes a silent H100/A100 substitution.
@@ -1428,17 +1672,29 @@ async function renderWorker(args: {
     if (latest.activeInstanceCount >= control.config.verifiedGpuQuota) {
       throw new NovitaAdmissionError("verified RTX 4090 quota is exhausted before worker create");
     }
-    instanceId = await recoverOrCreateInstance({ worker, lease, control, convex });
-    await observeWorker(worker, convex, secret);
+    instanceId = await recoverOrCreateInstance({
+      worker,
+      lease,
+      control,
+      convex,
+      beforeProviderSpend: args.beforeProviderSpend,
+      remoteChildFence: args.remoteChildFence,
+    });
   } catch (error) {
     if (error instanceof CreateClaimInProgressError || error instanceof ExecutionClaimInProgressError) throw error;
-    renderError = error;
-    await leaseMutation<void>(convex, "markFailed", {
+    startupFailed = true;
+    startupFailure = error;
+    await markActiveWorkerFailed({
+      worker,
+      control,
+      convex,
       secret,
-      workerName: worker.workerName,
-      now: Date.now(),
-      error: safeError(error),
-    }).catch(() => undefined);
+      instanceId: instanceId ?? "pending-provider-identity",
+      startedAt,
+      startupFailed,
+      startupFailure,
+      remoteChildFence: args.remoteChildFence,
+    }, error);
   }
 
   if (!instanceId) {
@@ -1449,32 +1705,34 @@ async function renderWorker(args: {
       secret,
       workerName: worker.workerName,
       now: Date.now(),
-      reason: renderError ? safeError(renderError) : "provider instance identity unavailable",
+      reason: startupFailed ? safeError(startupFailure) : "provider instance identity unavailable",
+      ...(args.remoteChildFence ? { remoteChildFence: args.remoteChildFence } : {}),
     }).catch(() => undefined);
     await leaseMutation<void>(convex, "markDeletionUnverified", {
       secret,
       workerName: worker.workerName,
       now: Date.now(),
       error: "provider instance identity unavailable; deterministic-name reaper required",
+      ...(args.remoteChildFence ? { remoteChildFence: args.remoteChildFence } : {}),
     }).catch(() => undefined);
-    throw renderError ?? new Error(`Novita worker ${worker.workerName} did not return an instance identity`);
+    if (startupFailed) throw startupFailure;
+    throw new Error(`Novita worker ${worker.workerName} did not return an instance identity`);
   }
 
-  const receipt = await deleteWorker({
-    worker,
-    provider: control.provider,
-    convex,
-    secret,
-    instanceId,
-    startedAt,
-    hourlyRate: control.product.spotPriceUsdPerHour,
-    reason: renderError ? `render failed: ${safeError(renderError)}` : "render complete",
-  });
-  if (renderError) throw renderError;
-  if (!await artifactIsComplete(worker)) {
-    throw new Error(`Novita worker ${worker.workerName} closed without its required R2 artifact`);
-  }
-  return receipt;
+  return {
+    status: "active",
+    active: {
+      worker,
+      control,
+      convex,
+      secret,
+      instanceId,
+      startedAt,
+      startupFailed,
+      ...(startupFailed ? { startupFailure } : {}),
+      remoteChildFence: args.remoteChildFence,
+    },
+  };
 }
 
 /**
@@ -1498,10 +1756,7 @@ export async function settleNovitaWorkerWave<T, TResult>(
     (result): result is PromiseRejectedResult => result.status === "rejected",
   );
   if (rejected.length) {
-    const first = rejected[0]!.reason;
-    throw new Error(
-      `Novita worker wave reached ${settled.length} terminal outcome(s) with ${rejected.length} failure(s): ${safeError(first)}`,
-    );
+    throw workerWaveTerminalError(settled.length, rejected.map((result) => result.reason));
   }
   return settled.map((result) => {
     if (result.status !== "fulfilled") {
@@ -1635,7 +1890,13 @@ function directStatus(args: {
  * Execute either Z-Image keyframes or LTX video directly from a Trigger cloud
  * task. It is deliberately not exported from a route/UI surface.
  */
-export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Promise<NovitaRenderResult> {
+export async function renderDirectNovita(inputCfg: NovitaRenderCfg, phase: Phase): Promise<NovitaRenderResult> {
+  // The direct worker controller is itself a provider boundary. Normal
+  // callers have already applied this contract, but re-applying it here makes
+  // a raw/direct caller just as unable to bypass continuity or style locks.
+  const cfg = phase === "video"
+    ? { ...inputCfg, shots: inputCfg.shots.map((shot) => applyLtxI2vPromptContract(shot, inputCfg.styleId)) }
+    : inputCfg;
   // Keep the unproven native-720p x2 promotion path outside all provider work:
   // not merely before POST, but before secret bootstrap, fleet discovery, or
   // any worker-manifest/reservation side effect.
@@ -1671,7 +1932,7 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
         baseRevision: cfg.profile.revision,
         runtimeRevision: OFFICIAL_RENDER_PINS.ltx.runtimeRevision,
       })
-    : new Map<string, ResolvedLtxCreativeAdapter>();
+    : new Map<string, ResolvedLtxCreativeAdapterStack>();
   const jobs = makeRenderJobs(cfg, phase, adapters);
   if (!jobs.length) throw new NovitaAdmissionError("direct Novita render has no jobs");
   const requestedWorkers = automaticRtx4090Concurrency(cfg.shots);
@@ -1714,7 +1975,6 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
   const prepared: PreparedWorker[] = [];
   const convex = convexClient();
   const receiptByManifest = new Map<string, NovitaBillingReceipt>();
-  let spendAuthorized = false;
   for (const waveIds of plan.waves) {
     const wave: PreparedWorker[] = [];
     for (const jobId of waveIds) {
@@ -1737,23 +1997,37 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
         await restoreWorkerVideoCompletionEvidence(worker);
       }
     }
-    if (wave.length && !spendAuthorized && cfg.beforeProviderSpend) {
-      await cfg.beforeProviderSpend();
-      spendAuthorized = true;
+    if (wave.length && cfg.beforeProviderSpend) {
+      // Do not treat a first-wave admission as authority for every later
+      // checkpointed batch. A recovered parent revokes the old generation,
+      // and this exact check stops it before a later paid wave begins.
+      await cfg.beforeProviderSpend({ reason: "paid_wave" });
     }
-    const receipts = await settleNovitaWorkerWave(wave, async (worker) => ({
-      manifestId: worker.manifestId,
-      receipt: await renderWorker({ worker, lifecycle, control, convex }),
-    }));
+    const receipts = await renderNovitaWorkerWave({
+      workers: wave,
+      lifecycle,
+      control,
+      convex,
+      beforeProviderSpend: cfg.beforeProviderSpend,
+      remoteChildFence: cfg.remoteChildFence,
+    });
     receipts.forEach(({ manifestId, receipt }) => receiptByManifest.set(manifestId, receipt));
   }
-  const allReceipts = prepared.map((worker) => receiptByManifest.get(worker.manifestId) ?? lifecycleReceipt({
-    worker,
-    instanceId: "already-closed",
-    startedAt: Date.now(),
-    endedAt: Date.now(),
-    hourlyRate: control.product.spotPriceUsdPerHour,
-  }));
+  // Keep the exact worker receipt beside its exact output id. Some callers
+  // create a derivative R2 asset from one direct still and need to attest it
+  // without falsely dividing an aggregate receipt across unrelated workers.
+  const receiptByOutputId = new Map<string, NovitaBillingReceipt>();
+  const allReceipts = prepared.map((worker) => {
+    const receipt = receiptByManifest.get(worker.manifestId) ?? lifecycleReceipt({
+      worker,
+      instanceId: "already-closed",
+      startedAt: Date.now(),
+      endedAt: Date.now(),
+      hourlyRate: control.product.spotPriceUsdPerHour,
+    });
+    receiptByOutputId.set(worker.job.id, receipt);
+    return receipt;
+  });
   if (phase === "video") {
     await Promise.all(prepared.map(async (worker) => {
       if (!worker.videoOutputProof) await restoreWorkerVideoCompletionEvidence(worker);
@@ -1778,6 +2052,12 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
       videoOutputProofs: Object.fromEntries(prepared.map((worker) => [worker.job.shotId, worker.videoOutputProof!])),
       ...(nativeInputGeometrySources ? { nativeInputGeometrySources } : {}),
     } : {}),
+    requestSha256ByOutputId: Object.fromEntries(
+      prepared.map((worker) => [worker.job.id, worker.requestSha256]),
+    ),
+    billingReceiptsByOutputId: Object.fromEntries(
+      prepared.map((worker) => [worker.job.id, receiptByOutputId.get(worker.job.id)!]),
+    ),
     outputs: candidates.length,
     durationSec: 0,
     costUsd: status.billingReceipt.costUsd,

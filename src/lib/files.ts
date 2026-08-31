@@ -47,8 +47,34 @@ export async function cleanupDir(dir: string): Promise<void> {
 }
 
 /** Download a remote URL to a local file path, streaming to disk. */
-export async function downloadTo(url: string, destPath: string): Promise<string> {
-  const res = await fetch(url);
+export interface DownloadToOptions {
+  /**
+   * Optional whole-transfer deadline. Callers opt in only when an unbounded
+   * provider-output download could otherwise outlive their paid-work recovery
+   * boundary.
+   */
+  timeoutMs?: number;
+}
+
+/**
+ * Direct-render artifacts are already durably committed before callers fetch
+ * them. Five minutes leaves ample headroom for the production 1920×1088 stills
+ * and short 1280×704 LTX clips, while preventing a dead transfer from holding
+ * a Trigger worker until its much larger task deadline. Callers must opt in.
+ */
+export const DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
+
+export async function downloadTo(
+  url: string,
+  destPath: string,
+  options: DownloadToOptions = {},
+): Promise<string> {
+  const timeoutMs = options.timeoutMs;
+  const request =
+    typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? { signal: AbortSignal.timeout(Math.floor(timeoutMs)) }
+      : undefined;
+  const res = await fetch(url, request);
   if (!res.ok || !res.body) {
     throw new Error(`download failed (${res.status}) for ${url}`);
   }

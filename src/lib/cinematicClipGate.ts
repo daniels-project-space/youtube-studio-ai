@@ -6,6 +6,10 @@ import {
   CINEMATIC_CLIP_REVIEW_VERSION,
   type CinematicClipReview,
 } from "@/engine/cinematicClipReview";
+import {
+  VISUAL_ARTIFACT_REVIEW_OUTCOME_VERSION,
+  VisualArtifactReviewRejectedError,
+} from "@/engine/visualArtifactReviewOutcome";
 import { ffprobeDuration, grabFrame } from "@/lib/ffmpeg";
 import { VISION_GATE_MAX_TOKENS, visionLocal } from "@/lib/vision";
 
@@ -36,15 +40,71 @@ export interface CinematicClipGateScene {
   keyframeRequirements?: readonly string[];
 }
 
-function parseVerdict(raw: string): z.infer<typeof ReviewerVerdictSchema> {
+/**
+ * The only clip-review failure that establishes a visual repair is warranted.
+ * Reviewer transport, storage/download, ffprobe/frame, malformed-response, and
+ * binding failures remain ordinary errors so recovery never buys a new take on
+ * uncertain evidence.
+ */
+export class CinematicClipRejectedError extends VisualArtifactReviewRejectedError {
+  constructor(sceneId: string, notes: readonly string[]) {
+    super(
+      {
+        schemaVersion: VISUAL_ARTIFACT_REVIEW_OUTCOME_VERSION,
+        gateId: "cinematic-clip",
+        artifactKind: "video",
+        subjectId: sceneId,
+        reviewVersion: CINEMATIC_CLIP_REVIEW_VERSION,
+        notes,
+      },
+      `cinematic clip gate failed ${sceneId}: ` +
+        (notes.join("; ") || "reviewer rejected the moving take"),
+    );
+    this.name = "CinematicClipRejectedError";
+  }
+}
+
+function parseVerdict(raw: string): unknown {
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
   if (start < 0 || end <= start) throw new Error("cinematic clip gate: reviewer returned no JSON object");
   try {
-    return ReviewerVerdictSchema.parse(JSON.parse(raw.slice(start, end + 1)));
+    return JSON.parse(raw.slice(start, end + 1));
   } catch (error) {
     throw new Error(`cinematic clip gate: malformed reviewer verdict (${error instanceof Error ? error.message : String(error)})`);
   }
+}
+
+export type CinematicClipGateVerdict = z.infer<typeof ReviewerVerdictSchema>;
+
+/**
+ * Convert a parsed independent reviewer verdict into either a trusted visual
+ * rejection or an accepted typed verdict. Schema failures remain ordinary
+ * errors: malformed evidence cannot authorize a paid replacement.
+ */
+export function assertCinematicClipReviewerVerdictAccepted(args: {
+  sceneId: string;
+  verdict: unknown;
+  terminalFrameRequired: boolean;
+}): CinematicClipGateVerdict {
+  let verdict: CinematicClipGateVerdict;
+  try {
+    verdict = ReviewerVerdictSchema.parse(args.verdict);
+  } catch (error) {
+    throw new Error(`cinematic clip gate: malformed reviewer verdict (${error instanceof Error ? error.message : String(error)})`);
+  }
+  const failingScores = [
+    verdict.semanticAlignment,
+    verdict.motionIntegrity,
+    verdict.continuity,
+    verdict.endBeat,
+    verdict.artifactFree,
+    ...(args.terminalFrameRequired ? [verdict.terminalFrameAlignment] : []),
+  ].some((score) => score === undefined || score < CINEMATIC_CLIP_MIN_SCORE);
+  if (!verdict.pass || !verdict.textWatermarkFree || !verdict.onlyExpectedCastVisible || failingScores) {
+    throw new CinematicClipRejectedError(args.sceneId, verdict.notes);
+  }
+  return verdict;
 }
 
 function sampleOffsets(durationSec: number): [number, number, number] {
@@ -123,11 +183,11 @@ export async function reviewCinematicClip(args: {
     // Do not allow a Gemini fallback to mint a non-Google moving-take receipt.
     providers: ["openrouter"], tier: "final",
   });
-  const verdict = parseVerdict(raw);
-  if (!verdict.pass || !verdict.textWatermarkFree || !verdict.onlyExpectedCastVisible ||
-    (args.terminalStillPath && (verdict.terminalFrameAlignment === undefined || verdict.terminalFrameAlignment < CINEMATIC_CLIP_MIN_SCORE))) {
-    throw new Error(`cinematic clip gate failed ${args.scene.id}: ${verdict.notes.join("; ") || "reviewer rejected the moving take"}`);
-  }
+  const verdict = assertCinematicClipReviewerVerdictAccepted({
+    sceneId: args.scene.id,
+    verdict: parseVerdict(raw),
+    terminalFrameRequired: Boolean(args.terminalStillPath),
+  });
   return assertCinematicClipReview({
     version: CINEMATIC_CLIP_REVIEW_VERSION,
     reviewer: "non_google_vision",

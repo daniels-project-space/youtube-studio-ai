@@ -139,7 +139,7 @@ const visualRelease = {
   source: visualReceipt.evidence.source,
 };
 
-function createBridge(family: "shorts" | "illustrated_explainer") {
+function createBridge(family: "narrated_stock" | "shorts" | "illustrated_explainer") {
   return createReferenceQualityEvidenceBridgeV2({
     contract: referenceQualityContractFor(family),
     finalMaster,
@@ -209,6 +209,20 @@ assert.deepEqual(
   "Shorts use their distinct allowlisted requirement rather than inheriting illustrated proof",
 );
 
+const narratedStock = createBridge("narrated_stock");
+assert.deepEqual(
+  narratedStock.evidence.filter((item) => item.measurementState === "measured").map((item) => ({
+    requirementId: item.requirementId,
+    evidenceId: item.evidenceId,
+  })),
+  [{
+    requirementId: "measured-documentary-narration",
+    evidenceId: "audio-intelligibility-or-continuity-evidence",
+  }],
+  "narrated stock may reuse the same final-master narration recipe only for its own documentary narration pair",
+);
+assert.deepEqual(assertBridge(narratedStock), narratedStock);
+
 const v1 = createUnmeasuredReferenceQualityFinalMasterBinding({
   contract: referenceQualityContractFor("illustrated_explainer"),
   finalMasterSha256: masterSha256,
@@ -228,14 +242,25 @@ assert.equal(
 
 assert.throws(
   () => createReferenceQualityEvidenceBridgeV2({
-    contract: referenceQualityContractFor("narrated_stock"),
+    contract: referenceQualityContractFor("quizyear"),
     finalMaster,
     visualRelease,
     finalMasterNarration: narrationSemantic,
     audioAxis,
   }),
-  /does not permit measured evidence for family narrated_stock/,
-  "identical generic receipts cannot upgrade a different channel family",
+  /does not permit measured evidence for family quizyear/,
+  "identical narration receipts cannot upgrade a non-narrated quiz family",
+);
+assert.throws(
+  () => createReferenceQualityEvidenceBridgeV2({
+    contract: referenceQualityContractFor("sleep"),
+    finalMaster,
+    visualRelease,
+    finalMasterNarration: narrationSemantic,
+    audioAxis,
+  }),
+  /does not permit measured evidence for family sleep/,
+  "wordless ambient audio remains unmeasured until it has its own final-master continuity receipt",
 );
 
 assert.throws(
@@ -291,8 +316,8 @@ assert.throws(
     contract: crossFamilyContract,
     contractFingerprint: referenceQualityContractFingerprint(crossFamilyContract),
   })),
-  /does not permit measured evidence for family narrated_stock/,
-  "even a re-signed persisted V2 claim cannot transfer illustrated audio proof to another family",
+  /does not enumerate every required evidence item/,
+  "even a re-signed persisted V2 claim cannot transfer illustrated requirements to narrated stock",
 );
 
 const certificate = createFinalMasterReleaseCertificate({
@@ -300,6 +325,7 @@ const certificate = createFinalMasterReleaseCertificate({
   finalMaster: {
     r2Key: `${keyPrefix}runs/${runId}/final.mp4`,
     ...finalMaster,
+    byteLength: 2_048,
   },
   visualReview: {
     evidenceManifestKey,
@@ -321,6 +347,16 @@ assert.doesNotThrow(
   () => assertFinalMasterReleaseCertificate(certificate),
   "a V2 bridge verifies against its certificate's same-master narration, audio, and visual siblings",
 );
+const { certificateFingerprint: _certificateFingerprint, ...certificateInput } = certificate;
+void _certificateFingerprint;
+const narratedStockCertificate = createFinalMasterReleaseCertificate({
+  ...certificateInput,
+  referenceQuality: narratedStock,
+});
+assert.doesNotThrow(
+  () => assertFinalMasterReleaseCertificate(narratedStockCertificate),
+  "narrated stock keeps the same certificate-bound narration, audio, and visual tamper checks",
+);
 assert.doesNotThrow(
   () => assertReleaseCertificateVisualReviewBindings({
     certificate,
@@ -333,8 +369,6 @@ assert.doesNotThrow(
   }),
   "durable visual-release reload must cross-validate the V2 bridge against the exact reviewed master",
 );
-const { certificateFingerprint: _certificateFingerprint, ...certificateInput } = certificate;
-void _certificateFingerprint;
 assert.throws(
   () => createFinalMasterReleaseCertificate({
     ...certificateInput,
@@ -374,13 +408,20 @@ async function verifyDurableV2Bridge() {
     if (!bytes) throw new Error("missing durable object");
     return bytes;
   };
+  const getObjectIntegrity = async (key: string) => {
+    assert.equal(key, certificate.finalMaster.r2Key);
+    return {
+      sha256: certificate.finalMaster.sha256,
+      byteLength: certificate.finalMaster.byteLength!,
+    };
+  };
   await assert.doesNotReject(
-    () => verifyFinalMasterReleaseEvidenceObjects({ certificate, getObjectBytes }),
-    "V2 must revalidate the durable visual receipt, narration audit, and exact reviewed frame bytes",
+    () => verifyFinalMasterReleaseEvidenceObjects({ certificate, getObjectBytes, getObjectIntegrity }),
+    "V2 must revalidate the stored master, durable visual receipt, narration audit, and exact reviewed frame bytes",
   );
   objects.delete(narrationSemantic.auditArtifact.r2Key);
   await assert.rejects(
-    () => verifyFinalMasterReleaseEvidenceObjects({ certificate, getObjectBytes }),
+    () => verifyFinalMasterReleaseEvidenceObjects({ certificate, getObjectBytes, getObjectIntegrity }),
     /narration audit is unavailable/,
     "a missing V2 narration audit must fail closed instead of degrading to unmeasured provenance",
   );

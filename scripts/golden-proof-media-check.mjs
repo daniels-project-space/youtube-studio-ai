@@ -1,89 +1,84 @@
-// Diagnostic quality check for public/golden/ proof videos.
+// Golden proof-media audit.
 //
-// OPT-IN / NOT part of the default gate. This is intentionally NOT wired into
-// `npm test` or `npm run test:production-readiness` (see package.json) because
-// it shells out to ffmpeg/ffprobe against every committed video file under
-// public/golden/, which is slow and would slow down every CI run for a class
-// of defect (stale proof media) that changes rarely. Run it manually:
+// This is intentionally opt-in: it runs ffmpeg/ffprobe against every stored
+// Golden artifact, so it is too slow for the normal unit-test loop. Its
+// companion source test verifies the same manifest hashes cheaply on every
+// production-readiness run. Run it after changing Golden media:
 //
 //   npm run test:golden-proof-media
 //
-// after touching anything under public/golden/, or periodically to catch
-// media that went stale / got re-uploaded with a regression.
-//
-// Background: an audit on 2026-08-12 found public/golden/documotion/fordlandia.mp4
-// had an 11.5%-of-runtime black tail (59.87s -> 67.63s of 67.71s) with narration
-// still playing at full volume over the black screen -- a real defect in what the
-// app's "golden modules" showcase page presents to viewers. It was traced to
-// stale media (produced before the narration-driven-audio fix in commit
-// f7543832, 2026-06-28) rather than a current bug, but nothing caught it
-// automatically. This script exists so the next stale/bad upload gets flagged.
-//
-// It checks two things:
-//   1. Black-frame defects: any video with a large black-frame run is flagged,
-//      UNLESS the black segment is clearly an intentional intro/outro fade --
-//      i.e. it sits at the very start or very end of the clip AND the audio is
-//      also near-silent during that segment. A real fade drops picture and
-//      sound together; the fordlandia bug is exactly the case where the
-//      picture drops but the audio does not -- that's the tell we key on.
-//   2. Byte-identical duplicates: any two golden .mp4 files (in the same or a
-//      different proof directory) with the same MD5 are flagged, since two
-//      files presented as separate pieces of evidence should not literally be
-//      the same bytes.
-//
-// This is a diagnostic tool, not a hard gate: it prints clear, specific
-// findings (file + defect) rather than a bare pass/fail, and it is written to
-// be tolerant of edge cases (missing audio streams, unreadable files, etc.)
-// rather than exhaustively engineered. Exit code is 1 if anything was flagged
-// so a human running it manually gets a nonzero signal, but nothing in the
-// default build/test pipeline depends on that exit code.
+// The versioned manifest is the authority for what the Golden catalog may
+// present. `reference` assets may appear as evidence; `context` assets may be
+// shown only with a non-evidence hold; `historical`, `quarantined`, and
+// `duplicate` assets are retained for audit but cannot be resolved by the UI.
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { createReadStream, readdirSync, statSync } from "node:fs";
-import { dirname, join, relative } from "node:path";
+import { readFileSync, readdirSync, statSync } from "node:fs";
+import { dirname, extname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
-const goldenRoot = join(root, "public", "golden");
+const publicRoot = join(root, "public");
+const goldenRoot = join(publicRoot, "golden");
+const manifestPath = join(root, "src", "engine", "goldenProofMediaManifest.json");
 
-// ---- Tunable thresholds -----------------------------------------------
-// Total black time as a percentage of runtime above which a video is flagged.
+const JSON_OUTPUT = process.argv.includes("--json");
+const INTEGRITY_ONLY = process.argv.includes("--integrity-only");
+const PRESENTABLE = new Set(["reference", "context"]);
+const STATUSES = new Set(["reference", "context", "historical", "quarantined", "duplicate"]);
+const KINDS = new Set(["image", "video", "audio"]);
+const EXTENSIONS = {
+  image: new Set([".jpg", ".jpeg", ".png", ".webp"]),
+  video: new Set([".mp4"]),
+  audio: new Set([".mp3"]),
+};
+
+// Total black time as a percentage of runtime above which a blank-video run is
+// reportable. A long individual run is reportable even below that percentage.
 const BLACK_TOTAL_PCT_THRESHOLD = 5;
-// Any single black segment longer than this (seconds) is flagged on its own.
 const BLACK_SEGMENT_SECONDS_THRESHOLD = 3;
-// How close (seconds) a black segment's start/end must be to the clip's own
-// start/end to count as "the very start/end" for fade-exemption purposes.
 const EDGE_TOLERANCE_SECONDS = 2;
-// mean_volume (dB) at or below this counts as "near-silent" for fade checks.
-// A real fade's audio bed sits far below normal dialogue/narration level.
 const SILENCE_DB_THRESHOLD = -35;
-// blackdetect tuning: minimum segment duration to report, and the picture /
-// pixel thresholds that decide whether a frame counts as "black". These are
-// close to ffmpeg's own defaults but with a shorter min duration (0.5s
-// instead of ffmpeg's default 2.0s) so short intro/outro fades still surface
-// and can go through the exemption check rather than being invisible.
 const BLACKDETECT_FILTER = "blackdetect=d=0.5:pic_th=0.98:pix_th=0.10";
-// -------------------------------------------------------------------------
 
-function findMp4Files(dir) {
-  const out = [];
+// `blackdetect` deliberately treats a mostly-dark title card as black. A
+// designed dark frame is still visual evidence when it has persistent bright
+// title/countdown content, so sample three points and require a high-luma
+// signal in at least two. This keeps a genuine blank tail (Fordlandia YMAX 59)
+// separate from the Quiz title/countdown (YMAX 255) without a per-file waiver.
+const VISIBLE_CONTENT_YMAX_THRESHOLD = 96;
+const VISIBLE_CONTENT_MIN_SAMPLES = 2;
+
+function relativeToPublic(path) {
+  return relative(publicRoot, path).replaceAll("\\", "/");
+}
+
+function findGoldenFiles(dir) {
+  const files = [];
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      out.push(...findMp4Files(full));
-    } else if (entry.isFile() && entry.name.toLowerCase().endsWith(".mp4")) {
-      out.push(full);
-    }
+    if (entry.isDirectory()) files.push(...findGoldenFiles(full));
+    else if (entry.isFile()) files.push(full);
   }
-  return out;
+  return files;
+}
+
+function kindForPath(path) {
+  const extension = extname(path).toLowerCase();
+  for (const [kind, extensions] of Object.entries(EXTENSIONS)) {
+    if (extensions.has(extension)) return kind;
+  }
+  return null;
+}
+
+function sha256File(path) {
+  return createHash("sha256").update(readFileSync(path)).digest("hex");
 }
 
 function runFfprobe(args) {
   const result = spawnSync("ffprobe", args, { encoding: "utf8" });
-  if (result.error || result.status !== 0) {
-    return null;
-  }
+  if (result.error || result.status !== 0) return null;
   return result.stdout;
 }
 
@@ -113,14 +108,14 @@ function hasAudioStream(file) {
 function detectBlackSegments(file) {
   const result = spawnSync(
     "ffmpeg",
-    ["-i", file, "-vf", BLACKDETECT_FILTER, "-an", "-f", "null", "-"],
+    ["-hide_banner", "-loglevel", "info", "-i", file, "-vf", BLACKDETECT_FILTER, "-an", "-f", "null", "-"],
     { encoding: "utf8" },
   );
-  const stderr = result.stderr || "";
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
   const segments = [];
   const re = /black_start:([\d.]+) black_end:([\d.]+) black_duration:([\d.]+)/g;
   let match;
-  while ((match = re.exec(stderr)) !== null) {
+  while ((match = re.exec(output)) !== null) {
     segments.push({
       start: Number.parseFloat(match[1]),
       end: Number.parseFloat(match[2]),
@@ -130,173 +125,296 @@ function detectBlackSegments(file) {
   return segments;
 }
 
-// Returns mean_volume in dB for the given window, or null if there's no
-// audio to measure (no audio stream, or ffmpeg couldn't parse a level).
 function getAudioLevelDb(file, start, end) {
   const result = spawnSync(
     "ffmpeg",
-    ["-ss", String(start), "-to", String(end), "-i", file, "-vn", "-af", "volumedetect", "-f", "null", "-"],
+    ["-hide_banner", "-loglevel", "info", "-ss", String(start), "-to", String(end), "-i", file, "-vn", "-af", "volumedetect", "-f", "null", "-"],
     { encoding: "utf8" },
   );
-  const stderr = result.stderr || "";
-  const match = stderr.match(/mean_volume:\s*(-?[\d.]+)\s*dB/);
-  if (!match) return null;
-  return Number.parseFloat(match[1]);
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  const match = output.match(/mean_volume:\s*(-?[\d.]+)\s*dB/);
+  return match ? Number.parseFloat(match[1]) : null;
 }
 
-function md5File(file) {
-  return new Promise((resolve, reject) => {
-    const hash = createHash("md5");
-    const stream = createReadStream(file);
-    stream.on("data", (chunk) => hash.update(chunk));
-    stream.on("end", () => resolve(hash.digest("hex")));
-    stream.on("error", reject);
-  });
+function getFrameYMax(file, timestamp) {
+  const result = spawnSync(
+    "ffmpeg",
+    [
+      "-hide_banner", "-loglevel", "info", "-ss", String(timestamp), "-i", file,
+      "-vf", "signalstats,metadata=print:file=-", "-frames:v", "1", "-an", "-f", "null", "-",
+    ],
+    { encoding: "utf8" },
+  );
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+  const values = [...output.matchAll(/lavfi\.signalstats\.YMAX=(\d+(?:\.\d+)?)/g)]
+    .map((match) => Number.parseFloat(match[1]))
+    .filter(Number.isFinite);
+  return values.length ? Math.max(...values) : null;
+}
+
+function visualContentSamples(file, segment) {
+  const timestamps = [0.25, 0.5, 0.75].map(
+    (portion) => segment.start + segment.duration * portion,
+  );
+  const yMax = timestamps.map((timestamp) => getFrameYMax(file, timestamp));
+  const visibleCount = yMax.filter((value) => value !== null && value >= VISIBLE_CONTENT_YMAX_THRESHOLD).length;
+  return { yMax, visibleCount, meaningful: visibleCount >= VISIBLE_CONTENT_MIN_SAMPLES };
 }
 
 function formatSeconds(value) {
   return `${value.toFixed(2)}s`;
 }
 
-async function checkFile(file) {
-  const label = relative(root, file);
-  const finding = { file: label, issues: [], corrupt: false };
+function validateManifest(value) {
+  const errors = [];
+  if (!value || typeof value !== "object") return { errors: ["manifest must be an object"], entries: [], entriesByPath: new Map(), entriesById: new Map() };
+  if (value.schemaVersion !== 1) errors.push(`unsupported manifest schemaVersion ${String(value.schemaVersion)}`);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value.catalogVersion ?? "")) errors.push("manifest catalogVersion must be YYYY-MM-DD");
+  if (!Array.isArray(value.entries) || value.entries.length === 0) errors.push("manifest entries must be a non-empty array");
 
-  const size = statSync(file).size;
-  const duration = getDuration(file);
+  const entries = Array.isArray(value.entries) ? value.entries : [];
+  const entriesByPath = new Map();
+  const entriesById = new Map();
+  for (const entry of entries) {
+    if (!entry || typeof entry !== "object") {
+      errors.push("manifest contains a non-object entry");
+      continue;
+    }
+    const label = typeof entry.id === "string" ? entry.id : "<unknown>";
+    if (!/^[a-z0-9-]+$/.test(entry.id ?? "")) errors.push(`${label}: invalid id`);
+    if (!/^golden\/[a-z0-9_/-]+\.(?:jpg|jpeg|png|webp|mp4|mp3)$/i.test(entry.path ?? "")) errors.push(`${label}: invalid public/golden path`);
+    if (!KINDS.has(entry.kind)) errors.push(`${label}: invalid kind ${String(entry.kind)}`);
+    if (!STATUSES.has(entry.status)) errors.push(`${label}: invalid status ${String(entry.status)}`);
+    if (!/^[a-f0-9]{64}$/.test(entry.sha256 ?? "")) errors.push(`${label}: invalid SHA-256`);
+    if (entry.path && kindForPath(entry.path) !== entry.kind) errors.push(`${label}: path extension does not match ${String(entry.kind)} kind`);
+    if (entriesByPath.has(entry.path)) errors.push(`${label}: duplicate path ${entry.path}`);
+    if (entriesById.has(entry.id)) errors.push(`${label}: duplicate id`);
+    entriesByPath.set(entry.path, entry);
+    entriesById.set(entry.id, entry);
+    if (entry.status === "duplicate" && !entry.duplicateOf) errors.push(`${label}: duplicate status needs duplicateOf`);
+    if (entry.status !== "duplicate" && entry.duplicateOf) errors.push(`${label}: only duplicate status may declare duplicateOf`);
+    if ((entry.status === "context" || entry.status === "quarantined") && !entry.statusReason) errors.push(`${label}: ${entry.status} status needs a reason`);
+  }
 
-  if (size === 0 || duration === null || duration <= 0) {
+  for (const entry of entries.filter((candidate) => candidate?.status === "duplicate")) {
+    const canonical = entriesById.get(entry.duplicateOf);
+    if (!canonical) errors.push(`${entry.id}: duplicateOf ${entry.duplicateOf} is not in the manifest`);
+    else if (canonical.status === "duplicate") errors.push(`${entry.id}: duplicateOf may not point to another duplicate`);
+    else if (canonical.sha256 !== entry.sha256) errors.push(`${entry.id}: duplicateOf SHA-256 does not match canonical`);
+    else if (canonical.kind !== entry.kind) errors.push(`${entry.id}: duplicateOf kind does not match canonical`);
+  }
+
+  const presentable = new Map();
+  for (const entry of entries.filter((candidate) => PRESENTABLE.has(candidate?.status))) {
+    const prior = presentable.get(entry.sha256);
+    if (prior) errors.push(`${entry.id} and ${prior.id}: presentable duplicate SHA-256 is forbidden`);
+    presentable.set(entry.sha256, entry);
+  }
+  return { errors, entries, entriesByPath, entriesById };
+}
+
+function checkFile(entry, path) {
+  const finding = {
+    id: entry.id,
+    file: entry.path,
+    status: entry.status,
+    kind: entry.kind,
+    issues: [],
+    notes: [],
+    corrupt: false,
+  };
+  const size = statSync(path).size;
+  if (size === 0) {
     finding.corrupt = true;
-    finding.issues.push(
-      `corrupt or unreadable: ffprobe could not read a valid duration (size=${size} bytes, duration=${duration})`,
-    );
+    finding.issues.push("empty media file");
     return finding;
   }
 
-  const segments = detectBlackSegments(file);
-  if (segments.length > 0) {
-    const audioPresent = hasAudioStream(file);
-    const annotated = segments.map((seg) => {
-      const isAtStart = seg.start <= EDGE_TOLERANCE_SECONDS;
-      const isAtEnd = duration - seg.end <= EDGE_TOLERANCE_SECONDS;
-      const isEdge = isAtStart || isAtEnd;
-      const audioDb = audioPresent ? getAudioLevelDb(file, seg.start, seg.end) : null;
-      // No audio stream at all counts as silent for fade-detection purposes.
-      const isSilent = !audioPresent || audioDb === null || audioDb <= SILENCE_DB_THRESHOLD;
-      const exempt = isEdge && isSilent;
-      return { ...seg, isAtStart, isAtEnd, isEdge, audioDb, audioPresent, isSilent, exempt };
-    });
+  if (entry.kind === "image") return finding;
 
-    const nonExempt = annotated.filter((s) => !s.exempt);
-    const nonExemptTotal = nonExempt.reduce((sum, s) => sum + s.duration, 0);
-    const nonExemptPct = (nonExemptTotal / duration) * 100;
-    const worstSegment = nonExempt.reduce(
-      (max, s) => (s.duration > (max?.duration ?? 0) ? s : max),
-      null,
+  const duration = getDuration(path);
+  if (duration === null || duration <= 0) {
+    finding.corrupt = true;
+    finding.issues.push(`corrupt or unreadable: ffprobe could not read a valid duration (size=${size} bytes, duration=${duration})`);
+    return finding;
+  }
+  if (entry.kind === "audio") return finding;
+
+  const segments = detectBlackSegments(path);
+  const audioPresent = hasAudioStream(path);
+  const annotated = segments.map((segment) => {
+    const visual = visualContentSamples(path, segment);
+    const isAtStart = segment.start <= EDGE_TOLERANCE_SECONDS;
+    const isAtEnd = duration - segment.end <= EDGE_TOLERANCE_SECONDS;
+    const isEdge = isAtStart || isAtEnd;
+    const audioDb = audioPresent ? getAudioLevelDb(path, segment.start, segment.end) : null;
+    const isSilent = !audioPresent || audioDb === null || audioDb <= SILENCE_DB_THRESHOLD;
+    const exemptFade = isEdge && isSilent;
+    return { ...segment, ...visual, isAtStart, isAtEnd, audioDb, audioPresent, isSilent, exemptFade };
+  });
+
+  for (const segment of annotated.filter((candidate) => candidate.meaningful)) {
+    finding.notes.push(
+      `dark-design segment ${formatSeconds(segment.start)}-${formatSeconds(segment.end)} has persistent visible content (YMAX samples ${segment.yMax.map((value) => value ?? "?").join(", ")})`,
     );
+  }
 
-    const overPct = nonExemptPct > BLACK_TOTAL_PCT_THRESHOLD;
-    const overSingle = Boolean(worstSegment) && worstSegment.duration > BLACK_SEGMENT_SECONDS_THRESHOLD;
+  const nonExempt = annotated.filter((segment) => !segment.exemptFade && !segment.meaningful);
+  const nonExemptTotal = nonExempt.reduce((sum, segment) => sum + segment.duration, 0);
+  const nonExemptPct = (nonExemptTotal / duration) * 100;
+  const worstSegment = nonExempt.reduce(
+    (max, segment) => (segment.duration > (max?.duration ?? 0) ? segment : max),
+    null,
+  );
+  const overPct = nonExemptPct > BLACK_TOTAL_PCT_THRESHOLD;
+  const overSingle = Boolean(worstSegment) && worstSegment.duration > BLACK_SEGMENT_SECONDS_THRESHOLD;
 
-    if (overPct || overSingle) {
-      for (const seg of nonExempt) {
-        const position = seg.isAtStart ? "at start" : seg.isAtEnd ? "at end" : "mid-video";
-        const audioDesc = seg.audioPresent
-          ? seg.audioDb === null
-            ? "audio level unreadable"
-            : `audio mean level ${seg.audioDb.toFixed(1)} dB`
-          : "no audio stream";
-        const tell = seg.audioPresent && seg.audioDb !== null && !seg.isSilent
-          ? " -- picture is black but audio is still at normal level (not a fade)"
-          : "";
-        finding.issues.push(
-          `black segment ${formatSeconds(seg.start)}-${formatSeconds(seg.end)} ` +
-          `(${formatSeconds(seg.duration)}, ${((seg.duration / duration) * 100).toFixed(1)}% of ${formatSeconds(duration)} runtime), ` +
-          `${position}, ${audioDesc}${tell}`,
-        );
-      }
-    } else if (annotated.some((s) => s.exempt)) {
-      // Nothing to report at file level; exempted fades are expected and not printed as issues.
+  if (overPct || overSingle) {
+    for (const segment of nonExempt) {
+      const position = segment.isAtStart ? "at start" : segment.isAtEnd ? "at end" : "mid-video";
+      const audioDesc = segment.audioPresent
+        ? segment.audioDb === null
+          ? "audio level unreadable"
+          : `audio mean level ${segment.audioDb.toFixed(1)} dB`
+        : "no audio stream";
+      const tell = segment.audioPresent && segment.audioDb !== null && !segment.isSilent
+        ? " -- picture is black but audio is still at normal level (not a fade)"
+        : "";
+      finding.issues.push(
+        `blank segment ${formatSeconds(segment.start)}-${formatSeconds(segment.end)} ` +
+        `(${formatSeconds(segment.duration)}, ${((segment.duration / duration) * 100).toFixed(1)}% of ${formatSeconds(duration)} runtime), ` +
+        `${position}, ${audioDesc}${tell}`,
+      );
     }
   }
 
   return finding;
 }
 
-async function findDuplicates(files) {
-  const byHash = new Map();
-  for (const file of files) {
-    const hash = await md5File(file);
-    if (!byHash.has(hash)) byHash.set(hash, []);
-    byHash.get(hash).push(file);
-  }
-  const duplicateGroups = [];
-  for (const [hash, group] of byHash.entries()) {
-    if (group.length > 1) {
-      duplicateGroups.push({ hash, files: group.map((f) => relative(root, f)) });
-    }
-  }
-  return duplicateGroups;
-}
-
-async function main() {
-  console.log("Golden proof media check (opt-in diagnostic -- not part of the default test gate)");
-  console.log(`Scanning: ${relative(root, goldenRoot)}\n`);
-
-  let files;
-  try {
-    files = findMp4Files(goldenRoot).sort();
-  } catch (err) {
-    console.error(`Could not read ${goldenRoot}: ${err.message}`);
-    process.exit(1);
-  }
-
-  if (files.length === 0) {
-    console.log("No .mp4 files found under public/golden/. Nothing to check.");
-    return;
-  }
-
-  const findings = [];
-  for (const file of files) {
-    findings.push(await checkFile(file));
-  }
-
-  const duplicateGroups = await findDuplicates(files);
-
-  const flaggedFindings = findings.filter((f) => f.issues.length > 0);
-  const cleanCount = findings.length - flaggedFindings.length;
-
-  for (const finding of findings) {
-    if (finding.issues.length === 0) {
-      console.log(`OK    ${finding.file}`);
+function duplicateErrors(groups, entriesByPath) {
+  const errors = [];
+  for (const group of groups) {
+    const entries = group.paths.map((path) => entriesByPath.get(path)).filter(Boolean);
+    if (entries.length !== group.paths.length) {
+      errors.push(`duplicate bytes ${group.sha256}: an asset is missing from the manifest`);
       continue;
     }
-    console.log(`${finding.corrupt ? "CORRUPT" : "FLAGGED"} ${finding.file}`);
-    for (const issue of finding.issues) {
-      console.log(`         - ${issue}`);
+    const canonical = entries.filter((entry) => entry.status !== "duplicate");
+    if (canonical.length !== 1) {
+      errors.push(`duplicate bytes ${group.sha256}: expected exactly one canonical asset, found ${canonical.length}`);
+      continue;
     }
-  }
-
-  if (duplicateGroups.length > 0) {
-    console.log("\nDuplicate (byte-identical) proof files:");
-    for (const group of duplicateGroups) {
-      console.log(`  DUPLICATE md5=${group.hash}`);
-      for (const path of group.files) {
-        console.log(`    - ${path}`);
+    for (const entry of entries) {
+      if (entry === canonical[0]) continue;
+      if (entry.status !== "duplicate" || entry.duplicateOf !== canonical[0].id) {
+        errors.push(`duplicate bytes ${group.sha256}: ${entry.id} must be duplicateOf ${canonical[0].id}`);
       }
     }
   }
-
-  console.log("\n--- Summary ---");
-  console.log(`Checked ${files.length} file(s): ${cleanCount} clean, ${flaggedFindings.length} flagged.`);
-  console.log(`Duplicate groups: ${duplicateGroups.length}.`);
-
-  if (flaggedFindings.length > 0 || duplicateGroups.length > 0) {
-    process.exitCode = 1;
-  }
+  return errors;
 }
 
-main().catch((err) => {
-  console.error(`golden-proof-media-check failed: ${err.stack || err.message}`);
-  process.exit(1);
-});
+async function main() {
+  let rawManifest;
+  try {
+    rawManifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+  } catch (error) {
+    const message = `Could not parse Golden proof-media manifest: ${error instanceof Error ? error.message : String(error)}`;
+    if (JSON_OUTPUT) process.stdout.write(`${JSON.stringify({ ok: false, errors: [message] }, null, 2)}\n`);
+    else console.error(message);
+    process.exitCode = 1;
+    return;
+  }
+
+  const { errors, entries, entriesByPath } = validateManifest(rawManifest);
+  let files = [];
+  try {
+    files = findGoldenFiles(goldenRoot).sort();
+  } catch (error) {
+    errors.push(`Could not read public/golden: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const filesByPath = new Map(files.map((path) => [relativeToPublic(path), path]));
+
+  for (const path of filesByPath.keys()) {
+    if (!kindForPath(path)) errors.push(`${path}: unsupported Golden media extension; add an explicit kind before it can be cataloged`);
+    if (!entriesByPath.has(path)) errors.push(`${path}: missing from Golden proof-media manifest`);
+  }
+  for (const entry of entries) {
+    if (!filesByPath.has(entry.path)) errors.push(`${entry.id}: manifest path ${entry.path} is missing on disk`);
+  }
+
+  const findings = [];
+  const hashesByPath = new Map();
+  for (const entry of entries.slice().sort((left, right) => left.path.localeCompare(right.path))) {
+    const path = filesByPath.get(entry.path);
+    if (!path) continue;
+    const sha256 = sha256File(path);
+    hashesByPath.set(entry.path, sha256);
+    if (sha256 !== entry.sha256) errors.push(`${entry.id}: SHA-256 drift (${sha256} != ${entry.sha256})`);
+    const finding = INTEGRITY_ONLY
+      ? { id: entry.id, file: entry.path, status: entry.status, kind: entry.kind, issues: [], notes: [], corrupt: false }
+      : checkFile(entry, path);
+    findings.push(finding);
+    if (finding.issues.length && PRESENTABLE.has(entry.status)) {
+      errors.push(`${entry.id}: presentable ${entry.status} media failed quality audit: ${finding.issues.join("; ")}`);
+    }
+  }
+
+  const duplicateMap = new Map();
+  for (const [path, sha256] of hashesByPath.entries()) {
+    if (!duplicateMap.has(sha256)) duplicateMap.set(sha256, []);
+    duplicateMap.get(sha256).push(path);
+  }
+  const duplicateGroups = [...duplicateMap.entries()]
+    .filter(([, paths]) => paths.length > 1)
+    .map(([sha256, paths]) => ({ sha256, paths: paths.sort() }));
+  errors.push(...duplicateErrors(duplicateGroups, entriesByPath));
+
+  const statusSummary = Object.fromEntries(
+    [...STATUSES].map((status) => [status, entries.filter((entry) => entry.status === status).length]),
+  );
+  const report = {
+    ok: errors.length === 0,
+    manifest: {
+      schemaVersion: rawManifest.schemaVersion,
+      catalogVersion: rawManifest.catalogVersion,
+      auditedAt: rawManifest.auditedAt,
+    },
+    integrityOnly: INTEGRITY_ONLY,
+    filesChecked: findings.length,
+    statusSummary,
+    findings,
+    duplicateGroups,
+    errors,
+  };
+
+  if (JSON_OUTPUT) {
+    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+  } else {
+    console.log(`Golden proof-media audit · catalog v${rawManifest.catalogVersion} · ${INTEGRITY_ONLY ? "integrity only" : "full visual check"}`);
+    for (const finding of findings) {
+      const label = finding.status.toUpperCase().padEnd(11);
+      console.log(`${label} ${finding.file}`);
+      for (const note of finding.notes) console.log(`             note: ${note}`);
+      for (const issue of finding.issues) console.log(`             ${PRESENTABLE.has(finding.status) ? "ERROR" : "excluded"}: ${issue}`);
+    }
+    if (duplicateGroups.length) {
+      console.log("\nDuplicate byte groups (all noncanonical paths are excluded):");
+      for (const group of duplicateGroups) {
+        console.log(`  SHA-256=${group.sha256}`);
+        for (const path of group.paths) console.log(`    - ${path}`);
+      }
+    }
+    console.log("\n--- Summary ---");
+    console.log(`Checked ${findings.length} manifest assets: ${Object.entries(statusSummary).map(([status, count]) => `${count} ${status}`).join(", ")}.`);
+    if (errors.length) {
+      console.log(`FAILED with ${errors.length} manifest/evidence error(s):`);
+      for (const error of errors) console.log(`  - ${error}`);
+    } else {
+      console.log("PASS: all presentable assets match their recorded SHA-256; no presentable video failed the configured blank-frame check; quarantined and duplicate assets remain nonpresentable.");
+    }
+  }
+  if (errors.length) process.exitCode = 1;
+}
+
+await main();

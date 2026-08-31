@@ -89,6 +89,8 @@ export const EpisodeVisualStateSchema = z.object({
   /** Explicit fictional-scenario visual grammar. Omitted for factual/general episodes. */
   syntheticScenarioProfile: SyntheticScenarioProfileSchema.optional(),
   syntheticScenarioVisualKind: SyntheticScenarioVisualKindSchema.optional(),
+  /** Sealed policy receipt carried into each fictional renderer scene. */
+  scenarioVisualTreatmentFingerprint: z.string().regex(/^[a-f0-9]{64}$/i).optional(),
   /** Explicit declaration; generic seeded charts/maps stay illustrative by default. */
   evidenceVisualIntent: EvidenceVisualIntentSchema.optional(),
   /** Required review-bound data when the declared intent is factual. */

@@ -5,6 +5,8 @@
  */
 import { register, _clear } from "./registry";
 import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
+import { serializedProgramEpisodeContextBlocks } from "@/trigger/blocks/serializedProgramEpisodeContextBlocks";
+import { narrativeSeriesVisualControlsBlocks } from "@/trigger/blocks/narrativeSeriesVisualControlsBlocks";
 import { intelligenceBlocks } from "@/trigger/blocks/intelligenceBlocks";
 import { narratedBlocks } from "@/trigger/blocks/narratedBlocks";
 import { complianceBlocks } from "@/trigger/blocks/complianceBlocks";
@@ -17,10 +19,13 @@ import { STORY_SPINE_BLOCKS } from "@/trigger/blocks/storySpineBlocks";
 import { whiteboardScribeBlocks } from "@/trigger/blocks/whiteboardScribeBlocks";
 import { motionComicBlocks } from "@/trigger/blocks/motionComicBlocks";
 import { loreShortBlocks } from "@/trigger/blocks/loreShortBlocks";
+import { selfContainedStoryBlocks } from "@/trigger/blocks/selfContainedStoryBlocks";
 import { quizYearBlocks } from "@/trigger/blocks/quizYearBlocks";
 import { quizPlanningBlocks } from "@/trigger/blocks/quizPlanningBlocks";
+import { quizShortReleaseBlocks } from "@/trigger/blocks/quizShortReleaseBlocks";
 import { documentaryCollageShortBlocks } from "@/trigger/blocks/documentaryCollageShortBlocks";
 import { VISUAL_MATTER_BLOCKS } from "@/trigger/blocks/visualMatterBlocks";
+import { STUDIO_ASSET_LIBRARY_BLOCKS } from "@/trigger/blocks/studioAssetLibraryBlocks";
 import { episodeGraphBlocks } from "@/trigger/blocks/episodeGraphBlocks";
 import { learningContractBlocks } from "@/trigger/blocks/learningContractBlocks";
 import { curriculumEpisodeSeedBlocks } from "@/trigger/blocks/curriculumEpisodeSeedBlocks";
@@ -43,6 +48,10 @@ export function registerAllBlocks(): void {
   // Template C (Lofi) blocks. metadata + thumbnail_gen come from the
   // competitor-intelligence engine below, NOT from lofiBlocks.
   for (const b of lofiBlocks) register(b);
+  // Route-owned, provider-free bridge from a completed serialized Topic Select
+  // receipt to the shared script/crew/QA consumers. Registration alone cannot
+  // admit a route; the designer only materializes it for serialized_program/v1.
+  for (const b of serializedProgramEpisodeContextBlocks) register(b);
   // Competitor-intelligence engine: competitor_research, metadata (optimised),
   // thumbnail_gen (banana engine).
   for (const b of intelligenceBlocks) register(b);
@@ -59,6 +68,10 @@ export function registerAllBlocks(): void {
   for (const b of STORY_SPINE_BLOCKS) register(b);
   // Provider-free Story Spine → causal Episode Graph → Scene Manifest bridge.
   for (const b of episodeGraphBlocks) register(b);
+  // Latent serialized-cinematic continuity bridge. It persists only an
+  // already-admitted plan/binding/control receipt; registration cannot create
+  // a route, invoke an adapter, or start a character LoRA training job.
+  for (const b of narrativeSeriesVisualControlsBlocks) register(b);
   // Renderer-neutral learning objective / retrieval-practice handoff.
   for (const b of learningContractBlocks) register(b);
   // Pre-Story-Spine, operator-authored curriculum intent for supervised
@@ -97,6 +110,9 @@ export function registerAllBlocks(): void {
   // storyboard locks. Cinematic is its first integrated consumer; the block
   // remains renderer-neutral for future generated-visual lanes.
   for (const b of VISUAL_MATTER_BLOCKS) register(b);
+  // Owner-scoped approved recipe lookup. This remains provider-free and only
+  // exposes recipe text to preproduction; adapters/guide bytes stay fenced.
+  for (const b of STUDIO_ASSET_LIBRARY_BLOCKS) register(b);
   // Script-synced motion-graphics inserts (visual_inserts): Remotion data viz
   // planned from the numbers the narration actually speaks.
   for (const b of insertBlocks) register(b);
@@ -107,6 +123,10 @@ export function registerAllBlocks(): void {
   // novita_render_video): cloud Trigger child tasks own the short-lived spot
   // worker lifecycle; drop-in producer-compatible with gen_footage.
   for (const b of novitaRenderBlocks) register(b);
+  // Bounded native-story planner → provider-free route/lane/topic seal. This
+  // pair is latent until a future admitted route explicitly places it before a
+  // matching self-contained renderer; registration cannot authorize a route.
+  for (const b of selfContainedStoryBlocks) register(b);
   // DRAWN-CINEMA self-contained engine (whiteboard_scribe): narration-synced
   // whiteboard explainer (src/lib/whiteboardSync.ts) — produces the final video.
   for (const b of whiteboardScribeBlocks) register(b);
@@ -124,6 +144,9 @@ export function registerAllBlocks(): void {
   // metadata and renderer-native thumbnail receipts used by QuizYear.
   for (const b of quizPlanningBlocks) register(b);
   for (const b of quizYearBlocks) register(b);
+  // Post-QA, certificate-bound supervised private-review handoff for the
+  // portrait QuizShort route. Registration alone never admits that route.
+  for (const b of quizShortReleaseBlocks) register(b);
   // Native documentary-collage Shorts: source/claim/beat manifest → portrait
   // DocuMotion master → scene-level safe-area and provenance gate.
   for (const b of documentaryCollageShortBlocks) register(b);

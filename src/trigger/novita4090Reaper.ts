@@ -119,6 +119,7 @@ async function markCandidateDeletionUnverified(
     workerName: candidate.workerName,
     now: Date.now(),
     error: safeError(error),
+    reaper: true,
   });
 }
 
@@ -137,6 +138,7 @@ async function reapLeaseCandidate(args: {
     workerName: candidate.workerName,
     now: Date.now(),
     reason: candidate.reason,
+    reaper: true,
   });
 
   try {
@@ -156,6 +158,7 @@ async function reapLeaseCandidate(args: {
       secret,
       workerName: candidate.workerName,
       now,
+      reaper: true,
       billingReceipt: teardownReceipt({
         workerName: candidate.workerName,
         instanceIds,

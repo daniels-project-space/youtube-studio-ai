@@ -29,6 +29,22 @@ export const getForSeries = query({
   },
 });
 
+/**
+ * Serialized-program continuity is deliberately route-identity keyed.  Do
+ * not fall back to the title-keyed legacy state: a renewed route may reuse a
+ * human series title while starting a wholly new arc.
+ */
+export const getForSeriesIdentity = query({
+  args: { channelId: v.id("channels"), seriesIdentity: v.string() },
+  handler: async (ctx, args) =>
+    await ctx.db
+      .query("seriesStoryState")
+      .withIndex("by_channel_series_identity", (q) =>
+        q.eq("channelId", args.channelId).eq("seriesIdentity", args.seriesIdentity),
+      )
+      .unique(),
+});
+
 export const recordEpisodeBeat = mutation({
   args: {
     ownerId: v.string(),

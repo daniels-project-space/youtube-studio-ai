@@ -3,7 +3,23 @@
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
 import { createPortal } from "react-dom";
 
-export interface ProofImage { src: string; alt: string }
+export interface ProofImage {
+  id: string;
+  src: string;
+  alt: string;
+  /** The server resolves this from the Golden proof-media manifest. */
+  status?: "reference" | "context";
+  /** Full content fingerprint; the compact viewer shows an inspectable prefix. */
+  sha256?: string;
+}
+
+function evidenceLabel(image: ProofImage): string {
+  return image.status === "context" ? "CONTEXT ONLY" : "MANIFEST REFERENCE";
+}
+
+function fingerprint(image: ProofImage): string | undefined {
+  return image.sha256 ? `SHA-256 ${image.sha256.slice(0, 12)}…` : undefined;
+}
 
 /**
  * Golden proof images — a wrapping grid (everything visible at once, no
@@ -51,14 +67,18 @@ export function GoldenImages({ images }: { images: ProofImage[] }) {
         <button onClick={(e) => { e.stopPropagation(); prev(); }} style={{ ...NAV, left: 12 }} aria-label="Previous">‹</button>
         {/* eslint-disable-next-line @next/next/no-img-element -- lightbox image */}
         <img
-          src={`/golden/${images[idx].src}`}
+          src={images[idx].src}
           alt={images[idx].alt}
           onClick={(e) => e.stopPropagation()}
           style={{ maxWidth: "90vw", maxHeight: "84vh", borderRadius: 10, boxShadow: "0 24px 70px rgba(0,0,0,0.6)" }}
         />
         <button onClick={(e) => { e.stopPropagation(); next(); }} style={{ ...NAV, right: 12 }} aria-label="Next">›</button>
         <button onClick={(e) => { e.stopPropagation(); close(); }} style={CLOSE} aria-label="Close">×</button>
-        <div style={CAPTION}>{images[idx].alt} · {idx + 1}/{images.length}</div>
+        <div style={CAPTION}>
+          <span>{images[idx].alt} · {idx + 1}/{images.length}</span>
+          <span style={{ color: images[idx].status === "context" ? "#f9c968" : "#d9ddff" }}>{evidenceLabel(images[idx])} · {images[idx].id}</span>
+          {fingerprint(images[idx]) && <span>{fingerprint(images[idx])}</span>}
+        </div>
       </div>
     ) : null;
 
@@ -75,16 +95,20 @@ export function GoldenImages({ images }: { images: ProofImage[] }) {
         }}
       >
         {images.map((p, i) => (
-          // eslint-disable-next-line @next/next/no-img-element -- static proof image
-          <img
-            key={p.src}
-            src={`/golden/${p.src}`}
-            alt={p.alt}
-            title={p.alt}
-            loading="lazy"
+          <button
+            key={p.id}
+            type="button"
             onClick={() => setIdx(i)}
-            style={{ width: "100%", aspectRatio: "16 / 9", objectFit: "cover", borderRadius: 7, border: "1px solid var(--color-border)", cursor: "zoom-in", display: "block" }}
-          />
+            aria-label={`Inspect ${evidenceLabel(p).toLowerCase()} artifact ${p.id}: ${p.alt}`}
+            title={`${evidenceLabel(p)} · ${p.id}${fingerprint(p) ? ` · ${fingerprint(p)}` : ""}`}
+            style={PROOF_BUTTON}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element -- manifest-resolved proof image */}
+            <img src={p.src} alt={p.alt} loading="lazy" style={PROOF_IMAGE} />
+            <span style={{ ...PROOF_STATUS, color: p.status === "context" ? "var(--color-warning)" : "var(--color-gold)" }}>{evidenceLabel(p)}</span>
+            <span style={PROOF_ID}>{p.id}</span>
+            {fingerprint(p) && <span style={PROOF_HASH}>{fingerprint(p)}</span>}
+          </button>
         ))}
       </div>
       {overlay ? createPortal(overlay, document.body) : null}
@@ -143,11 +167,61 @@ const CAPTION: CSSProperties = {
   bottom: 20,
   left: "50%",
   transform: "translateX(-50%)",
+  display: "grid",
+  gap: "0.12rem",
   fontFamily: "var(--font-mono)",
   fontSize: "0.72rem",
   color: "rgba(255,255,255,0.7)",
   background: "rgba(20,20,24,0.7)",
   padding: "0.35rem 0.8rem",
   borderRadius: 999,
+  maxWidth: "calc(100vw - 2rem)",
+  textAlign: "center",
+};
+
+const PROOF_BUTTON: CSSProperties = {
+  appearance: "none",
+  width: "100%",
+  padding: 0,
+  overflow: "hidden",
+  borderRadius: 7,
+  border: "1px solid var(--color-border)",
+  background: "var(--color-surface-solid)",
+  color: "var(--color-fg)",
+  cursor: "zoom-in",
+  textAlign: "left",
+  display: "grid",
+};
+
+const PROOF_IMAGE: CSSProperties = {
+  width: "100%",
+  aspectRatio: "16 / 9",
+  objectFit: "cover",
+  display: "block",
+  borderBottom: "1px solid var(--color-border)",
+};
+
+const PROOF_STATUS: CSSProperties = {
+  padding: "0.38rem 0.45rem 0",
+  fontFamily: "var(--font-mono)",
+  fontSize: "0.52rem",
+  letterSpacing: "0.055em",
+  fontWeight: 700,
+};
+
+const PROOF_ID: CSSProperties = {
+  padding: "0.08rem 0.45rem 0",
+  fontFamily: "var(--font-mono)",
+  fontSize: "0.55rem",
+  color: "var(--color-secondary)",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
   whiteSpace: "nowrap",
+};
+
+const PROOF_HASH: CSSProperties = {
+  padding: "0.1rem 0.45rem 0.43rem",
+  fontFamily: "var(--font-mono)",
+  fontSize: "0.5rem",
+  color: "var(--color-faint)",
 };

@@ -4,6 +4,7 @@ import {
   assertCinematicFinalMasterAudioAesthetics,
   assertCinematicFinalMasterQaAdmission,
   assertCinematicFinalMasterQaProfile,
+  cinematicFinalMasterQaVisualReviewPlan,
 } from "@/engine/cinematicFinalMasterQaAdmission";
 import {
   CinematicCreativeLocksSchema,
@@ -116,11 +117,15 @@ assert.throws(
   "a malformed out-of-range scorer value must not become a passing production-quality score",
 );
 
-// A twelve-shot final master has 12 lock judgements and 11 cut judgements.
-// Its exact receipt must fit the long-established $5 qa_visual ceiling, while
-// a larger receipt is rejected rather than under-reserved or silently allowed
-// to expand that authority.
-const twelveShotReviewCost = cinematicFinalMasterQaReviewCost(23);
+// The pre-render reservation receives the same sealed complete-focus plan as
+// qa_visual execution. It must add that exact 2fps schedule to the bounded
+// broad/reactive allowance rather than pricing only the lock/cut receipt.
+const visualReviewPlan = cinematicFinalMasterQaVisualReviewPlan({
+  admission,
+  creativeLocks,
+  editDecisionList,
+});
+assert.ok(visualReviewPlan.completeFocusFrameCount > 0);
 const qaVisual: Block = {
   id: "qa_visual",
   consumes: [],
@@ -133,32 +138,82 @@ const normalEnvelope = configuredMaxCostUsd(qaManifest, {}, {
   entries: [],
   index: 0,
   store: {
-    cinematicFinalMasterQaAdmission: {
-      ...admission,
-      lockCount: 12,
-      cutCount: 11,
-      reviewCallCount: 23,
-      reviewCostUsd: twelveShotReviewCost,
-    },
+    cinematicFinalMasterQaAdmission: admission,
+    cinematicCreativeLocks: creativeLocks,
+    cinematicEditDecisionList: editDecisionList,
   },
 });
-assert.equal(normalEnvelope, qaVisualCost({}, twelveShotReviewCost));
+assert.equal(
+  normalEnvelope,
+  qaVisualCost({}, admission.reviewCostUsd, visualReviewPlan.completeFocusFrameCount),
+  "store-backed cinematic reservation and qa_visual runtime pricing must share the sealed focus plan",
+);
 assert.ok(normalEnvelope < 5);
 
-const oversizedReviewCost = cinematicFinalMasterQaReviewCost(60);
+// A large sealed reveal is admitted as a complete 2fps plan, then rejected by
+// qa_visual's absolute $5 ceiling before a future Novita renderer may start.
+const oversizedCreativeLocks = CinematicCreativeLocksSchema.parse({
+  version: "cinematic-case-sequence/v1",
+  sequenceFingerprint: "c".repeat(64),
+  locks: [
+    {
+      id: "cinematic-shot-one",
+      startSec: 0,
+      endSec: 1,
+      expected: "opening evidence state",
+      acceptanceCriteria: ["continuity", "citation", "faceless cast", "no likeness"],
+    },
+    {
+      id: "cinematic-shot-two",
+      startSec: 1,
+      endSec: 450.5,
+      expected: "long evidence reveal",
+      acceptanceCriteria: ["continuity", "citation", "faceless cast", "no likeness"],
+    },
+  ],
+});
+const oversizedEditDecisionList = CinematicEditDecisionListSchema.parse({
+  version: "cinematic-case-sequence/v1",
+  sequenceFingerprint: "c".repeat(64),
+  durationSec: 450.5,
+  edits: [
+    {
+      shotId: "cinematic-shot-one",
+      t0: 0,
+      t1: 1,
+      cutReason: "new_location",
+      tensionState: "uncertainty",
+      narrationPurpose: "Establish the question.",
+    },
+    {
+      shotId: "cinematic-shot-two",
+      t0: 1,
+      t1: 450.5,
+      cutReason: "reveal",
+      tensionState: "reversal",
+      narrationPurpose: "Show the complete evidence reveal.",
+    },
+  ],
+});
+const oversizedAdmission = admitCinematicFinalMasterQa({
+  creativeLocks: oversizedCreativeLocks,
+  editDecisionList: oversizedEditDecisionList,
+});
+const oversizedPlan = cinematicFinalMasterQaVisualReviewPlan({
+  admission: oversizedAdmission,
+  creativeLocks: oversizedCreativeLocks,
+  editDecisionList: oversizedEditDecisionList,
+});
+assert.ok(oversizedPlan.completeFocusFrameCount >= 900);
 assert.throws(
   () =>
     configuredMaxCostUsd(qaManifest, {}, {
       entries: [],
       index: 0,
       store: {
-        cinematicFinalMasterQaAdmission: {
-          ...admission,
-          lockCount: 31,
-          cutCount: 29,
-          reviewCallCount: 60,
-          reviewCostUsd: oversizedReviewCost,
-        },
+        cinematicFinalMasterQaAdmission: oversizedAdmission,
+        cinematicCreativeLocks: oversizedCreativeLocks,
+        cinematicEditDecisionList: oversizedEditDecisionList,
       },
     }),
   /configured envelope .* exceeds its absolute \$5\.00 ceiling/,

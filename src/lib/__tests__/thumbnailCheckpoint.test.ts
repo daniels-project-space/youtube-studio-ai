@@ -5,6 +5,11 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { ExecutionError } from "@/engine/executionErrors";
+import {
+  SCENARIO_VISUAL_TREATMENT_THUMBNAIL_BINDING_VERSION,
+  scenarioVisualTreatmentThumbnailBindingFingerprint,
+  type ScenarioVisualTreatmentThumbnailBinding,
+} from "@/engine/scenarioVisualTreatment";
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
   NANO_BANANA_THUMBNAIL_PROFILE,
@@ -58,6 +63,22 @@ class MemoryCheckpointIo implements ThumbnailCheckpointIo {
       typeof body === "string" ? Buffer.from(body) : Uint8Array.from(body),
     );
   }
+}
+
+function treatmentBinding(seed: string): ScenarioVisualTreatmentThumbnailBinding {
+  const unsigned = {
+    version: SCENARIO_VISUAL_TREATMENT_THUMBNAIL_BINDING_VERSION,
+    routeFingerprint: `${seed}1`.repeat(32),
+    programBriefFingerprint: `${seed}2`.repeat(32),
+    topicFingerprint: `${seed}3`.repeat(32),
+    scenarioFingerprint: `${seed}4`.repeat(32),
+    profile: "ai_town" as const,
+    treatmentFingerprint: `${seed}5`.repeat(32),
+  };
+  return {
+    ...unsigned,
+    fingerprint: scenarioVisualTreatmentThumbnailBindingFingerprint(unsigned),
+  };
 }
 
 async function nanoEvidenceSurvivesRemoteRecovery(root: string): Promise<void> {
@@ -221,6 +242,182 @@ async function completedCheckpointReusesPixelsAndQa(root: string): Promise<void>
   assert.equal(qaPurchases, 1, "fresh-worker retry reuses purchased QA");
 }
 
+async function scenarioTreatmentHashIsolationAndTamperFailClosed(root: string): Promise<void> {
+  const io = new MemoryCheckpointIo();
+  const checkpointRoot = "owners/o/runs/r/thumbnail-checkpoints";
+  const legacyHash = thumbnailRequestHash({
+    contract: "thumbnail-gen-checkpoint-v4-nano-banana-only",
+    title: "Fictional town bridge",
+  });
+  const treatmentBoundHash = thumbnailRequestHash({
+    contract: "thumbnail-gen-checkpoint-v5-nano-banana-scenario-treatment",
+    title: "Fictional town bridge",
+    scenarioVisualTreatment: { fingerprint: "a".repeat(64) },
+  });
+  assert.notEqual(treatmentBoundHash, legacyHash, "treatment-bound thumbnails must not reuse a generic checkpoint key");
+
+  const legacyPath = join(root, "legacy-scenario-isolation", "thumbnail.jpg");
+  await mkdir(join(root, "legacy-scenario-isolation"), { recursive: true });
+  let legacy = await openThumbnailCheckpoint(
+    { checkpointRoot, requestHash: legacyHash, localImagePath: legacyPath },
+    io,
+  );
+  legacy = await beginThumbnailPaidWork(legacy, io);
+  await writeFile(legacyPath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  await saveThumbnailGenerationCheckpoint(legacy, 0, undefined, io);
+
+  const treatmentPath = join(root, "treatment-scenario-isolation", "thumbnail.jpg");
+  await mkdir(join(root, "treatment-scenario-isolation"), { recursive: true });
+  const treatmentSession = await openThumbnailCheckpoint(
+    { checkpointRoot, requestHash: treatmentBoundHash, localImagePath: treatmentPath },
+    io,
+  );
+  assert.equal(treatmentSession.source, "new", "a treatment-bound retry cannot reuse legacy generic pixels");
+
+  const tamperedHash = thumbnailRequestHash({ title: "tampered scenario treatment checkpoint" });
+  io.objects.set(
+    `${checkpointRoot}/${tamperedHash}.manifest.json`,
+    Buffer.from(JSON.stringify({
+      version: 3,
+      requestHash: tamperedHash,
+      generationCostUsd: 0,
+      artifactSha256: "b".repeat(64),
+      scenarioVisualTreatment: { forged: true },
+    })),
+  );
+  await assert.rejects(
+    openThumbnailCheckpoint(
+      {
+        checkpointRoot,
+        requestHash: tamperedHash,
+        localImagePath: join(root, "tampered-scenario-isolation", "thumbnail.jpg"),
+      },
+      io,
+    ),
+    /scenario visual treatment binding is invalid/i,
+    "a forged treatment checkpoint must fail before a retry can begin paid work",
+  );
+
+  const unboundV3Hash = thumbnailRequestHash({ title: "unbound v3 scenario treatment checkpoint" });
+  io.objects.set(
+    `${checkpointRoot}/${unboundV3Hash}.manifest.json`,
+    Buffer.from(JSON.stringify({
+      version: 3,
+      requestHash: unboundV3Hash,
+      generationCostUsd: 0,
+      artifactSha256: "c".repeat(64),
+    })),
+  );
+  await assert.rejects(
+    openThumbnailCheckpoint(
+      {
+        checkpointRoot,
+        requestHash: unboundV3Hash,
+        localImagePath: join(root, "unbound-v3-scenario-isolation", "thumbnail.jpg"),
+      },
+      io,
+    ),
+    /treatment version and binding disagree/i,
+    "v3 cannot omit the binding that makes its fictional thumbnail reusable",
+  );
+}
+
+async function treatmentBoundCheckpointRejectsMismatchedRestore(root: string): Promise<void> {
+  const io = new MemoryCheckpointIo();
+  const checkpointRoot = "owners/o/runs/treatment-bound/thumbnail-checkpoints";
+  const requestHash = thumbnailRequestHash({ title: "A sealed fictional town", candidate: 1 });
+  const binding = treatmentBinding("a");
+  const mismatchedBinding = treatmentBinding("b");
+  const localImagePath = join(root, "treatment-bound", "thumbnail.jpg");
+  await mkdir(join(root, "treatment-bound"), { recursive: true });
+
+  let first = await openThumbnailCheckpoint({
+    checkpointRoot,
+    requestHash,
+    localImagePath,
+    scenarioVisualTreatmentBinding: binding,
+  }, io);
+  first = await beginThumbnailPaidWork(first, io);
+  await writeFile(localImagePath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  first = await saveThumbnailGenerationCheckpoint(first, 0, undefined, io);
+  assert.equal(first.manifest?.version, 3, "an admitted treatment must be persisted by the shared checkpoint API");
+  await assert.rejects(
+    saveThumbnailGenerationCheckpoint(first, 0, undefined, io, mismatchedBinding),
+    /does not match its session/i,
+    "generation checkpoint writes cannot substitute a different treatment binding",
+  );
+  await saveThumbnailQaCheckpoint(first, {
+    requestHash: thumbnailRequestHash({ requestHash, qa: "fictional-treatment" }),
+    verdict: { visualTreatmentCompliant: true },
+    costUsd: 0,
+    scenarioVisualTreatment: { binding, visualTreatmentCompliant: true },
+  }, io);
+
+  await rm(join(root, "treatment-bound"), { recursive: true, force: true });
+  const restored = await openThumbnailCheckpoint({
+    checkpointRoot,
+    requestHash,
+    localImagePath: join(root, "treatment-bound-restored", "thumbnail.jpg"),
+    scenarioVisualTreatmentBinding: binding,
+  }, io);
+  assert.equal(restored.source, "remote", "the exact treatment binding may reuse sealed pixels");
+
+  let providerAttempts = 0;
+  await assert.rejects(
+    openThumbnailCheckpoint({
+      checkpointRoot,
+      requestHash,
+      localImagePath: join(root, "treatment-bound-mismatch", "thumbnail.jpg"),
+      scenarioVisualTreatmentBinding: mismatchedBinding,
+      beforeClaim: () => { providerAttempts += 1; },
+    }, io),
+    /does not match the admitted request/i,
+    "a forged route/scenario/treatment binding cannot recover paid pixels",
+  );
+  assert.equal(providerAttempts, 0, "mismatched treatment fails before a provider can be claimed");
+
+  await assert.rejects(
+    openThumbnailCheckpoint({
+      checkpointRoot,
+      requestHash,
+      localImagePath: join(root, "treatment-bound-generic", "thumbnail.jpg"),
+    }, io),
+    /does not match the admitted request/i,
+    "generic callers cannot downgrade a treatment-bound checkpoint",
+  );
+
+  await assert.rejects(
+    saveThumbnailQaCheckpoint(restored, {
+      requestHash: thumbnailRequestHash({ requestHash, qa: "missing-treatment-binding" }),
+      verdict: { visualTreatmentCompliant: true },
+      costUsd: 0,
+    }, io),
+    /requires the admitted scenario visual treatment binding/i,
+    "treatment-bound QA cannot be checkpointed without its matching witness",
+  );
+}
+
+async function legacyV1CheckpointStillRestoresForGenericCallers(root: string): Promise<void> {
+  const io = new MemoryCheckpointIo();
+  const checkpointRoot = "owners/o/runs/legacy-v1/thumbnail-checkpoints";
+  const requestHash = thumbnailRequestHash({ title: "Legacy generic thumbnail" });
+  const localImagePath = join(root, "legacy-v1", "thumbnail.jpg");
+  await mkdir(join(root, "legacy-v1"), { recursive: true });
+  await writeFile(localImagePath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
+  await writeFile(`${localImagePath}.checkpoint.json`, JSON.stringify({
+    version: 1,
+    requestHash,
+    generationCostUsd: 0,
+  }));
+  const restored = await openThumbnailCheckpoint({
+    checkpointRoot,
+    requestHash,
+    localImagePath,
+  }, io);
+  assert.equal(restored.source, "local");
+  assert.equal(restored.manifest?.version, 1, "legacy generic thumbnail checkpoints stay recoverable");
+}
+
 async function uploadFailureUsesLocalCheckpoint(root: string): Promise<void> {
   const io = new MemoryCheckpointIo();
   const requestHash = thumbnailRequestHash({ title: "Storage recovery" });
@@ -323,6 +520,9 @@ async function main(): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "thumbnail-checkpoint-test-"));
   try {
     await completedCheckpointReusesPixelsAndQa(root);
+    await scenarioTreatmentHashIsolationAndTamperFailClosed(root);
+    await treatmentBoundCheckpointRejectsMismatchedRestore(root);
+    await legacyV1CheckpointStillRestoresForGenericCallers(root);
     await uploadFailureUsesLocalCheckpoint(root);
     await incompleteClaimFailsClosed(root);
     await nanoEvidenceSurvivesRemoteRecovery(root);

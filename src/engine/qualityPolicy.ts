@@ -9,6 +9,8 @@ export interface ThumbnailGateVerdict {
   styleMatch: number;
   storyMatch: number;
   uiClean: boolean;
+  /** Present only when a provenance-bound visual-treatment review was requested. */
+  visualTreatmentCompliant?: boolean;
   reason: string;
 }
 

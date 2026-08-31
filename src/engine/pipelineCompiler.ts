@@ -246,6 +246,17 @@ function ensureReleaseVisualReview(entries: PipelineEntry[]): boolean {
     if (entries[qaIndex].params?.["qaProfile"] === "draft") {
       throw new PipelinePolicyError("upload_draft cannot use qa_visual qaProfile=draft");
     }
+    // A final master always has an audience-facing audio experience. Upgrade
+    // old/custom production QA in place before it can become a frozen
+    // invocation; the runner must never discover this omission after render.
+    entries[qaIndex] = {
+      ...entries[qaIndex],
+      params: {
+        ...(entries[qaIndex].params ?? {}),
+        ...(entries[qaIndex].params?.["qaProfile"] === undefined ? { qaProfile: "production" } : {}),
+        audioQa: true,
+      },
+    };
     return false;
   }
 
@@ -256,7 +267,47 @@ function ensureReleaseVisualReview(entries: PipelineEntry[]): boolean {
   if (!upstream.some((entry) => producesArtifact(entry, "thumbnailKey"))) {
     throw new PipelinePolicyError("cannot add qa_visual: upload_draft has no thumbnail upstream");
   }
-  entries.splice(uploadIndex, 0, { block: "qa_visual", params: { qaProfile: "production" } });
+  entries.splice(uploadIndex, 0, {
+    block: "qa_visual",
+    params: { qaProfile: "production", audioQa: true },
+  });
+  return true;
+}
+
+/**
+ * The package promise must be frozen before thumbnail generation spends. This
+ * is not a semantic claim: final QA later binds the plan to the exact thumbnail
+ * bytes and a retained opening frame, or records an explicit omission.
+ */
+function ensurePackageToOpeningPlan(entries: PipelineEntry[]): boolean {
+  const thumbnailIndex = entries.findIndex((entry) => entry.block === "thumbnail_gen");
+  if (thumbnailIndex < 0) return false;
+  const planIndexes = entries
+    .map((entry, index) => entry.block === "package_to_opening_plan" ? index : -1)
+    .filter((index) => index >= 0);
+  if (planIndexes.length > 1) {
+    throw new PipelinePolicyError("package pipeline has multiple package_to_opening_plan stages");
+  }
+  if (planIndexes.length === 1) {
+    if (planIndexes[0] > thumbnailIndex) {
+      throw new PipelinePolicyError("package_to_opening_plan must run before thumbnail_gen");
+    }
+    return false;
+  }
+  const metadataIndex = entries
+    .map((entry, index) =>
+      (entry.block === "metadata" || entry.block === "quiz_metadata") && index < thumbnailIndex
+        ? index
+        : -1,
+    )
+    .filter((index) => index >= 0)
+    .at(-1);
+  if (metadataIndex === undefined) {
+    throw new PipelinePolicyError(
+      "cannot add package_to_opening_plan: thumbnail_gen has no upstream metadata or quiz_metadata producer",
+    );
+  }
+  entries.splice(thumbnailIndex, 0, { block: "package_to_opening_plan" });
   return true;
 }
 
@@ -341,6 +392,10 @@ export function completePipelineForPolicy(
   if (pipelineCapabilities(entries).has("script.generated")) {
     const moduleId = insertCapabilityProvider(entries, "script.qa_passed");
     if (moduleId) inserted.push(moduleId);
+  }
+
+  if (ensurePackageToOpeningPlan(entries)) {
+    inserted.push("package_to_opening_plan");
   }
 
   if (ensureReleaseVisualReview(entries)) {
@@ -472,7 +527,7 @@ function enforcePrivateOnlyPublication(
     const params = (entry.params ?? {}) as Record<string, unknown>;
     if (spec.isPublicAttempt(params)) {
       throw new PipelinePolicyError(
-        `pipeline declares capability "${PRIVATE_ONLY_CAPABILITY}" (a Casefile/children-safety admission module is present), so "${entry.block}" may never leave a private draft; public/scheduled/crosspost publish attempts are rejected regardless of approvedForPublish or the channel's approvalMode setting`,
+        `pipeline declares capability "${PRIVATE_ONLY_CAPABILITY}" (a private-only admission module is present), so "${entry.block}" may never leave a private draft; public/scheduled/crosspost publish attempts are rejected regardless of approvedForPublish or the channel's approvalMode setting`,
       );
     }
   }

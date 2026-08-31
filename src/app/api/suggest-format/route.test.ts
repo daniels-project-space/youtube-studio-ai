@@ -41,11 +41,29 @@ async function main() {
       fallback: boolean;
       reasoning: string;
       preflight: { validationRenderRequired: boolean };
+      executableAlternatives: Array<{
+        family: string;
+        selectable: boolean;
+        executable: boolean;
+        certifiedFamilyAdmission: { automatic: boolean };
+      }>;
     };
     assert.equal(recommendation.family, "comic");
     assert.equal(recommendation.fallback, true);
     assert.equal(recommendation.preflight.validationRenderRequired, true);
     assert.match(recommendation.reasoning, /Matched/i);
+    assert.deepEqual(
+      recommendation.executableAlternatives.map((alternate) => alternate.family),
+      ["narrated_stock"],
+      "the API must keep factual comic history on an evidence path and expose only its deliberate factual adaptation",
+    );
+    assert.equal(
+      recommendation.executableAlternatives.every(
+        (alternate) => alternate.selectable && alternate.executable && alternate.certifiedFamilyAdmission.automatic,
+      ),
+      true,
+      "the API must never advertise a merely available or supervised family as an executable alternative",
+    );
     assert.equal(remoteCalls, 0);
 
     const audienceLedChildren = await POST(request({

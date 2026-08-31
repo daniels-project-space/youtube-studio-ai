@@ -5,6 +5,7 @@ import { useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import { PageHeader } from "@/components/PageHeader";
 import { SkeletonList } from "@/components/Skeleton";
+import { ChannelOperatingStatusStrip } from "@/components/ChannelOperatingStatusStrip";
 import { useSelectedChannel } from "@/lib/channel-context";
 import { useOwnerId } from "@/lib/owner-context";
 import type { ChannelRow } from "@/lib/types";
@@ -84,6 +85,42 @@ interface LearningRecommendationRow {
   createdAt: number;
 }
 
+interface ShowBibleClaimRow {
+  claimId: string;
+  channelId: string;
+  recommendationKey: string;
+  basePolicyVersion: number;
+  proposedPolicyVersion: number;
+  status: string;
+  providerStartedAt?: number;
+  providerDispatchStartedAt?: number;
+  ambiguousAt?: number;
+  deferredAt?: number;
+  deferredAdmissionDay?: string;
+  deferredReason?: string;
+  preProviderAttempts: number;
+  operatorResolutionAudit: Array<{
+    action: string;
+    actor: string;
+    reason: string;
+    evidence: string;
+    attestedAt: number;
+    resolvedAt: number;
+  }>;
+  operatorResolutionCount: number;
+  lastError?: string;
+  recommendationId?: string;
+  createdAt: number;
+  updatedAt: number;
+  rearmAllowed: boolean;
+}
+
+type ShowBibleRearmDraft = {
+  reason: string;
+  evidence: string;
+  verifiedNoDispatch: boolean;
+};
+
 const DAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function fmtDate(value?: number): string {
@@ -97,6 +134,54 @@ function proposalSummary(value: unknown): string {
   } catch {
     return "Proposal details unavailable";
   }
+}
+
+function showBibleClaimStatusLabel(status: string): string {
+  const labels: Record<string, string> = {
+    claimed: "Waiting to generate",
+    deferred_owner_budget: "Waiting for daily allowance",
+    provider_started: "Needs no-dispatch review",
+    provider_dispatch_started: "Generation may be in progress",
+    ambiguous: "Needs reconciliation",
+    finalized: "Proposal saved",
+    pre_provider_exhausted: "Generation did not start",
+  };
+  return labels[status] ?? status.replaceAll("_", " ");
+}
+
+function showBibleClaimStatusDescription(status: string): string {
+  const descriptions: Record<string, string> = {
+    claimed:
+      "This proposal is safely queued for a bounded generation attempt.",
+    deferred_owner_budget:
+      "The daily generation allowance is full. This proposal is retained and will be considered fairly on a later run.",
+    provider_started:
+      "Preparation stopped before the system recorded a generation as sent. An owner may reopen it only after verifying that no provider request left the system.",
+    provider_dispatch_started:
+      "A generation was marked as started. It will not be retried automatically because another request could duplicate the work.",
+    ambiguous:
+      "The outcome is uncertain and remains held for reconciliation. It will not be retried automatically.",
+    finalized: "The evaluated proposal was saved for normal policy review.",
+    pre_provider_exhausted:
+      "The proposal used its bounded preparation attempts without starting a generation.",
+  };
+  return descriptions[status] ?? "This proposal state is retained for audit.";
+}
+
+function showBibleClaimStateClass(status: string): string {
+  if (status === "finalized") return styles.stateOk;
+  if (status === "ambiguous" || status === "pre_provider_exhausted") {
+    return styles.stateBad;
+  }
+  return "";
+}
+
+function canSubmitShowBibleRearm(draft: ShowBibleRearmDraft): boolean {
+  return (
+    draft.verifiedNoDispatch &&
+    draft.reason.trim().length >= 12 &&
+    draft.evidence.trim().length >= 20
+  );
 }
 
 function currentPublishMode(channel: SettingsChannel): PublishMode {
@@ -130,6 +215,9 @@ export default function SettingsPage() {
   const [recommendations, setRecommendations] = useState<
     LearningRecommendationRow[]
   >([]);
+  const [showBibleClaims, setShowBibleClaims] = useState<ShowBibleClaimRow[]>(
+    [],
+  );
   const [loadingGovernance, setLoadingGovernance] = useState(false);
   const [governanceLoaded, setGovernanceLoaded] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -148,7 +236,11 @@ export default function SettingsPage() {
         learningResponse.json(),
       ])) as [
         { intents?: PublishIntentRow[]; error?: string },
-        { recommendations?: LearningRecommendationRow[]; error?: string },
+        {
+          recommendations?: LearningRecommendationRow[];
+          showBibleClaims?: ShowBibleClaimRow[];
+          error?: string;
+        },
       ];
       if (!publishResponse.ok) {
         throw new Error(
@@ -168,6 +260,11 @@ export default function SettingsPage() {
       setRecommendations(
         [...(learningBody.recommendations ?? [])].sort(
           (a, b) => b.createdAt - a.createdAt,
+        ),
+      );
+      setShowBibleClaims(
+        [...(learningBody.showBibleClaims ?? [])].sort(
+          (a, b) => b.updatedAt - a.updatedAt,
         ),
       );
     } catch (loadError) {
@@ -221,6 +318,16 @@ export default function SettingsPage() {
         : [],
     [recommendations, selectedChannel],
   );
+  const selectedShowBibleClaims = useMemo(
+    () =>
+      selectedChannel
+        ? showBibleClaims.filter((claim) => claim.channelId === selectedChannel._id)
+        : [],
+    [selectedChannel, showBibleClaims],
+  );
+  const learningAttentionCount =
+    pendingRecommendations.length +
+    selectedShowBibleClaims.filter((claim) => claim.rearmAllowed).length;
 
   const act = async (
     endpoint: string,
@@ -256,7 +363,7 @@ export default function SettingsPage() {
     { id: "account", label: "Account" },
     { id: "production", label: "Production" },
     { id: "publishing", label: "Publishing", count: pendingIntents.length },
-    { id: "learning", label: "Learning", count: pendingRecommendations.length },
+    { id: "learning", label: "Learning", count: learningAttentionCount },
   ];
 
   return (
@@ -312,6 +419,14 @@ export default function SettingsPage() {
         </select>
       </section>
 
+      {selectedChannel && (
+        <ChannelOperatingStatusStrip
+          channel={selectedChannel}
+          connector={connector}
+          connectorLoading={connectors === undefined}
+        />
+      )}
+
       <nav
         className={styles.tabs}
         aria-label="Settings sections"
@@ -348,6 +463,7 @@ export default function SettingsPage() {
           intents={selectedIntents}
           pendingIntents={pendingIntents}
           pendingRecommendations={pendingRecommendations}
+          showBibleClaims={selectedShowBibleClaims}
           loadingGovernance={loadingGovernance}
           busyId={busyId}
           act={act}
@@ -366,6 +482,7 @@ function ChannelSettingsPanel({
   intents,
   pendingIntents,
   pendingRecommendations,
+  showBibleClaims,
   loadingGovernance,
   busyId,
   act,
@@ -378,6 +495,7 @@ function ChannelSettingsPanel({
   intents: PublishIntentRow[];
   pendingIntents: PublishIntentRow[];
   pendingRecommendations: LearningRecommendationRow[];
+  showBibleClaims: ShowBibleClaimRow[];
   loadingGovernance: boolean;
   busyId: string | null;
   act: (
@@ -419,6 +537,12 @@ function ChannelSettingsPanel({
     String(schedule.retryBaseMinutes ?? 15),
   );
   const [madeForKids, setMadeForKids] = useState(schedule.madeForKids === true);
+  const [openRearmClaimId, setOpenRearmClaimId] = useState<string | null>(
+    null,
+  );
+  const [showBibleRearmDrafts, setShowBibleRearmDrafts] = useState<
+    Record<string, ShowBibleRearmDraft>
+  >({});
 
   const hasConfiguredCrosspost = channel.pipeline?.some(
     (entry) =>
@@ -430,6 +554,23 @@ function ChannelSettingsPanel({
     channel.status === "active" &&
     connector?.status === "active" &&
     connector.scopeHealth !== "partial";
+
+  const updateShowBibleRearmDraft = (
+    claimId: string,
+    update: Partial<ShowBibleRearmDraft>,
+  ) => {
+    setShowBibleRearmDrafts((current) => {
+      const currentDraft = current[claimId] ?? {
+        reason: "",
+        evidence: "",
+        verifiedNoDispatch: false,
+      };
+      return {
+        ...current,
+        [claimId]: { ...currentDraft, ...update },
+      };
+    });
+  };
 
   const postSetting = async (
     action: string,
@@ -1080,112 +1221,296 @@ function ChannelSettingsPanel({
       )}
 
       {tab === "learning" && (
-        <section>
-          <div className={styles.sectionHeading}>
-            <div>
-              <span className={styles.eyebrow}>Evidence gate</span>
-              <h2>Policy changes waiting for review</h2>
+        <div className={styles.stack}>
+          <section aria-labelledby="show-bible-proposal-status">
+            <div className={styles.sectionHeading}>
+              <div>
+                <span className={styles.eyebrow}>Generation safeguard</span>
+                <h2 id="show-bible-proposal-status">Show Bible proposal status</h2>
+              </div>
+              <span className={styles.count}>{showBibleClaims.length}</span>
             </div>
-            <span className={styles.count}>
-              {pendingRecommendations.length}
-            </span>
-          </div>
-          {loadingGovernance ? (
-            <SkeletonList rows={3} />
-          ) : pendingRecommendations.length === 0 ? (
-            <div className={`glass ${styles.empty}`}>
-              No evaluated policy changes are waiting for approval.
-            </div>
-          ) : (
-            <div className={styles.list}>
-              {pendingRecommendations.map((recommendation) => (
-                <article
-                  key={recommendation._id}
-                  className={`glass ${styles.queueCard}`}
-                >
-                  <div className={styles.queueTitle}>
-                    <strong>
-                      {recommendation.kind.replaceAll("_", " ")} →{" "}
-                      {recommendation.target.replaceAll("_", " ")}
-                    </strong>
-                    <span
-                      className={`${styles.state} ${recommendation.offlineEvaluation.passed ? styles.stateOk : styles.stateBad}`}
+            {loadingGovernance ? (
+              <SkeletonList rows={2} />
+            ) : showBibleClaims.length === 0 ? (
+              <div className={`glass ${styles.empty}`}>
+                No Show Bible proposal activity has been recorded for this channel.
+              </div>
+            ) : (
+              <div className={styles.list}>
+                {showBibleClaims.slice(0, 20).map((claim) => {
+                  const draft = showBibleRearmDrafts[claim.claimId] ?? {
+                    reason: "",
+                    evidence: "",
+                    verifiedNoDispatch: false,
+                  };
+                  const rearmActionId = `show-bible-rearm:${claim.claimId}`;
+                  const rearmReady = canSubmitShowBibleRearm(draft);
+                  return (
+                    <article
+                      key={claim.claimId}
+                      className={`glass ${styles.queueCard}`}
                     >
-                      offline{" "}
-                      {recommendation.offlineEvaluation.passed
-                        ? "passed"
-                        : "failed"}
-                    </span>
-                  </div>
-                  <p>
-                    Policy v{recommendation.basePolicyVersion} → v
-                    {recommendation.proposedPolicyVersion} ·{" "}
-                    {recommendation.dataWindowStart} to{" "}
-                    {recommendation.dataWindowEnd} · n=
-                    {recommendation.offlineEvaluation.sampleSize}
-                  </p>
-                  <p className={styles.notes}>
-                    {recommendation.offlineEvaluation.notes}
-                  </p>
-                  <code className={styles.code}>
-                    {proposalSummary(recommendation.proposal)}
-                  </code>
-                  <div className={styles.actions}>
-                    <button
-                      type="button"
-                      className={`${styles.button} ${styles.primaryButton}`}
-                      disabled={
-                        busyId === recommendation._id ||
-                        !recommendation.offlineEvaluation.passed
-                      }
-                      onClick={() => {
-                        if (
-                          !window.confirm(
-                            "Activate this evaluated policy version? The previous version remains in durable history.",
+                      <div className={styles.queueTitle}>
+                        <strong>
+                          Proposal policy v{claim.basePolicyVersion} → v
+                          {claim.proposedPolicyVersion}
+                        </strong>
+                        <span
+                          className={`${styles.state} ${showBibleClaimStateClass(claim.status)}`}
+                        >
+                          {showBibleClaimStatusLabel(claim.status)}
+                        </span>
+                      </div>
+                      <p>{showBibleClaimStatusDescription(claim.status)}</p>
+                      <dl className={styles.facts}>
+                        <div>
+                          <dt>Last recorded</dt>
+                          <dd>{fmtDate(claim.updatedAt)}</dd>
+                        </div>
+                        <div>
+                          <dt>Preparation attempts</dt>
+                          <dd>{claim.preProviderAttempts}</dd>
+                        </div>
+                      </dl>
+                      {claim.deferredReason ? (
+                        <p className={styles.policyNote}>
+                          Waiting note: {claim.deferredReason}
+                        </p>
+                      ) : null}
+                      {claim.lastError ? (
+                        <p className={styles.policyNote}>
+                          Latest recorded note: {claim.lastError}
+                        </p>
+                      ) : null}
+                      {claim.rearmAllowed ? (
+                        <div className={styles.showBibleRecovery}>
+                          <strong>Confirmed no-dispatch recovery</strong>
+                          <p>
+                            Use this only when your evidence proves that no
+                            provider generation request was sent. It records
+                            your review before allowing a controlled retry.
+                          </p>
+                          {openRearmClaimId === claim.claimId ? (
+                            <form
+                              className={styles.showBibleRecoveryForm}
+                              onSubmit={(event) => {
+                                event.preventDefault();
+                                if (!rearmReady) return;
+                                if (
+                                  !window.confirm(
+                                    "Reopen this Show Bible proposal only if you have verified that no generation request was sent. Your reason and evidence will be retained for audit.",
+                                  )
+                                )
+                                  return;
+                                void act(
+                                  "/api/learning-recommendations",
+                                  {
+                                    action: "rearm_show_bible_no_dispatch",
+                                    claimId: claim.claimId,
+                                    reason: draft.reason,
+                                    evidence: draft.evidence,
+                                    verifiedNoDispatch: true,
+                                  },
+                                  rearmActionId,
+                                );
+                              }}
+                            >
+                              <label className={styles.field}>
+                                <span>Why are you certain no generation was sent?</span>
+                                <textarea
+                                  className={`${styles.input} ${styles.showBibleTextarea}`}
+                                  value={draft.reason}
+                                  minLength={12}
+                                  maxLength={1000}
+                                  required
+                                  onChange={(event) =>
+                                    updateShowBibleRearmDraft(claim.claimId, {
+                                      reason: event.target.value,
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label className={styles.field}>
+                                <span>What check proves this?</span>
+                                <textarea
+                                  className={`${styles.input} ${styles.showBibleTextarea}`}
+                                  value={draft.evidence}
+                                  minLength={20}
+                                  maxLength={4000}
+                                  required
+                                  onChange={(event) =>
+                                    updateShowBibleRearmDraft(claim.claimId, {
+                                      evidence: event.target.value,
+                                    })
+                                  }
+                                />
+                              </label>
+                              <label className={styles.checks}>
+                                <input
+                                  type="checkbox"
+                                  checked={draft.verifiedNoDispatch}
+                                  onChange={(event) =>
+                                    updateShowBibleRearmDraft(claim.claimId, {
+                                      verifiedNoDispatch: event.target.checked,
+                                    })
+                                  }
+                                />
+                                I verified that no provider generation request was sent.
+                              </label>
+                              <div className={styles.actions}>
+                                <button
+                                  type="submit"
+                                  className={`${styles.button} ${styles.primaryButton}`}
+                                  disabled={
+                                    busyId === rearmActionId || !rearmReady
+                                  }
+                                >
+                                  {busyId === rearmActionId
+                                    ? "Recording…"
+                                    : "Record verification & reopen"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className={styles.button}
+                                  disabled={busyId === rearmActionId}
+                                  onClick={() => setOpenRearmClaimId(null)}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            </form>
+                          ) : (
+                            <button
+                              type="button"
+                              className={styles.button}
+                              disabled={busyId === rearmActionId}
+                              onClick={() => setOpenRearmClaimId(claim.claimId)}
+                            >
+                              Review no-dispatch recovery
+                            </button>
+                          )}
+                        </div>
+                      ) : null}
+                      {claim.operatorResolutionCount > 0 ? (
+                        <p className={styles.recoveryAudit}>
+                          Confirmed recovery reviews retained: {claim.operatorResolutionCount}
+                        </p>
+                      ) : null}
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+
+          <section aria-labelledby="learning-policy-review">
+            <div className={styles.sectionHeading}>
+              <div>
+                <span className={styles.eyebrow}>Evidence gate</span>
+                <h2 id="learning-policy-review">Policy changes waiting for review</h2>
+              </div>
+              <span className={styles.count}>
+                {pendingRecommendations.length}
+              </span>
+            </div>
+            {loadingGovernance ? (
+              <SkeletonList rows={3} />
+            ) : pendingRecommendations.length === 0 ? (
+              <div className={`glass ${styles.empty}`}>
+                No evaluated policy changes are waiting for approval.
+              </div>
+            ) : (
+              <div className={styles.list}>
+                {pendingRecommendations.map((recommendation) => (
+                  <article
+                    key={recommendation._id}
+                    className={`glass ${styles.queueCard}`}
+                  >
+                    <div className={styles.queueTitle}>
+                      <strong>
+                        {recommendation.kind.replaceAll("_", " ")} →{" "}
+                        {recommendation.target.replaceAll("_", " ")}
+                      </strong>
+                      <span
+                        className={`${styles.state} ${recommendation.offlineEvaluation.passed ? styles.stateOk : styles.stateBad}`}
+                      >
+                        offline{" "}
+                        {recommendation.offlineEvaluation.passed
+                          ? "passed"
+                          : "failed"}
+                      </span>
+                    </div>
+                    <p>
+                      Policy v{recommendation.basePolicyVersion} → v
+                      {recommendation.proposedPolicyVersion} ·{" "}
+                      {recommendation.dataWindowStart} to{" "}
+                      {recommendation.dataWindowEnd} · n=
+                      {recommendation.offlineEvaluation.sampleSize}
+                    </p>
+                    <p className={styles.notes}>
+                      {recommendation.offlineEvaluation.notes}
+                    </p>
+                    <code className={styles.code}>
+                      {proposalSummary(recommendation.proposal)}
+                    </code>
+                    <div className={styles.actions}>
+                      <button
+                        type="button"
+                        className={`${styles.button} ${styles.primaryButton}`}
+                        disabled={
+                          busyId === recommendation._id ||
+                          !recommendation.offlineEvaluation.passed
+                        }
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              "Activate this evaluated policy version? The previous version remains in durable history.",
+                            )
                           )
-                        )
-                          return;
-                        void act(
-                          "/api/learning-recommendations",
-                          {
-                            action: "approve_and_activate",
-                            recommendationId: recommendation._id,
-                          },
-                          recommendation._id,
-                        );
-                      }}
-                    >
-                      Approve & activate
-                    </button>
-                    <button
-                      type="button"
-                      className={`${styles.button} ${styles.dangerButton}`}
-                      disabled={busyId === recommendation._id}
-                      onClick={() => {
-                        if (
-                          !window.confirm(
-                            "Reject this recommendation? Its evaluation history will remain available for audit.",
+                            return;
+                          void act(
+                            "/api/learning-recommendations",
+                            {
+                              action: "approve_and_activate",
+                              recommendationId: recommendation._id,
+                            },
+                            recommendation._id,
+                          );
+                        }}
+                      >
+                        Approve & activate
+                      </button>
+                      <button
+                        type="button"
+                        className={`${styles.button} ${styles.dangerButton}`}
+                        disabled={busyId === recommendation._id}
+                        onClick={() => {
+                          if (
+                            !window.confirm(
+                              "Reject this recommendation? Its evaluation history will remain available for audit.",
+                            )
                           )
-                        )
-                          return;
-                        void act(
-                          "/api/learning-recommendations",
-                          {
-                            action: "reject",
-                            recommendationId: recommendation._id,
-                          },
-                          recommendation._id,
-                        );
-                      }}
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </article>
-              ))}
-            </div>
-          )}
-        </section>
+                            return;
+                          void act(
+                            "/api/learning-recommendations",
+                            {
+                              action: "reject",
+                              recommendationId: recommendation._id,
+                            },
+                            recommendation._id,
+                          );
+                        }}
+                      >
+                        Reject
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
+        </div>
       )}
     </div>
   );

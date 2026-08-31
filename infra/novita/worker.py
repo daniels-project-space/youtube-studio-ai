@@ -174,6 +174,115 @@ def approved_profile(profile_id: str, phase: str) -> dict[str, Any]:
     raise ValueError(f"unsupported approved render profile: {profile_id}/{phase}")
 
 
+# Match the Studio-side v2 contract at the final provider boundary.  A third
+# simultaneous LoRA is not a harmless extension: it can dilute the two
+# independently reviewed roles and make the accepted quality benchmark
+# inapplicable to the actual LTX invocation.
+CREATIVE_ADAPTER_STACK_VERSION = "ltx-creative-adapter-stack/v2"
+CREATIVE_ADAPTER_STACK_MAX_ADAPTERS = 2
+CREATIVE_ADAPTER_STACK_MAX_COMBINED_STRENGTH = 1.5
+CREATIVE_ADAPTER_ROLE_METRICS = {
+    "visual-style": "visual_style_coherence",
+    "camera-control": "camera_motion_adherence",
+    "material-style": "material_identity_consistency",
+}
+
+
+def _valid_adapter_benchmark_evidence(evidence: Any) -> bool:
+    return (
+        isinstance(evidence, dict)
+        and evidence.get("version") == "ltx-creative-adapter-benchmark-evidence/v1"
+        and all(
+            isinstance(evidence.get(key), str)
+            and re.fullmatch(r"(?!/)(?!.*(?:^|/)\.\.(?:/|$))[A-Za-z0-9][A-Za-z0-9._/@+=:-]{1,511}", evidence[key])
+            for key in ("evidenceManifestKey", "outputVideoKey")
+        )
+        and isinstance(evidence.get("immutableEvidenceObjectVersionId"), str)
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{2,159}", evidence["immutableEvidenceObjectVersionId"])
+        and all(
+            SHA256_RE.fullmatch(str(evidence.get(key) or ""))
+            for key in ("evidenceSha256", "outputVideoSha256", "outputArtifactReceiptFingerprint", "visualReviewReceiptFingerprint")
+        )
+        and not isinstance(evidence.get("outputDurationMs"), bool)
+        and isinstance(evidence.get("outputDurationMs"), int)
+        and 0 < evidence["outputDurationMs"] <= 3_600_000
+        and isinstance(evidence.get("reviewedAt"), str)
+        and re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z", evidence["reviewedAt"])
+        and isinstance(evidence.get("reviewedBy"), str)
+        and re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{2,159}", evidence["reviewedBy"])
+    )
+
+
+def _valid_stack_benchmark(benchmark: Any) -> bool:
+    if (
+        not isinstance(benchmark, dict)
+        or benchmark.get("rtx4090ProfileBenchmarked") is not True
+        or benchmark.get("visualVerdict") != "pass"
+        or not _valid_adapter_benchmark_evidence(benchmark.get("evidence"))
+    ):
+        return False
+    deltas = benchmark.get("qualityDeltas")
+    if not isinstance(deltas, list) or not 2 <= len(deltas) <= CREATIVE_ADAPTER_STACK_MAX_ADAPTERS:
+        return False
+    calibrated_adapters = benchmark.get("calibratedAdapters")
+    if not isinstance(calibrated_adapters, list) or not 2 <= len(calibrated_adapters) <= CREATIVE_ADAPTER_STACK_MAX_ADAPTERS:
+        return False
+    calibrated_ids: set[str] = set()
+    calibrated_strengths: list[float] = []
+    for adapter in calibrated_adapters:
+        if (
+            not isinstance(adapter, dict)
+            or not isinstance(adapter.get("id"), str)
+            or not re.fullmatch(r"ltx-creative-[a-z0-9][a-z0-9-]{1,78}", adapter["id"])
+            or isinstance(adapter.get("strength"), bool)
+            or not isinstance(adapter.get("strength"), (int, float))
+            or not math.isfinite(float(adapter["strength"]))
+            or not 0.15 <= float(adapter["strength"]) <= 0.95
+        ):
+            return False
+        calibrated_ids.add(adapter["id"])
+        calibrated_strengths.append(float(adapter["strength"]))
+    if (
+        len(calibrated_ids) != len(calibrated_adapters)
+        or sum(calibrated_strengths) >= CREATIVE_ADAPTER_STACK_MAX_COMBINED_STRENGTH
+    ):
+        return False
+    metrics: set[str] = set()
+    for delta in deltas:
+        if (
+            not isinstance(delta, dict)
+            or delta.get("metric") not in set(CREATIVE_ADAPTER_ROLE_METRICS.values())
+            or isinstance(delta.get("baselineScore"), bool)
+            or not isinstance(delta.get("baselineScore"), (int, float))
+            or not 0 <= float(delta["baselineScore"]) <= 10
+            or isinstance(delta.get("adaptedScore"), bool)
+            or not isinstance(delta.get("adaptedScore"), (int, float))
+            or not 8 <= float(delta["adaptedScore"]) <= 10
+            or float(delta["adaptedScore"]) - float(delta["baselineScore"]) < 0.5
+        ):
+            return False
+        metrics.add(str(delta["metric"]))
+    return len(metrics) == len(deltas)
+
+
+def _creative_adapters_for_job(job: dict[str, Any]) -> list[dict[str, Any]]:
+    adapter = job.get("creativeAdapter")
+    stack = job.get("creativeAdapterStack")
+    if adapter is not None and stack is not None:
+        raise ValueError("creative adapter job cannot mix legacy and stack contracts")
+    if stack is None:
+        return [] if adapter is None else [adapter]
+    if (
+        not isinstance(stack, dict)
+        or stack.get("version") != CREATIVE_ADAPTER_STACK_VERSION
+        or not isinstance(stack.get("adapters"), list)
+        or not 2 <= len(stack["adapters"]) <= CREATIVE_ADAPTER_STACK_MAX_ADAPTERS
+        or not _valid_stack_benchmark(stack.get("benchmark"))
+    ):
+        raise ValueError("creative adapter stack contract is invalid or lacks a combined quality benchmark")
+    return stack["adapters"]
+
+
 def requested_creative_adapter_ids(jobs: Any, phase: str) -> set[str]:
     if phase != "video":
         return set()
@@ -181,26 +290,70 @@ def requested_creative_adapter_ids(jobs: Any, phase: str) -> set[str]:
         raise ValueError("manifest jobs must be a list")
     ids: set[str] = set()
     for job in jobs:
-        adapter = job.get("creativeAdapter") if isinstance(job, dict) else None
-        if adapter is None:
-            continue
-        if not isinstance(adapter, dict):
-            raise ValueError("creative adapter must be a structured job contract")
-        adapter_id = str(adapter.get("id") or "")
-        strength = adapter.get("strength")
-        trigger_tokens = adapter.get("triggerTokens")
-        if (
-            not re.fullmatch(r"ltx-creative-[a-z0-9][a-z0-9-]{1,78}", adapter_id)
-            or isinstance(strength, bool) or not isinstance(strength, (int, float))
-            or not math.isfinite(float(strength)) or not 0.15 <= float(strength) <= 0.95
-            or not isinstance(trigger_tokens, list) or not 1 <= len(trigger_tokens) <= 8
-            or not all(isinstance(token, str) and token.strip() for token in trigger_tokens)
-        ):
-            raise ValueError("creative adapter contract is invalid")
-        if not all(token.lower() in str(job.get("prompt") or "").lower() for token in trigger_tokens):
-            raise ValueError("creative adapter trigger tokens are missing from the LTX prompt")
-        ids.add(adapter_id)
+        if not isinstance(job, dict):
+            raise ValueError("manifest job must be a structured contract")
+        adapters = _creative_adapters_for_job(job)
+        adapter_ids: set[str] = set()
+        for adapter in adapters:
+            if not isinstance(adapter, dict):
+                raise ValueError("creative adapter must be a structured job contract")
+            adapter_id = str(adapter.get("id") or "")
+            strength = adapter.get("strength")
+            trigger_tokens = adapter.get("triggerTokens")
+            if (
+                not re.fullmatch(r"ltx-creative-[a-z0-9][a-z0-9-]{1,78}", adapter_id)
+                or isinstance(strength, bool) or not isinstance(strength, (int, float))
+                or not math.isfinite(float(strength)) or not 0.15 <= float(strength) <= 0.95
+                or not isinstance(trigger_tokens, list) or not 1 <= len(trigger_tokens) <= 8
+                or not all(isinstance(token, str) and token.strip() for token in trigger_tokens)
+            ):
+                raise ValueError("creative adapter contract is invalid")
+            if not all(token.lower() in str(job.get("prompt") or "").lower() for token in trigger_tokens):
+                raise ValueError("creative adapter trigger tokens are missing from the LTX prompt")
+            adapter_ids.add(adapter_id)
+            ids.add(adapter_id)
+        if len(adapter_ids) != len(adapters):
+            raise ValueError("creative adapter stack cannot repeat an adapter")
     return ids
+
+
+def validate_creative_adapter_stacks(jobs: Any, model_specs: list[dict[str, Any]], phase: str) -> None:
+    """Bind each stacked job's combined benchmark to roles in its sealed model manifest."""
+    if phase != "video" or not isinstance(jobs, list):
+        return
+    specs_by_id = {str(spec.get("id") or ""): spec for spec in model_specs}
+    for job in jobs:
+        if not isinstance(job, dict) or job.get("creativeAdapterStack") is None:
+            continue
+        stack = job["creativeAdapterStack"]
+        adapters = _creative_adapters_for_job(job)
+        calibrated = stack["benchmark"]["calibratedAdapters"]
+        selected_strengths = {
+            (str(adapter.get("id") or ""), float(adapter.get("strength")))
+            for adapter in adapters
+        }
+        calibrated_strengths = {
+            (str(adapter.get("id") or ""), float(adapter.get("strength")))
+            for adapter in calibrated
+        }
+        if selected_strengths != calibrated_strengths:
+            raise ValueError(
+                "creative adapter stack strengths must exactly match its combined RTX 4090 benchmark calibration",
+            )
+        expected_metrics: set[str] = set()
+        for adapter in adapters:
+            spec = specs_by_id.get(str(adapter.get("id") or ""))
+            descriptor = spec.get("creativeAdapter") if isinstance(spec, dict) else None
+            role = descriptor.get("role") if isinstance(descriptor, dict) else None
+            metric = CREATIVE_ADAPTER_ROLE_METRICS.get(role)
+            if metric is None:
+                raise ValueError("creative adapter stack references a model without an approved role")
+            expected_metrics.add(metric)
+        if len(expected_metrics) != len(adapters):
+            raise ValueError("creative adapter stack has overlapping roles")
+        observed_metrics = {str(delta.get("metric") or "") for delta in stack["benchmark"]["qualityDeltas"]}
+        if observed_metrics != expected_metrics:
+            raise ValueError("creative adapter stack quality benchmark does not cover its exact selected roles")
 
 
 def validate_model_specs(
@@ -243,6 +396,15 @@ def validate_model_specs(
         if contract is None:
             adapter = spec.get("creativeAdapter")
             trigger_tokens = adapter.get("triggerTokens") if isinstance(adapter, dict) else None
+            benchmark = adapter.get("benchmark") if isinstance(adapter, dict) else None
+            evidence = benchmark.get("evidence") if isinstance(benchmark, dict) else None
+            quality_delta = benchmark.get("qualityDelta") if isinstance(benchmark, dict) else None
+            role = adapter.get("role") if isinstance(adapter, dict) else None
+            expected_quality_metric = {
+                "visual-style": "visual_style_coherence",
+                "camera-control": "camera_motion_adherence",
+                "material-style": "material_identity_consistency",
+            }.get(role)
             source_path = Path(str(spec.get("sourcePath") or "")).as_posix()
             local_path = Path(str(spec.get("localPath") or "")).as_posix()
             if (
@@ -251,15 +413,50 @@ def validate_model_specs(
                 or spec.get("revision") != LTX_REVISION
                 or not SHA256_RE.fullmatch(str(spec.get("manifestSha256") or ""))
                 or not isinstance(adapter, dict)
-                or adapter.get("contractVersion") != "ltx-creative-adapter/v1"
+                or adapter.get("contractVersion") != "ltx-creative-adapter/v3"
                 or adapter.get("baseModel") != LTX_MODEL
                 or adapter.get("baseRevision") != LTX_REVISION
                 or adapter.get("runtimeRevision") != LTX_RUNTIME_REVISION
-                or adapter.get("role") not in {"visual-style", "camera-control", "material-style"}
+                or role not in {"visual-style", "camera-control", "material-style"}
                 or not isinstance(trigger_tokens, list) or not 1 <= len(trigger_tokens) <= 8
-                or not isinstance(adapter.get("benchmark"), dict)
-                or adapter["benchmark"].get("rtx4090ProfileBenchmarked") is not True
-                or adapter["benchmark"].get("visualVerdict") != "pass"
+                or not isinstance(benchmark, dict)
+                or benchmark.get("rtx4090ProfileBenchmarked") is not True
+                or benchmark.get("visualVerdict") != "pass"
+                # A direct standard LoRA must beat a matched base-LTX render
+                # in the exact visual property named by its role. A generic
+                # pass cannot admit an adapter that merely changes pixels.
+                or not isinstance(quality_delta, dict)
+                or quality_delta.get("metric") != expected_quality_metric
+                or isinstance(quality_delta.get("baselineScore"), bool)
+                or not isinstance(quality_delta.get("baselineScore"), (int, float))
+                or not 0 <= float(quality_delta["baselineScore"]) <= 10
+                or isinstance(quality_delta.get("adaptedScore"), bool)
+                or not isinstance(quality_delta.get("adaptedScore"), (int, float))
+                or not 8 <= float(quality_delta["adaptedScore"]) <= 10
+                or float(quality_delta["adaptedScore"]) - float(quality_delta["baselineScore"]) < 0.5
+                # A boolean 'pass' is not benchmark evidence. Bind the worker
+                # to an immutable retained output + final visual-review receipt
+                # before an adapter can affect a paid LTX render.
+                or not isinstance(evidence, dict)
+                or evidence.get("version") != "ltx-creative-adapter-benchmark-evidence/v1"
+                or not all(
+                    isinstance(evidence.get(key), str)
+                    and re.fullmatch(r"(?!/)(?!.*(?:^|/)\.\.(?:/|$))[A-Za-z0-9][A-Za-z0-9._/@+=:-]{1,511}", evidence[key])
+                    for key in ("evidenceManifestKey", "outputVideoKey")
+                )
+                or not isinstance(evidence.get("immutableEvidenceObjectVersionId"), str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{2,159}", evidence["immutableEvidenceObjectVersionId"])
+                or not all(
+                    SHA256_RE.fullmatch(str(evidence.get(key) or ""))
+                    for key in ("evidenceSha256", "outputVideoSha256", "outputArtifactReceiptFingerprint", "visualReviewReceiptFingerprint")
+                )
+                or isinstance(evidence.get("outputDurationMs"), bool)
+                or not isinstance(evidence.get("outputDurationMs"), int)
+                or not 0 < evidence["outputDurationMs"] <= 3_600_000
+                or not isinstance(evidence.get("reviewedAt"), str)
+                or not re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{3})?Z", evidence["reviewedAt"])
+                or not isinstance(evidence.get("reviewedBy"), str)
+                or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._:-]{2,159}", evidence["reviewedBy"])
                 or "/loras/" not in source_path or "/loras/" not in local_path
             ):
                 raise ValueError(f"manifest creative adapter {spec['id']} is not an exact benchmarked LTX 2.5 adapter")
@@ -837,8 +1034,10 @@ def build_video_command(
         command.extend(["--image", str(image_path), "0", "1.0"])
     if end_image_path:
         command.extend(["--image", str(end_image_path), str(int(job["frames"]) - 1), "1.0"])
-    adapter = job.get("creativeAdapter")
-    if adapter is not None:
+    # ltx_pipelines accepts repeatable --lora flags. Legacy single-adapter
+    # jobs remain byte-for-byte compatible; validated v2 stacks supply at
+    # most two complementary adapters at their exact benchmarked strengths.
+    for adapter in _creative_adapters_for_job(job):
         adapter_id = str(adapter["id"])
         adapter_path = models.get(adapter_id)
         if adapter_path is None:
@@ -1304,6 +1503,10 @@ def main() -> int:
             manifest.get("models"), manifest["phase"], manifest["profile"].get("pipeline"),
             requested_creative_adapter_ids(manifest.get("jobs"), manifest["phase"]),
         )
+        # A repeated --lora command is admitted only when the *combined* stack
+        # is benchmarked for the exact complementary roles, not merely because
+        # its individual files happened to pass separate tests.
+        validate_creative_adapter_stacks(manifest.get("jobs"), model_specs, manifest["phase"])
         models = {
             str(spec["id"]): hydrate_model(spec, volume_root, cache_root, deadline_monotonic)
             for spec in model_specs

@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -13,6 +14,13 @@ import { SkeletonList } from "@/components/Skeleton";
 import { Chart, compact, type ChartSeries } from "@/components/Chart";
 import { IconAnalytics, IconChannels, IconExternal } from "@/components/icons";
 import { fmtUsd } from "@/lib/format";
+import type { VideoRow } from "@/lib/types";
+import { ArtifactWorkRail } from "@/components/ArtifactWorkRail";
+import { QualityLearningPanel } from "@/components/QualityLearningPanel";
+import {
+  qualityLearningInsightsFromUnknown,
+  type QualityLearningInsight,
+} from "@/lib/qualityLearningPresentation";
 
 /** Per-channel summary row shape returned by analytics.channelSummary. */
 type SummaryRow = {
@@ -55,6 +63,16 @@ export default function AnalyticsPage() {
     () => summary?.find((s) => s.slug === selectedSlug) ?? null,
     [summary, selectedSlug],
   );
+  const recentWork = useQuery(
+    api.videos.listVideos,
+    selected
+      ? {
+          ownerId,
+          channelId: selected.channelId as Id<"channels">,
+          limit: 12,
+        }
+      : { ownerId, limit: 12 },
+  ) as VideoRow[] | undefined;
 
   const trend = useQuery(
     api.analytics.channelTrend,
@@ -66,6 +84,28 @@ export default function AnalyticsPage() {
         }
       : "skip",
   ) as TrendRow[] | undefined;
+  const [qualityLearning, setQualityLearning] = useState<{
+    state: "loading" | "ready" | "unavailable";
+    insights: readonly QualityLearningInsight[];
+  }>({ state: "loading", insights: [] });
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void fetch("/api/learning-recommendations", { signal: controller.signal })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(`quality learning request failed (${response.status})`);
+        return await response.json() as { recommendations?: unknown };
+      })
+      .then((payload) => {
+        if (!controller.signal.aborted) {
+          setQualityLearning({ state: "ready", insights: qualityLearningInsightsFromUnknown(payload.recommendations) });
+        }
+      })
+      .catch(() => {
+        if (!controller.signal.aborted) setQualityLearning({ state: "unavailable", insights: [] });
+      });
+    return () => controller.abort();
+  }, []);
 
   const loading = overview === undefined || summary === undefined;
   const hasTrend = (trend?.length ?? 0) > 0;
@@ -135,6 +175,23 @@ export default function AnalyticsPage() {
           ) : (
             <GlobalCharts rows={summary ?? []} />
           )}
+
+          <ArtifactWorkRail
+            videos={recentWork}
+            title={selected ? `${selected.name} — visible work` : "Visible work behind the numbers"}
+            description={selected
+              ? "Persisted thumbnails and release provenance for the current channel—separate from forecasts and rollup metrics."
+              : "The latest persisted video artifacts across your channels, so the analytics rollup stays connected to the work viewers actually see."}
+            action={<Link href="/library">Open Library ↗</Link>}
+            emptyMessage="No rendered or uploaded video artifacts match this analytics scope yet."
+          />
+
+          <QualityLearningPanel
+            state={qualityLearning.state}
+            insights={qualityLearning.insights}
+            channelNames={new Map((summary ?? []).map((row) => [row.channelId, row.name]))}
+            {...(selected ? { selectedChannelId: selected.channelId } : {})}
+          />
 
           {/* Competitors for the selected channel's niche. */}
           <CompetitorsSection ownerId={ownerId} selected={selected} />

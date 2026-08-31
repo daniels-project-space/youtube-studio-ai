@@ -11,14 +11,25 @@ import {
   type Shot,
 } from "@/lib/novitaRenderFarm";
 import { recordImageUsage } from "@/lib/imageUsage";
+import { DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS } from "@/lib/files";
 import { getObjectBytes, presignDownload, putObject } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { assertNovitaVideoProfileRuntime } from "@/engine/runtimeCapability";
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
-import type { CinematicKeyframeReview } from "@/engine/cinematicKeyframeReview";
-import type { CinematicClipReview } from "@/engine/cinematicClipReview";
-import { CinematicKeyframeRejectedError } from "@/lib/cinematicKeyframeGate";
-import type { LtxCreativeAdapterSelection } from "@/lib/ltxCreativeAdapter";
+import { applyLtxI2vPromptContract } from "@/lib/ltxI2vPrompt";
+import {
+  CINEMATIC_KEYFRAME_REVIEW_VERSION,
+  type CinematicKeyframeReview,
+} from "@/engine/cinematicKeyframeReview";
+import {
+  CINEMATIC_CLIP_REVIEW_VERSION,
+  type CinematicClipReview,
+} from "@/engine/cinematicClipReview";
+import {
+  classifyVisualArtifactReviewOutcome,
+  type VisualArtifactReviewRejection,
+} from "@/engine/visualArtifactReviewOutcome";
+import type { LtxCreativeAdapterInput } from "@/lib/ltxCreativeAdapter";
 
 export type NovitaProfileId = GenerationProfile["id"];
 /**
@@ -40,6 +51,8 @@ export interface NovitaGeneratedScene {
   negativePrompt?: string;
   seed?: number;
   cameraMove?: Shot["cameraMove"];
+  /** Concrete camera path grounded in the approved source frame. */
+  cameraInstruction?: string;
   shotScale?: Shot["shotScale"];
   lens?: string;
   /** Stable mannequin identities that must remain visually continuous. */
@@ -53,7 +66,7 @@ export interface NovitaGeneratedScene {
   /** Reviewer-facing endpoint obligations for a terminal conditioned frame. */
   terminalKeyframeRequirements?: string[];
   /** Applied only to the LTX phase after exact worker-manifest admission. */
-  creativeAdapter?: LtxCreativeAdapterSelection;
+  creativeAdapter?: LtxCreativeAdapterInput;
 }
 
 export interface NovitaRenderedScene extends NovitaGeneratedScene {
@@ -78,7 +91,29 @@ export interface NovitaKeyframeGate {
     stillKey: string;
     stillUrl: string;
   }): Promise<CinematicKeyframeReview>;
+  /**
+   * Record-only observation of the independent gate. It is awaited before a
+   * replacement can be rendered, but it never decides whether a replacement
+   * is allowed; that remains the fail-closed review-outcome policy below.
+   */
+  checkpointReview?: (event: NovitaKeyframeReviewCheckpoint) => Promise<void>;
 }
+
+export type NovitaKeyframeReviewCheckpoint =
+  | {
+      scene: NovitaGeneratedScene;
+      stillKey: string;
+      attempt: number;
+      verdict: "accepted";
+      review: CinematicKeyframeReview;
+    }
+  | {
+      scene: NovitaGeneratedScene;
+      stillKey: string;
+      attempt: number;
+      verdict: "rejected";
+      rejection: VisualArtifactReviewRejection;
+    };
 
 export interface NovitaClipGate {
   /** One controlled replacement take is enough to avoid duplicate spend loops. */
@@ -92,7 +127,25 @@ export interface NovitaClipGate {
     clipKey: string;
     clipUrl: string;
   }): Promise<CinematicClipReview>;
+  /** See NovitaKeyframeGate.checkpointReview. */
+  checkpointReview?: (event: NovitaClipReviewCheckpoint) => Promise<void>;
 }
+
+export type NovitaClipReviewCheckpoint =
+  | {
+      scene: NovitaGeneratedScene;
+      clipKey: string;
+      attempt: number;
+      verdict: "accepted";
+      review: CinematicClipReview;
+    }
+  | {
+      scene: NovitaGeneratedScene;
+      clipKey: string;
+      attempt: number;
+      verdict: "rejected";
+      rejection: VisualArtifactReviewRejection;
+    };
 
 export interface NovitaImageProviderReceipt {
   key: string;
@@ -188,6 +241,7 @@ function asShot(
     diegeticSoundscape: scene.diegeticSoundscape,
     seconds: scene.durationSec,
     cameraMove: scene.cameraMove ?? "static",
+    cameraInstruction: scene.cameraInstruction,
     shotScale: scene.shotScale ?? "medium",
     lens: scene.lens ?? "35mm",
     negative: scene.negativePrompt,
@@ -221,6 +275,50 @@ function asLtxDistilledVideoShot(
     negative: undefined,
     ...(endStillKey ? { endStillKey } : {}),
   };
+}
+
+/**
+ * Prepare a standalone direct I2V take with the exact same LTX continuity
+ * contract as the multi-shot production path.  In particular, distilled LTX
+ * has no negative-prompt argument, so exclusions are embedded in the sealed
+ * positive/motion contract rather than being silently dropped or rejected only
+ * after a caller has already prepared the worker request.
+ */
+export function prepareDirectLtxI2vShot(input: {
+  id: string;
+  prompt: string;
+  diegeticSoundscape?: string;
+  durationSec: number;
+  negativePrompt?: string;
+  seed?: number;
+  motionPrompt?: string;
+  cameraMove?: Shot["cameraMove"];
+  cameraInstruction?: string;
+  shotScale?: Shot["shotScale"];
+  lens?: string;
+  creativeAdapter?: LtxCreativeAdapterInput;
+  profileId: NovitaProfileId;
+  stillKey: string;
+  endStillKey?: string;
+  styleId?: string;
+}): Shot {
+  return applyLtxI2vPromptContract(
+    asLtxDistilledVideoShot({
+      id: input.id,
+      imagePrompt: input.prompt,
+      motionPrompt: input.motionPrompt ?? input.prompt,
+      diegeticSoundscape: input.diegeticSoundscape,
+      durationSec: input.durationSec,
+      negativePrompt: input.negativePrompt,
+      seed: input.seed,
+      cameraMove: input.cameraMove,
+      cameraInstruction: input.cameraInstruction,
+      shotScale: input.shotScale,
+      lens: input.lens,
+      creativeAdapter: input.creativeAdapter,
+    }, input.profileId, input.stillKey, input.endStillKey),
+    input.styleId,
+  );
 }
 
 function keyframeRetrySeed(seed: number | undefined, attempt: number): number {
@@ -260,6 +358,7 @@ export async function reviewKeyframesBeforeVideo(args: {
   imageMaxCostUsd: number;
   imageReceipts: readonly NovitaBillingReceipt[];
   review: (input: { scene: NovitaGeneratedScene; stillKey: string }) => Promise<CinematicKeyframeReview>;
+  checkpointReview?: (event: NovitaKeyframeReviewCheckpoint) => Promise<void>;
   renderReplacement: (input: {
     scene: NovitaGeneratedScene;
     repairId: string;
@@ -286,16 +385,38 @@ export async function reviewKeyframesBeforeVideo(args: {
       if (!stillKey) throw new Error(`novita keyframe gate is missing the initial still for ${id}`);
       try {
         const review = await args.review({ scene, stillKey });
+        await args.checkpointReview?.({
+          scene,
+          stillKey,
+          attempt,
+          verdict: "accepted",
+          review,
+        });
         keyframeReviewByShot.set(id, review);
         break;
       } catch (reviewError) {
         // A replacement image is an evidence-led repair, not a fallback for a
         // reviewer outage, a malformed receipt, or another infrastructure
-        // fault. Only the typed pixel-review rejection from the independent
-        // keyframe gate is allowed to consume the one repair attempt.
-        if (!(reviewError instanceof CinematicKeyframeRejectedError)) {
+        // fault. Only the structurally valid pixel-review rejection from the
+        // independent keyframe gate is allowed to consume the one repair.
+        const outcome = classifyVisualArtifactReviewOutcome(reviewError, {
+          gateId: "cinematic-keyframe",
+          artifactKind: "image",
+          subjectId: id,
+          reviewVersion: CINEMATIC_KEYFRAME_REVIEW_VERSION,
+        });
+        if (outcome.disposition !== "render_replacement") {
           throw reviewError;
         }
+        // Durable audit persistence is deliberately before the paid repair.
+        // A failed checkpoint must therefore stop rather than double-spend.
+        await args.checkpointReview?.({
+          scene,
+          stillKey,
+          attempt,
+          verdict: "rejected",
+          rejection: outcome.rejection,
+        });
         if (attempt >= args.maxImageAttempts) throw reviewError;
         const remainingCostUsd = args.imageMaxCostUsd - observedImageCostUsd;
         if (remainingCostUsd <= 0) {
@@ -336,6 +457,7 @@ export async function reviewClipsBeforeAssembly(args: {
   videoMaxCostUsd: number;
   videoReceipts: readonly NovitaBillingReceipt[];
   review: (input: { scene: NovitaGeneratedScene; stillKey: string; terminalStillKey?: string; clipKey: string }) => Promise<CinematicClipReview>;
+  checkpointReview?: (event: NovitaClipReviewCheckpoint) => Promise<void>;
   renderReplacement: (input: {
     scene: NovitaGeneratedScene;
     stillKey: string;
@@ -367,9 +489,37 @@ export async function reviewClipsBeforeAssembly(args: {
       if (!clipKey) throw new Error(`novita clip gate is missing the initial LTX clip for ${id}`);
       try {
         const review = await args.review({ scene, stillKey, terminalStillKey, clipKey });
+        await args.checkpointReview?.({
+          scene,
+          clipKey,
+          attempt,
+          verdict: "accepted",
+          review,
+        });
         clipReviewByShot.set(id, review);
         break;
       } catch (reviewError) {
+        // A second LTX take is a repair only after the independent gate has
+        // parsed and typed a real pixel-level rejection. A reviewer outage,
+        // malformed verdict, R2/download failure, or ffprobe/frame fault must
+        // retain the paid candidate and fail closed rather than buy new pixels.
+        const outcome = classifyVisualArtifactReviewOutcome(reviewError, {
+          gateId: "cinematic-clip",
+          artifactKind: "video",
+          subjectId: id,
+          reviewVersion: CINEMATIC_CLIP_REVIEW_VERSION,
+        });
+        if (outcome.disposition !== "render_replacement") {
+          throw reviewError;
+        }
+        // Keep the rejected take durable before any second paid LTX request.
+        await args.checkpointReview?.({
+          scene,
+          clipKey,
+          attempt,
+          verdict: "rejected",
+          rejection: outcome.rejection,
+        });
         if (attempt >= args.maxVideoAttempts) throw reviewError;
         const remainingCostUsd = args.videoMaxCostUsd - observedVideoCostUsd;
         if (remainingCostUsd <= 0) {
@@ -502,6 +652,7 @@ export async function renderNovitaGeneratedScenes(args: {
         imageCostUsd: observedImageCostUsd,
         imageMaxCostUsd: openingImageBudgetUsd,
         imageReceipts,
+        checkpointReview: args.keyframeGate.checkpointReview,
         review: async ({ scene, stillKey }) => args.keyframeGate!.review({
           scene,
           stillKey,
@@ -563,6 +714,7 @@ export async function renderNovitaGeneratedScenes(args: {
           imageCostUsd: terminalImageResult.costUsd,
           imageMaxCostUsd: terminalImageBudgetUsd,
           imageReceipts: [terminalImageResult.billingReceipt],
+          checkpointReview: args.keyframeGate.checkpointReview,
           review: async ({ scene, stillKey }) => args.keyframeGate!.review({
             scene,
             stillKey,
@@ -637,6 +789,7 @@ export async function renderNovitaGeneratedScenes(args: {
         videoCostUsd: observedVideoCostUsd,
         videoMaxCostUsd: envelope.videoMaxCostUsd,
         videoReceipts,
+        checkpointReview: args.clipGate.checkpointReview,
         review: async ({ scene, stillKey, terminalStillKey, clipKey }) => args.clipGate!.review({
           scene,
           stillKey,
@@ -919,7 +1072,9 @@ export async function renderAttestedNovitaImageBytes(
     throw error;
   }
   try {
-    const bytes = Buffer.from(await (dependencies.downloadImage ?? getObjectBytes)(rendered.key));
+    const downloadImage = dependencies.downloadImage ?? ((key: string) =>
+      getObjectBytes(key, undefined, { timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS }));
+    const bytes = Buffer.from(await downloadImage(rendered.key));
     if (!bytes.length || bytes.length > 30 * 1024 * 1024) {
       throw new Error("novita image: downloaded bytes are outside the 1B..30MiB contract");
     }
@@ -997,10 +1152,19 @@ export async function renderNovitaI2V(args: {
   endImageUrl?: string;
   durationSec?: number;
   negativePrompt?: string;
+  /** Independent in-frame action/particle direction; defaults to `prompt`. */
+  motionPrompt?: string;
+  cameraMove?: Shot["cameraMove"];
+  /** Concrete source-grounded camera path, included in the sealed LTX prompt. */
+  cameraInstruction?: string;
+  shotScale?: Shot["shotScale"];
+  lens?: string;
   seed?: number;
   profileId?: NovitaProfileId;
+  /** Optional sealed LTX visual-treatment preset for the direct I2V contract. */
+  styleId?: string;
   /** Optional sealed LTX creative adapter; runtime/benchmark admission happens in the direct worker path. */
-  creativeAdapter?: LtxCreativeAdapterSelection;
+  creativeAdapter?: LtxCreativeAdapterInput;
   /** Signed envelope for this one direct video worker. */
   maxCostUsd: number;
   lifecycle?: NovitaRenderLifecycle;
@@ -1032,16 +1196,24 @@ export async function renderNovitaI2V(args: {
     ?? (args.endImageUrl
       ? await persistRemoteStill({ imageUrl: args.endImageUrl, prefix, id: `${id}-terminal` })
       : undefined);
-  const shot = asShot({
+  const shot = prepareDirectLtxI2vShot({
     id,
-    imagePrompt: args.prompt,
-    motionPrompt: args.prompt,
+    prompt: args.prompt,
     diegeticSoundscape: args.diegeticSoundscape,
     durationSec: args.durationSec ?? 5,
     negativePrompt: args.negativePrompt,
+    motionPrompt: args.motionPrompt,
     seed: args.seed,
+    cameraMove: args.cameraMove,
+    cameraInstruction: args.cameraInstruction,
+    shotScale: args.shotScale,
+    lens: args.lens,
     creativeAdapter: args.creativeAdapter,
-  }, profile.id, stillKey, endStillKey);
+    profileId: profile.id,
+    stillKey,
+    endStillKey,
+    styleId: args.styleId,
+  });
   const result = await renderVideo({
     prefix: `${prefix}/video`,
     shots: [shot],
@@ -1051,6 +1223,7 @@ export async function renderNovitaI2V(args: {
     jobs: "full",
     maxCostUsd: envelope.videoMaxCostUsd,
     lifecycle: args.lifecycle,
+    styleId: args.styleId,
   });
   const key = exactCandidateByShot(result, [id]).get(id)!;
   return {

@@ -16,6 +16,8 @@ export function RunCard({ run }: { run: RunRow }) {
     <Link
       href={`/runs/${run._id}`}
       className="glass run-card"
+      data-status={run.status}
+      data-release-evidence={run.releaseEvidenceStatus}
     >
       <div className="run-card-main">
         <StageBadge status={run.status} />

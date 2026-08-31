@@ -29,14 +29,19 @@ export async function GET(request: Request) {
   try {
     const actor = await requireStudioActor(request);
     await hydrateEnv("youtube");
-    const rows = await convexClient().query(
-      api.learningGovernance.listForOwner,
-      {
-        secret: requireInternalQuerySecret(),
+    const convex = convexClient();
+    const secret = requireInternalQuerySecret();
+    const [rows, showBibleClaims] = await Promise.all([
+      convex.query(api.learningGovernance.listForOwner, {
+        secret,
         ownerId: actor.ownerId,
-      },
-    );
-    return NextResponse.json({ ok: true, recommendations: rows });
+      }),
+      convex.query(api.learningGovernance.listShowBibleClaims, {
+        secret,
+        ownerId: actor.ownerId,
+      }),
+    ]);
+    return NextResponse.json({ ok: true, recommendations: rows, showBibleClaims });
   } catch (error) {
     return errorResponse(error);
   }
@@ -45,11 +50,55 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const actor = await requireStudioActor(request);
-    await hydrateEnv("youtube");
     const body = (await request.json()) as {
-      action?: "approve_and_activate" | "reject";
+      action?: "approve_and_activate" | "reject" | "rearm_show_bible_no_dispatch";
       recommendationId?: string;
+      claimId?: string;
+      reason?: string;
+      evidence?: string;
+      verifiedNoDispatch?: boolean;
     };
+    if (body.action === "rearm_show_bible_no_dispatch") {
+      if (actor.authKind !== "session" || actor.role !== "owner") {
+        throw new StudioAuthError("an interactive owner session is required to rearm a Show Bible claim", 403);
+      }
+      if (
+        !body.claimId ||
+        typeof body.reason !== "string" ||
+        typeof body.evidence !== "string" ||
+        body.verifiedNoDispatch !== true
+      ) {
+        return NextResponse.json(
+          { ok: false, error: "claimId, reason, evidence, and verifiedNoDispatch=true are required" },
+          { status: 400 },
+        );
+      }
+      // Reject service callers before touching the vault or Convex. This keeps
+      // the recovery control owner-session-only even when an internal worker
+      // has a valid service credential.
+      await hydrateEnv("youtube");
+      const convex = convexClient();
+      const secret = requireInternalQuerySecret();
+      const now = Date.now();
+      const showBibleClaim = await convex.mutation(
+        api.learningGovernance.resolveShowBibleProviderStartedNoDispatch,
+        {
+          secret,
+          ownerId: actor.ownerId,
+          claimId: body.claimId as Id<"showBibleProposalClaims">,
+          actor: `${actor.authKind}:${actor.ownerId}`,
+          reason: body.reason,
+          evidence: body.evidence,
+          verifiedNoDispatch: true,
+          attestedAt: now,
+          now,
+        },
+      );
+      return NextResponse.json({ ok: true, showBibleClaim });
+    }
+    await hydrateEnv("youtube");
+    const convex = convexClient();
+    const secret = requireInternalQuerySecret();
     if (
       !body.recommendationId ||
       (body.action !== "approve_and_activate" && body.action !== "reject")
@@ -59,8 +108,6 @@ export async function POST(request: Request) {
         { status: 400 },
       );
     }
-    const convex = convexClient();
-    const secret = requireInternalQuerySecret();
     const recommendationId =
       body.recommendationId as Id<"learningRecommendations">;
     const recommendation =

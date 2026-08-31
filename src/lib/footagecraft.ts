@@ -48,6 +48,7 @@ import {
   scoreClip,
   type FootageClip,
 } from "@/lib/footage";
+import { type ThirdPartyStockSource } from "@/lib/thirdPartyStockEvidence";
 
 export { searchFootage, is4k, scoreClip, activeProviders, hasAnyFootageProvider, type FootageClip } from "@/lib/footage";
 export { footageDoctrineFor, FOOTAGE_DOCTRINE, type FootageDoctrine } from "@/engine/golden";
@@ -91,7 +92,12 @@ export interface PickedClip {
   path: string;
   query: string;
   provider: string;
+  /** Stable `provider:assetId`, never a rendition/CDN URL. */
   clipId: string;
+  /** Exact provider source evidence carried through download and gating. */
+  source: ThirdPartyStockSource;
+  /** Epoch milliseconds when this exact source rendition was successfully acquired. */
+  acquiredAt: number;
   score: number;
   durationSec: number;
 }
@@ -350,9 +356,18 @@ export async function gateClip(
 /* ------------------------------- casting -------------------------------- */
 
 /** Stable cross-video id: Pexels numeric video id; else the full URL. */
-function clipId(url: string, provider: string): string {
-  if (provider.startsWith("pexels")) return url.match(/video-files\/(\d+)/)?.[1] ?? url;
-  return url;
+type ReleaseBoundFootageClip = FootageClip & { thirdPartyStock: ThirdPartyStockSource };
+
+function hasReleaseBoundStockEvidence(clip: FootageClip): clip is ReleaseBoundFootageClip {
+  return Boolean(clip.thirdPartyStock);
+}
+
+function clipId(clip: Pick<FootageClip, "url" | "provider" | "thirdPartyStock">): string {
+  if (clip.thirdPartyStock) return `${clip.thirdPartyStock.provider}:${clip.thirdPartyStock.assetId}`;
+  // Defensive fallback for non-production callers. `castFootage` rejects these
+  // before download, so no release-bound narrated-stock result can use it.
+  if (clip.provider.startsWith("pexels")) return clip.url.match(/video-files\/(\d+)/)?.[1] ?? clip.url;
+  return clip.url;
 }
 
 export interface CastFootageArgs {
@@ -390,7 +405,14 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
   const clips: PickedClip[] = [];
   const pickedIds = new Set<string>();
   const usedUrls = new Set<string>();
-  const spares: { path: string; dur: number; score: number }[] = [];
+  const spares: {
+    path: string;
+    dur: number;
+    score: number;
+    query: string;
+    candidate: ReleaseBoundFootageClip;
+    acquiredAt: number;
+  }[] = [];
   let coveredSec = 0;
   let gated = 0;
   let dlCounter = 0;
@@ -409,12 +431,22 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
       ? await searchFootageLegacy(q, 8, a.brief.orientation).catch(() => [] as FootageClip[])
       : await searchFootage(q, 6, a.brief.orientation).catch(() => [] as FootageClip[]);
     const cands = found
-      .filter((c) => !usedUrls.has(c.url) && !pickedIds.has(clipId(c.url, c.provider)) && (allowReuse || !a.usedClipIds.has(clipId(c.url, c.provider))))
+      // A provider that cannot identify the asset and attach official terms is
+      // never downloaded or sent to the paid relevance gate. This is a pre-spend
+      // fail-closed boundary, not a best-effort metadata warning.
+      .filter((c): c is ReleaseBoundFootageClip => {
+        if (!hasReleaseBoundStockEvidence(c)) {
+          log(`footagecraft: skipping ${c.provider} candidate without release-bound rights evidence`);
+          return false;
+        }
+        const id = clipId(c);
+        return !usedUrls.has(c.url) && !pickedIds.has(id) && (allowReuse || !a.usedClipIds.has(id));
+      })
       .sort((x, y) => scoreClip(y) - scoreClip(x))
       .slice(0, 3);
     for (const cand of cands) {
       if (!need()) return;
-      const id = clipId(cand.url, cand.provider);
+      const id = clipId(cand);
       if (pickedIds.has(id)) continue;
       pickedIds.add(id);
       usedUrls.add(cand.url);
@@ -424,6 +456,9 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
         return false;
       }));
       if (!ok) continue;
+      // This records actual receipt of the selected rendition, not a later
+      // manifest-write time after a long relevance/compose queue.
+      const acquiredAt = Date.now();
       const verdict = await gate(() => gateClip(local, cand.durationSec, q, a.brief, log, a.legacy));
       const dur = cand.durationSec || a.perClipSec;
       if (verdict.relevant && verdict.score >= RELEVANCE_MIN) {
@@ -435,17 +470,26 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
           const ms = await motionScore(local, log);
           if (ms !== null && ms > mot.maxMotion) {
             log(`footagecraft: motion reject "${q}" — ${ms.toFixed(1)} > ${mot.maxMotion} (${mot.motion} channel, too dynamic/shaky)`);
-            spares.push({ path: local, dur, score: verdict.score });
+            spares.push({ path: local, dur, score: verdict.score, query: q, candidate: cand, acquiredAt });
             continue;
           }
           if (ms !== null) motionLogged.push(ms);
         }
-        clips.push({ path: local, query: q, provider: cand.provider, clipId: id, score: verdict.score, durationSec: dur });
+        clips.push({
+          path: local,
+          query: q,
+          provider: cand.provider,
+          clipId: id,
+          source: cand.thirdPartyStock,
+          acquiredAt,
+          score: verdict.score,
+          durationSec: dur,
+        });
         coveredSec += Math.min(dur, a.perClipSec);
         gated++;
         return;
       }
-      spares.push({ path: local, dur, score: verdict.score });
+      spares.push({ path: local, dur, score: verdict.score, query: q, candidate: cand, acquiredAt });
     }
   };
 
@@ -474,7 +518,19 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
     for (const s of spares) {
       if (!need()) break;
       if (used.has(s.path)) continue;
-      clips.push({ path: s.path, query: "(spare)", provider: "spare", clipId: s.path, score: s.score, durationSec: s.dur });
+      // Do not erase source identity in the fallback path. A relevance/motion
+      // spare is weaker editorially, but it is still the same acquired provider
+      // asset and therefore must carry the same rights evidence.
+      clips.push({
+        path: s.path,
+        query: s.query,
+        provider: s.candidate.provider,
+        clipId: clipId(s.candidate),
+        source: s.candidate.thirdPartyStock,
+        acquiredAt: s.acquiredAt,
+        score: s.score,
+        durationSec: s.dur,
+      });
       coveredSec += Math.min(s.dur, a.perClipSec);
     }
     log(`footagecraft: last-resort spare fill → ${coveredSec.toFixed(0)}s`);

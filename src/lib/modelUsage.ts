@@ -77,9 +77,35 @@ interface ModelRate {
 interface ScopeState {
   groups: Map<string, ModelUsageGroup>;
   responses: Map<string, unknown>;
+  /**
+   * Exact requests which have crossed the provider boundary but have not yet
+   * produced a validated result.  A block can fan out (or retry around a later
+   * failure) before the first response has settled; a completed-only memo then
+   * lets every caller buy the same request.  Keep this inside the existing
+   * async-local scope so unrelated runs, channels, and credentials never share
+   * an answer.
+   */
+  inFlightResponses: Map<string, Promise<unknown>>;
 }
 
 const storage = new AsyncLocalStorage<ScopeState>();
+
+// Structured-output contracts are executable objects (for example Zod schemas),
+// not stable JSON. An opaque WeakMap identity is deliberately conservative: two
+// independently constructed contracts never share a response, while the same
+// sealed contract can still join an exact request within a scope. The WeakMap
+// does not retain the contract or any request content.
+const responseContractIdentities = new WeakMap<object, number>();
+let nextResponseContractIdentity = 0;
+
+export function modelResponseContractIdentity(contract: object): string {
+  let identity = responseContractIdentities.get(contract);
+  if (identity === undefined) {
+    identity = ++nextResponseContractIdentity;
+    responseContractIdentities.set(contract, identity);
+  }
+  return `contract:${identity}`;
+}
 
 function finiteNonNegative(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
@@ -162,7 +188,6 @@ function builtInRate(provider: string, model: string, inputTokens: number): Mode
   // overrides are intentionally not priced here: an unknown override must show
   // as unpriced rather than appearing cheaper than it is.
   if (p === "openrouter") {
-    if (m === "openai/gpt-oss-20b") return { inputUsdPerMillion: 0.03, outputUsdPerMillion: 0.13 };
     if (m === "mistralai/ministral-3b-2512") return { inputUsdPerMillion: 0.1, outputUsdPerMillion: 0.1, cachedInputUsdPerMillion: 0.01 };
     if (m === "mistralai/ministral-8b-2512") return { inputUsdPerMillion: 0.15, outputUsdPerMillion: 0.15, cachedInputUsdPerMillion: 0.015 };
     if (m === "qwen/qwen3.6-27b") return { inputUsdPerMillion: 0.289, outputUsdPerMillion: 2.4 };
@@ -302,6 +327,57 @@ export function cacheModelResponse(key: string, value: unknown): void {
   storage.getStore()?.responses.set(key, value);
 }
 
+/**
+ * Run one exact provider request at most once per usage scope.
+ *
+ * This extends the completed-response memo to the short window before a
+ * provider reply arrives.  It is deliberately response-scoped rather than a
+ * global cache: an exact validated answer can satisfy sibling consumers or an
+ * outer retry, while errors are never retained and independent runs retain
+ * their normal freshness and isolation.  A joiner is reported as a cache hit,
+ * but only the creator records provider usage after a real response.
+ */
+export async function getOrCreateModelResponse<T>(
+  key: string,
+  details: Pick<ModelUsageRecord, "provider" | "model" | "kind">,
+  create: () => Promise<T>,
+  options?: { memoize?: boolean },
+): Promise<T> {
+  const state = storage.getStore();
+  // A caller with a stricter validation contract owns its outer memo. In that
+  // case, retaining a merely JSON-valid inner response would let a rejected
+  // structured output suppress the next provider attempt.
+  if (!state || options?.memoize === false) return create();
+
+  const completed = getCachedModelResponse<T>(key, details);
+  if (completed !== undefined) return completed;
+
+  const inFlight = state.inFlightResponses.get(key);
+  if (inFlight) {
+    groupFor(state, details).cacheHits++;
+    return inFlight as Promise<T>;
+  }
+
+  // Defer invocation by one microtask so a synchronous throw has the same
+  // cleanup semantics as a rejected provider promise.
+  const started = Promise.resolve().then(create);
+  state.inFlightResponses.set(key, started);
+  try {
+    const value = await started;
+    // Adapters may also persist a durable receipt immediately after the paid
+    // response.  This assignment intentionally agrees with that value for a
+    // successful creator and makes the primitive safe for text-only adapters.
+    state.responses.set(key, value);
+    return value;
+  } finally {
+    // Do not retain failures: an ambiguous provider error must stay visible to
+    // the caller's safety policy, never become a synthetic cache entry.
+    if (state.inFlightResponses.get(key) === started) {
+      state.inFlightResponses.delete(key);
+    }
+  }
+}
+
 function snapshot(state: ScopeState): ModelUsageSummary {
   const groups = [...state.groups.values()]
     .map((group) => ({ ...group, unpricedReasons: [...group.unpricedReasons] }))
@@ -338,7 +414,11 @@ export function createModelUsageScope(): {
   run: <T>(fn: () => Promise<T>) => Promise<T>;
   snapshot: () => ModelUsageSummary;
 } {
-  const state: ScopeState = { groups: new Map(), responses: new Map() };
+  const state: ScopeState = {
+    groups: new Map(),
+    responses: new Map(),
+    inFlightResponses: new Map(),
+  };
   return {
     run: <T>(fn: () => Promise<T>) => storage.run(state, fn),
     snapshot: () => snapshot(state),

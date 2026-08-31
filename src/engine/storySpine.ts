@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
 import { generationProfile } from "./generationProfiles";
 import {
   planCinematicShotLanguage,
@@ -212,6 +214,14 @@ export interface PlanStorySpineInput {
   };
   visualBrief?: Record<string, unknown>;
   styleDNA?: Record<string, unknown> | null;
+  /** Immutable serial-episode projection; never sourced from live series state. */
+  serializedEpisodeContinuity?: {
+    episodeNumber: number;
+    seriesTitle: string;
+    arcSummary?: string;
+    unresolvedThreads?: readonly string[];
+    entities?: readonly { name: string; role: string }[];
+  };
   generationProfile?: unknown;
   targetShotSec?: number;
 }
@@ -274,6 +284,19 @@ export function validateStorySpine(value: StorySpine): StorySpine {
     }
   }
   return spine;
+}
+
+/**
+ * Immutable identity of a fully validated timed Story Spine.
+ *
+ * This intentionally covers the entire spine (timed script, continuity,
+ * shots, DP specs, EDL, and coverage), rather than a renderer-specific
+ * projection such as only the ShotPlan. It is provider-free and reusable by
+ * any downstream receipt that needs to prove it consumed the same story.
+ */
+export function storySpineFingerprint(value: unknown): string {
+  const spine = validateStorySpine(StorySpineSchema.parse(value));
+  return sha256Hex(canonicalJson(spine));
 }
 
 export function planStorySpine(input: PlanStorySpineInput): StorySpine {
@@ -353,12 +376,51 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
   const recurringSubject = typeof dna.recurringSubject === "string" ? dna.recurringSubject : "";
   const setting = typeof dna.setting === "string" ? dna.setting : "";
   const palette = strings(dna.palette);
-  const negativeConstraints = strings(dna.visualAvoid);
+  const serializedEpisodeContinuity = input.serializedEpisodeContinuity;
+  const serialEntities = (serializedEpisodeContinuity?.entities ?? [])
+    .map((entity, index) => {
+      const name = typeof entity.name === "string" ? entity.name.trim().slice(0, 120) : "";
+      if (!name) return undefined;
+      const role = typeof entity.role === "string" ? entity.role.trim().slice(0, 280) : "";
+      return {
+        id: `serial-entity-${String(index + 1).padStart(2, "0")}`,
+        name,
+        // Episode context carries a narrative role, not a physical description.
+        // Make that boundary explicit for any downstream visual consumer.
+        look: role
+          ? `Narrative continuity role only: ${role}. Do not infer physical appearance from this role.`
+          : "Narrative continuity entity; do not invent or change physical appearance.",
+      };
+    })
+    .filter((entity): entity is { id: string; name: string; look: string } => Boolean(entity));
+  const serialArcSummary = typeof serializedEpisodeContinuity?.arcSummary === "string"
+    ? serializedEpisodeContinuity.arcSummary.replace(/\s+/g, " ").trim().slice(0, 420)
+    : "";
+  const serialOpenThreads = (serializedEpisodeContinuity?.unresolvedThreads ?? [])
+    .map((thread) => typeof thread === "string" ? thread.replace(/\s+/g, " ").trim().slice(0, 160) : "")
+    .filter(Boolean)
+    .slice(0, 2);
+  const serializedContinuityConstraint = serializedEpisodeContinuity
+    ? [
+        `Serialized episode ${serializedEpisodeContinuity.episodeNumber} of ${serializedEpisodeContinuity.seriesTitle}: preserve named narrative continuity and do not contradict the immutable episode receipt.`,
+        serialArcSummary ? `Sealed arc context: ${serialArcSummary}` : "",
+        serialOpenThreads.length
+          ? `Do not visually imply these sealed open threads are already resolved unless the narration explicitly resolves them: ${serialOpenThreads.join("; ")}`
+          : "",
+      ].filter(Boolean).join(" ")
+    : "";
+  const negativeConstraints = [
+    ...strings(dna.visualAvoid),
+    ...(serializedContinuityConstraint ? [serializedContinuityConstraint] : []),
+  ];
   const visual = input.visualBrief ?? {};
   const cameraGrammar = strings((visual as { directives?: { cameraMoves?: unknown } }).directives?.cameraMoves);
   const continuityLedger = {
     version: "1.0.0" as const,
-    entities: recurringSubject ? [{ id: "entity-primary", name: recurringSubject, look: recurringSubject }] : [],
+    entities: [
+      ...(recurringSubject ? [{ id: "entity-primary", name: recurringSubject, look: recurringSubject }] : []),
+      ...serialEntities,
+    ],
     locations: setting ? [{ id: "location-primary", name: setting, look: setting }] : [],
     era: typeof dna.era === "string" ? dna.era : "unspecified; obey source sentence",
     wardrobe: strings(dna.wardrobe),

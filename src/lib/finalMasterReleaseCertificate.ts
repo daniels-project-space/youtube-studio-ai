@@ -4,8 +4,40 @@
  * and storage references; it never authorizes a provider or a publication.
  */
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { z } from "zod";
 
+import {
+  assertReferenceQualityMechanicsLedger,
+  assertReferenceQualityMechanicsProgramRouteBinding,
+  assertReferenceQualityMechanicsVisualReceiptBinding,
+  ReferenceQualityMechanicsLedgerSchema,
+} from "@/engine/referenceQualityMechanicsRegistry";
+import {
+  assertVisualSequenceEvidenceOmission,
+  assertVisualSequenceEvidenceLedger,
+  VisualSequenceEvidenceOmissionSchema,
+  VisualSequenceEvidenceLedgerSchema,
+} from "@/engine/visualSequenceContract";
+import {
+  assertViewerPromiseProgressionCertificateBinding,
+  assertViewerPromiseProgressionOmissionCertificateBinding,
+  ViewerPromiseProgressionOmissionSchema,
+  ViewerPromiseProgressionReceiptSchema,
+} from "@/engine/viewerPromiseProgression";
+import {
+  assertPackageToOpeningOmission,
+  assertPackageToOpeningReceiptCertificateBinding,
+  PackageToOpeningOmissionSchema,
+  PackageToOpeningReceiptSchema,
+} from "@/engine/packageToOpening";
+import {
+  assertShortsOpeningEvidenceCertificateBinding,
+  ShortsOpeningEvidenceSchema,
+} from "@/engine/shortsOpeningEvidence";
+import { ChannelProgramRouteRunSeedSchema } from "@/engine/channelProgramRoute";
+import { ScenarioVisualTreatmentSchema } from "@/engine/scenarioVisualTreatment";
+import { FINAL_MASTER_NARRATED_STORY_COVERAGE_SOURCE } from "@/engine/qualityEvidence";
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
   assertReferenceQualityFinalMasterBinding,
@@ -19,6 +51,41 @@ import {
   FinalMasterNarrationSemanticEvidenceSchema,
   parseFinalMasterNarrationTranscriptAuditBytes,
 } from "@/lib/narrationTranscriptProof";
+import {
+  assertFinalMasterNarratedStoryCoverageReceipt,
+  assertFinalMasterNarratedStoryCoverageReceiptBinding,
+  finalMasterNarratedStoryCoverageAuditObjectKey,
+  FinalMasterNarratedStoryCoverageReceiptSchema,
+  parseFinalMasterNarratedStoryCoverageAuditBytes,
+} from "@/lib/finalMasterNarratedStoryCoverage";
+import { OnScreenTextProofSchema } from "@/lib/onScreenTextProof";
+import {
+  assertFinalMasterQualityEvidenceBinding,
+  FinalMasterQualityEvidenceBindingSchema,
+  type FinalMasterQualityEvidenceCoverage,
+  type FinalMasterStoryMeasurementCoverage,
+} from "@/lib/finalMasterQualityEvidenceBinding";
+import {
+  assertFinalMasterVisualPacingBinding,
+  FinalMasterVisualPacingBindingSchema,
+} from "@/lib/finalMasterVisualPacingBinding";
+import {
+  assertThirdPartyStockEvidenceReferenceBinding,
+  parseThirdPartyStockEvidenceManifestBytes,
+  thirdPartyStockEvidenceManifestKey,
+  ThirdPartyStockEvidenceReferenceSchema,
+} from "@/lib/thirdPartyStockEvidence";
+import { NarrativeShortOriginSchema } from "@/lib/narrativeShortOrigin";
+import {
+  assertStudioAssetReleaseUsageReceipt,
+  assertStudioLtxReleaseAdapterBinding,
+  StudioAssetReleaseUsageReceiptSchema,
+  STUDIO_LTX_RELEASE_ADAPTER_BINDING_VERSION,
+} from "@/engine/studioAssetLibrary";
+import {
+  assertStudioPostproductionDecisionReceipt,
+  StudioPostproductionDecisionReceiptSchema,
+} from "@/engine/studioPostproductionDecision";
 
 export const FINAL_MASTER_RELEASE_CERTIFICATE_VERSION =
   "final-master-release-certificate/v1" as const;
@@ -36,9 +103,26 @@ const sha256 = z.string().regex(/^[a-f0-9]{64}$/i, "expected SHA-256");
 const objectKey = z.string().trim().min(1).max(2_000);
 const finite = z.number().finite();
 const evidenceFrameArtifactSchema = z.object({
+  /** Durable review-frame identity; absent only on historical v1 receipts. */
+  id: z.string().trim().min(1).max(240).optional(),
+  /** Exact review sampling time; absent only on historical v1 receipts. */
+  tSec: finite.nonnegative().optional(),
   r2Key: objectKey,
   contentSha256: sha256,
   byteLength: z.number().int().positive(),
+}).strict();
+
+/**
+ * `byteLength` is optional solely so v1 certificates already retained in R2
+ * remain readable.  Every newly created certificate must include it, and every
+ * operational verification requires it before a release can be uploaded or
+ * cleaned up.
+ */
+const finalMasterSchema = z.object({
+  r2Key: objectKey,
+  sha256,
+  byteLength: z.number().int().positive().optional(),
+  durationSec: finite.positive(),
 }).strict();
 
 export type FinalMasterReleaseEvidenceFrame = z.infer<typeof evidenceFrameArtifactSchema>;
@@ -56,6 +140,16 @@ const visualReviewReceiptSchema = z.object({
   focusWindows: z.array(z.unknown()).max(10_000),
   referenceCriteria: z.array(z.unknown()).max(10_000),
   referenceCriteriaComplete: z.literal(true),
+  /**
+   * Optional for pre-wide-sample v1 receipts. New qa_visual receipts bind the
+   * conservative score from every broad final-review batch into this
+   * content-addressed release proof.
+   */
+  broadQualityScore: z.object({
+    version: z.literal("visual-review-wide-sample-quality/v1"),
+    score: finite.min(0).max(10),
+    broadBatchCount: z.number().int().positive(),
+  }).strict().optional(),
   evidence: z.object({
     source: z.object({
       durationSec: finite.positive(),
@@ -72,11 +166,7 @@ export type VisualReviewReleaseReceipt = z.infer<typeof visualReviewReceiptSchem
 
 export const FinalMasterReleaseCertificateSchema = z.object({
   version: z.literal(FINAL_MASTER_RELEASE_CERTIFICATE_VERSION),
-  finalMaster: z.object({
-    r2Key: objectKey,
-    sha256,
-    durationSec: finite.positive(),
-  }).strict(),
+  finalMaster: finalMasterSchema,
   visualReview: z.object({
     evidenceManifestKey: objectKey,
     evidenceFrameKeys: z.array(objectKey).min(1).max(20_000),
@@ -89,10 +179,60 @@ export const FinalMasterReleaseCertificateSchema = z.object({
     releaseReceiptFingerprint: sha256,
   }).strict(),
   /**
+   * Optional immutable sidecar for narrated third-party stock. Historical
+   * certificates intentionally remain readable without it. This pointer binds
+   * only the compact rights evidence JSON, never raw source footage objects.
+   */
+  thirdPartyStockEvidence: ThirdPartyStockEvidenceReferenceSchema.optional(),
+  /**
+   * Immutable final-master narration-semantic coverage for a shared Story
+   * Spine. It never represents visual-shot realization; the full audit is
+   * retained as a separately content-addressed sidecar.
+   */
+  narratedStoryCoverage: FinalMasterNarratedStoryCoverageReceiptSchema.optional(),
+  /**
+   * Immutable structural binding from the selected package to the exact
+   * thumbnail bytes and a retained opening-review frame. It deliberately does
+   * not claim semantic equivalence in v1.
+   */
+  packageToOpening: PackageToOpeningReceiptSchema.optional(),
+  /** Explicit non-gating reason when a new structural package receipt was unavailable. */
+  packageToOpeningOmission: PackageToOpeningOmissionSchema.optional(),
+  /**
    * Exact static reference contract selected for this master. v1 can only
    * record explicitly unmeasured evidence; it must never imply approval.
    */
   referenceQuality: ReferenceQualityFinalMasterBindingAnySchema.optional(),
+  /**
+   * Optional route-aware evidence coverage ledger. It records only existing
+   * receipts and never changes release/publish authority; historical
+   * certificates intentionally remain readable without it.
+   */
+  referenceQualityMechanics: ReferenceQualityMechanicsLedgerSchema.optional(),
+  /**
+   * Optional artifact-bound visual-sequence provenance. It records exactly
+   * what raw-byte and final-master evidence exists; it never grants release,
+   * readiness, assembly, or publishing authority.
+   */
+  visualSequenceEvidence: VisualSequenceEvidenceLedgerSchema.optional(),
+  /**
+   * Bounded, fingerprinted explanation when no ledger was attached. This
+   * observability record never changes release or publishing authority.
+   */
+  visualSequenceEvidenceOmission: VisualSequenceEvidenceOmissionSchema.optional(),
+  /**
+   * Optional observation of plan anchors and existing final-review samples.
+   * It is not a QA axis, score, or release/publish authority.
+   */
+  viewerPromiseProgression: ViewerPromiseProgressionReceiptSchema.optional(),
+  /** Bounded non-gating explanation when that observation was not attached. */
+  viewerPromiseProgressionOmission: ViewerPromiseProgressionOmissionSchema.optional(),
+  /**
+   * Full sealed route retained only with viewer-promise evidence so its
+   * directive-derived promise can be recomputed during certificate parsing.
+   * The receipt itself exposes only a hash of the viewer job.
+   */
+  viewerPromiseProgressionRoute: ChannelProgramRouteRunSeedSchema.optional(),
   /** Present only when the source-bound Casefile final-master reviewer ran. */
   cinematic: z.object({
     receiptFingerprint: sha256,
@@ -109,6 +249,65 @@ export const FinalMasterReleaseCertificateSchema = z.object({
     finalMasterMeters: z.unknown().optional(),
     qualityAxis: z.unknown().optional(),
   }).strict().optional(),
+  /**
+   * Optional deterministic OCR receipt for text burned into this exact master.
+   * The post-transform Short route uses it for caption legibility; other lanes
+   * remain compatible until they can emit equally concrete timed text cues.
+   */
+  onScreenText: OnScreenTextProofSchema.optional(),
+  /**
+   * A post-transform Short-only opening observation. It is optional for every
+   * other lane and does not create a universal fast-cut/pacing requirement.
+   */
+  shortsOpeningEvidence: ShortsOpeningEvidenceSchema.optional(),
+  /**
+   * Optional provenance for a portrait Short selected from a sealed narrative
+   * Episode Graph. The certificate fingerprint binds the exact parent master,
+   * beat, source window, and candidate decision to these derivative bytes.
+   */
+  narrativeShortOrigin: NarrativeShortOriginSchema.optional(),
+  /**
+   * When the direct LTX renderer selected Studio-approved standard LoRAs,
+   * this proves the exact selection matched the persisted per-shot render
+   * manifest. IC-LoRAs remain absent until their distinct Comfy worker path is
+   * separately admitted.
+   */
+  studioLtxAdapterBinding: z.object({
+    version: z.literal(STUDIO_LTX_RELEASE_ADAPTER_BINDING_VERSION),
+    shotRenderManifestFingerprint: sha256,
+    globalSelectionFingerprint: sha256.optional(),
+    perShotSelectionsFingerprint: sha256.optional(),
+    sourceEntryFingerprints: z.array(sha256).min(1).max(12),
+    fingerprint: sha256,
+  }).strict().optional(),
+  /**
+   * Correlation-only record of approved Studio recipes present in this exact
+   * passing master. It can inform future reuse ranking but never changes this
+   * release decision or asserts a recipe caused the observed quality.
+   */
+  studioAssetReleaseUsage: StudioAssetReleaseUsageReceiptSchema.optional(),
+  /**
+   * Sealed actual timeline decisions. These distinguish a Studio transition
+   * that won the edit from one merely resolved upstream and later overridden.
+   */
+  studioPostproductionDecisions: z.array(StudioPostproductionDecisionReceiptSchema).max(4).optional(),
+  /**
+   * Exact fictional-scenario visual policy when the renderer was bound to it.
+   * It is included in the certificate payload, so the certificate fingerprint
+   * binds this immutable policy to the same final-master byte receipt.
+   */
+  scenarioVisualTreatment: ScenarioVisualTreatmentSchema.optional(),
+  /**
+   * Shared final-QA receipt sealed to this exact master and visual-review
+   * receipt. Optional so historical v1 certificates remain readable.
+   */
+  qualityEvidence: FinalMasterQualityEvidenceBindingSchema.optional(),
+  /**
+   * Exact final-master FFmpeg pacing receipt. It binds the lane policy and
+   * matching QA/review fingerprints, rather than reducing pacing to text in a
+   * generic quality-evidence array.
+   */
+  visualPacing: FinalMasterVisualPacingBindingSchema.optional(),
   certificateFingerprint: sha256,
 }).strict();
 
@@ -116,11 +315,7 @@ export const FinalMasterReleaseCertificateReferenceSchema = z.object({
   version: z.literal(FINAL_MASTER_RELEASE_CERTIFICATE_REFERENCE_VERSION),
   certificateKey: objectKey,
   certificateFingerprint: sha256,
-  finalMaster: z.object({
-    r2Key: objectKey,
-    sha256,
-    durationSec: finite.positive(),
-  }).strict(),
+  finalMaster: finalMasterSchema,
   visualReview: z.object({
     evidenceManifestKey: objectKey,
     evidenceFrameCount: z.number().int().positive().max(20_000),
@@ -132,6 +327,22 @@ export const FinalMasterReleaseCertificateReferenceSchema = z.object({
     reviewReceiptFingerprint: sha256,
     releaseReceiptFingerprint: sha256,
   }).strict(),
+  /** Compact provenance only; the full shared QA receipt remains in the R2 certificate. */
+  qualityEvidence: z.object({
+    bindingFingerprint: sha256,
+    qualityEvidenceFingerprint: sha256,
+    evidenceCoverage: z.enum(["complete", "partial", "unmeasured"]),
+    /**
+     * Measurement scope only: `plan_only` is pre-render and `final_master`
+     * is source-backed ratio evidence, never an assertion of complete coverage.
+     */
+    storyMeasurementCoverage: z.enum([
+      "unmeasured",
+      "plan_only",
+      "final_master",
+      "scope_undeclared",
+    ]).optional(),
+  }).strict().optional(),
 }).strict();
 
 export type FinalMasterReleaseCertificate = z.infer<typeof FinalMasterReleaseCertificateSchema>;
@@ -175,6 +386,7 @@ export function createFinalMasterReleaseCertificate(
   input: FinalMasterReleaseCertificateInput,
 ): FinalMasterReleaseCertificate {
   const normalized = FinalMasterReleaseCertificateSchema.omit({ certificateFingerprint: true }).parse(input);
+  requireFinalMasterByteReceipt(normalized.finalMaster, "new final-master release certificate");
   requireEvidenceFrameArtifacts({
     frameKeys: normalized.visualReview.evidenceFrameKeys,
     frameArtifacts: normalized.visualReview.evidenceFrameArtifacts,
@@ -182,6 +394,21 @@ export function createFinalMasterReleaseCertificate(
   });
   const certificateFingerprint = finalMasterReleaseCertificateFingerprint(normalized);
   return assertFinalMasterReleaseCertificate({ ...normalized, certificateFingerprint });
+}
+
+function requireFinalMasterByteReceipt(
+  finalMaster: FinalMasterReleaseCertificate["finalMaster"],
+  subject: string,
+): { r2Key: string; sha256: string; byteLength: number; durationSec: number } {
+  if (finalMaster.byteLength === undefined) {
+    throw new Error(`${subject} lacks a byte-bound final-master receipt`);
+  }
+  return {
+    r2Key: finalMaster.r2Key,
+    sha256: finalMaster.sha256,
+    byteLength: finalMaster.byteLength,
+    durationSec: finalMaster.durationSec,
+  };
 }
 
 /** The receipt sits beside the immutable visual-review evidence and is retained with it. */
@@ -316,6 +543,76 @@ export function assertFinalMasterReleaseCertificate(value: unknown): FinalMaster
       audioAxis: certificate.audio?.qualityAxis,
     });
   }
+  if (certificate.referenceQualityMechanics) {
+    assertReferenceQualityMechanicsLedger({
+      ledger: certificate.referenceQualityMechanics,
+      referenceQualityBinding: certificate.referenceQuality,
+      finalMasterQualityEvidenceBinding: certificate.qualityEvidence,
+      finalMaster: {
+        sha256: certificate.finalMaster.sha256,
+        durationSec: certificate.finalMaster.durationSec,
+      },
+      visualReview: {
+        reviewFingerprint: certificate.visualReview.reviewFingerprint,
+        reviewReceiptVersion: certificate.visualReview.reviewReceiptVersion,
+        reviewReceiptFingerprint: certificate.visualReview.reviewReceiptFingerprint,
+        releaseReceiptFingerprint: certificate.visualReview.releaseReceiptFingerprint,
+      },
+    });
+  }
+  if (certificate.visualSequenceEvidence) {
+    const finalMasterByteLength = certificate.finalMaster.byteLength;
+    const evidenceFrameArtifacts = certificate.visualReview.evidenceFrameArtifacts;
+    if (
+      finalMasterByteLength === undefined ||
+      !Number.isSafeInteger(finalMasterByteLength) ||
+      finalMasterByteLength < 1 ||
+      !evidenceFrameArtifacts
+    ) {
+      throw new Error(
+        "visual-sequence evidence ledger requires byte-bound final-master and visual-review artifacts",
+      );
+    }
+    assertVisualSequenceEvidenceLedger({
+      ledger: certificate.visualSequenceEvidence,
+      finalMaster: {
+        sha256: certificate.finalMaster.sha256,
+        byteLength: finalMasterByteLength,
+        durationSec: certificate.finalMaster.durationSec,
+      },
+      visualReview: {
+        evidenceManifestKey: certificate.visualReview.evidenceManifestKey,
+        reviewFingerprint: certificate.visualReview.reviewFingerprint,
+        reviewReceiptVersion: certificate.visualReview.reviewReceiptVersion,
+        reviewReceiptFingerprint: certificate.visualReview.reviewReceiptFingerprint,
+        releaseReceiptFingerprint: certificate.visualReview.releaseReceiptFingerprint,
+        source: {
+          sha256: certificate.finalMaster.sha256,
+          durationSec: certificate.finalMaster.durationSec,
+        },
+        // Visual-sequence evidence predates durable review-frame identities.
+        // Keep its existing byte-only contract rather than widening it.
+        frameArtifacts: evidenceFrameArtifacts.map((frame) => ({
+          r2Key: frame.r2Key,
+          contentSha256: frame.contentSha256,
+          byteLength: frame.byteLength,
+        })),
+      },
+    });
+  }
+  if (
+    certificate.visualSequenceEvidence &&
+    certificate.visualSequenceEvidenceOmission
+  ) {
+    throw new Error(
+      "final-master release certificate cannot attach visual-sequence evidence and an omission together",
+    );
+  }
+  if (certificate.visualSequenceEvidenceOmission) {
+    assertVisualSequenceEvidenceOmission(
+      certificate.visualSequenceEvidenceOmission,
+    );
+  }
   if (certificate.audio?.finalMasterNarration) {
     const narrationEvidence = assertFinalMasterNarrationSemanticEvidence(
       certificate.audio.finalMasterNarration,
@@ -326,6 +623,270 @@ export function assertFinalMasterReleaseCertificate(value: unknown): FinalMaster
     if (narrationEvidence.finalMaster.durationSec !== certificate.finalMaster.durationSec) {
       throw new Error("final-master narration semantic evidence duration does not match the released master");
     }
+  }
+  if (certificate.onScreenText) {
+    const onScreenText = OnScreenTextProofSchema.parse(certificate.onScreenText);
+    if (!onScreenText.passed || onScreenText.cues.some((cue) => !cue.passed)) {
+      throw new Error("final-master on-screen text proof does not pass every required cue");
+    }
+    if (onScreenText.source.sha256 !== certificate.finalMaster.sha256) {
+      throw new Error("final-master on-screen text proof belongs to a different released master");
+    }
+  }
+  if (certificate.shortsOpeningEvidence) {
+    assertShortsOpeningEvidenceCertificateBinding({
+      evidence: certificate.shortsOpeningEvidence,
+      finalMaster: {
+        sha256: certificate.finalMaster.sha256,
+        durationSec: certificate.finalMaster.durationSec,
+      },
+      visualReview: {
+        reviewFingerprint: certificate.visualReview.reviewFingerprint,
+        reviewReceiptVersion: certificate.visualReview.reviewReceiptVersion,
+        reviewReceiptFingerprint: certificate.visualReview.reviewReceiptFingerprint,
+        releaseReceiptFingerprint: certificate.visualReview.releaseReceiptFingerprint,
+        evidenceFrameArtifacts: certificate.visualReview.evidenceFrameArtifacts,
+      },
+      onScreenText: certificate.onScreenText,
+    });
+  }
+  if (certificate.studioLtxAdapterBinding) {
+    assertStudioLtxReleaseAdapterBinding(certificate.studioLtxAdapterBinding);
+  }
+  if (certificate.studioAssetReleaseUsage) {
+    const usage = assertStudioAssetReleaseUsageReceipt(certificate.studioAssetReleaseUsage);
+    const qualityEvidence = certificate.qualityEvidence;
+    if (!qualityEvidence) {
+      throw new Error("Studio asset release usage requires the matching final-master quality evidence binding");
+    }
+    if (
+      usage.finalMaster.sha256 !== certificate.finalMaster.sha256 ||
+      usage.finalMaster.durationSec !== certificate.finalMaster.durationSec ||
+      usage.visualReview.reviewFingerprint !== certificate.visualReview.reviewFingerprint ||
+      usage.visualReview.reviewReceiptFingerprint !== certificate.visualReview.reviewReceiptFingerprint ||
+      usage.qualityEvidence.bindingFingerprint !== qualityEvidence.bindingFingerprint ||
+      usage.qualityEvidence.qualityEvidenceFingerprint !== qualityEvidence.qualityEvidenceFingerprint ||
+      usage.contentLane !== qualityEvidence.contentLane.key
+    ) {
+      throw new Error("Studio asset release usage does not match this final-master certificate evidence");
+    }
+  }
+  if (certificate.studioPostproductionDecisions) {
+    const fingerprints = new Set<string>();
+    for (const decisionValue of certificate.studioPostproductionDecisions) {
+      const decision = assertStudioPostproductionDecisionReceipt(decisionValue);
+      if (fingerprints.has(decision.receiptFingerprint)) {
+        throw new Error("final-master release certificate cannot repeat a Studio post-production decision");
+      }
+      fingerprints.add(decision.receiptFingerprint);
+    }
+  }
+  if (certificate.scenarioVisualTreatment) {
+    const treatment = ScenarioVisualTreatmentSchema.parse(certificate.scenarioVisualTreatment);
+    const programRoute = certificate.qualityEvidence?.programRoute;
+    if (programRoute) {
+      if (treatment.routeFingerprint !== programRoute.routeFingerprint) {
+        throw new Error("scenario visual treatment route does not match the final-QA program route binding");
+      }
+      if (treatment.programBriefFingerprint !== programRoute.programBriefFingerprint) {
+        throw new Error("scenario visual treatment program brief does not match the final-QA program route binding");
+      }
+    }
+  }
+  if (certificate.qualityEvidence) {
+    assertFinalMasterQualityEvidenceBinding({
+      binding: certificate.qualityEvidence,
+      finalMasterSha256: certificate.finalMaster.sha256,
+      finalMasterDurationSec: certificate.finalMaster.durationSec,
+      visualReviewFingerprint: certificate.visualReview.reviewFingerprint,
+      visualReviewReceiptVersion: certificate.visualReview.reviewReceiptVersion,
+      visualReviewReceiptFingerprint: certificate.visualReview.reviewReceiptFingerprint,
+      visualReviewReleaseReceiptFingerprint: certificate.visualReview.releaseReceiptFingerprint,
+    });
+  }
+  if (certificate.visualPacing) {
+    if (!certificate.qualityEvidence) {
+      throw new Error("final-master visual-pacing binding requires final-master quality evidence");
+    }
+    assertFinalMasterVisualPacingBinding({
+      binding: certificate.visualPacing,
+      finalMaster: {
+        sha256: certificate.finalMaster.sha256,
+        durationSec: certificate.finalMaster.durationSec,
+      },
+      visualReview: {
+        reviewFingerprint: certificate.visualReview.reviewFingerprint,
+        reviewReceiptVersion: certificate.visualReview.reviewReceiptVersion,
+        reviewReceiptFingerprint: certificate.visualReview.reviewReceiptFingerprint,
+        releaseReceiptFingerprint: certificate.visualReview.releaseReceiptFingerprint,
+      },
+      qualityEvidence: {
+        bindingFingerprint: certificate.qualityEvidence.bindingFingerprint,
+        qualityEvidenceFingerprint: certificate.qualityEvidence.qualityEvidenceFingerprint,
+      },
+    });
+  }
+  const selfContainedNarrationTextSha256 =
+    certificate.qualityEvidence?.qualityEvidence.episode.story.plan?.narrationTextSha256;
+  if (selfContainedNarrationTextSha256 !== undefined) {
+    const narrationEvidence = certificate.audio?.finalMasterNarration;
+    if (!narrationEvidence) {
+      throw new Error(
+        "self-contained narrated plan evidence requires final-master narration-semantic evidence",
+      );
+    }
+    if (narrationEvidence.narration.expectedTextSha256 !== selfContainedNarrationTextSha256) {
+      throw new Error(
+        "self-contained narrated plan does not match the narration audited in the final-master certificate",
+      );
+    }
+  }
+  const storyEvidence = certificate.qualityEvidence?.qualityEvidence.episode.story;
+  const requiresNarratedStoryCoverage =
+    storyEvidence?.source === FINAL_MASTER_NARRATED_STORY_COVERAGE_SOURCE ||
+    storyEvidence?.measurementKind === "narration_semantic";
+  if (requiresNarratedStoryCoverage && !certificate.narratedStoryCoverage) {
+    throw new Error(
+      "final-master narration-semantic story evidence requires its durable coverage sidecar",
+    );
+  }
+  if (certificate.narratedStoryCoverage) {
+    const receipt = assertFinalMasterNarratedStoryCoverageReceipt(
+      certificate.narratedStoryCoverage,
+    );
+    const narrationEvidence = certificate.audio?.finalMasterNarration;
+    const cueTiming = certificate.audio?.cueTiming;
+    if (!certificate.qualityEvidence || !narrationEvidence || !cueTiming) {
+      throw new Error(
+        "final-master narrated-story coverage requires quality, narration-semantic, and cue-timing evidence",
+      );
+    }
+    if (
+      receipt.finalMaster.sha256 !== certificate.finalMaster.sha256 ||
+      receipt.finalMaster.durationSec !== certificate.finalMaster.durationSec
+    ) {
+      throw new Error(
+        "final-master narrated-story coverage belongs to a different released master",
+      );
+    }
+    const story = certificate.qualityEvidence.qualityEvidence.episode.story;
+    if (
+      story.source !== FINAL_MASTER_NARRATED_STORY_COVERAGE_SOURCE ||
+      story.measurementScope !== "final_master" ||
+      story.measurementKind !== "narration_semantic" ||
+      story.finalMasterNarratedStoryReceiptFingerprint !== receipt.receiptFingerprint ||
+      story.beatCount !== receipt.storySpine.beatCount ||
+      story.shotCount !== receipt.storySpine.shotCount ||
+      story.coverageRatio !== receipt.coverage.coverageRatio
+    ) {
+      throw new Error(
+        "final-master narrated-story coverage does not match the sealed quality-evidence story receipt",
+      );
+    }
+    const semantic = assertFinalMasterNarrationSemanticEvidence(narrationEvidence);
+    if (receipt.narration.semanticReceiptFingerprint !== semantic.receiptFingerprint) {
+      throw new Error(
+        "final-master narrated-story coverage belongs to a different narration-semantic receipt",
+      );
+    }
+  }
+  if (certificate.packageToOpening && certificate.packageToOpeningOmission) {
+    throw new Error(
+      "final-master release certificate cannot attach package-to-opening evidence and an omission together",
+    );
+  }
+  if (certificate.packageToOpening) {
+    assertPackageToOpeningReceiptCertificateBinding({
+      receipt: certificate.packageToOpening,
+      finalMaster: {
+        sha256: certificate.finalMaster.sha256,
+        durationSec: certificate.finalMaster.durationSec,
+      },
+      visualReview: {
+        reviewFingerprint: certificate.visualReview.reviewFingerprint,
+        reviewReceiptVersion: certificate.visualReview.reviewReceiptVersion,
+        reviewReceiptFingerprint: certificate.visualReview.reviewReceiptFingerprint,
+        releaseReceiptFingerprint: certificate.visualReview.releaseReceiptFingerprint,
+        evidenceFrameArtifacts: certificate.visualReview.evidenceFrameArtifacts,
+      },
+    });
+  }
+  if (certificate.packageToOpeningOmission) {
+    assertPackageToOpeningOmission(certificate.packageToOpeningOmission);
+  }
+  if (certificate.referenceQualityMechanics) {
+    if (!certificate.qualityEvidence?.programRoute) {
+      throw new Error(
+        "reference-quality mechanics ledger requires the matching final-QA program route binding",
+      );
+    }
+    assertReferenceQualityMechanicsProgramRouteBinding({
+      ledger: certificate.referenceQualityMechanics,
+      programRoute: certificate.qualityEvidence.programRoute,
+    });
+  }
+  if (
+    certificate.viewerPromiseProgression &&
+    certificate.viewerPromiseProgressionOmission
+  ) {
+    throw new Error(
+      "final-master release certificate cannot attach viewer-promise progression evidence and an omission together",
+    );
+  }
+  if (
+    certificate.viewerPromiseProgressionRoute &&
+    !certificate.viewerPromiseProgression &&
+    !certificate.viewerPromiseProgressionOmission
+  ) {
+    throw new Error(
+      "final-master release certificate cannot retain a viewer-promise route without viewer-promise evidence",
+    );
+  }
+  if (certificate.viewerPromiseProgression) {
+    const qualityEvidence = certificate.qualityEvidence;
+    const programRoute = qualityEvidence?.programRoute;
+    const evidenceFrameArtifacts = certificate.visualReview.evidenceFrameArtifacts;
+    const sealedRoute = certificate.viewerPromiseProgressionRoute;
+    if (!qualityEvidence || !programRoute || !evidenceFrameArtifacts || !sealedRoute) {
+      throw new Error(
+        "viewer-promise progression receipt requires sealed route-bound final-QA and visual-review artifact evidence",
+      );
+    }
+    assertViewerPromiseProgressionCertificateBinding({
+      receipt: certificate.viewerPromiseProgression,
+      finalMaster: {
+        sha256: certificate.finalMaster.sha256,
+        durationSec: certificate.finalMaster.durationSec,
+      },
+      visualReview: {
+        reviewFingerprint: certificate.visualReview.reviewFingerprint,
+        reviewReceiptVersion: certificate.visualReview.reviewReceiptVersion,
+        reviewReceiptFingerprint: certificate.visualReview.reviewReceiptFingerprint,
+        releaseReceiptFingerprint: certificate.visualReview.releaseReceiptFingerprint,
+      },
+      programRoute,
+      sealedRoute,
+      contentLane: qualityEvidence.contentLane,
+      evidenceFrameArtifacts,
+      finalMasterNarration: certificate.audio?.finalMasterNarration,
+      narrationCueTiming: certificate.audio?.cueTiming,
+    });
+  }
+  if (certificate.viewerPromiseProgressionOmission) {
+    const qualityEvidence = certificate.qualityEvidence;
+    const programRoute = qualityEvidence?.programRoute;
+    const sealedRoute = certificate.viewerPromiseProgressionRoute;
+    if (!qualityEvidence || !programRoute || !sealedRoute) {
+      throw new Error(
+        "viewer-promise progression omission requires the matching sealed final-QA program route binding",
+      );
+    }
+    assertViewerPromiseProgressionOmissionCertificateBinding({
+      omission: certificate.viewerPromiseProgressionOmission,
+      programRoute,
+      sealedRoute,
+      contentLane: qualityEvidence.contentLane,
+    });
   }
   return certificate;
 }
@@ -406,12 +967,46 @@ export function retainedFinalMasterReleaseObjectKeys(args: {
       throw new Error("final-master narration transcript audit key is not content-addressed for its run");
     }
   }
+  const narratedStoryCoverageAuditArtifact =
+    certificate.narratedStoryCoverage?.auditArtifact;
+  if (narratedStoryCoverageAuditArtifact) {
+    const expectedNarratedStoryCoverageAuditKey =
+      finalMasterNarratedStoryCoverageAuditObjectKey(
+        args.keyPrefix,
+        args.runId,
+        narratedStoryCoverageAuditArtifact.contentSha256,
+      );
+    if (
+      narratedStoryCoverageAuditArtifact.r2Key !==
+      expectedNarratedStoryCoverageAuditKey
+    ) {
+      throw new Error(
+        "final-master narrated-story coverage audit key is not content-addressed for its run",
+      );
+    }
+  }
+  const thirdPartyStockEvidence = certificate.thirdPartyStockEvidence;
+  if (thirdPartyStockEvidence) {
+    const expectedStockEvidenceKey = thirdPartyStockEvidenceManifestKey(
+      args.keyPrefix,
+      args.runId,
+      thirdPartyStockEvidence.manifestSha256,
+    );
+    if (thirdPartyStockEvidence.manifestKey !== expectedStockEvidenceKey) {
+      throw new Error("final-master third-party stock evidence key is not content-addressed for its run");
+    }
+  }
   const keys = [
     certificate.finalMaster.r2Key,
     certificate.visualReview.evidenceManifestKey,
     certificate.visualReview.receiptKey,
     ...certificate.visualReview.evidenceFrameKeys,
     ...(narrationAuditArtifact ? [narrationAuditArtifact.r2Key] : []),
+    ...(narratedStoryCoverageAuditArtifact
+      ? [narratedStoryCoverageAuditArtifact.r2Key]
+      : []),
+    ...(certificate.packageToOpening ? [certificate.packageToOpening.thumbnail.r2Key] : []),
+    ...(thirdPartyStockEvidence ? [thirdPartyStockEvidence.manifestKey] : []),
     args.certificateKey,
   ];
   for (const key of keys) {
@@ -436,6 +1031,7 @@ export function createFinalMasterReleaseCertificateReference(args: {
   certificate: FinalMasterReleaseCertificate;
 }): FinalMasterReleaseCertificateReference {
   const certificate = assertFinalMasterReleaseCertificate(args.certificate);
+  requireFinalMasterByteReceipt(certificate.finalMaster, "new final-master release certificate reference");
   // Reuse the stricter cleanup boundary: it validates the content-addressed
   // certificate and receipt keys and rejects cross-run R2 references.
   retainedFinalMasterReleaseObjectKeys({
@@ -470,6 +1066,21 @@ export function createFinalMasterReleaseCertificateReference(args: {
       reviewReceiptFingerprint: certificate.visualReview.reviewReceiptFingerprint,
       releaseReceiptFingerprint: certificate.visualReview.releaseReceiptFingerprint,
     },
+    ...(certificate.qualityEvidence
+      ? {
+          qualityEvidence: {
+            bindingFingerprint: certificate.qualityEvidence.bindingFingerprint,
+            qualityEvidenceFingerprint: certificate.qualityEvidence.qualityEvidenceFingerprint,
+            evidenceCoverage: certificate.qualityEvidence.evidenceCoverage as FinalMasterQualityEvidenceCoverage,
+            ...(certificate.qualityEvidence.storyMeasurementCoverage === undefined
+              ? {}
+              : {
+                  storyMeasurementCoverage:
+                    certificate.qualityEvidence.storyMeasurementCoverage as FinalMasterStoryMeasurementCoverage,
+                }),
+          },
+        }
+      : {}),
   });
 }
 
@@ -507,6 +1118,8 @@ export function assertReleaseCertificateVisualReviewBindings(args: {
     source: z.object({ sha256 }).passthrough(),
     manifestKey: objectKey,
     frames: z.array(z.object({
+      id: z.string().trim().min(1).max(240).optional(),
+      tSec: finite.nonnegative().optional(),
       r2Key: objectKey.optional(),
       contentSha256: sha256.optional(),
       byteLength: z.number().int().positive().optional(),
@@ -519,7 +1132,13 @@ export function assertReleaseCertificateVisualReviewBindings(args: {
     if (!frame.r2Key || !frame.contentSha256 || frame.byteLength === undefined) {
       throw new Error("final-master release certificate visual-review evidence manifest lacks byte-bound frame evidence");
     }
+    const needsDurableReviewWitness = Boolean(certificate.viewerPromiseProgression);
+    if (needsDurableReviewWitness && (frame.id === undefined || frame.tSec === undefined)) {
+      throw new Error("viewer-promise progression certificate requires full visual-review frame witnesses in its evidence manifest");
+    }
     return {
+      ...(frame.id === undefined ? {} : { id: frame.id }),
+      ...(frame.tSec === undefined ? {} : { tSec: frame.tSec }),
       r2Key: frame.r2Key,
       contentSha256: frame.contentSha256,
       byteLength: frame.byteLength,
@@ -560,25 +1179,97 @@ export function assertReleaseCertificateVisualReviewBindings(args: {
       },
     });
   }
+  if (certificate.referenceQualityMechanics) {
+    assertReferenceQualityMechanicsVisualReceiptBinding({
+      ledger: certificate.referenceQualityMechanics,
+      visualRelease: receipt,
+    });
+  }
 }
 
 export type FinalMasterReleaseEvidenceObjectReader = (key: string) => Promise<Uint8Array>;
+/** Streaming storage reader for a release master; never buffers a full video. */
+export type FinalMasterReleaseEvidenceObjectIntegrityReader = (key: string) => Promise<{
+  sha256: string;
+  byteLength: number;
+}>;
+/** Cheap availability/size fence for the local upload verifier; never hashes remote bytes. */
+export type FinalMasterReleaseEvidenceObjectHeadReader = (key: string) => Promise<{
+  contentLength?: number;
+} | null>;
+
+type FinalMasterObjectIntegrity = Awaited<ReturnType<FinalMasterReleaseEvidenceObjectIntegrityReader>>;
+
+function assertFinalMasterIntegrityMatchesReceipt(args: {
+  actual: FinalMasterObjectIntegrity;
+  expected: ReturnType<typeof requireFinalMasterByteReceipt>;
+  subject: string;
+}): void {
+  if (
+    !Number.isSafeInteger(args.actual.byteLength) ||
+    args.actual.byteLength < 1 ||
+    !sha256.safeParse(args.actual.sha256).success
+  ) {
+    throw new Error(`${args.subject} returned invalid byte integrity`);
+  }
+  if (
+    args.actual.byteLength !== args.expected.byteLength ||
+    args.actual.sha256.toLowerCase() !== args.expected.sha256.toLowerCase()
+  ) {
+    throw new Error(`${args.subject} bytes do not match receipt (${args.expected.r2Key})`);
+  }
+}
 
 /**
- * Re-read immutable review artifacts before an external release or destructive
- * cleanup. The certificate/receipt bind every object address; frame receipts
- * additionally bind exact image bytes, so missing or overwritten evidence
- * cannot masquerade as what the reviewer actually saw.
+ * Hash the exact local file that will immediately be supplied to an external
+ * upload connector. This intentionally accepts a pathname rather than a
+ * caller-supplied digest: a release verifier must not expose a generic
+ * arbitrary-integrity bypass for durable R2 evidence.
  */
-export async function verifyFinalMasterReleaseEvidenceObjects(args: {
+async function localUploadMasterIntegrity(filePath: string): Promise<FinalMasterObjectIntegrity> {
+  const hash = createHash("sha256");
+  let byteLength = 0;
+  try {
+    for await (const chunk of createReadStream(filePath)) {
+      const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+      hash.update(bytes);
+      byteLength += bytes.byteLength;
+    }
+  } catch (error) {
+    throw new Error(
+      `local final-master upload source is unavailable (${filePath}): ` +
+        `${error instanceof Error ? error.message : error}`,
+    );
+  }
+  if (!Number.isSafeInteger(byteLength) || byteLength < 1) {
+    throw new Error(`local final-master upload source has an invalid byte length (${filePath})`);
+  }
+  return { sha256: hash.digest("hex"), byteLength };
+}
+
+async function verifyFinalMasterReleaseEvidenceWithIntegrity(args: {
   certificate: FinalMasterReleaseCertificate;
   getObjectBytes: FinalMasterReleaseEvidenceObjectReader;
+  getFinalMasterIntegrity: (
+    finalMaster: ReturnType<typeof requireFinalMasterByteReceipt>,
+  ) => Promise<FinalMasterObjectIntegrity>;
+  finalMasterSubject: string;
 }): Promise<void> {
   const certificate = assertFinalMasterReleaseCertificate(args.certificate);
-  const [receiptBytes, evidenceManifestBytes] = await Promise.all([
+  const finalMaster = requireFinalMasterByteReceipt(
+    certificate.finalMaster,
+    "final-master release certificate",
+  );
+  const [actualMaster, receiptBytes, evidenceManifestBytes] = await Promise.all([
+    args.getFinalMasterIntegrity(finalMaster),
     args.getObjectBytes(certificate.visualReview.receiptKey),
     args.getObjectBytes(certificate.visualReview.evidenceManifestKey),
   ]);
+  assertFinalMasterIntegrityMatchesReceipt({
+    actual: actualMaster,
+    expected: finalMaster,
+    subject: args.finalMasterSubject,
+  });
   let evidenceManifest: unknown;
   try {
     evidenceManifest = JSON.parse(Buffer.from(evidenceManifestBytes).toString("utf8"));
@@ -590,6 +1281,53 @@ export async function verifyFinalMasterReleaseEvidenceObjects(args: {
     receipt: parseVisualReviewReleaseReceiptBytes(receiptBytes),
     evidenceManifest,
   });
+  if (certificate.narratedStoryCoverage) {
+    const narrationEvidence = certificate.audio?.finalMasterNarration;
+    const cueTiming = certificate.audio?.cueTiming;
+    if (!narrationEvidence || !cueTiming) {
+      throw new Error(
+        "final-master narrated-story coverage lacks narration-semantic or cue-timing evidence",
+      );
+    }
+    let narrationAuditBytes: Uint8Array;
+    let coverageAuditBytes: Uint8Array;
+    try {
+      [narrationAuditBytes, coverageAuditBytes] = await Promise.all([
+        args.getObjectBytes(narrationEvidence.auditArtifact.r2Key),
+        args.getObjectBytes(certificate.narratedStoryCoverage.auditArtifact.r2Key),
+      ]);
+    } catch (error) {
+      throw new Error(
+        "final-master narrated-story coverage audit is unavailable: " +
+          `${error instanceof Error ? error.message : error}`,
+      );
+    }
+    assertFinalMasterNarratedStoryCoverageReceiptBinding({
+      receipt: certificate.narratedStoryCoverage,
+      finalMasterNarration: narrationEvidence,
+      narrationAudit: parseFinalMasterNarrationTranscriptAuditBytes(narrationAuditBytes),
+      narrationCueTiming: cueTiming,
+      coverageAudit: parseFinalMasterNarratedStoryCoverageAuditBytes(coverageAuditBytes),
+    });
+  }
+  if (certificate.packageToOpening) {
+    let thumbnailBytes: Uint8Array;
+    try {
+      thumbnailBytes = await args.getObjectBytes(certificate.packageToOpening.thumbnail.r2Key);
+    } catch (error) {
+      throw new Error(
+        `package-to-opening thumbnail is unavailable (${certificate.packageToOpening.thumbnail.r2Key}): ` +
+          `${error instanceof Error ? error.message : error}`,
+      );
+    }
+    const actualThumbnailSha256 = createHash("sha256").update(thumbnailBytes).digest("hex");
+    if (
+      thumbnailBytes.byteLength !== certificate.packageToOpening.thumbnail.byteLength ||
+      actualThumbnailSha256 !== certificate.packageToOpening.thumbnail.sha256
+    ) {
+      throw new Error("package-to-opening thumbnail bytes do not match the sealed receipt");
+    }
+  }
   if (certificate.referenceQuality?.version === REFERENCE_QUALITY_EVIDENCE_BRIDGE_V2_VERSION) {
     const narrationEvidence = certificate.audio?.finalMasterNarration;
     if (!narrationEvidence) {
@@ -606,6 +1344,21 @@ export async function verifyFinalMasterReleaseEvidenceObjects(args: {
     assertFinalMasterNarrationTranscriptAuditBinding({
       evidence: narrationEvidence,
       audit: parseFinalMasterNarrationTranscriptAuditBytes(narrationAuditBytes),
+    });
+  }
+  if (certificate.thirdPartyStockEvidence) {
+    let stockEvidenceBytes: Uint8Array;
+    try {
+      stockEvidenceBytes = await args.getObjectBytes(certificate.thirdPartyStockEvidence.manifestKey);
+    } catch (error) {
+      throw new Error(
+        `third-party stock release evidence is unavailable (${certificate.thirdPartyStockEvidence.manifestKey}): ` +
+          `${error instanceof Error ? error.message : error}`,
+      );
+    }
+    assertThirdPartyStockEvidenceReferenceBinding({
+      reference: certificate.thirdPartyStockEvidence,
+      manifest: parseThirdPartyStockEvidenceManifestBytes(stockEvidenceBytes),
     });
   }
   const frameArtifacts = requireEvidenceFrameArtifacts({
@@ -632,4 +1385,66 @@ export async function verifyFinalMasterReleaseEvidenceObjects(args: {
       }
     }));
   }
+}
+
+/**
+ * Re-read immutable review artifacts before an external release or destructive
+ * cleanup. The certificate/receipt bind every object address; frame receipts
+ * additionally bind exact image bytes, so missing or overwritten evidence
+ * cannot masquerade as what the reviewer actually saw.
+ */
+export async function verifyFinalMasterReleaseEvidenceObjects(args: {
+  certificate: FinalMasterReleaseCertificate;
+  getObjectBytes: FinalMasterReleaseEvidenceObjectReader;
+  getObjectIntegrity: FinalMasterReleaseEvidenceObjectIntegrityReader;
+}): Promise<void> {
+  await verifyFinalMasterReleaseEvidenceWithIntegrity({
+    certificate: args.certificate,
+    getObjectBytes: args.getObjectBytes,
+    getFinalMasterIntegrity: async (finalMaster) => {
+      try {
+        return await args.getObjectIntegrity(finalMaster.r2Key);
+      } catch (error) {
+        throw new Error(
+          `final-master release object is unavailable (${finalMaster.r2Key}): ` +
+            `${error instanceof Error ? error.message : error}`,
+        );
+      }
+    },
+    finalMasterSubject: "final-master release object",
+  });
+}
+
+/**
+ * Upload-only release verification. The caller supplies the actual local file
+ * that will immediately be sent to the connector; this verifier streams and
+ * hashes that file itself, checks the durable R2 object's existence and byte
+ * length without downloading it, then still re-reads every durable receipt and
+ * review-evidence frame. QA, cleanup, and all other callers must use the
+ * remote-object verifier above.
+ */
+export async function verifyFinalMasterReleaseEvidenceForLocalUpload(args: {
+  certificate: FinalMasterReleaseCertificate;
+  filePath: string;
+  getObjectBytes: FinalMasterReleaseEvidenceObjectReader;
+  headObjectMetadata: FinalMasterReleaseEvidenceObjectHeadReader;
+}): Promise<void> {
+  await verifyFinalMasterReleaseEvidenceWithIntegrity({
+    certificate: args.certificate,
+    getObjectBytes: args.getObjectBytes,
+    getFinalMasterIntegrity: async (finalMaster) => {
+      const [localIntegrity, durableMaster] = await Promise.all([
+        localUploadMasterIntegrity(args.filePath),
+        args.headObjectMetadata(finalMaster.r2Key),
+      ]);
+      if (!durableMaster) {
+        throw new Error(`final-master release object is unavailable (${finalMaster.r2Key})`);
+      }
+      if (durableMaster.contentLength !== finalMaster.byteLength) {
+        throw new Error(`final-master release object byte length does not match receipt (${finalMaster.r2Key})`);
+      }
+      return localIntegrity;
+    },
+    finalMasterSubject: "local final-master upload source",
+  });
 }

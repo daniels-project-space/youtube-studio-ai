@@ -33,6 +33,8 @@ export interface CrewContext {
   dnaAudio?: string;
   /** Resolved per-channel role controls; must influence the actual brief. */
   roleDirectives?: string;
+  /** Bounded, immutable serial-episode continuity (when the route owns one). */
+  serializedEpisodeContext?: string;
   log?: Logger;
 }
 
@@ -47,6 +49,7 @@ function header(bible: ShowBible, ctx: CrewContext): string {
     ctx.dnaDigest ?? "",
     ctx.roleDirectives ? `Operator role directives: ${ctx.roleDirectives}` : "",
     `Video topic: "${ctx.topic}".`,
+    ctx.serializedEpisodeContext ?? "",
     ctx.targetSeconds ? `Target length: ~${Math.round(ctx.targetSeconds / 60)} min.` : "",
   ].filter(Boolean).join("\n");
 }

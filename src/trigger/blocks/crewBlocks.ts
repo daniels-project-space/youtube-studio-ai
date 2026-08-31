@@ -36,6 +36,8 @@ import {
   briefCritic,
   type CrewContext,
 } from "@/engine/creative/crew";
+import { renderSerializedProgramEpisodeContextForPrompt } from "@/lib/serializedProgramEpisodeContext";
+import { serializedProgramEpisodeContextForStage } from "@/trigger/serializedProgramEpisodeContext";
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -199,12 +201,12 @@ function crewProfileFor(ctx: StageContext, g: ChannelGrounding): ChannelProfile 
 /**
  * Calls resolveCrew — the catalog's documented "no silent gaps" resolver
  * (golden.ts's show-bible engine) — against this channel's REAL crew config
- * (moduleConfig['show-bible'], read straight off the channel row via
- * crewProfileFor, bypassing runPipeline's per-block merge entirely: "show-bible"
- * is never itself a literal pipeline block id, so that merge never touches it)
- * and the bible this block is about to brief from. Non-fatal: any resolution
- * failure (malformed moduleConfig, etc.) is logged and returns null so callers
- * degrade to today's per-role-only defaults — never blocks a brief.
+ * (moduleConfig['show-bible'], read from the invocation's frozen effective
+ * config via crewProfileFor). New invocations validate this virtual module
+ * before any provider is admitted. A historical frozen invocation carrying an
+ * invalid explicit Show-Bible config must also fail closed rather than quietly
+ * degrading to generic crew defaults. A channel with no crew configuration at
+ * all still keeps the intentional doctrine-only fallback below.
  *
  * Called ONCE per block run and threaded to two consumers:
  *  1. logCrewDoctrineGap (below) — the typed per-role "active but no authored
@@ -225,8 +227,13 @@ function resolveChannelCrew(
   try {
     return resolveCrew(crewProfileFor(ctx, g), bible);
   } catch (e) {
+    if (g.moduleConfig?.["show-bible"] !== undefined) {
+      throw new Error(
+        `invalid frozen show-bible configuration: ${e instanceof Error ? e.message : String(e)}`,
+      );
+    }
     ctx.log(
-      `resolveCrew check failed (non-fatal, brief still proceeds): ${e instanceof Error ? e.message : e}`,
+      `resolveCrew unavailable without saved Show-Bible configuration (brief proceeds with role-local defaults): ${e instanceof Error ? e.message : e}`,
     );
     return null;
   }
@@ -317,6 +324,7 @@ function crewCtx(
   g: ChannelGrounding,
   roleDirectives?: unknown,
 ): CrewContext {
+  const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "crew");
   return {
     topic: topicOf(ctx),
     family: (ctx.params["family"] as string | undefined) ?? "narrated_stock",
@@ -326,6 +334,9 @@ function crewCtx(
     dnaDigest: dnaDigest(g.dna),
     dnaAudio: dnaAudioDigest(g.dna),
     roleDirectives: roleDirectives ? JSON.stringify(roleDirectives) : undefined,
+    serializedEpisodeContext: serializedEpisodeContext
+      ? renderSerializedProgramEpisodeContextForPrompt(serializedEpisodeContext)
+      : undefined,
     log: ctx.log,
   };
 }

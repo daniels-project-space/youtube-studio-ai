@@ -38,6 +38,23 @@ async function main(): Promise<void> {
         providers: ["openrouter"],
       });
     }
+    await assert.rejects(
+      () => visionUrls({
+        prompt: "final-review-cannot-bypass-batch-envelope",
+        imageUrls: [
+          "https://images.test/router.jpg",
+          "https://images.test/router.jpg",
+          "https://images.test/router.jpg",
+        ],
+        json: true,
+        noCache: true,
+        tier: "final",
+        providers: ["openrouter"],
+      }),
+      /at most 2/,
+      "direct final-tier review calls must use the same two-image operational envelope as reviewRender",
+    );
+    assert.equal(requests.length, 3, "oversized final review rejects before image fetch/provider work");
     assert.deepEqual(requests.map((request) => request.model), [
       "mistralai/ministral-3b-2512",
       "mistralai/ministral-8b-2512",
@@ -49,6 +66,11 @@ async function main(): Promise<void> {
       assert.equal(provider.data_collection, "deny");
       assert.ok(Array.isArray(provider.only) && provider.only.length === 1);
     }
+    assert.deepEqual(
+      (requests[2]?.provider as { only?: unknown }).only,
+      ["coreweave"],
+      "final visual review stays on its explicit, currently supported non-Google host",
+    );
   } finally {
     global.fetch = originalFetch;
     if (saved.key === undefined) delete process.env.OPENROUTER_API_KEY;

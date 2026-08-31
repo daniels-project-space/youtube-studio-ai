@@ -16,6 +16,11 @@
  *   videvo  VIDEVO_API_KEY   (partner; VIDEVO_API_BASE overridable)
  */
 
+import {
+  approvedThirdPartyStockSource,
+  type ThirdPartyStockSource,
+} from "@/lib/thirdPartyStockEvidence";
+
 export interface FootageClip {
   url: string;
   width: number;
@@ -24,6 +29,12 @@ export interface FootageClip {
   query: string;
   /** Which provider supplied it (logging + per-provider dedup namespacing). */
   provider: string;
+  /**
+   * Stable provider identity plus a reviewed official-license snapshot. It is
+   * absent only for providers which are deliberately ineligible for a
+   * release-bound narrated-stock run.
+   */
+  thirdPartyStock?: ThirdPartyStockSource;
 }
 
 export function hasPexelsKey(): boolean {
@@ -32,12 +43,14 @@ export function hasPexelsKey(): boolean {
 
 /** True when ANY footage provider is configured. */
 export function hasAnyFootageProvider(): boolean {
-  return PROVIDERS.some((p) => p.hasKey());
+  return PROVIDERS.some((p) => p.hasKey() && p.rightsProven);
 }
 
 /** Names of the providers that will actually be queried now (4K-only aware). */
 export function activeProviders(): string[] {
-  return PROVIDERS.filter((p) => p.hasKey() && (!fourKOnly() || p.serves4k !== false)).map((p) => p.name);
+  return PROVIDERS
+    .filter((p) => p.hasKey() && p.rightsProven && (!fourKOnly() || p.serves4k !== false))
+    .map((p) => p.name);
 }
 
 /** A clip counts as 4K when its long edge is UHD/DCI (≈3840+). */
@@ -99,6 +112,8 @@ type Orientation = "landscape" | "portrait";
 interface Provider {
   name: string;
   hasKey: () => boolean;
+  /** A release-bound stock adapter must provide stable IDs and official terms. */
+  rightsProven: boolean;
   /** False = the provider's FREE tier serves no 4K, so it's skipped under
    *  4K-only (don't burn its rate limit on clips that get filtered out). */
   serves4k?: boolean;
@@ -108,7 +123,14 @@ interface Provider {
 /* ------------------------------- Pexels -------------------------------- */
 
 interface PexelsFile { link: string; quality?: string; width?: number; height?: number; file_type?: string }
-interface PexelsVideo { duration?: number; width?: number; height?: number; video_files?: PexelsFile[] }
+interface PexelsVideo {
+  id?: string | number;
+  url?: string;
+  duration?: number;
+  width?: number;
+  height?: number;
+  video_files?: PexelsFile[];
+}
 
 /** Largest mp4 not wider than `maxW` (UHD allowed — the canvas downscales). */
 function bestPexelsFile(v: PexelsVideo, maxW: number): PexelsFile | null {
@@ -121,11 +143,12 @@ function bestPexelsFile(v: PexelsVideo, maxW: number): PexelsFile | null {
 const pexels: Provider = {
   name: "pexels",
   hasKey: () => Boolean(process.env.PEXELS_API_KEY),
+  rightsProven: true,
   async search(query, count, orientation) {
     const key = process.env.PEXELS_API_KEY!;
     // size=large biases to higher-res results; bestPexelsFile then pulls UHD.
     const url =
-      `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}` +
+      `https://api.pexels.com/v1/videos/search?query=${encodeURIComponent(query)}` +
       `&per_page=${Math.max(1, Math.min(count, 15))}&orientation=${orientation}&size=large`;
     const json = await getJson<{ videos?: PexelsVideo[] }>(url, { headers: { Authorization: key } }, "pexels");
     if (!json) return [];
@@ -133,8 +156,20 @@ const pexels: Provider = {
     const out: FootageClip[] = [];
     for (const v of json.videos ?? []) {
       const f = bestPexelsFile(v, maxW);
-      if (!f) continue;
-      out.push({ url: f.link, width: f.width ?? v.width ?? 0, height: f.height ?? v.height ?? 0, durationSec: v.duration ?? 0, query, provider: "pexels" });
+      if (!f || v.id === undefined || !v.url) continue;
+      out.push({
+        url: f.link,
+        width: f.width ?? v.width ?? 0,
+        height: f.height ?? v.height ?? 0,
+        durationSec: v.duration ?? 0,
+        query,
+        provider: "pexels",
+        thirdPartyStock: approvedThirdPartyStockSource({
+          provider: "pexels",
+          assetId: v.id,
+          assetUrl: v.url,
+        }),
+      });
     }
     return out;
   },
@@ -143,11 +178,17 @@ const pexels: Provider = {
 /* ------------------------------- Pixabay ------------------------------- */
 
 interface PixabayFile { url?: string; width?: number; height?: number; size?: number }
-interface PixabayHit { duration?: number; videos?: Record<string, PixabayFile> }
+interface PixabayHit {
+  id?: string | number;
+  pageURL?: string;
+  duration?: number;
+  videos?: Record<string, PixabayFile>;
+}
 
 const pixabay: Provider = {
   name: "pixabay",
   hasKey: () => Boolean(process.env.PIXABAY_API_KEY),
+  rightsProven: true,
   async search(query, count, orientation) {
     const key = process.env.PIXABAY_API_KEY!;
     const url =
@@ -162,8 +203,20 @@ const pixabay: Provider = {
       const files = Object.values(h.videos ?? {}).filter((f): f is PixabayFile => Boolean(f?.url && f.width && f.height));
       const oriented = files.filter((f) => (orientation === "portrait" ? f.height! >= f.width! : f.width! >= f.height!));
       const best = (oriented.length ? oriented : files).sort((a, b) => (b.width ?? 0) - (a.width ?? 0))[0];
-      if (!best?.url) continue;
-      out.push({ url: best.url, width: best.width ?? 0, height: best.height ?? 0, durationSec: h.duration ?? 0, query, provider: "pixabay" });
+      if (!best?.url || h.id === undefined || !h.pageURL) continue;
+      out.push({
+        url: best.url,
+        width: best.width ?? 0,
+        height: best.height ?? 0,
+        durationSec: h.duration ?? 0,
+        query,
+        provider: "pixabay",
+        thirdPartyStock: approvedThirdPartyStockSource({
+          provider: "pixabay",
+          assetId: h.id,
+          assetUrl: h.pageURL,
+        }),
+      });
     }
     return out;
   },
@@ -182,6 +235,11 @@ interface VidevoClip { id?: string | number; download_url?: string; mp4_url?: st
 const videvo: Provider = {
   name: "videvo",
   hasKey: () => Boolean(process.env.VIDEVO_API_KEY),
+  // Videvo's official terms make license/usage/attribution per-clip. The
+  // partner response currently exposes no such fields, so a stable id + CDN
+  // URL cannot honestly produce release evidence. Keep the adapter dormant
+  // until its contracted response includes the per-asset license record.
+  rightsProven: false,
   async search(query, count, orientation) {
     const key = process.env.VIDEVO_API_KEY!;
     const base = (process.env.VIDEVO_API_BASE ?? "https://api.videvo.net/v1").replace(/\/$/, "");
@@ -221,7 +279,7 @@ export async function searchFootageLegacy(
 ): Promise<FootageClip[]> {
   if (!process.env.PEXELS_API_KEY) return [];
   const url =
-    `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}` +
+    `https://api.pexels.com/v1/videos/search?query=${encodeURIComponent(query)}` +
     `&per_page=${Math.max(1, Math.min(count, 10))}&orientation=${orientation}&size=medium`;
   const json = await getJson<{ videos?: PexelsVideo[] }>(url, { headers: { Authorization: process.env.PEXELS_API_KEY! } }, "pexels(legacy)");
   if (!json) return [];
@@ -229,8 +287,20 @@ export async function searchFootageLegacy(
   const out: FootageClip[] = [];
   for (const v of json.videos ?? []) {
     const f = bestPexelsFile(v, maxW);
-    if (!f) continue;
-    out.push({ url: f.link, width: f.width ?? v.width ?? 0, height: f.height ?? v.height ?? 0, durationSec: v.duration ?? 0, query, provider: "pexels(legacy)" });
+    if (!f || v.id === undefined || !v.url) continue;
+    out.push({
+      url: f.link,
+      width: f.width ?? v.width ?? 0,
+      height: f.height ?? v.height ?? 0,
+      durationSec: v.duration ?? 0,
+      query,
+      provider: "pexels(legacy)",
+      thirdPartyStock: approvedThirdPartyStockSource({
+        provider: "pexels",
+        assetId: v.id,
+        assetUrl: v.url,
+      }),
+    });
   }
   return out;
 }
@@ -248,7 +318,7 @@ export async function searchFootage(
 ): Promise<FootageClip[]> {
   // Under 4K-only (default) skip providers whose free tier serves no 4K, so we
   // never spend their rate limit on clips the 4K filter would drop anyway.
-  const active = PROVIDERS.filter((p) => p.hasKey() && (!fourKOnly() || p.serves4k !== false));
+  const active = PROVIDERS.filter((p) => p.hasKey() && p.rightsProven && (!fourKOnly() || p.serves4k !== false));
   if (active.length === 0) throw new Error("searchFootage: no footage provider configured (need at least PEXELS_API_KEY)");
   const results = await Promise.all(
     active.map((p) =>

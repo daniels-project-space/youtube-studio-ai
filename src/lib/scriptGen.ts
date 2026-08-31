@@ -8,6 +8,7 @@ import { claudeJson, claudeJsonPro, scriptProModel, hasAnthropicKey } from "@/li
 import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 import { craftHook, type CraftedHook } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
+import type { ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
 
 export interface ScriptSection {
   heading: string;
@@ -95,6 +96,15 @@ export interface Script {
   hookLoop?: string;
   /** The gated CraftedHook used — pass back via req.precraftedHook on regen. */
   crafted?: CraftedHook;
+  /** Fingerprint of the frozen channel program route that authored this script. */
+  programRouteFingerprint?: string;
+  /**
+   * Exact immutable serialized-episode receipt that authored this script.
+   * Its content address binds the frozen route seed, run, identity, episode,
+   * topic, and topic-memory key, so render-group reuse cannot cross episodes
+   * merely because the broader program route is the same.
+   */
+  serializedProgramEpisodeContextFingerprint?: string;
 }
 
 export interface ScriptRequest {
@@ -146,6 +156,10 @@ export interface ScriptRequest {
   sourceAttributionRequired?: boolean;
   /** Reviewed source/numeric-claim ledger injected by the data-story admission path. */
   sourceGrounding?: string;
+  /** Compact immutable receipt for the current serialized-program episode. */
+  serializedEpisodeContext?: string;
+  /** Content address for that same receipt; persisted on the resulting Script. */
+  serializedProgramEpisodeContextFingerprint?: string;
   /**
    * Script Lab playbook (hook rules + opening devices distilled from WATCHING
    * the niche's top-view videos). One opening device is assigned per video.
@@ -154,6 +168,8 @@ export interface ScriptRequest {
   openingDeviceIdx?: number;
   /** Episodic program context (Calm-style progressive curriculum). */
   series?: SeriesContext;
+  /** Immutable route directive set from the frozen pipeline invocation. */
+  programRoute?: ChannelProgramRouteRunSeed;
 }
 
 /** Per-request sanitize that PRESERVES audio tags on v3-voiced channels. */
@@ -195,6 +211,43 @@ function voiceTagClause(req: ScriptRequest): string {
 /** Full playbook guidance (hook + assigned device + retention + voice). */
 function playbookFull(req: ScriptRequest): string {
   return req.playbook ? scriptPlaybookDigest(req.playbook, req.openingDeviceIdx ?? 0) : "";
+}
+
+/**
+ * The run seed is the only source of recurring episode grammar. It is carried
+ * through every generation branch so a continuation, long-form fallback, or
+ * translated render cannot quietly revert to generic channel prose.
+ */
+function programRouteClause(req: Pick<ScriptRequest, "programRoute">): string {
+  const route = req.programRoute;
+  if (!route) return "";
+  return [
+    `SEALED CHANNEL PROGRAM ROUTE: ${route.routeKey} (${route.routeFingerprint}).`,
+    `VIEWER JOB: ${route.directives.viewerJob}`,
+    `CLAIM MODE: ${route.directives.claimMode}.`,
+    "SCRIPT RULES (non-negotiable):",
+    ...route.directives.scriptRules.map((rule) => `- ${rule}`),
+    "CRITIC FOCUS (write so these can be proved):",
+    ...route.directives.criticFocus.map((focus) => `- ${focus}`),
+  ].join("\n");
+}
+
+function bindProgramRoute(req: ScriptRequest, script: Script): Script {
+  const serializedProgramEpisodeContextFingerprint = req.serializedProgramEpisodeContextFingerprint;
+  if (
+    serializedProgramEpisodeContextFingerprint !== undefined &&
+    !/^[a-f0-9]{64}$/.test(serializedProgramEpisodeContextFingerprint)
+  ) {
+    throw new Error("scriptGen: serialized episode context fingerprint is invalid");
+  }
+  if (!req.programRoute && !serializedProgramEpisodeContextFingerprint) return script;
+  return {
+    ...script,
+    ...(req.programRoute ? { programRouteFingerprint: req.programRoute.routeFingerprint } : {}),
+    ...(serializedProgramEpisodeContextFingerprint
+      ? { serializedProgramEpisodeContextFingerprint }
+      : {}),
+  };
 }
 
 /** The hookcraft cold open is LAW for the script writer — continue, never repeat. */
@@ -321,7 +374,10 @@ function styleGuidance(req: ScriptRequest): string {
   const sourceGrounding = req.sourceGrounding?.trim()
     ? `\n\n${req.sourceGrounding.trim()}`
     : "";
-  return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) + sourceGrounding;
+  const serializedEpisodeContext = req.serializedEpisodeContext?.trim()
+    ? `\n\n${req.serializedEpisodeContext.trim()}`
+    : "";
+  return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) + sourceGrounding + serializedEpisodeContext;
 }
 
 /**
@@ -396,6 +452,7 @@ async function synthFullScriptOneShot(
         req.channelName ? `Channel: ${req.channelName}.` : "",
         req.persona ? `Channel voice/persona: ${req.persona}` : "",
         req.niche ? `Niche: ${req.niche}.` : "",
+        programRouteClause(req),
         hookMandate(crafted),
         seriesClause(req.series),
         styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
@@ -431,6 +488,7 @@ async function synthFullScriptOneShot(
           temperature: 0.8,
           prompt: [
             `You are CONTINUING a long-form YouTube narration script about "${req.topic}".`,
+            programRouteClause(req),
             styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
             voiceTagClause(req),
             CRAFT_RULES,
@@ -508,6 +566,7 @@ async function synthLongScript(
           `Plan ${n} DISTINCT, non-repeating sections for a long narrated video about "${req.topic}".`,
           req.persona ? `Persona: ${req.persona}` : "",
           req.niche ? `Niche: ${req.niche}` : "",
+          programRouteClause(req),
           seriesClause(req.series),
           styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
           exclude.length
@@ -537,7 +596,7 @@ async function synthLongScript(
       prompt:
         `For a long video about "${req.topic}"${req.niche ? ` (${req.niche})` : ""}: write closing_line — ` +
         `THE QUOTE of the episode: one resonant, quotable line (<=12 words) that distills its lesson, shown ` +
-        `on the outro card as the takeaway. ${styleGuidance(req)}\n` +
+        `on the outro card as the takeaway. ${programRouteClause(req)}\n${styleGuidance(req)}\n` +
         `Return STRICT JSON {"closing_line":string}.`,
       maxTokens: 300,
       temperature: 0.85,
@@ -578,6 +637,7 @@ async function synthLongScript(
     // sent 10-75x per chunked long-form run.
     const sectionPrompt = [
       `You are writing ONE section of a long narrated video about "${req.topic}".`,
+      programRouteClause(req),
       styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
       playbookSlim(req),
       voiceTagClause(req),
@@ -621,6 +681,7 @@ async function synthLongScript(
       log,
       prompt: [
         `Write the CLOSING CONCLUSION (about 180-260 words, 2-3 short paragraphs) for a long narrated video about "${req.topic}".`,
+        programRouteClause(req),
         seriesClause(req.series),
         styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
         `This is the emotional landing of the whole video — it must feel deliberate, rounded, and SATISFYING, never like it just stops. Build it as a clear arc:`,
@@ -654,7 +715,12 @@ async function synthLongScript(
 }
 
 /** Translate one spoken passage; keep names/quotes intact. Degrades to original. */
-async function translateText(text: string, langName: string, log: Logger): Promise<string> {
+async function translateText(
+  text: string,
+  langName: string,
+  log: Logger,
+  programRoute?: ChannelProgramRouteRunSeed,
+): Promise<string> {
   const t = (text ?? "").trim();
   if (!t) return "";
   try {
@@ -662,6 +728,9 @@ async function translateText(text: string, langName: string, log: Logger): Promi
       prompt:
         `Translate this spoken narration into ${langName}. Keep proper names and direct quotes in their ` +
         `ORIGINAL form (do NOT translate names). Natural, fluent ${langName} suitable for voiceover. ` +
+        (programRoute
+          ? `Preserve this sealed recurring-program contract while translating:\n${programRouteClause({ programRoute })}\n\n`
+          : "") +
         `Return STRICT JSON {"translation":string}.\n\nTEXT:\n${t}`,
       maxTokens: 2200,
       temperature: 0.3,
@@ -683,7 +752,27 @@ export async function translateScript(
   script: Script,
   language: string | undefined,
   log: Logger = () => {},
+  programRoute?: ChannelProgramRouteRunSeed,
+  serializedProgramEpisodeContextFingerprint?: string,
 ): Promise<Script> {
+  if (
+    programRoute !== undefined &&
+    script.programRouteFingerprint !== programRoute.routeFingerprint
+  ) {
+    throw new Error("scriptGen: reused script does not match the frozen channel program route");
+  }
+  if (
+    serializedProgramEpisodeContextFingerprint !== undefined &&
+    script.serializedProgramEpisodeContextFingerprint !== serializedProgramEpisodeContextFingerprint
+  ) {
+    throw new Error("scriptGen: reused script does not match the immutable serialized episode context");
+  }
+  if (
+    serializedProgramEpisodeContextFingerprint === undefined &&
+    script.serializedProgramEpisodeContextFingerprint !== undefined
+  ) {
+    throw new Error("scriptGen: serialized-episode-bound reused script cannot run without its immutable context");
+  }
   if (!language || language === "en" || !hasAnthropicKey()) return script;
   const name = LANG_NAMES[language] ?? language;
   log(`scriptGen: translating ${script.sections.length}-section script → ${name}`);
@@ -717,6 +806,7 @@ export async function translateScript(
         `Translate these spoken-narration sections into ${name}. Keep proper names and direct quotes in their ` +
         `ORIGINAL form (do NOT translate names). Natural, fluent ${name} suitable for voiceover. Translate BOTH ` +
         `heading and narration of every section, keep the array order and length EXACTLY. ` +
+        (programRoute ? `Preserve this sealed recurring-program contract while translating:\n${programRouteClause({ programRoute })}\n\n` : "") +
         `Return STRICT JSON {"sections":[{"heading":string,"narration":string}]}.\n\n` +
         JSON.stringify({ sections: items.map((s) => ({ heading: s.heading, narration: s.narration })) }),
       maxTokens: 8000,
@@ -733,7 +823,7 @@ export async function translateScript(
   };
 
   const [hook, chunkResults, closingLine] = await Promise.all([
-    translateText(script.hook, name, log),
+    translateText(script.hook, name, log, programRoute),
     Promise.all(
       chunks.map(async (c) => {
         try {
@@ -742,18 +832,28 @@ export async function translateScript(
           log(`scriptGen: batch translate chunk failed (${e instanceof Error ? e.message : e}) — per-section fallback`);
           return Promise.all(
             c.items.map(async (s): Promise<ScriptSection> => ({
-              heading: await translateText(s.heading, name, log),
-              narration: await translateText(s.narration, name, log),
+              heading: await translateText(s.heading, name, log, programRoute),
+              narration: await translateText(s.narration, name, log, programRoute),
             })),
           );
         }
       }),
     ),
-    script.closingLine ? translateText(script.closingLine, name, log) : Promise.resolve(undefined),
+    script.closingLine ? translateText(script.closingLine, name, log, programRoute) : Promise.resolve(undefined),
   ]);
   const sections = chunkResults.flat();
   const narrationText = assemble(hook, sections);
-  return { hook, sections, narrationText, estDurationSec: estSeconds(narrationText), closingLine };
+  return {
+    hook,
+    sections,
+    narrationText,
+    estDurationSec: estSeconds(narrationText),
+    closingLine,
+    ...(script.programRouteFingerprint ? { programRouteFingerprint: script.programRouteFingerprint } : {}),
+    ...(script.serializedProgramEpisodeContextFingerprint
+      ? { serializedProgramEpisodeContextFingerprint: script.serializedProgramEpisodeContextFingerprint }
+      : {}),
+  };
 }
 
 export async function synthScript(
@@ -798,7 +898,7 @@ export async function synthScript(
 
   // Long-form (>~7 min) needs chunked generation — one call can't write it.
   if (maxSeconds > 420) {
-    return synthLongScript(req, crafted, maxSeconds, wordBudget, log);
+    return bindProgramRoute(req, await synthLongScript(req, crafted, maxSeconds, wordBudget, log));
   }
 
   // Director (crew) structure: beats respected in SHORT-form too (the hook
@@ -817,6 +917,7 @@ export async function synthScript(
     req.channelName ? `Channel: ${req.channelName}.` : "",
     req.persona ? `Channel voice/persona: ${req.persona}` : "",
     req.niche ? `Niche: ${req.niche}.` : "",
+    programRouteClause(req),
     hookMandate(crafted),
     seriesClause(req.series),
     styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
@@ -898,6 +999,7 @@ export async function synthScript(
         temperature: 0.8,
         prompt: [
           `You are CONTINUING a YouTube narration script about "${req.topic}".`,
+          programRouteClause(req),
           styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
           voiceTagClause(req),
           CRAFT_RULES,
@@ -943,5 +1045,5 @@ export async function synthScript(
     words: narrationText.split(/\s+/).length,
     estSec: script.estDurationSec,
   });
-  return script;
+  return bindProgramRoute(req, script);
 }

@@ -23,16 +23,15 @@ const SCRIPT_MODULE: ModuleCard = {
   stage: "script",
   does: "Writes the narration script in the chosen tone, to the spoken-length target.",
   customization: {
-    capabilities: ["tone presets", "length-budgeted word count", "optional summary close"],
+    capabilities: ["tone presets", "format-owned word budget", "optional summary close"],
     knobs: [
       { id: "style", type: "enum", values: ["essay", "crime", "shorts", "meditation", "generic"], default: "generic", describes: "narration tone / structure", servesStyles: ["documentary", "crime", "shorts", "meditation"] },
-      { id: "maxSeconds", type: "number", range: [30, 3600], default: 420, describes: "spoken-length target → word budget", servesStyles: ["platform"] },
       { id: "endWithSummary", type: "boolean", default: false, describes: "close with a concise recap section", servesStyles: ["explainer", "documentary"] },
     ],
     presets: {
       documentary: { style: "essay", endWithSummary: true },
       essay: { style: "essay" },
-      shorts: { style: "shorts", maxSeconds: 50 },
+      shorts: { style: "shorts" },
       meditation: { style: "meditation" },
     },
   },
@@ -125,11 +124,9 @@ const TOPIC_MODULE: ModuleCard = {
   stage: "topic",
   does: "Picks the next on-identity topic (or the next episode of a series), honoring the repeat policy.",
   customization: {
-    capabilities: ["fresh-vs-recycle repeat policy", "ordered numbered series"],
+    capabilities: ["fresh-vs-recycle repeat policy", "route-sealed episode order"],
     knobs: [
       { id: "policy", type: "enum", values: ["prefer_fresh", "no_repeat"], default: "prefer_fresh", describes: "repeat behavior when the topic pool is exhausted", servesStyles: ["evergreen", "series"] },
-      { id: "seriesTitle", type: "text", maxLength: 120, default: "", describes: "run an ordered numbered series under this title (blank = standalone)", servesStyles: ["series"] },
-      { id: "seriesCount", type: "number", range: [0, 100], default: 0, describes: "episodes in the series (0 = open-ended)", servesStyles: ["series"] },
     ],
     presets: {},
   },
@@ -172,11 +169,8 @@ const LENGTH_MODULE: ModuleCard = {
   stage: "verify",
   does: "Gates the final video to an acceptable duration band.",
   customization: {
-    capabilities: ["min/max duration gate"],
-    knobs: [
-      { id: "minSeconds", type: "number", range: [0, 3600], default: 180, describes: "minimum acceptable video length", servesStyles: ["platform"] },
-      { id: "maxSeconds", type: "number", range: [0, 5400], default: 1800, describes: "maximum acceptable video length", servesStyles: ["platform"] },
-    ],
+    capabilities: ["channel-format duration gate"],
+    knobs: [],
     presets: {},
   },
 };
@@ -230,9 +224,8 @@ const LOOP_ASSEMBLE_MODULE: ModuleCard = {
   stage: "build",
   does: "Loops the clip to the full runtime with a deblur intro.",
   customization: {
-    capabilities: ["runtime length", "deblur intro"],
+    capabilities: ["channel-format runtime", "deblur intro"],
     knobs: [
-      { id: "durationSec", type: "number", range: [30, 36000], default: 600, describes: "total runtime the loop is extended to", servesStyles: ["lofi", "ambient"] },
       { id: "deblurIntro", type: "boolean", default: true, describes: "open on a focus-pull from blur with the title", servesStyles: ["lofi"] },
     ],
     presets: {},
@@ -257,25 +250,22 @@ const VISUAL_MATTER_MODULE: ModuleCard = {
   key: "visual_matter",
   title: "Visual Matter",
   stage: "visual development",
-  does: "Builds a channel-and-topic-specific mood board, character and setting sheets, plus per-shot storyboard locks. fal.ai Nano Banana 2 references are an explicit paid option; the visual lock itself feeds cinematic rendering and QA.",
+  does: "Builds a channel-and-topic-specific mood board, character and setting sheets, plus per-shot storyboard locks. Planning is provider-free; an explicit server-admitted direct-Novita text-to-image pack may create byte-bound QA comparison assets, never keyframe image conditioning.",
   customization: {
     capabilities: [
       "topic-specific mood direction",
       "character and setting continuity sheets",
       "per-shot storyboard and visual QA locks",
-      "optional fal.ai Nano Banana 2 reference assets",
+      "typed provider-free visual handoff",
     ],
     knobs: [
       { id: "enabled", type: "boolean", default: true, describes: "apply the Visual Matter contract to cinematic renders", servesStyles: ["cinematic", "story"] },
       { id: "maxCharacters", type: "number", range: [0, 6], default: 3, describes: "maximum character sheets planned from the story continuity ledger", servesStyles: ["character", "comic", "cinematic"] },
       { id: "maxSettings", type: "number", range: [0, 6], default: 3, describes: "maximum setting sheets planned from the channel world", servesStyles: ["worldbuilding", "cinematic"] },
-      { id: "renderReferenceAssets", type: "boolean", default: false, describes: "explicitly spend on fal.ai Nano Banana 2 mood/character/setting/storyboard reference images", servesStyles: ["reference", "cinematic"] },
-      { id: "maxReferenceImages", type: "number", range: [1, 12], default: 8, describes: "hard cap for the paid fal.ai Nano Banana 2 reference pack", servesStyles: ["reference", "budget"] },
     ],
     presets: {
-      planning_only: { enabled: true, renderReferenceAssets: false, maxCharacters: 3, maxSettings: 3 },
-      reference_pack: { enabled: true, renderReferenceAssets: true, maxCharacters: 3, maxSettings: 3, maxReferenceImages: 8 },
-      world_only: { enabled: true, renderReferenceAssets: false, maxCharacters: 0, maxSettings: 3 },
+      planning_only: { enabled: true, maxCharacters: 3, maxSettings: 3 },
+      world_only: { enabled: true, maxCharacters: 0, maxSettings: 3 },
     },
   },
 };

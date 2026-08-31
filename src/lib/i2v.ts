@@ -8,7 +8,8 @@
  */
 import { createHash } from "node:crypto";
 import { renderNovitaI2V, type NovitaRenderLifecycle } from "@/lib/novitaMedia";
-import type { LtxCreativeAdapterSelection } from "@/lib/ltxCreativeAdapter";
+import type { LtxCreativeAdapterInput } from "@/lib/ltxCreativeAdapter";
+import type { CameraMove, ShotScale } from "@/lib/novitaRenderFarm";
 
 export interface I2VRequest {
   prompt: string;
@@ -22,6 +23,15 @@ export interface I2VRequest {
   durationSec?: number;
   aspectRatio?: string;
   negativePrompt?: string;
+  /** Independent action/particle direction for the I2V contract. */
+  motionPrompt?: string;
+  cameraMove?: CameraMove;
+  /** Concrete source-grounded camera path, preserving real depth/parallax. */
+  cameraInstruction?: string;
+  shotScale?: ShotScale;
+  lens?: string;
+  /** Optional LTX visual-treatment preset; defaults are resolved by the sealed I2V contract. */
+  styleId?: string;
   model?: string;
   provider?: string;
   runId?: string;
@@ -30,7 +40,7 @@ export interface I2VRequest {
   maxCostUsd: number;
   lifecycle?: NovitaRenderLifecycle;
   /** Optional exact-base/benchmarked LTX adapter for this I2V shot. */
-  creativeAdapter?: LtxCreativeAdapterSelection;
+  creativeAdapter?: LtxCreativeAdapterInput;
   log?: (message: string) => void;
 }
 
@@ -79,6 +89,12 @@ export async function generateI2V(req: I2VRequest): Promise<I2VResult> {
     endImageUrl,
     durationSec: req.durationSec,
     negativePrompt: req.negativePrompt,
+    motionPrompt: req.motionPrompt,
+    cameraMove: req.cameraMove,
+    cameraInstruction: req.cameraInstruction,
+    shotScale: req.shotScale,
+    lens: req.lens,
+    styleId: req.styleId,
     profileId: "production",
     creativeAdapter: req.creativeAdapter,
     maxCostUsd: req.maxCostUsd,

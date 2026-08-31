@@ -13,7 +13,11 @@
  * by `quiz_year` from CC0 Wikidata and re-validated before pixels render.
  */
 import { createHash } from "node:crypto";
-import { type Block } from "@/engine/types";
+import { type Block, type StageContext } from "@/engine/types";
+import {
+  parseChannelProgramRouteRunSeed,
+  type ChannelProgramRouteRunSeed,
+} from "@/engine/channelProgramRoute";
 import {
   profileAllowsQuizTopic,
   resolveCertifiedQuizProfile,
@@ -219,6 +223,37 @@ export function assertCertifiedQuizTopicPlan(
   return candidate as QuizTopicPlan;
 }
 
+function quizProgramRoute(
+  ctx: StageContext,
+  block: "quiz_topic_plan" | "quiz_topic_safety" | "quiz_critic_spec",
+): ChannelProgramRouteRunSeed | undefined {
+  const raw = ctx.store["channelProgramRoute"];
+  if (raw === undefined) return undefined;
+  const route = parseChannelProgramRouteRunSeed(raw);
+  if (!route.requiredBlocks.includes(block)) {
+    throw new Error(`${block}: frozen channel program route ${route.routeKey} does not permit this QuizYear block`);
+  }
+  if (route.directives.claimMode !== "certified_quiz_facts" || !route.quizProfile) {
+    throw new Error(`${block}: frozen channel program route is not a certified QuizYear profile route`);
+  }
+  return route;
+}
+
+function quizProfileForRoute(
+  ctx: StageContext,
+  block: "quiz_topic_plan" | "quiz_topic_safety" | "quiz_critic_spec",
+): { route?: ChannelProgramRouteRunSeed; profile: ResolvedCertifiedQuizProfile } {
+  const route = quizProgramRoute(ctx, block);
+  if (!route) return { profile: resolveCertifiedQuizProfile(ctx.params["quizProfile"]) };
+  const requested = ctx.params["quizProfile"];
+  if (requested !== undefined && requested !== route.quizProfile) {
+    throw new Error(
+      `${block}: mutable quizProfile does not match the frozen channel program route profile`,
+    );
+  }
+  return { route, profile: resolveCertifiedQuizProfile(route.quizProfile) };
+}
+
 /** Fingerprint only the stable planner fields consumed by the safety gate. */
 export function quizTopicPlanFingerprint(value: QuizTopicPlan): string {
   const plan = assertCertifiedQuizTopicPlan(value);
@@ -290,7 +325,7 @@ const quizTopicPlan: Block = {
   consumes: [],
   produces: ["topic", "quizTopic", "quizPlan", "musicBrief"],
   run: async (ctx) => {
-    const profile = resolveCertifiedQuizProfile(ctx.params["quizProfile"]);
+    const { profile } = quizProfileForRoute(ctx, "quiz_topic_plan");
     const client = convex();
     const rows = await client.query(
       api.topicMemory.listForChannel,
@@ -380,7 +415,11 @@ const quizTopicSafety: Block = {
   consumes: ["topic", "quizPlan"],
   produces: ["disclosureRequired", "sensitiveTopic", "complianceNote", "quizSafety"],
   run: async (ctx) => {
-    const plan = assertCertifiedQuizTopicPlan(ctx.store["quizPlan"]);
+    const { route, profile } = quizProfileForRoute(ctx, "quiz_topic_safety");
+    const plan = assertCertifiedQuizTopicPlan(ctx.store["quizPlan"], profile);
+    if (route && plan.profileKey !== route.quizProfile) {
+      throw new Error("quiz_topic_safety: planner receipt profile does not match the frozen channel program route");
+    }
     const topic = String(ctx.store["topic"] ?? "").trim();
     if (topic !== plan.topic) throw new Error("quiz_topic_safety: topic does not match its curated planner receipt");
     if (!QUIZ_TOPIC_PRESENTATIONS[plan.topicKey]) {
@@ -457,7 +496,11 @@ const quizCriticSpec: Block = {
   consumes: ["quizPlan"],
   produces: ["validationSpec"],
   run: async (ctx) => {
-    const plan = assertCertifiedQuizTopicPlan(ctx.store["quizPlan"]);
+    const { route, profile } = quizProfileForRoute(ctx, "quiz_critic_spec");
+    const plan = assertCertifiedQuizTopicPlan(ctx.store["quizPlan"], profile);
+    if (route && plan.profileKey !== route.quizProfile) {
+      throw new Error("quiz_critic_spec: planner receipt profile does not match the frozen channel program route");
+    }
     return {
       validationSpec: {
         assertions: [

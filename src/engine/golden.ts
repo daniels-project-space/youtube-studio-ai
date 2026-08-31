@@ -44,18 +44,18 @@ export interface GoldenStage {
 }
 
 export const GOLDEN_SPINE: GoldenStage[] = [
-  { stage: "intel", blocks: ["competitor_research", "topic_select", "quiz_topic_plan"], note: "Pick topics from real outliers + competitor signal, learning-weighted; QuizYear alternatively rotates a curated CC0 Wikidata topic registry with a durable provenance receipt." },
-  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "curriculum_episode_seed", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "casefile_source_packet", "casefile_evidence_shot_map", "source_bound_story_spine", "editorial_evidence_packet", "cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence", "synthetic_scenario", "short_strategy"], note: "Show Bible crew and timed story spine; curriculum_episode_seed locks a child-editor-approved age band, one objective, vocabulary/actions, assessment, and original recurring world/characters before Story Spine planning, and emits only a private review receipt; episode_graph locks causal beat-to-scene continuity before render; learning_contract turns an approved objective into source-linked demonstrations and retrieval practice; children_show_bible binds that earlier intent into its graph-and-lesson proof; casefile_source_packet admits only an operator-supplied, primary-source- and rights-bound Case Packet with fresh Case Packet and source-use-ledger-bound editorial approval, and can emit only a private human-review draft; casefile_evidence_shot_map additionally binds every factual claim to reviewed current Scene Manifest / ShotPlan targets under an explicit no-gore/no-unsupported-recreation policy; source_bound_story_spine carries those exact reviewed claim/source/citation/treatment bindings into every timed Story Spine shot without generating facts or admitting a family; editorial_evidence_packet provides the smaller shared source/claim/snapshot core for supervised factual explainers while Casefile keeps its separate rights and reconstruction rails; cinematic_case_sequence_draft converts that evidence into source-bound, faceless mannequin multi-shot coverage; cinematic_case_sequence_finalize accepts only a real editor’s matching signature before strict cinematic admission and Novita generation; synthetic_scenario locks an explicitly fictional, assumption-led scenario before writing; collage Shorts lock claim/source/beat/motion evidence before render." },
+  { stage: "intel", blocks: ["competitor_research", "topic_select", "serialized_program_episode_context", "quiz_topic_plan"], note: "Pick topics from real outliers + competitor signal, learning-weighted; an admitted serialized route seals Topic Select's atomic completion into one bounded, route/run/topic-bound continuity receipt before any downstream consumer can run; QuizYear alternatively rotates a curated CC0 Wikidata topic registry with a durable provenance receipt." },
+  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "curriculum_episode_seed", "story_spine", "episode_graph", "narrative_series_visual_controls", "self_contained_story_plan", "self_contained_story", "learning_contract", "children_show_bible", "casefile_source_packet", "casefile_evidence_shot_map", "source_bound_story_spine", "editorial_evidence_packet", "cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence", "synthetic_scenario", "scenario_visual_treatment", "short_strategy"], note: "Show Bible crew and timed story spine; curriculum_episode_seed locks a child-editor-approved age band, one objective, vocabulary/actions, assessment, and original recurring world/characters before Story Spine planning, and emits only a private review receipt; episode_graph locks causal beat-to-scene continuity before render; narrative_series_visual_controls can bind a sealed Series Plan, Episode Graph/Story Spine, and already-accepted character adapters into provider-free shot controls for a future exact serialized route—it neither trains, renders, admits, nor publishes; self_contained_story_plan uses a bounded, critic-approved native storyboard before self_contained_story seals it to its route, topic, and matching renderer; learning_contract turns an approved objective into source-linked demonstrations and retrieval practice; children_show_bible binds that earlier intent into its graph-and-lesson proof; casefile_source_packet admits only an operator-supplied, primary-source- and rights-bound Case Packet with fresh Case Packet and source-use-ledger-bound editorial approval, and can emit only a private human-review draft; casefile_evidence_shot_map additionally binds every factual claim to reviewed current Scene Manifest / ShotPlan targets under an explicit no-gore/no-unsupported-recreation policy; source_bound_story_spine carries those exact reviewed claim/source/citation/treatment bindings into every timed Story Spine shot without generating facts or admitting a family; editorial_evidence_packet provides the smaller shared source/claim/snapshot core for supervised factual explainers while Casefile keeps its separate rights and reconstruction rails; cinematic_case_sequence_draft converts that evidence into source-bound, faceless mannequin multi-shot coverage; cinematic_case_sequence_finalize accepts only a real editor’s matching signature before strict cinematic admission and Novita generation; synthetic_scenario locks an explicitly fictional, assumption-led scenario before writing; scenario_visual_treatment immediately seals the route-derived non-real visual policy before script or visual work; collage Shorts lock claim/source/beat/motion evidence before render." },
   { stage: "write", blocks: ["script_gen", "hook_craft"], note: "Hook-first, CRAFT_RULES applied." },
   { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check", "quiz_topic_safety", "quiz_critic_spec", "scenario_disclosure_gate"], note: "Quality + originality + compliance floor; QuizYear contributes deterministic topic-safety and game-format critic receipts; synthetic scenarios must disclose their illustrative assumptions before narration." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
-  { stage: "sound", blocks: ["music"], note: "Channel-scoped score or long-form music product." },
-  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "scene_compiler", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, the deterministic Scene Compiler turns a reviewed scene manifest into a local 16:9 master, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
-  { stage: "layer", blocks: ["captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz." },
-  { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both. NOTE (P2-10): this spine block id \"assemble\" is lofi's loop-assembly step — it has no dedicated GOLDEN_MODULES row and is folded into the `lofi` catalog entry's executableIds (see goldenExecution.ts CATALOG_EXECUTION_BINDINGS.lofi). Do not confuse it with the unrelated catalog key `assemble` below (also stage \"build\"), which documents the separate build-stage EDL/Timeline engine used by narrated content." },
-  { stage: "package", blocks: ["thumbnail_gen", "metadata", "quiz_metadata"], note: "SEO metadata plus a required thumbnail description flow into one universal Nano Banana scene route with deterministic Style-DNA typography and one publishing gate; QuizYear retains a source-grounded metadata package while every channel shares the same final thumbnail provider." },
+  { stage: "sound", blocks: ["music_program_plan", "music"], note: "A route-sealed original-music program locks one episode’s instrumental and loop-visual intent before the channel-scoped score or long-form music product is generated." },
+  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "studio_asset_resolve", "visual_matter", "visual_matter_references", "novita_render_images", "studio_ltx_adapter_resolve", "novita_render_video", "scene_compiler", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs. Cinematic first resolves only its owner-scoped, approved Studio camera/motion/prompt recipes, then plans any genuinely new Visual Matter. After accepted keyframe QA it may select one approved, runtime-pinned standard LTX LoRA; the direct worker independently verifies the exact model-manifest digest before spend. It never exposes raw LoRA weights or IC-LoRA guides to generic prompting, and IC-LoRAs stay gated to their future dedicated Comfy control worker. Cinematic can optionally add a bounded, direct-Novita text-to-image Visual Matter QA-reference pack after its mood/cast/setting/storyboard plan. The pack is not primary-keyframe image conditioning. The deterministic Scene Compiler turns a reviewed scene manifest into a local 16:9 master, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
+  { stage: "layer", blocks: ["studio_postproduction_asset_resolve", "captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz. The Studio resolver can reuse only approved, module-specific audio direction, quote-card grammar, motion-graphics treatment, and a closed title-to-body transition choice; it cannot override story, sources, timing, cuts, or accessibility." },
+  { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both. Narrated assembly accepts only the Studio's closed hard-cut, crossfade, or dip-to-black title transition and each path has real render-parity coverage. NOTE (P2-10): this spine block id \"assemble\" is lofi's loop-assembly step — it has no dedicated GOLDEN_MODULES row and is folded into the `lofi` catalog entry's executableIds (see goldenExecution.ts CATALOG_EXECUTION_BINDINGS.lofi). Do not confuse it with the unrelated catalog key `assemble` below (also stage \"build\"), which documents the separate build-stage EDL/Timeline engine used by narrated content." },
+  { stage: "package", blocks: ["package_to_opening_plan", "thumbnail_gen", "metadata", "quiz_metadata"], note: "SEO metadata plus a required thumbnail description first seal a package-to-opening plan, then flow into one universal Nano Banana scene route with deterministic Style-DNA typography and one publishing gate. Production QA rebinds the plan to exact cover bytes, a retained reviewed opening frame, and the final master; that is structural evidence, not a fabricated semantic-equality claim. QuizYear retains a source-grounded metadata package while every channel shares the same final thumbnail provider." },
   { stage: "verify", blocks: ["qa_assets", "qa_shots", "short_scene_qa", "length_check", "qa_visual", "child_content_safety"], note: "Required asset/shot checks, portrait scene-safe-area proof, deterministic final quality gate, and an additional children-learning human-review admission gate where applicable." },
-  { stage: "ship", blocks: ["upload_draft", "emit_bundle", "crosspost", "notify", "cleanup"], note: "PRIVATE-first upload + multilang reuse + optional distribution + scoped cleanup. NOTE (P2-9): planning-only Short window selection (shorts_spinoff / documentary_short_candidates) is NOT owned by ship — goldenExecution.ts's CATALOG_EXECUTION_BINDINGS assigns those two executables to the `shorts` catalog module (stage: visual); they were moved to the visual stage row to match." },
+  { stage: "ship", blocks: ["quiz_short_release", "upload_draft", "emit_bundle", "crosspost", "notify", "cleanup"], note: "PRIVATE-first upload + multilang reuse + optional distribution + scoped cleanup. quiz_short_release is a post-QA, certificate-only QuizYear handoff that binds certified fact/source and opening evidence to final visual/audio QA, then permits only a private human-review draft; it is not an automatic channel-admission or publishing path. NOTE (P2-9): planning-only Short window selection (shorts_spinoff / documentary_short_candidates) is NOT owned by ship — goldenExecution.ts's CATALOG_EXECUTION_BINDINGS assigns those two executables to the `shorts` catalog module (stage: visual); they were moved to the visual stage row to match." },
 ];
 
 /**
@@ -478,13 +478,14 @@ export function cinematicDoctrineFor(niche?: string): CinematicDoctrine & { arch
  * studio's "Golden Pipeline" tab. One entry per module of the spine with the
  * honest story of HOW it works and which gates are intended to protect it.
  * `status: "reference"` is an editorial reference flag only: it means a proof
- * sample exists in this catalog. It is deliberately not an executable or
- * production certification. Production promotion is fail-closed in
+ * sample exists in this catalog. `status: "registered"` means the block exists
+ * in the registry but has no owner-facing intake or admitted standalone route.
+ * Neither label confers execution or production certification. Production promotion is fail-closed in
  * goldenExecution.ts and requires registered Golden-certified manifests plus a
  * machine-readable proof receipt covering every gate.
  * Order = display order: reference modules lead, then the spine in stage order.
  */
-export type CatalogModuleStatus = "reference" | "active";
+export type CatalogModuleStatus = "reference" | "registered" | "active";
 
 export interface GoldenModule {
   key: string;
@@ -498,9 +499,11 @@ export interface GoldenModule {
   /** The QA gates that protect its output. */
   gates: string[];
   /**
-   * EDITORIAL LABEL ONLY — this is NOT a runtime gate. `"reference"` vs
-   * `"active"` records a curator's judgment for this catalog page; it has no
-   * bearing on whether the module actually executes in production. The only
+   * EDITORIAL LABEL ONLY — this is NOT a runtime gate. `"reference"`,
+   * `"registered"`, and `"active"` record a curator's judgment for this
+   * catalog page; they have no bearing on whether the module actually executes
+   * in production. `"registered"` is deliberately used for a registered block
+   * with no owner-facing intake or admitted standalone route. The only
    * things that enforce anything at runtime are block registration
    * (registerAllBlocks -> runner.ts:208 block.run(ctx)) plus each block's own
    * fail-closed checks. Golden certification — the layer that WOULD give
@@ -537,6 +540,27 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "children-learning graphs require curriculum evidence and an explicit resolution",
     ],
     status: "reference",
+  },
+  {
+    key: "self-contained-story",
+    stage: "brief",
+    title: "Self-Contained Story — Sealed Renderer Handoff",
+    engine:
+      "Provider-free approved native plan → route, lane, program-brief, and topic-bound immutable renderer receipt",
+    how:
+      "The registered self_contained_story_plan → self_contained_story pair is a shared handoff for visual engines that otherwise own both " +
+      "planning and paid rendering. The first step has one bounded non-Google text-plan/critique reservation; the second seals the accepted " +
+      "native plan to an already admitted channel-program route, content lane, program brief, and topic. The certified automatic whiteboard " +
+      "and motion-comic routes, plus Lore's registered benchmark-pending route, require that exact planner → sealing → matching-renderer sequence. The pair itself still neither selects or " +
+      "admits a route, renders media, nor publishes.",
+    gates: [
+      "critic-approved typed native plan only",
+      "exact matching family, content lane, frozen route, program brief, and topic",
+      "the matching renderer must already be required by the admitted route; sealing cannot admit it",
+      "provider-free: no render, spend, or publication authority",
+      "a registered route can still remain blocked by its independent renderer/runtime benchmark admission",
+    ],
+    status: "active",
   },
   {
     key: "casefile-documentary",
@@ -939,6 +963,24 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "active",
   },
   {
+    key: "quiz-short-private-release",
+    stage: "ship",
+    title: "QuizShort — Registered Private-Release Block (No Owner Intake)",
+    engine:
+      "quiz_short_release — certified QuizYear fact/source receipts + final visual/audio QA + opening evidence → private human-review receipt",
+    how:
+      "This is a registered post-QA private-release checkpoint for a future owner-selected portrait QuizShort intake, not a channel format or admitted creator route. " +
+      "It performs no planning, rendering, provider call, spend, or publication; it only validates that an already-rendered 9:16 master retains the exact certified facts, source OCR, opening/motion evidence, and final visual/audio QA before allowing a private human-review draft. " +
+      "There is currently no owner-facing intake for it, so it cannot be selected from the creator flow and cannot make ordinary QuizYear executable as a Short.",
+    gates: [
+      "registered private-release block only — no owner-facing intake or admitted standalone route",
+      "same certified QuizYear facts and source OCR must bind to the final master",
+      "final visual QA, scored audio QA, and retained opening/motion evidence must all pass",
+      "private human-review draft only; no provider work, automatic production, public/scheduled release, or cross-posting",
+    ],
+    status: "registered",
+  },
+  {
     key: "thumbnail",
     stage: "package",
     title: "Thumbnail — Banana Engine",
@@ -951,6 +993,28 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "may block publishing but never regenerates or substitutes a generic card. Observed provider/model usage " +
       "is charged from counters rather than a stale flat estimate.",
     gates: ["structural text-free provider request", "deterministic spelling + bounded layout", "faceClear", "punch ≥ 7", "styleMatch ≥ 7", "storyMatch ≥ 7", "uiClean"],
+    status: "reference",
+  },
+  {
+    key: "package-opening-proof",
+    stage: "package",
+    title: "Package → Opening Evidence",
+    engine: "Typed package plan → exact cover bytes → reviewed opening/master receipt",
+    how:
+      "Before thumbnail generation, the title, thumbnail description, topic, active route, and declared opening " +
+      "anchor are frozen into one content-addressed package plan. The cover request carries that plan fingerprint. " +
+      "During production QA, the plan is checked again, then bound to the exact uploaded cover bytes, the final-master " +
+      "hash and duration, and one retained visual-review frame inside the opening window. Retries reload and hash the " +
+      "cover again before dispatch. This is deliberately structural evidence: it proves the same package and reviewed " +
+      "opening travel together; it does not pretend to infer semantic equivalence from pixels.",
+    gates: [
+      "title, cover brief, topic, route and opening anchor are immutable before cover spend",
+      "cover request hash carries the package-plan fingerprint",
+      "production receipt binds exact cover bytes, final master and a retained opening-review frame",
+      "missing or altered cover bytes reject retry-time release verification",
+      "legacy/unmeasurable runs emit an explicit bounded omission, never a fabricated claim",
+      "structural evidence only — not a substitute for semantic or retention review",
+    ],
     status: "reference",
   },
   {
@@ -969,6 +1033,41 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "metadata, thumbnail and hook engines downstream. Two LLM calls per slate; loud failure; " +
       "quota-immune outlier reads.",
     gates: ["evidence citation verified vs real signals", "semantic dedupe vs done + planned", "metacraft title lint on every bet", "demand / freshness / fit / packageability ≥ 7", "banned words / stale years"],
+    status: "reference",
+  },
+  {
+    key: "serialized-program-episode-context",
+    stage: "intel",
+    title: "Serialized Episode Context — Immutable Continuity Receipt",
+    engine: "Provider-free completed episode row → bounded route/run/topic-bound continuity projection",
+    how:
+      "Only an already-admitted serialized_program/v1 route can place this block, immediately after Topic Select. " +
+      "Topic Select commits the finished serial episode and a compact continuity receipt in the same atomic row update; the bridge then reads only that completed row, validates its full frozen route seed, run, series identity, and topic, and exposes the receipt to existing crew, script, story, packaging, and QA calls. " +
+      "It never reads live series state, chooses a route, calls a provider, renders media, spends, or publishes; non-serialized and historical runs remain unchanged when no receipt exists.",
+    gates: [
+      "route-owned placement exactly once after topic_select and before every continuity consumer",
+      "atomic completion row contains a bounded, content-addressed receipt rather than a mutable series-state lookup",
+      "full frozen route seed, run, series identity/count, topic, and topic-memory key must all match exactly",
+      "tampered, stale-retry, cross-route, or cross-topic receipts fail closed before prompt use",
+      "provider-free and cost-neutral: no model, render, route admission, or publication authority",
+    ],
+    status: "reference",
+  },
+  {
+    key: "narrative-series-visual-controls",
+    stage: "brief",
+    title: "Narrative Series Visual Controls — Sealed Shot Continuity",
+    engine: "Provider-free Series Plan + Episode Graph/Story Spine + accepted character-adapter receipt → per-shot continuity contract",
+    how:
+      "For a future exact serialized route only, this bridge reloads the owner-scoped immutable Series Plan and any already-accepted character-adapter receipts, then binds them to the completed Episode Graph and Story Spine. " +
+      "It records a route/run-bound episode and shot-control receipt for later visual engines. It cannot train or download an adapter, invoke a provider or renderer, spend, select/admit a family, or publish; no current certified route includes it.",
+    gates: [
+      "serialized route seed, owner/channel, series-plan fingerprint, and episode topic must match exactly",
+      "only a previously accepted reusable character-adapter receipt may be referenced",
+      "Episode Graph, Story Spine, cast/location continuity, first/last frame, and camera-motion controls are sealed before a visual engine sees them",
+      "missing, stale, cross-owner, or mismatched persistence records fail closed",
+      "provider-free bridge only; training, rendering, admission, and publication remain separate gates",
+    ],
     status: "reference",
   },
   {
@@ -1080,6 +1179,30 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "active",
   },
   {
+    key: "studio-assets",
+    stage: "visual",
+    title: "Studio Asset Library",
+    engine: "Owner-scoped reusable camera, motion, prompt, presentation, character-adapter, and control-guide records",
+    how:
+      "The Studio keeps approved reusable visual language as evidence-bound records, so a compatible channel can " +
+      "reuse a proven camera grammar, overlay, transition, motion graphic, or accepted character adapter instead " +
+      "of rediscovering it every run. Every entry remains owner-, channel-, and where needed series-bound; missing " +
+      "or incompatible evidence creates a new reviewed candidate rather than borrowing another channel's material. " +
+      "A selected clay, brick-built, anime-inspired, or drawn treatment is compiled into the canonical Visual Matter " +
+      "revision, character and setting sheets, storyboard/motion locks, and visual-review criteria; it does not claim " +
+      "a treatment renderer is admitted. " +
+      "Standard LTX LoRAs are separately pinned and benchmarked, while IC-LoRA controls remain visibly gated to a " +
+      "future dedicated Comfy/LTX worker with a sealed workflow and per-shot guide.",
+    gates: [
+      "owner/channel/series scope — no cross-channel borrowing",
+      "approval evidence + exact compatibility before reuse",
+      "canonical visual-treatment plan bound into prompts, continuity, and visual QA — not an automatic renderer claim",
+      "pinned model/runtime + benchmark before a standard LoRA",
+      "IC controls require a sealed Comfy workflow + guide; direct LTX is blocked",
+    ],
+    status: "registered",
+  },
+  {
     key: "cinematic",
     stage: "visual",
     title: "Cinematic — Cinecraft",
@@ -1099,14 +1222,15 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "retired PAID Higgsfield CLI; that renderer must never be reopened. The file survives as a type/catalog surface only " +
       "(ShotSpec, src/lib/crew/cinematographer.ts:16). The hero-anchor consistency LAW described above IS nevertheless enforced in " +
       "production, by an equivalent renderer-neutral module rather than by cinecraft: the `visual_matter` block " +
-      "(src/engine/visualMatter.ts + src/trigger/blocks/visualMatterBlocks.ts) emits per-character `identityLock` and per-setting " +
-      "`continuityLock` plus character_sheet/setting_sheet reference assets, and the Z-Image -> qa_assets -> LTX -> qa_shots chain " +
-      "HARD-REQUIRES that manifest (requireVisualMatter throws, src/trigger/blocks/novitaRenderBlocks.ts:452-456; consumed at :550, " +
-      ":610, :808, :888). Per shot the sheets are pulled from R2 and passed to the vision grader alongside the candidates " +
-      "(visualMatterReferenceAssetsForShot, :635/:927) under an enforced identity floor with bounded repair re-rolls (:626-627, :645). " +
-      "So the gates below are REAL, but they are cinecraft's law re-implemented with attested receipts and content-addressed " +
-      "idempotency -- not cinecraft's own code.",
-    gates: ["reference-sheet identity anchor via visual_matter (not the retired Soul)", "vision identity floor with bounded repair re-rolls (qa_assets)", "per-kind lock: identityLock (person) / continuityLock (place)", "operator-authorized reference-asset spend (renderReferenceAssets)"],
+      "(src/engine/visualMatter.ts + src/trigger/blocks/visualMatterBlocks.ts) emits per-character `identityLock`, per-setting " +
+      "`continuityLock`, and storyboard review criteria which the Z-Image -> qa_assets -> LTX -> qa_shots chain HARD-REQUIRES " +
+      "(requireVisualMatter throws, src/trigger/blocks/novitaRenderBlocks.ts:452-456; consumed at :550, :610, :808, :888). " +
+      "When explicitly enabled for a cinematic run, the separate `visual_matter_references` block uses the admitted direct-Novita " +
+      "Z-Image text-to-image path to create a bounded R2 pack with exact byte/request/worker-receipt binding. `qa_assets` and " +
+      "`qa_shots` alone load those pixels as comparison anchors. Direct Z-Image remains text-only: this does not claim image-to-image " +
+      "or reference-image conditioning of primary keyframes. With no opt-in, the identity locks remain enforced by the normal vision " +
+      "quality floor and bounded repair path; no non-thumbnail media is routed through the thumbnail provider.",
+    gates: ["planning identity anchor via visual_matter (not the retired Soul)", "optional bounded, byte/receipt-bound direct-Novita QA reference pack", "vision identity floor with bounded repair re-rolls (qa_assets)", "per-kind lock: identityLock (person) / continuityLock (place)", "no claimed direct-Z-Image image conditioning"],
     status: "reference",
   },
   {
@@ -1201,12 +1325,14 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   {
     key: "layer",
     stage: "layer",
-    title: "Captions + Overlays",
-    engine: "Word-level captions, quote overlays, intro card (Remotion)",
+    title: "Captions + Presentation",
+    engine: "Word-level captions, quote overlays, intro card, and approved Studio presentation recipes (Remotion/FFmpeg)",
     how:
       "Word-timed captions, quote overlays and the intro card are composited over the edit, styled by the " +
-      "channel's DNA typography so every layer stays on brand.",
-    gates: ["timing sync vs narration"],
+      "channel's DNA typography so every layer stays on brand. The Studio may also reuse an approved, exact " +
+      "module-specific audio direction, quote-card grammar, data-insert treatment, or closed title-to-body " +
+      "transition—never an arbitrary filter or a replacement for the episode's timing, story, or accessibility plan.",
+    gates: ["timing sync vs narration", "approved module-specific recipe only", "closed assembly transition set"],
     status: "active",
   },
   {
@@ -1224,8 +1350,10 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "card/overlay is a typed warning the verify stage gates on). Every style choice — cut energy, aspect, intro/" +
       "outro, music-duck profile, captions on/off, vertical reframe — comes from the channel's CustomizationSurface: " +
       "one preset (documentary / essay / hype / shorts / meditation / lofi) configures the whole module, and the " +
-      "'essay' preset reproduces the legacy renderer EXACTLY (parity). One model serves narrated AND lofi. Standalone " +
-      "+ unit-tested (6 suites) with a real ffmpeg smoke render proving the body/compose/caption path; the module " +
+      "'essay' preset reproduces the legacy renderer EXACTLY (parity). Its title-to-body hard cut, crossfade, and " +
+      "dip-to-black paths are each real-render parity checked, rather than being display-only configuration. One model " +
+      "serves narrated AND lofi. Standalone + unit-tested (6 suites) with a real ffmpeg smoke render proving the " +
+      "body/compose/caption path; the module " +
       "guides the Architect/Director (src/lib/assembly, registered in MODULE_REGISTRY).",
     gates: [
       "validate-before-spend (length band · coverage · overlay windows)",
@@ -1233,6 +1361,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "heal from a declared checkpoint (no regex)",
       "no silent skips (dropped overlays → typed warnings)",
       "'essay' preset == legacy renderer (parity)",
+      "hard cut / crossfade / dip-to-black each render-parity checked",
     ],
     status: "reference",
   },
@@ -1255,57 +1384,74 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   {
     key: "verify",
     stage: "verify",
-    title: "Verify + Heal",
-    engine: "Per-artifact qa_visual + critic ValidationSpec + self-heal loop",
+    title: "Artifact + Shot Gates",
+    engine: "qa_assets + qa_shots + short_scene_qa + length_check",
     how:
-      "Every generated artifact is vision-checked inside the qa_visual block (src/trigger/blocks/narratedBlocks.ts: " +
-      "structural/length/frame checks ~2002-2212, thumbnail check ~2219-2231 via evaluateThumbnail in videoVerifier.ts, critic " +
-      "ValidationSpec ~2412-2450+ via runValidationSpec/getValidationSpec). Failures route back through the heal loop with defect " +
-      "hints instead of shipping degraded output. RECONCILED AGAINST THE REAL THROW SITES (P2-2): only \"ValidationSpec\" below is " +
-      "a directly traceable, standalone gate. \"mobile-size legibility\" is NOT implemented inside verify's own evaluateThumbnail() " +
-      "-- the real 168px-mobile-render comparison it paraphrases lives in the separate thumbnail module's own candidate judge " +
-      "(src/lib/thumbnailLab.ts:348-381), not here. \"reference comparison\" is not a standalone verify check either -- it " +
-      "corresponds to the optional marketAwareCritic knob (src/lib/crew/critic.ts:21,58, \"beats the scraped top competitors\") " +
-      "which, when enabled, authors an assertion INTO the same ValidationSpec that runValidationSpec enforces, rather than " +
-      "running as its own gate.",
+      "Inputs are checked before final-master certification: source assets and individual generated shots must meet their " +
+      "lane-specific requirements, Shorts must retain their safe-area scene evidence, and duration must be exact. Failed " +
+      "artifacts feed typed repair hints into the bounded self-heal loop instead of being silently shipped. The final-master " +
+      "review itself is shown separately so its video-quality, narration-semantic and certificate proof do not disappear " +
+      "inside this broader asset-check card.",
     gates: [
-      "ValidationSpec (runValidationSpec, narratedBlocks.ts ~2412-2450+ -- critic-authored BLOCK-severity assertions, incl. the optional marketAwareCritic \"reference comparison\" assertion)",
-      "thumbnail vision grade (evaluateThumbnail, videoVerifier.ts:61 -- fails closed if the required grader doesn't run; NOT the 168px mobile-render comparison, which belongs to the thumbnail module)",
+      "asset and shot evidence must satisfy the active lane before mastering",
+      "Shorts retain safe-area / scene evidence where required",
+      "exact duration gates fail closed; child safety remains a separate dedicated module",
+      "bounded typed self-heal; no silent skip or blind re-render",
     ],
     status: "active",
+  },
+  {
+    key: "final-master-story-coverage",
+    stage: "verify",
+    title: "Final Master — Visual Quality + Narrated Story Coverage",
+    engine: "qa_visual → full final-master transcript audit → content-addressed Story Spine coverage sidecar",
+    how:
+      "The final-master quality stage binds broad visual review, the exact reviewed video hash, a complete timestamped " +
+      "narration transcript, and the validated Story Spine. Every narrated beat is checked against the final master with " +
+      "ordered timing; each beat needs at least 85% token and timing coverage, while the duration-weighted total needs 95%. " +
+      "The detailed audit is retained as a content-addressed certificate sidecar and is rechecked before a retry can publish. " +
+      "It proves narration-semantic story delivery only—not that every planned shot was visually realized.",
+    gates: [
+      "production visual score must meet the lane floor before certificate creation",
+      "final-master narration transcript and timing must bind to the exact reviewed master",
+      "every narrated beat needs ≥85% token and timing coverage; total duration-weighted coverage ≥95%",
+      "coverage audit is content-addressed, retained with the certificate, and revalidated on retry",
+      "narration-semantic coverage only — never a fabricated visual-shot realization claim",
+    ],
+    status: "reference",
   },
   {
     key: "whiteboard",
     stage: "visual",
     title: "Whiteboard — Drawn Cinema (synced scribe)",
-    engine: "whiteboardSync — narration-synced deterministic write-on: Gemini layered storyboard + bounded attested 2K image scenes + Fish narration, Whisper-aligned, drawn by a real hand in time with the voice.",
+    engine: "whiteboardSync — route-sealed non-Google storyboard + bounded attested Novita still scenes + Fish narration, Whisper-aligned and drawn in time with the voice.",
     how:
-      "The whiteboard family's self-contained visual engine (src/lib/whiteboardSync.ts, block whiteboard_scribe). Gemini-Pro " +
-      "designs each panel as a STACK OF LAYERS — composed line-art SCENES (no baked text) + marker-font LABELS — each carrying " +
-      "a verbatim narration CUE and a box. Fish TTS speaks the script; local Whisper force-aligns it to word timestamps so every " +
+      "The automatic whiteboard route runs the shared bounded non-Google storyboard producer and critic before self_contained_story seals " +
+      "its accepted board. whiteboardSync (block whiteboard_scribe) then renders each panel as a STACK OF LAYERS — composed line-art " +
+      "SCENES (no baked text) plus marker-font LABELS — each carrying a verbatim narration CUE and a box. Fish TTS speaks the script; " +
+      "local Whisper force-aligns it to word timestamps so every " +
       "cue becomes a millisecond. A deterministic renderer traces the real ink of each layer and reveals it under a moving hand " +
       "AT its cue, one layer at a time, paced to ink with a minimum draw time and a guaranteed HOLD before each panel cuts; a " +
       "persistent topic header + frame are drawn once, words letter in reading order, then ffmpeg muxes the narration. No video " +
-      "model = $0 render credits; spend is the 2K Banana art + Fish TTS. Resolution-configurable (1080p / 2K).",
-    gates: ["storyboard retry until full beat coverage", "cue → ms via Whisper word-alignment (interpolated)", "per-layer pixels (no segmentation): nothing shown before its cue", "minimum draw time + guaranteed panel HOLD: nothing pops or cuts early", "number-integrity: labels grounded in the narration"],
-    status: "reference",
+      "model is used; bounded spend is attested Novita image work plus Fish TTS. Resolution remains route/renderer-configured (1080p / 2K).",
+    gates: ["route-sealed critic-approved storyboard before renderer admission", "cue → ms via Whisper word-alignment (interpolated)", "per-layer pixels (no segmentation): nothing shown before its cue", "minimum draw time + guaranteed panel HOLD: nothing pops or cuts early", "number-integrity: labels grounded in the narration", "final-master visual/audio review before draft upload"],
+    status: "active",
   },
   {
     key: "comic",
     stage: "visual",
     title: "Comic — Motion-Comic Page Engine",
-    engine: "motionComic — Gemini structured story → text-free Flash character/panel art → ElevenLabs multi-voice → vision anchors/keep-clear regions → deterministic Python comic-page render. ZERO video-model credits.",
+    engine: "motionComic — route-sealed non-Google structured story → text-free attested panel art → ElevenLabs multi-voice → vision anchors/keep-clear regions → deterministic Python comic-page render.",
     how:
-      "A standalone reference engine (src/lib/motionComic.ts + scripts/mc_page_render.py). Gemini-Pro emits closed, typed " +
-      "visual fields for subject, object, environment, era, physical action and relations; dialogue and printable prop copy have " +
-      "no provider-boundary field. Character sheets and panels render as text-free 4:3 Flash images with model-sheet references. " +
-      "The page renderer center-crops those images into varied comic tiles, so composition reserves broad negative space and keeps " +
-      "faces away from edges. ElevenLabs voices each line. A vision letterer supplies mouth targets, preferred anchors and keep-clear " +
-      "regions; deterministic pixel placement adapts bubble size, hard-excludes those regions and fails instead of accepting an " +
-      "overlap. Tails point to the reported mouth. Python/Pillow animates the page, hand reveal, camera tour and page turns, then " +
-      "FFmpeg muxes voices and the optional Suno score. No paid video model is used.",
-    gates: ["closed visual schema: no dialogue/printed-copy route to art provider", "4:3 text-free art with edge-safe composition for tile crops", "keep-clear overlap = 0 or render fails", "adaptive readable bubble fit near the vision anchor", "tail targets the vision-reported mouth", "character consistency via model-sheet image-to-image"],
-    status: "reference",
+      "The automatic motion-comic route runs the shared bounded non-Google storyboard producer and critic before self_contained_story " +
+      "seals the accepted plan. The engine (src/lib/motionComic.ts + scripts/mc_page_render.py) preserves closed, typed visual fields for " +
+      "subject, object, environment, era, physical action and relations; dialogue and printable prop copy have no art-provider field. " +
+      "Character sheets and panels render as text-free 4:3 images with model-sheet references. The page renderer center-crops those images " +
+      "into varied comic tiles, reserves negative space, and keeps faces away from edges. ElevenLabs voices each line; a vision letterer " +
+      "supplies mouth targets, preferred anchors and keep-clear regions. Deterministic pixel placement fails rather than accepting overlap, " +
+      "then Python/Pillow animates the page, hand reveal, camera tour and page turns before FFmpeg muxes voices and the optional score.",
+    gates: ["route-sealed critic-approved storyboard before renderer admission", "closed visual schema: no dialogue/printed-copy route to art provider", "4:3 text-free art with edge-safe composition for tile crops", "keep-clear overlap = 0 or render fails", "adaptive readable bubble fit near the vision anchor", "tail targets the vision-reported mouth", "final-master visual/audio review before draft upload"],
+    status: "active",
   },
   {
     key: "ship",

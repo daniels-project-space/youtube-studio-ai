@@ -5,6 +5,10 @@ import {
   CINEMATIC_KEYFRAME_REVIEW_VERSION,
   type CinematicKeyframeReview,
 } from "@/engine/cinematicKeyframeReview";
+import {
+  VISUAL_ARTIFACT_REVIEW_OUTCOME_VERSION,
+  VisualArtifactReviewRejectedError,
+} from "@/engine/visualArtifactReviewOutcome";
 import { VISION_GATE_MAX_TOKENS, visionLocal } from "@/lib/vision";
 
 const ReviewerVerdictSchema = z.object({
@@ -47,9 +51,17 @@ export interface CinematicKeyframeGateScene {
  * Transport, provider, and malformed-response failures must remain terminal:
  * they do not establish that a visual repair would fix the candidate.
  */
-export class CinematicKeyframeRejectedError extends Error {
+export class CinematicKeyframeRejectedError extends VisualArtifactReviewRejectedError {
   constructor(sceneId: string, notes: readonly string[]) {
     super(
+      {
+        schemaVersion: VISUAL_ARTIFACT_REVIEW_OUTCOME_VERSION,
+        gateId: "cinematic-keyframe",
+        artifactKind: "image",
+        subjectId: sceneId,
+        reviewVersion: CINEMATIC_KEYFRAME_REVIEW_VERSION,
+        notes,
+      },
       `cinematic keyframe gate failed ${sceneId}: ` +
         (notes.join("; ") || "reviewer rejected the candidate"),
     );

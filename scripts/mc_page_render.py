@@ -263,6 +263,17 @@ def build_page(subset):
 nP = max(1, math.ceil(N / PER_PAGE)); base = max(1, math.ceil(N / nP))
 PAGES = [build_page(panels[s:s + base]) for s in range(0, N, base)]
 
+# The opening is an actual story hook, never an empty page of panel borders.
+# `castMotionComic` has already made panel_0 mandatory before this local
+# renderer is called.  Surface that approved art during the preroll, then keep
+# the first camera beat on it instead of pretending to draw a blank template.
+opening_pane = PAGES[0]["panes"][0] if PAGES and PAGES[0]["panes"] else None
+if opening_pane is None:
+    raise RuntimeError("motionComic opening panel art is missing; refusing empty template opening")
+ox, oy, ow, oh = opening_pane["box"]
+PAGES[0]["world"][PAGES[0]["PY"] + oy:PAGES[0]["PY"] + oy + oh, PAGES[0]["PX"] + ox:PAGES[0]["PX"] + ox + ow] = opening_pane["art"]
+opening_pane["intro_visible"] = True
+
 
 # ---------------- camera (per page) ----------------
 def frame_top(pg):
@@ -367,7 +378,7 @@ for f in range(nframes):
         else:
             hf = min(1.0, (local - MOVE) / max(0.1, panel["dur"] - MOVE))
             cam = [f_to[0], f_to[1] - 0.012 * f_to[2] * hf, f_to[2] * (1 - 0.045 * hf)]
-        if pane is not None:
+        if pane is not None and not (pi == 0 and li == 0 and pane.get("intro_visible")):
             draw_span = max(0.45, (panel["dur"] - MOVE - HOLD) * DRAW_FRAC); prog = (local - MOVE) / draw_span
             if prog > 0:
                 prog = min(prog, 1.0); x, y, w, h = pane["box"]; mask = pane["order2d"] <= prog

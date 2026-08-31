@@ -103,7 +103,7 @@ export function RecentVideos({
                 }}
                 aria-label={`Open R2 render: ${video.title}`}
               >
-                <span className={styles.media}>
+                <div className={styles.media}>
                   <AssetImg
                     k={video.thumbnailKey ?? undefined}
                     alt=""
@@ -112,13 +112,14 @@ export function RecentVideos({
                         ? `https://i.ytimg.com/vi/${video.youtubeVideoId}/hqdefault.jpg`
                         : undefined
                     }
+                    fallbackSource="youtube"
                     style={{ width: "100%", height: "100%" }}
                   />
                   <span className={styles.play} aria-hidden="true">▶</span>
                   {video.durationSec ? (
                     <span className={styles.duration}>{fmtDur(video.durationSec)}</span>
                   ) : null}
-                </span>
+                </div>
                 <span className={styles.copy}>
                   <strong>{video.title}</strong>
                   <small>

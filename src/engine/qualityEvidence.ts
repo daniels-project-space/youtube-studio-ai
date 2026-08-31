@@ -1,4 +1,8 @@
+import { createHash } from "node:crypto";
+
 import { z } from "zod";
+
+import { canonicalJson } from "@/lib/canonicalJson";
 
 /**
  * A deliberately small, provider-neutral receipt for an individual episode.
@@ -13,6 +17,110 @@ export const QUALITY_EVIDENCE_VERSION = "1.0.0" as const;
 const ScoreSchema = z.number().finite().min(0).max(10);
 const CountSchema = z.number().int().nonnegative();
 const EvidenceListSchema = z.array(z.string().min(1));
+const FingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/i, "expected SHA-256");
+
+function selfContainedPlanTopicFingerprint(topic: string): string {
+  return createHash("sha256").update(canonicalJson(topic.trim())).digest("hex");
+}
+
+/**
+ * A story measurement may describe an approved plan or the rendered master.
+ * These scopes must never be conflated: a pre-render plan does not establish
+ * that every planned beat survived the final edit.
+ */
+export const StoryMeasurementScopeSchema = z.enum(["plan", "final_master"]);
+/**
+ * The modality of a final-master story measurement. A narration-semantic
+ * receipt proves that planned spoken beats survived into the released master;
+ * it must never be read as proof that every planned visual shot did.
+ */
+export const StoryMeasurementKindSchema = z.enum(["narration_semantic"]);
+
+/** Exact source emitted by the content-addressed Story Spine narration audit. */
+export const FINAL_MASTER_NARRATED_STORY_COVERAGE_SOURCE =
+  "final-master-narrated-story-coverage/v1" as const;
+/** Existing Story Spine receipt source: it is plan-time only. */
+export const VALIDATED_STORY_SPINE_SOURCE = "validated-story-spine/v1" as const;
+
+const SelfContainedStoryPlanCountsSchema = z.object({
+  /** Canonical cross-family plan measures. These are never final-master coverage. */
+  beatCount: z.number().int().positive(),
+  shotCount: z.number().int().positive(),
+  /** Family-specific exact plan measures retained for audit and cost reasoning. */
+  panelCount: z.number().int().positive().optional(),
+  sceneCount: z.number().int().positive().optional(),
+  artLayerCount: z.number().int().positive().optional(),
+  spokenLineCount: z.number().int().positive().optional(),
+  characterCount: CountSchema.optional(),
+}).strict();
+
+/**
+ * Immutable provenance for a sealed self-contained creative plan. It is
+ * intentionally explicit about being pre-render evidence; final-master
+ * visual/narrative coverage remains the responsibility of `qa_visual`.
+ */
+export const SelfContainedStoryPlanEvidenceSchema = z.object({
+  version: z.literal("self-contained-story-plan-evidence/v1"),
+  measurementScope: z.literal("plan"),
+  family: z.enum(["whiteboard", "comic", "loreshort"]),
+  storyKind: z.enum([
+    "whiteboard-storyboard/v1",
+    "motion-comic-storyboard/v1",
+    "lore-plan/v1",
+  ]),
+  contentLaneKey: z.string().trim().min(1).max(120),
+  topic: z.string().trim().min(1).max(500),
+  topicFingerprint: FingerprintSchema,
+  routeFingerprint: FingerprintSchema,
+  programBriefFingerprint: FingerprintSchema,
+  receiptFingerprint: FingerprintSchema,
+  storyFingerprint: FingerprintSchema,
+  plannerId: z.string().trim().min(1).max(160),
+  receiptVersion: z.string().trim().min(1).max(128),
+  /**
+   * Exact approved spoken text for whiteboard/comic, retained only as a
+   * digest. It lets final QA bind the sealed plan to the independently
+   * auditable narration that actually reached the released master.
+   */
+  narrationTextSha256: FingerprintSchema.optional(),
+  counts: SelfContainedStoryPlanCountsSchema,
+}).strict().superRefine((value, ctx) => {
+  const expectedKind = value.family === "whiteboard"
+    ? "whiteboard-storyboard/v1"
+    : value.family === "comic"
+      ? "motion-comic-storyboard/v1"
+      : "lore-plan/v1";
+  if (value.storyKind !== expectedKind) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "self-contained plan family does not match story kind" });
+  }
+  if (value.topicFingerprint !== selfContainedPlanTopicFingerprint(value.topic)) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "self-contained plan topic fingerprint does not match topic" });
+  }
+  if (value.family === "whiteboard" && value.counts.panelCount === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "whiteboard plan evidence requires panelCount" });
+  }
+  if (value.family === "comic" && value.counts.panelCount === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "motion-comic plan evidence requires panelCount" });
+  }
+  if (value.family === "loreshort" && value.counts.sceneCount === undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "lore plan evidence requires sceneCount" });
+  }
+  if (
+    (value.family === "whiteboard" || value.family === "comic") &&
+    value.narrationTextSha256 === undefined
+  ) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "narrated self-contained plan evidence requires its approved narration digest",
+    });
+  }
+  if (value.family === "loreshort" && value.narrationTextSha256 !== undefined) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      message: "non-narrated lore plan evidence must not claim a narration digest",
+    });
+  }
+});
 
 export const QualityAxisNameSchema = z.enum([
   "technical",
@@ -44,6 +152,68 @@ export const StoryEvidenceSchema = z.object({
   beatCount: CountSchema.optional(),
   shotCount: CountSchema.optional(),
   coverageRatio: z.number().finite().min(0).max(1).optional(),
+  /** Absent on historical/legacy receipts whose story evidence scope was not declared. */
+  measurementScope: StoryMeasurementScopeSchema.optional(),
+  /** Explicitly distinguishes final-master narrated-story coverage from visual coverage. */
+  measurementKind: StoryMeasurementKindSchema.optional(),
+  /** Compact link to the sealed final-master narrated-story coverage receipt. */
+  finalMasterNarratedStoryReceiptFingerprint: FingerprintSchema.optional(),
+  /** Optional immutable plan provenance; it can never establish final-master coverage. */
+  plan: SelfContainedStoryPlanEvidenceSchema.optional(),
+}).superRefine((value, ctx) => {
+  if (value.measurementScope === "plan" && !value.plan) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "plan-scoped story evidence requires a sealed plan receipt" });
+  }
+  if (value.measurementScope === "final_master") {
+    if (value.status !== "measured") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "final-master story measurement must be marked measured" });
+    }
+    if (value.source === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "final-master story measurement requires a source" });
+    }
+    if (value.coverageRatio === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "final-master story measurement requires a coverage ratio" });
+    }
+  }
+  if (value.plan) {
+    if (value.status !== "measured") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "sealed plan evidence must be marked measured" });
+    }
+    if (value.measurementScope !== "plan") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "sealed plan evidence must retain plan measurement scope" });
+    }
+    if (value.coverageRatio !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "pre-render plan evidence must not claim final-master coverage ratio",
+      });
+    }
+    if (value.source !== "self-contained-story-receipt/v1") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "sealed plan evidence has an invalid source" });
+    }
+    if (value.beatCount !== value.plan.counts.beatCount || value.shotCount !== value.plan.counts.shotCount) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "sealed plan counts must match story evidence counts" });
+    }
+  }
+  if (value.measurementScope === "final_master" && value.plan) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "final-master story evidence cannot reuse a pre-render plan receipt" });
+  }
+  if (value.measurementKind === "narration_semantic") {
+    if (value.measurementScope !== "final_master") {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "narration-semantic story coverage must be scoped to the final master" });
+    }
+    if (value.source !== FINAL_MASTER_NARRATED_STORY_COVERAGE_SOURCE) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "narration-semantic story coverage has an invalid source" });
+    }
+    if (!value.finalMasterNarratedStoryReceiptFingerprint) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "narration-semantic story coverage requires its sealed receipt fingerprint" });
+    }
+    if (!value.beatCount || !value.shotCount || value.coverageRatio === undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "narration-semantic story coverage requires Story Spine counts and a coverage ratio" });
+    }
+  } else if (value.finalMasterNarratedStoryReceiptFingerprint !== undefined) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "final-master narrated-story receipt fingerprint requires narration-semantic measurement kind" });
+  }
 });
 
 export const CandidateSelectionEvidenceSchema = z.object({
@@ -102,6 +272,15 @@ export const EpisodeSpecSchema = z.object({
   story: StoryEvidenceSchema,
   candidateSelection: CandidateSelectionEvidenceSchema.optional(),
   repairs: RepairEvidenceSchema.optional(),
+}).superRefine((value, ctx) => {
+  const plan = value.story.plan;
+  if (!plan) return;
+  if (plan.contentLaneKey !== value.lane.key) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "sealed plan content lane does not match episode lane" });
+  }
+  if (plan.topic !== value.topic) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "sealed plan topic does not match episode topic" });
+  }
 });
 
 export const QualityEvidenceSchema = z.object({
@@ -128,6 +307,9 @@ export const QualityEvidenceSchema = z.object({
 export type QualityAxisName = z.infer<typeof QualityAxisNameSchema>;
 export type QualityAxisStatus = z.infer<typeof QualityAxisStatusSchema>;
 export type QualityAxisEvidence = z.infer<typeof QualityAxisEvidenceSchema>;
+export type StoryMeasurementScope = z.infer<typeof StoryMeasurementScopeSchema>;
+export type StoryMeasurementKind = z.infer<typeof StoryMeasurementKindSchema>;
+export type SelfContainedStoryPlanEvidence = z.infer<typeof SelfContainedStoryPlanEvidenceSchema>;
 export type EpisodeSpec = z.infer<typeof EpisodeSpecSchema>;
 export type QualityEvidence = z.infer<typeof QualityEvidenceSchema>;
 
@@ -195,6 +377,15 @@ const EDITORIAL_PRODUCTION_POLICIES: Record<string, EditorialLanePolicy> = {
     requiresMeasuredStory: true,
     requiresAestheticAudioScore: true,
   },
+  // The illustrated route produces the shared Story Spine/Episode Graph and
+  // a narrated, scored final master through scene_compiler. It therefore has
+  // the same full release evidence obligation as other narrated editorial
+  // lanes; do not weaken this to an advisory or self-contained exception.
+  illustrated_explainer: {
+    requiredAxes: NARRATIVE_EDITORIAL_AXES,
+    requiresMeasuredStory: true,
+    requiresAestheticAudioScore: true,
+  },
   // These engines hold their beat/panel plans internally rather than emitting
   // the shared EpisodeSpec story artifact. Their critic validation result is
   // therefore the real narrative evidence available to final QA; requiring a
@@ -229,6 +420,17 @@ const EDITORIAL_PRODUCTION_POLICIES: Record<string, EditorialLanePolicy> = {
   },
 };
 
+/**
+ * Catalog-level admission uses this before work starts. Runtime release
+ * evaluation still uses `assessProductionEditorialAcceptance` below so legacy
+ * or unknown receipts receive a structured fail-closed result rather than an
+ * exception.
+ */
+export function hasProductionEditorialPolicy(lane: string): boolean {
+  const policy = EDITORIAL_PRODUCTION_POLICIES[lane];
+  return Boolean(policy && policy.requiredAxes.length > 0);
+}
+
 export interface QualityAxisInput {
   /** A direct evaluator verdict. It is not inferred from pipeline completion. */
   passed?: boolean;
@@ -253,6 +455,11 @@ export interface EpisodeSpecInput {
     beatCount?: number;
     shotCount?: number;
     coverageRatio?: number;
+    measurementScope?: StoryMeasurementScope;
+    measurementKind?: StoryMeasurementKind;
+    finalMasterNarratedStoryReceiptFingerprint?: string;
+    /** A sealed pre-render plan; callers cannot attach a final-master ratio to it. */
+    plan?: SelfContainedStoryPlanEvidence;
   };
   candidateSelection?: {
     generated?: number;
@@ -404,6 +611,25 @@ export function assessProductionEditorialAcceptance(evidence: QualityEvidence): 
       }
       if (story.coverageRatio === undefined || story.coverageRatio < 0.95) {
         blockers.push("editorial story evidence requires at least 95% measured coverage");
+      }
+      // Only the shared Story Spine has this adapter today. Other automatic
+      // families use distinct self-contained or Short-strategy evidence and
+      // must not be deadlocked by a narration-semantic requirement they cannot
+      // truthfully produce.
+      const requiresFinalMasterNarratedStoryCoverage =
+        story.source === VALIDATED_STORY_SPINE_SOURCE ||
+        story.source === FINAL_MASTER_NARRATED_STORY_COVERAGE_SOURCE ||
+        story.measurementKind === "narration_semantic";
+      if (requiresFinalMasterNarratedStoryCoverage) {
+        if (story.measurementScope !== "final_master") {
+          blockers.push("Story-Spine story evidence must be measured against the final master before production release");
+        }
+        if (story.measurementKind !== "narration_semantic") {
+          blockers.push("Story-Spine final-master coverage must declare narration-semantic measurement rather than plan-only coverage");
+        }
+        if (!story.finalMasterNarratedStoryReceiptFingerprint) {
+          blockers.push("Story-Spine final-master coverage is missing its sealed narration-semantic receipt");
+        }
       }
     }
   }
@@ -587,19 +813,45 @@ function normalizeRepairs(
 function normalizeEpisode(input: EpisodeSpecInput): NormalizedEpisode {
   const gaps: string[] = [];
   const story = input.story;
-  const beatCount = count(story?.beatCount);
-  const shotCount = count(story?.shotCount);
-  const coverageRatio = ratio(story?.coverageRatio);
-  const storySource = nonEmpty(story?.source);
-  const hasStoryMeasurement = beatCount !== undefined || shotCount !== undefined || coverageRatio !== undefined;
+  const storyPlan = story?.plan === undefined
+    ? undefined
+    : SelfContainedStoryPlanEvidenceSchema.parse(story.plan);
+  const beatCount = storyPlan ? storyPlan.counts.beatCount : count(story?.beatCount);
+  const shotCount = storyPlan ? storyPlan.counts.shotCount : count(story?.shotCount);
+  const coverageRatio = storyPlan ? undefined : ratio(story?.coverageRatio);
+  const storySource = storyPlan ? "self-contained-story-receipt/v1" : nonEmpty(story?.source);
+  const measurementScope = storyPlan ? "plan" as const : story?.measurementScope;
+  const measurementKind = storyPlan ? undefined : story?.measurementKind;
+  const finalMasterNarratedStoryReceiptFingerprint = storyPlan
+    ? undefined
+    : nonEmpty(story?.finalMasterNarratedStoryReceiptFingerprint);
+  const hasStoryMeasurement = storyPlan !== undefined || beatCount !== undefined || shotCount !== undefined || coverageRatio !== undefined || measurementScope !== undefined || measurementKind !== undefined || finalMasterNarratedStoryReceiptFingerprint !== undefined;
 
-  if (story?.beatCount !== undefined && beatCount === undefined) {
+  if (storyPlan) {
+    if (story?.coverageRatio !== undefined) {
+      throw new Error("pre-render self-contained plan evidence cannot claim final-master coverage");
+    }
+    if (story?.beatCount !== undefined && count(story.beatCount) !== storyPlan.counts.beatCount) {
+      throw new Error("self-contained plan beat count conflicts with the sealed receipt");
+    }
+    if (story?.shotCount !== undefined && count(story.shotCount) !== storyPlan.counts.shotCount) {
+      throw new Error("self-contained plan shot count conflicts with the sealed receipt");
+    }
+    if (story?.measurementScope !== undefined && story.measurementScope !== "plan") {
+      throw new Error("pre-render self-contained plan evidence cannot claim final-master scope");
+    }
+    if (story?.measurementKind !== undefined || story?.finalMasterNarratedStoryReceiptFingerprint !== undefined) {
+      throw new Error("pre-render self-contained plan evidence cannot carry a final-master narrated-story receipt");
+    }
+  }
+
+  if (!storyPlan && story?.beatCount !== undefined && beatCount === undefined) {
     appendGap(gaps, "story: ignored invalid beat count.");
   }
-  if (story?.shotCount !== undefined && shotCount === undefined) {
+  if (!storyPlan && story?.shotCount !== undefined && shotCount === undefined) {
     appendGap(gaps, "story: ignored invalid shot count.");
   }
-  if (story?.coverageRatio !== undefined && coverageRatio === undefined) {
+  if (!storyPlan && story?.coverageRatio !== undefined && coverageRatio === undefined) {
     appendGap(gaps, "story: ignored invalid coverage ratio.");
   }
 
@@ -621,13 +873,27 @@ function normalizeEpisode(input: EpisodeSpecInput): NormalizedEpisode {
     topic: input.topic.trim(),
     ...(title ? { title } : {}),
     ...(durationSec === undefined ? {} : { durationSec }),
-    story: {
-      status: hasStoryMeasurement ? "measured" : "not_measured",
-      ...(storySource ? { source: storySource } : {}),
-      ...(beatCount === undefined ? {} : { beatCount }),
-      ...(shotCount === undefined ? {} : { shotCount }),
-      ...(coverageRatio === undefined ? {} : { coverageRatio }),
-    },
+    story: storyPlan
+      ? {
+          status: "measured",
+          measurementScope: "plan",
+          source: storySource,
+          beatCount,
+          shotCount,
+          plan: storyPlan,
+        }
+      : {
+          status: hasStoryMeasurement ? "measured" : "not_measured",
+          ...(storySource ? { source: storySource } : {}),
+          ...(beatCount === undefined ? {} : { beatCount }),
+          ...(shotCount === undefined ? {} : { shotCount }),
+          ...(coverageRatio === undefined ? {} : { coverageRatio }),
+          ...(measurementScope === undefined ? {} : { measurementScope }),
+          ...(measurementKind === undefined ? {} : { measurementKind }),
+          ...(finalMasterNarratedStoryReceiptFingerprint === undefined
+            ? {}
+            : { finalMasterNarratedStoryReceiptFingerprint }),
+        },
     ...(candidateSelection ? { candidateSelection } : {}),
     ...(repairs ? { repairs } : {}),
   });

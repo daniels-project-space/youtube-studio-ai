@@ -6,6 +6,7 @@ import {
 } from "@/trigger/designChannelInception";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { createChannelShowProfile } from "@/engine/channelShowProfile";
+import { CHANNEL_COMPOSITION_RECEIPT_VERSION } from "@/engine/channelCompositionCatalog";
 import {
   CREATIVE_CAPABILITY_CATALOG,
   CREATIVE_CAPABILITY_CATALOG_FINGERPRINT,
@@ -44,7 +45,7 @@ const legacyV1DefinitionIdentity = {
   requiredCapabilityKeys: ["source_attributed_data_story"],
 } as const;
 const legacyV1CompositionBody = {
-  version: currentProfile.composition!.version,
+  version: CHANNEL_COMPOSITION_RECEIPT_VERSION,
   key: "source_attributed_data_story",
   definitionVersion: "v1",
   definitionFingerprint: sha256Hex(canonicalJson(legacyV1DefinitionIdentity)),
@@ -174,7 +175,7 @@ try {
       ],
       pipeline: design.pipeline,
     }),
-    /no certified autonomous channel composition is registered for narrated_stock/,
+    /(?:has no declared composition fragment version|no certified (?:capability composition fragment|autonomous channel composition) is registered for narrated_stock)/,
     "a retry cannot add a known uncomposed capability and inherit its historical subset route",
   );
 } finally {

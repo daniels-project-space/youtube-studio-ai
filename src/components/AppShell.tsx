@@ -4,6 +4,7 @@ import { ChannelSwitcher } from "./ChannelSwitcher";
 import { OwnerProvider } from "@/lib/owner-context";
 import { ChannelProvider } from "@/lib/channel-context";
 import { OperationsAccess } from "./OperationsAccess";
+import { StudioLocation } from "./StudioLocation";
 
 /** Responsive app chrome shared by every operating surface. */
 export function AppShell({ children }: { children: ReactNode }) {
@@ -18,10 +19,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <span aria-hidden="true">✦</span>
                 <strong>AutoStudio</strong>
               </div>
-              <div className="studio-topbar-context" aria-label="Current workspace">
-                <span>Workspace</span>
-                <strong>Production command</strong>
-              </div>
+              <StudioLocation />
               <div className="studio-topbar-actions">
                 <ChannelSwitcher />
                 <OperationsAccess />

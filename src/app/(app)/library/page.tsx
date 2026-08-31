@@ -11,6 +11,8 @@ import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
 import { VideoGrid } from "@/components/VideoGrid";
 import { Lightbox } from "@/components/Lightbox";
+import { ArtifactWorkRail } from "@/components/ArtifactWorkRail";
+import { ThumbnailRefreshInventoryPanel } from "@/components/ThumbnailRefreshInventoryPanel";
 import {
   LibraryFilters,
   type LibraryFilterState,
@@ -136,11 +138,24 @@ export default function LibraryPage() {
         but are labelled unverified rather than being presented as release-quality masters.
       </p>
 
+      <div style={{ marginBottom: "1.4rem" }}>
+        <ArtifactWorkRail
+          videos={videos === undefined ? undefined : filtered}
+          onOpen={(video) => openLightbox(video.channelSlug, video)}
+          title="Latest visible work"
+          description="Open a retained render or YouTube-linked release before filtering the full archive."
+          emptyMessage="No rendered or uploaded video artifacts match the selected channel and filters yet."
+        />
+      </div>
+
+      <ThumbnailRefreshInventoryPanel selectedChannelSlug={selectedSlug} />
+
       {!loading && (
         <LibraryFilters
           channels={channels ?? []}
           state={filters}
           onChange={setFilters}
+          resultCount={filtered.length}
         />
       )}
 

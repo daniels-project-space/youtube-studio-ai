@@ -824,26 +824,22 @@ async function removeBackground(imgPath: string, outPng: string, log?: Logger): 
   const key = process.env.FAL_KEY;
   if (!key) throw new Error("documotion: FAL_KEY missing (vault service 'fal')");
   const dataUri = `data:image/jpeg;base64,${(await readFile(imgPath)).toString("base64")}`;
-  let lastErr = "";
-  for (const ep of ["fal-ai/birefnet/v2", "fal-ai/birefnet"]) {
-    try {
-      const res = await fetch(`https://fal.run/${ep}`, {
-        method: "POST",
-        headers: { Authorization: `Key ${key}`, "content-type": "application/json" },
-        body: JSON.stringify({ image_url: dataUri }),
-        signal: AbortSignal.timeout(120_000),
-      });
-      const j = (await res.json()) as { image?: { url?: string } };
-      if (!res.ok) { lastErr = `${ep} HTTP ${res.status}`; continue; }
-      const url = j?.image?.url;
-      if (!url) { lastErr = `${ep}: no url`; continue; }
-      await downloadTo(url, outPng);
-      return outPng;
-    } catch (e) {
-      lastErr = `${ep}: ${e instanceof Error ? e.message : e}`;
-    }
-  }
-  throw new Error(`documotion: background removal failed (${lastErr})`);
+  // Do not cascade from one paid FAL model to another: a successful response
+  // followed by an unreadable CDN URL is already ambiguous spend. The caller
+  // deliberately degrades this cutout to its source image on any failure.
+  const endpoint = "fal-ai/birefnet/v2";
+  const res = await fetch(`https://fal.run/${endpoint}`, {
+    method: "POST",
+    headers: { Authorization: `Key ${key}`, "content-type": "application/json" },
+    body: JSON.stringify({ image_url: dataUri }),
+    signal: AbortSignal.timeout(120_000),
+  });
+  const j = (await res.json()) as { image?: { url?: string } };
+  if (!res.ok) throw new Error(`${endpoint} HTTP ${res.status}`);
+  const url = j?.image?.url;
+  if (!url) throw new Error(`${endpoint}: no url`);
+  await downloadTo(url, outPng);
+  return outPng;
 }
 
 /**

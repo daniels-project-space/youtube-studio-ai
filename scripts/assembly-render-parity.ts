@@ -258,6 +258,8 @@ const LEGACY_MARKERS: { marker: string; why: string }[] = [
   { marker: "await normalizeAudioOnly(finalVideo, norm, target)", why: "unconditional final loudnorm" },
   { marker: 'Number(ctx.params["introMusicVol"] ?? 0.513)', why: "music duck levels" },
   { marker: 'Number(ctx.params["bodyMusicVol"] ?? 0.1026)', why: "music duck levels" },
+  { marker: "const assemblyTransition", why: "closed title-to-body transition selection" },
+  { marker: "transition: assemblyTransition,", why: "shared composer receives the selected transition" },
 ];
 
 async function assertLegacyReplicaInSync(): Promise<void> {
@@ -338,6 +340,10 @@ async function renderLegacyEssay(
   const tailSec = Number(params["tailSec"] ?? 3);
   const fadeOutSec = Number(params["fadeOutSec"] ?? 2);
   const audioFadeOutSec = Number(params["audioFadeOutSec"] ?? fadeOutSec);
+  const configuredTransition = params["transitions"];
+  const assemblyTransition = configuredTransition === "hardcut" || configuredTransition === "crossfade" || configuredTransition === "dip_to_black"
+    ? configuredTransition
+    : "crossfade";
   const videoSec = introSec + narrationSec + tailSec;
 
   // :2034-2041 — beats + editor cutSheet cadence
@@ -403,6 +409,7 @@ async function renderLegacyEssay(
     introMusicVol: Number(params["introMusicVol"] ?? 0.513),
     bodyMusicVol: Number(params["bodyMusicVol"] ?? 0.1026),
     musicDuckRampSec: Number(params["musicDuckRampSec"] ?? 4),
+    transition: assemblyTransition,
     outroCardPath,
     outroFadeInSec: 1.2,
   });
@@ -572,6 +579,46 @@ const SCENARIOS: Scenario[] = [
         channelName: "Investory",
       },
       params: { aspect: "16:9", tailSec: 3, burnCaptions: true },
+    }),
+  },
+  {
+    name: "essay-title transition (hard cut)",
+    needsCards: false,
+    note: "A pre-rendered title card followed by a real hard cut; validates the closed transition path without a new card render.",
+    build: (fx) => ({
+      store: {
+        footageClips: fx.clips,
+        narrationLocalPath: fx.narration,
+        narrationDurationSec: fx.narrationSec,
+        introCardPath: fx.introCard,
+        introSec: 5,
+        musicKey: fx.music,
+        sentenceTimings: timings(fx.narrationSec),
+        cutSheet: { sections: [{ name: "intro", cutsPerMin: 6 }, { name: "body", cutsPerMin: 6 }] },
+        script: { closingLine: "Think it through." },
+        channelName: "Investory",
+      },
+      params: { aspect: "16:9", tailSec: 1, burnCaptions: true, transitions: "hardcut" },
+    }),
+  },
+  {
+    name: "essay-title transition (dip to black)",
+    needsCards: false,
+    note: "A pre-rendered title card with the closed fade-to-black-and-back effect; must remain distinct from a dissolve while preserving the master timeline.",
+    build: (fx) => ({
+      store: {
+        footageClips: fx.clips,
+        narrationLocalPath: fx.narration,
+        narrationDurationSec: fx.narrationSec,
+        introCardPath: fx.introCard,
+        introSec: 5,
+        musicKey: fx.music,
+        sentenceTimings: timings(fx.narrationSec),
+        cutSheet: { sections: [{ name: "intro", cutsPerMin: 6 }, { name: "body", cutsPerMin: 6 }] },
+        script: { closingLine: "Think it through." },
+        channelName: "Investory",
+      },
+      params: { aspect: "16:9", tailSec: 1, burnCaptions: true, transitions: "dip_to_black" },
     }),
   },
 ];

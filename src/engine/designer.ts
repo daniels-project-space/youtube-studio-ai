@@ -16,17 +16,26 @@ import {
   type FamilyKey,
 } from "./families";
 import { resolveChannelFamilyManifest } from "./channelFamilyManifest";
+import { certifiedFamilyAdmission } from "./certifiedFamilyAdmission";
+import type { NovitaVideoRuntimeTarget } from "./runtimeCapability";
 import { subcategoryTags } from "@/lib/nicheCatalog";
 import { nichePreset } from "./golden";
 import {
   briefToCreativeCapabilityIntent,
   type ChannelProgramBrief,
 } from "./channelProgramBrief";
-import { compileCertifiedChannelComposition } from "./channelCompositionCompiler";
 import {
-  findCertifiedChannelComposition,
-  resolveCertifiedChannelComposition,
-} from "./channelCompositionCatalog";
+  assertChannelProgramRouteBinding,
+  assertChannelProgramRoutePipelineCompatibility,
+  type ChannelProgramRoute,
+} from "./channelProgramRoute";
+import {
+  assertCreatorIntentDiagnosisBinding,
+  type CreatorIntentDiagnosis,
+} from "./creatorIntentDiagnosis";
+import { compileCertifiedChannelComposition } from "./channelCompositionCompiler";
+import { visualTreatmentKeyFromUnknown, type VisualTreatmentKey } from "./visualTreatmentCatalog";
+import { findCertifiedChannelComposition } from "./channelCompositionCatalog";
 import {
   dataStoryInsertParams,
   dataStoryProductionReadiness,
@@ -53,6 +62,8 @@ import {
 import { registerAllBlocks } from "./blocks";
 import { validatePipeline } from "./validate";
 import { childrenShowBibleSeedKeys } from "./childrenShowBible";
+import { materializeSelfContainedStoryPlanningHandoff } from "./selfContainedStoryPlanning";
+import { sanitizeParamOverrides } from "./moduleCatalog";
 import type { PipelineEntry } from "./types";
 import {
   assertPipelineMatchesContentLane,
@@ -60,10 +71,17 @@ import {
   type ContentLane,
 } from "./contentLane";
 import {
+  assertMinimumVideoFoundation,
+  assertMinimumVideoFoundationForAutomaticFamily,
+  pipelineSupportsNarrationAlignedShorts,
+} from "./minimumVideoFoundation";
+import {
   compilePipeline,
   completePipelineForPolicy,
+  DEFAULT_GENERATION_PROFILE,
   type PipelineCompilation,
 } from "./pipelineCompiler";
+import type { GenerationProfileId } from "./runtimeCapability";
 
 export interface DesignOptions {
   family: FamilyKey;
@@ -71,6 +89,19 @@ export interface DesignOptions {
   subcategory?: string;
   /** Immutable creator intent, required by the channel-inception executor. */
   programBrief?: ChannelProgramBrief;
+  /** Server-derived, brief-bound episode grammar. Never accepted as a raw UI choice. */
+  programRoute?: ChannelProgramRoute;
+  /**
+   * Sealed explanation of the brief/route's reusable editorial consequences.
+   * It is optional only so historical callers remain readable; when present,
+   * the designer verifies it before using the route-owned grammar.
+   */
+  creatorIntentDiagnosis?: CreatorIntentDiagnosis;
+  /**
+   * Internal-only owner-reviewed runtime target. The Trigger authority derives
+   * this from the service registry; browser input is never trusted for it.
+   */
+  runtimeTarget?: NovitaVideoRuntimeTarget;
   lengthMinutes?: number; // narrated target length
   locale?: string; // "en" | "es" | "de" …
   footageTheme?: string; // narrated-stock visual theme, e.g. "nature"
@@ -78,8 +109,12 @@ export interface DesignOptions {
   publishMode?: string; // draft | scheduled | public
   /** Set only at an authenticated operator boundary after explicit confirmation. */
   approvedForPublish?: boolean;
-  seriesTitle?: string; // ordered series mode, e.g. "7 Days of Stoic Calm"
-  seriesCount?: number; // total episodes in the series (0/undefined = open-ended)
+  /**
+   * Legacy route-less snapshot compatibility only. New or route-bearing
+   * admissions must derive series semantics from ProgramBrief.serializedProgram.
+   */
+  seriesTitle?: string;
+  seriesCount?: number;
   /**
    * Structured external sources for the documentary-collage Short lane. These
    * are persisted on short_strategy and validated again before a render spends.
@@ -92,6 +127,24 @@ export interface DesignOptions {
   claimEvidence?: unknown;
   /** Advanced editor: per-block param overrides, keyed by block id. */
   paramOverrides?: Record<string, Record<string, unknown>>;
+  /**
+   * Render tier for this channel's generated visuals: "draft" (cheap preview),
+   * "production" (what every existing channel resolves to), or "hero".
+   *
+   * This is the only way to select a tier at DESIGN time, because the render
+   * blocks below are spliced/swapped in AFTER `paramOverrides` has already been
+   * applied — a per-block override on novita_render_images / novita_render_video
+   * / story_spine is therefore discarded and can never reach them. Leave unset
+   * to keep the historical hardcoded "production" tier.
+   *
+   * `draft` is deliberately preview-only. It may produce a design/preview
+   * graph, but that graph is not production-ready and the execution and
+   * channel-certification boundaries reject it before provider work. Only the
+   * standard `production` or higher-quality `hero` profiles are runnable.
+   * Renderer profile selection is route-owned and cannot be overridden through
+   * per-channel runtime module configuration.
+   */
+  generationProfile?: GenerationProfileId;
   /** Server-owned QuizYear identity; category/topic combinations are profile-owned. */
   quizProfile?: CertifiedQuizProfileKey;
   /**
@@ -117,12 +170,26 @@ export interface DesignOptions {
     chapters?: boolean;
     notify?: boolean;
     crosspost?: boolean;
-    /** Auto-spin a 9:16 Short from each long-form (private-first). Default OFF. */
+    /** Auto-spin a 9:16 Short from each eligible long-form (private-first). The automatic creator enables this by default; API callers opt in explicitly. */
     shorts?: boolean;
     /** Mine source-windowed documentary Short candidates after a long-form draft. */
     documentaryCandidates?: boolean;
     /** Reusable visual-development contract for cinematic story renders. Default ON for cinematic. */
     visualMatter?: boolean;
+    /**
+     * A catalog-backed visual treatment applied to the cinematic Visual Matter
+     * plan and existing QA locks. It selects no renderer and grants no
+     * automatic-admission authority.
+     */
+    visualTreatment?: VisualTreatmentKey;
+    /**
+     * Server-side opt-in for a bounded direct-Novita text-to-image Visual
+     * Matter reference pack. Its actual R2 pixels are QA comparison input only;
+     * it does not claim image conditioning of primary keyframes. Default OFF.
+     */
+    visualMatterReferenceAssets?: boolean;
+    /** Reuse approved owner-scoped Studio recipes before fresh visual planning. Default ON for cinematic. */
+    studioAssetLibrary?: boolean;
     /** Film-crew creative-direction layer. Default ON. */
     crew?: boolean;
   };
@@ -142,6 +209,17 @@ export interface DesignResult {
   warnings: string[];
   compilation?: PipelineCompilation;
 }
+
+/**
+ * QuizYear's supervised portrait derivative is a distinct, human-reviewed
+ * Short product. Keep this envelope shared by design and later architectural
+ * length re-pinning so the parent family's fixed 80-second cadence cannot
+ * silently overwrite the route's 35–60 second release contract.
+ */
+export const QUIZ_SHORT_PORTRAIT_LENGTH_ENVELOPE = Object.freeze({
+  minSeconds: 35,
+  maxSeconds: 60,
+});
 
 const OPTIONAL_BLOCKS = new Set([
   "quote_overlays",
@@ -177,13 +255,88 @@ function lengthCheckEnvelope(
 
 /** Build a validated pipeline for a channel from the wizard's choices. */
 export function designPipeline(opts: DesignOptions): DesignResult {
+  // `designPipeline` is used by the API, inception, and engine-level callers.
+  // The API already sanitizes editor input, but this shared compiler is the
+  // actual trust boundary: direct callers must not gain a second path to
+  // inject arbitrary block parameters or compete with route-owned settings.
+  const rawParamOverrides = opts.paramOverrides;
+  const paramOverrides = sanitizeParamOverrides(rawParamOverrides);
   // Resolve before block registration or compilation. The same composed
   // contract powers creator admission, so a catalog drift cannot yield a
   // pipeline with a different lane, cadence, or visual archetype.
   const manifest = resolveChannelFamilyManifest(opts.family);
+  // Resolve the render tier ONCE, here, so every block this function emits
+  // agrees. An unset field is the only state any existing channel has, and it
+  // resolves to exactly the literal these call sites used to hardcode.
+  const generationProfileId: GenerationProfileId =
+    opts.generationProfile ?? DEFAULT_GENERATION_PROFILE;
+  const previewOnlyGenerationProfile = generationProfileId === "draft";
   registerAllBlocks();
   const fam = manifest.family;
   const base = manifest.archetype;
+  if (opts.programRoute && !opts.programBrief) {
+    throw new Error("channel program route requires its canonical channel program brief");
+  }
+  const programRoute = opts.programRoute && opts.programBrief
+    ? assertChannelProgramRouteBinding({ route: opts.programRoute, programBrief: opts.programBrief, expectedFamily: opts.family })
+    : undefined;
+  // Whiteboard and motion-comic automatic production is route-owned: their
+  // shared plan/seal pair needs the frozen route at runtime. Keep old
+  // route-less design previews compilable for inspection, but never label one
+  // production-ready or run its automatic-plan invariant as though the seal
+  // existed.
+  const requiresSealedSelfContainedRoute = opts.family === "whiteboard" || opts.family === "comic" || opts.family === "loreshort";
+  const hasRequiredSelfContainedRoute = !requiresSealedSelfContainedRoute || programRoute !== undefined;
+  const isSupervisedQuizShort = programRoute?.routeKey === "quizyear/portrait-supervised/v1";
+  if (opts.programBrief?.serializedProgram && !programRoute) {
+    throw new Error("serialized_program/v1 requires its sealed channel program route");
+  }
+  const routeSerializedProgram = programRoute?.serializedProgram;
+  const rawSeriesOptions = opts as unknown as {
+    seriesTitle?: unknown;
+    seriesCount?: unknown;
+  };
+  if (
+    programRoute &&
+    (rawSeriesOptions.seriesTitle !== undefined || rawSeriesOptions.seriesCount !== undefined) &&
+    (
+      rawSeriesOptions.seriesTitle !== routeSerializedProgram?.seriesTitle ||
+      rawSeriesOptions.seriesCount !== routeSerializedProgram?.seriesCount
+    )
+  ) {
+    throw new Error("serialized_program/v1 values must be derived from the sealed channel program route");
+  }
+  const topicSelectOverrides = rawParamOverrides?.["topic_select"];
+  if (
+    programRoute &&
+    topicSelectOverrides &&
+    ("seriesTitle" in topicSelectOverrides || "seriesCount" in topicSelectOverrides)
+  ) {
+    throw new Error("serialized_program/v1 values are route-owned and cannot be supplied through topic_select overrides");
+  }
+  if (opts.creatorIntentDiagnosis !== undefined) {
+    if (!programRoute || !opts.programBrief) {
+      throw new Error("creator intent diagnosis requires a canonical channel program brief and route");
+    }
+    assertCreatorIntentDiagnosisBinding({
+      diagnosis: opts.creatorIntentDiagnosis,
+      programBrief: opts.programBrief,
+      programRoute,
+    });
+  }
+  const routeQuizProfile = programRoute?.quizProfile;
+  const routeSyntheticScenario = programRoute?.syntheticScenarioProfile
+    ? syntheticScenarioContract(programRoute.syntheticScenarioProfile)
+    : undefined;
+  if (programRoute && opts.quizProfile !== undefined && opts.quizProfile !== routeQuizProfile) {
+    throw new Error("QuizYear profile must match the sealed channel program route");
+  }
+  if (programRoute && opts.syntheticScenario !== undefined && opts.syntheticScenario.profile !== routeSyntheticScenario?.profile) {
+    throw new Error("fictional scenario must match the sealed channel program route");
+  }
+  if (programRoute && !routeSyntheticScenario && opts.syntheticScenario !== undefined) {
+    throw new Error("a baseline channel program route cannot accept a mutable fictional scenario");
+  }
   if (opts.capabilitySelections?.length && !opts.programBrief) {
     throw new Error("creative capability selections require a canonical channel program brief");
   }
@@ -203,20 +356,34 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     throw new Error("legacy data-story contract does not match the selected creative capability");
   }
   const effectiveDataStory = selectedDataStory ?? opts.dataStory;
+  if (routeSerializedProgram && effectiveDataStory) {
+    throw new Error("serialized_program/v1 cannot combine with source-attributed data story admission");
+  }
   if (effectiveDataStory && !supportsDataStoryFamily(opts.family)) {
     throw new Error("source-attributed data story is currently supported only by Narrated + Stock Footage");
   }
-  if (opts.syntheticScenario !== undefined && !isSyntheticScenarioContract(opts.syntheticScenario)) {
+  const effectiveSyntheticScenario = routeSyntheticScenario ?? opts.syntheticScenario;
+  const effectiveQuizProfile = routeQuizProfile ?? opts.quizProfile;
+  if (effectiveSyntheticScenario !== undefined && !isSyntheticScenarioContract(effectiveSyntheticScenario)) {
     throw new Error("synthetic scenario must use the current typed fictional-scenario contract");
   }
-  if (opts.syntheticScenario && opts.family !== "illustrated_explainer") {
+  if (effectiveSyntheticScenario && opts.family !== "illustrated_explainer") {
     throw new Error("synthetic AI scenario stories are currently supported only by Illustrated Explainer");
   }
-  if (opts.quizProfile !== undefined && opts.family !== "quizyear") {
+  if (effectiveQuizProfile !== undefined && opts.family !== "quizyear") {
     throw new Error("certified QuizYear profiles are currently supported only by QuizYear");
   }
 
   const t = opts.toggles ?? {};
+  const selectedVisualTreatment = t.visualTreatment === undefined
+    ? undefined
+    : visualTreatmentKeyFromUnknown(t.visualTreatment);
+  if (t.visualTreatment !== undefined && !selectedVisualTreatment) {
+    throw new Error("visual treatment must be a known catalog key");
+  }
+  if (selectedVisualTreatment && opts.family !== "cinematic") {
+    throw new Error("visual treatments currently require the cinematic Visual Matter pipeline");
+  }
   const warnings: string[] = [];
   // Per-niche reference preset auto-populates length + script style on channel
   // inception when the operator/AI didn't specify them (so every niche launches
@@ -247,6 +414,10 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       }
     }
   }
+  // The parent QuizYear family remains a fixed long-form channel contract.
+  // Its supervised portrait derivative has its own preflighted 35–60s
+  // envelope and is never surfaced as an automatic family-length choice.
+  if (isSupervisedQuizShort) lenSec = 40;
   // Documentary collage Shorts are a distinct native-vertical product, not a
   // cropped long-form output. Keep every upstream sizing knob inside the
   // renderer's validated 5-7 beat window even when a channel preset is long.
@@ -285,6 +456,14 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         params.minSeconds = envelope.minSeconds;
         params.maxSeconds = envelope.maxSeconds;
       }
+      // QuizYear's ordinary family contract is long-form. The sealed portrait
+      // derivative is independently preflighted at 35–60 seconds, so keeping
+      // the parent 80-second check here would make every truthful Short fail
+      // before final QA despite a valid portrait render.
+      if (isSupervisedQuizShort && e.block === "length_check") {
+        params.minSeconds = QUIZ_SHORT_PORTRAIT_LENGTH_ENVELOPE.minSeconds;
+        params.maxSeconds = QUIZ_SHORT_PORTRAIT_LENGTH_ENVELOPE.maxSeconds;
+      }
       if (documentaryShortTargetSec !== undefined) {
         if (e.block === "topic_select" || e.block === "short_strategy" || e.block === "documotion_short") {
           params.targetSeconds = documentaryShortTargetSec;
@@ -305,7 +484,7 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         if (opts.footageTheme) params.footageTheme = opts.footageTheme;
         else if (preset?.footageTheme) params.footageTheme = preset.footageTheme;
       }
-      if (e.block === "topic_select" && opts.seriesTitle) {
+      if (e.block === "topic_select" && !programRoute && opts.seriesTitle) {
         params.seriesTitle = opts.seriesTitle;
         if (opts.seriesCount) params.seriesCount = opts.seriesCount;
       }
@@ -366,9 +545,17 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       }
       // Advanced editor: per-block param overrides win over every derived value.
       // Only whitelisted keys from MODULE_CATALOG are accepted (sanitized upstream).
-      const ov = opts.paramOverrides?.[e.block];
+      const ov = paramOverrides[e.block];
       if (ov) for (const [k, v] of Object.entries(ov)) {
         if (v !== undefined && v !== null && v !== "") params[k] = v;
+      }
+      if (e.block === "topic_select" && routeSerializedProgram) {
+        params.seriesTitle = routeSerializedProgram.seriesTitle;
+        if (routeSerializedProgram.seriesCount !== undefined) {
+          params.seriesCount = routeSerializedProgram.seriesCount;
+        } else {
+          delete params.seriesCount;
+        }
       }
       return { block: e.block, params: Object.keys(params).length ? params : undefined };
     });
@@ -404,13 +591,13 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // Keep this as a pipeline rewrite rather than a conditional inside Topicraft: the
   // compiled graph itself makes the non-Gemini route inspectable and reusable.
   if (opts.family === "quizyear") {
-    const quizOverrides = opts.paramOverrides?.["quiz_year"];
+    const quizOverrides = rawParamOverrides?.["quiz_year"];
     if (quizOverrides?.["categories"] !== undefined || quizOverrides?.["topic"] !== undefined) {
       throw new Error(
         "quiz: categories and topics are owned by the certified QuizYear profile; remove raw quiz_year overrides",
       );
     }
-    const quizProfile = resolveCertifiedQuizProfile(opts.quizProfile);
+    const quizProfile = resolveCertifiedQuizProfile(effectiveQuizProfile);
     const planner = familyAutonomousPlanningCapability("quizyear");
     const forbiddenPlannerBlocks = new Set(
       planner.mode === "registered_non_gemini" ? planner.forbiddenGeminiBlocks : [],
@@ -420,7 +607,7 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         return [{
           block: "quiz_topic_plan",
           params: {
-            ...(opts.quizProfile ? { quizProfile: quizProfile.key } : {}),
+            ...(effectiveQuizProfile ? { quizProfile: quizProfile.key } : {}),
           },
         }];
       }
@@ -432,8 +619,12 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         // mapping as a server-side contract.
         delete params.topic;
         params.categories = certifiedQuizProfileCategories(quizProfile);
-        if (opts.quizProfile) params.quizProfile = quizProfile.key;
+        if (effectiveQuizProfile) params.quizProfile = quizProfile.key;
         params.noGemini = true;
+        if (isSupervisedQuizShort) {
+          params.presentation = "portrait_supervised";
+          params.targetSeconds = 40;
+        }
         return [
           {
             block: "music",
@@ -442,7 +633,7 @@ export function designPipeline(opts: DesignOptions): DesignResult {
               trackCount: 1,
               prompt:
                 "bright modern game-show instrumental, warm marimba and light percussion, playful but not childish, no vocals, no lyrics, clean loopable 100 BPM",
-              ...(opts.paramOverrides?.["music"] ?? {}),
+              ...(paramOverrides["music"] ?? {}),
             },
           },
           { block: "quiz_year", params },
@@ -451,12 +642,38 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       if (entry.block === "metadata") {
         return [{ block: "quiz_critic_spec" }, { block: "quiz_metadata" }];
       }
+      if (isSupervisedQuizShort && entry.block === "qa_visual") {
+        return [{
+          block: "qa_visual",
+          params: {
+            ...(entry.params ?? {}),
+            qaProfile: "production",
+            audioQa: true,
+          },
+        }];
+      }
+      if (isSupervisedQuizShort && entry.block === "upload_draft") {
+        return [{
+          block: "upload_draft",
+          params: {
+            ...(entry.params ?? {}),
+            // A supervised QuizShort can only make a private draft.  The
+            // compiler and runtime release gate independently repeat this.
+            publishMode: "draft",
+          },
+        }];
+      }
       // Every legacy crew/research entry has a Gemini-backed planner. Keep the
       // authoritative list on the family capability, so later crew changes
       // cannot silently reintroduce a provider call into this certified route.
       if (forbiddenPlannerBlocks.has(entry.block)) return [];
       return [entry];
     });
+    if (isSupervisedQuizShort) {
+      const qaIndex = pipeline.findIndex((entry) => entry.block === "qa_visual");
+      if (qaIndex < 0) throw new Error("quiz_short: shared final QA block is missing from the portrait route");
+      pipeline.splice(qaIndex + 1, 0, { block: "quiz_short_release" });
+    }
   }
 
   // GENERATED-VISUALS families use the complete authored-shot chain. Each shot
@@ -486,9 +703,9 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         e.block === "gen_footage" ||
         (fam.visualEngine === "ai_scenes" && !hasCompleteDirectCinematicChain && e.block === "novita_render_video")
           ? [
-              { block: "novita_render_images", params: { generationProfile: "production" } },
+              { block: "novita_render_images", params: { generationProfile: generationProfileId } },
               { block: "qa_assets" },
-              { block: "novita_render_video", params: { generationProfile: "production" } },
+              { block: "novita_render_video", params: { generationProfile: generationProfileId } },
               { block: "qa_shots" },
             ]
           : [e]
@@ -587,6 +804,17 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         pipeline.splice(ei, 0, cc);
       }
     }
+    // Current route-less/manual self-contained work keeps the renderer-owned
+    // planner. A future certified route that declares the shared handoff must
+    // instead compose its bounded native plan and route seal immediately before
+    // the renderer, never as an optional afterthought.
+    if (programRoute) {
+      pipeline = materializeSelfContainedStoryPlanningHandoff({
+        route: programRoute,
+        visualEngine: fam.visualEngine,
+        pipeline,
+      });
+    }
     // Whiteboard beds the produced music under its narration — the track must
     // exist BEFORE the engine runs, so move `music` ahead of it (it sat after,
     // where the archetype's footage stage used to be).
@@ -645,6 +873,28 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     }
   }
 
+  // A sealed serialized-program route owns one provider-free bridge from
+  // Topic Select's atomic episode completion into all later consumers. Insert
+  // it after topic_select *after* crew entries have been placed: splicing at
+  // the same anchor makes the immutable receipt precede every crew brief.
+  // This is not a capability or family toggle — route binding below rejects it
+  // on non-serialized routes and no operator parameter can add it.
+  if (routeSerializedProgram) {
+    const topicIndex = pipeline.findIndex((entry) => entry.block === "topic_select");
+    if (topicIndex < 0) {
+      throw new Error("serialized_program/v1 requires topic_select before its episode context bridge");
+    }
+    const existingContexts = pipeline.filter(
+      (entry) => entry.block === "serialized_program_episode_context",
+    );
+    if (existingContexts.length > 1) {
+      throw new Error("serialized_program/v1 permits exactly one route-owned episode context bridge");
+    }
+    if (existingContexts.length === 0) {
+      pipeline.splice(topicIndex + 1, 0, { block: "serialized_program_episode_context" });
+    }
+  }
+
   // Every externally narrated family gets the versioned story artifact spine.
   // Self-contained comic/whiteboard engines own equivalent internal timing.
   if (
@@ -654,16 +904,18 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     const narrationIndex = pipeline.findIndex((entry) => entry.block === "narration_tts");
     pipeline.splice(narrationIndex + 1, 0, {
       block: "story_spine",
-      params: { generationProfile: "production", targetShotSec: opts.family === "shorts" ? 4 : 6 },
+      params: { generationProfile: generationProfileId, targetShotSec: opts.family === "shorts" ? 4 : 6 },
     });
   }
 
   // Fictional AI scenario stories reuse the zero-provider illustrated lane,
-  // but their disclosure must be a real pipeline artifact rather than a title
-  // convention. The first module gives script/hook generation the contract;
-  // the second rejects the script if it does not say it in the opening.
-  if (opts.syntheticScenario) {
-    const contract = syntheticScenarioContract(opts.syntheticScenario.profile);
+  // but their disclosure and visual treatment must be real pipeline artifacts
+  // rather than title/prompt conventions. The first module gives script/hook
+  // generation the contract; the route-derived treatment prevents a generic
+  // real-world visual source from silently depicting it; the gate rejects a
+  // script if it does not say the disclosure in the opening.
+  if (effectiveSyntheticScenario) {
+    const contract = syntheticScenarioContract(effectiveSyntheticScenario.profile);
     const scriptIndex = pipeline.findIndex((entry) => entry.block === "script_gen");
     if (scriptIndex < 0) throw new Error("synthetic AI scenario requires a script_gen block");
     if (!pipeline.some((entry) => entry.block === "synthetic_scenario")) {
@@ -671,6 +923,13 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         block: "synthetic_scenario",
         params: contract,
       });
+    }
+    const syntheticScenarioIndex = pipeline.findIndex((entry) => entry.block === "synthetic_scenario");
+    // The receipt is intentionally route-derived. A route-less invocation can
+    // still replay historical synthetic work, but cannot manufacture the new
+    // sealed treatment from mutable design parameters.
+    if (programRoute && !pipeline.some((entry) => entry.block === "scenario_visual_treatment")) {
+      pipeline.splice(syntheticScenarioIndex + 1, 0, { block: "scenario_visual_treatment" });
     }
     const resolvedScriptIndex = pipeline.findIndex((entry) => entry.block === "script_gen");
     if (!pipeline.some((entry) => entry.block === "scenario_disclosure_gate")) {
@@ -687,15 +946,98 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     const storyIndex = pipeline.findIndex((entry) => entry.block === "story_spine");
     if (storyIndex < 0) throw new Error("cinematic Visual Matter requires the timed story spine");
     pipeline.splice(storyIndex + 1, 0, {
+      block: "studio_asset_resolve",
+      params: {
+        enabled: t.studioAssetLibrary !== false,
+        family: "cinematic",
+        contentLane: "cinematic_ai",
+        moduleId: "visual_matter",
+        ...(selectedVisualTreatment ? { treatment: selectedVisualTreatment } : {}),
+      },
+    }, {
       block: "visual_matter",
       params: {
         enabled: t.visualMatter !== false,
-        renderReferenceAssets: false,
-        maxReferenceImages: 8,
         maxCharacters: 3,
         maxSettings: 3,
+        ...(selectedVisualTreatment ? { visualTreatment: selectedVisualTreatment } : {}),
       },
     });
+  }
+  // The paid bridge remains strictly conditional: it follows the resolved
+  // script/story-spine Visual Matter plan, exists only for the cinematic
+  // family, and is never materialized merely because Visual Matter planning is
+  // available. Its R2 outputs are fed to QA—not back into direct Z-Image as
+  // unsupported image-to-image/reference conditioning.
+  if (
+    opts.family === "cinematic" &&
+    t.visualMatter !== false &&
+    t.visualMatterReferenceAssets === true &&
+    !pipeline.some((entry) => entry.block === "visual_matter_references")
+  ) {
+    const storyIndex = pipeline.findIndex((entry) => entry.block === "story_spine");
+    const visualMatterIndex = pipeline.findIndex((entry) => entry.block === "visual_matter");
+    if (storyIndex < 0 || visualMatterIndex <= storyIndex) {
+      throw new Error("cinematic Visual Matter reference assets require the post-story-spine Visual Matter plan");
+    }
+    pipeline.splice(visualMatterIndex + 1, 0, {
+      block: "visual_matter_references",
+      params: {
+        enabled: true,
+        maxImages: 8,
+        generationProfile: generationProfileId,
+      },
+    });
+  }
+  // Resolve at most one approved direct-LTX standard LoRA after selected stills
+  // have passed visual QA, but before the paid video worker is admitted. A
+  // no-match is typed and preserves the sealed base runtime. IC-LoRAs stay out
+  // of this path because the current worker cannot consume Comfy guide inputs.
+  if (opts.family === "cinematic" && !pipeline.some((entry) => entry.block === "studio_ltx_adapter_resolve")) {
+    const assetQaIndex = pipeline.findIndex((entry) => entry.block === "qa_assets");
+    const videoIndex = pipeline.findIndex((entry) => entry.block === "novita_render_video");
+    if (assetQaIndex < 0 || videoIndex <= assetQaIndex) {
+      throw new Error("cinematic Studio LTX adapter resolution requires keyframe QA before direct video rendering");
+    }
+    pipeline.splice(assetQaIndex + 1, 0, {
+      block: "studio_ltx_adapter_resolve",
+      params: {
+        enabled: t.studioAssetLibrary !== false,
+        family: "cinematic",
+        contentLane: "cinematic_ai",
+        // The adapter resolver must see the same sealed treatment as Visual
+        // Matter. Otherwise an approved clay/brick/anime/drawn LoRA could
+        // never match the exact run it was benchmarked for.
+        ...(selectedVisualTreatment ? { treatment: selectedVisualTreatment } : {}),
+      },
+    });
+  }
+
+  // Reuse approved presentation language only at the explicit blocks that can
+  // consume it: music direction, quote cards, data graphics, and the bounded
+  // title→body transition. The resolver
+  // is intentionally placed before the first such block, while the concrete
+  // asset's compatibility still names its exact consumer. It is never a
+  // generic creative override for cuts, factual visuals, or timing.
+  if (!pipeline.some((entry) => entry.block === "studio_postproduction_asset_resolve")) {
+    const postproductionIndices = ["music", "quote_overlays", "visual_inserts", "timeline_assemble"]
+      .map((block) => pipeline.findIndex((entry) => entry.block === block))
+      .filter((index) => index >= 0);
+    if (postproductionIndices.length) {
+      pipeline.splice(Math.min(...postproductionIndices), 0, {
+        block: "studio_postproduction_asset_resolve",
+        params: {
+          // Keep a typed resolver in every route-owned post-production chain.
+          // A caller may disable reuse, but must not remove the artifacts that
+          // downstream assembly modules and the sealed route expect. The block
+          // emits explicit no-match/no-op projections without any provider
+          // call when reuse is disabled.
+          enabled: t.studioAssetLibrary !== false,
+          family: opts.family,
+          contentLane: manifest.contentLane,
+        },
+      });
+    }
   }
 
   // A selected certified composition owns the strict source-attributed
@@ -703,15 +1045,15 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // policy/capability/validation gates below; this layer only applies sealed
   // block and parameter operations and cannot introduce a new renderer.
   const selectedCapabilityKeys = selectedCapabilities.map((selection) => selection.capability);
-  const certifiedComposition = selectedCapabilityKeys.length
-    ? resolveCertifiedChannelComposition({ family: opts.family, selectedCapabilityKeys })
-    : findCertifiedChannelComposition({ family: opts.family, selectedCapabilityKeys });
-  if (certifiedComposition) {
+  const shouldCompileCertifiedComposition = selectedCapabilityKeys.length > 0 || Boolean(
+    findCertifiedChannelComposition({ family: opts.family, selectedCapabilityKeys }),
+  );
+  if (shouldCompileCertifiedComposition) {
     const compositionCompilation = compileCertifiedChannelComposition({
       family: opts.family,
       capabilitySelections: selectedCapabilities,
       ...(opts.programBrief ? { intent: briefToCreativeCapabilityIntent(opts.programBrief) } : {}),
-      parameterOverrides: opts.paramOverrides,
+      parameterOverrides: paramOverrides,
       pipeline,
     });
     pipeline = compositionCompilation.pipeline;
@@ -729,7 +1071,7 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         ? { insertTypes: preset.insertTypes }
         : undefined;
   if (fam.narrated && insertParams && pipeline.some((entry) => entry.block === "timeline_assemble")) {
-    const visualInsertOverrides = opts.paramOverrides?.visual_inserts ?? {};
+    const visualInsertOverrides = paramOverrides.visual_inserts ?? {};
     const maxInserts = Number(visualInsertOverrides.maxInserts);
     const minGapSec = Number(visualInsertOverrides.minGapSec);
     if (Number.isFinite(maxInserts) && maxInserts >= 1 && maxInserts <= 8) {
@@ -783,12 +1125,13 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     else pipeline.push(entry);
   }
 
-  // shorts spinoff is opt-in — append AFTER upload_draft (needs watchUrl) but
-  // before notify/cleanup (cleanup deletes intermediates). Only when the family
-  // produces a narration timeline (skip music-loop/lofi where there's no speech).
+  // A requested companion Short appends AFTER upload_draft (needs watchUrl) but
+  // before notify/cleanup (cleanup deletes intermediates). It is only available
+  // for a narration timeline; non-narrated formats are skipped rather than
+  // receiving an invented voice-based derivative.
   if (t.shorts && opts.family !== "music_loop") {
     const hasUpload = pipeline.some((e) => e.block === "upload_draft");
-    const hasTimings = pipeline.some((e) => e.block === "narration_tts");
+    const hasTimings = pipelineSupportsNarrationAlignedShorts(pipeline);
     if (hasUpload && hasTimings) {
       const idx = pipeline.findIndex((e) => e.block === "notify" || e.block === "cleanup");
       const entry: PipelineEntry = { block: "shorts_spinoff" };
@@ -820,7 +1163,8 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     }
   }
 
-  const runtimeReadiness = familyProductionReadiness(opts.family);
+  const runtimeReadiness = familyProductionReadiness(opts.family, opts.runtimeTarget);
+  const certifiedAdmission = certifiedFamilyAdmission(opts.family, opts.runtimeTarget);
   const dataStoryReadiness = effectiveDataStory ? dataStoryProductionReadiness() : undefined;
   if (!fam.available) {
     warnings.push(
@@ -833,6 +1177,17 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     );
     if (runtimeReadiness.remediation) warnings.push(runtimeReadiness.remediation);
   }
+  if (!certifiedAdmission.automatic) {
+    warnings.push(
+      `${fam.label}: CertifiedFamilyAdmission blocks automatic production — ${certifiedAdmission.blockers.join(" ")}`,
+    );
+    if (certifiedAdmission.remediation) warnings.push(certifiedAdmission.remediation);
+  }
+  if (!hasRequiredSelfContainedRoute) {
+    warnings.push(
+      `${fam.label}: automatic production requires its sealed channel program route; this route-less design is preview-only.`,
+    );
+  }
   if (dataStoryReadiness && !dataStoryReadiness.autonomous) {
     warnings.push(
       `Source-attributed Data Story: automatic production is blocked — ${dataStoryReadiness.blockers.join(" ")}`,
@@ -842,7 +1197,9 @@ export function designPipeline(opts: DesignOptions): DesignResult {
 
   // Resolve uniquely identifiable policy/crew capability gaps from certified
   // manifests. Creative engine choices remain the designer's responsibility.
-  const completed = completePipelineForPolicy(pipeline);
+  const completed = completePipelineForPolicy(pipeline, {
+    generationProfile: generationProfileId,
+  });
   pipeline = completed.entries;
   if (completed.inserted.length) {
     warnings.push(`Production compiler added required modules: ${completed.inserted.join(", ")}.`);
@@ -859,10 +1216,50 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     }
   }
 
+  // The selected family/route owns episode duration. Advanced controls may
+  // shape style inside that envelope, but may not quietly make narration,
+  // loop assembly, or family-specific renderers disagree about how long the
+  // episode is. This is deliberately after every designer rewrite and policy
+  // completion, so no later template step can reintroduce a competing value.
+  const enforcedLength = enforceLengthContract(
+    pipeline,
+    lenSec,
+    opts.family,
+    isSupervisedQuizShort
+      ? { lengthEnvelope: QUIZ_SHORT_PORTRAIT_LENGTH_ENVELOPE }
+      : undefined,
+  );
+  pipeline = enforcedLength.pipeline;
+  if (enforcedLength.changed.length) {
+    warnings.push(`Length contract pinned: ${enforcedLength.changed.join(", ")}.`);
+  }
+
   const contentLane = manifest.contentLane;
   assertPipelineMatchesContentLane(contentLane, pipeline);
   pipeline = injectContentLaneIntoPipeline(pipeline, contentLane);
-  assertFamilyAutonomousPlanningPipeline(opts.family, pipeline);
+  assertMinimumVideoFoundation({ family: opts.family, contentLane, pipeline });
+  // Keep creator previews and API-facing designs on the exact same automatic
+  // baseline as channel persistence and run admission.  The generic
+  // foundation deliberately works for supervised and blocked preview lanes;
+  // this companion assertion adds cross-episode differentiation only when
+  // the family is actually certified for autonomous production.
+  assertMinimumVideoFoundationForAutomaticFamily({
+    family: opts.family,
+    contentLane,
+    pipeline,
+  });
+  if (programRoute && opts.programBrief) {
+    assertChannelProgramRoutePipelineCompatibility({
+      route: programRoute,
+      programBrief: opts.programBrief,
+      pipeline,
+    });
+  }
+  if (hasRequiredSelfContainedRoute) {
+    assertFamilyAutonomousPlanningPipeline(opts.family, pipeline, {
+      allowPreviewGenerationProfile: previewOnlyGenerationProfile,
+    });
+  }
   // A selected creative capability must leave exact, inspectable evidence in
   // the effective graph. This is deliberately after every family rewrite and
   // policy completion so a UI recommendation can never survive as a no-op.
@@ -875,7 +1272,15 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     // seed store by runPipeline.ts, not an executable block artifact. Seed it
     // here as well so creator-time validation verifies the same graph that the
     // runner will execute.
-    const resolved = validatePipeline(pipeline, ["contentLane", ...childrenShowBibleSeedKeys(contentLane)]);
+    // A certified route is likewise injected by runPipeline for route-bearing
+    // executions. Seed it during creator-time validation so route-owned local
+    // blocks (for example scenario_visual_treatment) validate the same graph
+    // they will receive at runtime.
+    const resolved = validatePipeline(pipeline, [
+      "contentLane",
+      ...childrenShowBibleSeedKeys(contentLane),
+      ...(programRoute ? ["channelProgramRoute"] : []),
+    ]);
     if (fam.available) compilation = compilePipeline(resolved);
   } catch (e) {
     throw new Error(`designed pipeline invalid: ${e instanceof Error ? e.message : e}`);
@@ -883,14 +1288,30 @@ export function designPipeline(opts: DesignOptions): DesignResult {
 
   const runtimeBlockers = [
     ...runtimeReadiness.blockers,
+    ...certifiedAdmission.blockers,
+    ...(!hasRequiredSelfContainedRoute
+      ? ["Automatic self-contained production requires a sealed channel program route."]
+      : []),
     ...(dataStoryReadiness?.blockers ?? []),
+    ...(isSupervisedQuizShort
+      ? ["QuizShort is an explicitly supervised private-draft route; automatic creation and public/scheduled release remain disabled."]
+      : []),
+    ...(previewOnlyGenerationProfile
+      ? ["The draft generation profile is preview-only and cannot create, schedule, or publish a production channel."]
+      : []),
   ];
   return {
     pipeline,
     episodeLengthSeconds: lenSec,
     contentLane,
     available: fam.available,
-    productionReady: fam.available && runtimeReadiness.productionReady && dataStoryReadiness?.autonomous !== false,
+    productionReady: fam.available
+      && runtimeReadiness.productionReady
+      && certifiedAdmission.automatic
+      && hasRequiredSelfContainedRoute
+      && dataStoryReadiness?.autonomous !== false
+      && !isSupervisedQuizShort
+      && !previewOnlyGenerationProfile,
     runtimeBlockers,
     warnings,
     compilation,
@@ -908,7 +1329,21 @@ export function enforceLengthContract(
   pipeline: PipelineEntry[],
   lenSec: number,
   family: FamilyKey,
+  options?: Readonly<{
+    /** A sealed route may narrow a parent family's generic envelope. */
+    lengthEnvelope?: Readonly<{ minSeconds: number; maxSeconds: number }>;
+  }>,
 ): { pipeline: PipelineEntry[]; changed: string[] } {
+  const overrideEnvelope = options?.lengthEnvelope;
+  if (
+    overrideEnvelope &&
+    (!Number.isFinite(overrideEnvelope.minSeconds) ||
+      !Number.isFinite(overrideEnvelope.maxSeconds) ||
+      overrideEnvelope.minSeconds <= 0 ||
+      overrideEnvelope.minSeconds > overrideEnvelope.maxSeconds)
+  ) {
+    throw new Error("length contract override must be a finite positive min/max envelope");
+  }
   const changed: string[] = [];
   const out = pipeline.map((e) => {
     const p: Record<string, unknown> = { ...(e.params ?? {}) };
@@ -928,7 +1363,7 @@ export function enforceLengthContract(
     ) pin("targetSeconds", lenSec);
     if (e.block === "script_gen") pin("maxSeconds", lenSec);
     if (e.block === "length_check") {
-      const envelope = lengthCheckEnvelope(family, lenSec);
+      const envelope = overrideEnvelope ?? lengthCheckEnvelope(family, lenSec);
       pin("minSeconds", envelope.minSeconds);
       pin("maxSeconds", envelope.maxSeconds);
     }

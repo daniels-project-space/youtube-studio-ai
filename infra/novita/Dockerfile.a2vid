@@ -1,0 +1,51 @@
+# syntax=docker/dockerfile:1.7
+# Dedicated open-weight LTX 2.5 A2Vid worker. This intentionally does not
+# inherit the direct image-to-video worker entrypoint or its model bundle.
+FROM pytorch/pytorch:2.8.0-cuda12.8-cudnn9-runtime@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385
+
+# A2Vid is a gated LTX model path. An operator must pass the exact accepted
+# source revision; a moving branch or the direct worker's old revision is not
+# silently substituted at build time.
+ARG LTX_RUNTIME_REVISION
+
+LABEL org.opencontainers.image.source="https://github.com/daniels-project-space/youtube-studio-ai" \
+      ai.youtube.render.contract="a2vid-1.0.0" \
+      ai.youtube.render.execution-path="dedicated_self_hosted_ltx_a2vid"
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    HF_HUB_OFFLINE=1 \
+    TRANSFORMERS_OFFLINE=1 \
+    HF_HOME=/workspace/model-cache/huggingface \
+    NOVITA_MODEL_VOLUME=/network \
+    NOVITA_LOCAL_MODEL_CACHE=/workspace/model-cache \
+    UV_LINK_MODE=copy \
+    UV_NO_CACHE=1 \
+    UV_PYTHON=3.12.12 \
+    UV_PYTHON_INSTALL_DIR=/opt/uv/python
+
+RUN test -n "${LTX_RUNTIME_REVISION}" \
+    && printf '%s' "${LTX_RUNTIME_REVISION}" | grep -Eq '^[a-f0-9]{40}$' \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates ffmpeg git libgl1 libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/* \
+    && python -m pip install --no-cache-dir uv==0.10.6
+
+RUN git clone --filter=blob:none https://github.com/Lightricks/LTX-2.git /opt/LTX-2 \
+    && git -C /opt/LTX-2 checkout --detach "${LTX_RUNTIME_REVISION}" \
+    && test "$(git -C /opt/LTX-2 rev-parse HEAD)" = "${LTX_RUNTIME_REVISION}" \
+    && cd /opt/LTX-2 \
+    && uv lock \
+    && uv sync --frozen --no-dev --package ltx-pipelines --python "${UV_PYTHON}" \
+    && /opt/LTX-2/.venv/bin/python -c "import ltx_pipelines.a2vid_two_stage" \
+    && rm -rf /opt/LTX-2/.git
+
+COPY infra/novita/worker.py /opt/novita-worker/worker.py
+COPY infra/novita/a2vid_worker.py /opt/novita-worker/a2vid_worker.py
+RUN /opt/LTX-2/.venv/bin/python -m py_compile /opt/novita-worker/worker.py /opt/novita-worker/a2vid_worker.py \
+    && mkdir -p /workspace/model-cache /workspace/render \
+    && chmod 0755 /opt/novita-worker/a2vid_worker.py
+
+WORKDIR /workspace/render
+ENTRYPOINT ["/opt/LTX-2/.venv/bin/python", "/opt/novita-worker/a2vid_worker.py"]

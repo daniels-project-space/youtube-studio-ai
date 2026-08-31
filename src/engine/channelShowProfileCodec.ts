@@ -13,13 +13,19 @@ import {
   CREATIVE_CAPABILITY_RECEIPT_CATALOG_FINGERPRINT,
   assertCreativeCapabilityReceiptPipelineObligations,
   assertCreativeCapabilityReceiptSelection,
+  creativeCapabilityReceiptCompositionFragmentVersionBindings,
   type CreativeCapabilityReceiptPipelineEntry,
 } from "@/engine/creative/creativeCapabilityReceiptCatalog";
 import {
+  assertChannelCapabilityCompositionPlanPipelineCompatibility,
+  assertCurrentChannelCapabilityCompositionPlanBinding,
   assertChannelCompositionReceiptBinding,
   assertCertifiedChannelCompositionPipelineCompatibility,
+  assertPersistedChannelCapabilityCompositionPlanBinding,
   assertPersistedChannelCompositionReceiptBinding,
+  parseChannelCompositionBinding,
   parseChannelCompositionReceipt,
+  type ChannelCompositionBinding,
   type ChannelCompositionReceipt,
 } from "@/engine/channelCompositionCatalog";
 import {
@@ -27,6 +33,12 @@ import {
   briefToCreativeCapabilityIntent,
   channelProgramBriefFingerprint,
 } from "@/engine/channelProgramBrief";
+import {
+  assertChannelProgramRouteBinding,
+  assertChannelProgramRoutePipelineCompatibility,
+  parseChannelProgramRoute,
+  type ChannelProgramRoute,
+} from "@/engine/channelProgramRoute";
 import {
   resolveChannelFamilyManifest,
   type ChannelFamilyManifest,
@@ -41,6 +53,11 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 export interface ChannelShowProfile {
   version: typeof CHANNEL_SHOW_PROFILE_VERSION;
   programBriefFingerprint: string;
+  /**
+   * Present for post-route admissions. Historical receipts intentionally omit
+   * it so they remain readable as their original sealed composition.
+   */
+  programRoute?: ChannelProgramRoute;
   familyManifestFingerprint: string;
   contentLaneFingerprint: string;
   creativeCapabilityCatalogFingerprint: string;
@@ -51,6 +68,12 @@ export interface ChannelShowProfile {
    * and upgraded by their next exact new-channel admission.
    */
   composition?: ChannelCompositionReceipt;
+  /**
+   * New modular-channel authority. It is mutually exclusive with the legacy
+   * exact receipt above so a stored profile can never have two competing
+   * composition sources.
+   */
+  compositionBinding?: ChannelCompositionBinding;
   designedPipelineFingerprint: string;
   fingerprint: string;
 }
@@ -70,11 +93,13 @@ export interface AssertChannelShowProfileReceiptPipelineCompatibilityInput
 const ChannelShowProfileSchema = z.object({
   version: z.literal(CHANNEL_SHOW_PROFILE_VERSION),
   programBriefFingerprint: z.string().regex(SHA256_PATTERN),
+  programRoute: z.unknown().optional(),
   familyManifestFingerprint: z.string().regex(SHA256_PATTERN),
   contentLaneFingerprint: z.string().regex(SHA256_PATTERN),
   creativeCapabilityCatalogFingerprint: z.string().min(1).max(512),
   selectedCapabilityKeys: z.array(z.string().min(1).max(160)),
   composition: z.unknown().optional(),
+  compositionBinding: z.unknown().optional(),
   designedPipelineFingerprint: z.string().regex(SHA256_PATTERN),
   fingerprint: z.string().regex(SHA256_PATTERN),
 }).strict();
@@ -175,14 +200,25 @@ export function parseChannelShowProfileReceipt(value: unknown): ChannelShowProfi
   const composition = profile.composition === undefined
     ? undefined
     : parseChannelCompositionReceipt(profile.composition);
+  const compositionBinding = profile.compositionBinding === undefined
+    ? undefined
+    : parseChannelCompositionBinding(profile.compositionBinding);
+  if (composition && compositionBinding) {
+    throw new Error("channel show profile cannot carry both legacy and modular composition authority");
+  }
+  const programRoute = profile.programRoute === undefined
+    ? undefined
+    : parseChannelProgramRoute(profile.programRoute);
   const body: ChannelShowProfileBody = {
     version: profile.version,
     programBriefFingerprint: profile.programBriefFingerprint,
+    ...(programRoute ? { programRoute } : {}),
     familyManifestFingerprint: profile.familyManifestFingerprint,
     contentLaneFingerprint: profile.contentLaneFingerprint,
     creativeCapabilityCatalogFingerprint: profile.creativeCapabilityCatalogFingerprint,
     selectedCapabilityKeys,
     ...(composition ? { composition } : {}),
+    ...(compositionBinding ? { compositionBinding } : {}),
     designedPipelineFingerprint: profile.designedPipelineFingerprint,
   };
   if (profile.fingerprint !== profileFingerprint(body)) {
@@ -204,6 +240,12 @@ export function assertChannelShowProfileReceiptProgramBinding(
   const manifest = resolveChannelFamilyManifest(programBrief.family);
   if (profile.programBriefFingerprint !== channelProgramBriefFingerprint(programBrief)) {
     throw new Error("channel show profile does not match the canonical channel program brief");
+  }
+  if (profile.programRoute) {
+    assertChannelProgramRouteBinding({
+      route: profile.programRoute,
+      programBrief,
+    });
   }
   if (
     profile.familyManifestFingerprint !==
@@ -238,6 +280,20 @@ export function assertChannelShowProfileReceiptProgramBinding(
       selectedCapabilityKeys: profile.selectedCapabilityKeys,
     });
   }
+  if (profile.compositionBinding?.kind === "exact_catalog_v1") {
+    assertPersistedChannelCompositionReceiptBinding({
+      receipt: profile.compositionBinding.receipt,
+      family: programBrief.family,
+      selectedCapabilityKeys: profile.selectedCapabilityKeys,
+    });
+  }
+  if (profile.compositionBinding?.kind === "capability_plan_v1") {
+    assertPersistedChannelCapabilityCompositionPlanBinding({
+      plan: profile.compositionBinding.plan,
+      family: programBrief.family,
+      selectedCapabilityKeys: profile.selectedCapabilityKeys,
+    });
+  }
   return profile;
 }
 
@@ -259,10 +315,33 @@ export function assertChannelShowProfileReceiptPipelineCompatibility(
       intent: briefToCreativeCapabilityIntent(programBrief),
     }),
   );
-  assertCreativeCapabilityReceiptPipelineObligations(definitions, pipeline);
+  assertCreativeCapabilityReceiptPipelineObligations(definitions, pipeline, {
+    // The exact persisted composition/plan below owns versioned Episode Graph
+    // compatibility. This keeps a v1-v3 retry from inheriting v4 work.
+    deferMaterializationOwnedObligations: true,
+  });
+  if (profile.programRoute) {
+    assertChannelProgramRoutePipelineCompatibility({
+      route: profile.programRoute,
+      programBrief,
+      pipeline,
+    });
+  }
   if (profile.composition) {
     assertCertifiedChannelCompositionPipelineCompatibility({
       receipt: profile.composition,
+      pipeline,
+    });
+  }
+  if (profile.compositionBinding?.kind === "exact_catalog_v1") {
+    assertCertifiedChannelCompositionPipelineCompatibility({
+      receipt: profile.compositionBinding.receipt,
+      pipeline,
+    });
+  }
+  if (profile.compositionBinding?.kind === "capability_plan_v1") {
+    assertChannelCapabilityCompositionPlanPipelineCompatibility({
+      plan: profile.compositionBinding.plan,
       pipeline,
     });
   }
@@ -279,13 +358,44 @@ function assertCurrentChannelShowProfileCompositionBinding(
   profile: ChannelShowProfile,
   programBrief: unknown,
 ): void {
-  if (!profile.composition) return;
   const canonicalProgramBrief = assertCanonicalChannelProgramBrief(programBrief);
+  if (profile.compositionBinding?.kind === "capability_plan_v1") {
+    const selectedDefinitions = profile.selectedCapabilityKeys.map((capability) =>
+      assertCreativeCapabilityReceiptSelection({
+        capability,
+        family: canonicalProgramBrief.family,
+        intent: briefToCreativeCapabilityIntent(canonicalProgramBrief),
+      }),
+    );
+    assertCurrentChannelCapabilityCompositionPlanBinding({
+      plan: profile.compositionBinding.plan,
+      family: canonicalProgramBrief.family,
+      selectedCapabilityKeys: profile.selectedCapabilityKeys,
+      expectedFragmentVersions:
+        creativeCapabilityReceiptCompositionFragmentVersionBindings(selectedDefinitions),
+    });
+    return;
+  }
+  if (profile.compositionBinding?.kind === "exact_catalog_v1") {
+    assertChannelCompositionReceiptBinding({
+      receipt: profile.compositionBinding.receipt,
+      family: canonicalProgramBrief.family,
+      selectedCapabilityKeys: profile.selectedCapabilityKeys,
+    });
+    if (profile.selectedCapabilityKeys.length) {
+      throw new Error("new selected-capability channel admission requires a capability plan binding");
+    }
+    return;
+  }
+  if (!profile.composition) return;
   assertChannelCompositionReceiptBinding({
     receipt: profile.composition,
     family: canonicalProgramBrief.family,
     selectedCapabilityKeys: profile.selectedCapabilityKeys,
   });
+  if (profile.selectedCapabilityKeys.length) {
+    throw new Error("new selected-capability channel admission requires a capability plan binding");
+  }
 }
 
 /**

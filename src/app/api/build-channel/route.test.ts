@@ -52,6 +52,25 @@ async function main() {
     });
     const design = designFor(brief);
 
+    const factualWhiteboard = await POST(request({
+      requestKey: requestKey(design),
+      design,
+    }));
+    assert.equal(
+      factualWhiteboard.status,
+      409,
+      "factual whiteboard claims must stop at the creator boundary before Trigger or provider work",
+    );
+    const factualWhiteboardBody = await factualWhiteboard.json() as {
+      error: string;
+      sourceRequirements?: unknown;
+    };
+    assert.match(factualWhiteboardBody.error, /source\/module evidence/);
+    assert.deepEqual(factualWhiteboardBody.sourceRequirements, [
+      "reviewed factual evidence pack",
+      "source-bound claim ledger",
+    ]);
+
     const missingNestedBriefDesign = { ...design };
     delete missingNestedBriefDesign.programBrief;
     const missingNestedBrief = await POST(request({
@@ -98,7 +117,16 @@ async function main() {
       design: unhostedDesign,
     }));
     assert.equal(rootOmittedUsesNestedBrief.status, 409);
-    assert.match((await rootOmittedUsesNestedBrief.json() as { error: string }).error, /private review/);
+    const rootOmittedBody = await rootOmittedUsesNestedBrief.json() as {
+      error: string;
+      reviewHrefs?: unknown;
+    };
+    assert.match(rootOmittedBody.error, /private review/);
+    assert.deepEqual(
+      rootOmittedBody.reviewHrefs,
+      ["/casefile"],
+      "the blocked route must provide an explicit private-review desk",
+    );
 
     // The creator may only carry audience/topic signals inside the canonical
     // nested brief. The authenticated route must still re-evaluate those

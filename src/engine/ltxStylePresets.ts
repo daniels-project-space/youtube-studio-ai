@@ -289,3 +289,85 @@ export const DEFAULT_LTX_STYLE_ID = "cinematic_heist_noir";
 export function getLtxStyle(id?: string): LtxStyleDef {
   return LTX_STYLES[id ?? DEFAULT_LTX_STYLE_ID] ?? LTX_STYLES[DEFAULT_LTX_STYLE_ID]!;
 }
+
+export interface LtxChannelStyleSelectionInput {
+  /** Persisted selection from an earlier stage/retry. Unknown values never become a style. */
+  explicitStyleId?: unknown;
+  /** Family-owned safe fallback — normally cinematic_heist_noir for the current LTX lane. */
+  familyDefaultStyleId?: string;
+  styleDNA?: {
+    colorGrade?: string;
+    composition?: string;
+    motifs?: readonly string[];
+    motionDiscipline?: string;
+    visualAvoid?: readonly string[];
+  } | null;
+  visualBrief?: {
+    promptStyle?: string;
+    look?: string;
+    setting?: string;
+    world?: string;
+  } | null;
+}
+
+export interface LtxChannelStyleSelection {
+  styleId: string;
+  /** Where the selection came from; retained with the render for audit/retry truthfulness. */
+  source: "persisted" | "channel_identity" | "family_default";
+  /** The bounded signals that made an identity-derived treatment unambiguous. */
+  matchedSignals: readonly string[];
+}
+
+const STYLE_SIGNAL_RULES: Readonly<Record<string, readonly RegExp[]>> = {
+  anime: [/\banime\b/i, /\bmanga\b/i, /\bcel[ -]?shad/i, /\bspeed lines?\b/i],
+  watercolor: [/\bwatercolou?r\b/i, /\bpencil(?:[ -]?(?:sketch|linework))?\b/i, /\bpaint(?:ed|erly)?\b/i, /\bink wash\b/i],
+  music_video_cinematic: [/\bmusic[ -]?video\b/i, /\bperformance\b/i, /\bbeat[ -]?sync/i, /\banamorphic flare\b/i],
+  documentary_mannequin: [/\bdocumentary\b/i, /\bevidentiar/i, /\bforensic\b/i, /\bcase[ -]?file\b/i, /\barchive\b/i, /\bmannequin\b/i],
+  photorealistic: [/\bphoto(?:graphic|realistic)?\b/i, /\bnaturalistic\b/i, /\blive[ -]?action\b/i, /\breal[ -]?world\b/i],
+};
+
+function knownLtxStyleId(value: unknown): string | undefined {
+  return typeof value === "string" && Object.hasOwn(LTX_STYLES, value) ? value : undefined;
+}
+
+/**
+ * Choose a channel's LTX visual treatment only when its sealed identity gives
+ * one clear answer. Ambiguous or ungrounded DNA deliberately keeps the family
+ * default instead of guessing a new aesthetic into a production render.
+ */
+export function selectLtxStyleForChannel(input: LtxChannelStyleSelectionInput): LtxChannelStyleSelection {
+  const persisted = knownLtxStyleId(input.explicitStyleId);
+  if (persisted) return { styleId: persisted, source: "persisted", matchedSignals: [] };
+
+  const signals = [
+    input.styleDNA?.colorGrade,
+    input.styleDNA?.composition,
+    input.styleDNA?.motionDiscipline,
+    ...(input.styleDNA?.motifs ?? []),
+    ...(input.styleDNA?.visualAvoid ?? []),
+    input.visualBrief?.promptStyle,
+    input.visualBrief?.look,
+    input.visualBrief?.setting,
+    input.visualBrief?.world,
+  ].filter((value): value is string => typeof value === "string" && value.trim().length > 0).slice(0, 24);
+
+  const matches = Object.entries(STYLE_SIGNAL_RULES).map(([styleId, rules]) => ({
+    styleId,
+    matchedSignals: signals.filter((signal) => rules.some((rule) => rule.test(signal))).slice(0, 4),
+  })).filter((candidate) => candidate.matchedSignals.length > 0);
+  const highest = Math.max(0, ...matches.map((candidate) => candidate.matchedSignals.length));
+  const winners = matches.filter((candidate) => candidate.matchedSignals.length === highest);
+  if (highest > 0 && winners.length === 1) {
+    return {
+      styleId: winners[0]!.styleId,
+      source: "channel_identity",
+      matchedSignals: winners[0]!.matchedSignals,
+    };
+  }
+
+  return {
+    styleId: knownLtxStyleId(input.familyDefaultStyleId) ?? DEFAULT_LTX_STYLE_ID,
+    source: "family_default",
+    matchedSignals: [],
+  };
+}

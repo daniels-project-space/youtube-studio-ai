@@ -28,6 +28,10 @@ import { visionLocal, VISION_GATE_MAX_TOKENS } from "./vision";
 import { synthNarration } from "./tts";
 import { generateFalImage } from "./falImage";
 import { ffprobeDuration } from "./ffmpeg";
+import {
+  resolveSelfContainedStoryPlan,
+  type SelfContainedStoryReceiptBinding,
+} from "@/engine/selfContainedStoryReceipt";
 
 export interface LoreSubStyle {
   /** image-prompt style prefix fed to every scene render */
@@ -182,8 +186,12 @@ export interface LorePlan {
  * Is the engine's own (non-injectable) story planner configured? LoreCraft uses
  * Claude for text planning; the visual analysis route is pinned to Groq/FAL.
  */
-export function hasLoreShort(): boolean {
-  return hasAnthropicKey();
+export function hasLoreShort(options: { requiresStoryboard?: boolean } = {}): boolean {
+  // A sealed, externally settled story never reaches the Claude planner. Keep
+  // the historical default strict for direct/self-planning calls while letting
+  // the Trigger adapter validate a receipt before it asks for an unused key.
+  const requiresStoryboard = options.requiresStoryboard ?? true;
+  return !requiresStoryboard || hasAnthropicKey();
 }
 
 /** What the story writer needs. Deliberately a subset of LoreShortCfg. */
@@ -337,6 +345,10 @@ export interface LoreClipRequest {
   id: string;
   index: number;
   prompt: string;
+  /** Physical action/particle motion, separated from the camera path for LTX. */
+  motionPrompt: string;
+  /** Concrete source-grounded camera path, used by the shared LTX I2V contract. */
+  cameraInstruction: string;
   negativePrompt: string;
   /** Local path to the already-downscaled 1280px JPEG still for this beat. */
   imagePath: string;
@@ -357,6 +369,13 @@ export interface LoreShortDeps {
    * When present the engine does ZERO planning calls and renders exactly this.
    */
   plan?: LorePlan;
+  /**
+   * A sealed, route-bound story receipt. When supplied it is validated before
+   * any cache or provider path, supersedes `plan`, and never falls back to one.
+   */
+  approvedStoryReceipt?: unknown;
+  /** Exact lane/route/brief/topic binding expected for approvedStoryReceipt. */
+  storyReceiptBinding?: SelfContainedStoryReceiptBinding;
   /** Beat art. Default: non-Google FAL image route. */
   generateImage?: (request: LoreArtRequest) => Promise<Buffer | Uint8Array>;
   /** Image→video camera move. Default: Replicate LTX/Seedance/Wan. */
@@ -386,6 +405,13 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
   const requiredFields = ["slug", "title", "kicker", "topic", "narrator"] as const;
   const missing = requiredFields.filter((key) => !String(cfg[key] ?? "").trim());
   if (missing.length) throw new Error(`loreshort: missing required input(s): ${missing.join(", ")}. See LORESHORT_MODULE.requires.`);
+  const approved = resolveSelfContainedStoryPlan({
+    family: "loreshort",
+    receipt: deps.approvedStoryReceipt,
+    binding: deps.storyReceiptBinding,
+    legacyPlan: deps.plan,
+  });
+  const approvedPlan = approved.plan as LorePlan | undefined;
   const style = SUB_STYLES[cfg.subStyle] ?? SUB_STYLES.cinematic;
   // Only demand the secrets the DEFAULT implementations still in play actually
   // need. An injected caller (the pipeline block) supplies its own attested
@@ -396,7 +422,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
   const usesFalImage = !deps.generateImage;
   await bootstrapSecrets(() => {}, {
     required: [
-      "ANTHROPIC_API_KEY",
+      ...(approved.receiptSupplied ? [] : ["ANTHROPIC_API_KEY"]),
       ...(usesFalImage ? ["FAL_KEY"] : []),
       ...(deps.synthLine ? [] : ["ELEVENLABS_API_KEY"]),
       ...(usesReplicate ? ["REPLICATE_API_TOKEN"] : []),
@@ -427,10 +453,10 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
 
   // 1 ── STORY ────────────────────────────────────────────────────────────────
   let plan: LorePlan = {};
-  if (deps.plan) {
+  if (approvedPlan) {
     // The caller already settled the story under its own critique loop; never
     // re-plan (a second draft here would silently discard the accepted one).
-    plan = deps.plan;
+    plan = approvedPlan;
     await writeFile(rd("plan.json"), JSON.stringify(plan, null, 2));
   } else if (existsSync(rd("plan.json"))) {
     plan = JSON.parse(await readFile(rd("plan.json"), "utf8")) as LorePlan;
@@ -505,24 +531,44 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
 
   // 4 ── CAMERA MOVES (cheap i2v) — parallel ──────────────────────────────────
   const real = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0 && !/^none\b/i.test(value.trim());
-  function shotPrompt(i: number): { prompt: string; negative: string } {
+  function shotPrompt(i: number): {
+    prompt: string;
+    motionPrompt: string;
+    cameraInstruction: string;
+    negative: string;
+  } {
     const m = motion[i];
     if (cfg.analyzeMotion && m && (real(m.subject_action) || real(m.camera))) {
       const intensity = m.intensity === "gentle" || m.intensity === "strong" ? m.intensity : "moderate";
-      // camera ALWAYS leads (the depth core); subject/particles/secondary only when genuinely present
-      const parts = [m.camera, m.subject_action, m.particles, m.secondary].filter(real);
+      // Camera direction and in-frame movement are independent LTX controls:
+      // separating them prevents a source-grounded dolly path being weakened by
+      // a generic/default camera directive in the I2V adapter.
+      const cameraInstruction = real(m.camera) ? m.camera : scenes[i].camera;
+      const motionPrompt = [m.subject_action, m.particles, m.secondary].filter(real).join(". ")
+        || "subtle natural depth parallax in the visible scene";
+      const parts = [cameraInstruction, motionPrompt].filter(real);
       const negative = NEG_BASE + (intensity === "gentle" ? "" : NEG_ANTISTATIC); // don't force motion on calm scenes
-      return { prompt: `${parts.join(". ")}.${HOLD[intensity]}`, negative };
+      return {
+        prompt: `${parts.join(". ")}.${HOLD[intensity]}`,
+        motionPrompt: `${motionPrompt}. ${HOLD[intensity]}`,
+        cameraInstruction,
+        negative,
+      };
     }
     const prompt = cfg.elaborateMoves ? `${CAM_MOVES[i % CAM_MOVES.length]}. ${scenes[i].camera}.${DEPTH_STRONG}` : `${scenes[i].camera}.${DEPTH_SIMPLE}`;
-    return { prompt, negative: NEG_BASE + NEG_ANTISTATIC };
+    return {
+      prompt,
+      motionPrompt: prompt,
+      cameraInstruction: scenes[i].camera,
+      negative: NEG_BASE + NEG_ANTISTATIC,
+    };
   }
   async function repI2V(i: number) {
     if (existsSync(rd(`clip_${i}.mp4`))) return;
     // downscale the scene to a compact 1280px JPEG and send it as a data URI (no nginx dependency)
     const imgJpg = rd(`img_${i}.jpg`);
     if (!existsSync(imgJpg)) await sh("ffmpeg", ["-y", "-loglevel", "error", "-i", rd(`scene_${i}.png`), "-vf", "scale=1280:-2", "-q:v", "3", imgJpg]);
-    const { prompt, negative } = shotPrompt(i);
+    const { prompt, motionPrompt, cameraInstruction, negative } = shotPrompt(i);
     // INJECTED LANE (the pipeline block): the attested Novita render farm gets
     // the same shot prompt and the same downscaled still, and its receipts are
     // accumulated by the caller. No Replicate submission happens at all.
@@ -531,6 +577,8 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
         id: `${cfg.slug}-clip-${i}`,
         index: i,
         prompt,
+        motionPrompt,
+        cameraInstruction,
         negativePrompt: negative,
         imagePath: imgJpg,
         durationSec: cfg.model === "seedance" ? cfg.seedanceDur : Math.max(1, Math.round(cfg.frames / 24)),

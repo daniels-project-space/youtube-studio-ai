@@ -1,5 +1,5 @@
 import type { Shot } from "@/lib/novitaRenderFarm";
-import { getLtxStyle } from "@/engine/ltxStylePresets";
+import { getLtxStyle, LTX_STYLES } from "@/engine/ltxStylePresets";
 
 /**
  * LTX receives a source still, not a storyboard. This compact prompt structure
@@ -17,11 +17,11 @@ import { getLtxStyle } from "@/engine/ltxStylePresets";
  * *labels* REQUIRED_CONTRACT_CLAUSES checks for never change, only the prose
  * merged inside them.
  */
-export const LTX_I2V_PROMPT_CONTRACT_VERSION = "ltx-i2v-directing/v3" as const;
+export const LTX_I2V_PROMPT_CONTRACT_VERSION = "ltx-i2v-directing/v4" as const;
 
-const MARKER = `[${LTX_I2V_PROMPT_CONTRACT_VERSION}]`;
+const CONTRACT_MARKER_PREFIX = "[ltx-i2v-directing/";
+const LEGACY_V3_MARKER = "[ltx-i2v-directing/v3]";
 const REQUIRED_CONTRACT_CLAUSES = [
-  MARKER,
   "Source-frame anchor:",
   "Action onset:",
   "Continuous development:",
@@ -31,6 +31,10 @@ const REQUIRED_CONTRACT_CLAUSES = [
   "Keep the take cinematic and physically plausible.",
 ] as const;
 const TERMINAL_FRAME_CLAUSE = "Terminal-frame anchor:";
+
+function markerForStyle(styleId: string): string {
+  return `[${LTX_I2V_PROMPT_CONTRACT_VERSION} style=${styleId}]`;
+}
 
 function clean(value: string | undefined, fallback: string): string {
   const normalized = value?.replace(/\s+/g, " ").trim();
@@ -42,10 +46,35 @@ function clean(value: string | undefined, fallback: string): string {
  * continuity contract. Keep this deliberately text-level: the shared render
  * boundary needs an inexpensive, provider-free proof before any LTX spend.
  */
-export function hasCompleteLtxI2vPromptContract(shot: Pick<Shot, "prompt" | "motion" | "endStillKey">): boolean {
+export function hasCompleteLtxI2vPromptContract(
+  shot: Pick<Shot, "prompt" | "motion" | "endStillKey">,
+  styleId?: string,
+): boolean {
+  if (styleId !== undefined && !Object.hasOwn(LTX_STYLES, styleId)) return false;
+  const styleMarkerMatches = styleId === undefined
+    ? Object.keys(LTX_STYLES).some((id) => {
+      const marker = markerForStyle(id);
+      return shot.motion.includes(marker) && shot.prompt.includes(marker);
+    })
+    : (() => {
+      const marker = markerForStyle(getLtxStyle(styleId).id);
+      return shot.motion.includes(marker) && shot.prompt.includes(marker);
+    })();
   return REQUIRED_CONTRACT_CLAUSES.every((clause) => shot.motion.includes(clause)) &&
-    shot.prompt.includes(MARKER) &&
+    styleMarkerMatches &&
     (!shot.endStillKey || shot.motion.includes(TERMINAL_FRAME_CLAUSE));
+}
+
+function hasCompleteLegacyV3PromptContract(shot: Pick<Shot, "prompt" | "motion" | "endStillKey">): boolean {
+  return REQUIRED_CONTRACT_CLAUSES.every((clause) => shot.motion.includes(clause)) &&
+    shot.motion.includes(LEGACY_V3_MARKER) &&
+    shot.prompt.includes(LEGACY_V3_MARKER) &&
+    (!shot.endStillKey || shot.motion.includes(TERMINAL_FRAME_CLAUSE));
+}
+
+function visualPromptBeforeContract(prompt: string): string {
+  const contractStart = prompt.indexOf(CONTRACT_MARKER_PREFIX);
+  return contractStart < 0 ? prompt : prompt.slice(0, contractStart).trim();
 }
 
 /**
@@ -58,23 +87,45 @@ export function hasCompleteLtxI2vPromptContract(shot: Pick<Shot, "prompt" | "mot
  * omitted or unknown — callers never need to guard this themselves.
  */
 export function applyLtxI2vPromptContract(shot: Shot, styleId?: string): Shot {
-  if (shot.motion.includes(MARKER)) {
-    if (!hasCompleteLtxI2vPromptContract(shot)) {
-      throw new Error(
-        "LTX I2V prompt contract marker is present but its required continuity and audio clauses are incomplete",
-      );
-    }
-    return shot;
+  if (styleId !== undefined && !Object.hasOwn(LTX_STYLES, styleId)) {
+    throw new Error(`LTX I2V prompt contract received unknown requested visual style ${styleId}`);
   }
   const style = getLtxStyle(styleId);
-  const visual = clean(shot.prompt, "the supplied source frame");
-  const action = clean(shot.motion, "subtle natural motion appropriate to the shot");
-  const camera = clean(shot.cameraMove, "the planned camera position");
+  const marker = markerForStyle(style.id);
+  let upgradingLegacyV3 = false;
+  if (shot.motion.includes(CONTRACT_MARKER_PREFIX)) {
+    if (shot.motion.includes(marker)) {
+      if (!hasCompleteLtxI2vPromptContract(shot, style.id)) {
+        throw new Error(
+          "LTX I2V prompt contract marker is present but its required continuity, style, or audio clauses are incomplete",
+        );
+      }
+      return shot;
+    }
+    if (!shot.motion.includes(LEGACY_V3_MARKER)) {
+      throw new Error(
+        `LTX I2V prompt contract is bound to a different or unsupported visual style; expected ${style.id}`,
+      );
+    }
+    if (!hasCompleteLegacyV3PromptContract(shot)) {
+      throw new Error(
+        "legacy LTX I2V prompt contract is incomplete and cannot be safely upgraded to the current style-bound contract",
+      );
+    }
+    upgradingLegacyV3 = true;
+  }
+  const visual = clean(visualPromptBeforeContract(shot.prompt), "the supplied source frame");
+  // A v3 contract replaced the original free-form motion in `shot.motion`.
+  // Do not leak that prior style doctrine back into a v4 prompt during the
+  // one safe migration path; a fresh, bounded action is more faithful than a
+  // stacked and contradictory directing instruction.
+  const action = clean(upgradingLegacyV3 ? undefined : shot.motion, "subtle natural motion appropriate to the shot");
+  const camera = clean(shot.cameraInstruction ?? shot.cameraMove, "the planned camera position");
   const scale = clean(shot.shotScale, "the planned composition");
   const lens = clean(shot.lens, "the planned lens");
   const soundscape = clean(shot.diegeticSoundscape, style.promptGuidance.soundscapeDefault);
   const contract = [
-    MARKER,
+    marker,
     `Source-frame anchor: begin exactly from the supplied image; preserve the visible subject, faceless identity treatment, wardrobe, palette, props, environment, lighting, ${scale} framing, and ${lens}. Visual world appearance doctrine: ${style.promptGuidance.appearance}`,
     `Action onset: ${action}`,
     `Continuous development: perform one coherent physical action in the same place and time while the camera executes ${camera}; no jump cut, subject replacement, wardrobe/prop swap, time skip, or invented event. Visual world camera doctrine: ${style.promptGuidance.cameraDoctrine} Visual world lighting and color doctrine: ${style.promptGuidance.lightingColor}`,

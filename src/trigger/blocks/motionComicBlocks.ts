@@ -2,7 +2,7 @@
  * motion_comic — the DRAWN-COMIC visual engine (src/lib/motionComic.ts) as a
  * pipeline block, structural twin of whiteboard_scribe.
  *
- * SELF-CONTAINED like whiteboard_scribe: it writes its own storyboard (Gemini),
+ * SELF-CONTAINED like whiteboard_scribe: it writes its own storyboard (Claude),
  * renders character-consistent panel art through bounded attested Novita workers, voices every
  * line (ElevenLabs v3 dialogue), lays a Suno bed, and draws the page with the
  * deterministic python renderer — so it REPLACES the script→narration→footage→
@@ -30,6 +30,7 @@ import {
   castMotionComic,
   hasMotionComic,
   motionComicImageCallCeiling,
+  motionComicOpeningPanelDefect,
   motionComicPanelCount,
   planMotionComicStoryboard,
   type MotionComicBrief,
@@ -47,10 +48,16 @@ import {
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
 import { laneQualityPolicy } from "@/engine/contentLane";
+import {
+  selfContainedStoryReceiptBindingFromRoute,
+  selfContainedStoryReceiptRequiredForRoute,
+} from "@/engine/selfContainedStoryReceipt";
+import type { CritiquedSelfContainedStory } from "@/engine/selfContainedStoryPlanning";
 import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
 import { novitaCostEnvelope, type NovitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { PRICE } from "@/engine/pricing";
+import { preflightNarrationPerformance } from "@/lib/narrationPerformance";
 
 /**
  * Checks the complete primary + bounded-recovery art envelope before the
@@ -130,7 +137,15 @@ const NO_TEXT_GUARD =
  *   - Critic outage gets only the bounded text retry, then blocks before paid
  *     rendering; deterministic checks still run unconditionally.
  */
-const COMIC_STORYBOARD_CHECKPOINT_VERSION = "motion-comic-storyboard/v2";
+const COMIC_STORYBOARD_CHECKPOINT_VERSION = "motion-comic-storyboard/v3";
+const MOTION_COMIC_STORYBOARD_PLANNER = {
+  id: "motion-comic-structured-storyboard-producer/v1",
+  provenance: "Studio non-Google structured producer plus bounded storyboard critic",
+} as const;
+
+export type CritiquedMotionComicStoryboard = CritiquedSelfContainedStory & {
+  readonly story: MotionComicStoryboard;
+};
 
 /** Channel doctrine + lane grounding for this block's critique (P1-1/P1-17). */
 function comicCritiqueChannel(ctx: StageContext): ChannelCritiqueContext {
@@ -175,6 +190,8 @@ export function motionComicStoryboardDefects(
   if (plan.characters.length < 2) {
     issues.push(`only ${plan.characters.length} named character(s) were cast — cast 2-4 so the panels can hold real dialogue`);
   }
+  const openingDefect = motionComicOpeningPanelDefect(plan);
+  if (openingDefect) issues.push(openingDefect);
   const castIds = new Set(plan.characters.map((character) => character.id));
   plan.panels.forEach((panel, index) => {
     if (!panel.lines.length) {
@@ -264,18 +281,40 @@ function storyboardCheckpointKey(ctx: StageContext, inputs: unknown): string {
   return `${ctx.keyPrefix}runs/${ctx.runId}/storyboards/motion-comic-${hash}.json`;
 }
 
-async function loadStoryboardCheckpoint(key: string): Promise<MotionComicStoryboard | null> {
+async function loadStoryboardCheckpoint(key: string): Promise<CritiquedMotionComicStoryboard | null> {
   try {
     const parsed = JSON.parse(Buffer.from(await getObjectBytes(key)).toString("utf8")) as {
       version?: unknown;
-      storyboard?: unknown;
+      outcome?: Partial<CritiquedMotionComicStoryboard>;
     };
     if (parsed.version !== COMIC_STORYBOARD_CHECKPOINT_VERSION) return null;
-    const storyboard = parsed.storyboard as MotionComicStoryboard | undefined;
+    const outcome = parsed.outcome;
+    const storyboard = outcome?.story as MotionComicStoryboard | undefined;
     if (!storyboard || !Array.isArray(storyboard.panels) || !storyboard.panels.length) return null;
     if (!Array.isArray(storyboard.characters)) return null;
     if (storyboard.panels.some((panel) => !Array.isArray(panel.lines) || !panel.lines.length)) return null;
-    return storyboard;
+    const critique = outcome?.critique;
+    if (
+      critique?.accepted !== true
+      || !Number.isFinite(critique.score)
+      || !Number.isInteger(critique.iterations)
+      || critique.iterations < 1
+      || !Array.isArray(critique.issues)
+      || typeof outcome?.planner?.id !== "string"
+      || !outcome.planner.id.trim()
+      || typeof outcome.planner.provenance !== "string"
+      || !outcome.planner.provenance.trim()
+    ) return null;
+    return {
+      story: storyboard,
+      planner: { id: outcome.planner.id, provenance: outcome.planner.provenance },
+      critique: {
+        accepted: true,
+        score: critique.score,
+        iterations: critique.iterations,
+        issues: critique.issues.filter((issue): issue is string => typeof issue === "string"),
+      },
+    };
   } catch {
     return null;
   }
@@ -285,10 +324,10 @@ async function loadStoryboardCheckpoint(key: string): Promise<MotionComicStorybo
  * Write the storyboard with the Director in the loop, then FREEZE it. The only
  * caller renders the returned storyboard exactly once and nothing else.
  */
-async function planComicWithCritique(
+export async function planComicWithCritique(
   ctx: StageContext,
   brief: MotionComicBrief,
-): Promise<MotionComicStoryboard> {
+): Promise<CritiquedMotionComicStoryboard> {
   const channel = comicCritiqueChannel(ctx);
   const wantPanels = motionComicPanelCount(brief.panels);
   const targetSeconds = Number(brief.targetSeconds ?? 0) || 0;
@@ -305,7 +344,7 @@ async function planComicWithCritique(
 
   const cached = await loadStoryboardCheckpoint(checkpointKey);
   if (cached) {
-    ctx.log(`motion_comic: reused the frozen storyboard (${cached.panels.length} panels) — no re-planning, no re-render`);
+    ctx.log(`motion_comic: reused the frozen storyboard (${cached.story.panels.length} panels) — no re-planning, no re-render`);
     return cached;
   }
 
@@ -347,32 +386,71 @@ async function planComicWithCritique(
     score: loop.critique.score,
     issues: loop.critique.issues,
   });
-  const plan = loop.value;
-  if (!plan.panels.length) throw new Error("motion_comic: storyboard writer returned no panels");
+  const story = loop.value;
+  if (!story.panels.length) throw new Error("motion_comic: storyboard writer returned no panels");
   ctx.log(
     `motion_comic: storyboard settled after ${loop.iterations} candidate(s) ` +
     `(${loop.accepted ? "accepted" : "best of the rejected set"}, score ${loop.critique.score.toFixed(2)}, ` +
-    `${plan.panels.length} panels, ~${storyboardWords(plan)} spoken words)`,
+    `${story.panels.length} panels, ~${storyboardWords(story)} spoken words)`,
   );
+  const outcome: CritiquedMotionComicStoryboard = {
+    story,
+    planner: MOTION_COMIC_STORYBOARD_PLANNER,
+    critique: {
+      accepted: true,
+      score: loop.critique.score,
+      iterations: loop.iterations,
+      issues: loop.critique.issues,
+    },
+  };
   await putObject(
     checkpointKey,
-    Buffer.from(JSON.stringify({ version: COMIC_STORYBOARD_CHECKPOINT_VERSION, storyboard: plan })),
+    Buffer.from(JSON.stringify({ version: COMIC_STORYBOARD_CHECKPOINT_VERSION, outcome })),
     { contentType: "application/json" },
   );
-  return plan;
+  return outcome;
 }
 
 export const motionComicBlock: Block = {
   id: "motion_comic",
   consumes: ["topic"],
-  produces: ["videoKey", "videoLocalPath", "videoDurationSec", "narrationText", "motionComicTimeline"],
+  produces: [
+    "videoKey", "videoLocalPath", "videoDurationSec", "narrationText", "motionComicTimeline",
+    "narrationKey", "narrationLocalPath", "narrationDurationSec", "narrationTranscriptText",
+    "narrationPerformanceEvidence", "sentenceTimings", "narrationStartSec",
+  ],
   paid: true,
   run: async (ctx) => {
-    if (!hasMotionComic() || !hasNovitaRenderFarmConfig()) {
-      throw new Error("motion_comic: storyboard, ElevenLabs voice, and the attested Novita render farm must all be configured (no fallback)");
-    }
     const topic = String(ctx.store["topic"] ?? "");
     if (!topic) throw new Error("motion_comic: no topic in store");
+    // Bind a supplied approved story before any capability check, cache, or
+    // legacy planning branch. A receipt can never degrade into a new comic
+    // storyboard if its frozen route/topic is invalid.
+    const approvedStoryReceipt = ctx.store["selfContainedStoryReceipt"];
+    if (
+      approvedStoryReceipt === undefined &&
+      ctx.store["channelProgramRoute"] !== undefined &&
+      selfContainedStoryReceiptRequiredForRoute({
+        family: "comic",
+        route: ctx.store["channelProgramRoute"],
+        topic,
+      })
+    ) {
+      throw new Error("motion_comic: this route requires its sealed self-contained story receipt before planning or rendering");
+    }
+    const receiptInput = approvedStoryReceipt === undefined
+      ? {}
+      : {
+          approvedStoryReceipt,
+          storyReceiptBinding: selfContainedStoryReceiptBindingFromRoute({
+            family: "comic",
+            route: ctx.store["channelProgramRoute"],
+            topic,
+          }),
+        };
+    if (!hasMotionComic({ requiresStoryboard: approvedStoryReceipt === undefined }) || !hasNovitaRenderFarmConfig()) {
+      throw new Error("motion_comic: required voice and attested Novita render capabilities are unavailable");
+    }
 
     // Grounding facts: prefer real research notes; else the channel's fact sheet.
     const facts =
@@ -463,14 +541,29 @@ export const motionComicBlock: Block = {
     // QUALITY GATE — settle the storyboard with the Director FIRST, at text
     // prices. castMotionComic below is then called exactly once with the
     // accepted story, so a rejected draft never costs a second paid render.
-    const storyboard = await planComicWithCritique(ctx, brief);
+    const storyboard = approvedStoryReceipt === undefined
+      ? (await planComicWithCritique(ctx, brief)).story
+      : undefined;
     const res = await castMotionComic({
       brief,
-      plan: storyboard,
+      ...(storyboard === undefined ? {} : { plan: storyboard }),
+      ...receiptInput,
       runDir,
       outPath,
       generateImage,
       log: (m) => ctx.log(`mc: ${m}`),
+    });
+    const narrationPerformanceEvidence = await preflightNarrationPerformance({
+      audioPath: res.narrationPath,
+      text: res.narrationText,
+      speed: 1,
+    });
+    const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/motion-comic-narration.mp3`;
+    await putObjectFromFile(narrationKey, res.narrationPath, { contentType: "audio/mpeg" });
+    await recordAsset(ctx, "narration", narrationKey, {
+      durationSec: narrationPerformanceEvidence.durationSec,
+      engine: "motion_comic",
+      source: "pre-mix voice-only master",
     });
     const artCost = ctx.imageUsageAccounting?.().costUsd ?? novitaImageCostUsd;
     const ttsCost =
@@ -502,6 +595,13 @@ export const motionComicBlock: Block = {
       videoLocalPath: res.outPath,
       videoDurationSec,
       narrationText: res.narrationText,
+      narrationKey,
+      narrationLocalPath: res.narrationPath,
+      narrationDurationSec: narrationPerformanceEvidence.durationSec,
+      narrationTranscriptText: res.narrationText,
+      narrationPerformanceEvidence,
+      sentenceTimings: res.sentenceTimings,
+      narrationStartSec: res.narrationStartSec,
       motionComicTimeline: res.reviewTimeline,
       [COST_PATCH_KEY]: comicCost,
     };

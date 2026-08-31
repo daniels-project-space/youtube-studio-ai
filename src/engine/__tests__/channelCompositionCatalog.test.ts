@@ -1,16 +1,26 @@
 import assert from "node:assert/strict";
 
 import {
+  CAPABILITY_COMPOSITION_FRAGMENT_HISTORY,
   CERTIFIED_CHANNEL_COMPOSITIONS,
   CHANNEL_COMPOSITION_DEFINITION_HISTORY,
+  SOURCE_ATTRIBUTED_DATA_STORY_V3_MATERIALIZATION,
+  SOURCE_ATTRIBUTED_DATA_STORY_V4_MATERIALIZATION,
+  assertCapabilityCompositionFragmentCatalog,
+  assertCapabilityCompositionFragmentSelectionCompatibility,
+  assertCurrentChannelCapabilityCompositionPlanBinding,
   assertChannelCompositionReceiptBinding,
   assertCertifiedChannelCompositionCatalog,
   assertCertifiedChannelCompositionPipelineCompatibility,
+  capabilityCompositionPlanMaterialization,
+  type CapabilityCompositionFragmentDefinition,
   type ChannelCompositionDefinition,
   certifiedChannelCompositionMaterialization,
   certifiedChannelCompositionDefinition,
   findCertifiedChannelComposition,
+  parseChannelCapabilityCompositionPlan,
   parseChannelCompositionReceipt,
+  resolveChannelCapabilityCompositionPlan,
   resolveCertifiedChannelComposition,
 } from "@/engine/channelCompositionCatalog";
 import { SOURCE_ATTRIBUTED_DATA_STORY, dataStoryInsertParams } from "@/engine/dataStory";
@@ -52,7 +62,75 @@ const dataStory = resolveCertifiedChannelComposition({
   selectedCapabilityKeys: ["source_attributed_data_story"],
 });
 assert.equal(dataStory.key, "source_attributed_data_story");
-assert.equal(dataStory.definitionVersion, "v3");
+assert.equal(dataStory.definitionVersion, "v4");
+const historicalV3Definition = CHANNEL_COMPOSITION_DEFINITION_HISTORY.find((definition) => (
+  definition.key === "source_attributed_data_story" && definition.definitionVersion === "v3"
+));
+const currentV4Definition = CHANNEL_COMPOSITION_DEFINITION_HISTORY.find((definition) => (
+  definition.key === "source_attributed_data_story" && definition.definitionVersion === "v4"
+));
+assert.equal(historicalV3Definition?.status, "historical");
+assert.equal(currentV4Definition?.status, "current");
+assert.deepEqual(
+  historicalV3Definition?.materialization,
+  SOURCE_ATTRIBUTED_DATA_STORY_V3_MATERIALIZATION,
+  "v3 must retain its sealed pre-checkpoint materialization byte-for-byte",
+);
+assert.equal(
+  SOURCE_ATTRIBUTED_DATA_STORY_V3_MATERIALIZATION.operations
+    .map((operation) => String(operation.block))
+    .includes("episode_graph"),
+  false,
+  "historical v3 must not be silently upgraded with a newly introduced checkpoint artifact",
+);
+assert.deepEqual(
+  SOURCE_ATTRIBUTED_DATA_STORY_V4_MATERIALIZATION.operations[0],
+  {
+    kind: "ensure_block_between",
+    block: "episode_graph",
+    afterBlocks: ["story_spine"],
+    beforeBlock: "stock_footage",
+  },
+  "the new materialization must freeze Episode Graph after Story Spine and before the first visual stage",
+);
+const historicalV1Fragment = CAPABILITY_COMPOSITION_FRAGMENT_HISTORY.find((fragment) => (
+  fragment.capability === "source_attributed_data_story" && fragment.definitionVersion === "v1"
+));
+const currentV2Fragment = CAPABILITY_COMPOSITION_FRAGMENT_HISTORY.find((fragment) => (
+  fragment.capability === "source_attributed_data_story" && fragment.definitionVersion === "v2"
+));
+assert.equal(historicalV1Fragment?.status, "historical");
+assert.equal(currentV2Fragment?.status, "current");
+const dataStoryCapabilityPlan = resolveChannelCapabilityCompositionPlan({
+  family: "narrated_stock",
+  selectedCapabilityKeys: ["source_attributed_data_story"],
+  expectedFragmentVersions: { source_attributed_data_story: "v2" },
+});
+assert.equal(dataStoryCapabilityPlan.fragments[0]?.definitionVersion, "v2");
+assert.deepEqual(
+  capabilityCompositionPlanMaterialization(dataStoryCapabilityPlan).operations[0],
+  SOURCE_ATTRIBUTED_DATA_STORY_V4_MATERIALIZATION.operations[0],
+  "new capability plans must seal the provider-free Episode Graph placement rather than reuse v3",
+);
+assert.throws(
+  () => resolveChannelCapabilityCompositionPlan({
+    family: "narrated_stock",
+    selectedCapabilityKeys: ["source_attributed_data_story"],
+    expectedFragmentVersions: { source_attributed_data_story: "v999" },
+  }),
+  /resolves v2 but the declared fragment version is v999/,
+  "current composition resolution must reject a creator catalog fragment-version drift",
+);
+assert.throws(
+  () => assertCurrentChannelCapabilityCompositionPlanBinding({
+    plan: dataStoryCapabilityPlan,
+    family: "narrated_stock",
+    selectedCapabilityKeys: ["source_attributed_data_story"],
+    expectedFragmentVersions: { source_attributed_data_story: "v999" },
+  }),
+  /resolves v2 but the declared fragment version is v999/,
+  "current admission must re-check the creator catalog fragment-version declaration",
+);
 assert.deepEqual(
   parseChannelCompositionReceipt(dataStory),
   dataStory,
@@ -104,6 +182,179 @@ assert.throws(
   /ambiguous current certified composition route for narrated_stock capability set \["source_attributed_data_story"\]/,
   "the catalog must reject two current routes that claim the same normalized capability set",
 );
+
+const dependencyAwareFragments = [
+  {
+    capability: "casefile_cinematic",
+    definitionVersion: "test-v1",
+    status: "current",
+    family: "narrated_stock",
+    materialization: {
+      version: "test/casefile/v1",
+      operations: [
+        { kind: "ensure_block_before", block: "casefile_layer", beforeBlock: "timeline_assemble" },
+      ],
+    },
+  },
+  {
+    capability: "editorial_evidence_packet",
+    definitionVersion: "test-v1",
+    status: "current",
+    family: "narrated_stock",
+    materialization: {
+      version: "test/editorial/v1",
+      operations: [
+        { kind: "ensure_block_before", block: "editorial_layer", beforeBlock: "timeline_assemble" },
+      ],
+    },
+  },
+  {
+    capability: "source_attributed_data_story",
+    definitionVersion: "test-v1",
+    status: "current",
+    family: "narrated_stock",
+    requiredCapabilityKeys: ["editorial_evidence_packet"],
+    incompatibleCapabilityKeys: ["casefile_cinematic"],
+    materialization: {
+      version: "test/source/v1",
+      operations: [
+        { kind: "ensure_block_before", block: "source_layer", beforeBlock: "timeline_assemble" },
+      ],
+    },
+  },
+] as const satisfies readonly CapabilityCompositionFragmentDefinition[];
+
+assert.doesNotThrow(
+  () => assertCapabilityCompositionFragmentCatalog(dependencyAwareFragments),
+  "fragment-owned constraints may model a safe multi-capability composition without a cross-product route row",
+);
+assert.throws(
+  () => assertCapabilityCompositionFragmentSelectionCompatibility({
+    selectedCapabilityKeys: ["source_attributed_data_story"],
+    fragments: [dependencyAwareFragments[2]],
+  }),
+  /source_attributed_data_story requires selected capability editorial_evidence_packet/,
+  "a fragment dependency must remain an explicit creator selection rather than being silently auto-added",
+);
+assert.doesNotThrow(
+  () => assertCapabilityCompositionFragmentSelectionCompatibility({
+    selectedCapabilityKeys: ["editorial_evidence_packet", "source_attributed_data_story"],
+    fragments: [dependencyAwareFragments[1], dependencyAwareFragments[2]],
+  }),
+  "a complete dependency set is deterministic and compatible",
+);
+assert.throws(
+  () => assertCapabilityCompositionFragmentSelectionCompatibility({
+    selectedCapabilityKeys: [
+      "casefile_cinematic",
+      "editorial_evidence_packet",
+      "source_attributed_data_story",
+    ],
+    fragments: dependencyAwareFragments,
+  }),
+  /source_attributed_data_story is incompatible with selected capability casefile_cinematic/,
+  "a fragment-owned incompatibility must reject the full selected set before plan sealing",
+);
+assert.throws(
+  () => assertCapabilityCompositionFragmentCatalog([
+    dependencyAwareFragments[0],
+    {
+      ...dependencyAwareFragments[1],
+      requiredCapabilityKeys: ["source_attributed_data_story"],
+    },
+    dependencyAwareFragments[2],
+  ]),
+  /cyclic current capability composition dependency for narrated_stock: editorial_evidence_packet -> source_attributed_data_story -> editorial_evidence_packet/,
+  "current fragment dependency cycles must fail during catalog admission rather than relying on operation ordering",
+);
+assert.throws(
+  () => assertCapabilityCompositionFragmentCatalog([
+    dependencyAwareFragments[0],
+    dependencyAwareFragments[1],
+    {
+      ...dependencyAwareFragments[2],
+      requiredCapabilityKeys: ["children_show_bible"],
+    },
+  ]),
+  /requires an unavailable current narrated_stock\/children_show_bible fragment/,
+  "a current dependency cannot point at an unregistered cross-family or review-only fragment",
+);
+
+// A sealed plan is not trusted merely because its public fingerprints are
+// internally consistent: the fragment-owned dependency remains part of the
+// historical definition contract during retry/rehydration as well.
+const mutableFragmentHistory = CAPABILITY_COMPOSITION_FRAGMENT_HISTORY as unknown as Array<Record<string, unknown>>;
+const mutableSourceFragment = mutableFragmentHistory.find(
+  (definition) => definition.capability === "source_attributed_data_story" && definition.definitionVersion === "v2",
+);
+assert.ok(mutableSourceFragment);
+const originalSourceRequiredCapabilities = mutableSourceFragment.requiredCapabilityKeys;
+const testEditorialFragment = {
+  capability: "editorial_evidence_packet",
+  definitionVersion: "persisted-plan-test-v1",
+  status: "current",
+  family: "narrated_stock",
+  materialization: {
+    version: "persisted-plan-test/editorial/v1",
+    operations: [
+      { kind: "ensure_block_before", block: "editorial_layer", beforeBlock: "timeline_assemble" },
+    ],
+  },
+} as const;
+try {
+  mutableSourceFragment.requiredCapabilityKeys = ["editorial_evidence_packet"];
+  mutableFragmentHistory.push(testEditorialFragment as unknown as Record<string, unknown>);
+  const completePlan = resolveChannelCapabilityCompositionPlan({
+    family: "narrated_stock",
+    selectedCapabilityKeys: ["editorial_evidence_packet", "source_attributed_data_story"],
+    expectedFragmentVersions: {
+      editorial_evidence_packet: "persisted-plan-test-v1",
+      source_attributed_data_story: "v2",
+    },
+  });
+  const incompleteOperations = capabilityCompositionPlanMaterialization(completePlan).operations.filter(
+    (operation) => !(operation.kind === "ensure_block_before" && operation.block === "editorial_layer"),
+  );
+  const malformedPlanBody = {
+    version: completePlan.version,
+    family: completePlan.family,
+    base: completePlan.base,
+    fragments: completePlan.fragments.filter(
+      (fragment) => fragment.capability === "source_attributed_data_story",
+    ),
+    selectedCapabilityKeys: ["source_attributed_data_story"],
+    operationsFingerprint: sha256Hex(canonicalJson(incompleteOperations)),
+  } as const;
+  const malformedPlan = {
+    ...malformedPlanBody,
+    fingerprint: sha256Hex(canonicalJson(malformedPlanBody)),
+  } as const;
+  assert.throws(
+    () => parseChannelCapabilityCompositionPlan(malformedPlan),
+    /source_attributed_data_story requires selected capability editorial_evidence_packet/,
+    "a re-fingerprinted persisted plan cannot omit a fragment dependency after current admission",
+  );
+  const emptyPlanBody = {
+    version: completePlan.version,
+    family: completePlan.family,
+    base: completePlan.base,
+    fragments: [],
+    selectedCapabilityKeys: [],
+    operationsFingerprint: sha256Hex(canonicalJson([])),
+  } as const;
+  assert.throws(
+    () => parseChannelCapabilityCompositionPlan({
+      ...emptyPlanBody,
+      fingerprint: sha256Hex(canonicalJson(emptyPlanBody)),
+    }),
+    /must select at least one capability/,
+    "the plan-only authority cannot be used to relabel an empty legacy base receipt",
+  );
+} finally {
+  const testFragmentIndex = mutableFragmentHistory.indexOf(testEditorialFragment as unknown as Record<string, unknown>);
+  if (testFragmentIndex >= 0) mutableFragmentHistory.splice(testFragmentIndex, 1);
+  mutableSourceFragment.requiredCapabilityKeys = originalSourceRequiredCapabilities;
+}
 
 const legacyDataStoryDefinitionIdentity = {
   key: "source_attributed_data_story",
@@ -225,13 +476,49 @@ assert.throws(
   "a persisted v2 profile must reject quote-overlay timing drift rather than resume an invalid assembly",
 );
 
+const historicalV3DataStoryDefinitionIdentity = {
+  key: "source_attributed_data_story",
+  definitionVersion: "v3",
+  family: "narrated_stock",
+  title: "Source-attributed data story",
+  qualityFocus: ["named sources", "spoken numeric anchors", "readable chart progression", "causal comparison"],
+  requiredCapabilityKeys: ["source_attributed_data_story"],
+  materialization: SOURCE_ATTRIBUTED_DATA_STORY_V3_MATERIALIZATION,
+} as const;
+const historicalV3DataStoryBody = {
+  version: dataStory.version,
+  key: "source_attributed_data_story",
+  definitionVersion: "v3",
+  definitionFingerprint: sha256Hex(canonicalJson(historicalV3DataStoryDefinitionIdentity)),
+  family: "narrated_stock",
+  title: "Source-attributed data story",
+  qualityFocus: ["named sources", "spoken numeric anchors", "readable chart progression", "causal comparison"],
+} as const;
+const historicalV3DataStory = {
+  ...historicalV3DataStoryBody,
+  fingerprint: sha256Hex(canonicalJson(historicalV3DataStoryBody)),
+} as const;
+assert.deepEqual(
+  parseChannelCompositionReceipt(historicalV3DataStory),
+  historicalV3DataStory,
+  "the former v3 current receipt must stay parseable as an exact historical materialization",
+);
+assert.deepEqual(
+  certifiedChannelCompositionMaterialization(historicalV3DataStory),
+  SOURCE_ATTRIBUTED_DATA_STORY_V3_MATERIALIZATION,
+  "a historical v3 retry must retain its original operation set instead of acquiring Episode Graph",
+);
+
 const currentDataStoryDefinition = CHANNEL_COMPOSITION_DEFINITION_HISTORY.find((definition) => (
-  definition.key === "source_attributed_data_story" && definition.definitionVersion === "v3"
+  definition.key === "source_attributed_data_story" && definition.definitionVersion === "v4"
 ));
 assert.ok(currentDataStoryDefinition?.materialization);
-const currentOrderingOperation = currentDataStoryDefinition.materialization.operations[0]! as {
+const currentOrderingOperation = currentDataStoryDefinition.materialization.operations.find((operation) => (
+  operation.kind === "ensure_block_between" && operation.block === "visual_inserts"
+)) as {
   optionalAfterBlocks?: readonly string[];
 };
+assert.ok(currentOrderingOperation);
 const originalOptionalAfterBlocks = currentOrderingOperation.optionalAfterBlocks;
 try {
   currentOrderingOperation.optionalAfterBlocks = [];
@@ -262,15 +549,15 @@ try {
 } finally {
   (currentDataStoryDefinition.materialization as { operations: readonly unknown[] }).operations = originalCurrentOperations;
 }
-assert.throws(
-  () => resolveCertifiedChannelComposition({ family: "cinematic" }),
-  /no certified autonomous channel composition/,
-  "a renderer-present but unregistered family must not gain creator authority from a composition label",
+assert.equal(
+  resolveCertifiedChannelComposition({ family: "cinematic" }).key,
+  "cinematic_visual_control_story",
+  "the cinematic composition is explicit and receipt-bound; its independently measured runtime gate remains outside this catalog",
 );
 assert.equal(
-  findCertifiedChannelComposition({ family: "cinematic" }),
-  undefined,
-  "a supervised or unregistered family can retain its generic Show Profile without being mislabeled as certified autonomous",
+  findCertifiedChannelComposition({ family: "cinematic" })?.key,
+  "cinematic_visual_control_story",
+  "a cinematic Show Profile has one exact route-owned visual-control composition rather than a generic renderer label",
 );
 
 const { fingerprint: _dataStoryFingerprint, ...dataStoryBody } = dataStory;
@@ -281,7 +568,7 @@ const futureCatalogV2 = [
     key: "future_certified_timeline",
     definitionVersion: "v1",
     status: "current" as const,
-    family: "cinematic" as const,
+    family: "documentary_collage_short" as const,
     title: "Future certified timeline",
     qualityFocus: ["timeline clarity"],
     requiredCapabilityKeys: [],

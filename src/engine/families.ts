@@ -1,6 +1,7 @@
 import {
   assessPipelineVideoRuntimeReadiness,
   NOVITA_VIDEO_RUNTIME_REMEDIATION,
+  type NovitaVideoRuntimeTarget,
   type PipelineRuntimeBlockInput,
 } from "./runtimeCapability";
 import { familyChannelInceptionCapability } from "./channelInceptionCapability";
@@ -9,6 +10,7 @@ import {
   narratedPlanningFoundation,
   type NarratedFoundationFamily,
 } from "./narratedPlanningFoundation";
+import { isProductionQualityGenerationProfile } from "./generationProfiles";
 
 /**
  * Engine families = curated presets that map a channel format to a base pipeline
@@ -71,9 +73,9 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     narrated: true,
     requiresKeys: ["fish-audio", "pexels", "mureka"],
     defaultThumbnailStyle: "banana",
-    // Current standard-episode compiler reservation: $0.64. This rounded
-    // floor keeps creator advice and server admission above the real pipeline.
-    defaultRunBudgetUsd: 1,
+    // Current standard-episode compiler reservation includes fully batched
+    // final visual evidence. Keep the creator floor above that sealed cost.
+    defaultRunBudgetUsd: 2,
   },
   music_loop: {
     key: "music_loop",
@@ -88,8 +90,8 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // The final cover always uses the universal Nano Banana scene path with
     // deterministic local typography.
     defaultThumbnailStyle: "banana",
-    // Standard production loop + aesthetic-audio review reserves $1.47.
-    defaultRunBudgetUsd: 2,
+    // Standard production loop + final visual/audio review reservation.
+    defaultRunBudgetUsd: 3,
   },
   sleep: {
     key: "sleep",
@@ -105,7 +107,8 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     narrated: true,
     requiresKeys: ["mureka", "pexels", "fish-audio"],
     defaultThumbnailStyle: "banana",
-    defaultRunBudgetUsd: 1,
+    // Narrated ambient masters retain the same complete final-review envelope.
+    defaultRunBudgetUsd: 2,
   },
   comic: {
     key: "comic",
@@ -122,9 +125,9 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // non-Google; its thumbnail is the sole sealed exception elsewhere.
     requiresKeys: ["elevenlabs", "novita"],
     defaultThumbnailStyle: "banana",
-    // The standard eight-panel comic now reserves $6.36 once every direct
-    // Novita panel worker is costed at its real teardown-verified ceiling.
-    defaultRunBudgetUsd: 7,
+    // The standard eight-panel comic reserves direct panel workers plus the
+    // complete final-review envelope at its real teardown-verified ceiling.
+    defaultRunBudgetUsd: 8,
   },
   shorts: {
     key: "shorts",
@@ -136,7 +139,9 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     narrated: true,
     requiresKeys: ["fish-audio", "pexels"],
     defaultThumbnailStyle: "banana",
-    defaultRunBudgetUsd: 1,
+    // Portrait production includes complete final visual evidence, not a
+    // representative sample.
+    defaultRunBudgetUsd: 2,
   },
   documentary_collage_short: {
     key: "documentary_collage_short",
@@ -165,10 +170,11 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     narrated: true,
     requiresKeys: ["fish-audio", "novita"],
     defaultThumbnailStyle: "banana",
-    // The authored five-minute board reserves $24.99 once every direct
-    // Novita drawing layer is admitted; this is intentionally below the $31
-    // absolute sixteen-panel module ceiling but above the real default run.
-    defaultRunBudgetUsd: 25,
+    // The authored five-minute board reserves just over $25 once every direct
+    // drawing layer and its full final-QA evidence plan are admitted. Keep a
+    // small declared floor above that exact compiled envelope rather than
+    // weakening review coverage to fit an obsolete $25 budget.
+    defaultRunBudgetUsd: 25.25,
   },
   loreshort: {
     key: "loreshort",
@@ -529,7 +535,12 @@ export type AutonomousPlanningCapability =
     }
   | {
       mode: "unregistered";
-      geminiBackedBlocks: readonly string[];
+      /**
+       * Concrete prerequisites still missing from an automatic planner. This
+       * intentionally describes the architecture gap rather than guessing a
+       * provider from a legacy implementation.
+       */
+      missingPlanningRequirements: readonly string[];
     };
 
 function registeredNarratedPlanningCapability(
@@ -547,20 +558,142 @@ function registeredNarratedPlanningCapability(
   };
 }
 
+/**
+ * Self-contained visual engines do not consume a generic script/narration/
+ * footage chain. Their one accepted native storyboard is planned, critic
+ * checked, route-sealed, then consumed exactly once by their own renderer.
+ */
+function registeredSelfContainedPlanningCapability(
+  family: "whiteboard" | "comic" | "loreshort",
+): Extract<AutonomousPlanningCapability, { mode: "registered_non_gemini" }> {
+  const renderer = family === "whiteboard"
+    ? "whiteboard_scribe"
+    : family === "comic"
+      ? "motion_comic"
+      : "lore_short";
+  return {
+    mode: "registered_non_gemini",
+    id: `self-contained-${family}-storyboard-foundation/v1`,
+    plannerBlock: "self_contained_story_plan",
+    provenance:
+      "route-owned non-Google native storyboard producer with a bounded critic loop; the accepted plan is sealed to its route, lane, and topic before the self-contained renderer can read it",
+    requiredEntries: [
+      { block: "topic_select" },
+      { block: "critic_spec" },
+      { block: "compliance_check" },
+      { block: "self_contained_story_plan" },
+      { block: "self_contained_story" },
+      { block: renderer },
+      { block: "originality_gate" },
+      { block: "thumbnail_gen" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+    ],
+    forbiddenGeminiBlocks: [],
+  };
+}
+
+/**
+ * Unlike a narrated episode, a music loop has no script to prove its intent.
+ * The sealed original-music program is therefore the route-owned episode
+ * authority consumed by both its visual loop and its paid audio generation.
+ */
+function registeredOriginalMusicProgramCapability(): Extract<AutonomousPlanningCapability, { mode: "registered_non_gemini" }> {
+  return {
+    mode: "registered_non_gemini",
+    id: "music-loop-original-program-foundation/v1",
+    plannerBlock: "music_program_plan",
+    provenance:
+      "route-owned deterministic original-music program binding the selected non-Google topic, channel sound, visual-loop setting, and instrumental-only constraints before either Novita or the music provider is called",
+    requiredEntries: [
+      { block: "topic_select" },
+      { block: "music_program_plan" },
+      { block: "scene_planner" },
+      { block: "music" },
+      { block: "keyframes" },
+      { block: "loop_clips" },
+      { block: "assemble" },
+      { block: "thumbnail_gen" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+    ],
+    forbiddenGeminiBlocks: [],
+  };
+}
+
+/**
+ * Cinematic is a distinct visual-control foundation, not a renamed narrated
+ * essay. It seals the causal Story Spine, reusable studio assets, Visual
+ * Matter controls, exact Novita image/video chain, and final-master QA before
+ * release. The separate runtime admission still keeps it blocked until the
+ * exact LTX profile has an immutable reviewed RTX 4090 benchmark.
+ */
+function registeredCinematicPlanningCapability(): Extract<AutonomousPlanningCapability, { mode: "registered_non_gemini" }> {
+  return {
+    mode: "registered_non_gemini",
+    id: "cinematic-story-spine-visual-control-foundation/v1",
+    plannerBlock: "story_spine",
+    provenance:
+      "non-Google Topiccraft and Claude crew/script planning, local Story Spine causality, sealed Studio Asset and Visual Matter controls, direct Novita keyframe-to-video rendering, and independent final-master visual review; Gemini remains limited to the separately receipt-bound thumbnail block",
+    requiredEntries: [
+      { block: "competitor_research" },
+      { block: "topic_select" },
+      { block: "director_brief" },
+      { block: "dp_brief" },
+      { block: "editor_brief" },
+      { block: "composer_brief" },
+      { block: "critic_spec" },
+      { block: "script_gen" },
+      { block: "qa_script" },
+      { block: "hook_craft" },
+      { block: "originality_gate" },
+      { block: "compliance_check" },
+      { block: "narration_tts" },
+      { block: "story_spine" },
+      { block: "studio_asset_resolve" },
+      { block: "visual_matter" },
+      { block: "novita_render_images", params: { generationProfile: "production" } },
+      { block: "qa_assets" },
+      { block: "studio_ltx_adapter_resolve" },
+      { block: "novita_render_video", params: { generationProfile: "production" } },
+      { block: "qa_shots" },
+      { block: "studio_postproduction_asset_resolve" },
+      { block: "music" },
+      { block: "timeline_assemble" },
+      { block: "length_check" },
+      { block: "captions" },
+      { block: "metadata" },
+      { block: "package_to_opening_plan" },
+      { block: "thumbnail_gen" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+    ],
+    forbiddenGeminiBlocks: [
+      "motion_comic",
+      "documotion_short",
+      "whiteboard_scribe",
+      "lore_short",
+    ],
+  };
+}
+
 export const FAMILY_AUTONOMOUS_PLANNING: Readonly<
   Record<FamilyKey, AutonomousPlanningCapability>
 > = {
   narrated_stock: registeredNarratedPlanningCapability("narrated_stock"),
-  music_loop: { mode: "unregistered", geminiBackedBlocks: ["topic_select"] },
+  music_loop: registeredOriginalMusicProgramCapability(),
   sleep: registeredNarratedPlanningCapability("sleep"),
-  comic: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "motion_comic"] },
+  comic: registeredSelfContainedPlanningCapability("comic"),
   shorts: registeredNarratedPlanningCapability("shorts"),
   documentary_collage_short: {
     mode: "unregistered",
-    geminiBackedBlocks: ["topic_select", "script_gen", "documotion_short"],
+    missingPlanningRequirements: [
+      "a source-first route-owned episode plan",
+      "a matching channel-inception and composition binding",
+    ],
   },
-  whiteboard: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "whiteboard_scribe"] },
-  loreshort: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "lore_short"] },
+  whiteboard: registeredSelfContainedPlanningCapability("whiteboard"),
+  loreshort: registeredSelfContainedPlanningCapability("loreshort"),
   quizyear: {
     mode: "registered_non_gemini",
     id: "quiz-curated-wikidata-planner/v1",
@@ -619,8 +752,13 @@ export const FAMILY_AUTONOMOUS_PLANNING: Readonly<
       "lore_short",
     ],
   },
-  children_learning: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "script_gen"] },
-  cinematic: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "script_gen"] },
+  children_learning: {
+    mode: "unregistered",
+    missingPlanningRequirements: [
+      "a child-editor-approved program route for automatic planning",
+    ],
+  },
+  cinematic: registeredCinematicPlanningCapability(),
 };
 
 export function familyAutonomousPlanningCapability(family: FamilyKey): AutonomousPlanningCapability {
@@ -635,6 +773,7 @@ export function familyAutonomousPlanningCapability(family: FamilyKey): Autonomou
 export function assertFamilyAutonomousPlanningPipeline(
   family: FamilyKey,
   pipeline: readonly Readonly<{ block: string; params?: Record<string, unknown> }>[],
+  options: Readonly<{ allowPreviewGenerationProfile?: boolean }> = {},
 ): void {
   const capability = familyAutonomousPlanningCapability(family);
   if (capability.mode !== "registered_non_gemini") return;
@@ -647,7 +786,16 @@ export function assertFamilyAutonomousPlanningPipeline(
       );
     }
     for (const [key, value] of Object.entries(required.params ?? {})) {
-      if (entry.params?.[key] !== value) {
+      const actual = entry.params?.[key];
+      // The cinematic contract requires a production-quality image profile.
+      // Hero is stronger than production, while draft is only valid for the
+      // designer's explicitly non-runnable preview output. All execution,
+      // inception, and persisted-pipeline callers use the default strict mode.
+      const satisfied = key === "generationProfile" && value === "production"
+        ? isProductionQualityGenerationProfile(actual) ||
+          (options.allowPreviewGenerationProfile === true && actual === "draft")
+        : actual === value;
+      if (!satisfied) {
         throw new Error(
           `${FAMILIES[family].label}: autonomous planner ${capability.id} requires ${required.block}.${key}=${JSON.stringify(value)}`,
         );
@@ -664,12 +812,13 @@ export function assertFamilyAutonomousPlanningPipeline(
   assertNarratedFoundationFormatContract(family, pipeline);
 }
 
-function noGeminiPlanningBlocker(template: Family): string | undefined {
-  const capability = familyAutonomousPlanningCapability(template.key);
+export function autonomousPlanningBlocker(family: FamilyKey): string | undefined {
+  const capability = familyAutonomousPlanningCapability(family);
   if (capability.mode === "registered_non_gemini") return undefined;
+  const label = FAMILIES[family].label;
   return (
-    `${template.label}: no-Gemini automatic planning is not registered; ` +
-    `the creator pipeline still requires Gemini-backed ${capability.geminiBackedBlocks.join(", ")}.`
+    `${label}: automatic planning is not registered; still missing ` +
+    `${capability.missingPlanningRequirements.join(" and ")}.`
   );
 }
 
@@ -695,7 +844,15 @@ function noGeminiChannelInceptionBlocker(template: Family): {
   };
 }
 
-export function familyProductionReadiness(family: FamilyKey): FamilyProductionReadiness {
+/**
+ * Resolve production readiness against an optional owner-attested video runtime.
+ * Callers that do not have a reviewed runtime record retain the locked static
+ * target, so no browser or untrusted payload can promote an LTX family.
+ */
+export function familyProductionReadiness(
+  family: FamilyKey,
+  runtimeTarget?: NovitaVideoRuntimeTarget,
+): FamilyProductionReadiness {
   const template = FAMILIES[family];
   const blockers: string[] = [];
   if (!template.available) {
@@ -703,11 +860,11 @@ export function familyProductionReadiness(family: FamilyKey): FamilyProductionRe
       `${template.label}: the ${template.visualEngine} production template is not implemented`,
     );
   }
-  const planningBlocker = noGeminiPlanningBlocker(template);
+  const planningBlocker = autonomousPlanningBlocker(template.key);
   if (planningBlocker) blockers.push(planningBlocker);
   const inception = noGeminiChannelInceptionBlocker(template);
   if (inception.blocker) blockers.push(inception.blocker);
-  const runtime = assessPipelineVideoRuntimeReadiness(FAMILY_RUNTIME_PIPELINE[family]);
+  const runtime = assessPipelineVideoRuntimeReadiness(FAMILY_RUNTIME_PIPELINE[family], runtimeTarget);
   if (!runtime.ready) {
     blockers.push(...runtime.blockers.map((blocker) => `${template.label}: ${blocker}`));
   }
@@ -717,7 +874,7 @@ export function familyProductionReadiness(family: FamilyKey): FamilyProductionRe
     blockers,
     remediation: [
       ...(planningBlocker
-        ? ["Register a deterministic or non-Gemini topic/story planner before admitting this family."]
+        ? ["Register a route-owned deterministic or non-Gemini planner/seal and its matching composition before admitting this family."]
         : []),
       ...(inception.remediation ? [inception.remediation] : []),
       ...(!runtime.ready ? [NOVITA_VIDEO_RUNTIME_REMEDIATION] : []),

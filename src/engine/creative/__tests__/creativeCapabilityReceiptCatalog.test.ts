@@ -25,6 +25,7 @@ const richProjection = CREATIVE_CAPABILITY_CATALOG.map((definition) => {
     capability: definition.capability,
     supportedFamilies: definition.supportedFamilies,
     selectionMode: definition.selectionMode,
+    compositionFragmentVersion: definition.compositionFragmentVersion,
     pipelineObligations: offer.pipelineObligations,
   };
 });
@@ -33,13 +34,15 @@ const receiptProjection = CREATIVE_CAPABILITY_RECEIPT_CATALOG.map((definition) =
   capability: definition.capability,
   supportedFamilies: definition.supportedFamilies,
   selectionMode: definition.selectionMode,
+  compositionFragmentVersion:
+    "compositionFragmentVersion" in definition ? definition.compositionFragmentVersion : undefined,
   pipelineObligations: definition.pipelineObligations,
 }));
 
 assert.deepEqual(
   receiptProjection,
   richProjection,
-  "the Convex-safe receipt spine must preserve every catalog key, family, selection mode, and pipeline obligation",
+  "the Convex-safe receipt spine must preserve every catalog key, family, selection mode, fragment version, and pipeline obligation",
 );
 
 assert.doesNotThrow(() =>

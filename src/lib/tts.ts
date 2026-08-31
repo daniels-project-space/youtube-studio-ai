@@ -72,6 +72,13 @@ export interface TtsStitch {
 /** eleven_v3 doesn't support request stitching yet (verified live) — see above. */
 const V3_STITCH = process.env.ELEVENLABS_V3_STITCH === "1";
 
+// A single sentence/line synthesis should complete well below this ceiling.
+// Without a local bound, a post-submit hung socket can outlive the Trigger task
+// and turn its whole-task crash retry into a duplicate paid TTS purchase.  The
+// catch paths below deliberately classify an abort as an ambiguous, terminal
+// outcome rather than trying the POST again.
+const TTS_SUBMISSION_TIMEOUT_MS = 120_000;
+
 /**
  * ElevenLabs v3 — the expressive voice tier. PERFORMS inline bracketed audio
  * tags ([pause], [sighs], [whispers], [chuckles]…) instead of reading them;
@@ -116,6 +123,7 @@ async function synthElevenLabs(args: {
         {
           method: "POST",
           headers: { "xi-api-key": key, "content-type": "application/json" },
+          signal: AbortSignal.timeout(TTS_SUBMISSION_TIMEOUT_MS),
           body: JSON.stringify({
             text: args.text,
             model_id: args.eleven?.modelId ?? "eleven_v3",
@@ -219,6 +227,7 @@ export async function synthNarration(args: {
       res = await fetch("https://api.fish.audio/v1/tts", {
         method: "POST",
         headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
+        signal: AbortSignal.timeout(TTS_SUBMISSION_TIMEOUT_MS),
         body: JSON.stringify({
           text: args.text,
           format: "mp3",

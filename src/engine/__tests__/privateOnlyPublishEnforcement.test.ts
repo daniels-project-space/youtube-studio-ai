@@ -72,6 +72,14 @@ function expectPrivateOnlyRejection(entries: PipelineEntry[], messageContains: s
         `expected error to reference "publish.private_only", got: ${(error as Error).message}`,
       );
       assert.ok(
+        (error as Error).message.includes("private-only admission module"),
+        `expected neutral private-only admission wording, got: ${(error as Error).message}`,
+      );
+      assert.ok(
+        !(error as Error).message.includes("Casefile/children-safety"),
+        `private-only guard must not misidentify the admitting module, got: ${(error as Error).message}`,
+      );
+      assert.ok(
         (error as Error).message.includes(messageContains),
         `expected error to reference "${messageContains}", got: ${(error as Error).message}`,
       );

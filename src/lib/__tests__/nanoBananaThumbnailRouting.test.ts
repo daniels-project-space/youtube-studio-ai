@@ -32,8 +32,8 @@ async function main(): Promise<void> {
   assert.doesNotMatch(production, /verifiedSceneBase|isThumbnailBaseProvenance|baseArt/,
     "publishable thumbnail_gen must purchase its pixels from the pinned Nano route");
   assert.match(production, /generateNanoBananaImageWithReceipt\s*\(/);
-  assert.match(production, /consumes:\s*\["title", "thumbnailDescription"\]/,
-    "the universal thumbnail block must require a concrete visual brief");
+  assert.match(production, /consumes:\s*\["title", "thumbnailDescription", "topic", "packageToOpeningPlan"\]/,
+    "the universal thumbnail block must require a concrete visual brief and its package-to-opening binding");
   assert.match(production, /sceneSeed:\s*thumbnailDescription/,
     "the required brief must reach the thumbnail art director");
   assert.doesNotMatch(production, /draft_preview_placeholder|thumbnailer\s*===\s*["']title_card["']/,

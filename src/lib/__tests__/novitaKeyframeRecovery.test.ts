@@ -4,6 +4,7 @@ import {
   type NovitaGeneratedScene,
 } from "@/lib/novitaMedia";
 import { CinematicKeyframeRejectedError } from "@/lib/cinematicKeyframeGate";
+import { CinematicClipRejectedError } from "@/lib/cinematicClipGate";
 import type { CinematicKeyframeReview } from "@/engine/cinematicKeyframeReview";
 import type { NovitaBillingReceipt } from "@/lib/novitaRenderFarm";
 
@@ -64,7 +65,66 @@ assert.equal(replacementInput?.attempt, 2);
 assert.match(replacementInput?.prompt ?? "", /keyframe correction 2\/2/);
 assert.ok((replacementInput?.remainingCostUsd ?? 0) > 0);
 
+let checkpointOrderingReviews = 0;
+let checkpointOrderingReplacementCalls = 0;
+const checkpointOrder: string[] = [];
+await reviewKeyframesBeforeVideo({
+  scenes: [scene],
+  stillByShot: new Map([[scene.id, "initial.png"]]),
+  maxImageAttempts: 2,
+  imageCostUsd: 0.1,
+  imageMaxCostUsd: 0.7,
+  imageReceipts: [receipt],
+  review: async () => {
+    checkpointOrderingReviews += 1;
+    if (checkpointOrderingReviews === 1) {
+      throw new CinematicKeyframeRejectedError(scene.id, ["candidate needs a durable repair record first"]);
+    }
+    return review;
+  },
+  checkpointReview: async (event) => {
+    checkpointOrder.push(`${event.verdict}:${event.stillKey}`);
+  },
+  renderReplacement: async () => {
+    checkpointOrderingReplacementCalls += 1;
+    checkpointOrder.push("replacement-render");
+    return { stillKey: "replacement.png", costUsd: 0.1, billingReceipt: receipt };
+  },
+});
+assert.deepEqual(
+  checkpointOrder,
+  ["rejected:initial.png", "replacement-render", "accepted:replacement.png"],
+  "the rejected keyframe checkpoint completes before the one permitted replacement render",
+);
+assert.equal(checkpointOrderingReplacementCalls, 1);
+
+let checkpointFailureReplacementCalls = 0;
+await assert.rejects(
+  reviewKeyframesBeforeVideo({
+    scenes: [scene],
+    stillByShot: new Map([[scene.id, "initial.png"]]),
+    maxImageAttempts: 2,
+    imageCostUsd: 0.1,
+    imageMaxCostUsd: 0.7,
+    imageReceipts: [receipt],
+    review: async () => {
+      throw new CinematicKeyframeRejectedError(scene.id, ["durable audit must succeed before replacement"]);
+    },
+    checkpointReview: async () => {
+      throw new Error("visual attempt ledger write failed");
+    },
+    renderReplacement: async () => {
+      checkpointFailureReplacementCalls += 1;
+      return { stillKey: "replacement.png", costUsd: 0.1, billingReceipt: receipt };
+    },
+  }),
+  /visual attempt ledger write failed/,
+  "a failed keyframe checkpoint aborts before buying a replacement still",
+);
+assert.equal(checkpointFailureReplacementCalls, 0, "a failed keyframe checkpoint permits no paid replacement");
+
 let failedReviews = 0;
+let persistentReplacementCalls = 0;
 await assert.rejects(
   reviewKeyframesBeforeVideo({
     scenes: [scene],
@@ -77,11 +137,15 @@ await assert.rejects(
       failedReviews += 1;
       throw new CinematicKeyframeRejectedError(scene.id, ["persistent broken anatomy"]);
     },
-    renderReplacement: async () => ({ stillKey: "replacement.png", costUsd: 0.1, billingReceipt: receipt }),
+    renderReplacement: async () => {
+      persistentReplacementCalls += 1;
+      return { stillKey: "replacement.png", costUsd: 0.1, billingReceipt: receipt };
+    },
   }),
   /persistent broken anatomy/,
 );
 assert.equal(failedReviews, 2, "the recovery budget may not buy an unbounded third still");
+assert.equal(persistentReplacementCalls, 1, "the second visual rejection must not buy a second still replacement");
 
 let replacementCalls = 0;
 let unavailableReviews = 0;
@@ -107,6 +171,28 @@ await assert.rejects(
 );
 assert.equal(unavailableReviews, 1, "unavailable review evidence must not be retried as a visual repair");
 assert.equal(replacementCalls, 0, "only a typed pixel-review rejection may buy the bounded repair still");
+
+let wrongArtifactReplacementCalls = 0;
+await assert.rejects(
+  reviewKeyframesBeforeVideo({
+    scenes: [scene],
+    stillByShot: new Map([[scene.id, "initial.png"]]),
+    maxImageAttempts: 2,
+    imageCostUsd: 0.1,
+    imageMaxCostUsd: 0.7,
+    imageReceipts: [receipt],
+    review: async () => {
+      throw new CinematicClipRejectedError(scene.id, ["a moving take failed elsewhere"]);
+    },
+    renderReplacement: async () => {
+      wrongArtifactReplacementCalls += 1;
+      return { stillKey: "replacement.png", costUsd: 0.1, billingReceipt: receipt };
+    },
+  }),
+  /moving take failed elsewhere/,
+  "a typed video rejection cannot authorize an image replacement",
+);
+assert.equal(wrongArtifactReplacementCalls, 0, "wrong-artifact evidence must fail closed");
 }
 
 void main();

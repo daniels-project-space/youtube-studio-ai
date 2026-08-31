@@ -31,5 +31,15 @@ assert.match(
   /onClick=\{\(\) => window\.location\.reload\(\)\}/,
   "Retry must perform a real token/subscription reload",
 );
+assert.match(
+  source,
+  /No render, schedule, or publishing action is started from this state\./,
+  "the connection fallback must state that it does not fabricate or start work",
+);
+assert.match(
+  source,
+  /<StudioSessionGate state="loading" \/>/,
+  "loading and unavailable states should use the same polished, scoped shell",
+);
 
 console.log("Convex client auth gate regression tests passed");

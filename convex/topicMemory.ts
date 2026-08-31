@@ -23,6 +23,11 @@ export const recordTopic = mutation({
   },
   returns: v.id("topicMemory"),
   handler: async (ctx, args) => {
+    const existing = await ctx.db
+      .query("topicMemory")
+      .withIndex("by_channel_key", (q) => q.eq("channelId", args.channelId).eq("key", args.key))
+      .unique();
+    if (existing) return existing._id;
     return await ctx.db.insert("topicMemory", {
       ownerId: args.ownerId,
       channelId: args.channelId,

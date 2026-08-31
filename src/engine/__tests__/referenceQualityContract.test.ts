@@ -63,6 +63,14 @@ const casefile = referenceQualityContractFor("documentary_collage_short");
 assert.equal(casefile.calibration, "calibrated");
 assert.equal(casefile.comparisonPolicy, "mechanics-only-no-automatic-comparison");
 assert.ok(casefile.sources.some((source) => source.id === "fern"));
+assert.ok(
+  casefile.sources.some((source) => source.id === "wendover"),
+  "documentary calibration must include a systems-explainer standard without permitting imitation",
+);
+assert.match(
+  casefile.sources.find((source) => source.id === "wendover")?.prohibitedImitation ?? "",
+  /Do not copy topics, scripts, maps, visual identity, sourcing, narration, or packaging/,
+);
 assert.deepEqual(
   new Set(casefile.requirements.map((requirement) => requirement.area)),
   new Set(["story", "pacing", "presentation", "audio"]),

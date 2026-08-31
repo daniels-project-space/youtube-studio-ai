@@ -6,12 +6,17 @@ import { NavItem } from "./NavItem";
 import {
   IconOverview,
   IconChannels,
+  IconRuns,
   IconLibrary,
   IconAnalytics,
+  IconSeo,
   IconSettings,
   IconSpark,
   IconCalendar,
   IconGolden,
+  IconTerminal,
+  IconLofi,
+  IconLore,
 } from "./icons";
 
 const NAV_GROUPS = [
@@ -20,6 +25,7 @@ const NAV_GROUPS = [
     items: [
       { href: "/", label: "Overview", icon: <IconOverview /> },
       { href: "/channels", label: "Channels", icon: <IconChannels /> },
+      { href: "/runs", label: "Runs", icon: <IconRuns /> },
       { href: "/schedule", label: "Schedule", icon: <IconCalendar /> },
     ],
   },
@@ -27,14 +33,25 @@ const NAV_GROUPS = [
     label: "Content",
     items: [
       { href: "/library", label: "Library", icon: <IconLibrary /> },
-      { href: "/analytics", label: "Analytics", icon: <IconAnalytics /> },
+      { href: "/studio-assets", label: "Studio assets", icon: <IconSpark /> },
     ],
   },
   {
-    label: "Production",
+    label: "Growth & evidence",
+    items: [
+      { href: "/analytics", label: "Analytics", icon: <IconAnalytics /> },
+      { href: "/seo", label: "SEO", icon: <IconSeo /> },
+      { href: "/editorial-evidence", label: "Evidence desk", icon: <IconSpark /> },
+      { href: "/casefile", label: "Casefile desk", icon: <IconSpark /> },
+    ],
+  },
+  {
+    label: "Standards",
     items: [
       { href: "/golden", label: "Golden modules", icon: <IconGolden /> },
-      { href: "/casefile", label: "Casefile desk", icon: <IconSpark /> },
+      { href: "/novita-render", label: "Render lab", icon: <IconTerminal /> },
+      { href: "/lofi", label: "Music archive", icon: <IconLofi /> },
+      { href: "/loreshort", label: "Lore archive", icon: <IconLore /> },
     ],
   },
   {

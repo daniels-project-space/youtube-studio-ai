@@ -6,11 +6,12 @@
  * Gemini is deliberately not a text-agent fallback: its sole admitted use is
  * the sealed Nano Banana thumbnail module.
  *
- * `agentJson()` is the single entry point chunks call. It is RESILIENT by design:
- * it tries the Mastra agent (structured output validated by a zod schema, traced
- * to Langfuse when keys are present) and, on ANY failure (bundling, runtime, API),
- * falls back to the existing REST helpers. So adopting Mastra can never break a
- * working chunk — that is the hybrid seam.
+ * `agentJson()` is the single entry point chunks call. It uses the Mastra agent
+ * when its bundle is available (structured output validated by a zod schema,
+ * traced to Langfuse when keys are present). A REST fallback is permitted only
+ * when that bundle was unavailable before a provider submission. Once
+ * `agent.generate()` has started, a failure or malformed response may represent
+ * a paid outcome, so it must fail closed rather than buy the same work twice.
  *
  * Mastra + AI-SDK packages are dynamically imported so a module-load/bundle
  * problem is caught here rather than crashing the Trigger task at import time.
@@ -21,8 +22,8 @@ import type { z } from "zod";
 import { assertNonGeminiModelIdentifier } from "@/lib/gemini";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import {
-  cacheModelResponse,
-  getCachedModelResponse,
+  getOrCreateModelResponse,
+  modelResponseContractIdentity,
   modelRequestCacheKey,
   recordModelUsage,
 } from "@/lib/modelUsage";
@@ -218,6 +219,81 @@ function recordMastraUsage(
 let bundlePromise: Promise<MastraBundle | null> | null = null;
 let mastraDisabled = false;
 
+/**
+ * `agent.generate()` does not expose a durable provider receipt that lets us
+ * distinguish a local failure from a request accepted by the model provider.
+ * Callers and retry policy must therefore treat every post-dispatch Mastra
+ * failure as terminal until an explicit recovery/reconciliation path exists.
+ */
+export class MastraGenerationOutcomeUnknownError extends Error {
+  readonly code = "mastra_generation_outcome_unknown";
+  readonly retryable = false;
+
+  constructor(role: AgentRole, detail: string, options?: ErrorOptions) {
+    super(
+      `agentJson(${role}): Mastra generation may already have consumed provider work; ` +
+        `refusing REST fallback: ${detail}`,
+      options,
+    );
+    this.name = "MastraGenerationOutcomeUnknownError";
+  }
+}
+
+/** A native provider rejected the request before a generation could start. */
+export class MastraGenerationUnavailableError extends Error {
+  readonly code = "mastra_generation_unavailable";
+  readonly retryable = false;
+
+  constructor(role: AgentRole, detail: string, options?: ErrorOptions) {
+    super(`agentJson(${role}): native provider is unavailable before generation: ${detail}`, options);
+    this.name = "MastraGenerationUnavailableError";
+  }
+}
+
+function knownPreGenerationProviderFailure(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const rawStatus = (error as { statusCode?: unknown; status?: unknown }).statusCode
+    ?? (error as { status?: unknown }).status;
+  return typeof rawStatus === "number" && rawStatus >= 400 && rawStatus < 500 && rawStatus !== 408;
+}
+
+/**
+ * A loaded Mastra runtime is not evidence that its selected model can run.
+ * When the direct Anthropic credential is absent, route through the existing
+ * pinned OpenRouter REST fallback rather than submitting a guaranteed native
+ * failure and then classifying it as an ambiguous paid generation.
+ */
+function hasDirectMastraCredential(model: string): boolean {
+  return !model.startsWith("anthropic/") || Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+}
+
+/**
+ * Validate a completed Mastra response without offering a second provider
+ * route. This is deliberately separate from generation so a response that was
+ * accepted but cannot satisfy the requested contract is still terminal.
+ */
+export function parseMastraStructuredObject<T>(args: {
+  role: AgentRole;
+  schema: z.ZodType<T>;
+  response: MastraGenerationResponse;
+}): T {
+  if (args.response.object === undefined || args.response.object === null) {
+    throw new MastraGenerationOutcomeUnknownError(
+      args.role,
+      "agent.generate() returned no structured object",
+    );
+  }
+  try {
+    return args.schema.parse(args.response.object);
+  } catch (error) {
+    throw new MastraGenerationOutcomeUnknownError(
+      args.role,
+      "agent.generate() returned a structured object that failed the requested contract",
+      { cause: error },
+    );
+  }
+}
+
 /** Build (once) the Mastra instance + agents + optional Langfuse exporter. */
 async function getBundle(): Promise<MastraBundle | null> {
   if (mastraDisabled) return null;
@@ -298,7 +374,8 @@ export interface AgentJsonOptions<T> {
 
 /**
  * Structured generation via the named agent. Mastra-first (validated + traced),
- * REST-fallback on any failure. Throws only if BOTH paths are unavailable.
+ * with REST fallback only when the Mastra bundle was unavailable before any
+ * provider submission.
  */
 export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
   const log = o.log ?? (() => {});
@@ -306,56 +383,73 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
   // A model override must never route creative text through Gemini. The only
   // admitted Google integration lives in the receipt-bound thumbnail module.
   assertNonGeminiModelIdentifier(cfg.model, `agentJson(${o.role})`);
+  const responseContract = modelResponseContractIdentity(o.schema);
   const requestKey = modelRequestCacheKey("mastra", cfg.model, {
     role: o.role,
     prompt: o.prompt,
+    // Mastra itself uses the sealed role instructions, but this is the exact
+    // system prompt sent by the non-Google REST recovery path. Keep it in the
+    // identity so two callers that intentionally change that quality contract
+    // can never share a response during a concurrent recovery.
+    system: o.system?.trim() || undefined,
     temperature: o.temperature,
     maxTokens: o.maxTokens,
+    // Mastra sends this contract as structuredOutput. Never let different
+    // schemas share an otherwise identical response within a run.
+    responseContract,
   });
-  const cached = getCachedModelResponse<T>(requestKey, {
+  return getOrCreateModelResponse(requestKey, {
     provider: cfg.model.startsWith("anthropic/") ? "anthropic" : "mastra",
     model: cfg.model,
     kind: "text",
-  });
-  if (cached !== undefined) return cached;
-
-  const bundle = await getBundle();
-  if (bundle) {
-    try {
+  }, async () => {
+    const bundle = hasDirectMastraCredential(cfg.model) ? await getBundle() : null;
+    if (bundle) {
       const agent = bundle.getAgent(o.role);
-      const res = await agent.generate(o.prompt, {
-        structuredOutput: { schema: o.schema },
-        ...(o.temperature !== undefined ? { temperature: o.temperature } : {}),
-        ...(o.maxTokens !== undefined ? { maxOutputTokens: o.maxTokens } : {}),
-      });
-      recordMastraUsage(cfg.model, res);
-      if (res?.object !== undefined && res.object !== null) {
-        const parsed = o.schema.parse(res.object);
-        cacheModelResponse(requestKey, parsed);
-        return parsed;
+      let res: MastraGenerationResponse;
+      try {
+        res = await agent.generate(o.prompt, {
+          structuredOutput: { schema: o.schema },
+          ...(o.temperature !== undefined ? { temperature: o.temperature } : {}),
+          ...(o.maxTokens !== undefined ? { maxOutputTokens: o.maxTokens } : {}),
+        });
+      } catch (e) {
+        if (knownPreGenerationProviderFailure(e)) {
+          throw new MastraGenerationUnavailableError(
+            o.role,
+            e instanceof Error ? e.message : String(e),
+            { cause: e },
+          );
+        }
+        throw new MastraGenerationOutcomeUnknownError(
+          o.role,
+          `agent.generate() failed after dispatch (${e instanceof Error ? e.message : String(e)})`,
+          { cause: e },
+        );
       }
-      log(`agentJson(${o.role}): Mastra returned no object — falling back to REST`);
-    } catch (e) {
-      log(`agentJson(${o.role}): Mastra path failed (${e instanceof Error ? e.message : e}) — REST fallback`);
+      recordMastraUsage(cfg.model, res);
+      return parseMastraStructuredObject({ role: o.role, schema: o.schema, response: res });
     }
-  }
 
-  // REST fallback uses the same declared non-Google provider. No hidden
-  // provider substitution is allowed for creative text.
-  const system = o.system ?? cfg?.instructions;
-  if (!hasAnthropicKey()) throw new Error(`agentJson(${o.role}): no Mastra and no ANTHROPIC_API_KEY`);
-  // Mirror the Mastra-available path's model tier here so a Mastra outage
-  // degrades gracefully (fast roles -> "flash", higher-stakes roles ->
-  // "pro") instead of silently collapsing every role to claudeJson's
-  // tier-less "flash" default.
-  const out = await claudeJson<T>({
-    prompt: o.prompt,
-    system,
-    tier: cfg?.tier,
-    maxTokens: o.maxTokens,
-    temperature: o.temperature,
+    // REST fallback uses the same declared non-Google provider. No hidden
+    // provider substitution is allowed for creative text.
+    const system = o.system ?? cfg?.instructions;
+    if (!hasAnthropicKey()) throw new Error(`agentJson(${o.role}): no Mastra and no ANTHROPIC_API_KEY`);
+    // Mirror the Mastra-available path's model tier here so a Mastra outage
+    // degrades gracefully (fast roles -> "flash", higher-stakes roles ->
+    // "pro") instead of silently collapsing every role to claudeJson's
+    // tier-less "flash" default.
+    const out = await claudeJson<T>({
+      prompt: o.prompt,
+      system,
+      tier: cfg?.tier,
+      maxTokens: o.maxTokens,
+      temperature: o.temperature,
+      // The outer memo includes the response contract and only completes after
+      // this parse succeeds. A generic JSON memo here could otherwise retain a
+      // response rejected by this schema and turn a retry into a stale failure.
+      memoize: false,
+    });
+    return o.schema.parse(out);
   });
-  const parsed = o.schema.parse(out);
-  cacheModelResponse(requestKey, parsed);
-  return parsed;
 }

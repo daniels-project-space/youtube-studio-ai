@@ -1,7 +1,5 @@
 import { z } from "zod";
 
-import { sha256Hex } from "@/lib/sha256";
-
 import {
   CasefileEvidenceShotMapAdmissionReceiptSchema,
   CasefileEvidenceShotMapSchema,
@@ -13,7 +11,12 @@ import {
   CasefileSourceAdmissionReceiptSchema,
   assertCasefileSourcePacket,
 } from "./sourceFirstAdmission";
-import { StorySpineSchema, type StorySpine, validateStorySpine } from "./storySpine";
+import {
+  StorySpineSchema,
+  storySpineFingerprint,
+  type StorySpine,
+  validateStorySpine,
+} from "./storySpine";
 
 /**
  * A provider-free bridge between an already-admitted Casefile evidence map and
@@ -60,21 +63,6 @@ export const SourceBoundStorySpineHandoffSchema = z.object({
 
 export type SourceBoundStorySpineClaimBinding = z.infer<typeof SourceBoundStorySpineClaimBindingSchema>;
 export type SourceBoundStorySpineHandoff = z.infer<typeof SourceBoundStorySpineHandoffSchema>;
-
-function canonicalJson(value: unknown): string {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.entries(value as Record<string, unknown>)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, item]) => `${JSON.stringify(key)}:${canonicalJson(item)}`)
-      .join(",")}}`;
-  }
-  return JSON.stringify(value);
-}
-
-function fingerprint(value: unknown): string {
-  return sha256Hex(canonicalJson(value));
-}
 
 function unique<T>(values: readonly T[]): T[] {
   return [...new Set(values)];
@@ -144,7 +132,7 @@ function assertMatchingAdmission(args: {
 export function validateSourceBoundStorySpineHandoff(value: unknown): SourceBoundStorySpineHandoff {
   const handoff = SourceBoundStorySpineHandoffSchema.parse(value);
   const storySpine = validateStorySpine(handoff.storySpine);
-  if (handoff.storySpineFingerprint !== fingerprint(storySpine)) {
+  if (handoff.storySpineFingerprint !== storySpineFingerprint(storySpine)) {
     throw new Error("source-bound Story Spine fingerprint does not match the timed Story Spine");
   }
   if (handoff.storySpineShotPlanFingerprint !== casefileShotPlanFingerprint(storySpine.shotList)) {
@@ -345,7 +333,7 @@ export function createSourceBoundStorySpineHandoff(args: {
     caseId: sourcePacket.casePacket.id,
     sourcePacketFingerprint: sourcePacket.receipt.sourcePacketFingerprint,
     evidenceShotMapFingerprint: evidenceShotMap.contentFingerprint,
-    storySpineFingerprint: fingerprint(storySpine),
+    storySpineFingerprint: storySpineFingerprint(storySpine),
     storySpineShotPlanFingerprint,
     storySpine,
     claimBindings,

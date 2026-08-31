@@ -31,6 +31,17 @@ import {
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { hasVisionKey } from "@/lib/vision";
 import { assertThumbnailGate } from "@/engine/qualityPolicy";
+import {
+  assertPersistedProgramBriefIdentity,
+  type ChannelProgramBrief,
+} from "@/engine/channelProgramBrief";
+import {
+  assertChannelProgramRouteBinding,
+  assertChannelProgramRoutePipelineCompatibility,
+  type ChannelProgramRoute,
+} from "@/engine/channelProgramRoute";
+import { assertChannelShowProfilePipelineCompatibility } from "@/engine/channelShowProfile";
+import type { PipelineEntry } from "@/engine/types";
 import { thumbnailRequestHash } from "@/lib/thumbnailCheckpoint";
 import { readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -117,6 +128,122 @@ function exactRecoveryInvocation(
   return { recovery: payload.recovery, requestKey, count };
 }
 
+function planWeekProgramDirective(route: ChannelProgramRoute, programBrief: {
+  audience?: string;
+  sampleTopics?: readonly string[];
+}): string {
+  return [
+    `FROZEN CHANNEL PROGRAM ROUTE: ${route.routeKey}.`,
+    `Viewer job: ${route.directives.viewerJob}`,
+    `Claim mode: ${route.directives.claimMode}.`,
+    "TOPIC RULES (non-negotiable):",
+    ...route.directives.topicRules.map((rule) => `- ${rule}`),
+    programBrief.audience ? `Audience: ${programBrief.audience}.` : "",
+    programBrief.sampleTopics?.length
+      ? `Creator-declared program examples (bounded fit evidence, never copy blindly): ${programBrief.sampleTopics.join(" | ")}`
+      : "",
+  ].filter(Boolean).join("\n");
+}
+
+function assertPlanWeekTopicFitsRoute(route: ChannelProgramRoute, topic: string): void {
+  if (!topic.trim()) {
+    throw new Error(`plan-week-ahead: topic is empty for route ${route.routeKey}`);
+  }
+  if (
+    route.family === "quizyear" ||
+    route.directives.claimMode === "certified_quiz_facts"
+  ) {
+    throw new Error(
+      "plan-week-ahead: certified QuizYear routes require their dedicated sealed planner",
+    );
+  }
+  if (
+    route.directives.claimMode === "fictional_scenario_no_external_claims" &&
+    /\b(?:breaking|latest|today|current events?|news|forecast)\b/i.test(topic)
+  ) {
+    throw new Error(
+      "plan-week-ahead: topic conflicts with the fictional-scenario route's no-real-world-claims contract",
+    );
+  }
+}
+
+/**
+ * Fresh week-ahead planning is never a legacy replay surface. Bind the planner
+ * to the immutable channel program/profile before it reserves a batch or can
+ * ask Topicraft for a provider-backed candidate.
+ */
+export function assertPlanWeekChannelRouteAdmission(channel: {
+  identity?: unknown;
+  pipeline?: unknown;
+}): {
+  programBrief: ChannelProgramBrief;
+  programRoute: ChannelProgramRoute;
+  programDirective: string;
+} {
+  const programBrief = assertPersistedProgramBriefIdentity(channel.identity, {
+    context: "plan-week-ahead channel identity",
+    requireProgramBrief: true,
+  });
+  if (!programBrief) {
+    throw new Error("plan-week-ahead requires a canonical channel program brief");
+  }
+  const rawProgramRoute =
+    channel.identity && typeof channel.identity === "object" && !Array.isArray(channel.identity)
+      ? (channel.identity as { programRoute?: unknown }).programRoute
+      : undefined;
+  if (rawProgramRoute === undefined) {
+    throw new Error(
+      "plan-week-ahead requires a sealed channel program route; legacy route-less channels cannot create new plans",
+    );
+  }
+  if (!Array.isArray(channel.pipeline)) {
+    throw new Error("plan-week-ahead requires a persisted channel pipeline");
+  }
+  const pipeline = channel.pipeline as PipelineEntry[];
+  const programRoute = assertChannelProgramRouteBinding({
+    route: rawProgramRoute,
+    programBrief,
+  });
+  assertChannelProgramRoutePipelineCompatibility({
+    route: programRoute,
+    programBrief,
+    pipeline,
+  });
+  const rawShowProfile =
+    channel.identity && typeof channel.identity === "object" && !Array.isArray(channel.identity)
+      ? (channel.identity as { showProfile?: unknown }).showProfile
+      : undefined;
+  if (rawShowProfile === undefined) {
+    throw new Error("plan-week-ahead requires a sealed channel show profile");
+  }
+  const showProfile = assertChannelShowProfilePipelineCompatibility({
+    profile: rawShowProfile,
+    programBrief,
+    pipeline,
+  });
+  if (!showProfile.programRoute || showProfile.programRoute.fingerprint !== programRoute.fingerprint) {
+    throw new Error("plan-week-ahead channel show profile does not match its sealed program route");
+  }
+  if (
+    programRoute.family === "quizyear" ||
+    programRoute.directives.claimMode === "certified_quiz_facts"
+  ) {
+    throw new Error(
+      "plan-week-ahead: certified QuizYear routes require their dedicated sealed planner",
+    );
+  }
+  if (programRoute.serializedProgram) {
+    throw new Error(
+      "plan-week-ahead: serialized_program/v1 routes require the atomic episode reservation planner; generic week-ahead planning is not admitted",
+    );
+  }
+  return {
+    programBrief,
+    programRoute,
+    programDirective: planWeekProgramDirective(programRoute, programBrief),
+  };
+}
+
 /**
  * Zero-provider deployment/live-state probe. The launcher pins this and the
  * paid task to the same deployment version; Convex repeats the state proof in
@@ -175,7 +302,13 @@ export const planWeekAheadTask = task({
     if (!channel) abortTask(`channel not found: ${payload.channelId}`);
     const ownerId = channel.ownerId;
     if (payload.ownerId !== ownerId) abortTask("plan-week-ahead: owner/channel mismatch");
-    const niche = channel.identity?.niche ?? "";
+    let routeAdmission: ReturnType<typeof assertPlanWeekChannelRouteAdmission>;
+    try {
+      routeAdmission = assertPlanWeekChannelRouteAdmission(channel);
+    } catch (error) {
+      abortTask(error);
+    }
+    const niche = routeAdmission.programBrief.nicheKey;
     const persona = channel.identity?.persona ?? "";
     const channelName = channel.name;
     const requestKey = payload.requestKey?.trim() || ctx.run.id;
@@ -338,6 +471,7 @@ export const planWeekAheadTask = task({
                   channelName,
                   alsoAvoid: [...existing.map((row) => row.topic), ...uniqueFollowups.map((bet) => bet.topic)],
                   providerSemanticDedupe: false,
+                  programDirective: routeAdmission.programDirective,
                   beforeProviderSpend: async () => {
                     await convex.mutation(api.contentPlan.markPlanTopicsProviderStarted, {
                       ownerId, channelId, batchId, attempt: topicClaim.attempt, claimant,
@@ -351,6 +485,9 @@ export const planWeekAheadTask = task({
               existing.map((row) => row.topic),
             ).slice(0, count);
             if (!candidates.length) throw new Error("plan-week-ahead: no unique topics passed the plan gate");
+            for (const candidate of candidates) {
+              assertPlanWeekTopicFitsRoute(routeAdmission.programRoute, candidate.topic);
+            }
             return candidates.map((candidate) => {
               const topic = candidate.topic.trim();
               const title = String(candidate.title || topic).trim().slice(0, 100);

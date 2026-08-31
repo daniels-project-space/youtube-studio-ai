@@ -10,7 +10,12 @@ import { join } from "node:path";
 import type { Block, StageContext } from "@/engine/types";
 import { COST_PATCH_KEY } from "@/engine/types";
 import { register as registerBlock, get as getRegistered } from "@/engine/registry";
-import { makeRunTempDir, downloadTo, readBytes } from "@/lib/files";
+import {
+  DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+  makeRunTempDir,
+  downloadTo,
+  readBytes,
+} from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { geminiJson, parseJsonLoose } from "@/lib/gemini";
 import { PRICE } from "@/engine/pricing";
@@ -189,7 +194,9 @@ async function runStep(
       },
     });
     reconcileProviderCost(CLIP_COST, clip.costUsd, "forged Novita i2v");
-    const path = await downloadTo(clip.url, join(state.tmp, `forge_${state.n++}.mp4`));
+    const path = await downloadTo(clip.url, join(state.tmp, `forge_${state.n++}.mp4`), {
+      timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+    });
     return { path, url: clip.url };
   }
   if (step.op === "remotion") {

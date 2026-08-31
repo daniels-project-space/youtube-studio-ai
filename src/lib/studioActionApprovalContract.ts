@@ -1,6 +1,10 @@
 export type StudioAction =
   | "channel-inception-execute"
   | "channel-inception-probe"
+  /** Owner intent recorded before the dispatcher derives a sealed private benchmark. */
+  | "route-qualification-benchmark-request"
+  /** Full private master/QA run that may earn a route-release receipt, never upload. */
+  | "route-qualification-benchmark"
   | "youtube-channel-create"
   | "channel-publish";
 

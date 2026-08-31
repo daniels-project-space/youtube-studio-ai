@@ -61,7 +61,7 @@ base, sourceScript, sentence timings). After the base render + upload, fan out a
 - burn localized captions + re-render localized text/quote cards.
 - localized metadata (title/desc/tags) — already localized by the metadata block.
 - upload to the sibling's YouTube channel.
-Reuses ~90% of cost/time (Higgsfield/Topaz/Pexels/Mureka run once); each language ≈
+Reuses ~90% of cost/time (attested source media/Pexels/Mureka run once); each language ≈
 Fish TTS + Gemini + ffmpeg + upload.
 
 Non-narrated (lofi/sleep): the rendered video is identical across languages → only

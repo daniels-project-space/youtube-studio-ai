@@ -30,6 +30,11 @@ import {
   bananaUnitRate,
   qaVisualCost,
 } from "@/engine/pricing";
+import { NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE } from "@/lib/nanoBananaWhiteboardArtContract";
+import {
+  whiteboardNarrationCharacterCeiling,
+  whiteboardPanelsForTargetSeconds,
+} from "@/lib/whiteboardSync";
 import {
   assertThumbnailGate,
   assertThumbnailStrategy,
@@ -428,38 +433,38 @@ function goldenPromotionGuards(manifests: readonly ModuleManifest[]): void {
     "a wired module is still not Golden without a promotion receipt",
   );
 
-  const thumbnail = GOLDEN_MODULES.find((module) => module.key === "thumbnail")!;
-  const thumbnailManifest = getManifest("thumbnail_gen")!;
-  const contractProof = proofFor(thumbnail, [thumbnailManifest]);
+  const packageOpening = GOLDEN_MODULES.find((module) => module.key === "package-opening-proof")!;
+  const packagePlanManifest = getManifest("package_to_opening_plan")!;
+  const contractProof = proofFor(packageOpening, [packagePlanManifest]);
   assert.throws(
-    () => selectGoldenProductionModules("thumbnail", manifests, contractProof),
+    () => selectGoldenProductionModules("package-opening-proof", manifests, contractProof),
     /contract-certified, not golden-certified/,
     "contract certification must never be presented as Golden",
   );
 
   const certified: ModuleManifest = {
-    ...thumbnailManifest,
+    ...packagePlanManifest,
     certification: { status: "golden", evidence: "test promotion receipt" },
     qualityContract: { required: true, failClosed: true },
   };
   assert.throws(
-    () => selectGoldenProductionModules("thumbnail", [certified]),
+    () => selectGoldenProductionModules("package-opening-proof", [certified]),
     /promotion proof is missing/,
     "Golden certification without an immutable proof receipt is insufficient",
   );
 
   const incompleteProof: GoldenPromotionProof = {
-    ...proofFor(thumbnail, [certified]),
-    gates: proofFor(thumbnail, [certified]).gates.slice(1),
+    ...proofFor(packageOpening, [certified]),
+    gates: proofFor(packageOpening, [certified]).gates.slice(1),
   };
   assert.throws(
-    () => selectGoldenProductionModules("thumbnail", [certified], incompleteProof),
+    () => selectGoldenProductionModules("package-opening-proof", [certified], incompleteProof),
     /proof is missing gate/,
     "a receipt must cover every catalog gate",
   );
   assert.deepEqual(
-    selectGoldenProductionModules("thumbnail", [certified], proofFor(thumbnail, [certified])).map((manifest) => manifest.id),
-    ["thumbnail_gen"],
+    selectGoldenProductionModules("package-opening-proof", [certified], proofFor(packageOpening, [certified])).map((manifest) => manifest.id),
+    ["package_to_opening_plan"],
     "only a registered, Golden-certified, fail-closed, fully proven binding is selectable",
   );
 }
@@ -570,9 +575,12 @@ function configurationSpecificCostEnvelopes(): void {
     "narration reservation must cover both cold-open attempts and bounded chapter headings",
   );
 
-  const whiteboardPanels = 6;
-  const whiteboardCharacters = Math.ceil(Math.round(132 * 3.1)) * 12;
-  const whiteboardArt = whiteboardPanels * 5 * PRICE.novitaImageMaxUsd;
+  const whiteboardPanels = whiteboardPanelsForTargetSeconds(132);
+  const whiteboardCharacters = whiteboardNarrationCharacterCeiling(
+    whiteboardPanels,
+    Math.round(132 * 3.1),
+  );
+  const whiteboardArt = whiteboardPanels * 5 * NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE.admissionCeilingUsd;
   assert.equal(
     envelope("whiteboard_scribe", { targetSeconds: 132 }),
     whiteboardArt + (whiteboardCharacters / 1_000) * PRICE.ttsPerKCharUsd,
@@ -599,11 +607,11 @@ function configurationSpecificCostEnvelopes(): void {
     "motion-comic reservation must cover art, dialogue, music, and lettering graders",
   );
 
-  const maxWhiteboardArt = 16 * 5 * PRICE.novitaImageMaxUsd;
+  const maxWhiteboardArt = 16 * 5 * NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE.admissionCeilingUsd;
   const maxWhiteboardPremiumTts = (16 * 120 * 12 / 1_000) * PRICE.ttsElevenPerKCharUsd;
   assert.ok(
     (MODULE_CONTRACTS.whiteboard_scribe.maxCostUsd ?? 0) >= maxWhiteboardArt + maxWhiteboardPremiumTts,
-    "whiteboard hard cap must cover all 16 panels, five direct Novita art workers each, and premium narration",
+    "whiteboard hard cap must cover all 16 panels, five Nano Banana Pro art assets each, and premium narration",
   );
 
   assert.equal(
@@ -617,14 +625,24 @@ function configurationSpecificCostEnvelopes(): void {
     "Novita video reservation must follow the pinned profile fanout",
   );
   assert.equal(
-    envelope("visual_matter", { renderReferenceAssets: false }),
+    MODULE_CONTRACTS.visual_matter.maxCostUsd,
     0,
     "planning-only Visual Matter must not reserve or silently spend image money",
   );
   assert.equal(
-    envelope("visual_matter", { renderReferenceAssets: true, maxReferenceImages: 8 }),
-    8 * PRICE.falNanoBanana2Usd,
-    "an explicit Visual Matter reference pack must reserve its bounded fal.ai Nano Banana 2 allowance",
+    MODULE_CONTRACTS.visual_matter.maxCostUsdFor,
+    undefined,
+    "Visual Matter must not retain a paid reference-image envelope after the FAL route is disabled",
+  );
+  assert.equal(
+    envelope("visual_matter_references", { maxImages: 8 }),
+    8 * PRICE.novitaImageMaxUsd,
+    "the optional direct Visual Matter reference pack must reserve one exact image worker per requested asset",
+  );
+  assert.equal(
+    envelope("visual_matter_references", { maxImages: 999 }),
+    12 * PRICE.novitaImageMaxUsd,
+    "the optional direct Visual Matter reference pack must never reserve more than its 12-image hard cap",
   );
   assert.equal(
     envelope("gen_footage", { maxClips: 6 }),
@@ -691,7 +709,7 @@ function catalogCitedFilePathsExistOrAreExplicitlyRetired(): void {
 function main(): void {
   registerAllBlocks();
   const manifests = allManifests();
-  assert.equal(manifests.length, 71, "all 71 executable blocks must have manifests");
+  assert.equal(manifests.length, 83, "all 83 executable blocks must have manifests");
   assert.deepEqual(
     manifests.filter((manifest) => manifest.certification.status === "legacy").map((manifest) => manifest.id),
     [],

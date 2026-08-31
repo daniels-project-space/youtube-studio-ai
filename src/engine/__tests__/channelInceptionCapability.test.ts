@@ -75,7 +75,18 @@ if (illustrated.mode === "registered_non_gemini") {
   assert.doesNotMatch(illustrated.provenance, /Gemini|Google|Nano Banana/i);
 }
 
-const unregisteredFutureFamily = familyChannelInceptionCapability("cinematic");
+const cinematic = familyChannelInceptionCapability("cinematic");
+assert.equal(
+  cinematic.mode,
+  "registered_non_gemini",
+  "cinematic has a sealed non-Gemini channel foundation; independent runtime proof still controls its automatic admission",
+);
+if (cinematic.mode === "registered_non_gemini") {
+  assert.match(cinematic.provenance, /Visual Matter control plan/);
+  assert.match(cinematic.provenance, /runtime remains independently benchmark-gated/);
+}
+
+const unregisteredFutureFamily = familyChannelInceptionCapability("documentary_collage_short");
 assert.equal(
   unregisteredFutureFamily.mode,
   "unregistered",

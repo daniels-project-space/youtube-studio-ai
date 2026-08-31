@@ -17,6 +17,11 @@ import {
   falImageRates,
   selectedFalImageCostUsd,
 } from "@/lib/falImagePricing";
+import {
+  qaVisualReviewFrameLimits,
+  qaVisualReviewProviderCallCount,
+  visualReviewProviderBatchCount,
+} from "./visualReviewBudget";
 
 function rate(envName: string, fallback: number): number {
   const raw = process.env[envName];
@@ -43,7 +48,7 @@ export const NOVITA_CINEMATIC_QA_REPAIR_CAP = 2;
 export const CINEMATIC_FINAL_MASTER_QA_MAX_REVIEW_CALLS = 479;
 
 export const PRICE = {
-  /** Per keyframe still (Higgsfield/Flux). keyframes renders 2. */
+  /** Legacy-named per-keyframe rate for the attested direct Novita still path. keyframes renders 2. */
   fluxStillUsd: rate("PRICE_FLUX_STILL_USD", 0.01),
   /** Per Nano Banana PRO image (gemini-3-pro-image-preview, 2K). The ledger
    *  previously had NO Gemini image rate at all — the exact spend that blew
@@ -157,18 +162,22 @@ export function cinematicFinalMasterQaReviewCost(reviewCallCount: unknown): numb
 export function qaVisualCost(
   params: Readonly<Record<string, unknown>>,
   cinematicFinalMasterQaCostUsd: unknown = 0,
+  cinematicCompleteFocusFrameCount: unknown = 0,
 ): number {
-  const clampFrames = (value: unknown, fallback: number, max: number): number => {
-    const parsed = Number(value);
-    if (!Number.isFinite(parsed)) return fallback;
-    return Math.max(8, Math.min(max, Math.floor(parsed)));
-  };
-  // The evidence review performs a broad pass plus a focused re-watch. Reserve
-  // a full managed-vision allowance per 12-image batch; runtime accounting
-  // still records the provider's observed usage separately.
-  const broadFrames = clampFrames(params["visualReviewFrames"], 48, 72);
-  const focusFrames = clampFrames(params["visualReviewFocusFrames"], 24, 36);
-  const evidenceBatches = Math.ceil(broadFrames / 12) + Math.ceil(focusFrames / 12);
+  const { broadFrames, focusFrames } = qaVisualReviewFrameLimits(params);
+  const completeFocusFrames = Number(cinematicCompleteFocusFrameCount);
+  if (!Number.isInteger(completeFocusFrames) || completeFocusFrames < 0) {
+    throw new Error("cinematic complete-focus frame count must be a non-negative integer");
+  }
+  // The evidence review performs a broad pass plus a regular/reactive re-watch.
+  // A cinematic route adds its sealed complete-focus frames to that second
+  // pass. The provider limit is shared with execution, so an explicit block
+  // cost covers every permitted call rather than a larger hidden batch.
+  const evidenceBatches = qaVisualReviewProviderCallCount({
+    broadFrames,
+    focusFrames,
+    completeFocusFrames,
+  });
   const finalMasterCost = Number(cinematicFinalMasterQaCostUsd);
   if (!Number.isFinite(finalMasterCost) || finalMasterCost < 0) {
     throw new Error("cinematic final-master QA cost must be a finite non-negative amount");
@@ -197,7 +206,8 @@ export function shortsSpinoffReleaseEvidenceCost(
   };
   const broadFrames = clampFrames(params["shortVisualReviewFrames"], 36, 72);
   const focusFrames = clampFrames(params["shortVisualReviewFocusFrames"], 18, 36);
-  const evidenceBatches = Math.ceil(broadFrames / 12) + Math.ceil(focusFrames / 12);
+  const evidenceBatches =
+    visualReviewProviderBatchCount(broadFrames) + visualReviewProviderBatchCount(focusFrames);
   return PRICE.qaBaseUsd * evidenceBatches;
 }
 

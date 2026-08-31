@@ -25,6 +25,7 @@
  */
 import { task } from "@trigger.dev/sdk/v3";
 import { executeRenderBlock, type RenderBlockInput } from "@/trigger/renderBlockRunner";
+import { RENDER_CHILD_TASK_MAX_DURATION_SECONDS } from "@/lib/renderChildLease";
 
 export type { RenderBlockInput };
 
@@ -32,9 +33,17 @@ export const renderBlockTask = task({
   id: "render-block",
   machine: "large-2x",
   // Wall-clock ceiling for the render (matches the orchestrator's old budget).
-  maxDuration: 5400,
-  // OOM/crash retry — the render block re-runs cleanly (it re-reads its inputs).
-  retry: { maxAttempts: 2, minTimeoutInMs: 5000, maxTimeoutInMs: 30000, factor: 2 },
+  maxDuration: RENDER_CHILD_TASK_MAX_DURATION_SECONDS,
+  // This task can execute DocuMotion's paid FAL/TTS work. Until its individual
+  // provider receipts/artifacts have a durable resumable checkpoint, a crash
+  // or ambiguous failure after block start must reconcile rather than make
+  // Trigger replay the entire child attempt and buy the same work twice.
+  retry: {
+    maxAttempts: 1,
+    minTimeoutInMs: 5000,
+    maxTimeoutInMs: 30000,
+    factor: 2,
+  },
   run: async (payload: RenderBlockInput) =>
     executeRenderBlock(payload, { taskLabel: "render-block", machineClass: "heavy" }),
 });

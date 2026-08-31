@@ -96,7 +96,10 @@ export async function preflightPythonRenderer(opts: {
       "python renderer preflight: python3 not found on PATH — bake python3 + python3-pip into the worker image (trigger.config.ts aptGet)",
     );
   }
-  const missing = scripts.filter((s) => !existsSync(join(process.cwd(), s)));
+  // These paths are intentionally runtime-relative: Trigger's additionalFiles
+  // explicitly bakes each renderer script into its worker image. Do not make
+  // Next trace process.cwd() and pull the entire application into its server.
+  const missing = scripts.filter((s) => !existsSync(join(/* turbopackIgnore: true */ process.cwd(), s)));
   if (missing.length) {
     throw new Error(
       `python renderer preflight: missing script(s) [${missing.join(", ")}] relative to ${process.cwd()} — add them to additionalFiles in trigger.config.ts`,

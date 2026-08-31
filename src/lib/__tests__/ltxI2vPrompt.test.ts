@@ -30,6 +30,16 @@ assert.match(directed.prompt, /rust wool coat/);
 assert.match(directed.motion, /no jump cut, subject replacement, wardrobe\/prop swap/);
 assert.equal(hasCompleteLtxI2vPromptContract(directed), true);
 assert.deepEqual(applyLtxI2vPromptContract(directed), directed, "recovery retries must not duplicate the shared prompt contract");
+assert.equal(
+  hasCompleteLtxI2vPromptContract(directed, "not-a-real-style"),
+  false,
+  "a requested but unknown visual treatment must never verify as the fallback style",
+);
+assert.throws(
+  () => applyLtxI2vPromptContract({ ...source, id: "cinematic-shot-unknown-style" }, "not-a-real-style"),
+  /unknown requested visual style not-a-real-style/,
+  "the provider-bound I2V contract must reject an unknown requested style rather than silently render noir",
+);
 
 const terminalDirected = applyLtxI2vPromptContract({
   ...source,
@@ -45,7 +55,7 @@ assert.deepEqual(
 );
 assert.throws(
   () => applyLtxI2vPromptContract({ ...directed, endStillKey: "stills/a-terminal.png" }),
-  /marker is present but its required continuity and audio clauses are incomplete/,
+  /marker is present but its required continuity, style, or audio clauses are incomplete/,
   "an older marked prompt must not silently skip a newly supplied final-frame condition",
 );
 
@@ -53,9 +63,9 @@ assert.throws(
   () => applyLtxI2vPromptContract({
     ...source,
     id: "cinematic-shot-partial-contract",
-    motion: `[${LTX_I2V_PROMPT_CONTRACT_VERSION}] preserve the source frame`,
+    motion: `[${LTX_I2V_PROMPT_CONTRACT_VERSION} style=cinematic_heist_noir] preserve the source frame`,
   }),
-  /marker is present but its required continuity and audio clauses are incomplete/,
+  /marker is present but its required continuity, style, or audio clauses are incomplete/,
   "a partial marker must not bypass the shared final LTX directing contract",
 );
 
@@ -79,7 +89,7 @@ for (const styleId of STYLE_IDS_TO_CHECK) {
     styleId,
   );
   assert.equal(
-    hasCompleteLtxI2vPromptContract(styled),
+    hasCompleteLtxI2vPromptContract(styled, styleId),
     true,
     `style ${styleId ?? "(default)"} must still produce a complete LTX I2V contract`,
   );
@@ -93,6 +103,35 @@ for (const styleId of STYLE_IDS_TO_CHECK) {
     `style ${styleId ?? "(default)"} camera doctrine prose must appear in the motion contract`,
   );
 }
+
+const styleBound = applyLtxI2vPromptContract({ ...source, id: "cinematic-shot-style-bound" }, "anime");
+assert.equal(hasCompleteLtxI2vPromptContract(styleBound, "anime"), true);
+assert.equal(
+  hasCompleteLtxI2vPromptContract(styleBound, DEFAULT_LTX_STYLE_ID),
+  false,
+  "a style-bound take must not be accepted as the fallback visual world",
+);
+assert.throws(
+  () => applyLtxI2vPromptContract(styleBound),
+  /bound to a different or unsupported visual style; expected cinematic_heist_noir/,
+  "a retry may not silently reuse anime direction under the fallback LTX style",
+);
+
+const legacyV3 = {
+  ...directed,
+  prompt: directed.prompt.replace(
+    `[${LTX_I2V_PROMPT_CONTRACT_VERSION} style=${DEFAULT_LTX_STYLE_ID}]`,
+    "[ltx-i2v-directing/v3]",
+  ),
+  motion: directed.motion.replace(
+    `[${LTX_I2V_PROMPT_CONTRACT_VERSION} style=${DEFAULT_LTX_STYLE_ID}]`,
+    "[ltx-i2v-directing/v3]",
+  ),
+};
+const upgradedLegacy = applyLtxI2vPromptContract(legacyV3, "anime");
+assert.equal(hasCompleteLtxI2vPromptContract(upgradedLegacy, "anime"), true);
+assert.match(upgradedLegacy.motion, /style=anime/);
+assert.ok(!upgradedLegacy.prompt.includes("ltx-i2v-directing\/v3"), "legacy directing prose must be replaced, not stacked");
 
 // An explicit shot-level diegetic soundscape always wins over any style default.
 for (const styleId of ["documentary_mannequin", "anime", "photorealistic", "watercolor", "music_video_cinematic"] as const) {

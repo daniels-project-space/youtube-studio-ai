@@ -8,16 +8,23 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { RunStageSink } from "./types";
 import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
+import type { RunExecutionLeaseFence } from "@/lib/runLease";
 
 export function makeConvexSink(
   client: ConvexHttpClient,
   ownerId: string,
+  executionLease?: RunExecutionLeaseFence,
 ): RunStageSink {
   return {
     async upsert(args) {
+      if (!executionLease) {
+        throw new Error("Convex stage writes require an active execution lease fence");
+      }
       await client.mutation(api.runStages.upsertRunStage, {
         ownerId: args.ownerId ?? ownerId,
         runId: args.runId as Id<"runs">,
+        leaseOwner: executionLease.leaseOwner,
+        executionLeaseToken: executionLease.executionLeaseToken,
         block: args.block,
         status: args.status,
         startedAt: args.startedAt,
@@ -52,11 +59,16 @@ export function makeConvexSink(
       // One mutation for the whole block. `upsertMany` is transactional, so
       // the block's artifact set lands completely or not at all.
       if (args.artifacts.length === 0) return;
+      if (!executionLease) {
+        throw new Error("Convex artifact writes require an active execution lease fence");
+      }
       await client.mutation(api.runArtifacts.upsertMany, {
         secret: requireInternalQuerySecret(),
         ownerId: args.ownerId ?? ownerId,
         channelId: args.channelId as Id<"channels">,
         runId: args.runId as Id<"runs">,
+        leaseOwner: executionLease.leaseOwner,
+        executionLeaseToken: executionLease.executionLeaseToken,
         artifacts: args.artifacts.map((entry) => ({
           artifactId: entry.artifact.artifactId,
           key: entry.artifact.key,

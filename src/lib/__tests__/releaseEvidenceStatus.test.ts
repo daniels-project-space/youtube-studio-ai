@@ -10,6 +10,7 @@ import {
 import {
   deriveReleaseEvidenceProjection,
   normalizeReleaseEvidenceStatus,
+  recordedReleaseEvidenceMasterKey,
   releaseEvidenceStatusLabel,
   type ReleaseEvidenceArtifact,
 } from "@/lib/releaseEvidenceStatus";
@@ -36,6 +37,7 @@ const certificate = createFinalMasterReleaseCertificate({
   finalMaster: {
     r2Key: `${keyPrefix}runs/${runId}/final.mp4`,
     sha256: masterSha256,
+    byteLength: 2_048,
     durationSec: 92.4,
   },
   visualReview: {
@@ -122,6 +124,11 @@ assert.deepEqual(
     certificateKey,
   },
   "only matching QA, certificate, master, and review-evidence lineage may be recorded",
+);
+assert.equal(
+  recordedReleaseEvidenceMasterKey({ runId, qaStage, artifacts: completeArtifacts }),
+  certificate.finalMaster.r2Key,
+  "the Library source resolver must select the exact master sealed by the current certificate",
 );
 
 const compactQaStage = {
@@ -231,6 +238,39 @@ assert.equal(
   }).status,
   "evidence_incomplete",
   "a certificate cannot be promoted without a retained matching final-master artifact",
+);
+assert.equal(
+  recordedReleaseEvidenceMasterKey({
+    runId,
+    qaStage,
+    artifacts: completeArtifacts.filter((artifact) => artifact.key !== "videoKey"),
+  }),
+  undefined,
+  "the Library source resolver must fail closed when the sealed master lineage is incomplete",
+);
+
+assert.equal(
+  deriveReleaseEvidenceProjection({
+    runId,
+    qaStage,
+    artifacts: completeArtifacts.map((artifact) =>
+      artifact.key === "finalMasterReleaseCertificateReference"
+        ? {
+            ...artifact,
+            payload: {
+              ...certificateReference,
+              finalMaster: {
+                r2Key: certificateReference.finalMaster.r2Key,
+                sha256: certificateReference.finalMaster.sha256,
+                durationSec: certificateReference.finalMaster.durationSec,
+              },
+            },
+          }
+        : artifact,
+    ),
+  }).status,
+  "evidence_incomplete",
+  "a legacy compact reference without a final-master byte receipt cannot claim recorded release evidence",
 );
 
 assert.equal(

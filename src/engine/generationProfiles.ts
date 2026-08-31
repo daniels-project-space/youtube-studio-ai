@@ -63,6 +63,16 @@ const ProfileSchema = z.object({
 export type GenerationProfile = z.infer<typeof ProfileSchema>;
 
 /**
+ * A production channel may use the standard profile or the strictly stronger
+ * hero profile. Draft deliberately remains outside this set: it is useful for
+ * a non-runnable planning/preview surface, but is not an acceptable quality
+ * floor for a channel creation, scheduled run, or release.
+ */
+export function isProductionQualityGenerationProfile(id: unknown): boolean {
+  return id === "production" || id === "hero";
+}
+
+/**
  * One source of truth for the video renderer. LTX 2.5's distilled pipeline
  * genuinely performs a second, latent-space x2 refinement pass: 640x352 in
  * stage one becomes the deliverable 1280x704 frame. 1280x704 is divisible by

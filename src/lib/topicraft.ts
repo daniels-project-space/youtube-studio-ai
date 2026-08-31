@@ -100,6 +100,8 @@ export interface CraftTopicsArgs {
   perfContext?: string;
   /** Target video length (seconds) — bets must be answerable at this scope. */
   targetSeconds?: number;
+  /** Sealed route instruction supplied by the frozen invocation, never UI input. */
+  programDirective?: string;
   /** Pre-fetched competitor top titles (databank) — no live fetch happens here. */
   competitorTitles?: { title: string; views: number }[];
   /** Pre-fetched outlier scan (loadOutlierBank) — omit to live-fetch best-effort. */
@@ -437,6 +439,9 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
             (a.targetSeconds ? `
 - VIDEO LENGTH: ~${Math.round(a.targetSeconds / 60)} minute(s). Every bet MUST be fully answerable at that scope: one tight story/mechanism/question, NEVER a survey topic ("the complete history of X" is an automatic fail at this length).` : "") +
             (bannedWords.length ? `\n- NEVER use: ${bannedWords.join(", ")}` : ""),
+          a.programDirective
+            ? `SEALED PROGRAM ROUTE (overrides generic topic habits):\n${a.programDirective}`
+            : "",
           `PORTFOLIO DOCTRINE — the ${want} bets must MIX three types:\n` +
             `- "hero": rides a cited breakout signal (outlier/reddit) for browse reach\n` +
             `- "hub": serves the core audience deeper inside the channel's identity\n` +
@@ -508,6 +513,9 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
         const j = await claudeJson<{ rankings?: { idx?: number; demand?: number; freshness?: number; fit?: number; packageability?: number }[] }>({
           prompt: [
             `You are a YouTube growth strategist auditing topic BETS for "${a.channelName ?? "this channel"}" (${a.niche ?? "general"}).`,
+            a.programDirective
+              ? `SEALED PROGRAM ROUTE — reject any bet that violates these directives:\n${a.programDirective}`
+              : "",
             evidenceClauses.length ? `THE EVIDENCE the bets claim to ride:\n\n${evidenceClauses.join("\n\n").slice(0, 4000)}` : "",
             avoidAll.length ? `ALREADY DONE (freshness check):\n${avoidAll.slice(-40).join(" | ")}` : "",
             `BETS:\n${survivors.map((b, i) => `${i}. [${b.betType}] ${b.topic} — title "${b.provisionalTitle}" — evidence: ${b.evidence}`).join("\n")}`,

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
+import { dirname, resolve } from "node:path";
 import test from "node:test";
+import { fileURLToPath } from "node:url";
 import {
   canonicalJson,
   createLtx25BenchmarkTerminal,
@@ -7,6 +10,7 @@ import {
 } from "../lib/ltx25BenchmarkTerminal.mjs";
 
 const contract = "ltx-2.5-rtx4090-benchmark/v1";
+const root = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 function completeReport() {
   return {
@@ -105,4 +109,19 @@ test("refuses a controller proof that omits independently probed audio", async (
   await assert.rejects(terminal.sealSuccess(unsigned), /require an audio stream/);
   assert.equal(terminal.state(), "running");
   assert.equal(objects.has("run/report.json"), false);
+});
+
+test("rejects a mutable runtime-bundle override before benchmark work can begin", () => {
+  const result = spawnSync(
+    process.execPath,
+    ["scripts/run-ltx25-benchmark.mjs", "novita/model-manifests/ltx-2.5-acde-1234.json"],
+    {
+      cwd: root,
+      env: { ...process.env, NOVITA_RUNTIME_BUNDLE_SHA256: "e".repeat(64) },
+      encoding: "utf8",
+    },
+  );
+  assert.notEqual(result.status, 0);
+  assert.match(`${result.stdout}\n${result.stderr}`, /runtime bundle overrides must exactly match/);
+  assert.doesNotMatch(`${result.stdout}\n${result.stderr}`, /benchmark_stage/);
 });

@@ -2,12 +2,24 @@ import { createHash } from "node:crypto";
 
 import { admitProviderTaskOwner } from "@/lib/providerTaskOwnerAdmission";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
+import { resolveOwnerReviewedLtxRuntime } from "@/lib/reviewedLtxRuntimeStateRuntime";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { synthChannelConcept } from "@/lib/conceptSynth";
 import { generateChannelArtAsset } from "@/lib/channelArt";
-import { designPipeline, enforceLengthContract, type DesignOptions } from "@/engine/designer";
+import {
+  designPipeline,
+  enforceLengthContract,
+  QUIZ_SHORT_PORTRAIT_LENGTH_ENVELOPE,
+  type DesignOptions,
+} from "@/engine/designer";
+import { assertMinimumVideoFoundation } from "@/engine/minimumVideoFoundation";
+import { assertAutomaticFamilyExecutionReadiness } from "@/engine/automaticFamilyExecutionReadiness";
+import {
+  assertReviewedDataStoryChannelIntake,
+  isReviewedDataStoryChannelIntakeMode,
+} from "@/engine/reviewedDataStoryChannelIntake";
 import type { PipelineEntry } from "@/engine/types";
 import {
   assertFamilyAutonomousPlanningPipeline,
@@ -17,6 +29,10 @@ import {
   type FamilyKey,
 } from "@/engine/families";
 import { getArchetype } from "@/engine/archetypes";
+import {
+  certifiedFamilyAdmission,
+  certifiedFamilyAdmissionCanAwaitRuntimeEvidence,
+} from "@/engine/certifiedFamilyAdmission";
 import { getNiche } from "@/lib/nicheCatalog";
 import { refreshNicheResearchCore } from "@/lib/nicheResearch";
 import {
@@ -123,6 +139,27 @@ import {
   type ChannelProgramBrief,
 } from "@/engine/channelProgramBrief";
 import {
+  assertChannelProgramRouteBinding,
+  channelProgramRouteFingerprint,
+  channelProgramRouteRunSeed,
+  parseChannelProgramRoute,
+  resolveChannelProgramRoute,
+  type ChannelProgramRoute,
+} from "@/engine/channelProgramRoute";
+import { serializedProgramEpisodeIdentity } from "@/lib/serializedProgramEpisode";
+import { createNarrativeSeriesPlanFromInception } from "@/engine/narrativeSeriesIntelligence";
+import {
+  getNarrativeSeriesPlanRecord,
+  recordNarrativeSeriesPlan,
+} from "@/lib/narrativeSeriesStateRuntime";
+import {
+  assertCreatorIntentDiagnosisBinding,
+  creatorIntentDiagnosisFingerprint,
+  deriveCreatorIntentDiagnosis,
+  parseCreatorIntentDiagnosis,
+  type CreatorIntentDiagnosis,
+} from "@/engine/creatorIntentDiagnosis";
+import {
   assertChannelShowProfile,
   assertChannelShowProfilePipelineCompatibility,
   channelShowProfileFingerprint,
@@ -151,7 +188,18 @@ import { compilePipeline, completePipelineForPolicy } from "@/engine/pipelineCom
 import { validatePipeline } from "@/engine/validate";
 import { registerAllBlocks } from "@/engine/blocks";
 import { childrenShowBibleSeedKeys } from "@/engine/childrenShowBible";
+import {
+  isSyntheticScenarioContract,
+  syntheticScenarioContract,
+} from "@/engine/syntheticScenario";
 import { contentLaneForFamily } from "@/engine/contentLane";
+import {
+  readProductionRouteInceptionEvidence,
+  readProductionRoutePlannerEvidence,
+  readProductionRouteQualificationBinding,
+  readProductionRouteRuntimeEvidence,
+  readProductionRouteVisualMatterEvidence,
+} from "@/engine/productionRouteQualification";
 import {
   convexChannelInceptionLedger,
   initializeChannelInceptionLedger,
@@ -181,6 +229,11 @@ export interface DesignChannelArgs extends Omit<DesignOptions, "family" | "progr
   youtubeCreationApproval?: StudioActionApprovalReceipt;
   exampleClipUrl?: string;
   moduleConfig?: Record<string, Record<string, unknown>>;
+  /**
+   * A narrowly-scoped, zero-spend shell for the reviewed Data Story desk.
+   * It is never an automatic channel-creation or publication authority.
+   */
+  supervisedDataStoryIntake?: "reviewed_data_story_intake/v1";
   /** Stable across automatic retries; Trigger run id is the default. */
   requestKey?: string;
 }
@@ -225,16 +278,19 @@ function persistedChannelProgramBrief(brief: ChannelProgramBrief): PersistedChan
 }
 
 function persistedChannelShowProfile(profile: ChannelShowProfile): PersistedChannelShowProfile {
-  const { selectedCapabilityKeys, composition, ...canonical } = profile;
+  const { selectedCapabilityKeys, composition, programRoute, ...canonical } = profile;
   return {
     ...canonical,
     selectedCapabilityKeys: [...selectedCapabilityKeys],
     ...(composition ? { composition: { ...composition, qualityFocus: [...composition.qualityFocus] } } : {}),
+    ...(programRoute ? { programRoute: structuredClone(programRoute) } : {}),
   };
 }
 
 interface ChannelIdentityState {
   programBrief?: PersistedChannelProgramBrief;
+  programRoute?: ChannelProgramRoute;
+  creatorIntentDiagnosis?: CreatorIntentDiagnosis;
   showProfile?: PersistedChannelShowProfile;
   persona: string;
   voiceId?: string;
@@ -247,6 +303,19 @@ interface ChannelIdentityState {
   palette: string[];
   thumbnailTemplate: string;
   topicPool: string[];
+  /**
+   * Compact pointer to the immutable, research-bound season horizon. The full
+   * plan lives in the owner-scoped narrative-series store; this identity field
+   * only lets inception prove it was created and later lets a dedicated series
+   * dispatcher select it without trusting browser data.
+   */
+  narrativeSeriesPlan?: {
+    version: "narrative-series-intelligence/v1";
+    fingerprint: string;
+    seriesIdentity: string;
+    researchEvidenceFingerprint: string;
+    planningHorizonEpisodes: number;
+  };
   cadence: string;
   /** Stable catalog key for reads; `niche` remains a human-facing display label. */
   nicheKey?: string;
@@ -373,6 +442,30 @@ function sameChannelShowProfile(left: unknown, right: ChannelShowProfile): boole
   }
 }
 
+function sameChannelProgramRoute(left: unknown, right: ChannelProgramRoute | undefined): boolean {
+  if (right === undefined) return left === undefined;
+  try {
+    return left !== undefined &&
+      channelProgramRouteFingerprint(parseChannelProgramRoute(left)) ===
+        channelProgramRouteFingerprint(right);
+  } catch {
+    return false;
+  }
+}
+
+function sameCreatorIntentDiagnosis(
+  left: unknown,
+  right: CreatorIntentDiagnosis | undefined,
+): boolean {
+  if (right === undefined) return left === undefined;
+  try {
+    return left !== undefined &&
+      creatorIntentDiagnosisFingerprint(parseCreatorIntentDiagnosis(left)) === right.fingerprint;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Validate an existing identity against the submitted current admission, but
  * preserve its exact historical profile for a retry request. A v1 receipt can
@@ -382,6 +475,7 @@ function sameChannelShowProfile(left: unknown, right: ChannelShowProfile): boole
 export function existingChannelInceptionRetryShowProfile(input: {
   profile: unknown;
   programBrief: ChannelProgramBrief;
+  programRoute?: ChannelProgramRoute;
   capabilitySelections?: unknown;
   pipeline: readonly Pick<PipelineEntry, "block" | "params">[];
 }): ChannelShowProfile {
@@ -390,9 +484,18 @@ export function existingChannelInceptionRetryShowProfile(input: {
     programBrief: input.programBrief,
     pipeline: input.pipeline,
   });
+  if (
+    input.programRoute &&
+    persisted.programRoute &&
+    channelProgramRouteFingerprint(input.programRoute) !==
+      channelProgramRouteFingerprint(persisted.programRoute)
+  ) {
+    throw new Error("existing channel show profile route does not match the canonical program route");
+  }
   assertChannelShowProfile({
     profile: input.profile,
     programBrief: input.programBrief,
+    ...(input.programRoute ? { programRoute: input.programRoute } : {}),
     capabilitySelections: input.capabilitySelections,
     pipeline: input.pipeline,
   });
@@ -400,7 +503,7 @@ export function existingChannelInceptionRetryShowProfile(input: {
 }
 
 /** Actual coordinator retry guard, retained as a pure seam for regression tests. */
-export function channelInceptionSnapshotCanResume(input: {
+export interface ChannelInceptionSnapshotResumeInput {
   previousSnapshot: unknown;
   ownerId: string;
   channelRef: string;
@@ -410,9 +513,26 @@ export function channelInceptionSnapshotCanResume(input: {
   moduleConfigFingerprint: string;
   pipelineSourceFingerprint: string;
   programBrief: ChannelProgramBrief;
+  programRoute?: ChannelProgramRoute;
+  creatorIntentDiagnosis?: CreatorIntentDiagnosis;
   showProfile: ChannelShowProfile;
   currentPreviewFingerprintSet: ReadonlySet<string>;
-}): boolean {
+}
+
+function isRouteLessLegacyChannelIdentity(identity: unknown): boolean {
+  if (!identity || typeof identity !== "object" || Array.isArray(identity)) return false;
+  const record = identity as {
+    programRoute?: unknown;
+    showProfile?: unknown;
+  };
+  if (record.programRoute !== undefined) return false;
+  if (!record.showProfile || typeof record.showProfile !== "object" || Array.isArray(record.showProfile)) {
+    return false;
+  }
+  return (record.showProfile as { programRoute?: unknown }).programRoute === undefined;
+}
+
+export function channelInceptionSnapshotCanResume(input: ChannelInceptionSnapshotResumeInput): boolean {
   const snapshot = input.previousSnapshot;
   if (!snapshot || typeof snapshot !== "object") return false;
   const previous = snapshot as Partial<ChannelInceptionRequest>;
@@ -430,9 +550,25 @@ export function channelInceptionSnapshotCanResume(input: {
     previous.moduleConfigFingerprint === input.moduleConfigFingerprint &&
     previous.pipelineSourceFingerprint === input.pipelineSourceFingerprint &&
     sameChannelProgramBrief(previous.programBrief, input.programBrief) &&
+    sameChannelProgramRoute(previous.programRoute, input.programRoute) &&
+    sameCreatorIntentDiagnosis(previous.creatorIntentDiagnosis, input.creatorIntentDiagnosis) &&
     sameChannelShowProfile(previous.showProfile, input.showProfile) &&
     previousPreviewFingerprints.every((fingerprint) => input.currentPreviewFingerprintSet.has(fingerprint))
   );
+}
+
+/**
+ * The only route-less execution branch: an old channel may replay its own
+ * durable snapshot, but cannot be upgraded into the current route contract.
+ */
+export function routeLessLegacyInceptionCanResume(
+  input: Omit<ChannelInceptionSnapshotResumeInput, "programRoute"> & { identity: unknown },
+): boolean {
+  return isRouteLessLegacyChannelIdentity(input.identity) &&
+    channelInceptionSnapshotCanResume({
+      ...input,
+      programRoute: undefined,
+    });
 }
 
 async function writeImmutableDeterministicFoundationObject(
@@ -480,10 +616,17 @@ async function completeDeterministicQuizYearInception(args: {
   readonly channelName: string;
   readonly family: (typeof FAMILIES)["quizyear"];
   readonly programBrief: ChannelProgramBrief;
+  readonly programRoute?: ChannelProgramRoute;
 }): Promise<{
   readonly foundationFingerprint: string;
   readonly receiptFingerprint: string;
 }> {
+  if (args.programRoute) {
+    assertChannelProgramRouteBinding({
+      route: args.programRoute,
+      programBrief: args.programBrief,
+    });
+  }
   const programBriefFingerprint = channelProgramBriefFingerprint(args.programBrief);
   const programBriefPositioningText = channelProgramBriefPositioningText(args.programBrief);
   const expected = buildQuizYearFoundation({
@@ -515,6 +658,7 @@ async function completeDeterministicQuizYearInception(args: {
   const foundationIdentity: ChannelIdentityState = {
     ...identity,
     programBrief: persistedChannelProgramBrief(args.programBrief),
+    ...(args.programRoute ? { programRoute: structuredClone(args.programRoute) } : {}),
     persona: persisted.foundation.positioning.persona,
     styleGrammar: persisted.foundation.positioning.styleGrammar,
     palette: [...persisted.foundation.positioning.palette],
@@ -568,10 +712,17 @@ async function completeDeterministicIllustratedInception(args: {
   readonly channelName: string;
   readonly family: (typeof FAMILIES)["illustrated_explainer"];
   readonly programBrief: ChannelProgramBrief;
+  readonly programRoute?: ChannelProgramRoute;
 }): Promise<{
   readonly foundationFingerprint: string;
   readonly receiptFingerprint: string;
 }> {
+  if (args.programRoute) {
+    assertChannelProgramRouteBinding({
+      route: args.programRoute,
+      programBrief: args.programBrief,
+    });
+  }
   const programBriefFingerprint = channelProgramBriefFingerprint(args.programBrief);
   const programBriefPositioningText = channelProgramBriefPositioningText(args.programBrief);
   const expected = buildIllustratedFoundation({
@@ -603,6 +754,7 @@ async function completeDeterministicIllustratedInception(args: {
   const foundationIdentity: ChannelIdentityState = {
     ...identity,
     programBrief: persistedChannelProgramBrief(args.programBrief),
+    ...(args.programRoute ? { programRoute: structuredClone(args.programRoute) } : {}),
     persona: persisted.foundation.positioning.persona,
     styleGrammar: persisted.foundation.positioning.styleGrammar,
     palette: [...persisted.foundation.positioning.palette],
@@ -687,6 +839,15 @@ type ProvenReadyPlanPage = {
 const READY_PLAN_PAGE_SIZE = 8;
 const READY_PLAN_RESULT_LIMIT = 24;
 const STARTER_PREVIEW_TARGET = 5;
+
+// The generated Convex declarations intentionally remain unchanged until an
+// explicitly authorized codegen pass. Keep this new service-only receipt write
+// narrow and local, exactly like the runtime registry reader.
+const productionRouteQualificationStateApi = (api as unknown as {
+  readonly productionRouteQualificationState: {
+    readonly recordRoutePreflightReady: never;
+  };
+}).productionRouteQualificationState;
 
 function readyPlanArtifactFingerprint(row: ProvenReadyPlanRow): string | undefined {
   const key = row.thumbnailKey?.trim();
@@ -1136,6 +1297,10 @@ function certifyChannelPipeline(args: {
     pipeline: args.pipeline,
   });
   const lane = contentLaneForFamily(args.family);
+  if (!lane) {
+    throw new Error(`channel pipeline certification requires a resolved content lane for ${args.family}`);
+  }
+  assertMinimumVideoFoundation({ family: args.family, contentLane: lane, pipeline: args.pipeline });
   const compilation = compilePipeline(
     validatePipeline(args.pipeline, ["contentLane", ...childrenShowBibleSeedKeys(lane)]),
   );
@@ -1248,6 +1413,10 @@ export async function executeDesignChannel(
   // before creating a resumable shell, loading providers, or reserving spend;
   // no legacy/implicit brief may silently receive a new execution.
   const programBrief = assertCanonicalChannelProgramBrief(payload.programBrief);
+  const reviewedDataStoryIntake = payload.supervisedDataStoryIntake !== undefined;
+  if (reviewedDataStoryIntake && !isReviewedDataStoryChannelIntakeMode(payload.supervisedDataStoryIntake)) {
+    throw new Error("unknown supervised channel intake mode");
+  }
   if (programBrief.family !== payload.family) {
     throw new Error("channel program brief family does not match the requested channel family");
   }
@@ -1257,9 +1426,94 @@ export async function executeDesignChannel(
   if (payload.locale !== undefined && payload.locale !== programBrief.locale) {
     throw new Error("channel program brief locale does not match the requested channel locale");
   }
+  // The canonical brief, not mutable per-run quiz/synthetic options, is the
+  // sole authority for the recurring program grammar and its executable
+  // route. A pre-route channel may be route-less only while it replays its
+  // already-durable legacy snapshot; that narrow branch is proved below before
+  // any execution work begins. A new admission never reaches persistence
+  // without a resolved route.
+  let resolvedProgramRoute: ChannelProgramRoute | undefined;
+  let programRouteResolutionError: unknown;
+  try {
+    resolvedProgramRoute = resolveChannelProgramRoute(programBrief);
+    assertChannelProgramRouteBinding({
+      route: resolvedProgramRoute,
+      programBrief,
+    });
+  } catch (error) {
+    programRouteResolutionError = error;
+  }
+  // Legacy callers may still send these siblings, but only an exact echo of
+  // a resolved route is tolerated. The compiler always receives route-derived
+  // values for a route-bearing admission, so no UI payload can switch its
+  // recurring episode grammar.
+  if (resolvedProgramRoute) {
+    if (
+      payload.quizProfile !== undefined &&
+      payload.quizProfile !== resolvedProgramRoute.quizProfile
+    ) {
+      throw new Error("quiz profile must be selected through the canonical channel program intent");
+    }
+    if (payload.syntheticScenario !== undefined) {
+      if (
+        !isSyntheticScenarioContract(payload.syntheticScenario) ||
+        payload.syntheticScenario.profile !== resolvedProgramRoute.syntheticScenarioProfile
+      ) {
+        throw new Error("synthetic scenario profile must be selected through the canonical channel program intent");
+      }
+    }
+  }
+  const derivedCreatorIntentDiagnosis = resolvedProgramRoute
+    ? deriveCreatorIntentDiagnosis({ programBrief, programRoute: resolvedProgramRoute })
+    : undefined;
+  const submittedCreatorIntentDiagnosis = payload.creatorIntentDiagnosis === undefined
+    ? undefined
+    : (() => {
+        if (!resolvedProgramRoute || !derivedCreatorIntentDiagnosis) {
+          throw new Error("creator intent diagnosis requires a resolved canonical channel program route");
+        }
+        const bound = assertCreatorIntentDiagnosisBinding({
+          diagnosis: payload.creatorIntentDiagnosis,
+          programBrief,
+          programRoute: resolvedProgramRoute,
+        });
+        if (bound.fingerprint !== derivedCreatorIntentDiagnosis.fingerprint) {
+          throw new Error("creator intent diagnosis does not match the resolved canonical program route");
+        }
+        return bound;
+      })();
+  // Reject every incompletely registered automatic family before resolving an
+  // owner, opening Convex, or considering providers. The only deliberately
+  // deferred case is an otherwise complete family whose final proof is the
+  // owner-scoped reviewed runtime record (for example cinematic on Novita).
+  const certifiedAdmission = certifiedFamilyAdmission(payload.family);
+  if (
+    !reviewedDataStoryIntake
+    && !certifiedAdmission.automatic
+    && !certifiedFamilyAdmissionCanAwaitRuntimeEvidence(certifiedAdmission)
+  ) {
+    throw new Error(
+      `${family.label} cannot start automatic channel inception: ${certifiedAdmission.blockers.join(" ")}` +
+      (certifiedAdmission.remediation ? ` ${certifiedAdmission.remediation}` : ""),
+    );
+  }
+  // A reviewed runtime registry lookup is the one data dependency that must
+  // precede dynamic LTX admission. It is owner-scoped, read-only, and happens
+  // before secret bootstrap, budgeting, a lease, or any provider call. An
+  // absent/revoked record yields the locked static target and remains blocked.
+  const ownerId = admitProviderTaskOwner({
+    requestedOwnerId: payload.ownerId,
+    configuredOwnerId: process.env.STUDIO_OWNER_ID,
+    runtime: process.env.NODE_ENV,
+    developmentFallbackOwnerId: process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel",
+  });
+  const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
+  if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
+  const convex = new ConvexHttpClient(url);
+  const reviewedLtxRuntime = await resolveOwnerReviewedLtxRuntime({ client: convex, ownerId });
   // A Trigger payload may bypass the browser route. Re-run the same canonical
-  // creator admission from the bound brief before readiness, Convex, providers
-  // or any cost authority is considered.
+  // creator admission from the bound brief with only the server-derived runtime
+  // target before provider setup or any cost authority is considered.
   const requestedLengthMinutes = Number(payload.lengthMinutes);
   const requestedBudgetUsd = Number(payload.budget);
   const creatorPreflight = formatPreflight(
@@ -1272,14 +1526,17 @@ export async function executeDesignChannel(
         ? { maxPerVideoBudgetUsd: requestedBudgetUsd }
         : {}),
     }),
+    { runtimeTarget: reviewedLtxRuntime.runtime },
   );
-  if (!creatorPreflight.creatorAdmission.autonomous || creatorPreflight.creatorAdmission.privateReviewOnly) {
+  if (!reviewedDataStoryIntake && (
+    !creatorPreflight.creatorAdmission.autonomous || creatorPreflight.creatorAdmission.privateReviewOnly
+  )) {
     throw new Error(
       `channel program is not admitted for automatic inception: ${creatorPreflight.creatorAdmission.remediation}`,
     );
   }
   const privateReviewOffers = privateReviewCapabilityOffers(creatorPreflight.creativeCapabilities);
-  if (privateReviewOffers.length) {
+  if (!reviewedDataStoryIntake && privateReviewOffers.length) {
     throw new Error(
       `channel program requires private review before automatic inception: ` +
       privateReviewOffers.map((offer) => offer.title).join(", "),
@@ -1288,10 +1545,23 @@ export async function executeDesignChannel(
   const supervisedModules = creatorPreflight.moduleAdmissions.filter(
     (module) => module.requiredForConcept && !module.autonomous,
   );
-  if (supervisedModules.length) {
+  if (!reviewedDataStoryIntake && supervisedModules.length) {
     throw new Error(
       `channel program requires supervised admission before automatic inception: ` +
       supervisedModules.map((module) => module.block).join(", "),
+    );
+  }
+  // The API is not the sole authority: a direct Trigger payload must enforce
+  // the complete concept-sensitive preflight before Convex, provider setup, or
+  // any cost authority. This keeps factual whiteboard/comic briefs from using
+  // an automatic original-story route without a source-bound evidence path.
+  if (!reviewedDataStoryIntake && !creatorPreflight.productionReady) {
+    const blockers = [...new Set([
+      ...creatorPreflight.missingRequirements,
+      ...creatorPreflight.runtimeBlockers,
+    ])];
+    throw new Error(
+      `channel program is not admitted for automatic inception: ${blockers.join(" ")}`,
     );
   }
   const programCapabilityIntent = briefToCreativeCapabilityIntent(programBrief);
@@ -1318,8 +1588,23 @@ export async function executeDesignChannel(
     selections: payload.capabilitySelections,
     intent: programCapabilityIntent,
   });
+  if (reviewedDataStoryIntake) {
+    assertReviewedDataStoryChannelIntake({
+      mode: payload.supervisedDataStoryIntake,
+      programBrief,
+      selections: selectedCapabilities,
+      publishMode: payload.publishMode,
+      approvedForPublish: payload.approvedForPublish,
+      approveSetupSpend: payload.approveSetupSpend,
+      runProbe: payload.runProbe,
+      autoYoutube: payload.autoYoutube,
+      dataStory: payload.dataStory,
+      sourceReferences: payload.sourceReferences,
+      claimEvidence: payload.claimEvidence,
+    });
+  }
   const selectedCapabilityAdmission = assessCreativeCapabilityAutomaticBuildAdmission(selectedCapabilities);
-  if (!selectedCapabilityAdmission.autonomous) {
+  if (!reviewedDataStoryIntake && !selectedCapabilityAdmission.autonomous) {
     throw new Error(
       "selected creative capabilities require supervised admission before automatic inception: " +
       selectedCapabilityAdmission.blockers
@@ -1327,8 +1612,15 @@ export async function executeDesignChannel(
         .join("; "),
     );
   }
-  const runtimeReadiness = familyProductionReadiness(payload.family);
-  if (!runtimeReadiness.productionReady) {
+  const runtimeReadiness = familyProductionReadiness(payload.family, reviewedLtxRuntime.runtime);
+  const runtimeCertifiedAdmission = certifiedFamilyAdmission(payload.family, reviewedLtxRuntime.runtime);
+  if (!reviewedDataStoryIntake && !runtimeCertifiedAdmission.automatic) {
+    throw new Error(
+      `${family.label} cannot start automatic channel inception: ${runtimeCertifiedAdmission.blockers.join(" ")}` +
+      (runtimeCertifiedAdmission.remediation ? ` ${runtimeCertifiedAdmission.remediation}` : ""),
+    );
+  }
+  if (!reviewedDataStoryIntake && !runtimeReadiness.productionReady) {
     const fallback = productionReadyFamilyFallback(payload.family);
     throw new Error(
       `${family.label} cannot start channel inception because its production path is unavailable: ` +
@@ -1338,15 +1630,6 @@ export async function executeDesignChannel(
         : " No no-Gemini production-family fallback is registered."),
     );
   }
-  const ownerId = admitProviderTaskOwner({
-    requestedOwnerId: payload.ownerId,
-    configuredOwnerId: process.env.STUDIO_OWNER_ID,
-    runtime: process.env.NODE_ENV,
-    developmentFallbackOwnerId: process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel",
-  });
-  const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
-  if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
-  const convex = new ConvexHttpClient(url);
   const niche = getNiche(programBrief.nicheKey);
   const requestKey = payload.requestKey?.trim() || runtime.runId;
   const requestedYoutubeName = normalizeYoutubeChannelName(
@@ -1412,47 +1695,111 @@ export async function executeDesignChannel(
     },
   );
 
-  const design = designPipeline({
+  // Resolve the durable identity before compiling the baseline. A historical
+  // route-less row can replay only after the exact-snapshot proof below, but
+  // it must first be compiled through its original route-less shape. In
+  // particular, a current resolver may now recognize a brief that predates
+  // routes; using that newly resolved route here would mutate its fingerprint
+  // before the legacy proof has a chance to reject it.
+  const baseName = payload.name?.trim() || `${niche?.label ?? programBrief.nicheKey} ${family.label}`;
+  const slug = channelInceptionSlug(baseName, requestKey);
+  const existingAtStart = await convex.query(api.channels.getChannelBySlug, { ownerId, slug });
+  if (existingAtStart?.family && existingAtStart.family !== payload.family) {
+    throw new Error(`inception key already belongs to family ${existingAtStart.family}`);
+  }
+  const existingIdentityAtStart = existingAtStart
+    ? asIdentity(existingAtStart.identity)
+    : undefined;
+  const isRouteLessLegacyRetry = isRouteLessLegacyChannelIdentity(existingIdentityAtStart);
+  const programRouteForCompile = isRouteLessLegacyRetry ? undefined : resolvedProgramRoute;
+  const payloadSuppliesSeries = payload.seriesTitle !== undefined || payload.seriesCount !== undefined;
+  if (payloadSuppliesSeries && !isRouteLessLegacyRetry) {
+    const sealedSerializedProgram = programRouteForCompile?.serializedProgram;
+    if (
+      payload.seriesTitle !== sealedSerializedProgram?.seriesTitle ||
+      payload.seriesCount !== sealedSerializedProgram?.seriesCount
+    ) {
+      throw new Error("seriesTitle and seriesCount must match the sealed serialized program route");
+    }
+  }
+  const routeSyntheticScenario = programRouteForCompile?.syntheticScenarioProfile
+    ? syntheticScenarioContract(programRouteForCompile.syntheticScenarioProfile)
+    : undefined;
+
+  const designOptions: DesignOptions = {
     family: payload.family,
     nicheKey: programBrief.nicheKey,
     subcategory: programBrief.subcategory,
     programBrief,
+    runtimeTarget: reviewedLtxRuntime.runtime,
     lengthMinutes: payload.lengthMinutes,
     locale: programBrief.locale,
     footageTheme: payload.footageTheme,
     voiceFx: payload.voiceFx,
     publishMode: payload.publishMode ?? "draft",
     approvedForPublish: publishingApproved,
-    seriesTitle: payload.seriesTitle,
-    seriesCount: payload.seriesCount,
+    ...(programRouteForCompile ? { programRoute: programRouteForCompile } : {}),
+    ...(isRouteLessLegacyRetry && payload.seriesTitle
+      ? {
+        // Only a durable route-less historical identity may still carry these
+        // legacy fields. The exact-snapshot gate below decides whether its
+        // pre-route compiler output may replay.
+        seriesTitle: payload.seriesTitle,
+        ...(payload.seriesCount !== undefined ? { seriesCount: payload.seriesCount } : {}),
+      }
+      : {}),
     sourceReferences: payload.sourceReferences,
     claimEvidence: payload.claimEvidence,
     dataStory: payload.dataStory,
     capabilitySelections: payload.capabilitySelections,
-    syntheticScenario: payload.syntheticScenario,
+    syntheticScenario: routeSyntheticScenario ?? payload.syntheticScenario,
     toggles: payload.toggles,
     paramOverrides: payload.paramOverrides,
-    quizProfile: payload.quizProfile,
-  });
+    quizProfile: programRouteForCompile?.quizProfile ?? payload.quizProfile,
+    ...(!isRouteLessLegacyRetry && submittedCreatorIntentDiagnosis
+      ? {
+        // The diagnosis is route-derived, so the shared compiler must receive
+        // the same sealed route when it revalidates that receipt. Keep this
+        // paired with the receipt instead of applying a current route to a
+        // route-less legacy retry.
+        creatorIntentDiagnosis: submittedCreatorIntentDiagnosis,
+      }
+      : {}),
+  };
+  const design = designPipeline(designOptions);
   // Seal the compiled baseline before any channel state is written. The final
   // architect may refine the pipeline later, but it must retain this profile's
   // selected-capability obligations and traceability.
   const showProfile = createChannelShowProfile({
     programBrief,
+    ...(programRouteForCompile ? { programRoute: programRouteForCompile } : {}),
     capabilitySelections: payload.capabilitySelections,
     pipeline: design.pipeline,
   });
+  if (programRouteForCompile && (
+    !showProfile.programRoute ||
+    channelProgramRouteFingerprint(showProfile.programRoute) !==
+      channelProgramRouteFingerprint(programRouteForCompile)
+  )) {
+    throw new Error("new channel admission did not seal its resolved program route into the show profile");
+  }
   const designPipelineFingerprint = channelInceptionContentSha256(design.pipeline);
   // Preserve the exact design resolution: an omitted operator duration may
   // intentionally use a valid niche preset rather than the generic family default.
   const lengthSeconds = design.episodeLengthSeconds;
+  const isSupervisedQuizShort = programRouteForCompile?.routeKey === "quizyear/portrait-supervised/v1";
   const withLengthLaw = (pipeline: PipelineEntry[]): PipelineEntry[] => {
-    const result = enforceLengthContract(pipeline, lengthSeconds, payload.family);
+    const result = enforceLengthContract(
+      pipeline,
+      lengthSeconds,
+      payload.family,
+      isSupervisedQuizShort
+        ? { lengthEnvelope: QUIZ_SHORT_PORTRAIT_LENGTH_ENVELOPE }
+        : undefined,
+    );
     if (result.changed.length) log(`length law re-pinned: ${result.changed.join(", ")}`);
     return result.pipeline;
   };
-  const baseName = payload.name?.trim() || `${niche?.label ?? programBrief.nicheKey} ${family.label}`;
-  const slug = channelInceptionSlug(baseName, requestKey);
   const archetype = getArchetype(family.archetypeKey);
   const disabledBlocks = [
     payload.toggles?.shorts === false ? "shorts_spinoff" : "",
@@ -1461,10 +1808,67 @@ export async function executeDesignChannel(
     payload.toggles?.notify === false ? "notify" : "",
   ].filter(Boolean);
 
-  const existingAtStart = await convex.query(api.channels.getChannelBySlug, { ownerId, slug });
-  if (existingAtStart?.family && existingAtStart.family !== payload.family) {
-    throw new Error(`inception key already belongs to family ${existingAtStart.family}`);
+  if (!resolvedProgramRoute && !isRouteLessLegacyRetry) {
+    throw programRouteResolutionError ?? new Error("channel program route could not be resolved");
   }
+  if (!existingAtStart && !resolvedProgramRoute) {
+    throw programRouteResolutionError ?? new Error("new channel admission requires a resolved channel program route");
+  }
+  const persistedProgramRoute = existingAtStart
+    ? (() => {
+        const rawRoute = existingIdentityAtStart?.programRoute;
+        if (rawRoute === undefined) return undefined;
+        if (!resolvedProgramRoute) {
+          throw programRouteResolutionError ?? new Error("existing channel program route could not be resolved");
+        }
+        const route = parseChannelProgramRoute(rawRoute);
+        assertChannelProgramRouteBinding({
+          route,
+          programBrief,
+        });
+        if (
+          channelProgramRouteFingerprint(route) !==
+          channelProgramRouteFingerprint(resolvedProgramRoute)
+        ) {
+          throw new Error("existing channel program route does not match the newly submitted canonical program");
+        }
+        return route;
+      })()
+    : undefined;
+  // A route-less row predates this contract. It can keep replaying its exact
+  // existing snapshot but cannot be silently upgraded by a new admission.
+  const requestProgramRoute = existingAtStart ? persistedProgramRoute : resolvedProgramRoute;
+  const persistedCreatorIntentDiagnosis = existingAtStart
+    ? (() => {
+        const rawDiagnosis = existingIdentityAtStart?.creatorIntentDiagnosis;
+        if (rawDiagnosis === undefined) return undefined;
+        if (!requestProgramRoute) {
+          throw new Error("existing creator intent diagnosis requires its sealed channel program route");
+        }
+        return assertCreatorIntentDiagnosisBinding({
+          diagnosis: rawDiagnosis,
+          programBrief,
+          programRoute: requestProgramRoute,
+        });
+      })()
+    : undefined;
+  if (
+    persistedCreatorIntentDiagnosis &&
+    submittedCreatorIntentDiagnosis &&
+    persistedCreatorIntentDiagnosis.fingerprint !== submittedCreatorIntentDiagnosis.fingerprint
+  ) {
+    throw new Error("submitted creator intent diagnosis does not match the durable channel identity");
+  }
+  if (!existingAtStart && !submittedCreatorIntentDiagnosis) {
+    throw new Error("new channel admission requires a sealed creator intent diagnosis");
+  }
+  // A pre-diagnosis channel remains readable and can replay its historical
+  // snapshot. Do not backfill it opportunistically: that would change its
+  // request fingerprint and make a retry reuse work under a new semantic
+  // contract without an explicit fork/admission.
+  const requestCreatorIntentDiagnosis = existingAtStart
+    ? persistedCreatorIntentDiagnosis
+    : submittedCreatorIntentDiagnosis;
   // A row at this idempotency key is a retry candidate, never a place to
   // backfill a newly submitted program. Requiring its sealed brief before any
   // mutation, ledger, deterministic foundation, research, or provider work
@@ -1473,10 +1877,17 @@ export async function executeDesignChannel(
     ? existingChannelInceptionRetryShowProfile({
         profile: asIdentity(existingAtStart.identity).showProfile,
         programBrief,
+        ...(requestProgramRoute ? { programRoute: requestProgramRoute } : {}),
         capabilitySelections: payload.capabilitySelections,
         pipeline: design.pipeline,
       })
     : undefined;
+  if (persistedProgramRoute && !persistedRetryShowProfile?.programRoute) {
+    throw new Error("existing channel identity route does not match its sealed show profile route");
+  }
+  if (!isRouteLessLegacyRetry && existingAtStart && !persistedProgramRoute) {
+    throw new Error("existing channel has an incomplete channel program route identity");
+  }
   if (existingAtStart) {
     assertPersistedProgramBriefIdentity(existingAtStart.identity, {
       context: "existing inception channel identity",
@@ -1484,6 +1895,46 @@ export async function executeDesignChannel(
       expectedProgramBrief: programBrief,
       requireProgramBrief: true,
     });
+  }
+  // A route-less identity is historical evidence, never a request to invent a
+  // current route. Before any mutation, deterministic foundation, or provider
+  // work, prove that this invocation is replaying the exact durable legacy
+  // snapshot with the same profile, brief, compiler source, config, and
+  // accepted previews.
+  if (isRouteLessLegacyRetry && existingAtStart) {
+    const legacyChannelId = existingAtStart._id;
+    const legacyChannel = await currentChannel(convex, legacyChannelId);
+    const legacyRows = await readyPlanRows(convex, ownerId, legacyChannelId);
+    const legacyAcceptedPreviewFingerprints = legacyRows
+      .map(readyPlanArtifactFingerprint)
+      .filter((fingerprint): fingerprint is string => Boolean(fingerprint));
+    const legacyInception = (legacyChannel as unknown as {
+      inception?: { requestSnapshot?: unknown };
+    }).inception;
+    const legacyModuleConfigFingerprint = channelInceptionContentSha256(
+      structuredClone(payload.moduleConfig ?? {}),
+    );
+    const legacyShowProfile = persistedRetryShowProfile;
+    const canResumeLegacySnapshot = legacyShowProfile !== undefined &&
+      routeLessLegacyInceptionCanResume({
+        identity: existingIdentityAtStart,
+        previousSnapshot: legacyInception?.requestSnapshot,
+        ownerId,
+        channelRef: String(legacyChannelId),
+        slug,
+        family: payload.family,
+        sourceRevision: requestKey,
+        moduleConfigFingerprint: legacyModuleConfigFingerprint,
+        pipelineSourceFingerprint: designPipelineFingerprint,
+        programBrief,
+        showProfile: legacyShowProfile,
+        currentPreviewFingerprintSet: new Set(legacyAcceptedPreviewFingerprints),
+      });
+    if (!canResumeLegacySnapshot) {
+      throw new Error(
+        "a route-less historical channel may only resume its exact already-durable route-less snapshot; create a fresh admitted channel or fork",
+      );
+    }
   }
   // RESUME HOLE: `createChannel` below is the ONLY writer in this flow that
   // stamps `family`/`contentLane`, and the `existingAtStart?._id ??`
@@ -1514,6 +1965,8 @@ export async function executeDesignChannel(
     ? asIdentity(existingAtStart.identity)
     : {
         programBrief: persistedChannelProgramBrief(programBrief),
+        programRoute: structuredClone(resolvedProgramRoute!),
+        creatorIntentDiagnosis: structuredClone(requestCreatorIntentDiagnosis!),
         showProfile: persistedChannelShowProfile(showProfile),
         persona: payload.persona?.trim() || `Evidence-grounded ${family.label} channel`,
         styleGrammar: `${family.label}; identity pending Channel Inception positioning`,
@@ -1553,6 +2006,24 @@ export async function executeDesignChannel(
     });
   }
 
+  if (reviewedDataStoryIntake) {
+    // The draft is deliberately inert until an owner attaches a reviewed pack
+    // through the separate desk. Returning before secret hydration guarantees
+    // this convenience never spends, creates a YouTube destination, renders,
+    // or claims an ordinary scheduler plan.
+    return {
+      ok: true,
+      channelId,
+      slug,
+      name: baseName,
+      family: payload.family,
+      status: "draft" as const,
+      zeroSpendDraft: true,
+      supervisedDataStoryIntake: true,
+      warnings: design.warnings,
+    };
+  }
+
   // QuizYear's complete creator path is local/source-first and draft-only.
   // It must return before generic research, Style DNA, art, starter-thumbnail,
   // provider bootstrap, or publishing logic can route it back to Gemini.
@@ -1565,6 +2036,7 @@ export async function executeDesignChannel(
       channelName: baseName,
       family: FAMILIES.quizyear,
       programBrief,
+      programRoute: requestProgramRoute,
     });
     log("QuizYear deterministic foundation persisted", foundation);
     return {
@@ -1594,6 +2066,7 @@ export async function executeDesignChannel(
       channelName: baseName,
       family: FAMILIES.illustrated_explainer,
       programBrief,
+      programRoute: requestProgramRoute,
     });
     log("Illustrated Explainer deterministic foundation persisted", foundation);
     return {
@@ -1613,6 +2086,11 @@ export async function executeDesignChannel(
   // No creator-time Gemini prerequisite: admission above rejects any family
   // whose autonomous planning path still depends on it.
   await bootstrapSecrets(log);
+
+  // Catalog admission alone cannot guarantee that the self-contained renderer
+  // stack is present in this environment. Fail before research, art, or any
+  // other inception provider work when an automatic family cannot execute.
+  assertAutomaticFamilyExecutionReadiness(payload.family);
 
   // A missing template or unavailable runtime cannot pass an end-to-end proof.
   // Persist only the deterministic shell and stop before research/model/art/
@@ -1684,6 +2162,8 @@ export async function executeDesignChannel(
     moduleConfigFingerprint: requestedModuleConfigFingerprint,
     pipelineSourceFingerprint: designPipelineFingerprint,
     programBrief,
+    programRoute: requestProgramRoute,
+    creatorIntentDiagnosis: requestCreatorIntentDiagnosis,
     showProfile: requestShowProfile,
     currentPreviewFingerprintSet,
   });
@@ -1699,6 +2179,10 @@ export async function executeDesignChannel(
     pipelineSourceFingerprint: designPipelineFingerprint,
     moduleConfigFingerprint: requestedModuleConfigFingerprint,
     programBrief,
+    ...(requestProgramRoute ? { programRoute: requestProgramRoute } : {}),
+    ...(requestCreatorIntentDiagnosis
+      ? { creatorIntentDiagnosis: requestCreatorIntentDiagnosis }
+      : {}),
     showProfile: requestShowProfile,
     brand: {
       ...(existingIdentity.imageKey ? {
@@ -1749,9 +2233,56 @@ export async function executeDesignChannel(
       : currentRequest,
   );
   if (canResumeSnapshot) log("restored immutable inception request snapshot for retry");
+  if (!canResumeSnapshot && !plan.requestSnapshot.programRoute) {
+    throw new Error(
+      "a historical channel without a sealed program route may only resume its exact existing snapshot; create a fresh admitted channel or fork",
+    );
+  }
   const plannedShowProfile = plan.requestSnapshot.showProfile;
   if (!plannedShowProfile) {
     throw new Error("new channel inception requires a sealed channel show profile");
+  }
+  // Seal the first qualification stage from the exact, route-bound inception
+  // artifacts. It authorizes only a later explicitly approved private benchmark
+  // probe; normal cadence still needs a separate final-master release receipt.
+  // This happens before bootstrap/provider work and is idempotent across retries.
+  if (!reviewedDataStoryIntake && plan.requestSnapshot.programRoute) {
+    const qualificationBinding = readProductionRouteQualificationBinding({
+      programBrief: plan.requestSnapshot.programBrief,
+      programRoute: plan.requestSnapshot.programRoute,
+      showProfile: plannedShowProfile,
+      pipeline: design.pipeline,
+    });
+    const qualificationPlanner = readProductionRoutePlannerEvidence({
+      binding: qualificationBinding,
+      options: designOptions,
+    });
+    const qualificationInception = readProductionRouteInceptionEvidence({
+      binding: qualificationBinding,
+      plan,
+    });
+    const qualificationRuntime = readProductionRouteRuntimeEvidence({
+      binding: qualificationBinding,
+      planner: qualificationPlanner,
+      pipeline: design.pipeline,
+      runtimeTarget: reviewedLtxRuntime.runtime,
+    });
+    const qualificationVisualMatter = readProductionRouteVisualMatterEvidence({
+      binding: qualificationBinding,
+    });
+    await convex.mutation(
+      productionRouteQualificationStateApi.recordRoutePreflightReady,
+      {
+        ownerId,
+        channelId,
+        binding: qualificationBinding,
+        planner: qualificationPlanner,
+        inception: qualificationInception,
+        runtime: qualificationRuntime,
+        visualMatter: qualificationVisualMatter,
+      } as never,
+    );
+    log("sealed current route_preflight_ready receipt before provider-capable inception");
   }
   const executionReceiptFingerprint = payload.inceptionApproval
     ? channelInceptionContentSha256(payload.inceptionApproval)
@@ -2050,9 +2581,44 @@ export async function executeDesignChannel(
     const identity = asIdentity(channel.identity);
     const needsScript = plan.familyPolicy.requiresNarrativePlaybook;
     if (identity.topicPool.length < 5 || (needsScript && !channel.scriptPlaybook)) return undefined;
+    if (programBrief.serializedProgram) {
+      const pointer = identity.narrativeSeriesPlan;
+      const route = resolvedProgramRoute;
+      if (!pointer || !route) return undefined;
+      const serialIdentity = serializedProgramEpisodeIdentity(
+        channelProgramRouteRunSeed({ route, programBrief }),
+      );
+      if (
+        !serialIdentity ||
+        pointer.seriesIdentity !== serialIdentity.value ||
+        pointer.planningHorizonEpisodes < 1
+      ) {
+        return undefined;
+      }
+      const persisted = await getNarrativeSeriesPlanRecord({
+        client: convex,
+        ownerId,
+        channelId,
+        fingerprint: pointer.fingerprint,
+      });
+      if (
+        !persisted ||
+        persisted.ownerId !== ownerId ||
+        String(persisted.channelId) !== String(channelId) ||
+        persisted.fingerprint !== pointer.fingerprint
+      ) {
+        return undefined;
+      }
+    }
     return {
       value: identity,
-      evidence: { topics: identity.topicPool.length, scriptPlaybook: Boolean(channel.scriptPlaybook) },
+      evidence: {
+        topics: identity.topicPool.length,
+        scriptPlaybook: Boolean(channel.scriptPlaybook),
+        ...(identity.narrativeSeriesPlan
+          ? { narrativeSeriesPlan: identity.narrativeSeriesPlan.fingerprint }
+          : {}),
+      },
       outputFingerprint: channelInceptionContentSha256({
         identity: seoIdentityProjection(identity),
         scriptPlaybook: needsScript ? channel.scriptPlaybook : null,
@@ -2090,7 +2656,52 @@ export async function executeDesignChannel(
           log,
         });
       }
-      const nextIdentity = { ...identity, topicPool };
+      let narrativeSeriesPlan: ChannelIdentityState["narrativeSeriesPlan"];
+      if (programBrief.serializedProgram) {
+        const research = await loadResearchEvidence();
+        if (!research) {
+          throw new Error("serialized narrative horizon requires the accepted channel research receipt");
+        }
+        const route = resolvedProgramRoute;
+        if (!route) {
+          throw new Error("serialized narrative horizon requires the resolved Program Route");
+        }
+        const routeSeed = channelProgramRouteRunSeed({ route, programBrief });
+        const serialIdentity = serializedProgramEpisodeIdentity(routeSeed);
+        if (!serialIdentity) {
+          throw new Error("serialized narrative horizon requires a durable serialized episode identity");
+        }
+        const horizon = createNarrativeSeriesPlanFromInception({
+          accountId: ownerId,
+          channelId: String(channelId),
+          seriesIdentity: serialIdentity.value,
+          channelProgramBrief: programBrief,
+          researchEvidenceFingerprint: channelResearchEvidenceFingerprint(research.value),
+          topicBets: optimized,
+          // Twelve is enough to structure a real first season while preserving
+          // the hard 24-episode contract cap. A declared series count caps it
+          // again in the pure planner.
+          planningHorizonEpisodes: 12,
+        });
+        await recordNarrativeSeriesPlan({
+          client: convex,
+          ownerId,
+          channelId,
+          plan: horizon,
+        });
+        narrativeSeriesPlan = {
+          version: "narrative-series-intelligence/v1",
+          fingerprint: horizon.fingerprint,
+          seriesIdentity: horizon.seriesIdentity,
+          researchEvidenceFingerprint: channelResearchEvidenceFingerprint(research.value),
+          planningHorizonEpisodes: horizon.planningHorizonEpisodes,
+        };
+      }
+      const nextIdentity: ChannelIdentityState = {
+        ...identity,
+        topicPool,
+        ...(narrativeSeriesPlan ? { narrativeSeriesPlan } : {}),
+      };
       await convex.mutation(api.channels.updateChannel, {
         channelId,
         identity: nextIdentity,
@@ -2102,6 +2713,12 @@ export async function executeDesignChannel(
           optimizedTopics: optimized.length,
           topicPool: topicPool.length,
           narrativePlaybook: Boolean(scriptPlaybook),
+          ...(narrativeSeriesPlan
+            ? {
+                narrativeSeriesPlan: narrativeSeriesPlan.fingerprint,
+                narrativeHorizonEpisodes: narrativeSeriesPlan.planningHorizonEpisodes,
+              }
+            : {}),
         },
         outputFingerprint: channelInceptionContentSha256({
           identity: seoIdentityProjection(nextIdentity),

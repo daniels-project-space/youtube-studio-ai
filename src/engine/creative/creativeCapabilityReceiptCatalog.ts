@@ -19,7 +19,7 @@ import {
 
 /** Keep this pinned to the rich catalog's current, creator-facing fingerprint. */
 export const CREATIVE_CAPABILITY_RECEIPT_CATALOG_FINGERPRINT =
-  "creative-capability-catalog/v3:ebe23da5" as const;
+  "creative-capability-catalog/v4:34597e64" as const;
 
 export type CreativeCapabilityReceiptKey =
   | "source_attributed_data_story"
@@ -49,17 +49,29 @@ export interface CreativeCapabilityReceiptPipelineObligation {
   params?: Readonly<Record<string, unknown>>;
 }
 
+/** Mirrors the rich catalog's versioned-materialization deferral. */
+export interface CreativeCapabilityReceiptPipelineObligationValidationOptions {
+  readonly deferMaterializationOwnedObligations?: boolean;
+}
+
 type CreativeCapabilityReceiptEligibility = "data_story_intent" | "none";
 
 export interface CreativeCapabilityReceiptDefinition {
   capability: CreativeCapabilityReceiptKey;
   supportedFamilies: readonly FamilyKey[];
   selectionMode: CreativeCapabilityReceiptSelectionMode;
+  /**
+   * The V8-safe mirror of the rich catalog's sealed composition-fragment
+   * declaration.  New Convex admissions use it to reject a plan that names a
+   * different current fragment version than the creator catalog selected.
+   */
+  compositionFragmentVersion?: string;
   eligibility: CreativeCapabilityReceiptEligibility;
   pipelineObligations: readonly CreativeCapabilityReceiptPipelineObligation[];
 }
 
 const SOURCE_ATTRIBUTED_DATA_STORY_PIPELINE_OBLIGATIONS = [
+  { block: "episode_graph" },
   { block: "timeline_assemble" },
   {
     block: "visual_inserts",
@@ -88,6 +100,7 @@ export const CREATIVE_CAPABILITY_RECEIPT_CATALOG = [
     capability: "source_attributed_data_story",
     supportedFamilies: ["narrated_stock"],
     selectionMode: "explicit_opt_in",
+    compositionFragmentVersion: "v2",
     eligibility: "data_story_intent",
     pipelineObligations: SOURCE_ATTRIBUTED_DATA_STORY_PIPELINE_OBLIGATIONS,
   },
@@ -120,6 +133,22 @@ export function creativeCapabilityReceiptDefinition(
   return CREATIVE_CAPABILITY_RECEIPT_CATALOG.find((definition) =>
     definition.capability === capability,
   );
+}
+
+/** V8-safe counterpart to the rich creator catalog's fragment-version map. */
+export function creativeCapabilityReceiptCompositionFragmentVersionBindings(
+  definitions: readonly CreativeCapabilityReceiptDefinition[],
+): Readonly<Record<string, string>> {
+  const bindings: Record<string, string> = {};
+  for (const definition of definitions) {
+    if (!definition.compositionFragmentVersion) {
+      throw new Error(
+        `creative capability ${definition.capability} has no declared composition fragment version`,
+      );
+    }
+    bindings[definition.capability] = definition.compositionFragmentVersion;
+  }
+  return bindings;
 }
 
 function matchesRequiredParams(
@@ -177,9 +206,19 @@ export function assertCreativeCapabilityReceiptSelection(input: {
 export function assertCreativeCapabilityReceiptPipelineObligations(
   definitions: readonly CreativeCapabilityReceiptDefinition[],
   pipeline: readonly CreativeCapabilityReceiptPipelineEntry[],
+  options: CreativeCapabilityReceiptPipelineObligationValidationOptions = {},
 ): void {
   for (const definition of definitions) {
     for (const obligation of definition.pipelineObligations) {
+      // v4 owns this provider-free handoff in its sealed composition plan;
+      // historical v1-v3 profiles must not acquire it during a retry.
+      if (
+        options.deferMaterializationOwnedObligations &&
+        definition.capability === "source_attributed_data_story" &&
+        obligation.block === "episode_graph"
+      ) {
+        continue;
+      }
       const entry = pipeline.find((candidate) => candidate.block === obligation.block);
       if (!entry) {
         throw new Error(

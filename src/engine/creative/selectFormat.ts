@@ -6,19 +6,24 @@
  * source-evidence requirements, and the fact that no channel is promotable
  * until a held-out validation render passes. It is deliberately deterministic:
  * selecting a format must never make a provider call or imply that a
- * Gemini-backed planner is autonomous.
+ * legacy provider implementation is autonomous.
  */
 import {
   FAMILIES,
   FAMILY_CREW,
   FAMILY_KEYS,
   FAMILY_RUNTIME_PIPELINE,
+  autonomousPlanningBlocker,
   familyAutonomousPlanningCapability,
   familyProductionReadiness,
   formatFamilyDurationContract,
   type FamilyKey,
 } from "@/engine/families";
 import { resolveChannelFamilyManifest } from "@/engine/channelFamilyManifest";
+import {
+  certifiedFamilyAdmission,
+  type CertifiedFamilyAdmission,
+} from "@/engine/certifiedFamilyAdmission";
 import type { DataStoryContract } from "@/engine/dataStory";
 import {
   CREATIVE_CAPABILITY_CATALOG_FINGERPRINT,
@@ -27,7 +32,10 @@ import {
   type CreativeCapabilityOffer,
 } from "@/engine/creative/creativeCapabilityCatalog";
 import { nichePreset } from "@/engine/golden";
-import { assessPipelineVideoRuntimeReadiness } from "@/engine/runtimeCapability";
+import {
+  assessPipelineVideoRuntimeReadiness,
+  type NovitaVideoRuntimeTarget,
+} from "@/engine/runtimeCapability";
 import {
   familyChannelInceptionCapability,
   familySupervisedChannelInceptionCapability,
@@ -146,6 +154,8 @@ export interface FormatPreflight {
   templateAvailable: boolean;
   /** True only if its actual production renderer can execute on the current fleet. */
   productionReady: boolean;
+  /** Cross-catalog receipt required before a family can truthfully be automatic. */
+  certifiedFamilyAdmission: CertifiedFamilyAdmission;
   /**
    * All current automatic-production blockers, retained under the legacy
    * field name so existing creator clients do not mistake a blocked route for
@@ -236,10 +246,31 @@ export interface FormatRecommendation {
   /** 0..1 — confidence in the selected format, not a quality promise. */
   confidence: number;
   alternates: { family: FamilyKey; why: string }[];
+  /**
+   * Explicit, operator-selectable automatic routes when the requested visual
+   * grammar is blocked. This is never a fallback selection: `family` remains
+   * the requested ideal and every entry must carry a current automatic
+   * CertifiedFamilyAdmission as well as a concept-specific production preflight.
+   */
+  executableAlternatives: ExecutableFormatAlternative[];
   /** A transparent readiness contract for the creator UI. */
   preflight: FormatPreflight;
   /** Always true: this advisor is deterministic and never calls an AI provider. */
   fallback: boolean;
+}
+
+export interface ExecutableFormatAlternative {
+  family: FamilyKey;
+  /** Why this is the closest currently admitted automatic adaptation. */
+  why: string;
+  /** Deterministic match strength; empty matched signals means an explicit audited adaptation. */
+  score: number;
+  matchedSignals: string[];
+  /** Literal flags make this safe to render as an action in untyped clients. */
+  selectable: true;
+  executable: true;
+  /** The admission receipt that made this particular alternate eligible. */
+  certifiedFamilyAdmission: CertifiedFamilyAdmission;
 }
 
 /**
@@ -372,10 +403,24 @@ function canonicalCrew(family: FamilyKey, input: FormatSelectionInput): FormatCr
 function sourceRequirements(
   family: FamilyKey,
   creativeCapabilities: readonly CreativeCapabilityOffer[],
+  input: FormatSelectionInput,
 ): string[] {
-  const familyRequirements = family === "documentary_collage_short"
-    ? ["structured sourceReferences", "per-claim claimEvidence"]
-    : [];
+  const intent = normalizedIntent(input);
+  const factualSelfContainedIntent =
+    (family === "whiteboard" || family === "comic")
+    && /\b(?:biograph(?:y|ies)|business|case study|current events?|documentary|econom(?:y|ics|ic)|evidence|fact(?:s|ual)?|finance|histor(?:y|ical)|legal|medicine|news|politic(?:s|al)?|real[- ]world|science|scientific|true story)\b/u.test(intent);
+  const familyRequirements = [
+    ...(family === "documentary_collage_short"
+      ? ["structured sourceReferences", "per-claim claimEvidence"]
+      : []),
+    // The shared self-contained planner makes original whiteboard and comic
+    // stories automatic. It is not a substitute for a source-bound factual
+    // ledger, so do not label a factual creator request as ready merely
+    // because its rendering path happens to be available.
+    ...(factualSelfContainedIntent
+      ? ["reviewed factual evidence pack", "source-bound claim ledger"]
+      : []),
+  ];
   // Review-only capabilities are concept-implied intake routes, not optional
   // visual flourishes. Their source/evidence requirements come from the same
   // catalog object that supplied their module and review-desk behavior.
@@ -409,11 +454,8 @@ function planningPreflight(family: FamilyKey): FormatPlanningPreflight {
   return {
     ready: false,
     mode: capability.mode,
-    blockers: [
-      `${FAMILIES[family].label}: no-Gemini automatic planning is not registered; ` +
-        `the creator pipeline still requires Gemini-backed ${capability.geminiBackedBlocks.join(", ")}.`,
-    ],
-    remediation: "Register a deterministic or non-Gemini topic/story planner before admitting this family.",
+    blockers: [autonomousPlanningBlocker(family) ?? `${FAMILIES[family].label}: automatic planning is not registered.`],
+    remediation: "Register a route-owned deterministic or non-Gemini planner/seal and its matching composition before admitting this family.",
   };
 }
 
@@ -500,8 +542,11 @@ function creatorAdmissionPreflight(
   };
 }
 
-function runtimePreflight(family: FamilyKey): FormatRuntimePreflight {
-  const assessment = assessPipelineVideoRuntimeReadiness(FAMILY_RUNTIME_PIPELINE[family]);
+function runtimePreflight(
+  family: FamilyKey,
+  runtimeTarget?: NovitaVideoRuntimeTarget,
+): FormatRuntimePreflight {
+  const assessment = assessPipelineVideoRuntimeReadiness(FAMILY_RUNTIME_PIPELINE[family], runtimeTarget);
   return {
     ready: assessment.ready,
     videoRequired: assessment.videoRequired,
@@ -534,7 +579,16 @@ function moduleAdmissions(modules: readonly FormatModuleRecommendation[]): Forma
  * decides whether a paid held-out probe may start. Keeping that boundary here
  * prevents a lightweight creator request from bundling render workers into Next.
  */
-export function formatPreflight(family: FamilyKey, input: FormatSelectionInput): FormatPreflight {
+/** A server-derived runtime target from the reviewed owner registry. */
+export interface FormatPreflightOptions {
+  readonly runtimeTarget?: NovitaVideoRuntimeTarget;
+}
+
+export function formatPreflight(
+  family: FamilyKey,
+  input: FormatSelectionInput,
+  options: FormatPreflightOptions = {},
+): FormatPreflight {
   // This is called by both the browser admission route and the direct Trigger
   // authority before either can reserve provider work. Resolve the composed
   // family contract here so a drift among independent catalog tables stops
@@ -546,7 +600,7 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
   const planning = planningPreflight(family);
   const creativeCapabilities = resolveCreativeCapabilities(input, family);
   const creatorAdmission = creatorAdmissionPreflight(family, creativeCapabilities);
-  const runtime = runtimePreflight(family);
+  const runtime = runtimePreflight(family, options.runtimeTarget);
   const recommendedModules: FormatModuleRecommendation[] = creativeCapabilities.flatMap((capability) =>
     capability.modules.map((module) => ({
       block: module.block,
@@ -558,7 +612,7 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
     })),
   );
   const admittedModules = moduleAdmissions(recommendedModules);
-  const requiredSources = sourceRequirements(family, creativeCapabilities);
+  const requiredSources = sourceRequirements(family, creativeCapabilities, input);
   const missingRequirements = uniqueStrings([
     ...requiredSources,
     ...admittedModules
@@ -567,7 +621,8 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
   ]);
   const sourceRequirementsReady = missingRequirements.length === 0;
   const templateAvailable = spec.available;
-  const readiness = familyProductionReadiness(family);
+  const readiness = familyProductionReadiness(family, options.runtimeTarget);
+  const certifiedAdmission = certifiedFamilyAdmission(family, options.runtimeTarget);
   const duration = manifest.duration;
   const targetSeconds = positiveFiniteNumber(input.targetDurationSeconds);
   const durationWithinFamilyContract = targetSeconds === undefined
@@ -588,6 +643,8 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
   ];
   const runtimeBlockers = uniqueStrings([
     ...readiness.blockers,
+    ...certifiedAdmission.blockers,
+    ...(!creatorAdmission.autonomous ? creatorAdmission.blockers : []),
     ...moduleBlockers,
     ...constraintBlockers,
     ...(!sourceRequirementsReady
@@ -599,7 +656,9 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
   // duration/budget constraints implied by this particular channel concept.
   const productionReady = templateAvailable
     && readiness.productionReady
+    && certifiedAdmission.automatic
     && planning.ready
+    && creatorAdmission.autonomous
     && runtime.ready
     && sourceRequirementsReady
     && admittedModules.every((module) => !module.requiredForConcept || module.autonomous)
@@ -608,6 +667,7 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
   return {
     templateAvailable,
     productionReady,
+    certifiedFamilyAdmission: certifiedAdmission,
     runtimeBlockers,
     planning,
     creatorAdmission,
@@ -721,6 +781,88 @@ function deterministicAlternates(
     .map(({ candidate }) => ({ family: candidate.family, why: alternateReason(candidate) }));
 }
 
+/**
+ * A blocked visual grammar is not permission to silently convert a creator's
+ * channel into the easiest available family. These are deliberately small,
+ * audited translations where the existing automatic production grammar can
+ * preserve the requested story intent without claiming cinematic/comic output.
+ *
+ * This list is a ranking hint only. `executableAlternatives()` still checks the
+ * exact concept preflight and CertifiedFamilyAdmission before exposing a card.
+ */
+const EXPLICIT_AUTOMATIC_ADAPTATIONS: Partial<Record<FamilyKey, readonly FamilyKey[]>> = {
+  cinematic: ["illustrated_explainer", "narrated_stock"],
+  comic: ["illustrated_explainer", "narrated_stock"],
+};
+
+function executableAlternativeReason(
+  candidate: RankedFormatCandidate,
+  requested: RankedFormatCandidate,
+  adaptationRank: number | undefined,
+): string {
+  if (candidate.matchedSignals.length > 0) {
+    return `Matched ${candidate.matchedSignals.slice(0, 2).join(" / ")}. This is a certified automatic route; ${FORMAT_RECIPES[candidate.family].tradeoff}`;
+  }
+  if (adaptationRank !== undefined) {
+    return `Explicit automatic adaptation of the blocked ${FAMILIES[requested.family].label} request. It does not claim the requested visual grammar; ${FORMAT_RECIPES[candidate.family].tradeoff}`;
+  }
+  return alternateReason(candidate);
+}
+
+/**
+ * Return actual operator choices for a blocked ideal without changing that
+ * ideal. A candidate is intentionally admitted twice: its exact creator
+ * preflight must be ready and its cross-catalog CertifiedFamilyAdmission must
+ * be automatic. This prevents a future family from becoming selectable merely
+ * because a keyword score happens to rank it highly.
+ */
+function executableAlternatives(
+  ranked: readonly RankedFormatCandidate[],
+  chosen: RankedFormatCandidate,
+  chosenPreflight: FormatPreflight,
+  input: FormatSelectionInput,
+): ExecutableFormatAlternative[] {
+  if (chosenPreflight.productionReady) return [];
+
+  const adaptationOrder = EXPLICIT_AUTOMATIC_ADAPTATIONS[chosen.family] ?? [];
+  const adaptationRank = new Map(adaptationOrder.map((family, index) => [family, index]));
+
+  return ranked
+    .filter((candidate) => candidate.family !== chosen.family)
+    // A default narrated score is deliberately not treated as semantic evidence.
+    // It can enter only through an explicit audited adaptation above.
+    .filter((candidate) => candidate.matchedSignals.length > 0 || adaptationRank.has(candidate.family))
+    .map((candidate) => ({
+      candidate,
+      preflight: formatPreflight(candidate.family, input),
+      adaptationRank: adaptationRank.get(candidate.family),
+    }))
+    .filter(({ preflight }) => preflight.productionReady && preflight.certifiedFamilyAdmission.automatic)
+    .sort((left, right) => {
+      const leftHasSemanticEvidence = left.candidate.matchedSignals.length > 0;
+      const rightHasSemanticEvidence = right.candidate.matchedSignals.length > 0;
+      const semanticDelta = Number(rightHasSemanticEvidence) - Number(leftHasSemanticEvidence);
+      if (semanticDelta !== 0) return semanticDelta;
+      if (leftHasSemanticEvidence && rightHasSemanticEvidence) {
+        const scoreDelta = right.candidate.score - left.candidate.score;
+        if (scoreDelta !== 0) return scoreDelta;
+      }
+      const leftAdaptation = left.adaptationRank ?? Number.MAX_SAFE_INTEGER;
+      const rightAdaptation = right.adaptationRank ?? Number.MAX_SAFE_INTEGER;
+      return leftAdaptation - rightAdaptation || left.candidate.family.localeCompare(right.candidate.family);
+    })
+    .slice(0, 2)
+    .map(({ candidate, preflight, adaptationRank: rank }) => ({
+      family: candidate.family,
+      why: executableAlternativeReason(candidate, chosen, rank),
+      score: candidate.score,
+      matchedSignals: [...candidate.matchedSignals],
+      selectable: true,
+      executable: true,
+      certifiedFamilyAdmission: preflight.certifiedFamilyAdmission,
+    }));
+}
+
 function recommendationReason(
   chosen: RankedFormatCandidate,
   preflight: FormatPreflight,
@@ -738,7 +880,7 @@ function recommendationReason(
   const requirements = preflight.missingRequirements.length
     ? ` Before automatic production, supply: ${preflight.missingRequirements.join("; ")}.`
     : "";
-  return `${match} Automatic production is currently blocked: ${blockers}${requirements} The requested format remains selected; no unrelated channel was substituted.`;
+  return `${match} Automatic production is currently blocked: ${blockers}${requirements} The requested format remains visible as blocked; no unrelated channel was substituted.`;
 }
 
 /**
@@ -760,6 +902,7 @@ export function recommendFormatDeterministically(
     reasoning: reasoning ?? recommendationReason(chosen, preflight),
     confidence: confidenceForRank(chosen, ranked[1]),
     alternates: deterministicAlternates(ranked, chosen, input),
+    executableAlternatives: executableAlternatives(ranked, chosen, preflight, input),
     preflight,
     fallback: true,
   };

@@ -81,3 +81,32 @@ before activation.
 
 No model download, public bootstrap script, provider fallback, paid render, or
 publishing action is part of this directory's validation path.
+
+## Dedicated A2Vid worker (sealed benchmark only)
+
+`Dockerfile.a2vid` and `a2vid_worker.py` are a separate self-hosted,
+open-weight LTX 2.5 audio-to-video path for Novita. They are not an LTX API
+integration and they do not alter the established image-to-video worker.
+
+- The build accepts **no default LTX runtime revision**. It must be supplied
+  after the LTX model terms are accepted and the exact source commit is pinned.
+- The one-job `audio_video` manifest binds a 2–20 second mastered-audio window,
+  optional approved opening/ending stills, six hash-checked A2Vid components,
+  a single exact GPU SKU, cost/lifetime cap, and R2 delivery metadata.
+- It invokes only the official `ltx_pipelines.a2vid_two_stage` CLI. A direct
+  `ltx_pipelines.distilled` image-to-video job cannot be re-labelled as A2Vid.
+- The initial profile is benchmark-only: 1280×704, 25 fps, eight steps, native
+  two-stage 640×352 → 1280×704. It may run on a sealed RTX 4090 or RTX 5090;
+  ComfyUI IC-LoRA work remains a different **RTX 5090 / 32 GB+** worker route.
+- Its result must pass the matched A/B quality admission in
+  `src/engine/selfHostedLtxMusicVideoA2Vid.ts` before a Music Video pipeline
+  may consider it. Building this image alone does not enable dispatch.
+
+Build only after recording the accepted immutable runtime revision and model
+component manifest; never use a moving branch or the direct worker's pinned
+revision as a substitute:
+
+```bash
+docker build --build-arg LTX_RUNTIME_REVISION=<accepted-40-hex-commit> \
+  -f infra/novita/Dockerfile.a2vid -t <registry>/youtube-ltx-a2vid:<pin> .
+```

@@ -1,6 +1,7 @@
 "use client";
 
 import type { ChannelRow } from "@/lib/types";
+import styles from "./LibraryFilters.module.css";
 
 export type SortKey = "date" | "views";
 export type StatusFilter = "all" | "ok" | "failed";
@@ -14,26 +15,6 @@ export type LibraryFilterState = {
   to: string; // yyyy-mm-dd or ""
 };
 
-const fieldStyle: React.CSSProperties = {
-  padding: "0.45rem 0.65rem",
-  borderRadius: 10,
-  fontSize: "0.82rem",
-  font: "inherit",
-  color: "var(--color-fg)",
-  background: "var(--color-surface)",
-  border: "1px solid var(--color-border)",
-  outline: "none",
-};
-
-const labelStyle: React.CSSProperties = {
-  fontSize: "0.68rem",
-  letterSpacing: "0.05em",
-  textTransform: "uppercase",
-  color: "var(--color-faint)",
-  marginBottom: "0.3rem",
-  display: "block",
-};
-
 /**
  * Library toolbar: channel dropdown, status, sort, free-text title search, and
  * a date range. Fully controlled — the page owns the state and does the actual
@@ -43,10 +24,12 @@ export function LibraryFilters({
   channels,
   state,
   onChange,
+  resultCount,
 }: {
   channels: ChannelRow[];
   state: LibraryFilterState;
   onChange: (next: LibraryFilterState) => void;
+  resultCount?: number;
 }) {
   const set = <K extends keyof LibraryFilterState>(
     key: K,
@@ -54,36 +37,26 @@ export function LibraryFilters({
   ) => onChange({ ...state, [key]: value });
 
   return (
-    <div
-      className="glass"
-      style={{
-        padding: "0.9rem 1rem",
-        marginBottom: "1.5rem",
-        display: "flex",
-        flexWrap: "wrap",
-        gap: "0.9rem",
-        alignItems: "flex-end",
-      }}
-    >
+    <div className={`glass ${styles.toolbar}`} aria-label="Library filters">
       {/* Search */}
-      <div style={{ flex: "1 1 200px", minWidth: 160 }}>
-        <label style={labelStyle}>Search title</label>
+      <div className={`${styles.field} ${styles.search}`}>
+        <label className={styles.label}>Search title</label>
         <input
           type="search"
           placeholder="Search videos…"
           value={state.search}
           onChange={(e) => set("search", e.target.value)}
-          style={{ ...fieldStyle, width: "100%" }}
+          className={styles.input}
         />
       </div>
 
       {/* Channel */}
-      <div>
-        <label style={labelStyle}>Channel</label>
+      <div className={styles.field}>
+        <label className={styles.label}>Channel</label>
         <select
           value={state.channelSlug ?? ""}
           onChange={(e) => set("channelSlug", e.target.value || null)}
-          style={fieldStyle}
+          className={styles.select}
         >
           <option value="">All channels</option>
           {channels.map((c) => (
@@ -95,12 +68,12 @@ export function LibraryFilters({
       </div>
 
       {/* Status */}
-      <div>
-        <label style={labelStyle}>Status</label>
+      <div className={styles.field}>
+        <label className={styles.label}>Status</label>
         <select
           value={state.status}
           onChange={(e) => set("status", e.target.value as StatusFilter)}
-          style={fieldStyle}
+          className={styles.select}
         >
           <option value="all">All</option>
           <option value="ok">Done</option>
@@ -109,12 +82,12 @@ export function LibraryFilters({
       </div>
 
       {/* Sort */}
-      <div>
-        <label style={labelStyle}>Sort</label>
+      <div className={styles.field}>
+        <label className={styles.label}>Sort</label>
         <select
           value={state.sort}
           onChange={(e) => set("sort", e.target.value as SortKey)}
-          style={fieldStyle}
+          className={styles.select}
         >
           <option value="date">Newest</option>
           <option value="views">Est. views</option>
@@ -122,24 +95,30 @@ export function LibraryFilters({
       </div>
 
       {/* Date range */}
-      <div>
-        <label style={labelStyle}>From</label>
+      <div className={styles.field}>
+        <label className={styles.label}>From</label>
         <input
           type="date"
           value={state.from}
           onChange={(e) => set("from", e.target.value)}
-          style={fieldStyle}
+          className={styles.input}
         />
       </div>
-      <div>
-        <label style={labelStyle}>To</label>
+      <div className={styles.field}>
+        <label className={styles.label}>To</label>
         <input
           type="date"
           value={state.to}
           onChange={(e) => set("to", e.target.value)}
-          style={fieldStyle}
+          className={styles.input}
         />
       </div>
+      {resultCount !== undefined ? (
+        <div className={styles.resultCount} aria-live="polite">
+          <strong>{resultCount}</strong>
+          <span>visible</span>
+        </div>
+      ) : null}
     </div>
   );
 }

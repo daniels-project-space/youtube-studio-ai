@@ -16,10 +16,20 @@ import {
   resolveChannelShowProfileComposition,
 } from "@/engine/channelShowProfile";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
-import { creativeCapabilitySelection } from "@/engine/creative/creativeCapabilityCatalog";
-import { resolveCertifiedChannelComposition } from "@/engine/channelCompositionCatalog";
+import {
+  CREATIVE_CAPABILITY_CATALOG,
+  creativeCapabilitySelection,
+} from "@/engine/creative/creativeCapabilityCatalog";
+import { CREATIVE_CAPABILITY_RECEIPT_CATALOG } from "@/engine/creative/creativeCapabilityReceiptCatalog";
+import {
+  CHANNEL_COMPOSITION_RECEIPT_VERSION,
+  SOURCE_ATTRIBUTED_DATA_STORY_V3_MATERIALIZATION,
+  resolveChannelCapabilityCompositionPlan,
+  resolveCertifiedChannelComposition,
+} from "@/engine/channelCompositionCatalog";
 import { SOURCE_ATTRIBUTED_DATA_STORY, dataStoryInsertParams } from "@/engine/dataStory";
 import { designPipeline } from "@/engine/designer";
+import { certifiedFamilyAdmission } from "@/engine/certifiedFamilyAdmission";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 
@@ -44,6 +54,16 @@ const profile = createChannelShowProfile({
   pipeline: design.pipeline,
 });
 
+assert.throws(
+  () => createChannelShowProfile({
+    programBrief: brief,
+    capabilitySelections,
+    pipeline: design.pipeline.filter((entry) => entry.block !== "episode_graph"),
+  }),
+  /requires exactly one episode_graph block/,
+  "a new v4 source-data capability plan must retain Episode Graph even though legacy v3 receipts do not",
+);
+
 assert.deepEqual(
   assertChannelShowProfile({
     profile,
@@ -55,18 +75,25 @@ assert.deepEqual(
   "a profile must replay only its exact admitted composition",
 );
 assert.equal(channelShowProfileFingerprint(profile), profile.fingerprint);
+assert.equal(profile.composition, undefined);
+assert.equal(profile.compositionBinding?.kind, "capability_plan_v1");
 assert.equal(
-  profile.composition?.key,
+  profile.compositionBinding?.kind === "capability_plan_v1"
+    ? profile.compositionBinding.plan.fragments[0]?.capability
+    : undefined,
   "source_attributed_data_story",
-  "the explicit existing data-story capability must become a durable named composition rather than collapse into generic narrated stock",
+  "the explicit existing data-story capability must become a durable capability-owned plan rather than collapse into generic narrated stock",
 );
 assert.deepEqual(
-  resolveChannelShowProfileComposition({
+  profile.compositionBinding?.kind === "capability_plan_v1"
+    ? profile.compositionBinding.plan
+    : undefined,
+  resolveChannelCapabilityCompositionPlan({
     family: brief.family,
-    selectedCapabilityKeys: profile.selectedCapabilityKeys,
+    selectedCapabilityKeys: ["source_attributed_data_story"],
+    expectedFragmentVersions: { source_attributed_data_story: "v2" },
   }),
-  profile.composition,
-  "the Show Profile must resolve its current receipt from the exact selected capability set",
+  "the Show Profile must resolve its current sealed plan from the exact selected capability set",
 );
 assert.throws(
   () => resolveChannelShowProfileComposition({
@@ -102,6 +129,52 @@ assert.deepEqual(
   profile,
   "a new Convex channel write must bind the profile to its exact compiler baseline",
 );
+const sourceDataStoryCapabilityDefinition = CREATIVE_CAPABILITY_CATALOG.find(
+  (definition) => definition.capability === "source_attributed_data_story",
+);
+assert.ok(sourceDataStoryCapabilityDefinition);
+const mutableSourceDataStoryCapabilityDefinition =
+  sourceDataStoryCapabilityDefinition as { compositionFragmentVersion?: string };
+const originalSourceDataStoryFragmentVersion =
+  mutableSourceDataStoryCapabilityDefinition.compositionFragmentVersion;
+try {
+  mutableSourceDataStoryCapabilityDefinition.compositionFragmentVersion = "v999";
+  assert.throws(
+    () => createChannelShowProfile({
+      programBrief: brief,
+      capabilitySelections,
+      pipeline: design.pipeline,
+    }),
+    /resolves v2 but the declared fragment version is v999/,
+    "the rich Show Profile admission must bind its selected capability to the declared fragment version",
+  );
+} finally {
+  mutableSourceDataStoryCapabilityDefinition.compositionFragmentVersion =
+    originalSourceDataStoryFragmentVersion;
+}
+const sourceDataStoryReceiptDefinition = CREATIVE_CAPABILITY_RECEIPT_CATALOG.find(
+  (definition) => definition.capability === "source_attributed_data_story",
+);
+assert.ok(sourceDataStoryReceiptDefinition);
+const mutableSourceDataStoryReceiptDefinition =
+  sourceDataStoryReceiptDefinition as { compositionFragmentVersion?: string };
+const originalSourceDataStoryReceiptFragmentVersion =
+  mutableSourceDataStoryReceiptDefinition.compositionFragmentVersion;
+try {
+  mutableSourceDataStoryReceiptDefinition.compositionFragmentVersion = "v999";
+  assert.throws(
+    () => assertChannelShowProfileReceiptExactComposition({
+      profile,
+      programBrief: brief,
+      pipeline: design.pipeline,
+    }),
+    /resolves v2 but the declared fragment version is v999/,
+    "the Convex-safe Show Profile admission must enforce its matching receipt-catalog fragment version",
+  );
+} finally {
+  mutableSourceDataStoryReceiptDefinition.compositionFragmentVersion =
+    originalSourceDataStoryReceiptFragmentVersion;
+}
 assert.deepEqual(
   assertChannelShowProfileProgramBinding({ profile, programBrief: brief }),
   profile,
@@ -205,10 +278,21 @@ const rekeyed = {
   contentLaneFingerprint: profile.contentLaneFingerprint,
   familyManifestFingerprint: profile.familyManifestFingerprint,
   programBriefFingerprint: profile.programBriefFingerprint,
-  composition: profile.composition,
+  compositionBinding: profile.compositionBinding,
   version: profile.version,
 };
 assert.deepEqual(parseChannelShowProfile(rekeyed), profile, "object key order must not alter a show profile");
+assert.throws(
+  () => parseChannelShowProfile({
+    ...profile,
+    composition: resolveCertifiedChannelComposition({
+      family: brief.family,
+      selectedCapabilityKeys: profile.selectedCapabilityKeys,
+    }),
+  }),
+  /cannot carry both legacy and modular composition authority/,
+  "a profile may have exactly one sealed composition authority",
+);
 
 assert.throws(
   () => parseChannelShowProfile({ ...profile, selectedCapabilityKeys: ["source_attributed_data_story", "source_attributed_data_story"] }),
@@ -365,6 +449,89 @@ assert.throws(
   "the Convex-safe receipt codec must enforce the same selected-route binding",
 );
 
+const legacyV3DefinitionIdentity = {
+  key: "source_attributed_data_story",
+  definitionVersion: "v3",
+  family: "narrated_stock",
+  title: "Source-attributed data story",
+  qualityFocus: ["named sources", "spoken numeric anchors", "readable chart progression", "causal comparison"],
+  requiredCapabilityKeys: ["source_attributed_data_story"],
+  materialization: SOURCE_ATTRIBUTED_DATA_STORY_V3_MATERIALIZATION,
+} as const;
+const legacyV3ExactCompositionBody = {
+  version: CHANNEL_COMPOSITION_RECEIPT_VERSION,
+  key: "source_attributed_data_story",
+  definitionVersion: "v3",
+  definitionFingerprint: sha256Hex(canonicalJson(legacyV3DefinitionIdentity)),
+  family: "narrated_stock",
+  title: "Source-attributed data story",
+  qualityFocus: ["named sources", "spoken numeric anchors", "readable chart progression", "causal comparison"],
+} as const;
+const legacyV3ExactComposition = {
+  ...legacyV3ExactCompositionBody,
+  fingerprint: sha256Hex(canonicalJson(legacyV3ExactCompositionBody)),
+} as const;
+const legacyV3Pipeline = design.pipeline.filter((entry) => entry.block !== "episode_graph");
+const legacyV3ExactProfileBody = {
+  version: profile.version,
+  programBriefFingerprint: profile.programBriefFingerprint,
+  familyManifestFingerprint: profile.familyManifestFingerprint,
+  contentLaneFingerprint: profile.contentLaneFingerprint,
+  creativeCapabilityCatalogFingerprint: profile.creativeCapabilityCatalogFingerprint,
+  selectedCapabilityKeys: profile.selectedCapabilityKeys,
+  composition: legacyV3ExactComposition,
+  designedPipelineFingerprint: profile.designedPipelineFingerprint,
+};
+const legacyV3ExactProfile = {
+  ...legacyV3ExactProfileBody,
+  fingerprint: sha256Hex(canonicalJson(legacyV3ExactProfileBody)),
+};
+const legacyV3NoEpisodeGraphProfileBody = {
+  ...legacyV3ExactProfileBody,
+  designedPipelineFingerprint: sha256Hex(canonicalJson(legacyV3Pipeline)),
+};
+const legacyV3NoEpisodeGraphProfile = {
+  ...legacyV3NoEpisodeGraphProfileBody,
+  fingerprint: sha256Hex(canonicalJson(legacyV3NoEpisodeGraphProfileBody)),
+};
+assert.deepEqual(
+  assertChannelShowProfilePipelineCompatibility({
+    profile: legacyV3NoEpisodeGraphProfile,
+    programBrief: brief,
+    pipeline: legacyV3Pipeline,
+  }),
+  legacyV3NoEpisodeGraphProfile,
+  "the rich compatibility gate must preserve a v3 retry without the later Episode Graph",
+);
+assert.deepEqual(
+  assertChannelShowProfileReceiptPipelineCompatibility({
+    profile: legacyV3NoEpisodeGraphProfile,
+    programBrief: brief,
+    pipeline: legacyV3Pipeline,
+  }),
+  legacyV3NoEpisodeGraphProfile,
+  "the pre-plan exact v3 receipt remains valid for historical retry compatibility",
+);
+assert.throws(
+  () => assertChannelShowProfileReceiptExactComposition({
+    profile: legacyV3ExactProfile,
+    programBrief: brief,
+    pipeline: design.pipeline,
+  }),
+  /does not match the admitted channel route|requires a capability plan binding/,
+  "a new selected-capability admission cannot silently retain the retired exact-catalog authority",
+);
+assert.deepEqual(
+  assertChannelShowProfile({
+    profile: legacyV3ExactProfile,
+    programBrief: brief,
+    capabilitySelections,
+    pipeline: design.pipeline,
+  }),
+  profile,
+  "a historically sealed v3 exact receipt upgrades to the current plan only on a fresh admission",
+);
+
 const legacyDataStoryDefinitionIdentity = {
   key: "source_attributed_data_story",
   definitionVersion: "v1",
@@ -374,7 +541,7 @@ const legacyDataStoryDefinitionIdentity = {
   requiredCapabilityKeys: ["source_attributed_data_story"],
 } as const;
 const legacyDataStoryCompositionBody = {
-  version: profile.composition!.version,
+  version: CHANNEL_COMPOSITION_RECEIPT_VERSION,
   key: "source_attributed_data_story",
   definitionVersion: "v1",
   definitionFingerprint: sha256Hex(canonicalJson(legacyDataStoryDefinitionIdentity)),
@@ -439,7 +606,7 @@ const legacyV2DataStoryDefinitionIdentity = {
   },
 } as const;
 const legacyV2DataStoryCompositionBody = {
-  version: profile.composition!.version,
+  version: CHANNEL_COMPOSITION_RECEIPT_VERSION,
   key: "source_attributed_data_story",
   definitionVersion: "v2",
   definitionFingerprint: sha256Hex(canonicalJson(legacyV2DataStoryDefinitionIdentity)),
@@ -599,9 +766,14 @@ const genericCinematicProfile = createChannelShowProfile({
   pipeline: [],
 });
 assert.equal(
-  genericCinematicProfile.composition,
-  undefined,
-  "a generic or supervised family remains profile-readable without acquiring an autonomous composition label",
+  genericCinematicProfile.composition?.key,
+  "cinematic_visual_control_story",
+  "a route-complete cinematic profile carries its real composition receipt even before runtime qualification",
+);
+assert.equal(
+  certifiedFamilyAdmission("cinematic").automatic,
+  false,
+  "a composition receipt describes the channel plan; it never substitutes for independently measured runtime admission",
 );
 
 console.log("channel show profile contract tests passed");

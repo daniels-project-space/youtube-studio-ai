@@ -53,6 +53,27 @@ export function renderBlockMachineClass(blockId: string): RenderBlockMachineClas
   throw new Error(`renderBlockMachineClass: "${blockId}" is not a remote render block`);
 }
 
+export type PipelineInvocationBudgetAdmission =
+  | {
+      kind: "channel-inception-probe";
+      maximumCostUsd: number;
+      receiptFingerprint: string;
+      subject: string;
+      pipelineOverrideFingerprint: string;
+      dispatchEnvelopeFingerprint: string;
+    }
+  | {
+      /** Full private final-master benchmark; it never has upload authority. */
+      kind: "route-qualification-benchmark";
+      maximumCostUsd: number;
+      receiptFingerprint: string;
+      subject: string;
+      pipelineOverrideFingerprint: string;
+      dispatchEnvelopeFingerprint: string;
+      productionPipelineFingerprint: string;
+      preflightReceiptFingerprint: string;
+    };
+
 export interface PipelineInvocationSnapshot {
   version: typeof PIPELINE_INVOCATION_SNAPSHOT_VERSION;
   ownerId: string;
@@ -76,14 +97,25 @@ export interface PipelineInvocationSnapshot {
    * historical runs that predate Channel Show Profile v1.
    */
   showProfileFingerprint?: string;
-  budgetAdmission?: {
-    kind: "channel-inception-probe";
-    maximumCostUsd: number;
-    receiptFingerprint: string;
-    subject: string;
-    pipelineOverrideFingerprint: string;
-    dispatchEnvelopeFingerprint: string;
-  };
+  /**
+   * Present when the channel's canonical program brief resolves to a sealed
+   * Program Route. Optional solely for durable invocations that predate the
+   * route receipt; route-bearing fresh runs must also carry its seed-store
+   * counterpart before execution begins.
+   */
+  programRouteFingerprint?: string;
+  budgetAdmission?: PipelineInvocationBudgetAdmission;
+}
+
+/**
+ * Route-bearing invocations carry their own immutable route seed and must not
+ * inspect mutable channel identity on retry. Earlier durable snapshots have
+ * no route receipt, so they retain the historical show-profile guard.
+ */
+export function pipelineInvocationUsesCurrentShowProfileGuard(
+  snapshot?: Pick<PipelineInvocationSnapshot, "programRouteFingerprint">,
+): boolean {
+  return snapshot === undefined || snapshot.programRouteFingerprint === undefined;
 }
 
 function requiredText(value: unknown, label: string): string {
@@ -203,10 +235,19 @@ export function normalizePipelineInvocationSnapshot(
   if (showProfileFingerprint !== undefined && !/^[a-f0-9]{64}$/.test(showProfileFingerprint)) {
     throw new Error("pipeline invocation channel show profile fingerprint is invalid");
   }
+  const programRouteFingerprint = snapshot.programRouteFingerprint === undefined
+    ? undefined
+    : requiredText(snapshot.programRouteFingerprint, "channel program route fingerprint");
+  if (programRouteFingerprint !== undefined && !/^[a-f0-9]{64}$/.test(programRouteFingerprint)) {
+    throw new Error("pipeline invocation channel program route fingerprint is invalid");
+  }
   let budgetAdmission: PipelineInvocationSnapshot["budgetAdmission"];
   if (snapshot.budgetAdmission !== undefined) {
     const admission = snapshot.budgetAdmission;
-    if (admission.kind !== "channel-inception-probe") {
+    if (
+      admission.kind !== "channel-inception-probe" &&
+      admission.kind !== "route-qualification-benchmark"
+    ) {
       throw new Error("pipeline invocation budget admission kind is invalid");
     }
     if (
@@ -235,7 +276,7 @@ export function normalizePipelineInvocationSnapshot(
     ) {
       throw new Error("pipeline invocation budget admission fingerprint is invalid");
     }
-    budgetAdmission = {
+    const common = {
       kind: admission.kind,
       maximumCostUsd: admission.maximumCostUsd,
       receiptFingerprint,
@@ -243,6 +284,27 @@ export function normalizePipelineInvocationSnapshot(
       pipelineOverrideFingerprint,
       dispatchEnvelopeFingerprint,
     };
+    if (admission.kind === "route-qualification-benchmark") {
+      const productionPipelineFingerprint = requiredText(
+        admission.productionPipelineFingerprint,
+        "benchmark production pipeline fingerprint",
+      );
+      const preflightReceiptFingerprint = requiredText(
+        admission.preflightReceiptFingerprint,
+        "benchmark preflight receipt fingerprint",
+      );
+      if (!/^[a-f0-9]{64}$/.test(productionPipelineFingerprint) || !/^[a-f0-9]{64}$/.test(preflightReceiptFingerprint)) {
+        throw new Error("pipeline invocation benchmark binding fingerprint is invalid");
+      }
+      budgetAdmission = {
+        ...common,
+        kind: "route-qualification-benchmark",
+        productionPipelineFingerprint,
+        preflightReceiptFingerprint,
+      };
+    } else {
+      budgetAdmission = { ...common, kind: "channel-inception-probe" };
+    }
   }
 
   return {
@@ -264,6 +326,7 @@ export function normalizePipelineInvocationSnapshot(
     compilationCapabilities,
     reservedMaxCostUsd: snapshot.reservedMaxCostUsd,
     ...(showProfileFingerprint ? { showProfileFingerprint } : {}),
+    ...(programRouteFingerprint ? { programRouteFingerprint } : {}),
     ...(budgetAdmission ? { budgetAdmission } : {}),
   };
 }

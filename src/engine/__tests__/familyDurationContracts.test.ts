@@ -206,11 +206,10 @@ assert.throws(
 );
 
 // --- Wave: cinematic family LTX style-id wiring ---------------------------
-// The gen_footage render path (src/trigger/blocks/genFootageBlocks.ts) reads
-// FAMILIES.cinematic.styleId and forwards it end-to-end to
-// applyLtxI2vPromptContract. This is a hard backward-compatibility contract:
-// every existing cinematic channel must keep rendering through the exact
-// same look it always has.
+// The gen_footage render path uses FAMILIES.cinematic.styleId as its safe
+// fallback. A channel's sealed visual identity may now select a different,
+// explicit LTX treatment only when one clear registry match exists; existing
+// or ambiguous channels retain this historical default.
 assert.equal(
   FAMILIES.cinematic.styleId,
   "cinematic_heist_noir",
@@ -226,8 +225,9 @@ assert.equal(
   "cinematic_heist_noir",
   "FAMILIES.cinematic.styleId must resolve through getLtxStyle to a valid, matching LtxStyleDef",
 );
-// No other family currently renders through the LTX I2V contract; each of
-// their catalog entries should simply omit styleId rather than guess a look.
+// No other family has a catalog-owned LTX visual default. Individual admitted
+// modules may carry a sealed runtime style selection, but the family catalog
+// must not guess one for them.
 for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
   if (family === "cinematic") continue;
   assert.equal(

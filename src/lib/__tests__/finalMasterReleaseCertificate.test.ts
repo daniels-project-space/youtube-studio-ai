@@ -1,13 +1,21 @@
 import assert from "node:assert/strict";
 
+import { laneQualityPolicy } from "@/engine/contentLane";
+import { buildQualityEvidence } from "@/engine/qualityEvidence";
+import { selfContainedStoryTopicFingerprint } from "@/engine/selfContainedStoryReceipt";
+import { createFinalMasterQualityEvidenceBinding } from "@/lib/finalMasterQualityEvidenceBinding";
+import { createFinalMasterVisualPacingBinding } from "@/lib/finalMasterVisualPacingBinding";
+import { createStudioTransitionDecisionReceipt } from "@/engine/studioPostproductionDecision";
 import {
   FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
   FINAL_MASTER_RELEASE_CERTIFICATE_REFERENCE_VERSION,
   assertFinalMasterReleaseCertificate,
   assertReleaseCertificateVisualReviewBindings,
+  assertVisualReviewReleaseReceipt,
   createFinalMasterReleaseCertificate,
   createFinalMasterReleaseCertificateReference,
   createVisualReviewReleaseReceipt,
+  finalMasterReleaseCertificateFingerprint,
   finalMasterReleaseEvidenceFrameArtifactsFingerprint,
   finalMasterReleaseEvidenceFrameKeysFingerprint,
   finalMasterReleaseCertificateKey,
@@ -26,6 +34,12 @@ import {
   sealFinalMasterNarrationSemanticEvidence,
   type NarrationTranscriptProof,
 } from "@/lib/narrationTranscriptProof";
+import {
+  ON_SCREEN_TEXT_PROOF_VERSION,
+  TESSERACT_LANGUAGE,
+  TESSERACT_PAGE_SEGMENTATION_MODE,
+  type OnScreenTextProof,
+} from "@/lib/onScreenTextProof";
 import { createUnmeasuredReferenceQualityFinalMasterBinding } from "@/lib/referenceQualityFinalMasterBinding";
 import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
 
@@ -41,6 +55,8 @@ const frameKeys = [
   `${keyPrefix}runs/${runId}/visual-review/review-fingerprint/frames/f002.jpg`,
 ];
 const frameArtifacts = frameKeys.map((r2Key, index) => ({
+  id: `frame-${index + 1}`,
+  tSec: 20 + index * 40,
   r2Key,
   contentSha256: `${index + 1}`.repeat(64),
   byteLength: 100 + index,
@@ -104,6 +120,28 @@ const finalMasterNarrationAudit = prepareFinalMasterNarrationTranscriptAudit({
   finalMasterTranscript: passingTranscriptProof(masterSha256),
 });
 const finalMasterNarration = sealNarrationAudit(finalMasterNarrationAudit);
+const onScreenText: OnScreenTextProof = {
+  version: ON_SCREEN_TEXT_PROOF_VERSION,
+  engine: {
+    name: "tesseract" as const,
+    version: "5.3.4",
+    language: TESSERACT_LANGUAGE,
+    pageSegmentationMode: TESSERACT_PAGE_SEGMENTATION_MODE,
+  },
+  source: { sha256: masterSha256, byteLength: 2_048 },
+  cues: [{
+    id: "short-caption-001",
+    sampleSec: 1.25,
+    expectedTextSha256: "f".repeat(64),
+    expectedTokenCount: 4,
+    recognizedText: "A clear opening hook",
+    recognizedTokenCount: 4,
+    tokenCoverage: 1,
+    minTokenCoverage: 0.8,
+    passed: true,
+  }],
+  passed: true,
+};
 
 const receipt = createVisualReviewReleaseReceipt({
   reviewFingerprint: "review-fingerprint",
@@ -127,12 +165,44 @@ const receiptKey = visualReviewReleaseReceiptKey(
   runId,
   receipt.releaseReceiptFingerprint,
 );
+assert.doesNotThrow(
+  () => assertVisualReviewReleaseReceipt(receipt),
+  "a legacy visual-review release receipt without a wide-sample score must remain readable",
+);
+const {
+  version: _receiptVersion,
+  releaseReceiptFingerprint: _receiptFingerprint,
+  ...unsignedReceipt
+} = receipt;
+void _receiptVersion;
+void _receiptFingerprint;
+const wideSampleReceipt = createVisualReviewReleaseReceipt({
+  ...unsignedReceipt,
+  broadQualityScore: {
+    version: "visual-review-wide-sample-quality/v1",
+    score: 7.4,
+    broadBatchCount: 3,
+  },
+});
+assert.doesNotThrow(
+  () => assertVisualReviewReleaseReceipt(wideSampleReceipt),
+  "a new wide-sample score must be accepted when it is included in the release receipt fingerprint",
+);
+assert.throws(
+  () => assertVisualReviewReleaseReceipt({
+    ...wideSampleReceipt,
+    broadQualityScore: { ...wideSampleReceipt.broadQualityScore!, score: 7.3 },
+  }),
+  /fingerprint does not match its payload/,
+  "editing a sealed wide-sample score must invalidate its release receipt",
+);
 
 const certificate = createFinalMasterReleaseCertificate({
   version: FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
   finalMaster: {
     r2Key: `${keyPrefix}runs/${runId}/final.mp4`,
     sha256: masterSha256,
+    byteLength: 2_048,
     durationSec: 92.4,
   },
   visualReview: {
@@ -154,7 +224,131 @@ const certificate = createFinalMasterReleaseCertificate({
     finalMasterNarration,
     finalMasterMeters: { integratedLufs: -16.2, windowMeanDb: -21.1 },
   },
+  onScreenText,
 });
+
+function selfContainedQualityBinding(narrationTextSha256: string) {
+  const topic = "How a water clock changed a city";
+  const qualityEvidence = buildQualityEvidence({
+    episode: {
+      lane: { key: "whiteboard_explainer", renderer: "whiteboard_scribe" },
+      topic,
+      story: {
+        plan: {
+          version: "self-contained-story-plan-evidence/v1",
+          measurementScope: "plan",
+          family: "whiteboard",
+          storyKind: "whiteboard-storyboard/v1",
+          contentLaneKey: "whiteboard_explainer",
+          topic,
+          topicFingerprint: selfContainedStoryTopicFingerprint(topic),
+          routeFingerprint: "4".repeat(64),
+          programBriefFingerprint: "5".repeat(64),
+          receiptFingerprint: "6".repeat(64),
+          storyFingerprint: "7".repeat(64),
+          plannerId: "certificate-fixture/v1",
+          receiptVersion: "self-contained-story-receipt/v1",
+          narrationTextSha256,
+          counts: { beatCount: 2, shotCount: 2, panelCount: 2, spokenLineCount: 2 },
+        },
+      },
+    },
+    technical: { passed: true, evaluator: "fixture", evidence: ["master validated"] },
+    visual: { passed: true, evaluator: "fixture", evidence: ["review passed"] },
+    temporal: { passed: true, evaluator: "fixture", evidence: ["timing passed"] },
+    narrative: { passed: true, evaluator: "fixture", evidence: ["critic passed"] },
+    audio: { score: 8, minimumScore: 7, evaluator: "fixture", evidence: ["audio passed"] },
+    brand: { passed: true, evaluator: "fixture", evidence: ["brand passed"] },
+  });
+  return createFinalMasterQualityEvidenceBinding({
+    finalMaster: { sha256: masterSha256, durationSec: 92.4 },
+    visualReview: {
+      reviewFingerprint: "review-fingerprint",
+      reviewReceiptVersion: "visual-review-receipt/v1",
+      reviewReceiptFingerprint,
+      releaseReceiptFingerprint: receipt.releaseReceiptFingerprint,
+    },
+    contentLane: { key: "whiteboard_explainer", renderer: "whiteboard_scribe" },
+    programRoute: {
+      routeFingerprint: "4".repeat(64),
+      family: "whiteboard",
+      contentLaneKey: "whiteboard_explainer",
+      programBriefFingerprint: "5".repeat(64),
+    },
+    qualityEvidence,
+  });
+}
+
+const { certificateFingerprint: _narrationBoundCertificateFingerprint, ...narrationBoundCertificateInput } = certificate;
+void _narrationBoundCertificateFingerprint;
+const selfContainedNarrationBoundCertificate = createFinalMasterReleaseCertificate({
+  ...narrationBoundCertificateInput,
+  qualityEvidence: selfContainedQualityBinding(approvedNarrationTextSha256),
+});
+assert.doesNotThrow(
+  () => assertFinalMasterReleaseCertificate(selfContainedNarrationBoundCertificate),
+  "a narrated self-contained plan may release only when its approved narration digest matches the audited final master",
+);
+assert.throws(
+  () => createFinalMasterReleaseCertificate({
+    ...narrationBoundCertificateInput,
+    qualityEvidence: selfContainedQualityBinding("f".repeat(64)),
+  }),
+  /self-contained narrated plan does not match the narration audited in the final-master certificate/,
+  "a certificate must reject a self-contained plan whose approved narration differs from the audible final master",
+);
+
+const whiteboardQualityBinding = selfContainedQualityBinding(approvedNarrationTextSha256);
+const whiteboardPacingPolicy = laneQualityPolicy("whiteboard_explainer").visualPacing;
+const whiteboardPacingIntervals = [
+  ...Array.from({ length: 11 }, (_, index) => ({
+    startSec: index * 8,
+    endSec: (index + 1) * 8,
+    durationSec: 8,
+  })),
+  { startSec: 88, endSec: 92.4, durationSec: 4.4 },
+];
+const whiteboardPacing = createFinalMasterVisualPacingBinding({
+  finalMaster: { sha256: masterSha256, durationSec: 92.4 },
+  contentLane: { key: "whiteboard_explainer", renderer: "whiteboard_scribe" },
+  visualReview: {
+    reviewFingerprint: "review-fingerprint",
+    reviewReceiptVersion: "visual-review-receipt/v1",
+    reviewReceiptFingerprint,
+    releaseReceiptFingerprint: receipt.releaseReceiptFingerprint,
+  },
+  qualityEvidence: {
+    bindingFingerprint: whiteboardQualityBinding.bindingFingerprint,
+    qualityEvidenceFingerprint: whiteboardQualityBinding.qualityEvidenceFingerprint,
+  },
+  visualPacing: {
+    source: "ffmpeg/select-scene",
+    ran: true,
+    usable: true,
+    enforced: true,
+    verdict: "pass",
+    signal: "calibrated_scene_rhythm_observed",
+    durationSec: 92.4,
+    policy: whiteboardPacingPolicy,
+    changeTimestampsSec: Array.from({ length: 11 }, (_, index) => (index + 1) * 8),
+    changeCount: 11,
+    rawHoldIntervals: whiteboardPacingIntervals,
+    evaluatedHoldIntervals: whiteboardPacingIntervals,
+    excludedWindows: [],
+    maxHoldSec: 8,
+    medianHoldSec: 8,
+    meetsPolicy: true,
+  },
+});
+const pacingBoundCertificate = createFinalMasterReleaseCertificate({
+  ...narrationBoundCertificateInput,
+  qualityEvidence: whiteboardQualityBinding,
+  visualPacing: whiteboardPacing,
+});
+assert.doesNotThrow(
+  () => assertFinalMasterReleaseCertificate(pacingBoundCertificate),
+  "a release certificate retains only pacing evidence bound to the same master, review, lane, and QA receipt",
+);
 
 const certificateKey = finalMasterReleaseCertificateKey(
   keyPrefix,
@@ -205,6 +399,42 @@ assert.doesNotThrow(
   "a frozen legacy release certificate without the new reference binding must remain resumable/readable",
 );
 
+const { byteLength: _newMasterByteLength, ...legacyFinalMaster } = certificate.finalMaster;
+void _newMasterByteLength;
+const { certificateFingerprint: _legacyCertificateFingerprint, ...certificateWithoutFingerprint } = certificate;
+void _legacyCertificateFingerprint;
+const legacyUnsignedCertificate = {
+  ...certificateWithoutFingerprint,
+  finalMaster: legacyFinalMaster,
+};
+const legacyCertificate = {
+  ...legacyUnsignedCertificate,
+  certificateFingerprint: finalMasterReleaseCertificateFingerprint(legacyUnsignedCertificate),
+};
+assert.doesNotThrow(
+  () => assertFinalMasterReleaseCertificate(legacyCertificate),
+  "a pre-byte-receipt certificate with its original fingerprint remains readable for historical provenance",
+);
+assert.throws(
+  () => createFinalMasterReleaseCertificate(legacyUnsignedCertificate),
+  /lacks a byte-bound final-master receipt/,
+  "new release certificates must bind the final master byte length",
+);
+assert.throws(
+  () => createFinalMasterReleaseCertificateReference({
+    keyPrefix,
+    runId,
+    certificateKey: finalMasterReleaseCertificateKey(
+      keyPrefix,
+      runId,
+      legacyCertificate.certificateFingerprint,
+    ),
+    certificate: legacyCertificate,
+  }),
+  /lacks a byte-bound final-master receipt/,
+  "new compact certificate references must retain the final master byte length",
+);
+
 const retained = retainedFinalMasterReleaseObjectKeys({
   keyPrefix,
   runId,
@@ -233,6 +463,28 @@ assert.doesNotThrow(() => assertReleaseCertificateVisualReviewBindings({
     frames: frameArtifacts,
   },
 }));
+for (const [label, framePatch] of [
+  ["identity", { id: "forged-frame-id" }],
+  ["timestamp", { tSec: 20.25 }],
+  ["content hash", { contentSha256: "f".repeat(64) }],
+  ["byte length", { byteLength: 999 }],
+] as const) {
+  assert.throws(
+    () => assertReleaseCertificateVisualReviewBindings({
+      certificate,
+      receipt,
+      evidenceManifest: {
+        source: { durationSec: 92.4, sha256: masterSha256 },
+        manifestKey: evidenceManifestKey,
+        frames: frameArtifacts.map((frame, index) =>
+          index === 0 ? { ...frame, ...framePatch } : frame,
+        ),
+      },
+    }),
+    /does not match its visual-review evidence manifest/,
+    `release-manifest replay must reject a forged visual-review frame ${label}`,
+  );
+}
 
 assert.throws(
   () => assertFinalMasterReleaseCertificate({ ...certificate, finalMaster: { ...certificate.finalMaster, sha256: "d".repeat(64) } }),
@@ -271,6 +523,28 @@ assert.throws(
 
 const { certificateFingerprint: _certificateFingerprint, ...certificateInput } = certificate;
 void _certificateFingerprint;
+const certificatePostproductionDecision = createStudioTransitionDecisionReceipt({
+  frozenChannelModuleConfig: { editor_brief: { transitions: "hardcut" } },
+  explicitTransition: "hardcut",
+  studioTransitionPreset: "crossfade",
+  studioSourceEntryFingerprints: ["a".repeat(64)],
+});
+const certificateWithPostproductionDecision = createFinalMasterReleaseCertificate({
+  ...certificateInput,
+  studioPostproductionDecisions: [certificatePostproductionDecision],
+});
+assert.doesNotThrow(
+  () => assertFinalMasterReleaseCertificate(certificateWithPostproductionDecision),
+  "a certificate may retain one sealed decision that records the transition actually selected for the master",
+);
+assert.throws(
+  () => createFinalMasterReleaseCertificate({
+    ...certificateInput,
+    studioPostproductionDecisions: [certificatePostproductionDecision, certificatePostproductionDecision],
+  }),
+  /cannot repeat a Studio post-production decision/i,
+  "a certificate may not duplicate a post-production decision receipt",
+);
 const referenceReviewFingerprint = "e".repeat(64);
 const certificateWithReferenceQuality = createFinalMasterReleaseCertificate({
   ...certificateInput,
@@ -341,6 +615,28 @@ assert.throws(
   }),
   /duration does not match the released master/,
   "certificate creation must reject a narration audition receipt with different master timing",
+);
+assert.throws(
+  () => createFinalMasterReleaseCertificate({
+    ...certificateInput,
+    onScreenText: {
+      ...onScreenText,
+      source: { ...onScreenText.source, sha256: "f".repeat(64) },
+    },
+  }),
+  /on-screen text proof belongs to a different released master/,
+  "certificate creation must reject timed OCR evidence for different final-master bytes",
+);
+assert.throws(
+  () => createFinalMasterReleaseCertificate({
+    ...certificateInput,
+    onScreenText: {
+      ...onScreenText,
+      passed: false,
+    },
+  }),
+  /on-screen text proof does not pass every required cue/,
+  "certificate creation must reject a non-passing timed OCR caption receipt",
 );
 const nonContentAddressedReceiptCertificate = createFinalMasterReleaseCertificate({
   ...certificateInput,

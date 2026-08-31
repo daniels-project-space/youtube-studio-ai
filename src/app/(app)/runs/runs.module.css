@@ -1,0 +1,122 @@
+.page {
+  display: grid;
+  gap: 0;
+  padding-bottom: 2rem;
+}
+
+.filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.filter {
+  min-height: 34px;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-muted);
+  background: rgba(255, 255, 255, 0.018);
+  cursor: pointer;
+  font: 600 0.7rem/1 var(--font-sans);
+  padding: 0.42rem 0.65rem;
+  transition: border-color 150ms ease, background 150ms ease, color 150ms ease;
+}
+
+.filter:hover,
+.filter[data-active="true"] {
+  border-color: color-mix(in srgb, var(--color-accent) 38%, var(--color-border));
+  color: var(--color-fg);
+}
+
+.filter[data-active="true"] {
+  background: var(--color-accent-soft);
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 0.55rem;
+  margin-bottom: 1rem;
+  padding: 0.68rem;
+}
+
+.metric {
+  --metric-tone: var(--color-faint);
+  display: grid;
+  min-width: 0;
+  gap: 0.15rem;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  color: inherit;
+  background: rgba(255, 255, 255, 0.018);
+  cursor: pointer;
+  padding: 0.62rem 0.7rem;
+  text-align: left;
+  transition: border-color 150ms ease, background 150ms ease, transform 150ms ease;
+}
+
+.metric:hover {
+  border-color: color-mix(in srgb, var(--metric-tone) 44%, var(--color-border));
+  transform: translateY(-1px);
+}
+
+.metric[data-active="true"] {
+  border-color: color-mix(in srgb, var(--metric-tone) 50%, var(--color-border));
+  background: color-mix(in srgb, var(--metric-tone) 10%, transparent);
+}
+
+.metric[data-status="running"] { --metric-tone: var(--color-running); }
+.metric[data-status="queued"] { --metric-tone: var(--color-queued); }
+.metric[data-status="failed"] { --metric-tone: var(--color-failed); }
+.metric[data-status="ok"] { --metric-tone: var(--color-ok); }
+
+.metricLabel {
+  overflow: hidden;
+  color: var(--color-faint);
+  font: 600 0.61rem/1.2 var(--font-mono);
+  letter-spacing: 0.07em;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.metricValue {
+  color: var(--metric-tone);
+  font-family: var(--font-display);
+  font-size: 1.16rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  line-height: 1.1;
+}
+
+.list {
+  display: grid;
+  gap: 0.58rem;
+}
+
+@media (max-width: 780px) {
+  .summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 520px) {
+  .filters {
+    width: 100%;
+  }
+
+  .filter {
+    flex: 1 1 auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .filter,
+  .metric {
+    transition: none;
+  }
+
+  .metric:hover {
+    transform: none;
+  }
+}

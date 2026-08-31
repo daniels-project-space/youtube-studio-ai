@@ -8,6 +8,7 @@ import {
   sealCinematicProofAdmissionReceipt,
 } from "@/lib/cinematicProofAdmission";
 import { renderDirectNovita } from "@/lib/novitaDirectRender";
+import { applyLtxI2vPromptContract } from "@/lib/ltxI2vPrompt";
 import {
   launchVideo,
   renderVideo,
@@ -88,7 +89,26 @@ async function main(): Promise<void> {
   );
   const syntheticNativeProof = proofFor(native720Profile);
 
+  const animeBoundShot = applyLtxI2vPromptContract({
+    id: "style-bound-direct-worker-shot",
+    prompt: "A traveler waits beneath a station clock.",
+    motion: "The traveler takes one measured step toward the platform edge.",
+    seconds: 4,
+    cameraMove: "dolly_push",
+    shotScale: "medium",
+    lens: "50mm",
+    stillKey: "owners/o/channels/c/stills/opening.png",
+  }, "anime");
+
   let paidRenderCalls = 0;
+  await assert.rejects(
+    () => renderDirectNovita({
+      ...native720Cfg(() => { paidRenderCalls += 1; }),
+      shots: [animeBoundShot],
+    }, "video"),
+    /bound to a different or unsupported visual style; expected cinematic_heist_noir/,
+    "the direct provider boundary must enforce the same style-bound I2V contract as normal callers",
+  );
   await assert.rejects(
     () => renderDirectNovita(native720Cfg(() => { paidRenderCalls += 1; }), "video"),
     /no immutable approved proof receipt is registered/,

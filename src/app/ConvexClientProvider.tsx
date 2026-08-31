@@ -6,6 +6,7 @@ import {
   ConvexReactClient,
   useConvexAuth,
 } from "convex/react";
+import styles from "./StudioSessionGate.module.css";
 
 type TokenState = "loading" | "authenticated" | "unauthenticated";
 
@@ -72,58 +73,54 @@ function StudioConvexAuthGate({ children }: { children: ReactNode }) {
   const { isLoading, isAuthenticated } = useConvexAuth();
 
   if (isLoading) {
-    return (
-      <main
-        aria-busy="true"
-        aria-label="Authenticating studio session"
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          padding: "2rem",
-          color: "#a1a1aa",
-          fontFamily: "system-ui",
-        }}
-      >
-        Securing studio session…
-      </main>
-    );
+    return <StudioSessionGate state="loading" />;
   }
 
   if (!isAuthenticated) {
-    return (
-      <main
-        style={{
-          minHeight: "100vh",
-          display: "grid",
-          placeItems: "center",
-          padding: "2rem",
-          color: "#f87171",
-          fontFamily: "system-ui",
-        }}
-      >
-        <div style={{ display: "grid", justifyItems: "center", gap: "0.75rem" }}>
-          <p style={{ margin: 0 }}>Studio data is temporarily unavailable.</p>
-          <button
-            type="button"
-            onClick={() => window.location.reload()}
-            style={{
-              border: "1px solid rgba(248, 113, 113, 0.32)",
-              borderRadius: "0.65rem",
-              padding: "0.55rem 0.8rem",
-              color: "inherit",
-              background: "rgba(248, 113, 113, 0.08)",
-              cursor: "pointer",
-            }}
-          >
-            Retry live data
-          </button>
-        </div>
-      </main>
-    );
+    return <StudioSessionGate state="unavailable" />;
   }
 
   return children;
+}
+
+function StudioSessionGate({ state }: { state: "loading" | "unavailable" }) {
+  const loading = state === "loading";
+  return (
+    <main
+      className={styles.screen}
+      aria-busy={loading || undefined}
+      aria-label={loading ? "Securing studio session" : "Studio connection unavailable"}
+    >
+      <section className={`${styles.card} glass glass-shine`}>
+        <span className={styles.mark} aria-hidden="true">✦</span>
+        <span className={styles.eyebrow}>AutoStudio · private workspace</span>
+        <h1 className={styles.title}>
+          {loading ? "Securing your studio" : "Live studio connection paused"}
+        </h1>
+        <p className={styles.body}>
+          {loading
+            ? "Checking the signed connection before loading channels, media, or production records."
+            : "Your workspace is still protected, but its signed live-data connection could not be confirmed."}
+        </p>
+        <span className={styles.status} data-state={state}>
+          <span className={styles.statusDot} aria-hidden="true" />
+          {loading ? "Connecting to retained studio data" : "No live records are being shown"}
+        </span>
+        {!loading ? (
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className={`studio-action studio-action-primary ${styles.retry}`}
+          >
+            Retry live data
+          </button>
+        ) : null}
+        <p className={styles.safety}>
+          No render, schedule, or publishing action is started from this state.
+        </p>
+      </section>
+    </main>
+  );
 }
 
 /**

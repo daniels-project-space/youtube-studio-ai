@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 
 import {
   CASEFILE_AUTO_RESEARCH_DEFAULT_DAILY_LIMIT,
   CASEFILE_AUTO_RESEARCH_MAX_CANDIDATES_PER_ITER,
   CASEFILE_AUTO_RESEARCH_MAX_ITERS,
   casefileResearchDayKey,
+  casefileAutoResearchRouteAdmission,
   dispatchCasefileAutoResearch,
   parseCasefileAutoResearchDailyLimit,
   type CasefileAutoResearchDeps,
@@ -35,8 +37,8 @@ function spyDeps(
     listExcludedCaseIds: unknown[][];
     recordCaseId: unknown[][];
     triggerPipeline: unknown[][];
-    countResearchAttemptsToday: unknown[][];
-    recordResearchAttempt: unknown[][];
+    claimResearchAttempt: unknown[][];
+    order: string[];
   };
 } {
   const calls = {
@@ -44,20 +46,22 @@ function spyDeps(
     listExcludedCaseIds: [] as unknown[][],
     recordCaseId: [] as unknown[][],
     triggerPipeline: [] as unknown[][],
-    countResearchAttemptsToday: [] as unknown[][],
-    recordResearchAttempt: [] as unknown[][],
+    claimResearchAttempt: [] as unknown[][],
+    order: [] as string[],
   };
   const deps: CasefileAutoResearchDeps = {
     researchCase: async (...args: unknown[]) => {
       calls.researchCase.push(args);
+      calls.order.push("researchCase");
       return FAKE_CONTENT;
     },
-    countResearchAttemptsToday: async (...args: unknown[]) => {
-      calls.countResearchAttemptsToday.push(args);
-      return attemptsToday;
-    },
-    recordResearchAttempt: async (...args: unknown[]) => {
-      calls.recordResearchAttempt.push(args);
+    claimResearchAttempt: async (channelId, limit) => {
+      calls.claimResearchAttempt.push([channelId, limit]);
+      calls.order.push("claimResearchAttempt");
+      if (attemptsToday >= limit) {
+        return { kind: "daily_ceiling_reached", attemptsToday, limit };
+      }
+      return { kind: "claimed", attemptsToday: attemptsToday + 1, limit };
     },
     maxResearchAttemptsPerDay: CASEFILE_AUTO_RESEARCH_DEFAULT_DAILY_LIMIT,
     listExcludedCaseIds: async (...args: unknown[]) => {
@@ -77,6 +81,46 @@ function spyDeps(
 }
 
 async function run(): Promise<void> {
+  /* ---- 0. scheduler route/profile gate: unsupported Casefile never spends ---- */
+  {
+    const routeAdmission = casefileAutoResearchRouteAdmission({
+      contentLane: {
+        version: "content-lane/v1",
+        key: "cinematic_ai",
+        family: "cinematic",
+        primaryRenderer: "novita_render_video",
+      },
+      family: "cinematic",
+      pipeline: [],
+      identity: { nicheKey: "historical" },
+    });
+    assert.equal(routeAdmission.eligible, false);
+    assert.match(
+      routeAdmission.reason,
+      /missing a canonical program brief/,
+      "a private-review Casefile channel cannot enter automatic research without a sealed route identity",
+    );
+
+    const schedulerSource = readFileSync(
+      new URL("../../trigger/scheduler.ts", import.meta.url),
+      "utf8",
+    );
+    const routeGate = schedulerSource.indexOf("casefileAutoResearchRouteAdmission({");
+    assert.ok(routeGate >= 0, "the scheduler must invoke the Casefile route/profile admission gate");
+    for (const [boundary, index] of [
+      ["claimNextPlanRun", schedulerSource.indexOf("api.contentPlan.claimNextPlanRun")],
+      ["dispatchCasefileAutoResearch", schedulerSource.lastIndexOf("dispatchCasefileAutoResearch(")],
+      ["atomic attempt claim", schedulerSource.indexOf("claimResearchAttempt:")],
+      ["researchCase", schedulerSource.indexOf("researchCase,")],
+    ] as const) {
+      assert.ok(index >= 0, `expected ${boundary} in the scheduler`);
+      assert.ok(
+        routeGate < index,
+        `unsupported Casefile automation must exit before ${boundary} can persist or spend`,
+      );
+    }
+  }
+
   /* ---- 1. eligible + due channel, researchCase succeeds ---- */
   {
     const { deps, calls } = spyDeps();
@@ -194,7 +238,7 @@ async function run(): Promise<void> {
         `researchCase must NEVER be called for lane "${laneKey}" — run-pipeline would reject the packet, so the spend is pure waste`,
       );
       assert.equal(
-        calls.recordResearchAttempt.length,
+        calls.claimResearchAttempt.length,
         0,
         "a lane-skipped dispatch costs nothing and must not consume daily ceiling budget",
       );
@@ -269,7 +313,7 @@ async function run(): Promise<void> {
         0,
         "researchCase must never be called once the fleet-wide daily ceiling is reached",
       );
-      assert.equal(calls.recordResearchAttempt.length, 0, "a skipped dispatch must not inflate the counter");
+      assert.equal(calls.claimResearchAttempt.length, 1, "a skipped dispatch must atomically observe the ceiling, not inflate it");
       assert.equal(calls.listExcludedCaseIds.length, 0);
       assert.equal(calls.triggerPipeline.length, 0);
     }
@@ -308,18 +352,22 @@ async function run(): Promise<void> {
     });
     assert.equal(calls.researchCase.length, 1, "an eligible, in-budget channel must still be researched");
     assert.equal(calls.triggerPipeline.length, 1, "the pipeline must still be triggered on the happy path");
+    assert.ok(
+      calls.order.indexOf("claimResearchAttempt") < calls.order.indexOf("researchCase"),
+      "the durable daily slot must be claimed before any billable research starts",
+    );
     assert.equal(
-      calls.recordResearchAttempt.length,
+      calls.claimResearchAttempt.length,
       1,
       "a billable attempt must be recorded exactly once so the ceiling actually advances",
     );
-    assert.deepEqual(calls.recordResearchAttempt[0], ["channel-7"]);
+    assert.deepEqual(calls.claimResearchAttempt[0], ["channel-7", 3]);
   }
 
-  /* ---- 8. attempt-ledger write failure fails CLOSED (never research uncounted) ---- */
+  /* ---- 8. atomic attempt-claim failure fails CLOSED (never research uncounted) ---- */
   {
     const { deps, calls } = spyDeps({
-      recordResearchAttempt: async () => {
+      claimResearchAttempt: async () => {
         throw new Error("convex unavailable");
       },
     });
@@ -341,7 +389,56 @@ async function run(): Promise<void> {
     assert.equal(calls.triggerPipeline.length, 0);
   }
 
-  /* ---- 9. daily-limit env parsing: conservative default, loud on garbage ---- */
+  /* ---- 9. concurrent dispatches: one atomic final slot, one paid research ---- */
+  {
+    let admittedCount = 0;
+    let researchCalls = 0;
+    const atomicClaim = async (_channelId: string, limit: number) => {
+      // Mirrors the serializable result returned by the Convex mutation: the
+      // increment happens before this async function yields to either caller.
+      if (admittedCount >= limit) {
+        return { kind: "daily_ceiling_reached" as const, attemptsToday: admittedCount, limit };
+      }
+      admittedCount++;
+      return { kind: "claimed" as const, attemptsToday: admittedCount, limit };
+    };
+    const makeDeps = () => spyDeps({
+      maxResearchAttemptsPerDay: 1,
+      claimResearchAttempt: atomicClaim,
+      researchCase: async () => {
+        researchCalls++;
+        return FAKE_CONTENT;
+      },
+    }).deps;
+    const [left, right] = await Promise.all([
+      dispatchCasefileAutoResearch(
+        {
+          channelId: "channel-concurrent-left",
+          channelName: "Concurrent Left",
+          casefileAutoResearchEnabled: true,
+          contentLaneKey: "cinematic_ai",
+        },
+        makeDeps(),
+      ),
+      dispatchCasefileAutoResearch(
+        {
+          channelId: "channel-concurrent-right",
+          channelName: "Concurrent Right",
+          casefileAutoResearchEnabled: true,
+          contentLaneKey: "cinematic_ai",
+        },
+        makeDeps(),
+      ),
+    ]);
+    assert.equal(admittedCount, 1, "only one concurrent caller may reserve the final daily slot");
+    assert.equal(researchCalls, 1, "the losing concurrent caller must not start a paid research run");
+    assert.deepEqual(
+      [left.outcome, right.outcome].sort(),
+      ["daily_ceiling_reached", "researched_and_triggered"],
+    );
+  }
+
+  /* ---- 10. daily-limit env parsing: conservative default, loud on garbage ---- */
   {
     assert.equal(
       parseCasefileAutoResearchDailyLimit(undefined),

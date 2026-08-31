@@ -168,6 +168,7 @@ export async function completedPublishContinuationPatch(
     publishContinuationVideoId: intent.youtubeVideoId,
     publishContinuationUpdatedAt: completedAt,
     publishContinuationCompletedAt: completedAt,
+    publishContinuationQueueDeadlineAt: undefined,
     publishContinuationLastError: undefined,
   };
 }

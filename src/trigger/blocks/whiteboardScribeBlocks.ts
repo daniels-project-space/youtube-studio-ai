@@ -8,7 +8,7 @@
  * the final `videoKey` directly (mirrors the lofi `assemble` block).
  *
  * Deterministic write-on reveal uses no video model; its bounded paid path is
- * per-layer attested Novita art plus TTS. Resolution-configurable (1080p
+ * per-layer attested Nano Banana Pro art plus TTS. Resolution-configurable (1080p
  * default, 2K via `width`).
  *
  * RUNTIME NOTE: the renderer shells out to python3 with faster-whisper +
@@ -19,7 +19,7 @@
  */
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
@@ -31,9 +31,11 @@ import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
 import {
   castWhiteboardSync,
   hasWhiteboardSync,
+  whiteboardGoldenStyleDefects,
   whiteboardImageCallCeiling,
   planWhiteboardStoryboard,
   whiteboardPanelCount,
+  whiteboardPanelsForTargetSeconds,
   type WhiteboardArtRequest,
   type WhiteboardStoryboard,
   type WhiteboardSyncBrief,
@@ -49,33 +51,51 @@ import {
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
 import { laneQualityPolicy } from "@/engine/contentLane";
-import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
-import { novitaCostEnvelope, type NovitaCostEnvelope } from "@/lib/novitaCostEnvelope";
-import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
+import {
+  selfContainedStoryReceiptBindingFromRoute,
+  selfContainedStoryReceiptRequiredForRoute,
+} from "@/engine/selfContainedStoryReceipt";
+import type { CritiquedSelfContainedStory } from "@/engine/selfContainedStoryPlanning";
+import {
+  generateNanoBananaProWhiteboardArtWithReceipt,
+  hasNanoBananaProWhiteboardArt,
+} from "@/lib/banana";
+import { NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE } from "@/lib/nanoBananaWhiteboardArtContract";
 import { PRICE } from "@/engine/pricing";
+import { buildWhiteboardOnScreenTextCues } from "@/lib/whiteboardOnScreenTextCues";
+import { preflightNarrationPerformance } from "@/lib/narrationPerformance";
 
 /**
  * Prove the complete bounded art sequence fits the signed compiler stage
  * reservation before a single direct worker can be provisioned. `budgetUsd`
  * is run-wide and must never be used as a substitute for this stage envelope.
  */
-export function whiteboardNovitaImageStageEnvelope(
+export interface WhiteboardNanoBananaProArtStageEnvelope {
+  label: "whiteboard_scribe:nano-banana-pro";
+  imageJobs: number;
+  imageMaxCostUsd: number;
+}
+
+export function whiteboardNanoBananaProArtStageEnvelope(
   panelCount: unknown,
   stageBudgetUsd: number | undefined,
-): NovitaCostEnvelope {
+): WhiteboardNanoBananaProArtStageEnvelope {
   if (
     typeof stageBudgetUsd !== "number" ||
     !Number.isFinite(stageBudgetUsd) ||
     stageBudgetUsd <= 0
   ) {
-    throw new Error("whiteboard_scribe requires a positive compiler-signed stage budget before Novita art can start");
+    throw new Error("whiteboard_scribe requires a positive compiler-signed stage budget before Nano Banana Pro art can start");
   }
   const panels = whiteboardPanelCount(panelCount);
-  return novitaCostEnvelope({
-    label: "whiteboard_scribe",
-    imageJobs: whiteboardImageCallCeiling(panels),
-    maxCostUsd: stageBudgetUsd,
-  });
+  const imageJobs = whiteboardImageCallCeiling(panels);
+  const imageMaxCostUsd = imageJobs * NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE.admissionCeilingUsd;
+  if (stageBudgetUsd + Number.EPSILON < imageMaxCostUsd) {
+    throw new Error(
+      `whiteboard_scribe requires a $${imageMaxCostUsd.toFixed(4)} Nano Banana Pro envelope before art can start`,
+    );
+  }
+  return { label: "whiteboard_scribe:nano-banana-pro", imageJobs, imageMaxCostUsd };
 }
 
 function convex(): ConvexHttpClient {
@@ -133,7 +153,15 @@ function run(cmd: string, args: string[], log: (msg: string) => void): Promise<v
  *   - Hard cap of 2 iterations (one informed retry), lane-tunable downward.
  *   - Critic outage gets only the bounded text retry, then blocks before paid rendering.
  */
-const SCRIBE_STORYBOARD_CHECKPOINT_VERSION = "whiteboard-scribe-storyboard/v2";
+const SCRIBE_STORYBOARD_CHECKPOINT_VERSION = "whiteboard-scribe-storyboard/v3";
+const WHITEBOARD_STORYBOARD_PLANNER = {
+  id: "whiteboard-structured-storyboard-producer/v1",
+  provenance: "Studio non-Google structured producer plus bounded storyboard critic",
+} as const;
+
+export type CritiquedWhiteboardStoryboard = CritiquedSelfContainedStory & {
+  readonly story: WhiteboardStoryboard;
+};
 
 /** The whiteboard renderer hand-letters every word; art asking for text fights it. */
 const TEXT_IN_ART = /\b(text|caption|subtitle|title|lettering|letters|word|words|label|logo|watermark|signage|handwriting|number|numbers)\b/i;
@@ -221,6 +249,9 @@ export function whiteboardStoryboardDefects(
       issues.push(`the whole script is only ~${got} spoken words but needs ~${targetWords} to hit the requested length — deepen each panel`);
     }
   }
+  // Keep the Golden visual grammar inside the text-only Director loop, so a
+  // sparse plan is rewritten before a Nano Banana Pro image is purchased.
+  issues.push(...whiteboardGoldenStyleDefects(plan));
   return issues.slice(0, 8);
 }
 
@@ -268,18 +299,40 @@ function storyboardCheckpointKey(ctx: StageContext, inputs: unknown): string {
   return `${ctx.keyPrefix}runs/${ctx.runId}/storyboards/whiteboard-scribe-${hash}.json`;
 }
 
-async function loadStoryboardCheckpoint(key: string): Promise<WhiteboardStoryboard | null> {
+async function loadStoryboardCheckpoint(key: string): Promise<CritiquedWhiteboardStoryboard | null> {
   try {
     const parsed = JSON.parse(Buffer.from(await getObjectBytes(key)).toString("utf8")) as {
       version?: unknown;
-      storyboard?: unknown;
+      outcome?: Partial<CritiquedWhiteboardStoryboard>;
     };
     if (parsed.version !== SCRIBE_STORYBOARD_CHECKPOINT_VERSION) return null;
-    const storyboard = parsed.storyboard as WhiteboardStoryboard | undefined;
+    const outcome = parsed.outcome;
+    const storyboard = outcome?.story as WhiteboardStoryboard | undefined;
     if (!storyboard || typeof storyboard.fullText !== "string" || !storyboard.fullText.trim()) return null;
     if (!Array.isArray(storyboard.panels) || !storyboard.panels.length) return null;
     if (storyboard.panels.some((panel) => typeof panel?.narration !== "string" || !Array.isArray(panel?.layers))) return null;
-    return storyboard;
+    const critique = outcome?.critique;
+    if (
+      critique?.accepted !== true
+      || !Number.isFinite(critique.score)
+      || !Number.isInteger(critique.iterations)
+      || critique.iterations < 1
+      || !Array.isArray(critique.issues)
+      || typeof outcome?.planner?.id !== "string"
+      || !outcome.planner.id.trim()
+      || typeof outcome.planner.provenance !== "string"
+      || !outcome.planner.provenance.trim()
+    ) return null;
+    return {
+      story: storyboard,
+      planner: { id: outcome.planner.id, provenance: outcome.planner.provenance },
+      critique: {
+        accepted: true,
+        score: critique.score,
+        iterations: critique.iterations,
+        issues: critique.issues.filter((issue): issue is string => typeof issue === "string"),
+      },
+    };
   } catch {
     return null;
   }
@@ -289,10 +342,10 @@ async function loadStoryboardCheckpoint(key: string): Promise<WhiteboardStoryboa
  * Write the storyboard with the Director in the loop, then FREEZE it. The only
  * caller renders the returned storyboard exactly once and nothing else.
  */
-async function planScribeWithCritique(
+export async function planScribeWithCritique(
   ctx: StageContext,
   brief: WhiteboardSyncBrief,
-): Promise<WhiteboardStoryboard> {
+): Promise<CritiquedWhiteboardStoryboard> {
   const channel = scribeCritiqueChannel(ctx);
   const wantPanels = whiteboardPanelCount(brief.panels);
   const targetWords = Number(brief.targetWords ?? 0) || 0;
@@ -311,7 +364,7 @@ async function planScribeWithCritique(
 
   const cached = await loadStoryboardCheckpoint(checkpointKey);
   if (cached) {
-    ctx.log(`whiteboard_scribe: reused the frozen storyboard (${cached.panels.length} panels) — no re-planning, no re-render`);
+    ctx.log(`whiteboard_scribe: reused the frozen storyboard (${cached.story.panels.length} panels) — no re-planning, no re-render`);
     return cached;
   }
 
@@ -353,32 +406,86 @@ async function planScribeWithCritique(
     score: loop.critique.score,
     issues: loop.critique.issues,
   });
-  const plan = loop.value;
-  if (!plan.panels.length) throw new Error("whiteboard_scribe: storyboard writer returned no panels");
+  const story = loop.value;
+  if (!story.panels.length) throw new Error("whiteboard_scribe: storyboard writer returned no panels");
   ctx.log(
     `whiteboard_scribe: storyboard settled after ${loop.iterations} candidate(s) ` +
     `(${loop.accepted ? "accepted" : "best of the rejected set"}, score ${loop.critique.score.toFixed(2)}, ` +
-    `${plan.panels.length} panels, ~${storyboardWords(plan)} spoken words)`,
+    `${story.panels.length} panels, ~${storyboardWords(story)} spoken words)`,
   );
+  const outcome: CritiquedWhiteboardStoryboard = {
+    story,
+    planner: WHITEBOARD_STORYBOARD_PLANNER,
+    critique: {
+      accepted: true,
+      score: loop.critique.score,
+      iterations: loop.iterations,
+      issues: loop.critique.issues,
+    },
+  };
   await putObject(
     checkpointKey,
-    Buffer.from(JSON.stringify({ version: SCRIBE_STORYBOARD_CHECKPOINT_VERSION, storyboard: plan })),
+    Buffer.from(JSON.stringify({ version: SCRIBE_STORYBOARD_CHECKPOINT_VERSION, outcome })),
     { contentType: "application/json" },
   );
-  return plan;
+  return outcome;
 }
 
 export const whiteboardScribe: Block = {
   id: "whiteboard_scribe",
   consumes: ["topic"],
-  produces: ["videoKey", "videoLocalPath", "videoDurationSec", "narrationText"],
+  produces: [
+    "videoKey", "videoLocalPath", "videoDurationSec", "narrationText", "onScreenTextCues",
+    "narrationKey", "narrationLocalPath", "narrationDurationSec", "narrationTranscriptText",
+    "narrationPerformanceEvidence", "sentenceTimings", "narrationStartSec",
+  ],
   paid: true,
   run: async (ctx) => {
-    if (!hasWhiteboardSync() || !hasNovitaRenderFarmConfig()) {
-      throw new Error("whiteboard_scribe: storyboard/TTS plus the attested Novita render farm are required (no fallback)");
-    }
     const topic = String(ctx.store["topic"] ?? "");
     if (!topic) throw new Error("whiteboard_scribe: no topic in store");
+    // A sealed story is resolved before capability checks, caches, or the
+    // legacy planner. Receipt-bearing routes therefore cannot silently fall
+    // back to a new self-authored storyboard.
+    const approvedStoryReceipt = ctx.store["selfContainedStoryReceipt"];
+    if (
+      approvedStoryReceipt === undefined &&
+      ctx.store["channelProgramRoute"] !== undefined &&
+      selfContainedStoryReceiptRequiredForRoute({
+        family: "whiteboard",
+        route: ctx.store["channelProgramRoute"],
+        topic,
+      })
+    ) {
+      throw new Error("whiteboard_scribe: this route requires its sealed self-contained story receipt before planning or rendering");
+    }
+    const receiptInput = approvedStoryReceipt === undefined
+      ? {}
+      : {
+          approvedStoryReceipt,
+          storyReceiptBinding: selfContainedStoryReceiptBindingFromRoute({
+            family: "whiteboard",
+            route: ctx.store["channelProgramRoute"],
+            topic,
+          }),
+        };
+    // Resolve the exact voice selection before capability admission. A valid
+    // ElevenLabs cast must not depend on an unrelated Fish credential, while
+    // an incomplete Eleven selection deliberately uses the documented Fish
+    // default and is checked as such.
+    const requestedTtsProvider = String(ctx.params["ttsProvider"] ?? ctx.store["ttsProvider"] ?? "fish");
+    const requestedElevenVoiceId = typeof ctx.params["elevenVoiceId"] === "string"
+      ? ctx.params["elevenVoiceId"].trim()
+      : "";
+    const usesElevenLabsVoice = requestedTtsProvider === "elevenlabs" && requestedElevenVoiceId.length > 0;
+    if (
+      !hasWhiteboardSync({
+        requiresStoryboard: approvedStoryReceipt === undefined,
+        ttsProvider: usesElevenLabsVoice ? "elevenlabs" : "fish",
+      }) ||
+      !hasNanoBananaProWhiteboardArt()
+    ) {
+      throw new Error("whiteboard_scribe: the selected TTS and sealed Nano Banana Pro art capabilities are unavailable");
+    }
 
     // Grounding facts: prefer real research notes; else the channel's brief look.
     const facts =
@@ -393,8 +500,8 @@ export const whiteboardScribe: Block = {
     // + dark/chalk board mode + palette into these params (they used to be unset
     // → every scribe rendered the light "history" marker style in a Fish default
     // voice regardless of the channel's DNA and audition winner).
-    const ttsProvider = String(ctx.params["ttsProvider"] ?? ctx.store["ttsProvider"] ?? "fish");
-    const elevenVoiceId = ctx.params["elevenVoiceId"] as string | undefined;
+    const ttsProvider = requestedTtsProvider;
+    const elevenVoiceId = requestedElevenVoiceId || undefined;
     const boardMode = (ctx.params["boardMode"] as "white" | "chalk" | undefined) ?? undefined;
     const palette =
       (ctx.params["palette"] as string[] | undefined) ??
@@ -404,11 +511,11 @@ export const whiteboardScribe: Block = {
     const height = Math.round((width * 9) / 16);
     // LENGTH: the wizard's lengthMinutes never reached this engine — it sized
     // itself from its own defaults (6 panels / 150 words ≈ one minute) no
-    // matter what the operator chose. targetSeconds (designer-set) converts to
-    // the scribe's real levers: spoken-word budget (~2.1 w/s at whiteboard
-    // pacing incl. draw holds) + one panel per ~22s.
+    // matter what the operator chose. targetSeconds chooses fewer, fuller
+    // boards: the visible hand is part of the product, so a dense board may
+    // never be compressed into the old 22-second sparse-panel cadence.
     const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
-    const panels = targetSeconds > 0 ? Math.max(4, Math.min(16, Math.round(targetSeconds / 22))) : undefined;
+    const panels = targetSeconds > 0 ? whiteboardPanelsForTargetSeconds(targetSeconds) : undefined;
     // Calibrated on TWO live renders: Fish speaks the scribe scripts at
     // ~3.7-3.9 w/s (468 words -> ~120s narration). 3.1 w/s budgets words so
     // narration + draw-holds lands ~95% of target instead of -30%.
@@ -421,13 +528,13 @@ export const whiteboardScribe: Block = {
     // rendering the first layer. A custom/legacy invocation with no signed
     // stage reservation now fails closed instead of consuming the run budget
     // one panel at a time.
-    const novitaEnvelope = whiteboardNovitaImageStageEnvelope(
+    const nanoBananaProEnvelope = whiteboardNanoBananaProArtStageEnvelope(
       panels ?? whiteboardPanelCount(undefined),
       ctx.stageBudgetUsd,
     );
     ctx.log(
-      `whiteboard_scribe: admitted ${novitaEnvelope.imageJobs} bounded Novita image worker(s) ` +
-      `($${novitaEnvelope.imageMaxCostUsd.toFixed(4)} within the signed stage budget)`,
+      `whiteboard_scribe: admitted ${nanoBananaProEnvelope.imageJobs} Nano Banana Pro art asset(s) ` +
+      `($${nanoBananaProEnvelope.imageMaxCostUsd.toFixed(4)} within the signed stage budget)`,
     );
 
     // DETERMINISTIC dir (scoped): whiteboardSync's per-layer art cache is
@@ -437,26 +544,23 @@ export const whiteboardScribe: Block = {
     const outPath = join(runDir, "final.mp4");
     ctx.log(`whiteboard_scribe: drawing synced explainer "${topic.slice(0, 60)}" @ ${width}x${height} (style ${styleId})…`);
 
-    let novitaImageCostUsd = 0;
-    const generateImage = createAttestedNovitaImageGenerator<WhiteboardArtRequest>({
-      prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/whiteboard-art`,
-      id: (request) => request.id,
-      profileId: "production",
-      // The aggregate admission above reserves the full sequence. Each
-      // individual worker receives only its own conservative lifecycle cap.
-      maxCostUsd: PRICE.novitaImageMaxUsd,
-      lifecycle: {
-        ownerId: ctx.ownerId,
-        channelId: ctx.channelId,
-        runId: ctx.runId,
-        blockId: "whiteboard_scribe",
-      },
-      onReceipt: (receipt) => { novitaImageCostUsd += receipt.costUsd; },
-    });
+    let nanoBananaProArtCostUsd = 0;
+    const generateImage = async (request: WhiteboardArtRequest) => {
+      const generated = await generateNanoBananaProWhiteboardArtWithReceipt({
+        prompt: request.prompt,
+        maxProviderAttempts: 1,
+        // The native endpoint provides no accepted-job handle. Bind every
+        // request to the run, layer, and deterministic seed for auditability,
+        // but never auto-resubmit an ambiguous paid attempt.
+        idempotencyContext: `${ctx.ownerId}:${ctx.channelId}:${ctx.runId}:whiteboard:${request.id}:seed-${request.seed}`,
+      });
+      nanoBananaProArtCostUsd += generated.receipt.costUsd;
+      return generated;
+    };
     const brief: WhiteboardSyncBrief = {
       topic, facts, styleId, artStyle: visualBrief?.promptStyle,
       header: visualBrief?.header, voiceId, width, height,
-      ...(ttsProvider === "elevenlabs" && elevenVoiceId ? { ttsProvider, elevenVoiceId } : {}),
+      ...(usesElevenLabsVoice ? { ttsProvider: "elevenlabs" as const, elevenVoiceId } : {}),
       ...(boardMode ? { boardMode } : {}),
       ...(palette ? { palette } : {}),
       ...(panels ? { panels } : {}),
@@ -465,16 +569,65 @@ export const whiteboardScribe: Block = {
     // QUALITY GATE — settle the storyboard with the Director FIRST, at text
     // prices. castWhiteboardSync below is then called exactly once with the
     // accepted board, so a rejected draft never costs a second paid render.
-    const storyboard = await planScribeWithCritique(ctx, brief);
+    const storyboard = approvedStoryReceipt === undefined
+      ? (await planScribeWithCritique(ctx, brief)).story
+      : undefined;
     const res = await castWhiteboardSync({
       brief,
-      plan: storyboard,
+      ...(storyboard === undefined ? {} : { plan: storyboard }),
+      ...receiptInput,
       runDir,
       outPath,
       generateImage,
       log: (m) => ctx.log(`wb: ${m}`),
     });
-    const artCost = ctx.imageUsageAccounting?.().costUsd ?? novitaImageCostUsd;
+    const narrationPerformanceEvidence = await preflightNarrationPerformance({
+      audioPath: res.narrationPath,
+      text: res.narrationText,
+      speed: 0.95,
+    });
+    const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/whiteboard-narration.mp3`;
+    await putObjectFromFile(narrationKey, res.narrationPath, { contentType: "audio/mpeg" });
+    await recordAsset(ctx, "narration", narrationKey, {
+      durationSec: narrationPerformanceEvidence.durationSec,
+      engine: "whiteboard_scribe",
+      source: "pre-mix voice-only master",
+    });
+    const whiteboardArtPrefix = `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/whiteboard-art`;
+    for (const art of res.artAssets) {
+      const bytes = await readFile(art.localPath);
+      const artifactSha256 = createHash("sha256").update(bytes).digest("hex");
+      if (artifactSha256 !== art.contentSha256 || artifactSha256 !== art.receipt.responseSha256) {
+        throw new Error(`whiteboard_scribe: ${art.id} art bytes no longer match their Nano Banana Pro receipt`);
+      }
+      const imageKey = `${whiteboardArtPrefix}/${art.id}.png`;
+      const receiptKey = `${whiteboardArtPrefix}/${art.id}.receipt.json`;
+      await putObject(imageKey, bytes, {
+        contentType: art.contentType,
+        metadata: {
+          "whiteboard-art-provider": art.receipt.provider,
+          "whiteboard-art-model": art.receipt.model,
+          "whiteboard-art-route": art.receipt.route,
+          "whiteboard-art-request-sha256": art.receipt.providerRequestSha256,
+          "whiteboard-art-response-sha256": art.receipt.responseSha256,
+        },
+      });
+      await putObject(receiptKey, Buffer.from(JSON.stringify(art.receipt)), {
+        contentType: "application/json",
+      });
+      await recordAsset(ctx, "image", imageKey, {
+        engine: "whiteboard_scribe",
+        artId: art.id,
+        artifactSha256,
+        provider: art.receipt.provider,
+        providerModel: art.receipt.model,
+        providerRoute: art.receipt.route,
+        providerRequestSha256: art.receipt.providerRequestSha256,
+        providerResponseSha256: art.receipt.responseSha256,
+        providerReceiptKey: receiptKey,
+      });
+    }
+    const artCost = nanoBananaProArtCostUsd;
     const usedEleven = ttsProvider === "elevenlabs" && Boolean(elevenVoiceId);
     const ttsCost =
       (res.ttsCharactersGenerated / 1000) *
@@ -483,16 +636,14 @@ export const whiteboardScribe: Block = {
     // fallback charge merely because this is a paid-capable block.
     const scribeCost = artCost + ttsCost;
     ctx.log(
-      `whiteboard_scribe: attested Novita art $${artCost.toFixed(4)} + ` +
+      `whiteboard_scribe: attested Nano Banana Pro art $${artCost.toFixed(4)} + ` +
       `${res.ttsCharactersGenerated} TTS chars = $${scribeCost.toFixed(4)}`,
     );
 
-    // MUSIC BED (P1-8): whiteboard-family pipelines generate a PAID music track
-    // upstream (musicKey/musicUrl) that this engine never consumed — the bed
-    // played in ZERO published videos. Read it straight from the store as an
-    // OPTIONAL input (deliberately NOT in `consumes`: pipelines without a music
-    // stage must still validate) and duck it under the narration. Failure is
-    // non-fatal — ship the narration-only video rather than lose the run.
+    // A route may legitimately omit a music stage, but if an approved upstream
+    // bed exists it is part of the sealed episode direction. Do not silently
+    // turn a music-directed Whiteboard episode into narration-only output when
+    // muxing fails; cached upstream work makes retry safer than a weaker master.
     let finalPath = res.outPath;
     const musicKey = ctx.store["musicKey"] as string | undefined;
     const musicUrl = ctx.store["musicUrl"] as string | undefined;
@@ -514,31 +665,35 @@ export const whiteboardScribe: Block = {
         finalPath = withMusic;
         ctx.log(`whiteboard_scribe: music bed muxed under narration (${musicKey ? "musicKey" : "musicUrl"})`);
       } catch (e) {
-        ctx.log(`whiteboard_scribe: music bed mux FAILED (keeping narration-only video): ${e instanceof Error ? e.message : e}`);
+        throw new Error(
+          `whiteboard_scribe: required approved music bed could not be muxed into the final master: ${e instanceof Error ? e.message : e}`,
+        );
       }
     }
 
-    // FINAL LOUDNESS: the scribe mux shipped at ~-22 LUFS (quiet vs YT's -14
-    // renorm). Audio-only measured loudnorm, video stream copied — same pass
-    // the narrated assembler runs. Non-fatal on failure.
-    try {
-      const { normalizeAudioOnly } = await import("@/lib/ffmpeg");
-      const norm = join(runDir, "final_norm.mp4");
-      await normalizeAudioOnly(finalPath, norm, -14);
-      finalPath = norm;
-      ctx.log("whiteboard_scribe: final mix loudness-normalized to -14 LUFS");
-    } catch (e) {
-      ctx.log(`whiteboard_scribe: loudnorm skipped (non-fatal): ${e instanceof Error ? e.message : e}`);
-    }
+    // FINAL LOUDNESS: a quiet mix cannot be silently released. The audio-only
+    // measured loudnorm keeps video bytes untouched while making the resulting
+    // final master comparable to the other narrated production lanes.
+    const { normalizeAudioOnly } = await import("@/lib/ffmpeg");
+    const norm = join(runDir, "final_norm.mp4");
+    await normalizeAudioOnly(finalPath, norm, -14);
+    finalPath = norm;
+    ctx.log("whiteboard_scribe: final mix loudness-normalized to -14 LUFS");
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await putObjectFromFile(videoKey, finalPath, { contentType: "video/mp4" });
     const videoDurationSec = Math.round(res.durationMs / 1000);
+    const onScreenTextCues = buildWhiteboardOnScreenTextCues({
+      panels: res.panels,
+      durationMs: res.durationMs,
+    });
     await recordAsset(ctx, "video", videoKey, {
       durationSec: videoDurationSec,
       engine: "whiteboard_scribe",
       panels: res.panels.length,
-      imageProvider: "novita-z-image-turbo-local",
+      imageProvider: "fal-nano-banana-pro",
+      imageProviderModel: NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE.model,
+      whiteboardArtAssets: res.artAssets.length,
     });
     ctx.log(`whiteboard_scribe ✓ → ${videoKey} (${videoDurationSec}s, ${res.panels.length} panels)`);
 
@@ -547,6 +702,14 @@ export const whiteboardScribe: Block = {
       videoLocalPath: finalPath,
       videoDurationSec,
       narrationText: res.narrationText,
+      narrationKey,
+      narrationLocalPath: res.narrationPath,
+      narrationDurationSec: narrationPerformanceEvidence.durationSec,
+      narrationTranscriptText: res.narrationText,
+      narrationPerformanceEvidence,
+      sentenceTimings: res.sentenceTimings,
+      narrationStartSec: res.narrationStartSec,
+      onScreenTextCues,
       [COST_PATCH_KEY]: scribeCost,
     };
   },

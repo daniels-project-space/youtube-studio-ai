@@ -29,6 +29,16 @@ import {
   CHANNEL_PROGRAM_BRIEF_VERSION,
 } from "@/engine/channelProgramBrief";
 import {
+  assertChannelProgramRouteBinding,
+  channelProgramRouteFingerprint,
+  parseChannelProgramRoute,
+  type ChannelProgramRoute,
+} from "@/engine/channelProgramRoute";
+import {
+  assertCreatorIntentDiagnosisBinding,
+  type CreatorIntentDiagnosis,
+} from "@/engine/creatorIntentDiagnosis";
+import {
   assertChannelShowProfileReceiptExactComposition,
   assertChannelShowProfileReceiptPipelineCompatibility,
   channelShowProfileReceiptFingerprint,
@@ -50,6 +60,8 @@ import {
   parseContentLane,
   resolveContentLane,
 } from "@/engine/contentLane";
+import { assertMinimumVideoFoundationForAutomaticFamily } from "@/engine/minimumVideoFoundation";
+import { assertStyleDNAAdmissionSafety } from "@/engine/creative/styleDNAAdmission";
 
 const MAX_INCEPTION_OUTPUT_CHARS = 16_000;
 const MAX_INCEPTION_STAGES = 10;
@@ -85,6 +97,7 @@ function assertProgramBriefIdentityMutation(args: {
   /** Only brand-new admitted channels may introduce their first show profile. */
   readonly allowFirstShowProfile?: boolean;
 }): void {
+  const allowFirstShowProfile = args.allowFirstShowProfile === true;
   const existingProgramBrief = assertPersistedProgramBriefIdentity(args.existingIdentity, {
     context: "existing channel identity",
   });
@@ -109,15 +122,98 @@ function assertProgramBriefIdentityMutation(args: {
     throw new Error("channel program brief is immutable once stored; create a fresh admitted channel or fork");
   }
 
+  const routeFromIdentity = (identity: unknown): ChannelProgramRoute | undefined => {
+    if (!identity || typeof identity !== "object" || Array.isArray(identity)) return undefined;
+    const rawRoute = (identity as { programRoute?: unknown }).programRoute;
+    return rawRoute === undefined ? undefined : parseChannelProgramRoute(rawRoute);
+  };
+  const existingProgramRoute = routeFromIdentity(args.existingIdentity);
+  const nextProgramRoute = routeFromIdentity(args.nextIdentity);
+  if (nextProgramRoute) {
+    if (!nextProgramBrief) {
+      throw new Error("channel program route requires a canonical channel program brief");
+    }
+    assertChannelProgramRouteBinding({
+      route: nextProgramRoute,
+      programBrief: nextProgramBrief,
+    });
+  }
+  if (existingProgramRoute && !nextProgramRoute) {
+    throw new Error("channel program route cannot be removed by a generic channel mutation");
+  }
+  if (!existingProgramRoute && nextProgramRoute && !args.allowFirstShowProfile) {
+    throw new Error("channel program route cannot be backfilled by a generic channel mutation; create a fresh admitted channel or fork");
+  }
+  if (
+    existingProgramRoute &&
+    nextProgramRoute &&
+    channelProgramRouteFingerprint(existingProgramRoute) !== channelProgramRouteFingerprint(nextProgramRoute)
+  ) {
+    throw new Error("channel program route is immutable once stored; create a fresh admitted channel or fork");
+  }
+
+  const diagnosisFromIdentity = (identity: unknown): unknown => {
+    if (!identity || typeof identity !== "object" || Array.isArray(identity)) return undefined;
+    return (identity as { creatorIntentDiagnosis?: unknown }).creatorIntentDiagnosis;
+  };
+  const existingRawDiagnosis = diagnosisFromIdentity(args.existingIdentity);
+  const nextRawDiagnosis = diagnosisFromIdentity(args.nextIdentity);
+  const requireBoundDiagnosis = (
+    rawDiagnosis: unknown,
+    programBrief: typeof existingProgramBrief,
+    programRoute: ChannelProgramRoute | undefined,
+    context: string,
+  ): CreatorIntentDiagnosis | undefined => {
+    if (rawDiagnosis === undefined) return undefined;
+    if (!programBrief || !programRoute) {
+      throw new Error(`${context} creator intent diagnosis requires a canonical channel program brief and route`);
+    }
+    return assertCreatorIntentDiagnosisBinding({
+      diagnosis: rawDiagnosis,
+      programBrief,
+      programRoute,
+    });
+  };
+  const existingCreatorIntentDiagnosis = requireBoundDiagnosis(
+    existingRawDiagnosis,
+    existingProgramBrief,
+    existingProgramRoute,
+    "existing channel identity",
+  );
+  const nextCreatorIntentDiagnosis = requireBoundDiagnosis(
+    nextRawDiagnosis,
+    nextProgramBrief,
+    nextProgramRoute,
+    "next channel identity",
+  );
+  if (existingCreatorIntentDiagnosis && !nextCreatorIntentDiagnosis) {
+    throw new Error("creator intent diagnosis cannot be removed by a generic channel mutation");
+  }
+  if (!existingCreatorIntentDiagnosis && nextCreatorIntentDiagnosis && !allowFirstShowProfile) {
+    throw new Error("creator intent diagnosis cannot be backfilled by a generic channel mutation; create a fresh admitted channel or fork");
+  }
+  if (
+    existingCreatorIntentDiagnosis &&
+    nextCreatorIntentDiagnosis &&
+    existingCreatorIntentDiagnosis.fingerprint !== nextCreatorIntentDiagnosis.fingerprint
+  ) {
+    throw new Error("creator intent diagnosis is immutable once stored; create a fresh admitted channel or fork");
+  }
+
   const existingShowProfile = args.existingIdentity && typeof args.existingIdentity === "object"
     ? (args.existingIdentity as { showProfile?: unknown }).showProfile
     : undefined;
   const nextShowProfile = args.nextIdentity && typeof args.nextIdentity === "object"
     ? (args.nextIdentity as { showProfile?: unknown }).showProfile
     : undefined;
-  const allowFirstShowProfile = args.allowFirstShowProfile === true;
   if (nextProgramBrief && !existingProgramBrief && !nextShowProfile) {
     throw new Error("a newly admitted channel program requires a sealed channel show profile");
+  }
+  if (nextProgramBrief && !existingProgramBrief && !nextProgramRoute) {
+    throw new Error("a newly admitted channel program requires a sealed channel program route");
+  }
+  if (nextProgramBrief && !existingProgramBrief && !nextCreatorIntentDiagnosis) {
+    throw new Error("a newly admitted channel program requires a sealed creator intent diagnosis");
   }
   if (existingShowProfile && !nextShowProfile) {
     throw new Error("channel show profile cannot be removed by a generic channel mutation");
@@ -125,7 +221,12 @@ function assertProgramBriefIdentityMutation(args: {
   if (!existingShowProfile && nextShowProfile && !allowFirstShowProfile) {
     throw new Error("channel show profile cannot be backfilled by a generic channel mutation; create a fresh admitted channel or fork");
   }
-  if (!nextShowProfile) return;
+  if (!nextShowProfile) {
+    if (nextProgramRoute) {
+      throw new Error("channel program route requires a sealed channel show profile");
+    }
+    return;
+  }
   if (!nextProgramBrief) {
     throw new Error("channel show profile requires a canonical channel program brief");
   }
@@ -143,6 +244,19 @@ function assertProgramBriefIdentityMutation(args: {
   const profile = allowFirstShowProfile
     ? assertChannelShowProfileReceiptExactComposition(profileInput)
     : assertChannelShowProfileReceiptPipelineCompatibility(profileInput);
+  if (nextProgramRoute && !profile.programRoute) {
+    throw new Error("channel program route must match the sealed channel show profile route");
+  }
+  if (!nextProgramRoute && profile.programRoute) {
+    throw new Error("channel show profile route requires the matching durable channel program route");
+  }
+  if (
+    nextProgramRoute &&
+    profile.programRoute &&
+    channelProgramRouteFingerprint(nextProgramRoute) !== channelProgramRouteFingerprint(profile.programRoute)
+  ) {
+    throw new Error("channel program route does not match the sealed channel show profile route");
+  }
   if (
     existingShowProfile &&
     channelShowProfileReceiptFingerprint(existingShowProfile) !==
@@ -400,8 +514,21 @@ const identityValidator = v.object({
       concept: v.string(),
       audience: v.optional(v.string()),
       sampleTopics: v.optional(v.array(v.string())),
+      // The sealed route resolver owns this discriminated form. Keep Convex
+      // structural here and re-parse the full canonical brief before a
+      // mutation can admit or resume work, so this duplicated boundary cannot
+      // drift from the engine contract.
+      programIntent: v.optional(v.any()),
     }),
   ),
+  // Durable route identity is deliberately separate from the brief and show
+  // profile. The mutation guard proves all three agree before it persists a
+  // new admission; old identities may omit it unchanged.
+  programRoute: v.optional(v.any()),
+  // Engine-validated sealed receipt. Keep the Convex envelope permissive so
+  // historical rows remain readable; `assertProgramBriefIdentityMutation`
+  // verifies the exact current derivation before any write can admit it.
+  creatorIntentDiagnosis: v.optional(v.any()),
   showProfile: v.optional(
     v.object({
       version: v.literal(CHANNEL_SHOW_PROFILE_VERSION),
@@ -422,6 +549,15 @@ const identityValidator = v.object({
           fingerprint: v.string(),
         }),
       ),
+      // New capability-owned composition authority. The V8-safe receipt
+      // parser validates this sealed discriminated structure before any
+      // durable write; keep the outer envelope permissive for historical
+      // profile shapes and future immutable plan revisions.
+      compositionBinding: v.optional(v.any()),
+      // Parsed and bound to the canonical program brief by the V8-safe route
+      // contract in the mutation guard below. A permissive outer schema keeps
+      // historical rows readable without duplicating its versioned shape.
+      programRoute: v.optional(v.any()),
       designedPipelineFingerprint: v.string(),
       fingerprint: v.string(),
     }),
@@ -581,6 +717,11 @@ export const createChannel = mutation({
     });
     assertContentLaneMatchesFamily(lane, family);
     assertPipelineMatchesContentLane(lane, args.pipeline);
+    assertMinimumVideoFoundationForAutomaticFamily({
+      family: family ?? lane.family,
+      contentLane: lane,
+      pipeline: args.pipeline,
+    });
     assertProgramBriefIdentityMutation({
       existingIdentity: existing?.identity,
       nextIdentity: args.identity,
@@ -588,6 +729,9 @@ export const createChannel = mutation({
       nextPipeline: args.pipeline,
       allowFirstShowProfile: !existing,
     });
+    if (args.styleDNA !== undefined) {
+      assertStyleDNAAdmissionSafety(args.styleDNA, { context: "channel creation styleDNA" });
+    }
     if (
       args.contentLane !== undefined &&
       contentLaneFingerprint(parseContentLane(args.contentLane)) !== contentLaneFingerprint(lane)
@@ -834,7 +978,7 @@ export const deleteChannel = mutation({
       }
       await ctx.db.delete(r._id);
     }
-    const sweep = async (table: "assets" | "topicMemory" | "videoAnalytics" | "channelAnalytics" | "contentPlan" | "youtubeAuth", index: string) => {
+    const sweep = async (table: "assets" | "topicMemory" | "videoAnalytics" | "videoReleaseProvenance" | "channelAnalytics" | "contentPlan" | "youtubeAuth", index: string) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const rows = await (ctx.db.query(table as any) as any)
         .withIndex(index, (q: { eq: (f: string, v: unknown) => unknown }) => q.eq("channelId", args.channelId))
@@ -844,6 +988,7 @@ export const deleteChannel = mutation({
     await sweep("assets", "by_channel");
     await sweep("topicMemory", "by_channel");
     await sweep("videoAnalytics", "by_channel");
+    await sweep("videoReleaseProvenance", "by_channel");
     await sweep("channelAnalytics", "by_channel_date");
     await sweep("contentPlan", "by_channel_order");
     await sweep("youtubeAuth", "by_channel");
@@ -867,9 +1012,9 @@ export const updateChannel = mutation({
     architectReport: v.optional(v.any()),
     family: v.optional(v.string()),
     disabledBlocks: v.optional(v.array(v.string())),
-    // Strictly opt-in automatic Casefile case research. Enabling it is
-    // gated on the cinematic_ai lane in the handler below — see the guard
-    // for why a non-cinematic_ai channel must be refused, not warned.
+    // Strictly opt-in automatic Casefile case research. No sealed Program
+    // Route currently admits this autonomous spend path, so enable requests
+    // are rejected in the handler below until one is registered deliberately.
     casefileAutoResearchEnabled: v.optional(v.boolean()),
     thumbnailPlaybook: v.optional(v.any()),
     scriptPlaybook: v.optional(v.any()),
@@ -924,23 +1069,26 @@ export const updateChannel = mutation({
       );
     }
     const lane = channelContentLane(existing);
-    // SPEND GUARD (write time, not dispatch time). `run-pipeline` rejects a
-    // `casefileSourcePacketInput` on any lane other than cinematic_ai, so
-    // enabling this flag elsewhere would pay for real Browserbase search
-    // sessions + LLM calls every 6h and then throw the run away. Refuse the
-    // write outright so the operator sees the problem immediately instead of
-    // discovering it as silent recurring spend. Turning the flag OFF is
-    // always permitted, on any lane.
-    if (rest.casefileAutoResearchEnabled === true && lane.key !== "cinematic_ai") {
+    // SPEND GUARD (write time, not dispatch time). Casefile's current route
+    // is private-review/manual only: no sealed channel Program Route binds
+    // autonomous real-case sourcing and dispatch. Refuse every enable until a
+    // dedicated route is registered; turning the flag OFF remains permitted.
+    if (rest.casefileAutoResearchEnabled === true) {
       throw new Error(
-        `casefileAutoResearchEnabled requires the cinematic_ai content lane; this channel's lane is ${lane.key}. ` +
-          "run-pipeline only accepts a casefileSourcePacketInput on cinematic_ai, so enabling automatic case " +
-          "research here would spend real research budget on runs that can never succeed.",
+        "casefileAutoResearchEnabled cannot be enabled: no sealed channel Program Route currently " +
+          "admits autonomous Casefile research. Use the private-review Casefile workflow instead.",
       );
     }
     const nextFamily = rest.family ?? existing.family;
     assertContentLaneMatchesFamily(lane, nextFamily);
     assertPipelineMatchesContentLane(lane, rest.pipeline ?? existing.pipeline);
+    if (rest.pipeline !== undefined) {
+      assertMinimumVideoFoundationForAutomaticFamily({
+        family: nextFamily ?? lane.family,
+        contentLane: lane,
+        pipeline: rest.pipeline,
+      });
+    }
     assertProgramBriefIdentityMutation({
       existingIdentity: existing.identity,
       nextIdentity: rest.identity ?? existing.identity,
@@ -948,6 +1096,12 @@ export const updateChannel = mutation({
       nextPipeline: rest.pipeline ?? existing.pipeline,
       allowFirstShowProfile: false,
     });
+    // Apply this only to an incoming DNA patch.  Historical rows can remain
+    // readable until an operator deliberately re-grounds them; a generic
+    // update must never rewrite or reinterpret their persisted payload.
+    if (rest.styleDNA !== undefined) {
+      assertStyleDNAAdmissionSafety(rest.styleDNA, { context: "channel update styleDNA" });
+    }
     const patch: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(rest)) {
       if (val !== undefined) patch[k] = val;
@@ -1013,6 +1167,11 @@ export const updatePipelineIfCurrent = mutation({
     }
     const lane = channelContentLane(channel);
     assertPipelineMatchesContentLane(lane, args.pipeline);
+    assertMinimumVideoFoundationForAutomaticFamily({
+      family: channel.family ?? lane.family,
+      contentLane: lane,
+      pipeline: args.pipeline,
+    });
     if (channel.identity?.showProfile) {
       const programBrief = assertPersistedProgramBriefIdentity(channel.identity, {
         context: "channel pipeline upgrade identity",

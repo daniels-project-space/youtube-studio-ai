@@ -1,27 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import {
+  casefileEvidenceLocks,
+  type CasefileEvidenceEpisode,
+} from "@/lib/editorialDeskEvidence";
+import styles from "../editorial-desk.module.css";
 
-type Episode = {
+type Episode = CasefileEvidenceEpisode & {
   _id: string;
   caseId: string;
-  sourcePacketFingerprint?: string;
   status: string;
   updatedAt: number;
-  workflow?: {
-    cinematicDraft?: {
-      sequenceContentFingerprint?: string;
-      content?: {
-        beats?: Array<{
-          shots?: Array<{ id?: string; visualMode?: string; sourceProofMedia?: unknown }>;
-        }>;
-      };
-    };
-    cinematicAdmission?: { generatedSceneCount?: number; release?: string };
-    referenceMechanicsPacket?: { contentFingerprint?: string; release?: string };
-    sourceBoundStorySpine?: { storySpineFingerprint?: string; release?: string };
-    narrativeEvidenceLedger?: { contentFingerprint?: string; release?: string };
-  };
 };
 
 const stages = [
@@ -106,10 +96,15 @@ function parseSourceProofAttachments(raw: string): Record<string, unknown>[] {
   });
 }
 
-function hasAttachedSourceProofMedia(episode: Episode | null): boolean {
-  return Boolean(episode?.workflow?.cinematicDraft?.content?.beats?.some((beat) =>
-    beat.shots?.some((shot) => shot.visualMode === "source_proof" && shot.sourceProofMedia),
-  ));
+function humanizeStatus(status: string): string {
+  return status.replaceAll("_", " ");
+}
+
+function updatedLabel(updatedAt: number): string {
+  const date = new Date(updatedAt);
+  return Number.isNaN(date.valueOf())
+    ? "Updated time unavailable"
+    : `Updated ${date.toLocaleString()}`;
 }
 
 /** Private editor desk for the immutable Casefile → cinematic render handoff. */
@@ -174,40 +169,84 @@ export default function CasefilePage() {
 
   const activeStage = stages.findIndex(([status]) => status === selected?.status);
   const actionDisabled = busy;
-  const sourceProofMediaAttached = hasAttachedSourceProofMedia(selected);
+  const evidenceLocks = casefileEvidenceLocks(selected);
+  const recordedLockCount = evidenceLocks.filter((lock) => lock.recorded).length;
+  const sourceProofMediaAttached = evidenceLocks.some(
+    (lock) => lock.label === "Source-proof media" && lock.recorded,
+  );
+  const selectedStageLabel = selected
+    ? stages.find(([status]) => status === selected.status)?.[1] ?? humanizeStatus(selected.status)
+    : "New source packet";
 
   return (
-    <main style={{ maxWidth: 1240, margin: "0 auto", padding: "28px 22px 80px", display: "grid", gap: 18 }}>
-      <header style={{ display: "grid", gap: 8 }}>
-        <p style={{ margin: 0, color: "#84a8ff", fontSize: 12, fontWeight: 700, letterSpacing: ".11em", textTransform: "uppercase" }}>Private editorial workflow</p>
-        <h1 style={{ margin: 0, fontSize: 30 }}>Casefile cinematic desk</h1>
-        <p style={{ margin: 0, maxWidth: 850, color: "#aeb9cb", lineHeight: 1.55 }}>
+    <main className={styles.desk}>
+      <header className={styles.header}>
+        <p className={styles.eyebrow}>Private editorial workflow</p>
+        <h1>Casefile cinematic desk</h1>
+        <p>
           Build an evidence-led cinematic sequence in two phases: lock real sources and causal shot coverage first, then approve the faceless-mannequin multi-shot treatment. This desk cannot render, spend, or publish.
         </p>
       </header>
 
-      <section style={{ ...card, display: "grid", gap: 12 }} aria-label="Casefile workflow status">
-        <strong>Immutable handoff path</strong>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+      <section className={styles.summary} aria-label="Casefile workflow status">
+        <div className={styles.summaryCopy}>
+          <small>Selected handoff</small>
+          <strong>{selected?.caseId ?? "Start with a source packet"}</strong>
+          <span>{selected ? `Currently at ${selectedStageLabel}.` : "No case is selected yet; only a reviewed source packet can open one."}</span>
+        </div>
+        <div className={styles.stageRail} aria-label="Immutable handoff path">
           {stages.map(([status, label], index) => (
-            <span key={status} style={{ borderRadius: 999, padding: "6px 10px", fontSize: 12, background: index <= activeStage ? "#28487e" : "#182131", color: index <= activeStage ? "#e5efff" : "#8290a5" }}>{label}</span>
+            <div
+              key={status}
+              className={`${styles.stage} ${index <= activeStage ? styles.stageReached : ""} ${index === activeStage ? styles.stageCurrent : ""}`}
+            >
+              <strong>{label}</strong>
+              <span>{index < activeStage ? "Recorded" : index === activeStage ? "Current gate" : "Not reached"}</span>
+            </div>
           ))}
         </div>
       </section>
 
-      <div style={{ display: "grid", gridTemplateColumns: "minmax(230px, .36fr) minmax(0, 1fr)", gap: 18, alignItems: "start" }}>
-        <aside style={{ ...card, display: "grid", gap: 10 }}>
-          <strong>Episodes</strong>
-          {episodes.length === 0 ? <span style={{ color: "#8d9aad", fontSize: 13 }}>No source-admitted Casefile episodes yet.</span> : episodes.map((episode) => (
-            <button key={episode._id} type="button" onClick={() => setSelectedId(episode._id)} style={{ textAlign: "left", border: "1px solid #293448", borderRadius: 9, padding: 10, cursor: "pointer", color: "#e7edf8", background: selected?._id === episode._id ? "#182d4d" : "#101722" }}>
-              <strong style={{ display: "block", fontSize: 13 }}>{episode.caseId}</strong>
-              <small style={{ color: "#9eadc1" }}>{episode.status.replaceAll("_", " ")}</small>
-              {episode.sourcePacketFingerprint && <small style={{ display: "block", color: "#71819a", marginTop: 3 }}>{episode.sourcePacketFingerprint.slice(0, 12)}…</small>}
-            </button>
+      {selected && <section className={styles.ledger} aria-label="Recorded Casefile evidence bindings">
+        <div className={styles.ledgerHeader}>
+          <div>
+            <h2>Recorded bindings for this case</h2>
+            <p>These are the exact evidence and review records persisted on {selected.caseId}. A missing record is shown as missing, not treated as an automatic failure.</p>
+          </div>
+          <span className={styles.ledgerCount}>{recordedLockCount} recorded</span>
+        </div>
+        <div className={styles.lockGrid}>
+          {evidenceLocks.map((lock) => (
+            <div key={lock.label} className={`${styles.lock} ${lock.recorded ? styles.lockRecorded : styles.lockMissing}`}>
+              <span className={styles.lockTitle}>{lock.label}</span>
+              <span className={styles.lockDetail}>{lock.detail}</span>
+              {lock.value && <code className={styles.lockValue} title={lock.value}>{lock.value}</code>}
+            </div>
           ))}
+        </div>
+      </section>}
+
+      <div className={styles.workspace}>
+        <aside style={{ ...card }} className={styles.library}>
+          <div className={styles.libraryHeader}>
+            <strong>Casefiles</strong>
+            <span>{episodes.length} recorded</span>
+          </div>
+          {episodes.length === 0 ? <span style={{ color: "#8d9aad", fontSize: 13 }}>No source-admitted Casefile episodes yet.</span> : <div className={styles.recordList}>{episodes.map((episode) => (
+              <button
+                key={episode._id}
+                type="button"
+                onClick={() => setSelectedId(episode._id)}
+                className={`${styles.recordButton} ${selected?._id === episode._id ? styles.recordButtonSelected : ""}`}
+              >
+                <strong className={styles.recordTitle}>{episode.caseId}</strong>
+                <span className={styles.recordDetail}>{humanizeStatus(episode.status)} · {updatedLabel(episode.updatedAt)}</span>
+                {episode.sourcePacketFingerprint && <code className={styles.recordFingerprint}>{episode.sourcePacketFingerprint}</code>}
+              </button>
+          ))}</div>}
         </aside>
 
-        <section style={{ ...card, display: "grid", gap: 14 }}>
+        <section style={{ ...card }} className={styles.operatorPane}>
           {!selected && <>
             <h2 style={{ margin: 0, fontSize: 19 }}>1. Admit a source packet</h2>
             <p style={{ margin: 0, color: "#aeb9cb", fontSize: 13 }}>Paste the editor-approved Casefile Source Packet. The server checks every claim’s primary source, visual rights usage, and the review fingerprint before it stores anything.</p>
@@ -303,7 +342,7 @@ export default function CasefilePage() {
           </>}
         </section>
       </div>
-      {message && <p role="status" style={{ ...card, margin: 0, color: message.startsWith("Saved") ? "#9be2b3" : "#ffb8b8" }}>{message}</p>}
+      {message && <p role="status" className={styles.statusMessage} style={{ ...card, color: message.startsWith("Saved") ? "#9be2b3" : "#ffb8b8" }}>{message}</p>}
     </main>
   );
 }

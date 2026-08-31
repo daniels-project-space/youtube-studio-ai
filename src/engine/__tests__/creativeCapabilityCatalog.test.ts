@@ -71,6 +71,7 @@ assert.equal(
   "an autonomous explicit opt-in must remain eligible for an automatic build boundary",
 );
 assertResolvedCreativeCapabilityPipelineObligations(hypotheticalAutomaticSelection, [
+  { block: "episode_graph" },
   { block: "timeline_assemble" },
   {
     block: "visual_inserts",
@@ -281,6 +282,7 @@ assert.deepEqual(
 
 assert.throws(
   () => assertCreativeCapabilityPipelineObligations("narrated_stock", [dataSelection], [
+    { block: "episode_graph" },
     { block: "timeline_assemble" },
     { block: "script_gen", params: { dataRich: true, sourceAttributionRequired: true } },
     { block: "qa_script", params: { dataStoryContract: "source-attributed-data-story/v1", requireNamedSource: true, requireSpokenNumericAnchor: true } },
@@ -336,7 +338,9 @@ const buildRouteSource = readFileSync(
 );
 assert.match(buildRouteSource, /privateReviewCapabilityOffers\(creatorPreflight\.creativeCapabilities\)/);
 assert.match(buildRouteSource, /assessCreativeCapabilityAutomaticBuildAdmission/);
-const automaticAdmissionGate = buildRouteSource.indexOf("if (!automaticCapabilityAdmission.autonomous)");
+const automaticAdmissionGate = buildRouteSource.indexOf(
+  "if (!reviewedDataStoryIntake && !automaticCapabilityAdmission.autonomous)",
+);
 const taskDispatch = buildRouteSource.indexOf("return tasks.trigger(");
 assert(
   automaticAdmissionGate >= 0 && automaticAdmissionGate < taskDispatch,

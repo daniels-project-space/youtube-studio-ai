@@ -19,6 +19,7 @@ import {
   draftCasefileEpisodeCinematicSequence,
   finalizeCasefileEpisodeCinematicSequence,
 } from "@/engine/casefileEpisodeWorkflow";
+import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
 import {
   CINEMATIC_CASE_DIRECTION_VERSION,
 } from "@/engine/cinematicCaseSequenceDraft";
@@ -279,8 +280,8 @@ async function main(): Promise<void> {
   assert.equal(evidenceWithReferenceMechanics.status, "awaiting_cinematic_direction");
   assert.equal(
     evidenceWithReferenceMechanics.referenceMechanicsPacket?.sources.map((source) => source.id).join(","),
-    "fern,fascinating-horror",
-    "the intake derives its attributed source set from the fixed documentary contract",
+    referenceQualityContractFor("documentary_collage_short").sources.map((source) => source.id).join(","),
+    "the intake derives its attributed source set from the current fixed documentary contract",
   );
   assert.throws(
     () => attachCasefileEpisodeReferenceMechanics({

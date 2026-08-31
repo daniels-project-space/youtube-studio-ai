@@ -26,6 +26,7 @@ import { StatsCharts } from "@/components/StatsCharts";
 import { fmtUsd } from "@/lib/format";
 import { VOICES } from "@/lib/voices";
 import { useAssetUrl, useAssetUrlState } from "@/lib/asset-url";
+import { assessYouTubeSetup } from "@/lib/youtubeSetupStatus";
 import { NICHE_CATALOG_EVIDENCE, NICHES, subcategoryTags } from "@/lib/nicheCatalog";
 import {
   formatZonedScheduleTimestamp,
@@ -931,6 +932,7 @@ function SettingsTab({ channel }: { channel: ChannelDoc }) {
   return (
     <div className="channel-settings-stack">
       <ChannelSettingsCard channel={channel} />
+      <RouteQualificationBenchmarkCard channel={channel} />
       <YouTubeConnectCard channel={channel} />
       <details className="channel-advanced glass">
         <summary>
@@ -944,6 +946,161 @@ function SettingsTab({ channel }: { channel: ChannelDoc }) {
         </div>
       </details>
     </div>
+  );
+}
+
+/**
+ * An explicit owner-only route benchmark. It is intentionally separate from
+ * the cadence controls: it runs an exact production master privately, creates
+ * no upload, and can only qualify a future route after final QA succeeds.
+ */
+function RouteQualificationBenchmarkCard({ channel }: { channel: ChannelDoc }) {
+  const [maximumCostUsd, setMaximumCostUsd] = useState("25");
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<string | null>(null);
+  const [runId, setRunId] = useState<string | null>(null);
+  // A lost browser response must retry the same durable owner request, not
+  // allocate a second paid private benchmark for this channel view.
+  const requestKeyRef = useRef<string | null>(null);
+  const benchmarkRuns = useQuery(api.runs.listRunsByChannel, {
+    channelId: channel._id as Id<"channels">,
+    limit: 100,
+  }) as Array<{
+    _id: string;
+    status: string;
+    error?: string;
+    routeQualificationBenchmarkDispatchState?: "pending" | "queued" | "consumed" | "blocked";
+    routeQualificationBenchmarkMaximumCostUsd?: number;
+  }> | undefined;
+  const latestBenchmark = benchmarkRuns?.find((run) =>
+    run.routeQualificationBenchmarkDispatchState !== undefined ||
+    run.status === "route_qualification_benchmark_blocked" ||
+    run.status === "awaiting_route_qualification_benchmark_dispatch",
+  );
+  const benchmarkStatus = benchmarkRuns === undefined
+    ? "Loading private benchmark status…"
+    : !latestBenchmark
+      ? "No private route qualification benchmark has been recorded for this channel."
+      : latestBenchmark.status === "route_qualification_benchmark_blocked" || latestBenchmark.routeQualificationBenchmarkDispatchState === "blocked"
+        ? `Manual attention required${latestBenchmark.error ? `: ${latestBenchmark.error}` : "."}`
+        : latestBenchmark.status === "ok"
+          ? "Private benchmark completed. Its final-master evidence was recorded before this run completed."
+          : latestBenchmark.status === "running" || latestBenchmark.routeQualificationBenchmarkDispatchState === "consumed"
+            ? "Private benchmark is running its sealed creative and final-QA route."
+            : latestBenchmark.routeQualificationBenchmarkDispatchState === "queued"
+              ? "Private benchmark is queued with its immutable dispatch envelope."
+              : "Private benchmark request is waiting for a valid sealed route preflight before it can start.";
+  const controlInput: CSSProperties = {
+    height: 34,
+    padding: "0 0.55rem",
+    borderRadius: 7,
+    border: "1px solid var(--color-border)",
+    background: "var(--color-surface)",
+    color: "var(--color-text)",
+  };
+  const controlButton: CSSProperties = {
+    height: 34,
+    padding: "0 0.7rem",
+    borderRadius: 7,
+    border: "1px solid var(--color-border)",
+    background: "var(--color-accent)",
+    color: "#111",
+    fontWeight: 700,
+    cursor: busy ? "default" : "pointer",
+  };
+
+  const requestBenchmark = async () => {
+    const maximum = Number(maximumCostUsd);
+    if (!Number.isFinite(maximum) || maximum <= 0 || maximum > 100) {
+      setMessage("Choose a private benchmark ceiling between $0.01 and $100.");
+      return;
+    }
+    if (!window.confirm(
+      `Run a private final-master qualification benchmark for “${channel.name}” with a maximum cost of ${fmtUsd(maximum)}? ` +
+      "It will not upload or publish anything. Only a passing final master can qualify this exact route for later production.",
+    )) return;
+    setBusy(true);
+    setMessage(null);
+    setRunId(null);
+    const requestKey = requestKeyRef.current ?? window.crypto.randomUUID();
+    requestKeyRef.current = requestKey;
+    try {
+      const response = await fetch("/api/route-qualification-benchmarks", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          channelId: channel._id,
+          requestKey,
+          maximumCostUsd: maximum,
+          confirmPrivateBenchmark: true,
+        }),
+      });
+      const data = await response.json() as { ok?: boolean; error?: string; state?: string; runId?: string };
+      if (!response.ok || !data.ok || !data.runId) {
+        setMessage(data.error || "The private benchmark could not be queued.");
+        return;
+      }
+      setRunId(data.runId);
+      setMessage(
+        data.state === "reused"
+          ? "The exact private benchmark request is already recorded. Its durable dispatcher will continue from the existing run."
+          : "Private benchmark request recorded. The system will re-check the sealed route before any render and will never upload this run.",
+      );
+    } catch {
+      setMessage("Network error while recording the private benchmark request.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section
+      id="route-qualification-benchmark"
+      className="glass"
+      aria-label="Private route qualification benchmark"
+      style={{ padding: "1rem" }}
+    >
+      <SectionTitle>Route qualification</SectionTitle>
+      <p style={{ margin: "-0.35rem 0 0.85rem", fontSize: "0.79rem", lineHeight: 1.45, color: "var(--color-muted)" }}>
+        For supervised or newly-qualified routes only. This runs the exact creative and final-QA chain privately to prove the route. It cannot upload, publish, or change this channel&apos;s normal schedule.
+      </p>
+      <div style={{ display: "flex", gap: "0.55rem", alignItems: "center", flexWrap: "wrap" }}>
+        <label style={{ display: "grid", gap: "0.22rem", fontSize: "0.68rem", color: "var(--color-muted)" }}>
+          PRIVATE COST CEILING (USD)
+          <input
+            type="number"
+            min="0.01"
+            max="100"
+            step="1"
+            value={maximumCostUsd}
+            disabled={busy}
+            onChange={(event) => setMaximumCostUsd(event.target.value)}
+            aria-label="Private route qualification benchmark cost ceiling"
+            style={{ ...controlInput, width: 116 }}
+          />
+        </label>
+        <button type="button" onClick={requestBenchmark} disabled={busy} style={{ ...controlButton, alignSelf: "end" }}>
+          {busy ? "Recording…" : "Run private benchmark"}
+        </button>
+      </div>
+      <div style={{ marginTop: "0.8rem", display: "grid", gap: "0.22rem", fontSize: "0.73rem", lineHeight: 1.42, color: "var(--color-muted)" }}>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.58rem", letterSpacing: "0.07em", color: "var(--color-faint)" }}>
+          PRIVATE BENCHMARK STATUS
+        </span>
+        <span>{benchmarkStatus}</span>
+        {latestBenchmark && (
+          <Link href={`/runs/${encodeURIComponent(latestBenchmark._id)}`} style={{ color: "var(--color-accent)", width: "fit-content" }}>
+            Open latest private benchmark
+          </Link>
+        )}
+      </div>
+      {message && (
+        <p style={{ margin: "0.8rem 0 0", fontSize: "0.75rem", lineHeight: 1.42, color: message.includes("could not") || message.includes("error") ? "var(--color-danger)" : "var(--color-muted)" }}>
+          {message}{" "}
+          {runId && <Link href={`/runs/${encodeURIComponent(runId)}`} style={{ color: "var(--color-accent)" }}>Open run</Link>}
+        </p>
+      )}
+    </section>
   );
 }
 
@@ -984,11 +1141,17 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
       }[]
     | undefined;
   const connector = links?.find((l) => l.channelId === channel._id);
-  const link = connector?.status === "active" ? connector : undefined;
+  const setup = assessYouTubeSetup({
+    connector,
+    created: channel.youtubeCreated,
+    generatedAvatarKey: channel.identity?.imageKey,
+  });
+  const activeConnector = connector?.status === "active" ? connector : undefined;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
 
   const connect = () => {
+    if (!setup.canConnect) return;
     window.location.assign(
       new URL(`/api/youtube-connect?channelId=${channel._id}`, window.location.origin),
     );
@@ -1045,6 +1208,37 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
       setBusy(false);
     }
   };
+  const openProfilePictureHandoff = async () => {
+    const imageKey = channel.identity?.imageKey;
+    if (!imageKey || !setup.targetChannelId) return;
+    setBusy(true);
+    setMsg(null);
+    try {
+      // This remains an owner action. Opening Studio before the awaited request
+      // preserves the browser's user gesture and never attempts to control
+      // Google's cross-origin profile-picker.
+      window.open(
+        `https://studio.youtube.com/channel/${setup.targetChannelId}/editing/profile`,
+        "_blank",
+        "noopener",
+      );
+      const response = await fetch(`/api/asset-url?key=${encodeURIComponent(imageKey)}`);
+      if (!response.ok) throw new Error("Could not prepare the generated profile picture");
+      const payload = (await response.json()) as { url?: string };
+      if (!payload.url) throw new Error("The generated profile picture is unavailable");
+      const download = document.createElement("a");
+      download.href = payload.url;
+      download.download = `${channel.slug}-avatar.png`;
+      document.body.appendChild(download);
+      download.click();
+      download.remove();
+      setMsg("YouTube Studio is open and the generated profile picture was downloaded. Upload it there, then save in YouTube.");
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : "Could not open the profile-picture handoff.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const btn: CSSProperties = {
     background: "var(--color-accent)", color: "#0a0a0b", border: "none", borderRadius: 10,
@@ -1054,14 +1248,69 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
     background: "var(--color-surface)", color: "var(--color-fg)", border: "1px solid var(--color-border)",
     borderRadius: 10, padding: "0.6rem 1.2rem", fontSize: "0.88rem", fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
   };
+  const destinationDetail = setup.destination === "verified"
+    ? `Google returned ${setup.targetLabel ?? "the selected channel"} as this channel's destination.`
+    : setup.destination === "creating"
+      ? "The explicitly approved external-channel creation is still running. Do not start a second creation."
+      : setup.destination === "created_needs_oauth"
+        ? `A provider-created channel is recorded as ${setup.targetLabel ?? "the target"}. Switch to it in YouTube, then connect it here.`
+        : setup.destination === "unverified"
+          ? "A connector record exists, but Google did not return a usable destination channel ID. Reconnect before any work can publish."
+          : "Choose an existing YouTube channel, or explicitly create one before connecting it.";
+  const oauthDetail = setup.oauth === "ready"
+    ? "All required upload, management, and analytics scopes are present for this destination."
+    : setup.oauth === "incomplete"
+      ? "A token exists, but required YouTube permissions are incomplete. Reconnect and approve the full requested scope set."
+      : setup.oauth === "reconnect_required"
+        ? "The saved connector was revoked or failed validation. Reconnect explicitly before publishing or analytics can resume."
+        : setup.oauth === "waiting_for_channel"
+          ? "OAuth cannot be bound until the external channel creation has a verified destination."
+          : setup.oauth === "connect_required"
+            ? "Switch to the recorded target channel in YouTube, then use Connect so Google can bind its exact destination ID."
+            : "A YouTube channel must exist before an OAuth connection can be created.";
+  const profileDetail = setup.profileHandoff === "owner_action_required"
+    ? "Required owner action: upload the generated profile image in YouTube Studio. Google does not provide this integration a reliable completion receipt."
+    : setup.profileHandoff === "waiting_for_target"
+      ? "The generated image is ready, but wait until a destination channel is known before opening YouTube Studio."
+      : "No generated profile image is attached to this channel yet; resolve the channel-art stage before this handoff.";
+  const setupSteps = [
+    {
+      label: "Destination channel",
+      state: setup.destination === "verified" ? "complete" : setup.destination === "creating" ? "working" : "action",
+      detail: destinationDetail,
+    },
+    {
+      label: "OAuth permissions",
+      state: setup.oauth === "ready" ? "complete" : setup.oauth === "waiting_for_channel" ? "waiting" : "action",
+      detail: oauthDetail,
+    },
+    {
+      label: "Profile picture",
+      // This is deliberately not marked complete: the owner performs it in
+      // YouTube and the API does not provide a trustworthy receipt to us.
+      state: setup.profileHandoff === "owner_action_required" ? "action" : "waiting",
+      detail: profileDetail,
+    },
+    {
+      label: "Banner + basic information",
+      state: setup.brandingSync === "attempted_unverified" ? "automatic" : "waiting",
+      detail: setup.brandingSync === "attempted_unverified"
+        ? "After a healthy OAuth callback, the system attempts an official API update for the generated banner, description, country, language, and keywords. Verify the result in YouTube Studio; this page has no delivery receipt yet."
+        : "The automatic branding attempt waits for a healthy OAuth connection.",
+    },
+  ];
 
   return (
     <section>
       <SectionTitle>YouTube connection</SectionTitle>
       <div className="glass" style={{ padding: "1.2rem", display: "grid", gap: "1rem" }}>
-        {link ? (
+        {setup.oauth === "ready" ? (
           <div style={{ fontSize: "0.86rem", color: "var(--color-ok)" }}>
-            ✓ Linked to <strong>{link.ytTitle || link.ytChannelId || "a YouTube channel"}</strong> — uploads go here.
+            ✓ Connected to <strong>{setup.targetLabel || setup.targetChannelId || "the selected YouTube channel"}</strong> — the destination and required permissions are ready.
+          </div>
+        ) : setup.oauth === "incomplete" ? (
+          <div style={{ fontSize: "0.84rem", color: "#fbbf24", lineHeight: 1.5 }}>
+            ⚠ Connected to <strong>{setup.targetLabel || setup.targetChannelId || "a YouTube channel"}</strong>, but its OAuth permissions are incomplete. It is not ready for publishing, branding, or analytics until reconnected with the full scope set.
           </div>
         ) : (
           <div style={{ fontSize: "0.84rem", color: "var(--color-muted)" }}>
@@ -1069,16 +1318,16 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
               ? "YouTube access was revoked. Reconnect explicitly before this channel can publish or ingest analytics."
               : connector?.status === "error"
                 ? "The YouTube connector failed validation. Reconnect it before publishing or analytics can resume."
-                : "Not linked yet. Connect a YouTube channel so this channel can publish. (A channel must exist on YouTube first — create one manually, or try Browserbase auto-create below.)"}
+              : "Not linked yet. Connect a YouTube channel so this channel can publish. (A channel must exist on YouTube first — create one manually, or try Browserbase auto-create below.)"}
           </div>
         )}
-        {!link && channel.youtubeCreated?.status === "creating" && (
+        {setup.destination === "creating" && (
           <div style={{ fontSize: "0.82rem", color: "#fbbf24", lineHeight: 1.5 }}>
             <span className="studio-pulse">●</span> Setting up the YouTube channel… (runs in the background — this
             updates by itself, no need to watch anything).
           </div>
         )}
-        {!link && channel.youtubeCreated?.status !== "creating" && channel.youtubeCreated?.ytChannelId && (
+        {setup.destination === "created_needs_oauth" && channel.youtubeCreated?.ytChannelId && (
           <div style={{ fontSize: "0.82rem", color: "var(--color-accent)", lineHeight: 1.5 }}>
             ● The agent created a YouTube channel for this:{" "}
             <a href={channel.youtubeCreated.url} target="_blank" rel="noreferrer" style={{ color: "var(--color-accent)", textDecoration: "underline" }}>
@@ -1087,27 +1336,59 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
             . Switch to it on youtube.com, then click <strong>Connect</strong> to finish linking.
           </div>
         )}
+        <div
+          aria-label="YouTube setup checklist"
+          style={{ display: "grid", gap: "0.55rem", padding: "0.8rem", border: "1px solid var(--color-border)", borderRadius: 10, background: "rgba(255,255,255,0.018)" }}
+        >
+          <strong style={{ fontSize: "0.82rem" }}>Setup status</strong>
+          {setupSteps.map((step) => (
+            <div key={step.label} style={{ display: "grid", gridTemplateColumns: "0.9rem minmax(0, 1fr)", gap: "0.5rem", alignItems: "start" }}>
+              <span
+                aria-label={step.state}
+                style={{ color: step.state === "complete" ? "var(--color-ok)" : step.state === "action" ? "#fbbf24" : "var(--color-muted)", lineHeight: 1.4 }}
+              >
+                {step.state === "complete" ? "✓" : step.state === "action" ? "!" : step.state === "working" ? "●" : "·"}
+              </span>
+              <div style={{ fontSize: "0.78rem", lineHeight: 1.45 }}>
+                <strong>{step.label}</strong><br />
+                <span style={{ color: "var(--color-muted)" }}>{step.detail}</span>
+              </div>
+            </div>
+          ))}
+        </div>
         <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
-          <button onClick={connect} style={btn}>{link ? "Reconnect YouTube" : "Connect YouTube"}</button>
-          {link && (
+          <button onClick={connect} disabled={busy || !setup.canConnect} style={{ ...btn, opacity: busy || !setup.canConnect ? 0.6 : 1 }}>
+            {setup.oauth === "ready" ? "Reconnect YouTube" : setup.oauth === "incomplete" || setup.oauth === "reconnect_required" ? "Reconnect with full permissions" : setup.destination === "creating" ? "Channel creation running" : "Connect YouTube"}
+          </button>
+          {activeConnector && (
             <button onClick={revoke} disabled={busy} style={{ ...ghost, color: "#f87171" }}>
               {busy ? "Revoking…" : "Revoke access"}
             </button>
           )}
-          {!link && (
+          {setup.canAutoCreate && (
             <button onClick={autoCreate} disabled={busy} style={ghost}>
               {busy ? "Starting…" : "Auto-create channel (Browserbase)"}
             </button>
           )}
+          {setup.profileHandoff === "owner_action_required" && (
+            <button onClick={openProfilePictureHandoff} disabled={busy} style={ghost}>
+              {busy ? "Preparing…" : "Set profile picture in YouTube"}
+            </button>
+          )}
         </div>
-        {!link && (
+        {setup.oauth !== "ready" && (
           <p style={{ fontSize: "0.74rem", color: "var(--color-faint)", margin: 0 }}>
             <strong>Connect</strong> links a channel via Google (instant, in your browser — switch to the target
-            channel on youtube.com first). <strong>Auto-create</strong> uses the cloud agent to create a brand-new
-            YouTube channel; once it exists, switch to it and Connect.
+            channel on youtube.com first). <strong>Auto-create</strong> is only offered before any destination or
+            connector exists, because creating a second external channel is irreversible.
           </p>
         )}
-        {msg && <p style={{ fontSize: "0.8rem", color: "var(--color-muted)", margin: 0 }}>{msg}</p>}
+        {setup.oauth === "ready" && (
+          <p style={{ fontSize: "0.74rem", color: "var(--color-faint)", margin: 0 }}>
+            A new or rotated YouTube connector intentionally pauses this app channel. Review release authority in Settings before enabling automation.
+          </p>
+        )}
+        {msg && <p aria-live="polite" style={{ fontSize: "0.8rem", color: "var(--color-muted)", margin: 0 }}>{msg}</p>}
       </div>
     </section>
   );

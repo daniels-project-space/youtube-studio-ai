@@ -145,11 +145,15 @@ async function main(): Promise<void> {
       );
     }
 
-    // ---- short tracks pass through unchanged (documented contract) ----
+    // ---- an unprovable short track must fail closed ----
     const shortIn = join(dir, "short.mp3");
     await synth(shortIn, 5); // 5s < fade*4 = 8s
-    const shortOut = await selfLoopAudio(shortIn, join(dir, "short-out.mp3"));
-    assert.equal(shortOut, shortIn, "sub-4x-fade tracks must be returned unchanged");
+    await assert.rejects(
+      selfLoopAudio(shortIn, join(dir, "short-out.mp3")),
+      (e: unknown) =>
+        e instanceof MusicError && /too short to establish seamless loop continuity/i.test(e.message),
+      "sub-4x-fade tracks must not become hard-spliced loop beds",
+    );
 
     // ---- an unreadable input must THROW, never return a path ----
     const bogus = join(dir, "bogus.mp3");

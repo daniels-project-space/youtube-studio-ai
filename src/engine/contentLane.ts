@@ -31,6 +31,36 @@ export const ContentLaneKeySchema = z.enum([
 
 export type ContentLaneKey = z.infer<typeof ContentLaneKeySchema>;
 
+/**
+ * The direct-Novita Visual Matter reference pack is an optional cinematic
+ * QA-input lane. It is deliberately not a general-purpose image feature: the
+ * admitted renderer remains text-to-image and the resulting R2 pixels are not
+ * primary-renderer conditioning inputs.
+ */
+export const VISUAL_MATTER_REFERENCE_CONTENT_LANE = "cinematic_ai" as const;
+export const VISUAL_MATTER_REFERENCE_ARTIFACT = "visualMatterReferenceAssets" as const;
+export const VISUAL_MATTER_REFERENCE_COMPOSITION = [
+  "story_spine",
+  "studio_asset_resolve",
+  "visual_matter",
+  "visual_matter_references",
+  "novita_render_images",
+  "qa_assets",
+  "studio_ltx_adapter_resolve",
+  "novita_render_video",
+  "qa_shots",
+] as const;
+
+/**
+ * This is intentionally shared with ModuleContracts rather than duplicated in
+ * a renderer. The pack is useful only when a declared QA block consumes its
+ * byte/receipt-bound assets; no primary renderer is a consumer.
+ */
+export const VISUAL_MATTER_REFERENCE_QA_CONSUMERS = {
+  qa_assets: [VISUAL_MATTER_REFERENCE_ARTIFACT],
+  qa_shots: [VISUAL_MATTER_REFERENCE_ARTIFACT],
+} as const;
+
 export interface ContentLaneDefinition {
   key: ContentLaneKey;
   /** The family that canonically owns this lane. Absent only for unknown legacy flows. */
@@ -480,6 +510,7 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     ...GENERIC_LANE_QUALITY,
     emphasis: [
       "The drawing must stay in lockstep with the narration: a label that appears before or after the words that explain it is a defect.",
+      "Treat a generic isolated icon, a mostly empty board, or a long hold before the board has accumulated its hero scene plus supporting evidence sketches as a visual-style defect. The finished board must feel information-dense, not rationalized down to a diagram placeholder.",
     ],
   },
   motion_comic: {
@@ -740,38 +771,121 @@ export function assertPipelineMatchesContentLane(
   pipeline: readonly PipelineEntry[] | null | undefined,
 ): void {
   const parsed = parseContentLane(lane);
-  if (parsed.key === "legacy_unclassified") return;
   if (!Array.isArray(pipeline)) throw new Error(`Content lane ${parsed.key} requires a pipeline array`);
 
-  const definition = CONTENT_LANE_POLICIES[parsed.key];
-  const blocks = new Set(
-    pipeline
-      .map((entry) => entry?.block)
-      .filter((block): block is string => typeof block === "string"),
+  const orderedBlocks = pipeline
+    .map((entry) => entry?.block)
+    .filter((block): block is string => typeof block === "string");
+  const visualMatterBlocks = orderedBlocks.filter(
+    (block) =>
+      block === "visual_matter" ||
+      block === "visual_matter_references" ||
+      block === "studio_ltx_adapter_resolve",
   );
+  // Do this before the legacy escape hatch. A legacy snapshot may retain its
+  // established renderer, but it must never use an unadmitted paid Visual
+  // Matter reference pack (or a Visual Matter plan) in a non-cinematic lane.
+  if (parsed.key !== VISUAL_MATTER_REFERENCE_CONTENT_LANE && visualMatterBlocks.length) {
+    throw new Error(
+      `Pipeline violates content lane ${parsed.key}: ` +
+      `forbids ${[...new Set(visualMatterBlocks)].join(", ")}; ` +
+      `Visual Matter is cinematic_ai-only`,
+    );
+  }
+  if (parsed.key === "legacy_unclassified") return;
+
+  const definition = CONTENT_LANE_POLICIES[parsed.key];
+  const blocks = new Set(orderedBlocks);
   const missing = definition.requiredBlocks.filter((block) => !blocks.has(block));
   const rendererChains = definition.requiredRendererChains ?? [];
-  const hasRequiredRendererChain = rendererChains.length === 0 || rendererChains
-    .some((chain) => chain.every((block) => blocks.has(block)));
+  const rendererChainIsOrdered = (chain: readonly string[]): boolean => chain.every((block, index) =>
+    index === 0 || orderedBlocks.indexOf(chain[index - 1]) < orderedBlocks.indexOf(block),
+  );
+  const presentRendererChains = rendererChains.filter((chain) => chain.every((block) => blocks.has(block)));
+  const unorderedRendererChains = presentRendererChains.filter((chain) => !rendererChainIsOrdered(chain));
+  const completeRendererChains = presentRendererChains.filter(rendererChainIsOrdered);
+  const hasRequiredRendererChain = rendererChains.length === 0 || completeRendererChains.length > 0;
+  // A lane is a visual-language boundary, not merely a list of allowed
+  // modules. Each renderer chain declares a complete alternative final-pixel
+  // path: the direct cinematic chain is owned by novita_render_video, whereas
+  // the reviewed Casefile handoff is owned by gen_footage. A custom/imported
+  // pipeline must select exactly one path and include its owner only once.
+  // Count from the ordered graph rather than the set above so duplication
+  // cannot hide behind membership checks.
+  const rendererOwnershipIssue = (() => {
+    if (rendererChains.length === 0) {
+      const count = orderedBlocks.filter((block) => block === definition.primaryRenderer).length;
+      return count === 1
+        ? undefined
+        : `requires exactly one primary renderer ${definition.primaryRenderer} (found ${count})`;
+    }
+    if (completeRendererChains.length > 1) {
+      return `requires exactly one complete renderer chain (found ${completeRendererChains.length})`;
+    }
+    if (completeRendererChains.length !== 1) return undefined;
+    const chain = completeRendererChains[0];
+    const owner = [...chain].reverse().find((block) => isContentLaneRendererBlock(block)) ?? chain[chain.length - 1];
+    const count = orderedBlocks.filter((block) => block === owner).length;
+    return count === 1
+      ? undefined
+      : `requires exactly one renderer owner ${owner} (found ${count})`;
+  })();
+  const selectedRendererOwner = (() => {
+    if (rendererChains.length === 0) return definition.primaryRenderer;
+    if (completeRendererChains.length !== 1) return undefined;
+    const chain = completeRendererChains[0];
+    return [...chain].reverse().find((block) => isContentLaneRendererBlock(block))
+      ?? chain[chain.length - 1];
+  })();
+  const finalQaIndices = orderedBlocks
+    .map((block, index) => block === "qa_visual" ? index : -1)
+    .filter((index) => index >= 0);
+  const finalReviewOrderIssue = (() => {
+    if (finalQaIndices.length !== 1) {
+      return `requires exactly one final qa_visual stage (found ${finalQaIndices.length})`;
+    }
+    if (!selectedRendererOwner) return undefined;
+    const rendererIndex = orderedBlocks.indexOf(selectedRendererOwner);
+    return rendererIndex >= finalQaIndices[0]
+      ? `requires renderer owner ${selectedRendererOwner} before final qa_visual`
+      : undefined;
+  })();
   const missingRendererChainGuards = (definition.rendererChainGuards ?? [])
     .filter((guard) => guard.whenPresent.every((block) => blocks.has(block)))
     .filter((guard) => !guard.requires.every((block) => blocks.has(block)));
   const forbidden = [...definition.forbiddenRendererBlocks, ...(definition.forbiddenBlocks ?? [])]
     .filter((block) => blocks.has(block));
-  if (missing.length || !hasRequiredRendererChain || missingRendererChainGuards.length || forbidden.length) {
+  if (
+    rendererOwnershipIssue !== undefined
+    || missing.length
+    || !hasRequiredRendererChain
+    || unorderedRendererChains.length
+    || finalReviewOrderIssue !== undefined
+    || missingRendererChainGuards.length
+    || forbidden.length
+  ) {
     const issues = [
+      ...(rendererOwnershipIssue ? [rendererOwnershipIssue] : []),
       ...(missing.length ? [`requires ${missing.join(", ")}`] : []),
       ...(!hasRequiredRendererChain
         ? [`requires one renderer chain: ${rendererChains
             .map((chain) => chain.join(" + "))
             .join(" OR ")}`]
         : []),
+      ...unorderedRendererChains.map((chain) =>
+        `requires renderer chain order ${chain.join(" < ")}`,
+      ),
+      ...(finalReviewOrderIssue ? [finalReviewOrderIssue] : []),
       ...missingRendererChainGuards.map((guard) =>
         `${guard.whenPresent.join(" + ")} requires ${guard.requires.join(" + ")}`,
       ),
       ...(forbidden.length ? [`forbids ${forbidden.join(", ")}`] : []),
     ];
     throw new Error(`Pipeline violates content lane ${parsed.key}: ${issues.join("; ")}`);
+  }
+  assertVisualMatterReferenceComposition(parsed, orderedBlocks);
+  if (parsed.key === VISUAL_MATTER_REFERENCE_CONTENT_LANE) {
+    assertCinematicStudioTreatmentBindings(pipeline);
   }
   // The children curriculum seed is an actual planning boundary, not a badge
   // that can be appended after a generated story. Preserve its order here so a
@@ -790,6 +904,116 @@ export function assertPipelineMatchesContentLane(
         "Pipeline violates content lane children_learning_supervised: curriculum_episode_seed must precede Story Spine, Episode Graph, Show Bible, and child safety review",
       );
     }
+  }
+}
+
+/**
+ * Fail closed around the one paid Visual Matter extension. Membership checks
+ * alone cannot prove that the pack was planned from the story spine or that
+ * QA receives it before either render phase, so preserve an exact, single-pack
+ * linear composition whenever the optional pack is present.
+ */
+export function assertVisualMatterReferenceComposition(
+  lane: ContentLane | unknown,
+  orderedBlocks: readonly string[],
+): void {
+  const parsed = parseContentLane(lane);
+  const packCount = orderedBlocks.filter((block) => block === "visual_matter_references").length;
+  if (packCount === 0) return;
+  if (parsed.key !== VISUAL_MATTER_REFERENCE_CONTENT_LANE) {
+    throw new Error(
+      `Visual Matter reference pack requires contentLane ${VISUAL_MATTER_REFERENCE_CONTENT_LANE}`,
+    );
+  }
+  if (packCount !== 1) {
+    throw new Error("Visual Matter reference composition requires exactly one visual_matter_references pack");
+  }
+
+  const positions = new Map<string, number>();
+  const duplicates: string[] = [];
+  for (const block of VISUAL_MATTER_REFERENCE_COMPOSITION) {
+    const matches = orderedBlocks
+      .map((candidate, index) => candidate === block ? index : -1)
+      .filter((index) => index >= 0);
+    if (matches.length !== 1) {
+      duplicates.push(`${block} (${matches.length === 0 ? "missing" : `${matches.length} occurrences`})`);
+      continue;
+    }
+    positions.set(block, matches[0]!);
+  }
+  if (duplicates.length) {
+    throw new Error(
+      `Visual Matter reference composition requires exactly one of each ordered block: ${duplicates.join(", ")}`,
+    );
+  }
+
+  const declaredQaConsumers = Object.keys(VISUAL_MATTER_REFERENCE_QA_CONSUMERS)
+    .filter((block) => orderedBlocks.includes(block));
+  if (!declaredQaConsumers.length) {
+    throw new Error("Visual Matter reference composition requires a declared QA consumer");
+  }
+
+  const outOfOrder = VISUAL_MATTER_REFERENCE_COMPOSITION.some((block, index) =>
+    index > 0 && (positions.get(VISUAL_MATTER_REFERENCE_COMPOSITION[index - 1]!) ?? -1) >=
+      (positions.get(block) ?? Number.MAX_SAFE_INTEGER),
+  );
+  if (outOfOrder) {
+    throw new Error(
+      "Visual Matter reference composition requires " +
+      VISUAL_MATTER_REFERENCE_COMPOSITION.join(" < "),
+    );
+  }
+}
+
+function optionalPipelineTreatment(entry: PipelineEntry, parameter: string): string | undefined {
+  const value = entry.params?.[parameter];
+  if (value === undefined) return undefined;
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`Pipeline ${entry.block} treatment parameter ${parameter} must be a non-empty string when present`);
+  }
+  return value.trim();
+}
+
+/**
+ * Visual Matter, recipe resolution, and direct-LTX adapter resolution must
+ * share one sealed treatment key. This prevents an imported composition from
+ * planning clay/brick/anime/drawn locks while looking up a LoRA benchmarked
+ * for another treatment. The check is intentionally scoped to pipelines that
+ * actually contain a Visual Matter plan; historical direct-LTX routes without
+ * that planner remain readable.
+ */
+function assertCinematicStudioTreatmentBindings(pipeline: readonly PipelineEntry[]): void {
+  const visualMatter = pipeline.find((entry) => entry.block === "visual_matter");
+  if (!visualMatter) return;
+  const treatment = optionalPipelineTreatment(visualMatter, "visualTreatment");
+  for (const entry of pipeline) {
+    if (entry.block !== "studio_asset_resolve" && entry.block !== "studio_ltx_adapter_resolve") continue;
+    const resolvedTreatment = optionalPipelineTreatment(entry, "treatment");
+    if (resolvedTreatment !== treatment) {
+      throw new Error(
+        `Pipeline ${entry.block} treatment must match visual_matter visualTreatment exactly`,
+      );
+    }
+  }
+}
+
+/**
+ * A tiny static cross-check used by certification. ModuleContracts consumes
+ * these exact declarations, so this guards future catalog edits from turning
+ * the QA-only pack into an orphaned paid renderer feature.
+ */
+export function assertVisualMatterReferenceAdmissionCatalog(): void {
+  if (CONTENT_LANE_POLICIES[VISUAL_MATTER_REFERENCE_CONTENT_LANE].family !== "cinematic") {
+    throw new Error("Visual Matter reference pack must remain owned by the cinematic content lane");
+  }
+  const consumers = Object.entries(VISUAL_MATTER_REFERENCE_QA_CONSUMERS);
+  if (
+    consumers.length !== 2 ||
+    consumers.some(([, inputs]) =>
+      inputs.length !== 1 || inputs[0] !== VISUAL_MATTER_REFERENCE_ARTIFACT,
+    )
+  ) {
+    throw new Error("Visual Matter reference pack must retain exactly the declared QA consumers");
   }
 }
 

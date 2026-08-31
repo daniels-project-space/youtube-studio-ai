@@ -1,7 +1,8 @@
 import { type Infer, v } from "convex/values";
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx } from "./_generated/server";
 import { mutation, query } from "./studioFunctions";
+import { assertRunExecutionWriteFence, requiresRunExecutionWriteFence } from "../src/lib/runLease";
 
 function assertInternalSecret(secret: string, operation: string): void {
   const expected = process.env.INTERNAL_QUERY_SECRET;
@@ -72,13 +73,31 @@ async function assertRunOwnership(
   ownerId: string,
   channelId: Id<"channels">,
   runId: Id<"runs">,
-): Promise<void> {
+): Promise<Doc<"runs">> {
   const [channel, run] = await Promise.all([ctx.db.get(channelId), ctx.db.get(runId)]);
   if (!channel || channel.ownerId !== ownerId) {
     throw new Error("runArtifacts: channel ownership mismatch");
   }
   if (!run || run.ownerId !== ownerId || run.channelId !== channelId) {
     throw new Error("runArtifacts: run ownership/channel mismatch");
+  }
+  return run;
+}
+
+function assertArtifactExecutionFence(
+  run: Doc<"runs">,
+  leaseOwner: string | undefined,
+  executionLeaseToken: number | undefined,
+): void {
+  if ((leaseOwner === undefined) !== (executionLeaseToken === undefined)) {
+    throw new Error("runArtifacts: write must provide both execution lease fence fields or neither");
+  }
+  if (leaseOwner !== undefined && executionLeaseToken !== undefined) {
+    assertRunExecutionWriteFence(run, { leaseOwner, executionLeaseToken }, Date.now());
+    return;
+  }
+  if (requiresRunExecutionWriteFence(run)) {
+    throw new Error("runArtifacts: execution writes require a lease fence");
   }
 }
 
@@ -132,6 +151,8 @@ export const upsert = mutation({
     ownerId: v.string(),
     channelId: v.id("channels"),
     runId: v.id("runs"),
+    leaseOwner: v.optional(v.string()),
+    executionLeaseToken: v.optional(v.number()),
     artifactId: v.string(),
     key: v.string(),
     type: v.string(),
@@ -150,10 +171,19 @@ export const upsert = mutation({
   handler: async (ctx, args) => {
     assertInternalSecret(args.secret, "runArtifacts.upsert");
     assertToken(args.ownerId, "ownerId", 160);
-    const { secret: _secret, ownerId, channelId, runId, ...entry } = args;
+    const {
+      secret: _secret,
+      ownerId,
+      channelId,
+      runId,
+      leaseOwner,
+      executionLeaseToken,
+      ...entry
+    } = args;
     void _secret;
     assertArtifactEntry(entry);
-    await assertRunOwnership(ctx, ownerId, channelId, runId);
+    const run = await assertRunOwnership(ctx, ownerId, channelId, runId);
+    assertArtifactExecutionFence(run, leaseOwner, executionLeaseToken);
     return await writeArtifactRow(ctx, ownerId, channelId, runId, entry);
   },
 });
@@ -183,6 +213,8 @@ export const upsertMany = mutation({
     ownerId: v.string(),
     channelId: v.id("channels"),
     runId: v.id("runs"),
+    leaseOwner: v.optional(v.string()),
+    executionLeaseToken: v.optional(v.number()),
     artifacts: v.array(artifactEntry),
   },
   returns: v.array(v.id("runArtifacts")),
@@ -193,7 +225,8 @@ export const upsertMany = mutation({
     // never be preceded by a partially-applied sibling.
     for (const entry of args.artifacts) assertArtifactEntry(entry);
     if (args.artifacts.length === 0) return [];
-    await assertRunOwnership(ctx, args.ownerId, args.channelId, args.runId);
+    const run = await assertRunOwnership(ctx, args.ownerId, args.channelId, args.runId);
+    assertArtifactExecutionFence(run, args.leaseOwner, args.executionLeaseToken);
 
     const ids: Array<Id<"runArtifacts">> = [];
     for (const entry of args.artifacts) {

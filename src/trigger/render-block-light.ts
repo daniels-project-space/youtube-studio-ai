@@ -23,12 +23,21 @@
  */
 import { task } from "@trigger.dev/sdk/v3";
 import { executeRenderBlock, type RenderBlockInput } from "@/trigger/renderBlockRunner";
+import {
+  RENDER_CHILD_OFFLOADED_MAX_ATTEMPTS,
+  RENDER_CHILD_TASK_MAX_DURATION_SECONDS,
+} from "@/lib/renderChildLease";
 
 export const renderBlockLightTask = task({
   id: "render-block-light",
   machine: "medium-1x",
-  maxDuration: 5400,
-  retry: { maxAttempts: 2, minTimeoutInMs: 5000, maxTimeoutInMs: 30000, factor: 2 },
+  maxDuration: RENDER_CHILD_TASK_MAX_DURATION_SECONDS,
+  retry: {
+    maxAttempts: RENDER_CHILD_OFFLOADED_MAX_ATTEMPTS,
+    minTimeoutInMs: 5000,
+    maxTimeoutInMs: 30000,
+    factor: 2,
+  },
   run: async (payload: RenderBlockInput) =>
     executeRenderBlock(payload, { taskLabel: "render-block-light", machineClass: "offloaded" }),
 });

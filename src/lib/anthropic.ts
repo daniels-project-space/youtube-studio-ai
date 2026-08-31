@@ -6,11 +6,37 @@
  * risky caller-by-caller migration while moving ordinary channel intelligence
  * to GPT-OSS 20B and creative work to Ministral 3 8B.
  */
-import { recordModelUsage } from "@/lib/modelUsage";
+import {
+  getOrCreateModelResponse,
+  modelRequestCacheKey,
+  recordModelUsage,
+} from "@/lib/modelUsage";
 import { hasOpenRouterKey, openRouterJson, openRouterModel } from "@/lib/openRouter";
 
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
+const ANTHROPIC_REQUEST_TIMEOUT_MS = 120_000;
+
+/**
+ * A direct Anthropic request has crossed the paid-provider boundary but did
+ * not yield a safely usable result. We do not have an idempotency receipt or
+ * recovery lookup for this endpoint, so automatic block/task retries must not
+ * turn one uncertain outcome into a second billed completion.
+ */
+export class ClaudeGenerationOutcomeUnknownError extends Error {
+  readonly code = "claude_generation_outcome_unknown";
+  readonly retryable = false;
+  readonly status?: number;
+
+  constructor(detail: string, options?: { status?: number; cause?: unknown }) {
+    super(
+      `claudeJson: Anthropic generation may already have consumed provider work; refusing automatic replay: ${detail}`,
+      options?.cause === undefined ? undefined : { cause: options.cause },
+    );
+    this.name = "ClaudeGenerationOutcomeUnknownError";
+    if (options?.status !== undefined) this.status = options.status;
+  }
+}
 
 export function hasAnthropicKey(): boolean {
   return hasOpenRouterKey() || Boolean(process.env.ANTHROPIC_API_KEY?.trim());
@@ -64,58 +90,111 @@ export async function claudeJson<T = unknown>(args: {
   maxTokens?: number;
   temperature?: number;
   log?: (message: string) => void;
+  /** An outer, schema-aware caller owns response reuse for this request. */
+  memoize?: boolean;
 }): Promise<T> {
   const tier = args.tier ?? "flash";
   const maxTokens = Math.max(128, Math.min(tier === "pro" ? 16_000 : 8_000, Math.floor(args.maxTokens ?? 1_200)));
-  if (hasOpenRouterKey()) {
-    return openRouterJson<T>({
-      tier,
-      prompt: args.prompt,
-      system: args.system,
-      model: args.model,
-      maxTokens,
-      temperature: args.temperature,
-      log: args.log,
-    });
-  }
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!apiKey) throw new Error("claudeJson: OPENROUTER_API_KEY or ANTHROPIC_API_KEY is required; no Gemini fallback is permitted");
+  const viaOpenRouter = hasOpenRouterKey();
   const model = configuredModel(tier, args.model);
-  const response = await fetch(ANTHROPIC_MESSAGES_URL, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      "x-api-key": apiKey,
-      "anthropic-version": ANTHROPIC_VERSION,
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: maxTokens,
-      ...(args.system?.trim() ? { system: args.system.trim() } : {}),
-      ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
-      messages: [{ role: "user", content: args.prompt }],
-    }),
+  const provider = viaOpenRouter ? "openrouter" : "anthropic";
+  const requestKey = modelRequestCacheKey(provider, model, {
+    prompt: args.prompt,
+    system: args.system?.trim() || undefined,
+    maxTokens,
+    temperature: args.temperature,
+    responseFormat: "json",
   });
-  const payload: unknown = await response.json().catch(() => undefined);
-  if (!response.ok) {
-    const message = payload && typeof payload === "object"
-      ? String((payload as { error?: { message?: unknown } }).error?.message ?? "Claude request failed")
-      : "Claude request failed";
-    throw new Error(`claudeJson: HTTP ${response.status}: ${message.slice(0, 500)}`);
-  }
-  const text = responseText(payload);
-  if (!text) throw new Error("claudeJson: response contained no text block");
-  const usage = payload && typeof payload === "object" ? (payload as { usage?: Record<string, unknown> }).usage : undefined;
-  recordModelUsage({
-    provider: "anthropic",
+
+  return getOrCreateModelResponse(requestKey, {
+    provider,
     model,
     kind: "text",
-    requestId: payload && typeof payload === "object" ? String((payload as { id?: unknown }).id ?? "") || undefined : undefined,
-    inputTokens: typeof usage?.input_tokens === "number" ? usage.input_tokens : undefined,
-    outputTokens: typeof usage?.output_tokens === "number" ? usage.output_tokens : undefined,
-  });
-  args.log?.(`claudeJson: ${model} returned structured text`);
-  return parseStructuredText<T>(text);
+  }, async () => {
+    if (viaOpenRouter) {
+      return openRouterJson<T>({
+        tier,
+        prompt: args.prompt,
+        system: args.system,
+        model,
+        maxTokens,
+        temperature: args.temperature,
+        log: args.log,
+      });
+    }
+    const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+    if (!apiKey) throw new Error("claudeJson: OPENROUTER_API_KEY or ANTHROPIC_API_KEY is required; no Gemini fallback is permitted");
+    let response: Response;
+    try {
+      response = await fetch(ANTHROPIC_MESSAGES_URL, {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-api-key": apiKey,
+          "anthropic-version": ANTHROPIC_VERSION,
+        },
+        body: JSON.stringify({
+          model,
+          max_tokens: maxTokens,
+          ...(args.system?.trim() ? { system: args.system.trim() } : {}),
+          ...(args.temperature !== undefined ? { temperature: args.temperature } : {}),
+          messages: [{ role: "user", content: args.prompt }],
+        }),
+        signal: AbortSignal.timeout(ANTHROPIC_REQUEST_TIMEOUT_MS),
+      });
+    } catch (error) {
+      throw new ClaudeGenerationOutcomeUnknownError(
+        `request transport failed after dispatch (${error instanceof Error ? error.message : String(error)})`,
+        { cause: error },
+      );
+    }
+    let payload: unknown;
+    try {
+      payload = await response.json();
+    } catch (error) {
+      throw new ClaudeGenerationOutcomeUnknownError(
+        `HTTP ${response.status} response body could not be read`,
+        { status: response.status, cause: error },
+      );
+    }
+    if (!response.ok) {
+      const message = payload && typeof payload === "object"
+        ? String((payload as { error?: { message?: unknown } }).error?.message ?? "Claude request failed")
+        : "Claude request failed";
+      if (response.status === 408 || response.status >= 500) {
+        throw new ClaudeGenerationOutcomeUnknownError(
+          `HTTP ${response.status} after request dispatch: ${message.slice(0, 500)}`,
+          { status: response.status },
+        );
+      }
+      throw new Error(`claudeJson: HTTP ${response.status}: ${message.slice(0, 500)}`);
+    }
+    const usage = payload && typeof payload === "object" ? (payload as { usage?: Record<string, unknown> }).usage : undefined;
+    recordModelUsage({
+      provider: "anthropic",
+      model,
+      kind: "text",
+      requestId: payload && typeof payload === "object" ? String((payload as { id?: unknown }).id ?? "") || undefined : undefined,
+      inputTokens: typeof usage?.input_tokens === "number" ? usage.input_tokens : undefined,
+      outputTokens: typeof usage?.output_tokens === "number" ? usage.output_tokens : undefined,
+    });
+    const text = responseText(payload);
+    if (!text) {
+      throw new ClaudeGenerationOutcomeUnknownError(
+        "successful response contained no text block",
+        { status: response.status },
+      );
+    }
+    args.log?.(`claudeJson: ${model} returned structured text`);
+    try {
+      return parseStructuredText<T>(text);
+    } catch (error) {
+      throw new ClaudeGenerationOutcomeUnknownError(
+        "successful response text failed the requested JSON contract",
+        { status: response.status, cause: error },
+      );
+    }
+  }, { memoize: args.memoize });
 }
 
 export async function claudeJsonPro<T = unknown>(args: Omit<Parameters<typeof claudeJson<T>>[0], "tier">): Promise<T> {

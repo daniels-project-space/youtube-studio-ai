@@ -113,7 +113,8 @@ export default function OverviewPage() {
   return (
     <div className={styles.dashboard}>
       <PageHeader
-        title="Overview"
+        title="Studio"
+        subtitle="A live view of the work, channels, and release gates that matter now."
         actions={
           <Link href="/schedule" className="studio-action studio-action-secondary">
             <IconCalendar width={16} height={16} /> Schedule
@@ -156,6 +157,16 @@ export default function OverviewPage() {
 
         <StatusBanner overdueCount={overdue.length} channelSlug={selectedSlug} />
       </section>
+
+      <RecentVideos
+        ownerId={ownerId}
+        channelId={
+          selectedSlug && channelsFiltered?.[0]
+            ? (channelsFiltered[0]._id as unknown as Id<"channels">)
+            : undefined
+        }
+        limit={12}
+      />
 
       <div className={styles.productionGrid}>
         <section className={`${styles.panel} glass`}>
@@ -201,16 +212,6 @@ export default function OverviewPage() {
           )}
         </section>
       </div>
-
-      <RecentVideos
-        ownerId={ownerId}
-        channelId={
-          selectedSlug && channelsFiltered?.[0]
-            ? (channelsFiltered[0]._id as unknown as Id<"channels">)
-            : undefined
-        }
-        limit={12}
-      />
 
       <details className={`${styles.runsWidget} glass`}>
         <summary>

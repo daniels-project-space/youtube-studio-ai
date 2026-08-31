@@ -1,6 +1,7 @@
 import type { QueryCtx } from "./_generated/server";
 import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
+import { observedVideoReleaseProvenanceFromRecord } from "../src/lib/videoReleaseProvenanceIntegrity";
 import type { Id } from "./_generated/dataModel";
 
 /**
@@ -187,6 +188,48 @@ export const ownerTrends = query({
   },
 });
 
+/**
+ * Per-video snapshots with the release mapping that was present at ingestion
+ * time. `observedReleaseProvenance: null` is an honest historical/unlinked
+ * state, not a failed quality or outcome assessment.
+ */
+export const videoSnapshotProvenance = query({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    youtubeVideoId: v.string(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const limit = args.limit ?? 30;
+    if (!Number.isSafeInteger(limit) || limit < 1 || limit > 180) {
+      throw new Error("analytics.videoSnapshotProvenance: limit must be 1..180");
+    }
+    const rows = await ctx.db
+      .query("videoAnalytics")
+      .withIndex("by_video", (q) => q.eq("youtubeVideoId", args.youtubeVideoId))
+      .order("desc")
+      .take(limit);
+    return rows
+      .filter((row) => row.ownerId === args.ownerId && row.channelId === args.channelId)
+      .map((row) => ({
+        youtubeVideoId: row.youtubeVideoId,
+        snapshotAt: row.snapshotAt,
+        source: row.source ?? null,
+        metricDefinitionVersion: row.metricDefinitionVersion ?? null,
+        confidence: row.confidence ?? null,
+        views: row.views,
+        likes: row.likes,
+        comments: row.comments,
+        watchTimeHours: row.watchTimeHours ?? null,
+        estimatedRevenueUsd: row.estimatedRevenueUsd ?? null,
+        ctr: row.ctr ?? null,
+        rpm: row.rpm ?? null,
+        observedReleaseProvenance: row.observedReleaseProvenance ?? null,
+      }));
+  },
+});
+
 /** Latest (most recent date) channelAnalytics row for a channel, or null. */
 async function latestChannelDay(ctx: QueryCtx, channelId: Id<"channels">) {
   // Index is (channelId, date) and date is YYYY-MM-DD, so desc-first IS the
@@ -260,7 +303,22 @@ export const recordVideoSnapshot = mutation({
     ) {
       throw new Error("analytics.recordVideoSnapshot: ingestion provenance mismatch");
     }
-    return await ctx.db.insert("videoAnalytics", {
+    const existing = await ctx.db
+      .query("videoAnalytics")
+      .withIndex("by_ingestion_video", (q) =>
+        q.eq("ingestionId", args.ingestionId).eq("youtubeVideoId", args.youtubeVideoId),
+      )
+      .unique();
+    const releaseProvenance = await ctx.db
+      .query("videoReleaseProvenance")
+      .withIndex("by_owner_youtube_video", (q) =>
+        q.eq("ownerId", args.ownerId).eq("youtubeVideoId", args.youtubeVideoId),
+      )
+      .unique();
+    if (releaseProvenance && releaseProvenance.channelId !== args.channelId) {
+      throw new Error("analytics.recordVideoSnapshot: release provenance channel mismatch");
+    }
+    const doc = {
       ownerId: args.ownerId,
       channelId: args.channelId,
       connectorId: args.connectorId,
@@ -279,8 +337,23 @@ export const recordVideoSnapshot = mutation({
       estimatedRevenueUsd: args.estimatedRevenueUsd,
       ctr: args.ctr,
       rpm: args.rpm,
-      snapshotAt: args.snapshotAt ?? Date.now(),
-    });
+      // Preserve the original observation on a replay. A later retry must not
+      // turn release metadata that appeared afterwards into evidence observed
+      // at the first snapshot time.
+      ...(existing?.observedReleaseProvenance
+        ? { observedReleaseProvenance: existing.observedReleaseProvenance }
+        : !releaseProvenance
+        ? {}
+        : {
+            observedReleaseProvenance: observedVideoReleaseProvenanceFromRecord(releaseProvenance),
+          }),
+      snapshotAt: existing?.snapshotAt ?? args.snapshotAt ?? Date.now(),
+    };
+    if (existing) {
+      await ctx.db.patch(existing._id, doc);
+      return existing._id;
+    }
+    return await ctx.db.insert("videoAnalytics", doc);
   },
 });
 
@@ -335,16 +408,21 @@ export const upsertChannelDay = mutation({
     ) {
       throw new Error("analytics.upsertChannelDay: connector provenance mismatch");
     }
-    const rows = await ctx.db
+    const sameDay = await ctx.db
       .query("channelAnalytics")
-      .withIndex("by_channel_date", (q) => q.eq("channelId", args.channelId))
-      .collect();
-
-    const sameDay = rows.find((r) => r.date === args.date);
-    // Most-recent prior day strictly before `date`, for the subscriber delta.
-    const prior = rows
-      .filter((r) => r.date < args.date)
-      .sort((a, b) => (a.date < b.date ? 1 : -1))[0];
+      .withIndex("by_channel_date", (q) =>
+        q.eq("channelId", args.channelId).eq("date", args.date),
+      )
+      .unique();
+    // The compound index can return the prior day directly. This avoids a
+    // growing `.collect()` of every historical daily rollup on each refresh.
+    const prior = await ctx.db
+      .query("channelAnalytics")
+      .withIndex("by_channel_date", (q) =>
+        q.eq("channelId", args.channelId).lt("date", args.date),
+      )
+      .order("desc")
+      .first();
     const subscriberDelta = prior
       ? args.subscriberCount - prior.subscriberCount
       : 0;

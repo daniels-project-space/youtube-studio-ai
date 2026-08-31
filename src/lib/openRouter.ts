@@ -10,9 +10,41 @@ import { recordModelUsage } from "@/lib/modelUsage";
 import type { ModelCallKind } from "@/lib/modelUsage";
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
+// Final multimodal receipts can take longer than lightweight planning calls.
+// These bounded limits allow the pinned reviewer to finish one operational
+// batch without turning a slow body into a synthetic "no text" outcome.
+const OPENROUTER_REQUEST_TIMEOUT_MS = 180_000;
+// The final Qwen reviewer can return headers before its constrained JSON body
+// is ready. Four minutes aborted a real two-frame final-review response after
+// an HTTP 200; six minutes remains a hard bound while allowing the admitted
+// model to finish a complete receipt instead of manufacturing a false failure.
+const OPENROUTER_RESPONSE_BODY_TIMEOUT_MS = 360_000;
+
+/**
+ * The router accepted a request boundary but did not produce a safely usable
+ * result. Its endpoint has no durable caller-visible receipt/recovery lookup,
+ * so retries here could buy the same completion twice.
+ */
+export class OpenRouterGenerationOutcomeUnknownError extends Error {
+  readonly code = "openrouter_generation_outcome_unknown";
+  readonly retryable = false;
+  readonly status?: number;
+
+  constructor(detail: string, options?: { status?: number; cause?: unknown }) {
+    super(
+      `openRouter: generation may already have consumed provider work; refusing automatic replay: ${detail}`,
+      options?.cause === undefined ? undefined : { cause: options.cause },
+    );
+    this.name = "OpenRouterGenerationOutcomeUnknownError";
+    if (options?.status !== undefined) this.status = options.status;
+  }
+}
 
 export const OPENROUTER_MODELS = {
-  intelligence: "openai/gpt-oss-20b",
+  // The shared structured-planning route needs a model that leaves a final
+  // answer after reasoning. The larger Qwen route is independently health
+  // checked with JSON output and is also the pinned final vision reviewer.
+  intelligence: "qwen/qwen3.6-27b",
   creative: "mistralai/ministral-8b-2512",
   visionBulk: "mistralai/ministral-3b-2512",
   visionStandard: "mistralai/ministral-8b-2512",
@@ -34,13 +66,6 @@ export type OpenRouterProviderPreferences = {
 };
 
 const PROVIDERS: Record<string, OpenRouterProviderPreferences> = {
-  "openai/gpt-oss-20b": {
-    // CoreWeave's endpoint supports structured output and is not Google-hosted.
-    only: ["coreweave/fp4"],
-    allow_fallbacks: false,
-    require_parameters: true,
-    data_collection: "deny",
-  },
   "mistralai/ministral-3b-2512": {
     only: ["mistral"],
     allow_fallbacks: false,
@@ -54,17 +79,30 @@ const PROVIDERS: Record<string, OpenRouterProviderPreferences> = {
     data_collection: "deny",
   },
   "qwen/qwen3.6-27b": {
-    // Morph supports the JSON mode used by final visual admissions.
-    only: ["morph/fp4"],
+    // CoreWeave is the currently available non-Google host for the JSON-mode
+    // final visual-review route. Keep this pin fail-closed: a host change is
+    // a deliberate policy update, never an implicit fallback.
+    only: ["coreweave"],
     allow_fallbacks: false,
     require_parameters: true,
     data_collection: "deny",
   },
 };
 
+function assertNoOpenAiModel(model: string): void {
+  // A Codex subscription is not a deployable application credential. The
+  // Studio therefore uses its explicitly approved non-OpenAI provider routes
+  // only, and must fail closed if an environment override tries to reintroduce
+  // an OpenAI-branded hosted model through OpenRouter.
+  if (/^openai\//i.test(model.trim())) {
+    throw new Error(`OpenRouter ${model} is prohibited: Studio runtime must not use OpenAI API models`);
+  }
+}
+
 function configured(key: OpenRouterModelKey): string {
   const envKey = `OPENROUTER_${key.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}_MODEL`;
   const model = process.env[envKey]?.trim() || OPENROUTER_MODELS[key];
+  assertNoOpenAiModel(model);
   if (/\b(?:google|gemini)\b/i.test(model)) {
     throw new Error(`OpenRouter ${key} model must not be Google/Gemini: ${model}`);
   }
@@ -118,28 +156,63 @@ export async function openRouterChat(args: {
   kind?: ModelCallKind;
   log?: (message: string) => void;
 }): Promise<string> {
+  assertNoOpenAiModel(args.model);
   const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) throw new Error("OpenRouter requires OPENROUTER_API_KEY");
   const provider = PROVIDERS[args.model];
   if (!provider) throw new Error(`OpenRouter model is not an approved pinned non-Google route: ${args.model}`);
-  const response = await fetch(OPENROUTER_CHAT_URL, {
-    method: "POST",
-    headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
-    body: JSON.stringify({
-      model: args.model,
-      messages: args.messages,
-      max_tokens: args.maxTokens,
-      ...(args.temperature === undefined ? {} : { temperature: args.temperature }),
-      ...(args.json ? { response_format: { type: "json_object" } } : {}),
-      provider,
-    }),
-    signal: AbortSignal.timeout(90_000),
-  });
-  const payload: unknown = await response.json().catch(() => undefined);
+  const controller = new AbortController();
+  const requestDeadline = setTimeout(() => controller.abort(), OPENROUTER_REQUEST_TIMEOUT_MS);
+  let response: Response;
+  try {
+    response = await fetch(OPENROUTER_CHAT_URL, {
+      method: "POST",
+      headers: { authorization: `Bearer ${key}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        model: args.model,
+        messages: args.messages,
+        max_tokens: args.maxTokens,
+        ...(args.temperature === undefined ? {} : { temperature: args.temperature }),
+        ...(args.json ? { response_format: { type: "json_object" } } : {}),
+        provider,
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    throw new OpenRouterGenerationOutcomeUnknownError(
+      `request transport failed after dispatch (${error instanceof Error ? error.message : String(error)})`,
+      { cause: error },
+    );
+  } finally {
+    // fetch() resolves when response headers arrive. Do not let a request
+    // deadline abort a valid, still-streaming structured body after headers.
+    clearTimeout(requestDeadline);
+  }
+  let payload: unknown;
+  const bodyDeadline = setTimeout(() => controller.abort(), OPENROUTER_RESPONSE_BODY_TIMEOUT_MS);
+  try {
+    payload = await response.json();
+  } catch (error) {
+    const detail = error instanceof Error
+      ? `${error.name}: ${error.message}`
+      : String(error);
+    throw new OpenRouterGenerationOutcomeUnknownError(
+      `HTTP ${response.status} response body could not be read (${detail.slice(0, 300)})`,
+      { status: response.status, cause: error },
+    );
+  } finally {
+    clearTimeout(bodyDeadline);
+  }
   if (!response.ok) {
     const message = payload && typeof payload === "object"
       ? String((payload as { error?: { message?: unknown } }).error?.message ?? "OpenRouter request failed")
       : "OpenRouter request failed";
+    if (response.status === 408 || response.status >= 500) {
+      throw new OpenRouterGenerationOutcomeUnknownError(
+        `HTTP ${response.status} after request dispatch: ${message.slice(0, 500)}`,
+        { status: response.status },
+      );
+    }
     throw new Error(`OpenRouter HTTP ${response.status}: ${message.slice(0, 500)}`);
   }
   const usage = payload && typeof payload === "object" ? (payload as { usage?: Record<string, unknown> }).usage : undefined;
@@ -162,7 +235,22 @@ export async function openRouterChat(args: {
     ...(!usage ? { unpricedReason: "OpenRouter response omitted usage" } : {}),
   });
   const text = responseText(payload);
-  if (!text) throw new Error("OpenRouter response contained no text");
+  if (!text) {
+    throw new OpenRouterGenerationOutcomeUnknownError(
+      "successful response contained no text",
+      { status: response.status },
+    );
+  }
+  if (args.json) {
+    try {
+      parseJson(text);
+    } catch (error) {
+      throw new OpenRouterGenerationOutcomeUnknownError(
+        "successful response text failed the requested JSON contract",
+        { status: response.status, cause: error },
+      );
+    }
+  }
   args.log?.(`openrouter: ${returnedModel} returned text`);
   return text;
 }
@@ -191,6 +279,7 @@ export async function openRouterJson<T>(args: {
 }
 
 export function openRouterProviderPreferences(model: string): OpenRouterProviderPreferences {
+  assertNoOpenAiModel(model);
   const provider = PROVIDERS[model];
   if (!provider) throw new Error(`OpenRouter model is not an approved pinned non-Google route: ${model}`);
   return provider;

@@ -32,6 +32,7 @@ import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { makeRunTempDir, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { renderDataInsert } from "@/lib/remotionRender";
+import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 
 const KINDS = ["big_stat", "line_chart", "bar_compare", "annotated_line", "lower_third"] as const;
 type InsertKind = (typeof KINDS)[number];
@@ -189,6 +190,13 @@ export const visualInserts: Block = {
     const topic = (ctx.store["topic"] as string | undefined) ?? "";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
     const dna = ctx.store["styleDNA"] as { palette?: string[] } | null;
+    const studioMotionGraphicsRecipe = studioPostproductionRecipeProjectionFromUnknown(
+      ctx.store["studioMotionGraphicsRecipeProjection"],
+      "motion_graphics_template",
+    );
+    const studioPresentationDirection = studioMotionGraphicsRecipe.promptAddenda.length
+      ? `\nAPPROVED STUDIO PRESENTATION DIRECTION (appearance only; do not alter facts, values, source attribution, visual type, or timing): ${studioMotionGraphicsRecipe.promptAddenda.join(" ")}\n`
+      : "";
     const palette =
       dna?.palette?.length ? dna.palette : ((ctx.store["palette"] as string[] | undefined) ?? []);
     const accent = palette.length >= 2 ? palette[palette.length - 2] : undefined;
@@ -233,6 +241,7 @@ export const visualInserts: Block = {
           `whole span so the viewer can actually read it while it is being talked about.\n` +
           `Available kinds:\n${kindDocs}\n\n` +
           factualManifestDocs +
+          studioPresentationDirection +
           `HARD RULES:\n` +
           `- anchorValues: list the EXACT numbers from the chosen sentence that the insert visualizes. ` +
           `You may NOT use numbers that are not spoken in that sentence (inserts are fact-checked against the script).\n` +
@@ -371,6 +380,7 @@ export const visualInserts: Block = {
           events: it.events,
           palette,
           accent,
+          presentation: studioMotionGraphicsRecipe.dataInsertPreset ?? undefined,
           outPath: path,
           durationSec: durSec,
           width: W,

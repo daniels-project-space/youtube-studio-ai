@@ -11,11 +11,19 @@ import type {
   VisualRepairOwner,
   VisualRepairSignal,
 } from "@/engine/healer";
+import {
+  completeVisualReviewFocusTimes,
+  FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST,
+} from "@/engine/visualReviewBudget";
 import { detectSceneChanges, grabFrame } from "@/lib/ffmpeg";
 import { makeRunTempDir } from "@/lib/files";
 import { parseJsonLoose } from "@/lib/gemini";
 import { putObject } from "@/lib/storage";
-import { hasNonGoogleVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
+import {
+  hasNonGoogleVisionKey,
+  visionLocal,
+  VISION_GATE_MAX_TOKENS,
+} from "@/lib/vision";
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -26,6 +34,9 @@ import { join } from "node:path";
 export const VISUAL_REVIEW_VERSION = "video-review/v5" as const;
 /** Post-review result schema; kept separate so `reviewFingerprint` stays a plan/intent binding. */
 export const VISUAL_REVIEW_RECEIPT_VERSION = "visual-review-receipt/v1" as const;
+/** Opt-in, evidence-bound score emitted once for every broad reviewer batch. */
+export const VISUAL_REVIEW_BROAD_QUALITY_SCORE_VERSION =
+  "visual-review-wide-sample-quality/v1" as const;
 
 export type VisualReviewSeverity = "critical" | "major" | "minor";
 export type VisualReviewVerdict = "pass" | "fail" | "needs_human";
@@ -164,6 +175,12 @@ export interface ChannelVisualReviewProfileInput {
   criticDoctrine?: string;
   /** Lane-tuned emphases (see engine/contentLane laneQualityPolicy). */
   laneEmphasis?: readonly string[];
+  /**
+   * Production release callers set this so a newly added lane cannot silently
+   * inherit the generic reviewer rubric. Legacy diagnostics may retain the
+   * deliberately generic fallback while they are migrated.
+   */
+  requireSpecificLaneProfile?: boolean;
 }
 
 export interface ChannelVisualReviewProfile {
@@ -184,16 +201,40 @@ const CHANNEL_REQUIREMENTS: Readonly<Record<string, {
 }>> = {
   motion_comic: {
     expected:
-      "A comic-panel narrative: speech bubbles and captions must stay inside their panel, remain legible, and avoid faces and hero artwork.",
+      "A comic-panel narrative: speech bubbles and captions must stay inside their panel, remain legible, and avoid faces and hero artwork. The opening must immediately show a purposeful title, panel action, or planned drawing; an unplanned empty panel/template is a broken intro.",
     allowed: [
       "Intentional comic page borders and deliberately cropped adjacent panels are not defects unless a planned overlay itself is clipped or obscures the subject.",
     ],
   },
+  lore_micro_doc: {
+    expected:
+      "A lore micro-documentary: the opening must immediately establish a purposeful title, scene, or narration-aligned visual; the world, captions, and transitions must remain coherent, legible, and free of blank templates, frozen holds, or repeated placeholder art.",
+    allowed: [],
+  },
+  quiz_year: {
+    expected:
+      "A QuizYear knowledge video: the hook or first question must appear immediately; question, countdown, reveal, and source context must remain readable, internally consistent, and inside the intended safe area without blank, duplicate, or contradictory cards.",
+    allowed: [],
+  },
+  illustrated_explainer: {
+    expected:
+      "A narration-led illustrated explainer: scenes, diagrams, maps, labels, and transitions must form a clear progression that supports the current spoken idea. The opening must establish the topic or learning promise without a blank template, and visual facts or labels must remain legible and coherent.",
+    allowed: [],
+  },
+  children_learning_supervised: {
+    expected:
+      "A supervised child-learning episode: the opening must clearly establish the learning activity, while age-appropriate scenes, prompts, diagrams, and captions remain calm, legible, coherent, and free of blank templates, clutter, or distracting visual glitches.",
+    allowed: [],
+  },
   whiteboard_explainer: {
     expected:
-      "A sequential whiteboard explainer: each drawing and label must be legible, the visual progression must match the narration, and no key annotation may be clipped.",
+      "A sequential, information-dense whiteboard explainer: each narrated beat must accumulate a composed hero scene, distinct supporting evidence sketches, and native labels as the explanation advances. Every sketch must make the exact spoken claim or causal mechanism visible—not a generic metaphor—and separately generated drawings must not paint over a person or factual detail. Each drawing and label must be legible, every art arrival must show an actual hand trace or finishing hold, the visual progression must match the narration, and no key annotation may be clipped. A generic isolated icon, ambiguous decorative metaphor, empty board, missing drawing hand, or prolonged unfinished/static board is a defect rather than an acceptable simplification.",
     allowed: [
       "An intentional drawing cursor or hand may enter the frame while creating the whiteboard illustration when it does not permanently hide the active explanation.",
+      "During the intentional board prelude, a partially written frame or progressively drawn header is expected; judge title legibility only after that prelude completes.",
+      "During active whiteboard handwriting, a non-title label may be visibly mid-stroke or mid-word while the hand is creating it inside the board. Do not classify that transient drawing state as clipped or off-canvas; assess the completed hold, while still reporting ink that actually crosses the board edge or remains incomplete after the drawing finishes.",
+      "A completed whiteboard panel may hold while its narration continues; a stable, narration-aligned illustration is not a repeated-clip defect by itself.",
+      "The final narrated panel may be the intentional ending. A separate outro card is required only when the route or channel plan explicitly declares one.",
     ],
   },
   documentary_collage_short: {
@@ -281,7 +322,14 @@ export function channelVisualReviewProfile(
 ): ChannelVisualReviewProfile {
   const laneKey = compactReviewContext(input.contentLaneKey, 80) ?? "legacy_unclassified";
   const renderer = compactReviewContext(input.primaryRenderer, 100);
-  const requirement = CHANNEL_REQUIREMENTS[laneKey] ?? {
+  const registeredRequirement = CHANNEL_REQUIREMENTS[laneKey];
+  if (!registeredRequirement && input.requireSpecificLaneProfile) {
+    throw new Error(
+      `visual review production profile is not registered for content lane ${laneKey}; ` +
+      "add its explicit expected visual structure before release",
+    );
+  }
+  const requirement = registeredRequirement ?? {
     expected:
       "A finished channel video: planned overlays, captions, and inserts must be readable, in-frame, and support the intended story without hiding key subjects.",
     allowed: [],
@@ -373,6 +421,17 @@ export interface VisualReviewDefect {
   source: "geometry" | "vision";
 }
 
+/**
+ * A conservative quality score from the already-required broad final-review
+ * batches. It is the minimum batch score, never an unsupported whole-video
+ * average or a substitute for the final visual-review verdict.
+ */
+export interface VisualReviewBroadQualityScore {
+  version: typeof VISUAL_REVIEW_BROAD_QUALITY_SCORE_VERSION;
+  score: number;
+  broadBatchCount: number;
+}
+
 export interface VisualReviewResult {
   ran: boolean;
   verdict: VisualReviewVerdict;
@@ -396,6 +455,15 @@ export interface VisualReviewResult {
    * parsed findings, typed criterion receipts, and the final verdict.
    */
   reviewReceiptFingerprint: string;
+  /**
+   * Existing deterministic scene-detector timestamps used to plan this review.
+   * Optional because no-review/legacy paths intentionally do not invoke the
+   * local detector; consumers may derive a lane-specific observation but must
+   * not infer a visual change when this list is empty.
+   */
+  sceneChangeTimes?: number[];
+  /** Present only when every requested broad-review batch returned a valid score. */
+  broadQualityScore?: VisualReviewBroadQualityScore;
   /** Ephemeral paths for same-stage critic checks only; never persist these. */
   framePaths: string[];
 }
@@ -408,6 +476,7 @@ export interface VisualReviewReceiptFingerprintInput {
   defects: readonly VisualReviewDefect[];
   referenceCriteria: readonly VisualReviewReferenceCriterionReceipt[];
   referenceCriteriaComplete: boolean;
+  broadQualityScore?: VisualReviewBroadQualityScore;
 }
 
 export class VisualReviewFailure extends Error {
@@ -448,7 +517,15 @@ export interface ReviewRenderOptions {
    */
   sourceSha256?: string;
   required?: boolean;
-  /** Broad evidence cap. Each vision request is always <= 12 images. */
+  /** Ask every broad final-review batch for a receipt-bound 0–10 quality score. */
+  collectBroadQualityScore?: boolean;
+  /**
+   * Make the broad score mandatory. This implies collection and makes a
+   * missing/malformed batch score incomplete; production qa_visual uses it
+   * while draft/probe review remains advisory.
+   */
+  requireBroadQualityScore?: boolean;
+  /** Broad evidence cap. Each vision request is always <= the provider limit. */
   maxFrames?: number;
   /** Extra evidence cap for reviewer-requested or repair-focused windows. */
   maxFocusFrames?: number;
@@ -459,6 +536,18 @@ export interface ReviewRenderOptions {
    * complete cut review while silently dropping later cuts.
    */
   requireCompleteFocusCoverage?: boolean;
+  /**
+   * The sealed subset of focus windows that must receive complete 2fps
+   * coverage. Reactive model findings remain under maxFocusFrames so an
+   * untrusted defect range cannot enlarge this pre-reserved provider plan.
+   */
+  completeFocusWindows?: readonly VisualReviewWindow[];
+  /**
+   * Optional pre-render witness for a sealed complete-focus plan. A mismatch
+   * fails before evidence extraction/provider work rather than spending under
+   * a plan whose timing no longer matches the admitted master.
+   */
+  expectedCompleteFocusFrameCount?: number;
   persistEvidence?: boolean;
   reviewer?: VisualReviewer;
   log?: (message: string) => void;
@@ -669,18 +758,7 @@ export function planVisualReviewEvidence(input: {
  * call and therefore makes the exact review cost visible before a run starts.
  */
 export function planCompleteFocusEvidence(durationSec: number, windows: readonly VisualReviewWindow[]): VisualReviewFrame[] {
-  const candidates = new Map<string, number>();
-  const add = (raw: number) => {
-    if (!Number.isFinite(raw) || raw < 0 || raw > durationSec) return;
-    const tSec = clamp(roundTime(raw), 0, durationSec);
-    candidates.set(tSec.toFixed(1), tSec);
-  };
-  for (const window of mergeWindows(windows, durationSec)) {
-    for (let tSec = window.startSec; tSec <= window.endSec + 0.001; tSec += 0.5) add(tSec);
-    add(window.endSec);
-  }
-  return [...candidates.values()]
-    .sort((a, b) => a - b)
+  return completeVisualReviewFocusTimes(durationSec, windows)
     .map((tSec, index) => ({
       id: `c${String(index + 1).padStart(3, "0")}`,
       tSec,
@@ -766,6 +844,7 @@ function reviewerPrompt(
   frames: readonly ExtractedFrame[],
   phase: "broad" | "focus",
   referenceCriteria: readonly NormalizedVisualReviewReferenceCriterion[],
+  collectBroadQualityScore: boolean,
 ): string {
   const timeline = frames.map((frame) => {
     const transcript = cueForFrame(intent.transcriptCues ?? [], frame.descriptor.tSec);
@@ -796,6 +875,12 @@ function reviewerPrompt(
       `Every receipt must cite one or more IDs from this batch's FRAME LEDGER; never invent frame IDs.\n` +
       `${referenceCriteria.map((item) => `- ${item.id} [${item.scope}]: "${item.criterion}"`).join("\n")}\n\n`
     : "";
+  const broadQualityScoreInstructions = phase === "broad" && collectBroadQualityScore
+    ? `WIDE-SAMPLE QUALITY SCORE\n` +
+      `Return one \"broadQualityScore\" from 0 to 10 for this entire broad-review batch. Rate only visible ` +
+      `clarity, relevance to the stated topic, and absence of glitches, black frames, or distortion. This is a ` +
+      `batch-local evidence measurement that will be conservatively combined across every broad batch; do not omit it.\n\n`
+    : "";
   return (
     `You are the production visual QA director for a rendered YouTube video. Review only what is visible in the ` +
     `timestamped frames below. This is the ${phase} pass; do not claim continuous-frame coverage.\n\n` +
@@ -816,6 +901,7 @@ function reviewerPrompt(
         `${qualityCriteria.map((item) => `"${item}"`).join("; ")}\n\n`
       : "") +
     referenceCriteriaInstructions +
+    broadQualityScoreInstructions +
     `INTENT\n- Title: "${intent.title}"\n` +
     (intent.topic ? `- Topic: "${intent.topic}"\n` : "") +
     (intent.niche ? `- Niche: ${intent.niche}\n` : "") +
@@ -838,6 +924,9 @@ function reviewerPrompt(
     `"evidenceFrameIds":["f001"],"suggestedRepair":"short safe repair"}],` +
     (referenceCriteria.length
       ? `"referenceCriteria":[{"id":"${referenceCriteria[0]?.id}","verdict":"pass|fail|not_observable","evidenceFrameIds":["f001"]}],`
+      : "") +
+    (phase === "broad" && collectBroadQualityScore
+      ? `"broadQualityScore":number,`
       : "") +
     `"summary":"<=100 words"}.`
   );
@@ -935,12 +1024,14 @@ function parseModelDefects(
   intent: VisualReviewIntent,
   phase: "broad" | "focus",
   requestedReferenceCriteria: readonly NormalizedVisualReviewReferenceCriterion[],
+  collectBroadQualityScore: boolean,
 ): {
   defects: VisualReviewDefect[];
   summary: string;
   complete: boolean;
   referenceCriteria: VisualReviewReferenceCriterionReceipt[];
   referenceCriteriaComplete: boolean;
+  broadQualityScore?: number;
 } {
   let parsed: unknown;
   try {
@@ -964,6 +1055,16 @@ function parseModelDefects(
     };
   }
   const receipt = parsed as Record<string, unknown>;
+  const expectsBroadQualityScore = phase === "broad" && collectBroadQualityScore;
+  const rawBroadQualityScore = receipt.broadQualityScore;
+  const broadQualityScore =
+    expectsBroadQualityScore &&
+    typeof rawBroadQualityScore === "number" &&
+    Number.isFinite(rawBroadQualityScore) &&
+    rawBroadQualityScore >= 0 &&
+    rawBroadQualityScore <= 10
+      ? Math.round(rawBroadQualityScore * 10) / 10
+      : undefined;
   const reportedDefects = receipt.defects;
   const summary = typeof receipt.summary === "string" ? receipt.summary.trim().slice(0, 500) : "";
   if (!Array.isArray(reportedDefects) || !summary) {
@@ -1018,6 +1119,7 @@ function parseModelDefects(
     complete,
     referenceCriteria: parsedReferenceCriteria.referenceCriteria,
     referenceCriteriaComplete: parsedReferenceCriteria.complete,
+    ...(broadQualityScore === undefined ? {} : { broadQualityScore }),
   };
 }
 
@@ -1116,30 +1218,49 @@ async function reviewBatches(
   frames: readonly ExtractedFrame[],
   phase: "broad" | "focus",
   referenceCriteria: readonly NormalizedVisualReviewReferenceCriterion[],
+  collectBroadQualityScore: boolean,
 ): Promise<{
   defects: VisualReviewDefect[];
   summaries: string[];
   incompleteReceiptCount: number;
   referenceCriteria: VisualReviewReferenceCriterionReceipt[];
   incompleteReferenceCriteriaReceiptCount: number;
+  broadQualityScores: number[];
+  incompleteBroadQualityScoreCount: number;
 }> {
   const defects: VisualReviewDefect[] = [];
   const summaries: string[] = [];
   const criteriaReceipts: VisualReviewReferenceCriterionReceipt[] = [];
   let incompleteReceiptCount = 0;
   let incompleteReferenceCriteriaReceiptCount = 0;
-  for (let index = 0; index < frames.length; index += 12) {
-    const batch = frames.slice(index, index + 12);
-    const raw = await reviewer({
-      prompt: reviewerPrompt(intent, batch, phase, referenceCriteria),
-      phase,
-      frames: batch.map((frame) => ({ ...frame.descriptor, localPath: frame.localPath })),
-    });
-    const parsed = parseModelDefects(raw, batch, intent, phase, referenceCriteria);
+  const broadQualityScores: number[] = [];
+  let incompleteBroadQualityScoreCount = 0;
+  for (let index = 0; index < frames.length; index += FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST) {
+    const batch = frames.slice(index, index + FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST);
+    let raw: string;
+    try {
+      raw = await reviewer({
+        prompt: reviewerPrompt(intent, batch, phase, referenceCriteria, collectBroadQualityScore),
+        phase,
+        frames: batch.map((frame) => ({ ...frame.descriptor, localPath: frame.localPath })),
+      });
+    } catch (error) {
+      const batchNumber = index / FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST + 1;
+      const totalBatches = Math.ceil(frames.length / FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST);
+      throw new Error(
+        `visualReview ${phase} batch ${batchNumber}/${totalBatches} (${batch.map((frame) => frame.descriptor.id).join(", ")}) failed`,
+        { cause: error },
+      );
+    }
+    const parsed = parseModelDefects(raw, batch, intent, phase, referenceCriteria, collectBroadQualityScore);
     defects.push(...parsed.defects);
     criteriaReceipts.push(...parsed.referenceCriteria);
     if (!parsed.complete) incompleteReceiptCount += 1;
     if (!parsed.referenceCriteriaComplete) incompleteReferenceCriteriaReceiptCount += 1;
+    if (phase === "broad" && collectBroadQualityScore) {
+      if (parsed.broadQualityScore === undefined) incompleteBroadQualityScoreCount += 1;
+      else broadQualityScores.push(parsed.broadQualityScore);
+    }
     if (parsed.summary) summaries.push(parsed.summary);
   }
   return {
@@ -1148,6 +1269,8 @@ async function reviewBatches(
     incompleteReceiptCount,
     referenceCriteria: criteriaReceipts,
     incompleteReferenceCriteriaReceiptCount,
+    broadQualityScores,
+    incompleteBroadQualityScoreCount,
   };
 }
 
@@ -1287,6 +1410,15 @@ export function visualReviewReceiptFingerprint(input: VisualReviewReceiptFingerp
       defects,
       referenceCriteria,
       referenceCriteriaComplete: input.referenceCriteriaComplete,
+      ...(input.broadQualityScore
+        ? {
+            broadQualityScore: {
+              version: input.broadQualityScore.version,
+              score: input.broadQualityScore.score,
+              broadBatchCount: input.broadQualityScore.broadBatchCount,
+            },
+          }
+        : {}),
     }))
     .digest("hex");
 }
@@ -1344,6 +1476,22 @@ export async function reviewRender(
   const sourceSha256 = opts.sourceSha256?.trim().toLowerCase();
   if (opts.sourceSha256 !== undefined && !/^[a-f0-9]{64}$/.test(sourceSha256 ?? "")) {
     throw new Error("visualReview sourceSha256 must be a 64-character hexadecimal SHA-256");
+  }
+  const requireCompleteFocusCoverage = opts.requireCompleteFocusCoverage === true;
+  const sealedCompleteFocusWindows = requireCompleteFocusCoverage
+    ? opts.completeFocusWindows ?? intent.focusWindows ?? []
+    : [];
+  const requiredFocusFrames = requireCompleteFocusCoverage
+    ? planCompleteFocusEvidence(durationSec, sealedCompleteFocusWindows)
+    : [];
+  if (opts.expectedCompleteFocusFrameCount !== undefined) {
+    const expected = Number(opts.expectedCompleteFocusFrameCount);
+    if (!Number.isInteger(expected) || expected < 0 || expected !== requiredFocusFrames.length) {
+      throw new Error(
+        `visualReview sealed complete-focus plan mismatch: expected ${opts.expectedCompleteFocusFrameCount}, ` +
+          `planned ${requiredFocusFrames.length}`,
+      );
+    }
   }
   if (!opts.reviewer && !hasNonGoogleVisionKey()) {
     if (required) {
@@ -1438,48 +1586,77 @@ export async function reviewRender(
         referenceCriteria,
         referenceCriteriaComplete,
       }),
+      sceneChangeTimes: sceneTimes,
       framePaths: broad.map((frame) => frame.localPath),
     };
   }
 
-  const firstPass = await reviewBatches(reviewer, intent, broad, "broad", requestedReferenceCriteria);
+  const requireBroadQualityScore = opts.requireBroadQualityScore === true;
+  const collectBroadQualityScore = opts.collectBroadQualityScore === true || requireBroadQualityScore;
+  const firstPass = await reviewBatches(
+    reviewer,
+    intent,
+    broad,
+    "broad",
+    requestedReferenceCriteria,
+    collectBroadQualityScore,
+  );
   const geometry = geometryDefects(intent.overlays ?? [], broad);
   const initialDefects = dedupeDefects([...geometry, ...firstPass.defects]);
   const focusWindows = mergeWindows([
     ...(intent.focusWindows ?? []),
     ...focusForDefects(initialDefects, durationSec),
   ], durationSec);
-  const requireCompleteFocusCoverage = opts.requireCompleteFocusCoverage === true;
-  const requiredFocusFrames = requireCompleteFocusCoverage
-    ? planCompleteFocusEvidence(durationSec, focusWindows)
-    : [];
-  const focusCandidates = focusOnlyEvidence(
+  // Sealed complete coverage is deliberately planned before the broad review.
+  // Model findings can request a re-watch, but only through the separately
+  // bounded regular focus allowance; an untrusted endSec must never expand the
+  // paid 2fps cinematic plan after its pre-render reservation.
+  const regularFocusCandidates = focusOnlyEvidence(
     durationSec,
     focusWindows,
     Math.max(0, Math.floor(finite(opts.maxFocusFrames, 24))),
-    requireCompleteFocusCoverage,
-  )
+    false,
+  );
+  const candidatesByTimestamp = new Map<string, VisualReviewFrame>();
+  for (const candidate of [...requiredFocusFrames, ...regularFocusCandidates]) {
+    candidatesByTimestamp.set(candidate.tSec.toFixed(1), candidate);
+  }
+  const focusCandidates = [...candidatesByTimestamp.values()]
+    .sort((left, right) => left.tSec - right.tSec)
     .filter((candidate) => !broad.some((frame) => Math.abs(frame.descriptor.tSec - candidate.tSec) < 0.11))
     .map((candidate, index) => ({ ...candidate, id: `x${String(index + 1).padStart(3, "0")}` }));
   const focused = focusCandidates.length
     ? await extractFrames(videoPath, focusCandidates, opts.runId, "focus", log)
     : [];
   const focusPass = focused.length
-    ? await reviewBatches(reviewer, intent, focused, "focus", requestedReferenceCriteria)
+    ? await reviewBatches(reviewer, intent, focused, "focus", requestedReferenceCriteria, false)
     : {
         defects: [],
         summaries: [],
         incompleteReceiptCount: 0,
         referenceCriteria: [],
         incompleteReferenceCriteriaReceiptCount: 0,
+        broadQualityScores: [],
+        incompleteBroadQualityScoreCount: 0,
       };
   const allExtracted = [...broad, ...focused];
   const defects = dedupeDefects([...geometry, ...firstPass.defects, ...focusPass.defects]);
+  const broadBatchCount = Math.ceil(broad.length / FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST);
+  const broadQualityScore =
+    collectBroadQualityScore &&
+    firstPass.incompleteBroadQualityScoreCount === 0 &&
+    firstPass.broadQualityScores.length === broadBatchCount
+      ? {
+          version: VISUAL_REVIEW_BROAD_QUALITY_SCORE_VERSION,
+          score: Math.min(...firstPass.broadQualityScores),
+          broadBatchCount,
+        }
+      : undefined;
   const aggregatedReferenceCriteria = aggregateReferenceCriteria(
     requestedReferenceCriteria,
     firstPass.referenceCriteria,
     focusPass.referenceCriteria,
-    Math.ceil(broad.length / 12),
+    broadBatchCount,
   );
   const allFrames = allExtracted.map((frame) => frame.descriptor);
   const missingFocusFrameCount = requiredFocusFrames.filter((requiredFrame) =>
@@ -1521,6 +1698,7 @@ export async function reviewRender(
     (defect.category === "general_visual" || defect.confidence < minBlockingConfidence),
   );
   const incompleteReviewerReceipts = firstPass.incompleteReceiptCount + focusPass.incompleteReceiptCount;
+  const incompleteBroadQualityScore = requireBroadQualityScore && broadQualityScore === undefined;
   const incompleteReferenceCriteriaReceipts =
     firstPass.incompleteReferenceCriteriaReceiptCount + focusPass.incompleteReferenceCriteriaReceiptCount;
   const coverageIncomplete = evidence.coverage.maxGapSec > evidence.coverage.maxAllowedGapSec + 0.01;
@@ -1548,7 +1726,7 @@ export async function reviewRender(
   const focusCoverageIncomplete = requireCompleteFocusCoverage && missingFocusFrameCount > 0;
   const verdict: VisualReviewVerdict = blocking.length || failedReferenceCriteria.length
     ? "fail"
-    : incompleteReviewerReceipts > 0 || !referenceCriteriaComplete || unobservableReferenceCriteria.length > 0 || uncertain || focusCoverageIncomplete || (required && coverageIncomplete)
+    : incompleteReviewerReceipts > 0 || incompleteBroadQualityScore || !referenceCriteriaComplete || unobservableReferenceCriteria.length > 0 || uncertain || focusCoverageIncomplete || (required && coverageIncomplete)
       ? "needs_human"
       : "pass";
   // This intentionally happens after `persistEvidence`: the receipt binds the
@@ -1562,6 +1740,7 @@ export async function reviewRender(
     defects,
     referenceCriteria,
     referenceCriteriaComplete,
+    ...(broadQualityScore ? { broadQualityScore } : {}),
   });
   const reviewerSummary = [...firstPass.summaries, ...focusPass.summaries].filter(Boolean).join(" | ") ||
     `${defects.length} evidence-backed defect(s); ${allFrames.length} frames reviewed`;
@@ -1569,6 +1748,9 @@ export async function reviewRender(
     reviewerSummary,
     incompleteReviewerReceipts
       ? `${incompleteReviewerReceipts} reviewer batch(es) returned an incomplete structured receipt`
+      : "",
+    incompleteBroadQualityScore
+      ? `${firstPass.incompleteBroadQualityScoreCount}/${broadBatchCount} broad-review batch(es) omitted or malformed the required quality score`
       : "",
     normalizedReferenceCriteria.error
       ? `invalid reference criteria: ${normalizedReferenceCriteria.error}`
@@ -1597,7 +1779,7 @@ export async function reviewRender(
     (intent.qualityCriteria ?? []).length ? `quality-bar×${(intent.qualityCriteria ?? []).length}` : "",
     requestedReferenceCriteria.length ? `reference-criteria×${requestedReferenceCriteria.length}` : "",
   ].filter(Boolean).join("+");
-  log(`visualReview: ${allFrames.length} frames (${Math.ceil(allFrames.length / 12)} batch(es)), ${defects.length} defect(s), ${incompleteReviewerReceipts} incomplete receipt(s), ${incompleteReferenceCriteriaReceipts} incomplete reference-criterion receipt(s), coverage ${evidence.coverage.maxGapSec.toFixed(2)}/${evidence.coverage.maxAllowedGapSec.toFixed(2)}s${grounding ? `, grounded by ${grounding}` : ""} → ${verdict.toUpperCase()}`);
+  log(`visualReview: ${allFrames.length} frames (${Math.ceil(allFrames.length / FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST)} batch(es)), ${defects.length} defect(s), ${incompleteReviewerReceipts} incomplete receipt(s), ${incompleteReferenceCriteriaReceipts} incomplete reference-criterion receipt(s)${collectBroadQualityScore ? `, broad score ${broadQualityScore ? `${broadQualityScore.score.toFixed(1)}/10 across ${broadQualityScore.broadBatchCount} batch(es)` : "unavailable"}` : ""}, coverage ${evidence.coverage.maxGapSec.toFixed(2)}/${evidence.coverage.maxAllowedGapSec.toFixed(2)}s${grounding ? `, grounded by ${grounding}` : ""} → ${verdict.toUpperCase()}`);
   return {
     ran: true,
     verdict,
@@ -1610,6 +1792,8 @@ export async function reviewRender(
     reviewFingerprint,
     reviewReceiptVersion: VISUAL_REVIEW_RECEIPT_VERSION,
     reviewReceiptFingerprint,
+    sceneChangeTimes: sceneTimes,
+    ...(broadQualityScore ? { broadQualityScore } : {}),
     framePaths: allExtracted.map((frame) => frame.localPath),
   };
 }

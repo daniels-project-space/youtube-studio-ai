@@ -88,20 +88,18 @@ export const MODULE_CATALOG: ModuleSpec[] = [
   {
     block: "visual_matter",
     label: "Visual Matter",
-    description: "Creates mood, character, setting, and storyboard locks for a cinematic story; reference-image rendering remains explicitly paid and capped.",
+    description: "Creates typed mood, character, setting, and storyboard locks for a cinematic story. Planning remains provider-free; a separate server-admitted direct-Novita text-to-image pack may supply byte-bound QA references, never keyframe image conditioning.",
     optional: true,
     params: [
       { key: "enabled", label: "Use Visual Matter", type: "toggle", help: "Keep the typed visual-development handoff active for this cinematic pipeline." },
       { key: "maxCharacters", label: "Character sheets", type: "number", min: 0, max: 6, step: 1 },
       { key: "maxSettings", label: "Setting sheets", type: "number", min: 0, max: 6, step: 1 },
-      { key: "renderReferenceAssets", label: "Render fal.ai Nano Banana 2 references", type: "toggle", help: "Explicit paid action; requires FAL_KEY and a configured Nano Banana 2 unit-cost guard." },
-      { key: "maxReferenceImages", label: "Reference-image cap", type: "number", min: 1, max: 12, step: 1 },
     ],
   },
   {
     block: "topic_select",
     label: "Topic Select",
-    description: "Chooses each video's topic (no-repeat memory, optional ordered series).",
+    description: "Chooses each video's topic with no-repeat memory. Ordered series are sealed in the channel Program Brief, not configured as runtime module overrides.",
     optional: false,
     params: [
       {
@@ -112,17 +110,21 @@ export const MODULE_CATALOG: ModuleSpec[] = [
         ],
         help: "Whether the channel may eventually reuse a topic.",
       },
-      { key: "seriesTitle", label: "Series title", type: "text", help: "Set to run an ordered, numbered series (e.g. \"7 Days of Stoic Calm\"). Leave blank for standalone videos." },
-      { key: "seriesCount", label: "Series length", type: "number", min: 0, max: 100, step: 1, help: "Episodes in the series. 0 = open-ended. After the last episode the channel resumes normal topics." },
     ],
+  },
+  {
+    block: "serialized_program_episode_context",
+    label: "Serialized Episode Context",
+    description: "Route-owned, provider-free continuity receipt inserted only after an admitted serialized Topic Select completion. It has no user controls and cannot be used to create a series route.",
+    optional: false,
+    params: [],
   },
   {
     block: "script_gen",
     label: "Script",
-    description: "Researches and writes the narration script.",
+    description: "Researches and writes the narration script. Its spoken-length budget is sealed by the channel format.",
     optional: false,
     params: [
-      { key: "maxSeconds", label: "Target length (sec)", type: "number", min: 30, max: 3600, step: 30, help: "Spoken length target. Drives the word budget." },
       { key: "endWithSummary", label: "End with summary", type: "toggle", help: "Close with a concise recap section." },
       {
         key: "style", label: "Tone", type: "select",
@@ -268,12 +270,16 @@ export const MODULE_CATALOG: ModuleSpec[] = [
   {
     block: "length_check",
     label: "Length Check",
-    description: "Gates the final video to an acceptable duration band.",
+    description: "Gates the final video to the duration band sealed by the selected channel format.",
     optional: true,
-    params: [
-      { key: "minSeconds", label: "Min length (sec)", type: "number", min: 0, max: 3600, step: 30 },
-      { key: "maxSeconds", label: "Max length (sec)", type: "number", min: 0, max: 5400, step: 30 },
-    ],
+    params: [],
+  },
+  {
+    block: "music_program_plan",
+    label: "Original Music Program",
+    description: "Seals the episode’s instrumental and looping-visual direction to the selected channel program before rendering.",
+    optional: false,
+    params: [],
   },
   {
     block: "scene_planner",
@@ -312,10 +318,9 @@ export const MODULE_CATALOG: ModuleSpec[] = [
   {
     block: "assemble",
     label: "Assemble (Loop)",
-    description: "Loops the clip to the full runtime with a deblur intro.",
+    description: "Loops the clip to the runtime sealed by the selected channel format, with an optional deblur intro.",
     optional: false,
     params: [
-      { key: "durationSec", label: "Runtime (sec)", type: "number", min: 30, max: 36000, step: 30, help: "Total video length the loop is extended to." },
       { key: "deblurIntro", label: "Deblur intro", type: "toggle", help: "Open on a focus-pull from blur with the title." },
     ],
   },

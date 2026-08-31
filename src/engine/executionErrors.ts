@@ -8,12 +8,19 @@
  */
 
 export type ExecutionErrorKind = "transient" | "deterministic" | "unknown";
+/**
+ * Where a retry is safe to perform. `durable_task` means the worker must yield
+ * to a persisted scheduler/requeue rather than occupy its machine while a
+ * durable external lease is still live.
+ */
+export type ExecutionRetryScope = "block" | "durable_task";
 
 export interface ExecutionErrorOptions {
   status?: number;
   code?: string;
   retryable?: boolean;
   retryAfterMs?: number;
+  retryScope?: ExecutionRetryScope;
   phase?: string;
 }
 
@@ -25,6 +32,7 @@ export interface ExecutionErrorClassification {
   status?: number;
   code?: string;
   retryAfterMs?: number;
+  retryScope?: ExecutionRetryScope;
 }
 
 /** Error with machine-readable retry metadata for provider/runtime adapters. */
@@ -33,6 +41,7 @@ export class ExecutionError extends Error {
   readonly code?: string;
   readonly retryable?: boolean;
   readonly retryAfterMs?: number;
+  readonly retryScope?: ExecutionRetryScope;
   readonly phase?: string;
 
   constructor(message: string, options: ExecutionErrorOptions = {}) {
@@ -42,6 +51,7 @@ export class ExecutionError extends Error {
     this.code = options.code;
     this.retryable = options.retryable;
     this.retryAfterMs = options.retryAfterMs;
+    this.retryScope = options.retryScope;
     this.phase = options.phase;
   }
 }
@@ -53,6 +63,7 @@ type RetryMetadata = {
   code?: unknown;
   retryable?: unknown;
   retryAfterMs?: unknown;
+  retryScope?: unknown;
   name?: unknown;
   message?: unknown;
 };
@@ -114,7 +125,12 @@ function result(
   kind: ExecutionErrorKind,
   message: string,
   reason: string,
-  metadata: { status?: number; code?: string; retryAfterMs?: number },
+  metadata: {
+    status?: number;
+    code?: string;
+    retryAfterMs?: number;
+    retryScope?: ExecutionRetryScope;
+  },
 ): ExecutionErrorClassification {
   return {
     kind,
@@ -145,7 +161,12 @@ export function classifyExecutionError(error: unknown): ExecutionErrorClassifica
     finiteNumber(metadata.$metadata?.httpStatusCode);
   const status = explicitStatus ?? statusFromMessage(message);
   const code = typeof metadata.code === "string" ? metadata.code.toUpperCase() : undefined;
-  const shared = { status, code, retryAfterMs };
+  const retryScope = metadata.retryScope === "durable_task"
+    ? "durable_task" as const
+    : metadata.retryScope === "block"
+      ? "block" as const
+      : undefined;
+  const shared = { status, code, retryAfterMs, ...(retryScope ? { retryScope } : {}) };
 
   if (typeof metadata.retryable === "boolean") {
     return result(

@@ -12,6 +12,7 @@ const statusBanner = readFileSync(join(root, "src/components/StatusBanner.tsx"),
 const settings = readFileSync(join(root, "src/app/(app)/settings/page.tsx"), "utf8");
 const sidebar = readFileSync(join(root, "src/components/Sidebar.tsx"), "utf8");
 const scheduleCss = readFileSync(join(root, "src/app/(app)/schedule/schedule.module.css"), "utf8");
+const designer = readFileSync(join(root, "src/engine/designer.ts"), "utf8");
 
 const terminalError = wizard.match(/const terminalError = \(message: string\) => \{([\s\S]*?)\n    \};/)?.[1];
 assert.ok(terminalError, "terminal build recovery handler must exist");
@@ -44,6 +45,25 @@ const programBriefArgs = wizard.match(/const programBrief = createChannelProgram
 assert.ok(programBriefArgs, "the creator must construct a canonical ProgramBrief before request-key binding");
 assert.match(programBriefArgs, /\{ audience: normalizedAudience \}/);
 assert.match(programBriefArgs, /\{ sampleTopics \}/);
+assert.match(programBriefArgs, /\{ programIntent \}/);
+assert.match(programBriefArgs, /\{ serializedProgram \}/);
+assert.match(wizard, /const serializedProgram = seriesTitle\.trim\(\)/);
+assert.match(wizard, /version: SERIALIZED_PROGRAM_VERSION/);
+assert.doesNotMatch(
+  wizard,
+  /seriesTitle: seriesTitle\.trim\(\) \|\| undefined/,
+  "the browser must not send a top-level mutable series title beside the sealed ProgramBrief",
+);
+assert.doesNotMatch(
+  wizard,
+  /seriesCount: seriesTitle\.trim\(\) && seriesCount > 0 \? seriesCount : undefined/,
+  "the browser must not send a top-level mutable series count beside the sealed ProgramBrief",
+);
+assert.match(wizard, /const programIntent = family === "quizyear"/);
+assert.match(wizard, /kind: "sports_championship_timeline" as const/);
+assert.match(wizard, /kind: "fictional_scenario" as const, profile: syntheticScenarioProfile/);
+assert.doesNotMatch(wizard, /syntheticScenario: syntheticScenarioContract\(syntheticScenarioProfile\)/);
+assert.doesNotMatch(wizard, /family === "quizyear" \? \{ quizProfile \} : \{\}/);
 assert.match(wizard, /Sample episode ideas \(optional — one per line\)/);
 
 // A selectable private-review intake is not an inactive automatic family
@@ -56,17 +76,99 @@ assert.match(wizard, /Only these private-review stages are active\. The family p
 assert.match(wizard, /Production module controls are unavailable/);
 assert.match(wizard, /\{!supervisedAdmission && \(/);
 
+// A source-attributed data story is review-first rather than automatic. Its
+// explicit intake creates only a sealed draft shell and carries the exact mode
+// into the normal recoverable request; it never inherits automatic creation.
+assert.match(wizard, /Create reviewed Data Story intake/);
+assert.match(wizard, /It creates only a sealed draft channel/);
+assert.match(wizard, /supervisedDataStoryIntake: "reviewed_data_story_intake\/v1"/);
+assert.match(wizard, /mode: "reviewed_data_story_intake\/v1"/);
+assert.match(wizard, /function isAutomaticCapabilityOffer\(offer: CreativeCapabilityUiOffer\): boolean/);
+assert.match(wizard, /offer\.capability !== "source_attributed_data_story"/);
+assert.match(wizard, /\.\.\.automaticCapabilitySelections[\s\S]*source_attributed_data_story/);
+
+// A renderer-ready family is not automatically creator-ready until the exact
+// certified route, composition, inception, runtime, and release policy agree.
+// The manual picker, niche shortcut, suggestion action, review step, and
+// alternative cards must share that stronger projection rather than offering
+// a route the server will subsequently refuse.
+assert.match(wizard, /automaticFamilyCreatorReadiness/);
+assert.doesNotMatch(wizard, /isFamilyProductionReady\(/);
+assert.match(wizard, /automatic admission blocked — no spend/);
+assert.match(wizard, /const liveRuntime = automaticFamilyRuntime\[next\]/);
+assert.match(wizard, /live automatic foundation is unavailable/);
+assert.match(wizard, /const \[automaticFamilyRuntimeCheck, setAutomaticFamilyRuntimeCheck\]/);
+assert.match(wizard, /const selectedAutomaticRuntimeReady = Boolean\(/);
+assert.match(wizard, /automaticFamilyRuntimeCheck === "ready"/);
+assert.match(wizard, /&& selectedAutomaticRuntimeReady/);
+assert.match(wizard, /Automatic setup remains locked until this completes\./);
+assert.match(wizard, /Live production readiness could not be verified\./);
+
+// Prose advice has no explicit creator length. It may use a researched niche
+// default only when that niche's normal family is the exact suggested family;
+// otherwise the suggested family owns its own duration contract.
+assert.match(wizard, /const matchedNichePreset = niche\?\.defaultFamily === suggestedFamily/);
+assert.match(wizard, /selectFamily\(suggestedFamily, matchedNichePreset\?\.targetSeconds\)/);
+assert.match(wizard, /typeof d\.family !== "string" \|\| !\(d\.family in FAMILIES\)/);
+assert.match(wizard, /const defaultFamilyReadiness = automaticFamilyCreatorReadiness\(n\.defaultFamily\)/);
+assert.match(wizard, /Automatic route ready/);
+assert.match(wizard, /Automatic start held/);
+assert.match(wizard, /Needs before automatic creation:/);
+assert.match(wizard, /defaultFamilyReadiness\.blockers\[0\]/);
+
+// Creator choice must expose the family-specific, mechanics-only quality bar
+// that production review will enforce. This is original craft calibration, not
+// a visual/style clone or an audience-performance promise.
+assert.match(wizard, /referenceQualityContractFor/);
+assert.match(wizard, /Original mechanics calibrated from/);
+assert.match(wizard, /never a style-copying instruction or a promise of another channel’s audience/);
+assert.match(wizard, /No usable reference-quality calibration is registered/);
+
+// Companion Shorts are the default growth layer for a newly created narrated
+// channel, but the designer must derive only an eligible private-first child
+// after the parent upload and skip formats without narration timing.
+assert.match(wizard, /shorts:\s*true/);
+assert.match(wizard, /Companion Short when eligible \(9:16, private\)/);
+assert.match(designer, /if \(t\.shorts && opts\.family !== "music_loop"\)/);
+assert.match(designer, /hasUpload && hasTimings/);
+assert.match(designer, /block: "shorts_spinoff"/);
+assert.match(designer, /before notify\/cleanup/);
+
+// The server may identify a private desk on an intentional 409. Render only
+// internal path-only destinations and require an explicit operator click;
+// never redirect or replay the rejected request.
+assert.match(wizard, /function safeReviewHrefs\(value: unknown\): string\[\]/);
+assert.match(wizard, /const REVIEW_HREFS = new Set\(\["\/casefile", "\/editorial-evidence"\]\)/);
+assert.match(wizard, /!REVIEW_HREFS\.has\(entry\)/);
+assert.match(wizard, /setReviewHrefs\(res\.status === 409 \? safeReviewHrefs\(data\.reviewHrefs\) : \[\]\)/);
+assert.match(wizard, /reviewHrefs\.map\(\(href\) => \(/);
+assert.match(wizard, /<Link key=\{href\} href=\{href\} style=\{btnPrimary\}>/);
+assert.doesNotMatch(wizard, /window\.location.*reviewHrefs|router\.push\(.*reviewHrefs/);
+
 assert.doesNotMatch(sidebar, /health-dot-ready/);
 assert.doesNotMatch(sidebar, /Live production workspace/);
-assert.doesNotMatch(sidebar, /href:\s*["']\/runs["']/);
-assert.doesNotMatch(sidebar, /href:\s*["']\/seo["']/);
+// The global rail now deliberately exposes the non-mutating Run and SEO
+// workspaces. This must not be confused with a channel card starting work:
+// those cards continue to surface their own guarded channel/detail links only.
+assert.match(sidebar, /href:\s*["']\/runs["']/);
+assert.match(sidebar, /href:\s*["']\/seo["']/);
+assert.match(sidebar, /label:\s*["']Command["'][\s\S]*href:\s*["']\/runs["']/);
 assert.doesNotMatch(sidebar, /Novita Render/);
 assert.match(sidebar, /MOBILE_PRIMARY_COUNT/);
 assert.match(channels, /channel-live-state/);
 assert.match(channels, /link\.status === "active"/);
-assert.match(channels, /link\.scopeHealth !== "partial"/);
+assert.match(channels, /link\.scopeHealth === "healthy"/);
+assert.match(channels, /OAuth scopes unverified/);
 assert.match(channels, /\?tab=seo/);
 assert.match(detail, /Refresh intelligence/);
+// A connector with partial scopes is not a ready destination just because it
+// has a token. The detail surface must use the same conservative state model
+// as the channel list, preserve the manual profile-picture handoff, and never
+// offer a second irreversible channel creation after a target is recorded.
+assert.match(detail, /assessYouTubeSetup/);
+assert.match(detail, /setup\.oauth === "ready"/);
+assert.match(detail, /setup\.canAutoCreate/);
+assert.match(detail, /Google does not provide this integration a reliable completion receipt/);
 assert.match(overview, /item\.status === "ready"/);
 assert.doesNotMatch(overview, /need review/);
 assert.match(overview, /<details className=\{`\$\{styles\.runsWidget\}/);
@@ -91,7 +193,7 @@ for (const [selector, property] of [
   [".dayColumnHeader small", "font"],
   [".dayEmpty", "font-size"],
   [".dayEventTime", "font"],
-  [".dayEvent > strong", "font-size"],
+  [".dayEventCopy > strong", "font-size"],
   [".dayEventMeta > span:first-child", "font-size"],
 ] as const) {
   assert.ok(

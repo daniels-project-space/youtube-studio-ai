@@ -3,19 +3,21 @@ import {
   hasWhiteboardSync,
   WHITEBOARD_MAX_ART_IMAGES_PER_PANEL,
   WHITEBOARD_MAX_PANELS,
+  boundWhiteboardNarration,
   whiteboardImageCallCeiling,
   whiteboardNarrationCharacterCeiling,
   whiteboardPanelCount,
+  whiteboardStoryboardTokenCeiling,
   whiteboardTtsProviderCallCeiling,
 } from "@/lib/whiteboardSync";
 
 // P2-5 (GOLDEN_MODULE_AUDIT_2026-08.md): "whiteboard" was never test-run
-// directly. castWhiteboardSync's full orchestration needs Gemini + Fish Audio
-// + Novita render-farm credentials and shells out to Python, but its actual
+// directly. castWhiteboardSync's full orchestration needs a non-Google planner + Fish Audio
+// + sealed Nano Banana Pro art credentials and shells out to Python, but its actual
 // spend-bounding gates — panel count clamp, per-panel image ceiling,
 // narration/TTS character ceiling — are pure, exported, and directly
 // testable. This exercises those real ceilings plus the readiness gate's
-// real AND-composition across all three required subsystems.
+// real local-renderer AND-composition.
 
 /* ------------------------------ panel count -------------------------------*/
 
@@ -30,6 +32,14 @@ assert.equal(
   `an oversized request must clamp DOWN to the ${WHITEBOARD_MAX_PANELS}-panel spend ceiling`,
 );
 assert.equal(whiteboardPanelCount("not-a-number"), 6, "non-numeric input must fall back to the 6-panel default");
+
+assert.equal(
+  whiteboardStoryboardTokenCeiling(6),
+  6_600,
+  "the normal six-panel board receives a dense but bounded structured-plan response budget",
+);
+assert.equal(whiteboardStoryboardTokenCeiling(1), 3_000, "one panel retains a useful minimum response reserve");
+assert.equal(whiteboardStoryboardTokenCeiling(999), 8_000, "oversized boards cannot ask one provider response to run unbounded");
 
 /* --------------------------- per-panel image ceiling ---------------------- */
 
@@ -66,21 +76,80 @@ assert.equal(
 
 assert.equal(whiteboardTtsProviderCallCeiling(), 3, "TTS provider retry ceiling must remain 3");
 
+{
+  const panel = [{
+    idx: 0,
+    narration: "The first phrase appears before the bounded narration ends but the visual anchor appears much later in this sentence.",
+    layers: [{
+      kind: "art" as const,
+      draw: "a simple marker diagram",
+      cue: "visual anchor appears much later",
+      color: "#c0392b",
+      box: [0.12, 0.18, 0.76, 0.62] as [number, number, number, number],
+    }],
+  }];
+  assert.throws(
+    () => boundWhiteboardNarration(panel, 8),
+    /visual cue\(s\) outside its bounded narration/i,
+    "a truncated panel must fail before it silently loses its promised visual layer",
+  );
+}
+{
+  const panel = [{
+    idx: 0,
+    narration: "The visual anchor arrives immediately, then the panel can explain the remaining context without losing its art.",
+    layers: [{
+      kind: "art" as const,
+      draw: "a simple marker diagram",
+      cue: "visual anchor arrives immediately",
+      color: "#c0392b",
+      box: [0.12, 0.18, 0.76, 0.62] as [number, number, number, number],
+    }],
+  }];
+  assert.equal(
+    boundWhiteboardNarration(panel, 8)[0]?.layers.length,
+    1,
+    "a cue inside the actual bounded narration retains its required visual layer",
+  );
+}
+{
+  const panel = [{
+    idx: 0,
+    narration: "The first visual cue is spoken before the second visual cue in this panel.",
+    layers: [
+      {
+        kind: "art" as const,
+        draw: "a later marker diagram",
+        cue: "second visual cue",
+        color: "#c0392b",
+        box: [0.12, 0.18, 0.76, 0.62] as [number, number, number, number],
+      },
+      {
+        kind: "label" as const,
+        text: "FIRST",
+        cue: "first visual cue",
+        color: "#c0392b",
+        box: [0.12, 0.84, 0.76, 0.08] as [number, number, number, number],
+        draw: "",
+      },
+    ],
+  }];
+  assert.throws(
+    () => boundWhiteboardNarration(panel, 30),
+    /visual cues are out of narration order/i,
+    "cue ordering must be checked before an otherwise valid plan reaches paid artwork",
+  );
+}
+
 console.log("whiteboardSyncCeilings.test.ts: panel/image/narration spend ceilings verified against realistic requests");
 
 /* ------------------------------ readiness gate ----------------------------*/
 //
-// hasWhiteboardSync() must be a genuine AND across THREE independent
-// subsystems (Gemini, Fish Audio TTS, Novita render farm) — not accidentally
-// an OR, and not satisfied by any two of the three alone.
-
-const NOVITA_VARS = [
-  "NOVITA_API_KEY", "NOVITA_RENDER_WORKER_IMAGE", "NOVITA_RENDER_IMAGE_AUTH_ID",
-  "NOVITA_RENDER_4090_PRODUCT_ID", "NOVITA_VERIFIED_4090_GPU_QUOTA", "NOVITA_MODEL_MANIFEST_KEY",
-  "NOVITA_MODEL_MANIFEST_SHA256", "NOVITA_RENDER_MAX_JOB_USD", "NOVITA_RENDER_MAX_FLEET_USD",
-  "INTERNAL_QUERY_SECRET",
-] as const;
-const GATE_VARS = ["GEMINI_API_KEY", "FISH_AUDIO_API_KEY", ...NOVITA_VARS] as const;
+// hasWhiteboardSync() is the local renderer gate: it is a genuine AND across
+// the required storyboard planner and Fish Audio TTS. Nano Banana Pro is
+// enforced by the paid art block just before its first provider submission,
+// rather than being hidden in this reusable local helper.
+const GATE_VARS = ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "FISH_AUDIO_API_KEY", "ELEVENLABS_API_KEY"] as const;
 
 const saved: Record<string, string | undefined> = {};
 for (const name of GATE_VARS) saved[name] = process.env[name];
@@ -103,19 +172,43 @@ try {
   assert.equal(hasWhiteboardSync(), false, "with nothing configured, hasWhiteboardSync must be false");
 
   setAll();
-  assert.equal(hasWhiteboardSync(), true, "with every one of the three subsystems configured, hasWhiteboardSync must be true");
+  assert.equal(hasWhiteboardSync(), true, "with both local renderer dependencies configured, hasWhiteboardSync must be true");
 
-  // Drop just the TTS key — the other two subsystems alone must not satisfy the gate.
+  // Drop just the default TTS key — the planner alone must not satisfy the
+  // default Fish gate.
   delete process.env.FISH_AUDIO_API_KEY;
-  assert.equal(hasWhiteboardSync(), false, "missing FISH_AUDIO_API_KEY alone must fail the gate even with Gemini + Novita fully configured");
+  assert.equal(hasWhiteboardSync(), false, "missing FISH_AUDIO_API_KEY alone must fail the gate even with the storyboard planner configured");
+  assert.equal(
+    hasWhiteboardSync({ ttsProvider: "elevenlabs" }),
+    true,
+    "an explicitly selected ElevenLabs voice must not require the unrelated Fish key",
+  );
+  delete process.env.ELEVENLABS_API_KEY;
+  assert.equal(
+    hasWhiteboardSync({ ttsProvider: "elevenlabs" }),
+    false,
+    "a selected ElevenLabs voice must fail closed when its own key is unavailable",
+  );
+  process.env.ELEVENLABS_API_KEY = "test-value";
   process.env.FISH_AUDIO_API_KEY = "test-value";
 
-  // Drop just one of the ten Novita vars — proves the render-farm check is a
-  // real all-ten AND, not satisfied by a partial credential set.
-  delete process.env.NOVITA_MODEL_MANIFEST_SHA256;
-  assert.equal(hasWhiteboardSync(), false, "a single missing Novita render-farm credential must still fail the gate");
+  delete process.env.ANTHROPIC_API_KEY;
+  delete process.env.OPENROUTER_API_KEY;
+  assert.equal(hasWhiteboardSync(), false, "missing the storyboard planner must fail a fresh Whiteboard storyboard run");
+  process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+  assert.equal(
+    hasWhiteboardSync({ ttsProvider: "elevenlabs" }),
+    true,
+    "the pinned non-Google OpenRouter planner is a valid fresh-storyboard route when a direct Anthropic key is absent",
+  );
+  delete process.env.OPENROUTER_API_KEY;
+  assert.equal(
+    hasWhiteboardSync({ requiresStoryboard: false }),
+    true,
+    "a sealed preplanned storyboard may use the local renderer without re-requiring a planner credential",
+  );
 } finally {
   restore();
 }
 
-console.log("whiteboardSyncCeilings.test.ts: hasWhiteboardSync() genuine three-subsystem AND-gate verified");
+console.log("whiteboardSyncCeilings.test.ts: hasWhiteboardSync() genuine local-renderer AND-gate verified");

@@ -25,8 +25,10 @@ import {
 } from "@/lib/youtubeConnector";
 import { YOUTUBE_WRITE_SCOPES } from "@/lib/publishingPolicy";
 import { enqueueFailedPipelineResume } from "@/trigger/publishRetry";
+import { publishPipelineResumeEnqueueAttempt } from "@/lib/publishRetrySchedule";
 import { syncChannelPipelines } from "@/lib/goldenChannelSync";
 import { listRunHistorySince } from "@/lib/runHistory";
+import { dispatchPendingFactualReviewContinuations } from "@/trigger/factualReviewContinuationDispatcher";
 
 const DAY = 86_400_000;
 
@@ -35,6 +37,16 @@ async function recoverPendingPublishContinuations(
   ownerId: string,
   log: (m: string) => void,
 ): Promise<number> {
+  const queuedRecovery = await convex.mutation(api.runs.reapExpiredQueuedPublishContinuations, {
+    ownerId,
+    now: Date.now(),
+    limit: 50,
+  });
+  if (queuedRecovery.requeued > 0 || queuedRecovery.blocked > 0) {
+    log(
+      `publish continuation queued delivery recovery: ${queuedRecovery.requeued} reissued, ${queuedRecovery.blocked} manual-blocked`,
+    );
+  }
   const pending = await convex.query(api.runs.listPendingPublishContinuations, {
     ownerId,
     limit: 50,
@@ -47,12 +59,26 @@ async function recoverPendingPublishContinuations(
       log(`publish continuation recovery skipped corrupt run ${run._id}: missing intent id`);
       continue;
     }
+    let enqueueAttempt: number | undefined;
     try {
       const intent = await convex.query(api.publishIntents.get, {
         secret,
         intentId,
       });
       if (!intent) throw new Error(`publish intent not found: ${intentId}`);
+      const durableRun = {
+        ...run,
+        _id: String(run._id),
+        channelId: String(run.channelId),
+        blockedPublishIntentId: run.blockedPublishIntentId
+          ? String(run.blockedPublishIntentId)
+          : undefined,
+        publishContinuationIntentId: run.publishContinuationIntentId
+          ? String(run.publishContinuationIntentId)
+          : undefined,
+        planItemId: run.planItemId ? String(run.planItemId) : undefined,
+      };
+      enqueueAttempt = publishPipelineResumeEnqueueAttempt(durableRun);
       const resumed = await enqueueFailedPipelineResume(
         {
           ...intent,
@@ -60,18 +86,7 @@ async function recoverPendingPublishContinuations(
           channelId: String(intent.channelId),
           runId: intent.runId ? String(intent.runId) : undefined,
         },
-        {
-          ...run,
-          _id: String(run._id),
-          channelId: String(run.channelId),
-          blockedPublishIntentId: run.blockedPublishIntentId
-            ? String(run.blockedPublishIntentId)
-            : undefined,
-          publishContinuationIntentId: run.publishContinuationIntentId
-            ? String(run.publishContinuationIntentId)
-            : undefined,
-          planItemId: run.planItemId ? String(run.planItemId) : undefined,
-        },
+        durableRun,
       );
       if (!resumed || !intent.runId || !intent.youtubeVideoId) {
         throw new Error("pending failed-run continuation did not produce an enqueue request");
@@ -85,6 +100,8 @@ async function recoverPendingPublishContinuations(
         youtubeVideoId: intent.youtubeVideoId,
         triggerRunId: resumed.runId,
         queuedAt: Date.now(),
+        enqueueAttempt: resumed.enqueueAttempt,
+        externalUploadedFailedRunHandoff: "uploaded_failed_run",
       });
       queued++;
       log(`publish continuation recovery queued ${run._id} (${resumed.runId})`);
@@ -92,6 +109,7 @@ async function recoverPendingPublishContinuations(
       const message = error instanceof Error ? error.message : String(error);
       try {
         if (
+          enqueueAttempt !== undefined &&
           run.blockedPublishIntentId &&
           run.blockedPublishArtifactId &&
           run.publishContinuationVideoId
@@ -105,6 +123,8 @@ async function recoverPendingPublishContinuations(
             youtubeVideoId: run.publishContinuationVideoId,
             error: message,
             failedAt: Date.now(),
+            enqueueAttempt,
+            externalUploadedFailedRunHandoff: "uploaded_failed_run",
           });
         }
       } catch (stateError) {
@@ -254,7 +274,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
               const bump = (k: string) => defectTrends.set(k, (defectTrends.get(k) ?? 0) + 1);
               if ((qa.thumbnail?.score ?? 10) < 6) bump(`${ch.name}: low thumbnail score`);
               if ((qa.seo?.score ?? 10) < 6) bump(`${ch.name}: low SEO score`);
-              if ((qa.video?.score ?? 10) < 6) bump(`${ch.name}: low visual-frame score`);
+              if ((qa.video?.score ?? 10) < 6) bump(`${ch.name}: low final wide-sample visual score`);
               for (const d of qa.watch?.defects ?? []) {
                 if (d.severity === "major" || d.severity === "critical") {
                   bump(`${ch.name}: watch ${String(d.category ?? d.issue ?? "defect").slice(0, 60)}`);
@@ -321,6 +341,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
   // failed run; it never calls YouTube and reuses the same global idempotency
   // key as the immediate handoff.
   let publishContinuationsQueued = 0;
+  let factualReviewContinuationsQueued = 0;
   try {
     publishContinuationsQueued = await recoverPendingPublishContinuations(
       convex,
@@ -335,7 +356,21 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     );
   }
 
-  log(`sweep: ${failures.length} failure(s), ${healed.length} healed run(s), ${retentionQueued.length} retention job(s), ${publishContinuationsQueued} publish continuation(s), ${missingCaps.size} missing capability(ies)`);
+  try {
+    factualReviewContinuationsQueued = (await dispatchPendingFactualReviewContinuations({
+      convex,
+      ownerId,
+      log,
+    })).triggered;
+  } catch (error) {
+    log(
+      `factual review continuation recovery failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  log(`sweep: ${failures.length} failure(s), ${healed.length} healed run(s), ${retentionQueued.length} retention job(s), ${publishContinuationsQueued} publish continuation(s), ${factualReviewContinuationsQueued} factual-review continuation(s), ${missingCaps.size} missing capability(ies)`);
 
   // ENGAGEMENT: post the owner HOOK-QUESTION comment on freshly PUBLIC videos
   // (an engagement signal the algorithm rewards). Dedupe = the channel already
@@ -423,6 +458,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     groundingGapChannels,
     researchTriggered,
     publishContinuationsQueued,
+    factualReviewContinuationsQueued,
     channelPipelineSync,
     diagnosis,
   };
@@ -449,7 +485,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
       log(`telegram digest failed: ${e instanceof Error ? e.message : e}`);
     }
   }
-  return { ok: true, reportKey: key, failures: failures.length, healedRuns: healed.length, retentionQueued: retentionQueued.length, publishContinuationsQueued, channelPipelineSync, commentsPosted, actions };
+  return { ok: true, reportKey: key, failures: failures.length, healedRuns: healed.length, retentionQueued: retentionQueued.length, publishContinuationsQueued, factualReviewContinuationsQueued, channelPipelineSync, commentsPosted, actions };
 }
 
 export const pipelineDoctorSchedule = schedules.task({

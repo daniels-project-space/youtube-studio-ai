@@ -263,19 +263,95 @@ export async function deleteObjects(keys: string[], bucket?: string): Promise<nu
 export async function getObjectBytes(
   key: string,
   bucket?: string,
+  options: { timeoutMs?: number } = {},
 ): Promise<Uint8Array> {
   const command = new GetObjectCommand({
     Bucket: getBucket(bucket),
     Key: key,
   });
-  const res = await getR2Client().send(command);
+  const timeoutMs = options.timeoutMs;
+  const signal =
+    typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+      ? AbortSignal.timeout(Math.floor(timeoutMs))
+      : undefined;
+  const res = await getR2Client().send(command, signal ? { abortSignal: signal } : undefined);
   if (!res.Body) {
     throw new Error(`R2 object has no body: ${key}`);
   }
   // @aws-sdk v3 streams expose transformToByteArray in Node + browser builds.
-  return await (
-    res.Body as { transformToByteArray: () => Promise<Uint8Array> }
-  ).transformToByteArray();
+  const body = res.Body as {
+    transformToByteArray: () => Promise<Uint8Array>;
+    destroy?: (error?: Error) => void;
+    cancel?: (reason?: unknown) => Promise<void> | void;
+  };
+  if (!signal) return await body.transformToByteArray();
+
+  return await new Promise<Uint8Array>((resolve, reject) => {
+    const cancel = () => {
+      const reason = signal.reason instanceof Error ? signal.reason : new Error("R2 object download timed out");
+      try {
+        body.destroy?.(reason);
+      } catch {
+        // The deadline still releases the local waiter for non-Node streams.
+      }
+      try {
+        void Promise.resolve(body.cancel?.(reason)).catch(() => undefined);
+      } catch {
+        // The request signal is already aborted; cancellation is best effort.
+      }
+      reject(reason);
+    };
+    const cleanup = () => signal.removeEventListener("abort", cancel);
+    if (signal.aborted) {
+      cancel();
+      return;
+    }
+    signal.addEventListener("abort", cancel, { once: true });
+    void body.transformToByteArray().then(
+      (bytes) => {
+        cleanup();
+        resolve(bytes);
+      },
+      (error) => {
+        cleanup();
+        reject(error);
+      },
+    );
+  });
+}
+
+/**
+ * Compute the exact byte identity of an R2 object without materialising a
+ * potentially multi-gigabyte master in memory.  Release evidence uses this
+ * instead of `getObjectBytes()` for final video masters; evidence frames and
+ * JSON receipts remain safely bounded byte reads.
+ */
+export async function getObjectIntegrity(
+  key: string,
+  bucket?: string,
+): Promise<{ sha256: string; byteLength: number }> {
+  const command = new GetObjectCommand({
+    Bucket: getBucket(bucket),
+    Key: key,
+  });
+  const res = await getR2Client().send(command);
+  if (!res.Body) throw new Error(`R2 object has no body: ${key}`);
+  const body = res.Body as AsyncIterable<Uint8Array | Buffer | string>;
+  if (typeof body[Symbol.asyncIterator] !== "function") {
+    throw new Error(`R2 object body is not an async byte stream: ${key}`);
+  }
+  const { createHash } = await import("node:crypto");
+  const hash = createHash("sha256");
+  let byteLength = 0;
+  for await (const chunk of body) {
+    const bytes = typeof chunk === "string" ? Buffer.from(chunk) : chunk;
+    hash.update(bytes);
+    byteLength += bytes.byteLength;
+  }
+  if (!Number.isSafeInteger(byteLength) || byteLength < 1) {
+    throw new Error(`R2 object has an invalid streamed byte length: ${key}`);
+  }
+  return { sha256: hash.digest("hex"), byteLength };
 }
 
 /** Stream a large R2 object directly to disk without buffering the render. */

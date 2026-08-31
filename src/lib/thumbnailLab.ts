@@ -37,6 +37,19 @@ import type { ThumbnailTextZone } from "@/lib/thumbnailLayout";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
+/**
+ * Renderer-neutral visual treatment supplied by an admitted provenance policy.
+ * It keeps policy language out of ad-hoc art-direction branches and lets the
+ * same constraints reach the art director, provider prompt, local overlay,
+ * and thumbnail-specific reviewer.
+ */
+export interface ThumbnailVisualTreatment {
+  artDirectionRules?: readonly string[];
+  providerPromptRequirements?: readonly string[];
+  reviewCriteria?: readonly string[];
+  disclosureBadge?: string;
+}
+
 /** Distilled 2026 CTR research — the judge's and synthesizer's ground truth. */
 export const RESEARCH_PRINCIPLES = [
   "≤3 visual elements; the tone+topic must read in under 1 second (clutter costs ~23% CTR).",
@@ -358,6 +371,7 @@ export async function runThumbnailMobileReferenceQa(args: {
   playbook: ThumbnailPlaybook;
   referenceUrls?: readonly string[];
   brandContext?: Record<string, unknown> | null;
+  visualTreatmentCriteria?: readonly string[];
   log?: Logger;
 }): Promise<ThumbnailGateVerdict> {
   if (!hasVisionKey()) {
@@ -377,6 +391,11 @@ export async function runThumbnailMobileReferenceQa(args: {
       );
     }
   }
+  const visualTreatmentCriteria = (args.visualTreatmentCriteria ?? [])
+    .map((criterion) => criterion.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  const requiresVisualTreatmentVerdict = visualTreatmentCriteria.length > 0;
   const raw = await visionLocal({
     prompt:
       `Image 1 is a CANDIDATE YouTube thumbnail rendered at real mobile browse size (~168px wide). ` +
@@ -395,8 +414,13 @@ export async function runThumbnailMobileReferenceQa(args: {
       `(3) Rate punch, styleMatch, and storyMatch 1-10` +
       (refPaths.length ? ` against the reference set.\n` : `.\n`) +
       `(4) uiClean: no broken glyphs, watermarks, accidental UI, clipping, or unreadable clutter.\n` +
+      (requiresVisualTreatmentVerdict
+        ? `(5) visualTreatmentCompliant: evaluate ALL of these non-negotiable treatment criteria against the actual candidate; false if any fail:\n- ${visualTreatmentCriteria.join("\n- ")}\n`
+        : "") +
       `Return ONLY JSON {"textOk":boolean,"faceClear":boolean,"punch":1-10,"styleMatch":1-10,` +
-      `"storyMatch":1-10,"uiClean":boolean,"reason":"..."}.`,
+      `"storyMatch":1-10,"uiClean":boolean,` +
+      (requiresVisualTreatmentVerdict ? `"visualTreatmentCompliant":boolean,` : "") +
+      `"reason":"..."}.`,
     imagePaths: [mobileJpg, ...refPaths],
     json: true,
     maxTokens: VISION_GATE_MAX_TOKENS,
@@ -409,6 +433,9 @@ export async function runThumbnailMobileReferenceQa(args: {
     styleMatch: Number(verdict.styleMatch ?? 0),
     storyMatch: Number(verdict.storyMatch ?? 0),
     uiClean: verdict.uiClean === true,
+    ...(requiresVisualTreatmentVerdict
+      ? { visualTreatmentCompliant: verdict.visualTreatmentCompliant === true }
+      : {}),
     reason: String(verdict.reason ?? "judge omitted its reason"),
   };
 }
@@ -727,6 +754,8 @@ export async function renderCandidate(args: {
   priorIssues?: readonly string[];
   /** This channel's standing critic instruction, applied to the art direction. */
   criticDoctrine?: string;
+  /** Provenance-bound rules shared by the local compositor and image provider. */
+  visualTreatment?: ThumbnailVisualTreatment;
   /** Explicit production still route. There is deliberately no provider fallback. */
   generateScene?: GenerateScene;
   log?: Logger;
@@ -748,6 +777,9 @@ export async function renderCandidate(args: {
         : "") +
       (args.criticDoctrine
         ? `CHANNEL CRITIC DOCTRINE (this channel's standing standard — honour it): ${args.criticDoctrine.replace(/\s+/g, " ").trim().slice(0, 400)}\n`
+        : "") +
+      (args.visualTreatment?.artDirectionRules?.length
+        ? `NON-NEGOTIABLE VISUAL TREATMENT (apply every rule; this overrides pattern inspiration and generic CTR conventions):\n- ${args.visualTreatment.artDirectionRules.join("\n- ")}\n`
         : "") +
       `${args.sceneMandate ? `MANDATORY SCENE (operator/DNA-locked - NOT inspiration, NOT optional): the heroProp MUST be exactly this subject, adapted to this topic: ${args.sceneMandate}. Invent background and details AROUND it - never replace it.\n` : ""}` +
       (args.sceneSeed
@@ -869,13 +901,17 @@ export async function renderCandidate(args: {
         composition: (vl as { composition?: string }).composition,
         textZone: zone,
         visualAvoid: args.playbook.avoid,
+        ...(args.visualTreatment?.providerPromptRequirements?.length
+          ? { requiredVisualDirectives: args.visualTreatment.providerPromptRequirements }
+          : {}),
       },
       typography: {
         lines: overlayLines,
-        subtitle: String(textProps["badge"] ?? "") || undefined,
+        subtitle: args.visualTreatment?.disclosureBadge ?? (String(textProps["badge"] ?? "") || undefined),
         baseColor: vl.baseColor,
         accentColor: vl.accentColor,
-        badgeStyle: vl.badgeStyle,
+        badgePlacement: args.visualTreatment?.disclosureBadge ? "topRight" : undefined,
+        badgeStyle: args.visualTreatment?.disclosureBadge ? "pill" : vl.badgeStyle,
         font: vl.font ?? "sans",
         uppercase: textProps["uppercase"] !== false,
         treatment: vl.treatment,

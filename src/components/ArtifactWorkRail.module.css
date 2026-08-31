@@ -1,0 +1,237 @@
+.section {
+  display: grid;
+  gap: 0.8rem;
+}
+
+.header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.headingGroup {
+  min-width: 0;
+}
+
+.eyebrow {
+  display: block;
+  color: var(--color-faint);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.heading {
+  margin: 0.22rem 0 0;
+  color: var(--color-fg);
+  font-size: 1.02rem;
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.description {
+  margin: 0.28rem 0 0;
+  color: var(--color-muted);
+  font-size: 0.8rem;
+  line-height: 1.45;
+}
+
+.action {
+  flex: 0 0 auto;
+  color: var(--color-accent);
+  font-size: 0.78rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.action:hover {
+  text-decoration: underline;
+}
+
+.rail {
+  display: grid;
+  grid-auto-columns: minmax(225px, 1fr);
+  grid-auto-flow: column;
+  gap: 0.8rem;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+  padding: 0.08rem 0 0.3rem;
+  scrollbar-width: thin;
+}
+
+.card {
+  display: grid;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--color-surface) 86%, transparent);
+  color: inherit;
+  text-align: left;
+}
+
+button.card {
+  width: 100%;
+  padding: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.card:hover,
+button.card:focus-visible {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border));
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.14);
+  transform: translateY(-2px);
+}
+
+button.card:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.media {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background:
+    linear-gradient(140deg, color-mix(in srgb, var(--color-accent) 22%, transparent), transparent 50%),
+    var(--color-surface);
+}
+
+.media img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 180ms ease;
+}
+
+.card:hover .media img {
+  transform: scale(1.025);
+}
+
+.mediaFallback {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  color: var(--color-faint);
+  font-size: 0.76rem;
+}
+
+.mediaBadges {
+  position: absolute;
+  z-index: 2;
+  inset: 0.55rem 0.55rem auto;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.4rem;
+  pointer-events: none;
+}
+
+.sourceBadge {
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 999px;
+  background: rgba(8, 9, 13, 0.72);
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.065em;
+  line-height: 1;
+  padding: 0.32rem 0.42rem;
+  text-transform: uppercase;
+}
+
+.body {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.72rem 0.78rem 0.78rem;
+}
+
+.title {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0;
+  color: var(--color-fg);
+  font-size: 0.88rem;
+  font-weight: 620;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.metadata,
+.proof {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.metadata {
+  color: var(--color-faint);
+  font-size: 0.71rem;
+}
+
+.metadata span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.proof {
+  padding-top: 0.52rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
+}
+
+.proofLabel {
+  color: var(--color-faint);
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.055em;
+  text-transform: uppercase;
+}
+
+.views {
+  color: var(--color-secondary);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.loadingCard {
+  min-height: 196px;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: linear-gradient(100deg, var(--color-surface), color-mix(in srgb, var(--color-surface) 70%, var(--color-border)), var(--color-surface));
+  background-size: 220% 100%;
+  animation: artifactRailShimmer 1.35s ease-in-out infinite;
+}
+
+.empty {
+  padding: 0.9rem 1rem;
+  border: 1px dashed var(--color-border);
+  border-radius: 12px;
+  color: var(--color-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+@keyframes artifactRailShimmer {
+  0% { background-position: 100% 0; }
+  100% { background-position: -100% 0; }
+}
+
+@media (max-width: 620px) {
+  .header {
+    align-items: flex-start;
+  }
+
+  .rail {
+    grid-auto-columns: minmax(205px, 82vw);
+  }
+}

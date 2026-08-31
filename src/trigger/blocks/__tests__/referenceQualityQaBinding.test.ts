@@ -17,8 +17,8 @@ assert.match(
 );
 assert.match(
   source,
-  /qualityCriteria:\s*\[\.\.\.channelReviewProfile\.qualityCriteria, \.\.\.casefileCinematicQualityCriteria\]/,
-  "qa_visual must bind both channel criteria and source-bound Casefile mechanics into reviewRender intent",
+  /qualityCriteria:\s*\[\s*\.\.\.channelReviewProfile\.qualityCriteria,\s*\.\.\.casefileCinematicQualityCriteria,[\s\S]{0,280}scenarioVisualTreatmentReviewCriteria/,
+  "qa_visual must bind channel criteria, source-bound Casefile mechanics, and any sealed fictional treatment into reviewRender intent",
 );
 assert.match(
   source,
@@ -32,18 +32,23 @@ assert.match(
 );
 assert.match(
   source,
+  /const referenceQualityVisualCriteria =[\s\S]{0,520}referenceQualityVisualReviewCriteriaForRoute/,
+  "production QA must translate only the frozen, frame-observable reference mechanic into typed reviewer criteria",
+);
+assert.match(
+  source,
   /const casefileCinematicReferenceCriteria: VisualReviewReferenceCriterion\[\]/,
-  "only the source-bound Casefile path may add typed v5 visual criteria",
+  "the source-bound Casefile path keeps its additional typed visual criteria",
 );
 assert.match(
   source,
-  /requirement\.id === "evidence-bearing-visual-rhythm"[\s\S]{0,700}requirement\.id === "rights-aware-casefile-presentation"/,
-  "typed QA criteria must remain limited to the two visually observable Casefile standards",
+  /const reviewReferenceCriteria = \[[\s\S]*?referenceQualityVisualCriteria/,
+  "QA must merge Casefile and frozen reference-quality criteria before review",
 );
 assert.match(
   source,
-  /referenceCriteria: casefileCinematicReferenceCriteria/,
-  "the final reviewer must receive typed Casefile criteria, not only prose QualityBar guidance",
+  /referenceCriteria: reviewReferenceCriteria/,
+  "the final reviewer must receive the merged typed criteria, not only prose QualityBar guidance",
 );
 assert.match(
   source,

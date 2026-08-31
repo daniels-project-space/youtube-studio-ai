@@ -68,8 +68,8 @@ Legend: ✅ exists · ↘ port from autostudio · 🆕 new. `paid` blocks report
 ### Asset generation (paid)
 | Block | consumes → produces | Provider | Archetypes |
 |---|---|---|---|
-| `keyframes` ✅ | scenes → f1/f2 stills | Higgsfield Flux (hostless) | AI-visual (lofi) |
-| `loop_clips` ✅ | keyframes → clips | Higgsfield Kling | lofi loop |
+| `keyframes` ✅ | scenes → f1/f2 stills | attested Novita Z-Image | AI-visual (lofi) |
+| `loop_clips` ✅ | keyframes → clips | pinned Novita LTX (benchmark-gated) | lofi loop |
 | `stock_footage` ↘ | script/scenes → footageClips[] | Pexels/Openverse | narrated/essay/crime |
 | `broll_clips` ↘ | scenes → brollClips[] | Kling/LTX | narrated b-roll |
 | `narration_tts` ↘ | script, hook → narrationKey | Fish Audio (+edge-tts fallback) | all narrated; voice from identity |
@@ -208,7 +208,7 @@ Reuse existing components (StatCard, Chart, VideoGrid, Lightbox, LivePipeline, L
 - **One pattern for every capability:** port lib → thin block → reuse `convexSink`/`runLogSink`/`bootstrapSecrets`/`COST_PATCH_KEY`. No bespoke wiring per feature.
 - **Config over code:** archetypes, voice routing, QA profiles, conditional features are data/presets — not `if` branches in the runner.
 - **Fail loud, retry narrow:** `qa_visual` re-runs only the failed stage (cost-bounded); preflight refuses invalid graphs/budgets before spending.
-- **Hostless:** all blocks run in the Trigger image (Higgsfield now baked; ffmpeg baked; Remotion via build extension in Stage 3). The VPS is retired.
+- **Hostless control plane:** Trigger owns orchestration, ffmpeg, and Remotion; attested Novita workers own paid image/video generation. The retired Higgsfield CLI is not a production renderer. The VPS is retired.
 
 ---
 

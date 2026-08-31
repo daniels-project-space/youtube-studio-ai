@@ -6,7 +6,7 @@ import { thumbnailGen } from "@/trigger/blocks/intelligenceBlocks";
 
 assert.deepEqual(
   thumbnailGen.consumes,
-  ["title", "thumbnailDescription"],
+  ["title", "thumbnailDescription", "topic", "packageToOpeningPlan"],
   "the only executable thumbnail producer must require a title plus a concrete visual description",
 );
 

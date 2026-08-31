@@ -15,6 +15,12 @@ import {
   VisualCoverageSchema,
 } from "./renderArtifacts";
 import { ContentLaneSchema } from "./contentLane";
+import { ChannelProgramRouteRunSeedSchema } from "./channelProgramRoute";
+import { SerializedProgramEpisodeContextSchema } from "@/lib/serializedProgramEpisodeContext";
+import {
+  SelfContainedStoryPlanSchema,
+  SelfContainedStoryReceiptSchema,
+} from "./selfContainedStoryReceipt";
 import { EpisodeSpecSchema, QualityEvidenceSchema } from "./qualityEvidence";
 import {
   ShortCandidateSelectionSchema,
@@ -23,13 +29,17 @@ import {
   ShortStrategyManifestSchema,
 } from "./shortStrategyManifest";
 import { ShortRetentionManifestSchema, ShortSceneQaSchema } from "./documentaryCollageShort";
-import { VisualMatterManifestSchema } from "./visualMatter";
+import { VisualMatterManifestSchema, VisualMatterReferenceAssetSchema } from "./visualMatter";
 import { EpisodeGraphSchema, SceneManifestSchema } from "./episodeGraph";
 import { LearningContractSchema } from "./learningContract";
 import {
   SyntheticScenarioContractSchema,
   SyntheticScenarioDisclosureSchema,
 } from "./syntheticScenario";
+import {
+  ScenarioVisualTreatmentSchema,
+  ScenarioVisualTreatmentThumbnailProvenanceSchema,
+} from "./scenarioVisualTreatment";
 import {
   ChildrenShowBibleApprovalReceiptSchema,
   ChildrenShowBibleInputSchema,
@@ -68,11 +78,18 @@ import {
 } from "./cinematicCaseSequenceDraft";
 import { CinematicFinalMasterQaAdmissionSchema } from "./cinematicFinalMasterQaAdmission";
 import { GeneratedFootageSceneManifestSchema } from "./generatedFootageManifest";
+import { VisualSequenceArtifactManifestSchema } from "./visualSequenceContract";
+import { VisualArtifactAttemptSchema } from "./visualArtifactAttemptLedger";
+import {
+  ViewerPromiseProgressionOmissionSchema,
+  ViewerPromiseProgressionReceiptSchema,
+} from "./viewerPromiseProgression";
 import { VisualPacingEvidenceSchema } from "@/lib/visualPacing";
 import {
   FinalMasterReleaseCertificateReferenceSchema,
   FinalMasterReleaseCertificateSchema,
 } from "@/lib/finalMasterReleaseCertificate";
+import { ThirdPartyStockEvidenceReferenceSchema } from "@/lib/thirdPartyStockEvidence";
 
 /**
  * A versioned runtime contract for one value crossing a module boundary.
@@ -137,7 +154,18 @@ const qaReport = z.object({
     defects: z.array(z.record(z.string(), jsonValue)),
     summary: z.string(),
   }),
-}).passthrough();
+  /** Optional observation only; it never alters the QA verdict or axis receipt. */
+  viewerPromiseProgression: ViewerPromiseProgressionReceiptSchema.optional(),
+  viewerPromiseProgressionOmission: ViewerPromiseProgressionOmissionSchema.optional(),
+}).passthrough().superRefine((report, context) => {
+  if (report.viewerPromiseProgression && report.viewerPromiseProgressionOmission) {
+    context.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["viewerPromiseProgressionOmission"],
+      message: "qa report cannot attach viewer-promise progression evidence and an omission together",
+    });
+  }
+});
 
 const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; persist?: ArtifactContract["persist"] }> = {
   topic: { type: "VideoIntent", schema: nonEmpty },
@@ -162,6 +190,34 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   },
   videoDurationSec: { type: "DurationSeconds", schema: z.number().finite().positive() },
   contentLane: { type: "ContentLane", schema: ContentLaneSchema },
+  // The frozen route is a first-class seed artifact. This lets every route
+  // consumer receive the same typed, fingerprint-bound directive set instead
+  // of reconstructing intent from mutable channel fields.
+  channelProgramRoute: {
+    type: "ChannelProgramRouteRunSeed",
+    schema: ChannelProgramRouteRunSeedSchema,
+  },
+  // Route/run-bound, immutable continuity snapshot emitted after Topic Select
+  // completes a serialized episode. It is compact enough to persist inline and
+  // is the only serial-continuity artifact later blocks may consume.
+  serializedProgramEpisodeContext: {
+    type: "SerializedProgramEpisodeContext",
+    schema: SerializedProgramEpisodeContextSchema,
+  },
+  // A route/lane/topic-bound native storyboard handoff for self-contained
+  // renderers. This is deliberately inline in Phase I: it is a compact,
+  // validated planning artifact, not a new R2/provider path.
+  selfContainedStoryReceipt: {
+    type: "SelfContainedStoryReceipt",
+    schema: SelfContainedStoryReceiptSchema,
+  },
+  // A provider-free, critic-approved native plan. The shared
+  // `self_contained_story` block is its only intended consumer and seals it to
+  // an already-admitted route before any renderer can read it.
+  selfContainedStoryPlan: {
+    type: "SelfContainedStoryPlan",
+    schema: SelfContainedStoryPlanSchema,
+  },
   syntheticScenario: {
     type: "SyntheticScenarioContract",
     schema: SyntheticScenarioContractSchema,
@@ -170,6 +226,11 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   syntheticScenarioDisclosure: {
     type: "SyntheticScenarioDisclosure",
     schema: SyntheticScenarioDisclosureSchema,
+    persist: "reference",
+  },
+  scenarioVisualTreatment: {
+    type: "ScenarioVisualTreatment",
+    schema: ScenarioVisualTreatmentSchema,
     persist: "reference",
   },
   qaPassed: { type: "QualityGateDecision", schema: z.boolean() },
@@ -446,6 +507,14 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
     schema: VisualMatterManifestSchema,
     persist: "reference",
   },
+  // A distinct artifact prevents a paid adapter from overwriting the
+  // planning-only Visual Matter manifest. QA attaches this byte/receipt-bound
+  // pack at its own consumer boundary; renderers do not treat it as img2img.
+  visualMatterReferenceAssets: {
+    type: "VisualMatterReferenceAsset[]",
+    schema: z.array(VisualMatterReferenceAssetSchema).max(12),
+    persist: "reference",
+  },
   shotList: {
     type: "ShotPlan[]",
     schema: z.array(ShotPlanSchema).min(1),
@@ -456,11 +525,93 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   shotRenderManifest: { type: "ShotRenderManifest", schema: ShotRenderManifestSchema, persist: "reference" },
   shotQaReport: { type: "ShotQaReport", schema: ShotQaReportSchema },
   visualCoverage: { type: "VisualCoverage", schema: VisualCoverageSchema },
+  // Byte receipts captured from already-downloaded accepted raw clips. This
+  // is intentionally separate from the key-only render manifest so resume
+  // code cannot mistake an R2 key for current-byte proof.
+  visualSequenceArtifactManifest: {
+    type: "VisualSequenceArtifactManifest",
+    schema: VisualSequenceArtifactManifestSchema,
+    persist: "reference",
+  },
+  // Independent review-event records are checkpointed outside a block patch.
+  // They preserve accepted and rejected candidates without becoming a
+  // downstream input, retry authority, or release gate.
+  visualArtifactAttempt: {
+    type: "VisualArtifactAttempt",
+    schema: VisualArtifactAttemptSchema,
+    persist: "reference",
+  },
   footageClips: { type: "VideoAssetRef[]", schema: stringList, persist: "reference" },
   footageKeys: { type: "R2ObjectKey[]", schema: stringList, persist: "reference" },
+  thirdPartyStockEvidence: {
+    type: "ThirdPartyStockEvidenceReference",
+    schema: ThirdPartyStockEvidenceReferenceSchema,
+    persist: "reference",
+  },
+  reuseThirdPartyStockEvidence: {
+    type: "ThirdPartyStockEvidenceReference",
+    schema: ThirdPartyStockEvidenceReferenceSchema,
+    persist: "reference",
+  },
   stillKeys: { type: "R2ObjectKey[]", schema: stringList, persist: "reference" },
   thumbnailKey: { type: "R2ObjectKey", schema: nonEmpty, persist: "reference" },
+  thumbnailScenarioVisualTreatmentProvenance: {
+    type: "ScenarioVisualTreatmentThumbnailProvenance",
+    schema: ScenarioVisualTreatmentThumbnailProvenanceSchema,
+    persist: "reference",
+  },
   videoKey: { type: "R2ObjectKey", schema: nonEmpty, persist: "reference" },
+  // The portrait renderer owns this non-narrated first-question authority.
+  // It is deliberately typed independently from captions so a QuizShort cannot
+  // claim spoken-caption evidence it never produced.
+  quizShortOpeningHook: {
+    type: "QuizShortOpeningHook",
+    schema: z.object({
+      version: z.literal("quiz-short-opening-hook/v1"),
+      cueId: z.literal("quiz-short-opening-hook"),
+      startSec: z.number().finite().nonnegative(),
+      endSec: z.number().finite().positive(),
+      sampleSec: z.number().finite().nonnegative(),
+      expectedText: nonEmpty,
+    }).strict().superRefine((value, context) => {
+      if (value.endSec <= value.startSec) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["endSec"],
+          message: "opening hook end must follow its start",
+        });
+      }
+      if (value.sampleSec < value.startSec || value.sampleSec > value.endSec) {
+        context.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ["sampleSec"],
+          message: "opening hook OCR sample must fall inside its visible window",
+        });
+      }
+    }),
+  },
+  // A local, certificate-bound private-review handoff. This is not a public
+  // approval token: the compiler and upload boundary both preserve draft-only
+  // behavior even when an operator later changes ordinary publish parameters.
+  quizShortRelease: {
+    type: "QuizShortReleaseReceipt",
+    schema: z.object({
+      version: z.literal("quiz-short-release/v1"),
+      pass: z.literal(true),
+      release: z.literal("human-editorial-review-required"),
+      allowedPublishMode: z.literal("draft"),
+      routeKey: z.literal("quizyear/portrait-supervised/v1"),
+      routeFingerprint: z.string().regex(/^[a-f0-9]{64}$/i),
+      planFingerprint: z.string().regex(/^[a-f0-9]{64}$/i),
+      certificateFingerprint: z.string().regex(/^[a-f0-9]{64}$/i),
+      finalMasterKey: nonEmpty,
+      finalMasterSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+      finalMasterDurationSec: z.number().finite().positive(),
+      factSourceCount: z.number().int().min(3).max(4),
+      factSourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/i),
+      openingEvidenceFingerprint: z.string().regex(/^[a-f0-9]{64}$/i),
+    }).strict(),
+  },
   finalMasterReleaseCertificate: {
     type: "FinalMasterReleaseCertificate",
     schema: FinalMasterReleaseCertificateSchema,

@@ -13,6 +13,7 @@ import {
   createChannelProgramBrief,
   parseChannelProgramBrief,
   parseChannelProgramBriefDraft,
+  SERIALIZED_PROGRAM_VERSION,
 } from "@/engine/channelProgramBrief";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
@@ -73,6 +74,90 @@ assert.deepEqual(parseChannelProgramBriefDraft({
 assert.deepEqual(assertCanonicalChannelProgramBrief(canonical), canonical);
 assert.deepEqual(parseChannelProgramBrief(canonical), canonical);
 assert.equal(canonicalChannelProgramBrief(canonical), canonicalJson(canonical));
+
+const sportsIntentBrief = createChannelProgramBrief({
+  family: "quizyear",
+  nicheKey: "educational",
+  locale: "en",
+  concept: "Trace recurring sports championships through sourced Guess-the-Year challenges.",
+  programIntent: { kind: "sports_championship_timeline" },
+});
+const certifiedQuizIntentBrief = createChannelProgramBrief({
+  family: "quizyear",
+  nicheKey: "educational",
+  locale: "en",
+  concept: "Trace recurring sports championships through sourced Guess-the-Year challenges.",
+  programIntent: { kind: "certified_quiz", profile: "world_geography" },
+});
+assert.deepEqual(sportsIntentBrief.programIntent, { kind: "sports_championship_timeline" });
+assert.notEqual(
+  channelProgramBriefFingerprint(sportsIntentBrief),
+  channelProgramBriefFingerprint(certifiedQuizIntentBrief),
+  "a declared program intent must be part of the immutable program identity",
+);
+const serializedBrief = createChannelProgramBrief({
+  family: "narrated_stock",
+  nicheKey: "educational",
+  locale: "en",
+  concept: "A recurring educational series with one clear lesson and a reliable viewer promise.",
+  serializedProgram: {
+    version: SERIALIZED_PROGRAM_VERSION,
+    seriesTitle: "  Seven Days of Better Questions  ",
+    seriesCount: 7,
+  },
+});
+assert.deepEqual(serializedBrief.serializedProgram, {
+  version: SERIALIZED_PROGRAM_VERSION,
+  seriesTitle: "Seven Days of Better Questions",
+  seriesCount: 7,
+});
+assert.notEqual(
+  channelProgramBriefFingerprint(serializedBrief),
+  channelProgramBriefFingerprint(createChannelProgramBrief({
+    ...serializedBrief,
+    serializedProgram: undefined,
+  })),
+  "serialized_program/v1 must be part of the canonical brief identity",
+);
+assert.throws(
+  () => assertCanonicalChannelProgramBrief({
+    ...serializedBrief,
+    serializedProgram: {
+      ...serializedBrief.serializedProgram,
+      seriesTitle: " Seven Days of Better Questions ",
+    },
+  }),
+  /noncanonical/,
+  "a submitted serialized program must reject a whitespace variant instead of rewriting it",
+);
+assert.throws(
+  () => createChannelProgramBrief({
+    ...serializedBrief,
+    serializedProgram: {
+      version: SERIALIZED_PROGRAM_VERSION,
+      seriesTitle: "Three useful lessons",
+      seriesCount: 0,
+    },
+  }),
+  /greater than 0/,
+  "seriesCount is optional but, when declared, must be positive",
+);
+assert.throws(
+  () => createChannelProgramBrief({
+    ...canonical,
+    programIntent: { kind: "fictional_scenario", profile: "ai_decision" },
+  }),
+  /fictional scenario program intents require the illustrated_explainer family/,
+  "a structured program intent must remain compatible with its canonical family",
+);
+assert.throws(
+  () => assertCanonicalChannelProgramBrief({
+    ...sportsIntentBrief,
+    programIntent: { kind: "certified_quiz", profile: "not-a-profile" },
+  }),
+  /programIntent/,
+  "a submitted intent must remain within the certified enum rather than becoming loose route text",
+);
 assert.deepEqual(
   assertPersistedProgramBriefIdentity(
     { nicheKey: canonical.nicheKey, programBrief: canonical },
@@ -159,7 +244,8 @@ assert.throws(
   /noncanonical/,
   "a tampered or stale catalog snapshot must be re-submitted against the live catalog",
 );
-const { catalogFingerprint: _catalogFingerprint, ...withoutCatalogFingerprint } = canonical;
+const withoutCatalogFingerprint = { ...canonical };
+Reflect.deleteProperty(withoutCatalogFingerprint, "catalogFingerprint");
 assert.throws(
   () => assertCanonicalChannelProgramBrief(withoutCatalogFingerprint),
   /catalogFingerprint/,

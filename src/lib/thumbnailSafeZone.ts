@@ -206,7 +206,11 @@ export async function resolveGoldenThumbnailTextZoneFromImage(args: {
   const ffmpeg = process.env.FFMPEG_BIN ?? "ffmpeg";
   const luma = await new Promise<Buffer>((resolve, reject) => {
     execFile(
-      ffmpeg,
+      // FFmpeg is an environment/PATH-resolved runtime executable, never a
+      // project asset. Its availability is checked by the caller's local
+      // render environment, so tracing the repository from this argument
+      // would only inflate the deployed server bundle.
+      /* turbopackIgnore: true */ ffmpeg,
       [
         "-v", "error",
         "-i", args.imagePath,

@@ -243,7 +243,10 @@ async function engineDefaultsSurviveForTheCli(): Promise<void> {
 
   // A caller-supplied plan must never be re-planned (that would discard the
   // critique loop's accepted output and pay for a second draft).
-  assert.match(engine, /if \(deps\.plan\)/, "an accepted plan must short-circuit the story pass");
+  assert.match(engine, /resolveSelfContainedStoryPlan\(/,
+    "a supplied plan must first resolve through the sealed-story receipt boundary");
+  assert.match(engine, /if \(approvedPlan\)/,
+    "an accepted plan must short-circuit the story pass");
   assert.match(engine, /claudeJsonPro/, "the lore story planner must use Claude, never Google text planning");
   assert.doesNotMatch(engineCode, /gemini|google|generateBananaImage/i,
     "LoreCraft itself must contain no Google planning, scene-art, or utility path");
@@ -318,12 +321,16 @@ function blockIsRegisteredWithTheRightAbi(): void {
     "produces must mirror whiteboard_scribe's self-contained shape",
   );
   assert.equal(block.paid, true, "the block buys stills, clips and narration");
-  // Same self-contained ABI as the sibling engine — one producer of the master.
-  assert.deepEqual(
-    [...manifest.block.produces].sort(),
-    [...getManifest("whiteboard_scribe")!.block.produces].sort(),
-    "lore_short and whiteboard_scribe must expose the identical self-contained output contract",
+  // Both engines share the complete master ABI. Whiteboard additionally
+  // exposes its renderer-native, final-master OCR cue sidecar; Lore must not
+  // fabricate equivalent on-screen-text evidence.
+  const whiteboardProduces = getManifest("whiteboard_scribe")!.block.produces;
+  assert.ok(
+    block.produces.every((key) => whiteboardProduces.includes(key)),
+    "lore_short's master outputs must remain compatible with whiteboard_scribe",
   );
+  assert.ok(whiteboardProduces.includes("onScreenTextCues"));
+  assert.ok(!block.produces.includes("onScreenTextCues"));
 
   assert.equal(manifest.certification.status, "contract");
   assert.ok(manifest.capabilities.includes("master.assembled"),

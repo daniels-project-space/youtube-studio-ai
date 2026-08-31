@@ -1,0 +1,112 @@
+.card {
+  display: grid;
+  gap: 1rem;
+  overflow: hidden;
+  padding: 1rem;
+}
+
+.header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.eyebrow {
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.header h3 {
+  margin: 0.28rem 0 0;
+  max-width: 42rem;
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 600;
+  line-height: 1.25;
+}
+
+.lane {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 0.16rem;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 26%, var(--color-border));
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--color-accent) 8%, transparent);
+  padding: 0.44rem 0.56rem;
+  text-align: right;
+}
+
+.lane span {
+  color: var(--color-faint);
+  font-size: 0.58rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.lane strong {
+  color: var(--color-fg);
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.stages {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 0.35rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.stages li {
+  display: grid;
+  min-width: 0;
+  gap: 0.36rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--color-bg) 52%, transparent);
+  padding: 0.58rem;
+}
+
+.index {
+  color: var(--color-accent);
+  font-family: var(--font-mono);
+  font-size: 0.62rem;
+}
+
+.stages li > span:last-child {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.stages strong {
+  font-size: 0.72rem;
+  font-weight: 600;
+  line-height: 1.2;
+}
+
+.stages small,
+.note {
+  color: var(--color-muted);
+  font-size: 0.64rem;
+  line-height: 1.4;
+}
+
+.note {
+  margin: 0;
+}
+
+@media (max-width: 1020px) {
+  .stages { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+@media (max-width: 620px) {
+  .header { display: grid; }
+  .lane { text-align: left; justify-self: start; }
+  .stages { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

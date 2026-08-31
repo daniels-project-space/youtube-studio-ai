@@ -31,7 +31,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
-import { makeRunTempDir } from "@/lib/files";
+import { DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS, makeRunTempDir } from "@/lib/files";
 import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
 import {
   craftLoreShort,
@@ -54,6 +54,10 @@ import {
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
 import { laneQualityPolicy } from "@/engine/contentLane";
+import {
+  selfContainedStoryReceiptBindingFromRoute,
+  selfContainedStoryReceiptRequiredForRoute,
+} from "@/engine/selfContainedStoryReceipt";
 import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { generateI2V } from "@/lib/i2v";
@@ -82,6 +86,29 @@ async function recordAsset(ctx: StageContext, kind: string, r2Key: string, meta?
 }
 
 const LORE_STORY_CHECKPOINT_VERSION = "lore-short-story/v2";
+const LORE_STORY_OUTCOME_CHECKPOINT_VERSION = "lore-short-story-outcome/v1";
+
+/**
+ * The shared self-contained-story handoff needs the accepted planning proof,
+ * not merely the native plan.  Keeping this separately typed lets the legacy
+ * renderer continue to reuse its v2 plan checkpoint while a route-sealed
+ * Lore run persists the complete non-Google planner/critic outcome.
+ */
+export const LORE_SHORT_STORYBOARD_PLANNER = Object.freeze({
+  id: "lore-short-claude-critic-plan/v1",
+  provenance: "bounded Claude lore-beat planner plus a bounded Claude storyboard critic; both settle before any image, voice, or LTX render admission",
+});
+
+export interface CritiquedLorePlan {
+  readonly story: LorePlan;
+  readonly planner: typeof LORE_SHORT_STORYBOARD_PLANNER;
+  readonly critique: {
+    readonly accepted: true;
+    readonly score: number;
+    readonly iterations: number;
+    readonly issues: readonly string[];
+  };
+}
 
 /** ~6s of screen time per beat is the engine's own pacing (145 LTX frames @ 24fps). */
 export const LORE_SECONDS_PER_BEAT = 6;
@@ -169,32 +196,52 @@ async function loadStoryCheckpoint(key: string): Promise<LorePlan | null> {
   }
 }
 
+async function loadStoryOutcomeCheckpoint(key: string): Promise<CritiquedLorePlan | null> {
+  try {
+    const parsed = JSON.parse(Buffer.from(await getObjectBytes(key)).toString("utf8")) as {
+      version?: unknown;
+      outcome?: unknown;
+    };
+    if (parsed.version !== LORE_STORY_OUTCOME_CHECKPOINT_VERSION) return null;
+    const outcome = parsed.outcome as CritiquedLorePlan | undefined;
+    if (
+      !outcome ||
+      !outcome.story ||
+      !Array.isArray(outcome.story.scenes) ||
+      !outcome.story.scenes.length ||
+      outcome.story.scenes.some((scene) => typeof scene?.line !== "string" || typeof scene?.visual !== "string") ||
+      outcome.planner?.id !== LORE_SHORT_STORYBOARD_PLANNER.id ||
+      outcome.planner.provenance !== LORE_SHORT_STORYBOARD_PLANNER.provenance ||
+      outcome.critique?.accepted !== true ||
+      !Number.isFinite(outcome.critique.score) ||
+      !Number.isInteger(outcome.critique.iterations) ||
+      outcome.critique.iterations < 1 ||
+      !Array.isArray(outcome.critique.issues) ||
+      outcome.critique.issues.some((issue) => typeof issue !== "string")
+    ) return null;
+    assertStoryboardCritiqueApproved({
+      label: "lore_short cached outcome",
+      accepted: outcome.critique.accepted,
+      score: outcome.critique.score,
+      issues: outcome.critique.issues,
+    });
+    return outcome;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Settle the story with the Director in the loop, then FREEZE it. The only
  * caller renders the returned plan exactly once and nothing else. Every
  * iteration is a TEXT call (planLoreShortStory touches no image, TTS or video
  * provider), so a rejection cannot re-purchase a render by construction.
  */
-async function planLoreWithCritique(
+async function settleLorePlanWithCritique(
   ctx: StageContext,
   brief: { topic: string; narrator: string; nScenes: number },
   channel: ChannelCritiqueContext,
-): Promise<LorePlan> {
-  const checkpointKey = storyCheckpointKey(ctx, {
-    contract: LORE_STORY_CHECKPOINT_VERSION,
-    topic: brief.topic,
-    narrator: brief.narrator,
-    nScenes: brief.nScenes,
-    criticDoctrine: channel.criticDoctrine ?? null,
-    contentLaneKey: channel.contentLaneKey ?? null,
-  });
-
-  const cached = await loadStoryCheckpoint(checkpointKey);
-  if (cached) {
-    ctx.log(`lore_short: reused the frozen beat sheet (${cached.scenes?.length ?? 0} beats) — no re-planning, no re-render`);
-    return cached;
-  }
-
+): Promise<CritiquedLorePlan> {
   const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
   const maxIters = Math.max(1, Math.min(2, laneQuality.maxCritiqueIters));
 
@@ -231,19 +278,88 @@ async function planLoreWithCritique(
     score: loop.critique.score,
     issues: loop.critique.issues,
   });
-  const plan = loop.value;
-  if (!plan.scenes?.length) throw new Error("lore_short: story writer returned no beats");
+  const story = loop.value;
+  if (!story.scenes?.length) throw new Error("lore_short: story writer returned no beats");
   ctx.log(
     `lore_short: story settled after ${loop.iterations} candidate(s) ` +
     `(${loop.accepted ? "accepted" : "best of the rejected set"}, score ${loop.critique.score.toFixed(2)}, ` +
-    `${plan.scenes.length} beats)`,
+    `${story.scenes.length} beats)`,
   );
+  return {
+    story,
+    planner: LORE_SHORT_STORYBOARD_PLANNER,
+    critique: {
+      accepted: true,
+      score: loop.critique.score,
+      iterations: loop.iterations,
+      issues: loop.critique.issues,
+    },
+  };
+}
+
+/**
+ * Legacy renderer-owned planning retains the v2 checkpoint, which contains
+ * just the accepted native beat sheet. Route-sealed planning below writes its
+ * own complete critic outcome instead of reinterpreting an old cache as proof.
+ */
+async function planLoreWithCritique(
+  ctx: StageContext,
+  brief: { topic: string; narrator: string; nScenes: number },
+  channel: ChannelCritiqueContext,
+): Promise<LorePlan> {
+  const checkpointKey = storyCheckpointKey(ctx, {
+    contract: LORE_STORY_CHECKPOINT_VERSION,
+    topic: brief.topic,
+    narrator: brief.narrator,
+    nScenes: brief.nScenes,
+    criticDoctrine: channel.criticDoctrine ?? null,
+    contentLaneKey: channel.contentLaneKey ?? null,
+  });
+  const cached = await loadStoryCheckpoint(checkpointKey);
+  if (cached) {
+    ctx.log(`lore_short: reused the frozen beat sheet (${cached.scenes?.length ?? 0} beats) — no re-planning, no re-render`);
+    return cached;
+  }
+  const outcome = await settleLorePlanWithCritique(ctx, brief, channel);
   await putObject(
     checkpointKey,
-    Buffer.from(JSON.stringify({ version: LORE_STORY_CHECKPOINT_VERSION, story: plan })),
+    Buffer.from(JSON.stringify({ version: LORE_STORY_CHECKPOINT_VERSION, story: outcome.story })),
     { contentType: "application/json" },
   );
-  return plan;
+  return outcome.story;
+}
+
+/**
+ * Route-owned adapter for the common self-contained-story handoff. Its v1
+ * sidecar contains the exact approved planner and critic receipt needed by the
+ * following provider-free route/topic seal. It never reads the legacy v2
+ * storyboard checkpoint as if that older shape were equivalent evidence.
+ */
+export async function planLoreWithCritiqueOutcome(
+  ctx: StageContext,
+  brief: { topic: string; narrator: string; nScenes: number },
+): Promise<CritiquedLorePlan> {
+  const channel = loreCritiqueChannel(ctx);
+  const checkpointKey = storyCheckpointKey(ctx, {
+    contract: LORE_STORY_OUTCOME_CHECKPOINT_VERSION,
+    topic: brief.topic,
+    narrator: brief.narrator,
+    nScenes: brief.nScenes,
+    criticDoctrine: channel.criticDoctrine ?? null,
+    contentLaneKey: channel.contentLaneKey ?? null,
+  });
+  const cached = await loadStoryOutcomeCheckpoint(checkpointKey);
+  if (cached) {
+    ctx.log(`lore_short: reused the sealed critic-approved beat sheet (${cached.story.scenes?.length ?? 0} beats) — no re-planning, no re-render`);
+    return cached;
+  }
+  const outcome = await settleLorePlanWithCritique(ctx, brief, channel);
+  await putObject(
+    checkpointKey,
+    Buffer.from(JSON.stringify({ version: LORE_STORY_OUTCOME_CHECKPOINT_VERSION, outcome })),
+    { contentType: "application/json" },
+  );
+  return outcome;
 }
 
 export const loreShort: Block = {
@@ -252,11 +368,35 @@ export const loreShort: Block = {
   produces: ["videoKey", "videoLocalPath", "videoDurationSec", "narrationText"],
   paid: true,
   run: async (ctx) => {
-    if (!hasLoreShort() || !hasNovitaRenderFarmConfig()) {
-      throw new Error("lore_short: the configured Claude lore planner plus the attested Novita LTX render farm are required (no fallback)");
-    }
     const topic = String(ctx.store["topic"] ?? "");
     if (!topic) throw new Error("lore_short: no topic in store");
+    // A receipt-bearing route validates its exact story authority before any
+    // cache or legacy Claude planning branch is reachable.
+    const approvedStoryReceipt = ctx.store["selfContainedStoryReceipt"];
+    if (
+      approvedStoryReceipt === undefined &&
+      ctx.store["channelProgramRoute"] !== undefined &&
+      selfContainedStoryReceiptRequiredForRoute({
+        family: "loreshort",
+        route: ctx.store["channelProgramRoute"],
+        topic,
+      })
+    ) {
+      throw new Error("lore_short: this route requires its sealed self-contained story receipt before planning or rendering");
+    }
+    const receiptInput = approvedStoryReceipt === undefined
+      ? {}
+      : {
+          approvedStoryReceipt,
+          storyReceiptBinding: selfContainedStoryReceiptBindingFromRoute({
+            family: "loreshort",
+            route: ctx.store["channelProgramRoute"],
+            topic,
+          }),
+        };
+    if (!hasLoreShort({ requiresStoryboard: approvedStoryReceipt === undefined }) || !hasNovitaRenderFarmConfig()) {
+      throw new Error("lore_short: required lore and attested Novita LTX render capabilities are unavailable");
+    }
 
     const visualBrief = getVisualBrief(ctx.store);
     const subStyle = String(ctx.params["subStyle"] ?? "cinematic");
@@ -303,7 +443,9 @@ export const loreShort: Block = {
     const channel = loreCritiqueChannel(ctx);
     // QUALITY GATE — settle the beat sheet at TEXT prices first. craftLoreShort
     // below is called exactly once with the accepted plan and does zero planning.
-    const plan = await planLoreWithCritique(ctx, { topic, narrator, nScenes }, channel);
+    const plan = approvedStoryReceipt === undefined
+      ? await planLoreWithCritique(ctx, { topic, narrator, nScenes }, channel)
+      : undefined;
 
     let imageCostUsd = 0;
     let clipCostUsd = 0;
@@ -344,7 +486,8 @@ export const loreShort: Block = {
         upscaleRes: "2k",
       },
       {
-        plan,
+        ...(plan === undefined ? {} : { plan }),
+        ...receiptInput,
         workDir: runDir,
         log: (m) => ctx.log(`lore: ${m}`),
         // The engine's own per-beat motion-analysis vision pass. Counted only
@@ -360,12 +503,15 @@ export const loreShort: Block = {
           await putObjectFromFile(imageKey, request.imagePath, { contentType: "image/jpeg" });
           const clip = await generateI2V({
             prompt: request.prompt,
+            motionPrompt: request.motionPrompt,
+            cameraInstruction: request.cameraInstruction,
             negativePrompt: request.negativePrompt,
             imageKey,
             durationSec: request.durationSec,
             provider: "novita-ltx",
             model: "ltx-2.5-distilled-x2",
             aspectRatio: "16:9",
+            styleId: subStyle === "watercolor_pencil" ? "watercolor" : "cinematic_heist_noir",
             maxCostUsd: PRICE.novitaVideoMaxUsd,
             runId: ctx.runId,
             keyPrefix: ctx.keyPrefix,
@@ -379,7 +525,9 @@ export const loreShort: Block = {
           });
           clipCostUsd += clip.costUsd;
           clipCalls += 1;
-          return Buffer.from(await getObjectBytes(clip.key));
+          return Buffer.from(await getObjectBytes(clip.key, undefined, {
+            timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+          }));
         },
         synthLine: async (request) =>
           Buffer.from(

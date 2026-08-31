@@ -21,6 +21,7 @@ export const CERTIFIED_QUIZ_PROFILE_KEYS = [
   "chemistry_challenge",
   "discovery_timeline",
   "screen_game_timeline",
+  "sports_championship_timeline",
 ] as const;
 
 export type CertifiedQuizProfileKey = (typeof CERTIFIED_QUIZ_PROFILE_KEYS)[number];
@@ -103,6 +104,19 @@ export const CERTIFIED_QUIZ_PROFILES: Readonly<Record<CertifiedQuizProfileKey, C
       titleStem: "Screen & Game Timeline Trivia",
       keywords: ["movie history quiz", "video game history", "film release trivia", "gaming timeline"],
       audiencePromise: "film releases and video-game milestones verified from CC0 Wikidata statements",
+    },
+  },
+  sports_championship_timeline: {
+    version: CERTIFIED_QUIZ_PROFILE_VERSION,
+    key: "sports_championship_timeline",
+    label: "Sports Championship Timeline",
+    description: "Guess-the-year rounds using only the existing certified sports-championship source route.",
+    categories: ["guess_year"],
+    topicKeys: ["sports_championship"],
+    presentation: {
+      titleStem: "Sports Championship Timeline Trivia",
+      keywords: ["sports history quiz", "championship trivia", "sports timeline", "title history"],
+      audiencePromise: "sports championship milestones verified from CC0 Wikidata statements",
     },
   },
 };

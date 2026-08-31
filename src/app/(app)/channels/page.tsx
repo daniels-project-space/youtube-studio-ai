@@ -78,6 +78,7 @@ function youtubeConnectionIssue(
   if (connector.status === "revoked") return "YouTube link revoked";
   if (connector.status === "error") return "YouTube link error";
   if (connector.scopeHealth === "partial") return "OAuth scopes incomplete";
+  if (connector.scopeHealth === "unknown") return "OAuth scopes unverified";
   if (!connector.ytChannelId) return "Destination unverified";
   return "YouTube not linked";
 }
@@ -115,7 +116,7 @@ export default function ChannelsPage() {
   const publishReadyLinks = (links ?? []).filter(
     (link) =>
       link.status === "active" &&
-      link.scopeHealth !== "partial" &&
+      link.scopeHealth === "healthy" &&
       Boolean(link.ytChannelId),
   );
   const linkedIds = new Set(publishReadyLinks.map((link) => link.channelId));

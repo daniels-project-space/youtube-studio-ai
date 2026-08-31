@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { LtxCreativeAdapterInputSchema } from "@/lib/ltxCreativeAdapter";
+
 export const GenerationIdentitySchema = z.object({
   contractVersion: z.literal("1.0.0"),
   profileId: z.enum(["draft", "production", "hero"]),
@@ -82,6 +84,12 @@ export const ShotRenderManifestSchema = z.object({
     t1: z.number().finite().positive(),
     sourceSentenceIds: z.array(z.string()).min(1),
     continuityState: z.string().min(1),
+    /**
+     * Exact standard-LoRA selection that created this clip. A QA replacement
+     * must replay this sealed adapter rather than consult a mutable/global
+     * render parameter and accidentally change the channel's visual identity.
+     */
+    creativeAdapter: LtxCreativeAdapterInputSchema.optional(),
     /**
      * Present only when this clip is LTX-conditioned to arrive at the
      * already-selected first frame of the following continuous shot.

@@ -13,7 +13,7 @@
  * `.init()` pattern is gone (the constructor is private in 4.x).
  *   1. `browserbase.launch(sessionCreateParams)` creates the Browserbase session
  *      and returns a browser handle. Every option the old
- *      `browserbaseSessionCreateParams` carried (projectId, timeout,
+ *      `browserbaseSessionCreateParams` carried (projectId, session lifetime,
  *      browserSettings.context) is a top-level field here.
  *   2. `Stagehand.create({ browser, model, logging })` attaches the LLM layer.
  * The live-view session id moved from `stagehand.browserbaseSessionID` to
@@ -96,8 +96,9 @@ export async function withStagehand<T>(
     apiKey: process.env.BROWSERBASE_API_KEY!,
     projectId: process.env.BROWSERBASE_PROJECT_ID,
     // Long enough for a multi-step create flow (default Browserbase timeout is
-    // short and was killing the session mid-run).
-    timeout: Number(process.env.BROWSERBASE_SESSION_TIMEOUT ?? 1800),
+    // short and was killing the session mid-run). The current SDK names this
+    // session-lifetime field `api_timeout`; preserve the existing env setting.
+    api_timeout: Number(process.env.BROWSERBASE_SESSION_TIMEOUT ?? 1800),
     // Reuse the authenticated context (persisted Google login) when provided.
     ...(contextId
       ? { browserSettings: { context: { id: contextId, persist: true } } }

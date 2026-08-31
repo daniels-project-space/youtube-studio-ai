@@ -11,6 +11,9 @@ const library = readFileSync(join(root, "src/app/(app)/library/page.tsx"), "utf8
 // A completed render is not itself quality or provenance evidence. The Library
 // must carry the conservative, normalized status all the way to the card.
 assert.match(videosQuery, /normalizeReleaseEvidenceStatus\(run\.releaseEvidenceStatus\)/);
+assert.match(videosQuery, /recordedReleaseEvidenceMasterKey/);
+assert.match(videosQuery, /sealedMasterKey/);
+assert.match(videosQuery, /videoKey:\s*sealedMasterKey\s*\?\?/);
 assert.match(videoTypes, /releaseEvidenceStatus:\s*ReleaseEvidenceStatus/);
 assert.match(card, /ReleaseEvidenceBadge/);
 assert.match(card, /Master evidence/);

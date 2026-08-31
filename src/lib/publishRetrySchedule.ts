@@ -11,6 +11,11 @@ import { pipelineInvocationSha256 as hashPipelineInvocation } from "@/lib/pipeli
 export const PUBLISH_DISPATCH_TASK_ID = "dispatch-publish-intent" as const;
 export const RUN_PIPELINE_TASK_ID = "run-pipeline" as const;
 export const PUBLISH_RETRY_IDEMPOTENCY_TTL = "30d" as const;
+// A post-upload pipeline resume is safe only while it is tied to the exact
+// immutable uploaded intent. Keep the durable delivery budget deliberately
+// short: a receipt that cannot start twice needs an operator, not another
+// unbounded Trigger loop.
+export const MAX_PUBLISH_CONTINUATION_ENQUEUE_ATTEMPTS = 2;
 
 export interface RetryablePublishIntent {
   _id: string;
@@ -61,6 +66,7 @@ export interface DurablePipelineRunForPublishResume {
   publishContinuationIntentId?: string;
   publishContinuationArtifactId?: string;
   publishContinuationVideoId?: string;
+  publishContinuationAttempts?: number;
 }
 
 export interface PublishPipelineResumeTriggerRequest {
@@ -81,6 +87,36 @@ export interface PublishPipelineResumeTriggerRequest {
     idempotencyKeyTTL: typeof PUBLISH_RETRY_IDEMPOTENCY_TTL;
     concurrencyKey: string;
   };
+  enqueueAttempt: number;
+}
+
+/**
+ * Select the immutable Trigger delivery key for a durable continuation
+ * receipt. A queued receipt reuses its acknowledged delivery; a reaped
+ * pending receipt moves forward exactly once. This means a late acknowledgement
+ * from the older delivery can be recognized as stale without re-opening the
+ * newer receipt.
+ */
+export function publishPipelineResumeEnqueueAttempt(
+  run: Pick<
+    DurablePipelineRunForPublishResume,
+    "publishContinuationState" | "publishContinuationAttempts"
+  >,
+): number {
+  const attempts = run.publishContinuationAttempts ?? 0;
+  if (!Number.isSafeInteger(attempts) || attempts < 0) {
+    throw new Error("failed pipeline run has an invalid publish continuation delivery count");
+  }
+  if (run.publishContinuationState === "queued") {
+    if (attempts < 1) {
+      throw new Error("queued failed pipeline run has an invalid publish continuation delivery count");
+    }
+    return attempts;
+  }
+  if (run.publishContinuationState !== "pending") {
+    throw new Error("failed pipeline run is not pending a publish continuation delivery");
+  }
+  return attempts + 1;
 }
 
 /**
@@ -158,6 +194,10 @@ export function publishPipelineResumeTriggerRequest(
     throw new Error("uploaded publish intent/run YouTube video mismatch");
   }
   if (run.status !== "failed") return undefined;
+  // An exhausted receipt is intentionally terminal. A late dispatcher may
+  // observe it, but it must not mint another provider task or overwrite the
+  // manual-recovery evidence.
+  if (run.publishContinuationState === "manual_recovery_required") return undefined;
   if (
     run.youtubeVideoId !== videoId ||
     run.blockedPublishIntentId !== intentId ||
@@ -168,6 +208,12 @@ export function publishPipelineResumeTriggerRequest(
     !["pending", "queued"].includes(run.publishContinuationState ?? "")
   ) {
     throw new Error("uploaded publish intent does not match the run continuation fence");
+  }
+  const enqueueAttempt = publishPipelineResumeEnqueueAttempt(run);
+  if (enqueueAttempt > MAX_PUBLISH_CONTINUATION_ENQUEUE_ATTEMPTS) {
+    throw new Error(
+      `publish continuation exhausted ${MAX_PUBLISH_CONTINUATION_ENQUEUE_ATTEMPTS} bounded delivery attempts`,
+    );
   }
   const invocationSha256 = run.pipelineInvocationSha256?.trim();
   if (
@@ -225,9 +271,10 @@ export function publishPipelineResumeTriggerRequest(
       ...(scheduledPlan ? { scheduledPlan } : {}),
     },
     options: {
-      idempotencyKey: `publish-resume:${intentId}:run:${runId}:snapshot:${invocationSha256}:video:${videoId}`,
+      idempotencyKey: `publish-resume:${intentId}:run:${runId}:snapshot:${invocationSha256}:video:${videoId}:attempt:${enqueueAttempt}`,
       idempotencyKeyTTL: PUBLISH_RETRY_IDEMPOTENCY_TTL,
       concurrencyKey: channelId,
     },
+    enqueueAttempt,
   };
 }

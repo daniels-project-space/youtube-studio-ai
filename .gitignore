@@ -14,6 +14,10 @@ node_modules/
 # testing
 /coverage
 
+# Python worker runtime cache
+__pycache__/
+*.pyc
+
 # next.js
 /.next/
 /out/

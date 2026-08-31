@@ -24,7 +24,7 @@ import {
 
 // Bump whenever an offer changes so a cached browser cannot submit a selection
 // against a less restrictive catalog.
-export const CREATIVE_CAPABILITY_CATALOG_VERSION = "creative-capability-catalog/v3" as const;
+export const CREATIVE_CAPABILITY_CATALOG_VERSION = "creative-capability-catalog/v4" as const;
 
 export type CreativeCapabilityKey =
   | "source_attributed_data_story"
@@ -74,6 +74,15 @@ export interface CreativeCapabilityPipelineObligation {
   params?: Readonly<Record<string, unknown>>;
 }
 
+/**
+ * A Show Profile retry may first apply its sealed composition compatibility
+ * fence. That fence—not the current generic offer—is authoritative for
+ * versioned operations such as the Phase-I Episode Graph.
+ */
+export interface CreativeCapabilityPipelineObligationValidationOptions {
+  readonly deferMaterializationOwnedObligations?: boolean;
+}
+
 export interface CreativeCapabilityOffer {
   capability: CreativeCapabilityKey;
   title: string;
@@ -96,6 +105,13 @@ export interface CreativeCapabilityDefinition {
   capability: CreativeCapabilityKey;
   supportedFamilies: readonly FamilyKey[];
   selectionMode: CreativeCapabilitySelectionMode;
+  /**
+   * An explicit reference to the V8-safe, versioned composition fragment the
+   * capability owns when selected. The fragment itself is sealed in the
+   * composition catalog so durable retry validation need not import this rich
+   * creator catalog. It does not grant automated build or release authority.
+   */
+  compositionFragmentVersion?: string;
   matches: (intent: CreativeCapabilityIntent, family: FamilyKey) => boolean;
   /**
    * Explicit opt-in for reporting an otherwise-unhosted private-review intent
@@ -109,6 +125,12 @@ export interface CreativeCapabilityDefinition {
 export interface ResolvedCreativeCapabilitySelection {
   selection: CreativeCapabilitySelection;
   offer: CreativeCapabilityOffer;
+  /**
+   * The capability's declared composition-fragment version.  Keep this next
+   * to the resolved selection so composition callers cannot silently resolve
+   * an unrelated current fragment after the creator catalog changes.
+   */
+  compositionFragmentVersion?: string;
 }
 
 /**
@@ -324,6 +346,7 @@ function sourceAttributedDataStoryOffer(
     requirements: recommendation.requirements,
     qualityFocus: recommendation.qualityFocus,
     pipelineObligations: [
+      { block: "episode_graph" },
       { block: "timeline_assemble" },
       { block: "visual_inserts", params: insertParams },
       { block: "script_gen", params: { dataRich: true, sourceAttributionRequired: true } },
@@ -452,6 +475,7 @@ export const CREATIVE_CAPABILITY_CATALOG: readonly CreativeCapabilityDefinition[
     capability: "source_attributed_data_story",
     supportedFamilies: ["narrated_stock"],
     selectionMode: "explicit_opt_in",
+    compositionFragmentVersion: "v2",
     matches: (intent, family) => dataStoryRecommendationForIntent(intent, family).length > 0,
     materialize: sourceAttributedDataStoryOffer,
   },
@@ -503,6 +527,7 @@ export const CREATIVE_CAPABILITY_CATALOG_FINGERPRINT = `${CREATIVE_CAPABILITY_CA
       capability: definition.capability,
       supportedFamilies: definition.supportedFamilies,
       selectionMode: definition.selectionMode,
+      compositionFragmentVersion: definition.compositionFragmentVersion,
       offer,
     };
   })),
@@ -636,8 +661,36 @@ export function validateCreativeCapabilitySelections(
     if (input.intent && !definition.matches(input.intent, input.family)) {
       throw new Error(`creative capability ${selection.capability} is not eligible for the stated channel concept`);
     }
-    return { selection, offer: definition.materialize(input.intent ?? {}, input.family) };
+    return {
+      selection,
+      offer: definition.materialize(input.intent ?? {}, input.family),
+      ...(definition.compositionFragmentVersion === undefined
+        ? {}
+        : { compositionFragmentVersion: definition.compositionFragmentVersion }),
+    };
   });
+}
+
+/**
+ * Resolve the declared fragment-version contract for automatic capability
+ * selections.  The composition catalog remains V8-safe and does not import
+ * this rich creator catalog, so callers pass these exact bindings into its
+ * sealed-plan resolver rather than allowing a mutable "current" lookup to
+ * become an untracked source of authority.
+ */
+export function creativeCapabilityCompositionFragmentVersionBindings(
+  resolved: readonly ResolvedCreativeCapabilitySelection[],
+): Readonly<Record<string, string>> {
+  const bindings: Record<string, string> = {};
+  for (const { selection, compositionFragmentVersion } of resolved) {
+    if (!compositionFragmentVersion) {
+      throw new Error(
+        `creative capability ${selection.capability} has no declared composition fragment version`,
+      );
+    }
+    bindings[selection.capability] = compositionFragmentVersion;
+  }
+  return bindings;
 }
 
 /**
@@ -697,9 +750,21 @@ function matchesRequiredParams(
 export function assertResolvedCreativeCapabilityPipelineObligations(
   resolved: readonly ResolvedCreativeCapabilitySelection[],
   pipeline: readonly Pick<PipelineEntry, "block" | "params">[],
+  options: CreativeCapabilityPipelineObligationValidationOptions = {},
 ): void {
   for (const { selection, offer } of resolved) {
     for (const obligation of offer.pipelineObligations) {
+      // This operation was introduced by the sealed v4 source-data
+      // materialization. Historical v1-v3 receipts must prove only their own
+      // materialization below; a current/new capability selection keeps the
+      // default generic requirement and the v4 plan independently proves it.
+      if (
+        options.deferMaterializationOwnedObligations &&
+        selection.capability === "source_attributed_data_story" &&
+        obligation.block === "episode_graph"
+      ) {
+        continue;
+      }
       const entry = pipeline.find((candidate) => candidate.block === obligation.block);
       if (!entry) {
         throw new Error(
@@ -756,6 +821,17 @@ export function assertCreativeCapabilityCatalog(
     }
     if (definition.selectionMode === "private_review_only" && offer.pipelineObligations.length) {
       throw new Error(`private-review capability ${definition.capability} cannot declare an automatic pipeline path`);
+    }
+    if (
+      definition.compositionFragmentVersion !== undefined &&
+      (
+        !definition.compositionFragmentVersion ||
+        definition.selectionMode !== "explicit_opt_in"
+      )
+    ) {
+      throw new Error(
+        `creative capability ${definition.capability} cannot expose an autonomous composition fragment`,
+      );
     }
     if (definition.crossFamilySafetyGate && definition.selectionMode !== "private_review_only") {
       throw new Error(`cross-family safety gate ${definition.capability} must be private review only`);

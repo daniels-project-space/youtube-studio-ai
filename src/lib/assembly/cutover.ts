@@ -207,6 +207,7 @@ export function paramsToAssemble(params: ParamsBag): AssembleParams {
     // there, so this must always resolve to a number — leaving it undefined made
     // renderTimeline skip loudness entirely (~8 LUFS below every legacy video).
     targetLufs: num("targetLufs", ASSEMBLE_DEFAULTS.targetLufs ?? -14),
+    transitions: typeof params["transitions"] === "string" ? params["transitions"] : ASSEMBLE_DEFAULTS.transitions,
     captions: params["burnCaptions"] !== false,
     reframe: aspect === "16:9" ? "none" : (ASSEMBLE_DEFAULTS.reframe ?? "none"),
   };

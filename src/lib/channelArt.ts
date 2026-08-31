@@ -12,7 +12,11 @@ import { join } from "node:path";
 
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { PRICE } from "@/engine/pricing";
-import { downloadTo, makeRunTempDir } from "@/lib/files";
+import {
+  downloadTo,
+  DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+  makeRunTempDir,
+} from "@/lib/files";
 import { imageToJpeg } from "@/lib/ffmpeg";
 import { parseJsonLoose } from "@/lib/gemini";
 import { renderNovitaImage, type NovitaRenderLifecycle } from "@/lib/novitaMedia";
@@ -51,7 +55,7 @@ export interface ChannelArtRenderRequest {
 export interface ChannelArtRuntime {
   hasJudge(): boolean;
   renderImage(request: ChannelArtRenderRequest): Promise<{ url: string; key: string }>;
-  download(url: string, path: string): Promise<unknown>;
+  download(url: string, path: string, options?: { timeoutMs?: number }): Promise<unknown>;
   makeTempDir(prefix: string): Promise<string>;
   toJpeg(input: string, output: string, width: number, height: number): Promise<unknown>;
   judge(request: { kind: ArtKind; prompt: string; imagePaths: string[] }): Promise<unknown>;
@@ -334,7 +338,9 @@ async function directArt(args: {
           throw new Error(`channelArt: ${kind} renderer escaped its versioned Imagecraft namespace`);
         }
         const sourcePath = join(temp, `${id}.png`);
-        await runtime.download(rendered.url, sourcePath);
+        await runtime.download(rendered.url, sourcePath, {
+          timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+        });
         const candidate = await prepareCandidate(kind, {
           key: rendered.key,
           url: rendered.url,

@@ -41,8 +41,12 @@ export const createOrGet = mutation({
     videoArtifactId: v.string(),
     videoArtifactKey: v.string(),
     videoSha256: v.string(),
+    releaseEvidenceCertificateKey: v.string(),
+    releaseEvidenceCertificateFingerprint: v.string(),
     thumbnailArtifactKey: v.optional(v.string()),
     thumbnailSha256: v.optional(v.string()),
+    thumbnailScenarioVisualTreatmentProvenance: v.optional(v.any()),
+    thumbnailScenarioVisualTreatmentProvenanceFingerprint: v.optional(v.string()),
     intentVersion: v.number(),
     idempotencyKey: v.string(),
     metadataSha256: v.string(),
@@ -90,12 +94,24 @@ export const createOrGet = mutation({
     if (
       !/^[a-f0-9]{64}$/.test(args.metadataSha256) ||
       !/^[a-f0-9]{64}$/.test(args.videoSha256) ||
+      !/^[a-f0-9]{64}$/.test(args.releaseEvidenceCertificateFingerprint) ||
       (args.thumbnailSha256 !== undefined && !/^[a-f0-9]{64}$/.test(args.thumbnailSha256))
     ) {
       throw new Error("publishIntents.createOrGet: invalid content digest");
     }
+    if (!args.releaseEvidenceCertificateKey.trim()) {
+      throw new Error("publishIntents.createOrGet: final-master release certificate key is required");
+    }
     if (Boolean(args.thumbnailArtifactKey) !== Boolean(args.thumbnailSha256)) {
       throw new Error("publishIntents.createOrGet: thumbnail key/digest must be paired");
+    }
+    if (
+      Boolean(args.thumbnailScenarioVisualTreatmentProvenance) !==
+        Boolean(args.thumbnailScenarioVisualTreatmentProvenanceFingerprint) ||
+      (args.thumbnailScenarioVisualTreatmentProvenanceFingerprint !== undefined &&
+        !/^[a-f0-9]{64}$/.test(args.thumbnailScenarioVisualTreatmentProvenanceFingerprint))
+    ) {
+      throw new Error("publishIntents.createOrGet: thumbnail treatment provenance/fingerprint must be paired");
     }
     const bindRun = async (intentId: Id<"publishIntents">) => {
       if (!args.runId) return;
@@ -122,23 +138,49 @@ export const createOrGet = mutation({
       );
     }
 
-    const existing = await ctx.db
+    let existing = await ctx.db
       .query("publishIntents")
       .withIndex("by_idempotency", (q) =>
         q.eq("ownerId", args.ownerId).eq("idempotencyKey", args.idempotencyKey),
       )
       .unique();
     if (existing) {
+      const hasExistingReleaseEvidenceKey =
+        existing.releaseEvidenceCertificateKey !== undefined;
+      const hasExistingReleaseEvidenceFingerprint =
+        existing.releaseEvidenceCertificateFingerprint !== undefined;
+      if (hasExistingReleaseEvidenceKey !== hasExistingReleaseEvidenceFingerprint) {
+        throw new Error("publishIntents.createOrGet: stored release-evidence pointer is incomplete");
+      }
       if (
         existing.metadataSha256 !== args.metadataSha256 ||
         existing.connectorId !== args.connectorId ||
         existing.connectorVersion !== args.connectorVersion ||
         existing.videoArtifactKey !== args.videoArtifactKey ||
         existing.videoSha256 !== args.videoSha256 ||
+        (hasExistingReleaseEvidenceKey &&
+          (existing.releaseEvidenceCertificateKey !== args.releaseEvidenceCertificateKey ||
+            existing.releaseEvidenceCertificateFingerprint !==
+              args.releaseEvidenceCertificateFingerprint)) ||
         existing.thumbnailArtifactKey !== args.thumbnailArtifactKey ||
-        existing.thumbnailSha256 !== args.thumbnailSha256
+        existing.thumbnailSha256 !== args.thumbnailSha256 ||
+        existing.thumbnailScenarioVisualTreatmentProvenanceFingerprint !==
+          args.thumbnailScenarioVisualTreatmentProvenanceFingerprint
       ) {
         throw new Error("publishIntents.createOrGet: immutable intent conflict");
+      }
+      // A pre-binding row may be resumed safely only by the current upload
+      // block after it has revalidated the exact certificate. Fill that missing
+      // historical pair once; any already-bound row is immutable.
+      if (!hasExistingReleaseEvidenceKey) {
+        await ctx.db.patch(existing._id, {
+          releaseEvidenceCertificateKey: args.releaseEvidenceCertificateKey,
+          releaseEvidenceCertificateFingerprint: args.releaseEvidenceCertificateFingerprint,
+        });
+        existing = await ctx.db.get(existing._id);
+        if (!existing) {
+          throw new Error("publishIntents.createOrGet: existing intent disappeared during evidence migration");
+        }
       }
       if (
         existing.status === "awaiting_approval" &&
@@ -625,6 +667,39 @@ export const fail = mutation({
       leaseExpiresAt: undefined,
       lastError: args.error.slice(0, 1_000),
       updatedAt: args.failedAt,
+    });
+    return await ctx.db.get(intent._id);
+  },
+});
+
+/**
+ * Evidence corruption is not a provider/transient failure. Once a claimed
+ * attempt proves that its sealed final-master certificate or retained objects
+ * are missing or mismatched, retire that exact intent instead of scheduling a
+ * retry which could publish without the reviewer evidence.
+ */
+export const blockReleaseEvidence = mutation({
+  args: {
+    secret: v.string(),
+    intentId: v.id("publishIntents"),
+    workerId: v.string(),
+    reason: v.string(),
+    blockedAt: v.number(),
+  },
+  handler: async (ctx, args) => {
+    assertInternalSecret(args.secret);
+    const intent = await ctx.db.get(args.intentId);
+    if (!intent) throw new Error("publishIntents.blockReleaseEvidence: intent not found");
+    if (intent.status === "uploaded" || intent.status === "dead_letter") return intent;
+    if (intent.status !== "dispatching" || intent.leaseOwner !== args.workerId) {
+      throw new Error("publishIntents.blockReleaseEvidence: lease owner mismatch");
+    }
+    await ctx.db.patch(intent._id, {
+      status: "dead_letter",
+      leaseOwner: undefined,
+      leaseExpiresAt: undefined,
+      lastError: `release evidence invalid: ${args.reason}`.slice(0, 1_000),
+      updatedAt: args.blockedAt,
     });
     return await ctx.db.get(intent._id);
   },

@@ -59,7 +59,7 @@ export const NICHES: Niche[] = [
     subcategories: [
       { id: "study-beats", name: "Study / Focus beats", searchVolume: 90, rpm: 2.8, tags: ["study music", "lofi hip hop", "focus music", "concentration", "study beats", "chill beats", "homework music", "lofi radio"] },
       { id: "sleep-calm", name: "Sleep / Calm", searchVolume: 74, rpm: 3.5, tags: ["sleep music", "relaxing music", "deep sleep", "insomnia relief", "calm music", "ambient sleep", "sleeping music", "8 hours"] },
-      { id: "ghibli-anime", name: "Ghibli / Anime ambience", searchVolume: 61, rpm: 3.1, tags: ["ghibli lofi", "anime lofi", "studio ghibli music", "anime ambience", "cozy anime", "nostalgic lofi", "piano lofi", "chillhop"] },
+      { id: "hand-drawn-anime-ambience", name: "Hand-drawn anime-inspired ambience", searchVolume: 61, rpm: 3.1, tags: ["hand-drawn ambience", "anime-inspired lofi", "cozy illustrated ambience", "nostalgic lofi", "piano lofi", "chillhop", "soft illustration music", "cozy study music"] },
       { id: "rainy-cozy", name: "Rainy / Cozy", searchVolume: 48, rpm: 3.2, tags: ["rain sounds", "rain on window", "rain for sleep", "rain ambience", "cozy lofi", "rainy day", "rain noise", "thunderstorm"] },
       { id: "coffee-shop", name: "Coffee Shop Ambience", searchVolume: 75, rpm: 3.0, tags: ["coffee shop ambient", "cafe music", "coffee shop sounds", "background noise", "cafe ambience", "work music", "cafe lofi"] },
       { id: "jazz-lofi", name: "Jazz Lo-Fi", searchVolume: 55, rpm: 3.4, tags: ["jazz lofi", "smooth jazz", "jazz hop", "jazz beats", "late night jazz", "jazz music", "chill jazz", "lofi jazz"] },

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import {
+  motionComicOpeningPanelDefect,
   projectMotionComicVisualCharacter,
   projectMotionComicVisualScene,
   type MotionComicStoryboard,
@@ -12,7 +13,7 @@ import { motionComicStoryboardDefects } from "@/trigger/blocks/motionComicBlocks
 import { whiteboardStoryboardDefects } from "@/trigger/blocks/whiteboardScribeBlocks";
 
 // Phase 51: motion_comic and whiteboard_scribe were the last two paid engines
-// with NO quality feedback — one unreviewed Gemini storyboard decided how the
+// with NO quality feedback — one unreviewed storyboard decided how the
 // whole art + voice + music budget was spent. Both now expose a plan/render
 // seam (planMotionComicStoryboard / planWhiteboardStoryboard + an optional
 // `plan` arg on cast*), and their blocks critique the CHEAP storyboard before
@@ -23,6 +24,25 @@ import { whiteboardStoryboardDefects } from "@/trigger/blocks/whiteboardScribeBl
 
 const SOURCE_ROOT = join(process.cwd(), "src");
 const read = (relativePath: string): string => readFileSync(join(SOURCE_ROOT, relativePath), "utf8");
+
+for (const engineFile of ["lib/motionComic.ts", "lib/whiteboardSync.ts"]) {
+  const engine = read(engineFile);
+  assert.match(
+    engine,
+    /import\s*\{[\s\S]*\bagentJson\b[\s\S]*\}\s*from "@\/agents\/mastra"/,
+    `${engineFile}: the storyboard boundary must use the Studio's structured non-Google planner`,
+  );
+  assert.match(
+    engine,
+    /hasAnthropicKey\(\)/,
+    `${engineFile}: readiness must require the non-Google planner rather than a thumbnail-only credential`,
+  );
+  assert.doesNotMatch(
+    engine,
+    /geminiJsonPro/,
+    `${engineFile}: a self-contained storyboard may not silently route creative planning through Gemini`,
+  );
+}
 
 /* ══════════════════════════ 1. motion_comic defects ══════════════════════════ */
 //
@@ -40,6 +60,7 @@ function comicPanel(overrides: {
     visual: projectMotionComicVisualScene({
       environment: "interior",
       era: "modern",
+      subjects: ["reference_characters"],
       action: "deliberate_work",
       mood: "tense",
       lighting: "interior_light",
@@ -65,6 +86,23 @@ function comicStoryboard(panels: MotionComicStoryboard["panels"]): MotionComicSt
     ],
     panels,
   };
+}
+
+{
+  // The viewer sees this panel before any narration. A bare atmospheric
+  // default produces a paid empty comic template, not a story hook.
+  const emptyOpening = comicStoryboard([
+    comicPanel({ scene: { environment: "atmospheric_exterior", era: "timeless", subjects: [], objects: [], action: "poised_action", mood: "mysterious", lighting: "daylight" } }),
+    comicPanel({ shot: "wide", scene: { environment: "forest", subjects: ["traveler"], action: "discovering" } }),
+    comicPanel({ shot: "close", scene: { environment: "temple", subjects: ["philosopher"], action: "contemplating", mood: "calm" } }),
+    comicPanel({ shot: "medium", scene: { environment: "mountain", subjects: ["traveler"], action: "watchful_pause", mood: "mysterious" } }),
+  ]);
+  const defect = motionComicOpeningPanelDefect(emptyOpening);
+  assert.match(defect ?? "", /opening panel has no visible subject or concrete object/);
+  assert.ok(
+    motionComicStoryboardDefects(emptyOpening, 4, 0).some((issue) => issue.includes("opening panel has no visible subject")),
+    "the text-only critique must reject an empty opening before any paid panel art is requested",
+  );
 }
 
 {
@@ -187,16 +225,28 @@ console.log("storyboardCritiqueSeam.test.ts: motion_comic deterministic storyboa
 function scribePanel(overrides: {
   narration?: string;
   layers?: WhiteboardStoryboard["panels"][number]["layers"];
+  preserveNarrationLength?: boolean;
 } = {}): WhiteboardStoryboard["panels"][number] {
+  const rawNarration =
+    overrides.narration ??
+    "The railroads reached the coast in eighteen sixty nine, and the price of grain collapsed almost overnight.";
+  // Healthy fixtures must have enough spoken time for the real visible hand
+  // schedule. Short snippets are still available when a test is specifically
+  // exercising word-budget behavior.
+  const narration = overrides.preserveNarrationLength
+    ? rawNarration
+    : `${rawNarration} The new route connected farmers, warehouse clerks, shipping agents, price sheets, and distant buyers in a single visible chain, so every later drawing has a narrated reason to arrive before the board reaches its final hold. Viewers can follow the locomotive, the port ledger, the worried farmer, and the falling grain price as one causal sequence rather than a stack of unrelated icons.`;
+  const words = narration.split(/\s+/).filter(Boolean);
+  const cue = (start: number, count: number) => words.slice(start, start + count).join(" ");
   return {
     idx: 0,
-    narration:
-      overrides.narration ??
-      "The railroads reached the coast in eighteen sixty nine, and the price of grain collapsed almost overnight.",
+    narration,
     layers: overrides.layers ?? [
-      { kind: "art", draw: "a locomotive crossing a plain toward distant mountains", color: "black", cue: "The railroads reached", box: [0.12, 0.24, 0.42, 0.4] },
-      { kind: "art", draw: "a sack of grain tipping over", color: "black", cue: "price of grain", box: [0.62, 0.3, 0.18, 0.2] },
-      { kind: "label", text: "1869", color: "red", cue: "eighteen sixty nine", box: [0.6, 0.62, 0.12, 0.08] },
+      { kind: "art", role: "hero", draw: "a locomotive crossing a plain toward distant mountains with grain wagons and a rail signal", color: "black", cue: cue(0, 2), box: [0.12, 0.24, 0.42, 0.4] },
+      { kind: "art", role: "evidence", draw: "a port crane loading a grain wagon beside a route ledger", color: "black", cue: cue(Math.max(2, Math.floor(words.length * 0.28)), 2), box: [0.62, 0.28, 0.18, 0.2] },
+      { kind: "label", text: "1869", color: "red", cue: cue(Math.max(4, Math.floor(words.length * 0.50)), 2), box: [0.60, 0.62, 0.12, 0.08] },
+      { kind: "art", role: "reaction", draw: "a worried farmer watching a grain price arrow fall beside the tracks", color: "black", cue: cue(Math.max(5, Math.floor(words.length * 0.58)), 2), box: [0.56, 0.52, 0.16, 0.22] },
+      { kind: "art", role: "evidence", draw: "a sack of grain tipping over beside a price arrow and a competing market cart", color: "black", cue: cue(Math.max(6, Math.floor(words.length * 0.70)), 2), box: [0.74, 0.52, 0.17, 0.18] },
     ],
   };
 }
@@ -221,6 +271,22 @@ function scribeStoryboard(panels: WhiteboardStoryboard["panels"]): WhiteboardSto
     whiteboardStoryboardDefects(healthy, 4, 0),
     [],
     "a well-formed 4-panel whiteboard storyboard must pass every deterministic check",
+  );
+}
+
+{
+  const sparse = scribeStoryboard([
+    scribePanel({
+      layers: [
+        { kind: "art", draw: "one generic dollar icon", color: "black", cue: "The railroads reached", box: [0.18, 0.24, 0.42, 0.4] },
+        { kind: "label", text: "1869", color: "red", cue: "eighteen sixty nine", box: [0.60, 0.62, 0.12, 0.08] },
+      ],
+    }),
+    scribePanel(),
+  ]);
+  assert.ok(
+    whiteboardStoryboardDefects(sparse, 2, 0).some((issue) => issue.includes("Golden whiteboard grammar")),
+    "a single-icon board must be rejected before image generation rather than rationalized into a passing explainer",
   );
 }
 
@@ -309,15 +375,14 @@ function scribeStoryboard(panels: WhiteboardStoryboard["panels"]): WhiteboardSto
 }
 
 {
-  const thin = scribeStoryboard([scribePanel(), scribePanel({ narration: "Then prices fell everywhere at once for years." })]);
+  const thin = scribeStoryboard([scribePanel({ preserveNarrationLength: true }), scribePanel({ narration: "Then prices fell across every grain town at once for years.", preserveNarrationLength: true })]);
   assert.ok(
     whiteboardStoryboardDefects(thin, 2, 600).some((issue) => issue.includes("spoken words")),
     "a script far under the requested word budget must be flagged",
   );
-  assert.deepEqual(
-    whiteboardStoryboardDefects(thin, 2, 0),
-    [],
-    "with NO target word count the budget check must not fire",
+  assert.ok(
+    !whiteboardStoryboardDefects(thin, 2, 0).some((issue) => issue.includes("spoken words")),
+    "with NO target word count the script-length budget must not fire (the independent hand-capacity gate may still reject the board)",
   );
 }
 
@@ -555,8 +620,8 @@ for (const seam of SEAMS) {
     `${seam.label}: cast* must accept an optional pre-approved storyboard`,
   );
   assert.ok(
-    engine.includes("if (args.plan) {"),
-    `${seam.label}: a supplied storyboard must short-circuit the engine's own planning branch`,
+    engine.includes("legacyPlan: args.plan,") && engine.includes("if (approvedPlan) {"),
+    `${seam.label}: a supplied storyboard must short-circuit the engine's own planning branch through the sealed-plan resolver`,
   );
 }
 

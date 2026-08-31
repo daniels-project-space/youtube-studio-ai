@@ -5,6 +5,16 @@ import {
   type ChannelProgramBrief,
 } from "./channelProgramBrief";
 import {
+  assertChannelProgramRouteBinding,
+  channelProgramRouteFingerprint,
+  parseChannelProgramRoute,
+  type ChannelProgramRoute,
+} from "./channelProgramRoute";
+import {
+  assertCreatorIntentDiagnosisBinding,
+  type CreatorIntentDiagnosis,
+} from "./creatorIntentDiagnosis";
+import {
   assertChannelShowProfileProgramBinding,
   channelShowProfileFingerprint,
   type ChannelShowProfile,
@@ -81,6 +91,17 @@ export interface ChannelInceptionRequest {
    */
   programBrief: ChannelProgramBrief;
   /**
+   * Brief-derived route sealed by a post-route admission. Absent only on a
+   * historical snapshot, whose original retry identity is preserved.
+   */
+  programRoute?: ChannelProgramRoute;
+  /**
+   * Brief-and-route receipt that pins the channel-level editorial semantics.
+   * Optional exclusively for immutable historical snapshots created before
+   * creator-intent diagnosis existed.
+   */
+  creatorIntentDiagnosis?: CreatorIntentDiagnosis;
+  /**
    * Immutable resolved module composition for new inception. It remains
    * optional solely to read historical snapshots; the executor never admits a
    * new or retried paid run without it.
@@ -124,6 +145,7 @@ export interface ChannelInceptionStageParamsByKey {
     family: FamilyKey;
     nicheKey: string;
     programBrief: ChannelProgramBrief;
+    creatorIntentDiagnosisFingerprint?: string;
     minimumStyleDnaConfidence: number;
     maximumUnresolvedGaps: number;
   };
@@ -167,6 +189,7 @@ export interface ChannelInceptionStageParamsByKey {
     sourcePipelineFingerprint: string;
     moduleConfigFingerprint: string;
     showProfileFingerprint: string | null;
+    creatorIntentDiagnosisFingerprint?: string;
     preserveSpecializedEntries: true;
     retireOnlyCompilerDeclaredLegacy: true;
     requireGoldenProofForGoldenLabel: true;
@@ -422,9 +445,35 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
   if (programBrief.locale !== locale) {
     throw new Error("channel program brief locale does not match the inception request");
   }
+  const programRoute = request.programRoute === undefined
+    ? undefined
+    : parseChannelProgramRoute(request.programRoute);
+  if (programRoute) {
+    assertChannelProgramRouteBinding({
+      route: programRoute,
+      programBrief,
+    });
+  }
+  if (!programRoute && request.creatorIntentDiagnosis !== undefined) {
+    throw new Error("creator intent diagnosis requires a sealed channel program route");
+  }
+  const creatorIntentDiagnosis = request.creatorIntentDiagnosis === undefined
+    ? undefined
+    : assertCreatorIntentDiagnosisBinding({
+        diagnosis: request.creatorIntentDiagnosis,
+        programBrief,
+        programRoute: programRoute!,
+      });
   const showProfile = request.showProfile
     ? assertChannelShowProfileProgramBinding({ profile: request.showProfile, programBrief })
     : undefined;
+  if (
+    programRoute &&
+    showProfile?.programRoute &&
+    channelProgramRouteFingerprint(programRoute) !== channelProgramRouteFingerprint(showProfile.programRoute)
+  ) {
+    throw new Error("channel inception route does not match the sealed channel show profile route");
+  }
 
   if (policy.voiceOwnership === "none" && request.voice) {
     throw new Error(`${request.family} omits voice inception and cannot accept a voice intent`);
@@ -542,6 +591,9 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
     family: request.family,
     nicheKey,
     programBrief,
+    ...(creatorIntentDiagnosis
+      ? { creatorIntentDiagnosisFingerprint: creatorIntentDiagnosis.fingerprint }
+      : {}),
     minimumStyleDnaConfidence: 0.7,
     maximumUnresolvedGaps: 0,
   });
@@ -595,6 +647,9 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
     sourcePipelineFingerprint: pipelineSourceFingerprint,
     moduleConfigFingerprint,
     showProfileFingerprint: showProfile ? channelShowProfileFingerprint(showProfile) : null,
+    ...(creatorIntentDiagnosis
+      ? { creatorIntentDiagnosisFingerprint: creatorIntentDiagnosis.fingerprint }
+      : {}),
     preserveSpecializedEntries: true,
     retireOnlyCompilerDeclaredLegacy: true,
     requireGoldenProofForGoldenLabel: true,
@@ -634,6 +689,8 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
     locale,
     sourceRevision,
     programBrief,
+    programRoute: programRoute ?? null,
+    creatorIntentDiagnosis: creatorIntentDiagnosis ?? null,
     showProfile: showProfile ?? null,
     pipelineSourceFingerprint,
     moduleConfigFingerprint,
@@ -680,6 +737,8 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
     pipelineSourceFingerprint,
     moduleConfigFingerprint,
     programBrief,
+    ...(programRoute ? { programRoute } : {}),
+    ...(creatorIntentDiagnosis ? { creatorIntentDiagnosis } : {}),
     ...(showProfile ? { showProfile } : {}),
     ...(Object.values(snapshotBrand).some(Boolean) ? { brand: snapshotBrand } : {}),
     ...(policy.voiceOwnership !== "none" && existingCastFingerprint

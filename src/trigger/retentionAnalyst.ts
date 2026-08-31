@@ -25,6 +25,14 @@ import {
 import { YOUTUBE_ANALYTICS_SCOPE } from "@/lib/publishingPolicy";
 import { claudeJson } from "@/lib/anthropic";
 import { ShortRetentionManifestSchema } from "@/engine/documentaryCollageShort";
+import {
+  describePackageOpeningRetentionAttribution,
+  packageOpeningRetentionAttribution,
+} from "@/lib/retentionAttribution";
+import {
+  deriveAudienceOpeningRetention,
+  describeAudienceOpeningRetention,
+} from "@/lib/audienceRetentionOpening";
 
 interface Drop {
   atRatio: number;
@@ -85,6 +93,10 @@ export const retentionAnalystTask = task({
     const quotes = (out("quote_overlays")["quoteOverlays"] as { startSec: number; durSec: number; text?: string }[] | undefined) ?? [];
     const inserts = (out("visual_inserts")["insertOverlays"] as { startSec: number; durSec: number }[] | undefined) ?? [];
     const topic = String(out("topic_select")["topic"] ?? "");
+    const packageOpeningAttribution = packageOpeningRetentionAttribution({
+      plan: out("package_to_opening_plan")["packageToOpeningPlan"],
+      receipt: out("qa_visual")["packageToOpening"],
+    });
 
     // 2. The retention curve (≥3-day metric finality; caller enforces ~7d lag).
     const end = new Date().toISOString().slice(0, 10);
@@ -96,6 +108,8 @@ export const retentionAnalystTask = task({
       refreshToken: connector.refreshToken,
     });
     if (!curve || curve.length < 10) return { ok: false, reason: "no retention curve yet (too few views or too early)" };
+    const openingRetention = deriveAudienceOpeningRetention({ durationSec, curve });
+    const openingRetentionSummary = describeAudienceOpeningRetention(openingRetention);
     const summary = await fetchVideoAnalytics({
       videoId,
       startDate: start,
@@ -152,13 +166,11 @@ export const retentionAnalystTask = task({
         .map((entry) => entry.slice("beat:".length))),
     )];
     const hookHold = curve.find((p) => p.ratio >= 0.05)?.watch ?? 1; // survivors at 5%
-    log(`curve: ${curve.length} pts | hook hold ${(hookHold * 100).toFixed(0)}% | ${drops.length} steep drop(s) | avgView ${summary?.avgViewPct?.toFixed(1) ?? "?"}%`);
+    log(`curve: ${curve.length} pts | hook hold ${(hookHold * 100).toFixed(0)}% | ${openingRetentionSummary} | ${drops.length} steep drop(s) | avgView ${summary?.avgViewPct?.toFixed(1) ?? "?"}%`);
 
     // 4. Channel + playbook context for attribution.
     const playbook = (channel as { scriptPlaybook?: Record<string, unknown> } | null)?.scriptPlaybook;
-    const deviceIdx = [...payload.runId].reduce((s, c) => s + c.charCodeAt(0), 0);
-    const devices = (playbook?.["openingDevices"] as { name: string }[] | undefined) ?? [];
-    const deviceUsed = devices.length ? devices[deviceIdx % devices.length].name : "unknown";
+    const openingAttribution = describePackageOpeningRetentionAttribution(packageOpeningAttribution);
 
     // 5. Showrunner distills learnings → playbook rules.
     const analysis = await claudeJson<{
@@ -170,8 +182,8 @@ export const retentionAnalystTask = task({
       temperature: 0.3,
       system: "You are a YouTube retention engineer turning REAL audience data into writing rules. Return ONLY JSON.",
       prompt:
-        `Video: "${topic}" (${durationSec}s) on "${channel?.name}". Opening device used: "${deviceUsed}".\n` +
-        `Hook hold at 5%: ${(hookHold * 100).toFixed(0)}% | avg view: ${summary?.avgViewPct?.toFixed(1) ?? "?"}% | views: ${summary?.views ?? "?"}.\n\n` +
+        `Video: "${topic}" (${durationSec}s) on "${channel?.name}". Opening evidence: ${openingAttribution}.\n` +
+        `Hook hold at 5%: ${(hookHold * 100).toFixed(0)}% | opening measure: ${openingRetentionSummary} | avg view: ${summary?.avgViewPct?.toFixed(1) ?? "?"}% | views: ${summary?.views ?? "?"}.\n\n` +
         `STEEP DROPS (≥4% of remaining viewers, worst first) with what the pipeline had on screen:\n` +
         drops.slice(0, 8).map((d) => `- ${d.atSec}s (${(d.atRatio * 100).toFixed(0)}%): -${d.lostPctOfRemaining}% — ${d.context.join("; ")}`).join("\n") +
         `\n\nDistill: diagnosis (2-3 sentences, what actually loses viewers on THIS channel) + learnings: 1-4 RULES ` +
@@ -192,13 +204,14 @@ export const retentionAnalystTask = task({
             ...l,
             videoId,
             runId: payload.runId,
-            deviceUsed,
+            packageOpeningAttribution,
+            openingRetention,
             ...(shortRetention.success
               ? { lane: shortRetention.data.lane, shortBeatIds: affectedShortBeatIds }
               : {}),
             at: Date.now(),
           }))
-        : [{ rule: "(no confident rule — data too thin)", evidence: "analysis ran; digest ignores low confidence", confidence: "low" as const, videoId, runId: payload.runId, deviceUsed, at: Date.now() }];
+        : [{ rule: "(no confident rule — data too thin)", evidence: "analysis ran; digest ignores low confidence", confidence: "low" as const, videoId, runId: payload.runId, packageOpeningAttribution, openingRetention, at: Date.now() }];
       const existing = (playbook["retentionLearnings"] as unknown[] | undefined) ?? [];
       const updated = {
         ...playbook,
@@ -221,6 +234,8 @@ export const retentionAnalystTask = task({
           nextValue: updated,
           diagnosis: analysis.diagnosis,
           runId: payload.runId,
+          packageOpeningAttribution,
+          openingRetention,
           ...(shortRetention.success
             ? {
                 lane: shortRetention.data.lane,
@@ -248,6 +263,8 @@ export const retentionAnalystTask = task({
       videoId,
       hookHoldPct: Math.round(hookHold * 100),
       avgViewPct: summary?.avgViewPct,
+      packageOpeningAttribution,
+      openingRetention,
       drops: drops.slice(0, 8),
       diagnosis: analysis.diagnosis,
       learnings,

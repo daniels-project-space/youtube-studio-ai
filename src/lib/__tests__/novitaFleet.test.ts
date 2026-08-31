@@ -20,6 +20,7 @@ import {
   assertRtx4090VideoRuntime,
   automaticRtx4090Concurrency,
   budgetBoundedWorkerLifetime,
+  pollNovitaWorkerWave,
   runtimeBootstrapSource,
   settleNovitaWorkerWave,
 } from "@/lib/novitaDirectRender";
@@ -181,6 +182,55 @@ async function main() {
   releaseSecondWorker();
   await assert.rejects(failingWave, /2 terminal outcome\(s\) with 1 failure\(s\): first worker failed/);
   assert.deepEqual(waveEvents, ["first:started", "second:started", "second:teardown-complete"]);
+
+  // A capacity wave can contain eight workers, but its Trigger poll must be a
+  // single checkpoint. Both workers remain pending through the first tick;
+  // a regression to one wait per worker would drive this counter above one.
+  const wavePollPasses = new Map<string, number>();
+  const wavePollEvents: string[] = [];
+  const terminalBatches: string[][] = [];
+  const checkpointEvents: Array<{ attempt: number; pendingWorkers: number }> = [];
+  let waitsInFlight = 0;
+  let maximumConcurrentWaits = 0;
+  await pollNovitaWorkerWave({
+    workers: ["first", "second"],
+    inspect: async (worker) => {
+      const pass = (wavePollPasses.get(worker) ?? 0) + 1;
+      wavePollPasses.set(worker, pass);
+      wavePollEvents.push(`${worker}:tick-${pass}`);
+      return pass === 1 ? "pending" : "complete";
+    },
+    settleTerminal: async (workers) => {
+      terminalBatches.push([...workers]);
+    },
+    checkpoint: async (checkpoint) => {
+      checkpointEvents.push(checkpoint);
+      waitsInFlight += 1;
+      maximumConcurrentWaits = Math.max(maximumConcurrentWaits, waitsInFlight);
+      await Promise.resolve();
+      waitsInFlight -= 1;
+    },
+  });
+  assert.deepEqual(wavePollEvents, ["first:tick-1", "second:tick-1", "first:tick-2", "second:tick-2"]);
+  assert.deepEqual(checkpointEvents, [{ attempt: 1, pendingWorkers: 2 }]);
+  assert.deepEqual(terminalBatches, [["first", "second"]]);
+  assert.equal(maximumConcurrentWaits, 1, "two same-wave workers must share one concurrent Trigger wait.for");
+
+  let failedWaveCheckpointCalls = 0;
+  await assert.rejects(
+    pollNovitaWorkerWave({
+      workers: ["first", "second"],
+      inspect: async (worker) => {
+        if (worker === "first") throw new Error("first worker poll failed");
+        return "pending";
+      },
+      checkpoint: async () => {
+        failedWaveCheckpointCalls += 1;
+      },
+    }),
+    /first worker poll failed/,
+  );
+  assert.equal(failedWaveCheckpointCalls, 0, "a failed tick must surface before another durable poll wait");
 
   assert.equal(budgetBoundedWorkerLifetime({ maximumCostUsd: 0.4, hourlyRate: 0.17 }).maxRuntimeSeconds, 7_200);
   assert(budgetBoundedWorkerLifetime({ maximumCostUsd: 0.35, hourlyRate: 0.17 }).maxRuntimeSeconds < 7_200);

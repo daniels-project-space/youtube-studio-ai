@@ -6,6 +6,7 @@ import {
   getClaimedPlanItemForRun,
   listPlanByOwner,
 } from "../../../convex/contentPlan";
+import { createNarrativeSeriesRunSelector } from "@/lib/narrativeSeriesRunAdmission";
 import { topicSelect } from "@/trigger/blocks/lofiBlocks";
 import {
   assertScheduledPlanPayloadMatches,
@@ -19,7 +20,11 @@ import {
   type ScheduledPlanRunPayload,
 } from "@/lib/scheduledPlanRuntime";
 import { markLeaseRecoveryDispatched, reapExpiredRunLeases } from "../../../convex/runs";
-import { RUN_EXECUTION_LEASE_MS, RUN_QUEUE_LEASE_MS } from "@/lib/runLease";
+import {
+  MAX_AUTOMATIC_LEASE_RECOVERIES,
+  RUN_EXECUTION_LEASE_MS,
+  RUN_QUEUE_LEASE_MS,
+} from "@/lib/runLease";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
 type Filter = { field: string; op: "eq" | "gt" | "lte"; value: unknown };
@@ -71,7 +76,9 @@ class MemoryQuery {
 
   async collect(): Promise<Row[]> {
     const rows = this.db.rows(this.table).filter((row) => this.matches(row));
-    const field = this.indexName.includes("schedule")
+    const field = this.indexName.includes("lease_expires")
+      ? "leaseExpiresAt"
+      : this.indexName.includes("schedule")
       ? "scheduledAt"
       : this.indexName.includes("order")
         ? "order"
@@ -515,6 +522,78 @@ async function main() {
   assert.equal(emptyReplay.runId, emptyClaim.runId);
   assert.equal(emptyDb.rows("runs").length, 1);
 
+  // A serialized horizon gets a run with its exact selector persisted. It
+  // cannot be converted into a generic plan run on replay, and a generic
+  // ready-plan queue explicitly blocks rather than silently taking authority.
+  const serialDb = new MemoryDb();
+  const serialChannel = seedChannel(serialDb, {
+    enabled: true,
+    frequency: "daily",
+    timezone: "UTC",
+    localTime: "00:00",
+  });
+  const serialSelector = createNarrativeSeriesRunSelector({
+    version: "narrative-series-run-selector/v1",
+    seriesPlanFingerprint: "d".repeat(64),
+    seriesIdentity: "serialized_program_episode/v1/serial-route/signals/8",
+    routeFingerprint: "e".repeat(64),
+    routeRunSeedFingerprint: "f".repeat(64),
+    programBriefFingerprint: "1".repeat(64),
+    acceptedCharacterAdapters: [],
+  });
+  await serialDb.patch(serialChannel, {
+    identity: {
+      cadence: "daily",
+      narrativeSeriesPlan: {
+        fingerprint: serialSelector.seriesPlanFingerprint,
+      },
+    },
+  });
+  const serialArgs = {
+    ownerId: "owner-test",
+    channelId: serialChannel,
+    dueBefore: Date.now() + DEFAULT_PLAN_GENERATION_LEAD_MS,
+    narrativeSeriesSelector: serialSelector,
+  };
+  const serialClaim = await invoke<{
+    state: string;
+    reused: boolean;
+    runId: string;
+    narrativeSeriesSelector: typeof serialSelector;
+  }>(claimNextPlanRun, testContext(serialDb), serialArgs);
+  assert.equal(serialClaim.state, "cadence");
+  assert.equal(serialClaim.reused, false);
+  assert.equal(serialClaim.narrativeSeriesSelector.fingerprint, serialSelector.fingerprint);
+  const persistedSerialRun = await serialDb.get(serialClaim.runId) as {
+    narrativeSeriesSelector?: { fingerprint?: string };
+  } | undefined;
+  assert.equal(persistedSerialRun?.narrativeSeriesSelector?.fingerprint, serialSelector.fingerprint);
+  const serialReplay = await invoke<typeof serialClaim>(claimNextPlanRun, testContext(serialDb), serialArgs);
+  assert.equal(serialReplay.reused, true);
+  assert.equal(serialReplay.runId, serialClaim.runId);
+
+  const serialPlanDb = new MemoryDb();
+  const serialPlanChannel = seedChannel(serialPlanDb, {
+    enabled: true,
+    frequency: "daily",
+    timezone: "UTC",
+    localTime: "00:00",
+  });
+  await serialPlanDb.patch(serialPlanChannel, {
+    identity: {
+      cadence: "daily",
+      narrativeSeriesPlan: { fingerprint: serialSelector.seriesPlanFingerprint },
+    },
+  });
+  seedReadyPlan(serialPlanDb, serialPlanChannel, { id: "contentPlan:serial-conflict", order: 0 });
+  const serialPlanClaim = await invoke<{ state: string; reason: string }>(claimNextPlanRun, testContext(serialPlanDb), {
+    ...serialArgs,
+    channelId: serialPlanChannel,
+  });
+  assert.equal(serialPlanClaim.state, "blocked");
+  assert.match(serialPlanClaim.reason, /generic ready content plan/);
+  assert.equal(serialPlanDb.rows("runs").length, 0);
+
   // Failure is durable but never marks used or releases the item to a new run.
   const failureDb = new MemoryDb();
   const failureChannel = seedChannel(failureDb, { enabled: false, timezone: "UTC", localTime: "00:00" });
@@ -682,6 +761,103 @@ async function main() {
     true,
   );
   assert.equal((await resumeDb.get(resumeRun))?.leaseRecoveryPending, undefined);
+
+  // Recovery can re-enter a frozen invocation twice, then remains visibly
+  // failed for manual reconciliation instead of repeatedly purchasing the
+  // same run forever.
+  const cappedRecoveryDb = new MemoryDb();
+  const cappedRecoveryRun = "runs:recovery-cap";
+  cappedRecoveryDb.seed("runs", {
+    ownerId: "owner-test",
+    channelId: "channel:recovery-cap",
+    status: "running",
+    startedAt: Date.now() - RUN_EXECUTION_LEASE_MS - 5_000,
+    heartbeatAt: Date.now() - RUN_EXECUTION_LEASE_MS - 5_000,
+    leaseExpiresAt: Date.now() - 5_000,
+    leaseOwner: "dead-trigger",
+    costTotal: 0,
+    pipelineInvocationSnapshot: { runId: cappedRecoveryRun },
+    pipelineInvocationSha256: "c".repeat(64),
+  }, cappedRecoveryRun);
+  await invoke(reapExpiredRunLeases, testContext(cappedRecoveryDb), {});
+  assert.equal((await cappedRecoveryDb.get(cappedRecoveryRun))?.leaseRecoveryAttempts, 1);
+  await cappedRecoveryDb.patch(cappedRecoveryRun, {
+    status: "running",
+    heartbeatAt: Date.now() - RUN_EXECUTION_LEASE_MS - 5_000,
+    leaseExpiresAt: Date.now() - 5_000,
+    leaseOwner: "dead-trigger-2",
+    leaseRecoveryPending: undefined,
+  });
+  await invoke(reapExpiredRunLeases, testContext(cappedRecoveryDb), {});
+  assert.equal(
+    (await cappedRecoveryDb.get(cappedRecoveryRun))?.leaseRecoveryAttempts,
+    MAX_AUTOMATIC_LEASE_RECOVERIES,
+  );
+  await cappedRecoveryDb.patch(cappedRecoveryRun, {
+    status: "running",
+    heartbeatAt: Date.now() - RUN_EXECUTION_LEASE_MS - 5_000,
+    leaseExpiresAt: Date.now() - 5_000,
+    leaseOwner: "dead-trigger-3",
+    leaseRecoveryPending: undefined,
+  });
+  await invoke(reapExpiredRunLeases, testContext(cappedRecoveryDb), {});
+  const cappedRun = await cappedRecoveryDb.get(cappedRecoveryRun);
+  assert.equal(cappedRun?.status, "failed");
+  assert.equal(cappedRun?.leaseRecoveryPending, undefined);
+  assert.equal(cappedRun?.leaseRecoveryAttempts, MAX_AUTOMATIC_LEASE_RECOVERIES);
+  assert.match(String(cappedRun?.error), /manual reconciliation/);
+
+  // Deadline-indexed reaping reaches an actually expired worker even when the
+  // oldest 100 rows are healthy workers that merely started long ago.
+  const fairReaperDb = new MemoryDb();
+  const fairNow = Date.now();
+  for (let index = 0; index < 100; index++) {
+    fairReaperDb.seed("runs", {
+      ownerId: "owner-test",
+      channelId: "channel:fair-reaper",
+      status: "running",
+      startedAt: fairNow - RUN_EXECUTION_LEASE_MS - 10_000 - index,
+      heartbeatAt: fairNow,
+      leaseExpiresAt: fairNow + RUN_EXECUTION_LEASE_MS,
+      leaseOwner: `live-${index}`,
+      costTotal: 0,
+    }, `runs:live-${index}`);
+  }
+  fairReaperDb.seed("runs", {
+    ownerId: "owner-test",
+    channelId: "channel:fair-reaper",
+    status: "running",
+    startedAt: fairNow - RUN_EXECUTION_LEASE_MS - 1,
+    heartbeatAt: fairNow - RUN_EXECUTION_LEASE_MS - 1,
+    leaseExpiresAt: fairNow - 1,
+    leaseOwner: "dead-fair-worker",
+    costTotal: 0,
+  }, "runs:dead-fair-worker");
+  const fairResult = await invoke<{ checked: number; reaped: number }>(
+    reapExpiredRunLeases,
+    testContext(fairReaperDb),
+    {},
+  );
+  assert.equal(fairResult.reaped, 1);
+  assert.equal((await fairReaperDb.get("runs:dead-fair-worker"))?.status, "failed");
+  assert.equal((await fairReaperDb.get("runs:live-0"))?.status, "running");
+
+  // Pre-index legacy rows get their deterministic deadline materialized in a
+  // bounded pass, so only the migration slice ever needs a startedAt fallback.
+  const legacyLeaseDb = new MemoryDb();
+  const legacyNow = Date.now();
+  legacyLeaseDb.seed("runs", {
+    ownerId: "owner-test",
+    channelId: "channel:legacy-lease",
+    status: "queued",
+    startedAt: legacyNow,
+    heartbeatAt: legacyNow,
+    costTotal: 0,
+  }, "runs:legacy-lease");
+  await invoke(reapExpiredRunLeases, testContext(legacyLeaseDb), {});
+  const legacyLease = await legacyLeaseDb.get("runs:legacy-lease");
+  assert.equal(legacyLease?.status, "queued");
+  assert.equal(legacyLease?.leaseExpiresAt, legacyNow + RUN_QUEUE_LEASE_MS);
 
   console.log("scheduled plan runtime tests passed");
 }

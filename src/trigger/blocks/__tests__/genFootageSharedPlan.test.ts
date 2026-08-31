@@ -193,7 +193,7 @@ assert.match(source, /imagePrompt: `\$\{scene\.still\}\. Absolutely NO text/);
 assert.match(source, /terminalImagePrompt/);
 assert.match(source, /motionPrompt: scene\.motion/);
 assert.match(source, /seed: scene\.continuitySeed/);
-assert.match(source, /LtxCreativeAdapterSelectionSchema\.optional\(\)\.parse/);
+assert.match(source, /LtxCreativeAdapterInputSchema\.optional\(\)\.parse/);
 assert.match(source, /creativeAdapter \? \{ creativeAdapter \} : \{\}/);
 assert.match(
   source,
@@ -269,8 +269,8 @@ assert.match(
 );
 assert.match(
   genFootageSource,
-  /name-card overlay failed on scene .* using the clip without it/,
-  "an overlay failure must degrade to the clip without the card, never fail the whole render",
+  /required name-card overlay failed on scene/,
+  "a planned deterministic name card must fail closed rather than silently shipping a clip without it",
 );
 
 /* ------- Phase 18: realImageInsertQuery + evidenceOverlay threading ------ */
@@ -388,13 +388,37 @@ assert.match(
 );
 assert.match(
   phase18Source,
-  /evidence overlay failed on scene .* using the clip without it/,
-  "an evidence-overlay failure must degrade to the clip without it, never fail the whole render",
+  /required evidence overlay failed on scene/,
+  "a planned evidence overlay must fail closed rather than silently shipping a clip without it",
+);
+assert.match(
+  phase18Source,
+  /footageOnScreenTextCues\(/,
+  "successful deterministic text overlays must emit body-relative OCR obligations for final QA",
+);
+assert.match(
+  phase18Source,
+  /selectLtxStyleForChannel\(/,
+  "generated cinematic footage must resolve its treatment from the sealed channel identity rather than a hardcoded look",
+);
+assert.match(
+  phase18Source,
+  /styleId: ltxStyleSelection\.styleId/,
+  "the selected treatment must reach the Novita LTX render handoff",
+);
+assert.match(
+  phase18Source,
+  /ltxStyleId: ltxStyleSelection\.styleId/,
+  "the treatment used for pixels must be retained for final assembly and retry",
 );
 // The generated-clip download call must still be present unconditionally
 // (as the fallback / default path) even after the real-image-insert branch
-// was added.
-assert.match(phase18Source, /downloadTo\(scene\.clipUrl, join\(tmp, `gen_\$\{index\}\.mp4`\)\)/);
+// was added. Its durable-output transfer must also stay bounded so a hung
+// delivery cannot outlive the task and replay paid work.
+assert.match(
+  phase18Source,
+  /downloadTo\(scene\.clipUrl, join\(tmp, `gen_\$\{index\}\.mp4`\), \{\s*timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,?\s*\}\)/,
+);
 
 console.log("Phase 18 (evidence overlays + real-image insert) shared-plan tests passed");
 

@@ -32,10 +32,39 @@
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
+import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 import { PRICE, shortsSpinoffReleaseEvidenceCost } from "@/engine/pricing";
 import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
+import { certifiedFamilyAdmission } from "@/engine/certifiedFamilyAdmission";
+import { requireAutomaticPackageToOpeningReceipt } from "@/engine/packageToOpening";
+import {
+  createShortsOpeningEvidence,
+  planShortsOpeningCaptionEvidence,
+} from "@/engine/shortsOpeningEvidence";
+import {
+  channelProgramRouteRunSeedFingerprint,
+  parseChannelProgramRouteRunSeed,
+  type ChannelProgramRouteRunSeed,
+} from "@/engine/channelProgramRoute";
+import {
+  assertOriginalMusicProgramPlanBinding,
+  createOriginalMusicProgramPlan,
+  type OriginalMusicProgramPlan,
+} from "@/engine/originalMusicProgram";
+import { EpisodeGraphSchema } from "@/engine/episodeGraph";
+import { StorySpineSchema } from "@/engine/storySpine";
+import {
+  bindNarrativeEpisodeToSeries,
+  planNarrativeShortsExpansion,
+} from "@/engine/narrativeSeriesIntelligence";
+import {
+  assertScenarioVisualTreatmentThumbnailProvenance,
+  resolveScenarioVisualTreatmentForNewVisualArtifact,
+  type ScenarioVisualTreatmentThumbnailProvenance,
+} from "@/engine/scenarioVisualTreatment";
 import { assertChildContentRenderEvidence } from "@/trigger/blocks/childrenSafetyBlocks";
+import { assertQuizShortReleaseReceiptForUpload } from "@/trigger/blocks/quizShortReleaseBlocks";
 import { assessProductionEditorialAcceptance, QualityEvidenceSchema } from "@/engine/qualityEvidence";
 import {
   assertFinalMasterReleaseCertificate,
@@ -46,6 +75,7 @@ import {
   finalMasterReleaseCertificateKey,
   parseFinalMasterReleaseCertificateBytes,
   retainedFinalMasterReleaseObjectKeys,
+  verifyFinalMasterReleaseEvidenceForLocalUpload,
   verifyFinalMasterReleaseEvidenceObjects,
   visualReviewReleaseReceiptKey,
   type FinalMasterReleaseCertificate,
@@ -64,7 +94,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { renderNovitaI2V, renderNovitaImage } from "@/lib/novitaMedia";
-import { LtxCreativeAdapterSelectionSchema } from "@/lib/ltxCreativeAdapter";
+import { LtxCreativeAdapterInputSchema } from "@/lib/ltxCreativeAdapter";
 import {
   generateMureka,
   generateSuno,
@@ -76,8 +106,13 @@ import {
 } from "@/lib/music";
 import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { notifyDraftReady } from "@/lib/telegram";
-import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, measureAudio, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
+import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, measureAudio, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio, type CaptionCue } from "@/lib/ffmpeg";
 import { channelVisualReviewProfile, reviewRender, type VisualReviewResult } from "@/lib/visualReview";
+import {
+  proveOnScreenText,
+  sha256OnScreenTextSource,
+  type TimedOnScreenTextCue,
+} from "@/lib/onScreenTextProof";
 import { hasAyrshareKey, crosspost as ayrCrosspost } from "@/lib/ayrshare";
 import { parseJsonLoose } from "@/lib/gemini";
 import { hasAnthropicKey } from "@/lib/anthropic";
@@ -87,6 +122,22 @@ import { produceAndCritique } from "@/engine/critiqueLoop";
 import { agentJson } from "@/agents/mastra";
 import { loadPerformanceContext } from "@/lib/performance";
 import { renderStoryStateForPrompt } from "@/lib/seriesStoryState";
+import { ExecutionError } from "@/engine/executionErrors";
+import {
+  continueReservedSerializedProgramEpisode,
+  parseSerializedProgramEpisodeMemoryKey,
+  serializedProgramEpisodeIdentity,
+  serializedProgramEpisodeMemoryKey,
+  type SerializedProgramEpisodeReservationAuthority,
+} from "@/lib/serializedProgramEpisode";
+import {
+  assertNarrativeSeriesNoGenericTopicFastPath,
+  assertNarrativeSeriesRunAdmission,
+  NARRATIVE_SERIES_RUN_SELECTOR_SEED_KEY,
+  parseNarrativeSeriesRunSelector,
+} from "@/lib/narrativeSeriesRunAdmission";
+import { getNarrativeSeriesPlanRecord } from "@/lib/narrativeSeriesStateRuntime";
+import { createNarrativeShortOrigin, type NarrativeShortOrigin } from "@/lib/narrativeShortOrigin";
 import { z } from "zod";
 
 /**
@@ -116,14 +167,16 @@ const producerTopicSchema = z.object({
 import {
   makeRunTempDir,
   downloadTo,
+  DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
   readBytes,
   writeBytes,
 } from "@/lib/files";
-import { putObject, putObjectFromFile, getObjectBytes, listObjects, deleteObjects, publicUrl } from "@/lib/storage";
+import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity, headObjectMetadata, listObjects, deleteObjects, publicUrl } from "@/lib/storage";
 import { join } from "node:path";
-import { access } from "node:fs/promises";
+import { access, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+
 import {
   composeKlingPrompt,
   composeFluxPrompt,
@@ -155,6 +208,11 @@ import {
   type ChannelPublishDecision,
 } from "@/lib/channelPublishPolicy";
 
+// Accepted Mureka/Suno jobs do not expose a durable replay receipt yet. Keep
+// their output transfer bounded so a stalled provider body reaches this block's
+// existing cost-carrying terminal catch instead of the whole-task timeout.
+const MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS = 300_000;
+
 /* ----------------------------- helpers --------------------------------- */
 
 function convex(): ConvexHttpClient {
@@ -183,6 +241,301 @@ function normalizeTopic(s: string): string {
     .replace(/[^a-z0-9]+/g, " ")
     .trim()
     .replace(/\s+/g, " ");
+}
+
+function routeSeedForTopicSelection(ctx: StageContext): ChannelProgramRouteRunSeed | undefined {
+  const raw = ctx.store["channelProgramRoute"];
+  if (raw === undefined) return undefined;
+  const route = parseChannelProgramRouteRunSeed(raw);
+  if (!route.requiredBlocks.includes("topic_select")) {
+    throw new Error(
+      `topic_select: frozen channel program route ${route.routeKey} is owned by a different planner`,
+    );
+  }
+  if (route.directives.claimMode === "certified_quiz_facts") {
+    throw new Error("topic_select: certified QuizYear routes must use quiz_topic_plan");
+  }
+  return route;
+}
+
+/**
+ * The original-music plan is mandatory only for the new route-owned music
+ * foundation. Historical channel pipelines remain replayable, but cannot gain
+ * automatic admission until they migrate to the sealed route.
+ */
+function musicProgramForCurrentRoute(
+  ctx: StageContext,
+  topic: string,
+): OriginalMusicProgramPlan | undefined {
+  const route = routeSeedForTopicSelection(ctx);
+  if (!route?.requiredBlocks.includes("music_program_plan")) return undefined;
+  return assertOriginalMusicProgramPlanBinding({
+    plan: ctx.store["musicProgramPlan"],
+    route,
+    topic,
+  });
+}
+
+function routeTopicDirective(route: ChannelProgramRouteRunSeed | undefined): string | undefined {
+  if (!route) return undefined;
+  return [
+    `FROZEN CHANNEL PROGRAM ROUTE: ${route.routeKey}.`,
+    `Viewer job: ${route.directives.viewerJob}`,
+    `Claim mode: ${route.directives.claimMode}.`,
+    "TOPIC RULES (non-negotiable):",
+    ...route.directives.topicRules.map((rule) => `- ${rule}`),
+    route.context.audience ? `Audience: ${route.context.audience}.` : "",
+    route.context.sampleTopics?.length
+      ? `Creator-declared program examples (use as bounded fit evidence, never copy blindly): ${route.context.sampleTopics.join(" | ")}`
+      : "",
+  ].filter(Boolean).join("\n");
+}
+
+function seriesProgramForTopicSelection(
+  ctx: StageContext,
+  route: ChannelProgramRouteRunSeed | undefined,
+): { seriesTitle?: string; seriesCount: number } {
+  // Some deterministic/runtime test contexts omit the optional parameter bag.
+  // Treat that exactly like an unconfigured legacy series; sealed routes still
+  // fail closed below unless their compiler-owned values are present.
+  const params = ctx.params ?? {};
+  const configuredTitle = (params["seriesTitle"] as string | undefined)?.trim();
+  const configuredCount = Number(params["seriesCount"] ?? 0) || 0;
+  const sealed = route?.serializedProgram;
+  if (!sealed) return { seriesTitle: configuredTitle, seriesCount: configuredCount };
+  if (
+    configuredTitle !== sealed.seriesTitle ||
+    configuredCount !== (sealed.seriesCount ?? 0)
+  ) {
+    throw new Error(
+      `topic_select: route ${route?.routeKey ?? "unknown"} serialized_program/v1 does not match frozen topic_select params`,
+    );
+  }
+  return {
+    seriesTitle: sealed.seriesTitle,
+    seriesCount: sealed.seriesCount ?? 0,
+  };
+}
+
+function assertSerializedProgramFastPathAdmission(
+  route: ChannelProgramRouteRunSeed | undefined,
+  source: "planned" | "reused",
+): void {
+  if (!route?.serializedProgram) return;
+  throw new Error(
+    `topic_select: ${source} topic requires a verified serialized_program_episode/v1 receipt; ` +
+    "direct serialized-program fast paths are not admitted",
+  );
+}
+
+function serializedProgramEpisodeAuthority(
+  client: ConvexHttpClient,
+): SerializedProgramEpisodeReservationAuthority {
+  return {
+    claim: async (input) => await client.mutation(api.serializedProgramEpisodes.claimNext, {
+      ownerId: input.ownerId,
+      channelId: input.channelId as Id<"channels">,
+      seriesIdentity: input.seriesIdentity.value,
+      routeFingerprint: input.seriesIdentity.routeFingerprint,
+      routeRunSeedFingerprint: input.routeRunSeedFingerprint,
+      seriesTitle: input.seriesIdentity.seriesTitle,
+      ...(input.seriesIdentity.seriesCount === undefined
+        ? {}
+        : { seriesCount: input.seriesIdentity.seriesCount }),
+      runId: input.runId as Id<"runs">,
+    }),
+    complete: async (input) => await client.mutation(api.serializedProgramEpisodes.complete, {
+      ownerId: input.ownerId,
+      channelId: input.channelId as Id<"channels">,
+      seriesIdentity: input.seriesIdentity.value,
+      routeFingerprint: input.seriesIdentity.routeFingerprint,
+      routeRunSeedFingerprint: input.routeRunSeedFingerprint,
+      seriesTitle: input.seriesIdentity.seriesTitle,
+      ...(input.seriesIdentity.seriesCount === undefined
+        ? {}
+        : { seriesCount: input.seriesIdentity.seriesCount }),
+      runId: input.runId as Id<"runs">,
+      claimToken: input.claimToken,
+      episodeNumber: input.episodeNumber,
+      topic: input.topic,
+      topicMemoryKey: input.topicMemoryKey,
+      storyState: {
+        ...(input.storyState.arcSummary === undefined
+          ? {}
+          : { arcSummary: input.storyState.arcSummary }),
+        newPlotBeat: input.storyState.newPlotBeat,
+        ...(input.storyState.unresolvedThreads === undefined
+          ? {}
+          : { unresolvedThreads: [...input.storyState.unresolvedThreads] }),
+        ...(input.storyState.newEntities === undefined
+          ? {}
+          : {
+              newEntities: input.storyState.newEntities.map((entity) => ({
+                name: entity.name,
+                role: entity.role,
+              })),
+            }),
+      },
+    }),
+    release: async (input) => await client.mutation(api.serializedProgramEpisodes.release, {
+      ownerId: input.ownerId,
+      channelId: input.channelId as Id<"channels">,
+      seriesIdentity: input.seriesIdentity.value,
+      routeFingerprint: input.seriesIdentity.routeFingerprint,
+      routeRunSeedFingerprint: input.routeRunSeedFingerprint,
+      seriesTitle: input.seriesIdentity.seriesTitle,
+      ...(input.seriesIdentity.seriesCount === undefined
+        ? {}
+        : { seriesCount: input.seriesIdentity.seriesCount }),
+      runId: input.runId as Id<"runs">,
+      claimToken: input.claimToken,
+    }),
+  };
+}
+
+/**
+ * The selected narrative horizon is resolved before the generic planner or
+ * any fast path. The only durable write remains the existing serial claim /
+ * completion transaction, now supplied with a preplanned immutable episode
+ * rather than a run-time generated subtitle.
+ */
+async function continueFrozenNarrativeSeriesEpisode(input: {
+  readonly ctx: StageContext;
+  readonly client: ConvexHttpClient;
+  readonly route: ChannelProgramRouteRunSeed;
+  readonly identity: NonNullable<ReturnType<typeof serializedProgramEpisodeIdentity>>;
+}): Promise<{ readonly topic: string }> {
+  const selector = parseNarrativeSeriesRunSelector(
+    input.ctx.store[NARRATIVE_SERIES_RUN_SELECTOR_SEED_KEY],
+  );
+  const record = await getNarrativeSeriesPlanRecord({
+    client: input.client,
+    ownerId: input.ctx.ownerId,
+    channelId: input.ctx.channelId as Id<"channels">,
+    fingerprint: selector.seriesPlanFingerprint,
+  });
+  if (
+    !record ||
+    record.ownerId !== input.ctx.ownerId ||
+    String(record.channelId) !== input.ctx.channelId ||
+    record.fingerprint !== selector.seriesPlanFingerprint
+  ) {
+    throw new Error("topic_select: narrative series selector has no matching immutable owner-scoped plan");
+  }
+  const admission = assertNarrativeSeriesRunAdmission({
+    selector,
+    plan: record.plan,
+    ownerId: input.ctx.ownerId,
+    channelId: input.ctx.channelId,
+    routeSeed: input.route,
+  });
+  const continuation = await continueReservedSerializedProgramEpisode({
+    authority: serializedProgramEpisodeAuthority(input.client),
+    claim: {
+      ownerId: input.ctx.ownerId,
+      channelId: input.ctx.channelId,
+      seriesIdentity: input.identity,
+      routeRunSeedFingerprint: selector.routeRunSeedFingerprint,
+      runId: input.ctx.runId,
+    },
+    generate: async (episodeNumber) => {
+      const planned = admission.plan.episodes.find((episode) => episode.episodeNumber === episodeNumber);
+      if (!planned) {
+        throw new Error(
+          `topic_select: narrative series plan horizon has no immutable episode ${episodeNumber}; refusing a generic continuation`,
+        );
+      }
+      assertTopicFitsProgramRoute(input.route, planned.topic, "series");
+      return {
+        topic: planned.topic,
+        topicMemoryKey: serializedProgramEpisodeMemoryKey({
+          identity: input.identity,
+          episodeNumber,
+          topic: planned.topic,
+        }),
+        storyState: {
+          newPlotBeat: `${planned.narrativeFunction}: ${planned.premise}`,
+          unresolvedThreads: [],
+        },
+        value: planned,
+      };
+    },
+  });
+  if (continuation.kind === "generated") {
+    input.ctx.log(
+      `topic_select(narrative series): frozen episode ${continuation.episodeNumber}` +
+        `${input.identity.seriesCount ? `/${input.identity.seriesCount}` : ""} "${continuation.topic}"`,
+    );
+    return { topic: continuation.topic };
+  }
+  if (continuation.kind === "completed") {
+    const planned = admission.plan.episodes.find((episode) => episode.episodeNumber === continuation.episodeNumber);
+    if (!planned || normalizeTopic(planned.topic) !== normalizeTopic(continuation.topic)) {
+      throw new Error("topic_select: completed serialized episode does not match the frozen narrative series plan");
+    }
+    input.ctx.log(
+      `topic_select(narrative series): replayed frozen episode ${continuation.episodeNumber} "${continuation.topic}"`,
+    );
+    return { topic: continuation.topic };
+  }
+  if (continuation.kind === "busy") {
+    throw new ExecutionError(
+      `topic_select: narrative series episode claim is in progress; retry after ${continuation.retryAfterMs}ms without another provider call`,
+      {
+        code: "SERIALIZED_EPISODE_BUSY",
+        retryable: true,
+        retryAfterMs: continuation.retryAfterMs,
+        retryScope: "durable_task",
+        phase: "topic_select",
+      },
+    );
+  }
+  throw new Error(
+    "topic_select: the frozen narrative series is complete; refusing a generic topic after its sealed horizon",
+  );
+}
+
+function topicMemoryDisplayTopic(key: string): string {
+  return parseSerializedProgramEpisodeMemoryKey(key)?.topic ?? key;
+}
+
+type TopicRouteSource = "planned" | "reused" | "series" | "crafted";
+
+function assertTopicFitsProgramRoute(
+  route: ChannelProgramRouteRunSeed | undefined,
+  topic: string,
+  source: TopicRouteSource,
+): void {
+  if (!route) return;
+  if (!topic.trim()) throw new Error(`topic_select: ${source} topic is empty for route ${route.routeKey}`);
+  if (route.family === "quizyear" || route.directives.claimMode === "certified_quiz_facts") {
+    throw new Error(`topic_select: ${source} topic bypasses the certified QuizYear planner`);
+  }
+  if (
+    route.directives.claimMode === "fictional_scenario_no_external_claims" &&
+    /\b(?:breaking|latest|today|current events?|news|forecast)\b/i.test(topic)
+  ) {
+    throw new Error(
+      `topic_select: ${source} topic conflicts with the fictional-scenario route's no-real-world-claims contract`,
+    );
+  }
+}
+
+/**
+ * A route failure must happen before topic history changes. In particular, the
+ * series path records durable topic/arc state, so it cannot defer this guard
+ * until after its write merely because ordinary Topicraft candidates are
+ * already checked in memory.
+ */
+export async function persistTopicAfterRouteValidation(input: {
+  readonly route: ChannelProgramRouteRunSeed | undefined;
+  readonly topic: string;
+  readonly source: TopicRouteSource;
+  readonly dryRun: boolean;
+  readonly persist: () => Promise<void>;
+}): Promise<void> {
+  assertTopicFitsProgramRoute(input.route, input.topic, input.source);
+  if (!input.dryRun) await input.persist();
 }
 
 /**
@@ -268,18 +621,57 @@ export const topicSelect: Block = {
   consumes: [],
   produces: ["topic", "topicBet"],
   run: async (ctx) => {
+    // The sealed run seed is consulted before EVERY fast path. A scheduled
+    // plan or render-group reuse is still an episode of this exact program;
+    // neither may bypass the route's planner/claim-mode boundary.
+    const programRoute = routeSeedForTopicSelection(ctx);
+    const programDirective = routeTopicDirective(programRoute);
+    // This is intentionally before every fast path and any Convex write: a
+    // mutable module setting may never retitle or lengthen a sealed series.
+    const seriesProgram = seriesProgramForTopicSelection(ctx, programRoute);
+    const serializedEpisodeIdentity = serializedProgramEpisodeIdentity(programRoute);
+    const narrativeSelector = ctx.store[NARRATIVE_SERIES_RUN_SELECTOR_SEED_KEY] === undefined
+      ? undefined
+      : parseNarrativeSeriesRunSelector(ctx.store[NARRATIVE_SERIES_RUN_SELECTOR_SEED_KEY]);
     // A scheduler-claimed plan item is committed intent, not a candidate to
     // exclude. Use it verbatim without another model call; completion records
     // topic memory only after the full pipeline succeeds.
     const plannedTopic = ctx.store["plannedTopic"] as string | undefined;
-    if (typeof plannedTopic === "string" && plannedTopic.trim()) {
-      ctx.log(`topic_select: CLAIMED plan topic "${plannedTopic}"`);
-      return { topic: plannedTopic };
-    }
     // RENDER-GROUP REUSE: a language sibling renders the SAME topic as the base
     // (shared video, different language) — skip selection + history recording.
     const reuseTopic = ctx.store["reuseTopic"] as string | undefined;
+    if (narrativeSelector) {
+      if (!serializedEpisodeIdentity || !programRoute) {
+        throw new Error("topic_select: narrative series selector requires a sealed serialized_program/v1 route");
+      }
+      // This runs before the generic fast paths and before topic-memory/list
+      // queries. A persisted plan owns the next episode, not contentPlan.
+      assertNarrativeSeriesNoGenericTopicFastPath({
+        selector: narrativeSelector,
+        plannedTopic,
+        reuseTopic,
+      });
+      if (ctx.params["dryRun"] === true) {
+        throw new Error(
+          "topic_select: narrative series selector requires a durable episode reservation; dry-run continuation is not admitted",
+        );
+      }
+      return await continueFrozenNarrativeSeriesEpisode({
+        ctx,
+        client: convex(),
+        route: programRoute,
+        identity: serializedEpisodeIdentity,
+      });
+    }
+    if (typeof plannedTopic === "string" && plannedTopic.trim()) {
+      assertSerializedProgramFastPathAdmission(programRoute, "planned");
+      assertTopicFitsProgramRoute(programRoute, plannedTopic, "planned");
+      ctx.log(`topic_select: CLAIMED plan topic "${plannedTopic}"`);
+      return { topic: plannedTopic };
+    }
     if (typeof reuseTopic === "string" && reuseTopic.trim()) {
+      assertSerializedProgramFastPathAdmission(programRoute, "reused");
+      assertTopicFitsProgramRoute(programRoute, reuseTopic, "reused");
       ctx.log(`topic_select: REUSED base topic "${reuseTopic}"`);
       return { topic: reuseTopic };
     }
@@ -326,12 +718,13 @@ export const topicSelect: Block = {
           return [] as Array<{ topic: string }>;
         }),
     ]);
+    const rememberedTopics = usedRows.map((row) => topicMemoryDisplayTopic(row.key));
     const plannedTopics = (planRows as Array<{ topic: string }>).map((p) => p.topic);
     const usedNorm = new Set([
-      ...usedRows.map((r) => normalizeTopic(r.key)),
+      ...rememberedTopics.map(normalizeTopic),
       ...plannedTopics.map(normalizeTopic),
     ]);
-    const recentList = usedRows.map((r) => r.key).slice(-40);
+    const recentList = rememberedTopics.slice(-40);
     // Phase 7: bias toward topics like past high-retention winners ("" until enough data).
     const perfCtx = await loadPerformanceContext(ctx.keyPrefix);
 
@@ -353,9 +746,156 @@ export const topicSelect: Block = {
     // episode, or a non-series channel) behaves exactly as before: the prompt
     // simply omits the "story so far" section and the write below just starts
     // one.
-    const seriesTitle = (ctx.params["seriesTitle"] as string | undefined)?.trim();
-    const seriesCount = Number(ctx.params["seriesCount"] ?? 0) || 0;
-    if (seriesTitle) {
+    const { seriesTitle, seriesCount } = seriesProgram;
+    if (serializedEpisodeIdentity) {
+      if (!programRoute) {
+        throw new Error("topic_select: serialized_program/v1 is missing its frozen route seed");
+      }
+      const routeRunSeedFingerprint = channelProgramRouteRunSeedFingerprint(programRoute);
+      if (ctx.params["dryRun"] === true) {
+        throw new Error(
+          "topic_select: serialized_program/v1 requires a durable episode reservation; dry-run continuation is not admitted",
+        );
+      }
+      const serializedPrior = usedRows
+        .map((row) => parseSerializedProgramEpisodeMemoryKey(row.key))
+        .filter((entry) => entry?.identity.value === serializedEpisodeIdentity.value)
+        .sort((a, b) => a!.episodeNumber - b!.episodeNumber)
+        .map((entry) => entry!.topic)
+        .slice(-40);
+      const continuation = await continueReservedSerializedProgramEpisode({
+        authority: serializedProgramEpisodeAuthority(c),
+        claim: {
+          ownerId: ctx.ownerId,
+          channelId: String(channelId),
+          seriesIdentity: serializedEpisodeIdentity,
+          routeRunSeedFingerprint,
+          runId: ctx.runId,
+        },
+        generate: async (episodeNumber) => {
+          if (!hasAnthropicKey()) {
+            throw new Error(
+              "topic_select: serialized_program/v1 requires ANTHROPIC_API_KEY; refusing a generic Part-N fallback",
+            );
+          }
+          const label = serializedEpisodeIdentity.seriesCount
+            ? `Part ${episodeNumber} of ${serializedEpisodeIdentity.seriesCount}`
+            : `Part ${episodeNumber}`;
+          const existingStoryState = await c
+            .query(api.seriesStoryState.getForSeriesIdentity, {
+              channelId,
+              seriesIdentity: serializedEpisodeIdentity.value,
+            })
+            .catch((e) => {
+              ctx.log(`topic_select(serialized series): story-state read failed (continuing without it): ${e instanceof Error ? e.message : e}`);
+              return null;
+            });
+          const storyContext = renderStoryStateForPrompt(existingStoryState);
+          const out = await agentJson({
+            role: "producer",
+            schema: producerTopicSchema,
+            log: ctx.log,
+            prompt:
+              `You are planning episode ${episodeNumber} of an ordered YouTube series titled "${serializedEpisodeIdentity.seriesTitle}"` +
+              (serializedEpisodeIdentity.seriesCount
+                ? ` (a ${serializedEpisodeIdentity.seriesCount}-part series).`
+                : ".") + "\n" +
+              `Channel "${channelName}" — persona: ${persona || "n/a"}; niche: ${niche || "n/a"}; style: ${style || "n/a"}.\n` +
+              (programDirective ? `${programDirective}\n\n` : "") +
+              `Episodes already published (CONTINUE the arc, do NOT repeat):\n${serializedPrior.join("\n") || "(none yet — this is episode 1)"}\n\n` +
+              (storyContext
+                ? `STORY SO FAR (use this — not just the titles above — to continue REAL plot/thematic content):\n${storyContext}\n\n`
+                : "") +
+              `Propose the SINGLE best focus for episode ${episodeNumber}: a specific, compelling SUBTITLE (the episode's unique theme — not the series name) and a one-line angle. ` +
+              `It must build on prior episodes and fit the whole series. ` +
+              `Also update the running story state: a short 2-4 sentence ARC SUMMARY covering everything through THIS episode, ` +
+              `a one-line PLOT BEAT capturing what this specific episode adds, the UPDATED list of unresolved narrative threads ` +
+              `(open questions/promises still to pay off), and any newly introduced entities (name + one-line ROLE only — never wardrobe or appearance). ` +
+              `Return STRICT JSON {"candidates":[{"topic":string,"angle":string,"arcSummary":string,"newPlotBeat":string,"unresolvedThreads":string[],"entities":[{"name":string,"role":string}]}]}.`,
+            maxTokens: 600,
+            temperature: 0.8,
+          });
+          const candidate = out.candidates?.[0];
+          const subtitle = (candidate?.topic ?? "").trim().replace(/^["']|["']$/g, "");
+          if (!subtitle) {
+            throw new Error(
+              "topic_select: serialized_program/v1 continuation returned no valid episode subtitle; claim released for retry",
+            );
+          }
+          const topic = `${serializedEpisodeIdentity.seriesTitle} — ${label}: ${subtitle}`;
+          assertTopicFitsProgramRoute(programRoute, topic, "series");
+          const angle = (candidate?.angle ?? "").trim();
+          const subtitleBeat = `${label}: ${subtitle}${angle ? ` — ${angle}` : ""}`;
+          return {
+            topic,
+            topicMemoryKey: serializedProgramEpisodeMemoryKey({
+              identity: serializedEpisodeIdentity,
+              episodeNumber,
+              topic,
+            }),
+            storyState: {
+              ...(candidate?.arcSummary?.trim()
+                ? { arcSummary: candidate.arcSummary.trim() }
+                : {}),
+              newPlotBeat: candidate?.newPlotBeat?.trim() || subtitleBeat,
+              ...(candidate?.unresolvedThreads?.length
+                ? {
+                    unresolvedThreads: candidate.unresolvedThreads
+                      .map((thread) => thread.trim())
+                      .filter(Boolean),
+                  }
+                : {}),
+              ...(candidate?.entities?.length
+                ? {
+                    newEntities: candidate.entities
+                      .map((entity) => ({ name: (entity.name ?? "").trim(), role: (entity.role ?? "").trim() }))
+                      .filter((entity) => entity.name),
+                  }
+                : {}),
+            },
+            value: {
+              label,
+              subtitle,
+              angle,
+              arcSummary: (candidate?.arcSummary ?? "").trim(),
+              newPlotBeat: (candidate?.newPlotBeat ?? "").trim(),
+              unresolvedThreads: (candidate?.unresolvedThreads ?? []).map((thread) => thread.trim()).filter(Boolean),
+              entities: (candidate?.entities ?? [])
+                .map((entity) => ({ name: (entity.name ?? "").trim(), role: (entity.role ?? "").trim() }))
+                .filter((entity) => entity.name),
+            },
+          };
+        },
+      });
+      if (continuation.kind === "generated") {
+        ctx.log(
+          `topic_select(serialized series): "${continuation.topic}" ` +
+          `(episode ${continuation.episodeNumber}${serializedEpisodeIdentity.seriesCount ? `/${serializedEpisodeIdentity.seriesCount}` : ""})`,
+        );
+        return { topic: continuation.topic };
+      }
+      if (continuation.kind === "completed") {
+        ctx.log(`topic_select(serialized series): replayed "${continuation.topic}" (episode ${continuation.episodeNumber})`);
+        return { topic: continuation.topic };
+      }
+      if (continuation.kind === "busy") {
+        throw new ExecutionError(
+          `topic_select: serialized_program/v1 episode claim is in progress; retry after ${continuation.retryAfterMs}ms without another provider call`,
+          {
+            code: "SERIALIZED_EPISODE_BUSY",
+            retryable: true,
+            retryAfterMs: continuation.retryAfterMs,
+            retryScope: "durable_task",
+            phase: "topic_select",
+          },
+        );
+      }
+      ctx.log(
+        `topic_select(serialized series): "${serializedEpisodeIdentity.seriesTitle}" complete ` +
+        `(${serializedEpisodeIdentity.seriesCount ?? "open"}) — falling through to normal topics`,
+      );
+    }
+    if (seriesTitle && !serializedEpisodeIdentity) {
       const doneCount = usedRows.filter((r) => r.key.includes(seriesTitle)).length;
       const epNum = doneCount + 1;
       if (!(seriesCount > 0 && epNum > seriesCount)) {
@@ -384,6 +924,7 @@ export const topicSelect: Block = {
                 `You are planning episode ${epNum} of an ordered YouTube series titled "${seriesTitle}"` +
                 (seriesCount > 0 ? ` (a ${seriesCount}-part series).` : ".") + "\n" +
                 `Channel "${channelName}" — persona: ${persona || "n/a"}; niche: ${niche || "n/a"}; style: ${style || "n/a"}.\n` +
+                (programDirective ? `${programDirective}\n\n` : "") +
                 `Episodes already published (CONTINUE the arc, do NOT repeat):\n${prior.join("\n") || "(none yet — this is episode 1)"}\n\n` +
                 (storyContext
                   ? `STORY SO FAR (use this — not just the titles above — to continue REAL plot/thematic content):\n${storyContext}\n\n`
@@ -413,6 +954,10 @@ export const topicSelect: Block = {
         const topic = subtitle
           ? `${seriesTitle} — ${label}: ${subtitle}`
           : `${seriesTitle} — ${label}`;
+        // Validate before either durable series write. Keep topic-memory and
+        // story-state updates under the same dry-run guard: their ordered
+        // pairing is the series continuation transaction boundary.
+        assertTopicFitsProgramRoute(programRoute, topic, "series");
         if (ctx.params["dryRun"] !== true) {
           await recordTopicMemory(c, ctx, topic);
           // Best-effort write-back: a failed story-state write must never break
@@ -435,7 +980,7 @@ export const topicSelect: Block = {
               })
               .catch((e) => {
                 ctx.log(`topic_select(series): story-state write-back failed (non-fatal): ${e instanceof Error ? e.message : e}`);
-              });
+            });
           }
         }
         ctx.log(`topic_select(series): "${topic}" (episode ${epNum}${seriesCount ? `/${seriesCount}` : ""})`);
@@ -481,11 +1026,13 @@ export const topicSelect: Block = {
       perfContext: perfCtx || undefined,
       competitorTitles,
       outliers,
+      programDirective,
       log: ctx.log,
     });
     const bet = crafted.bets[0];
 
     let topic = bet.topic;
+    assertTopicFitsProgramRoute(programRoute, topic, "crafted");
     // FINAL hard guarantee (code, not model).
     if (usedNorm.has(normalizeTopic(topic))) {
       if (policy === "no_repeat") {
@@ -497,7 +1044,13 @@ export const topicSelect: Block = {
       if (fresh.length) topic = fresh[0];
     }
     // dryRun = preview a topic without committing it to history (UI preview/tests).
-    if (ctx.params["dryRun"] !== true) await recordTopicMemory(c, ctx, topic);
+    await persistTopicAfterRouteValidation({
+      route: programRoute,
+      topic,
+      source: "crafted",
+      dryRun: ctx.params["dryRun"] === true,
+      persist: () => recordTopicMemory(c, ctx, topic),
+    });
     ctx.log(
       `topic_select: "${topic}" [${bet.betType}] title="${bet.provisionalTitle}" ` +
         `evidence=${bet.evidence.slice(0, 90)}`,
@@ -510,14 +1063,67 @@ export const topicSelect: Block = {
 
 /* -------------------------- 1b. scene_planner --------------------------- */
 
+/**
+ * Creates the immutable episode-level audio/visual brief consumed by both the
+ * looping-scene planner and the paid music generation block.  The plan is
+ * deterministic from the already-selected topic and frozen channel route; it
+ * never calls a provider or grants render/publication authority.
+ */
+export const musicProgramPlan: Block = {
+  id: "music_program_plan",
+  consumes: ["topic"],
+  produces: ["musicProgramPlan", "musicProgramPlanFingerprint"],
+  run: async (ctx) => {
+    const topic = str(ctx, "topic");
+    const route = routeSeedForTopicSelection(ctx);
+    if (!route) {
+      throw new Error("music_program_plan: requires a sealed music-loop channel program route");
+    }
+    const dna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
+    const visual = getVisualBrief(ctx.store);
+    const audio = getMusicBrief(ctx.store);
+    const setting = [
+      visual?.setting,
+      visual?.world,
+      visual?.footageQueries?.[0],
+      ctx.params["setting"] as string | undefined,
+      dna?.setting,
+      ctx.store["niche"] as string | undefined,
+    ].map((value) => value?.toString().trim()).find(Boolean);
+    const audioDirection = [
+      `Original instrumental program for “${topic}”.`,
+      dna?.audio?.genre ? `Preserve the channel sound: ${dna.audio.genre}.` : "",
+      dna?.audio?.instrumentation?.length ? `Instrumentation: ${dna.audio.instrumentation.join(", ")}.` : "",
+      dna?.audio?.textures?.length ? `Texture: ${dna.audio.textures.join(", ")}.` : "",
+      audio?.musicPrompt ? `Episode mood movement: ${audio.musicPrompt.trim().slice(0, 260)}.` : "",
+      "No vocals, no lyrics, and a musically resolved seamless loop.",
+    ].filter(Boolean).join(" ");
+    const plan = createOriginalMusicProgramPlan({
+      route,
+      topic,
+      setting,
+      visualStyle: visualStyle(ctx),
+      motionIntent: "one calm, seamless camera movement with no abrupt cuts, flashes, or subject drift",
+      audioDirection,
+      providerPreference: (ctx.params["provider"] as "suno" | "mureka" | undefined) ?? "suno",
+    });
+    ctx.log(`music_program_plan: sealed ${plan.fingerprint.slice(0, 12)} for ${plan.routeKey}`);
+    return {
+      musicProgramPlan: plan,
+      musicProgramPlanFingerprint: plan.fingerprint,
+    };
+  },
+};
+
 export const scenePlanner: Block = {
   id: "scene_planner",
   consumes: ["topic"],
-  produces: ["scenes", "sceneMusicPrompt"],
+  produces: ["scenes", "sceneMusicPrompt", "musicProgramMotionIntent"],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
-    const style = styleGrammar(ctx);
-    const vs = visualStyle(ctx);
+    const musicProgram = musicProgramForCurrentRoute(ctx, topic);
+    const style = musicProgram?.visual.visualStyle ?? styleGrammar(ctx);
+    const vs = musicProgram?.visual.visualStyle ?? visualStyle(ctx);
     // Optional per-channel pre-authored library (locked consistency across a
     // series). Seeded from channel identity into the store by the runner, or
     // passed as a block param.
@@ -535,6 +1141,7 @@ export const scenePlanner: Block = {
     // far better scene setting than the bare niche label.
     const vb = getVisualBrief(ctx.store);
     const settingHint = [
+      musicProgram?.visual.setting,
       vb?.setting,
       vb?.world,
       vb?.footageQueries?.[0],
@@ -562,7 +1169,13 @@ export const scenePlanner: Block = {
     );
     return {
       scenes: plan.scenes,
-      sceneMusicPrompt: plan.musicPrompt ?? "",
+      // The route-owned plan is the binding instruction. The derived planner
+      // prompt remains a legacy fallback for historical pipelines only.
+      sceneMusicPrompt: musicProgram?.audio.direction ?? plan.musicPrompt ?? "",
+      // loop_clips reads this before its generic scene prompt.  Passing the
+      // sealed intent through is what makes the program’s motion constraint a
+      // real renderer input rather than decorative planning metadata.
+      ...(musicProgram ? { musicProgramMotionIntent: musicProgram.visual.motionIntent } : {}),
     };
   },
 };
@@ -646,7 +1259,9 @@ export const keyframes: Block = {
           },
         });
         imageCostUsd += rendered.costUsd;
-        const local = await downloadTo(rendered.url, join(tmp, `f1_${stills}.png`));
+        const local = await downloadTo(rendered.url, join(tmp, `f1_${stills}.png`), {
+          timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+        });
         return { url: rendered.url, local, key: rendered.key, jobId: rendered.jobId, model: rendered.model };
       },
       critique: async (cand) => {
@@ -751,6 +1366,15 @@ export const loopClips: Block = {
     // pair (needs a local authed CLI). One generation per render (frugal +
     // honours the "≤2 renders" budget).
     const f1Key = str(ctx, "f1Key");
+    // The source track is sealed before visual generation. Distilled I2V does
+    // not accept an audio-conditioning input, so do not imply that it does;
+    // retaining this verified dependency is what lets the separate LTX 2.5
+    // A2V benchmark consume the exact mastered source without re-generation.
+    const musicKey = typeof ctx.store["musicKey"] === "string" ? ctx.store["musicKey"].trim() : "";
+    const routeBoundMusicProgram = musicProgramForCurrentRoute(ctx, str(ctx, "topic"));
+    if (routeBoundMusicProgram && !musicKey) {
+      throw new Error("loop_clips: the registered music-loop route requires mastered music before visual generation");
+    }
     const style = styleGrammar(ctx);
     const vs = visualStyle(ctx);
     const scene = scenesFromStore(ctx)[0];
@@ -773,14 +1397,16 @@ export const loopClips: Block = {
     // This optional adapter travels through the same sealed direct-worker path
     // as cinematic I2V: base/revision, benchmark, strength and trigger tokens
     // are validated there before a GPU job starts. Do not flatten it into text.
-    const creativeAdapter = LtxCreativeAdapterSelectionSchema.optional().parse(
+    const creativeAdapter = LtxCreativeAdapterInputSchema.optional().parse(
       ctx.params["ltxCreativeAdapter"],
     );
 
     // Prefer the independently reviewed scene-director motion over the template, and
     // push hard for a LOCKED camera + NON-directional ambient motion so the loop
     // (esp. the boomerang's reverse half) reads naturally with no scale/pan pop.
-    const motion = (ctx.store["motionPrompt"] as string | undefined) || scene.klingMotionPrompt;
+    const motion = (ctx.store["musicProgramMotionIntent"] as string | undefined)
+      || (ctx.store["motionPrompt"] as string | undefined)
+      || scene.klingMotionPrompt;
     const fwd = composeKlingPrompt({
       sceneDescription: `${motion}. Extremely subtle, slow, NON-directional ambient motion only ` +
         `(gentle shimmer, soft glow flicker, drifting steam, faint sway) — avoid strong directional ` +
@@ -791,7 +1417,7 @@ export const loopClips: Block = {
       extraNegative: "zoom, push in, dolly, camera move, scale change, framing change, pan, tilt",
     });
 
-    ctx.log(`loop_clips: Novita LTX-2.5 distilled x2 (loop=${loopMode}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
+    ctx.log(`loop_clips: Novita LTX-2.5 distilled x2 (loop=${loopMode}${musicKey ? `; sealed music=${musicKey.slice(-32)}` : "; legacy no-audio path"}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
     const stageBudgetUsd = requireNovitaStageBudget(ctx.stageBudgetUsd, "loop_clips");
     const clip = await renderNovitaI2V({
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/lofi-loop`,
@@ -805,6 +1431,7 @@ export const loopClips: Block = {
       ...(flf ? { endImageKey: f1Key } : {}),
       durationSec: dur,
       profileId: "production",
+      ...(typeof ctx.params["ltxStyleId"] === "string" ? { styleId: ctx.params["ltxStyleId"] } : {}),
       creativeAdapter,
       maxCostUsd: stageBudgetUsd,
       lifecycle: {
@@ -817,7 +1444,9 @@ export const loopClips: Block = {
     if (!clip.url) throw new Error("loop_clips: Novita i2v produced no URL");
 
     const tmp = await makeRunTempDir(ctx.runId);
-    const clipLocal = await downloadTo(clip.url, join(tmp, "clip.mp4"));
+    const clipLocal = await downloadTo(clip.url, join(tmp, "clip.mp4"), {
+      timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+    });
     ctx.log(`loop_clips: building ${loopMode} seamless loop unit…`);
     const loopRaw = flf
       // FLF2V already closes the loop; a short crossfade is the safety net and
@@ -928,6 +1557,10 @@ export const music: Block = {
   paid: true,
   run: async (ctx) => {
     const topic = str(ctx, "topic");
+    // Bind before a reuse shortcut as well: otherwise a newly admitted music
+    // route could attach a sibling's track without proving it belongs to this
+    // episode program.
+    const musicProgram = musicProgramForCurrentRoute(ctx, topic);
     // RENDER-GROUP REUSE: a language sibling reuses the base render's music track
     // (identical audio bed; only narration differs) — no Mureka/Suno generation.
     const reuseMusicKey = ctx.store["reuseMusicKey"] as string | undefined;
@@ -942,12 +1575,20 @@ export const music: Block = {
         [COST_PATCH_KEY]: 0,
       };
     }
-    const provider = ((ctx.params.provider as MusicProvider) ?? "mureka");
+    const provider = musicProgram?.audio.providerPreference
+      ?? ((ctx.params.provider as MusicProvider) ?? "mureka");
     // Phase 2 grounding: "Suno generated by the STYLE OF THE CHANNEL" — the frozen
     // Style DNA audio spec (genre/instrumentation/textures/BPM/loop) is the
     // channel's locked SOUND and WINS. Priority: DNA spec > Composer crew brief
     // (per-video nuance, only when there is no DNA) > explicit param > default.
     const composerPrompt = getMusicBrief(ctx.store)?.musicPrompt;
+    const studioAudioRecipe = studioPostproductionRecipeProjectionFromUnknown(
+      ctx.store["studioAudioRecipeProjection"],
+      "audio_recipe",
+    );
+    const studioAudioDirection = studioAudioRecipe.promptAddenda.length
+      ? ` Approved Studio audio direction (must preserve the locked channel sound, instrumental/no-vocal rule, and requested duration): ${studioAudioRecipe.promptAddenda.join(" ")}`
+      : "";
     const dna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
     const a = dna?.audio;
     const dnaPrompt = a?.genre?.trim()
@@ -974,14 +1615,19 @@ export const music: Block = {
     const arcNote = composerPrompt?.trim()
       ? ` This video's emotional direction: ${composerPrompt.trim().slice(0, 220)}`
       : "";
-    const prompt =
+    const basePrompt =
       (dnaPrompt && dnaPrompt.trim() ? `${dnaPrompt.trim()}${arcNote}` : "") ||
       (composerPrompt && composerPrompt.trim()) ||
       (ctx.params.prompt as string) ||
       `warm cozy lofi hip-hop instrumental to study/relax to, evoking "${topic}". ` +
       `mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle, tape warmth, ` +
       `calm and nostalgic, ~72 bpm, purely instrumental, no vocals, no lyrics, loop-friendly`;
-    ctx.log(`music: prompt source = ${dnaPrompt ? (arcNote ? "style DNA + composer arc" : "style DNA") : composerPrompt ? "composer brief" : "default"}`);
+    const prompt = [
+      musicProgram?.audio.direction,
+      basePrompt,
+      studioAudioDirection,
+    ].filter(Boolean).join(" ");
+    ctx.log(`music: prompt source = ${dnaPrompt ? (arcNote ? "style DNA + composer arc" : "style DNA") : composerPrompt ? "composer brief" : "default"}${studioAudioDirection ? " + approved Studio audio direction" : ""}`);
 
     // MULTI-TRACK MIX: a single looped 3-min track reads as stale on anything
     // longer than a few minutes. trackCount asks for N distinct clips that get
@@ -1079,23 +1725,33 @@ export const music: Block = {
     const locals: string[] = [];
     for (let i = 0; i < tracks.length; i++) {
       const ext = tracks[i].wavUrl ? "wav" : "mp3";
-      locals.push(await downloadTo(tracks[i].url, join(tmp, `track_${i}.${ext}`)));
+      locals.push(await downloadTo(tracks[i].url, join(tmp, `track_${i}.${ext}`), {
+        timeoutMs: MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+      }));
     }
     const mixPath =
       locals.length > 1 ? await crossfadeConcatAudio(locals, join(tmp, "mix.mp3"), 3) : locals[0];
     const targetLufs = Number(a?.loudnessLufs ?? -14);
     let local = await masterAudio(mixPath, join(tmp, "music.mp3"), { lufs: targetLufs });
     ctx.log(`music: mastered mix → loudnorm I=${targetLufs} LUFS, 320k`);
-    // SELF-LOOPING FOLD: assemble stream_loops this mix for the whole render, and
-    // a hard splice at every loop point was audible every N minutes for hours.
-    // One tail→head acrossfade makes end==start. Runs AFTER mastering so any
-    // loudnorm gain drift at the edges is smoothed by the fold itself.
-    // Degrade-safe: a failed polish pass must not kill a paid render.
-    try {
-      local = await selfLoopAudio(local, join(tmp, "music_loop.mp3"), { log: (m) => ctx.log(`music: ${m}`) });
-    } catch (e) {
-      ctx.log(`music: !!! self-loop fold FAILED (${e instanceof Error ? e.message : e}) — shipping the plain mix (loop splices will be hard)`);
+    // SELF-LOOPING FOLD: assemble stream_loops this mix for the whole render,
+    // so an unproven bed would create an audible hard splice every loop. This
+    // is a release gate, not optional polish: after a paid generation the
+    // outer catch retains its observed spend and makes this failure terminal,
+    // rather than buying the same music again on a task replay.
+    const loopedMusicPath = join(tmp, "music_loop.mp3");
+    const loopedMusic = await selfLoopAudio(local, loopedMusicPath, {
+      log: (m) => ctx.log(`music: ${m}`),
+    });
+    // `selfLoopAudio` promises this exact path on success. Keep the check at
+    // the release boundary as a future-proof guard against any reintroduced
+    // pass-through fallback.
+    if (loopedMusic !== loopedMusicPath) {
+      throw new MusicError(
+        "music: self-loop continuity proof did not produce the sealed loop artifact; refusing a hard-splice fallback",
+      );
     }
+    local = loopedMusic;
 
     const musicKey = `${ctx.keyPrefix}runs/${ctx.runId}/music.mp3`;
     await putObject(musicKey, await readBytes(local), { contentType: "audio/mpeg" });
@@ -1355,6 +2011,7 @@ async function verifyFinalMasterReleaseEvidenceForUpload(
   ctx: StageContext,
   filePath: string,
   videoKey: string,
+  source: "remote" | "local-upload" = "remote",
 ) {
   const { certificateKey, durableCertificate } = await loadDurableFinalMasterReleaseCertificate(ctx);
   // Validate the certificate and every retained evidence key in the same
@@ -1369,14 +2026,26 @@ async function verifyFinalMasterReleaseEvidenceForUpload(
   if (durableCertificate.finalMaster.r2Key !== videoKey) {
     throw new Error("upload_draft: final-master release certificate belongs to a different video object");
   }
-  await verifyFinalMasterReleaseEvidenceObjects({
-    certificate: durableCertificate,
-    getObjectBytes,
-  });
+  if (source === "local-upload") {
+    await verifyFinalMasterReleaseEvidenceForLocalUpload({
+      certificate: durableCertificate,
+      filePath,
+      getObjectBytes,
+      headObjectMetadata,
+    });
+  } else {
+    await verifyFinalMasterReleaseEvidenceObjects({
+      certificate: durableCertificate,
+      getObjectBytes,
+      getObjectIntegrity,
+    });
+  }
   await verifyFinalMasterNarrationAuditIfPresent(durableCertificate, "upload_draft");
-  const localMasterSha256 = await fileSha256(filePath);
-  if (localMasterSha256 !== durableCertificate.finalMaster.sha256) {
-    throw new Error("upload_draft: local final master no longer matches its durable release certificate");
+  if (source === "remote") {
+    const localMasterSha256 = await fileSha256(filePath);
+    if (localMasterSha256 !== durableCertificate.finalMaster.sha256) {
+      throw new Error("upload_draft: local final master no longer matches its durable release certificate");
+    }
   }
   return durableCertificate;
 }
@@ -1452,7 +2121,13 @@ export function assertShortReleaseVisualEvidence(args: {
 }): {
   evidenceManifestKey: string;
   evidenceFrameKeys: string[];
-  evidenceFrameArtifacts: Array<{ r2Key: string; contentSha256: string; byteLength: number }>;
+  evidenceFrameArtifacts: Array<{
+    id: string;
+    tSec: number;
+    r2Key: string;
+    contentSha256: string;
+    byteLength: number;
+  }>;
 } {
   const { review, expectedMasterSha256, actualMasterSha256 } = args;
   if (!review.ran) {
@@ -1476,6 +2151,10 @@ export function assertShortReleaseVisualEvidence(args: {
   }
   const evidenceFrameArtifacts = review.evidence.frames.map((frame) => {
     if (
+      typeof frame.id !== "string" ||
+      !frame.id.trim() ||
+      !Number.isFinite(frame.tSec) ||
+      frame.tSec < 0 ||
       !frame.r2Key ||
       !frame.contentSha256 ||
       !/^[a-f0-9]{64}$/i.test(frame.contentSha256) ||
@@ -1486,6 +2165,8 @@ export function assertShortReleaseVisualEvidence(args: {
       throw new Error("shorts_spinoff: post-transform visual review frame lacks a durable byte receipt");
     }
     return {
+      id: frame.id,
+      tSec: frame.tSec,
       r2Key: frame.r2Key,
       contentSha256: frame.contentSha256,
       byteLength: frame.byteLength,
@@ -1504,6 +2185,53 @@ export function assertShortReleaseVisualEvidence(args: {
     evidenceFrameKeys,
     evidenceFrameArtifacts: sortedArtifacts,
   };
+}
+
+/**
+ * Turn the exact captions burned into a 9:16 derivative into independently
+ * auditable OCR probes.  Sampling at the center of every cue proves both that
+ * the caption is still on screen at its intended time and that it remains
+ * readable after portrait reframing.  This deliberately fails closed for
+ * malformed or one-token cues: a Short that cannot supply meaningful text
+ * evidence must not receive the automatic upload path.
+ */
+export function buildShortCaptionOnScreenTextCues(
+  captions: readonly CaptionCue[],
+  durationSec: number,
+): TimedOnScreenTextCue[] {
+  if (!Number.isFinite(durationSec) || durationSec < 8) {
+    throw new Error("shorts_spinoff: post-transform duration is invalid for caption OCR evidence");
+  }
+  if (!captions.length) {
+    throw new Error("shorts_spinoff: no burned captions are available for required OCR evidence");
+  }
+
+  return captions.map((caption, index) => {
+    const text = typeof caption.text === "string" ? caption.text.trim() : "";
+    const startSec = Number(caption.startSec);
+    const endSec = Number(caption.endSec);
+    const tokenCount = text.match(/[\p{L}\p{N}]+(?:['’][\p{L}\p{N}]+)?/gu)?.length ?? 0;
+    if (!text || text.length < 3 || tokenCount < 2) {
+      throw new Error(
+        `shorts_spinoff: caption ${index + 1} cannot supply meaningful OCR evidence (need at least two readable tokens)`,
+      );
+    }
+    if (
+      !Number.isFinite(startSec) ||
+      !Number.isFinite(endSec) ||
+      startSec < 0 ||
+      endSec > durationSec ||
+      endSec - startSec < 0.2
+    ) {
+      throw new Error(`shorts_spinoff: caption ${index + 1} has invalid final-master timing`);
+    }
+    return {
+      id: `short-caption-${String(index + 1).padStart(3, "0")}`,
+      sampleSec: Number(((startSec + endSec) / 2).toFixed(3)),
+      expectedText: text,
+      minTokenCoverage: 0.8,
+    };
+  });
 }
 
 function shortReviewFrameCount(value: unknown, fallback: number, max: number): number {
@@ -1528,6 +2256,119 @@ function assertParentMasterReadyForShort(ctx: StageContext): void {
   }
 }
 
+function narrativeShortStorySpine(store: Readonly<Record<string, unknown>>) {
+  return StorySpineSchema.parse({
+    version: "1.0.0",
+    timedScript: store["timedScript"],
+    narrativeBeats: store["narrativeBeats"],
+    continuityLedger: store["continuityLedger"],
+    shotList: store["shotList"],
+    dpVisualSpecs: store["dpVisualSpecs"],
+    editorEdl: store["editorEdl"],
+    coverage: store["storyCoverage"],
+  });
+}
+
+type NarrativeShortSelection =
+  | Readonly<{ kind: "not_narrative" }>
+  | Readonly<{ kind: "not_safe"; reason: string }>
+  | Readonly<{
+      kind: "selected";
+      sourceStartSec: number;
+      sourceEndSec: number;
+      origin: NarrativeShortOrigin;
+    }>;
+
+/**
+ * A sealed serialized run never falls back to the first sentence when making
+ * a Short. It rehydrates the exact series horizon, binds the actual Episode
+ * Graph to its Story Spine, and selects one self-contained beat. The future
+ * portrait transform still has to earn its own review/certificate below.
+ */
+async function selectNarrativeShortSource(input: {
+  readonly ctx: StageContext;
+  readonly parentCertificate: FinalMasterReleaseCertificate;
+  readonly maxCandidateDurationSec: number;
+}): Promise<NarrativeShortSelection> {
+  const selectorValue = input.ctx.store[NARRATIVE_SERIES_RUN_SELECTOR_SEED_KEY];
+  if (selectorValue === undefined) return Object.freeze({ kind: "not_narrative" as const });
+  try {
+    const selector = parseNarrativeSeriesRunSelector(selectorValue);
+    const route = parseChannelProgramRouteRunSeed(input.ctx.store["channelProgramRoute"]);
+    const record = await getNarrativeSeriesPlanRecord({
+      client: convex(),
+      ownerId: input.ctx.ownerId,
+      channelId: input.ctx.channelId as Id<"channels">,
+      fingerprint: selector.seriesPlanFingerprint,
+    });
+    if (!record) throw new Error("immutable narrative horizon could not be reloaded");
+    const admission = assertNarrativeSeriesRunAdmission({
+      selector,
+      plan: record.plan,
+      ownerId: input.ctx.ownerId,
+      channelId: input.ctx.channelId,
+      routeSeed: route,
+    });
+    const episodeGraph = EpisodeGraphSchema.parse(input.ctx.store["episodeGraph"]);
+    const episodeBinding = bindNarrativeEpisodeToSeries({
+      plan: admission.plan,
+      serializedEpisodeContext: input.ctx.store["serializedProgramEpisodeContext"],
+      episodeGraph,
+      storySpine: narrativeShortStorySpine(input.ctx.store),
+    });
+    // A third-party-stock sidecar proves acquisition but deliberately cannot
+    // prove exact on-screen beat occurrence. Keep those derivatives manual;
+    // system-generated / first-party masters can proceed to a private draft.
+    const usesThirdPartyStock = input.parentCertificate.thirdPartyStockEvidence !== undefined;
+    const expansion = planNarrativeShortsExpansion({
+      seriesPlan: admission.plan,
+      episodeBinding,
+      episodeGraph,
+      parentReleaseReadiness: {
+        finalMasterReleaseEvidence: "verified",
+        finalMasterCertificateFingerprint: input.parentCertificate.certificateFingerprint,
+        sourceProvenance: usesThirdPartyStock ? "licensed" : "first_party",
+        selectedMomentRights: usesThirdPartyStock ? "unknown" : "cleared",
+        // This prospective plan must not claim transform evidence before the
+        // actual 9:16 output is created and reviewed.
+        portraitAssemblyAndReviewEvidence: "missing",
+        automaticDraftCreationAllowed: true,
+      },
+      maxCandidateDurationSec: input.maxCandidateDurationSec,
+    });
+    if (expansion.status !== "candidate_briefs_ready" || expansion.automaticAction !== "draft_only_after_post_transform_review") {
+      throw new Error(expansion.blockers.join("; ") || "no safe narrative Short candidate is available");
+    }
+    const candidate = expansion.candidates[0];
+    if (!candidate) throw new Error("narrative Short plan has no candidate");
+    if (candidate.sourceWindow.t1 > input.parentCertificate.finalMaster.durationSec + 0.05) {
+      throw new Error("narrative Short candidate exceeds the certified parent-master duration");
+    }
+    return Object.freeze({
+      kind: "selected" as const,
+      sourceStartSec: candidate.sourceWindow.t0,
+      sourceEndSec: candidate.sourceWindow.t1,
+      origin: createNarrativeShortOrigin({
+        version: "narrative-short-origin/v1",
+        parentFinalMasterSha256: input.parentCertificate.finalMaster.sha256,
+        parentFinalMasterCertificateFingerprint: input.parentCertificate.certificateFingerprint,
+        seriesPlanFingerprint: admission.plan.fingerprint,
+        episodeGraphFingerprint: episodeBinding.episodeGraphFingerprint,
+        episodeBindingFingerprint: episodeBinding.fingerprint,
+        shortsExpansionPlanFingerprint: expansion.fingerprint,
+        candidateId: candidate.id,
+        parentBeatId: candidate.parentBeatId,
+        sourceWindow: candidate.sourceWindow,
+      }),
+    });
+  } catch (error) {
+    return Object.freeze({
+      kind: "not_safe" as const,
+      reason: error instanceof Error ? error.message : String(error),
+    });
+  }
+}
+
 async function persistShortReleaseEvidence(args: {
   ctx: StageContext;
   filePath: string;
@@ -1535,9 +2376,11 @@ async function persistShortReleaseEvidence(args: {
   title: string;
   topic: string;
   expectedDurationSec: number;
+  captionCues: readonly CaptionCue[];
   transcriptCues: Array<{ text: string; startSec: number; endSec: number }>;
   sourceAudioPath: string;
   expectedNarrationText: string;
+  narrativeShortOrigin?: NarrativeShortOrigin;
 }): Promise<{
   certificateKey: string;
   certificateReference: ReturnType<typeof createFinalMasterReleaseCertificateReference>;
@@ -1553,6 +2396,15 @@ async function persistShortReleaseEvidence(args: {
     expectedDurationSec: args.expectedDurationSec,
     integratedLufs: audioMeters.integratedLufs,
   });
+  // Validate the deterministic Short caption clock before invoking the
+  // required visual reviewer. The first timed caption is the only existing
+  // post-transform semantic-visual authority, so an ambiguous clock must not
+  // consume a provider review and then fail at certificate time.
+  const captionTextCues = buildShortCaptionOnScreenTextCues(args.captionCues, structural.durationSec);
+  const openingCaptionPlan = planShortsOpeningCaptionEvidence(
+    args.captionCues,
+    structural.durationSec,
+  );
 
   const beforeReviewSha256 = await fileSha256(args.filePath);
   const contentLane = resolveContentLane({
@@ -1567,6 +2419,7 @@ async function persistShortReleaseEvidence(args: {
   const channelProfile = channelVisualReviewProfile({
     contentLaneKey: contentLane.key,
     primaryRenderer: contentLane.primaryRenderer,
+    requireSpecificLaneProfile: true,
     channelName: opt(ctx, "channelName"),
     persona: opt(ctx, "persona"),
     styleGrammar: opt(ctx, "styleGrammar"),
@@ -1617,6 +2470,17 @@ async function persistShortReleaseEvidence(args: {
         "The Short must begin and end at coherent speech/edit boundaries without a black, frozen, or abruptly truncated finish.",
       ],
       transcriptCues: args.transcriptCues,
+      ...(openingCaptionPlan
+        ? {
+            overlays: [{
+              id: openingCaptionPlan.cueId,
+              startSec: openingCaptionPlan.startSec,
+              endSec: openingCaptionPlan.endSec,
+              kind: "caption" as const,
+              expected: "Opening hook caption must be readable at its planned timing.",
+            }],
+          }
+        : {}),
       focusWindows: [
         { startSec: 0, endSec: Math.min(durationSec, 6), reason: "reviewer" },
         { startSec: Math.max(0, durationSec - 5), endSec: durationSec, reason: "reviewer" },
@@ -1638,6 +2502,26 @@ async function persistShortReleaseEvidence(args: {
     expectedMasterSha256: beforeReviewSha256,
     actualMasterSha256: afterReviewSha256,
   });
+  const captionTextSourceSha256 = await sha256OnScreenTextSource(args.filePath);
+  if (captionTextSourceSha256 !== afterReviewSha256) {
+    throw new Error("shorts_spinoff: post-transform master changed before caption OCR evidence");
+  }
+  const onScreenText = await proveOnScreenText({
+    videoPath: args.filePath,
+    sourceSha256: afterReviewSha256,
+    cues: captionTextCues,
+  });
+  if (!onScreenText.passed || onScreenText.cues.some((cue) => !cue.passed)) {
+    const failed = onScreenText.cues
+      .filter((cue) => !cue.passed)
+      .map((cue) => `${cue.id} ${cue.tokenCoverage.toFixed(2)} < ${cue.minTokenCoverage.toFixed(2)}`)
+      .join(", ");
+    throw new Error(`shorts_spinoff: burned-caption OCR evidence failed${failed ? ` (${failed})` : ""}`);
+  }
+  ctx.log(
+    `shorts_spinoff: burned-caption OCR PASSED (${onScreenText.cues.length} timed cue(s), ` +
+      `${onScreenText.engine.name} ${onScreenText.engine.version})`,
+  );
   const visualReviewReleaseReceipt = createVisualReviewReleaseReceipt({
     reviewFingerprint: review.reviewFingerprint,
     reviewReceiptVersion: review.reviewReceiptVersion,
@@ -1667,6 +2551,13 @@ async function persistShortReleaseEvidence(args: {
     Buffer.from(JSON.stringify(visualReviewReleaseReceipt, null, 2)),
     { contentType: "application/json" },
   );
+  const shortsOpeningEvidence = createShortsOpeningEvidence({
+    finalMaster: { sha256: afterReviewSha256, durationSec },
+    review,
+    visualReviewReleaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
+    ...(openingCaptionPlan ? { caption: openingCaptionPlan } : {}),
+    onScreenText,
+  });
   const expectedNarrationText = args.expectedNarrationText.trim();
   if (!expectedNarrationText) {
     throw new Error("shorts_spinoff: selected Short window has no approved narration text to audit");
@@ -1728,6 +2619,7 @@ async function persistShortReleaseEvidence(args: {
     finalMaster: {
       r2Key: args.shortKey,
       sha256: afterReviewSha256,
+      byteLength: (await stat(args.filePath)).size,
       durationSec,
     },
     visualReview: {
@@ -1747,6 +2639,9 @@ async function persistShortReleaseEvidence(args: {
         windowMeanDb: audioMeters.windowMeanDb,
       },
     },
+    onScreenText,
+    shortsOpeningEvidence,
+    ...(args.narrativeShortOrigin ? { narrativeShortOrigin: args.narrativeShortOrigin } : {}),
   });
   const certificateKey = finalMasterReleaseCertificateKey(
     ctx.keyPrefix,
@@ -1760,11 +2655,12 @@ async function persistShortReleaseEvidence(args: {
   if (durableCertificate.certificateFingerprint !== certificate.certificateFingerprint) {
     throw new Error("shorts_spinoff: reloaded post-transform release certificate fingerprint changed after persistence");
   }
-  await verifyFinalMasterReleaseEvidenceObjects({ certificate: durableCertificate, getObjectBytes });
+  await verifyFinalMasterReleaseEvidenceObjects({
+    certificate: durableCertificate,
+    getObjectBytes,
+    getObjectIntegrity,
+  });
   await verifyFinalMasterNarrationAuditIfPresent(durableCertificate, "shorts_spinoff");
-  if (bytesSha256(await getObjectBytes(args.shortKey)) !== afterReviewSha256) {
-    throw new Error("shorts_spinoff: durable Short object no longer matches its post-transform release certificate");
-  }
   if (await fileSha256(args.filePath) !== afterReviewSha256) {
     throw new Error("shorts_spinoff: post-transform master changed while its durable release evidence was being persisted");
   }
@@ -1797,20 +2693,29 @@ async function verifyShortReleaseEvidenceForUpload(args: {
   if (args.certificateKey !== expectedCertificateKey || certificate.finalMaster.r2Key !== args.shortKey) {
     throw new Error("shorts_spinoff: post-transform release certificate is not bound to this Short object");
   }
+  if (
+    !certificate.onScreenText ||
+    !certificate.onScreenText.passed ||
+    certificate.onScreenText.cues.some((cue) => !cue.passed)
+  ) {
+    throw new Error("shorts_spinoff: post-transform release certificate lacks passing burned-caption OCR evidence");
+  }
+  if (!certificate.shortsOpeningEvidence) {
+    throw new Error("shorts_spinoff: post-transform release certificate lacks opening timing evidence");
+  }
   retainedFinalMasterReleaseObjectKeys({
     keyPrefix: args.ctx.keyPrefix,
     runId: args.ctx.runId,
     certificateKey: args.certificateKey,
     certificate,
   });
-  await verifyFinalMasterReleaseEvidenceObjects({ certificate, getObjectBytes });
+  await verifyFinalMasterReleaseEvidenceForLocalUpload({
+    certificate,
+    filePath: args.filePath,
+    getObjectBytes,
+    headObjectMetadata,
+  });
   await verifyFinalMasterNarrationAuditIfPresent(certificate, "shorts_spinoff");
-  if (bytesSha256(await getObjectBytes(args.shortKey)) !== certificate.finalMaster.sha256) {
-    throw new Error("shorts_spinoff: durable Short object no longer matches its release certificate");
-  }
-  if (await fileSha256(args.filePath) !== certificate.finalMaster.sha256) {
-    throw new Error("shorts_spinoff: local Short no longer matches its durable post-transform release certificate");
-  }
   return certificate;
 }
 
@@ -1832,6 +2737,7 @@ export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
   }[];
   keepNames: readonly string[];
   getObjectBytes: (key: string) => Promise<Uint8Array>;
+  getObjectIntegrity: (key: string) => Promise<{ sha256: string; byteLength: number }>;
   listObjects: (prefix: string) => Promise<string[]>;
   deleteObjects: (keys: string[]) => Promise<number>;
 }): Promise<{
@@ -1857,6 +2763,7 @@ export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
         await verifyFinalMasterReleaseEvidenceObjects({
           certificate,
           getObjectBytes: args.getObjectBytes,
+          getObjectIntegrity: args.getObjectIntegrity,
         });
         return retained;
       }),
@@ -1896,6 +2803,30 @@ export const uploadDraft: Block = {
   ],
   produces: ["youtubeVideoId", "watchUrl", "youtubePrivacy"],
   run: async (ctx) => {
+    // Keep historical seeds inspectable, but never let a route-bearing legacy
+    // fictional run cross a new publication boundary as generic nonfiction.
+    // This must happen before any connector lookup or upload-adjacent work.
+    const thumbnailScenarioVisualTreatment = resolveScenarioVisualTreatmentForNewVisualArtifact({
+      treatment: ctx.store["scenarioVisualTreatment"],
+      route: ctx.store["channelProgramRoute"],
+      scenario: ctx.store["syntheticScenario"],
+      disclosure: ctx.store["syntheticScenarioDisclosure"],
+      topic: ctx.store["topic"],
+      consumer: "upload_draft",
+      operation: "publish thumbnail package art",
+    });
+    if (thumbnailScenarioVisualTreatment && typeof ctx.store["topic"] !== "string") {
+      throw new Error("upload_draft: fictional scenario thumbnail provenance requires its exact active topic");
+    }
+    if (thumbnailScenarioVisualTreatment && ctx.store["syntheticScenarioDisclosure"] === undefined) {
+      throw new Error("upload_draft: fictional scenario thumbnail lacks its verified disclosure receipt");
+    }
+    if (
+      thumbnailScenarioVisualTreatment &&
+      ctx.store["thumbnailScenarioVisualTreatmentProvenance"] === undefined
+    ) {
+      throw new Error("upload_draft: fictional scenario thumbnail lacks sealed treatment provenance");
+    }
     if (ctx.store["qaPassed"] !== true) {
       throw new Error("upload_draft: qa did not pass — refusing to upload");
     }
@@ -1933,6 +2864,25 @@ export const uploadDraft: Block = {
     if (ctx.store["thumbnailPublishable"] !== true) {
       throw new Error("upload_draft: thumbnail is a nonpublishable draft preview — refusing to upload");
     }
+    const thumbKey = str(ctx, "thumbnailKey");
+    const thumbnailSha256 = bytesSha256(await getObjectBytes(thumbKey));
+    // The final-master certificate intentionally seals video evidence only.
+    // Package art has a separate, byte-bound receipt revalidated here before
+    // any connector/publish work, so thumbnail swaps cannot inherit a video's
+    // treatment evidence.
+    let thumbnailScenarioVisualTreatmentProvenance:
+      | ScenarioVisualTreatmentThumbnailProvenance
+      | undefined;
+    if (thumbnailScenarioVisualTreatment) {
+      thumbnailScenarioVisualTreatmentProvenance = assertScenarioVisualTreatmentThumbnailProvenance({
+        provenance: ctx.store["thumbnailScenarioVisualTreatmentProvenance"],
+        treatment: thumbnailScenarioVisualTreatment,
+        thumbnailArtifactSha256: thumbnailSha256,
+        consumer: "upload_draft",
+      });
+    } else if (ctx.store["thumbnailScenarioVisualTreatmentProvenance"] !== undefined) {
+      throw new Error("upload_draft: non-fictional thumbnail carries scenario visual treatment provenance");
+    }
     const filePath = str(ctx, "videoLocalPath");
     const videoKey = str(ctx, "videoKey");
     const title = str(ctx, "title");
@@ -1969,6 +2919,7 @@ export const uploadDraft: Block = {
       ctx,
       filePath,
       videoKey,
+      "local-upload",
     );
     ctx.log(
       `upload_draft: revalidated final-master release evidence (${finalMasterReleaseCertificate.certificateFingerprint.slice(0, 12)})`,
@@ -1978,6 +2929,24 @@ export const uploadDraft: Block = {
     // approves). A scheduled timestamp is reused from the durable upload row so
     // a worker retry cannot change metadata and accidentally create a duplicate.
     const publishMode = (ctx.params["publishMode"] as string | undefined) ?? "draft";
+    const uploadProgramRoute = ctx.store["channelProgramRoute"] === undefined
+      ? undefined
+      : parseChannelProgramRouteRunSeed(ctx.store["channelProgramRoute"]);
+    if (uploadProgramRoute?.routeKey === "quizyear/portrait-supervised/v1") {
+      assertQuizShortReleaseReceiptForUpload({
+        receipt: ctx.store["quizShortRelease"],
+        route: uploadProgramRoute,
+        certificate: finalMasterReleaseCertificate,
+        videoKey,
+        publishMode,
+      });
+    }
+    if (uploadProgramRoute && certifiedFamilyAdmission(uploadProgramRoute.family).automatic) {
+      requireAutomaticPackageToOpeningReceipt({
+        receipt: finalMasterReleaseCertificate.packageToOpening,
+        omission: finalMasterReleaseCertificate.packageToOpeningOmission,
+      });
+    }
     if (finalMasterReleaseCertificate.referenceQuality?.assessment === "unmeasured") {
       // This is an honest evidence state, not a new publication veto. Existing
       // final QA, editorial acceptance, child-safety, and channel-policy gates
@@ -2087,10 +3056,6 @@ export const uploadDraft: Block = {
       videoArtifactId,
       intentVersion,
     });
-    const thumbKey = opt(ctx, "thumbnailKey");
-    const thumbnailSha256 = thumbKey
-      ? bytesSha256(await getObjectBytes(thumbKey))
-      : undefined;
     const intent = await client.mutation(api.publishIntents.createOrGet, {
       secret: internalSecret,
       ownerId: ctx.ownerId,
@@ -2101,8 +3066,18 @@ export const uploadDraft: Block = {
       videoArtifactId,
       videoArtifactKey: videoKey,
       videoSha256,
+      releaseEvidenceCertificateKey: str(ctx, "finalMasterReleaseCertificateKey"),
+      releaseEvidenceCertificateFingerprint:
+        finalMasterReleaseCertificate.certificateFingerprint,
       thumbnailArtifactKey: thumbKey,
       thumbnailSha256,
+      ...(thumbnailScenarioVisualTreatmentProvenance
+        ? {
+            thumbnailScenarioVisualTreatmentProvenance,
+            thumbnailScenarioVisualTreatmentProvenanceFingerprint:
+              thumbnailScenarioVisualTreatmentProvenance.fingerprint,
+          }
+        : {}),
       intentVersion,
       idempotencyKey,
       metadataSha256: publishMetadataSha256(metadata),
@@ -2145,6 +3120,7 @@ export const uploadDraft: Block = {
       intentId: intent._id,
       workerId: `pipeline:${ctx.runId}`,
       preferredLocalFilePath: filePath,
+      executionLease: ctx.executionLease,
       log: ctx.log,
     });
     if (dispatched.kind !== "uploaded") {
@@ -2210,12 +3186,6 @@ export const cleanup: Block = {
           shortRelease.durableCertificate,
           "cleanup",
         );
-        if (
-          bytesSha256(await getObjectBytes(shortRelease.durableCertificate.finalMaster.r2Key)) !==
-          shortRelease.durableCertificate.finalMaster.sha256
-        ) {
-          throw new Error("cleanup: durable Short object no longer matches its release certificate");
-        }
       }
       pruning = await pruneRunObjectsWithVerifiedFinalMasterEvidence({
         keyPrefix: ctx.keyPrefix,
@@ -2234,6 +3204,7 @@ export const cleanup: Block = {
           : {}),
         keepNames,
         getObjectBytes,
+        getObjectIntegrity,
         listObjects,
         deleteObjects,
       });
@@ -2333,18 +3304,53 @@ export const shortsSpinoff: Block = {
     const targetDur = Number.isFinite(requestedTargetDur)
       ? Math.max(8, requestedTargetDur)
       : 45;
-
-    // Window = the hook: accumulate opening sentences up to ~targetDur seconds.
-    const sourceStartSec = Math.max(0, timings[0].start);
-    let endSec = sourceStartSec;
-    const windowTimings: { text: string; start: number; end: number }[] = [];
-    for (const t of timings) {
-      if (t.start < sourceStartSec) continue;
-      windowTimings.push(t);
-      endSec = t.end;
-      if (endSec - sourceStartSec >= targetDur) break;
+    const narrativeSelection = await selectNarrativeShortSource({
+      ctx,
+      parentCertificate,
+      maxCandidateDurationSec: Math.max(15, targetDur),
+    });
+    if (narrativeSelection.kind === "not_safe") {
+      ctx.log(`shorts_spinoff: serialized narrative derivative skipped without transform spend — ${narrativeSelection.reason}`);
+      return { [COST_PATCH_KEY]: 0 };
     }
-    const durSec = Math.max(8, Math.min(endSec - sourceStartSec, targetDur + 12));
+
+    let sourceStartSec: number;
+    let endSec: number;
+    let windowTimings: { text: string; start: number; end: number }[];
+    if (narrativeSelection.kind === "selected") {
+      sourceStartSec = narrativeSelection.sourceStartSec;
+      endSec = narrativeSelection.sourceEndSec;
+      windowTimings = timings
+        .filter((timing) => timing.end > sourceStartSec && timing.start < endSec)
+        .map((timing) => ({
+          ...timing,
+          start: Math.max(sourceStartSec, timing.start),
+          end: Math.min(endSec, timing.end),
+        }))
+        .filter((timing) => timing.end > timing.start);
+      if (!windowTimings.length) {
+        ctx.log("shorts_spinoff: selected narrative beat has no timed narration — skipping without transform spend");
+        return { [COST_PATCH_KEY]: 0 };
+      }
+      ctx.log(
+        `shorts_spinoff: selected sealed Episode-Graph beat ${narrativeSelection.origin.parentBeatId} ` +
+          `(${sourceStartSec.toFixed(1)}–${endSec.toFixed(1)}s)`,
+      );
+    } else {
+      // Non-serialized channels retain the existing opening-window behavior.
+      sourceStartSec = Math.max(0, timings[0].start);
+      endSec = sourceStartSec;
+      windowTimings = [];
+      for (const t of timings) {
+        if (t.start < sourceStartSec) continue;
+        windowTimings.push(t);
+        endSec = t.end;
+        if (endSec - sourceStartSec >= targetDur) break;
+      }
+    }
+    const durSec = narrativeSelection.kind === "selected"
+      ? endSec - sourceStartSec
+      : Math.max(8, Math.min(endSec - sourceStartSec, targetDur + 12));
 
     const tmp = await makeRunTempDir(ctx.runId);
     const raw = join(tmp, "short_raw.mp4");
@@ -2368,7 +3374,9 @@ export const shortsSpinoff: Block = {
       title,
       topic: opt(ctx, "topic") ?? title,
       expectedDurationSec: durSec,
+      captionCues: cues,
       sourceAudioPath: raw,
+      ...(narrativeSelection.kind === "selected" ? { narrativeShortOrigin: narrativeSelection.origin } : {}),
       expectedNarrationText: windowTimings
         .map((timing) => typeof timing.text === "string" ? timing.text.trim() : "")
         .filter(Boolean)
@@ -2402,7 +3410,12 @@ export const shortsSpinoff: Block = {
       requiredScopes: YOUTUBE_UPLOAD_SCOPES,
     });
     const desc = (ctx.store["description"] as string | undefined) ?? "";
-    const publishShort = ctx.params["publishShort"] === "public";
+    const publishShort = narrativeSelection.kind === "selected"
+      ? false
+      : ctx.params["publishShort"] === "public";
+    if (narrativeSelection.kind === "selected" && ctx.params["publishShort"] === "public") {
+      ctx.log("shorts_spinoff: sealed narrative Short is forced private; publication remains a later explicit action");
+    }
     if (publishShort) {
       await requireChannelPublishAction({
         ownerId: ctx.ownerId,
@@ -2437,12 +3450,21 @@ export const shortsSpinoff: Block = {
       parentMasterCertificateFingerprint: parentCertificate.certificateFingerprint,
       releaseCertificateFingerprint: shortRelease.certificateFingerprint,
       releaseCertificateKey: shortRelease.certificateKey,
+      ...(narrativeSelection.kind === "selected"
+        ? {
+            narrativeShortOriginFingerprint: narrativeSelection.origin.fingerprint,
+            narrativeSeriesPlanFingerprint: narrativeSelection.origin.seriesPlanFingerprint,
+            narrativeEpisodeGraphFingerprint: narrativeSelection.origin.episodeGraphFingerprint,
+            narrativeParentBeatId: narrativeSelection.origin.parentBeatId,
+            narrativeSourceWindow: narrativeSelection.origin.sourceWindow,
+          }
+        : {}),
       referenceQualityAssessment: "not_attested_for_derivative",
     });
 
     // Optional multi-platform crosspost of the SHORT via Ayrshare — explicit opt-in
     // only (so private brand content is never auto-published off-platform).
-    if (ctx.params["crosspostShort"] === true && hasAyrshareKey()) {
+    if (narrativeSelection.kind !== "selected" && ctx.params["crosspostShort"] === true && hasAyrshareKey()) {
       await requireChannelPublishAction({
         ownerId: ctx.ownerId,
         channelId,
@@ -2469,6 +3491,7 @@ export const shortsSpinoff: Block = {
 
 export const lofiBlocks: Block[] = [
   topicSelect,
+  musicProgramPlan,
   scenePlanner,
   keyframes,
   loopClips,
@@ -2500,6 +3523,7 @@ export const lofiBlocks: Block[] = [
 export const LOFI_PIPELINE = [
   { block: "competitor_research" },
   { block: "topic_select" },
+  { block: "music_program_plan" },
   { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 5 } },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
   // crossfadeSec 2.5 only applies to loopMode:"crossfade" (the blend IS the loop

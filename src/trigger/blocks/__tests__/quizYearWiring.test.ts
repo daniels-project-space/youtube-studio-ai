@@ -80,6 +80,10 @@ async function main(): Promise<void> {
   const blocks = archetype.pipeline.map((p) => p.block);
   assert.ok(blocks.includes("quiz_year"), "the archetype must actually run the engine");
   assert.ok(blocks.includes("compliance_check"), "compliance gates before the engine runs");
+  assert.ok(
+    !blocks.includes("quiz_short_release"),
+    "the ordinary QuizYear archetype must not execute the separately supervised private-release adjunct",
+  );
   for (const forbidden of ["script_gen", "narration_tts", "timeline_assemble", "assemble"]) {
     assert.ok(!blocks.includes(forbidden), `self-contained engine must not chain ${forbidden}`);
   }
@@ -207,6 +211,14 @@ async function main(): Promise<void> {
     "quiz_metadata",
     "quiz_year",
   ]);
+  const dormantPortraitRelease = GOLDEN_MODULES.find((m) => m.key === "quiz-short-private-release");
+  assert.ok(dormantPortraitRelease, "the dormant portrait release must have its own non-active catalog card");
+  assert.equal(dormantPortraitRelease.status, "registered");
+  assert.deepEqual(
+    CATALOG_EXECUTION_BINDINGS["quiz-short-private-release"]?.executableIds,
+    ["quiz_short_release"],
+    "the dormant portrait receipt remains registry-owned without making ordinary QuizYear a Short route",
+  );
   assert.ok(
     MODULE_CONTRACTS.quiz_critic_spec,
     "the deterministic critic must stay registered rather than being replaced by a generic model crew role",

@@ -31,6 +31,8 @@ export interface ThumbnailSceneSpec {
   composition?: string;
   textZone: ThumbnailTextZone;
   visualAvoid?: string[];
+  /** Non-negotiable provenance-bound rules that reach the image provider. */
+  requiredVisualDirectives?: readonly string[];
 }
 
 export interface ThumbnailTypographySpec {
@@ -124,6 +126,9 @@ export function buildThumbnailImageRequest(scene: ThumbnailSceneSpec): Thumbnail
     `Put the dominant hero on the side opposite the ${zone} safe zone, filling 55-70% of the frame`,
     `Keep the ${zone} 42% darker, simple, and genuinely empty for a later local overlay`,
     "The scene alone must communicate the subject at phone size; use at most three visual elements",
+    scene.requiredVisualDirectives?.length
+      ? `Non-negotiable visual treatment: ${scene.requiredVisualDirectives.join(" ")}`
+      : "",
     scene.visualAvoid?.length ? `Avoid: ${scene.visualAvoid.join("; ")}` : "",
     "No textual props or writing surfaces: no text, letters, words, numbers, signs, labels, newspapers, posters, logos, badges, UI, or watermark",
   ].filter(Boolean).join(". ");

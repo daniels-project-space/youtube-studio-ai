@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -35,6 +35,10 @@ export function Lightbox({
 }) {
   const video = videos[index];
   const count = videos.length;
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const openerRef = useRef<HTMLElement | null>(null);
 
   // On-demand detail (full SEO description, tags, narration script) — a small
   // targeted query so the list payload stays lean.
@@ -53,12 +57,53 @@ export function Lightbox({
     [index, count, onIndex],
   );
 
-  // Keyboard: Esc closes, arrows navigate. Lock body scroll while open.
+  // Preserve where review started, then move focus into the modal. This keeps
+  // the real artifact inspection flow usable without a pointer.
+  useEffect(() => {
+    openerRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    window.requestAnimationFrame(() => closeRef.current?.focus());
+    return () => openerRef.current?.focus();
+  }, []);
+
+  // Keyboard: Esc closes, arrows navigate, Tab remains in the dialog. Lock
+  // body scroll while the evidence review surface is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-      else if (e.key === "ArrowLeft") prev();
-      else if (e.key === "ArrowRight") next();
+      if (e.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        prev();
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        next();
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button, video[controls], a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((element) => !element.hasAttribute("disabled"));
+      if (focusable.length === 0) {
+        e.preventDefault();
+        closeRef.current?.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     const prevOverflow = document.body.style.overflow;
@@ -76,9 +121,7 @@ export function Lightbox({
 
   return (
     <div
-      role="dialog"
-      aria-modal="true"
-      onClick={onClose}
+      onMouseDown={onClose}
       style={{
         position: "fixed",
         inset: 0,
@@ -93,7 +136,11 @@ export function Lightbox({
     >
       {/* Stop propagation so clicks inside don't close */}
       <div
-        onClick={(e) => e.stopPropagation()}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onMouseDown={(e) => e.stopPropagation()}
         className="glass"
         style={{
           width: "min(960px, 100%)",
@@ -129,6 +176,7 @@ export function Lightbox({
               </span>
             </div>
             <h2
+              id={titleId}
               style={{
                 fontSize: "1.15rem",
                 fontWeight: 600,
@@ -140,6 +188,7 @@ export function Lightbox({
             </h2>
           </div>
           <button
+            ref={closeRef}
             type="button"
             onClick={onClose}
             aria-label="Close"

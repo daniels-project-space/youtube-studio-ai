@@ -6,6 +6,7 @@ import { artifactContract } from "@/engine/artifactSchemas";
 import { registerAllBlocks } from "@/engine/blocks";
 import { getManifest } from "@/engine/registry";
 import {
+  buildShortCaptionOnScreenTextCues,
   assertShortReleaseStructuralEvidence,
   assertShortReleaseVisualEvidence,
 } from "@/trigger/blocks/lofiBlocks";
@@ -83,6 +84,32 @@ assert.throws(
   "a derivative without audio must stop before connector lookup",
 );
 
+assert.deepEqual(
+  buildShortCaptionOnScreenTextCues([
+    { startSec: 0, endSec: 1.2, text: "A clear opening hook" },
+    { startSec: 1.2, endSec: 2.4, text: "keeps the viewer watching" },
+  ], 45),
+  [
+    { id: "short-caption-001", sampleSec: 0.6, expectedText: "A clear opening hook", minTokenCoverage: 0.8 },
+    { id: "short-caption-002", sampleSec: 1.8, expectedText: "keeps the viewer watching", minTokenCoverage: 0.8 },
+  ],
+  "every burned caption must yield a midpoint OCR probe tied to its final timing",
+);
+assert.throws(
+  () => buildShortCaptionOnScreenTextCues([
+    { startSec: 0, endSec: 1.2, text: "Go" },
+  ], 45),
+  /at least two readable tokens/,
+  "a Short with an unprovable one-token caption must fail before its automatic upload path",
+);
+assert.throws(
+  () => buildShortCaptionOnScreenTextCues([
+    { startSec: 44.5, endSec: 46, text: "This caption exceeds the master" },
+  ], 45),
+  /invalid final-master timing/,
+  "caption OCR evidence must not silently clamp an invalid final-master window",
+);
+
 const masterSha256 = "a".repeat(64);
 const validReview = {
   ran: true,
@@ -93,6 +120,8 @@ const validReview = {
     manifestKey: "owner/alice/runs/run-short/visual-review/manifest.json",
     frames: [
       {
+        id: "f001",
+        tSec: 0.1,
         r2Key: "owner/alice/runs/run-short/visual-review/frames/f001.jpg",
         contentSha256: "b".repeat(64),
         byteLength: 123,
@@ -136,6 +165,15 @@ assert.throws(
 );
 
 const lofi = readFileSync(join(process.cwd(), "src/trigger/blocks/lofiBlocks.ts"), "utf8");
+const shortReviewHelper = lofi.slice(
+  lofi.indexOf("async function persistShortReleaseEvidence"),
+  lofi.indexOf("export const shortsSpinoff"),
+);
+assert.match(
+  shortReviewHelper,
+  /channelVisualReviewProfile\(\{[\s\S]*?requireSpecificLaneProfile:\s*true/,
+  "the post-transform Short release gate must reject an unregistered lane profile instead of falling back to generic visual QA",
+);
 const shortSource = lofi.slice(lofi.indexOf("export const shortsSpinoff"));
 const evidenceGate = shortSource.indexOf("await persistShortReleaseEvidence(");
 const durableReloadGate = shortSource.indexOf("await verifyShortReleaseEvidenceForUpload(");
@@ -160,13 +198,59 @@ assert.match(
 );
 assert.match(
   lofi,
-  /loadDurableShortReleaseCertificate\(ctx\)[\s\S]*?verifyFinalMasterNarrationAuditIfPresent\([\s\S]*?bytesSha256\(await getObjectBytes\(shortRelease\.durableCertificate\.finalMaster\.r2Key\)\)[\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence/,
-  "cleanup must revalidate the derivative narration audit and durable Short bytes before deletion",
+  /loadDurableShortReleaseCertificate\(ctx\)[\s\S]*?verifyFinalMasterNarrationAuditIfPresent\([\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence\([\s\S]*?getObjectIntegrity/,
+  "cleanup must revalidate the derivative narration audit and stream/hash durable Short bytes before deletion",
 );
 assert.match(
   lofi,
-  /async function verifyShortReleaseEvidenceForUpload[\s\S]*?verifyFinalMasterNarrationAuditIfPresent\([\s\S]*?bytesSha256\(await getObjectBytes\(args\.shortKey\)\)[\s\S]*?fileSha256\(args\.filePath\)/,
-  "connector admission must bind transcript proof, R2 object bytes, and local upload bytes to the Short certificate",
+  /async function verifyShortReleaseEvidenceForUpload[\s\S]*?verifyFinalMasterReleaseEvidenceForLocalUpload\([\s\S]*?filePath: args\.filePath[\s\S]*?verifyFinalMasterNarrationAuditIfPresent\(/,
+  "connector admission must hash the exact local Short source, bind transcript proof, and preserve durable review-frame verification",
+);
+assert.match(
+  lofi,
+  /const captionTextCues = buildShortCaptionOnScreenTextCues\(args\.captionCues, structural\.durationSec\)[\s\S]*?await proveOnScreenText\([\s\S]*?if \(!onScreenText\.passed[\s\S]*?onScreenText,[\s\S]*?shortsOpeningEvidence,[\s\S]*?\}\);/,
+  "the post-transform Short must seal passing timed OCR caption evidence into its release certificate",
+);
+assert.match(
+  lofi,
+  /async function verifyShortReleaseEvidenceForUpload[\s\S]*?!certificate\.onScreenText[\s\S]*?lacks passing burned-caption OCR evidence[\s\S]*?await verifyFinalMasterReleaseEvidenceForLocalUpload/,
+  "a durable Short certificate without passing burned-caption OCR evidence must stop before connector admission",
+);
+assert.match(
+  lofi,
+  /planShortsOpeningCaptionEvidence\([\s\S]*?overlays: \[\{[\s\S]*?createShortsOpeningEvidence\([\s\S]*?shortsOpeningEvidence,[\s\S]*?createFinalMasterReleaseCertificate/,
+  "only the Short post-transform review must bind its timed opening caption into a durable opening-evidence receipt",
+);
+assert.match(
+  lofi,
+  /async function verifyShortReleaseEvidenceForUpload[\s\S]*?!certificate\.shortsOpeningEvidence[\s\S]*?lacks opening timing evidence[\s\S]*?verifyFinalMasterReleaseEvidenceForLocalUpload/,
+  "a Short certificate lacking the lane-scoped opening receipt must stop before connector admission",
+);
+
+assert.match(
+  shortSource,
+  /verifyFinalMasterReleaseEvidenceForUpload\(ctx, src, videoKey\)[\s\S]*?selectNarrativeShortSource\([\s\S]*?narrativeSelection\.kind === "not_safe"[\s\S]*?makeVerticalClip\(src, raw, \{ startSec: sourceStartSec, durSec \}\)/,
+  "a serialized derivative must select one release-bound Episode-Graph window after parent verification and before transform spend",
+);
+assert.match(
+  shortSource,
+  /persistShortReleaseEvidence\(\{[\s\S]*?narrativeSelection\.kind === "selected"[\s\S]*?narrativeShortOrigin: narrativeSelection\.origin/,
+  "the selected narrative beat must be sealed into the post-transform Short certificate",
+);
+assert.match(
+  shortSource,
+  /const publishShort = narrativeSelection\.kind === "selected"\s*\? false[\s\S]*?privacyStatus: publishShort \? "public" : "private"/,
+  "a serialized narrative derivative is private-only even when a public Short parameter is supplied",
+);
+assert.match(
+  shortSource,
+  /narrativeSelection\.kind !== "selected" && ctx\.params\["crosspostShort"\] === true && hasAyrshareKey\(\)/,
+  "a sealed narrative derivative must not enter the optional cross-post path",
+);
+assert.match(
+  shortSource,
+  /Non-serialized channels retain the existing opening-window behavior[\s\S]*?sourceStartSec = Math\.max\(0, timings\[0\]\.start\)/,
+  "ordinary channels must retain their established opening-window Short selection",
 );
 
 console.log("Short post-transform release-evidence wiring tests passed");

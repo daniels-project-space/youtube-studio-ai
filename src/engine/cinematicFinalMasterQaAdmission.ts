@@ -5,10 +5,12 @@ import {
   type CinematicCreativeLocks,
   type CinematicEditDecisionList,
 } from "./cinematicCaseSequence";
+import { cinematicFinalMasterQaEvidence } from "./cinematicQaEvidence";
 import {
   CINEMATIC_FINAL_MASTER_QA_MAX_REVIEW_CALLS,
   cinematicFinalMasterQaReviewCost,
 } from "./pricing";
+import { completeVisualReviewFocusTimes } from "./visualReviewBudget";
 
 /**
  * Durable, pre-render proof that the exact final-master visual reviewer can
@@ -94,6 +96,65 @@ export function admitCinematicFinalMasterQa(args: {
     ...expected,
     reviewCostUsd: cinematicFinalMasterQaReviewCost(expected.reviewCallCount),
   });
+}
+
+export interface CinematicFinalMasterQaVisualReviewPlan {
+  admission: CinematicFinalMasterQaAdmission;
+  /** Exact 2fps sealed focus frames, before the separately capped reactive re-watch. */
+  completeFocusFrameCount: number;
+}
+
+/**
+ * The same sealed focus plan used by the final-review executor and by the
+ * qa_visual cost resolver. It is deliberately derived from the immutable
+ * locks/EDL rather than model-reported defect ranges, which are untrusted and
+ * must remain within the ordinary repair-focus allowance.
+ */
+export function cinematicFinalMasterQaVisualReviewPlan(args: {
+  admission: unknown;
+  creativeLocks: unknown;
+  editDecisionList: unknown;
+}): CinematicFinalMasterQaVisualReviewPlan {
+  const creativeLocks = CinematicCreativeLocksSchema.parse(args.creativeLocks);
+  const editDecisionList = CinematicEditDecisionListSchema.parse(args.editDecisionList);
+  const admission = assertCinematicFinalMasterQaAdmission({
+    admission: args.admission,
+    creativeLocks,
+    editDecisionList,
+  });
+  const sealedFocusWindows = cinematicFinalMasterQaEvidence({
+    creativeLocks,
+    editDecisionList,
+  }).focusWindows;
+  return {
+    admission,
+    completeFocusFrameCount: completeVisualReviewFocusTimes(
+      editDecisionList.durationSec,
+      sealedFocusWindows,
+    ).length,
+  };
+}
+
+/**
+ * `undefined` means no cinematic final-master artifacts are in this stage's
+ * store. A partial triplet is never a generic QA fallback: it is a stale or
+ * incomplete cinematic handoff and must fail before a paid render can start.
+ */
+export function cinematicFinalMasterQaVisualReviewPlanFromStore(
+  store: Readonly<Record<string, unknown>> | undefined,
+): CinematicFinalMasterQaVisualReviewPlan | undefined {
+  const admission = store?.["cinematicFinalMasterQaAdmission"];
+  const creativeLocks = store?.["cinematicCreativeLocks"];
+  const editDecisionList = store?.["cinematicEditDecisionList"];
+  if (admission === undefined && creativeLocks === undefined && editDecisionList === undefined) {
+    return undefined;
+  }
+  if (admission === undefined || creativeLocks === undefined || editDecisionList === undefined) {
+    throw new Error(
+      "cinematic final-master QA visual plan requires its admission, creative locks, and edit decision list",
+    );
+  }
+  return cinematicFinalMasterQaVisualReviewPlan({ admission, creativeLocks, editDecisionList });
 }
 
 /**

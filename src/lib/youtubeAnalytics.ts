@@ -14,6 +14,8 @@ export function hasAnalyticsAccess(refreshToken?: string): boolean {
 export interface VideoAnalytics {
   videoId: string;
   views: number;
+  /** Raw Analytics engagedViews; never a derived viewed-vs-swiped proxy. */
+  engagedViews?: number;
   avgViewPct: number; // 0..100 audience retention
   avgViewDurationSec: number;
   estMinutesWatched: number;
@@ -23,15 +25,43 @@ export interface VideoAnalytics {
 async function query(
   accessToken: string,
   params: Record<string, string>,
+  timeoutMs?: number,
+  beforeRequest?: () => void,
 ): Promise<{ headers: string[]; row: number[] } | null> {
   const url = `${BASE}?${new URLSearchParams({ ids: "channel==MINE", ...params }).toString()}`;
-  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
-  if (!res.ok) return null; // 403 (no scope) / 400 → degrade
-  const j = (await res.json()) as { columnHeaders?: { name: string }[]; rows?: number[][] };
-  const headers = (j.columnHeaders ?? []).map((h) => h.name);
-  const row = j.rows?.[0];
-  if (!row) return null;
-  return { headers, row };
+  const controller = timeoutMs === undefined ? undefined : new AbortController();
+  const timeout = controller === undefined
+    ? undefined
+    : setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    // This is intentionally adjacent to `fetch`: callers with a durable
+    // dispatch capability can reject an event-loop pause before it spends a
+    // second Analytics request.
+    beforeRequest?.();
+    const res = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+    if (!res.ok) return null; // 403 (no scope) / 400 → degrade
+    const j = (await res.json()) as { columnHeaders?: { name: string }[]; rows?: number[][] };
+    const headers = (j.columnHeaders ?? []).map((h) => h.name);
+    const row = j.rows?.[0];
+    if (!row) return null;
+    return { headers, row };
+  } finally {
+    if (timeout !== undefined) clearTimeout(timeout);
+  }
+}
+
+/** Resolve OAuth before the lease-fenced Analytics request boundary. */
+export async function getAnalyticsAccessToken(refreshToken: string): Promise<string | null> {
+  if (!hasAnalyticsAccess(refreshToken)) return null;
+  const { getAccessToken } = await import("@/lib/youtube");
+  try {
+    return await getAccessToken(refreshToken);
+  } catch {
+    return null;
+  }
 }
 
 export interface RetentionPoint {
@@ -54,10 +84,8 @@ export async function fetchRetentionCurve(args: {
   endDate: string;
   refreshToken: string;
 }): Promise<RetentionPoint[] | null> {
-  if (!hasAnalyticsAccess(args.refreshToken)) return null;
-  const { getAccessToken } = await import("@/lib/youtube");
-  let accessToken: string;
-  try { accessToken = await getAccessToken(args.refreshToken); } catch { return null; }
+  const accessToken = await getAnalyticsAccessToken(args.refreshToken);
+  if (!accessToken) return null;
   const url = `${BASE}?${new URLSearchParams({
     ids: "channel==MINE",
     startDate: args.startDate,
@@ -90,29 +118,45 @@ export async function fetchVideoAnalytics(args: {
   startDate: string;
   endDate: string;
   refreshToken: string;
+  /** Pre-resolved immediately before the lease-fenced GET boundary. */
+  accessToken?: string;
+  /** Bounded per-GET timeout; callers with a lease must keep it below that lease. */
+  timeoutMs?: number;
+  /** Add raw engagedViews to the existing fenced core Analytics GET. */
+  includeEngagedViews?: boolean;
+  /** Synchronous final fence, run directly before every outbound Analytics GET. */
+  beforeRequest?: () => void;
 }): Promise<VideoAnalytics | null> {
-  if (!hasAnalyticsAccess(args.refreshToken)) return null;
-  const { getAccessToken } = await import("@/lib/youtube");
-  let accessToken: string;
-  try {
-    accessToken = await getAccessToken(args.refreshToken);
-  } catch {
-    return null;
-  }
+  const accessToken = args.accessToken ?? await getAnalyticsAccessToken(args.refreshToken);
+  if (!accessToken) return null;
   const core = await query(accessToken, {
     startDate: args.startDate,
     endDate: args.endDate,
-    metrics: "views,averageViewPercentage,averageViewDuration,estimatedMinutesWatched",
+    metrics: args.includeEngagedViews
+      ? "views,engagedViews,averageViewPercentage,averageViewDuration,estimatedMinutesWatched"
+      : "views,averageViewPercentage,averageViewDuration,estimatedMinutesWatched",
     filters: `video==${args.videoId}`,
-  });
+  }, args.timeoutMs, args.beforeRequest);
   if (!core) return null;
   const get = (name: string) => {
     const i = core.headers.indexOf(name);
     return i >= 0 ? Number(core.row[i]) || 0 : 0;
   };
+  const getOptionalFinite = (name: string): number | undefined => {
+    const i = core.headers.indexOf(name);
+    if (i < 0) return undefined;
+    const value = Number(core.row[i]);
+    return Number.isFinite(value) && value >= 0 ? value : undefined;
+  };
+  const engagedViews = args.includeEngagedViews
+    ? getOptionalFinite("engagedViews")
+    : undefined;
+  // A v2 batch must not persist a missing/invalid provider metric as zero.
+  if (args.includeEngagedViews && engagedViews === undefined) return null;
   const out: VideoAnalytics = {
     videoId: args.videoId,
     views: get("views"),
+    ...(engagedViews === undefined ? {} : { engagedViews }),
     avgViewPct: get("averageViewPercentage"),
     avgViewDurationSec: get("averageViewDuration"),
     estMinutesWatched: get("estimatedMinutesWatched"),
@@ -123,7 +167,7 @@ export async function fetchVideoAnalytics(args: {
     endDate: args.endDate,
     metrics: "videoThumbnailImpressionsClickRate",
     filters: `video==${args.videoId}`,
-  });
+  }, args.timeoutMs, args.beforeRequest);
   if (ctrRes) {
     const i = ctrRes.headers.indexOf("videoThumbnailImpressionsClickRate");
     if (i >= 0) out.ctr = Number(ctrRes.row[i]) || 0;

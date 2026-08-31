@@ -42,6 +42,7 @@ type ReleaseCertificateReference = {
   certificateFingerprint: string;
   finalMasterKey: string;
   finalMasterSha256: string;
+  finalMasterByteLength: number;
   reviewEvidenceManifestKey: string;
   reviewEvidenceFrameCount: number;
   reviewEvidenceFrameKeysFingerprint: string;
@@ -101,6 +102,7 @@ function referenceFrom(value: unknown, runId: string): ReleaseCertificateReferen
     ? finalMaster.r2Key
     : undefined;
   const finalMasterSha256 = finalMaster && sha256(finalMaster.sha256);
+  const finalMasterByteLength = finalMaster?.byteLength;
   const durationSec = finalMaster?.durationSec;
   const reviewEvidenceManifestKey = visualReview && belongsToRun(visualReview.evidenceManifestKey, runId)
     ? visualReview.evidenceManifestKey
@@ -123,6 +125,9 @@ function referenceFrom(value: unknown, runId: string): ReleaseCertificateReferen
     !certificateFingerprint ||
     !finalMasterKey ||
     !finalMasterSha256 ||
+    typeof finalMasterByteLength !== "number" ||
+    !Number.isSafeInteger(finalMasterByteLength) ||
+    finalMasterByteLength < 1 ||
     typeof durationSec !== "number" ||
     !Number.isFinite(durationSec) ||
     durationSec <= 0 ||
@@ -147,6 +152,7 @@ function referenceFrom(value: unknown, runId: string): ReleaseCertificateReferen
     certificateFingerprint,
     finalMasterKey,
     finalMasterSha256,
+    finalMasterByteLength,
     reviewEvidenceManifestKey,
     reviewEvidenceFrameCount,
     reviewEvidenceFrameKeysFingerprint,
@@ -350,6 +356,28 @@ export function deriveReleaseEvidenceProjection({
     certificateFingerprint: reference.certificateFingerprint,
     certificateKey: reference.certificateKey,
   };
+}
+
+/**
+ * Returns the one master key sealed by the current QA certificate, if and only
+ * if the same inputs still satisfy the recorded-release projection. Consumers
+ * may use this to select a playable Library source without treating the first
+ * arbitrary `video` asset as the approved master.
+ */
+export function recordedReleaseEvidenceMasterKey({
+  runId,
+  qaStage,
+  artifacts,
+}: {
+  runId: string;
+  qaStage?: ReleaseEvidenceQaStage | null;
+  artifacts: readonly ReleaseEvidenceArtifact[];
+}): string | undefined {
+  const projection = deriveReleaseEvidenceProjection({ runId, qaStage, artifacts });
+  if (projection.status !== "release_evidence_recorded" || !projection.certificateKey) {
+    return undefined;
+  }
+  return referenceFromArtifact(artifacts, runId, projection.certificateKey)?.finalMasterKey;
 }
 
 /** Missing stored values are pre-projection legacy records, never proof. */

@@ -105,6 +105,58 @@ const EXPLICIT_CHANNEL_INCEPTION_CAPABILITIES: Readonly<
       "draft-only-publication-state",
     ]),
   }),
+  music_loop: Object.freeze({
+    mode: "registered_non_gemini" as const,
+    id: "music-loop-original-program-channel-foundation/v1",
+    provenance:
+      "route-bound original instrumental program planning with local channel brand assets; the frozen topic, visual loop direction, and audio program are persisted before the channel remains draft-only",
+    coveredStages: Object.freeze([
+      "deterministic-positioning",
+      "local-avatar-and-banner",
+      "route-bound-original-music-program",
+      "immutable-artifact-persistence",
+      "draft-only-publication-state",
+    ]),
+  }),
+  whiteboard: Object.freeze({
+    mode: "registered_non_gemini" as const,
+    id: "whiteboard-self-contained-channel-foundation/v1",
+    provenance:
+      "route-bound non-Google storyboard/critic foundation with local channel brand artifacts; immutable plan, route, and starter-art receipts are persisted before the channel remains draft-only",
+    coveredStages: Object.freeze([
+      "deterministic-positioning",
+      "local-avatar-and-banner",
+      "route-bound-native-storyboard-foundation",
+      "immutable-artifact-persistence",
+      "draft-only-publication-state",
+    ]),
+  }),
+  comic: Object.freeze({
+    mode: "registered_non_gemini" as const,
+    id: "motion-comic-self-contained-channel-foundation/v1",
+    provenance:
+      "route-bound non-Google storyboard/critic foundation with local channel brand artifacts; immutable plan, route, and starter-art receipts are persisted before the channel remains draft-only",
+    coveredStages: Object.freeze([
+      "deterministic-positioning",
+      "local-avatar-and-banner",
+      "route-bound-native-storyboard-foundation",
+      "immutable-artifact-persistence",
+      "draft-only-publication-state",
+    ]),
+  }),
+  loreshort: Object.freeze({
+    mode: "registered_non_gemini" as const,
+    id: "lore-self-contained-channel-foundation/v1",
+    provenance:
+      "route-bound non-Google first-person lore planner and critic foundation with local channel brand artifacts; immutable plan, route, narrator, and starter-art receipts are persisted before the channel remains draft-only",
+    coveredStages: Object.freeze([
+      "deterministic-positioning",
+      "local-avatar-and-banner",
+      "route-bound-native-storyboard-foundation",
+      "immutable-artifact-persistence",
+      "draft-only-publication-state",
+    ]),
+  }),
   illustrated_explainer: Object.freeze({
     mode: "registered_non_gemini" as const,
     id: "illustrated-explainer-deterministic-channel-foundation/v1",
@@ -114,6 +166,20 @@ const EXPLICIT_CHANNEL_INCEPTION_CAPABILITIES: Readonly<
       "deterministic-positioning",
       "local-avatar-and-banner",
       "fictional-no-external-claims-starter-slate",
+      "immutable-artifact-persistence",
+      "draft-only-publication-state",
+    ]),
+  }),
+  cinematic: Object.freeze({
+    mode: "registered_non_gemini" as const,
+    id: "cinematic-visual-control-channel-foundation/v1",
+    provenance:
+      "metadata-only YouTube research, Claude positioning/Style DNA/Show Bible, receipt-bound Novita channel art and starter slate, and a route-sealed Studio Asset / Visual Matter control plan; the channel stays draft-only and its LTX video runtime remains independently benchmark-gated",
+    coveredStages: Object.freeze([
+      "metadata-only-niche-research",
+      "claude-positioning-style-dna-show-bible",
+      "receipt-bound-novita-channel-art-and-starter-slate",
+      "route-sealed-studio-asset-and-visual-matter-controls",
       "immutable-artifact-persistence",
       "draft-only-publication-state",
     ]),

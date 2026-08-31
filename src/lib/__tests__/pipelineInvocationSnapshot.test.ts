@@ -6,6 +6,7 @@ import {
   HEAVY_RENDER_BLOCK_IDS,
   normalizePipelineInvocationSnapshot,
   OFFLOADED_RENDER_BLOCK_IDS,
+  pipelineInvocationUsesCurrentShowProfileGuard,
   pipelineInvocationSnapshotsEqual,
   REMOTE_RENDER_BLOCK_IDS,
   renderBlockMachineClass,
@@ -88,6 +89,31 @@ assert.throws(
   })),
   /channel show profile fingerprint is invalid/,
 );
+const routeBound = normalizePipelineInvocationSnapshot(snapshot({
+  programRouteFingerprint: "d".repeat(64),
+}));
+assert.equal(routeBound.programRouteFingerprint, "d".repeat(64));
+assert.equal(
+  pipelineInvocationUsesCurrentShowProfileGuard(undefined),
+  true,
+  "a fresh invocation may bind the current sealed profile",
+);
+assert.equal(
+  pipelineInvocationUsesCurrentShowProfileGuard(frozen),
+  true,
+  "a durable route-less invocation retains its historical show-profile guard",
+);
+assert.equal(
+  pipelineInvocationUsesCurrentShowProfileGuard(routeBound),
+  false,
+  "a route-bearing retry must use only its frozen route seed",
+);
+assert.throws(
+  () => normalizePipelineInvocationSnapshot(snapshot({
+    programRouteFingerprint: "not-a-route-fingerprint",
+  })),
+  /channel program route fingerprint is invalid/,
+);
 
 const hash = pipelineInvocationSha256(frozen);
 assert.match(hash, /^[a-f0-9]{64}$/);
@@ -167,6 +193,7 @@ for (const changed of [
     index === 0 ? { ...entry, params: { model: "changed" } } : entry) }),
   snapshot({ compilationFingerprint: "c".repeat(64) }),
   snapshot({ showProfileFingerprint: "c".repeat(64) }),
+  snapshot({ programRouteFingerprint: "d".repeat(64) }),
 ]) {
   assert.throws(
     () => decidePipelineInvocationClaim({

@@ -8,11 +8,22 @@ JSON, so it can never be accidentally parsed as live configuration by
 `src/lib/ltxCreativeAdapter.ts`'s resolver.
 
 Every candidate id string here is a *research pointer*, not a configuration
-value. As `docs/LTX_2_5_RTX_4090_OPERATIONAL_CONTRACT.md` and
-`ltxCreativeAdapter.ts` establish, community LoRA activation is gated behind
-a SHA-pinned worker manifest entry that has passed a controlled, paid Novita
-RTX-4090 visual benchmark. Nothing described below is registered today, and
-nothing in this document changes that.
+value. Nothing described below is registered today, and nothing in this
+document changes that.
+
+There are two deliberately incompatible activation classes:
+
+- **Standard LoRAs** can be considered for the current pinned 24 GB direct
+LTX route only after a SHA-pinned `ltx-creative-adapter/v3` manifest entry
+and exact-output benchmark evidence showing a role-specific improvement over
+a matched no-LoRA LTX baseline.
+- **IC-LoRAs and ComfyUI workflows** require a separate pinned ComfyUI/LTX
+  worker with at least 32 GB VRAM, hash-bound reference/guide assets and a
+  dedicated benchmark. They must never be placed in the direct worker
+  manifest, even if the style name appears compatible.
+
+The candidate notes below use “not registered” in that strict sense; a
+research link is neither a download approval nor runtime compatibility proof.
 
 ---
 

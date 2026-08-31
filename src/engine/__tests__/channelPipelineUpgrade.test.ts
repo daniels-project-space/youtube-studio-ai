@@ -54,6 +54,17 @@ const qaIndex = noVisualGatePlan.entries.findIndex((entry) => entry.block === "q
 const uploadIndex = noVisualGatePlan.entries.findIndex((entry) => entry.block === "upload_draft");
 assert.equal(qaIndex, uploadIndex - 1, "qa_visual must review the final render immediately before upload");
 assert.equal(noVisualGatePlan.entries[qaIndex]?.params?.qaProfile, "production");
+assert.equal(noVisualGatePlan.entries[qaIndex]?.params?.audioQa, true, "an injected final review must score audio aesthetics");
+
+const legacyAudioDisabled = liveWhiteboard.map((entry) =>
+  entry.block === "qa_visual" ? { ...entry, params: { qaProfile: "production", audioQa: false } } : entry,
+);
+const legacyAudioDisabledPlan = planChannelPipelineUpgrade(legacyAudioDisabled);
+assert.equal(
+  legacyAudioDisabledPlan.entries.find((entry) => entry.block === "qa_visual")?.params?.audioQa,
+  true,
+  "an upgraded persisted upload pipeline must not retain a loudness-only QA configuration",
+);
 
 const draftVisualGate = liveWhiteboard.map((entry) =>
   entry.block === "qa_visual" ? { ...entry, params: { qaProfile: "draft" } } : entry,

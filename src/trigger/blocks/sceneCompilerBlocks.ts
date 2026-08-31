@@ -7,6 +7,14 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { assertSceneManifest, type SceneManifest } from "@/engine/episodeGraph";
+import {
+  resolveScenarioVisualTreatmentForRoute,
+  type ScenarioVisualTreatment,
+} from "@/engine/scenarioVisualTreatment";
+import {
+  assertSyntheticScenarioContract,
+  syntheticScenarioVisualKindFor,
+} from "@/engine/syntheticScenario";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { composeWithIntro, probe } from "@/lib/ffmpeg";
 import { downloadTo, makeRunTempDir } from "@/lib/files";
@@ -79,6 +87,54 @@ export function assertSceneCompilerAdmission(args: {
   return manifest;
 }
 
+/**
+ * The deterministic Scene Compiler is the first concrete adapter for the
+ * renderer-neutral treatment. Its Remotion composition emits the exact
+ * disclosure badge whenever `syntheticScenarioProfile` is present, so reject
+ * a manifest that omits or mutates the receipt binding before pixels render.
+ */
+export function assertSceneCompilerScenarioVisualTreatment(args: {
+  readonly manifest: SceneManifest;
+  readonly treatment: ScenarioVisualTreatment | undefined;
+}): void {
+  const hasSyntheticScene = args.manifest.scenes.some(
+    (scene) => scene.visualState.syntheticScenarioProfile !== undefined,
+  );
+  if (!args.treatment) {
+    // Route-less/pre-treatment manifests remain resumable as legacy. Current
+    // fictional routes cannot reach this branch: resolveScenario... rejects a
+    // route that declares the treatment block but omits its receipt.
+    return;
+  }
+  if (!hasSyntheticScene) {
+    throw new Error("scene_compiler: scenario visual treatment requires fictional scene grammar in every scene");
+  }
+  for (const [index, scene] of args.manifest.scenes.entries()) {
+    if (scene.visualState.syntheticScenarioProfile !== args.treatment.profile) {
+      throw new Error(`scene_compiler: scene ${scene.id} synthetic profile does not match the scenario visual treatment`);
+    }
+    const visualKind = scene.visualState.syntheticScenarioVisualKind;
+    const visualGrammarMatches = args.treatment.profile === "ai_decision"
+      // Decision grammar is selected upstream from the Story Spine beat
+      // purpose, which intentionally does not travel in the renderer ABI.
+      ? visualKind === "decision_options" || visualKind === "decision_outcome"
+      : visualKind === syntheticScenarioVisualKindFor(
+          args.treatment.profile,
+          index,
+          args.manifest.scenes.length,
+        );
+    if (!visualGrammarMatches) {
+      throw new Error(`scene_compiler: scene ${scene.id} fictional visual grammar does not match the scenario visual treatment`);
+    }
+    if (scene.visualState.scenarioVisualTreatmentFingerprint !== args.treatment.fingerprint) {
+      throw new Error(`scene_compiler: scene ${scene.id} does not carry the sealed scenario visual treatment fingerprint`);
+    }
+    if (scene.visualState.evidenceVisualIntent || scene.visualState.evidenceVisualManifest) {
+      throw new Error(`scene_compiler: scene ${scene.id} cannot combine fictional scenario treatment with factual visual evidence`);
+    }
+  }
+}
+
 const sceneCompiler: Block = {
   id: "scene_compiler",
   consumes: ["sceneManifest", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
@@ -89,6 +145,17 @@ const sceneCompiler: Block = {
       narrationDurationSec: ctx.store["narrationDurationSec"],
       aspect: ctx.params["aspect"],
     });
+    const syntheticScenario = ctx.store["syntheticScenario"] === undefined
+      ? undefined
+      : assertSyntheticScenarioContract(ctx.store["syntheticScenario"]);
+    const scenarioVisualTreatment = resolveScenarioVisualTreatmentForRoute({
+      treatment: ctx.store["scenarioVisualTreatment"],
+      route: ctx.store["channelProgramRoute"],
+      scenario: syntheticScenario,
+      topic: manifest.topic,
+      consumer: "scene_compiler",
+    });
+    assertSceneCompilerScenarioVisualTreatment({ manifest, treatment: scenarioVisualTreatment });
     const narrationPath = requiredString(ctx.store["narrationLocalPath"], "narrationLocalPath");
     const narrationDurationSec = Number(ctx.store["narrationDurationSec"]);
     const { width, height } = resolveDimensions(ctx.params["aspect"]);

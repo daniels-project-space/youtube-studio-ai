@@ -9,6 +9,8 @@
 import { z } from "zod";
 
 import { FAMILIES, type FamilyKey } from "@/engine/families";
+import { CERTIFIED_QUIZ_PROFILE_KEYS } from "@/engine/certifiedQuizProfile";
+import { SYNTHETIC_SCENARIO_PROFILES } from "@/engine/syntheticScenario";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { getNiche, getSubcategory } from "@/lib/nicheCatalog";
 import { sha256Hex } from "@/lib/sha256";
@@ -21,7 +23,50 @@ export const CHANNEL_PROGRAM_BRIEF_POSITIONING_TEXT_MAX_CHARS = 1_200;
 const MAX_LOCALE_CHARS = 64;
 const MAX_SUBCATEGORY_CHARS = 240;
 const MAX_TOPIC_CHARS = 180;
+const MAX_SERIALIZED_PROGRAM_TITLE_CHARS = 160;
+const MAX_SERIALIZED_PROGRAM_COUNT = 100;
 const CATALOG_FINGERPRINT_PATTERN = /^[a-f0-9]{64}$/u;
+
+/**
+ * A route-owned series modifier. It changes the recurrence contract only;
+ * route admission remains responsible for deciding whether a family may use
+ * Topic Select series mode at all.
+ */
+export const SERIALIZED_PROGRAM_VERSION = "serialized_program/v1" as const;
+export const SerializedProgramSchema = z.object({
+  version: z.literal(SERIALIZED_PROGRAM_VERSION),
+  seriesTitle: z.string().min(2).max(MAX_SERIALIZED_PROGRAM_TITLE_CHARS),
+  seriesCount: z.number().int().positive().max(MAX_SERIALIZED_PROGRAM_COUNT).optional(),
+}).strict();
+export type SerializedProgram = z.infer<typeof SerializedProgramSchema>;
+
+/**
+ * A creator-declared, bounded program form. This is part of the canonical
+ * semantic brief rather than an executable pipeline override: later route
+ * resolution owns the exact family, disclosure, evidence, and block contract.
+ * Omitting it deliberately preserves pre-route channel briefs.
+ */
+export const ChannelProgramIntentSchema = z.discriminatedUnion("kind", [
+  z.object({
+    kind: z.literal("certified_quiz"),
+    profile: z.enum(CERTIFIED_QUIZ_PROFILE_KEYS),
+  }).strict(),
+  /**
+   * A deliberately supervised portrait derivative of the certified QuizYear
+   * fact format.  Route admission, not this browser-facing intent, decides
+   * whether it can ever execute or leave a private draft.
+   */
+  z.object({
+    kind: z.literal("quiz_short"),
+    profile: z.enum(CERTIFIED_QUIZ_PROFILE_KEYS),
+  }).strict(),
+  z.object({ kind: z.literal("sports_championship_timeline") }).strict(),
+  z.object({
+    kind: z.literal("fictional_scenario"),
+    profile: z.enum(SYNTHETIC_SCENARIO_PROFILES),
+  }).strict(),
+]);
+export type ChannelProgramIntent = z.infer<typeof ChannelProgramIntentSchema>;
 
 function normalizedText(value: string): string {
   return value.replace(/\s+/gu, " ").trim();
@@ -102,6 +147,21 @@ function canonicalTopics(value: readonly string[] | undefined): string[] | undef
   return topics;
 }
 
+function canonicalSerializedProgram(value: unknown): SerializedProgram {
+  const parsed = SerializedProgramSchema.parse(value);
+  const seriesTitle = canonicalBoundedText(
+    parsed.seriesTitle,
+    "serializedProgram.seriesTitle",
+    2,
+    MAX_SERIALIZED_PROGRAM_TITLE_CHARS,
+  );
+  return {
+    version: SERIALIZED_PROGRAM_VERSION,
+    seriesTitle,
+    ...(parsed.seriesCount !== undefined ? { seriesCount: parsed.seriesCount } : {}),
+  };
+}
+
 const DraftInputSchema = z.object({
   nicheKey: z.string().max(160),
   subcategory: z.string().max(MAX_SUBCATEGORY_CHARS).optional(),
@@ -109,6 +169,8 @@ const DraftInputSchema = z.object({
   concept: z.string().max(600),
   audience: z.string().max(160).optional(),
   sampleTopics: z.array(z.string().max(MAX_TOPIC_CHARS)).min(1).max(12).optional(),
+  programIntent: ChannelProgramIntentSchema.optional(),
+  serializedProgram: SerializedProgramSchema.optional(),
 }).strict();
 
 const CreateInputSchema = DraftInputSchema.extend({
@@ -133,6 +195,10 @@ export interface ChannelProgramBriefDraft {
   audience?: string;
   /** Order expresses the creator's declared priority and is never sorted. */
   sampleTopics?: readonly string[];
+  /** Optional structured program form; absent means the baseline family route. */
+  programIntent?: ChannelProgramIntent;
+  /** Optional sealed recurring-series modifier; route admission owns eligibility. */
+  serializedProgram?: SerializedProgram;
 }
 
 export interface ChannelProgramBrief extends ChannelProgramBriefDraft {
@@ -207,6 +273,12 @@ function canonicalDraft(value: z.infer<typeof DraftInputSchema>): ChannelProgram
   }
   const audience = canonicalOptionalText(value.audience, "audience", 2, 160);
   const sampleTopics = canonicalTopics(value.sampleTopics);
+  const programIntent = value.programIntent === undefined
+    ? undefined
+    : ChannelProgramIntentSchema.parse(value.programIntent) as ChannelProgramIntent;
+  const serializedProgram = value.serializedProgram === undefined
+    ? undefined
+    : canonicalSerializedProgram(value.serializedProgram);
   return {
     nicheKey: niche.key,
     ...(subcategory ? { subcategory } : {}),
@@ -214,6 +286,8 @@ function canonicalDraft(value: z.infer<typeof DraftInputSchema>): ChannelProgram
     concept: canonicalBoundedText(value.concept, "concept", 12, 600),
     ...(audience ? { audience } : {}),
     ...(sampleTopics ? { sampleTopics } : {}),
+    ...(programIntent ? { programIntent } : {}),
+    ...(serializedProgram ? { serializedProgram } : {}),
   };
 }
 
@@ -272,6 +346,24 @@ function assertCanonicalDraftShape(value: ChannelProgramBriefDraft, ctx: z.Refin
       seen.add(identity);
     });
   }
+  if (value.serializedProgram !== undefined) {
+    try {
+      const canonical = canonicalSerializedProgram(value.serializedProgram);
+      if (canonicalJson(canonical) !== canonicalJson(value.serializedProgram)) {
+        canonicalIssue(
+          ctx,
+          ["serializedProgram"],
+          "channel program brief serializedProgram must be canonical",
+        );
+      }
+    } catch (error) {
+      canonicalIssue(
+        ctx,
+        ["serializedProgram"],
+        error instanceof Error ? error.message : "invalid serialized program",
+      );
+    }
+  }
 }
 
 /** A strict schema for an already-normalized draft used by the format advisor. */
@@ -282,6 +374,8 @@ export const ChannelProgramBriefDraftSchema = z.object({
   concept: z.string().min(12).max(600),
   audience: z.string().min(2).max(160).optional(),
   sampleTopics: z.array(z.string().min(2).max(MAX_TOPIC_CHARS)).min(1).max(12).optional(),
+  programIntent: ChannelProgramIntentSchema.optional(),
+  serializedProgram: SerializedProgramSchema.optional(),
 }).strict().superRefine((value, ctx) => assertCanonicalDraftShape(value, ctx));
 
 /** A strict schema for the durable, already-normalized full brief. */
@@ -295,6 +389,8 @@ export const ChannelProgramBriefSchema = z.object({
   concept: z.string().min(12).max(600),
   audience: z.string().min(2).max(160).optional(),
   sampleTopics: z.array(z.string().min(2).max(MAX_TOPIC_CHARS)).min(1).max(12).optional(),
+  programIntent: ChannelProgramIntentSchema.optional(),
+  serializedProgram: SerializedProgramSchema.optional(),
 }).strict().superRefine((value, ctx) => {
   if (!(value.family in FAMILIES)) {
     canonicalIssue(ctx, ["family"], "channel program brief family must be a current catalog key");
@@ -303,6 +399,18 @@ export const ChannelProgramBriefSchema = z.object({
     canonicalIssue(ctx, ["family"], "channel program brief family must be canonical");
   }
   assertCanonicalDraftShape(value, ctx);
+  if (
+    value.programIntent?.kind === "certified_quiz" ||
+    value.programIntent?.kind === "quiz_short" ||
+    value.programIntent?.kind === "sports_championship_timeline"
+  ) {
+    if (value.family !== "quizyear") {
+      canonicalIssue(ctx, ["programIntent"], "QuizYear program intents require the quizyear family");
+    }
+  }
+  if (value.programIntent?.kind === "fictional_scenario" && value.family !== "illustrated_explainer") {
+    canonicalIssue(ctx, ["programIntent"], "fictional scenario program intents require the illustrated_explainer family");
+  }
   try {
     const family = canonicalFamily(value.family);
     const expectedCatalogFingerprint = currentCatalogFingerprint(

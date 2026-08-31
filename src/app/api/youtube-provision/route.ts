@@ -2,37 +2,23 @@ import { NextResponse } from "next/server";
 import { authorizeStudioRoute } from "@/lib/operatorSession";
 
 /**
- * POST /api/youtube-provision  { channelId: string, name: string }
- * Fires `provision-youtube`: create a YouTube channel + auto-link it (OAuth done
- * by the cloud agent). Cloud only. 503 when Trigger isn't activated.
+ * Retired legacy endpoint.
+ *
+ * Channel creation is a real-world, Browserbase-backed action.  The supported
+ * `/api/youtube-create` flow records explicit approval and a durable creation
+ * claim before it can dispatch `youtube-create-channel`.  Keep this route only
+ * to fail closed for old clients; it must never enqueue `provision-youtube`.
  */
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const authFailure = await authorizeStudioRoute(request);
   if (authFailure) return authFailure;
-  let body: { channelId?: string; name?: string };
-  try {
-    body = await request.json();
-  } catch {
-    return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
-  }
-  const channelId = body.channelId?.trim();
-  const name = body.name?.trim();
-  if (!channelId || !name) {
-    return NextResponse.json({ error: "missing channelId or name" }, { status: 400 });
-  }
-  if (!process.env.TRIGGER_SECRET_KEY) {
-    return NextResponse.json({ error: "Engine not activated.", inactive: true }, { status: 503 });
-  }
-  try {
-    const { tasks } = await import("@trigger.dev/sdk");
-    const handle = await tasks.trigger("provision-youtube", { appChannelId: channelId, name });
-    return NextResponse.json({ id: handle.id });
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "trigger failed" },
-      { status: 500 },
-    );
-  }
+  return NextResponse.json(
+    {
+      error: "Legacy YouTube provisioning is retired. Use the approved /api/youtube-create flow.",
+      code: "legacy_youtube_provision_retired",
+    },
+    { status: 410 },
+  );
 }

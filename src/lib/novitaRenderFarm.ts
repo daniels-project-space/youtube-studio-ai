@@ -14,7 +14,7 @@ import { NovitaAdmissionError, requireNovitaFleetReadiness } from "@/lib/novitaF
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import { applyLtxI2vPromptContract } from "@/lib/ltxI2vPrompt";
 import { assertCinematicProofAdmission } from "@/lib/cinematicProofAdmission";
-import type { LtxCreativeAdapterSelection } from "@/lib/ltxCreativeAdapter";
+import type { LtxCreativeAdapterInput } from "@/lib/ltxCreativeAdapter";
 import {
   waitForNovitaRenderPoll,
   type NovitaRenderPollWait,
@@ -44,6 +44,12 @@ export interface Shot {
   /** Script line / image-generation prompt for this shot. */
   prompt: string;
   cameraMove: CameraMove;
+  /**
+   * Optional shot-specific camera direction. This preserves an approved
+   * concrete move (for example, its real foreground/midground parallax) while
+   * `cameraMove` remains the canonical coarse movement category.
+   */
+  cameraInstruction?: string;
   shotScale: ShotScale;
   /** Lens description, e.g. "35mm anamorphic", "85mm portrait". */
   lens: string;
@@ -73,8 +79,12 @@ export interface Shot {
   continuityState?: string;
   generationProfile?: "draft" | "production" | "hero";
   candidateCount?: number;
-  /** Optional cache-pinned LTX creative LoRA; exact-base and benchmark admission is enforced before spend. */
-  creativeAdapter?: LtxCreativeAdapterSelection;
+  /**
+   * Optional cache-pinned LTX creative adapter input. A single LoRA remains
+   * compatible; a stack is capped to complementary roles and needs its own
+   * matched quality benchmark before a worker can be created.
+   */
+  creativeAdapter?: LtxCreativeAdapterInput;
 }
 
 export interface NovitaPhaseProfile {
@@ -273,8 +283,24 @@ export interface NovitaRenderCfg {
     runId: string;
     blockId: string;
   };
-  /** Called after fleet/budget attestation and immediately before paid POST. */
-  beforeProviderSpend?: () => void | Promise<void>;
+  /**
+   * Present only for an authenticated remote render child. It is checked by
+   * the durable Novita worker lease mutations themselves, not merely by the
+   * caller-side pre-spend callback.
+   */
+  remoteChildFence?: {
+    leaseOwner: string;
+    executionLeaseToken: number;
+    dispatchKey: string;
+  };
+  /**
+   * Fenced immediately before every paid direct-worker wave/create and while a
+   * checkpointed worker is being polled. Implementations must tolerate
+   * repeated calls; bridge compatibility callers may still receive no event.
+   */
+  beforeProviderSpend?: (event?: {
+    reason: "paid_wave" | "worker_create" | "poll";
+  }) => void | Promise<void>;
 }
 
 /** Result of an image or video render call. */
@@ -289,6 +315,19 @@ export interface NovitaRenderResult {
   footageKeys?: string[];
   /** Exact shot/candidate mapping; callers never infer identity from array order. */
   candidates?: RenderedCandidate[];
+  /**
+   * Per-output canonical request hashes from the sealed direct-worker
+   * manifests. These are intentionally separate from the aggregate bridge
+   * request so a derivative R2 asset can bind to the exact paid worker that
+   * created it.
+   */
+  requestSha256ByOutputId?: Readonly<Record<string, string>>;
+  /**
+   * Per-output lifecycle receipts from the sealed direct workers. Aggregate
+   * billing remains on `billingReceipt`; this map prevents downstream asset
+   * adapters from inventing a proportional cost allocation.
+   */
+  billingReceiptsByOutputId?: Readonly<Record<string, NovitaBillingReceipt>>;
   /** Per-shot ffprobe evidence for the LTX x2 video phase. */
   videoOutputProofs?: Readonly<Record<string, NovitaVideoOutputProof>>;
   /** Sealed native-720p conditioning still hashes, keyed by exact shot id. */

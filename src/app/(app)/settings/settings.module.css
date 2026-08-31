@@ -349,6 +349,38 @@
   color: color-mix(in srgb, var(--color-ok) 78%, var(--color-muted));
 }
 
+.showBibleRecovery {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.78rem;
+  border: 1px solid color-mix(in srgb, var(--color-accent) 34%, var(--color-border));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-accent-soft) 38%, transparent);
+}
+
+.showBibleRecovery > strong {
+  font-size: 0.8rem;
+}
+
+.showBibleRecovery > p,
+.recoveryAudit {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.73rem;
+  line-height: 1.45;
+}
+
+.showBibleRecoveryForm {
+  display: grid;
+  gap: 0.65rem;
+  padding-top: 0.15rem;
+}
+
+.showBibleTextarea {
+  min-height: 76px;
+  resize: vertical;
+}
+
 .code {
   max-height: 112px;
   overflow: auto;

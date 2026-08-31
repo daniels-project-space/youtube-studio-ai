@@ -3,6 +3,15 @@ import type {
   CasefileCaseResearchOptions,
 } from "./casefileCaseResearcher";
 import type { CasefileSourcePacketContentInput } from "./casefileSourceAutoVerifier";
+import { assertPersistedProgramBriefIdentity } from "@/engine/channelProgramBrief";
+import {
+  assertChannelProgramRouteBinding,
+  assertChannelProgramRoutePipelineCompatibility,
+  type ChannelProgramRouteKey,
+} from "@/engine/channelProgramRoute";
+import { assertChannelShowProfilePipelineCompatibility } from "@/engine/channelShowProfile";
+import { resolveContentLane } from "@/engine/contentLane";
+import type { PipelineEntry } from "@/engine/types";
 
 /**
  * Wires `researchCase()` (fail-closed, zero-fabrication real-case research —
@@ -17,11 +26,12 @@ import type { CasefileSourcePacketContentInput } from "./casefileSourceAutoVerif
  * plain stub functions, the same way `storySpineHookGate.test.ts` stubs a
  * minimal `StageContext` for a Block instead of standing up the real engine.
  *
- * Eligibility is strictly opt-in AND lane-gated:
+ * Eligibility is strictly opt-in, route/profile-admitted, AND lane-gated:
  * `channel.casefileAutoResearchEnabled` must be exactly `true` AND
- * `channel.contentLaneKey` must be exactly `cinematic_ai`. A channel failing
- * either test is `ineligible` and `researchCase` must never even be called
- * for it (see `dispatchCasefileAutoResearch`'s first two branches).
+ * `channel.contentLaneKey` must be exactly `cinematic_ai`. The scheduler also
+ * validates a canonical brief, sealed route, and matching show profile before
+ * it calls this dispatcher. A channel failing any gate is `ineligible` and
+ * `researchCase` must never even be called for it.
  *
  * THIS MODULE IS A SPEND GATE, NOT JUST A ROUTER.
  * -----------------------------------------------
@@ -37,13 +47,22 @@ import type { CasefileSourcePacketContentInput } from "./casefileSourceAutoVerif
  *      skips cleanly rather than buying research for a run that must throw.
  *   2. PER-DISPATCH CEILING. Explicit `maxIters` + `maxCandidatesPerIter`
  *      replace the critique loop's own looser defaults.
- *   3. FLEET-WIDE DAILY CEILING. A counter across ALL enabled channels, so a
- *      handful of channels each failing to converge cannot compound into a
- *      large unnoticed daily bill.
+ *   3. FLEET-WIDE DAILY CEILING. A service-owned atomic claim across ALL
+ *      enabled channels, so concurrent schedulers cannot both buy the last
+ *      remaining slot and a handful of channels cannot compound into a large
+ *      unnoticed daily bill.
  */
 
 /** The only content lane `runPipeline.ts` accepts a Casefile packet on. */
 export const CASEFILE_AUTO_RESEARCH_LANE_KEY = "cinematic_ai";
+
+/**
+ * The allowlist is deliberately empty until a cinematic Program Route binds
+ * real-case sourcing, review, and automatic-dispatch semantics end to end.
+ * Existing Casefile work remains private-review/manual; its route must never
+ * be treated as silent permission for recurring autonomous research.
+ */
+export const CASEFILE_AUTO_RESEARCH_SUPPORTED_ROUTE_KEYS = [] as const satisfies readonly ChannelProgramRouteKey[];
 
 /**
  * PER-DISPATCH SPEND CEILING — the numbers, and why these numbers.
@@ -122,6 +141,100 @@ export interface CasefileAutoResearchChannelInput {
   contentLaneKey: string;
 }
 
+export interface CasefileAutoResearchRouteAdmissionInput {
+  readonly identity?: unknown;
+  readonly contentLane?: unknown;
+  readonly family?: unknown;
+  readonly pipeline?: unknown;
+}
+
+export interface CasefileAutoResearchRouteAdmission {
+  readonly eligible: boolean;
+  readonly reason: string;
+}
+
+export type CasefileResearchAttemptClaim =
+  | {
+      kind: "claimed";
+      /** Count after this attempt was durably reserved. */
+      attemptsToday: number;
+      limit: number;
+    }
+  | {
+      kind: "daily_ceiling_reached";
+      attemptsToday: number;
+      limit: number;
+    };
+
+/**
+ * Pure worker-boundary gate for the only pre-run paid path. It validates the
+ * immutable channel identity/profile first, then checks an explicit automatic
+ * route allowlist. With no current allowed route, this intentionally returns
+ * ineligible for every channel before an attempt is ledgered or research starts.
+ */
+export function casefileAutoResearchRouteAdmission(
+  channel: CasefileAutoResearchRouteAdmissionInput,
+): CasefileAutoResearchRouteAdmission {
+  try {
+    const programBrief = assertPersistedProgramBriefIdentity(channel.identity, {
+      context: "casefile auto-research channel identity",
+      requireProgramBrief: true,
+    });
+    if (!programBrief) {
+      throw new Error("casefile auto-research requires a canonical channel program brief");
+    }
+    const identity = channel.identity && typeof channel.identity === "object" && !Array.isArray(channel.identity)
+      ? channel.identity as { programRoute?: unknown; showProfile?: unknown }
+      : undefined;
+    if (identity?.programRoute === undefined) {
+      throw new Error("casefile auto-research requires a sealed channel program route");
+    }
+    if (!Array.isArray(channel.pipeline)) {
+      throw new Error("casefile auto-research requires a persisted channel pipeline");
+    }
+    const pipeline = channel.pipeline as PipelineEntry[];
+    const route = assertChannelProgramRouteBinding({
+      route: identity.programRoute,
+      programBrief,
+    });
+    assertChannelProgramRoutePipelineCompatibility({ route, programBrief, pipeline });
+    if (identity.showProfile === undefined) {
+      throw new Error("casefile auto-research requires a sealed channel show profile");
+    }
+    const showProfile = assertChannelShowProfilePipelineCompatibility({
+      profile: identity.showProfile,
+      programBrief,
+      pipeline,
+    });
+    if (!showProfile.programRoute || showProfile.programRoute.fingerprint !== route.fingerprint) {
+      throw new Error("casefile auto-research channel show profile does not match its sealed program route");
+    }
+    const lane = resolveContentLane({
+      stored: channel.contentLane,
+      family: channel.family,
+      pipeline,
+    });
+    if (lane.key !== CASEFILE_AUTO_RESEARCH_LANE_KEY || route.contentLaneKey !== lane.key) {
+      throw new Error("casefile auto-research route does not match the cinematic_ai content lane");
+    }
+    if (
+      !(CASEFILE_AUTO_RESEARCH_SUPPORTED_ROUTE_KEYS as readonly string[]).includes(route.routeKey)
+    ) {
+      return {
+        eligible: false,
+        reason:
+          "no sealed channel program route currently admits automatic Casefile research; use the private-review Casefile workflow",
+      };
+    }
+    return { eligible: true, reason: "sealed automatic Casefile route admitted" };
+  } catch (error) {
+    return {
+      eligible: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 export interface CasefileAutoResearchDeps {
   /** Injected so tests can stub success/failure without real web search/LLM calls. */
   researchCase: (
@@ -129,19 +242,16 @@ export interface CasefileAutoResearchDeps {
     opts?: CasefileCaseResearchOptions,
   ) => Promise<CasefileSourcePacketContentInput>;
   /**
-   * Fleet-wide count of billable research attempts already made today (all
-   * channels, not just this one). Wraps
-   * `api.casefileResearchAttempts.countForDay`.
+   * Atomically checks the fleet-wide ceiling and records this attempt in the
+   * same durable mutation. It must be called before `researchCase()`; if it
+   * fails, dispatch declines to research rather than start an uncounted,
+   * unbounded spend path. Wraps
+   * `api.casefileResearchAttempts.claimAttemptUnderDailyCap`.
    */
-  countResearchAttemptsToday: () => Promise<number>;
-  /**
-   * Records ONE billable attempt. Called BEFORE `researchCase()` so that
-   * research which crashes part-way — having already paid for its browser
-   * sessions — still counts against the ceiling. Wraps
-   * `api.casefileResearchAttempts.recordAttempt`. If this throws, dispatch
-   * declines to research at all: an uncountable attempt is an unbounded one.
-   */
-  recordResearchAttempt: (channelId: string) => Promise<void>;
+  claimResearchAttempt: (
+    channelId: string,
+    limit: number,
+  ) => Promise<CasefileResearchAttemptClaim>;
   /**
    * Fleet-wide ceiling for today. `0` disables automatic research entirely,
    * which is a legitimate operator kill switch, not a misconfiguration.
@@ -190,9 +300,10 @@ export type CasefileAutoResearchOutcome =
  * throwing. That is expected, normal behavior — refusing to fabricate is the
  * point — so the caller must not alert on it, must not retry in a tight
  * loop, and must not fall back to non-Casefile content. It also must not
- * explicitly release the already-claimed run/plan slot: `claimNextPlanRun`
- * safely reattaches to a still-`queued` run on the next due cycle, so simply
- * not triggering is sufficient for a bounded, self-healing retry cadence.
+ * record the result against that queued plan: the scheduler's durable outcome
+ * mutation releases a bounded retry, or marks the exact plan manual-required
+ * once its failure/age ceiling is reached. It never falls back to unrelated
+ * content.
  */
 export async function dispatchCasefileAutoResearch(
   channel: CasefileAutoResearchChannelInput,
@@ -215,34 +326,34 @@ export async function dispatchCasefileAutoResearch(
     return { outcome: "ineligible" };
   }
 
-  // FLEET-WIDE DAILY CEILING — checked before `researchCase()`, never after.
-  const attemptsToday = await deps.countResearchAttemptsToday();
-  if (attemptsToday >= deps.maxResearchAttemptsPerDay) {
+  // FLEET-WIDE DAILY CEILING — atomically claimed before `researchCase()`,
+  // never after. A split count + insert has a check-then-act race when two
+  // scheduler invocations observe the last remaining slot concurrently.
+  let attemptClaim: CasefileResearchAttemptClaim;
+  try {
+    attemptClaim = await deps.claimResearchAttempt(
+      channel.channelId,
+      deps.maxResearchAttemptsPerDay,
+    );
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error);
+    deps.log(
+      `casefile auto-research: "${channel.channelName}": could not atomically claim the billable research attempt, ` +
+        `so research was NOT started (spend guard failing closed): ${reason}`,
+    );
+    return { outcome: "research_failed", reason: `attempt ledger claim failed: ${reason}` };
+  }
+  if (attemptClaim.kind === "daily_ceiling_reached") {
     deps.log(
       `casefile auto-research: "${channel.channelName}": daily research ceiling reached ` +
-        `(${attemptsToday}/${deps.maxResearchAttemptsPerDay} attempts today across all channels) — ` +
+        `(${attemptClaim.attemptsToday}/${attemptClaim.limit} attempts today across all channels) — ` +
         "skipping, not an error",
     );
     return {
       outcome: "daily_ceiling_reached",
-      attemptsToday,
-      limit: deps.maxResearchAttemptsPerDay,
+      attemptsToday: attemptClaim.attemptsToday,
+      limit: attemptClaim.limit,
     };
-  }
-
-  // Count the attempt BEFORE spending. Research that throws part-way has
-  // still paid for its browser sessions, so a started attempt must always be
-  // counted; and if the counter itself cannot be written, decline rather
-  // than research uncounted.
-  try {
-    await deps.recordResearchAttempt(channel.channelId);
-  } catch (error) {
-    const reason = error instanceof Error ? error.message : String(error);
-    deps.log(
-      `casefile auto-research: "${channel.channelName}": could not record the billable research attempt, ` +
-        `so research was NOT started (spend guard failing closed): ${reason}`,
-    );
-    return { outcome: "research_failed", reason: `attempt ledger write failed: ${reason}` };
   }
 
   const excludeCaseIds = await deps.listExcludedCaseIds(channel.channelId);

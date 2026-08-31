@@ -1,51 +1,33 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties } from "react";
+import type { CSSProperties } from "react";
+import { MediaPreview } from "./MediaPreview";
 
 /**
- * Renders a private R2 object (thumbnail/image) by presigning it via the
- * server-only /api/asset-url route — the browser only ever sees the short-lived
- * signed URL. Shows a tasteful placeholder while loading / when absent. Optional
- * `fallbackSrc` (e.g. a public YouTube thumb) is used if there's no R2 key.
+ * Backwards-compatible private-asset image entry point. The media primitive
+ * retains the area while a signed R2 URL resolves and only uses a public
+ * fallback after the retained asset cannot be loaded.
  */
 export function AssetImg({
   k,
   alt,
   style,
   fallbackSrc,
+  fallbackSource = "fallback",
 }: {
   k?: string | null;
   alt: string;
   style?: CSSProperties;
   fallbackSrc?: string;
+  fallbackSource?: "youtube" | "fallback";
 }) {
-  const [resolved, setResolved] = useState<{ key: string; url: string | null } | null>(null);
-  useEffect(() => {
-    if (!k) return;
-    let live = true;
-    fetch(`/api/asset-url?key=${encodeURIComponent(k)}`)
-      .then((r) => r.json() as Promise<{ url?: string }>)
-      .then((data) => {
-        if (live) setResolved({ key: k, url: data.url ?? null });
-      })
-      .catch(() => {
-        if (live) setResolved({ key: k, url: null });
-      });
-    return () => { live = false; };
-  }, [k]);
-
-  const base: CSSProperties = {
-    background: "var(--color-surface)",
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    color: "var(--color-muted)",
-    fontSize: "0.72rem",
-    ...style,
-  };
-  const url = resolved && resolved.key === k ? resolved.url : null;
-  const src = url ?? (!k ? fallbackSrc : undefined);
-  if (!src) return <div style={base}>{k ? "rendering…" : "no thumbnail"}</div>;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={src} alt={alt} style={{ objectFit: "cover", ...style }} />;
+  return (
+    <MediaPreview
+      assetKey={k}
+      alt={alt}
+      fallbackSrc={fallbackSrc}
+      fallbackSource={fallbackSource}
+      style={style}
+    />
+  );
 }

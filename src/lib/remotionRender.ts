@@ -215,6 +215,7 @@ export async function renderDataInsert(args: {
   events?: { idx: number; label: string }[];
   palette?: string[];
   accent?: string;
+  presentation?: "clean_editorial" | "technical_grid" | "soft_paper";
   outPath: string;
   durationSec: number;
   width?: number;
@@ -239,6 +240,7 @@ export async function renderDataInsert(args: {
     events: args.events,
     palette: args.palette ?? [],
     accent: args.accent,
+    presentation: args.presentation,
     durationInFrames,
     width,
     height,
@@ -311,6 +313,7 @@ export async function renderThumbTextLayer(args: {
 export async function renderQuoteOverlay(args: {
   quote: string;
   highlights?: string[];
+  presentation?: "editorial_glass" | "ink_card" | "signal_card";
   outPath: string;
   durationSec: number;
   width?: number;
@@ -327,6 +330,7 @@ export async function renderQuoteOverlay(args: {
   const inputProps = {
     quote: args.quote,
     highlights: args.highlights ?? [],
+    presentation: args.presentation,
     durationInFrames,
     width,
     height,

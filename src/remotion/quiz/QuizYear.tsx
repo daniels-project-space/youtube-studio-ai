@@ -1,6 +1,7 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
-import { quizCitationLabel } from "@/lib/quizCitation";
+// Keep the isolated quiz bundle free of Next's `@/` resolver requirement.
+import { quizCitationLabel } from "../../lib/quizCitation";
 
 /**
  * One quiz round, rendered as standard game-show multiple choice: four options

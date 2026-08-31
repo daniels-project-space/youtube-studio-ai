@@ -199,13 +199,22 @@ async function routingProof(): Promise<void> {
     "src/trigger/planWeekAhead.ts": /generateNanoBananaImageWithReceipt/,
     "src/trigger/blocks/intelligenceBlocks.ts": /generateNanoBananaImageWithReceipt/,
     "src/trigger/blocks/motionComicBlocks.ts": /createAttestedNovitaImageGenerator/,
-    "src/trigger/blocks/whiteboardScribeBlocks.ts": /createAttestedNovitaImageGenerator/,
+    "src/trigger/blocks/whiteboardScribeBlocks.ts": /generateNanoBananaProWhiteboardArtWithReceipt/,
     "src/trigger/blocks/loreShortBlocks.ts": /createAttestedNovitaImageGenerator/,
     "src/trigger/blocks/lofiBlocks.ts": /renderNovitaImage/,
   };
   for (const [relative, expected] of Object.entries(explicitInjection)) {
     assert.match(await readFile(join(process.cwd(), relative), "utf8"), expected);
   }
+  const whiteboardSource = await readFile(
+    join(process.cwd(), "src/trigger/blocks/whiteboardScribeBlocks.ts"),
+    "utf8",
+  );
+  assert.doesNotMatch(
+    whiteboardSource,
+    /\bcreateAttestedNovitaImageGenerator\b|\brenderNovitaImage\b/,
+    "Whiteboard art must stay on its sealed Nano Banana Pro route rather than falling back to Novita",
+  );
   const triggerConfig = await readFile(join(process.cwd(), "trigger.config.ts"), "utf8");
   assert.match(triggerConfig, /FORWARDED_ENV[\s\S]*"GEMINI_API_KEY"/,
     "Trigger deploys must forward the direct Nano Banana credential when present");

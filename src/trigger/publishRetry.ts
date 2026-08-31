@@ -45,7 +45,7 @@ export async function enqueueFailedPipelineResume(
   run: DurablePipelineRunForPublishResume | null | undefined,
   trigger: PublishPipelineResumeTrigger = async (taskId, payload, options) =>
     await tasks.trigger(taskId, payload, options),
-): Promise<{ runId: string; idempotencyKey: string } | undefined> {
+): Promise<{ runId: string; idempotencyKey: string; enqueueAttempt: number } | undefined> {
   const request = publishPipelineResumeTriggerRequest(intent, run);
   if (!request) return undefined;
   const handle = await trigger(
@@ -56,5 +56,6 @@ export async function enqueueFailedPipelineResume(
   return {
     runId: handle.id,
     idempotencyKey: request.options.idempotencyKey,
+    enqueueAttempt: request.enqueueAttempt,
   };
 }

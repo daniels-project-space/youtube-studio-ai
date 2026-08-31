@@ -26,6 +26,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { makeRunTempDir, readBytes } from "@/lib/files";
+import { createThumbnailCurrentCandidateEvidence } from "@/lib/thumbnailRefreshInventory";
 import { putObject } from "@/lib/storage";
 import {
   beginThumbnailPaidWork,
@@ -54,7 +55,21 @@ import {
 import { agentJson } from "@/agents/mastra";
 import { produceAndCritique, type ChannelCritiqueContext } from "@/engine/critiqueLoop";
 import { laneQualityPolicy } from "@/engine/contentLane";
+import {
+  assertScenarioVisualTreatmentThumbnailBinding,
+  createScenarioVisualTreatmentThumbnailBinding,
+  createScenarioVisualTreatmentThumbnailProvenance,
+  resolveScenarioVisualTreatmentForNewVisualArtifact,
+  scenarioVisualTreatmentThumbnailDirection,
+  scenarioVisualTreatmentThumbnailQaPassed,
+} from "@/engine/scenarioVisualTreatment";
+import {
+  assertPackageToOpeningPlanBinding,
+  createPackageToOpeningPlan,
+} from "@/engine/packageToOpening";
 import { loadPerformanceContext } from "@/lib/performance";
+import { renderSerializedProgramEpisodeContextForPrompt } from "@/lib/serializedProgramEpisodeContext";
+import { serializedProgramEpisodeContextForStage } from "@/trigger/serializedProgramEpisodeContext";
 import { z } from "zod";
 
 /** SEO chunk structured-output schemas (validated on Mastra + REST). */
@@ -72,6 +87,7 @@ const LOFI_LEAK = /lo-?fi|beats to (relax|study)|study music|chill beats/i;
 import { refreshNicheResearchCore } from "@/lib/nicheResearch";
 import { loadOutlierBank } from "@/lib/topicraft";
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 
 /* ----------------------------- helpers --------------------------------- */
 
@@ -276,14 +292,19 @@ function buildThumbnailDescription(args: {
   title: string;
   topic: string;
   scriptExcerpt: string;
+  serializedEpisodeContext?: string;
 }): string {
   const episodeContext = args.scriptExcerpt.replace(/\s+/g, " ").trim().slice(0, 420);
+  const serialContext = args.serializedEpisodeContext?.replace(/\s+/g, " ").trim().slice(0, 360);
   return [
     `Thumbnail promise: ${args.title.trim()}.`,
     `Visually enact the topic "${args.topic.trim()}" through one dominant subject, a concrete physical action, and a clear consequence; the image must communicate the promise without decorative filler or written words.`,
     episodeContext
       ? `Ground the scene in this actual episode context: ${episodeContext}`
       : "Keep the scene specific to this episode's topic and honest promise.",
+    serialContext
+      ? `Serial-continuity constraint: preserve this episode's actual arc and entities without implying a different part: ${serialContext}`
+      : "",
   ].join(" ");
 }
 
@@ -302,6 +323,10 @@ export const metadataOptimized: Block = {
   ],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
+    const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "metadata");
+    const serializedEpisodePrompt = serializedEpisodeContext
+      ? renderSerializedProgramEpisodeContextForPrompt(serializedEpisodeContext)
+      : "";
     const plannedTitle = typeof ctx.store["plannedTitle"] === "string"
       ? (ctx.store["plannedTitle"] as string).trim()
       : "";
@@ -346,6 +371,11 @@ export const metadataOptimized: Block = {
       if (sc?.sections?.length) {
         scriptExcerpt = sc.sections.map((s) => s.heading).filter(Boolean).join("; ").slice(0, 800);
       }
+    }
+    if (serializedEpisodePrompt) {
+      // Keep serial continuity in the same bounded script-grounding channel
+      // used by every metadata path, including provider fallbacks.
+      scriptExcerpt = `${serializedEpisodePrompt}\n\n${scriptExcerpt}`.trim().slice(0, 1_400);
     }
 
     // TITLE-PROMISE CONTRACT: title, thumbnail and the first 15 seconds are ONE
@@ -395,6 +425,7 @@ export const metadataOptimized: Block = {
           title: plannedTitle || title,
           topic,
           scriptExcerpt,
+          ...(serializedEpisodePrompt ? { serializedEpisodeContext: serializedEpisodePrompt } : {}),
         }),
         tags,
         pinnedComment: "",
@@ -450,6 +481,7 @@ export const metadataOptimized: Block = {
           title: plannedTitle || title,
           topic,
           scriptExcerpt,
+          ...(serializedEpisodePrompt ? { serializedEpisodeContext: serializedEpisodePrompt } : {}),
         }),
         tags,
         pinnedComment: m.pinnedComment,
@@ -680,6 +712,7 @@ export const metadataOptimized: Block = {
         title: plannedTitle || title,
         topic,
         scriptExcerpt,
+        ...(serializedEpisodePrompt ? { serializedEpisodeContext: serializedEpisodePrompt } : {}),
       }),
       tags,
       pinnedComment: "",
@@ -689,19 +722,86 @@ export const metadataOptimized: Block = {
   },
 };
 
-/* -------------------------- 3. thumbnail_gen ---------------------------- */
+/* --------------------- 3. package-to-opening plan ------------------------ */
+
+/**
+ * Freeze the package promise before the paid thumbnail boundary. The plan is
+ * intentionally structural: later final QA binds it to a durable opening
+ * frame, but does not infer semantic equivalence from text alone.
+ */
+export const packageToOpeningPlan: Block = {
+  id: "package_to_opening_plan",
+  consumes: ["title", "thumbnailDescription", "topic"],
+  produces: ["packageToOpeningPlan"],
+  run: async (ctx) => {
+    return {
+      packageToOpeningPlan: createPackageToOpeningPlan({
+        title: str(ctx, "title"),
+        thumbnailDescription: str(ctx, "thumbnailDescription"),
+        topic: str(ctx, "topic"),
+        route: ctx.store["channelProgramRoute"],
+        script: ctx.store["script"],
+        quizPlan: ctx.store["quizPlan"],
+        family: ctx.store["family"],
+        contentLane: ctx.store["contentLane"],
+      }),
+    };
+  },
+};
+
+/* -------------------------- 4. thumbnail_gen ---------------------------- */
 
 export const thumbnailGen: Block = {
   id: "thumbnail_gen",
-  consumes: ["title", "thumbnailDescription"],
+  consumes: ["title", "thumbnailDescription", "topic", "packageToOpeningPlan"],
   // `strategy` feeds the thumbnail learning loop (which path produced the
   // shipped thumbnail); every return path below must include it.
-  produces: ["thumbnailKey", "strategy", "thumbnailPublishable"],
+  produces: ["thumbnailKey", "strategy", "thumbnailPublishable", "thumbnailScenarioVisualTreatmentProvenance"],
   paid: true,
   run: async (ctx) => {
     const quality = qualityProfile(ctx.params["qualityProfile"]);
     const title = str(ctx, "title");
     const thumbnailDescription = str(ctx, "thumbnailDescription").replace(/\s+/g, " ").trim();
+    const packageTopic = str(ctx, "topic");
+    const packageToOpening = assertPackageToOpeningPlanBinding({
+      plan: ctx.store["packageToOpeningPlan"],
+      title,
+      thumbnailDescription,
+      topic: packageTopic,
+      route: ctx.store["channelProgramRoute"],
+      script: ctx.store["script"],
+      quizPlan: ctx.store["quizPlan"],
+      family: ctx.store["family"],
+      contentLane: ctx.store["contentLane"],
+    });
+    // Package art is a separately generated, publishable visual asset. Bind it
+    // before checkpoint admission so a malformed/missing fictional treatment
+    // can neither reuse a generic candidate nor begin provider work.
+    const scenarioVisualTreatment = resolveScenarioVisualTreatmentForNewVisualArtifact({
+      treatment: ctx.store["scenarioVisualTreatment"],
+      route: ctx.store["channelProgramRoute"],
+      scenario: ctx.store["syntheticScenario"],
+      disclosure: ctx.store["syntheticScenarioDisclosure"],
+      topic: ctx.store["topic"],
+      consumer: "thumbnail_gen",
+      operation: "generate thumbnail package art",
+    });
+    if (scenarioVisualTreatment && typeof ctx.store["topic"] !== "string") {
+      throw new Error("thumbnail_gen: fictional scenario requires its exact active topic before thumbnail work");
+    }
+    if (scenarioVisualTreatment && ctx.store["syntheticScenarioDisclosure"] === undefined) {
+      throw new Error("thumbnail_gen: fictional scenario lacks its verified disclosure receipt");
+    }
+    const thumbnailScenarioVisualTreatmentBinding = scenarioVisualTreatment
+      ? createScenarioVisualTreatmentThumbnailBinding(scenarioVisualTreatment)
+      : undefined;
+    const thumbnailVisualTreatment = scenarioVisualTreatment
+      ? scenarioVisualTreatmentThumbnailDirection(scenarioVisualTreatment)
+      : undefined;
+    const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "thumbnail_gen");
+    const serializedEpisodePrompt = serializedEpisodeContext
+      ? renderSerializedProgramEpisodeContextForPrompt(serializedEpisodeContext)
+      : "";
     if (thumbnailDescription.length < 80) {
       throw new Error("thumbnail_gen: thumbnailDescription must contain a concrete visual brief of at least 80 characters");
     }
@@ -793,7 +893,10 @@ export const thumbnailGen: Block = {
     const energyOverride = ctx.params["thumbEnergy"] as "spectacle" | "bold" | "cozy_pop" | undefined;
     const effectivePlaybook = energyOverride ? { ...playbook, energy: energyOverride } : playbook;
 
-    const scriptHint = String(ctx.store["narrationText"] ?? "").slice(0, 500);
+    const scriptHint = [
+      serializedEpisodePrompt ? `Immutable serial continuity:\n${serializedEpisodePrompt}` : "",
+      String(ctx.store["narrationText"] ?? "").slice(0, 500),
+    ].filter(Boolean).join("\n\n").slice(0, 1_000);
 
     // ── PRODUCE → CRITIQUE → REGENERATE (P1-3) ───────────────────────────────
     // The thumbnail is the highest-CTR-leverage asset in the run and used to be
@@ -830,6 +933,7 @@ export const thumbnailGen: Block = {
     interface ThumbnailAttempt {
       outJpg: string;
       requestHash: string;
+      qaRequestHash: string;
       refQA: ThumbnailGateVerdict | null;
       providerEvidence?: ThumbnailNanoBananaEvidence;
     }
@@ -842,15 +946,24 @@ export const thumbnailGen: Block = {
       channel: thumbnailChannel,
       produce: async (priorIssues, iter): Promise<ThumbnailAttempt> => {
         const requestHash = thumbnailRequestHash({
-          contract: "thumbnail-gen-checkpoint-v4-nano-banana-only",
+          contract: thumbnailScenarioVisualTreatmentBinding
+            ? "thumbnail-gen-checkpoint-v5-nano-banana-scenario-treatment"
+            : "thumbnail-gen-checkpoint-v4-nano-banana-only",
           title,
           thumbnailDescription,
+          packageToOpeningPlanFingerprint: packageToOpening.planFingerprint,
           scriptHint,
           sceneMandate: dnaThumb?.subject,
           pattern,
           playbook: effectivePlaybook,
           patternIndex: idx,
           providerRoute: NANO_BANANA_THUMBNAIL_PROFILE,
+          ...(serializedEpisodeContext
+            ? { serializedEpisodeContextFingerprint: serializedEpisodeContext.fingerprint }
+            : {}),
+          ...(thumbnailScenarioVisualTreatmentBinding
+            ? { scenarioVisualTreatment: thumbnailScenarioVisualTreatmentBinding }
+            : {}),
           // Iteration identity: without these two, a regenerate would re-read
           // the previous rejected candidate's checkpoint and change nothing.
           critiqueIteration: iter,
@@ -868,6 +981,9 @@ export const thumbnailGen: Block = {
           checkpointRoot: `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,
           requestHash,
           localImagePath: outJpg,
+          ...(thumbnailScenarioVisualTreatmentBinding
+            ? { scenarioVisualTreatmentBinding: thumbnailScenarioVisualTreatmentBinding }
+            : {}),
           beforeClaim: () => {
             if (!hasNanoBanana()) {
               throw new Error("thumbnail_gen: Nano Banana is not configured");
@@ -880,11 +996,21 @@ export const thumbnailGen: Block = {
 
         if (checkpoint.manifest) {
           if (
-            (checkpoint.manifest.version !== 2 || !checkpoint.manifest.providerEvidence)
+            ((checkpoint.manifest.version !== 2 && checkpoint.manifest.version !== 3) ||
+              !checkpoint.manifest.providerEvidence)
           ) {
             throw new Error(
               "thumbnail_gen: generated Nano Banana checkpoint is missing durable provider evidence",
             );
+          }
+          if (thumbnailScenarioVisualTreatmentBinding) {
+            assertScenarioVisualTreatmentThumbnailBinding({
+              binding: checkpoint.manifest.scenarioVisualTreatment,
+              treatment: scenarioVisualTreatment,
+              consumer: "thumbnail_gen checkpoint",
+            });
+          } else if (checkpoint.manifest.scenarioVisualTreatment !== undefined) {
+            throw new Error("thumbnail_gen: non-fictional thumbnail checkpoint carries a scenario visual treatment binding");
           }
           checkpointGenerationCostUsd += checkpoint.manifest.generationCostUsd;
           ctx.log(
@@ -925,6 +1051,7 @@ export const thumbnailGen: Block = {
             ...(dnaThumb?.subject ? { sceneMandate: dnaThumb.subject } : {}),
             ...(priorIssues.length ? { priorIssues } : {}),
             ...(criticDoctrine ? { criticDoctrine } : {}),
+            ...(thumbnailVisualTreatment ? { visualTreatment: thumbnailVisualTreatment } : {}),
           });
           // Persist THIS iteration's authoritative generation spend: the exact
           // concept token usage plus the actual image counter delta. The local
@@ -943,20 +1070,38 @@ export const thumbnailGen: Block = {
         // now feeds the regenerate; it never starts another paid RENDERER or
         // swaps in a generic card.
         const qaRequestHash = thumbnailRequestHash({
-          contract: "thumbnail-mobile-reference-qa-v2-exact-accounting",
+          contract: thumbnailScenarioVisualTreatmentBinding
+            ? "thumbnail-mobile-reference-qa-v3-scenario-treatment"
+            : "thumbnail-mobile-reference-qa-v2-exact-accounting",
           candidateRequestHash: requestHash,
           quality,
           title,
+          packageToOpeningPlanFingerprint: packageToOpening.planFingerprint,
           niche,
           qaBrandContext,
           playbookRules: effectivePlaybook.rules,
           playbookAvoid: effectivePlaybook.avoid,
           referenceThumbs,
+          ...(thumbnailScenarioVisualTreatmentBinding
+            ? {
+                scenarioVisualTreatment: thumbnailScenarioVisualTreatmentBinding,
+                visualTreatmentCriteria: thumbnailVisualTreatment?.reviewCriteria,
+              }
+            : {}),
         });
         let refQA: ThumbnailGateVerdict | null;
         const cachedQa = checkpoint.manifest?.qa;
         if (cachedQa?.completed && cachedQa.requestHash === qaRequestHash) {
           checkpointQaCostUsd += cachedQa.costUsd;
+          if (thumbnailScenarioVisualTreatmentBinding) {
+            assertScenarioVisualTreatmentThumbnailBinding({
+              binding: cachedQa.scenarioVisualTreatment?.binding,
+              treatment: scenarioVisualTreatment,
+              consumer: "thumbnail_gen checkpoint QA",
+            });
+          } else if (cachedQa.scenarioVisualTreatment !== undefined) {
+            throw new Error("thumbnail_gen: non-fictional thumbnail QA checkpoint carries a scenario visual treatment binding");
+          }
           if (cachedQa.verdict === null) {
             refQA = null;
           } else {
@@ -969,11 +1114,20 @@ export const thumbnailGen: Block = {
               !Number.isFinite(verdict.styleMatch) ||
               !Number.isFinite(verdict.storyMatch) ||
               typeof verdict.uiClean !== "boolean" ||
+              (thumbnailScenarioVisualTreatmentBinding &&
+                typeof verdict.visualTreatmentCompliant !== "boolean") ||
               typeof verdict.reason !== "string"
             ) {
               throw new Error("thumbnail_gen: cached QA verdict is invalid");
             }
             refQA = verdict as ThumbnailGateVerdict;
+          }
+          if (
+            thumbnailScenarioVisualTreatmentBinding &&
+            cachedQa.scenarioVisualTreatment?.visualTreatmentCompliant !==
+              (refQA?.visualTreatmentCompliant === true)
+          ) {
+            throw new Error("thumbnail_gen: checkpoint QA treatment verdict does not match its sealed binding");
           }
           ctx.log("thumbnail_gen: reused checkpointed mobile/reference QA verdict");
         } else {
@@ -987,6 +1141,9 @@ export const thumbnailGen: Block = {
               playbook: effectivePlaybook,
               referenceUrls: referenceThumbs,
               brandContext: qaBrandContext,
+              ...(thumbnailVisualTreatment
+                ? { visualTreatmentCriteria: thumbnailVisualTreatment.reviewCriteria }
+                : {}),
               log: ctx.log,
             });
           } catch (error) {
@@ -1001,14 +1158,24 @@ export const thumbnailGen: Block = {
             requestHash: qaRequestHash,
             verdict: refQA,
             costUsd: iterationQaSpend,
+            ...(thumbnailScenarioVisualTreatmentBinding
+              ? {
+                  scenarioVisualTreatment: {
+                    binding: thumbnailScenarioVisualTreatmentBinding,
+                    visualTreatmentCompliant: refQA?.visualTreatmentCompliant === true,
+                  },
+                }
+              : {}),
           });
         }
-        const providerEvidence = checkpoint.manifest?.version === 2
+        const providerEvidence =
+          (checkpoint.manifest?.version === 2 || checkpoint.manifest?.version === 3)
           ? checkpoint.manifest.providerEvidence
           : undefined;
         return {
           outJpg,
           requestHash,
+          qaRequestHash,
           refQA,
           ...(providerEvidence ? { providerEvidence } : {}),
         };
@@ -1024,7 +1191,11 @@ export const thumbnailGen: Block = {
           // `assertThumbnailGate`, which is the real gate.
           return { score: iter === 1 ? 1 : 0, pass: true, issues: [] };
         }
-        if (thumbnailGatePassed(verdict)) return { score: 1, pass: true, issues: [] };
+        const visualTreatmentPassed =
+          !thumbnailScenarioVisualTreatmentBinding || scenarioVisualTreatmentThumbnailQaPassed(verdict);
+        if (thumbnailGatePassed(verdict) && visualTreatmentPassed) {
+          return { score: 1, pass: true, issues: [] };
+        }
         const numeric = (verdict.punch + verdict.styleMatch + verdict.storyMatch) / 30;
         const booleans = [verdict.textOk, verdict.faceClear, verdict.uiClean].filter(Boolean).length / 3;
         const issues = [
@@ -1035,6 +1206,9 @@ export const thumbnailGen: Block = {
           verdict.punch >= 7 ? "" : `visual punch scored ${verdict.punch}/10 — the frame is not arresting enough in a feed`,
           verdict.styleMatch >= 7 ? "" : `style match scored ${verdict.styleMatch}/10 — it is off this channel's visual world`,
           verdict.storyMatch >= 7 ? "" : `story match scored ${verdict.storyMatch}/10 — the image does not enact the video's topic`,
+          visualTreatmentPassed
+            ? ""
+            : "the thumbnail violates or lacks a passing sealed fictional-scenario visual-treatment review",
         ].map((issue) => String(issue ?? "").trim()).filter(Boolean).slice(0, 6);
         ctx.log(
           `thumbnail_gen: candidate ${iter} REJECTED by the grader (${verdict.reason.slice(0, 120)})` +
@@ -1049,21 +1223,68 @@ export const thumbnailGen: Block = {
     const winner = attemptLoop.value;
     const outJpg = winner.outJpg;
     const requestHash = winner.requestHash;
+    const qaRequestHash = winner.qaRequestHash;
     const refQA = winner.refQA;
     ctx.log(
       `thumbnail_gen: critique loop finished after ${attemptLoop.iterations} candidate(s) ` +
       `(${attemptLoop.accepted ? "accepted" : "best of the rejected set"})`,
     );
     assertThumbnailGate(quality, refQA, `${strategy} candidate`);
-    const passed = refQA !== null && thumbnailGatePassed(refQA);
+    if (
+      scenarioVisualTreatment &&
+      quality === "production" &&
+      !scenarioVisualTreatmentThumbnailQaPassed(refQA)
+    ) {
+      throw new Error("thumbnail_gen: sealed fictional scenario thumbnail lacks a passing visual-treatment QA verdict");
+    }
+    const passed =
+      refQA !== null &&
+      thumbnailGatePassed(refQA) &&
+      (!scenarioVisualTreatment || scenarioVisualTreatmentThumbnailQaPassed(refQA));
     const publishable = quality === "production" ? true : passed;
     const finalStrategy = publishable ? strategy : "playbook_belowbar";
     const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
     const providerEvidence = winner.providerEvidence;
-    await putObject(thumbnailKey, await readBytes(outJpg), {
+    const thumbnailBytes = await readBytes(outJpg);
+    const thumbnailArtifactSha256 = createHash("sha256").update(thumbnailBytes).digest("hex");
+    const thumbnailScenarioVisualTreatmentProvenance =
+      scenarioVisualTreatment &&
+      thumbnailScenarioVisualTreatmentBinding &&
+      scenarioVisualTreatmentThumbnailQaPassed(refQA)
+        ? createScenarioVisualTreatmentThumbnailProvenance({
+            treatment: scenarioVisualTreatment,
+            binding: thumbnailScenarioVisualTreatmentBinding,
+            thumbnailRequestHash: requestHash,
+            qaRequestHash,
+            artifactSha256: thumbnailArtifactSha256,
+            visualTreatmentCompliant: true,
+          })
+        : undefined;
+    // This marker is deliberately provenance-only. It gives the Studio a
+    // durable way to distinguish a new, run-bound Golden candidate from an
+    // older thumbnail without suggesting that it has been owner-approved for
+    // an external replacement.
+    const thumbnailCurrentCandidateEvidence =
+      publishable && providerEvidence
+        ? createThumbnailCurrentCandidateEvidence({
+            ownerId: ctx.ownerId,
+            channelId: ctx.channelId,
+            runId: ctx.runId,
+            r2Key: thumbnailKey,
+            artifactSha256: thumbnailArtifactSha256,
+            providerRequestSha256: providerEvidence.receipt.providerRequestSha256,
+            providerResponseSha256: providerEvidence.receipt.responseSha256,
+          })
+        : undefined;
+    await putObject(thumbnailKey, thumbnailBytes, {
       contentType: "image/jpeg",
       metadata: {
         "thumbnail-request-sha256": requestHash,
+        ...(thumbnailScenarioVisualTreatmentProvenance ? {
+          "thumbnail-scenario-visual-treatment-fingerprint": thumbnailScenarioVisualTreatmentProvenance.fingerprint,
+          "thumbnail-scenario-visual-treatment-fingerprint-source":
+            thumbnailScenarioVisualTreatmentProvenance.binding.treatmentFingerprint,
+        } : {}),
         ...(providerEvidence ? {
           "thumbnail-provider-request-sha256": providerEvidence.receipt.providerRequestSha256,
           "thumbnail-provider-response-sha256": providerEvidence.receipt.responseSha256,
@@ -1080,6 +1301,11 @@ export const thumbnailGen: Block = {
       providerRoute: providerEvidence?.receipt.route ?? "verified-video-still",
       providerRequestSha256: providerEvidence?.receipt.providerRequestSha256,
       providerResponseSha256: providerEvidence?.receipt.responseSha256,
+      ...(thumbnailCurrentCandidateEvidence
+        ? { thumbnailCurrentCandidateEvidence }
+        : {}),
+      scenarioVisualTreatmentProvenanceFingerprint:
+        thumbnailScenarioVisualTreatmentProvenance?.fingerprint,
     });
     ctx.log(
       `thumbnail_gen: ${finalStrategy} thumbnail rendered${refQA ? ` — ref QA: ${refQA.reason}` : " (draft, unverified)"}`,
@@ -1088,6 +1314,9 @@ export const thumbnailGen: Block = {
       thumbnailKey,
       strategy: finalStrategy,
       thumbnailPublishable: publishable,
+      ...(thumbnailScenarioVisualTreatmentProvenance
+        ? { thumbnailScenarioVisualTreatmentProvenance }
+        : {}),
       [COST_PATCH_KEY]: thumbnailCost(),
     };
     } catch (error) {
@@ -1102,5 +1331,6 @@ export const thumbnailGen: Block = {
 export const intelligenceBlocks: Block[] = [
   competitorResearch,
   metadataOptimized,
+  packageToOpeningPlan,
   thumbnailGen,
 ];

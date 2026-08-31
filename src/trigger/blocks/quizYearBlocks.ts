@@ -60,6 +60,10 @@ import {
 } from "@/engine/critiqueLoop";
 import { laneQualityPolicy } from "@/engine/contentLane";
 import {
+  parseChannelProgramRouteRunSeed,
+  type ChannelProgramRouteRunSeed,
+} from "@/engine/channelProgramRoute";
+import {
   assertAnswerIntegrity,
   assertOptionIntegrity,
   buildYearOptions,
@@ -93,8 +97,15 @@ import {
   assertCertifiedQuizTopicPlan,
   assertCertifiedQuizTopicSafety,
 } from "@/trigger/blocks/quizPlanningBlocks";
-import { renderQuizYear, type QuizYearRound } from "@/lib/quizYearRender";
-import { muxLoopedMusicBed } from "@/lib/ffmpeg";
+import {
+  preflightQuizYearPortrait,
+  QUIZ_YEAR_PORTRAIT_INTRO_SECONDS,
+  renderQuizYear,
+  renderQuizYearPortrait,
+  type QuizYearRound,
+} from "@/lib/quizYearRender";
+import { measureAudio, muxLoopedMusicBed } from "@/lib/ffmpeg";
+import { assertQuizYearAudibleMix } from "@/lib/quizYearAudioMix";
 import { quizCitationLabel } from "@/lib/quizCitation";
 import {
   assertQuizIntegrity,
@@ -102,6 +113,10 @@ import {
   orderQuizRoundsForDifficulty,
 } from "@/lib/quizIntegrity";
 import type { TimedOnScreenTextCue } from "@/lib/onScreenTextProof";
+import {
+  quizSubjectIdsUsedByOtherRuns,
+  quizSubjectMemoryKey,
+} from "@/lib/quizSubjectMemory";
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -139,6 +154,21 @@ export const QUIZ_DEFAULT_REVEAL_SECONDS = 4;
 /** Round-count bounds. Floor keeps a watchable video; ceiling caps LLM calls. */
 export const QUIZ_MIN_ROUNDS = 3;
 export const QUIZ_MAX_ROUNDS = 15;
+export const QUIZ_SHORT_OPENING_HOOK_VERSION = "quiz-short-opening-hook/v1" as const;
+
+/**
+ * Renderer-owned timing authority for the first visible portrait question.
+ * It is deliberately distinct from a narration caption: this format has no
+ * spoken narration, so calling its question card a caption would be false.
+ */
+export interface QuizShortOpeningHook {
+  readonly version: typeof QUIZ_SHORT_OPENING_HOOK_VERSION;
+  readonly cueId: "quiz-short-opening-hook";
+  readonly startSec: number;
+  readonly endSec: number;
+  readonly sampleSec: number;
+  readonly expectedText: string;
+}
 
 /**
  * Build final-master OCR requirements from the exact rounds sent to Remotion.
@@ -151,8 +181,13 @@ export const QUIZ_MAX_ROUNDS = 15;
  */
 export function buildQuizOnScreenTextCues(
   rounds: readonly QuizYearRound[],
+  options: { readonly startSec?: number } = {},
 ): TimedOnScreenTextCue[] {
-  let cursorSec = 0;
+  const initialStartSec = Number(options.startSec ?? 0);
+  if (!Number.isFinite(initialStartSec) || initialStartSec < 0) {
+    throw new Error("quiz: on-screen text cue start must be finite and non-negative");
+  }
+  let cursorSec = initialStartSec;
   const cues: TimedOnScreenTextCue[] = [];
   for (const [index, round] of rounds.entries()) {
     const countdownSeconds = Number(round.countdownSeconds);
@@ -207,6 +242,35 @@ export function buildQuizOnScreenTextCues(
     cursorSec += countdownSeconds + revealSeconds;
   }
   return cues;
+}
+
+export function buildQuizShortOpeningHook(
+  rounds: readonly QuizYearRound[],
+  introSec: number,
+): QuizShortOpeningHook {
+  const first = rounds[0];
+  if (!first) throw new Error("quiz_short: portrait render requires a first quiz round");
+  const countdownSeconds = Number(first.countdownSeconds);
+  if (!Number.isFinite(introSec) || introSec < 0 || !Number.isFinite(countdownSeconds) || countdownSeconds < 3) {
+    throw new Error("quiz_short: first-round hook timing is invalid");
+  }
+  const expectedText = first.questionText.trim();
+  if (expectedText.length < 3) throw new Error("quiz_short: first-round hook text is empty");
+  const sampleOffsetSec = Math.min(2, Math.max(0.75, countdownSeconds - 0.75));
+  const startSec = introSec + 0.5;
+  const endSec = introSec + countdownSeconds - 0.2;
+  const sampleSec = introSec + sampleOffsetSec;
+  if (endSec <= startSec || sampleSec < startSec || sampleSec > endSec) {
+    throw new Error("quiz_short: first-round hook has no stable on-screen timing window");
+  }
+  return {
+    version: QUIZ_SHORT_OPENING_HOOK_VERSION,
+    cueId: "quiz-short-opening-hook",
+    startSec,
+    endSec,
+    sampleSec,
+    expectedText,
+  };
 }
 
 /**
@@ -457,6 +521,7 @@ interface SourceArgs {
   brief: string;
   allowSensitiveTopics: boolean;
   minNotability: number;
+  excludeSubjectIds: readonly string[];
 }
 
 /** The original guess-the-year path, now one category among several. */
@@ -467,6 +532,7 @@ async function sourceYearRounds(args: SourceArgs & { topic: QuizYearTopicKey }):
     count: args.want,
     minNotability: args.minNotability,
     allowSensitiveTopics: args.allowSensitiveTopics,
+    excludeQids: args.excludeSubjectIds,
     log: (m) => ctx.log(m),
     retries: 4,
     timeoutMs: 45_000,
@@ -521,6 +587,7 @@ async function sourceCategoryRounds(
     count: args.want,
     minNotability: args.minNotability,
     allowSensitiveTopics: args.allowSensitiveTopics,
+    excludeQids: args.excludeSubjectIds,
     log: (m) => ctx.log(m),
     retries: 4,
     timeoutMs: 45_000,
@@ -604,6 +671,7 @@ async function buildRounds(args: {
   brief: string;
   allowSensitiveTopics: boolean;
   minNotability: number;
+  excludeSubjectIds: readonly string[];
 }): Promise<PlannedRound[]> {
   const plan = planRoundCategories(args.rounds, args.categories);
   const wanted = new Map<QuizRoundCategory, number>();
@@ -618,6 +686,7 @@ async function buildRounds(args: {
     brief: args.brief,
     allowSensitiveTopics: args.allowSensitiveTopics,
     minNotability: args.minNotability,
+    excludeSubjectIds: args.excludeSubjectIds,
   };
   const bucket = new Map<QuizRoundCategory, PlannedRound[]>();
   for (const [category, want] of wanted) {
@@ -669,10 +738,15 @@ async function authorRounds(args: {
   minNotability: number;
 }): Promise<PlannedRound[]> {
   const { ctx } = args;
+  // A retry must retain its exact sourced questions, but a later episode must
+  // source against the channel's committed QID history rather than replay a
+  // prior round set.
   const fingerprint = createHash("sha256")
     .update(
       JSON.stringify({
         v: QUIZ_QUESTIONS_CHECKPOINT_VERSION,
+        channelId: ctx.channelId,
+        runId: ctx.runId,
         rounds: args.rounds,
         categories: [...args.categories].sort(),
         topic: args.topic,
@@ -684,6 +758,17 @@ async function authorRounds(args: {
     .digest("hex")
     .slice(0, 16);
   const checkpointKey = `${ctx.keyPrefix.replace(/\/$/, "")}/checkpoints/quiz-rounds/${fingerprint}.json`;
+
+  const persistSubjects = async (rounds: readonly PlannedRound[]): Promise<void> => {
+    const keys = [...new Set(rounds.map((round) => round.subjectId))]
+      .filter((subjectId) => /^Q[1-9]\d*$/.test(subjectId))
+      .map((subjectId) => quizSubjectMemoryKey({ runId: ctx.runId, subjectId }));
+    await Promise.all(keys.map((key) => convex().mutation(api.topicMemory.recordTopic, {
+      ownerId: ctx.ownerId,
+      channelId: ctx.channelId as Id<"channels">,
+      key,
+    })));
+  };
 
   try {
     const cached = await getObjectBytes(checkpointKey);
@@ -697,6 +782,7 @@ async function authorRounds(args: {
         // set still has to satisfy every deterministic invariant.
         const defects = quizSetDefects(parsed.rounds);
         if (!defects.length) {
+          await persistSubjects(parsed.rounds);
           ctx.log(`quiz: reused round checkpoint ${fingerprint} (${parsed.rounds.length} rounds, $0)`);
           return parsed.rounds;
         }
@@ -706,6 +792,15 @@ async function authorRounds(args: {
   } catch {
     /* cold checkpoint → author fresh */
   }
+
+  const memoryRows = await convex().query(
+    api.topicMemory.listForChannel,
+    { channelId: ctx.channelId as Id<"channels"> },
+  ) as Array<{ key: string }>;
+  const excludeSubjectIds = quizSubjectIdsUsedByOtherRuns(
+    memoryRows.map((row) => row.key),
+    ctx.runId,
+  );
 
   const loop = await produceAndCritique<PlannedRound[]>({
     label: "quiz:rounds",
@@ -727,6 +822,7 @@ async function authorRounds(args: {
         brief,
         allowSensitiveTopics: args.allowSensitiveTopics,
         minNotability: args.minNotability,
+        excludeSubjectIds,
       });
     },
     critique: async (rounds) => {
@@ -769,7 +865,27 @@ async function authorRounds(args: {
     Buffer.from(JSON.stringify({ version: QUIZ_QUESTIONS_CHECKPOINT_VERSION, rounds: repaired })),
     { contentType: "application/json" },
   );
+  await persistSubjects(repaired);
   return repaired;
+}
+
+function quizYearProgramRoute(ctx: StageContext): ChannelProgramRouteRunSeed | undefined {
+  const raw = ctx.store["channelProgramRoute"];
+  if (raw === undefined) return undefined;
+  const route = parseChannelProgramRouteRunSeed(raw);
+  if (!route.requiredBlocks.includes("quiz_year")) {
+    throw new Error(`quiz_year: frozen channel program route ${route.routeKey} does not permit the QuizYear renderer`);
+  }
+  if (route.directives.claimMode !== "certified_quiz_facts" || !route.quizProfile) {
+    throw new Error("quiz_year: frozen channel program route is not a certified QuizYear profile route");
+  }
+  if (
+    route.routeKey === "quizyear/portrait-supervised/v1" &&
+    route.admission !== "supervised_private"
+  ) {
+    throw new Error("quiz_short: portrait route is missing its supervised private-draft admission");
+  }
+  return route;
 }
 
 export const quizYear: Block = {
@@ -777,9 +893,32 @@ export const quizYear: Block = {
   // A certified run receives the matching planner and safety receipt here;
   // pipeline order alone is not a safety boundary.
   consumes: ["quizPlan", "quizSafety"],
-  produces: ["videoKey", "videoLocalPath", "videoDurationSec", "quizRounds", "onScreenTextCues"],
+  produces: [
+    "videoKey",
+    "videoLocalPath",
+    "videoDurationSec",
+    "quizRounds",
+    "onScreenTextCues",
+    "quizShortOpeningHook",
+  ],
   paid: true,
   run: async (ctx) => {
+    const programRoute = quizYearProgramRoute(ctx);
+    const isPortraitSupervisedShort = programRoute?.routeKey === "quizyear/portrait-supervised/v1";
+    const requestedPresentation = String(ctx.params["presentation"] ?? "landscape");
+    if (isPortraitSupervisedShort && requestedPresentation !== "portrait_supervised") {
+      throw new Error("quiz_short: frozen portrait route requires presentation=portrait_supervised");
+    }
+    if (!isPortraitSupervisedShort && requestedPresentation !== "landscape") {
+      throw new Error("quiz_year: portrait presentation is admitted only through the supervised QuizShort route");
+    }
+    if (
+      programRoute &&
+      ctx.params["quizProfile"] !== undefined &&
+      ctx.params["quizProfile"] !== programRoute.quizProfile
+    ) {
+      throw new Error("quiz_year: mutable quizProfile does not match the frozen channel program route profile");
+    }
     // This is an execution guard, not a UI convention: a certified planner
     // route must be able to run in an environment where Gemini is configured
     // for other channel families without inspecting or calling it here.
@@ -797,13 +936,24 @@ export const quizYear: Block = {
       2,
       Math.min(10, Number(ctx.params["revealSeconds"] ?? QUIZ_DEFAULT_REVEAL_SECONDS)),
     );
-    const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
+    const targetSeconds = Math.max(
+      0,
+      Number(ctx.params["targetSeconds"] ?? (isPortraitSupervisedShort ? 40 : 0)),
+    );
     const rounds = quizRoundCount(targetSeconds, countdown, reveal);
-    const profile = resolveCertifiedQuizProfile(ctx.params["quizProfile"]);
+    if (isPortraitSupervisedShort && (rounds < 3 || rounds > 4)) {
+      throw new Error(
+        `quiz_short: portrait release requires three or four rounds, resolved ${rounds}; adjust its sealed 35–60s timing`,
+      );
+    }
+    const profile = resolveCertifiedQuizProfile(programRoute?.quizProfile ?? ctx.params["quizProfile"]);
     // Re-check the exact planner → safety handoff immediately before sourcing
     // facts. This keeps retries and rehydration from marrying an older receipt
     // to a new renderer invocation.
     const plan = assertCertifiedQuizTopicPlan(ctx.store["quizPlan"], profile);
+    if (programRoute && plan.profileKey !== programRoute.quizProfile) {
+      throw new Error("quiz_year: planner receipt profile does not match the frozen channel program route");
+    }
     assertCertifiedQuizTopicSafety(ctx.store["quizSafety"], plan);
     const storedTopicKey = String(ctx.store["quizTopic"] ?? "").trim();
     const storedTopic = String(ctx.store["topic"] ?? "").trim();
@@ -888,17 +1038,48 @@ export const quizYear: Block = {
     // must remain readable during its active countdown—not merely be present
     // in the React props. The generic OCR proof consumes these timed cues in
     // qa_visual after the music mux has produced the actual release master.
-    const onScreenTextCues: TimedOnScreenTextCue[] = buildQuizOnScreenTextCues(quizRounds);
+    const title = String(ctx.store["channelName"] ?? "");
+    const portraitPreflight = isPortraitSupervisedShort
+      ? preflightQuizYearPortrait({ rounds: quizRounds, palette, title })
+      : undefined;
+    const quizShortOpeningHook = portraitPreflight
+      ? buildQuizShortOpeningHook(quizRounds, QUIZ_YEAR_PORTRAIT_INTRO_SECONDS)
+      : undefined;
+    const onScreenTextCues: TimedOnScreenTextCue[] = [
+      ...buildQuizOnScreenTextCues(
+        quizRounds,
+        portraitPreflight ? { startSec: QUIZ_YEAR_PORTRAIT_INTRO_SECONDS } : {},
+      ),
+      ...(quizShortOpeningHook
+        ? [{
+            id: quizShortOpeningHook.cueId,
+            sampleSec: quizShortOpeningHook.sampleSec,
+            expectedText: quizShortOpeningHook.expectedText,
+            minTokenCoverage: 0.8,
+          } satisfies TimedOnScreenTextCue]
+        : []),
+    ];
 
     const runDir = await makeRunTempDir(ctx.runId, "quiz_year");
-    const outPath = join(runDir, "quiz-year.mp4");
-    await renderQuizYear({
-      rounds: quizRounds,
-      palette,
-      title: String(ctx.store["channelName"] ?? ""),
-      outPath,
-      log: (m) => ctx.log(m),
-    });
+    const outPath = join(runDir, isPortraitSupervisedShort ? "quiz-short.mp4" : "quiz-year.mp4");
+    if (isPortraitSupervisedShort) {
+      await renderQuizYearPortrait({
+        rounds: quizRounds,
+        palette,
+        title,
+        outPath,
+        log: (m) => ctx.log(m),
+      });
+    } else {
+      await renderQuizYear({
+        rounds: quizRounds,
+        palette,
+        title,
+        outPath,
+        log: (m) => ctx.log(m),
+      });
+    }
+    const videoDurationSec = portraitPreflight?.durationSeconds ?? quizRounds.length * (countdown + reveal);
 
     // The Remotion composition deliberately owns a silent visual game board;
     // this reusable mux keeps the original licensed/generated instrumental
@@ -912,26 +1093,47 @@ export const quizYear: Block = {
         videoPath: outPath,
         musicPath,
         outPath: withMusic,
-        durationSec: quizRounds.length * (countdown + reveal),
+        durationSec: videoDurationSec,
         volume: 0.42,
         fadeOutSec: 0.8,
       });
       finalPath = withMusic;
       ctx.log("quiz: original instrumental bed muxed into final master");
     }
+    const quizAudioMixEvidence = assertQuizYearAudibleMix(
+      await measureAudio(finalPath, {
+        windowStartSec: Math.min(1, Math.max(0, videoDurationSec - 1.5)),
+        windowDurSec: Math.min(8, Math.max(1.5, videoDurationSec - 1)),
+      }),
+    );
+    ctx.log(
+      `quiz: audible final music mix verified (${quizAudioMixEvidence.integratedLufs.toFixed(1)} LUFS, ` +
+      `${quizAudioMixEvidence.windowMeanDb.toFixed(1)} dB opening bed)`,
+    );
 
-    const prefix = `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/quiz-year`;
-    const videoKey = `${prefix}/quiz-year.mp4`;
+    const prefix = `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/${isPortraitSupervisedShort ? "quiz-short" : "quiz-year"}`;
+    const videoKey = `${prefix}/${isPortraitSupervisedShort ? "quiz-short" : "quiz-year"}.mp4`;
     await putObjectFromFile(videoKey, finalPath, { contentType: "video/mp4" });
-    const videoDurationSec = quizRounds.length * (countdown + reveal);
 
     await recordAsset(ctx, "video", videoKey, {
       durationSec: videoDurationSec,
-      engine: "quiz_year",
+      engine: isPortraitSupervisedShort ? "quiz_short" : "quiz_year",
+      ...(portraitPreflight
+        ? {
+            portrait: {
+              aspect: portraitPreflight.aspect,
+              width: portraitPreflight.width,
+              height: portraitPreflight.height,
+              durationSec: portraitPreflight.durationSeconds,
+              openingHookCueId: quizShortOpeningHook?.cueId,
+            },
+          }
+        : {}),
       topic,
       categories: [...new Set(planned.map((r) => r.category))],
       rounds: quizRounds.length,
       audio: musicKey ? "original instrumental bed muxed from musicKey" : "none (legacy non-certified route)",
+      quizAudioMixEvidence,
       // Provenance travels with the asset: every answer is checkable.
       sources: planned.map((r) => ({
         category: r.category,
@@ -957,6 +1159,7 @@ export const quizYear: Block = {
       videoDurationSec,
       quizRounds,
       onScreenTextCues,
+      ...(quizShortOpeningHook ? { quizShortOpeningHook } : {}),
       [COST_PATCH_KEY]: costUsd,
     };
   },

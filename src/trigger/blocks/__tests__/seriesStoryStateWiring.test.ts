@@ -10,16 +10,23 @@ function source(relativePath: string): string {
 function main() {
   const topicSelect = source("src/trigger/blocks/lofiBlocks.ts");
   const seriesStoryStateConvex = source("convex/seriesStoryState.ts");
+  const serializedEpisodesConvex = source("convex/serializedProgramEpisodes.ts");
   const schema = source("convex/schema.ts");
 
   // ---- Schema wiring ----
   assert.match(schema, /seriesStoryState: defineTable\(/, "schema must declare the seriesStoryState table");
   assert.match(schema, /by_channel_series/, "schema must index seriesStoryState by (channelId, seriesTitle) for O(1) lookup");
+  assert.match(
+    schema,
+    /by_channel_series_identity/,
+    "sealed serialized programs must have a separate exact route-identity state namespace",
+  );
 
   // ---- Convex functions exist with the expected read/write shape ----
   assert.match(seriesStoryStateConvex, /export const getForSeries = query\(/, "getForSeries query must exist");
   assert.match(seriesStoryStateConvex, /export const recordEpisodeBeat = mutation\(/, "recordEpisodeBeat mutation must exist");
   assert.match(seriesStoryStateConvex, /mergeSeriesStoryState/, "the mutation must delegate to the shared pure merge function (single source of truth with the tested logic)");
+  assert.match(seriesStoryStateConvex, /export const getForSeriesIdentity = query\(/);
 
   // ---- topic_select SERIES MODE reads story state and injects it into the continuation prompt ----
   assert.match(
@@ -27,6 +34,37 @@ function main() {
     /api\.seriesStoryState\.getForSeries/,
     "topic_select SERIES MODE must read prior story state",
   );
+
+  const serializedMode = topicSelect.slice(
+    topicSelect.indexOf("if (serializedEpisodeIdentity)"),
+    topicSelect.indexOf("if (seriesTitle && !serializedEpisodeIdentity)"),
+  );
+  assert.match(
+    serializedMode,
+    /api\.seriesStoryState\.getForSeriesIdentity/,
+    "a serialized route must read continuity only through its exact sealed identity",
+  );
+  assert.match(
+    serializedMode,
+    /storyState:\s*\{[\s\S]*newPlotBeat/,
+    "serialized continuation must carry its continuity update into the reservation completion call",
+  );
+  assert.doesNotMatch(
+    serializedMode,
+    /api\.seriesStoryState\.recordEpisodeBeat/,
+    "serialized continuation may not issue a post-completion best-effort state write",
+  );
+
+  // Completion cannot release episode N to the next claim until the
+  // route-identity state write has joined the same Convex transaction.
+  const storyCommitIndex = serializedEpisodesConvex.indexOf("by_channel_series_identity");
+  const completionPatchIndex = serializedEpisodesConvex.indexOf("await ctx.db.patch(row._id, {");
+  assert.ok(storyCommitIndex >= 0 && completionPatchIndex >= 0 && storyCommitIndex < completionPatchIndex,
+    "serialized story-state commit must happen before the episode row becomes completed");
+  assert.match(
+    serializedEpisodesConvex,
+    /\.filter\(\(row\) => row\.status === "completed"\)/,
+    "episode N+1 selection must count only atomically completed rows");
   assert.match(
     topicSelect,
     /renderStoryStateForPrompt\(existingStoryState\)/,
@@ -38,11 +76,11 @@ function main() {
     "the continuation prompt must conditionally include a STORY SO FAR section only when story state exists (backward compat when absent)",
   );
 
-  // ---- topic_select SERIES MODE writes back after the episode's topic is finalized ----
+  // ---- Legacy (route-less) series mode writes back after the episode's topic is finalized ----
   assert.match(
     topicSelect,
     /api\.seriesStoryState\.recordEpisodeBeat/,
-    "topic_select SERIES MODE must write the episode's plot beat back to seriesStoryState",
+    "legacy series mode must write the episode's plot beat back to seriesStoryState",
   );
   assert.match(
     topicSelect,
@@ -52,7 +90,7 @@ function main() {
   // The write-back must sit behind the same `dryRun` gate as the existing
   // topicMemory commit — a preview run must not mutate story state either.
   const seriesModeBlock = topicSelect.slice(
-    topicSelect.indexOf('const seriesTitle = (ctx.params["seriesTitle"]'),
+    topicSelect.indexOf("if (seriesTitle && !serializedEpisodeIdentity)"),
     topicSelect.indexOf("TOPICRAFT — the golden topic-intel engine"),
   );
   assert.match(

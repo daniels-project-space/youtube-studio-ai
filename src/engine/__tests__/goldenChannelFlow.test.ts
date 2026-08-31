@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { registerAllBlocks } from "@/engine/blocks";
 import { buildChannelFlowExport, renderChannelFlowMarkdown, type ChannelFlowSource } from "@/engine/channelFlowExport";
+import { CERTIFIED_CHANNEL_PROGRAM_ROUTE_DEFINITIONS } from "@/engine/channelProgramRoute";
 import {
   CATALOG_EXECUTION_BINDINGS,
   NOVITA_GPU_VIDEO_RENDER_BINDING,
@@ -11,9 +12,10 @@ import {
   catalogExecutionBinding,
   compileCatalogExecutionFlow,
   compileGoldenExecutionFlow,
+  hasCatalogExecutableOwner,
   REFERENCE_EXECUTABLE_PROVENANCE,
 } from "@/engine/goldenExecution";
-import { GOLDEN_SPINE } from "@/engine/golden";
+import { GOLDEN_MODULES, GOLDEN_SPINE } from "@/engine/golden";
 import { allManifests, getManifest } from "@/engine/registry";
 
 function channel(name: string, slug: string, blocks: readonly string[]): ChannelFlowSource {
@@ -84,7 +86,7 @@ function registryHasOneGoldenOwner(): void {
   const manifests = allManifests();
   const owners = new Map<string, string>();
   for (const [catalogKey, binding] of Object.entries(CATALOG_EXECUTION_BINDINGS)) {
-    if (binding.kind !== "pipeline-module") continue;
+    if (!hasCatalogExecutableOwner(binding)) continue;
     for (const executableId of binding.executableIds) {
       assert(!owners.has(executableId), `${executableId} is multiply owned`);
       owners.set(executableId, catalogKey);
@@ -100,7 +102,133 @@ function registryHasOneGoldenOwner(): void {
     manifests.map((manifest) => manifest.id).sort(),
     "the catalog spine overview must contain every executable ABI and no retired/nonexistent steps",
   );
+  const selfContainedStory = catalogExecutionBinding("self-contained-story");
+  assert.equal(selfContainedStory.kind, "pipeline-module");
+  assert.deepEqual(selfContainedStory.executableIds, ["self_contained_story_plan", "self_contained_story"]);
+  assert.equal(
+    GOLDEN_MODULES.find((module) => module.key === "self-contained-story")?.status,
+    "active",
+    "self-contained story must be visible as the active shared foundation for its certified routes",
+  );
+  const selfContainedRoutes = CERTIFIED_CHANNEL_PROGRAM_ROUTE_DEFINITIONS.filter(
+    (definition) => definition.requiredBlocks.includes("self_contained_story"),
+  );
+  assert.deepEqual(
+    selfContainedRoutes.map((definition) => definition.key),
+    ["whiteboard/foundation/v1", "comic/foundation/v1", "loreshort/foundation/v1"],
+    "only registered self-contained family routes may materialize the shared planner/seal pair",
+  );
+  assert(
+    selfContainedRoutes.every((definition) => definition.requiredBlocks.includes("self_contained_story_plan")),
+    "a self-contained renderer route may never retain the seal without its bounded native planner",
+  );
   assert.equal(getManifest("qa_refine"), undefined, "retired qa_refine must not remain executable");
+}
+
+function dormantQuizShortReleaseIsNotAnActiveCreatorRoute(): void {
+  const quizYear = GOLDEN_MODULES.find((module) => module.key === "quiz-year");
+  const quizShortRelease = GOLDEN_MODULES.find((module) => module.key === "quiz-short-private-release");
+  assert(quizYear && quizShortRelease, "QuizYear and its dormant private-release adjunct must have distinct catalog cards");
+  assert.equal(quizYear.status, "active", "ordinary certified QuizYear remains an active executable format");
+  assert.equal(
+    catalogExecutionBinding("quiz-year").kind,
+    "pipeline-module",
+    "ordinary QuizYear remains a compiler-executable catalog binding",
+  );
+  assert(
+    !catalogExecutionBinding("quiz-year").executableIds.includes("quiz_short_release"),
+    "ordinary QuizYear must not inherit the dormant portrait release block",
+  );
+  const releaseBinding = catalogExecutionBinding("quiz-short-private-release");
+  assert.equal(quizShortRelease.status, "registered");
+  assert.equal(releaseBinding.kind, "registered-private-release");
+  assert.deepEqual(releaseBinding.executableIds, ["quiz_short_release"]);
+  assert.match(releaseBinding.note ?? "", /no owner-facing intake/i);
+  assert(
+    CERTIFIED_CHANNEL_PROGRAM_ROUTE_DEFINITIONS.every(
+      (definition) => !definition.requiredBlocks.includes("quiz_short_release"),
+    ),
+    "no automatic certified route may admit the dormant private-release block",
+  );
+  const releaseManifest = getManifest("quiz_short_release");
+  assert(releaseManifest, "the private-release block must remain registered for its future controlled use");
+  const [releaseStep] = compileCatalogExecutionFlow([releaseManifest]);
+  assert.equal(releaseStep.catalogKey, "quiz-short-private-release");
+  assert.equal(releaseStep.catalogStatus, "registered");
+  assert.equal(releaseStep.goldenQualified, false, "registered private-release infrastructure is never Golden-promoted");
+  assert.throws(
+    () => compileGoldenExecutionFlow([releaseManifest]),
+    /quiz_short_release=catalog-mapped/,
+    "the dormant block must not become a Golden executable through registry presence alone",
+  );
+  const goldenPage = readFileSync(join(process.cwd(), "src/app/(app)/golden/page.tsx"), "utf8");
+  assert.match(
+    goldenPage,
+    /REGISTERED PRIVATE-RELEASE BLOCK[\s\S]*?NO OWNER INTAKE[\s\S]*?NOT ROUTE-EXECUTABLE/,
+    "the Golden card must not describe the dormant block as an executable route",
+  );
+}
+
+function packageOpeningProofIsAVisibleSeparateModule(): void {
+  const packageOpening = GOLDEN_MODULES.find((module) => module.key === "package-opening-proof");
+  assert(packageOpening, "package/opening evidence must have its own Golden catalog card");
+  assert.equal(packageOpening.status, "reference", "a structural evidence guard is not a visual Golden promotion receipt");
+  assert.match(packageOpening.how, /structural evidence/i);
+  assert.match(packageOpening.how, /not pretend to infer semantic equivalence/i);
+
+  const binding = catalogExecutionBinding("package-opening-proof");
+  assert.equal(binding.kind, "pipeline-module");
+  assert.deepEqual(binding.executableIds, ["package_to_opening_plan"]);
+  assert.deepEqual(
+    catalogExecutionBinding("thumbnail").executableIds,
+    ["thumbnail_gen"],
+    "cover generation and package/opening verification must be separately visible module owners",
+  );
+
+  const [step] = compileCatalogExecutionFlow(manifests(["package_to_opening_plan"]));
+  assert.equal(step.catalogKey, "package-opening-proof");
+  assert.equal(step.qualification, "reference-executable");
+  assert.equal(step.goldenQualified, false, "a structural contract is not a visual Golden promotion receipt");
+
+  const goldenPage = readFileSync(join(process.cwd(), "src/app/(app)/golden/page.tsx"), "utf8");
+  assert.match(goldenPage, /case "package-opening-proof": return <PackageOpeningEvidenceStrip \/>;/);
+  assert.match(goldenPage, /STRUCTURAL WITNESS · NOT A SEMANTIC JUDGE/);
+}
+
+function studioAssetLibraryIsAVisibleGatedCatalogSurface(): void {
+  const studioAssets = GOLDEN_MODULES.find((module) => module.key === "studio-assets");
+  assert(studioAssets, "the reusable Studio Asset Library must be visible in Golden");
+  assert.equal(studioAssets.status, "registered", "a read-only control inventory is not a production promotion");
+  assert.match(studioAssets.how, /owner.*channel.*series/i);
+  assert.match(studioAssets.how, /IC-LoRA.*future dedicated Comfy/i);
+  const binding = catalogExecutionBinding("studio-assets");
+  assert.equal(binding.kind, "catalog-only", "the library card must not claim a second executable pipeline stage");
+  assert.deepEqual(binding.executableIds, []);
+}
+
+function finalMasterStoryCoverageIsAVisibleSeparateModule(): void {
+  const coverage = GOLDEN_MODULES.find((module) => module.key === "final-master-story-coverage");
+  assert(coverage, "final-master story coverage must have its own Golden catalog card");
+  assert.equal(coverage.status, "reference", "narration-semantic coverage is not a visual Golden promotion receipt");
+  assert.match(coverage.how, /narration-semantic story delivery only/i);
+  assert.match(coverage.how, /not that every planned shot was visually realized/i);
+
+  const binding = catalogExecutionBinding("final-master-story-coverage");
+  assert.equal(binding.kind, "pipeline-module");
+  assert.deepEqual(binding.executableIds, ["qa_visual"]);
+  assert(
+    !catalogExecutionBinding("verify").executableIds.includes("qa_visual"),
+    "the final-master certificate gate must be visually distinct from preliminary asset/shot checks",
+  );
+
+  const [step] = compileCatalogExecutionFlow(manifests(["qa_visual"]));
+  assert.equal(step.catalogKey, "final-master-story-coverage");
+  assert.equal(step.goldenQualified, false, "certificate evidence must not be displayed as a Golden visual promotion");
+
+  const goldenPage = readFileSync(join(process.cwd(), "src/app/(app)/golden/page.tsx"), "utf8");
+  assert.match(goldenPage, /case "final-master-story-coverage": return <NarratedStoryCoverageStrip \/>;/);
+  assert.match(goldenPage, /NARRATION-SEMANTIC ONLY/);
+  assert.match(goldenPage, /NOT VISUAL-SHOT PROOF/);
 }
 
 function manifests(ids: readonly string[]) {
@@ -246,6 +374,10 @@ function realChannelsCompileMinimally(): void {
 }
 
 registryHasOneGoldenOwner();
+dormantQuizShortReleaseIsNotAnActiveCreatorRoute();
+packageOpeningProofIsAVisibleSeparateModule();
+studioAssetLibraryIsAVisibleGatedCatalogSurface();
+finalMasterStoryCoverageIsAVisibleSeparateModule();
 approvedVideoRenderRouteIsExact();
 qualificationIsSourceBackedAndHonest();
 realChannelsCompileMinimally();

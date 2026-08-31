@@ -254,7 +254,7 @@ async function runAsyncRegressions(): Promise<void> {
     encoding: "utf8",
     env: {
       ...process.env,
-      GEMINI_API_KEY: "storyboard-ready",
+      ANTHROPIC_API_KEY: "storyboard-ready",
       ELEVENLABS_API_KEY: "voice-ready",
       IMAGE_DISABLE_GEMINI: "1",
       IMAGE_PROVIDERS: "fal",

@@ -3,6 +3,11 @@ import {
   channelInceptionProbeCostCeilingUsd,
 } from "@/engine/channelInceptionContracts";
 import type { FamilyKey } from "@/engine/families";
+import { assertCanonicalChannelProgramBrief } from "@/engine/channelProgramBrief";
+import {
+  assertChannelProgramRouteBinding,
+  channelProgramRouteRunSeed,
+} from "@/engine/channelProgramRoute";
 import {
   assessProductionEditorialAcceptance,
   QualityEvidenceSchema,
@@ -38,6 +43,8 @@ export {
 } from "@/lib/channelInceptionProbeContract";
 
 interface ProbeChannelIdentity {
+  programBrief?: unknown;
+  programRoute?: unknown;
   topicPool?: unknown[];
   styleGrammar?: string;
   palette?: string[];
@@ -219,6 +226,22 @@ export function freezeChannelInceptionProbeContext(args: {
   channel: ProbeChannelSnapshot;
 }): ChannelInceptionProbeInvocationContext {
   const identity = args.channel.identity ?? {};
+  const programBrief = identity.programBrief === undefined
+    ? undefined
+    : assertCanonicalChannelProgramBrief(identity.programBrief);
+  if (programBrief === undefined && identity.programRoute !== undefined) {
+    throw new Error("channel inception probe route is present without a canonical program brief");
+  }
+  const programRoute = programBrief === undefined
+    ? undefined
+    : (() => {
+        if (identity.programRoute === undefined) {
+          throw new Error(
+            "channel inception probe requires a sealed program route; historical route-less channels may only resume their existing frozen invocation",
+          );
+        }
+        return assertChannelProgramRouteBinding({ route: identity.programRoute, programBrief });
+      })();
   const seedStore: Record<string, unknown> = {
     ...(args.channel.thumbnailer ? { thumbnailer: args.channel.thumbnailer } : {}),
     topicPool: structuredClone(identity.topicPool ?? []),
@@ -236,6 +259,9 @@ export function freezeChannelInceptionProbeContext(args: {
     styleDNA: structuredClone(args.channel.styleDNA ?? null),
     qualityBar: structuredClone(args.channel.qaRubric ?? null),
     contentLane: structuredClone(args.channel.contentLane ?? null),
+    ...(programRoute && programBrief
+      ? { channelProgramRoute: channelProgramRouteRunSeed({ route: programRoute, programBrief }) }
+      : {}),
   };
   return {
     channelBudgetUsd: finiteUsd(args.channel.budget ?? 0, "probe channel budget"),

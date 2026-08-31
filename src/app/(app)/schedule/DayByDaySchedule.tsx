@@ -1,4 +1,6 @@
 import Link from "next/link";
+import { youtubeThumb } from "@/lib/asset-url";
+import { MediaPreview } from "@/components/MediaPreview";
 import { civilDayKey } from "@/lib/scheduleCalendar";
 import {
   channelHref,
@@ -69,27 +71,45 @@ export function DayByDaySchedule({
             <div className={styles.dayColumnEvents}>
               {dayEvents.length === 0 ? (
                 <span className={styles.dayEmpty}>No releases</span>
-              ) : dayEvents.map((event) => (
-                <Link
-                  className={styles.dayEvent}
-                  href={channelHref(event.slug, event.type === "planned" ? "week-ahead" : undefined)}
-                  key={event.key}
-                  style={{ borderLeftColor: event.color }}
-                >
-                  <span className={styles.dayEventTime}>{eventTime(event)}</span>
-                  <strong>{event.title}</strong>
-                  <span className={styles.dayEventMeta}>
-                    <span>{event.channel}</span>
-                    <span className={styles.readinessBadge} data-tone={event.readiness}>
-                      {eventStatusLabel(event)}
-                    </span>
-                  </span>
-                </Link>
-              ))}
+              ) : dayEvents.map((event) => <DayEventCard event={event} key={event.key} />)}
             </div>
           </article>
         ))}
       </div>
     </section>
+  );
+}
+
+/** Preview the exact persisted plan or published-video artwork in the default
+ * operational board, rather than making an operator open the hidden queue just
+ * to see what is actually scheduled. */
+function DayEventCard({ event }: { event: CalendarEvent }) {
+  return (
+    <Link
+      className={styles.dayEvent}
+      href={channelHref(event.slug, event.type === "planned" ? "week-ahead" : undefined)}
+      style={{ borderLeftColor: event.color }}
+    >
+      <MediaPreview
+        className={styles.dayEventMedia}
+        dataTone={event.readiness}
+        assetKey={event.thumbnailKey}
+        fallbackSrc={event.youtubeVideoId ? youtubeThumb(event.youtubeVideoId) : undefined}
+        fallbackSource="youtube"
+        alt=""
+        aspectRatio="1 / 1"
+        unavailableLabel="Preview unavailable"
+      />
+      <span className={styles.dayEventCopy}>
+        <span className={styles.dayEventTime}>{eventTime(event)}</span>
+        <strong>{event.title}</strong>
+        <span className={styles.dayEventMeta}>
+          <span>{event.channel}</span>
+          <span className={styles.readinessBadge} data-tone={event.readiness}>
+            {eventStatusLabel(event)}
+          </span>
+        </span>
+      </span>
+    </Link>
   );
 }

@@ -221,9 +221,18 @@ export default defineSchema({
           concept: v.string(),
           audience: v.optional(v.string()),
           sampleTopics: v.optional(v.array(v.string())),
+          // Parsed as the canonical discriminated program intent by the
+          // engine contract at every admission/retry boundary.
+          programIntent: v.optional(v.any()),
         }),
       ),
-      showProfile: v.optional(
+  // Optional only for historical rows. New admissions must bind this to
+  // the canonical brief and the sealed show profile in `channels`.
+  programRoute: v.optional(v.any()),
+  // Canonical brief-and-route diagnosis. V8-safe engine validation at the
+  // mutation boundary keeps this envelope backward-compatible for old rows.
+  creatorIntentDiagnosis: v.optional(v.any()),
+  showProfile: v.optional(
         v.object({
           version: v.literal(CHANNEL_SHOW_PROFILE_VERSION),
           programBriefFingerprint: v.string(),
@@ -243,6 +252,13 @@ export default defineSchema({
               fingerprint: v.string(),
             }),
           ),
+          // New capability-owned composition authority. Engine receipt
+          // validation binds this sealed discriminated structure before a
+          // write, while this permissive envelope preserves historical rows.
+          compositionBinding: v.optional(v.any()),
+          // The route receipt is validated by the V8-safe engine parser; keep
+          // this outer persistence envelope permissive for historical rows.
+          programRoute: v.optional(v.any()),
           designedPipelineFingerprint: v.string(),
           fingerprint: v.string(),
         }),
@@ -636,6 +652,10 @@ export default defineSchema({
     pipelineInvocationSnapshot: v.optional(v.any()),
     pipelineInvocationSha256: v.optional(v.string()),
     pipelineInvocationClaimedAt: v.optional(v.number()),
+    // Route-owned serial execution selector. Unlike a generic calendar topic,
+    // this contains only immutable plan/route identifiers and is revalidated
+    // before the invocation snapshot or any provider-capable stage begins.
+    narrativeSeriesSelector: v.optional(v.any()),
     // Write-once parent checkpoint for an admitted Channel Inception probe.
     // This is claimed before Trigger dispatch, so a lost response reuses the
     // exact child receipt, frozen overrides, context, run id, and cost cap.
@@ -643,6 +663,58 @@ export default defineSchema({
     probeDispatchEnvelopeFingerprint: v.optional(v.string()),
     probeDispatchClaimedAt: v.optional(v.number()),
     probeDispatchKey: v.optional(v.string()),
+    // Dedicated outbox for an owner-confirmed full private benchmark. Unlike a
+    // shortened inception probe, this runs the exact master/QA route and can
+    // only earn a later release-qualification receipt—never an upload.
+    routeQualificationBenchmarkDispatchEnvelope: v.optional(v.any()),
+    routeQualificationBenchmarkDispatchEnvelopeFingerprint: v.optional(v.string()),
+    routeQualificationBenchmarkDispatchKey: v.optional(v.string()),
+    routeQualificationBenchmarkRequestApproval: v.optional(v.any()),
+    routeQualificationBenchmarkRequestApprovalFingerprint: v.optional(v.string()),
+    routeQualificationBenchmarkMaximumCostUsd: v.optional(v.number()),
+    routeQualificationBenchmarkPreparationLastError: v.optional(v.string()),
+    routeQualificationBenchmarkPreparationUpdatedAt: v.optional(v.number()),
+    routeQualificationBenchmarkDispatchState: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("queued"),
+        v.literal("consumed"),
+        v.literal("blocked"),
+      ),
+    ),
+    routeQualificationBenchmarkDispatchAttempts: v.optional(v.number()),
+    routeQualificationBenchmarkDispatchQueuedAt: v.optional(v.number()),
+    routeQualificationBenchmarkDispatchQueueDeadlineAt: v.optional(v.number()),
+    routeQualificationBenchmarkDispatchTriggerRunId: v.optional(v.string()),
+    routeQualificationBenchmarkDispatchLastError: v.optional(v.string()),
+    // Immutable base-run → sibling receipt. This is a separate outbox from a
+    // probe: fan-out dispatch can be lost after its child row is committed, so
+    // every replay must recover this exact payload and global Trigger key.
+    bundleParentRunId: v.optional(v.id("runs")),
+    bundleParentChannelId: v.optional(v.id("channels")),
+    bundleDispatchKey: v.optional(v.string()),
+    bundleDispatchEnvelope: v.optional(v.any()),
+    bundleDispatchEnvelopeFingerprint: v.optional(v.string()),
+    bundleDispatchState: v.optional(
+      v.union(
+        v.literal("pending"),
+        v.literal("dispatching"),
+        v.literal("enqueued"),
+        v.literal("failed"),
+      ),
+    ),
+    bundleDispatchAttempts: v.optional(v.number()),
+    bundleDispatchNextAttemptAt: v.optional(v.number()),
+    bundleDispatchDeadlineAt: v.optional(v.number()),
+    bundleDispatchLeaseToken: v.optional(v.string()),
+    bundleDispatchLeaseExpiresAt: v.optional(v.number()),
+    // An accepted sibling may wait behind one bounded, same-channel remote
+    // render. This is exceptional and reaper-honored only for this receipt.
+    bundleDispatchQueueDeadlineAt: v.optional(v.number()),
+    bundleDispatchLastError: v.optional(v.string()),
+    bundleDispatchClaimedAt: v.optional(v.number()),
+    bundleDispatchUpdatedAt: v.optional(v.number()),
+    bundleDispatchEnqueuedAt: v.optional(v.number()),
     // Exact upload intent currently fencing post-upload continuation for this
     // run. The intent id and immutable artifact id are installed before the
     // dispatcher can call YouTube, and are cleared only by an exact successful
@@ -651,10 +723,16 @@ export default defineSchema({
     blockedPublishArtifactId: v.optional(v.string()),
     // Durable continuation outbox. A Trigger enqueue can fail after YouTube has
     // accepted the upload; `pending` survives that gap for the nightly Doctor,
-    // `queued` records a durable enqueue receipt, and `completed` is retained as
-    // audit evidence after the blocking fence is cleared.
+    // `queued` records a bounded enqueue receipt, `manual_recovery_required`
+    // stops exhausted delivery loops, and `completed` is retained as audit
+    // evidence after the blocking fence is cleared.
     publishContinuationState: v.optional(
-      v.union(v.literal("pending"), v.literal("queued"), v.literal("completed")),
+      v.union(
+        v.literal("pending"),
+        v.literal("queued"),
+        v.literal("manual_recovery_required"),
+        v.literal("completed"),
+      ),
     ),
     publishContinuationIntentId: v.optional(v.id("publishIntents")),
     publishContinuationArtifactId: v.optional(v.string()),
@@ -662,9 +740,71 @@ export default defineSchema({
     publishContinuationAttempts: v.optional(v.number()),
     publishContinuationUpdatedAt: v.optional(v.number()),
     publishContinuationQueuedAt: v.optional(v.number()),
+    publishContinuationQueueDeadlineAt: v.optional(v.number()),
     publishContinuationCompletedAt: v.optional(v.number()),
     publishContinuationTriggerRunId: v.optional(v.string()),
     publishContinuationLastError: v.optional(v.string()),
+    // A deliberate two-phase factual-review boundary. The immutable receipt
+    // lives in `factualReviewCheckpoints`; this compact projection lets the
+    // scheduler and run lease fail closed without shipping review payloads to
+    // ordinary run subscribers.
+    factualReviewCheckpointId: v.optional(v.id("factualReviewCheckpoints")),
+    factualReviewCheckpointFingerprint: v.optional(v.string()),
+    factualReviewState: v.optional(v.union(
+      v.literal("awaiting"),
+      v.literal("approved"),
+      v.literal("resumed"),
+      v.literal("rejected"),
+      v.literal("blocked"),
+    )),
+    // Owner approval creates this bounded outbox. It is deliberately separate
+    // from task retry: only the exact frozen checkpoint may move pending →
+    // queued → consumed, while terminal corruption/decline stays blocked.
+    factualReviewResumeState: v.optional(v.union(
+      v.literal("pending"),
+      v.literal("queued"),
+      v.literal("consumed"),
+      v.literal("blocked"),
+    )),
+    factualReviewApprovalFingerprint: v.optional(v.string()),
+    factualReviewResumeAttempts: v.optional(v.number()),
+    factualReviewResumeUpdatedAt: v.optional(v.number()),
+    factualReviewResumeQueuedAt: v.optional(v.number()),
+    // A Trigger acceptance is not proof that the serialized task will ever
+    // start. This bounded handoff deadline lets the factual-review outbox
+    // reissue the same owner-approved receipt if that accepted delivery dies
+    // before it can consume the execution lease.
+    factualReviewResumeQueueDeadlineAt: v.optional(v.number()),
+    factualReviewResumeTriggerRunId: v.optional(v.string()),
+    factualReviewResumeLastError: v.optional(v.string()),
+    // Owner-selected, immutable source-data-story packs use a dedicated
+    // initial-dispatch outbox. This is intentionally distinct from ordinary
+    // cadence: no scheduled plan may carry factual claims or replace this
+    // sealed pack selector.
+    reviewedDataStoryInitialDispatchState: v.optional(v.union(
+      v.literal("pending"),
+      v.literal("queued"),
+      v.literal("consumed"),
+      v.literal("blocked"),
+    )),
+    reviewedDataStoryInitialAdmission: v.optional(v.object({
+      version: v.literal("reviewed-data-story-initial-run-admission/v1"),
+      ownerId: v.string(),
+      channelId: v.string(),
+      selector: v.object({ packId: v.id("reviewedEvidencePacks"), contentFingerprint: v.string() }),
+      routeSeedFingerprint: v.string(),
+      showProfileFingerprint: v.string(),
+      pipelineFingerprint: v.string(),
+      topicFingerprint: v.string(),
+      selectedCapabilityKeys: v.array(v.string()),
+      admissionFingerprint: v.string(),
+    })),
+    reviewedDataStoryInitialAdmissionFingerprint: v.optional(v.string()),
+    reviewedDataStoryInitialDispatchAttempts: v.optional(v.number()),
+    reviewedDataStoryInitialDispatchQueuedAt: v.optional(v.number()),
+    reviewedDataStoryInitialDispatchQueueDeadlineAt: v.optional(v.number()),
+    reviewedDataStoryInitialDispatchTriggerRunId: v.optional(v.string()),
+    reviewedDataStoryInitialDispatchLastError: v.optional(v.string()),
     // Immutable snapshot of a pinned plan item admitted by the scheduler.
     // Keeping it on the run makes retries observable and prevents a later UI
     // edit from silently changing the topic or native YouTube publish time.
@@ -679,7 +819,37 @@ export default defineSchema({
     heartbeatAt: v.optional(v.number()),
     leaseExpiresAt: v.optional(v.number()),
     leaseOwner: v.optional(v.string()),
+    // Incremented for every execution-lease claim. Trigger writes carry this
+    // generation so a worker that wakes after recovery cannot overwrite the
+    // newer execution's stage, artifact, or terminal state.
     executionAttempts: v.optional(v.number()),
+    // Durable, bounded self-heal generation. Missing legacy rows mean h0;
+    // a repair advances this atomically with superseding its requested stages
+    // so a recovered orchestrator cannot accidentally reattach to h0 work.
+    selfHealGeneration: v.optional(v.number()),
+    // Reaper-issued same-run recovery is deliberately bounded. Missing means
+    // a pre-rollout row; the reaper treats it as zero and never backfills by
+    // re-dispatching more than the cap.
+    leaseRecoveryAttempts: v.optional(v.number()),
+    // A parent orchestrator may wait for a bounded remote render child. This
+    // exact dispatch receipt proves which lease generation may occupy the
+    // extended deadline; a late/duplicate child fails before provider work.
+    remoteChildWaitLeaseOwner: v.optional(v.string()),
+    remoteChildWaitExecutionLeaseToken: v.optional(v.number()),
+    remoteChildWaitBlockId: v.optional(v.string()),
+    remoteChildWaitDispatchKey: v.optional(v.string()),
+    remoteChildWaitUntil: v.optional(v.number()),
+    // Immutable ceiling for a checkpointed remote child. `remoteChildWaitUntil`
+    // is a short sliding liveness receipt; only the exact child generation can
+    // renew it, and never beyond this original bounded work deadline.
+    remoteChildWaitDeadline: v.optional(v.number()),
+    // Serial episode contention is not a terminal pipeline failure. A
+    // service-only mutation writes this small durable outbox before asking
+    // Trigger to re-enter the frozen same-run invocation after the current
+    // episode lease expires.
+    serializedProgramEpisodeRetryAt: v.optional(v.number()),
+    serializedProgramEpisodeRetryAttempts: v.optional(v.number()),
+    serializedProgramEpisodeRetryLastError: v.optional(v.string()),
     // Set only by the lease reaper when a dead execution has a complete,
     // immutable invocation snapshot. The scheduler may re-dispatch that exact
     // run once; claiming the execution lease clears this marker.
@@ -690,11 +860,75 @@ export default defineSchema({
     .index("by_channel_started", ["channelId", "startedAt"])
     .index("by_channel_status", ["channelId", "status"])
     .index("by_channel_probe_dispatch", ["channelId", "probeDispatchKey"])
+    .index("by_owner_channel_route_qualification_benchmark_dispatch", [
+      "ownerId",
+      "channelId",
+      "routeQualificationBenchmarkDispatchKey",
+    ])
+    .index("by_owner_route_qualification_benchmark_dispatch", [
+      "ownerId",
+      "routeQualificationBenchmarkDispatchState",
+    ])
+    .index("by_owner_route_qualification_benchmark_dispatch_deadline", [
+      "ownerId",
+      "routeQualificationBenchmarkDispatchState",
+      "routeQualificationBenchmarkDispatchQueueDeadlineAt",
+    ])
+    .index("by_channel_bundle_dispatch", ["channelId", "bundleDispatchKey"])
     .index("by_status_started", ["status", "startedAt"])
+    // Expired rows are read in deadline order. The legacy startedAt index
+    // remains for compatibility/backfill but cannot let live heartbeats starve
+    // actually-expired leases behind a bounded scan.
+    .index("by_status_lease_expires_at", ["status", "leaseExpiresAt"])
+    .index("by_owner_factual_review_resume", ["ownerId", "factualReviewResumeState"])
+    .index("by_owner_factual_review_resume_queue_deadline", [
+      "ownerId",
+      "factualReviewResumeState",
+      "factualReviewResumeQueueDeadlineAt",
+    ])
+    .index("by_owner_reviewed_data_story_initial_dispatch", [
+      "ownerId",
+      "reviewedDataStoryInitialDispatchState",
+    ])
+    .index("by_owner_reviewed_data_story_initial_dispatch_deadline", [
+      "ownerId",
+      "reviewedDataStoryInitialDispatchState",
+      "reviewedDataStoryInitialDispatchQueueDeadlineAt",
+    ])
+    .index("by_owner_channel_reviewed_data_story_admission", [
+      "ownerId",
+      "channelId",
+      "reviewedDataStoryInitialAdmissionFingerprint",
+    ])
+    // Service-only durable outbox for a serialized episode contention retry.
+    // The dispatcher reads only queued receipts due at or before its tick.
+    .index("by_owner_serialized_program_episode_retry", [
+      "ownerId",
+      "status",
+      "serializedProgramEpisodeRetryAt",
+    ])
+    // Bounded fan-out delivery outbox. One index finds intentionally deferred
+    // dispatches; the other recovers a dispatcher that died after Trigger
+    // accepted a request but before it recorded its durable enqueue receipt.
+    .index("by_owner_bundle_dispatch_due", [
+      "ownerId",
+      "bundleDispatchState",
+      "bundleDispatchNextAttemptAt",
+    ])
+    .index("by_owner_bundle_dispatch_lease", [
+      "ownerId",
+      "bundleDispatchState",
+      "bundleDispatchLeaseExpiresAt",
+    ])
     .index("by_owner_publish_continuation", [
       "ownerId",
       "publishContinuationState",
       "publishContinuationUpdatedAt",
+    ])
+    .index("by_owner_publish_continuation_queue_deadline", [
+      "ownerId",
+      "publishContinuationState",
+      "publishContinuationQueueDeadlineAt",
     ]),
 
   // A real Convex-transaction lease for the short channel-scoped R2
@@ -732,6 +966,10 @@ export default defineSchema({
     storageId: v.string(),
     imageDigest: v.string(),
     maximumCostUsd: v.number(),
+    // A remote Trigger child must prove its currently active run/child lease
+    // inside every worker-lifecycle mutation. Direct/local callers
+    // deliberately leave this false.
+    remoteChildFenceRequired: v.optional(v.boolean()),
     status: v.union(
       v.literal("requested"),
       v.literal("create_claimed"),
@@ -754,8 +992,14 @@ export default defineSchema({
     createDispatchedAt: v.optional(v.number()),
     // Only one Trigger execution may observe/delete a bound worker. The token
     // is an execution fence, distinct from the physical-create claim above.
+    // For remote children, retain the parent receipt that owns this mutable
+    // controller slot so a recovered generation can atomically take over a
+    // stale observer without ever granting that observer lifecycle authority.
     executionAttemptToken: v.optional(v.string()),
     executionClaimedAt: v.optional(v.number()),
+    remoteChildExecutionLeaseOwner: v.optional(v.string()),
+    remoteChildExecutionLeaseToken: v.optional(v.number()),
+    remoteChildExecutionDispatchKey: v.optional(v.string()),
     // Conservative billing anchor for resumed lifecycle estimates.
     instanceCreatedAt: v.optional(v.number()),
     requestedAt: v.number(),
@@ -856,6 +1100,93 @@ export default defineSchema({
     .index("by_channel_kind", ["channelId", "kind"])
     .index("by_run", ["runId"]),
 
+  // Immutable, owner-operated reusable recipe/adapter catalog. Media bytes
+  // remain in R2; a Studio entry carries only a content-addressed resource
+  // reference and evidence-bound compatibility metadata. Lifecycle changes
+  // append a superseding revision instead of mutating an approved entry.
+  studioAssetLibraryEntries: defineTable({
+    ownerId: v.string(),
+    version: v.literal("studio-asset-library/v1"),
+    logicalId: v.string(),
+    fingerprint: v.string(),
+    scope: v.union(
+      v.literal("owned_studio"),
+      v.literal("channel"),
+      v.literal("series"),
+    ),
+    channelId: v.optional(v.id("channels")),
+    seriesIdentity: v.optional(v.string()),
+    assetKind: v.string(),
+    status: v.union(
+      v.literal("approved"),
+      v.literal("deprecated"),
+      v.literal("revoked"),
+    ),
+    entry: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_owner_fingerprint", ["ownerId", "fingerprint"])
+    .index("by_owner_logical_id", ["ownerId", "logicalId"])
+    .index("by_channel", ["channelId"]),
+
+  // Immutable release observations for Studio assets that were actually
+  // reused in a calibrated, hard-gate-passing final master. These are ranking
+  // evidence only: they cannot approve, train, or publish an asset.
+  studioAssetReleaseUsageObservations: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    certificateFingerprint: v.string(),
+    usageReceiptFingerprint: v.string(),
+    assetEntryFingerprint: v.string(),
+    moduleId: v.string(),
+    family: v.string(),
+    contentLane: v.string(),
+    treatment: v.optional(v.string()),
+    finalMasterSha256: v.string(),
+    visualScore: v.optional(v.number()),
+    visualMinimumScore: v.optional(v.number()),
+    usage: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_channel", ["channelId"])
+    .index("by_run", ["runId"])
+    .index("by_owner_context", ["ownerId", "family", "contentLane", "moduleId"])
+    .index("by_owner_certificate_asset_module", ["ownerId", "certificateFingerprint", "assetEntryFingerprint", "moduleId"]),
+
+  // A passing final master may suggest a *channel-scoped* reusable recipe, but
+  // it is never resolvable until an owner approves it after certificate
+  // re-verification. Candidate rows retain the private R2 certificate pointer;
+  // browser inventory receives only a redacted projection.
+  studioAssetPromotionCandidates: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    candidateFingerprint: v.string(),
+    certificateFingerprint: v.string(),
+    finalMasterSha256: v.string(),
+    candidate: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_owner_fingerprint", ["ownerId", "candidateFingerprint"])
+    .index("by_channel", ["channelId"])
+    .index("by_run", ["runId"]),
+
+  // Append-only approval boundary for a pending Studio asset candidate. The
+  // entry itself stays immutable; retrying the same owner action is idempotent.
+  studioAssetPromotionApprovals: defineTable({
+    ownerId: v.string(),
+    candidateFingerprint: v.string(),
+    assetEntryId: v.id("studioAssetLibraryEntries"),
+    assetEntryFingerprint: v.string(),
+    approvedAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_owner_candidate", ["ownerId", "candidateFingerprint"]),
+
   // Topic dedup memory.
   topicMemory: defineTable({
     ownerId: v.string(),
@@ -867,8 +1198,278 @@ export default defineSchema({
     .index("by_channel", ["channelId"])
     .index("by_channel_key", ["channelId", "key"]),
 
+  // Atomic episode ownership for a sealed serialized_program/v1 route. This
+  // is deliberately separate from legacy title memory: a human title cannot
+  // be used as an episode counter or a cross-run reservation key.
+  serializedProgramEpisodes: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    version: v.literal("serialized_program_episode/v1"),
+    seriesIdentity: v.string(),
+    routeFingerprint: v.string(),
+    // Full frozen run-seed identity closes the gap where a route projection is
+    // unchanged but its sealed directives or creator context differ.
+    routeRunSeedFingerprint: v.optional(v.string()),
+    seriesTitle: v.string(),
+    seriesCount: v.optional(v.number()),
+    episodeNumber: v.number(),
+    // A real run id is part of the reservation's fencing boundary. Keeping
+    // this typed prevents a service caller from minting an unattached claim.
+    runId: v.id("runs"),
+    claimToken: v.string(),
+    status: v.union(v.literal("claimed"), v.literal("completed")),
+    topic: v.optional(v.string()),
+    topicMemoryKey: v.optional(v.string()),
+    // Immutable, bounded projection of the continuity state that was merged
+    // in the same completion transaction. Later pipeline blocks read this
+    // row-bound receipt rather than the mutable seriesStoryState table.
+    serializedProgramEpisodeContext: v.optional(
+      v.object({
+        version: v.literal("serialized_program_episode_context/v1"),
+        routeFingerprint: v.string(),
+        routeRunSeedFingerprint: v.string(),
+        runId: v.string(),
+        seriesIdentity: v.string(),
+        seriesTitle: v.string(),
+        seriesCount: v.optional(v.number()),
+        episodeNumber: v.number(),
+        topic: v.string(),
+        topicMemoryKey: v.string(),
+        continuity: v.object({
+          arcSummary: v.optional(v.string()),
+          recentPlotBeats: v.array(v.object({ episode: v.number(), beat: v.string() })),
+          unresolvedThreads: v.array(v.string()),
+          entities: v.array(v.object({ name: v.string(), role: v.string() })),
+        }),
+        fingerprint: v.string(),
+      }),
+    ),
+    claimedAt: v.number(),
+    updatedAt: v.number(),
+    leaseExpiresAt: v.optional(v.number()),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_channel_series", ["channelId", "seriesIdentity"])
+    .index("by_channel_series_episode", ["channelId", "seriesIdentity", "episodeNumber"])
+    .index("by_channel_series_run", ["channelId", "seriesIdentity", "runId"]),
+
+  // Provider-neutral, immutable season horizons. The full contract is parsed
+  // against the engine schema before every write; the indexed fingerprint is
+  // the idempotency boundary, not a mutable "latest plan" pointer.
+  narrativeSeriesPlans: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    accountId: v.string(),
+    version: v.literal("narrative-series-intelligence/v1"),
+    fingerprint: v.string(),
+    seriesIdentity: v.string(),
+    seriesTitle: v.string(),
+    programBriefFingerprint: v.string(),
+    visualStyle: v.string(),
+    plan: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_channel_fingerprint", ["channelId", "fingerprint"])
+    .index("by_channel_series_identity", ["channelId", "seriesIdentity"]),
+
+  // Exactly one frozen visual-continuity handoff per admitted run. This stores
+  // no renderer choice or provider job: it binds the planned episode, completed
+  // serialized context, and neutral camera/first-last-frame controls.
+  narrativeEpisodeReceipts: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    version: v.literal("narrative-episode-receipt/v1"),
+    seriesPlanFingerprint: v.string(),
+    episodeBindingFingerprint: v.string(),
+    shotControlFingerprint: v.string(),
+    episodeNumber: v.number(),
+    plannedEpisodeId: v.string(),
+    visualStyle: v.string(),
+    episodeBinding: v.any(),
+    shotControl: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_run", ["runId"])
+    .index("by_channel_series_plan", ["channelId", "seriesPlanFingerprint"]),
+
+  // One immutable character-sheet plan per exact script/policy/character
+  // fingerprint. Images live in R2 and appear only in the later dataset
+  // manifest, never inline in Convex.
+  characterSheetDatasetPlans: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    accountId: v.string(),
+    version: v.literal("character-sheet-dataset/v1"),
+    planFingerprint: v.string(),
+    channelPolicyFingerprint: v.string(),
+    characterId: v.string(),
+    characterSpecFingerprint: v.string(),
+    scriptTreatmentFingerprint: v.string(),
+    plan: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_channel_plan_fingerprint", ["channelId", "planFingerprint"])
+    .index("by_channel_character_spec", ["channelId", "characterId", "characterSpecFingerprint"]),
+
+  // Immutable manifest for a complete, rights-cleared character-sheet dataset.
+  // The stored artifact keys/hashes are validated by the engine contract.
+  characterSheetDatasets: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    accountId: v.string(),
+    version: v.literal("character-sheet-dataset/v1"),
+    datasetFingerprint: v.string(),
+    sheetPlanFingerprint: v.string(),
+    characterId: v.string(),
+    manifest: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_channel_dataset_fingerprint", ["channelId", "datasetFingerprint"])
+    .index("by_channel_sheet_plan", ["channelId", "sheetPlanFingerprint"]),
+
+  // A frozen admission evaluation, explicitly not a training invocation. At
+  // most one admitted request may exist for a character specification; blocked
+  // evaluations remain as audit evidence but cannot create provider work here.
+  characterLoRATrainingRequests: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    accountId: v.string(),
+    version: v.literal("character-lora-registry/v1"),
+    requestFingerprint: v.string(),
+    registryIdentity: v.string(),
+    sheetPlanFingerprint: v.string(),
+    datasetFingerprint: v.string(),
+    channelPolicyFingerprint: v.string(),
+    characterId: v.string(),
+    characterSpecFingerprint: v.string(),
+    status: v.union(v.literal("blocked"), v.literal("admitted")),
+    providerInvocation: v.literal("not_started"),
+    request: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_request_fingerprint", ["requestFingerprint"])
+    .index("by_registry_identity", ["registryIdentity"])
+    .index("by_channel_character_spec", ["channelId", "characterId", "characterSpecFingerprint"]),
+
+  // Accepted adapters only. The entry is write-once and becomes the mandatory
+  // reuse target for that owner/channel/character specification. A separate
+  // future adapter may produce a receipt, but cannot be invoked by this table.
+  characterLoRARegistryEntries: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    accountId: v.string(),
+    version: v.literal("character-lora-registry/v1"),
+    registryIdentity: v.string(),
+    trainingRequestFingerprint: v.string(),
+    datasetFingerprint: v.string(),
+    characterId: v.string(),
+    characterSpecFingerprint: v.string(),
+    status: v.literal("accepted"),
+    acceptedAdapter: v.any(),
+    entry: v.any(),
+    acceptedAt: v.number(),
+  })
+    .index("by_owner_accepted", ["ownerId", "acceptedAt"])
+    .index("by_registry_identity", ["registryIdentity"])
+    .index("by_training_request_fingerprint", ["trainingRequestFingerprint"])
+    .index("by_channel_character_spec", ["channelId", "characterId", "characterSpecFingerprint"]),
+
+  // Release-controlled, owner-scoped LTX runtime benchmark evidence. An
+  // admission cannot launch a worker on its own; it becomes usable only when
+  // a run snapshots it and revalidates it before each parent/remote pre-spend
+  // assertion. Revocations are append-only to keep stale retries fail-closed.
+  reviewedLtxRuntimeAdmissions: defineTable({
+    ownerId: v.string(),
+    version: v.literal("reviewed-ltx-runtime-admission/v1"),
+    admissionFingerprint: v.string(),
+    profileFingerprint: v.string(),
+    admission: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_owner_admission", ["ownerId", "admissionFingerprint"]),
+
+  reviewedLtxRuntimeRevocations: defineTable({
+    ownerId: v.string(),
+    version: v.literal("reviewed-ltx-runtime-revocation/v1"),
+    admissionFingerprint: v.string(),
+    reason: v.string(),
+    revocationFingerprint: v.string(),
+    revokedAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_owner_revocation", ["ownerId", "revocationFingerprint"]),
+
+  // Owner-scoped A2Vid capability evidence for the separate self-hosted LTX
+  // 2.5 music-to-video worker. This is a reusable benchmarked runtime record,
+  // not a render queue or worker credential. Per-clip audio/reference/budget
+  // admission remains required downstream.
+  musicVideoA2VidRuntimeAdmissions: defineTable({
+    ownerId: v.string(),
+    version: v.literal("music-video-a2vid-runtime-admission/v1"),
+    admissionFingerprint: v.string(),
+    runtimeFingerprint: v.string(),
+    admission: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_owner_admission", ["ownerId", "admissionFingerprint"]),
+
+  musicVideoA2VidRuntimeRevocations: defineTable({
+    ownerId: v.string(),
+    version: v.literal("music-video-a2vid-runtime-revocation/v1"),
+    admissionFingerprint: v.string(),
+    reason: v.string(),
+    revocationFingerprint: v.string(),
+    revokedAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_owner_revocation", ["ownerId", "revocationFingerprint"]),
+
+  // Immutable staged route-qualification receipts. A preflight says only that
+  // a later, explicit private benchmark may be considered; a release receipt
+  // carries the sealed QA/provenance hashes but still cannot dispatch, render,
+  // release, or publish on its own. Supersession is represented forward by a
+  // new immutable row, never by mutating an earlier receipt or a "current"
+  // status flag.
+  productionRouteQualificationReceipts: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    version: v.literal("production-route-qualification-receipt/v1"),
+    level: v.union(
+      v.literal("route_preflight_ready"),
+      v.literal("route_release_qualified"),
+    ),
+    bindingFingerprint: v.string(),
+    family: v.string(),
+    contentLaneKey: v.string(),
+    programBriefFingerprint: v.string(),
+    showProfileFingerprint: v.string(),
+    routeKey: v.string(),
+    routeAdmission: v.union(v.literal("automatic"), v.literal("supervised_private")),
+    routeFingerprint: v.string(),
+    compositionFingerprint: v.string(),
+    pipelineFingerprint: v.string(),
+    receiptFingerprint: v.string(),
+    supersedesReceiptFingerprint: v.optional(v.string()),
+    // Present only in release-qualified envelopes; this is a compact hash, not
+    // the preflight payload or a mutable run/admission reference.
+    preflightReceiptFingerprint: v.optional(v.string()),
+    // Present only in release-qualified envelopes. The actual master remains
+    // in object storage and must be independently verified by a later gate.
+    finalMasterSha256: v.optional(v.string()),
+    /** Full engine-validated compact envelope; never bytes or provider JSON. */
+    receipt: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_channel_receipt", ["channelId", "receiptFingerprint"])
+    .index("by_channel_level_binding", ["channelId", "level", "bindingFingerprint"])
+    .index("by_channel_level_binding_created", ["channelId", "level", "bindingFingerprint", "createdAt"]),
+
   // Real episodic story-state memory (Phase 4 — episodic continuity). One row
-  // per (channelId, seriesTitle): a running arc summary, prior plot beats,
+  // per legacy (channelId, seriesTitle), or per serialized
+  // (channelId, seriesIdentity): a running arc summary, prior plot beats,
   // unresolved narrative threads, and known entities (name + one-line ROLE
   // only — never wardrobe/appearance, which is a separate concern owned by
   // the character/wardrobe continuity system). `topic_select`'s SERIES MODE
@@ -879,6 +1480,10 @@ export default defineSchema({
     ownerId: v.string(),
     channelId: v.id("channels"),
     seriesTitle: v.string(),
+    // Present only for a sealed serialized-program route.  This deliberately
+    // keeps route renewals with the same human title from sharing an arc, and
+    // leaves historical title-keyed series state on its legacy namespace.
+    seriesIdentity: v.optional(v.string()),
     arcSummary: v.string(),
     plotBeats: v.array(
       v.object({
@@ -898,7 +1503,8 @@ export default defineSchema({
   })
     .index("by_owner", ["ownerId"])
     .index("by_channel", ["channelId"])
-    .index("by_channel_series", ["channelId", "seriesTitle"]),
+    .index("by_channel_series", ["channelId", "seriesTitle"])
+    .index("by_channel_series_identity", ["channelId", "seriesIdentity"]),
 
   // -------------------- Analytics (stats-refresh sink) --------------------
   // Per-video performance snapshots, captured by the stats-refresh task from
@@ -927,10 +1533,99 @@ export default defineSchema({
     estimatedRevenueUsd: v.optional(v.number()),
     ctr: v.optional(v.number()),
     rpm: v.optional(v.number()),
+    // A point-in-time copy of the immutable release mapping observed while
+    // this metric was ingested. It is provenance metadata, never a score,
+    // causal attribution, recommendation, or publishing authorization.
+    observedReleaseProvenance: v.optional(v.object({
+      provenanceId: v.id("videoReleaseProvenance"),
+      version: v.literal("video-release-provenance/v1"),
+      runId: v.id("runs"),
+      releaseCertificateKey: v.string(),
+      releaseCertificateFingerprint: v.string(),
+      finalMasterSha256: v.string(),
+      qualityBindingVersion: v.string(),
+      qualityBindingFingerprint: v.string(),
+      qualityEvidenceFingerprint: v.string(),
+      contentLaneKey: v.string(),
+      renderer: v.string(),
+      programRoute: v.optional(v.object({
+        routeFingerprint: v.string(),
+        family: v.string(),
+        contentLaneKey: v.string(),
+        programBriefFingerprint: v.optional(v.string()),
+      })),
+      releaseEvidenceStatus: v.literal("release_evidence_recorded"),
+      evidenceStatus: v.union(
+        v.literal("complete"),
+        v.literal("partial"),
+        v.literal("unmeasured"),
+      ),
+      // Scope only: plan-only is pre-render; final-master never means all-covered.
+      storyMeasurementCoverage: v.optional(v.union(
+        v.literal("unmeasured"),
+        v.literal("plan_only"),
+        v.literal("final_master"),
+        v.literal("scope_undeclared"),
+      )),
+      uploadedAt: v.number(),
+      recordedAt: v.number(),
+    })),
     snapshotAt: v.number(),
   })
     .index("by_channel", ["channelId"])
-    .index("by_video", ["youtubeVideoId", "snapshotAt"]),
+    .index("by_video", ["youtubeVideoId", "snapshotAt"])
+    // A durable stats-refresh batch owns at most one snapshot per video. This
+    // makes a worker replay update the same observation instead of appending
+    // duplicate rows after a crash between a provider response and completion.
+    .index("by_ingestion_video", ["ingestionId", "youtubeVideoId"]),
+
+  // Write-once bridge between an uploaded YouTube video and the certified
+  // release/QA evidence that was actually bound to its final-master bytes.
+  // Rows are installed only by the service-authenticated upload seam. They do
+  // not make performance, quality, or causal claims; analytics observes them
+  // later as provenance metadata when it ingests a snapshot.
+  videoReleaseProvenance: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    publishIntentId: v.id("publishIntents"),
+    youtubeVideoId: v.string(),
+    version: v.literal("video-release-provenance/v1"),
+    releaseCertificateKey: v.string(),
+    releaseCertificateFingerprint: v.string(),
+    finalMasterSha256: v.string(),
+    qualityBindingVersion: v.string(),
+    qualityBindingFingerprint: v.string(),
+    qualityEvidenceFingerprint: v.string(),
+    contentLaneKey: v.string(),
+    renderer: v.string(),
+    programRoute: v.optional(v.object({
+      routeFingerprint: v.string(),
+      family: v.string(),
+      contentLaneKey: v.string(),
+      programBriefFingerprint: v.optional(v.string()),
+    })),
+    releaseEvidenceStatus: v.literal("release_evidence_recorded"),
+    // Completeness of the evidence receipt only; no outcome or quality grade.
+    evidenceStatus: v.union(
+      v.literal("complete"),
+      v.literal("partial"),
+      v.literal("unmeasured"),
+    ),
+    // Scope only: plan-only is pre-render; final-master never means all-covered.
+    storyMeasurementCoverage: v.optional(v.union(
+      v.literal("unmeasured"),
+      v.literal("plan_only"),
+      v.literal("final_master"),
+      v.literal("scope_undeclared"),
+    )),
+    uploadedAt: v.number(),
+    recordedAt: v.number(),
+  })
+    .index("by_owner_youtube_video", ["ownerId", "youtubeVideoId"])
+    .index("by_youtube_video", ["youtubeVideoId"])
+    .index("by_channel", ["channelId"])
+    .index("by_run", ["runId"]),
 
   // Per-channel daily rollup, captured by the stats-refresh task from
   // channels.list?part=statistics. Idempotent on (channelId, date) — the task
@@ -986,6 +1681,15 @@ export default defineSchema({
     scheduledClaimedAt: v.optional(v.number()),
     scheduledUsedAt: v.optional(v.number()),
     scheduledFailure: v.optional(v.string()),
+    // Bounded pre-pipeline Casefile research safety state. A queued plan that
+    // repeatedly cannot converge is made visibly manual-required rather than
+    // being silently reattached by every scheduler cycle.
+    casefileResearchStartedAt: v.optional(v.number()),
+    casefileResearchFailureCount: v.optional(v.number()),
+    casefileResearchFirstFailedAt: v.optional(v.number()),
+    casefileResearchLastFailedAt: v.optional(v.number()),
+    casefileResearchLastOutcome: v.optional(v.string()),
+    casefileResearchBlockedAt: v.optional(v.number()),
   })
     .index("by_channel_order", ["channelId", "order"])
     .index("by_channel_status_order", ["channelId", "status", "order"])
@@ -1202,8 +1906,19 @@ export default defineSchema({
     videoArtifactId: v.string(),
     videoArtifactKey: v.string(),
     videoSha256: v.string(),
+    // Immutable final-master release-evidence pointer. Unlike package art,
+    // this seals the exact QA certificate that every delayed/retried upload
+    // must revalidate before it can call YouTube. Optional only for historical
+    // rows; new intent creation always supplies the complete pair.
+    releaseEvidenceCertificateKey: v.optional(v.string()),
+    releaseEvidenceCertificateFingerprint: v.optional(v.string()),
     thumbnailArtifactKey: v.optional(v.string()),
     thumbnailSha256: v.optional(v.string()),
+    // Package-art proof stays distinct from the final-master certificate. It
+    // lets a delayed publisher revalidate that a fictional thumbnail belongs
+    // to its frozen route and exact bytes before applying it on YouTube.
+    thumbnailScenarioVisualTreatmentProvenance: v.optional(v.any()),
+    thumbnailScenarioVisualTreatmentProvenanceFingerprint: v.optional(v.string()),
     intentVersion: v.number(),
     idempotencyKey: v.string(),
     metadataSha256: v.string(),
@@ -1308,6 +2023,177 @@ export default defineSchema({
     .index("by_channel_started", ["channelId", "startedAt"])
     .index("by_connector_started", ["connectorId", "startedAt"]),
 
+  // Exactly one bounded stats-refresh batch may be active per channel. The
+  // cursor advances only when its ingestion terminally completes, so a Trigger
+  // retry resumes the frozen page rather than starting a full upload-history
+  // scan from the newest row again.
+  analyticsRefreshCursors: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    connectorId: v.id("youtubeAuth"),
+    connectorVersion: v.number(),
+    historyCursor: v.optional(v.string()),
+    historyCompletedAt: v.optional(v.number()),
+    freshnessWindowStartedAfter: v.optional(v.number()),
+    freshnessCursor: v.optional(v.string()),
+    freshnessNextAt: v.optional(v.number()),
+    lastCompletedCadenceKey: v.optional(v.string()),
+    lastCompletedAt: v.optional(v.number()),
+    // Monotonically fences a late worker from an earlier batch generation.
+    // Optional only to tolerate rows written before worker fencing existed.
+    nextBatchGeneration: v.optional(v.number()),
+    activeState: v.optional(
+      v.union(v.literal("active"), v.literal("manual_reconciliation_required")),
+    ),
+    activeBatch: v.optional(v.object({
+      batchKey: v.string(),
+      cadenceKey: v.string(),
+      mode: v.union(v.literal("freshness"), v.literal("history"), v.literal("rollup")),
+      scanStartedAfter: v.number(),
+      scanCursorBefore: v.optional(v.string()),
+      scanCursorAfter: v.optional(v.string()),
+      scanIsDone: v.boolean(),
+      ingestionId: v.id("analyticsIngestions"),
+      connectorId: v.id("youtubeAuth"),
+      connectorVersion: v.number(),
+      // A claimed worker is the sole owner allowed to alter this generation.
+      // Existing rows may lack these while they are quarantined on first use.
+      generation: v.optional(v.number()),
+      workerLeaseToken: v.optional(v.string()),
+      workerLeaseExpiresAt: v.optional(v.number()),
+      workerLeaseAttempt: v.optional(v.number()),
+      videoIds: v.array(v.string()),
+      videoStats: v.optional(v.array(v.object({
+        youtubeVideoId: v.string(),
+        channelId: v.string(),
+        views: v.number(),
+        likes: v.number(),
+        comments: v.number(),
+      }))),
+      videoRequestStatus: v.union(
+        v.literal("pending"),
+        v.literal("request_started"),
+        v.literal("fetched"),
+        v.literal("manual_reconciliation_required"),
+      ),
+      videoRequestToken: v.optional(v.string()),
+      videoRequestStartedAt: v.optional(v.number()),
+      videoStatsFetchedAt: v.optional(v.number()),
+      channelRollup: v.optional(v.object({
+        found: v.boolean(),
+        subscriberCount: v.number(),
+        viewCount: v.number(),
+        videoCount: v.number(),
+      })),
+      channelRequestStatus: v.union(
+        v.literal("pending"),
+        v.literal("request_started"),
+        v.literal("fetched"),
+        v.literal("manual_reconciliation_required"),
+      ),
+      channelRequestToken: v.optional(v.string()),
+      channelRequestStartedAt: v.optional(v.number()),
+      channelRollupFetchedAt: v.optional(v.number()),
+      preDispatchFailureCount: v.number(),
+      commitFailureCount: v.optional(v.number()),
+      commitDeadlineAt: v.optional(v.number()),
+      lastError: v.optional(v.string()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_channel", ["ownerId", "channelId"])
+    .index("by_owner_active_updated", ["ownerId", "activeState", "updatedAt"])
+    .index("by_channel", ["channelId"]),
+
+  // Exactly one bounded, cursor-resumable learning batch may be active for a
+  // channel.  Its item results live on this small row so a Trigger replay can
+  // continue from a saved Analytics response rather than rereading every
+  // historical settled upload (or making the same quota request twice).
+  learningAnalyticsProgress: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    connectorId: v.id("youtubeAuth"),
+    connectorVersion: v.number(),
+    historyCursor: v.optional(v.string()),
+    historyCompletedAt: v.optional(v.number()),
+    // A freshness sweep freezes its lower bound and cursor until it is fully
+    // consumed.  This prevents a daily newest-page loop from starving older
+    // entries in the bounded recent window.
+    freshnessWindowStartedAfter: v.optional(v.number()),
+    freshnessCursor: v.optional(v.string()),
+    freshnessNextAt: v.optional(v.number()),
+    // Mirrors the bounded R2 ledger retention.  It is a durable dedupe fence,
+    // not an unbounded historical index.
+    processedVideoIds: v.array(v.string()),
+    activeBatch: v.optional(v.object({
+      batchKey: v.string(),
+      mode: v.union(v.literal("history"), v.literal("freshness")),
+      scanStartedAfter: v.number(),
+      scanCursorBefore: v.optional(v.string()),
+      scanCursorAfter: v.optional(v.string()),
+      scanIsDone: v.boolean(),
+      ingestionId: v.id("analyticsIngestions"),
+      // Absent is the original v1 query shape; v2 freezes engagedViews.
+      metricDefinitionVersion: v.optional(v.string()),
+      // New batches carry immutable connector provenance. Optional preserves
+      // legacy rows long enough for the runtime to fail them closed/manual.
+      connectorId: v.optional(v.id("youtubeAuth")),
+      connectorVersion: v.optional(v.number()),
+      status: v.union(
+        v.literal("collecting"),
+        v.literal("ledger_write_started"),
+        v.literal("manual_reconciliation_required"),
+      ),
+      items: v.array(v.object({
+        runId: v.id("runs"),
+        youtubeVideoId: v.string(),
+        publishedAt: v.number(),
+        requestStatus: v.union(
+          v.literal("pending"),
+          v.literal("request_started"),
+          v.literal("request_dispatch_started"),
+          v.literal("fetched"),
+          v.literal("ambiguous"),
+        ),
+        requestStartedAt: v.optional(v.number()),
+        requestDispatchStartedAt: v.optional(v.number()),
+        requestDispatchCapabilityToken: v.optional(v.string()),
+        requestDispatchCapabilityExpiresAt: v.optional(v.number()),
+        requestDispatchCapabilityConsumedAt: v.optional(v.number()),
+        requestDispatchHttpDeadlineAt: v.optional(v.number()),
+        fetchedAt: v.optional(v.number()),
+        ambiguousAt: v.optional(v.number()),
+        lastError: v.optional(v.string()),
+        views: v.optional(v.number()),
+        engagedViews: v.optional(v.number()),
+        avgViewPct: v.optional(v.number()),
+        ctr: v.optional(v.number()),
+        title: v.optional(v.string()),
+        topic: v.optional(v.string()),
+        thumbnailStrategy: v.optional(v.string()),
+      })),
+      ledgerWriteStartedAt: v.optional(v.number()),
+      ledgerFingerprint: v.optional(v.string()),
+      // A batch is single-flight.  Only this exact worker generation may turn
+      // a live request_started item into a response, ambiguity, ledger write,
+      // or cursor advance.  A competing manual/scheduled task observes busy
+      // rather than invalidating the healthy worker's response.
+      workerLeaseToken: v.optional(v.string()),
+      workerLeaseGeneration: v.optional(v.number()),
+      workerLeaseExpiresAt: v.optional(v.number()),
+      workerHeartbeatAt: v.optional(v.number()),
+      createdAt: v.number(),
+      updatedAt: v.number(),
+    })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_channel", ["ownerId", "channelId"])
+    .index("by_channel", ["channelId"]),
+
   // Versioned creative assignment and its observed outcome. This keeps title,
   // thumbnail, hook, and visual decisions joined to the exact published video.
   contentExperiments: defineTable({
@@ -1337,6 +2223,115 @@ export default defineSchema({
 
   // Recommendations are proposals, never active policy. Activation requires a
   // passing offline evidence evaluation and an authenticated operator approval.
+  //
+  // The claim is the irreversible model-call boundary for Show Bible learning.
+  // `claimed` can expire only before the provider marker.  Once
+  // `provider_started` is stored, every outcome is reconciliation-only: no
+  // automatic lease expiry can turn uncertainty into a second paid generation.
+  // A small owner-scoped round-robin cursor prevents a many-channel owner from
+  // fanning one daily refresh into unbounded Show Bible model calls.
+  showBibleOwnerAdmissionState: defineTable({
+    ownerId: v.string(),
+    roundRobinCursor: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_owner", ["ownerId"]),
+
+  // Every approved Show Bible model permission is retained as a daily owner
+  // budget receipt.  Deferred claims have no row here, so they can receive a
+  // fair future turn without silently spending today\'s capped envelope.
+  showBibleGenerationAdmissions: defineTable({
+    ownerId: v.string(),
+    day: v.string(),
+    channelId: v.id("channels"),
+    recommendationKey: v.string(),
+    fairnessKey: v.string(),
+    reservedMaxTokens: v.number(),
+    status: v.union(
+      v.literal("reserved"),
+      v.literal("provider_started"),
+      v.literal("provider_dispatch_started"),
+      v.literal("finalized"),
+      v.literal("manual_reconciliation_required"),
+      v.literal("pre_provider_exhausted"),
+      v.literal("operator_rearmed"),
+    ),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_day", ["ownerId", "day"])
+    .index("by_owner_key", ["ownerId", "recommendationKey"])
+    .index("by_owner_channel_day", ["ownerId", "channelId", "day"]),
+
+  showBibleProposalClaims: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    connectorId: v.id("youtubeAuth"),
+    connectorVersion: v.number(),
+    recommendationKey: v.string(),
+    basePolicyVersion: v.number(),
+    proposedPolicyVersion: v.number(),
+    request: v.object({
+      role: v.literal("showrunner"),
+      system: v.string(),
+      prompt: v.string(),
+      maxTokens: v.number(),
+    }),
+    baseBrief: v.any(),
+    sourceVideoIds: v.array(v.string()),
+    dataWindowStart: v.string(),
+    dataWindowEnd: v.string(),
+    offlineEvaluation: v.object({
+      method: v.string(),
+      sampleSize: v.number(),
+      baselineScore: v.optional(v.number()),
+      candidateScore: v.optional(v.number()),
+      passed: v.boolean(),
+      notes: v.string(),
+    }),
+    status: v.union(
+      v.literal("deferred_owner_budget"),
+      v.literal("claimed"),
+      v.literal("provider_started"),
+      v.literal("provider_dispatch_started"),
+      v.literal("ambiguous"),
+      v.literal("finalized"),
+      v.literal("pre_provider_exhausted"),
+    ),
+    claimToken: v.string(),
+    // Only v2 separates a no-dispatch provider_started gap from a durable
+    // dispatch-attempt marker.  Legacy v1 rows remain reconciliation-only.
+    claimProtocolVersion: v.optional(v.string()),
+    fairnessKey: v.optional(v.string()),
+    ownerAdmissionId: v.optional(v.id("showBibleGenerationAdmissions")),
+    preProviderAttempts: v.number(),
+    claimExpiresAt: v.optional(v.number()),
+    providerStartedAt: v.optional(v.number()),
+    providerDispatchStartedAt: v.optional(v.number()),
+    ambiguousAt: v.optional(v.number()),
+    deferredAt: v.optional(v.number()),
+    deferredAdmissionDay: v.optional(v.string()),
+    deferredReason: v.optional(v.string()),
+    // Explicit, owner-bound operator attestations are retained even after a
+    // no-dispatch rearm.  They never apply to ambiguous/dispatch-started rows.
+    operatorResolutionAudit: v.optional(v.array(v.object({
+      action: v.literal("rearm_no_dispatch"),
+      actor: v.string(),
+      reason: v.string(),
+      evidence: v.string(),
+      attestedAt: v.number(),
+      resolvedAt: v.number(),
+      priorClaimToken: v.string(),
+    }))),
+    operatorResolutionCount: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+    recommendationId: v.optional(v.id("learningRecommendations")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_key", ["ownerId", "recommendationKey"])
+    .index("by_owner_updated", ["ownerId", "updatedAt"])
+    .index("by_channel_updated", ["channelId", "updatedAt"]),
+
   learningRecommendations: defineTable({
     ownerId: v.string(),
     channelId: v.id("channels"),
@@ -1417,6 +2412,95 @@ export default defineSchema({
   })
     .index("by_owner_review", ["ownerId", "reviewId"])
     .index("by_owner_content", ["ownerId", "contentFingerprint"])
+    .index("by_owner_created", ["ownerId", "createdAt"]),
+
+  // Immutable factual-review receipt created only after the actual script,
+  // narration/TTS, Story Spine, and Episode Graph have all completed. The row
+  // stores identities/hashes, never mutable browser review data. The raw
+  // source-data ledger remains its authority; a derived editorial packet is
+  // not sufficient for Phase I admission or resume.
+  factualReviewCheckpoints: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    version: v.literal("factual-review-checkpoint/v1"),
+    invocationSha256: v.string(),
+    sourceAuthority: v.object({
+      authorityKind: v.literal("data_story_source_ledger"),
+      authorityContentFingerprint: v.string(),
+      rawLedgerFingerprint: v.string(),
+      reviewedPackId: v.id("reviewedEvidencePacks"),
+      reviewedPackContentFingerprint: v.string(),
+      routeSeedFingerprint: v.string(),
+      topicFingerprint: v.string(),
+      showProfileFingerprint: v.string(),
+      selectedCapabilityKeys: v.array(v.string()),
+    }),
+    artifacts: v.array(v.object({
+      key: v.string(),
+      artifactId: v.string(),
+      payloadHash: v.string(),
+      producerModule: v.string(),
+      producerVersion: v.string(),
+      schemaVersion: v.string(),
+    })),
+    checkpointFingerprint: v.string(),
+    decision: v.union(
+      v.literal("awaiting"),
+      v.literal("approved"),
+      v.literal("rejected"),
+      v.literal("blocked"),
+    ),
+    createdAt: v.number(),
+    reviewerId: v.optional(v.string()),
+    approvedAt: v.optional(v.number()),
+    rejectedAt: v.optional(v.number()),
+    blockedAt: v.optional(v.number()),
+    blockedReason: v.optional(v.string()),
+    approvalFingerprint: v.optional(v.string()),
+  })
+    .index("by_run", ["runId"])
+    .index("by_owner_decision", ["ownerId", "decision"])
+    .index("by_owner_created", ["ownerId", "createdAt"]),
+
+  // A reusable, immutable owner-scoped factual-evidence handoff. This is
+  // deliberately not a pipeline input by itself: it persists a fresh
+  // human-approved source authority, frozen route seed, and sealed Show
+  // Profile/capability projection for a later explicitly supervised consumer.
+  // No row in this table may dispatch a provider, render, run, release, or
+  // publish action without a separate policy-specific admission path.
+  reviewedEvidencePacks: defineTable({
+    ownerId: v.string(),
+    contentFingerprint: v.string(),
+    routeSeedFingerprint: v.string(),
+    topicFingerprint: v.string(),
+    authorityContentFingerprint: v.string(),
+    routeKey: v.string(),
+    family: v.string(),
+    contentLaneKey: v.string(),
+    showProfileFingerprint: v.string(),
+    capabilityFingerprint: v.string(),
+    selectedCapabilityKeys: v.array(v.string()),
+    authorityKind: v.union(
+      v.literal("editorial_evidence_packet"),
+      v.literal("data_story_source_ledger"),
+    ),
+    // Editorial authority is valid only when this is a durable owner-owned
+    // receipt. Data-story ledger authority intentionally keeps its separately
+    // validated immutable ledger directly in the pack instead.
+    editorialEvidencePacketId: v.optional(v.id("editorialEvidencePackets")),
+    reviewerId: v.string(),
+    reviewId: v.string(),
+    reviewedAt: v.string(),
+    reviewedEvidenceRouteBindingFingerprint: v.optional(v.string()),
+    /** Full engine-validated immutable receipt; no browser/result payload shape. */
+    pack: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_owner_review", ["ownerId", "reviewId"])
+    .index("by_owner_content", ["ownerId", "contentFingerprint"])
+    .index("by_owner_route_profile", ["ownerId", "routeSeedFingerprint", "showProfileFingerprint"])
+    .index("by_owner_authority", ["ownerId", "authorityContentFingerprint"])
     .index("by_owner_created", ["ownerId", "createdAt"]),
 
   // SPEND LEDGER for the automatic Casefile case-research path

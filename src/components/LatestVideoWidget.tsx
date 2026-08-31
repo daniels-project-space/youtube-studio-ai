@@ -58,6 +58,7 @@ export function LatestVideoWidget({
             k={v?.thumbnailKey ?? undefined}
             alt={v?.title ?? "latest video"}
             fallbackSrc={v?.youtubeVideoId ? `https://i.ytimg.com/vi/${v.youtubeVideoId}/hqdefault.jpg` : undefined}
+            fallbackSource="youtube"
             style={{ width: "100%", height: "100%" }}
           />
           {v?.durationSec ? (

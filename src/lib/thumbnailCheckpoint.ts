@@ -4,6 +4,10 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { ExecutionError } from "@/engine/executionErrors";
+import {
+  ScenarioVisualTreatmentThumbnailBindingSchema,
+  type ScenarioVisualTreatmentThumbnailBinding,
+} from "@/engine/scenarioVisualTreatment";
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
   NANO_BANANA_THUMBNAIL_PROFILE,
@@ -13,16 +17,23 @@ import {
 } from "@/lib/nanoBananaThumbnailContract";
 import { getObjectBytes, putObject } from "@/lib/storage";
 
+interface ThumbnailQaCheckpoint {
+  completed: true;
+  requestHash: string;
+  verdict: unknown;
+  costUsd: number;
+  /** Present only for a current fictional-scenario package-art review. */
+  scenarioVisualTreatment?: {
+    binding: ScenarioVisualTreatmentThumbnailBinding;
+    visualTreatmentCompliant: boolean;
+  };
+}
+
 interface LegacyThumbnailCheckpointManifest {
   version: 1;
   requestHash: string;
   generationCostUsd: number;
-  qa?: {
-    completed: true;
-    requestHash: string;
-    verdict: unknown;
-    costUsd: number;
-  };
+  qa?: ThumbnailQaCheckpoint;
 }
 
 export interface ThumbnailNanoBananaEvidence {
@@ -32,12 +43,14 @@ export interface ThumbnailNanoBananaEvidence {
 }
 
 interface CurrentThumbnailCheckpointManifest {
-  version: 2;
+  version: 2 | 3;
   requestHash: string;
   generationCostUsd: number;
   artifactSha256: string;
   providerEvidence?: ThumbnailNanoBananaEvidence;
-  qa?: LegacyThumbnailCheckpointManifest["qa"];
+  /** v3 carries this witness whenever the request is treatment-bound. */
+  scenarioVisualTreatment?: ScenarioVisualTreatmentThumbnailBinding;
+  qa?: ThumbnailQaCheckpoint;
 }
 
 export type ThumbnailCheckpointManifest =
@@ -74,6 +87,12 @@ export interface ThumbnailCheckpointSession {
   spendStarted: boolean;
   imageKey: string;
   manifestKey: string;
+  /**
+   * The admitted visual-treatment identity for this thumbnail request.  This
+   * belongs to the session rather than an individual save call so every
+   * restore and checkpoint write observes the same contract.
+   */
+  scenarioVisualTreatmentBinding?: ScenarioVisualTreatmentThumbnailBinding;
   manifest?: ThumbnailCheckpointManifest;
 }
 
@@ -246,7 +265,7 @@ function parseManifest(
     });
   }
   if (
-    (parsed.version !== 1 && parsed.version !== 2) ||
+    (parsed.version !== 1 && parsed.version !== 2 && parsed.version !== 3) ||
     parsed.requestHash !== requestHash ||
     finiteCost(parsed.generationCostUsd) === undefined
   ) {
@@ -257,7 +276,7 @@ function parseManifest(
     });
   }
   if (
-    parsed.version === 2 &&
+    (parsed.version === 2 || parsed.version === 3) &&
     (
       !SHA256.test(String(parsed.artifactSha256 ?? "")) ||
       (parsed.providerEvidence !== undefined &&
@@ -286,6 +305,43 @@ function parseManifest(
       phase: "storage",
     });
   }
+  if (
+    (parsed.version === 3) !== (parsed.scenarioVisualTreatment !== undefined)
+  ) {
+    throw new ExecutionError("thumbnail_gen: checkpoint treatment version and binding disagree", {
+      code: "THUMBNAIL_CHECKPOINT_CORRUPT",
+      retryable: false,
+      phase: "storage",
+    });
+  }
+  let scenarioVisualTreatment: ScenarioVisualTreatmentThumbnailBinding | undefined;
+  if (parsed.scenarioVisualTreatment !== undefined) {
+    const treatment = ScenarioVisualTreatmentThumbnailBindingSchema.safeParse(parsed.scenarioVisualTreatment);
+    if (!treatment.success) {
+      throw new ExecutionError("thumbnail_gen: checkpoint scenario visual treatment binding is invalid", {
+        code: "THUMBNAIL_CHECKPOINT_CORRUPT",
+        retryable: false,
+        phase: "storage",
+      });
+    }
+    scenarioVisualTreatment = treatment.data;
+  }
+  if (qa?.scenarioVisualTreatment !== undefined) {
+    const scenarioQa = qa.scenarioVisualTreatment as Record<string, unknown>;
+    const treatment = ScenarioVisualTreatmentThumbnailBindingSchema.safeParse(scenarioQa.binding);
+    if (
+      !treatment.success ||
+      typeof scenarioQa.visualTreatmentCompliant !== "boolean" ||
+      !scenarioVisualTreatment ||
+      canonicalJson(treatment.data) !== canonicalJson(scenarioVisualTreatment)
+    ) {
+      throw new ExecutionError("thumbnail_gen: checkpoint scenario visual treatment QA binding is invalid", {
+        code: "THUMBNAIL_CHECKPOINT_CORRUPT",
+        retryable: false,
+        phase: "storage",
+      });
+    }
+  }
   return parsed as unknown as ThumbnailCheckpointManifest;
 }
 
@@ -294,7 +350,7 @@ function assertArtifactIntegrity(
   bytes: Uint8Array,
 ): void {
   if (
-    manifest.version === 2 &&
+    (manifest.version === 2 || manifest.version === 3) &&
     createHash("sha256").update(bytes).digest("hex") !== manifest.artifactSha256
   ) {
     throw new ExecutionError("thumbnail_gen: checkpoint image does not match its manifest", {
@@ -302,6 +358,38 @@ function assertArtifactIntegrity(
       retryable: false,
       phase: "storage",
     });
+  }
+}
+
+/**
+ * A treatment-bound thumbnail must never be restored, saved, or judged under
+ * a different route/scenario/treatment identity.  Generic (including v1/v2)
+ * thumbnail work intentionally remains reusable when neither side carries a
+ * treatment binding.
+ */
+function assertScenarioVisualTreatmentBindingForSession(
+  session: ThumbnailCheckpointSession,
+  manifest: ThumbnailCheckpointManifest,
+): void {
+  const expected = session.scenarioVisualTreatmentBinding;
+  const actual =
+    manifest.version === 2 || manifest.version === 3
+      ? manifest.scenarioVisualTreatment
+      : undefined;
+  if (expected === undefined && actual === undefined) return;
+  if (
+    expected === undefined ||
+    actual === undefined ||
+    canonicalJson(expected) !== canonicalJson(actual)
+  ) {
+    throw new ExecutionError(
+      "thumbnail_gen: checkpoint scenario visual treatment binding does not match the admitted request",
+      {
+        code: "THUMBNAIL_CHECKPOINT_CORRUPT",
+        retryable: false,
+        phase: "storage",
+      },
+    );
   }
 }
 
@@ -362,6 +450,7 @@ async function localCheckpoint(
     await readFile(session.localManifestPath),
     session.requestHash,
   );
+  assertScenarioVisualTreatmentBindingForSession(session, manifest);
   assertArtifactIntegrity(manifest, await readFile(session.localImagePath));
   return { ...session, source: "local", manifest };
 }
@@ -378,6 +467,7 @@ async function remoteCheckpoint(
     throw error;
   }
   const manifest = parseManifest(manifestBytes, session.requestHash);
+  assertScenarioVisualTreatmentBindingForSession(session, manifest);
   let image: Uint8Array;
   try {
     image = await io.getObjectBytes(session.imageKey);
@@ -409,6 +499,11 @@ export async function openThumbnailCheckpoint(
     checkpointRoot: string;
     requestHash: string;
     localImagePath: string;
+    /**
+     * Exact route/scenario/treatment identity admitted before any checkpoint
+     * can be restored or provider work can be claimed.
+     */
+    scenarioVisualTreatmentBinding?: ScenarioVisualTreatmentThumbnailBinding;
     /** Free preflight that must pass before an irreversible paid-work claim. */
     beforeClaim?: () => void;
   },
@@ -416,6 +511,14 @@ export async function openThumbnailCheckpoint(
 ): Promise<ThumbnailCheckpointSession> {
   if (!/^[a-f0-9]{64}$/.test(args.requestHash)) {
     throw new Error("thumbnail checkpoint requires a SHA-256 request hash");
+  }
+  const binding = args.scenarioVisualTreatmentBinding === undefined
+    ? undefined
+    : ScenarioVisualTreatmentThumbnailBindingSchema.safeParse(
+      args.scenarioVisualTreatmentBinding,
+    );
+  if (binding !== undefined && !binding.success) {
+    throw new Error("thumbnail checkpoint requires a valid scenario visual treatment binding");
   }
   const root = `${args.checkpointRoot.replace(/\/+$/, "")}/${args.requestHash}`;
   const session: ThumbnailCheckpointSession = {
@@ -429,6 +532,9 @@ export async function openThumbnailCheckpoint(
     spendStarted: false,
     imageKey: `${root}.jpg`,
     manifestKey: `${root}.manifest.json`,
+    ...(binding && binding.success
+      ? { scenarioVisualTreatmentBinding: binding.data }
+      : {}),
   };
 
   const local = await localCheckpoint(session);
@@ -530,11 +636,15 @@ export async function saveThumbnailGenerationCheckpoint(
   generationCostUsd: number,
   providerEvidence?: ThumbnailNanoBananaEvidence,
   io: ThumbnailCheckpointIo = productionIo,
+  scenarioVisualTreatment?: ScenarioVisualTreatmentThumbnailBinding,
 ): Promise<ThumbnailCheckpointSession> {
   const cost = finiteCost(generationCostUsd);
   if (cost === undefined) throw new Error("thumbnail checkpoint cost must be finite and non-negative");
   if (!session.manifest && !session.spendStarted) {
     throw new Error("thumbnail paid work must cross the spend fence before checkpointing");
+  }
+  if (session.manifest) {
+    assertScenarioVisualTreatmentBindingForSession(session, session.manifest);
   }
   if (!existsSync(session.localImagePath)) {
     throw new Error("thumbnail checkpoint image does not exist locally");
@@ -542,13 +652,39 @@ export async function saveThumbnailGenerationCheckpoint(
   if (providerEvidence && !validNanoBananaEvidence(providerEvidence, session.requestHash)) {
     throw new Error("thumbnail checkpoint Nano Banana provider evidence is invalid");
   }
+  if (
+    scenarioVisualTreatment &&
+    !ScenarioVisualTreatmentThumbnailBindingSchema.safeParse(scenarioVisualTreatment).success
+  ) {
+    throw new Error("thumbnail checkpoint scenario visual treatment binding is invalid");
+  }
+  if (
+    scenarioVisualTreatment !== undefined &&
+    session.scenarioVisualTreatmentBinding === undefined
+  ) {
+    throw new Error(
+      "thumbnail checkpoint scenario visual treatment binding must be admitted before checkpointing",
+    );
+  }
+  if (
+    scenarioVisualTreatment !== undefined &&
+    session.scenarioVisualTreatmentBinding !== undefined &&
+    canonicalJson(scenarioVisualTreatment) !==
+      canonicalJson(session.scenarioVisualTreatmentBinding)
+  ) {
+    throw new Error("thumbnail checkpoint scenario visual treatment binding does not match its session");
+  }
+  const effectiveScenarioVisualTreatment = session.scenarioVisualTreatmentBinding;
   const imageBytes = await readFile(session.localImagePath);
   const manifest: CurrentThumbnailCheckpointManifest = {
-    version: 2,
+    version: effectiveScenarioVisualTreatment ? 3 : 2,
     requestHash: session.requestHash,
     generationCostUsd: cost,
     artifactSha256: createHash("sha256").update(imageBytes).digest("hex"),
     ...(providerEvidence ? { providerEvidence } : {}),
+    ...(effectiveScenarioVisualTreatment
+      ? { scenarioVisualTreatment: effectiveScenarioVisualTreatment }
+      : {}),
   };
   await writeFile(session.localManifestPath, JSON.stringify(manifest));
   await io.putObject(session.imageKey, imageBytes, {
@@ -563,14 +699,42 @@ export async function saveThumbnailGenerationCheckpoint(
 /** Save a paid QA result so a later storage/gate retry reuses its verdict. */
 export async function saveThumbnailQaCheckpoint(
   session: ThumbnailCheckpointSession,
-  qa: { requestHash: string; verdict: unknown; costUsd: number },
+  qa: {
+    requestHash: string;
+    verdict: unknown;
+    costUsd: number;
+    scenarioVisualTreatment?: ThumbnailQaCheckpoint["scenarioVisualTreatment"];
+  },
   io: ThumbnailCheckpointIo = productionIo,
 ): Promise<ThumbnailCheckpointSession> {
   if (!session.manifest) throw new Error("thumbnail QA requires a generation checkpoint");
+  assertScenarioVisualTreatmentBindingForSession(session, session.manifest);
   const cost = finiteCost(qa.costUsd);
   if (cost === undefined) throw new Error("thumbnail QA checkpoint cost must be finite and non-negative");
   if (!/^[a-f0-9]{64}$/.test(qa.requestHash)) {
     throw new Error("thumbnail QA checkpoint requires a SHA-256 request hash");
+  }
+  if (
+    qa.scenarioVisualTreatment &&
+    (
+      !ScenarioVisualTreatmentThumbnailBindingSchema.safeParse(qa.scenarioVisualTreatment.binding).success ||
+      typeof qa.scenarioVisualTreatment.visualTreatmentCompliant !== "boolean"
+    )
+  ) {
+    throw new Error("thumbnail QA scenario visual treatment binding is invalid");
+  }
+  if (session.scenarioVisualTreatmentBinding) {
+    if (!qa.scenarioVisualTreatment) {
+      throw new Error("thumbnail QA requires the admitted scenario visual treatment binding");
+    }
+    if (
+      canonicalJson(qa.scenarioVisualTreatment.binding) !==
+      canonicalJson(session.scenarioVisualTreatmentBinding)
+    ) {
+      throw new Error("thumbnail QA scenario visual treatment binding does not match its session");
+    }
+  } else if (qa.scenarioVisualTreatment !== undefined) {
+    throw new Error("generic thumbnail QA cannot carry a scenario visual treatment binding");
   }
   const manifest: ThumbnailCheckpointManifest = {
     ...session.manifest,
@@ -579,6 +743,7 @@ export async function saveThumbnailQaCheckpoint(
       requestHash: qa.requestHash,
       verdict: qa.verdict,
       costUsd: cost,
+      ...(qa.scenarioVisualTreatment ? { scenarioVisualTreatment: qa.scenarioVisualTreatment } : {}),
     },
   };
   await writeFile(session.localManifestPath, JSON.stringify(manifest));

@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   publishPipelineResumeTriggerRequest,
+  publishPipelineResumeEnqueueAttempt,
   publishRetryTriggerRequest,
   type DurablePipelineRunForPublishResume,
   type UploadedPublishIntentForPipelineResume,
@@ -116,6 +117,7 @@ function failedRun(
     publishContinuationIntentId: "intent-a",
     publishContinuationArtifactId: VIDEO_ARTIFACT_ID,
     publishContinuationVideoId: "yt-video-a",
+    publishContinuationAttempts: 0,
     ...overrides,
   };
 }
@@ -153,9 +155,10 @@ assert.deepEqual(scheduledResume.payload, {
 assert.deepEqual(scheduledResume.options, {
   concurrencyKey: "channel-a",
   idempotencyKey:
-    `publish-resume:intent-a:run:run-a:snapshot:${INVOCATION_SHA256}:video:yt-video-a`,
+    `publish-resume:intent-a:run:run-a:snapshot:${INVOCATION_SHA256}:video:yt-video-a:attempt:1`,
   idempotencyKeyTTL: "30d",
 });
+assert.equal(scheduledResume.enqueueAttempt, 1);
 
 const cadenceResume = publishPipelineResumeTriggerRequest(uploadedIntent(), failedRun());
 assert.ok(cadenceResume);
@@ -172,6 +175,41 @@ assert.deepEqual(cadenceResume.payload, {
 assert.equal(
   publishPipelineResumeTriggerRequest(uploadedIntent(), failedRun())?.options.idempotencyKey,
   cadenceResume.options.idempotencyKey,
+);
+assert.equal(cadenceResume.enqueueAttempt, 1);
+const reissuedResume = publishPipelineResumeTriggerRequest(
+  uploadedIntent(),
+  failedRun({ publishContinuationAttempts: 1 }),
+);
+assert.ok(reissuedResume);
+assert.equal(reissuedResume.enqueueAttempt, 2);
+assert.notEqual(reissuedResume.options.idempotencyKey, cadenceResume.options.idempotencyKey);
+const acknowledgedResume = publishPipelineResumeTriggerRequest(
+  uploadedIntent(),
+  failedRun({ publishContinuationState: "queued", publishContinuationAttempts: 1 }),
+);
+assert.ok(acknowledgedResume);
+assert.equal(acknowledgedResume.enqueueAttempt, 1);
+assert.equal(acknowledgedResume.options.idempotencyKey, cadenceResume.options.idempotencyKey);
+assert.throws(
+  () => publishPipelineResumeTriggerRequest(
+    uploadedIntent(),
+    failedRun({ publishContinuationAttempts: 2 }),
+  ),
+  /exhausted 2 bounded delivery attempts/,
+);
+assert.equal(
+  publishPipelineResumeTriggerRequest(
+    uploadedIntent(),
+    failedRun({ publishContinuationState: "manual_recovery_required" }),
+  ),
+  undefined,
+);
+assert.equal(
+  publishPipelineResumeEnqueueAttempt(
+    failedRun({ publishContinuationState: "queued", publishContinuationAttempts: 2 }),
+  ),
+  2,
 );
 const cadenceResumeOptions = cadenceResume.options;
 assert.equal(
@@ -309,6 +347,7 @@ async function enqueueContract(): Promise<void> {
   assert.deepEqual(resumed, {
     runId: "pipeline-resume-a",
     idempotencyKey: cadenceResumeOptions.idempotencyKey,
+    enqueueAttempt: 1,
   });
   assert.deepEqual(resumeTriggered, [[
     "run-pipeline",

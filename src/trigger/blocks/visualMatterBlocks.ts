@@ -1,10 +1,7 @@
-import { VisualMatterManifestSchema, attachVisualMatterReferenceAssets, planVisualMatter, visualMatterAssetRequests, type VisualMatterReferenceAsset } from "@/engine/visualMatter";
+import { VisualMatterManifestSchema, planVisualMatter } from "@/engine/visualMatter";
+import { studioAssetRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
+import { planVisualTreatment, visualTreatmentKeyFromUnknown } from "@/engine/visualTreatmentCatalog";
 import { COST_PATCH_KEY, type Block } from "@/engine/types";
-import {
-  generateFalNanoBanana2Image,
-  type FalNanoBanana2ReferenceImage,
-} from "@/lib/falNanoBanana";
-import { putObject } from "@/lib/storage";
 
 function boundedInteger(value: unknown, fallback: number, min: number, max: number): number {
   const parsed = Number(value);
@@ -12,21 +9,27 @@ function boundedInteger(value: unknown, fallback: number, min: number, max: numb
   return Math.max(min, Math.min(max, safe));
 }
 
-function safeAssetId(value: string): string {
-  return value.replace(/[^a-z0-9_-]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 90) || "reference";
-}
-
 /**
- * Builds a reusable Visual Matter package for a cinematic story. Reference
- * pixels are generated only when the operator explicitly enables that paid
- * option; otherwise the structured visual lock is still consumed downstream.
+ * Builds a reusable, provider-free Visual Matter package for a cinematic story.
+ * The typed lock is consumed downstream; rendering non-thumbnail reference
+ * pixels remains deliberately unavailable until an approved adapter exists.
  */
+export const VISUAL_MATTER_REFERENCE_ADAPTER_REQUIRED =
+  "visual_matter cannot render non-thumbnail reference assets: FAL/Nano Banana is thumbnail-only. " +
+  "Use planning-only Visual Matter, or configure an approved direct-Novita/licensed-source reference adapter.";
+
 const visualMatter: Block = {
   id: "visual_matter",
-  consumes: ["topic", "narrativeBeats", "continuityLedger", "shotList", "dpVisualSpecs"],
+  consumes: ["topic", "narrativeBeats", "continuityLedger", "shotList", "dpVisualSpecs", "studioAssetRecipeProjection"],
   produces: ["visualMatterManifest"],
-  paid: true,
+  paid: false,
   run: async (ctx) => {
+    const rawTreatment = ctx.params["visualTreatment"];
+    const treatmentKey = rawTreatment === undefined ? undefined : visualTreatmentKeyFromUnknown(rawTreatment);
+    if (rawTreatment !== undefined && !treatmentKey) {
+      throw new Error("visual_matter received an unknown visual treatment; treatment selection must be explicit and catalog-backed");
+    }
+    const visualTreatment = treatmentKey ? planVisualTreatment(treatmentKey) : undefined;
     const manifest = planVisualMatter({
       topic: String(ctx.store["topic"]),
       channelName: typeof ctx.store["channelName"] === "string" ? ctx.store["channelName"] : undefined,
@@ -36,6 +39,8 @@ const visualMatter: Block = {
       narrativeBeats: ctx.store["narrativeBeats"],
       shotList: ctx.store["shotList"],
       dpVisualSpecs: ctx.store["dpVisualSpecs"],
+      studioAssetRecipeProjection: studioAssetRecipeProjectionFromUnknown(ctx.store["studioAssetRecipeProjection"]),
+      ...(visualTreatment ? { visualTreatment } : {}),
       maxCharacters: boundedInteger(ctx.params["maxCharacters"], 3, 0, 6),
       maxSettings: boundedInteger(ctx.params["maxSettings"], 3, 0, 6),
     });
@@ -45,98 +50,19 @@ const visualMatter: Block = {
       return { visualMatterManifest: disabled, [COST_PATCH_KEY]: 0 };
     }
 
-    if (ctx.params["renderReferenceAssets"] !== true) {
-      ctx.log(
-        `visual_matter: planned ${manifest.characters.length} character, ${manifest.settings.length} setting, ` +
-        `${manifest.storyboard.length} storyboard locks (reference-image spend not authorized)`,
-      );
-      return { visualMatterManifest: manifest, [COST_PATCH_KEY]: 0 };
+    // Historical snapshots can still carry the old paid parameter. Reject it
+    // before any provider or storage boundary rather than silently downgrading
+    // quality or routing non-thumbnail imagery through the thumbnail provider.
+    if (ctx.params["renderReferenceAssets"] === true) {
+      throw new Error(VISUAL_MATTER_REFERENCE_ADAPTER_REQUIRED);
     }
 
-    const requests = visualMatterAssetRequests(
-      manifest,
-      boundedInteger(ctx.params["maxReferenceImages"], 8, 1, 12),
+    ctx.log(
+      `visual_matter: planned ${manifest.characters.length} character, ${manifest.settings.length} setting, ` +
+      `${manifest.storyboard.length} storyboard locks${visualTreatment ? ` with ${visualTreatment.label}` : ""} ` +
+      `(planning-only; reference rendering disabled pending an approved adapter)`,
     );
-    const assets: VisualMatterReferenceAsset[] = [];
-    const generatedAnchors: Array<{
-      id: string;
-      kind: VisualMatterReferenceAsset["kind"];
-      bytes: Uint8Array;
-      contentType: string;
-    }> = [];
-    let costUsd = 0;
-    for (const request of requests) {
-      const frameReferenceIds = request.kind === "storyboard_frame"
-        ? new Set(
-            manifest.storyboard.find((frame) => frame.shotId === request.shotId)?.referenceAssetIds ?? [],
-          )
-        : request.kind === "character_sheet" || request.kind === "setting_sheet"
-          ? new Set([manifest.moodBoard.id])
-          : new Set<string>();
-      const referenceImages: FalNanoBanana2ReferenceImage[] = generatedAnchors
-        .filter((asset) => frameReferenceIds.has(asset.id))
-        .slice(0, 6)
-        .map((asset) => ({ bytes: asset.bytes, contentType: asset.contentType }));
-      const prompt = referenceImages.length
-        ? request.kind === "storyboard_frame"
-          ? `${request.prompt} Use every supplied character, setting, and mood image as a locked visual continuity source. Preserve identity, wardrobe, silhouette, palette, and environment while composing this exact shot.`
-          : `${request.prompt} Use the supplied mood board only as the locked palette, texture, lighting, and art-direction source for this sheet.`
-        : request.prompt;
-      const rendered = await generateFalNanoBanana2Image({
-        prompt,
-        aspectRatio: request.kind === "storyboard_frame" ? "16:9" : "3:2",
-        resolution: "1K",
-        outputFormat: "png",
-        referenceImages,
-        idempotencyContext: `${ctx.runId}:visual-matter:${safeAssetId(request.id)}`,
-      });
-      const r2Key = `${ctx.keyPrefix}runs/${ctx.runId}/visual-matter/${safeAssetId(request.id)}.png`;
-      await putObject(r2Key, rendered.bytes, {
-        contentType: rendered.contentType,
-        ifNoneMatch: "*",
-        metadata: {
-          visualmatter: "v1",
-          kind: request.kind,
-          requestsha256: rendered.receipt.requestSha256,
-          responsesha256: rendered.receipt.responseSha256,
-        },
-      });
-      assets.push({
-        id: request.id,
-        kind: request.kind,
-        label: request.label,
-        prompt,
-        ...(request.shotId ? { shotId: request.shotId } : {}),
-        r2Key,
-        contentType: rendered.contentType,
-        receipt: {
-          provider: rendered.receipt.provider,
-          model: rendered.receipt.model,
-          responseId: rendered.receipt.responseId,
-          requestSha256: rendered.receipt.requestSha256,
-          responseSha256: rendered.receipt.responseSha256,
-          providerResponseMetadataSha256: rendered.receipt.providerResponseMetadataSha256,
-          costUsd: rendered.receipt.costUsd,
-          createdAt: rendered.receipt.createdAt,
-          route: rendered.receipt.route,
-          resolution: rendered.receipt.resolution,
-          seed: rendered.receipt.seed,
-          sourceReferenceSha256: rendered.receipt.referenceSha256,
-          ...(rendered.receipt.width !== undefined ? { width: rendered.receipt.width } : {}),
-          ...(rendered.receipt.height !== undefined ? { height: rendered.receipt.height } : {}),
-        },
-      });
-      generatedAnchors.push({
-        id: request.id,
-        kind: request.kind,
-        bytes: rendered.bytes,
-        contentType: rendered.contentType,
-      });
-      costUsd += rendered.receipt.costUsd;
-    }
-    const anchored = attachVisualMatterReferenceAssets(manifest, assets);
-    ctx.log(`visual_matter: rendered and attested ${assets.length} fal.ai Nano Banana 2 reference asset(s)`);
-    return { visualMatterManifest: anchored, [COST_PATCH_KEY]: costUsd };
+    return { visualMatterManifest: manifest, [COST_PATCH_KEY]: 0 };
   },
 };
 

@@ -1,4 +1,15 @@
-const RETRYABLE_PIPELINE_RUN_STATUSES = new Set(["queued", "running", "failed"]);
+// `awaiting_factual_review` is intentionally admitted only far enough to let
+// the fenced lease mutation return its non-dispatchable waiting outcome (or
+// validate the exact owner-approved continuation). It is not a generic retry
+// state and `factual_review_blocked` remains terminal.
+const RETRYABLE_PIPELINE_RUN_STATUSES = new Set([
+  "queued",
+  "running",
+  "failed",
+  "awaiting_factual_review",
+  "awaiting_reviewed_evidence_dispatch",
+  "awaiting_route_qualification_benchmark_dispatch",
+]);
 
 export interface DurablePipelineRunIdentity {
   _id: string;
@@ -37,5 +48,25 @@ export function assertRunPipelineAdmission(args: {
   const durablePlanItemId = run.planItemId ? String(run.planItemId) : undefined;
   if (durablePlanItemId !== args.scheduledPlanItemId) {
     throw new Error("run-pipeline scheduled-plan payload/run mismatch");
+  }
+}
+
+/**
+ * A route-less run can exist only as an already-sealed historical invocation.
+ * New work must bind the current canonical brief and sealed route before it
+ * can reserve, preflight, or reach a provider.
+ */
+export function assertFreshPipelineInvocationRouteAdmission(args: {
+  hasDurableInvocation: boolean;
+  programBrief: unknown;
+  programRoute: unknown;
+}): void {
+  if (
+    !args.hasDurableInvocation &&
+    (args.programBrief === undefined || args.programRoute === undefined)
+  ) {
+    throw new Error(
+      "fresh pipeline invocation requires a sealed channel program brief and route; historical route-less channels may only replay an exact durable invocation",
+    );
   }
 }

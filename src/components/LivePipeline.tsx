@@ -1,12 +1,19 @@
 "use client";
 
 import { useState } from "react";
-import { STATUS_COLOR } from "@/lib/config";
 import { blockLabel } from "@/lib/blocks";
 import { Elapsed } from "./Elapsed";
 import { StageBadge } from "./StageBadge";
 import { StageRow } from "./StageRow";
 import { IconChevron } from "./icons";
+import {
+  describeLivePipelinePhase,
+  LIVE_PIPELINE_PHASE_LABEL,
+  livePipelinePhaseForBlock,
+  summarizeLivePipelinePhases,
+  type LivePipelinePhase,
+} from "@/lib/livePipelinePresentation";
+import styles from "./LivePipeline.module.css";
 
 /** A live stage row, as persisted on the `runStages` table. */
 export type PipelineStage = {
@@ -23,7 +30,7 @@ export type PipelineStage = {
 
 /**
  * One node in the planned pipeline. `stage` is undefined when the block hasn't
- * produced a runStage row yet — it renders as `queued`.
+ * produced a runStage row — it renders as `queued`.
  */
 export type PipelineNode = {
   block: string;
@@ -35,176 +42,123 @@ function nodeStatus(node: PipelineNode): string {
 }
 
 /**
- * Vertical numbered stage track. Numbered nodes per block, connected by a
- * progress line that fills as blocks complete. Each node shows the block
- * label, a status pill, and per-block elapsed time; clicking expands the
- * persisted inputs/outputs and any error.
+ * A compact production workbench backed only by persisted stage receipts.
+ * It never implies a media stream or progress signal that the runner has not
+ * recorded; grouping makes the actual plan understandable without hiding any
+ * individual stage or its inspection detail.
  */
 export function LivePipeline({ nodes }: { nodes: PipelineNode[] }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const complete = nodes.filter((node) => ["ok", "skipped"].includes(nodeStatus(node))).length;
+  const failed = nodes.filter((node) => nodeStatus(node) === "failed").length;
+  const active = nodes.find((node) => nodeStatus(node) === "running");
+  const phaseSummaries = summarizeLivePipelinePhases(nodes);
+  const overallState = failed > 0 ? "blocked" : active ? "active" : complete === nodes.length ? "complete" : "queued";
 
   return (
-    <div style={{ display: "grid", gap: "0.4rem" }}>
-      {nodes.map((node, i) => {
-        const status = nodeStatus(node);
-        const color = STATUS_COLOR[status] ?? "var(--color-queued)";
-        const isLast = i === nodes.length - 1;
-        const stage = node.stage;
-        const running = status === "running";
-        const dim = status === "queued" || status === "skipped";
-        const open = expanded === node.block;
-        const hasDetail =
-          !!stage &&
-          (stage.inputs !== undefined ||
-            stage.outputs !== undefined ||
-            !!stage.error);
+    <div className={styles.root} data-state={overallState}>
+      <header className={`${styles.summary} glass`}>
+        <div className={styles.summaryLead}>
+          <span className={styles.summarySignal} aria-hidden="true" />
+          <span>
+            <strong>Production workbench</strong>
+            <small>
+              {active
+                ? `Working in ${LIVE_PIPELINE_PHASE_LABEL[livePipelinePhaseForBlock(active.block)].toLowerCase()} · ${blockLabel(active.block)}`
+                : failed
+                  ? "A recorded stage needs attention before release can continue"
+                  : complete === nodes.length
+                    ? "Every planned stage has reported a receipt"
+                    : "Waiting for the next verified stage receipt"}
+            </small>
+          </span>
+        </div>
+        <div className={styles.summaryMetrics} aria-label="Production progress">
+          <span>
+            <strong>{complete}/{nodes.length}</strong>
+            <small>verified</small>
+          </span>
+          <span>
+            <strong>{phaseSummaries.filter((phase) => phase.state === "complete").length}/{phaseSummaries.length}</strong>
+            <small>phases</small>
+          </span>
+          {failed > 0 && (
+            <span className={styles.blockedMetric}>
+              <strong>{failed}</strong>
+              <small>blocked</small>
+            </span>
+          )}
+        </div>
+      </header>
 
-        return (
-          <div
-            key={node.block}
-            className="glass"
-            style={{
-              borderColor: open
-                ? "var(--color-border-strong)"
-                : "var(--color-border)",
-              overflow: "hidden",
-            }}
-          >
-            <button
-              type="button"
-              onClick={() =>
-                setExpanded((cur) => (cur === node.block ? null : node.block))
-              }
-              disabled={!hasDetail}
-              style={{
-                width: "100%",
-                font: "inherit",
-                textAlign: "left",
-                cursor: hasDetail ? "pointer" : "default",
-                background: "transparent",
-                border: "none",
-                color: "inherit",
-                display: "flex",
-                alignItems: "center",
-                gap: "0.9rem",
-                padding: "0.8rem 1.05rem",
-                opacity: dim ? 0.6 : 1,
-              }}
-            >
-              {/* Numbered node + connecting progress line */}
-              <span
-                style={{
-                  position: "relative",
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  alignSelf: "stretch",
-                }}
-              >
-                <span
-                  className={running ? "studio-pulse" : undefined}
-                  style={{
-                    display: "grid",
-                    placeItems: "center",
-                    width: 28,
-                    height: 28,
-                    borderRadius: "50%",
-                    flexShrink: 0,
-                    zIndex: 1,
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "0.74rem",
-                    fontWeight: 600,
-                    color,
-                    background: `color-mix(in srgb, ${color} 16%, transparent)`,
-                    border: `1.5px solid color-mix(in srgb, ${color} 45%, transparent)`,
-                  }}
-                >
-                  {i + 1}
-                </span>
-                {!isLast && (
-                  <span
-                    aria-hidden
-                    style={{
-                      position: "absolute",
-                      top: 28,
-                      bottom: -16,
-                      width: 2,
-                      background:
-                        status === "ok"
-                          ? "var(--color-ok)"
-                          : "var(--color-border-strong)",
-                      opacity: status === "ok" ? 0.55 : 1,
-                    }}
-                  />
-                )}
-              </span>
-
-              <span style={{ minWidth: 0, flex: 1 }}>
-                <span
-                  style={{
-                    fontWeight: 500,
-                    fontSize: "0.95rem",
-                    display: "block",
-                  }}
-                >
-                  {blockLabel(node.block)}
-                </span>
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "0.72rem",
-                    color: "var(--color-faint)",
-                  }}
-                >
-                  {node.block}
-                </span>
-              </span>
-
-              <span
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "1rem",
-                  fontSize: "0.78rem",
-                  color: "var(--color-faint)",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {stage?.startedAt && (
-                  <span style={{ fontFamily: "var(--font-mono)" }}>
-                    <Elapsed
-                      from={stage.startedAt}
-                      to={running ? undefined : stage.finishedAt}
-                    />
-                  </span>
-                )}
-                <StageBadge status={status} size="sm" />
-                {hasDetail && (
-                  <IconChevron
-                    width={15}
-                    height={15}
-                    style={{
-                      transition: "transform 0.18s ease",
-                      transform: open ? "rotate(180deg)" : "none",
-                      color: "var(--color-muted)",
-                    }}
-                  />
-                )}
-              </span>
-            </button>
-
-            {open && hasDetail && stage && (
-              <div style={{ borderTop: "1px solid var(--color-border)" }}>
-                <StageRow
-                  inputs={stage.inputs}
-                  outputs={stage.outputs}
-                  error={stage.error}
-                />
-              </div>
-            )}
+      <div className={styles.phaseStrip} aria-label="Production phase progress">
+        {phaseSummaries.map((summary, index) => (
+          <div className={styles.phase} data-state={summary.state} key={summary.phase} title={describeLivePipelinePhase(summary)}>
+            <span className={styles.phaseOrder}>{String(index + 1).padStart(2, "0")}</span>
+            <div className={styles.phaseTopline}>
+              <span className={styles.phaseDot} aria-hidden="true" />
+              <span className={styles.phaseName}>{summary.label}</span>
+            </div>
+            <div className={styles.phaseProgress}>
+              <strong>{summary.verified}/{summary.total}</strong>
+              <span>receipts</span>
+            </div>
+            <span className={styles.phaseCaption}>{describeLivePipelinePhase(summary)}</span>
           </div>
-        );
-      })}
+        ))}
+      </div>
+
+      <div className={styles.stageList}>
+        {nodes.map((node, index) => {
+          const status = nodeStatus(node);
+          const phase: LivePipelinePhase = livePipelinePhaseForBlock(node.block);
+          const isPhaseStart = index === 0 || livePipelinePhaseForBlock(nodes[index - 1]!.block) !== phase;
+          const isPhaseEnd = index === nodes.length - 1 || livePipelinePhaseForBlock(nodes[index + 1]!.block) !== phase;
+          const stage = node.stage;
+          const running = status === "running";
+          const open = expanded === node.block;
+          const hasDetail = Boolean(stage && (stage.inputs !== undefined || stage.outputs !== undefined || stage.error));
+
+          return (
+            <div className={styles.stageGroup} data-phase={phase} key={node.block}>
+              {isPhaseStart && (
+                <div className={styles.phaseDivider}>
+                  <span>{LIVE_PIPELINE_PHASE_LABEL[phase]}</span>
+                  <i aria-hidden="true" />
+                </div>
+              )}
+              <div className={`${styles.stageCard} glass`} data-status={status} data-open={open ? "true" : undefined}>
+                <button
+                  type="button"
+                  className={styles.stageToggle}
+                  onClick={() => setExpanded((current) => current === node.block ? null : node.block)}
+                  disabled={!hasDetail}
+                  aria-expanded={hasDetail ? open : undefined}
+                >
+                  <span className={styles.stageTrack} aria-hidden="true">
+                    <span className={`${styles.stageIndex} ${running ? "studio-pulse" : ""}`}>{index + 1}</span>
+                    {!isPhaseEnd && <span className={styles.stageLine} />}
+                  </span>
+                  <span className={styles.stageIdentity}>
+                    <strong>{blockLabel(node.block)}</strong>
+                    <small>{node.block}</small>
+                  </span>
+                  <span className={styles.stageMeta}>
+                    {stage?.startedAt && <Elapsed from={stage.startedAt} to={running ? undefined : stage.finishedAt} />}
+                    <StageBadge status={status} size="sm" />
+                    {hasDetail && <IconChevron className={styles.chevron} data-open={open ? "true" : undefined} width={15} height={15} />}
+                  </span>
+                </button>
+                {open && stage && hasDetail && (
+                  <div className={styles.stageDetail}>
+                    <StageRow inputs={stage.inputs} outputs={stage.outputs} error={stage.error} />
+                  </div>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

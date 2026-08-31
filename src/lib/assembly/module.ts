@@ -38,11 +38,11 @@ export const ASSEMBLY_SURFACE: CustomizationSurface = {
     //
     // `true` makes the live `timeline_assemble` block compose through THIS
     // module (cutover.assembleViaEdl) instead of the god-block's own inline
-    // compose/heal code. It is the per-channel opt-in for a cutover that has
-    // NOT been validated on a real render yet: the `essay`-preset parity claim
-    // is proven only for the DETERMINISTIC PLAN MATH (scripts/assembly-parity.ts),
-    // never for a finished video. Flipping it is an OPERATOR decision on ONE
-    // channel at a time, not an engineering default.
+    // compose/heal code. Render parity is proven for the narrated essay
+    // profiles exercised by scripts/assembly-render-parity.ts, including
+    // captions, loudness, title cards, hard cuts, and dips to black. It stays
+    // an OPERATOR decision on ONE channel at a time—not an engineering default
+    // or an implicit preset change.
     //
     // Deliberately absent from every preset below, so no preset — and no
     // Architect pass that picks a preset — can turn it on implicitly. The only
@@ -50,7 +50,7 @@ export const ASSEMBLY_SURFACE: CustomizationSurface = {
     // `setModuleConfig(channelId, "timeline_assemble", { useAssemblyEdl: true })`.
     // `servesStyles: []` marks it as serving no channel style at all.
     // ────────────────────────────────────────────────────────────────────────
-    { id: "useAssemblyEdl", type: "boolean", default: false, describes: "OPERATOR CUTOVER SWITCH (unvalidated): compose via the standalone Assembly EDL module instead of the legacy inline god-block path. Leave off unless you are piloting the cutover on this one channel.", servesStyles: [] },
+    { id: "useAssemblyEdl", type: "boolean", default: false, describes: "OPERATOR CUTOVER SWITCH: compose via the standalone Assembly EDL module instead of the legacy inline god-block path. Leave off unless this channel is deliberately adopting the render-tested essay cutover.", servesStyles: [] },
   ],
   presets: {
     documentary: { cutEnergy: "slow", chapterCards: true, transitions: "crossfade", introStyle: "title_card", outroStyle: "closing_card", musicDuckProfile: "standard", aspect: "16:9", targetLufs: -14 },

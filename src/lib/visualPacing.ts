@@ -244,8 +244,10 @@ export function measureVisualPacing(opts: MeasureVisualPacingOptions): VisualPac
     return emptyEvidence(policy, durationSec, "unavailable", "final-master duration is not a positive finite value");
   }
 
+  // FFMPEG is resolved from FFMPEG_BIN/PATH in the renderer image; it is not
+  // a project asset for Turbopack to trace into this server bundle.
   const result = spawnSync(
-    FFMPEG,
+    /* turbopackIgnore: true */ FFMPEG,
     [
       "-hide_banner",
       "-i", opts.videoPath,

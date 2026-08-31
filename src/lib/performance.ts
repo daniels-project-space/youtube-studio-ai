@@ -13,6 +13,8 @@ export interface PerfEntry {
   thumbnailStrategy?: string;
   publishedAt: number;
   views: number;
+  /** Raw provider metric; intentionally not used by the ranking score. */
+  engagedViews?: number;
   avgViewPct: number; // audience retention 0..100
   ctr?: number; // thumbnail CTR 0..100 (if available)
   updatedAt: number;

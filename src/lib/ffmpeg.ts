@@ -1420,6 +1420,11 @@ export async function composeWithIntro(args: {
   audioFadeOutSec?: number;
   /** Crossfade (xfade) seconds from the title card into the body. Default 0.8. */
   crossfadeSec?: number;
+  /**
+   * Title→body transition. Defaults to the historical crossfade; hardcut and
+   * dip_to_black are closed, assembler-owned effects—not arbitrary filters.
+   */
+  transition?: "hardcut" | "crossfade" | "dip_to_black";
   width?: number;
   height?: number;
   /** Music volume during the intro (no voice) and under narration. */
@@ -1468,6 +1473,9 @@ export async function composeWithIntro(args: {
   const introVol = args.introMusicVol ?? 0.6;
   const bodyVol = args.narrationPath ? (args.bodyMusicVol ?? 0.12) : introVol;
   const duckRamp = Math.max(0.05, args.musicDuckRampSec ?? 3);
+  const titleTransition = args.transition === "hardcut" || args.transition === "dip_to_black" || args.transition === "crossfade"
+    ? args.transition
+    : "crossfade";
   const bodyAudioMode = args.bodyAudioMode ?? "off";
   const includeBodyAudio = bodyAudioMode !== "off";
   const diegeticVol = Math.min(0.35, Math.max(0.03, args.diegeticBodyAudioVol ?? 0.18));
@@ -1508,16 +1516,25 @@ export async function composeWithIntro(args: {
   const vparts: string[] = [];
   let vcat: string;
   if (cardIdx >= 0) {
-    const xf = Math.max(0, Math.min(intro, bodyTail, args.crossfadeSec ?? 0.8));
+    const requestedCrossfadeSec = titleTransition === "hardcut" ? 0 : (args.crossfadeSec ?? 0.8);
+    const xf = Math.max(0, Math.min(intro, bodyTail, requestedCrossfadeSec));
     vparts.push(
       `[${cardIdx}:v]${scalePad},trim=0:${intro.toFixed(3)},setpts=PTS-STARTPTS[card]`,
     );
-    vparts.push(
-      `[${bodyIdx}:v]${scalePad},trim=0:${(bodyTail + xf).toFixed(3)},setpts=PTS-STARTPTS[body]`,
-    );
-    vparts.push(
-      `[card][body]xfade=transition=fade:duration=${xf.toFixed(3)}:offset=${(intro - xf).toFixed(3)}[vcat]`,
-    );
+    if (xf > 0) {
+      vparts.push(
+        `[${bodyIdx}:v]${scalePad},trim=0:${(bodyTail + xf).toFixed(3)},setpts=PTS-STARTPTS[body]`,
+      );
+      const xfade = titleTransition === "dip_to_black" ? "fadeblack" : "fade";
+      vparts.push(
+        `[card][body]xfade=transition=${xfade}:duration=${xf.toFixed(3)}:offset=${(intro - xf).toFixed(3)}[vcat]`,
+      );
+    } else {
+      vparts.push(
+        `[${bodyIdx}:v]${scalePad},trim=0:${bodyTail.toFixed(3)},setpts=PTS-STARTPTS[body]`,
+      );
+      vparts.push(`[card][body]concat=n=2:v=1:a=0[vcat]`);
+    }
     vcat = "[vcat]";
   } else {
     vparts.push(
@@ -2567,8 +2584,9 @@ export async function patchSegment(
 export async function regionLuma(path: string, xFrac: number, wFrac: number): Promise<number> {
   const { execFile } = await import("node:child_process");
   return new Promise((resolve) => {
-    execFile(
-      FFMPEG,
+    // FFMPEG is deliberately resolved from FFMPEG_BIN/PATH in the renderer
+    // image; it is not a project asset that Next should trace into the server.
+    execFile(/* turbopackIgnore: true */ FFMPEG,
       [
         "-v", "error", "-i", path,
         "-vf", `crop=iw*${wFrac}:ih:iw*${xFrac}:0,scale=1:1,format=gray`,

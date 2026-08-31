@@ -36,6 +36,7 @@ import {
 } from "@/lib/whiteboardSync";
 import { music } from "@/trigger/blocks/lofiBlocks";
 import { qaVisual } from "@/trigger/blocks/narratedBlocks";
+import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
 import { synthNarration, TtsError } from "@/lib/tts";
 import { GEMINI_RUNTIME_OPT_IN_ENV } from "@/lib/gemini";
 
@@ -97,13 +98,23 @@ function costPatches(): void {
 
   assert.equal(qaVisual.paid, true);
   // A release review has a 48-frame broad pass and 24-frame focused re-review:
-  // six managed-vision batches at the 12-image batch size.
-  const qaEvidenceBatches = 6;
+  // thirty-six managed-vision batches at the final Qwen operational two-image cap.
+  const qaEvidenceBatches = 36;
   assert.equal(qaVisualCost({}), PRICE.qaBaseUsd * qaEvidenceBatches);
   assert.equal(
     qaVisualCost({ nativeWatch: true, audioQa: true }),
     PRICE.qaBaseUsd * qaEvidenceBatches + PRICE.audioQaUsd,
     "retired nativeWatch must not reserve a Gemini native-video review",
+  );
+  assert.equal(
+    qaVisualCost({ visualReviewFrames: 72, visualReviewFocusFrames: 36 }),
+    PRICE.qaBaseUsd * 54,
+    "the largest admitted broad/focus plan must reserve every final-review two-image batch",
+  );
+  assert.throws(
+    () => qaVisualCost({ visualReviewFrames: 73 }),
+    /refusing to silently change requested final-review coverage/,
+    "an out-of-envelope raw frame setting must fail before a reviewer can exceed its reservation",
   );
 }
 
@@ -277,6 +288,62 @@ async function successfulTinyTtsIsTerminal(): Promise<void> {
   }
 }
 
+async function timedOutTtsIsTerminal(): Promise<void> {
+  const originalFetch = globalThis.fetch;
+  const originalFishKey = process.env.FISH_AUDIO_API_KEY;
+  const originalElevenKey = process.env.ELEVENLABS_API_KEY;
+  process.env.FISH_AUDIO_API_KEY = "test-fish-key";
+  process.env.ELEVENLABS_API_KEY = "test-eleven-key";
+
+  try {
+    for (const provider of ["fish", "elevenlabs"] as const) {
+      const text = `bounded ${provider} request`;
+      let successCalls = 0;
+      globalThis.fetch = async (_input, init) => {
+        successCalls += 1;
+        assert.ok(init?.signal, `${provider} successful request carries a local timeout signal`);
+        assert.equal(init.signal.aborted, false);
+        return new Response(new Uint8Array(1_000), { status: 200 });
+      };
+      const success = await synthNarration({ text, provider, elevenVoiceId: "voice-test" });
+      assert.equal(success.length, 1_000, `${provider} preserves a completed audio response`);
+      assert.equal(successCalls, 1);
+
+      let timeoutCalls = 0;
+      globalThis.fetch = async (_input, init) => {
+        timeoutCalls += 1;
+        // The real AbortSignal.timeout abort reaches this exact transport
+        // catch. Simulating that rejection keeps the test hermetic and fast.
+        assert.ok(init?.signal, `${provider} bounded request carries a timeout signal`);
+        assert.equal(init.signal.aborted, false);
+        throw Object.assign(new Error("request aborted after submission timeout"), {
+          name: "TimeoutError",
+        });
+      };
+      let thrown: unknown;
+      try {
+        await synthNarration({ text, provider, elevenVoiceId: "voice-test" });
+      } catch (error) {
+        thrown = error;
+      }
+      assert.ok(thrown instanceof TtsError, `${provider} timeout is typed as terminal TTS ambiguity`);
+      assert.equal(thrown.retryable, false);
+      assert.match(thrown.message, /outcome is unknown.*not retrying/i);
+      const taskOutcome = taskErrorForRetryPolicy(thrown);
+      assert.equal(taskOutcome.classification.kind, "deterministic");
+      assert.ok(taskOutcome.error instanceof Error);
+      assert.equal(taskOutcome.error.name, "AbortTaskRunError", `${provider} timeout cannot trigger the outer task retry`);
+      assert.equal(timeoutCalls, 1, `${provider} timeout never resubmits a paid request`);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalFishKey === undefined) delete process.env.FISH_AUDIO_API_KEY;
+    else process.env.FISH_AUDIO_API_KEY = originalFishKey;
+    if (originalElevenKey === undefined) delete process.env.ELEVENLABS_API_KEY;
+    else process.env.ELEVENLABS_API_KEY = originalElevenKey;
+  }
+}
+
 async function main(): Promise<void> {
   const originalGeminiRuntime = process.env[GEMINI_RUNTIME_OPT_IN_ENV];
   process.env[GEMINI_RUNTIME_OPT_IN_ENV] = "1";
@@ -286,6 +353,7 @@ async function main(): Promise<void> {
     requestBounds();
     await cachedMusicIsFree();
     await successfulTinyTtsIsTerminal();
+    await timedOutTtsIsTerminal();
     // Gemini audio judging is retired. Production narration now uses the
     // local FFmpeg evidence tested in narrationPerformance/narrationMix tests.
     console.log("RUNTIME COST ACCOUNTING PASS: provider routes, patches, cache reuse, request bounds");

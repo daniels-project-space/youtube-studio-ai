@@ -20,6 +20,10 @@ import {
   syntheticScenarioVisualKindFor,
   type SyntheticScenarioContract,
 } from "@/engine/syntheticScenario";
+import {
+  ScenarioVisualTreatmentSchema,
+  resolveScenarioVisualTreatmentForRoute,
+} from "@/engine/scenarioVisualTreatment";
 import { resolveContentLane } from "@/engine/contentLane";
 import { assertCurriculumEpisodeSeedForStoryInput } from "@/engine/curriculumEpisodeSeed";
 import {
@@ -188,6 +192,8 @@ export function buildEpisodeGraphFromStorySpine(args: {
    */
   childrenLearningObjective?: string;
   syntheticScenario?: SyntheticScenarioContract;
+  /** Sealed renderer-neutral policy when this is a fictional scenario route. */
+  scenarioVisualTreatment?: unknown;
   /** Fresh reviewed factual visuals for this supervised episode only. */
   evidenceVisualManifests?: unknown;
   /** Shared reviewed factual source/claim packet; never required for original explainers. */
@@ -238,6 +244,15 @@ export function buildEpisodeGraphFromStorySpine(args: {
   const syntheticScenario = args.syntheticScenario
     ? assertSyntheticScenarioContract(args.syntheticScenario)
     : undefined;
+  const scenarioVisualTreatment = args.scenarioVisualTreatment === undefined
+    ? undefined
+    : ScenarioVisualTreatmentSchema.parse(args.scenarioVisualTreatment);
+  if (scenarioVisualTreatment && !syntheticScenario) {
+    throw new Error("episode_graph: a scenario visual treatment requires a fictional synthetic scenario");
+  }
+  if (scenarioVisualTreatment && syntheticScenario?.profile !== scenarioVisualTreatment.profile) {
+    throw new Error("episode_graph: scenario visual treatment does not match the fictional synthetic scenario");
+  }
   const sceneEvidenceVisuals = sceneEvidenceVisualsForStorySpine(args.evidenceVisualManifests, storySpine);
   const editorialEvidencePacket = args.editorialEvidencePacket === undefined
     ? undefined
@@ -306,6 +321,9 @@ export function buildEpisodeGraphFromStorySpine(args: {
                 storySpine.narrativeBeats.length,
                 beat.purpose,
               ),
+              ...(scenarioVisualTreatment
+                ? { scenarioVisualTreatmentFingerprint: scenarioVisualTreatment.fingerprint }
+                : {}),
             }
           : {}),
         ...(evidenceVisualManifest
@@ -371,6 +389,16 @@ const episodeGraph: Block = {
       })
       : undefined;
     const audience = childrenSeed ? "children" : ctx.params["audience"] === "children" ? "children" : "general";
+    const syntheticScenario = ctx.store["syntheticScenario"] !== undefined
+      ? assertSyntheticScenarioContract(ctx.store["syntheticScenario"])
+      : undefined;
+    const scenarioVisualTreatment = resolveScenarioVisualTreatmentForRoute({
+      treatment: ctx.store["scenarioVisualTreatment"],
+      route: ctx.store["channelProgramRoute"],
+      topic: ctx.store["topic"],
+      scenario: syntheticScenario,
+      consumer: "episode_graph",
+    });
     const { episodeGraph, sceneManifest } = buildEpisodeGraphFromStorySpine({
       storySpine: storySpineFromStore(ctx.store),
       topic: String(ctx.store["topic"] ?? "").trim(),
@@ -383,9 +411,8 @@ const episodeGraph: Block = {
         ? `curriculum://reviewed/${childrenSeed.seriesId}/${childrenSeed.episodeId}`
         : typeof ctx.params["curriculumLocator"] === "string" ? ctx.params["curriculumLocator"] : undefined,
       childrenLearningObjective: childrenSeed?.measurableObjective.statement,
-      syntheticScenario: ctx.store["syntheticScenario"] !== undefined
-        ? assertSyntheticScenarioContract(ctx.store["syntheticScenario"])
-        : undefined,
+      syntheticScenario,
+      scenarioVisualTreatment,
       evidenceVisualManifests: ctx.store["evidenceVisualManifests"],
       editorialEvidencePacket: ctx.store["editorialEvidencePacket"],
     });

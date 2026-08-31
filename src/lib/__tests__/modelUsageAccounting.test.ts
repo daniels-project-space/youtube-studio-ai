@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { z } from "zod";
 
 import { classifyExecutionError } from "@/engine/executionErrors";
 import { accountedModelUsageCost } from "@/engine/modelUsageCost";
@@ -8,8 +9,11 @@ import { runPipeline } from "@/engine/runner";
 import { COST_PATCH_KEY, type Block, type RunStageSink } from "@/engine/types";
 import { validatePipeline } from "@/engine/validate";
 import { GEMINI_RUNTIME_OPT_IN_ENV, GeminiSubmissionError, geminiJson } from "@/lib/gemini";
+import { claudeJson } from "@/lib/anthropic";
 import {
   createModelUsageScope,
+  getOrCreateModelResponse,
+  modelRequestCacheKey,
   priceModelUsage,
   recordModelUsage,
 } from "@/lib/modelUsage";
@@ -319,6 +323,209 @@ async function runnerAccountsAndReusesModelResponse(): Promise<void> {
   }
 }
 
+async function runnerReusesClaudeResponseAfterRetry(): Promise<void> {
+  const originalFetch = globalThis.fetch;
+  const originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
+  const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "hermetic-anthropic-test-key";
+  delete process.env.OPENROUTER_API_KEY;
+  let fetches = 0;
+  globalThis.fetch = async (input) => {
+    assert.equal(String(input), "https://api.anthropic.com/v1/messages");
+    fetches++;
+    return Response.json({
+      id: "claude-retry-response",
+      content: [{ type: "text", text: '{"value":"real"}' }],
+      usage: { input_tokens: 1_000, output_tokens: 200 },
+    });
+  };
+
+  _clear();
+  let attempts = 0;
+  const modelBlock: Block = {
+    id: "claude_model_accounting_test",
+    consumes: [],
+    produces: ["x"],
+    run: async () => {
+      const answer = await claudeJson<{ value: string }>({
+        prompt: "same paid Claude call after retry",
+      });
+      attempts++;
+      if (attempts === 1) {
+        throw Object.assign(new Error("later transport failed"), {
+          retryable: true,
+          retryAfterMs: 0,
+        });
+      }
+      return { x: answer.value };
+    },
+  };
+  register(modelBlock);
+  const { sink, rows } = sinkRows();
+  try {
+    const result = await runPipeline(validatePipeline([{ block: modelBlock.id }]), {
+      ownerId: "owner",
+      runId: "run-claude-model-accounting",
+      channelId: "channel",
+      keyPrefix: "test/",
+      budgetUsd: 10,
+      defaultRetries: 1,
+      sink,
+    });
+    assert.equal(result.ok, true);
+    assert.equal(attempts, 2);
+    assert.equal(fetches, 1, "outer retry reuses the first valid paid Claude response");
+    close(result.costTotal, 0.006, "runner preserves exact first-party Claude cost");
+    close(rows.find((row) => row.status === "ok")?.cost ?? -1, 0.006, "persisted Claude stage cost");
+  } finally {
+    globalThis.fetch = originalFetch;
+    if (originalAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = originalAnthropicKey;
+    if (originalOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = originalOpenRouterKey;
+  }
+}
+
+async function failedSingleFlightIsNeverMemoized(): Promise<void> {
+  const scope = createModelUsageScope();
+  const key = modelRequestCacheKey("anthropic", "claude-sonnet-4-5-20250929", {
+    prompt: "single-flight failure boundary",
+  });
+  let creates = 0;
+  await scope.run(async () => {
+    await assert.rejects(
+      getOrCreateModelResponse(key, {
+        provider: "anthropic",
+        model: "claude-sonnet-4-5-20250929",
+        kind: "text",
+      }, async () => {
+        creates++;
+        throw new Error("ambiguous provider transport");
+      }),
+      /ambiguous provider transport/,
+    );
+    assert.equal(
+      await getOrCreateModelResponse(key, {
+        provider: "anthropic",
+        model: "claude-sonnet-4-5-20250929",
+        kind: "text",
+      }, async () => {
+        creates++;
+        return "recovered";
+      }),
+      "recovered",
+    );
+  });
+  assert.equal(creates, 2, "a rejected provider attempt is never cached as a successful response");
+}
+
+async function agentPostDispatchFailureNeverFallsBack(): Promise<void> {
+  const originalFetch = globalThis.fetch;
+  const originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
+  const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
+  const originalMastraProducerModel = process.env.MASTRA_PRODUCER_MODEL;
+  const originalLangfusePublicKey = process.env.LANGFUSE_PUBLIC_KEY;
+  const originalLangfuseSecretKey = process.env.LANGFUSE_SECRET_KEY;
+  const originalLangfuseBaseUrl = process.env.LANGFUSE_BASE_URL;
+  const originalConsoleWarn = console.warn;
+  const originalConsoleError = console.error;
+  let fetches = 0;
+  try {
+    // Import after pinning the role model so this hermetic Mastra-boundary
+    // exercise never needs a real provider credential or reaches the network.
+    process.env.ANTHROPIC_API_KEY = "hermetic-agent-schema-test-key";
+    process.env.MASTRA_PRODUCER_MODEL = "anthropic/claude-sonnet-4-5-20250929";
+    delete process.env.OPENROUTER_API_KEY;
+    delete process.env.LANGFUSE_PUBLIC_KEY;
+    delete process.env.LANGFUSE_SECRET_KEY;
+    delete process.env.LANGFUSE_BASE_URL;
+    console.warn = () => undefined;
+    console.error = () => undefined;
+    globalThis.fetch = async () => {
+      fetches++;
+      // Mastra rejects this deliberately minimal non-stream response after
+      // dispatch. It might already represent paid model work, so agentJson
+      // must surface its typed terminal outcome instead of issuing a second
+      // REST request for the same prompt.
+      return Response.json({
+        id: "agent-schema-test",
+        content: [{ type: "text", text: '{"answer":42}' }],
+        usage: { input_tokens: 1, output_tokens: 1 },
+      });
+    };
+
+    const {
+      agentJson,
+      MastraGenerationOutcomeUnknownError,
+      parseMastraStructuredObject,
+    } = await import("@/agents/mastra");
+    assert.throws(
+      () => parseMastraStructuredObject({
+        role: "producer",
+        schema: z.object({ answer: z.number() }),
+        response: {},
+      }),
+      (error: unknown) => {
+        assert.ok(error instanceof MastraGenerationOutcomeUnknownError);
+        assert.equal(error.code, "mastra_generation_outcome_unknown");
+        assert.equal(error.retryable, false);
+        return true;
+      },
+      "a completed response without structured output is terminal before any REST fallback",
+    );
+    const scope = createModelUsageScope();
+    await scope.run(async () => {
+      await assert.rejects(
+        agentJson({
+          role: "producer",
+          prompt: "same prompt, intentionally different contracts",
+          schema: z.object({ answer: z.number() }),
+          log: () => undefined,
+        }),
+        (error: unknown) => {
+          assert.ok(error instanceof MastraGenerationOutcomeUnknownError);
+          assert.equal(error.code, "mastra_generation_outcome_unknown");
+          assert.equal(error.retryable, false);
+          return true;
+        },
+      );
+      await assert.rejects(
+        agentJson({
+          role: "producer",
+          prompt: "same prompt, intentionally different contracts",
+          schema: z.object({ label: z.string() }),
+          log: () => undefined,
+        }),
+        (error: unknown) => error instanceof MastraGenerationOutcomeUnknownError,
+      );
+    });
+
+    // Each distinct contract made exactly one Mastra request. Neither post-
+    // dispatch failure entered the REST fallback, so there is no duplicate
+    // provider spend.
+    assert.equal(fetches, 2, "post-dispatch Mastra failures make zero REST fallback calls");
+    const usage = scope.snapshot();
+    assert.equal(usage.calls, 0, "a rejected Mastra response is not misreported as a second REST success");
+    assert.equal(usage.cacheHits, 0, "distinct failed structured-output contracts never share a response");
+  } finally {
+    globalThis.fetch = originalFetch;
+    console.warn = originalConsoleWarn;
+    console.error = originalConsoleError;
+    if (originalAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
+    else process.env.ANTHROPIC_API_KEY = originalAnthropicKey;
+    if (originalOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = originalOpenRouterKey;
+    if (originalMastraProducerModel === undefined) delete process.env.MASTRA_PRODUCER_MODEL;
+    else process.env.MASTRA_PRODUCER_MODEL = originalMastraProducerModel;
+    if (originalLangfusePublicKey === undefined) delete process.env.LANGFUSE_PUBLIC_KEY;
+    else process.env.LANGFUSE_PUBLIC_KEY = originalLangfusePublicKey;
+    if (originalLangfuseSecretKey === undefined) delete process.env.LANGFUSE_SECRET_KEY;
+    else process.env.LANGFUSE_SECRET_KEY = originalLangfuseSecretKey;
+    if (originalLangfuseBaseUrl === undefined) delete process.env.LANGFUSE_BASE_URL;
+    else process.env.LANGFUSE_BASE_URL = originalLangfuseBaseUrl;
+  }
+}
+
 async function explicitAndFailedCostsAreAuthoritative(): Promise<void> {
   _clear();
   const composite: Block = {
@@ -515,6 +722,9 @@ async function main(): Promise<void> {
     // The old runner-retry fixture intentionally exercised generic Gemini.
     // It is now unavailable by policy; equivalent live accounting coverage
     // above uses OpenRouter, while historical Gemini receipts retain exact pricing.
+    await runnerReusesClaudeResponseAfterRetry();
+    await failedSingleFlightIsNeverMemoized();
+    await agentPostDispatchFailureNeverFallsBack();
     await explicitAndFailedCostsAreAuthoritative();
     await failedTrackedUsageIsNotLost();
     console.log("MODEL USAGE ACCOUNTING TESTS PASSED");

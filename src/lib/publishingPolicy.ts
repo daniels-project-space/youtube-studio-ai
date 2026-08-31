@@ -5,12 +5,15 @@ import {
 } from "./scheduleCalendar";
 import { scheduledPublishWindowElapsed } from "./publishTiming";
 
+export const YOUTUBE_FULL_SCOPE = "https://www.googleapis.com/auth/youtube";
+export const YOUTUBE_READONLY_SCOPE = "https://www.googleapis.com/auth/youtube.readonly";
+
 export const YOUTUBE_UPLOAD_SCOPES = [
-  "https://www.googleapis.com/auth/youtube",
+  YOUTUBE_FULL_SCOPE,
   "https://www.googleapis.com/auth/youtube.upload",
 ] as const;
 export const YOUTUBE_WRITE_SCOPES = [
-  "https://www.googleapis.com/auth/youtube",
+  YOUTUBE_FULL_SCOPE,
   "https://www.googleapis.com/auth/youtube.force-ssl",
 ] as const;
 
@@ -92,6 +95,18 @@ export function hasAnyScope(
 ): boolean {
   const granted = new Set(grantedScopes);
   return requiredScopes.some((scope) => granted.has(scope));
+}
+
+/**
+ * Targeted Analytics reports require both the Analytics scope and an effective
+ * YouTube read scope. `youtube` is broader than `youtube.readonly`.
+ */
+export function hasYouTubeAnalyticsReportScopes(
+  grantedScopes: readonly string[],
+): boolean {
+  const granted = new Set(grantedScopes);
+  return granted.has(YOUTUBE_ANALYTICS_SCOPE) &&
+    (granted.has(YOUTUBE_READONLY_SCOPE) || granted.has(YOUTUBE_FULL_SCOPE));
 }
 
 export function evaluatePublishClaim(input: PublishClaimInput): PublishClaimDecision {

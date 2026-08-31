@@ -38,6 +38,8 @@ export type DataInsertProps = {
   /** Brand palette (dominant → accent); accent falls back to gold. */
   palette?: string[];
   accent?: string;
+  /** Approved Studio template preset; never arbitrary CSS or chart data. */
+  presentation?: "clean_editorial" | "technical_grid" | "soft_paper";
 };
 
 const FALLBACK_ACCENT = "#e3b341";
@@ -70,10 +72,18 @@ export const DataInsert: React.FC<DataInsertProps> = ({
   events,
   palette,
   accent,
+  presentation = "clean_editorial",
 }) => {
   const frame = useCurrentFrame();
   const { fps, durationInFrames, width, height } = useVideoConfig();
-  const ac = accent ?? (palette && palette.length > 2 ? palette[palette.length - 2] : FALLBACK_ACCENT);
+  // Channel palette continues to win. An approved Studio template controls
+  // only the card's presentation grammar, never factual values or timing.
+  const presentationTheme = presentation === "technical_grid"
+    ? { accent: "#78c5ff", panel: "rgba(7, 20, 35, 0.62)", grid: "rgba(120, 197, 255, 0.16)", font: "'Helvetica Neue', Arial, sans-serif", scrim: 0.54 }
+    : presentation === "soft_paper"
+      ? { accent: "#e5bb75", panel: "rgba(45, 34, 22, 0.56)", grid: "transparent", font: "Georgia, 'Times New Roman', serif", scrim: 0.46 }
+      : { accent: FALLBACK_ACCENT, panel: "transparent", grid: "transparent", font: "'Helvetica Neue', Arial, sans-serif", scrim: 0.5 };
+  const ac = accent ?? (palette && palette.length > 2 ? palette[palette.length - 2] : presentationTheme.accent);
   // annotated_line = line_chart + event markers (same chart machinery).
   const kind = kindRaw === "annotated_line" ? "line_chart" : kindRaw;
 
@@ -97,7 +107,7 @@ export const DataInsert: React.FC<DataInsertProps> = ({
             bottom: Math.round(height * 0.16),
             transform: `translateX(${slideIn}px)`,
             opacity: Math.min(inA, outA),
-            background: "rgba(8,10,18,0.82)",
+            background: presentation === "clean_editorial" ? "rgba(8,10,18,0.82)" : presentationTheme.panel,
             borderLeft: `4px solid ${ac}`,
             padding: `${Math.round(height * 0.012)}px ${Math.round(width * 0.014)}px`,
             borderRadius: 4,
@@ -115,7 +125,7 @@ export const DataInsert: React.FC<DataInsertProps> = ({
     );
   }
 
-  const scrim = interpolate(frame, [0, 24], [0, 0.5], { extrapolateRight: "clamp" });
+  const scrim = interpolate(frame, [0, 24], [0, presentationTheme.scrim], { extrapolateRight: "clamp" });
   const appear = interpolate(frame, [6, 30], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
   const rise = interpolate(spring({ frame, fps, config: { damping: 200, stiffness: 60 } }), [0, 1], [36, 0]);
   const fadeOut = interpolate(frame, [durationInFrames - 30, durationInFrames], [1, 0], {
@@ -268,10 +278,11 @@ export const DataInsert: React.FC<DataInsertProps> = ({
   if (!body) return <AbsoluteFill />;
 
   return (
-    <AbsoluteFill style={{ opacity: fadeOut, fontFamily: "'Helvetica Neue', Arial, sans-serif" }}>
+    <AbsoluteFill style={{ opacity: fadeOut, fontFamily: presentationTheme.font }}>
       <AbsoluteFill style={{ backgroundColor: "#000", opacity: scrim }} />
+      {presentation === "technical_grid" ? <AbsoluteFill style={{ opacity: appear, backgroundImage: `linear-gradient(${presentationTheme.grid} 1px, transparent 1px), linear-gradient(90deg, ${presentationTheme.grid} 1px, transparent 1px)`, backgroundSize: `${Math.round(width * 0.035)}px ${Math.round(width * 0.035)}px` }} /> : null}
       <AbsoluteFill style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>
-        <div style={{ transform: `translateY(${rise}px)`, opacity: appear }}>
+        <div style={{ transform: `translateY(${rise}px)`, opacity: appear, background: presentationTheme.panel, borderRadius: presentation === "clean_editorial" ? 0 : Math.round(width * 0.012), padding: presentation === "clean_editorial" ? 0 : `${Math.round(height * 0.018)}px ${Math.round(width * 0.022)}px`, boxShadow: presentation === "clean_editorial" ? "none" : "0 16px 48px rgba(0,0,0,0.35)" }}>
           {title ? (
             <div
               style={{

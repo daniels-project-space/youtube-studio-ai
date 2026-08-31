@@ -2,7 +2,10 @@ import { query } from "./studioFunctions";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
-import { normalizeReleaseEvidenceStatus } from "../src/lib/releaseEvidenceStatus";
+import {
+  normalizeReleaseEvidenceStatus,
+  recordedReleaseEvidenceMasterKey,
+} from "../src/lib/releaseEvidenceStatus";
 
 /**
  * Finished-videos library (Tranche 4).
@@ -45,6 +48,33 @@ async function metadataOutputs(
     .first();
   const out = stage?.outputs;
   return out && typeof out === "object" ? (out as Record<string, unknown>) : {};
+}
+
+/**
+ * The asset table can retain several intermediate `video` objects for a run.
+ * Re-evaluate the compact QA lineage before using the certificate's master as
+ * a Library playback source; an old or malformed green status must not select
+ * an arbitrary first asset as though it were approved.
+ */
+async function recordedMasterKey(
+  ctx: QueryCtx,
+  runId: Id<"runs">,
+): Promise<string | undefined> {
+  const [qaStage, artifacts] = await Promise.all([
+    ctx.db
+      .query("runStages")
+      .withIndex("by_run_block", (q) => q.eq("runId", runId).eq("block", "qa_visual"))
+      .first(),
+    ctx.db
+      .query("runArtifacts")
+      .withIndex("by_run", (q) => q.eq("runId", runId))
+      .collect(),
+  ]);
+  return recordedReleaseEvidenceMasterKey({
+    runId,
+    qaStage: qaStage ? { status: qaStage.status, outputs: qaStage.outputs } : null,
+    artifacts,
+  });
 }
 
 export const listVideos = query({
@@ -97,14 +127,31 @@ export const listVideos = query({
       // Server-side status filter.
       if (args.status && run.status !== args.status) continue;
 
-      // Pull this run's assets once; pick out thumbnail + video.
+      // Pull this run's assets once. A final master with recorded release
+      // evidence is selected below from the sealed certificate reference,
+      // rather than by whichever `video` asset happened to be inserted first.
       const assets = await ctx.db
         .query("assets")
         .withIndex("by_run", (q) => q.eq("runId", run._id))
         .collect();
 
-      const videoAsset = assets.find((a) => a.kind === "video");
+      const fallbackVideoAsset = assets.find((a) => a.kind === "video");
       const thumbAsset = assets.find((a) => a.kind === "thumbnail");
+      const storedReleaseEvidenceStatus = normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus);
+      const sealedMasterKey = storedReleaseEvidenceStatus === "release_evidence_recorded"
+        ? await recordedMasterKey(ctx, run._id)
+        : undefined;
+      // A stored status is a cached projection. If the artifacts no longer
+      // reproduce it, downgrade the presentation and retain the legacy asset
+      // fallback without pretending that it is the approved master.
+      const releaseEvidenceStatus =
+        storedReleaseEvidenceStatus === "release_evidence_recorded" && !sealedMasterKey
+          ? "evidence_incomplete"
+          : storedReleaseEvidenceStatus;
+      const videoAsset = sealedMasterKey
+        ? assets.find((asset) => asset.kind === "video" && asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
+        : fallbackVideoAsset;
+      const videoKey = sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
 
       // A shippable video = published (youtubeVideoId) OR a rendered video from
       // a run that did NOT fail. A FAILED run that only left an intermediate
@@ -113,7 +160,7 @@ export const listVideos = query({
       // with duplicate rows (3 rows for 1 usable video). Published runs always
       // show regardless of status.
       const isFinished =
-        Boolean(run.youtubeVideoId) || (Boolean(videoAsset) && run.status !== "failed");
+        Boolean(run.youtubeVideoId) || (Boolean(videoKey) && run.status !== "failed");
       if (!isFinished) continue;
 
       const channel = await getChannel(run.channelId);
@@ -170,7 +217,7 @@ export const listVideos = query({
         // Execution completion and master provenance are deliberately distinct.
         // Historical rows without a retained certificate remain visible, but
         // must never inherit an implicit quality claim from their `ok` status.
-        releaseEvidenceStatus: normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus),
+        releaseEvidenceStatus,
         createdAt: run.startedAt ?? run._creationTime,
         startedAt: run.startedAt,
         finishedAt: run.finishedAt,
@@ -188,7 +235,7 @@ export const listVideos = query({
         description,
         tags,
         thumbnailKey: thumbAsset?.r2Key ?? null,
-        videoKey: videoAsset?.r2Key ?? null,
+        videoKey,
         thumbnailTitle:
           typeof tMeta.thumbnailTitle === "string"
             ? (tMeta.thumbnailTitle as string)
@@ -249,7 +296,13 @@ export const getVideoDetail = query({
       .query("assets")
       .withIndex("by_run", (q) => q.eq("runId", args.runId))
       .collect();
-    const videoAsset = assets.find((a) => a.kind === "video");
+    const fallbackVideoAsset = assets.find((a) => a.kind === "video");
+    const sealedMasterKey = normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus) === "release_evidence_recorded"
+      ? await recordedMasterKey(ctx, args.runId)
+      : undefined;
+    const videoAsset = sealedMasterKey
+      ? assets.find((asset) => asset.kind === "video" && asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
+      : fallbackVideoAsset;
     const thumbAsset = assets.find((a) => a.kind === "thumbnail");
     const vMeta = (videoAsset?.meta ?? {}) as Record<string, unknown>;
     const tMeta = (thumbAsset?.meta ?? {}) as Record<string, unknown>;
@@ -270,7 +323,7 @@ export const getVideoDetail = query({
         : [],
       script,
       thumbnailKey: thumbAsset?.r2Key ?? null,
-      videoKey: videoAsset?.r2Key ?? null,
+      videoKey: sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null,
       estimatedViews:
         typeof mOut.estimatedViews === "number"
           ? (mOut.estimatedViews as number)

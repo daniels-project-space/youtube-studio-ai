@@ -30,14 +30,26 @@ import {
   selectUnpinnedPlanItem,
   type ScheduledPlanRunPayload,
 } from "../src/lib/scheduledPlanRuntime";
+import {
+  CASEFILE_AUTO_RESEARCH_MAX_PLAN_AGE_MS,
+  CASEFILE_AUTO_RESEARCH_MAX_PLAN_FAILURES,
+  decideCasefileAutoResearchPlanDisposition,
+  type CasefileAutoResearchDeferralOutcome,
+} from "../src/lib/casefileAutoResearchSafety";
 import { isGenerationDue } from "../src/lib/publishingPolicy";
+import { parseNarrativeSeriesRunSelector } from "../src/lib/narrativeSeriesRunAdmission";
 import {
   materializeCalendarScheduleDefaults,
   orphanReadyCancellationPatch,
   orphanReadyRowsForMaintenance,
 } from "../src/lib/calendarMaintenance";
 import { completedPublishContinuationPatch } from "./publishContinuationState";
-import { RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
+import {
+  RUN_QUEUE_LEASE_MS,
+  assertRunExecutionWriteFence,
+  requiresRunExecutionWriteFence,
+  type RunExecutionLeaseSnapshot,
+} from "../src/lib/runLease";
 import { paginationOptsValidator } from "convex/server";
 import {
   CHANNEL_PLAN_LIMIT,
@@ -61,6 +73,21 @@ const PROVEN_READY_BATCH_PAGE_LIMIT = {
 
 function cleanError(value: string): string {
   return value.trim().slice(0, 1_000) || "unknown planner failure";
+}
+
+function assertClaimedPlanExecutionFence(
+  run: RunExecutionLeaseSnapshot,
+  leaseOwner: string | undefined,
+  executionLeaseToken: number | undefined,
+): void {
+  if ((leaseOwner === undefined) !== (executionLeaseToken === undefined)) {
+    throw new Error("scheduled plan terminal write must provide both execution lease fence fields or neither");
+  }
+  if (leaseOwner !== undefined && executionLeaseToken !== undefined) {
+    assertRunExecutionWriteFence(run, { leaseOwner, executionLeaseToken }, Date.now());
+  } else if (requiresRunExecutionWriteFence(run)) {
+    throw new Error("scheduled plan terminal write requires an execution lease fence");
+  }
 }
 
 function validUsd(value: number, label: string): number {
@@ -1587,6 +1614,12 @@ export const claimNextPlanRun = mutation({
     ownerId: v.string(),
     channelId: v.id("channels"),
     dueBefore: v.number(),
+    /**
+     * A serialized channel owns its next topic through the durable episode
+     * reservation, never through a generic content-plan item.  The selector
+     * is persisted on the run so recovery cannot lose that authority.
+     */
+    narrativeSeriesSelector: v.optional(v.any()),
   },
   handler: async (ctx, args) => {
     await requirePlannerService(ctx);
@@ -1601,8 +1634,23 @@ export const claimNextPlanRun = mutation({
     if (channel.status !== "active") {
       return { state: "disabled" as const };
     }
+    const narrativeSeriesSelector = args.narrativeSeriesSelector === undefined
+      ? undefined
+      : parseNarrativeSeriesRunSelector(args.narrativeSeriesSelector);
+    if (narrativeSeriesSelector) {
+      const identity = channel.identity && typeof channel.identity === "object"
+        ? channel.identity as Record<string, unknown>
+        : undefined;
+      const pointer = identity?.narrativeSeriesPlan;
+      if (
+        !pointer || typeof pointer !== "object" || Array.isArray(pointer)
+        || (pointer as { fingerprint?: unknown }).fingerprint !== narrativeSeriesSelector.seriesPlanFingerprint
+      ) {
+        throw new Error("narrative series selector does not match this channel's durable horizon pointer");
+      }
+    }
 
-    const [running, queued, lastRun] = await Promise.all([
+    const [running, queued, awaitingFactualReview, blockedFactualReview, lastRun] = await Promise.all([
       ctx.db
         .query("runs")
         .withIndex("by_channel_status", (q) =>
@@ -1617,13 +1665,67 @@ export const claimNextPlanRun = mutation({
         .first(),
       ctx.db
         .query("runs")
+        .withIndex("by_channel_status", (q) =>
+          q.eq("channelId", args.channelId).eq("status", "awaiting_factual_review"),
+        )
+        .first(),
+      ctx.db
+        .query("runs")
+        .withIndex("by_channel_status", (q) =>
+          q.eq("channelId", args.channelId).eq("status", "factual_review_blocked"),
+        )
+        .first(),
+      ctx.db
+        .query("runs")
         .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
         .order("desc")
         .first(),
     ]);
     if (running) return { state: "busy" as const, runId: running._id };
+    if (awaitingFactualReview) {
+      if (awaitingFactualReview.ownerId !== args.ownerId) {
+        throw new Error("awaiting factual review run ownership mismatch");
+      }
+      // This is a durable operator pause, not a queued scheduler job. Keeping
+      // it in the claim transaction prevents cadence fallback from creating an
+      // unrelated unsupervised run while factual evidence awaits approval.
+      return { state: "busy" as const, runId: awaitingFactualReview._id };
+    }
+    if (blockedFactualReview) {
+      if (blockedFactualReview.ownerId !== args.ownerId) {
+        throw new Error("blocked factual review run ownership mismatch");
+      }
+      return {
+        state: "blocked" as const,
+        runId: blockedFactualReview._id,
+        reason: blockedFactualReview.error ?? "factual review is blocked; create a fresh reviewed revision before scheduling",
+      };
+    }
     if (queued) {
       if (queued.ownerId !== args.ownerId) throw new Error("queued run ownership mismatch");
+      if (queued.narrativeSeriesSelector !== undefined) {
+        const queuedSelector = parseNarrativeSeriesRunSelector(queued.narrativeSeriesSelector);
+        if (!narrativeSeriesSelector || queuedSelector.fingerprint !== narrativeSeriesSelector.fingerprint) {
+          return {
+            state: "blocked" as const,
+            runId: queued._id,
+            reason: "queued narrative series run requires its exact durable selector",
+          };
+        }
+        return {
+          state: "cadence" as const,
+          reused: true,
+          runId: queued._id,
+          narrativeSeriesSelector: queuedSelector,
+        };
+      }
+      if (narrativeSeriesSelector) {
+        return {
+          state: "blocked" as const,
+          runId: queued._id,
+          reason: "a generic queued run exists; do not attach a narrative selector after run creation",
+        };
+      }
       if (queued.planItemId) {
         const item = await ctx.db.get(queued.planItemId);
         if (!item || item.ownerId !== args.ownerId || item.channelId !== args.channelId || item.scheduledRunId !== queued._id) {
@@ -1667,11 +1769,78 @@ export const claimNextPlanRun = mutation({
           ...payload,
         };
       }
+      if (lastRun.narrativeSeriesSelector !== undefined) {
+        const recoveredSelector = parseNarrativeSeriesRunSelector(lastRun.narrativeSeriesSelector);
+        if (!narrativeSeriesSelector || recoveredSelector.fingerprint !== narrativeSeriesSelector.fingerprint) {
+          return {
+            state: "blocked" as const,
+            runId: lastRun._id,
+            reason: "narrative series lease recovery requires its exact durable selector",
+          };
+        }
+        return {
+          state: "cadence" as const,
+          reused: true,
+          recoveryDispatch: true,
+          runId: lastRun._id,
+          narrativeSeriesSelector: recoveredSelector,
+        };
+      }
+      if (narrativeSeriesSelector) {
+        return {
+          state: "blocked" as const,
+          runId: lastRun._id,
+          reason: "a recoverable generic run cannot be converted into a narrative series run",
+        };
+      }
       return {
         state: "cadence" as const,
         reused: true,
         recoveryDispatch: true,
         runId: lastRun._id,
+      };
+    }
+
+    const cadenceDue = isGenerationDue({
+      now,
+      lastStartedAt: lastRun?.startedAt ?? 0,
+      schedule: channel.schedule,
+      cadence: channel.identity?.cadence,
+    });
+    if (narrativeSeriesSelector) {
+      // A series horizon and a generic ready-plan queue are competing topic
+      // authorities. Do not silently ignore either: explicit repair is needed
+      // before the route-owned serial planner can advance.
+      const readyRows = await ctx.db
+        .query("contentPlan")
+        .withIndex("by_channel_status_order", (q) =>
+          q.eq("channelId", args.channelId).eq("status", "ready"),
+        )
+        .take(1);
+      if (readyRows.some((item) => item.ownerId === args.ownerId)) {
+        return {
+          state: "blocked" as const,
+          reason: "serialized narrative channel has a generic ready content plan; reconcile its topic authority before dispatch",
+        };
+      }
+      if (!cadenceDue) {
+        return { state: "not_due" as const, lastStartedAt: lastRun?.startedAt ?? 0 };
+      }
+      const runId = await ctx.db.insert("runs", {
+        ownerId: args.ownerId,
+        channelId: args.channelId,
+        status: "queued",
+        startedAt: now,
+        costTotal: 0,
+        heartbeatAt: now,
+        leaseExpiresAt: now + RUN_QUEUE_LEASE_MS,
+        narrativeSeriesSelector,
+      });
+      return {
+        state: "cadence" as const,
+        reused: false,
+        runId,
+        narrativeSeriesSelector,
       };
     }
 
@@ -1744,12 +1913,6 @@ export const claimNextPlanRun = mutation({
       args.dueBefore,
     );
 
-    const cadenceDue = isGenerationDue({
-      now,
-      lastStartedAt: lastRun?.startedAt ?? 0,
-      schedule: channel.schedule,
-      cadence: channel.identity?.cadence,
-    });
     let chosen = pinned;
     let readyRows: typeof pinnedRows | undefined;
     if (!chosen && cadenceDue) {
@@ -1886,6 +2049,100 @@ export const claimNextPlanRun = mutation({
   },
 });
 
+/**
+ * Settles a non-successful pre-pipeline Casefile research dispatch for one
+ * already-claimed scheduled plan. This is intentionally separate from normal
+ * pipeline failure handling: no pipeline lease exists yet, and the only safe
+ * choices are a bounded future retry or a visible manual stop. Keeping the
+ * counter on the plan row makes the stop survive scheduler/task restarts.
+ */
+export const recordCasefileResearchDeferral = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    itemId: v.id("contentPlan"),
+    runId: v.id("runs"),
+    outcome: v.union(
+      v.literal("research_failed"),
+      v.literal("daily_ceiling_reached"),
+      v.literal("ineligible"),
+    ),
+    reason: v.string(),
+  },
+  returns: v.union(
+    v.object({ state: v.literal("requeue"), failureCount: v.number() }),
+    v.object({ state: v.literal("blocked"), failureCount: v.number(), reason: v.string() }),
+    v.object({ state: v.literal("not_applicable") }),
+  ),
+  handler: async (ctx, args) => {
+    await requirePlannerService(ctx);
+    const [item, run] = await Promise.all([ctx.db.get(args.itemId), ctx.db.get(args.runId)]);
+    if (!item || !run || item.ownerId !== args.ownerId || run.ownerId !== args.ownerId ||
+        item.channelId !== args.channelId || run.channelId !== args.channelId ||
+        item.scheduledRunId !== args.runId || run.planItemId !== args.itemId) {
+      throw new Error("Casefile research deferral ownership/fence mismatch");
+    }
+    if (item.status === "used" || run.status !== "queued") {
+      return { state: "not_applicable" as const };
+    }
+
+    const now = Date.now();
+    const disposition = decideCasefileAutoResearchPlanDisposition({
+      outcome: args.outcome as CasefileAutoResearchDeferralOutcome,
+      previousFailureCount: item.casefileResearchFailureCount,
+      // The regular lease reaper intentionally clears scheduledClaimedAt when
+      // it replaces an unstarted queued run. Keep a separate first-research
+      // timestamp so that replacement cannot reset this plan's 48h stop
+      // window and turn it into an infinite retry loop.
+      planClaimedAt: item.casefileResearchStartedAt ?? item.scheduledClaimedAt ?? run.startedAt,
+      now,
+      maxFailures: CASEFILE_AUTO_RESEARCH_MAX_PLAN_FAILURES,
+      maxAgeMs: CASEFILE_AUTO_RESEARCH_MAX_PLAN_AGE_MS,
+    });
+    const outcomeDetail = cleanError(args.reason);
+    const failurePatch = args.outcome === "research_failed"
+      ? {
+          casefileResearchFirstFailedAt: item.casefileResearchFirstFailedAt ?? now,
+          casefileResearchLastFailedAt: now,
+        }
+      : {};
+    const commonPatch = {
+      casefileResearchStartedAt:
+        item.casefileResearchStartedAt ?? item.scheduledClaimedAt ?? run.startedAt ?? now,
+      casefileResearchFailureCount: disposition.failureCount,
+      casefileResearchLastOutcome: args.outcome,
+      ...failurePatch,
+    };
+
+    if (disposition.state === "requeue") {
+      await ctx.db.patch(args.itemId, commonPatch);
+      return { state: "requeue" as const, failureCount: disposition.failureCount };
+    }
+
+    const reason = cleanError(`${disposition.reason} Last scheduler outcome: ${outcomeDetail}`);
+    await ctx.db.patch(args.runId, {
+      status: "failed",
+      finishedAt: now,
+      error: reason,
+      heartbeatAt: now,
+      leaseExpiresAt: undefined,
+      leaseOwner: undefined,
+      leaseRecoveryPending: undefined,
+      remoteChildWaitLeaseOwner: undefined,
+      remoteChildWaitExecutionLeaseToken: undefined,
+      remoteChildWaitBlockId: undefined,
+      remoteChildWaitDispatchKey: undefined,
+      remoteChildWaitUntil: undefined,
+    });
+    await ctx.db.patch(args.itemId, {
+      ...commonPatch,
+      casefileResearchBlockedAt: now,
+      scheduledFailure: reason,
+    });
+    return { state: "blocked" as const, failureCount: disposition.failureCount, reason };
+  },
+});
+
 /** Service-only durable lookup used to reject forged/stale Trigger payloads. */
 export const getClaimedPlanItemForRun = query({
   args: {
@@ -1915,6 +2172,8 @@ export const completeClaimedPlanRun = mutation({
     channelId: v.id("channels"),
     itemId: v.id("contentPlan"),
     runId: v.id("runs"),
+    leaseOwner: v.optional(v.string()),
+    executionLeaseToken: v.optional(v.number()),
     finishedAt: v.number(),
     costTotal: v.number(),
   },
@@ -1939,28 +2198,25 @@ export const completeClaimedPlanRun = mutation({
     if (!liveStages.some((stage) => stage.status === "ok") || liveStages.some((stage) => stage.status !== "ok")) {
       throw new Error("scheduled plan cannot be used before durable pipeline stages succeed");
     }
+    if (item.status === "used") {
+      if (run.status !== "ok" || Math.abs(run.costTotal - args.costTotal) > 0.000001) {
+        throw new Error("scheduled plan completion replay mismatch");
+      }
+      // A lost response can re-observe its exact completed result, but it
+      // cannot write a terminal row after its execution lease was cleared.
+      return { state: "used" as const, reused: true };
+    }
+    if (item.status !== "ready") throw new Error(`scheduled plan item is ${item.status}, not ready`);
+    assertClaimedPlanExecutionFence(
+      run,
+      args.leaseOwner,
+      args.executionLeaseToken,
+    );
     const continuationPatch = await completedPublishContinuationPatch(
       ctx,
       run,
       args.finishedAt,
     );
-    if (item.status === "used") {
-      if (Math.abs(run.costTotal - args.costTotal) > 0.000001) {
-        throw new Error("scheduled plan completion replay mismatch");
-      }
-      await ctx.db.patch(args.runId, {
-        status: "ok",
-        finishedAt: run.finishedAt ?? args.finishedAt,
-        error: undefined,
-        heartbeatAt: run.finishedAt ?? args.finishedAt,
-        leaseExpiresAt: undefined,
-        leaseOwner: undefined,
-        leaseRecoveryPending: undefined,
-        ...continuationPatch,
-      });
-      return { state: "used" as const, reused: true };
-    }
-    if (item.status !== "ready") throw new Error(`scheduled plan item is ${item.status}, not ready`);
 
     const priorTopic = await ctx.db
       .query("topicMemory")
@@ -1983,6 +2239,11 @@ export const completeClaimedPlanRun = mutation({
       leaseExpiresAt: undefined,
       leaseOwner: undefined,
       leaseRecoveryPending: undefined,
+      remoteChildWaitLeaseOwner: undefined,
+      remoteChildWaitExecutionLeaseToken: undefined,
+      remoteChildWaitBlockId: undefined,
+      remoteChildWaitDispatchKey: undefined,
+      remoteChildWaitUntil: undefined,
       ...continuationPatch,
     });
     await ctx.db.patch(args.itemId, {
@@ -2001,6 +2262,8 @@ export const failClaimedPlanRun = mutation({
     channelId: v.id("channels"),
     itemId: v.id("contentPlan"),
     runId: v.id("runs"),
+    leaseOwner: v.optional(v.string()),
+    executionLeaseToken: v.optional(v.number()),
     failedAt: v.number(),
     error: v.string(),
     costTotal: v.optional(v.number()),
@@ -2014,6 +2277,11 @@ export const failClaimedPlanRun = mutation({
       throw new Error("scheduled plan failure ownership/fence mismatch");
     }
     if (item.status === "used") return { state: "used" as const };
+    assertClaimedPlanExecutionFence(
+      run,
+      args.leaseOwner,
+      args.executionLeaseToken,
+    );
     const error = cleanError(args.error);
     await ctx.db.patch(args.runId, {
       status: "failed",
@@ -2024,6 +2292,11 @@ export const failClaimedPlanRun = mutation({
       leaseExpiresAt: undefined,
       leaseOwner: undefined,
       leaseRecoveryPending: undefined,
+      remoteChildWaitLeaseOwner: undefined,
+      remoteChildWaitExecutionLeaseToken: undefined,
+      remoteChildWaitBlockId: undefined,
+      remoteChildWaitDispatchKey: undefined,
+      remoteChildWaitUntil: undefined,
     });
     await ctx.db.patch(args.itemId, { scheduledFailure: error });
     return { state: "failed" as const };

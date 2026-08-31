@@ -12,6 +12,7 @@ review, and private-first release gate.
 | Visual STEM | [Kurzgesagt](https://www.youtube.com/watch?v=isdLel273rQ), [TED-Ed](https://www.youtube.com/watch?v=2W85Dwxx218), [Domain of Science](https://www.youtube.com/watch?v=ZihywtixUYo) | One question, one legible visual model, causal re-anchoring, bounded conclusion | Art style, characters, scripts, or claimed facts without sources |
 | Children’s learning | [TED-Ed](https://www.youtube.com/@TEDEd), [Pinkfong / Baby Shark Kids’ Songs & Stories](https://www.youtube.com/@pinkfong) | One explicit objective, participatory repetition, clear action cues, and a recall moment | Songs, characters, melody, visuals, packaging, or any unsupported instructional claim |
 | Atlas / history | [Atlas Pro](https://www.youtube.com/watch?v=V0o_7T3d3mw) | Artifact → observation → implication → map/timeline proof | Decorative map motion presented as evidence |
+| Systems / geography | [Wendover Productions](https://www.youtube.com/@Wendoverproductions) | One systems question, legible constraints through maps or diagrams, and a causal consequence | Topics, scripts, maps, visual identity, sourcing, narration, or packaging |
 | Language | [Dreaming Spanish](https://www.youtube.com/watch?v=FD3cN1rUOYo), [Easy Spanish](https://www.youtube.com/watch?v=SCS1dJ35lig), [English with Lucy](https://www.youtube.com/watch?v=oUD2gUmdzeI) | One communicative objective, comprehensible audio, context, repetition, pause for retrieval | Fake interviews, falsely documentary speakers, or unsupervised pronunciation claims |
 | Original fiction | [Dead Sound](https://www.youtube.com/watch?v=mVLrBJYGxk4), [DUST](https://www.youtube.com/watch?v=rv8kOzRZK8g) | Stable visual language, staged wide/close contrast, sound-led atmosphere | Existing stories, recognizable IP, or synthetic realism passed off as filmed acting |
 | Product tutorials | [Notion Training](https://www.youtube.com/watch?v=aA7si7AmPkY), [Figma Beginners](https://www.youtube.com/watch?v=dXQ7IHkTiMM) | Outcome promise → authentic UI proof → concrete result | Invented UI, stale feature claims, or unauthenticated product access |
@@ -29,6 +30,34 @@ evidence that can actually be checked (for example a reviewer-confirmed causal
 beat sheet, claim → source → shot coverage, audio evidence, thumbnail evidence,
 and originality evidence). It must never report an automatic visual comparison
 unless such a comparator was separately implemented and its receipt is present.
+
+## Auditable reference calibration
+
+Reference channels are **calibration sources**, never a style-transfer target or
+a proxy for expected views. A quality claim must distinguish three stages:
+
+1. **Pre-release mechanics.** The frozen channel contract transfers only a
+   bounded, observable rule—such as purposeful visual changes, a legible
+   explanatory model, or a stable original visual language. Production visual
+   QA receives those rules as typed criteria and retains frame-backed reviewer
+   receipts. Whiteboard and illustrated explainers currently require both
+   purposeful change and a legible visual model; motion-comic/fiction routes
+   require story-led staging and stable visual language when their reference
+   contract applies.
+2. **Release evidence.** The final master must separately prove its audio,
+   sources, originality, thumbnail/package, and visual-review requirements. A
+   passing reference criterion never substitutes for those independent rails.
+3. **Post-release learning.** Only a released video’s own YouTube Analytics can
+   establish audience response. The audience-retention report defines the
+   first-30-second intro metric and identifies top moments, spikes, and dips;
+   it is used to propose a bounded next-episode experiment, never to rewrite a
+   sealed episode or assert that a reference channel's audience will transfer.
+   See [YouTube's retention guidance](https://support.google.com/youtube/answer/9314415?hl=en)
+   and [Engagement analytics](https://support.google.com/youtube/answer/9313698?hl=en-0).
+
+This keeps the system ambitious without making false promises: the measurable
+result is a well-reviewed, original master; viewer retention is an observed
+outcome that can improve the next program decision.
 
 ## Reusable module map
 

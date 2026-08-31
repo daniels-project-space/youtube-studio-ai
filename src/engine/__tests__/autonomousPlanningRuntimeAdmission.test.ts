@@ -52,7 +52,7 @@ const laneAssertion = runtimeSource.indexOf("assertPipelineMatchesContentLane(co
 const runtimeAdmission = runtimeSource.indexOf(
   "assertFamilyAutonomousPlanningPipeline(laneFamily as FamilyKey, entries);",
 );
-const videoRuntimeGate = runtimeSource.indexOf("assertPipelineVideoRuntimeReady(entries);");
+const videoRuntimeGate = runtimeSource.indexOf("assertPipelineVideoRuntimeReady(entries, reviewedLtxRuntime?.runtime);");
 assert.ok(
   laneAssertion >= 0 && runtimeAdmission > laneAssertion && runtimeAdmission < videoRuntimeGate,
   "every canonical family run must re-check its planning admission before provider execution",

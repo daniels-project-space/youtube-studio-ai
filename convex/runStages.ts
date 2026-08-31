@@ -1,7 +1,8 @@
-import { mutation, query } from "./studioFunctions";
+import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { deriveReleaseEvidenceProjection } from "../src/lib/releaseEvidenceStatus";
+import { assertRunExecutionWriteFence, requiresRunExecutionWriteFence } from "../src/lib/runLease";
 
 /**
  * Upsert a per-block stage row for a run. Keyed by (runId, block) so the
@@ -11,6 +12,8 @@ export const upsertRunStage = mutation({
   args: {
     ownerId: v.string(),
     runId: v.id("runs"),
+    leaseOwner: v.optional(v.string()),
+    executionLeaseToken: v.optional(v.number()),
     block: v.string(),
     status: v.string(),
     startedAt: v.optional(v.number()),
@@ -22,6 +25,22 @@ export const upsertRunStage = mutation({
   },
   returns: v.id("runStages"),
   handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "run stage write");
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerId !== args.ownerId) {
+      throw new Error("run stage ownership mismatch");
+    }
+    if ((args.leaseOwner === undefined) !== (args.executionLeaseToken === undefined)) {
+      throw new Error("run stage write must provide both execution lease fence fields or neither");
+    }
+    if (args.leaseOwner !== undefined && args.executionLeaseToken !== undefined) {
+      assertRunExecutionWriteFence(run, {
+        leaseOwner: args.leaseOwner,
+        executionLeaseToken: args.executionLeaseToken,
+      }, Date.now());
+    } else if (requiresRunExecutionWriteFence(run)) {
+      throw new Error("run stage write requires an execution lease fence");
+    }
     const existing = await ctx.db
       .query("runStages")
       .withIndex("by_run_block", (q) =>

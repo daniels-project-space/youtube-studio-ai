@@ -93,3 +93,24 @@ assert.ok(
 );
 
 console.log("motionComicKeepClearGate.test.ts: mc_page_render.py wires place_safe's ok=False to a hard RuntimeError (catalog's '0 or render fails' claim confirmed)");
+
+/* ---------------- opening hook: never begin on an empty page grid -------- */
+
+const openingSeedIdx = renderSource.indexOf('opening_pane = PAGES[0]["panes"][0]');
+assert.notEqual(
+  openingSeedIdx,
+  -1,
+  "mc_page_render.py must resolve the approved first panel before the preroll — the comic cannot open on an empty template grid",
+);
+const openingMissingGuard = renderSource.indexOf("refusing empty template opening", openingSeedIdx);
+assert.ok(
+  openingMissingGuard > openingSeedIdx,
+  "mc_page_render.py must fail closed when first-panel art is missing rather than render a blank opening",
+);
+const openingComposite = renderSource.indexOf('opening_pane["art"]', openingMissingGuard);
+assert.ok(
+  openingComposite > openingMissingGuard,
+  "mc_page_render.py must composite approved first-panel art into the page before the preroll frames are rendered",
+);
+
+console.log("motionComicKeepClearGate.test.ts: opening panel is mandatory and visible during the preroll");

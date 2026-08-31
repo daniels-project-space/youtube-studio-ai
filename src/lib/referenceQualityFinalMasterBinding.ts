@@ -307,7 +307,17 @@ function assertExpectedEvidence(
   }
 }
 
+/**
+ * Exact family/contract pairs that can reuse the narrated final-master recipe.
+ * This is deliberately not a generic audio-QA switch: every listed family must
+ * require narration in its frozen contract and supply the semantic narration
+ * receipt plus a passing scored audio axis for the same master.
+ */
 const V2_MEASURED_AUDIO_ALLOWLIST = {
+  narrated_stock: {
+    requirementId: "measured-documentary-narration",
+    evidenceId: "audio-intelligibility-or-continuity-evidence",
+  },
   shorts: {
     requirementId: "intelligible-short-narration",
     evidenceId: "audio-intelligibility-or-continuity-evidence",

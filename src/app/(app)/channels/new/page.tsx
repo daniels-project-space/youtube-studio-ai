@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
+import { MinimumVideoFoundationCard } from "@/components/MinimumVideoFoundationCard";
 import { NICHE_CATALOG_EVIDENCE, NICHES, getNiche } from "@/lib/nicheCatalog";
 import { nichePreset } from "@/engine/golden";
 import {
@@ -13,20 +14,16 @@ import {
   CREW_ROLE_BLOCK,
   clampFamilyEpisodeLengthMinutes,
   familyDurationContract,
-  familyProductionReadiness,
   formatFamilyDurationContract,
   getFamily,
-  isFamilyProductionReady,
   type FamilyKey,
 } from "@/engine/families";
+import { automaticFamilyCreatorReadiness } from "@/engine/automaticFamilyCreatorReadiness";
 import { ARCHETYPES } from "@/engine/archetypes";
 import {
   supportsDataStoryFamily,
 } from "@/engine/dataStory";
-import {
-  syntheticScenarioContract,
-  type SyntheticScenarioProfile,
-} from "@/engine/syntheticScenario";
+import { type SyntheticScenarioProfile } from "@/engine/syntheticScenario";
 import {
   CERTIFIED_QUIZ_PROFILE_OPTIONS,
   type CertifiedQuizProfileKey,
@@ -48,11 +45,15 @@ import {
   suggestYoutubeHandle,
 } from "@/lib/youtubeChannelCreationClaim";
 import { familySupervisedChannelInceptionCapability } from "@/engine/channelInceptionCapability";
-import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import {
+  createChannelProgramBrief,
+  SERIALIZED_PROGRAM_VERSION,
+} from "@/engine/channelProgramBrief";
 import {
   certifiedChannelCompositionDefinition,
   findCertifiedChannelComposition,
 } from "@/engine/channelCompositionCatalog";
+import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
 
 type Phase = "form" | "building" | "error";
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -93,6 +94,22 @@ interface BuildProgress {
   }>;
 }
 
+interface AutomaticFamilyRuntimeStatus {
+  family: FamilyKey;
+  ready: boolean;
+  scope: "live_renderer_stack" | "universal_release_foundation" | "live_pipeline_stack";
+  blockers: readonly string[];
+}
+
+function qualityCalibrationForCreator(family: FamilyKey) {
+  const contract = referenceQualityContractFor(family);
+  return {
+    calibrated: contract.calibration === "calibrated",
+    sources: contract.sources.map((source) => source.label),
+    standards: contract.requirements.slice(0, 2).map((requirement) => requirement.standard),
+  };
+}
+
 interface Toggles {
   quotes: boolean;
   captions: boolean;
@@ -127,13 +144,90 @@ type CreativeCapabilityUiOffer = {
     remediation?: string;
   };
 };
+
+function isAutomaticCapabilityOffer(offer: CreativeCapabilityUiOffer): boolean {
+  // This factual route is deliberately reviewed-data-story intake only even if
+  // a malformed or stale client response omitted its admission metadata.
+  return offer.capability !== "source_attributed_data_story"
+    && offer.automationAdmission?.autonomous !== false;
+}
+
+/** A server-issued automatic alternative, rechecked against the local catalog before use. */
+type ExecutableFormatSuggestionAlternative = {
+  family: FamilyKey;
+  why: string;
+  selectable: true;
+  executable: true;
+};
+
+function certifiedExecutableFormatAlternatives(value: unknown): ExecutableFormatSuggestionAlternative[] {
+  if (!Array.isArray(value)) return [];
+
+  const seen = new Set<FamilyKey>();
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return [];
+    const candidate = entry as {
+      family?: unknown;
+      why?: unknown;
+      selectable?: unknown;
+      executable?: unknown;
+      certifiedFamilyAdmission?: { automatic?: unknown };
+    };
+    if (
+      typeof candidate.family !== "string"
+      || !(candidate.family in FAMILIES)
+      || candidate.selectable !== true
+      || candidate.executable !== true
+      || candidate.certifiedFamilyAdmission?.automatic !== true
+    ) return [];
+
+    const family = candidate.family as FamilyKey;
+    // The response is a helpful snapshot, not an authority. Recheck the
+    // declarative cross-catalog admission before rendering an action.
+    if (seen.has(family) || !automaticFamilyCreatorReadiness(family).ready) return [];
+    seen.add(family);
+    return [{
+      family,
+      why: typeof candidate.why === "string" ? candidate.why : "Certified automatic alternative.",
+      selectable: true,
+      executable: true,
+    }];
+  });
+}
+
+/**
+ * A blocked build may name a private desk, but browser response text never
+ * becomes a free-form destination. Keep the recovery UI on an explicit
+ * allowlist of registered desks and make the operator choose whether to open
+ * one.
+ */
+const REVIEW_HREFS = new Set(["/casefile", "/editorial-evidence"]);
+
+function safeReviewHrefs(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  return value.flatMap((entry) => {
+    if (typeof entry !== "string" || !REVIEW_HREFS.has(entry) || seen.has(entry)) return [];
+    seen.add(entry);
+    return [entry];
+  });
+}
+
+function reviewHrefLabel(href: string): string {
+  if (href === "/casefile") return "Open Casefile desk";
+  if (href === "/editorial-evidence") return "Open factual evidence desk";
+  return "Open private review desk";
+}
 const DEFAULT_TOGGLES: Toggles = {
   quotes: true,
   captions: true,
   chapters: true,
   notify: true,
   crosspost: false,
-  shorts: false,
+  // New narrated channels start with a private-first companion Short when
+  // their route can derive one from a verified parent master. The designer
+  // skips formats with no narration timeline; an operator may still opt out.
+  shorts: true,
   documentaryCandidates: false,
   visualMatter: true,
 };
@@ -246,6 +340,8 @@ export default function NewChannelWizard() {
   const [nicheKey, setNicheKey] = useState<string>("");
   const [subcategory, setSubcategory] = useState<string>("");
   const [family, setFamily] = useState<FamilyKey | "">("");
+  const [automaticFamilyRuntime, setAutomaticFamilyRuntime] = useState<Partial<Record<FamilyKey, AutomaticFamilyRuntimeStatus>>>({});
+  const [automaticFamilyRuntimeCheck, setAutomaticFamilyRuntimeCheck] = useState<"loading" | "ready" | "unavailable">("loading");
   const [name, setName] = useState("");
   const [clipUrl, setClipUrl] = useState("");
   const [lengthMinutes, setLengthMinutes] = useState(10);
@@ -276,6 +372,22 @@ export default function NewChannelWizard() {
   const [creativeCapabilityOffers, setCreativeCapabilityOffers] = useState<CreativeCapabilityUiOffer[]>([]);
   const [capabilitySelections, setCapabilitySelections] = useState<Record<string, string>>({});
   const [capabilityCatalogFingerprint, setCapabilityCatalogFingerprint] = useState("");
+  // A non-autonomous offer is review context, never a selection that reaches
+  // the normal automatic builder. This remains a UI safeguard; the API repeats
+  // the catalog admission before any Trigger/provider work.
+  const automaticCapabilitySelections = useMemo(
+    () => Object.entries(capabilitySelections).filter(([capability, catalogFingerprint]) =>
+      Boolean(catalogFingerprint)
+      && creativeCapabilityOffers.some((offer) =>
+        offer.capability === capability && isAutomaticCapabilityOffer(offer),
+      ),
+    ),
+    [capabilitySelections, creativeCapabilityOffers],
+  );
+  const automaticCapabilityKeys = useMemo(
+    () => automaticCapabilitySelections.map(([capability]) => capability),
+    [automaticCapabilitySelections],
+  );
   const dataStory = Boolean(capabilitySelections.source_attributed_data_story);
   const dataStorySuggested = creativeCapabilityOffers.some(
     (capability) => capability.capability === "source_attributed_data_story",
@@ -291,12 +403,65 @@ export default function NewChannelWizard() {
   // (validated server-side by channels.setModuleConfig in design-channel).
   const [moduleConfig, setModuleConfig] = useState<ModuleConfigMap>({});
   const [clipNote, setClipNote] = useState<string | null>(null);
+  const [executableFormatAlternatives, setExecutableFormatAlternatives] = useState<ExecutableFormatSuggestionAlternative[]>([]);
+  const [reviewHrefs, setReviewHrefs] = useState<string[]>([]);
   const [concept, setConcept] = useState("");
   const [audience, setAudience] = useState("");
   const [sampleTopicsText, setSampleTopicsText] = useState("");
   const sampleTopics = useMemo(() => channelSampleTopics(sampleTopicsText), [sampleTopicsText]);
   const [suggesting, setSuggesting] = useState(false);
   const [supervisedAdmission, setSupervisedAdmission] = useState<SupervisedCreatorSelection | null>(null);
+
+  useEffect(() => {
+    const abort = new AbortController();
+    let current = true;
+    void fetch("/api/automatic-family-readiness", { signal: abort.signal, cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() as Promise<unknown> : undefined)
+      .then((payload) => {
+        if (!payload || typeof payload !== "object") {
+          if (current) setAutomaticFamilyRuntimeCheck("unavailable");
+          return;
+        }
+        const rows = (payload as { families?: unknown }).families;
+        if (!Array.isArray(rows)) {
+          if (current) setAutomaticFamilyRuntimeCheck("unavailable");
+          return;
+        }
+        const next: Partial<Record<FamilyKey, AutomaticFamilyRuntimeStatus>> = {};
+        for (const row of rows) {
+          if (!row || typeof row !== "object") continue;
+          const candidate = row as Partial<AutomaticFamilyRuntimeStatus>;
+          if (
+            typeof candidate.family === "string"
+            && FAMILY_KEYS.includes(candidate.family as FamilyKey)
+            && typeof candidate.ready === "boolean"
+            && (candidate.scope === "live_renderer_stack" || candidate.scope === "universal_release_foundation" || candidate.scope === "live_pipeline_stack")
+            && Array.isArray(candidate.blockers)
+          ) {
+            next[candidate.family as FamilyKey] = {
+              family: candidate.family as FamilyKey,
+              ready: candidate.ready,
+              scope: candidate.scope,
+              blockers: candidate.blockers.filter((blocker): blocker is string => typeof blocker === "string"),
+            };
+          }
+        }
+        if (current) {
+          setAutomaticFamilyRuntime(next);
+          setAutomaticFamilyRuntimeCheck("ready");
+        }
+      })
+      .catch(() => {
+        // Keep automatic spending locked if a live capability check cannot be
+        // read. The server repeats this fence, but the creator must not offer
+        // a route that will predictably fail after configuration.
+        if (current && !abort.signal.aborted) setAutomaticFamilyRuntimeCheck("unavailable");
+      });
+    return () => {
+      current = false;
+      abort.abort();
+    };
+  }, []);
 
   const niche = getNiche(nicheKey);
   const fam = family ? getFamily(family) : undefined;
@@ -309,10 +474,10 @@ export default function NewChannelWizard() {
     if (!family) return null;
     const receipt = findCertifiedChannelComposition({
       family,
-      selectedCapabilityKeys: Object.keys(capabilitySelections),
+      selectedCapabilityKeys: automaticCapabilityKeys,
     });
     return receipt ? { receipt, definition: certifiedChannelCompositionDefinition(receipt) } : null;
-  }, [family, capabilitySelections]);
+  }, [family, automaticCapabilityKeys]);
   const duration = family ? familyDurationContract(family) : undefined;
   const costAuthority = channelBuildCostAuthority({
     approveSetupSpend,
@@ -326,12 +491,21 @@ export default function NewChannelWizard() {
     requestedSeconds?: number,
     supervised?: SupervisedCreatorSelection,
   ) => {
-    if (!isFamilyProductionReady(next) && !supervised) {
-      const readiness = familyProductionReadiness(next);
-      setClipNote(`${FAMILIES[next].label} is registered but cannot start production today: ${readiness.blockers.join(" ")}`);
+    const automaticReadiness = automaticFamilyCreatorReadiness(next);
+    if (!automaticReadiness.ready && !supervised) {
+      setClipNote(`${FAMILIES[next].label} is registered but cannot start automatic production today: ${automaticReadiness.blockers.join(" ")}`);
+      return;
+    }
+    const liveRuntime = automaticFamilyRuntime[next];
+    if (!supervised && liveRuntime?.ready === false) {
+      setClipNote(
+        `${FAMILIES[next].label} is admitted on paper but its live automatic foundation is unavailable: ${liveRuntime.blockers.join(" ")}`,
+      );
       return;
     }
     setFamily(next);
+    setExecutableFormatAlternatives([]);
+    setReviewHrefs([]);
     setSupervisedAdmission(supervised ?? null);
     setCreativeCapabilityOffers([]);
     setCapabilitySelections({});
@@ -362,7 +536,7 @@ export default function NewChannelWizard() {
     const preset = nichePreset(k);
     if (n) {
       setSubcategory(n.subcategories[0]?.name ?? "");
-      if (isFamilyProductionReady(n.defaultFamily)) {
+      if (automaticFamilyCreatorReadiness(n.defaultFamily).ready) {
         selectFamily(n.defaultFamily, preset?.targetSeconds);
       } else {
         // A blocked renderer is not permission to turn a lofi, lore, or
@@ -370,8 +544,8 @@ export default function NewChannelWizard() {
         // unselected until an operator deliberately chooses an available lane.
         setFamily("");
         setSupervisedAdmission(null);
-        const readiness = familyProductionReadiness(n.defaultFamily);
-        setClipNote(`${FAMILIES[n.defaultFamily].label} is currently blocked by its production contract: ${readiness.blockers.join(" ")}. No unlike fallback was selected automatically.`);
+        const automaticReadiness = automaticFamilyCreatorReadiness(n.defaultFamily);
+        setClipNote(`${FAMILIES[n.defaultFamily].label} is currently blocked by its automatic creator contract: ${automaticReadiness.blockers.join(" ")}. No unlike fallback was selected automatically.`);
       }
     }
   };
@@ -390,7 +564,7 @@ export default function NewChannelWizard() {
     const c = concept.trim();
     if (!c || suggesting) return;
     const audienceText = audience.trim();
-    setSuggesting(true); setClipNote(null);
+    setSuggesting(true); setClipNote(null); setExecutableFormatAlternatives([]); setReviewHrefs([]);
     (async () => {
       try {
         const res = await fetch("/api/suggest-format", {
@@ -405,10 +579,27 @@ export default function NewChannelWizard() {
           }),
         });
         const d = await res.json();
-        if (!res.ok || !d.family) { setClipNote(d.error ?? "Could not suggest a format."); setSuggesting(false); return; }
-        const fam = FAMILIES[d.family as FamilyKey]?.label ?? d.family;
+        if (!res.ok || typeof d.family !== "string" || !(d.family in FAMILIES)) {
+          setClipNote(d.error ?? "Could not suggest a compatible registered format.");
+          setSuggesting(false);
+          return;
+        }
+        const suggestedFamily = d.family as FamilyKey;
+        const fam = FAMILIES[suggestedFamily]?.label ?? d.family;
+        // A prose suggestion has no creator-authored runtime attached. Apply a
+        // researched niche default only when it belongs to this exact family;
+        // a different suggested family keeps its own validated default rather
+        // than inheriting an unrelated niche length.
+        const matchedNichePreset = niche?.defaultFamily === suggestedFamily
+          ? nichePreset(nicheKey)
+          : undefined;
+        const automaticAlternatives = certifiedExecutableFormatAlternatives(d.executableAlternatives);
+        setExecutableFormatAlternatives(automaticAlternatives);
         const alts = Array.isArray(d.alternates) && d.alternates.length
           ? ` Alternates: ${d.alternates.map((a: { family: string }) => FAMILIES[a.family as FamilyKey]?.label ?? a.family).join(", ")}.`
+          : "";
+        const executable = automaticAlternatives.length
+          ? ` Certified automatic alternatives are available below; none has been selected.`
           : "";
         const preflight = d.preflight as {
           templateAvailable?: boolean;
@@ -472,12 +663,12 @@ export default function NewChannelWizard() {
                 : {}),
             }
           : undefined;
-        if (preflight?.productionReady && isFamilyProductionReady(d.family as FamilyKey)) {
-          selectFamily(d.family as FamilyKey);
+        if (preflight?.productionReady && automaticFamilyCreatorReadiness(suggestedFamily).ready) {
+          selectFamily(suggestedFamily, matchedNichePreset?.targetSeconds);
           setCreativeCapabilityOffers(creativeCapabilities);
           setCapabilityCatalogFingerprint(preflight?.capabilityCatalogFingerprint ?? "");
         } else if (supervised) {
-          selectFamily(d.family as FamilyKey, undefined, supervised);
+          selectFamily(suggestedFamily, undefined, supervised);
           setCreativeCapabilityOffers(creativeCapabilities);
           setCapabilityCatalogFingerprint(preflight?.capabilityCatalogFingerprint ?? "");
         } else if (preflight?.productionReady === false) {
@@ -533,7 +724,7 @@ export default function NewChannelWizard() {
         const availability = supervised
           ? " (private review available; automatic renderer unavailable)"
           : d.available ? "" : " (renderer unavailable)";
-        setClipNote(`Suggested format: ${fam}${availability} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${rendererGuards}${duration}${budgetFloor}${providers}${planningFoundation}${requirements}${quality}${runtime}${validation}${capabilityNotes}${supervisedNote}`);
+        setClipNote(`Suggested format: ${fam}${availability} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${executable}${renderer}${chain}${rendererGuards}${duration}${budgetFloor}${providers}${planningFoundation}${requirements}${quality}${runtime}${validation}${capabilityNotes}${supervisedNote}`);
       } catch {
         setClipNote("Suggestion failed — pick a format manually below.");
       } finally {
@@ -543,12 +734,26 @@ export default function NewChannelWizard() {
   }
 
   async function create(startedAt: number) {
-    setPhase("building"); setError(null); setBuildProgress(null);
+    setPhase("building"); setError(null); setBuildProgress(null); setReviewHrefs([]);
     try {
       // Bind the creator-visible format promise before the recoverable intent
       // is fingerprinted. Execution choices stay on `design`; this immutable
       // brief is the sole source of its family/niche/concept/audience identity.
       const normalizedAudience = audience.trim();
+      const programIntent = family === "quizyear"
+        ? quizProfile === "sports_championship_timeline"
+          ? { kind: "sports_championship_timeline" as const }
+          : { kind: "certified_quiz" as const, profile: quizProfile }
+        : family === "illustrated_explainer" && syntheticScenarioProfile
+          ? { kind: "fictional_scenario" as const, profile: syntheticScenarioProfile }
+          : undefined;
+      const serializedProgram = seriesTitle.trim()
+        ? {
+          version: SERIALIZED_PROGRAM_VERSION,
+          seriesTitle: seriesTitle.trim(),
+          ...(seriesCount > 0 ? { seriesCount } : {}),
+        }
+        : undefined;
       const programBrief = createChannelProgramBrief({
         family,
         nicheKey,
@@ -557,6 +762,8 @@ export default function NewChannelWizard() {
         concept,
         ...(normalizedAudience ? { audience: normalizedAudience } : {}),
         ...(sampleTopics.length ? { sampleTopics } : {}),
+        ...(programIntent ? { programIntent } : {}),
+        ...(serializedProgram ? { serializedProgram } : {}),
       });
       const requestedYoutubeName = normalizeYoutubeChannelName(name);
       if (autoYoutube && !requestedYoutubeName) {
@@ -589,9 +796,21 @@ export default function NewChannelWizard() {
           return;
         }
       }
-      const selectedCapabilitySelections = Object.entries(capabilitySelections)
-        .filter(([, catalogFingerprint]) => Boolean(catalogFingerprint))
-        .map(([capability, catalogFingerprint]) => ({ capability, catalogFingerprint }));
+      const reviewedDataStoryIntake = family === "narrated_stock" && dataStory;
+      if (
+        reviewedDataStoryIntake &&
+        (autoYoutube || runProbe || approveSetupSpend || approvedForPublish || publishMode !== "draft")
+      ) {
+        setError("Reviewed Data Story intake creates a draft shell only. Disable YouTube setup, rendering, and publication first.");
+        setPhase("error");
+        return;
+      }
+      const selectedCapabilitySelections = [
+        ...automaticCapabilitySelections,
+        ...(reviewedDataStoryIntake
+          ? [["source_attributed_data_story", capabilitySelections.source_attributed_data_story] as const]
+          : []),
+      ].map(([capability, catalogFingerprint]) => ({ capability, catalogFingerprint }));
       const design: Record<string, unknown> = {
         nicheKey: programBrief.nicheKey,
         subcategory: programBrief.subcategory,
@@ -605,15 +824,12 @@ export default function NewChannelWizard() {
         lengthMinutes: fam && duration?.inputUnit !== "fixed" ? lengthMinutes : undefined,
         footageTheme: family === "narrated_stock" ? footageTheme : undefined,
         voiceFx: fam?.narrated && voiceFx !== "none" ? voiceFx : undefined,
-        seriesTitle: seriesTitle.trim() || undefined,
-        seriesCount: seriesTitle.trim() && seriesCount > 0 ? seriesCount : undefined,
         cadence, days, budget, publishMode, approvedForPublish, toggles, autoYoutube, runProbe,
         ...(family === "documentary_collage_short" ? { sourceReferences, claimEvidence } : {}),
         ...(selectedCapabilitySelections.length ? { capabilitySelections: selectedCapabilitySelections } : {}),
-        ...(family === "illustrated_explainer" && syntheticScenarioProfile
-          ? { syntheticScenario: syntheticScenarioContract(syntheticScenarioProfile) }
+        ...(reviewedDataStoryIntake
+          ? { supervisedDataStoryIntake: "reviewed_data_story_intake/v1" }
           : {}),
-        ...(family === "quizyear" ? { quizProfile } : {}),
         ...(autoYoutube ? { requestedYoutubeName, requestedYoutubeHandle } : {}),
         approveSetupSpend,
         setupBudgetUsd: costAuthority.setupCapUsd,
@@ -650,7 +866,7 @@ export default function NewChannelWizard() {
   }
 
   const submitPending = useCallback(async (pending: PendingChannelBuildRequest) => {
-    setPhase("building"); setError(null);
+    setPhase("building"); setError(null); setReviewHrefs([]);
     const attempt = submissionGateRef.current.begin(pending.requestKey);
     if (!attempt) return;
     try {
@@ -659,6 +875,9 @@ export default function NewChannelWizard() {
         body: JSON.stringify({
           requestKey: pending.requestKey,
           design: pending.design,
+          ...(pending.design.supervisedDataStoryIntake === "reviewed_data_story_intake/v1"
+            ? { mode: "reviewed_data_story_intake/v1" }
+            : {}),
         }),
         signal: attempt.controller.signal,
       });
@@ -668,6 +887,7 @@ export default function NewChannelWizard() {
           sessionStorage.removeItem(PENDING_BUILD_STORAGE_KEY);
           setPendingBuild(null);
         }
+        setReviewHrefs(res.status === 409 ? safeReviewHrefs(data.reviewHrefs) : []);
         setError(data.error ?? "Failed to start the builder."); setPhase("error"); return;
       }
       if (typeof data.id !== "string" || typeof data.slug !== "string") {
@@ -685,6 +905,7 @@ export default function NewChannelWizard() {
       pollCallbackRef.current?.(session);
     } catch {
       if (attempt.controller.signal.aborted) return;
+      setReviewHrefs([]);
       setError("The request may have started, but its response was lost. Retry uses the same request key."); setPhase("error");
     } finally {
       submissionGateRef.current.finish(attempt);
@@ -914,10 +1135,22 @@ export default function NewChannelWizard() {
     );
   }
 
+  const selectedAutomaticRuntimeReady = Boolean(
+    family
+      && automaticFamilyRuntimeCheck === "ready"
+      && automaticFamilyRuntime[family]?.ready === true,
+  );
   const canNext = step === 0
     ? !!nicheKey
     : step === 1
-      ? Boolean(family && fam?.available && (isFamilyProductionReady(family) || supervisedAdmission))
+      ? Boolean(
+        family
+          && fam?.available
+          && (supervisedAdmission || (
+            automaticFamilyCreatorReadiness(family).ready
+            && selectedAutomaticRuntimeReady
+          )),
+      )
       : true;
   const stepNames = ["Niche", "Format", "Details", "Review"];
 
@@ -944,6 +1177,11 @@ export default function NewChannelWizard() {
           {activeBuild && <small style={{ color: "var(--color-muted)" }}>The exact build identity is preserved. Provider work will not restart automatically.</small>}
         </span>
         <span style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          {reviewHrefs.map((href) => (
+            <Link key={href} href={href} style={btnPrimary}>
+              {reviewHrefLabel(href)}
+            </Link>
+          ))}
           {activeBuild && (
             <>
               <Link href={`/channels/${encodeURIComponent(activeBuild.slug)}`} style={btnPrimary}>Open channel</Link>
@@ -961,6 +1199,7 @@ export default function NewChannelWizard() {
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px,1fr))", gap: "0.8rem" }}>
           {NICHES.map((n) => {
             const on = n.key === nicheKey;
+            const defaultFamilyReadiness = automaticFamilyCreatorReadiness(n.defaultFamily);
             return (
               <button key={n.key} onClick={() => pickNiche(n.key)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: "pointer",
                 border: on ? "1px solid var(--color-accent)" : "1px solid var(--color-border)", background: on ? "rgba(124,124,255,0.08)" : undefined }}>
@@ -969,8 +1208,16 @@ export default function NewChannelWizard() {
                 <div style={{ display: "flex", gap: "0.4rem", margin: "0.4rem 0", fontSize: "0.72rem" }}>
                   <span style={{ color: "var(--color-faint)" }}>Planning seed</span>
                   <span style={{ color: n.difficulty === "Easy" ? "var(--color-ok)" : n.difficulty === "Hard" ? "var(--color-failed)" : "var(--color-accent)" }}>{n.difficulty}</span>
+                  <span style={{ color: defaultFamilyReadiness.ready ? "var(--color-ok)" : "#fbbf24" }}>
+                    {defaultFamilyReadiness.ready ? "Automatic route ready" : "Automatic start held"}
+                  </span>
                 </div>
                 <div style={{ fontSize: "0.76rem", color: "var(--color-muted)" }}>{n.blurb}</div>
+                {!defaultFamilyReadiness.ready && defaultFamilyReadiness.blockers[0] ? (
+                  <div style={{ marginTop: "0.45rem", fontSize: "0.7rem", lineHeight: 1.35, color: "#fbbf24" }}>
+                    Needs before automatic creation: {defaultFamilyReadiness.blockers[0]}
+                  </div>
+                ) : null}
               </button>
             );
           })}
@@ -991,8 +1238,10 @@ export default function NewChannelWizard() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px,1fr))", gap: "0.8rem" }}>
             {FAMILY_KEYS.map((k) => {
               const f = FAMILIES[k]; const on = k === family;
-              const productionReady = isFamilyProductionReady(k);
-              const readiness = familyProductionReadiness(k);
+              const automaticReadiness = automaticFamilyCreatorReadiness(k);
+              const productionReady = automaticReadiness.ready;
+              const liveRuntime = automaticFamilyRuntime[k];
+              const runtimeUnavailable = liveRuntime?.ready === false;
               const supervisedCapability = familySupervisedChannelInceptionCapability(k);
               const supervised = supervisedCapability
                 ? {
@@ -1003,19 +1252,38 @@ export default function NewChannelWizard() {
                     ...(supervisedCapability.reviewHref ? { reviewHref: supervisedCapability.reviewHref } : {}),
                   }
                 : undefined;
-              const selectable = f.available && (productionReady || Boolean(supervised));
+              const selectable = f.available && !runtimeUnavailable && (productionReady || Boolean(supervised));
               return (
                 <button key={k} disabled={!selectable} onClick={() => selectable && selectFamily(k, undefined, supervised)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: selectable ? "pointer" : "not-allowed", opacity: selectable ? 1 : 0.55,
                   border: on ? "1px solid var(--color-accent)" : "1px solid var(--color-border)", background: on ? "rgba(124,124,255,0.08)" : undefined }}>
-                  <div style={{ fontWeight: 600 }}>{f.label}{supervised ? <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· private review only</span> : !selectable && <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· renderer blocked — no spend</span>}</div>
+                  <div style={{ fontWeight: 600 }}>{f.label}{supervised ? <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· private review only</span> : runtimeUnavailable ? <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· live renderer unavailable — no spend</span> : !selectable && <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· automatic admission blocked — no spend</span>}</div>
                   <div style={{ fontSize: "0.78rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{f.description}</div>
                   {supervised
                     ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>Select to see the private-review requirements; no automatic build, render, spend, or publish can start here.</div>
-                    : !selectable && readiness.blockers[0] && <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{readiness.blockers[0]}</div>}
+                    : runtimeUnavailable && liveRuntime?.blockers[0]
+                      ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{liveRuntime.blockers[0]}</div>
+                      : !productionReady && automaticReadiness.blockers[0]
+                        ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{automaticReadiness.blockers[0]}</div>
+                      : liveRuntime?.scope === "live_renderer_stack"
+                        ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>Live renderer stack verified for automatic creation.</div>
+                        : liveRuntime?.scope === "universal_release_foundation"
+                          ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>Required thumbnail and final visual-QA foundation verified.</div>
+                        : liveRuntime?.scope === "live_pipeline_stack"
+                          ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>Required planning, media, thumbnail, and final visual-QA foundations verified.</div>
+                        : null}
                 </button>
               );
             })}
           </div>
+          {automaticFamilyRuntimeCheck === "loading" ? (
+            <p style={{ color: "var(--color-muted)", fontSize: "0.74rem", margin: "-0.2rem 0 0.2rem" }}>
+              Checking live production foundations. Automatic setup remains locked until this completes.
+            </p>
+          ) : automaticFamilyRuntimeCheck === "unavailable" ? (
+            <p style={{ color: "var(--color-failed)", fontSize: "0.74rem", margin: "-0.2rem 0 0.2rem" }}>
+              Live production readiness could not be verified. Automatic setup remains locked; refresh and try again.
+            </p>
+          ) : null}
           <label style={lblStyle}><span style={capStyle}>Channel name (optional — auto-generated if blank)</span>
             <input value={name} onChange={(e) => {
               setName(e.target.value);
@@ -1040,6 +1308,36 @@ export default function NewChannelWizard() {
             <span style={muted}>{sampleTopics.length}/12 examples. They are bound into the durable channel program and help the advisor select the right capability and safety path.</span>
           </label>
           {clipNote && <div className="glass" style={{ padding: "0.7rem 0.9rem", fontSize: "0.8rem", color: "var(--color-muted)", border: "1px solid var(--color-accent)" }}>{clipNote}</div>}
+          {executableFormatAlternatives.length > 0 && (
+            <div className="glass" style={{ padding: "0.8rem 0.9rem", display: "grid", gap: "0.65rem", border: "1px solid var(--color-ok)" }}>
+              <div style={{ display: "grid", gap: "0.2rem" }}>
+                <strong style={{ fontSize: "0.84rem" }}>Certified automatic alternatives</strong>
+                <span style={muted}>The requested format remains blocked. Choose an adaptation deliberately; nothing was substituted automatically.</span>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0.55rem" }}>
+                {executableFormatAlternatives.map((alternative) => (
+                  <button
+                    key={alternative.family}
+                    type="button"
+                    onClick={() => {
+                      if (!alternative.selectable || !alternative.executable || !automaticFamilyCreatorReadiness(alternative.family).ready) {
+                        setExecutableFormatAlternatives([]);
+                        setClipNote(`${FAMILIES[alternative.family].label} is no longer admitted for automatic channel creation. No alternative was selected.`);
+                        return;
+                      }
+                      selectFamily(alternative.family);
+                      setClipNote(`Selected ${FAMILIES[alternative.family].label} as an explicit automatic adaptation. The originally suggested format remains blocked and was not substituted automatically. ${alternative.why}`);
+                    }}
+                    className="glass lift"
+                    style={{ textAlign: "left", padding: "0.7rem", cursor: "pointer", border: "1px solid var(--color-ok)" }}
+                  >
+                    <div style={{ fontSize: "0.82rem", fontWeight: 600 }}>{FAMILIES[alternative.family].label}</div>
+                    <div style={{ fontSize: "0.72rem", color: "var(--color-muted)", marginTop: "0.25rem" }}>{alternative.why}</div>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 
@@ -1081,6 +1379,31 @@ export default function NewChannelWizard() {
                 </div>
               </Row>
             )}
+            {family && !supervisedAdmission && <MinimumVideoFoundationCard family={family} />}
+            {family && (() => {
+              const calibration = qualityCalibrationForCreator(family);
+              return (
+                <Row label="Quality bar">
+                  <div style={{ display: "grid", gap: "0.3rem", maxWidth: 520 }}>
+                    {calibration.calibrated && calibration.sources.length ? (
+                      <>
+                        <strong style={{ fontSize: "0.82rem" }}>
+                          Original mechanics calibrated from {calibration.sources.join(" · ")}
+                        </strong>
+                        <span style={muted}>
+                          These are reviewable production mechanics, never a style-copying instruction or a promise of another channel’s audience.
+                        </span>
+                        <ul style={{ margin: 0, paddingLeft: "1.1rem", display: "grid", gap: "0.2rem", fontSize: "0.78rem", color: "var(--color-muted)" }}>
+                          {calibration.standards.map((standard) => <li key={standard}>{standard}</li>)}
+                        </ul>
+                      </>
+                    ) : (
+                      <span style={muted}>No usable reference-quality calibration is registered for this family. Automatic release remains unavailable until one is proven.</span>
+                    )}
+                  </div>
+                </Row>
+              );
+            })()}
             <Row label="Language"><select value={locale} onChange={(e) => setLocale(e.target.value)} style={selStyle}><option value="en">English</option><option value="es">Spanish</option><option value="de">German</option></select></Row>
             {family === "narrated_stock" && (
               <Row label="Footage theme"><select value={footageTheme} onChange={(e) => setFootageTheme(e.target.value)} style={selStyle}><option value="">Topic-matched (channel DNA)</option><option value="nature">Nature / landscapes / ruins</option></select></Row>
@@ -1092,6 +1415,62 @@ export default function NewChannelWizard() {
               .filter((capability) => capability.selectionMode === "explicit_opt_in")
               .map((capability) => {
                 const selected = Boolean(capabilitySelections[capability.capability]);
+                const automatic = isAutomaticCapabilityOffer(capability);
+                if (!automatic) {
+                  const isDataStory = capability.capability === "source_attributed_data_story";
+                  if (isDataStory && family === "narrated_stock") {
+                    return (
+                      <Row key={capability.capability} label={capability.title}>
+                        <label style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", cursor: "pointer", fontSize: "0.8rem", color: "var(--color-muted)" }}>
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            onChange={(event) => {
+                              const checked = event.target.checked;
+                              setCapabilitySelections((current) => {
+                                const next = { ...current };
+                                if (checked) next[capability.capability] = capabilityCatalogFingerprint;
+                                else delete next[capability.capability];
+                                return next;
+                              });
+                              if (checked) {
+                                setAutoYoutube(false);
+                                setRunProbe(false);
+                                setApproveSetupSpend(false);
+                                setApprovedForPublish(false);
+                                setPublishMode("draft");
+                              }
+                            }}
+                          />
+                          <span>
+                            <strong style={{ color: "var(--color-fg)" }}>Create reviewed Data Story intake</strong>{" "}
+                            {dataStorySuggested ? "Advisor recommended this format. " : ""}
+                            {capability.description} It creates only a sealed draft channel; the Editorial Evidence desk later requires an immutable reviewed source ledger, then pauses every episode for factual review. It cannot set up YouTube, render, spend, or publish automatically.
+                          </span>
+                        </label>
+                      </Row>
+                    );
+                  }
+                  return (
+                    <Row key={capability.capability} label={capability.title}>
+                      <div
+                        style={{ display: "grid", gap: "0.3rem", fontSize: "0.8rem", color: "var(--color-muted)" }}
+                        role="status"
+                      >
+                        <strong style={{ color: "var(--color-fg)" }}>
+                          {isDataStory ? "Reviewed Data Story intake is available only for Narrated + Stock Footage" : "Private review intake unavailable"}
+                        </strong>
+                        <span>
+                          {dataStorySuggested && isDataStory ? "Advisor recommended this format. " : ""}
+                          {capability.description} {capability.requirements?.join(" ")}
+                        </span>
+                        <span>
+                          This is not submitted with a normal automatic channel build. {capability.automationAdmission?.remediation ?? "Complete its stated review admission first."}
+                        </span>
+                      </div>
+                    </Row>
+                  );
+                }
                 return (
                   <Row key={capability.capability} label={capability.title}>
                     <label style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", cursor: "pointer", fontSize: "0.8rem", color: "var(--color-muted)" }}>
@@ -1254,7 +1633,7 @@ export default function NewChannelWizard() {
           ) : (
             <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.6rem" }}>
               <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Advanced — optional modules</div>
-              {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Auto Short (9:16, private)"], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)"]] as [keyof Toggles, string][]).map(([k, lbl]) => (
+              {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Companion Short when eligible (9:16, private)"], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)"]] as [keyof Toggles, string][]).map(([k, lbl]) => (
                 <label key={k} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
                   <input type="checkbox" checked={toggles[k]} onChange={(e) => setToggles((p) => ({ ...p, [k]: e.target.checked }))} /> {lbl}
                 </label>
@@ -1290,7 +1669,7 @@ export default function NewChannelWizard() {
       {step === 3 && fam && (
         <div style={{ display: "grid", gap: "1rem", maxWidth: 760 }}>
           {!fam.available && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {fam.label}: visual engine “{fam.visualEngine}” not built yet — channel will be created as a DRAFT until it ships.</div>}
-          {!isFamilyProductionReady(fam.key) && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {familyProductionReadiness(fam.key).blockers.join(" ")}</div>}
+          {!automaticFamilyCreatorReadiness(fam.key).ready && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {automaticFamilyCreatorReadiness(fam.key).blockers.join(" ")}</div>}
           {supervisedAdmission && (
             <div className="glass" style={{ padding: "0.9rem 1rem", border: "1px solid rgba(124,124,255,0.55)", color: "#d7d9ff", display: "grid", gap: "0.45rem", fontSize: "0.84rem" }}>
               <strong>Private-review intake selected</strong>

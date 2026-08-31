@@ -127,6 +127,18 @@ function assertSceneTypographySplit(): void {
   assert.match(prompt, /no text, letters, words, numbers/i);
   assert.match(prompt, /left 42%/i);
 
+  const treatedRequest = buildThumbnailImageRequest({
+    ...spec.scene,
+    requiredVisualDirectives: [
+      "original clearly illustrative fictional artwork only",
+      "never a recognizable real person, real place, or factual map",
+    ],
+  });
+  assert.equal(treatedRequest.allowText, false, "policy directions must not move disclosure text into provider pixels");
+  assert.match(treatedRequest.prompt, /non-negotiable visual treatment/i);
+  assert.match(treatedRequest.prompt, /illustrative fictional artwork only/i);
+  assert.match(treatedRequest.prompt, /never a recognizable real person, real place, or factual map/i);
+
   assert.doesNotThrow(
     () => buildThumbnailImageRequest({
         ...spec.scene,

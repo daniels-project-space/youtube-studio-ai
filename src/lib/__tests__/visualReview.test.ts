@@ -5,11 +5,13 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { planHeal, type HealableBlock } from "@/engine/healer";
+import { CONTENT_LANE_POLICIES } from "@/engine/contentLane";
 import {
   channelVisualReviewProfile,
   maxAllowedVisualReviewGapSec,
   planVisualReviewEvidence,
   reviewRender,
+  VISUAL_REVIEW_BROAD_QUALITY_SCORE_VERSION,
   visualReviewReceiptFingerprint,
   visualRepairSignals,
   type VisualReviewIntent,
@@ -39,6 +41,11 @@ assert.match(
   reviewSource,
   /visual-review-receipt\/v1/,
   "a review result must declare the content-addressed receipt schema it returns",
+);
+assert.match(
+  reviewSource,
+  /visual-review-wide-sample-quality\/v1/,
+  "the opt-in broad quality score must carry a stable receipt-bound schema version",
 );
 const phraseReviewer = async () => JSON.stringify({
   defects: [{
@@ -112,8 +119,50 @@ async function main(): Promise<void> {
     ],
   });
   assert.match(comicProfile.expectedStructure, /speech bubbles/i, "comic channels must tell the reviewer their layout contract");
+  assert.match(
+    comicProfile.expectedStructure,
+    /unplanned empty panel\/template/i,
+    "comic QA must reject a dead opening while retaining the lane's deliberate-page-border allowance",
+  );
   assert.match(comicProfile.channelWorld ?? "", /Silent Night Stories/, "frozen channel identity must reach the reviewer");
   assert.equal(comicProfile.qualityCriteria.length, 2, "full QualityBar criteria must survive the channel-review profile");
+
+  const whiteboardProfile = channelVisualReviewProfile({
+    contentLaneKey: "whiteboard_explainer",
+    primaryRenderer: "whiteboard_scribe",
+    requireSpecificLaneProfile: true,
+  });
+  assert.match(
+    whiteboardProfile.allowedVisualConditions.join(" "),
+    /partially written frame/i,
+    "whiteboard QA must treat the intentional hand-drawn prelude as an allowed condition",
+  );
+  assert.match(
+    whiteboardProfile.allowedVisualConditions.join(" "),
+    /stable, narration-aligned illustration/i,
+    "whiteboard QA must not mislabel an intentional narration hold as a duplicate clip",
+  );
+
+  for (const lane of Object.values(CONTENT_LANE_POLICIES)) {
+    if (lane.key === "legacy_unclassified") continue;
+    const profile = channelVisualReviewProfile({
+      contentLaneKey: lane.key,
+      primaryRenderer: lane.primaryRenderer,
+      requireSpecificLaneProfile: true,
+    });
+    assert.ok(
+      profile.expectedStructure.length >= 80,
+      `${lane.key} must provide a concrete production visual-review contract instead of the generic fallback`,
+    );
+  }
+  assert.throws(
+    () => channelVisualReviewProfile({
+      contentLaneKey: "future_unregistered_lane",
+      requireSpecificLaneProfile: true,
+    }),
+    /profile is not registered/i,
+    "a new production lane must add explicit visual-review expectations before it can release",
+  );
 
   let groundedPrompt = "";
   const groundedReviewer = async (input: { prompt: string }) => {
@@ -123,6 +172,7 @@ async function main(): Promise<void> {
   const grounded = await reviewRender(fixture, 18, {
     title: "Reference-quality QA grounding fixture",
     expectTitleCard: false,
+    expectedStructure: comicProfile.expectedStructure,
     qualityCriteria: comicProfile.qualityCriteria,
   }, {
     runId: "visual-review-quality-bar",
@@ -132,6 +182,11 @@ async function main(): Promise<void> {
     maxFocusFrames: 0,
   });
   assert.equal(grounded.verdict, "pass");
+  assert.match(
+    groundedPrompt,
+    /unplanned empty panel\/template is a broken intro/i,
+    "motion-comic opening criteria must reach the final-review model prompt",
+  );
   assert.match(groundedPrompt, /CHANNEL QUALITY BAR/, "the final reviewer must receive the full channel quality standard");
   assert.match(groundedPrompt, /decorative novelty is a defect/i);
   assert.match(groundedPrompt, /not an automatic comparison/i);
@@ -139,6 +194,26 @@ async function main(): Promise<void> {
     groundedPrompt,
     /REFERENCE-MECHANICS CRITERIA/,
     "an unopted generic QualityBar review must not demand typed reference receipts or turn a normal reviewer pass into needs_human",
+  );
+
+  let failedBatchCalls = 0;
+  await assert.rejects(
+    () => reviewRender(fixture, 18, {
+      title: "Final-review batch failure attribution fixture",
+      expectTitleCard: false,
+    }, {
+      runId: "visual-review-batch-failure-attribution",
+      reviewer: async () => {
+        failedBatchCalls += 1;
+        if (failedBatchCalls === 2) throw new Error("simulated final provider body timeout");
+        return JSON.stringify({ defects: [], summary: "First batch receipt retained by the vision cache." });
+      },
+      persistEvidence: false,
+      maxFrames: 8,
+      maxFocusFrames: 0,
+    }),
+    /visualReview broad batch 2\/4 \(f003, f004\) failed/,
+    "a provider failure must name its exact bounded evidence batch for targeted recovery",
   );
 
   // Typed reference mechanics are a separate contract from the generic
@@ -149,14 +224,14 @@ async function main(): Promise<void> {
     criterion: `Original visual mechanic ${index + 1} must be visibly supported by the reviewed frames.`,
   }));
   let referenceCriteriaPrompt = "";
-  const referenceCriteriaReviewer = async (input: { prompt: string }) => {
+  const referenceCriteriaReviewer = async (input: { prompt: string; frames: readonly { id: string }[] }) => {
     referenceCriteriaPrompt = input.prompt;
     return JSON.stringify({
       defects: [],
       referenceCriteria: referenceCriteria.map((criterion) => ({
         id: criterion.id,
         verdict: "pass",
-        evidenceFrameIds: ["f001"],
+        evidenceFrameIds: [input.frames[0]!.id],
       })),
       summary: "All typed reference mechanics are visibly supported in this batch.",
     });
@@ -227,12 +302,12 @@ async function main(): Promise<void> {
     referenceCriteria,
   }, {
     runId: "visual-review-reference-criteria-output-change",
-    reviewer: async () => JSON.stringify({
+    reviewer: async (input) => JSON.stringify({
       defects: [],
       referenceCriteria: referenceCriteria.map((criterion, index) => ({
         id: criterion.id,
         verdict: index === 0 ? "fail" : "pass",
-        evidenceFrameIds: ["f001"],
+        evidenceFrameIds: [input.frames[0]!.id],
       })),
       summary: "One typed reference mechanic visibly fails.",
     }),
@@ -285,6 +360,102 @@ async function main(): Promise<void> {
   assert.equal(incompleteGlobalCriterion.referenceCriteriaComplete, false, "a global receipt requires passes from all sampled broad-review batches");
   assert.equal(incompleteGlobalCriterion.referenceCriteria[0]?.verdict, "not_observable");
   assert.match(incompleteGlobalCriterion.summary, /all sampled broad-review batches/i);
+
+  // qa_visual can reuse the already-required broad final-review calls for its
+  // health score. Every batch must answer; the sealed result keeps the lowest
+  // score so a strong first sample cannot mask a weak later sample.
+  const broadBatchScores: number[] = [];
+  let broadScorePrompt = "";
+  const wideSampleScore = await reviewRender(fixture, 18, {
+    title: "Wide-sample final-review score fixture",
+    topic: "Evidence-led visual quality",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-wide-sample-score",
+    reviewer: async (input) => {
+      if (input.phase === "broad") {
+        broadScorePrompt = input.prompt;
+        // The final reviewer now uses the operational two-frame batch cap.
+        // Keep every mocked batch score inside the real 0–10 receipt domain.
+        const score = 9 - broadBatchScores.length * 0.4;
+        broadBatchScores.push(score);
+        return JSON.stringify({
+          defects: [],
+          broadQualityScore: score,
+          summary: "Wide-sample score fixture.",
+        });
+      }
+      return JSON.stringify({ defects: [], summary: "No focused score required." });
+    },
+    persistEvidence: false,
+    maxFrames: 16,
+    maxFocusFrames: 0,
+    requireBroadQualityScore: true,
+  });
+  assert(broadBatchScores.length >= 2, "fixture must exercise more than one broad reviewer batch");
+  assert.deepEqual(
+    wideSampleScore.broadQualityScore,
+    {
+      version: VISUAL_REVIEW_BROAD_QUALITY_SCORE_VERSION,
+      score: Number(Math.min(...broadBatchScores).toFixed(1)),
+      broadBatchCount: broadBatchScores.length,
+    },
+    "the wide-sample score must be the conservative minimum across every broad batch",
+  );
+  assert.equal(wideSampleScore.verdict, "pass", "complete broad scores must not weaken an otherwise passing review");
+  assert.match(broadScorePrompt, /WIDE-SAMPLE QUALITY SCORE/);
+  assert.match(broadScorePrompt, /"broadQualityScore":number/);
+  const alteredWideSampleScoreFingerprint = visualReviewReceiptFingerprint({
+    ran: wideSampleScore.ran,
+    verdict: wideSampleScore.verdict,
+    reviewFingerprint: wideSampleScore.reviewFingerprint,
+    evidence: wideSampleScore.evidence,
+    defects: wideSampleScore.defects,
+    referenceCriteria: wideSampleScore.referenceCriteria,
+    referenceCriteriaComplete: wideSampleScore.referenceCriteriaComplete,
+    broadQualityScore: {
+      ...wideSampleScore.broadQualityScore!,
+      score: wideSampleScore.broadQualityScore!.score - 0.1,
+    },
+  });
+  assert.notEqual(
+    alteredWideSampleScoreFingerprint,
+    wideSampleScore.reviewReceiptFingerprint,
+    "the content-addressed review receipt must bind the wide-sample quality score",
+  );
+
+  const missingWideSampleScore = await reviewRender(fixture, 18, {
+    title: "Missing wide-sample final-review score fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-missing-wide-sample-score",
+    reviewer,
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+    requireBroadQualityScore: true,
+  });
+  assert.equal(missingWideSampleScore.broadQualityScore, undefined);
+  assert.equal(missingWideSampleScore.verdict, "needs_human", "a missing required broad score must fail closed");
+  assert.match(missingWideSampleScore.summary, /omitted or malformed the required quality score/i);
+
+  const advisoryMissingWideSampleScore = await reviewRender(fixture, 18, {
+    title: "Draft wide-sample final-review score fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-advisory-missing-wide-sample-score",
+    reviewer,
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+    collectBroadQualityScore: true,
+  });
+  assert.equal(advisoryMissingWideSampleScore.broadQualityScore, undefined);
+  assert.equal(
+    advisoryMissingWideSampleScore.verdict,
+    "pass",
+    "an advisory draft/probe score omission must not turn an otherwise complete review into a retry",
+  );
 
   const omittedReferenceCriteria = await reviewRender(fixture, 18, {
     title: "Omitted reference-criteria receipt fixture",

@@ -1,6 +1,13 @@
 import React from "react";
 import { Composition } from "remotion";
 import { QuizYear, type QuizYearProps, totalFrames } from "./QuizYear";
+import { QuizYearPortraitProof, type QuizYearPortraitProofProps } from "./QuizYearPortraitProof";
+import { QUIZ_YEAR_PORTRAIT_WORST_CASE_FIXTURE } from "./portraitProofFixture";
+import {
+  preflightQuizYearPortraitProof,
+  QUIZ_YEAR_PORTRAIT_HEIGHT,
+  QUIZ_YEAR_PORTRAIT_WIDTH,
+} from "./portraitLayout";
 
 /**
  * ISOLATED quiz Remotion root — deliberately NOT registered in
@@ -17,24 +24,71 @@ import { QuizYear, type QuizYearProps, totalFrames } from "./QuizYear";
  */
 export const QuizRemotionRoot: React.FC = () => {
   return (
-    <Composition
-      id="QuizYear"
-      component={QuizYear}
-      durationInFrames={900}
-      fps={30}
-      width={1920}
-      height={1080}
-      defaultProps={{ rounds: [], palette: [], title: "" } as QuizYearProps}
-      calculateMetadata={({ props }) => {
-        const p = props as unknown as QuizYearProps;
-        return {
-          durationInFrames: totalFrames(p.rounds ?? []),
-          fps: 30,
-          width: p.width ?? 1920,
-          height: p.height ?? 1080,
-          props,
-        };
-      }}
-    />
+    <>
+      <Composition
+        id="QuizYear"
+        component={QuizYear}
+        durationInFrames={900}
+        fps={30}
+        width={1920}
+        height={1080}
+        defaultProps={{ rounds: [], palette: [], title: "" } as QuizYearProps}
+        calculateMetadata={({ props }) => {
+          const p = props as unknown as QuizYearProps;
+          return {
+            durationInFrames: totalFrames(p.rounds ?? []),
+            fps: 30,
+            width: p.width ?? 1920,
+            height: p.height ?? 1080,
+            props,
+          };
+        }}
+      />
+      {/*
+       * The production ID is selected only by the supervised QuizShort route.
+       * Keeping the legacy proof ID preserves local layout-review tooling while
+       * ensuring no automatic route can confuse a proof render with a release.
+       */}
+      <Composition
+        id="QuizYearPortrait"
+        component={QuizYearPortraitProof}
+        durationInFrames={1320}
+        fps={30}
+        width={QUIZ_YEAR_PORTRAIT_WIDTH}
+        height={QUIZ_YEAR_PORTRAIT_HEIGHT}
+        defaultProps={QUIZ_YEAR_PORTRAIT_WORST_CASE_FIXTURE as QuizYearPortraitProofProps}
+        calculateMetadata={({ props }) => {
+          const p = props as unknown as QuizYearPortraitProofProps;
+          const preflight = preflightQuizYearPortraitProof(p);
+          return {
+            durationInFrames: preflight.durationFrames,
+            fps: 30,
+            width: QUIZ_YEAR_PORTRAIT_WIDTH,
+            height: QUIZ_YEAR_PORTRAIT_HEIGHT,
+            props,
+          };
+        }}
+      />
+      <Composition
+        id="QuizYearPortraitProof"
+        component={QuizYearPortraitProof}
+        durationInFrames={1320}
+        fps={30}
+        width={QUIZ_YEAR_PORTRAIT_WIDTH}
+        height={QUIZ_YEAR_PORTRAIT_HEIGHT}
+        defaultProps={QUIZ_YEAR_PORTRAIT_WORST_CASE_FIXTURE as QuizYearPortraitProofProps}
+        calculateMetadata={({ props }) => {
+          const p = props as unknown as QuizYearPortraitProofProps;
+          const preflight = preflightQuizYearPortraitProof(p);
+          return {
+            durationInFrames: preflight.durationFrames,
+            fps: 30,
+            width: QUIZ_YEAR_PORTRAIT_WIDTH,
+            height: QUIZ_YEAR_PORTRAIT_HEIGHT,
+            props,
+          };
+        }}
+      />
+    </>
   );
 };

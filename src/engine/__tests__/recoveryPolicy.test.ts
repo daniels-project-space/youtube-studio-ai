@@ -6,7 +6,10 @@ import {
   ExecutionError,
 } from "@/engine/executionErrors";
 import { _clear, register } from "@/engine/registry";
-import { runPipeline } from "@/engine/runner";
+import {
+  PAID_STAGE_RECONCILIATION_MARKER,
+  runPipeline,
+} from "@/engine/runner";
 import type { Block, RunStageSink } from "@/engine/types";
 import { validatePipeline } from "@/engine/validate";
 import { rehydrateOutputs } from "@/lib/rehydrate";
@@ -144,6 +147,38 @@ async function classificationAndRetryPolicy(): Promise<void> {
   assert(
     recovered.ok && transientAttempts === 3,
     "explicit transient 503 retries and recovers",
+  );
+
+  let durableBusyAttempts = 0;
+  const durableBusy: Block = {
+    id: "recovery_durable_serial_busy",
+    consumes: [],
+    produces: ["recoveryResult"],
+    run: async () => {
+      durableBusyAttempts++;
+      throw new ExecutionError("serialized episode lease remains live", {
+        code: "SERIALIZED_EPISODE_BUSY",
+        retryable: true,
+        retryAfterMs: 300_000,
+        retryScope: "durable_task",
+      });
+    },
+  };
+  _clear();
+  register(durableBusy);
+  const deferred = await runPipeline(
+    validatePipeline([{ block: durableBusy.id, params: { retries: 5 } }]),
+    { ...base, sink: sinkWithCompleted(), defaultRetries: 5 },
+  );
+  assert(
+    !deferred.ok && durableBusyAttempts === 1,
+    "a durable serial claim-busy condition never burns local block retries or another provider call",
+  );
+  assert(
+    deferred.retryDirective?.scope === "durable_task" &&
+      deferred.retryDirective.code === "SERIALIZED_EPISODE_BUSY" &&
+      deferred.retryDirective.retryAfterMs === 300_000,
+    "the runner preserves the durable busy receipt for the task requeue boundary",
   );
 
   let malformedAttempts = 0;
@@ -451,6 +486,105 @@ async function interruptedPaidStageRequiresReconciliation(): Promise<void> {
   );
 }
 
+async function failedRemoteDocuChildRequiresReconciliation(): Promise<void> {
+  let remoteChildCalls = 0;
+  let downstreamCalls = 0;
+  const writes: Array<{ block: string; status: string; cost?: number; error?: string }> = [];
+  // The production parent emits the marker only for `documotion_short`.
+  // Keep this registry-only block synthetic so the recovery test exercises
+  // the runner's remote-child protocol without depending on DocuMotion's
+  // complete production manifest/input contract.
+  const documotion: Block = {
+    id: "recovery_remote_documotion_child",
+    consumes: [],
+    produces: ["documotionMaster"],
+    paid: true,
+    run: async () => ({ documotionMaster: "inline path must never run" }),
+  };
+  const downstream: Block = {
+    id: "documotion_remote_downstream",
+    consumes: ["documotionMaster"],
+    produces: ["downstreamResult"],
+    run: async () => {
+      downstreamCalls++;
+      return { downstreamResult: "must not run after an ambiguous child failure" };
+    },
+  };
+  _clear();
+  register(documotion);
+  register(downstream);
+  const childFailure = new ExecutionError(
+    `${PAID_STAGE_RECONCILIATION_MARKER}: remote documotion_short child failed after dispatch; ` +
+      "provider cost is UNKNOWN and automatic replay/heal is forbidden.",
+    { retryable: false, code: "DOCUMOTION_REMOTE_COST_RECONCILIATION_REQUIRED" },
+  );
+  const resolved = validatePipeline([
+    { block: documotion.id },
+    { block: downstream.id },
+  ]);
+
+  const first = await runPipeline(resolved, {
+    ...base,
+    defaultRetries: 2,
+    remoteBlocks: new Set([documotion.id]),
+    runRemoteBlock: async (blockId) => {
+      assert(blockId === documotion.id, "only the DocuMotion child may be dispatched");
+      remoteChildCalls++;
+      throw childFailure;
+    },
+    sink: {
+      async upsert(args) {
+        writes.push({ block: args.block, status: args.status, cost: args.cost, error: args.error });
+      },
+      async getResumeState() {
+        return [];
+      },
+    },
+  });
+  assert(!first.ok, "a failed remote DocuMotion child fails the pipeline honestly");
+  assert(
+    remoteChildCalls === 1,
+    `the parent does not retry an ambiguous paid DocuMotion child in-process (got ${remoteChildCalls})`,
+  );
+  assert(downstreamCalls === 0, "no downstream stage runs after the failed remote child");
+  const marker = writes.find((write) =>
+    write.block === documotion.id &&
+    write.status === "failed" &&
+    write.error?.includes(PAID_STAGE_RECONCILIATION_MARKER),
+  );
+  assert(marker, "remote DocuMotion failure persists the paid-stage reconciliation marker");
+  assert(
+    marker?.cost === undefined,
+    "unknown child provider cost remains absent rather than being represented as a successful zero-cost receipt",
+  );
+
+  const resumed = await runPipeline(resolved, {
+    ...base,
+    remoteBlocks: new Set([documotion.id]),
+    runRemoteBlock: async () => {
+      remoteChildCalls++;
+      throw new Error("a reconciled remote child must not be dispatched");
+    },
+    sink: {
+      async upsert() {},
+      async getResumeState() {
+        return [{
+          block: documotion.id,
+          status: "failed",
+          error: marker?.error,
+        }];
+      },
+    },
+  });
+  assert(!resumed.ok, "a marked remote DocuMotion failure remains terminal on resume");
+  assert(remoteChildCalls === 1, "resume cannot launch an h+1 DocuMotion child without reconciliation");
+  assert(downstreamCalls === 0, "resume cannot advance to downstream stages after the remote fence");
+  assert(
+    /PAID_STAGE_RECONCILIATION_REQUIRED/.test(resumed.error ?? ""),
+    "the resumed failure preserves the durable reconciliation marker",
+  );
+}
+
 async function legacyThumbnailResumeFailsClosedWithoutRespend(): Promise<void> {
   let paidThumbnailCalls = 0;
   let persistedOutputs: Record<string, unknown> | undefined;
@@ -467,12 +601,20 @@ async function legacyThumbnailResumeFailsClosedWithoutRespend(): Promise<void> {
   _clear();
   register(thumbnail);
   const resumed = await runPipeline(
-    validatePipeline([{ block: thumbnail.id }], ["title", "thumbnailDescription"]),
+    validatePipeline(
+      [{ block: thumbnail.id }],
+      ["title", "thumbnailDescription", "topic", "packageToOpeningPlan"],
+    ),
     {
       ...base,
       seedStore: {
+        // The current universal video foundation supplies these before the
+        // thumbnail stage. They are run context, not a claim about the
+        // legacy cached thumbnail output below.
+        topic: "rental-economy",
         title: "A real legacy rental-economy thumbnail",
         thumbnailDescription: "A real legacy rental-economy thumbnail concept",
+        packageToOpeningPlan: {},
       },
       sink: {
         async upsert(args) {
@@ -517,6 +659,7 @@ async function main(): Promise<void> {
   await classificationAndRetryPolicy();
   await narrationResumeDoesNotRespend();
   await interruptedPaidStageRequiresReconciliation();
+  await failedRemoteDocuChildRequiresReconciliation();
   await legacyThumbnailResumeFailsClosedWithoutRespend();
   _clear();
   console.log("\nRECOVERY POLICY TEST PASSED");

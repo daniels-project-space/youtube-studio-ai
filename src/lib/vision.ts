@@ -31,8 +31,15 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import {
+  FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST,
+  NON_GOOGLE_VISION_MAX_IMAGES_PER_REQUEST,
+} from "@/engine/visualReviewBudget";
 import { recordModelUsage } from "@/lib/modelUsage";
 import { hasOpenRouterKey, openRouterChat, openRouterModel } from "@/lib/openRouter";
+
+/** Exact image limit for one non-Google vision-provider request. */
+export const VISION_MAX_IMAGES_PER_REQUEST = NON_GOOGLE_VISION_MAX_IMAGES_PER_REQUEST;
 
 export class VisionError extends Error {
   constructor(message: string) {
@@ -75,6 +82,17 @@ export interface VisionLocalArgs {
 /** Gemini is intentionally not a vision provider; it is sealed to Nano Banana thumbnail pixels. */
 export type VisionProvider = "openrouter";
 export type VisionTier = "bulk" | "standard" | "final";
+
+/**
+ * Final-master review uses a more constrained Qwen receipt route than general
+ * vision. Keep direct callers on its same envelope so they cannot bypass the
+ * visual-review batch planner with a larger final-tier request.
+ */
+function maxImagesForVisionTier(tier: VisionTier | undefined): number {
+  return tier === "final"
+    ? FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST
+    : VISION_MAX_IMAGES_PER_REQUEST;
+}
 
 /** Is an approved non-Google vision provider available? */
 export function hasVisionKey(): boolean {
@@ -422,16 +440,20 @@ async function openRouterVision(
   images: Buffer[],
   opts: { json?: boolean; maxTokens?: number; tier?: VisionTier },
 ): Promise<string> {
+  if (images.length > VISION_MAX_IMAGES_PER_REQUEST) {
+    throw new VisionError(
+      `non-Google vision requests may contain at most ${VISION_MAX_IMAGES_PER_REQUEST} images`,
+    );
+  }
   const key = opts.tier === "bulk" ? "visionBulk" : opts.tier === "final" ? "visionFinal" : "visionStandard";
   const model = openRouterModel(key);
-  const picked = sampleEvenly(images, 8);
   return openRouterChat({
     model,
     messages: [{
       role: "user",
       content: [
-        { type: "text", text: picked.length < images.length ? `${prompt}\n(Note: ${picked.length} representative frames sampled of ${images.length}.)` : prompt },
-        ...picked.map((b) => ({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b.toString("base64")}` } })),
+        { type: "text", text: prompt },
+        ...images.map((b) => ({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b.toString("base64")}` } })),
       ],
     }],
     maxTokens: opts.maxTokens ?? VISION_GATE_MAX_TOKENS,
@@ -466,6 +488,11 @@ async function visionBuffers(
   },
 ): Promise<string> {
   if (buffers.length === 0) throw new VisionError("no readable images");
+  if (buffers.length > VISION_MAX_IMAGES_PER_REQUEST) {
+    throw new VisionError(
+      `non-Google vision requests may contain at most ${VISION_MAX_IMAGES_PER_REQUEST} images`,
+    );
+  }
   const chain = providerChain(args.providers);
   // FLOOR, applied once for every provider: a caller asking for 80-400 tokens is
   // asking a reasoning model to answer before it has finished thinking, which
@@ -510,10 +537,18 @@ async function visionBuffers(
 
 /** Local image files + prompt → raw non-Google model text. */
 export async function visionLocal(args: VisionLocalArgs): Promise<string> {
+  const maxImages = maxImagesForVisionTier(args.tier);
+  if (args.imagePaths.length > maxImages) {
+    throw new VisionError(
+      `visionLocal received ${args.imagePaths.length} images for ${args.tier ?? "standard"} review; ` +
+        `split into requests of at most ${maxImages}`,
+    );
+  }
   const buffers: Buffer[] = [];
-  for (const p of args.imagePaths.slice(0, 12)) {
+  for (const p of args.imagePaths) {
     const b = await prepLocalImage(p);
-    if (b) buffers.push(b);
+    if (!b) throw new VisionError(`could not prepare required image ${p}`);
+    buffers.push(b);
   }
   return visionBuffers(args.prompt, buffers, args);
 }
@@ -536,10 +571,18 @@ export async function visionUrls(args: {
   /** See `VisionLocalArgs.maxAttemptsPerProvider`. */
   maxAttemptsPerProvider?: number;
 }): Promise<string> {
+  const maxImages = maxImagesForVisionTier(args.tier);
+  if (args.imageUrls.length > maxImages) {
+    throw new VisionError(
+      `visionUrls received ${args.imageUrls.length} images for ${args.tier ?? "standard"} review; ` +
+        `split into requests of at most ${maxImages}`,
+    );
+  }
   const buffers: Buffer[] = [];
-  for (const u of args.imageUrls.slice(0, 12)) {
+  for (const u of args.imageUrls) {
     const b = await fetchRemoteImage(u);
-    if (b) buffers.push(b);
+    if (!b) throw new VisionError(`could not fetch required image ${u}`);
+    buffers.push(b);
   }
   return visionBuffers(args.prompt, buffers, args);
 }

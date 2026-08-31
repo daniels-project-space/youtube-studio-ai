@@ -137,6 +137,38 @@ class WorkerContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "official LTX runtime"):
             worker.validate_manifest({**unsigned, "manifestSha256": digest}, digest)
 
+    def test_current_distilled_worker_cannot_be_mislabeled_as_audio_to_video(self):
+        """A2Vid needs its own pinned full-model worker path, not a phase rename."""
+        manifest, _ = self._sealed_manifest()
+        unsigned = {key: value for key, value in manifest.items() if key != "manifestSha256"}
+        unsigned["phase"] = "audio_video"
+        unsigned["manifestId"] = "audio_video-" + "c" * 32
+        unsigned["profile"] = worker.approved_profile("production", "video")
+        unsigned["profileSha256"] = worker.sha256_bytes(worker.canonical_bytes(unsigned["profile"]))
+        unsigned["runtimeRepository"] = worker.LTX_RUNTIME_REPOSITORY
+        unsigned["runtimeRevision"] = worker.LTX_RUNTIME_REVISION
+        unsigned["jobs"] = [{
+            "id": "music-loop-01",
+            "prompt": "A calm music visual",
+            "seed": 7,
+            "width": 1280,
+            "height": 704,
+            "steps": 8,
+            "frames": 17,
+            "fps": 25,
+            "artifact": {
+                "putUrl": "https://objects.example/music-loop-01.mp4?write=1",
+                "headers": {
+                    "x-amz-meta-manifest-id": unsigned["manifestId"],
+                    "x-amz-meta-profile-sha256": unsigned["profileSha256"],
+                    "x-amz-meta-job-id": "music-loop-01",
+                },
+            },
+        }]
+        a2vid, digest = self._seal(unsigned)
+        with self.assertRaisesRegex(ValueError, "invalid render manifest phase"):
+            worker.validate_manifest(a2vid, digest)
+
     def test_manifest_requires_cost_cap_and_rejects_profile_drift(self):
         manifest, _ = self._sealed_manifest()
         unsigned = {key: value for key, value in manifest.items() if key not in ("manifestSha256", "maxCostUsd")}
@@ -263,6 +295,62 @@ class WorkerContractTests(unittest.TestCase):
             adapter_command[adapter_command.index("--lora") + 1:adapter_command.index("--lora") + 3],
             ["/models/loras/faceless.safetensors", "0.8"],
         )
+        stack_job = {
+            **job,
+            "prompt": "faceless mannequin makes a slow deliberate orbit through the archive",
+            "creativeAdapterStack": {
+                "version": worker.CREATIVE_ADAPTER_STACK_VERSION,
+                "adapters": [
+                    {"id": "ltx-creative-faceless-mannequin", "strength": 0.52, "triggerTokens": ["faceless mannequin"]},
+                    {"id": "ltx-creative-deliberate-orbit", "strength": 0.42, "triggerTokens": ["slow deliberate orbit"]},
+                ],
+                "benchmark": {
+                    "rtx4090ProfileBenchmarked": True,
+                    "visualVerdict": "pass",
+                    "calibratedAdapters": [
+                        {"id": "ltx-creative-faceless-mannequin", "strength": 0.52},
+                        {"id": "ltx-creative-deliberate-orbit", "strength": 0.42},
+                    ],
+                    "qualityDeltas": [
+                        {"metric": "material_identity_consistency", "baselineScore": 7.2, "adaptedScore": 8.3},
+                        {"metric": "camera_motion_adherence", "baselineScore": 7.1, "adaptedScore": 8.2},
+                    ],
+                    "evidence": {
+                        "version": "ltx-creative-adapter-benchmark-evidence/v1",
+                        "evidenceManifestKey": "benchmarks/stack/evidence.json",
+                        "immutableEvidenceObjectVersionId": "r2-version-stack-001",
+                        "evidenceSha256": "a" * 64,
+                        "outputVideoKey": "benchmarks/stack/output.mp4",
+                        "outputVideoSha256": "b" * 64,
+                        "outputDurationMs": 5_000,
+                        "outputArtifactReceiptFingerprint": "c" * 64,
+                        "visualReviewReceiptFingerprint": "d" * 64,
+                        "reviewedAt": "2026-08-23T00:00:00Z",
+                        "reviewedBy": "visual-qa",
+                    },
+                },
+            },
+        }
+        stack_command = worker.build_video_command(
+            stack_job,
+            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu"},
+            {
+                **models,
+                "ltx-creative-faceless-mannequin": Path("/models/loras/faceless.safetensors"),
+                "ltx-creative-deliberate-orbit": Path("/models/loras/orbit.safetensors"),
+            },
+            Path("/output/adapter-stack.mp4"),
+            Path("/input/still.png"),
+        )
+        lora_indices = [index for index, value in enumerate(stack_command) if value == "--lora"]
+        self.assertEqual(
+            [stack_command[index + 1:index + 3] for index in lora_indices],
+            [
+                ["/models/loras/faceless.safetensors", "0.52"],
+                ["/models/loras/orbit.safetensors", "0.42"],
+            ],
+            "a quality-benchmarked complementary stack must become repeatable LTX --lora flags",
+        )
 
     def test_ltx_model_specs_require_official_file_hashes_and_sizes(self):
         specs = []
@@ -317,19 +405,169 @@ class WorkerContractTests(unittest.TestCase):
             "repository": worker.LTX_MODEL,
             "revision": worker.LTX_REVISION,
             "creativeAdapter": {
-                "contractVersion": "ltx-creative-adapter/v1",
+                "contractVersion": "ltx-creative-adapter/v3",
                 "role": "material-style",
                 "baseModel": worker.LTX_MODEL,
                 "baseRevision": worker.LTX_REVISION,
                 "runtimeRevision": worker.LTX_RUNTIME_REVISION,
                 "triggerTokens": ["faceless mannequin"],
-                "benchmark": {"rtx4090ProfileBenchmarked": True, "visualVerdict": "pass"},
+                "benchmark": {
+                    "rtx4090ProfileBenchmarked": True,
+                    "visualVerdict": "pass",
+                    "qualityDelta": {
+                        "metric": "material_identity_consistency",
+                        "baselineScore": 7.2,
+                        "adaptedScore": 8.1,
+                    },
+                    "evidence": {
+                        "version": "ltx-creative-adapter-benchmark-evidence/v1",
+                        "evidenceManifestKey": "benchmarks/faceless/evidence.json",
+                        "immutableEvidenceObjectVersionId": "r2-version-adapter-001",
+                        "evidenceSha256": "b" * 64,
+                        "outputVideoKey": "benchmarks/faceless/output.mp4",
+                        "outputVideoSha256": "c" * 64,
+                        "outputDurationMs": 5_000,
+                        "outputArtifactReceiptFingerprint": "d" * 64,
+                        "visualReviewReceiptFingerprint": "e" * 64,
+                        "reviewedAt": "2026-08-23T00:00:00Z",
+                        "reviewedBy": "visual-qa",
+                    },
+                },
             },
         }
         self.assertEqual(
             worker.validate_model_specs(specs + [adapter], "video", "distilled", {adapter_id}),
             specs + [adapter],
         )
+        camera_adapter = {
+            **adapter,
+            "id": "ltx-creative-deliberate-orbit",
+            "manifestSha256": "f" * 64,
+            "sourcePath": "models/LTX-2.5/loras/orbit.safetensors",
+            "localPath": "ltx-2.5/loras/orbit.safetensors",
+            "creativeAdapter": {
+                **adapter["creativeAdapter"],
+                "role": "camera-control",
+                "triggerTokens": ["slow deliberate orbit"],
+                "benchmark": {
+                    **adapter["creativeAdapter"]["benchmark"],
+                    "qualityDelta": {
+                        "metric": "camera_motion_adherence",
+                        "baselineScore": 7.1,
+                        "adaptedScore": 8.2,
+                    },
+                },
+            },
+        }
+        stack_job = {
+            "prompt": "faceless mannequin makes a slow deliberate orbit through the archive",
+            "creativeAdapterStack": {
+                "version": worker.CREATIVE_ADAPTER_STACK_VERSION,
+                "adapters": [
+                    {"id": adapter_id, "strength": 0.52, "triggerTokens": ["faceless mannequin"]},
+                    {"id": camera_adapter["id"], "strength": 0.42, "triggerTokens": ["slow deliberate orbit"]},
+                ],
+                "benchmark": {
+                    "rtx4090ProfileBenchmarked": True,
+                    "visualVerdict": "pass",
+                    "calibratedAdapters": [
+                        {"id": adapter_id, "strength": 0.52},
+                        {"id": camera_adapter["id"], "strength": 0.42},
+                    ],
+                    "qualityDeltas": [
+                        {"metric": "material_identity_consistency", "baselineScore": 7.2, "adaptedScore": 8.3},
+                        {"metric": "camera_motion_adherence", "baselineScore": 7.1, "adaptedScore": 8.2},
+                    ],
+                    "evidence": adapter["creativeAdapter"]["benchmark"]["evidence"],
+                },
+            },
+        }
+        selected_specs = worker.validate_model_specs(
+            specs + [adapter, camera_adapter],
+            "video",
+            "distilled",
+            worker.requested_creative_adapter_ids([stack_job], "video"),
+        )
+        worker.validate_creative_adapter_stacks([stack_job], selected_specs, "video")
+        with self.assertRaisesRegex(ValueError, "stack contract is invalid"):
+            worker.requested_creative_adapter_ids([
+                {
+                    **stack_job,
+                    "creativeAdapterStack": {
+                        **stack_job["creativeAdapterStack"],
+                        "adapters": [
+                            *stack_job["creativeAdapterStack"]["adapters"],
+                            {"id": "ltx-creative-extra-detail", "strength": 0.2, "triggerTokens": ["archive"]},
+                        ],
+                    },
+                },
+            ], "video")
+        with self.assertRaisesRegex(ValueError, "stack contract is invalid"):
+            worker.requested_creative_adapter_ids([
+                {
+                    **stack_job,
+                    "creativeAdapterStack": {
+                        **stack_job["creativeAdapterStack"],
+                        "benchmark": {
+                            **stack_job["creativeAdapterStack"]["benchmark"],
+                            "calibratedAdapters": [
+                                {"id": adapter_id, "strength": 0.8},
+                                {"id": camera_adapter["id"], "strength": 0.8},
+                            ],
+                        },
+                    },
+                },
+            ], "video")
+        with self.assertRaisesRegex(ValueError, "exactly match its combined RTX 4090 benchmark calibration"):
+            worker.validate_creative_adapter_stacks([
+                {
+                    **stack_job,
+                    "creativeAdapterStack": {
+                        **stack_job["creativeAdapterStack"],
+                        "adapters": [
+                            {**stack_job["creativeAdapterStack"]["adapters"][0], "strength": 0.51},
+                            stack_job["creativeAdapterStack"]["adapters"][1],
+                        ],
+                    },
+                },
+            ], selected_specs, "video")
+        with self.assertRaisesRegex(ValueError, "exact selected roles"):
+            worker.validate_creative_adapter_stacks([
+                {
+                    **stack_job,
+                    "creativeAdapterStack": {
+                        **stack_job["creativeAdapterStack"],
+                        "benchmark": {
+                            **stack_job["creativeAdapterStack"]["benchmark"],
+                            "qualityDeltas": [stack_job["creativeAdapterStack"]["benchmark"]["qualityDeltas"][0], {"metric": "visual_style_coherence", "baselineScore": 7.1, "adaptedScore": 8.2}],
+                        },
+                    },
+                },
+            ], selected_specs, "video")
+        missing_evidence = {
+            **adapter,
+            "creativeAdapter": {
+                **adapter["creativeAdapter"],
+                "benchmark": {"rtx4090ProfileBenchmarked": True, "visualVerdict": "pass"},
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "exact benchmarked LTX 2.5 adapter"):
+            worker.validate_model_specs(specs + [missing_evidence], "video", "distilled", {adapter_id})
+        weak_quality = {
+            **adapter,
+            "creativeAdapter": {
+                **adapter["creativeAdapter"],
+                "benchmark": {
+                    **adapter["creativeAdapter"]["benchmark"],
+                    "qualityDelta": {
+                        **adapter["creativeAdapter"]["benchmark"]["qualityDelta"],
+                        "adaptedScore": 7.9,
+                    },
+                },
+            },
+        }
+        with self.assertRaisesRegex(ValueError, "exact benchmarked LTX 2.5 adapter"):
+            worker.validate_model_specs(specs + [weak_quality], "video", "distilled", {adapter_id})
         self.assertEqual(
             worker.validate_model_specs(specs + [adapter], "video", "distilled"),
             specs,

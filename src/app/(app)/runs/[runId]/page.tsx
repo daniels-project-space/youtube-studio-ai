@@ -17,9 +17,15 @@ import {
   type PipelineStage,
 } from "@/components/LivePipeline";
 import { LogConsole } from "@/components/LogConsole";
+import { FactualReviewPanel } from "@/components/FactualReviewPanel";
+import {
+  RunMediaWorkbench,
+  type RunMediaAsset,
+} from "@/components/RunMediaWorkbench";
 import { LOFI_BLOCK_IDS } from "@/lib/blocks";
 import { fmtDateTime, fmtUsd } from "@/lib/format";
 import { IconChevron, IconExternal } from "@/components/icons";
+import styles from "./runDetail.module.css";
 
 export default function RunDetailPage({
   params,
@@ -35,6 +41,10 @@ export default function RunDetailPage({
     runId: runId as Id<"runs">,
     slim: true,
   }) as PipelineStage[] | undefined;
+  const assets = useQuery(
+    api.assets.listForRun,
+    run ? { runId: runId as Id<"runs"> } : "skip",
+  ) as RunMediaAsset[] | undefined;
 
   // Fetch the run's channel to derive the expected (planned) block list. We
   // skip the query until we know the channelId.
@@ -61,7 +71,7 @@ export default function RunDetailPage({
         <EmptyState
           title="Run not found"
           description={
-            <Link href="/runs" style={{ color: "var(--color-accent)" }}>
+            <Link href="/runs" className={styles.inlineLink}>
               Back to runs
             </Link>
           }
@@ -105,19 +115,19 @@ export default function RunDetailPage({
       <PageHeader
         title="Run detail"
         subtitle={
-          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.6rem" }}>
+          <span className={styles.runContext}>
             {channelSlug ? (
               <Link
                 href={`/channels/${channelSlug}`}
-                style={{ color: "var(--color-accent)", fontWeight: 500 }}
+                className={styles.channelLink}
               >
                 {channelName}
               </Link>
             ) : (
               <span>{channelName}</span>
             )}
-            <span style={{ color: "var(--color-faint)" }}>·</span>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem" }}>
+            <span className={styles.contextDivider}>·</span>
+            <span className={styles.runId}>
               {run._id}
             </span>
           </span>
@@ -125,16 +135,10 @@ export default function RunDetailPage({
         actions={<StageBadge status={run.status} />}
       />
 
-      {/* Summary */}
-      <section style={{ marginBottom: "1.5rem" }}>
+      <section className={styles.summarySection} aria-label="Run summary">
         <div
-          className="glass glass-shine"
-          style={{
-            padding: "1.25rem 1.4rem",
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-            gap: "1.1rem",
-          }}
+          className={`glass glass-shine ${styles.summaryGrid}`}
+          data-run-status={run.status}
         >
           <Field label="Started" value={fmtDateTime(run.startedAt)} />
           <Field
@@ -160,12 +164,7 @@ export default function RunDetailPage({
                   href={`https://www.youtube.com/watch?v=${run.youtubeVideoId}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "0.3rem",
-                    color: "var(--color-secondary)",
-                  }}
+                  className={styles.videoLink}
                 >
                   Watch <IconExternal width={13} height={13} />
                 </a>
@@ -177,65 +176,41 @@ export default function RunDetailPage({
         </div>
 
         {run.error && (
-          <div
-            className="glass"
-            style={{
-              marginTop: "0.9rem",
-              padding: "0.9rem 1.1rem",
-              border:
-                "1px solid color-mix(in srgb, var(--color-failed) 35%, transparent)",
-              color: "var(--color-failed)",
-              fontSize: "0.85rem",
-              fontFamily: "var(--font-mono)",
-              whiteSpace: "pre-wrap",
-            }}
-          >
+          <div className={`glass ${styles.errorPanel}`} role="alert">
             {run.error}
           </div>
         )}
       </section>
 
-      {/* Published video embed */}
+      {(run.status === "awaiting_factual_review" || run.status === "factual_review_blocked") && (
+        <FactualReviewPanel runId={String(run._id)} />
+      )}
+
+      <RunMediaWorkbench
+        assets={assets}
+        stages={stages}
+        runStatus={run.status}
+        selectedVideoAssetId={run.videoAssetId ? String(run.videoAssetId) : undefined}
+      />
+
       {run.youtubeVideoId && (
-        <section style={{ marginBottom: "1.75rem" }}>
+        <section className={styles.publishedSection}>
           <SectionTitle>Published video</SectionTitle>
-          <div
-            className="glass"
-            style={{
-              padding: 6,
-              borderRadius: "var(--radius-card)",
-              overflow: "hidden",
-            }}
-          >
-            <div
-              style={{
-                position: "relative",
-                width: "100%",
-                aspectRatio: "16 / 9",
-                borderRadius: 12,
-                overflow: "hidden",
-              }}
-            >
+          <div className={`glass ${styles.publishedShell}`}>
+            <div className={styles.publishedFrame}>
               <iframe
                 src={`https://www.youtube.com/embed/${run.youtubeVideoId}`}
                 title="Published video"
                 allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                 allowFullScreen
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  width: "100%",
-                  height: "100%",
-                  border: "none",
-                }}
+                className={styles.publishedPlayer}
               />
             </div>
           </div>
         </section>
       )}
 
-      {/* Live pipeline */}
-      <section>
+      <section className={styles.pipelineSection}>
         <SectionTitle>Pipeline</SectionTitle>
         {stages === undefined || (run && channel === undefined) ? (
           <SkeletonList rows={5} />
@@ -249,8 +224,7 @@ export default function RunDetailPage({
         )}
       </section>
 
-      {/* Live logs */}
-      <section style={{ marginTop: "1.75rem" }}>
+      <section className={styles.consoleSection}>
         <SectionTitle>Console</SectionTitle>
         <LogConsole runId={run._id} />
       </section>
@@ -262,19 +236,12 @@ function BackLink() {
   return (
     <Link
       href="/runs"
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.3rem",
-        marginBottom: "1rem",
-        fontSize: "0.85rem",
-        color: "var(--color-muted)",
-      }}
+      className={styles.backLink}
     >
       <IconChevron
         width={15}
         height={15}
-        style={{ transform: "rotate(90deg)" }}
+        className={styles.backIcon}
       />
       Back to runs
     </Link>
@@ -291,24 +258,11 @@ function Field({
   mono?: boolean;
 }) {
   return (
-    <div>
-      <div
-        style={{
-          fontSize: "0.7rem",
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-          color: "var(--color-faint)",
-          marginBottom: "0.3rem",
-        }}
-      >
+    <div className={styles.field}>
+      <div className={styles.fieldLabel}>
         {label}
       </div>
-      <div
-        style={{
-          fontSize: "0.95rem",
-          fontFamily: mono ? "var(--font-mono)" : undefined,
-        }}
-      >
+      <div className={`${styles.fieldValue}${mono ? ` ${styles.fieldMono}` : ""}`}>
         {value}
       </div>
     </div>

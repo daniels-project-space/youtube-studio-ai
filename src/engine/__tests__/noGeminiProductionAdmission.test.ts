@@ -67,7 +67,7 @@ assert.equal(familyChannelInceptionCapability("illustrated_explainer").mode, "re
 assert.equal(FAMILIES.illustrated_explainer.defaultThumbnailStyle, "banana");
 
 for (const family of FAMILY_KEYS.filter(
-  (candidate) => !["quizyear", "narrated_stock", "sleep", "shorts", "illustrated_explainer"].includes(candidate),
+  (candidate) => !["quizyear", "narrated_stock", "sleep", "shorts", "cinematic", "music_loop", "whiteboard", "comic", "loreshort", "illustrated_explainer"].includes(candidate),
 )) {
   const readiness = familyProductionReadiness(family);
   assert.equal(
@@ -77,10 +77,43 @@ for (const family of FAMILY_KEYS.filter(
   );
   assert.match(
     readiness.blockers.join(" "),
-    /no-Gemini automatic planning is not registered/,
-    `${family} must explain the no-Gemini admission failure`,
+    /automatic planning is not registered; still missing/,
+    `${family} must explain the actual automatic-planning admission failure`,
   );
-  assert.match(readiness.remediation ?? "", /non-Gemini topic\/story planner/);
+  assert.match(readiness.remediation ?? "", /route-owned deterministic or non-Gemini planner\/seal/);
+}
+
+const loreReadiness = familyProductionReadiness("loreshort");
+assert.equal(loreReadiness.productionReady, false);
+assert.deepEqual(
+  loreReadiness.blockers,
+  ["Lore micro-documentary: lore_short:ltx_2_5_revision_not_benchmarked_on_rtx_4090"],
+  "Lore must expose its actual remaining runtime gate after its non-Gemini planner, route, composition, and inception are registered",
+);
+assert.equal(familyChannelInceptionCapability("loreshort").mode, "registered_non_gemini");
+
+const musicLoopReadiness = familyProductionReadiness("music_loop");
+assert.equal(musicLoopReadiness.productionReady, false);
+assert.deepEqual(
+  musicLoopReadiness.blockers,
+  ["Music + looping visual: loop_clips:ltx_2_5_revision_not_benchmarked_on_rtx_4090"],
+  "Music Loop must expose its exact remaining runtime gate after its original-program route, composition, and inception are registered",
+);
+assert.equal(familyChannelInceptionCapability("music_loop").mode, "registered_non_gemini");
+
+const cinematicReadiness = familyProductionReadiness("cinematic");
+assert.equal(cinematicReadiness.productionReady, false);
+assert.deepEqual(
+  cinematicReadiness.blockers,
+  ["Cinematic AI scenes: novita_render_video:ltx_2_5_revision_not_benchmarked_on_rtx_4090"],
+  "Cinematic must expose its real remaining immutable runtime benchmark gate after its non-Gemini planning, route, composition, and inception foundation are registered",
+);
+assert.equal(familyChannelInceptionCapability("cinematic").mode, "registered_non_gemini");
+
+for (const family of ["whiteboard", "comic"] as const) {
+  const readiness = familyProductionReadiness(family);
+  assert.equal(readiness.productionReady, true, `${family} must be ready only after the sealed self-contained route, composition, and inception foundation exist`);
+  assert.deepEqual(readiness.blockers, []);
 }
 
 assert.equal(
@@ -107,9 +140,19 @@ assert.equal(
 );
 
 const inceptionSource = readFileSync(new URL("../../trigger/designChannelInception.ts", import.meta.url), "utf8");
-const readinessGate = inceptionSource.indexOf("const runtimeReadiness = familyProductionReadiness(payload.family);");
+const staticAdmissionGate = inceptionSource.indexOf("const certifiedAdmission = certifiedFamilyAdmission(payload.family);");
+const runtimeAdmissionGate = inceptionSource.indexOf(
+  "const runtimeReadiness = familyProductionReadiness(payload.family, reviewedLtxRuntime.runtime);",
+);
 const bootstrap = inceptionSource.indexOf("await bootstrapSecrets(log);");
-assert.ok(readinessGate >= 0 && bootstrap >= 0 && readinessGate < bootstrap);
+assert.ok(
+  staticAdmissionGate >= 0
+    && runtimeAdmissionGate >= 0
+    && bootstrap >= 0
+    && staticAdmissionGate < runtimeAdmissionGate
+    && runtimeAdmissionGate < bootstrap,
+  "static and owner-scoped runtime family gates must both run before credential bootstrap",
+);
 const quizyearBranch = inceptionSource.indexOf('if (payload.family === "quizyear")');
 assert.ok(quizyearBranch >= 0 && quizyearBranch < bootstrap);
 assert.match(inceptionSource, /buildAndPersistQuizYearFoundation/);

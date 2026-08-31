@@ -14,7 +14,11 @@ import {
   sealedNanoBananaThumbnailPurpose,
   uploadGeminiVideo,
 } from "@/lib/gemini";
-import { generateBananaImage, generateNanoBananaImageWithReceipt, hasNanoBanana } from "@/lib/banana";
+import {
+  generateBananaImage,
+  generateNanoBananaImageWithReceipt,
+  hasNanoBanana,
+} from "@/lib/banana";
 import { embedText, hasEmbedKey } from "@/lib/embeddings";
 import { browserbaseStagehandModel, withStagehand } from "@/lib/browserbase";
 import { hydrateEnv } from "@/lib/vault";
@@ -92,7 +96,7 @@ async function defaultDenyStopsEveryGeminiBoundaryBeforeNetwork(): Promise<void>
         prompt: "blocked Mastra Gemini request",
         schema: z.object({ answer: z.string() }),
       }),
-      /Gemini models are thumbnail-only/,
+      /Gemini models are sealed-image-only/,
     );
     assert.equal(stagehandCallbackCalls, 0, "Stagehand callback must not run after the provider refusal");
     assert.equal(networkCalls, 0, "every Gemini boundary must stop before fetch");
@@ -102,7 +106,7 @@ async function defaultDenyStopsEveryGeminiBoundaryBeforeNetwork(): Promise<void>
   }
 }
 
-async function explicitOptInAdmitsOnlyTheSealedThumbnailPurpose(): Promise<void> {
+async function explicitOptInAdmitsOnlySealedImageAssetPurposes(): Promise<void> {
   const snapshot = Object.fromEntries(GATE_ENV.map((name) => [name, process.env[name]])) as Record<
     (typeof GATE_ENV)[number],
     string | undefined
@@ -206,9 +210,19 @@ function directGoogleRuntimeOwnersStaySealed(): void {
 
   const banana = readFileSync(join(root, "src/lib/banana.ts"), "utf8");
   assert.match(banana, /sealedNanoBananaThumbnailPurpose\(\)/,
-    "the only admitted Google image boundary must present the opaque thumbnail capability");
+    "the sealed thumbnail boundary must present its opaque capability");
   assert.match(banana, /hydrateEnv\(["']gemini["']\s*,\s*\{/,
     "the sealed thumbnail adapter, not generic bootstrap, must hydrate its own credential");
+  const whiteboardAdapter = banana.slice(
+    banana.indexOf("export async function generateNanoBananaProWhiteboardArtWithReceipt"),
+    banana.indexOf("export async function generateBananaImage"),
+  );
+  assert.match(whiteboardAdapter, /hydrateSealedNanoBananaWhiteboardArtCredential\(\)/,
+    "the Whiteboard Pro-art adapter must keep its own credential boundary");
+  assert.match(whiteboardAdapter, /https:\/\/fal\.run\//,
+    "the Whiteboard Pro-art adapter must use Fal");
+  assert.doesNotMatch(whiteboardAdapter, /GEMINI_API_KEY|generativelanguage\.googleapis\.com|generateGeminiImage/,
+    "the Whiteboard Pro-art adapter must not retain a direct Google boundary");
   assert.doesNotMatch(banana, /["']sealed_thumbnail["']/,
     "a string literal must never forge the sealed thumbnail capability");
 
@@ -256,7 +270,7 @@ function browserAutomationGoogleModelIsRejectedBeforeImport(): void {
 
 async function main(): Promise<void> {
   await defaultDenyStopsEveryGeminiBoundaryBeforeNetwork();
-  await explicitOptInAdmitsOnlyTheSealedThumbnailPurpose();
+  await explicitOptInAdmitsOnlySealedImageAssetPurposes();
   productionRunnersDoNotRequireThumbnailCredentials();
   directGoogleRuntimeOwnersStaySealed();
   legacyOperatorScriptsCannotCreateRawGoogleRuntime();

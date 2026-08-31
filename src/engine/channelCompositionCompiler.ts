@@ -7,14 +7,18 @@
  * blocks, select providers, reserve spend, or replace any admission gate.
  */
 import {
+  assertCapabilityCompositionOperationCompatibility,
+  capabilityCompositionPlanMaterialization,
   assertChannelCompositionReceiptBinding,
   certifiedChannelCompositionMaterialization,
+  resolveChannelCapabilityCompositionPlan,
   resolveCertifiedChannelComposition,
+  type ChannelCompositionBinding,
   type ChannelCompositionMaterialization,
   type ChannelCompositionPipelineOperation,
-  type ChannelCompositionReceipt,
 } from "./channelCompositionCatalog";
 import {
+  creativeCapabilityCompositionFragmentVersionBindings,
   validateCreativeCapabilitySelections,
   type CreativeCapabilityIntent,
 } from "./creative/creativeCapabilityCatalog";
@@ -42,7 +46,8 @@ export interface CompileCertifiedChannelCompositionInput {
 
 export interface CertifiedChannelCompositionCompilation {
   version: typeof CHANNEL_COMPOSITION_COMPILER_VERSION;
-  receipt: ChannelCompositionReceipt;
+  /** The one sealed composition authority used by this compilation. */
+  compositionBinding: ChannelCompositionBinding;
   /** Undefined for identity-only compositions with no declared operations. */
   materialization?: ChannelCompositionMaterialization;
   /** Exact sealed operations that were materialized into `pipeline`. */
@@ -269,15 +274,100 @@ function applyOperation(
   }
 }
 
+/**
+ * An operation may consume a block inserted by a separately owned fragment.
+ * The sealed catalog already rejects cycles; this runtime scheduler simply
+ * waits for a producer operation when its required block is absent from the
+ * starting pipeline and lets a ready optional-edge producer settle first. It
+ * otherwise preserves declared order, so independent fragments remain
+ * deterministic without forcing every block-level relationship to be
+ * duplicated as a capability dependency.
+ */
+function operationCanApplyToPipeline(
+  pipeline: readonly PipelineEntry[],
+  operation: ChannelCompositionPipelineOperation,
+): boolean {
+  const hasBlock = (block: string) => pipeline.some((entry) => entry.block === block);
+  switch (operationKind(operation)) {
+    case "ensure_block_before": {
+      const ordered = operation as Extract<ChannelCompositionPipelineOperation, { kind: "ensure_block_before" }>;
+      return hasBlock(ordered.beforeBlock);
+    }
+    case "ensure_block_between": {
+      const ordered = operation as Extract<ChannelCompositionPipelineOperation, { kind: "ensure_block_between" }>;
+      return hasBlock(ordered.beforeBlock) &&
+        ordered.afterBlocks.every((block) => hasBlock(block));
+    }
+    case "merge_block_params": {
+      const merged = operation as Extract<ChannelCompositionPipelineOperation, { kind: "merge_block_params" }>;
+      return hasBlock(merged.block);
+    }
+    default:
+      return failUnsupportedOperationKind(operation);
+  }
+}
+
+function operationProducesBlock(
+  operation: ChannelCompositionPipelineOperation,
+  block: string,
+): boolean {
+  return (operation.kind === "ensure_block_before" || operation.kind === "ensure_block_between") &&
+    operation.block === block;
+}
+
+function operationDefersToReadyOptionalProducer(input: {
+  readonly pipeline: readonly PipelineEntry[];
+  readonly operation: ChannelCompositionPipelineOperation;
+  readonly operationIndex: number;
+  readonly pendingOperations: readonly ChannelCompositionPipelineOperation[];
+}): boolean {
+  if (input.operation.kind !== "ensure_block_between") return false;
+  const optionalPredecessors = input.operation.optionalAfterBlocks ?? [];
+  return optionalPredecessors.some((optionalBlock) => input.pendingOperations.some(
+    (candidate, candidateIndex) =>
+      candidateIndex !== input.operationIndex &&
+      operationProducesBlock(candidate, optionalBlock) &&
+      operationCanApplyToPipeline(input.pipeline, candidate),
+  ));
+}
+
+function applyOperationsInMaterializationOrder(
+  pipeline: PipelineEntry[],
+  operations: readonly ChannelCompositionPipelineOperation[],
+  parameterOverrides: CompileCertifiedChannelCompositionInput["parameterOverrides"],
+): void {
+  const pending = [...operations];
+  while (pending.length > 0) {
+    const readyIndex = pending.findIndex((operation, operationIndex) => (
+      operationCanApplyToPipeline(pipeline, operation) &&
+      !operationDefersToReadyOptionalProducer({
+        pipeline,
+        operation,
+        operationIndex,
+        pendingOperations: pending,
+      })
+    ));
+    const fallbackReadyIndex = pending.findIndex((operation) => operationCanApplyToPipeline(pipeline, operation));
+    if (readyIndex < 0 && fallbackReadyIndex < 0) {
+      // Preserve the existing fail-closed, operation-specific diagnostic when
+      // no remaining sealed operation can acquire its declared anchor.
+      applyOperation(pipeline, pending[0]!, parameterOverrides);
+      throw new Error("sealed composition operation scheduling made no progress");
+    }
+    const [operation] = pending.splice(readyIndex >= 0 ? readyIndex : fallbackReadyIndex, 1);
+    applyOperation(pipeline, operation!, parameterOverrides);
+  }
+}
+
 function compilationFingerprint(input: {
-  receipt: ChannelCompositionReceipt;
+  compositionBinding: ChannelCompositionBinding;
   materialization?: ChannelCompositionMaterialization;
   operations: readonly ChannelCompositionPipelineOperation[];
   pipeline: readonly PipelineEntry[];
 }): string {
   return sha256Hex(canonicalJson({
     version: CHANNEL_COMPOSITION_COMPILER_VERSION,
-    receipt: input.receipt,
+    compositionBinding: input.compositionBinding,
     ...(input.materialization ? { materialization: input.materialization } : {}),
     operations: input.operations,
     pipeline: input.pipeline,
@@ -285,10 +375,11 @@ function compilationFingerprint(input: {
 }
 
 /**
- * Revalidate the current selected capability route, resolve its sealed
- * composition receipt, and materialize its limited operation list. Callers
- * must still run the existing policy completion, family/capability assertions,
- * validation, and executable pipeline compilation afterwards.
+ * Revalidate the current selected capability route and materialize its sealed
+ * authority. Empty selections retain the historical exact-catalog receipt;
+ * selected capabilities use a base-plus-fragment plan. Callers must still run
+ * existing policy completion, family/capability assertions, validation, and
+ * executable pipeline compilation afterwards.
  */
 export function compileCertifiedChannelComposition(
   input: CompileCertifiedChannelCompositionInput,
@@ -307,25 +398,44 @@ export function compileCertifiedChannelComposition(
   const selectedCapabilityKeys = resolvedSelections
     .map(({ selection }) => selection.capability)
     .sort((left, right) => left.localeCompare(right));
-  const receipt = resolveCertifiedChannelComposition({
-    family: input.family,
-    selectedCapabilityKeys,
-  });
-  assertChannelCompositionReceiptBinding({
-    receipt,
-    family: input.family,
-    selectedCapabilityKeys,
-  });
-  const materialization = certifiedChannelCompositionMaterialization(receipt);
+  const expectedFragmentVersions =
+    creativeCapabilityCompositionFragmentVersionBindings(resolvedSelections);
+  const compositionBinding: ChannelCompositionBinding = selectedCapabilityKeys.length
+    ? {
+        kind: "capability_plan_v1",
+        plan: resolveChannelCapabilityCompositionPlan({
+          family: input.family,
+          selectedCapabilityKeys,
+          expectedFragmentVersions,
+        }),
+      }
+    : (() => {
+        const receipt = resolveCertifiedChannelComposition({
+          family: input.family,
+          selectedCapabilityKeys,
+        });
+        assertChannelCompositionReceiptBinding({
+          receipt,
+          family: input.family,
+          selectedCapabilityKeys,
+        });
+        return { kind: "exact_catalog_v1" as const, receipt };
+      })();
+  const materialization = compositionBinding.kind === "capability_plan_v1"
+    ? capabilityCompositionPlanMaterialization(compositionBinding.plan)
+    : certifiedChannelCompositionMaterialization(compositionBinding.receipt);
   const operations = materialization?.operations.map(cloneOperation) ?? [];
+  assertCapabilityCompositionOperationCompatibility(
+    operations.map((operation) => ({ source: compositionBinding.kind, operation })),
+  );
   const pipeline = clonePipeline(input.pipeline);
-  for (const operation of operations) applyOperation(pipeline, operation, input.parameterOverrides);
+  applyOperationsInMaterializationOrder(pipeline, operations, input.parameterOverrides);
   return {
     version: CHANNEL_COMPOSITION_COMPILER_VERSION,
-    receipt,
+    compositionBinding,
     ...(materialization ? { materialization } : {}),
     operations,
     pipeline,
-    fingerprint: compilationFingerprint({ receipt, materialization, operations, pipeline }),
+    fingerprint: compilationFingerprint({ compositionBinding, materialization, operations, pipeline }),
   };
 }

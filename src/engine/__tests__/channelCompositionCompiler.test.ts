@@ -4,13 +4,24 @@ import {
   CHANNEL_COMPOSITION_COMPILER_VERSION,
   compileCertifiedChannelComposition,
 } from "@/engine/channelCompositionCompiler";
+import {
+  CAPABILITY_COMPOSITION_FRAGMENT_HISTORY,
+  assertCapabilityCompositionOperationCompatibility,
+  capabilityCompositionPlanMaterialization,
+  certifiedChannelCompositionMaterialization,
+  resolveCertifiedChannelComposition,
+} from "@/engine/channelCompositionCatalog";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import {
+  CREATIVE_CAPABILITY_CATALOG,
+  CREATIVE_CAPABILITY_CATALOG_FINGERPRINT,
   creativeCapabilitySelection,
 } from "@/engine/creative/creativeCapabilityCatalog";
 import { designPipeline } from "@/engine/designer";
 import { createChannelShowProfile } from "@/engine/channelShowProfile";
+import { MODULE_CONTRACTS } from "@/engine/moduleContracts";
 import type { PipelineEntry } from "@/engine/types";
+import { canonicalJson } from "@/lib/canonicalJson";
 
 const brief = createChannelProgramBrief({
   family: "narrated_stock",
@@ -24,6 +35,10 @@ const narratedFixture: readonly PipelineEntry[] = [
   { block: "script_gen", params: { maxSeconds: 600, style: "business_explainer" } },
   { block: "qa_script" },
   { block: "narration_tts" },
+  { block: "story_spine" },
+  { block: "stock_footage" },
+  { block: "entity_imagery" },
+  { block: "music" },
   { block: "intro_card" },
   { block: "quote_overlays" },
   { block: "timeline_assemble" },
@@ -51,21 +66,213 @@ const compiled = compileCertifiedChannelComposition(input);
 const replay = compileCertifiedChannelComposition(input);
 
 assert.equal(compiled.version, CHANNEL_COMPOSITION_COMPILER_VERSION);
-assert.equal(compiled.receipt.key, "source_attributed_data_story");
+assert.equal(compiled.compositionBinding.kind, "capability_plan_v1");
+assert.equal(compiled.compositionBinding.plan.base.key, "narrated_visual_essay");
+assert.equal(compiled.compositionBinding.plan.fragments.length, 1);
+assert.equal(compiled.compositionBinding.plan.fragments[0]?.capability, "source_attributed_data_story");
 assert.equal(
-  compiled.receipt.definitionVersion,
-  "v3",
-  "new admissions must resolve the sealed declarative definition rather than rewrite historical v1/v2 receipts",
+  compiled.compositionBinding.plan.fragments[0]?.definitionVersion,
+  "v2",
+  "new admissions must seal the capability-owned fragment rather than rewrite historical exact receipts",
 );
-assert.equal(compiled.materialization?.version, "source-attributed-data-story-materialization/v2");
-assert.equal(compiled.operations.length, 4);
+assert.equal(compiled.materialization?.version, "channel-composition-plan/v1/materialization");
+assert.equal(compiled.operations.length, 5);
 assert.deepEqual(compiled, replay, "certified composition compilation must be deterministic");
+const sourceDataStoryCapabilityDefinition = CREATIVE_CAPABILITY_CATALOG.find(
+  (definition) => definition.capability === "source_attributed_data_story",
+);
+assert.ok(sourceDataStoryCapabilityDefinition);
+const mutableSourceDataStoryCapabilityDefinition =
+  sourceDataStoryCapabilityDefinition as { compositionFragmentVersion?: string };
+const originalSourceDataStoryFragmentVersion =
+  mutableSourceDataStoryCapabilityDefinition.compositionFragmentVersion;
+try {
+  mutableSourceDataStoryCapabilityDefinition.compositionFragmentVersion = "v999";
+  assert.throws(
+    () => compileCertifiedChannelComposition(input),
+    /resolves v2 but the declared fragment version is v999/,
+    "the compiler must bind the creator catalog's declared fragment version before materializing a plan",
+  );
+} finally {
+  mutableSourceDataStoryCapabilityDefinition.compositionFragmentVersion =
+    originalSourceDataStoryFragmentVersion;
+}
+const currentSourceReceipt = resolveCertifiedChannelComposition({
+  family: "narrated_stock",
+  selectedCapabilityKeys: ["source_attributed_data_story"],
+});
+assert.equal(
+  canonicalJson(capabilityCompositionPlanMaterialization(compiled.compositionBinding.plan).operations),
+  canonicalJson(certifiedChannelCompositionMaterialization(currentSourceReceipt)?.operations),
+  "new capability plans must be byte-equivalent to the current v4 exact source-data materialization",
+);
+
+// Capability selections and their sealed operation receipt retain lexical
+// identity for historical replay. The compiler must nevertheless schedule a
+// dependent fragment after its selected prerequisite when that prerequisite
+// supplies a block the dependent consumes.
+const mutableFragmentHistory = CAPABILITY_COMPOSITION_FRAGMENT_HISTORY as unknown as Array<Record<string, unknown>>;
+const mutableCreativeCatalog = CREATIVE_CAPABILITY_CATALOG as unknown as Array<Record<string, unknown>>;
+const mutableEditorialCapability = mutableCreativeCatalog.find(
+  (definition) => definition.capability === "editorial_evidence_packet",
+);
+assert.ok(mutableEditorialCapability);
+const originalEditorialCapability = {
+  supportedFamilies: mutableEditorialCapability.supportedFamilies,
+  selectionMode: mutableEditorialCapability.selectionMode,
+  compositionFragmentVersion: mutableEditorialCapability.compositionFragmentVersion,
+  matches: mutableEditorialCapability.matches,
+  materialize: mutableEditorialCapability.materialize,
+};
+const dependencyOrderTestFragment = {
+  capability: "editorial_evidence_packet",
+  definitionVersion: "dependency-order-test-v1",
+  status: "current",
+  family: "narrated_stock",
+  requiredCapabilityKeys: ["source_attributed_data_story"],
+  materialization: {
+    version: "dependency-order-test/editorial/v1",
+    operations: [
+      {
+        kind: "ensure_block_between",
+        block: "editorial_layer",
+        afterBlocks: ["visual_inserts"],
+        beforeBlock: "timeline_assemble",
+      },
+    ],
+  },
+} as const;
+try {
+  const sourceOffer = sourceDataStoryCapabilityDefinition.materialize(
+    { concept: brief.concept, nicheKey: brief.nicheKey },
+    brief.family,
+  );
+  mutableEditorialCapability.supportedFamilies = ["narrated_stock"];
+  mutableEditorialCapability.selectionMode = "explicit_opt_in";
+  mutableEditorialCapability.compositionFragmentVersion = "dependency-order-test-v1";
+  mutableEditorialCapability.matches = () => true;
+  mutableEditorialCapability.materialize = () => ({
+    ...sourceOffer,
+    capability: "editorial_evidence_packet",
+    selectionMode: "explicit_opt_in",
+  });
+  mutableFragmentHistory.push(dependencyOrderTestFragment as unknown as Record<string, unknown>);
+  const dependencyOrderedCompilation = compileCertifiedChannelComposition({
+    family: "narrated_stock",
+    intent: { concept: brief.concept, nicheKey: brief.nicheKey },
+    capabilitySelections: [
+      { capability: "editorial_evidence_packet", catalogFingerprint: CREATIVE_CAPABILITY_CATALOG_FINGERPRINT },
+      { capability: "source_attributed_data_story", catalogFingerprint: CREATIVE_CAPABILITY_CATALOG_FINGERPRINT },
+    ],
+    pipeline: [
+      { block: "script_gen" },
+      { block: "qa_script" },
+      { block: "story_spine" },
+      { block: "stock_footage" },
+      { block: "intro_card" },
+      { block: "timeline_assemble" },
+    ],
+  });
+  assert.equal(dependencyOrderedCompilation.compositionBinding.kind, "capability_plan_v1");
+  if (dependencyOrderedCompilation.compositionBinding.kind !== "capability_plan_v1") {
+    throw new Error("dependency-order fixture did not resolve a capability composition plan");
+  }
+  const dependencyOrderedPlan = dependencyOrderedCompilation.compositionBinding.plan;
+  assert.doesNotThrow(
+    () => capabilityCompositionPlanMaterialization(dependencyOrderedPlan),
+    "the lexically sealed historical operation fingerprint must remain parseable as a durable plan",
+  );
+  assert.deepEqual(
+    dependencyOrderedPlan.fragments.map((fragment) => fragment.capability),
+    ["editorial_evidence_packet", "source_attributed_data_story"],
+    "the durable selected-capability receipt remains lexically canonical",
+  );
+  const visualInsertOperationIndex = dependencyOrderedCompilation.operations.findIndex(
+    (operation) => operation.kind === "ensure_block_between" && operation.block === "visual_inserts",
+  );
+  const editorialOperationIndex = dependencyOrderedCompilation.operations.findIndex(
+    (operation) => operation.kind === "ensure_block_between" && operation.block === "editorial_layer",
+  );
+  assert.ok(
+    editorialOperationIndex >= 0 && editorialOperationIndex < visualInsertOperationIndex,
+    "the fixture keeps its lexical sealed-operation order so execution scheduling—not receipt rewriting—is exercised",
+  );
+  assert.ok(
+    dependencyOrderedCompilation.pipeline.findIndex((entry) => entry.block === "visual_inserts") <
+      dependencyOrderedCompilation.pipeline.findIndex((entry) => entry.block === "editorial_layer"),
+    "the compiled pipeline must receive the prerequisite block before its dependent layer",
+  );
+
+  // A block-level producer/consumer relationship may be safe without being a
+  // creator-facing capability dependency. The scheduler must still wait for
+  // the inserted producer block instead of failing because the consumer key
+  // is lexically earlier in the sealed receipt.
+  const mutableDependencyOrderTestFragment = dependencyOrderTestFragment as unknown as {
+    requiredCapabilityKeys?: readonly string[];
+  };
+  delete mutableDependencyOrderTestFragment.requiredCapabilityKeys;
+  const mutableOptionalDependencyOperation = dependencyOrderTestFragment.materialization.operations[0] as unknown as {
+    afterBlocks: readonly string[];
+    optionalAfterBlocks?: readonly string[];
+  };
+  mutableOptionalDependencyOperation.afterBlocks = ["intro_card"];
+  mutableOptionalDependencyOperation.optionalAfterBlocks = ["visual_inserts"];
+  const blockDependencyCompilation = compileCertifiedChannelComposition({
+    family: "narrated_stock",
+    intent: { concept: brief.concept, nicheKey: brief.nicheKey },
+    capabilitySelections: [
+      { capability: "editorial_evidence_packet", catalogFingerprint: CREATIVE_CAPABILITY_CATALOG_FINGERPRINT },
+      { capability: "source_attributed_data_story", catalogFingerprint: CREATIVE_CAPABILITY_CATALOG_FINGERPRINT },
+    ],
+    pipeline: [
+      { block: "script_gen" },
+      { block: "qa_script" },
+      { block: "story_spine" },
+      { block: "stock_footage" },
+      { block: "intro_card" },
+      { block: "timeline_assemble" },
+    ],
+  });
+  const lexicalEditorialOperationIndex = blockDependencyCompilation.operations.findIndex(
+    (operation) => operation.kind === "ensure_block_between" && operation.block === "editorial_layer",
+  );
+  const lexicalVisualOperationIndex = blockDependencyCompilation.operations.findIndex(
+    (operation) => operation.kind === "ensure_block_between" && operation.block === "visual_inserts",
+  );
+  assert.ok(
+    lexicalEditorialOperationIndex >= 0 && lexicalEditorialOperationIndex < lexicalVisualOperationIndex,
+    "the fixture retains lexical sealed-operation order so the scheduler path is exercised",
+  );
+  assert.ok(
+    blockDependencyCompilation.pipeline.findIndex((entry) => entry.block === "visual_inserts") <
+      blockDependencyCompilation.pipeline.findIndex((entry) => entry.block === "editorial_layer"),
+    "the compiler must defer an optional-edge consumer until its separately sealed producer block exists",
+  );
+} finally {
+  const testFragmentIndex = mutableFragmentHistory.indexOf(
+    dependencyOrderTestFragment as unknown as Record<string, unknown>,
+  );
+  if (testFragmentIndex >= 0) mutableFragmentHistory.splice(testFragmentIndex, 1);
+  mutableEditorialCapability.supportedFamilies = originalEditorialCapability.supportedFamilies;
+  mutableEditorialCapability.selectionMode = originalEditorialCapability.selectionMode;
+  mutableEditorialCapability.matches = originalEditorialCapability.matches;
+  mutableEditorialCapability.materialize = originalEditorialCapability.materialize;
+  if (originalEditorialCapability.compositionFragmentVersion === undefined) {
+    delete mutableEditorialCapability.compositionFragmentVersion;
+  } else {
+    mutableEditorialCapability.compositionFragmentVersion = originalEditorialCapability.compositionFragmentVersion;
+  }
+}
 assert.deepEqual(
   narratedFixture,
   [
     { block: "script_gen", params: { maxSeconds: 600, style: "business_explainer" } },
     { block: "qa_script" },
     { block: "narration_tts" },
+    { block: "story_spine" },
+    { block: "stock_footage" },
+    { block: "entity_imagery" },
+    { block: "music" },
     { block: "intro_card" },
     { block: "quote_overlays" },
     { block: "timeline_assemble" },
@@ -76,9 +283,28 @@ assert.deepEqual(
 const visualInserts = compiled.pipeline.find((entry) => entry.block === "visual_inserts");
 const script = compiled.pipeline.find((entry) => entry.block === "script_gen");
 const scriptQa = compiled.pipeline.find((entry) => entry.block === "qa_script");
+const episodeGraph = compiled.pipeline.find((entry) => entry.block === "episode_graph");
 assert.ok(visualInserts);
 assert.ok(script);
 assert.ok(scriptQa);
+assert.ok(episodeGraph);
+assert.deepEqual(
+  MODULE_CONTRACTS.episode_graph?.providerProfiles?.map((profile) => profile.provider),
+  ["local"],
+  "the Phase I checkpoint artifact must remain provider-free",
+);
+assert.ok(
+  compiled.pipeline.findIndex((entry) => entry.block === "story_spine") <
+    compiled.pipeline.findIndex((entry) => entry.block === "episode_graph"),
+  "Episode Graph must consume the actual Story Spine rather than a pre-script placeholder",
+);
+for (const downstreamSpendStage of ["stock_footage", "entity_imagery", "music", "visual_inserts"] as const) {
+  assert.ok(
+    compiled.pipeline.findIndex((entry) => entry.block === "episode_graph") <
+      compiled.pipeline.findIndex((entry) => entry.block === downstreamSpendStage),
+    `Episode Graph must precede ${downstreamSpendStage} so a review checkpoint can stop before visual or provider spend`,
+  );
+}
 assert.ok(
   compiled.pipeline.findIndex((entry) => entry.block === "intro_card") <
     compiled.pipeline.findIndex((entry) => entry.block === "visual_inserts"),
@@ -129,6 +355,10 @@ const quoteAfterVisual = compileCertifiedChannelComposition({
     { block: "script_gen" },
     { block: "qa_script" },
     { block: "narration_tts" },
+    { block: "story_spine" },
+    { block: "stock_footage" },
+    { block: "entity_imagery" },
+    { block: "music" },
     { block: "intro_card" },
     { block: "visual_inserts" },
     { block: "quote_overlays" },
@@ -172,7 +402,8 @@ const generic = compileCertifiedChannelComposition({
   ...input,
   capabilitySelections: [],
 });
-assert.equal(generic.receipt.key, "narrated_visual_essay");
+assert.equal(generic.compositionBinding.kind, "exact_catalog_v1");
+assert.equal(generic.compositionBinding.receipt.key, "narrated_visual_essay");
 assert.equal(generic.materialization, undefined);
 assert.deepEqual(generic.operations, []);
 assert.deepEqual(generic.pipeline, narratedFixture, "identity-only compositions must not invent a pipeline mutation");
@@ -183,9 +414,72 @@ const genericWithoutIntent = compileCertifiedChannelComposition({
   pipeline: narratedFixture,
 });
 assert.equal(
-  genericWithoutIntent.receipt.key,
+  genericWithoutIntent.compositionBinding.kind === "exact_catalog_v1"
+    ? genericWithoutIntent.compositionBinding.receipt.key
+    : undefined,
   "narrated_visual_essay",
   "a default certified composition remains materializable for legacy designer callers without a Program Brief",
+);
+
+assert.doesNotThrow(
+  () => assertCapabilityCompositionOperationCompatibility([
+    {
+      source: "fragment-a",
+      operation: { kind: "ensure_block_before", block: "shared_insert", beforeBlock: "timeline_assemble" },
+    },
+    {
+      source: "fragment-b",
+      operation: { kind: "ensure_block_before", block: "shared_insert", beforeBlock: "timeline_assemble" },
+    },
+  ]),
+  "identical independently sealed anchors are deterministic",
+);
+assert.throws(
+  () => assertCapabilityCompositionOperationCompatibility([
+    {
+      source: "fragment-a",
+      operation: { kind: "ensure_block_before", block: "shared_insert", beforeBlock: "timeline_assemble" },
+    },
+    {
+      source: "fragment-b",
+      operation: {
+        kind: "ensure_block_between",
+        block: "shared_insert",
+        afterBlocks: ["narration_tts"],
+        beforeBlock: "timeline_assemble",
+      },
+    },
+  ]),
+  /conflicting sealed composition anchors/,
+  "independent fragments cannot select incompatible anchors for the same inserted block",
+);
+assert.throws(
+  () => assertCapabilityCompositionOperationCompatibility([
+    {
+      source: "fragment-a",
+      operation: { kind: "merge_block_params", block: "shared_insert", params: { maxInserts: 4 } },
+    },
+    {
+      source: "fragment-b",
+      operation: { kind: "merge_block_params", block: "shared_insert", params: { maxInserts: 5 } },
+    },
+  ]),
+  /conflicting sealed composition parameter shared_insert\.maxInserts/,
+  "independent fragments cannot silently choose a parameter winner",
+);
+assert.throws(
+  () => assertCapabilityCompositionOperationCompatibility([
+    {
+      source: "fragment-a",
+      operation: { kind: "ensure_block_before", block: "visual_inserts", beforeBlock: "timeline_assemble" },
+    },
+    {
+      source: "fragment-b",
+      operation: { kind: "ensure_block_before", block: "timeline_assemble", beforeBlock: "visual_inserts" },
+    },
+  ]),
+  /cyclic sealed composition ordering: timeline_assemble -> visual_inserts -> timeline_assemble/,
+  "independent fragments cannot create a cycle through different operation targets",
 );
 
 assert.throws(
@@ -197,6 +491,16 @@ assert.throws(
   () => compileCertifiedChannelComposition({ ...input, pipeline: narratedFixture.filter((entry) => entry.block !== "intro_card") }),
   /requires exactly one intro_card block; found 0/,
   "a source data story must fail closed when its required intro timing producer is absent",
+);
+assert.throws(
+  () => compileCertifiedChannelComposition({ ...input, pipeline: narratedFixture.filter((entry) => entry.block !== "story_spine") }),
+  /requires exactly one story_spine block; found 0/,
+  "the Phase I materialization must reject a placeholder-free checkpoint with no actual Story Spine",
+);
+assert.throws(
+  () => compileCertifiedChannelComposition({ ...input, pipeline: narratedFixture.filter((entry) => entry.block !== "stock_footage") }),
+  /requires exactly one stock_footage block; found 0/,
+  "the Phase I materialization must retain its explicit first visual-work anchor",
 );
 assert.throws(
   () => compileCertifiedChannelComposition({ ...input, pipeline: narratedFixture.filter((entry) => entry.block !== "script_gen") }),
@@ -253,11 +557,12 @@ const genericProfile = createChannelShowProfile({
   programBrief: brief,
   pipeline: designedGeneric.pipeline,
 });
-assert.equal(dataStoryProfile.composition?.definitionVersion, "v3");
+assert.equal(dataStoryProfile.composition, undefined);
+assert.equal(dataStoryProfile.compositionBinding?.kind, "capability_plan_v1");
 assert.notEqual(
   dataStoryProfile.fingerprint,
   genericProfile.fingerprint,
-  "the existing Show Profile fingerprint must bind both the v3 composition receipt and its materialized pipeline",
+  "the Show Profile fingerprint must bind both the sealed plan authority and its materialized pipeline",
 );
 
 console.log("certified channel composition compiler tests passed");

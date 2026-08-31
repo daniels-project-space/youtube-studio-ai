@@ -28,7 +28,7 @@ KEY: Kling v3 Omni `end_image` is what makes the loop seamless. v2 build: src/li
 (animate start+end via replicate.ts) + reuse generateFalFluxProImage + gemini director +
 ffmpeg extract/concat + upscaleLoopUnit + new ffmpeg deblur-mux. Wire as music_loop visuals.
 
-NOTE: loop engine uses the Higgsfield CLI (src/lib/higgsfield.ts: generateKeyframe flux_2 + generateClip kling3_0 with --start-image/--end-image), NOT Replicate Kling. Same Kling model, via your Higgs CLI. Requires HIGGSFIELD_LIVE=1 + an authed higgsfield session in the runtime.
+NOTE: this historical Higgsfield loop note is retired. Production media uses the attested Novita Z-Image/LTX route; LTX remains unavailable for automatic production until its exact pinned RTX 4090 benchmark is recorded and accepted. `src/lib/higgsfield.ts` is a compatibility surface, not a runnable production renderer.
 
 ## CHANNEL BUILDER V2 — feature wiring (2026-06-05)
 

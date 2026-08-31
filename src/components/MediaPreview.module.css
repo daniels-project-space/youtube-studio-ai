@@ -1,0 +1,73 @@
+.preview {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background:
+    linear-gradient(135deg, color-mix(in srgb, var(--color-accent) 14%, transparent), transparent 62%),
+    var(--color-surface);
+}
+
+.image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.state {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  gap: 0.38rem;
+  align-content: center;
+  padding: 0.5rem;
+  background: linear-gradient(135deg, rgba(10, 14, 20, 0.22), rgba(10, 14, 20, 0.48));
+  color: var(--color-muted);
+  font-size: 0.68rem;
+  text-align: center;
+}
+
+.preview[data-preview-state="loading"][data-has-source="true"] .state {
+  place-items: end start;
+  align-content: end;
+  background: linear-gradient(180deg, transparent 44%, rgba(8, 10, 15, 0.58));
+  color: rgba(255, 255, 255, 0.82);
+}
+
+.spinner {
+  width: 0.72rem;
+  height: 0.72rem;
+  border: 1.5px solid currentColor;
+  border-right-color: transparent;
+  border-radius: 50%;
+  animation: previewSpin 700ms linear infinite;
+}
+
+.stateLabel {
+  line-height: 1.25;
+}
+
+.screenReaderOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+@keyframes previewSpin {
+  to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .spinner { animation: none; }
+}

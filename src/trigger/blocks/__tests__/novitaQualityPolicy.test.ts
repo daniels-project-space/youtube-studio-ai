@@ -178,6 +178,39 @@ assert.equal(
 );
 assert.match(videoRepair.shot.prompt, /First-frame constraint/);
 assert.match(videoRepair.shot.prompt, /middle frame freezes/);
+
+const adapterBoundVideoRepair = planCinematicQualityRepair({
+  phase: "video",
+  shot: repairShot,
+  spec: repairSpec,
+  policy: strict,
+  notes: ["The take drifted from the channel's locked noir visual language."],
+  attempt: 1,
+  stillKey: "owner/demo/runs/run/novita/image/selected.png",
+  creativeAdapter: {
+    id: "ltx-creative-archival-noir",
+    strength: 0.42,
+  },
+});
+assert.deepEqual(
+  adapterBoundVideoRepair.shot.creativeAdapter,
+  { id: "ltx-creative-archival-noir", strength: 0.42 },
+  "a QA-repaired clip must preserve the benchmarked creative adapter rather than silently falling back to the base model",
+);
+assert.deepEqual(
+  planCinematicQualityRepair({
+    phase: "video",
+    shot: repairShot,
+    spec: repairSpec,
+    policy: strict,
+    notes: ["The take drifted from the channel's locked noir visual language."],
+    attempt: 1,
+    stillKey: "owner/demo/runs/run/novita/image/selected.png",
+    creativeAdapter: { id: "ltx-creative-archival-noir", strength: 0.42 },
+  }).shot.creativeAdapter,
+  adapterBoundVideoRepair.shot.creativeAdapter,
+  "a retry must retain the same adapter selection as the original targeted repair",
+);
 assert.throws(
   () => planCinematicQualityRepair({
     phase: "video",

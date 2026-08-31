@@ -11,25 +11,46 @@
  */
 import type { Block } from "@/engine/types";
 import { join } from "node:path";
-import { makeRunTempDir, downloadTo, readBytes } from "@/lib/files";
+import {
+  DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+  makeRunTempDir,
+  downloadTo,
+  readBytes,
+} from "@/lib/files";
 import { putObject } from "@/lib/storage";
-import { renderNovitaGeneratedScenes } from "@/lib/novitaMedia";
+import {
+  renderNovitaGeneratedScenes,
+  type NovitaClipReviewCheckpoint,
+  type NovitaKeyframeReviewCheckpoint,
+} from "@/lib/novitaMedia";
 import { applyNameCardOverlay } from "@/lib/ffmpeg";
 import { kenBurns, applyHyperframesOverlayClip } from "@/lib/ffmpeg";
 import { searchWikimediaImage } from "@/lib/wikimedia";
 import { renderOverlay, selectAutomaticEvidenceOverlayShots, type OverlayTemplateId } from "@/lib/hyperframesOverlay";
+import { footageOnScreenTextCues } from "@/lib/footageOnScreenTextCues";
 import { hasNonGoogleVisionKey } from "@/lib/vision";
 import { requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 import { reviewCinematicKeyframe } from "@/lib/cinematicKeyframeGate";
 import { reviewCinematicClip } from "@/lib/cinematicClipGate";
 import { reviewCinematicTransition } from "@/lib/cinematicTransitionGate";
-import { LtxCreativeAdapterSelectionSchema } from "@/lib/ltxCreativeAdapter";
+import { LtxCreativeAdapterInputSchema } from "@/lib/ltxCreativeAdapter";
 import { resolveApprovedSourceProofMedia } from "@/lib/sourceProofMedia";
 import { FAMILIES } from "@/engine/families";
+import { selectLtxStyleForChannel } from "@/engine/ltxStylePresets";
 import { SceneManifestSchema } from "@/engine/episodeGraph";
 import { StorySpineSchema, type ShotPlan, validateStorySpine } from "@/engine/storySpine";
 import { CinematicGeneratedScenePlanSchema } from "@/engine/cinematicCaseSequence";
 import { assertCinematicFinalMasterQaAdmission } from "@/engine/cinematicFinalMasterQaAdmission";
+import {
+  createVisualArtifactAttempt,
+  visualArtifactReviewRejectionFingerprint,
+} from "@/engine/visualArtifactAttemptLedger";
+import {
+  CINEMATIC_KEYFRAME_REVIEW_VERSION,
+} from "@/engine/cinematicKeyframeReview";
+import {
+  CINEMATIC_CLIP_REVIEW_VERSION,
+} from "@/engine/cinematicClipReview";
 import {
   GENERATED_FOOTAGE_SCENE_MANIFEST_VERSION,
   GeneratedFootageSceneManifestSchema,
@@ -38,7 +59,17 @@ import type {
   SourceProofMediaObligation,
   SourceProofMediaReceipt,
 } from "@/engine/sourceProofMedia";
+import type { VisualArtifactReviewRejection } from "@/engine/visualArtifactReviewOutcome";
 import { COST_PATCH_KEY } from "@/engine/types";
+
+function stableVisualAttemptToken(value: string): string {
+  const token = value
+    .replace(/[^A-Za-z0-9_.:-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+  if (!token) throw new Error("visual artifact attempt requires a stable scene identifier");
+  return token;
+}
 
 /** Ordered pool (same as narratedBlocks.mapPool â€” local copy, no cross-import). */
 async function pool<T, R>(items: T[], limit: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> {
@@ -156,6 +187,15 @@ export interface PlannedScene {
    * above.
    */
   evidenceOverlay?: { templateId: OverlayTemplateId; primary: string; secondary?: string };
+}
+
+interface CompositedFootageClip {
+  path: string;
+  nameCardText?: string;
+  evidenceOverlay?: {
+    text: string;
+    durationSec: number;
+  };
 }
 
 export interface ResolvedGeneratedFootageScenePlan {
@@ -547,7 +587,7 @@ export async function generateSignatureClips(
   // adapter route as the main generated-footage lane so a calibrated wardrobe
   // or material look cannot disappear just because a channel uses a hybrid
   // stock-plus-cinematic opening.
-  const signatureCreativeAdapter = LtxCreativeAdapterSelectionSchema.optional().parse(
+  const signatureCreativeAdapter = LtxCreativeAdapterInputSchema.optional().parse(
     ctx.params["ltxCreativeAdapter"],
   );
   ctx.log(`signature_clips: using ${plan.source} (${scenes.length} validated scene(s))`);
@@ -581,7 +621,9 @@ export async function generateSignatureClips(
   const tmp = await makeRunTempDir(ctx.runId);
   try {
     const clips = await pool(rendered.scenes, 3, (scene, index) =>
-      downloadTo(scene.clipUrl, join(tmp, `sig_${index}.mp4`)));
+      downloadTo(scene.clipUrl, join(tmp, `sig_${index}.mp4`), {
+        timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+      }));
     return { clips, cost: rendered.costUsd };
   } catch (error) {
     throw withAdditionalObservedCost(error, rendered.costUsd);
@@ -595,7 +637,14 @@ export const genFootage: Block = {
   // Both alternatives are declared as optional manifest inputs; the resolver
   // below validates the complete handoff and fails before paid work if absent.
   consumes: [],
-  produces: ["footageClips", "footageKeys", "generatedFootageSceneManifest"],
+  produces: [
+    "footageClips",
+    "footageKeys",
+    "generatedFootageSceneManifest",
+    "footageOnScreenTextCues",
+    "ltxStyleId",
+    "ltxStyleSelection",
+  ],
   paid: true,
   run: async (ctx) => {
     assertCentralNovitaSelection(ctx.params["i2vModel"], "gen_footage");
@@ -603,7 +652,27 @@ export const genFootage: Block = {
       visualAvoid?: string[];
       palette?: string[];
       colorGrade?: string;
+      composition?: string;
+      motifs?: string[];
+      motionDiscipline?: string;
     } | null;
+    const ltxStyleSelection = selectLtxStyleForChannel({
+      explicitStyleId: ctx.store["ltxStyleId"],
+      familyDefaultStyleId: FAMILIES.cinematic.styleId,
+      styleDNA: dna,
+      visualBrief: ctx.store["visualBrief"] as {
+        promptStyle?: string;
+        look?: string;
+        setting?: string;
+        world?: string;
+      } | null | undefined,
+    });
+    ctx.log(
+      `gen_footage: LTX treatment ${ltxStyleSelection.styleId} (${ltxStyleSelection.source})` +
+      (ltxStyleSelection.matchedSignals.length
+        ? ` from ${ltxStyleSelection.matchedSignals.length} sealed channel-identity signal(s)`
+        : ""),
+    );
     const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 300;
     const clipSec = Math.min(10, Math.max(5, Number(ctx.params["clipSec"] ?? 5)));
     const genericMaxClips = Math.max(
@@ -635,7 +704,89 @@ export const genFootage: Block = {
       avoid,
     });
     const scenes = plan.scenes;
-    const creativeAdapter = LtxCreativeAdapterSelectionSchema.optional().parse(
+    // The existing runArtifacts checkpoint is intentionally record-only. It
+    // captures the exact independently reviewed Casefile candidate before a
+    // bounded replacement render, without becoming a release or retry input.
+    const casefileRejectedAttemptBySubject = new Map<
+      string,
+      { attemptFingerprint: string; rejectionFingerprint: string }
+    >();
+    let casefileVisualAttemptOrdinal = 0;
+    const checkpointCasefileVisualAttempt = async (input: {
+      phase: "keyframe" | "clip";
+      sceneId: string;
+      candidateKey: string;
+      attempt: number;
+      verdict: "accepted" | "rejected";
+      notes: readonly string[];
+      rejection?: VisualArtifactReviewRejection;
+    }): Promise<void> => {
+      if (plan.source !== "cinematic_case_sequence" || !plan.sequenceFingerprint) {
+        throw new Error("gen_footage visual attempt checkpoint requires a cinematic sequence fingerprint");
+      }
+      if (!ctx.checkpointVisualArtifactAttempts) {
+        throw new Error("gen_footage visual attempt checkpoint requires the runner durable artifact sink");
+      }
+      const lineageKey = `${input.phase}:${input.sceneId}`;
+      const parent = casefileRejectedAttemptBySubject.get(lineageKey);
+      const gate = input.phase === "keyframe"
+        ? {
+            gateId: "cinematic-keyframe",
+            reviewVersion: CINEMATIC_KEYFRAME_REVIEW_VERSION,
+            artifactKind: "image" as const,
+          }
+        : {
+            gateId: "cinematic-clip",
+            reviewVersion: CINEMATIC_CLIP_REVIEW_VERSION,
+            artifactKind: "video" as const,
+          };
+      const repair = parent
+        ? {
+            kind: "replacement" as const,
+            parentAttemptFingerprint: parent.attemptFingerprint,
+            parentRejectionFingerprint: parent.rejectionFingerprint,
+          }
+        : { kind: "initial" as const };
+      const token = stableVisualAttemptToken(input.sceneId);
+      const review = input.verdict === "accepted"
+        ? {
+            verdict: "accepted" as const,
+            gateId: gate.gateId,
+            reviewVersion: gate.reviewVersion,
+            notes: input.notes,
+          }
+        : {
+            verdict: "rejected" as const,
+            gateId: gate.gateId,
+            reviewVersion: gate.reviewVersion,
+            notes: input.notes,
+            rejection: input.rejection,
+          };
+      const record = createVisualArtifactAttempt({
+        adapterId: "casefile_cinematic",
+        scopeFingerprint: plan.sequenceFingerprint,
+        attemptId: `casefile-${input.phase}-${token}-${input.attempt}`,
+        ordinal: ++casefileVisualAttemptOrdinal,
+        artifact: {
+          kind: gate.artifactKind,
+          subjectId: input.sceneId,
+          candidate: {
+            id: `casefile-${input.phase}-${token}-candidate-${input.attempt}`,
+            r2Key: input.candidateKey,
+          },
+        },
+        review,
+        repair,
+      });
+      await ctx.checkpointVisualArtifactAttempts([record]);
+      if (record.review.verdict === "rejected") {
+        casefileRejectedAttemptBySubject.set(lineageKey, {
+          attemptFingerprint: record.attemptFingerprint,
+          rejectionFingerprint: visualArtifactReviewRejectionFingerprint(record.review.rejection),
+        });
+      }
+    };
+    const creativeAdapter = LtxCreativeAdapterInputSchema.optional().parse(
       ctx.params["ltxCreativeAdapter"],
     );
     ctx.log(`gen_footage: using ${plan.source} (${scenes.length} validated scene(s))`);
@@ -722,16 +873,19 @@ export const genFootage: Block = {
       ? await makeRunTempDir(`${ctx.runId}-cinematic-clips`)
       : undefined;
     const acceptedReferenceByCastId = new Map<string, { sceneId: string; path: string }>();
+    const keyframeCandidatePathByKey = new Map<string, string>();
     const keyframeGate = hasCinematicSequence
       ? {
           // One replacement is the only automatic recovery. More retries hide
           // a broken prompt behind unbounded spend instead of surfacing it.
           maxImageAttempts: 2 as const,
-          review: async ({ scene, stillUrl }: Parameters<NonNullable<Parameters<typeof renderNovitaGeneratedScenes>[0]["keyframeGate"]>["review"]>[0]) => {
+          review: async ({ scene, stillKey, stillUrl }: Parameters<NonNullable<Parameters<typeof renderNovitaGeneratedScenes>[0]["keyframeGate"]>["review"]>[0]) => {
           const candidatePath = await downloadTo(
             stillUrl,
             join(cinematicKeyframeTmp!, `${scene.id.replace(/[^a-z0-9_-]/gi, "_")}.png`),
+            { timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS },
           );
+          keyframeCandidatePathByKey.set(stillKey, candidatePath);
           const continuityIds = scene.continuityIds ?? [];
           const references = continuityIds
             .map((castId) => acceptedReferenceByCastId.get(castId))
@@ -744,12 +898,32 @@ export const genFootage: Block = {
             referencePaths: references.map((reference) => reference.path),
             reviewedAgainstSceneIds: references.map((reference) => reference.sceneId),
           });
-          for (const castId of continuityIds) {
-            if (!acceptedReferenceByCastId.has(castId)) {
-              acceptedReferenceByCastId.set(castId, { sceneId: scene.id, path: candidatePath });
-            }
-          }
           return review;
+          },
+          checkpointReview: async (event: NovitaKeyframeReviewCheckpoint) => {
+            await checkpointCasefileVisualAttempt({
+              phase: "keyframe",
+              sceneId: event.scene.id,
+              candidateKey: event.stillKey,
+              attempt: event.attempt,
+              verdict: event.verdict,
+              notes: event.verdict === "accepted" ? event.review.notes : event.rejection.notes,
+              ...(event.verdict === "rejected" ? { rejection: event.rejection } : {}),
+            });
+            if (event.verdict === "accepted") {
+              const candidatePath = keyframeCandidatePathByKey.get(event.stillKey);
+              if (!candidatePath) {
+                throw new Error(`gen_footage keyframe checkpoint lost local candidate path for ${event.scene.id}`);
+              }
+              for (const castId of event.scene.continuityIds ?? []) {
+                if (!acceptedReferenceByCastId.has(castId)) {
+                  acceptedReferenceByCastId.set(castId, {
+                    sceneId: event.scene.id,
+                    path: candidatePath,
+                  });
+                }
+              }
+            }
           },
         }
       : undefined;
@@ -760,17 +934,34 @@ export const genFootage: Block = {
           maxVideoAttempts: 2 as const,
           review: async ({ scene, stillUrl, terminalStillKey, terminalStillUrl, clipUrl }: Parameters<NonNullable<Parameters<typeof renderNovitaGeneratedScenes>[0]["clipGate"]>["review"]>[0]) => {
             const safeSceneId = scene.id.replace(/[^a-z0-9_-]/gi, "_");
-            const stillPath = await downloadTo(stillUrl, join(cinematicClipTmp!, `${safeSceneId}-source.png`));
+            const stillPath = await downloadTo(stillUrl, join(cinematicClipTmp!, `${safeSceneId}-source.png`), {
+              timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+            });
             const terminalStillPath = terminalStillUrl
-              ? await downloadTo(terminalStillUrl, join(cinematicClipTmp!, `${safeSceneId}-terminal.png`))
+              ? await downloadTo(terminalStillUrl, join(cinematicClipTmp!, `${safeSceneId}-terminal.png`), {
+                  timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+                })
               : undefined;
-            const clipPath = await downloadTo(clipUrl, join(cinematicClipTmp!, `${safeSceneId}-candidate.mp4`));
+            const clipPath = await downloadTo(clipUrl, join(cinematicClipTmp!, `${safeSceneId}-candidate.mp4`), {
+              timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+            });
             return await reviewCinematicClip({
               scene,
               stillPath,
               ...(terminalStillPath && terminalStillKey ? { terminalStillPath, terminalStillKey } : {}),
               clipPath,
               workDir: cinematicClipTmp!,
+            });
+          },
+          checkpointReview: async (event: NovitaClipReviewCheckpoint) => {
+            await checkpointCasefileVisualAttempt({
+              phase: "clip",
+              sceneId: event.scene.id,
+              candidateKey: event.clipKey,
+              attempt: event.attempt,
+              verdict: event.verdict,
+              notes: event.verdict === "accepted" ? event.review.notes : event.rejection.notes,
+              ...(event.verdict === "rejected" ? { rejection: event.rejection } : {}),
             });
           },
         }
@@ -788,10 +979,10 @@ export const genFootage: Block = {
       },
       keyframeGate,
       clipGate,
-      // gen_footage is reached only via the cinematic family's "ai_scenes"
-      // visual engine (see src/engine/families.ts) — no channel-level style
-      // override exists yet, so every run gets that family's default look.
-      styleId: FAMILIES.cinematic.styleId,
+      // A persisted selection wins on retry; otherwise a unique sealed
+      // Style-DNA/Visual-Brief treatment is used. Ambiguous DNA stays on the
+      // family's proven default rather than guessing an aesthetic mid-run.
+      styleId: ltxStyleSelection.styleId,
       scenes: ltxScenes.map((scene) => ({
         // Preserve the admitted id: timeline_assemble later verifies that the
         // R2 clip order still matches this exact cinematic cut plan.
@@ -841,11 +1032,11 @@ export const genFootage: Block = {
     const nameCardAccentColor = dna?.palette?.[0] || dna?.colorGrade || undefined;
     try {
       const renderedBySceneId = new Map(rendered.scenes.map((scene) => [scene.id, scene]));
-      const clips = await pool(scenes, 3, async (plannedScene, index) => {
+      const clipResults = await pool<PlannedScene, CompositedFootageClip>(scenes, 3, async (plannedScene, index) => {
         const sourceProof = sourceProofBySceneId.get(plannedScene.id);
         if (sourceProof) {
           ctx.log(`gen_footage: scene ${index + 1}/${scenes.length} using approved source-proof media; no LTX output exists for this shot`);
-          return sourceProof.localPath;
+          return { path: sourceProof.localPath };
         }
         const scene = renderedBySceneId.get(plannedScene.id);
         if (!scene) {
@@ -882,10 +1073,14 @@ export const genFootage: Block = {
             ctx.log(
               `gen_footage: real-image insert failed on scene ${index + 1} (${e instanceof Error ? e.message : e}) — using the generated clip instead`,
             );
-            rawPath = await downloadTo(scene.clipUrl, join(tmp, `gen_${index}.mp4`));
+            rawPath = await downloadTo(scene.clipUrl, join(tmp, `gen_${index}.mp4`), {
+              timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+            });
           }
         } else {
-          rawPath = await downloadTo(scene.clipUrl, join(tmp, `gen_${index}.mp4`));
+          rawPath = await downloadTo(scene.clipUrl, join(tmp, `gen_${index}.mp4`), {
+            timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+          });
         }
         // Character-introduction NAME CARD (automatic path only). Applied
         // here, once, directly to the already-rendered clip file — the exact
@@ -898,6 +1093,7 @@ export const genFootage: Block = {
         // (cinematicCaseSequence.ts) and is untouched here.
         const nameCardText = plan.source === "story_spine" ? scenes[index]?.nameCardText : undefined;
         let namedPath = rawPath;
+        let nameCardApplied = false;
         if (!nameCardText) {
           ctx.log(`gen_footage: scene ${index + 1}/${scenes.length} complete`);
         } else {
@@ -912,10 +1108,11 @@ export const genFootage: Block = {
               accentColor: nameCardAccentColor,
             });
             namedPath = cardPath;
+            nameCardApplied = true;
             ctx.log(`gen_footage: scene ${index + 1}/${scenes.length} complete (name card applied)`);
           } catch (e) {
-            ctx.log(
-              `gen_footage: name-card overlay failed on scene ${index + 1} (${e instanceof Error ? e.message : e}) — using the clip without it`,
+            throw new Error(
+              `gen_footage: required name-card overlay failed on scene ${index + 1}: ${e instanceof Error ? e.message : e}`,
             );
           }
         }
@@ -924,10 +1121,16 @@ export const genFootage: Block = {
         // selectAutomaticEvidenceOverlayShots inside scenePlanFromStorySpine
         // (capped at 2/video — see that function's own doc comment). An
         // independent finishing pass from the name card above, applied
-        // after it so both can stack on the same clip. Gated the same way;
-        // graceful degrade on failure, same as the name-card pass.
+        // after it so both can stack on the same clip. A planned overlay is
+        // required: failure stops the run so QA never certifies a master that
+        // silently lost authored evidence text.
         const evidenceOverlay = plan.source === "story_spine" ? scenes[index]?.evidenceOverlay : undefined;
-        if (!evidenceOverlay) return namedPath;
+        if (!evidenceOverlay) {
+          return {
+            path: namedPath,
+            ...(nameCardApplied ? { nameCardText } : {}),
+          };
+        }
         try {
           const overlayDurationSec = Math.max(
             1.2,
@@ -951,14 +1154,29 @@ export const genFootage: Block = {
           ctx.log(
             `gen_footage: scene ${index + 1}/${scenes.length} evidence overlay applied (${evidenceOverlay.templateId})`,
           );
-          return overlaidPath;
+          return {
+            path: overlaidPath,
+            ...(nameCardApplied ? { nameCardText } : {}),
+            evidenceOverlay: {
+              text: [evidenceOverlay.primary, evidenceOverlay.secondary].filter(Boolean).join(" "),
+              durationSec: overlayDurationSec,
+            },
+          };
         } catch (e) {
-          ctx.log(
-            `gen_footage: evidence overlay failed on scene ${index + 1} (${e instanceof Error ? e.message : e}) — using the clip without it`,
+          throw new Error(
+            `gen_footage: required evidence overlay failed on scene ${index + 1}: ${e instanceof Error ? e.message : e}`,
           );
-          return namedPath;
         }
       });
+      const clips = clipResults.map((result) => result.path);
+      const footageTextCues = footageOnScreenTextCues(
+        scenes.map((scene, index) => ({
+          sceneId: scene.id,
+          durationSec: scene.durationSec,
+          ...(clipResults[index]?.nameCardText ? { nameCardText: clipResults[index]!.nameCardText } : {}),
+          ...(clipResults[index]?.evidenceOverlay ? { evidenceOverlay: clipResults[index]!.evidenceOverlay } : {}),
+        })),
+      );
       const transitionToNextReviewByIndex = new Map<number, Awaited<ReturnType<typeof reviewCinematicTransition>>>();
       if (plan.source === "cinematic_case_sequence") {
         for (let index = 0; index < scenes.length - 1; index++) {
@@ -1037,6 +1255,9 @@ export const genFootage: Block = {
         footageClips: clips,
         footageKeys,
         generatedFootageSceneManifest,
+        footageOnScreenTextCues: footageTextCues,
+        ltxStyleId: ltxStyleSelection.styleId,
+        ltxStyleSelection,
         [COST_PATCH_KEY]: rendered.costUsd,
       };
     } catch (error) {

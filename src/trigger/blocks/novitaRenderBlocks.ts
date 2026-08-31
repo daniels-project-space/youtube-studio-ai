@@ -6,13 +6,28 @@
  * No caller infers shot identity from array order and no production render may
  * override the immutable model/profile contract.
  */
+import { createHash } from "node:crypto";
+import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { z } from "zod";
 
-import { laneQualityPolicy } from "@/engine/contentLane";
+import {
+  laneQualityPolicy,
+  parseContentLane,
+  VISUAL_MATTER_REFERENCE_CONTENT_LANE,
+} from "@/engine/contentLane";
+import {
+  studioLtxCreativeAdapterSelectionFromUnknown,
+  studioLtxShotAdapterSelectionsFromUnknown,
+} from "@/engine/studioAssetLibrary";
 import { channelCritiqueBrief, type ChannelCritiqueContext } from "@/engine/critiqueLoop";
 import { generationProfile, type GenerationProfile } from "@/engine/generationProfiles";
+import { NarrativeShotControlContractSchema } from "@/engine/narrativeSeriesIntelligence";
 import { NOVITA_CINEMATIC_QA_REPAIR_CAP, PRICE } from "@/engine/pricing";
+import {
+  NOVITA_VISUAL_QA_MAX_IMAGES_PER_GRADER_CALL,
+  novitaVisualQaReferenceBatchCount,
+} from "@/engine/novitaVisualQaBudget";
 import {
   AssetQaReportSchema,
   SelectedStillManifestSchema,
@@ -27,11 +42,37 @@ import {
 import { DPVisualSpecSchema, ShotPlanSchema, type ShotPlan } from "@/engine/storySpine";
 import type { Block, StageContext } from "@/engine/types";
 import { COST_PATCH_KEY } from "@/engine/types";
-import { visualMatterDirectiveForShot, visualMatterFromUnknown, visualMatterReferenceAssetsForShot, type VisualMatterManifest } from "@/engine/visualMatter";
+import {
+  createVisualArtifactAttempt,
+  type VisualArtifactAttempt,
+  visualArtifactReviewRejectionFingerprint,
+} from "@/engine/visualArtifactAttemptLedger";
+import {
+  VISUAL_ARTIFACT_REVIEW_OUTCOME_VERSION,
+  type VisualArtifactKind,
+  type VisualArtifactReviewRejection,
+} from "@/engine/visualArtifactReviewOutcome";
+import {
+  captureLocalVisualSequenceArtifactManifest,
+  standardNovitaVisualSequenceFingerprint,
+} from "@/engine/visualSequenceContract";
+import {
+  attachVisualMatterReferenceAssets,
+  assertVisualMatterReferenceAssetBytes,
+  visualMatterAssetRequestFingerprint,
+  visualMatterAssetRequests,
+  visualMatterDirectiveForShot,
+  visualMatterFromUnknown,
+  visualMatterReferenceAssetsForShot,
+  type VisualMatterAssetRequest,
+  type VisualMatterManifest,
+  type VisualMatterReferenceAsset,
+} from "@/engine/visualMatter";
 import { makeRunTempDir, writeBytes } from "@/lib/files";
 import { grabFrame, probe } from "@/lib/ffmpeg";
 import { parseJsonLoose } from "@/lib/gemini";
-import { LtxCreativeAdapterSelectionSchema } from "@/lib/ltxCreativeAdapter";
+import { LtxCreativeAdapterInputSchema } from "@/lib/ltxCreativeAdapter";
+import { parseNarrativeSeriesAcceptedCharacterAdapters } from "@/lib/narrativeSeriesRunAdmission";
 import { assertLtxVideoOutputProofSet } from "@/lib/ltxVideoProof";
 import {
   renderImages,
@@ -44,10 +85,218 @@ import {
   type Shot,
 } from "@/lib/novitaRenderFarm";
 import { novitaCostEnvelope, type NovitaCostEnvelope } from "@/lib/novitaCostEnvelope";
+import { sha256ShotAnalysisSource } from "@/lib/shotAnalysis";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
 import { getObjectBytes } from "@/lib/storage";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
 const EPSILON = 0.02;
+const STANDARD_NOVITA_ASSET_QA_REVIEW_VERSION = "standard-novita-asset-qa/v1";
+const STANDARD_NOVITA_SHOT_QA_REVIEW_VERSION = "standard-novita-shot-qa/v1";
+
+type RejectedVisualAttemptParent = {
+  attemptFingerprint: string;
+  rejectionFingerprint: string;
+};
+
+/**
+ * A bounded, text-to-image-only plan for Visual Matter comparison anchors.
+ * These shots are deliberately separate from the primary cinematic keyframes:
+ * current direct Z-Image has no reference-image input, so this plan can only
+ * be consumed by visual QA as actual comparison pixels.
+ */
+export interface VisualMatterReferenceRenderPlan {
+  requests: readonly VisualMatterAssetRequest[];
+  shots: readonly Shot[];
+}
+
+export function planVisualMatterReferenceRenders(
+  manifest: VisualMatterManifest,
+  maxImages: unknown,
+): VisualMatterReferenceRenderPlan {
+  if (manifest.status === "disabled") return { requests: [], shots: [] };
+  if (manifest.status === "anchored") {
+    throw new Error("Visual Matter reference pack is immutable once anchored");
+  }
+  const requests = visualMatterAssetRequests(manifest, Number(maxImages));
+  const shots = requests.map((request, index): Shot => {
+    const requestFingerprint = visualMatterAssetRequestFingerprint(manifest.revision, request);
+    return {
+      // Do not pass Visual Matter request IDs through to the worker namespace:
+      // storyboard IDs include a colon, while direct-worker IDs are sealed and
+      // intentionally conservative.
+      id: `vmref-${String(index + 1).padStart(2, "0")}-${request.kind.replace(/_/g, "-")}`,
+      prompt: [
+        request.prompt,
+        `Create one ${request.label.toLowerCase()} as a cinematic visual-development reference.`,
+        "No typography, captions, labels, logos, watermarks, or UI elements.",
+      ].join("\n\n"),
+      cameraMove: "static",
+      shotScale: request.kind === "character_sheet" ? "medium" : "wide",
+      lens: "35mm visual-development reference lens",
+      seconds: 1,
+      motion: "Static Visual Matter reference for downstream QA comparison only.",
+      // Exactly one worker/output per admitted request. The max image count,
+      // module reservation, and stage envelope all use this same cardinality.
+      candidateCount: 1,
+      seed: Number.parseInt(requestFingerprint.slice(0, 8), 16),
+    };
+  });
+  return { requests, shots };
+}
+
+/**
+ * Turn real direct-Novita R2 outputs into byte- and receipt-bound Visual
+ * Matter assets. This boundary never estimates a proportional output cost: it
+ * rejects a result that does not expose one exact sealed worker receipt per
+ * reference image.
+ */
+export async function materializeVisualMatterReferenceAssets(args: {
+  manifest: VisualMatterManifest;
+  plan: VisualMatterReferenceRenderPlan;
+  result: NovitaRenderResult;
+  profile: GenerationProfile;
+  getBytes: (key: string) => Promise<Uint8Array>;
+}): Promise<VisualMatterReferenceAsset[]> {
+  if (args.manifest.status !== "planned") {
+    throw new Error("Visual Matter reference assets require a planned, unanchored manifest");
+  }
+  if (args.plan.requests.length !== args.plan.shots.length) {
+    throw new Error("Visual Matter reference plan has mismatched requests and direct-render shots");
+  }
+  const candidates = args.result.candidates;
+  if (!candidates || candidates.length !== args.plan.shots.length) {
+    throw new Error("Visual Matter reference render returned an incomplete exact candidate mapping");
+  }
+
+  const requestByRenderShot = new Map<string, VisualMatterAssetRequest>();
+  for (const [index, shot] of args.plan.shots.entries()) {
+    const request = args.plan.requests[index];
+    if (!request || requestByRenderShot.has(shot.id)) {
+      throw new Error("Visual Matter reference plan has an ambiguous direct-render shot identity");
+    }
+    requestByRenderShot.set(shot.id, request);
+  }
+
+  const seenRenderShots = new Set<string>();
+  const assets: VisualMatterReferenceAsset[] = [];
+  for (const candidate of candidates) {
+    const request = requestByRenderShot.get(candidate.shotId);
+    if (!request || seenRenderShots.has(candidate.shotId)) {
+      throw new Error("Visual Matter reference render returned an unknown or duplicate shot identity");
+    }
+    if (
+      candidate.candidateIndex !== 0 ||
+      candidate.outputId !== `${candidate.shotId}-c01` ||
+      !candidate.key.endsWith(".png")
+    ) {
+      throw new Error(`Visual Matter reference render returned an invalid direct image output for ${candidate.shotId}`);
+    }
+    const requestSha256 = args.result.requestSha256ByOutputId?.[candidate.outputId];
+    const billingReceipt = args.result.billingReceiptsByOutputId?.[candidate.outputId];
+    if (!requestSha256 || !billingReceipt) {
+      throw new Error(`Visual Matter reference render lacks an exact worker receipt for ${candidate.outputId}`);
+    }
+    const bytes = await args.getBytes(candidate.key);
+    if (!bytes.length) throw new Error(`Visual Matter reference R2 object is empty: ${candidate.key}`);
+    const contentSha256 = createHash("sha256").update(bytes).digest("hex");
+    seenRenderShots.add(candidate.shotId);
+    assets.push({
+      ...request,
+      r2Key: candidate.key,
+      contentType: "image/png",
+      contentSha256,
+      sourceManifestRevision: args.manifest.revision,
+      requestFingerprint: visualMatterAssetRequestFingerprint(args.manifest.revision, request),
+      receipt: {
+        provider: billingReceipt.provider,
+        model: `${args.profile.image.model}@${args.profile.image.revision}`,
+        responseId: candidate.outputId,
+        requestSha256,
+        responseSha256: contentSha256,
+        costUsd: billingReceipt.costUsd,
+        billingReceiptId: billingReceipt.receiptId,
+        costSource: billingReceipt.costSource ?? "lifecycle_estimate",
+        gpuSku: billingReceipt.gpuSku,
+        gpuCount: billingReceipt.gpuCount,
+        gpuSeconds: billingReceipt.gpuSeconds,
+      },
+    });
+  }
+  if (seenRenderShots.size !== requestByRenderShot.size) {
+    throw new Error("Visual Matter reference render did not return every planned request exactly once");
+  }
+  // The manifest helper independently validates every request fingerprint,
+  // content hash shape, receipt shape, and final reference-pack fingerprint.
+  return attachVisualMatterReferenceAssets(args.manifest, assets).referenceAssets;
+}
+
+function stableVisualAttemptToken(value: string): string {
+  const token = value
+    .replace(/[^A-Za-z0-9_.:-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 120);
+  if (!token) throw new Error("standard Novita visual attempt requires a stable shot identifier");
+  return token;
+}
+
+function checkpointNotes(notes: readonly string[], fallback: string): string[] {
+  const compact = notes
+    .map((note) => note.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  return compact.length ? compact : [fallback.slice(0, 280)];
+}
+
+function standardQaRejection(input: {
+  gateId: string;
+  artifactKind: VisualArtifactKind;
+  subjectId: string;
+  reviewVersion: string;
+  notes: readonly string[];
+  fallback: string;
+}): VisualArtifactReviewRejection {
+  return {
+    schemaVersion: VISUAL_ARTIFACT_REVIEW_OUTCOME_VERSION,
+    gateId: input.gateId,
+    artifactKind: input.artifactKind,
+    subjectId: input.subjectId,
+    reviewVersion: input.reviewVersion,
+    notes: checkpointNotes(input.notes, input.fallback),
+  };
+}
+
+async function checkpointStandardVisualAttempt(
+  ctx: StageContext,
+  attempt: VisualArtifactAttempt,
+): Promise<void> {
+  if (!ctx.checkpointVisualArtifactAttempts) {
+    throw new Error("standard Novita visual attempt checkpoint requires the runner durable artifact sink");
+  }
+  await ctx.checkpointVisualArtifactAttempts([attempt]);
+}
+
+function standardNovitaStillAttemptScopeFingerprint(
+  manifest: StillRenderManifest,
+): string {
+  // Candidate keys remain part of the immutable initial still manifest. A
+  // targeted repair retains this scope rather than redefining its lineage.
+  return sha256Hex(canonicalJson(manifest));
+}
+
+async function localVisualSequenceArtifactIntegrity(
+  localPath: string,
+): Promise<{ sha256: string; byteLength: number }> {
+  const [sha256, details] = await Promise.all([
+    sha256ShotAnalysisSource(localPath),
+    stat(localPath),
+  ]);
+  if (!Number.isSafeInteger(details.size) || details.size < 1) {
+    throw new Error("qa_shots accepted clip has an invalid local byte length");
+  }
+  return { sha256, byteLength: details.size };
+}
 
 type DpVisualSpec = z.infer<typeof DPVisualSpecSchema>;
 
@@ -58,6 +307,21 @@ export interface TerminalStillAnchor {
 
 function sameStrings(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
+}
+
+
+function exactNarrativeCharacterRegistryIdentitiesForShot(input: {
+  readonly continuityCharacterIds: readonly string[];
+  readonly registryIdentityByCharacterId: ReadonlyMap<string, string>;
+}): readonly string[] {
+  if (input.continuityCharacterIds.length === 0) return [];
+  const identities = input.continuityCharacterIds.map((characterId) => input.registryIdentityByCharacterId.get(characterId));
+  if (identities.some((identity) => !identity)) return [];
+  const exact = [...new Set(identities as string[])].sort();
+  if (exact.length !== input.continuityCharacterIds.length) {
+    throw new Error("novita_render_video cannot map multiple visible characters to one accepted registry identity");
+  }
+  return exact;
 }
 
 /**
@@ -242,6 +506,12 @@ export function planCinematicQualityRepair(input: {
   attempt: number;
   stillKey?: string;
   endStillKey?: string;
+  /**
+   * The exact benchmarked creative adapter selected for the original LTX
+   * request. A repair is a replacement take, not permission to silently fall
+   * back to the base model and change the channel's visual identity.
+   */
+  creativeAdapter?: unknown;
 }): CinematicQualityRepairPlan {
   if (!canAttemptCinematicQualityRepair(input.attempt)) {
     throw new Error(
@@ -251,6 +521,12 @@ export function planCinematicQualityRepair(input: {
   if (input.phase === "video" && !input.stillKey?.trim()) {
     throw new Error(`cinematic video quality repair requires the selected still for ${input.shot.id}`);
   }
+  // Parse at the repair boundary, not only in the normal video-render path:
+  // this is the precise caller that turns a rejected take into a replacement
+  // paid request.
+  const creativeAdapter = input.phase === "video"
+    ? LtxCreativeAdapterInputSchema.optional().parse(input.creativeAdapter)
+    : undefined;
   const issues = compactRepairIssues(input.notes);
   const issueText = issues.length
     ? issues.map((issue, index) => `${index + 1}. ${issue}`).join("\n")
@@ -293,7 +569,11 @@ export function planCinematicQualityRepair(input: {
       seed: repairSeed(input.shot.seed, input.phase, input.attempt),
       ...(input.phase === "image"
         ? { candidateCount: 1 }
-        : { stillKey: input.stillKey, ...(input.endStillKey ? { endStillKey: input.endStillKey } : {}) }),
+        : {
+            stillKey: input.stillKey,
+            ...(input.endStillKey ? { endStillKey: input.endStillKey } : {}),
+            ...(creativeAdapter ? { creativeAdapter } : {}),
+          }),
     },
   };
 }
@@ -334,6 +614,7 @@ function qualityRecoveryRenderCfg(
       runId: ctx.runId,
       blockId: phase === "image" ? "qa_assets" : "qa_shots",
     },
+    ...(ctx.remoteChildFence ? { remoteChildFence: ctx.remoteChildFence } : {}),
   };
 }
 
@@ -560,10 +841,26 @@ export function assertAcceptedKeyframeSelection(args: {
   return selected;
 }
 
-function requireVisualMatter(store: Readonly<Record<string, unknown>>): VisualMatterManifest {
+function requireVisualMatter(
+  store: Readonly<Record<string, unknown>>,
+  options: { attachExternalReferenceAssets?: boolean } = {},
+): VisualMatterManifest {
   const manifest = visualMatterFromUnknown(store["visualMatterManifest"]);
   if (!manifest) throw new Error("cinematic render requires a valid Visual Matter manifest");
-  return manifest;
+  // The renderer itself intentionally does not consume this pack: direct
+  // Z-Image exposes no image/reference input on the admitted path. Only the
+  // visual QA blocks attach these actual R2 pixels as comparison evidence.
+  if (!options.attachExternalReferenceAssets) return manifest;
+  const rawAssets = store["visualMatterReferenceAssets"];
+  if (rawAssets === undefined) return manifest;
+  if (!Array.isArray(rawAssets)) {
+    throw new Error("cinematic Visual Matter reference assets must be a typed array");
+  }
+  if (!rawAssets.length) return manifest;
+  if (manifest.status !== "planned") {
+    throw new Error("external Visual Matter reference assets require one planned, unanchored manifest");
+  }
+  return attachVisualMatterReferenceAssets(manifest, rawAssets as VisualMatterReferenceAsset[]);
 }
 
 function profileForShots(shots: ShotPlan[], requested: unknown): GenerationProfile {
@@ -598,7 +895,7 @@ function ltxDistilledShot(shot: Shot, exclusions: readonly (string | undefined)[
  */
 function cinematicProviderEnvelope(
   ctx: StageContext,
-  blockId: "novita_render_images" | "novita_render_video",
+  blockId: "visual_matter_references" | "novita_render_images" | "novita_render_video",
   profile: GenerationProfile,
   shots: readonly Shot[],
 ): NovitaCostEnvelope {
@@ -609,7 +906,7 @@ function cinematicProviderEnvelope(
     );
   }
 
-  if (blockId === "novita_render_images") {
+  if (blockId === "novita_render_images" || blockId === "visual_matter_references") {
     return novitaCostEnvelope({
       label: blockId,
       imageJobs: shots.reduce((total, shot) => total + (shot.candidateCount ?? profile.image.candidates), 0),
@@ -628,6 +925,77 @@ function cinematicProviderEnvelope(
     maxCostUsd: stageBudgetUsd,
   });
 }
+
+/**
+ * Optional paid bridge from a planning-only Visual Matter manifest to actual
+ * R2 comparison assets. It intentionally performs text-to-image only and
+ * feeds the result only to visual QA; the primary keyframe generator remains
+ * text-only until an admitted native reference-image capability exists.
+ */
+export const visualMatterReferenceAssets: Block = {
+  id: "visual_matter_references",
+  consumes: ["contentLane", "visualMatterManifest"],
+  produces: ["visualMatterReferenceAssets"],
+  paid: true,
+  run: async (ctx) => {
+    // This direct-Novita lane is a cinematic-only QA-reference extension.
+    // Check the frozen seed before even the no-need fast path so an injected
+    // block cannot turn a non-cinematic invocation into an admissible paid
+    // renderer on a later resume.
+    const contentLane = parseContentLane(ctx.store["contentLane"]);
+    if (contentLane.key !== VISUAL_MATTER_REFERENCE_CONTENT_LANE) {
+      throw new Error(
+        `Visual Matter reference assets require contentLane ${VISUAL_MATTER_REFERENCE_CONTENT_LANE}`,
+      );
+    }
+    const manifest = visualMatterFromUnknown(ctx.store["visualMatterManifest"]);
+    if (!manifest) throw new Error("Visual Matter reference assets require a valid Visual Matter manifest");
+    // No need means no Novita admission, storage read, or spend. The designer
+    // only inserts this block for explicit cinematic opt-in, but this remains
+    // safe for a manually composed or resumed pipeline too.
+    if (ctx.params["enabled"] !== true || manifest.status === "disabled") {
+      ctx.log("visual_matter_references: no visual-development reference pack requested; no provider spend");
+      return { visualMatterReferenceAssets: [], [COST_PATCH_KEY]: 0 };
+    }
+    const plan = planVisualMatterReferenceRenders(manifest, ctx.params["maxImages"]);
+    if (!plan.shots.length) {
+      ctx.log("visual_matter_references: source plan has no reference requests; no provider spend");
+      return { visualMatterReferenceAssets: [], [COST_PATCH_KEY]: 0 };
+    }
+    const profile = generationProfile(ctx.params["generationProfile"]);
+    const envelope = cinematicProviderEnvelope(ctx, "visual_matter_references", profile, plan.shots);
+    const result = await renderImages({
+      prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/visual-matter-references`,
+      shots: [...plan.shots],
+      profile: toNovitaPhaseProfile(profile, "image"),
+      maxConcurrent: ctx.params["maxConcurrent"] as number | undefined,
+      maxCostUsd: envelope.imageMaxCostUsd,
+      lifecycle: {
+        ownerId: ctx.ownerId,
+        channelId: ctx.channelId,
+        runId: ctx.runId,
+        blockId: "visual_matter_references",
+      },
+      ...(ctx.remoteChildFence ? { remoteChildFence: ctx.remoteChildFence } : {}),
+      beforeProviderSpend: ctx.assertRemoteChildExecutionLease,
+    });
+    const assets = await materializeVisualMatterReferenceAssets({
+      manifest,
+      plan,
+      result,
+      profile,
+      getBytes: getObjectBytes,
+    });
+    ctx.log(
+      `visual_matter_references: ${assets.length} direct text-to-image R2 QA reference asset(s) ` +
+      `bound to exact worker receipts; not used as generator image conditioning`,
+    );
+    return {
+      visualMatterReferenceAssets: assets,
+      [COST_PATCH_KEY]: result.costUsd,
+    };
+  },
+};
 
 function generationIdentity(profile: GenerationProfile, phase: "image" | "video") {
   const settings = profile[phase];
@@ -803,6 +1171,11 @@ export const novitaRenderImages: Block = {
         runId: ctx.runId,
         blockId: "novita_render_images",
       },
+      ...(ctx.remoteChildFence ? { remoteChildFence: ctx.remoteChildFence } : {}),
+      // Remote children reassert their exact execution generation before each
+      // direct Novita wave/create and while checkpoint polling. Local runners
+      // intentionally omit this callback.
+      beforeProviderSpend: ctx.assertRemoteChildExecutionLease,
     };
     const result = await renderImages(cfg);
     if (!result.candidates?.length) throw new Error("novita_render_images returned no exact candidate mapping");
@@ -833,11 +1206,14 @@ export const qaAssets: Block = {
   paid: true,
   run: async (ctx) => {
     const { shots, specsByShot } = requireStoryInputs(ctx.store);
-    const visualMatter = requireVisualMatter(ctx.store);
+    const visualMatter = requireVisualMatter(ctx.store, { attachExternalReferenceAssets: true });
     const channelQuality = resolveChannelVisualQualityPolicy(ctx.store);
     const manifest = StillRenderManifestSchema.parse(ctx.store["stillRenderManifest"]);
     assertExactStillCandidates(shots, manifest);
     const profile = profileForShots(shots, manifest.generation.profileId);
+    const visualAttemptScopeFingerprint = standardNovitaStillAttemptScopeFingerprint(manifest);
+    const rejectedAttemptByShot = new Map<string, RejectedVisualAttemptParent>();
+    let visualAttemptOrdinal = 0;
     const tmp = await makeRunTempDir(`${ctx.runId}_asset_qa`);
     const selected: SelectedStillManifest["items"] = [];
     let repairRenderCostUsd = 0;
@@ -857,7 +1233,9 @@ export const qaAssets: Block = {
         const referencePaths: string[] = [];
         for (const [referenceIndex, reference] of referenceAssets.entries()) {
           const path = join(tmp, `reference_${shot.id}_${referenceIndex}_${reference.id.replace(/[^a-z0-9_-]/gi, "_")}.png`);
-          await writeBytes(path, await getObjectBytes(reference.r2Key!));
+          const bytes = await getObjectBytes(reference.r2Key);
+          assertVisualMatterReferenceAssetBytes(reference, bytes);
+          await writeBytes(path, bytes);
           referencePaths.push(path);
         }
         let candidates = manifest.items
@@ -872,14 +1250,14 @@ export const qaAssets: Block = {
             await writeBytes(path, await getObjectBytes(candidate.stillKey));
             candidatePaths.push(path);
           }
-          if (candidatePaths.length >= 5) {
+          if (candidatePaths.length >= NOVITA_VISUAL_QA_MAX_IMAGES_PER_GRADER_CALL) {
             throw new Error(`qa_assets cannot review ${candidatePaths.length} candidates without dropping required evidence for ${shot.id}`);
           }
-          const referenceBatchSize = 5 - candidatePaths.length;
-          const referenceBatches = referencePaths.length
-            ? Array.from({ length: Math.ceil(referencePaths.length / referenceBatchSize) }, (_, batchIndex) =>
-                referencePaths.slice(batchIndex * referenceBatchSize, (batchIndex + 1) * referenceBatchSize))
-            : [[]];
+          const referenceBatchSize = NOVITA_VISUAL_QA_MAX_IMAGES_PER_GRADER_CALL - candidatePaths.length;
+          const referenceBatches = Array.from(
+            { length: novitaVisualQaReferenceBatchCount(referencePaths.length, candidatePaths.length) },
+            (_, batchIndex) => referencePaths.slice(batchIndex * referenceBatchSize, (batchIndex + 1) * referenceBatchSize),
+          );
           const batchGrades: Array<z.infer<typeof AssetCandidateSetGradeSchema>> = [];
           for (const referenceBatch of referenceBatches) {
             graderCalls++;
@@ -919,11 +1297,81 @@ export const qaAssets: Block = {
             return { candidate, grade, score: imageScore(grade) };
           }).sort((a, b) => b.score - a.score || a.candidate.candidateIndex - b.candidate.candidateIndex);
           const best = ranked[0];
+          if (!best) throw new Error(`qa_assets has no graded candidate for ${shot.id}`);
           const passed =
             best.score >= thresholds.score &&
             best.grade.semanticAlignment >= thresholds.semanticAlignment &&
             best.grade.continuity >= thresholds.continuity &&
             best.grade.artifactFree >= thresholds.artifactFree;
+          // Preserve every independently graded candidate. This happens after
+          // the existing grader verdict and before the repair branch, so the
+          // checkpoint cannot alter selection, caps, or provider routing.
+          const priorRejected = rejectedAttemptByShot.get(shot.id);
+          const recordByCandidateIndex = new Map<number, VisualArtifactAttempt>();
+          for (const entry of candidates) {
+            const grade = byIndex.get(entry.candidateIndex)!;
+            const score = imageScore(grade);
+            const candidatePassed =
+              score >= thresholds.score &&
+              grade.semanticAlignment >= thresholds.semanticAlignment &&
+              grade.continuity >= thresholds.continuity &&
+              grade.artifactFree >= thresholds.artifactFree;
+            const notes = checkpointNotes(
+              grade.notes,
+              candidatePassed
+                ? `qa_assets accepted candidate ${entry.candidateIndex} for ${shot.id}`
+                : `qa_assets rejected candidate ${entry.candidateIndex} for ${shot.id}`,
+            );
+            const rejection = candidatePassed
+              ? undefined
+              : standardQaRejection({
+                  gateId: "standard-novita-asset-qa",
+                  artifactKind: "image",
+                  subjectId: shot.id,
+                  reviewVersion: STANDARD_NOVITA_ASSET_QA_REVIEW_VERSION,
+                  notes,
+                  fallback: `qa_assets rejected candidate ${entry.candidateIndex} for ${shot.id}`,
+                });
+            const ordinal = ++visualAttemptOrdinal;
+            const token = stableVisualAttemptToken(shot.id);
+            const record = createVisualArtifactAttempt({
+              adapterId: "standard_novita",
+              scopeFingerprint: visualAttemptScopeFingerprint,
+              attemptId: `standard-asset-${token}-${ordinal}`,
+              ordinal,
+              artifact: {
+                kind: "image",
+                subjectId: shot.id,
+                candidate: {
+                  id: `standard-asset-${token}-candidate-${entry.candidateIndex}`,
+                  r2Key: entry.stillKey,
+                },
+              },
+              review: candidatePassed
+                ? {
+                    verdict: "accepted",
+                    gateId: "standard-novita-asset-qa",
+                    reviewVersion: STANDARD_NOVITA_ASSET_QA_REVIEW_VERSION,
+                    notes,
+                  }
+                : {
+                    verdict: "rejected",
+                    gateId: "standard-novita-asset-qa",
+                    reviewVersion: STANDARD_NOVITA_ASSET_QA_REVIEW_VERSION,
+                    notes,
+                    rejection,
+                  },
+              repair: priorRejected
+                ? {
+                    kind: "replacement",
+                    parentAttemptFingerprint: priorRejected.attemptFingerprint,
+                    parentRejectionFingerprint: priorRejected.rejectionFingerprint,
+                  }
+                : { kind: "initial" },
+            });
+            await checkpointStandardVisualAttempt(ctx, record);
+            recordByCandidateIndex.set(entry.candidateIndex, record);
+          }
           if (passed) {
             selected.push({
               shotId: shot.id,
@@ -944,6 +1392,14 @@ export const qaAssets: Block = {
           const failure =
             `qa_assets FAILED ${shot.id}: best=${best.score.toFixed(3)} threshold=${thresholds.score.toFixed(3)} ` +
             `(semantic=${best.grade.semanticAlignment}, continuity=${best.grade.continuity}, artifact=${best.grade.artifactFree})`;
+          const rejectedBest = recordByCandidateIndex.get(best.candidate.candidateIndex);
+          if (!rejectedBest || rejectedBest.review.verdict !== "rejected") {
+            throw new Error(`qa_assets rejected best candidate ledger record is missing for ${shot.id}`);
+          }
+          rejectedAttemptByShot.set(shot.id, {
+            attemptFingerprint: rejectedBest.attemptFingerprint,
+            rejectionFingerprint: visualArtifactReviewRejectionFingerprint(rejectedBest.review.rejection),
+          });
           const attempt = repairAttempts + 1;
           if (!canAttemptCinematicQualityRepair(attempt)) {
             throw qualityRecoveryFailure(
@@ -1076,7 +1532,61 @@ export const novitaRenderVideo: Block = {
     // Same sealed, benchmark-gated adapter contract used by the Casefile and
     // loop routes. The worker resolves the exact pinned file and injects its
     // required trigger tokens; an unbenchmarked adapter cannot reach spend.
-    const creativeAdapter = LtxCreativeAdapterSelectionSchema.optional().parse(ctx.params["creativeAdapter"]);
+    const explicitCreativeAdapter = LtxCreativeAdapterInputSchema.optional().parse(ctx.params["creativeAdapter"]);
+    const studioAdapter = studioLtxCreativeAdapterSelectionFromUnknown(
+      ctx.store["studioLtxCreativeAdapterSelection"],
+    );
+    const scopedStudioAdapters = studioLtxShotAdapterSelectionsFromUnknown(
+      ctx.store["studioLtxCreativeAdapterSelectionsByShot"],
+    );
+    let scopedStudioAdapterByShot: ReadonlyMap<string, ReturnType<typeof studioLtxCreativeAdapterSelectionFromUnknown> | null> | undefined;
+    if (scopedStudioAdapters) {
+      const shotControl = NarrativeShotControlContractSchema.parse(ctx.store["narrativeShotControl"]);
+      if (shotControl.fingerprint !== scopedStudioAdapters.narrativeShotControlFingerprint) {
+        throw new Error("novita_render_video refuses a per-shot Studio adapter map from another narrative shot-control receipt");
+      }
+      const controlsByShot = new Map(shotControl.shots.map((control) => [control.shotId, control]));
+      const registryIdentityByCharacterId = new Map(
+        parseNarrativeSeriesAcceptedCharacterAdapters(ctx.store["narrativeAcceptedCharacterAdapters"] ?? [])
+          .map((adapter) => [adapter.characterId, adapter.registryIdentity]),
+      );
+      if (controlsByShot.size !== shots.length || !shots.every((shot) => controlsByShot.has(shot.id))) {
+        throw new Error("novita_render_video requires the narrative shot-control receipt to cover every rendered shot");
+      }
+      if (
+        scopedStudioAdapters.shots.length !== shots.length
+        || new Set(scopedStudioAdapters.shots.map((selection) => selection.shotId)).size !== shots.length
+      ) {
+        throw new Error("novita_render_video requires one exact Studio adapter decision per rendered shot");
+      }
+      for (const selection of scopedStudioAdapters.shots) {
+        const control = controlsByShot.get(selection.shotId);
+        if (!control) throw new Error("novita_render_video received an adapter decision for an unknown narrative shot");
+        const expectedCharacters = exactNarrativeCharacterRegistryIdentitiesForShot({
+          continuityCharacterIds: control.continuityCharacterIds,
+          registryIdentityByCharacterId,
+        });
+        if (!sameStrings(selection.continuityCharacterRegistryIdentities, expectedCharacters)) {
+          throw new Error("novita_render_video refuses a Studio adapter decision whose visible-cast binding does not match the shot plan");
+        }
+      }
+      scopedStudioAdapterByShot = new Map(
+        scopedStudioAdapters.shots.map((selection) => [selection.shotId, selection.selection]),
+      );
+    }
+    const studioSelections = scopedStudioAdapters
+      ? scopedStudioAdapters.shots.flatMap((selection) => selection.selection ? [selection.selection] : [])
+      : studioAdapter ? [studioAdapter] : [];
+    const explicitConflictsWithStudio = explicitCreativeAdapter && studioSelections.some((candidate) =>
+      canonicalJson(explicitCreativeAdapter) !== canonicalJson(candidate.selection),
+    );
+    if (explicitConflictsWithStudio) {
+      throw new Error("novita_render_video refuses conflicting explicit and Studio-approved LTX adapter selections");
+    }
+    // The Studio entry carries the expected model-manifest digest; the direct
+    // renderer independently compares it against its sealed worker manifest
+    // before a GPU worker can be created.
+    const creativeAdapter = studioAdapter?.selection ?? explicitCreativeAdapter;
     const globalNegative = ctx.params["negative"] as string | undefined;
     const shotsWithStills: Shot[] = shots.map((shot) => {
       const selectedStill = selectedByShot.get(shot.id);
@@ -1084,10 +1594,14 @@ export const novitaRenderVideo: Block = {
       const spec = specsByShot.get(shot.id)!;
       const directive = visualMatterDirectiveForShot(visualMatter, shot.id);
       const terminalAnchor = terminalAnchors.get(shot.id);
+      const scopedStudioAdapter = scopedStudioAdapterByShot?.get(shot.id);
+      const creativeAdapterForShot = scopedStudioAdapterByShot
+        ? scopedStudioAdapter?.selection
+        : creativeAdapter;
       return ltxDistilledShot({
         ...shot,
         stillKey: selectedStill.stillKey,
-        ...(creativeAdapter ? { creativeAdapter } : {}),
+        ...(creativeAdapterForShot ? { creativeAdapter: creativeAdapterForShot } : {}),
         ...(terminalAnchor ? { endStillKey: terminalAnchor.terminalStillKey } : {}),
         diegeticSoundscape: [
           `Only location tone and physical sounds motivated by the visible shot action: ${spec.motionPrompt}`,
@@ -1106,6 +1620,12 @@ export const novitaRenderVideo: Block = {
         negative: spec.negativePrompt,
       }, [spec.negativePrompt, globalNegative]);
     });
+    // Preserve the exact adapter actually sent for each initial shot in the
+    // durable manifest. qa_shots uses this—not a mutable block parameter—when
+    // producing a paid replacement take after a failed review.
+    const renderedAdapterByShot = new Map(
+      shotsWithStills.map((shot) => [shot.id, shot.creativeAdapter] as const),
+    );
     const envelope = cinematicProviderEnvelope(ctx, "novita_render_video", profile, shotsWithStills);
     const cfg: NovitaRenderCfg = {
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/novita`,
@@ -1122,6 +1642,8 @@ export const novitaRenderVideo: Block = {
         runId: ctx.runId,
         blockId: "novita_render_video",
       },
+      ...(ctx.remoteChildFence ? { remoteChildFence: ctx.remoteChildFence } : {}),
+      beforeProviderSpend: ctx.assertRemoteChildExecutionLease,
     };
     const result = await renderVideo(cfg);
     if (!result.candidates?.length) throw new Error("novita_render_video returned no exact shot mapping");
@@ -1172,6 +1694,9 @@ export const novitaRenderVideo: Block = {
           t1: shot.t1,
           sourceSentenceIds: shot.sourceSentenceIds,
           continuityState: shot.continuityState,
+          ...(renderedAdapterByShot.get(shot.id)
+            ? { creativeAdapter: renderedAdapterByShot.get(shot.id) }
+            : {}),
           ...(terminalAnchor ? terminalAnchor : {}),
         };
       }),
@@ -1189,15 +1714,24 @@ export const novitaRenderVideo: Block = {
 export const qaShots: Block = {
   id: "qa_shots",
   consumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "shotRenderManifest", "visualMatterManifest"],
-  produces: ["footageClips", "footageKeys", "shotQaReport", "visualCoverage"],
+  produces: [
+    "footageClips",
+    "footageKeys",
+    "shotQaReport",
+    "visualCoverage",
+    "visualSequenceArtifactManifest",
+  ],
   paid: true,
   run: async (ctx) => {
     const { shots, specsByShot } = requireStoryInputs(ctx.store);
-    const visualMatter = requireVisualMatter(ctx.store);
+    const visualMatter = requireVisualMatter(ctx.store, { attachExternalReferenceAssets: true });
     const channelQuality = resolveChannelVisualQualityPolicy(ctx.store);
     const manifest = ShotRenderManifestSchema.parse(ctx.store["shotRenderManifest"]);
     assertExactShotManifest(shots, manifest);
     const profile = profileForShots(shots, manifest.generation.profileId);
+    const visualAttemptScopeFingerprint = standardNovitaVisualSequenceFingerprint(manifest);
+    const rejectedAttemptByShot = new Map<string, RejectedVisualAttemptParent>();
+    let visualAttemptOrdinal = 0;
     const selectedStills = SelectedStillManifestSchema.parse(ctx.store["selectedStillManifest"]);
     if (selectedStills.generation.profileId !== profile.id) {
       throw new Error("qa_shots selected still profile does not match the pinned video profile");
@@ -1236,7 +1770,9 @@ export const qaShots: Block = {
         const referencePaths: string[] = [];
         for (const [referenceIndex, reference] of referenceAssets.entries()) {
           const path = join(tmp, `reference_${shot.id}_${referenceIndex}_${reference.id.replace(/[^a-z0-9_-]/gi, "_")}.png`);
-          await writeBytes(path, await getObjectBytes(reference.r2Key!));
+          const bytes = await getObjectBytes(reference.r2Key);
+          assertVisualMatterReferenceAssetBytes(reference, bytes);
+          await writeBytes(path, bytes);
           referencePaths.push(path);
         }
         const selectedStill = selectedByShot.get(shot.id)!;
@@ -1278,10 +1814,11 @@ export const qaShots: Block = {
                 frames.push(frame);
               }
               if (frames.length !== 3) throw new Error(`qa_shots FAILED ${shot.id}: could not extract start/middle/end frames`);
-              const referenceBatches = referencePaths.length
-                ? Array.from({ length: Math.ceil(referencePaths.length / 2) }, (_, batchIndex) =>
-                    referencePaths.slice(batchIndex * 2, batchIndex * 2 + 2))
-                : [[]];
+              const referenceBatchSize = NOVITA_VISUAL_QA_MAX_IMAGES_PER_GRADER_CALL - frames.length;
+              const referenceBatches = Array.from(
+                { length: novitaVisualQaReferenceBatchCount(referencePaths.length, frames.length) },
+                (_, batchIndex) => referencePaths.slice(batchIndex * referenceBatchSize, (batchIndex + 1) * referenceBatchSize),
+              );
               const batchGrades: Array<z.infer<typeof ShotGradeSchema>> = [];
               for (const referenceBatch of referenceBatches) {
                 graderCalls++;
@@ -1358,13 +1895,79 @@ export const qaShots: Block = {
             }
           }
 
-          if (!failure && grade) {
+          const accepted = !failure && grade !== undefined;
+          const checkpointedGradeNotes = checkpointNotes(
+            grade?.notes ?? repairNotes,
+            accepted
+              ? `qa_shots accepted candidate for ${shot.id}`
+              : (failure ?? `qa_shots rejected candidate for ${shot.id}`),
+          );
+          const rejection = accepted
+            ? undefined
+            : standardQaRejection({
+                gateId: "standard-novita-shot-qa",
+                artifactKind: "video",
+                subjectId: shot.id,
+                reviewVersion: STANDARD_NOVITA_SHOT_QA_REVIEW_VERSION,
+                notes: checkpointedGradeNotes,
+                fallback: failure ?? `qa_shots rejected candidate for ${shot.id}`,
+              });
+          const priorRejected = rejectedAttemptByShot.get(shot.id);
+          const ordinal = ++visualAttemptOrdinal;
+          const token = stableVisualAttemptToken(shot.id);
+          const visualAttempt = createVisualArtifactAttempt({
+            adapterId: "standard_novita",
+            scopeFingerprint: visualAttemptScopeFingerprint,
+            attemptId: `standard-shot-${token}-${ordinal}`,
+            ordinal,
+            artifact: {
+              kind: "video",
+              subjectId: shot.id,
+              candidate: {
+                id: `standard-shot-${token}-candidate-${repairAttempts + 1}`,
+                r2Key: clipKey,
+              },
+            },
+            review: accepted
+              ? {
+                  verdict: "accepted",
+                  gateId: "standard-novita-shot-qa",
+                  reviewVersion: STANDARD_NOVITA_SHOT_QA_REVIEW_VERSION,
+                  notes: checkpointedGradeNotes,
+                }
+              : {
+                  verdict: "rejected",
+                  gateId: "standard-novita-shot-qa",
+                  reviewVersion: STANDARD_NOVITA_SHOT_QA_REVIEW_VERSION,
+                  notes: checkpointedGradeNotes,
+                  rejection,
+                },
+            repair: priorRejected
+              ? {
+                  kind: "replacement",
+                  parentAttemptFingerprint: priorRejected.attemptFingerprint,
+                  parentRejectionFingerprint: priorRejected.rejectionFingerprint,
+                }
+              : { kind: "initial" },
+          });
+          // This record is awaited before the current code can call
+          // renderVideo below. A failed durable write stops the repair.
+          await checkpointStandardVisualAttempt(ctx, visualAttempt);
+
+          if (accepted) {
             localClips.push(local);
             footageKeys.push(clipKey);
-            grades.push({ ...grade, shotId: shot.id, score, threshold: thresholds.score });
+            grades.push({ ...grade!, shotId: shot.id, score, threshold: thresholds.score });
             ctx.log(`qa_shots: ${shot.id} passed @ ${score.toFixed(3)} after ${repairAttempts} automatic repair(s)`);
             break;
           }
+          if (visualAttempt.review.verdict !== "rejected") {
+            throw new Error(`qa_shots rejected candidate ledger record is missing for ${shot.id}`);
+          }
+          rejectedAttemptByShot.set(shot.id, {
+            attemptFingerprint: visualAttempt.attemptFingerprint,
+            rejectionFingerprint: visualArtifactReviewRejectionFingerprint(visualAttempt.review.rejection),
+          });
           const attempt = repairAttempts + 1;
           if (!canAttemptCinematicQualityRepair(attempt)) {
             throw qualityRecoveryFailure(
@@ -1381,6 +1984,11 @@ export const qaShots: Block = {
             attempt,
             stillKey: selectedStill.stillKey,
             endStillKey: terminalAnchor?.terminalStillKey,
+            // Keep a repair on the exact sealed adapter used by the rejected
+            // original clip. A Studio-selected (including per-shot character)
+            // adapter must never be replaced by a mutable global parameter or
+            // silently dropped for a base-model retry.
+            creativeAdapter: item.creativeAdapter,
           });
           ctx.log(`qa_shots: ${shot.id} failed QA; regenerating deterministic repair ${attempt}/${MAX_CINEMATIC_QUALITY_REPAIR_ATTEMPTS}`);
           let rendered;
@@ -1441,14 +2049,45 @@ export const qaShots: Block = {
       passed: true,
       shots: grades,
     });
+    // Every accepted clip is already present locally for the required QA
+    // frames. Stream-hashing those exact local bytes adds no provider call and
+    // no additional R2 download, while preventing a durable key from being
+    // presented later as if it alone proved which accepted take was reviewed.
+    const visualSequenceArtifactManifest =
+      await captureLocalVisualSequenceArtifactManifest({
+        source: "standard_novita",
+        sequenceFingerprint: standardNovitaVisualSequenceFingerprint(manifest),
+        items: manifest.items.map((item, index) => {
+          const localPath = localClips[index];
+          const r2Key = footageKeys[index];
+          if (!localPath || !r2Key) {
+            throw new Error(
+              "qa_shots accepted clip capture lost a local path or durable storage key",
+            );
+          }
+          return {
+            id: item.shotId,
+            r2Key,
+            localPath,
+          };
+        }),
+        getLocalFileIntegrity: localVisualSequenceArtifactIntegrity,
+      });
     return {
       footageClips: localClips,
       footageKeys,
       shotQaReport,
       visualCoverage,
+      visualSequenceArtifactManifest,
       [COST_PATCH_KEY]: repairRenderCostUsd + graderCalls * PRICE.visionGraderUsd,
     };
   },
 };
 
-export const novitaRenderBlocks: Block[] = [novitaRenderImages, qaAssets, novitaRenderVideo, qaShots];
+export const novitaRenderBlocks: Block[] = [
+  visualMatterReferenceAssets,
+  novitaRenderImages,
+  qaAssets,
+  novitaRenderVideo,
+  qaShots,
+];

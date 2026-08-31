@@ -20,10 +20,10 @@ function params(family: ReturnType<typeof designPipeline>, block: string): Recor
 
 assert.deepEqual(
   CERTIFIED_QUIZ_PROFILE_KEYS,
-  ["world_geography", "chemistry_challenge", "discovery_timeline", "screen_game_timeline"],
-  "the creator exposes exactly the four independently certified QuizYear identities",
+  ["world_geography", "chemistry_challenge", "discovery_timeline", "screen_game_timeline", "sports_championship_timeline"],
+  "the creator exposes exactly the five independently certified QuizYear identities",
 );
-assert.equal(CERTIFIED_QUIZ_PROFILE_OPTIONS.length, 4);
+assert.equal(CERTIFIED_QUIZ_PROFILE_OPTIONS.length, 5);
 
 for (const profile of CERTIFIED_QUIZ_PROFILE_OPTIONS) {
   assert.ok(profile.categories.length > 0, `${profile.key} must own at least one deterministic category`);

@@ -1,5 +1,10 @@
 import { v } from "convex/values";
 import { mutation, query } from "./studioFunctions";
+import type { MutationCtx } from "./_generated/server";
+import type { Id } from "./_generated/dataModel";
+import { assertRunExecutionWriteFence, isRunLeaseExpired } from "../src/lib/runLease";
+import { renderChildProviderWorkWindowMs } from "../src/lib/renderChildLease";
+import { renderBlockMachineClass } from "../src/lib/pipelineInvocationSnapshot";
 
 /**
  * A disposable Novita worker is a billing-bearing resource, not merely a
@@ -66,6 +71,18 @@ const ACTIVE_STATUSES = [
   "failed",
   "deletion_unverified",
 ] as const satisfies readonly LeaseStatus[];
+
+type RemoteChildFence = {
+  leaseOwner: string;
+  executionLeaseToken: number;
+  dispatchKey: string;
+};
+
+const remoteChildFenceValidator = v.object({
+  leaseOwner: v.string(),
+  executionLeaseToken: v.number(),
+  dispatchKey: v.string(),
+});
 
 function assertInternalSecret(secret: string, operation: string): void {
   const expected = process.env.INTERNAL_QUERY_SECRET;
@@ -154,6 +171,142 @@ function assertOwnedActiveRun(
   }
 }
 
+function assertRemoteChildFenceShape(fence: RemoteChildFence): void {
+  assertText(fence.leaseOwner, "remote child leaseOwner");
+  assertText(fence.dispatchKey, "remote child dispatchKey", 500);
+  if (
+    !Number.isSafeInteger(fence.executionLeaseToken) ||
+    fence.executionLeaseToken < 1
+  ) {
+    throw new Error("novitaWorkerLeases: invalid remote child execution lease token");
+  }
+}
+
+/**
+ * The caller-side renewal is a useful early rejection, but it cannot close a
+ * process-pause race by itself. This check runs in the same Convex mutation as
+ * the worker reservation/create transition, so a reaper's new execution token
+ * serializes ahead of any stale child attempting to consume paid capacity.
+ */
+async function assertCurrentRemoteChildFence(
+  ctx: Pick<MutationCtx, "db">,
+  args: {
+    ownerId: string;
+    channelId: Id<"channels">;
+    runId: Id<"runs">;
+    blockId: string;
+    fence: RemoteChildFence;
+    now: number;
+    operation: string;
+    requireFullProviderWindow: boolean;
+  },
+): Promise<void> {
+  assertRemoteChildFenceShape(args.fence);
+  const run = await ctx.db.get(args.runId);
+  if (
+    !run ||
+    run.ownerId !== args.ownerId ||
+    run.channelId !== args.channelId
+  ) {
+    throw new Error(`${args.operation}: remote child run ownership/channel mismatch`);
+  }
+  assertRunExecutionWriteFence(run, {
+    leaseOwner: args.fence.leaseOwner,
+    executionLeaseToken: args.fence.executionLeaseToken,
+  }, args.now);
+  const remoteChildWaitUntil = run.remoteChildWaitUntil;
+  const remoteChildWaitDeadline = run.remoteChildWaitDeadline;
+  if (
+    run.remoteChildWaitLeaseOwner !== args.fence.leaseOwner ||
+    run.remoteChildWaitExecutionLeaseToken !== args.fence.executionLeaseToken ||
+    run.remoteChildWaitBlockId !== args.blockId ||
+    run.remoteChildWaitDispatchKey !== args.fence.dispatchKey ||
+    typeof remoteChildWaitUntil !== "number" ||
+    !Number.isFinite(remoteChildWaitUntil) ||
+    typeof remoteChildWaitDeadline !== "number" ||
+    !Number.isFinite(remoteChildWaitDeadline) ||
+    remoteChildWaitDeadline < remoteChildWaitUntil ||
+    run.leaseExpiresAt !== remoteChildWaitUntil ||
+    args.now >= remoteChildWaitUntil ||
+    args.now >= remoteChildWaitDeadline
+  ) {
+    throw new Error(`${args.operation}: remote child lifecycle fence is stale or invalid`);
+  }
+  if (args.requireFullProviderWindow) {
+    const providerWindowMs = renderChildProviderWorkWindowMs(
+      renderBlockMachineClass(args.blockId),
+    );
+    if (args.now + providerWindowMs > remoteChildWaitDeadline) {
+      throw new Error(`${args.operation}: remote child lacks a full provider work window`);
+    }
+  }
+}
+
+/**
+ * A remote worker lease remains tied to the exact parent generation for its
+ * entire mutable lifecycle, not just its initial create POST. The only
+ * fence-free writer for such a lease is the scheduled reaper after the parent
+ * execution is no longer live; a stale child can never impersonate that path
+ * while a recovered parent owns the run.
+ */
+async function assertRemoteChildLifecycleMutationFence(
+  ctx: Pick<MutationCtx, "db">,
+  args: {
+    lease: {
+      ownerId: string;
+      channelId: Id<"channels">;
+      runId: Id<"runs">;
+      blockId: string;
+      remoteChildFenceRequired?: boolean;
+    };
+    fence?: RemoteChildFence;
+    reaper?: boolean;
+    now: number;
+    operation: string;
+    requireFullProviderWindow?: boolean;
+  },
+): Promise<void> {
+  if (!args.lease.remoteChildFenceRequired) {
+    if (args.fence) {
+      throw new Error(`${args.operation}: remote child fence does not match this lease`);
+    }
+    return;
+  }
+  if (args.fence) {
+    if (args.reaper) {
+      throw new Error(`${args.operation}: remote child and reaper fences are mutually exclusive`);
+    }
+    await assertCurrentRemoteChildFence(ctx, {
+      ownerId: args.lease.ownerId,
+      channelId: args.lease.channelId,
+      runId: args.lease.runId,
+      blockId: args.lease.blockId,
+      fence: args.fence,
+      now: args.now,
+      operation: args.operation,
+      requireFullProviderWindow: args.requireFullProviderWindow ?? false,
+    });
+    return;
+  }
+  if (!args.reaper) {
+    throw new Error(`${args.operation}: remote child fence is required`);
+  }
+  const run = await ctx.db.get(args.lease.runId);
+  // Reapers reconcile an abandoned lease only after its owning run has
+  // stopped or expired. A recovered parent is already `running` with a fresh
+  // lease before it dispatches its child, so this closes the gap before that
+  // child writes its first remote wait receipt.
+  if (
+    run &&
+    run.ownerId === args.lease.ownerId &&
+    run.channelId === args.lease.channelId &&
+    run.status === "running" &&
+    !isRunLeaseExpired(run, args.now)
+  ) {
+    throw new Error(`${args.operation}: live remote parent requires its exact child fence`);
+  }
+}
+
 function sameImmutableLease(
   existing: {
     ownerId: string;
@@ -171,6 +324,7 @@ function sameImmutableLease(
     storageId: string;
     imageDigest: string;
     maximumCostUsd: number;
+    remoteChildFenceRequired?: boolean;
     requestedAt: number;
     bootDeadlineAt: number;
     absoluteDeadlineAt: number;
@@ -191,6 +345,7 @@ function sameImmutableLease(
     storageId: string;
     imageDigest: string;
     maximumCostUsd: number;
+    remoteChildFenceRequired: boolean;
     requestedAt: number;
     bootDeadlineAt: number;
     absoluteDeadlineAt: number;
@@ -211,7 +366,8 @@ function sameImmutableLease(
     existing.clusterId === candidate.clusterId &&
     existing.storageId === candidate.storageId &&
     existing.imageDigest === candidate.imageDigest &&
-    existing.maximumCostUsd === candidate.maximumCostUsd
+    existing.maximumCostUsd === candidate.maximumCostUsd &&
+    Boolean(existing.remoteChildFenceRequired) === candidate.remoteChildFenceRequired
   );
 }
 
@@ -284,6 +440,7 @@ export const reserve = mutation({
     requestedAt: v.number(),
     bootDeadlineAt: v.number(),
     absoluteDeadlineAt: v.number(),
+    remoteChildFence: v.optional(remoteChildFenceValidator),
   },
   returns: v.object({
     leaseId: v.id("novitaWorkerLeases"),
@@ -312,6 +469,19 @@ export const reserve = mutation({
       throw new Error("novitaWorkerLeases: verifiedGpuQuota must be an integer from 1 to 8");
     }
     assertLeaseTimes(args);
+
+    if (args.remoteChildFence) {
+      await assertCurrentRemoteChildFence(ctx, {
+        ownerId: args.ownerId,
+        channelId: args.channelId,
+        runId: args.runId,
+        blockId: args.blockId,
+        fence: args.remoteChildFence,
+        now: Date.now(),
+        operation: "novitaWorkerLeases.reserve",
+        requireFullProviderWindow: true,
+      });
+    }
 
     const [channel, run] = await Promise.all([
       ctx.db.get(args.channelId),
@@ -343,6 +513,7 @@ export const reserve = mutation({
       storageId: args.storageId,
       imageDigest: args.imageDigest,
       maximumCostUsd: args.maximumCostUsd,
+      remoteChildFenceRequired: args.remoteChildFence !== undefined,
       requestedAt: args.requestedAt,
       bootDeadlineAt: args.bootDeadlineAt,
       absoluteDeadlineAt: args.absoluteDeadlineAt,
@@ -400,6 +571,7 @@ export const claimCreate = mutation({
     workerName: v.string(),
     attemptToken: v.string(),
     now: v.number(),
+    remoteChildFence: v.optional(remoteChildFenceValidator),
   },
   returns: v.object({
     claimed: v.boolean(),
@@ -419,6 +591,13 @@ export const claimCreate = mutation({
       .unique();
     if (!lease) throw new Error("novitaWorkerLeases: worker not found");
     assertAfterLeaseClock(lease, args.now, "novitaWorkerLeases.claimCreate");
+    await assertRemoteChildLifecycleMutationFence(ctx, {
+      lease,
+      fence: args.remoteChildFence,
+      now: Date.now(),
+      operation: "novitaWorkerLeases.claimCreate",
+      requireFullProviderWindow: true,
+    });
     if (lease.status === "requested") {
       await ctx.db.patch(lease._id, {
         status: "create_claimed",
@@ -452,6 +631,7 @@ export const markCreateDispatched = mutation({
     workerName: v.string(),
     attemptToken: v.string(),
     now: v.number(),
+    remoteChildFence: v.optional(remoteChildFenceValidator),
   },
   returns: v.id("novitaWorkerLeases"),
   handler: async (ctx, args) => {
@@ -467,6 +647,13 @@ export const markCreateDispatched = mutation({
       .unique();
     if (!lease) throw new Error("novitaWorkerLeases: worker not found");
     assertAfterLeaseClock(lease, args.now, "novitaWorkerLeases.markCreateDispatched");
+    await assertRemoteChildLifecycleMutationFence(ctx, {
+      lease,
+      fence: args.remoteChildFence,
+      now: Date.now(),
+      operation: "novitaWorkerLeases.markCreateDispatched",
+      requireFullProviderWindow: true,
+    });
     if (lease.status === "create_dispatched" && lease.createAttemptToken === args.attemptToken) {
       return lease._id;
     }
@@ -490,6 +677,7 @@ export const bindInstance = mutation({
     instanceId: v.string(),
     attemptToken: v.string(),
     now: v.number(),
+    remoteChildFence: v.optional(remoteChildFenceValidator),
   },
   returns: v.id("novitaWorkerLeases"),
   handler: async (ctx, args) => {
@@ -507,6 +695,12 @@ export const bindInstance = mutation({
       .unique();
     if (!lease) throw new Error("novitaWorkerLeases: reserved worker not found");
     assertAfterLeaseClock(lease, args.now, "novitaWorkerLeases.bindInstance");
+    await assertRemoteChildLifecycleMutationFence(ctx, {
+      lease,
+      fence: args.remoteChildFence,
+      now: Date.now(),
+      operation: "novitaWorkerLeases.bindInstance",
+    });
     if (lease.instanceId && lease.instanceId !== args.instanceId) {
       throw new Error("novitaWorkerLeases: provider instance collision");
     }
@@ -544,6 +738,7 @@ export const claimExecution = mutation({
     workerName: v.string(),
     attemptToken: v.string(),
     now: v.number(),
+    remoteChildFence: v.optional(remoteChildFenceValidator),
   },
   returns: v.object({
     claimed: v.boolean(),
@@ -563,6 +758,12 @@ export const claimExecution = mutation({
       .unique();
     if (!lease) throw new Error("novitaWorkerLeases: worker not found");
     assertAfterLeaseClock(lease, args.now, "novitaWorkerLeases.claimExecution");
+    await assertRemoteChildLifecycleMutationFence(ctx, {
+      lease,
+      fence: args.remoteChildFence,
+      now: Date.now(),
+      operation: "novitaWorkerLeases.claimExecution",
+    });
     if (["deleted_verified", "failed", "deletion_unverified"].includes(lease.status)) {
       return {
         claimed: false,
@@ -570,12 +771,26 @@ export const claimExecution = mutation({
         ...(lease.instanceId ? { instanceId: lease.instanceId } : {}),
       };
     }
-    if (!lease.executionAttemptToken) {
+    const recoveredRemoteController =
+      Boolean(lease.remoteChildFenceRequired && args.remoteChildFence) &&
+      (
+        lease.remoteChildExecutionLeaseOwner !== args.remoteChildFence!.leaseOwner ||
+        lease.remoteChildExecutionLeaseToken !== args.remoteChildFence!.executionLeaseToken ||
+        lease.remoteChildExecutionDispatchKey !== args.remoteChildFence!.dispatchKey
+      );
+    if (!lease.executionAttemptToken || recoveredRemoteController) {
       await ctx.db.patch(lease._id, {
         executionAttemptToken: args.attemptToken,
         executionClaimedAt: args.now,
         lastHeartbeatAt: args.now,
         lastWorkAt: args.now,
+        ...(args.remoteChildFence
+          ? {
+              remoteChildExecutionLeaseOwner: args.remoteChildFence.leaseOwner,
+              remoteChildExecutionLeaseToken: args.remoteChildFence.executionLeaseToken,
+              remoteChildExecutionDispatchKey: args.remoteChildFence.dispatchKey,
+            }
+          : {}),
       });
       return {
         claimed: true,
@@ -599,6 +814,7 @@ export const heartbeat = mutation({
     status: heartbeatStatus,
     now: v.number(),
     completionKey: v.optional(v.string()),
+    remoteChildFence: v.optional(remoteChildFenceValidator),
   },
   returns: v.id("novitaWorkerLeases"),
   handler: async (ctx, args) => {
@@ -616,6 +832,12 @@ export const heartbeat = mutation({
       .unique();
     if (!lease) throw new Error("novitaWorkerLeases: worker not found");
     assertAfterLeaseClock(lease, args.now, "novitaWorkerLeases.heartbeat");
+    await assertRemoteChildLifecycleMutationFence(ctx, {
+      lease,
+      fence: args.remoteChildFence,
+      now: Date.now(),
+      operation: "novitaWorkerLeases.heartbeat",
+    });
     if (!lease.instanceId) {
       throw new Error("novitaWorkerLeases: heartbeat before provider instance binding");
     }
@@ -653,6 +875,10 @@ export const requestDeletion = mutation({
     workerName: v.string(),
     now: v.number(),
     reason: v.optional(v.string()),
+    remoteChildFence: v.optional(remoteChildFenceValidator),
+    // The scheduled reconciler is the only fence-free writer for an
+    // abandoned remote worker, and only after the parent execution expires.
+    reaper: v.optional(v.literal(true)),
   },
   returns: v.id("novitaWorkerLeases"),
   handler: async (ctx, args) => {
@@ -665,6 +891,13 @@ export const requestDeletion = mutation({
       .unique();
     if (!lease) throw new Error("novitaWorkerLeases: worker not found");
     assertAfterLeaseClock(lease, args.now, "novitaWorkerLeases.requestDeletion");
+    await assertRemoteChildLifecycleMutationFence(ctx, {
+      lease,
+      fence: args.remoteChildFence,
+      reaper: args.reaper,
+      now: Date.now(),
+      operation: "novitaWorkerLeases.requestDeletion",
+    });
     if (lease.status === "deleted_verified") return lease._id;
     await ctx.db.patch(lease._id, {
       status: "delete_requested",
@@ -684,6 +917,8 @@ export const markDeletedVerified = mutation({
     workerName: v.string(),
     now: v.number(),
     billingReceipt: v.optional(v.any()),
+    remoteChildFence: v.optional(remoteChildFenceValidator),
+    reaper: v.optional(v.literal(true)),
   },
   returns: v.id("novitaWorkerLeases"),
   handler: async (ctx, args) => {
@@ -695,6 +930,13 @@ export const markDeletedVerified = mutation({
       .unique();
     if (!lease) throw new Error("novitaWorkerLeases: worker not found");
     assertAfterLeaseClock(lease, args.now, "novitaWorkerLeases.markDeletedVerified");
+    await assertRemoteChildLifecycleMutationFence(ctx, {
+      lease,
+      fence: args.remoteChildFence,
+      reaper: args.reaper,
+      now: Date.now(),
+      operation: "novitaWorkerLeases.markDeletedVerified",
+    });
     if (lease.status === "deleted_verified") return lease._id;
     if (lease.status !== "delete_requested") {
       throw new Error("novitaWorkerLeases: deletion must be requested before verification");
@@ -717,6 +959,8 @@ export const markDeletionUnverified = mutation({
     workerName: v.string(),
     now: v.number(),
     error: v.string(),
+    remoteChildFence: v.optional(remoteChildFenceValidator),
+    reaper: v.optional(v.literal(true)),
   },
   returns: v.id("novitaWorkerLeases"),
   handler: async (ctx, args) => {
@@ -729,6 +973,13 @@ export const markDeletionUnverified = mutation({
       .unique();
     if (!lease) throw new Error("novitaWorkerLeases: worker not found");
     assertAfterLeaseClock(lease, args.now, "novitaWorkerLeases.markDeletionUnverified");
+    await assertRemoteChildLifecycleMutationFence(ctx, {
+      lease,
+      fence: args.remoteChildFence,
+      reaper: args.reaper,
+      now: Date.now(),
+      operation: "novitaWorkerLeases.markDeletionUnverified",
+    });
     if (lease.status === "deleted_verified") {
       throw new Error("novitaWorkerLeases: cannot invalidate verified deletion");
     }
@@ -752,6 +1003,7 @@ export const markFailed = mutation({
     workerName: v.string(),
     now: v.number(),
     error: v.string(),
+    remoteChildFence: v.optional(remoteChildFenceValidator),
   },
   returns: v.id("novitaWorkerLeases"),
   handler: async (ctx, args) => {
@@ -764,6 +1016,12 @@ export const markFailed = mutation({
       .unique();
     if (!lease) throw new Error("novitaWorkerLeases: worker not found");
     assertAfterLeaseClock(lease, args.now, "novitaWorkerLeases.markFailed");
+    await assertRemoteChildLifecycleMutationFence(ctx, {
+      lease,
+      fence: args.remoteChildFence,
+      now: Date.now(),
+      operation: "novitaWorkerLeases.markFailed",
+    });
     if (lease.status === "deleted_verified") {
       throw new Error("novitaWorkerLeases: cannot fail a deleted lease");
     }

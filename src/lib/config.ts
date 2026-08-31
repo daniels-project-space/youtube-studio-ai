@@ -14,6 +14,8 @@ export const STATUS_COLOR: Record<string, string> = {
   canceled: "var(--color-canceled)",
   superseded: "var(--color-amber)",
   skipped: "var(--color-queued)",
+  awaiting_factual_review: "var(--color-amber)",
+  factual_review_blocked: "var(--color-failed)",
 };
 
 /** Status → human label. */
@@ -25,4 +27,6 @@ export const STATUS_LABEL: Record<string, string> = {
   canceled: "Canceled",
   superseded: "Superseded (self-heal)",
   skipped: "Skipped",
+  awaiting_factual_review: "Awaiting factual review",
+  factual_review_blocked: "Factual review blocked",
 };

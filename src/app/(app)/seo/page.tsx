@@ -272,6 +272,11 @@ export function SeoWorkspace({
               >
                 {activeSection === "brief" && (
                   <>
+                    <ResearchEvidenceLedger
+                      intel={intel}
+                      databank={databank}
+                      competitors={competitors}
+                    />
                     <SeoFocus
                       niche={niche}
                       channelName={channelNiche ? selectedChannel?.name : undefined}
@@ -345,6 +350,117 @@ type SeoDatabankRow = {
   };
 };
 
+type SeoEvidenceRow = {
+  label: string;
+  state: string;
+  detail: string;
+  measured?: boolean;
+};
+
+/**
+ * A compact ledger of the exact persisted research that may support the
+ * upload brief. It purposefully shows absences and metadata-only coverage
+ * instead of turning partial research into a readiness score.
+ */
+function ResearchEvidenceLedger({
+  intel,
+  databank,
+  competitors,
+}: {
+  intel: SeoIntel | null | undefined;
+  databank: SeoDatabankRow | null | undefined;
+  competitors: CompetitorRow[] | undefined;
+}) {
+  const competitorVideos = competitors?.reduce(
+    (total, competitor) => total + competitor.topVideos.length,
+    0,
+  );
+  const guide = intel?.thumbnailStyleGuide;
+  const metadataOnly =
+    guide?.visualEvidenceStatus === "metadata_only" ||
+    guide?.evidenceSource === "youtube_data_api_v3_metadata" ||
+    guide?.notes.toLowerCase().startsWith("minimal guide");
+  const visualState =
+    intel === undefined
+      ? "Loading record"
+      : !guide
+        ? "No record"
+        : metadataOnly
+          ? "Metadata only"
+          : typeof guide.hasTextOverlayPct === "number"
+            ? "Measured"
+            : "Not measured";
+  const rows: SeoEvidenceRow[] = [
+    {
+      label: "Search signals",
+      state: intel === undefined ? "Loading record" : intel ? "Stored" : "No record",
+      detail: intel
+        ? `${intel.topTags.length} tags and ${intel.topTitlePatterns.length} title patterns are stored.`
+        : "No persisted title, tag, or title-length evidence is available.",
+      measured: Boolean(intel),
+    },
+    {
+      label: "Strategy databank",
+      state:
+        databank === undefined
+          ? "Loading record"
+          : databank
+            ? "Stored"
+            : "No record",
+      detail: databank?.sourceAttribution
+        ? `${databank.sourceAttribution.topPerformersAnalysed} top performers are attributed in the stored record.`
+        : databank
+          ? "A strategy record exists without a stored source-attribution count."
+          : "No persisted title-template, hook, or gap record is available.",
+      measured: Boolean(databank),
+    },
+    {
+      label: "Competitor sample",
+      state:
+        competitors === undefined
+          ? "Loading record"
+          : competitorVideos
+            ? `${competitorVideos} videos`
+            : "No videos stored",
+      detail:
+        competitors === undefined
+          ? "Loading the persisted competitor sample."
+          : `${competitors.length} competitor channel${competitors.length === 1 ? "" : "s"} in the stored sample.`,
+      measured: competitorVideos !== undefined && competitorVideos > 0,
+    },
+    {
+      label: "Thumbnail evidence",
+      state: visualState,
+      detail:
+        guide && typeof guide.sampledVideoCount === "number"
+          ? `${guide.sampledVideoCount} sampled video${guide.sampledVideoCount === 1 ? "" : "s"}; ${metadataOnly ? "pixels and overlay text were not measured" : "stored guide available"}.`
+          : metadataOnly
+            ? "The stored guide is metadata-only; thumbnail pixels and overlay text were not measured."
+            : "No stored visual measurement is available.",
+      measured: visualState === "Measured",
+    },
+  ];
+
+  return (
+    <section className={styles.evidenceLedger} aria-label="Stored SEO research evidence">
+      <div className={styles.evidenceLedgerHeader}>
+        <small>Research evidence ledger</small>
+        <h2>What this upload brief is grounded in</h2>
+        <p>Only persisted research is represented here. Metadata-only collection remains visibly limited rather than being presented as visual or audience evidence.</p>
+      </div>
+      <div className={styles.evidenceRows}>
+        {rows.map((row) => (
+          <div key={row.label} className={`${styles.evidenceRow} ${row.measured ? styles.evidenceRowMeasured : ""}`}>
+            <small>{row.label}</small>
+            <strong>{row.state}</strong>
+            <span>{row.detail}</span>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function SeoFocus({
   niche,
   channelName,
@@ -379,7 +495,7 @@ function SeoFocus({
         : `${intel.thumbnailStyleGuide.hasTextOverlayPct}% use text`;
 
   return (
-    <section className="glass overview-panel seo-focus">
+    <section className={`glass overview-panel seo-focus ${styles.focus}`}>
       <div className="panel-heading">
         <span>
           <small>Use next</small>

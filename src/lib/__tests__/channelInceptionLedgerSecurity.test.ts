@@ -6,6 +6,11 @@ import {
 } from "@/engine/channelInceptionLedger";
 import { buildChannelInceptionPlan } from "@/engine/channelInceptionPlan";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import { resolveChannelProgramRoute } from "@/engine/channelProgramRoute";
+import {
+  creatorIntentDiagnosisFingerprint,
+  deriveCreatorIntentDiagnosis,
+} from "@/engine/creatorIntentDiagnosis";
 import { createChannelShowProfile } from "@/engine/channelShowProfile";
 import type { CreativeCapabilitySelection } from "@/engine/creative/creativeCapabilityCatalog";
 import { designPipeline } from "@/engine/designer";
@@ -132,6 +137,11 @@ async function main(): Promise<void> {
     concept: "A sharper daily stoic challenge program for ambitious professionals",
   });
   const capabilitySelections: readonly CreativeCapabilitySelection[] = [];
+  const initialProgramRoute = resolveChannelProgramRoute(initialProgramBrief);
+  const initialCreatorIntentDiagnosis = deriveCreatorIntentDiagnosis({
+    programBrief: initialProgramBrief,
+    programRoute: initialProgramRoute,
+  });
   const initialDesign = designPipeline({
     family: initialProgramBrief.family,
     nicheKey: initialProgramBrief.nicheKey,
@@ -141,6 +151,7 @@ async function main(): Promise<void> {
   });
   const initialShowProfile = createChannelShowProfile({
     programBrief: initialProgramBrief,
+    programRoute: initialProgramRoute,
     capabilitySelections,
     pipeline: initialDesign.pipeline,
   });
@@ -158,17 +169,114 @@ async function main(): Promise<void> {
     "a generic channel update cannot create a partial program identity that lacks its sealed composition",
   );
   assert.doesNotThrow(() => assertProgramBriefIdentityMutation({
+    existingIdentity: {
+      persona: "Calm guide",
+      nicheKey: initialProgramBrief.nicheKey,
+      programBrief: initialProgramBrief,
+      programRoute: initialProgramRoute,
+      showProfile: initialShowProfile,
+    },
+    nextIdentity: {
+      persona: "Calm guide",
+      nicheKey: initialProgramBrief.nicheKey,
+      programBrief: initialProgramBrief,
+      programRoute: initialProgramRoute,
+      showProfile: initialShowProfile,
+    },
+    effectiveFamily: "narrated_stock",
+    nextPipeline: initialDesign.pipeline,
+  }), "an existing pre-diagnosis identity remains readable and immutable");
+  assert.throws(
+    () => assertProgramBriefIdentityMutation({
+      existingIdentity: { persona: "Calm guide" },
+      nextIdentity: {
+        persona: "Calm guide",
+        nicheKey: initialProgramBrief.nicheKey,
+        programBrief: initialProgramBrief,
+        programRoute: initialProgramRoute,
+        showProfile: initialShowProfile,
+      },
+      effectiveFamily: "narrated_stock",
+      nextPipeline: initialDesign.pipeline,
+      allowFirstShowProfile: true,
+    }),
+    /requires a sealed creator intent diagnosis/,
+    "a new admitted channel cannot omit the route-derived semantic receipt",
+  );
+  assert.doesNotThrow(() => assertProgramBriefIdentityMutation({
     existingIdentity: { persona: "Calm guide" },
     nextIdentity: {
       persona: "Calm guide",
       nicheKey: initialProgramBrief.nicheKey,
       programBrief: initialProgramBrief,
+      programRoute: initialProgramRoute,
+      creatorIntentDiagnosis: initialCreatorIntentDiagnosis,
       showProfile: initialShowProfile,
     },
     effectiveFamily: "narrated_stock",
     nextPipeline: initialDesign.pipeline,
     allowFirstShowProfile: true,
   }));
+  const validLookingTamperedDiagnosis = {
+    ...structuredClone(initialCreatorIntentDiagnosis),
+    claimMode: "fictional_disclosed" as const,
+  };
+  validLookingTamperedDiagnosis.fingerprint = creatorIntentDiagnosisFingerprint(validLookingTamperedDiagnosis);
+  assert.throws(
+    () => assertProgramBriefIdentityMutation({
+      existingIdentity: { persona: "Calm guide" },
+      nextIdentity: {
+        persona: "Calm guide",
+        nicheKey: initialProgramBrief.nicheKey,
+        programBrief: initialProgramBrief,
+        programRoute: initialProgramRoute,
+        creatorIntentDiagnosis: validLookingTamperedDiagnosis,
+        showProfile: initialShowProfile,
+      },
+      effectiveFamily: "narrated_stock",
+      nextPipeline: initialDesign.pipeline,
+      allowFirstShowProfile: true,
+    }),
+    /does not match the canonical program brief and route/,
+    "Convex identity admission rejects a self-hashed diagnosis that changes route semantics",
+  );
+  assert.throws(
+    () => assertProgramBriefIdentityMutation({
+      existingIdentity: { persona: "Calm guide" },
+      nextIdentity: {
+        persona: "Calm guide",
+        nicheKey: initialProgramBrief.nicheKey,
+        programBrief: initialProgramBrief,
+        showProfile: initialShowProfile,
+      },
+      effectiveFamily: "narrated_stock",
+      nextPipeline: initialDesign.pipeline,
+      allowFirstShowProfile: true,
+    }),
+    /requires a sealed channel program route/,
+    "new admission cannot persist a profile without its route identity",
+  );
+  assert.throws(
+    () => assertProgramBriefIdentityMutation({
+      existingIdentity: {
+        persona: "Calm guide",
+        nicheKey: initialProgramBrief.nicheKey,
+        programBrief: initialProgramBrief,
+        programRoute: initialProgramRoute,
+        showProfile: initialShowProfile,
+      },
+      nextIdentity: {
+        persona: "Calm guide",
+        nicheKey: initialProgramBrief.nicheKey,
+        programBrief: initialProgramBrief,
+        showProfile: initialShowProfile,
+      },
+      effectiveFamily: "narrated_stock",
+      nextPipeline: initialDesign.pipeline,
+    }),
+    /channel program route cannot be removed/,
+    "a generic identity mutation cannot strip the route from a route-bearing historical channel",
+  );
   assert.throws(
     () => assertProgramBriefIdentityMutation({
       existingIdentity: { persona: "Calm guide" },

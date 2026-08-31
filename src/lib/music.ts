@@ -161,9 +161,10 @@ async function decodeAccurateDurationSec(path: string): Promise<number> {
  * mp3 generation, not three, and segment edges land on exact sample boundaries
  * instead of mp3 frame boundaries.
  *
- * Throws MusicError on ffmpeg/ffprobe failure OR on a corrupt/short result;
- * tracks too short to fold (< ~4×fade) are returned unchanged (a tiny bed loops
- * too often for the fold to matter and acrossfade would eat most of it).
+ * Throws MusicError on ffmpeg/ffprobe failure, a corrupt result, or a source
+ * too short to prove as a loop. A caller that later uses `-stream_loop` must
+ * never receive the original bed as a "best effort" fallback: that would turn
+ * an unproven seam into a repeated hard splice.
  */
 export async function selfLoopAudio(
   inPath: string,
@@ -200,8 +201,10 @@ export async function selfLoopAudio(
       throw new MusicError(`selfLoopAudio: could not measure input duration of ${inPath}`);
     }
     if (durationSec < fade * 4) {
-      opts?.log?.(`selfLoopAudio: track too short to fold (${durationSec.toFixed(1)}s) — keeping as-is`);
-      return inPath;
+      throw new MusicError(
+        `selfLoopAudio: track is too short to establish seamless loop continuity ` +
+          `(${durationSec.toFixed(1)}s; need at least ${(fade * 4).toFixed(1)}s)`,
+      );
     }
 
     const tail = fade + 0.5; // 0.5s pure lead-in before the fade (see proof above)
@@ -303,6 +306,13 @@ const SUNO_BASE = "https://api.sunoapi.org/api/v1";
 /** Default Suno model — V5 ("crystal-clear audio"); override per call/param. */
 export const SUNO_DEFAULT_MODEL = "V5";
 
+// Provider create responses can be lost after the provider has accepted a
+// billable job. Keep each HTTP boundary finite so ambiguity reaches the typed
+// MusicError path rather than surviving until a whole-task replay.
+const MUSIC_CREATE_REQUEST_TIMEOUT_MS = 120_000;
+const MUSIC_POLL_REQUEST_TIMEOUT_MS = 30_000;
+const MUSIC_WAV_UPGRADE_REQUEST_TIMEOUT_MS = 120_000;
+
 function murekaKey(): string {
   const k = process.env.MUREKA_API_KEY;
   if (!k) throw new MusicError("MUREKA_API_KEY is not configured");
@@ -312,6 +322,11 @@ function sunoKey(): string {
   const k = process.env.SUNO_API_KEY;
   if (!k) throw new MusicError("SUNO_API_KEY is not configured");
   return k;
+}
+
+/** True when the production music block has at least one supported provider. */
+export function hasMusicProvider(): boolean {
+  return Boolean(process.env.MUREKA_API_KEY || process.env.SUNO_API_KEY);
 }
 
 function extractAudioUrl(choice: Record<string, unknown>): string | undefined {
@@ -339,6 +354,7 @@ export async function generateMureka(args: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ model: args.model ?? "auto", prompt: args.prompt }),
+      signal: AbortSignal.timeout(MUSIC_CREATE_REQUEST_TIMEOUT_MS),
     });
   } catch (error) {
     throw new MusicError(
@@ -386,6 +402,7 @@ export async function generateMureka(args: {
     try {
       res = await fetch(`${MUREKA_BASE}/instrumental/query/${id}`, {
         headers: { Authorization: `Bearer ${murekaKey()}` },
+        signal: AbortSignal.timeout(MUSIC_POLL_REQUEST_TIMEOUT_MS),
       });
       if (!res.ok) {
         if (res.status === 429 || res.status >= 500) continue;
@@ -453,6 +470,9 @@ async function fetchSunoWav(
       method: "POST",
       headers: { Authorization: `Bearer ${sunoKey()}`, "Content-Type": "application/json" },
       body: JSON.stringify({ taskId, audioId, callBackUrl: "https://example.com/none" }),
+      // WAV is an optional paid upgrade. If its POST is ambiguous, keep the
+      // already-ready MP3 instead of resubmitting the upgrade.
+      signal: AbortSignal.timeout(MUSIC_WAV_UPGRADE_REQUEST_TIMEOUT_MS),
     });
     const cjson = (await created.json()) as { data?: { taskId?: string } };
     const wavTaskId = cjson.data?.taskId;
@@ -462,7 +482,10 @@ async function fetchSunoWav(
       await new Promise((r) => setTimeout(r, 6000));
       const res = await fetch(
         `${SUNO_BASE}/wav/record-info?taskId=${encodeURIComponent(wavTaskId)}`,
-        { headers: { Authorization: `Bearer ${sunoKey()}` } },
+        {
+          headers: { Authorization: `Bearer ${sunoKey()}` },
+          signal: AbortSignal.timeout(MUSIC_POLL_REQUEST_TIMEOUT_MS),
+        },
       );
       if (!res.ok) continue;
       const json = (await res.json()) as Record<string, unknown>;
@@ -559,6 +582,7 @@ export async function generateSuno(args: {
         method: "POST",
         headers,
         body: JSON.stringify(body),
+        signal: AbortSignal.timeout(MUSIC_CREATE_REQUEST_TIMEOUT_MS),
       });
     } catch (error) {
       throw new MusicError(
@@ -625,7 +649,10 @@ export async function generateSuno(args: {
     try {
       res = await fetch(
         `${SUNO_BASE}/generate/record-info?taskId=${encodeURIComponent(taskId)}`,
-        { headers: { Authorization: `Bearer ${sunoKey()}` } },
+        {
+          headers: { Authorization: `Bearer ${sunoKey()}` },
+          signal: AbortSignal.timeout(MUSIC_POLL_REQUEST_TIMEOUT_MS),
+        },
       );
       if (!res.ok) {
         if (res.status === 429 || res.status >= 500) continue;

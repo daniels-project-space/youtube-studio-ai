@@ -1,5 +1,8 @@
 import crypto from "node:crypto";
 import { spawn } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import path from "node:path";
 
 const SHA256 = /^[a-f0-9]{64}$/;
 
@@ -83,14 +86,23 @@ export function mediaFactsFromFfprobe(raw) {
 }
 
 async function runFfprobe(bytes) {
-  return await new Promise((resolve, reject) => {
+  // MP4 is often only fully probeable from a seekable input: the completed
+  // Novita output placed its metadata after the media packets, so piping its
+  // otherwise-valid bytes into ffprobe produced partial stream fields. The
+  // controller must probe the exact downloaded bytes, never weaken its proof
+  // requirements just because a non-seekable pipe omitted a field.
+  const directory = await mkdtemp(path.join(tmpdir(), "yt-ltx25-probe-"));
+  const mediaPath = path.join(directory, "output.mp4");
+  try {
+    await writeFile(mediaPath, bytes, { mode: 0o600 });
+    return await new Promise((resolve, reject) => {
     const child = spawn("ffprobe", [
       "-v", "error",
       "-count_frames",
       "-show_entries", "format=format_name,duration:stream=codec_type,codec_name,pix_fmt,width,height,channels,sample_rate,avg_frame_rate,r_frame_rate,nb_read_frames,nb_frames",
       "-of", "json",
-      "-i", "pipe:0",
-    ], { stdio: ["pipe", "pipe", "pipe"] });
+      "-i", mediaPath,
+    ], { stdio: ["ignore", "pipe", "pipe"] });
     let stdout = "";
     let stderr = "";
     let settled = false;
@@ -104,7 +116,6 @@ async function runFfprobe(bytes) {
     child.stderr.setEncoding("utf8");
     child.stdout.on("data", (chunk) => { stdout += chunk; });
     child.stderr.on("data", (chunk) => { stderr += chunk; });
-    child.stdin.once("error", (error) => finish(reject, new Error(`ffprobe input failed: ${error.message}`)));
     child.once("close", (code, signal) => {
       if (code !== 0) {
         finish(reject, new Error(`ffprobe failed (${signal || code}): ${stderr.trim().slice(0, 500) || "no diagnostics"}`));
@@ -112,8 +123,10 @@ async function runFfprobe(bytes) {
       }
       finish(resolve, stdout);
     });
-    child.stdin.end(bytes);
-  });
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 }
 
 /** Run an independent controller-side ffprobe over the exact downloaded bytes. */
