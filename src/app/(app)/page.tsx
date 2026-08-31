@@ -255,7 +255,7 @@ export default function OverviewPage() {
             <strong>Recent runs</strong>
           </span>
           <span className={styles.runSummaryMeta}>
-            {failed.length > 0 && <em>{failed.length} need review</em>}
+            {failed.length > 0 && <em>{failed.length} require inspection</em>}
             <small>{recentFiltered?.length ?? 0} retained</small>
           </span>
           <i aria-hidden="true" />

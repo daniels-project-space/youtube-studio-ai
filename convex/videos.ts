@@ -1,4 +1,4 @@
-import { query } from "./studioFunctions";
+import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
@@ -84,6 +84,7 @@ export const listVideos = query({
     status: v.optional(v.string()),
     search: v.optional(v.string()),
     limit: v.optional(v.number()),
+    includeArchived: v.optional(v.boolean()),
   },
   handler: async (ctx, args) => {
     // Bound the scan even when the caller passes no limit (all current
@@ -124,6 +125,8 @@ export const listVideos = query({
       if (rows.length >= limit) break;
       // Tenancy guard when reading the channel index.
       if (run.ownerId !== args.ownerId) continue;
+      const libraryState = run.libraryState ?? "active";
+      if (!args.includeArchived && libraryState === "archived") continue;
       // Server-side status filter.
       if (args.status && run.status !== args.status) continue;
 
@@ -222,6 +225,8 @@ export const listVideos = query({
         startedAt: run.startedAt,
         finishedAt: run.finishedAt,
         youtubeVideoId: run.youtubeVideoId,
+        libraryState,
+        libraryStateUpdatedAt: run.libraryStateUpdatedAt,
         // Fold the private-draft watch URL into the row so the Library can link
         // straight to the uploaded draft (it used to be stranded in the
         // upload_draft stage outputs, never surfaced to the UI).
@@ -253,6 +258,29 @@ export const listVideos = query({
     // Newest first (startedAt can drift a hair from _creationTime).
     rows.sort((a, b) => (b.createdAt as number) - (a.createdAt as number));
     return rows;
+  },
+});
+
+/**
+ * Reversible Library organization. Archiving changes only presentation state;
+ * retained masters, evidence, costs, run history, and YouTube records remain
+ * untouched and the same mutation restores the row.
+ */
+export const setLibraryState = mutation({
+  args: {
+    ownerId: v.string(),
+    runId: v.id("runs"),
+    state: v.union(v.literal("active"), v.literal("archived")),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerId !== args.ownerId) return null;
+    await ctx.db.patch(run._id, {
+      libraryState: args.state,
+      libraryStateUpdatedAt: Date.now(),
+    });
+    return null;
   },
 });
 

@@ -629,6 +629,11 @@ export default defineSchema({
     error: v.optional(v.string()),
     videoAssetId: v.optional(v.id("assets")),
     youtubeVideoId: v.optional(v.string()),
+    // Reversible operator organization for the finished-master Library. This
+    // never deletes a run, asset, certificate, or YouTube video; historical
+    // rows without the field are treated as active.
+    libraryState: v.optional(v.union(v.literal("active"), v.literal("archived"))),
+    libraryStateUpdatedAt: v.optional(v.number()),
     // Conservative, server-derived release provenance. This is deliberately
     // separate from publishing state: a stored QA boolean alone can never
     // promote a run to `release_evidence_recorded`.

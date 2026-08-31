@@ -77,6 +77,9 @@ export type VideoRow = {
   startedAt?: number;
   finishedAt?: number;
   youtubeVideoId?: string;
+  /** Reversible Library presentation state; old rows default to active. */
+  libraryState?: "active" | "archived";
+  libraryStateUpdatedAt?: number;
   channelId: string;
   channelName: string;
   channelSlug: string;

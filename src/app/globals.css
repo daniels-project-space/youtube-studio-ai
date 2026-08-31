@@ -2093,6 +2093,28 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
   padding: 0.5rem;
 }
 
+.channel-room-select {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, auto);
+  align-items: center;
+  gap: .7rem;
+  padding: .55rem .62rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-faint);
+  font-size: .62rem;
+}
+
+.channel-room-select select {
+  min-height: 32px;
+  padding: .35rem 1.8rem .35rem .5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 7px;
+  color: var(--color-muted);
+  background: var(--color-canvas);
+  font-size: .64rem;
+}
+
 .channel-ready { color: var(--color-ok) !important; }
 .channel-incomplete { color: var(--color-amber) !important; }
 
@@ -2387,16 +2409,17 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
 
 .video-card {
   width: 100%;
-  display: block;
+  display: grid;
+  align-content: start;
   padding: 0;
   overflow: hidden;
   color: inherit;
-  font: inherit;
   text-align: left;
-  cursor: pointer;
   transition: border-color 150ms ease, background 150ms ease;
 }
-.video-card:hover { border-color: var(--color-border-strong); background: #151a22; }
+.video-card:hover { border-color: var(--color-border-strong); background: var(--color-surface-raised); }
+.video-card-open { width: 100%; display: grid; padding: 0; border: 0; color: inherit; background: transparent; font: inherit; text-align: left; }
+button.video-card-open { cursor: pointer; }
 .video-card-media { position: relative; width: 100%; aspect-ratio: 16 / 9; overflow: hidden; background: #0d1117; }
 .video-card-media::after { content: ""; position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(0, 0, 0, 0.16), transparent 38%, rgba(0, 0, 0, 0.2)); }
 .video-card-image { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; transition: transform 220ms ease; }
@@ -2421,6 +2444,11 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
 .video-card-evidence { display: flex; align-items: center; justify-content: space-between; gap: 0.45rem; min-width: 0; }
 .video-card-evidence-label { color: var(--color-faint); font: 0.62rem/1.2 var(--font-mono); letter-spacing: 0.025em; text-transform: uppercase; }
 .video-card-views { color: var(--color-secondary); font: 0.65rem/1.35 var(--font-mono); }
+.video-card-footer { min-height: 39px; display: flex; align-items: center; justify-content: space-between; gap: .55rem; padding: .42rem .65rem; border-top: 1px solid var(--color-border); color: var(--color-faint); background: rgba(0,0,0,.11); font-size: .57rem; }
+.video-card-library-action { min-height: 27px; padding: .3rem .48rem; border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-muted); background: rgba(243,240,232,.025); font: 650 .6rem/1 var(--font-sans); cursor: pointer; }
+.video-card-library-action:hover { border-color: var(--color-border-strong); color: var(--color-fg); }
+.video-card-library-action:disabled { opacity: .48; cursor: wait; }
+.video-card[data-library-state="archived"] { opacity: .82; }
 
 /* ── Channel detail: operating profile + progressive disclosure ────────── */
 

@@ -1,8 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useQuery } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
+import type { Id } from "../../../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
 import { useSelectedChannel } from "@/lib/channel-context";
 import type { ChannelRow, VideoRow } from "@/lib/types";
@@ -19,7 +20,7 @@ import {
   LibraryFilters,
   type LibraryFilterState,
 } from "@/components/LibraryFilters";
-import { IconLibrary, IconChevron } from "@/components/icons";
+import { IconLibrary, IconChevron, IconSpark } from "@/components/icons";
 import {
   isLibraryGroupExpanded,
   LIBRARY_PAGE_SIZE,
@@ -29,18 +30,20 @@ import styles from "./library.module.css";
 
 /** Open lightbox = which channel group + which index within that group. */
 type LightboxTarget = { slug: string; index: number };
+type CollectionMode = "active" | "archived";
 
 export default function LibraryPage() {
   const ownerId = useOwnerId();
   const { selectedSlug } = useSelectedChannel();
   const operationsAccess = useOperationsAccess();
 
-  const videos = useQuery(api.videos.listVideos, { ownerId, limit: 500 }) as
+  const videos = useQuery(api.videos.listVideos, { ownerId, limit: 500, includeArchived: true }) as
     | VideoRow[]
     | undefined;
   const channels = useQuery(api.channels.listChannels, { ownerId }) as
     | ChannelRow[]
     | undefined;
+  const setLibraryState = useMutation(api.videos.setLibraryState);
 
   const [filters, setFilters] = useState<LibraryFilterState>({
     channelSlug: null,
@@ -53,6 +56,9 @@ export default function LibraryPage() {
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
+  const [collection, setCollection] = useState<CollectionMode>("active");
+  const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
+  const [recentChange, setRecentChange] = useState<{ video: VideoRow; state: CollectionMode } | null>(null);
 
   // Apply all filters + sort client-side over the query result.
   const filtered = useMemo<VideoRow[]>(() => {
@@ -65,6 +71,7 @@ export default function LibraryPage() {
     const needle = filters.search.trim().toLowerCase();
 
     const out = videos.filter((v) => {
+      if ((v.libraryState ?? "active") !== collection) return false;
       // Global ChannelSwitcher wins; the filter dropdown narrows further.
       if (selectedSlug && v.channelSlug !== selectedSlug) return false;
       if (filters.channelSlug && v.channelSlug !== filters.channelSlug)
@@ -86,7 +93,7 @@ export default function LibraryPage() {
       return b.createdAt - a.createdAt;
     });
     return out;
-  }, [videos, filters, selectedSlug]);
+  }, [videos, filters, selectedSlug, collection]);
 
   // Group by channel, preserving the sorted order within each group.
   const groups = useMemo(() => {
@@ -123,27 +130,69 @@ export default function LibraryPage() {
   };
 
   const loading = videos === undefined || channels === undefined;
+  const activeCount = videos?.filter((video) => (video.libraryState ?? "active") === "active").length ?? 0;
+  const archivedCount = videos?.filter((video) => video.libraryState === "archived").length ?? 0;
+
+  const changeLibraryState = async (video: VideoRow, state: CollectionMode) => {
+    if (busyIds.has(video._id)) return;
+    setBusyIds((current) => new Set(current).add(video._id));
+    try {
+      await setLibraryState({
+        ownerId,
+        runId: video._id as Id<"runs">,
+        state,
+      });
+      setRecentChange({ video, state });
+      if (lightbox?.slug === video.channelSlug) setLightbox(null);
+    } finally {
+      setBusyIds((current) => {
+        const next = new Set(current);
+        next.delete(video._id);
+        return next;
+      });
+    }
+  };
+
+  const undoRecentChange = async () => {
+    if (!recentChange) return;
+    const change = recentChange;
+    setRecentChange(null);
+    await changeLibraryState(
+      change.video,
+      change.state === "archived" ? "active" : "archived",
+    );
+    setRecentChange(null);
+  };
 
   return (
-    <>
+    <div className={styles.library}>
       <PageHeader
+        eyebrow="Master library / retained work"
         title="Library"
-        subtitle="Finished videos across your channels. Pipeline completion and retained master evidence are shown separately."
+        subtitle="Find finished work, improve its packaging, or archive it without deleting the master. Pipeline completion and retained master evidence are shown separately."
       />
 
-      <p
-        style={{
-          margin: "-0.65rem 0 1.25rem",
-          color: "var(--color-muted)",
-          fontSize: "0.78rem",
-          lineHeight: 1.45,
-        }}
-      >
-        Only <strong>Release evidence recorded</strong> has retained final-master proof. Historical outputs remain visible,
-        but are labelled unverified rather than being presented as release-quality masters.
-      </p>
+      <section className={styles.collectionBar} aria-label="Library collections">
+        <div className={styles.collectionTabs} role="tablist" aria-label="Video collection">
+          <button type="button" role="tab" aria-selected={collection === "active"} onClick={() => setCollection("active")}>
+            <span>Active masters</span><strong>{loading ? "—" : activeCount}</strong>
+          </button>
+          <button type="button" role="tab" aria-selected={collection === "archived"} onClick={() => setCollection("archived")}>
+            <span>Archive</span><strong>{loading ? "—" : archivedCount}</strong>
+          </button>
+        </div>
+        <p>
+          {collection === "active"
+            ? "The working collection. Historical outputs remain visible, but are labelled unverified when retained evidence is incomplete; failed orphan renders and archived work stay out of this view."
+            : "A reversible shelf for old or removed work. Restoring a row never recreates or republishes anything."}
+        </p>
+        <span className={styles.evidenceNote}>
+          <i aria-hidden="true" />
+          Only “release evidence recorded” proves the retained final master.
+        </span>
+      </section>
 
-      <div style={{ marginBottom: "1.4rem" }}>
+      {collection === "active" ? <div className={styles.latestRail}>
         <ArtifactWorkRail
           videos={videos === undefined ? undefined : filtered}
           onOpen={(video) => openLightbox(video.channelSlug, video)}
@@ -151,16 +200,25 @@ export default function LibraryPage() {
           description="Open a retained render or YouTube-linked release before filtering the full archive."
           emptyMessage="No rendered or uploaded video artifacts match the selected channel and filters yet."
         />
-      </div>
+      </div> : null}
 
-      {operationsAccess === "owner" ? (
-        <ThumbnailRefreshInventoryPanel selectedChannelSlug={selectedSlug} />
-      ) : (
-        <OwnerOnlyNotice
-          access={operationsAccess}
-          desk="the thumbnail refresh inventory"
-        />
-      )}
+      {collection === "active" ? (
+        <details className={`${styles.packagingWorkshop} glass`}>
+          <summary>
+            <span className={styles.workshopIcon} aria-hidden="true"><IconSpark width={18} height={18} /></span>
+            <span><small>Packaging workshop</small><strong>Review and refresh thumbnails</strong></span>
+            <p>Inspect retained candidates before spending or changing an existing YouTube video.</p>
+            <i aria-hidden="true" />
+          </summary>
+          <div className={styles.workshopBody}>
+            {operationsAccess === "owner" ? (
+              <ThumbnailRefreshInventoryPanel selectedChannelSlug={selectedSlug} />
+            ) : (
+              <OwnerOnlyNotice access={operationsAccess} desk="the thumbnail refresh inventory" />
+            )}
+          </div>
+        </details>
+      ) : null}
 
       {!loading && (
         <LibraryFilters
@@ -175,8 +233,10 @@ export default function LibraryPage() {
         <SkeletonList rows={4} />
       ) : groups.length === 0 ? (
         <EmptyState
-          title="No videos yet"
-          description="Finished and published videos will appear here, grouped by channel."
+          title={collection === "active" ? "No active masters" : "Archive is empty"}
+          description={collection === "active"
+            ? "Finished and published videos will appear here, grouped by channel."
+            : "Archived masters remain recoverable here until you restore them."}
           icon={<IconLibrary width={24} height={24} />}
         />
       ) : (
@@ -198,7 +258,7 @@ export default function LibraryPage() {
                 >
                   <IconChevron width={16} height={16} />
                   <h2>{g.name}</h2>
-                  <span className={styles.count}>{g.videos.length} matches</span>
+                  <span className={styles.count}>{g.videos.length} {g.videos.length === 1 ? "master" : "masters"}</span>
                 </button>
 
                 {isExpanded && (
@@ -206,6 +266,11 @@ export default function LibraryPage() {
                     <VideoGrid
                       videos={page.visible}
                       onOpen={(v) => openLightbox(g.slug, v)}
+                      libraryAction={operationsAccess === "owner" ? {
+                        label: collection === "active" ? "Archive" : "Restore",
+                        busyIds,
+                        onAction: (video) => void changeLibraryState(video, collection === "active" ? "archived" : "active"),
+                      } : undefined}
                     />
                     {page.total > LIBRARY_PAGE_SIZE ? (
                       <div className={styles.paging}>
@@ -262,6 +327,15 @@ export default function LibraryPage() {
           onClose={() => setLightbox(null)}
         />
       )}
-    </>
+      {recentChange ? (
+        <aside className={styles.changeToast} role="status">
+          <span><strong>{recentChange.state === "archived" ? "Moved to archive" : "Restored to active masters"}</strong><small>{recentChange.video.title}</small></span>
+          <button type="button" onClick={() => void undoRecentChange()}>
+            Undo
+          </button>
+          <button type="button" aria-label="Dismiss" onClick={() => setRecentChange(null)}>×</button>
+        </aside>
+      ) : null}
+    </div>
   );
 }

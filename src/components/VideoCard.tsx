@@ -20,19 +20,20 @@ import { MediaPreview } from "./MediaPreview";
 export function VideoCard({
   video,
   onOpen,
+  libraryAction,
 }: {
   video: VideoRow;
   onOpen?: (video: VideoRow) => void;
+  libraryAction?: {
+    label: string;
+    busy: boolean;
+    onAction: () => void;
+  };
 }) {
   const views = fmtViews(video.estimatedViews);
 
-  return (
-    <button
-      type="button"
-      onClick={() => onOpen?.(video)}
-      className="glass video-card"
-    >
-      {/* 16:9 thumbnail */}
+  const content = (
+    <>
       <MediaPreview
         className="video-card-media"
         imageClassName="video-card-image"
@@ -49,29 +50,48 @@ export function VideoCard({
         )}
       />
 
-      {/* Body */}
       <div className="video-card-body">
-        <h3>
-          {video.title}
-        </h3>
+        <h3>{video.title}</h3>
         <div className="video-card-meta">
-          <span>
-            {video.channelName}
-          </span>
-          <time>
-            {fmtDateTime(video.createdAt)}
-          </time>
+          <span>{video.channelName}</span>
+          <time>{fmtDateTime(video.createdAt)}</time>
         </div>
         <div className="video-card-evidence">
           <span className="video-card-evidence-label">Master evidence</span>
           <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} />
         </div>
-        {views && (
-          <div className="video-card-views">
-            ~{views} est. views
-          </div>
-        )}
+        {views && <div className="video-card-views">~{views} est. views</div>}
       </div>
-    </button>
+    </>
+  );
+
+  return (
+    <article className="glass video-card" data-library-state={video.libraryState ?? "active"}>
+      {onOpen ? (
+        <button
+          type="button"
+          onClick={() => onOpen(video)}
+          className="video-card-open"
+          aria-label={`Open ${video.title}`}
+        >
+          {content}
+        </button>
+      ) : (
+        <div className="video-card-open">{content}</div>
+      )}
+      {libraryAction ? (
+        <footer className="video-card-footer">
+          <span>{video.libraryState === "archived" ? "Out of the active library" : "Active collection"}</span>
+          <button
+            type="button"
+            className="video-card-library-action"
+            onClick={libraryAction.onAction}
+            disabled={libraryAction.busy}
+          >
+            {libraryAction.busy ? "Updating…" : libraryAction.label}
+          </button>
+        </footer>
+      ) : null}
+    </article>
   );
 }

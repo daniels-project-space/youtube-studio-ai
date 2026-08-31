@@ -117,9 +117,9 @@ function ThumbnailRefreshPreview({ row }: { row: ThumbnailInventoryRow }) {
 }
 
 /**
- * A read-only, owner-authenticated review queue. It never turns a legacy row
- * into a candidate, renders a thumbnail, or updates a YouTube video; those
- * are deliberate future approvals after the retained evidence is reviewed.
+ * Owner-authenticated packaging evidence queue. This view does not pretend a
+ * legacy row is ready: it proves whether an exact thumbnail-only replay is
+ * possible before a separate, bounded candidate action can spend.
  */
 export function ThumbnailRefreshInventoryPanel({
   selectedChannelSlug,
@@ -166,15 +166,15 @@ export function ThumbnailRefreshInventoryPanel({
     <section className={`${styles.section} glass`} aria-labelledby="thumbnail-review-title">
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>Legacy output review</p>
-          <h2 id="thumbnail-review-title">Thumbnail evidence queue</h2>
+          <p className={styles.eyebrow}>Packaging evidence / retained inputs</p>
+          <h2 id="thumbnail-review-title">Thumbnail review queue</h2>
           <p>
-            See which finished videos retain current thumbnail provenance before creating a candidate. A thumbnail can update the existing YouTube video after review; a rebuilt video must become a separate private successor draft because YouTube does not replace media in place. Legacy never means replace automatically.
+            First prove what can be replayed safely. A reviewed thumbnail may update the existing YouTube video; rebuilt media must become a separate private successor draft because YouTube cannot replace video bytes in place. Legacy never means replace automatically.
           </p>
         </div>
         <div className={styles.counts} aria-label="Thumbnail evidence totals">
-          <span data-tone="review"><strong>{inventory === null ? "—" : reviewCount}</strong> review</span>
-          <span data-tone="ready"><strong>{inventory === null ? "—" : counts.current_golden_candidate}</strong> current</span>
+          <span data-tone="review"><small>Needs review</small><strong>{inventory === null ? "—" : reviewCount}</strong></span>
+          <span data-tone="ready"><small>Current proof</small><strong>{inventory === null ? "—" : counts.current_golden_candidate}</strong></span>
         </div>
       </header>
 

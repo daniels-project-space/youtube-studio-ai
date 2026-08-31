@@ -1,0 +1,57 @@
+.workspace { display: grid; gap: .75rem; margin-bottom: 1.15rem; padding-block: .85rem; border-block: 1px solid var(--color-border); }
+.header { display: flex; align-items: end; justify-content: space-between; gap: 1rem; }
+.header > div { display: grid; gap: .14rem; }
+.header > div > span { color: var(--color-accent); font: 700 .54rem/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
+.header h2 { font-family: var(--font-display); font-size: 1.18rem; font-weight: 570; letter-spacing: -.025em; }
+.header p { margin: .1rem 0 0; color: var(--color-faint); font-size: .66rem; }
+.inlineForm { display: grid; grid-template-columns: auto minmax(180px, 340px) auto auto; align-items: center; gap: .5rem; padding: .65rem; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-surface); }
+.inlineForm label { color: var(--color-faint); font: .58rem/1 var(--font-mono); text-transform: uppercase; }
+.inlineForm input,
+.renameForm input { min-height: 39px; padding: .55rem .65rem; border: 1px solid var(--color-border-strong); border-radius: 7px; color: var(--color-fg); background: #090c0a; outline: 0; }
+.inlineForm input:focus,
+.renameForm input:focus { border-color: var(--color-secondary); box-shadow: 0 0 0 3px rgba(182,223,98,.07); }
+.shelf { display: flex; gap: .58rem; overflow-x: auto; padding: .06rem .04rem .28rem; scrollbar-width: thin; }
+.allRoom,
+.room { position: relative; min-width: 220px; min-height: 72px; flex: 0 0 220px; border: 1px solid var(--color-border); border-radius: 11px; color: var(--color-muted); background: var(--color-surface); }
+.allRoom { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: .62rem; padding: .65rem; text-align: left; cursor: pointer; }
+.allRoom[aria-pressed="true"],
+.room[data-selected="true"] { border-color: rgba(255,112,70,.42); background: rgba(255,112,70,.055); }
+.allRoom[data-drag-over="true"],
+.room[data-drag-over="true"] { border-color: var(--color-secondary); border-style: dashed; background: rgba(182,223,98,.06); }
+.allRoom > span:nth-child(2),
+.roomCopy { min-width: 0; display: grid; gap: .12rem; }
+.allRoom strong,
+.roomCopy strong { overflow: hidden; color: var(--color-fg); font-size: .72rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.allRoom small,
+.roomCopy small { color: var(--color-faint); font-size: .57rem; }
+.allRoom > i { color: var(--color-accent); font: normal .65rem/1 var(--font-mono); }
+.folderMark { width: 30px; height: 30px; display: grid; flex: 0 0 auto; place-items: center; border: 1px solid var(--color-border); border-radius: 8px; color: var(--color-accent); background: rgba(255,112,70,.04); }
+.room { display: flex; align-items: stretch; }
+.roomMain { min-width: 0; display: flex; flex: 1; align-items: center; gap: .55rem; padding: .62rem; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
+.avatars { display: flex; margin-left: auto; }
+.avatars > div { margin-left: -7px; border: 2px solid var(--color-surface) !important; }
+.avatars > div:first-child { margin-left: 0; }
+.roomMenu { position: relative; align-self: stretch; border-left: 1px solid var(--color-border); }
+.roomMenu > summary { width: 34px; height: 100%; display: grid; place-items: center; color: var(--color-faint); cursor: pointer; list-style: none; letter-spacing: .08em; }
+.roomMenu > summary::-webkit-details-marker { display: none; }
+.roomMenu > div { position: absolute; z-index: 20; top: calc(100% + .35rem); right: 0; width: 160px; display: grid; gap: .18rem; padding: .35rem; border: 1px solid var(--color-border-strong); border-radius: 9px; background: #171b16; box-shadow: 0 16px 46px rgba(0,0,0,.45); }
+.roomMenu button { min-height: 32px; border: 0; border-radius: 6px; color: var(--color-muted); background: transparent; font-size: .66rem; text-align: left; cursor: pointer; }
+.roomMenu button:hover { color: var(--color-fg); background: rgba(243,240,232,.05); }
+.roomMenu button[data-danger="true"] { color: var(--color-failed); background: rgba(251,113,133,.08); }
+.roomMenu small { padding: .25rem; color: var(--color-faint); font-size: .54rem; line-height: 1.4; }
+.renameForm { width: 100%; display: grid; grid-template-columns: minmax(0,1fr) auto; gap: .3rem; padding: .45rem; }
+.renameForm input { grid-column: 1 / -1; min-height: 32px; }
+.renameForm button { min-height: 27px; border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-muted); background: transparent; font-size: .58rem; cursor: pointer; }
+.hint,
+.message { margin: 0; color: var(--color-faint); font-size: .59rem; }
+.message { color: var(--color-failed); }
+
+@media (max-width: 620px) {
+  .header { align-items: flex-start; }
+  .header p { max-width: 31ch; }
+  .inlineForm { grid-template-columns: 1fr 1fr; }
+  .inlineForm label,
+  .inlineForm input { grid-column: 1 / -1; }
+  .allRoom,
+  .room { min-width: 205px; flex-basis: 205px; }
+}

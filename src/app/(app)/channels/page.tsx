@@ -12,6 +12,8 @@ import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
 import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
 import { IconChannels } from "@/components/icons";
+import { ChannelFolderWorkspace } from "@/components/ChannelFolderWorkspace";
+import { useOperationsAccess } from "@/components/OperationsAccess";
 import { fmtUsd } from "@/lib/format";
 import {
   formatZonedScheduleTimestamp,
@@ -104,12 +106,8 @@ export default function ChannelsPage() {
   const links = useQuery(api.youtubeAuth.linkStatus, { ownerId }) as
     | YoutubeLinkStatus[]
     | undefined;
-  const createFolder = useMutation(api.folders.create);
-  const removeFolder = useMutation(api.folders.remove);
-  const update = useMutation(api.channels.updateChannel);
   const [openFolder, setOpenFolder] = useState<string | null>(null);
   const [visibleLimit, setVisibleLimit] = useState(CHANNEL_PAGE_SIZE);
-  const [dragOver, setDragOver] = useState<string | null>(null);
   const [viewStartedAt] = useState(() => Date.now());
   const loading =
     channels === undefined ||
@@ -129,7 +127,6 @@ export default function ChannelsPage() {
     publishReadyLinks.map((link) => [link.channelId, link.ytChannelId ?? null]),
   );
 
-  const inFolder = (name: string) => (channels ?? []).filter((c) => c.folder === name);
   const visible = channelsVisibleForFolder(channels ?? [], openFolder);
   const fleetPage = pageChannels(visible, visibleLimit);
   const readyPlanBySlug = new Map<string, PlanCardRow[]>();
@@ -140,30 +137,14 @@ export default function ChannelsPage() {
     readyPlanBySlug.set(item.channelSlug, items);
   }
 
-  const onDropToFolder = async (e: React.DragEvent, folderName: string | null) => {
-    e.preventDefault();
-    setDragOver(null);
-    const id = e.dataTransfer.getData("text/channel-id");
-    if (!id) return;
-    await update({ channelId: id as Id<"channels">, folder: folderName ?? "" });
-  };
-
   return (
     <>
       <PageHeader
+        eyebrow="Channel fleet / identity rooms"
         title="Channels"
-        subtitle="Account health, queue, and next publish."
+        subtitle="See each show as an identity, organize related channels, and understand what is ready to make or release."
         actions={
           <div className="channel-page-actions">
-            <button
-              onClick={async () => {
-                const name = window.prompt("Folder name:");
-                if (name?.trim()) await createFolder({ ownerId, name: name.trim() });
-              }}
-              className="studio-action studio-action-secondary"
-            >
-              + Folder
-            </button>
             <Link
               href="/channels/new"
               className="studio-action"
@@ -174,79 +155,17 @@ export default function ChannelsPage() {
         }
       />
 
-      {/* Folder row: drop targets with mini avatar previews. */}
-      {(folders?.length ?? 0) > 0 && (
-        <div className="channel-folder-strip" aria-label="Channel folders">
-          {openFolder && (
-            <button
-              onClick={() => {
-                setOpenFolder(null);
-                setVisibleLimit(CHANNEL_PAGE_SIZE);
-              }}
-              onDragOver={(e) => { e.preventDefault(); setDragOver("__all"); }}
-              onDragLeave={() => setDragOver(null)}
-              onDrop={(e) => onDropToFolder(e, null)}
-              className="channel-folder-back"
-              title="Back to all channels (drop a channel here to unfile it)"
-              data-drag-over={dragOver === "__all" ? "true" : undefined}
-            >
-              ← All channels
-            </button>
-          )}
-          {(folders ?? []).map((f) => {
-            const members = inFolder(f.name);
-            const isOpen = openFolder === f.name;
-            return (
-              <div
-                key={f._id}
-                onDragOver={(e) => { e.preventDefault(); setDragOver(f.name); }}
-                onDragLeave={() => setDragOver(null)}
-                onDrop={(e) => onDropToFolder(e, f.name)}
-                className="channel-folder-chip"
-                data-open={isOpen ? "true" : undefined}
-                data-drag-over={dragOver === f.name ? "true" : undefined}
-              >
-                <button
-                  type="button"
-                  className="channel-folder-chip-main"
-                  onClick={() => {
-                    setOpenFolder(isOpen ? null : f.name);
-                    setVisibleLimit(CHANNEL_PAGE_SIZE);
-                  }}
-                  aria-pressed={isOpen}
-                  title={`${members.length} channel(s) — click to ${isOpen ? "close" : "open"}; drag a channel card here to file it`}
-                >
-                  <span aria-hidden="true">📁</span>
-                  <strong>{f.name}</strong>
-                  <span className="channel-folder-avatars" aria-hidden="true">
-                    {members.slice(0, 4).map((m, i) => (
-                      <span key={m._id} style={{ marginLeft: i === 0 ? 0 : -7 }}>
-                        <ChannelAvatar imageKey={m.identity?.imageKey} name={m.name} palette={m.identity?.palette} size={20} radius={5} />
-                      </span>
-                    ))}
-                  </span>
-                  <small>{members.length}</small>
-                </button>
-                <button
-                  type="button"
-                  className="channel-folder-delete"
-                  onClick={async () => {
-                    if (window.confirm(`Delete folder "${f.name}"? Channels inside are kept (unfiled).`)) {
-                      if (openFolder === f.name) setOpenFolder(null);
-                      setVisibleLimit(CHANNEL_PAGE_SIZE);
-                      await removeFolder({ ownerId, folderId: f._id as Id<"channelFolders"> });
-                    }
-                  }}
-                  aria-label={`Delete ${f.name} folder; channels are kept`}
-                  title="Delete folder (channels are kept)"
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
+      {!loading ? (
+        <ChannelFolderWorkspace
+          channels={channels}
+          folders={folders}
+          selectedFolder={openFolder}
+          onSelect={(folder) => {
+            setOpenFolder(folder);
+            setVisibleLimit(CHANNEL_PAGE_SIZE);
+          }}
+        />
+      ) : null}
 
       {loading ? (
         <SkeletonList rows={4} />
@@ -372,7 +291,8 @@ export default function ChannelsPage() {
                     <span>Manage channel</span>
                     <small>{setupDone}/{setupChecks.length} ready</small>
                   </summary>
-                  <div className="channel-card-details-body">
+                    <div className="channel-card-details-body">
+                    <ChannelRoomSelect channelId={c._id} currentFolder={c.folder} folders={folders} />
                     <div className="channel-module-path" title={modulePath.join(" → ")}>
                       <small>Module path</small>
                       <span>
@@ -603,5 +523,41 @@ function CardStat({ label, value }: { label: string; value: string }) {
       <small>{label}</small>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function ChannelRoomSelect({
+  channelId,
+  currentFolder,
+  folders,
+}: {
+  channelId: string;
+  currentFolder?: string;
+  folders: { _id: string; name: string }[];
+}) {
+  const update = useMutation(api.channels.updateChannel);
+  const access = useOperationsAccess();
+  const [busy, setBusy] = useState(false);
+  const canEdit = access === "owner";
+  return (
+    <label className="channel-room-select">
+      <span>Channel room</span>
+      <select
+        value={currentFolder ?? ""}
+        disabled={busy || !canEdit}
+        title={canEdit ? "Move this channel to another room" : "Enable owner editing to move channels"}
+        onChange={async (event) => {
+          setBusy(true);
+          try {
+            await update({ channelId: channelId as Id<"channels">, folder: event.target.value });
+          } finally {
+            setBusy(false);
+          }
+        }}
+      >
+        <option value="">All channels</option>
+        {folders.map((folder) => <option key={folder._id} value={folder.name}>{folder.name}</option>)}
+      </select>
+    </label>
   );
 }
