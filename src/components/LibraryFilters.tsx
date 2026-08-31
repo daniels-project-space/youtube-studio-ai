@@ -40,8 +40,9 @@ export function LibraryFilters({
     <div className={`glass ${styles.toolbar}`} aria-label="Library filters">
       {/* Search */}
       <div className={`${styles.field} ${styles.search}`}>
-        <label className={styles.label}>Search title</label>
+        <label htmlFor="library-search" className={styles.label}>Search title</label>
         <input
+          id="library-search"
           type="search"
           placeholder="Search videos…"
           value={state.search}
@@ -52,8 +53,9 @@ export function LibraryFilters({
 
       {/* Channel */}
       <div className={styles.field}>
-        <label className={styles.label}>Channel</label>
+        <label htmlFor="library-channel" className={styles.label}>Channel</label>
         <select
+          id="library-channel"
           value={state.channelSlug ?? ""}
           onChange={(e) => set("channelSlug", e.target.value || null)}
           className={styles.select}
@@ -69,8 +71,9 @@ export function LibraryFilters({
 
       {/* Status */}
       <div className={styles.field}>
-        <label className={styles.label}>Status</label>
+        <label htmlFor="library-status" className={styles.label}>Status</label>
         <select
+          id="library-status"
           value={state.status}
           onChange={(e) => set("status", e.target.value as StatusFilter)}
           className={styles.select}
@@ -83,8 +86,9 @@ export function LibraryFilters({
 
       {/* Sort */}
       <div className={styles.field}>
-        <label className={styles.label}>Sort</label>
+        <label htmlFor="library-sort" className={styles.label}>Sort</label>
         <select
+          id="library-sort"
           value={state.sort}
           onChange={(e) => set("sort", e.target.value as SortKey)}
           className={styles.select}
@@ -96,8 +100,9 @@ export function LibraryFilters({
 
       {/* Date range */}
       <div className={styles.field}>
-        <label className={styles.label}>From</label>
+        <label htmlFor="library-from" className={styles.label}>From</label>
         <input
+          id="library-from"
           type="date"
           value={state.from}
           onChange={(e) => set("from", e.target.value)}
@@ -105,8 +110,9 @@ export function LibraryFilters({
         />
       </div>
       <div className={styles.field}>
-        <label className={styles.label}>To</label>
+        <label htmlFor="library-to" className={styles.label}>To</label>
         <input
+          id="library-to"
           type="date"
           value={state.to}
           onChange={(e) => set("to", e.target.value)}

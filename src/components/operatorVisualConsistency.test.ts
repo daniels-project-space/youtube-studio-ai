@@ -47,7 +47,12 @@ assert.match(runsCss, /@media \(max-width: 980px\)/);
 assert.match(library, /resultCount=\{filtered\.length\}/);
 assert.match(libraryFilters, /aria-label="Library filters"/);
 assert.match(libraryFilters, /<strong>\{resultCount\}<\/strong>/);
-assert.match(libraryFilters, /<label className=\{styles\.label\}>Search title<\/label>/);
+for (const id of ["library-search", "library-channel", "library-status", "library-sort", "library-from", "library-to"]) {
+  assert.match(libraryFilters, new RegExp(`htmlFor="${id}"`));
+  assert.match(libraryFilters, new RegExp(`id="${id}"`));
+}
+assert.match(globalCss, /--color-failed: #fb7185/);
+assert.doesNotMatch(globalCss, /\.channel-live-state-inactive\s*\{\s*opacity:/);
 
 // Visual review always uses a persisted R2 thumbnail first. The shared media
 // boundary holds a stable space while R2 resolves and only falls back to a

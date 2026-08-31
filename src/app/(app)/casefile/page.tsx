@@ -184,7 +184,7 @@ export default function CasefilePage() {
 
   if (operationsAccess !== "owner") {
     return (
-      <main className={styles.desk}>
+      <div className={styles.desk}>
         <header className={styles.header}>
           <p className={styles.eyebrow}>Private editorial workflow</p>
           <h1>Casefile cinematic desk</h1>
@@ -194,12 +194,12 @@ export default function CasefilePage() {
           access={operationsAccess}
           desk="the Casefile cinematic desk"
         />
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className={styles.desk}>
+    <div className={styles.desk}>
       <header className={styles.header}>
         <p className={styles.eyebrow}>Private editorial workflow</p>
         <h1>Casefile cinematic desk</h1>
@@ -363,6 +363,6 @@ export default function CasefilePage() {
         </section>
       </div>
       {message && <p role="status" className={styles.statusMessage} style={{ ...card, color: message.startsWith("Saved") ? "#9be2b3" : "#ffb8b8" }}>{message}</p>}
-    </main>
+    </div>
   );
 }

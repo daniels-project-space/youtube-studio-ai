@@ -9,6 +9,7 @@ const editorialEvidence = readFileSync(
   "utf8",
 );
 const seo = readFileSync(join(root, "src/app/(app)/seo/page.tsx"), "utf8");
+const studioAssets = readFileSync(join(root, "src/app/(app)/studio-assets/page.tsx"), "utf8");
 
 // These specialist desks must lead with stored evidence rather than generic
 // activity widgets. The contracts intentionally assert the UI's truth surface,
@@ -24,5 +25,9 @@ assert.match(editorialEvidence, /source snapshots/);
 assert.match(seo, /function ResearchEvidenceLedger/);
 assert.match(seo, /Only persisted research is represented here/);
 assert.match(seo, /Metadata only/);
+
+for (const desk of [casefile, editorialEvidence, studioAssets]) {
+  assert.doesNotMatch(desk, /<main(?:\s|>)/, "the App shell owns the one top-level main landmark");
+}
 
 console.log("Specialist desk evidence-first UI contracts passed");

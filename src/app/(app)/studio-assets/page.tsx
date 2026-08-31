@@ -371,7 +371,7 @@ export default function StudioAssetsPage() {
 
   if (operationsAccess !== "owner") {
     return (
-      <main className={styles.page}>
+      <div className={styles.page}>
         <PageHeader
           title="Studio assets"
           subtitle="Approved reusable visual language, adapter evidence, and control guides."
@@ -380,12 +380,12 @@ export default function StudioAssetsPage() {
           access={operationsAccess}
           desk="the Studio asset library"
         />
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className={styles.page}>
+    <div className={styles.page}>
       <PageHeader
         title="Studio assets"
         subtitle="Our self-hosted asset library for approved reusable visual language, adapter evidence, and control guides. Each entry stays owner-bound; channel and series identity material never crosses its boundary."
@@ -683,6 +683,6 @@ export default function StudioAssetsPage() {
           <p className={styles.previewProof}>Image evidence · {preview.contentType} · SHA-256 {shortHash(preview.contentSha256)}</p>
         </section>
       </div> : null}
-    </main>
+    </div>
   );
 }

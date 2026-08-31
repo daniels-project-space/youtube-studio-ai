@@ -33,7 +33,7 @@
   --color-ok: #22c55e;
   --color-running: #3b82f6;
   --color-queued: #a1a1aa;
-  --color-failed: #ef4444;
+  --color-failed: #fb7185;
   --color-canceled: #f59e0b;
   --color-amber: #f59e0b;
 
@@ -1730,7 +1730,7 @@
   box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.11);
 }
 .channel-live-state-queued strong { color: var(--color-amber); }
-.channel-live-state-inactive { opacity: 0.78; }
+.channel-live-state-inactive { background: rgba(137, 146, 161, 0.055); }
 .channel-live-state-inactive strong { color: var(--color-muted); }
 
 .channel-card-operating-row {

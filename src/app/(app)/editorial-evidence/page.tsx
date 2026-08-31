@@ -185,7 +185,7 @@ export default function EditorialEvidencePage() {
 
   if (operationsAccess !== "owner") {
     return (
-      <main className={styles.desk}>
+      <div className={styles.desk}>
         <header className={styles.header}>
           <p className={styles.eyebrow}>Private editorial workflow</p>
           <h1>Factual evidence desk</h1>
@@ -195,12 +195,12 @@ export default function EditorialEvidencePage() {
           access={operationsAccess}
           desk="the factual evidence desk"
         />
-      </main>
+      </div>
     );
   }
 
   return (
-    <main className={styles.desk}>
+    <div className={styles.desk}>
       <header className={styles.header}>
         <p className={styles.eyebrow}>Private editorial workflow</p>
         <h1>Factual evidence desk</h1>
@@ -314,6 +314,6 @@ export default function EditorialEvidencePage() {
       </div>
       <ReviewedDataStoryRunDesk />
       {message && <p role="status" className={styles.statusMessage} style={{ ...card, color: message.startsWith("Saved") || message.startsWith("The exact") ? "#9be2b3" : "#ffb8b8" }}>{message}</p>}
-    </main>
+    </div>
   );
 }
