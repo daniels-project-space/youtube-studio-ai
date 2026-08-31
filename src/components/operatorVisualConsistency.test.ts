@@ -82,6 +82,11 @@ assert.match(sidebar, /const PRIMARY_NAV_ITEMS = \[[\s\S]*href: "\/runs"[\s\S]*h
 assert.match(sidebar, /const TOOLBOX_NAV_GROUPS = \[/);
 assert.match(sidebar, /<details[\s\S]*className="studio-toolbox"/);
 assert.match(sidebar, /const MOBILE_PRIMARY_COUNT = 4/);
+assert.match(sidebar, /const MOBILE_CORE_ITEMS = PRIMARY_NAV_ITEMS\.slice\(MOBILE_PRIMARY_COUNT\)/);
+assert.match(sidebar, /className="studio-toolbox studio-mobile-toolbox"/);
+assert.match(sidebar, /MOBILE_CORE_ITEMS\.map/);
+assert.doesNotMatch(sidebar, /MOBILE_MORE_ITEMS\.map/);
+assert.match(globalCss, /\.studio-mobile-toolbox-trigger/);
 assert.match(globalCss, /iframe\[title="JARVIS"\][\s\S]*bottom: calc\(81px/);
 assert.match(globalCss, /data-studio-more-open="true"[\s\S]*iframe\[title="JARVIS"\]/);
 

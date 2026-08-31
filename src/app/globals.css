@@ -1493,6 +1493,37 @@
     font-size: 0.75rem;
   }
 
+  .studio-mobile-toolbox {
+    display: block;
+    padding-top: 0;
+    border-block: 1px solid rgba(255, 255, 255, 0.07);
+  }
+
+  .studio-mobile-toolbox-trigger {
+    min-height: 48px;
+  }
+
+  .studio-mobile-toolbox-groups {
+    display: grid;
+    gap: 0.75rem;
+    padding: 0.55rem 0.35rem 0.7rem;
+  }
+
+  .studio-mobile-toolbox-group,
+  .studio-mobile-toolbox-items {
+    display: grid;
+    gap: 0.18rem;
+  }
+
+  .studio-mobile-toolbox-label {
+    padding: 0 0.45rem 0.12rem;
+    color: #747e8e;
+    font-size: 0.56rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
   [data-jarvis-edit-ui="controls"] {
     bottom: calc(81px + env(safe-area-inset-bottom)) !important;
     transition: opacity 160ms ease, visibility 160ms ease;

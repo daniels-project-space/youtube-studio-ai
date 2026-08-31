@@ -65,8 +65,9 @@ const SETTINGS_ITEM = {
 };
 const MOBILE_PRIMARY_COUNT = 4;
 const TOOLBOX_NAV_ITEMS = TOOLBOX_NAV_GROUPS.flatMap((group) => group.items);
+const MOBILE_CORE_ITEMS = PRIMARY_NAV_ITEMS.slice(MOBILE_PRIMARY_COUNT);
 const MOBILE_MORE_ITEMS = [
-  ...PRIMARY_NAV_ITEMS.slice(MOBILE_PRIMARY_COUNT),
+  ...MOBILE_CORE_ITEMS,
   ...TOOLBOX_NAV_ITEMS,
   SETTINGS_ITEM,
 ];
@@ -201,9 +202,13 @@ export function Sidebar() {
               id="studio-mobile-more-menu"
               className="studio-nav-more-menu glass"
               aria-label="More studio destinations"
-              onClick={() => setMoreOpenForPath(null)}
+              onClick={(event) => {
+                if ((event.target as HTMLElement).closest("a")) {
+                  setMoreOpenForPath(null);
+                }
+              }}
             >
-              {MOBILE_MORE_ITEMS.map((item) => (
+              {MOBILE_CORE_ITEMS.map((item) => (
                 <NavItem
                   key={item.href}
                   href={item.href}
@@ -211,6 +216,43 @@ export function Sidebar() {
                   icon={item.icon}
                 />
               ))}
+              <details
+                className="studio-toolbox studio-mobile-toolbox"
+                open={toolboxActive ? true : undefined}
+              >
+                <summary className="studio-toolbox-trigger studio-mobile-toolbox-trigger">
+                  <span className="studio-nav-icon">
+                    <IconToolbox />
+                  </span>
+                  <span className="studio-toolbox-copy">
+                    <strong>Toolbox</strong>
+                    <small>{activeToolboxLabel ?? "8 specialist desks"}</small>
+                  </span>
+                  <span className="studio-toolbox-chevron" aria-hidden="true">+</span>
+                </summary>
+                <div className="studio-toolbox-items studio-mobile-toolbox-groups">
+                  {TOOLBOX_NAV_GROUPS.map((group) => (
+                    <section
+                      className="studio-mobile-toolbox-group"
+                      key={group.label}
+                      aria-label={group.label}
+                    >
+                      <span className="studio-mobile-toolbox-label">{group.label}</span>
+                      <div className="studio-mobile-toolbox-items">
+                        {group.items.map((item) => (
+                          <NavItem
+                            key={item.href}
+                            href={item.href}
+                            label={item.label}
+                            icon={item.icon}
+                          />
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+                </div>
+              </details>
+              <NavItem {...SETTINGS_ITEM} />
             </div>
           )}
         </div>
