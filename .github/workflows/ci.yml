@@ -16,7 +16,11 @@ concurrency:
 jobs:
   typecheck:
     runs-on: ubuntu-latest
-    timeout-minutes: 12
+    # Cold runners sometimes spend several minutes installing ffmpeg before
+    # the complete production-readiness suite starts. Keep every gate intact
+    # and allow the full suite enough time to finish instead of cancelling a
+    # valid release before the cloud-runtime deployment can run.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - name: Detect package manager
