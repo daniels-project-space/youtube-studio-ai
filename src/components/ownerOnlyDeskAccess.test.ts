@@ -59,4 +59,13 @@ assert.ok(
   "both Novita mount effects must wait for owner access",
 );
 
+const settings = read("../app/(app)/settings/page.tsx");
+assert.match(settings, /const operationsAccess = useOperationsAccess\(\)/);
+assert.ok(
+  (settings.match(/if \(operationsAccess !== "owner"\) return;/g) ?? []).length >= 2,
+  "settings reads and mutations must both wait for owner access",
+);
+assert.match(settings, /operationsAccess !== "owner" \? \([\s\S]*<OwnerOnlyNotice/);
+assert.match(settings, /operationsAccess === "owner" && \(tab === "publishing"/);
+
 console.log("Owner-only desk access contracts passed");

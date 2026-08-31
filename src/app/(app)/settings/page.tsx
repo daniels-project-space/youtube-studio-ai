@@ -6,6 +6,8 @@ import { api } from "../../../../convex/_generated/api";
 import { PageHeader } from "@/components/PageHeader";
 import { SkeletonList } from "@/components/Skeleton";
 import { ChannelOperatingStatusStrip } from "@/components/ChannelOperatingStatusStrip";
+import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
+import { useOperationsAccess } from "@/components/OperationsAccess";
 import { useSelectedChannel } from "@/lib/channel-context";
 import { useOwnerId } from "@/lib/owner-context";
 import type { ChannelRow } from "@/lib/types";
@@ -202,6 +204,7 @@ function channelSettingsVersion(channel: SettingsChannel): string {
 
 export default function SettingsPage() {
   const ownerId = useOwnerId();
+  const operationsAccess = useOperationsAccess();
   const { selectedSlug, setSelectedSlug } = useSelectedChannel();
   const channels = useQuery(api.channels.listChannels, { ownerId }) as
     | SettingsChannel[]
@@ -224,6 +227,7 @@ export default function SettingsPage() {
   const [error, setError] = useState<string | null>(null);
 
   const loadGovernance = useCallback(async () => {
+    if (operationsAccess !== "owner") return;
     setLoadingGovernance(true);
     setError(null);
     try {
@@ -275,15 +279,19 @@ export default function SettingsPage() {
       setLoadingGovernance(false);
       setGovernanceLoaded(true);
     }
-  }, []);
+  }, [operationsAccess]);
 
   useEffect(() => {
-    if ((tab !== "publishing" && tab !== "learning") || governanceLoaded) return;
+    if (
+      operationsAccess !== "owner" ||
+      (tab !== "publishing" && tab !== "learning") ||
+      governanceLoaded
+    ) return;
     const timer = window.setTimeout(() => {
       void loadGovernance();
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [governanceLoaded, loadGovernance, tab]);
+  }, [governanceLoaded, loadGovernance, operationsAccess, tab]);
 
   const selectedChannel = useMemo(
     () =>
@@ -334,6 +342,7 @@ export default function SettingsPage() {
     body: Record<string, unknown>,
     id: string,
   ) => {
+    if (operationsAccess !== "owner") return;
     setBusyId(id);
     setError(null);
     try {
@@ -370,8 +379,10 @@ export default function SettingsPage() {
     <div className={styles.page}>
       <PageHeader
         title="Settings"
-        subtitle="Control one channel at a time, with every production change saved to the live workspace"
-        actions={tab === "publishing" || tab === "learning" ? (
+        subtitle={operationsAccess === "owner"
+          ? "Control one channel at a time, with every production change saved to the live workspace"
+          : "Inspect current channel policy; unlock operations before changing production or account controls"}
+        actions={operationsAccess === "owner" && (tab === "publishing" || tab === "learning") ? (
           <button
             type="button"
             className={styles.button}
@@ -427,48 +438,55 @@ export default function SettingsPage() {
         />
       )}
 
-      <nav
-        className={styles.tabs}
-        aria-label="Settings sections"
-        role="tablist"
-      >
-        {tabs.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            role="tab"
-            aria-selected={tab === item.id}
-            className={`${styles.tab} ${tab === item.id ? styles.tabActive : ""}`}
-            onClick={() => setTab(item.id)}
-          >
-            {item.label}
-            {item.count ? <span>{item.count}</span> : null}
-          </button>
-        ))}
-      </nav>
-
-      {channels === undefined ? (
+      {operationsAccess !== "owner" ? (
+        <OwnerOnlyNotice
+          access={operationsAccess}
+          desk="channel settings, approval history, and account controls"
+        />
+      ) : channels === undefined ? (
         <SkeletonList rows={4} />
       ) : !selectedChannel ? (
         <div className={`glass ${styles.empty}`}>
           Add a channel before configuring production settings.
         </div>
       ) : (
-        <ChannelSettingsPanel
-          key={`${selectedChannel._id}:${channelSettingsVersion(selectedChannel)}`}
-          tab={tab}
-          channel={selectedChannel}
-          connector={connector}
-          connectorsLoading={connectors === undefined}
-          intents={selectedIntents}
-          pendingIntents={pendingIntents}
-          pendingRecommendations={pendingRecommendations}
-          showBibleClaims={selectedShowBibleClaims}
-          loadingGovernance={loadingGovernance}
-          busyId={busyId}
-          act={act}
-          onError={setError}
-        />
+        <>
+          <nav
+            className={styles.tabs}
+            aria-label="Settings sections"
+            role="tablist"
+          >
+            {tabs.map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                role="tab"
+                aria-selected={tab === item.id}
+                className={`${styles.tab} ${tab === item.id ? styles.tabActive : ""}`}
+                onClick={() => setTab(item.id)}
+              >
+                {item.label}
+                {item.count ? <span>{item.count}</span> : null}
+              </button>
+            ))}
+          </nav>
+
+          <ChannelSettingsPanel
+            key={`${selectedChannel._id}:${channelSettingsVersion(selectedChannel)}`}
+            tab={tab}
+            channel={selectedChannel}
+            connector={connector}
+            connectorsLoading={connectors === undefined}
+            intents={selectedIntents}
+            pendingIntents={pendingIntents}
+            pendingRecommendations={pendingRecommendations}
+            showBibleClaims={selectedShowBibleClaims}
+            loadingGovernance={loadingGovernance}
+            busyId={busyId}
+            act={act}
+            onError={setError}
+          />
+        </>
       )}
     </div>
   );
