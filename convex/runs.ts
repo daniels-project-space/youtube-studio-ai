@@ -10,6 +10,7 @@ import {
   type PipelineInvocationSnapshot,
 } from "../src/lib/pipelineInvocationSnapshot";
 import { pipelineInvocationSha256 } from "../src/lib/pipelineInvocationHash";
+import { frozenRunPipelinePresentation } from "../src/lib/runPipelinePresentation";
 import {
   assertScheduledPlanPayloadMatches,
   normalizeScheduledPlanPayload,
@@ -2894,6 +2895,36 @@ export const getRun = query({
   handler: async (ctx, args) => {
     const run = await ctx.db.get(args.runId);
     return run ? withReleaseEvidenceStatus(run) : null;
+  },
+});
+
+/**
+ * Browser-sized live-run projection. Worker callers retain `getRun`, which
+ * needs the complete immutable invocation for recovery; the Studio surface
+ * receives only the verified block order required to track progress.
+ */
+export const getRunPresentation = query({
+  args: { runId: v.id("runs") },
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run) return null;
+    const release = withReleaseEvidenceStatus(run);
+    return {
+      _id: run._id,
+      channelId: run.channelId,
+      status: run.status,
+      startedAt: run.startedAt,
+      finishedAt: run.finishedAt,
+      costTotal: run.costTotal,
+      error: run.error,
+      videoAssetId: run.videoAssetId,
+      youtubeVideoId: run.youtubeVideoId,
+      releaseEvidenceStatus: release.releaseEvidenceStatus,
+      pipeline: frozenRunPipelinePresentation({
+        snapshot: run.pipelineInvocationSnapshot,
+        sha256: run.pipelineInvocationSha256,
+      }),
+    };
   },
 });
 

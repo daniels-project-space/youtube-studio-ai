@@ -47,7 +47,13 @@ function nodeStatus(node: PipelineNode): string {
  * recorded; grouping makes the actual plan understandable without hiding any
  * individual stage or its inspection detail.
  */
-export function LivePipeline({ nodes }: { nodes: PipelineNode[] }) {
+export function LivePipeline({
+  nodes,
+  planSource = "legacy",
+}: {
+  nodes: PipelineNode[];
+  planSource?: "frozen" | "legacy";
+}) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const complete = nodes.filter((node) => ["ok", "skipped"].includes(nodeStatus(node))).length;
   const failed = nodes.filter((node) => nodeStatus(node) === "failed").length;
@@ -69,7 +75,9 @@ export function LivePipeline({ nodes }: { nodes: PipelineNode[] }) {
                   ? "A recorded stage needs attention before release can continue"
                   : complete === nodes.length
                     ? "Every planned stage has reported a receipt"
-                    : "Waiting for the next verified stage receipt"}
+                    : planSource === "frozen"
+                      ? "Stage plan is locked to this run; waiting for the next verified receipt"
+                      : "Legacy run plan inferred from the current channel configuration"}
             </small>
           </span>
         </div>

@@ -34,7 +34,7 @@ export default function RunDetailPage({
 }) {
   const { runId } = use(params);
 
-  const run = useQuery(api.runs.getRun, { runId: runId as Id<"runs"> });
+  const run = useQuery(api.runs.getRunPresentation, { runId: runId as Id<"runs"> });
   // slim:true → no `inputs`, long output strings truncated server-side (the
   // full blobs were shipping megabytes to the browser on every subscription).
   const stages = useQuery(api.runStages.listRunStages, {
@@ -82,12 +82,16 @@ export default function RunDetailPage({
 
   const live = run.status === "running" || run.status === "queued";
 
-  // DERIVE-AND-MERGE: expected blocks come from the channel pipeline (fallback
-  // to the canonical lofi block ids), then each is matched to its live stage.
+  // The immutable invocation is the source of truth for an active run. Legacy
+  // rows predate that record, so only they fall back to today's channel plan.
+  // Executed rows are always merged below to keep historical drift visible.
   const expectedBlocks: string[] =
-    channel && channel.pipeline && channel.pipeline.length > 0
+    run.pipeline?.entries.length
+      ? run.pipeline.entries.map((entry) => entry.block)
+      : channel && channel.pipeline && channel.pipeline.length > 0
       ? channel.pipeline.map((p: { block: string }) => p.block)
       : [...LOFI_BLOCK_IDS];
+  const planSource = run.pipeline ? "frozen" : "legacy";
 
   const stageByBlock = new Map<string, PipelineStage>();
   for (const s of stages ?? []) stageByBlock.set(s.block, s);
@@ -215,7 +219,7 @@ export default function RunDetailPage({
         {stages === undefined || (run && channel === undefined) ? (
           <SkeletonList rows={5} />
         ) : nodes.length > 0 ? (
-          <LivePipeline nodes={nodes} />
+          <LivePipeline nodes={nodes} planSource={planSource} />
         ) : (
           <EmptyState
             title="No pipeline blocks"
