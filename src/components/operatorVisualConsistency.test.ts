@@ -12,6 +12,7 @@ const lightbox = read("src/components/Lightbox.tsx");
 const libraryFilters = read("src/components/LibraryFilters.tsx");
 const library = read("src/app/(app)/library/page.tsx");
 const runs = read("src/app/(app)/runs/page.tsx");
+const runsModel = read("src/app/(app)/runs/runsModel.ts");
 const runsCss = read("src/app/(app)/runs/runs.module.css");
 const schedule = read("src/app/(app)/schedule/DayByDaySchedule.tsx");
 const globalCss = read("src/app/globals.css");
@@ -30,12 +31,16 @@ assert.match(pageHeader, /className="page-header-copy"/);
 // Run controls deliberately filter the persisted query result; the summary is
 // an accessible control surface rather than a decorative set of counts.
 assert.match(runs, /api\.runs\.listRecent/);
-assert.match(runs, /const statusCounts/);
+assert.match(runs, /projectRunHistory/);
 assert.match(runs, /aria-label="Filter runs by status"/);
-assert.match(runs, /aria-pressed=\{filter === f\}/);
+assert.match(runs, /aria-pressed=\{filter === status\}/);
 assert.match(runs, /data-status=\{status\}/);
-assert.match(runsCss, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/);
-assert.match(runsCss, /@media \(max-width: 780px\)/);
+assert.match(runsModel, /export const INITIAL_VISIBLE_RUNS = 12/);
+assert.match(runsModel, /matching\.slice\(0, safeLimit\)/);
+assert.match(runs, /Showing \{projection\.visible\.length\} of \{projection\.matching\.length\}/);
+assert.match(runs, /Load \{Math\.min\(INITIAL_VISIBLE_RUNS, projection\.remaining\)\}/);
+assert.match(runsCss, /grid-template-columns: repeat\(6, minmax\(0, 1fr\)\)/);
+assert.match(runsCss, /@media \(max-width: 980px\)/);
 
 // The Library’s count derives from its actual filtered rows, never an invented
 // activity metric, and the toolbar keeps explicit labels for every control.
