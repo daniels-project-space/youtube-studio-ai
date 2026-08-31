@@ -7,8 +7,11 @@
  * `renderTimeline()` executes it deterministically. A Timeline is DATA — unit-testable
  * with no Trigger/Convex/ffmpeg in the loop.
  *
- * ADDITIVE ONLY — nothing imports this yet; the live block keeps running untouched
- * until the new path is parity-proven.
+ * The live block imports this contract only behind the explicit per-channel
+ * `useAssemblyEdl === true` operator switch.  The narrated essay surface is
+ * render-parity proven against the legacy compositor (including captions,
+ * pre-rendered intro cards, rendered outros, hard cuts, and dip-to-black); exact
+ * source-bound cinematic sequences remain on their separate assembler.
  */
 import { z } from "zod";
 

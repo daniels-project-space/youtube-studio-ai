@@ -1,0 +1,53 @@
+name: Assembly Render Parity
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'src/lib/assembly/**'
+      - 'src/lib/ffmpeg.ts'
+      - 'src/lib/remotionRender.ts'
+      - 'src/trigger/blocks/narratedBlocks.ts'
+      - 'scripts/assembly-render-parity.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/assembly-render-parity.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'src/lib/assembly/**'
+      - 'src/lib/ffmpeg.ts'
+      - 'src/lib/remotionRender.ts'
+      - 'src/trigger/blocks/narratedBlocks.ts'
+      - 'scripts/assembly-render-parity.ts'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/assembly-render-parity.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: assembly-render-parity-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  parity:
+    name: Legacy ↔ typed EDL real-render parity
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install renderer system dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
+      - name: Install
+        run: pnpm install --frozen-lockfile
+      - name: Render and compare all essay assembly scenarios
+        env:
+          PARITY_CARDS: '1'
+        run: pnpm test:assembly-render-parity

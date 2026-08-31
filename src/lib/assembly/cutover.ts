@@ -3,7 +3,7 @@
  * (src/trigger/blocks/narratedBlocks.ts) and the standalone Assembly module
  * (planTimeline + renderTimeline + the ffmpeg RenderBackend).
  *
- * It is the seam the flag-gated branch in narratedBlocks WOULD call:
+ * It is the seam the flag-gated branch in narratedBlocks calls:
  *
  *   if (USE_ASSEMBLY_EDL) return assembleViaEdl({ store: ctx.store, params: ctx.params, profile });
  *
@@ -22,8 +22,12 @@
  * outroApplied, overlaysDropped, preOverlayKey, preOverlayLocalPath). Downstream QA
  * gates read the last four directly, so emitting fewer keys would silently void them.
  *
- * ADDITIVE ONLY — nothing live imports this yet; the flip is a separate, human-
- * approved edit to narratedBlocks.ts.
+ * LIVE BUT OPERATOR-GATED — no preset enables this switch. The five-scenario
+ * real-render parity matrix in scripts/assembly-render-parity.ts proves the
+ * compatible narrated essay surface byte-for-byte against the legacy path,
+ * including the Remotion intro/outro case. Cinematic exact-order assembly is
+ * rejected before this adapter because that separate surface is not covered by
+ * the proof.
  */
 import type { ChannelProfile } from "@/engine/channelProfile";
 import { captionCuesFromTimings, type QuoteOverlaySpec } from "@/lib/ffmpeg";

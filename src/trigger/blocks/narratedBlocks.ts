@@ -2404,22 +2404,23 @@ export const timelineAssemble: Block = {
       });
     }
     // ========================================================================
-    // ⚠️  USE_ASSEMBLY_EDL — DELIBERATELY-GATED, NOT-YET-VALIDATED CUTOVER PATH
+    // ⚠️  USE_ASSEMBLY_EDL — OPERATOR-GATED, RENDER-PROVEN ESSAY CUTOVER
     // ========================================================================
     // Everything BELOW this branch is the legacy god-block: the compose/heal
     // code that has rendered every video this studio has ever shipped. The
     // branch swaps it wholesale for the standalone Assembly module
     // (`assembleViaEdl` — plan → renderTimeline → ffmpeg backend).
     //
-    // IT IS OFF FOR EVERY CHANNEL AND MUST STAY THAT WAY UNTIL A REAL RENDER
-    // PROVES PARITY. What is actually proven today is narrow: the
-    // DETERMINISTIC PLAN MATH matches (scripts/assembly-parity.ts — duration,
-    // per-clip screen time, interleave order, card presence, coverage), and
-    // the adapter emits all 11 keys this block `produces`
-    // (src/lib/assembly/__tests__/cutover.test.ts). NOTHING has proven that
-    // the finished MP4 is equivalent. The bar before this goes anywhere near a
-    // default is the `essay`-preset parity claim demonstrated on a REAL RENDER,
-    // compared side-by-side against the god-block's output for the same run.
+    // It remains OFF by default and absent from every preset. The compatible
+    // narrated essay surface now has two independent proofs:
+    //   - scripts/assembly-parity.ts: deterministic duration/cadence/order/math
+    //   - scripts/assembly-render-parity.ts with PARITY_CARDS=1: five actual
+    //     legacy-vs-EDL MP4 pairs, byte-identical across captions on/off,
+    //     pre-rendered intro + rendered outro, hard cut, and dip-to-black.
+    // The path-scoped Assembly Render Parity workflow reruns that full matrix
+    // whenever the compositor, adapter, FFmpeg primitives, or this block change.
+    // This proof does NOT cover source-bound cinematic sequences; the admission
+    // guard above keeps those on their exact clip-order assembler.
     //
     // Enabling it is an OPERATOR decision, on ONE channel, reversible in one
     // config write — never an engineering default and never a code edit:
@@ -2437,8 +2438,8 @@ export const timelineAssemble: Block = {
     // DYNAMIC so the default path does not even evaluate the module.
     //
     // No `profile` is passed on purpose: with one, `assembleViaEdl` layers
-    // per-account params + Editor directives on top, which ADDS divergence.
-    // Params-only is the configuration the parity script actually covers.
+    // per-account params + Editor directives on top, which is a distinct surface.
+    // Params-only is the configuration the render-parity matrix proves.
     // ========================================================================
     if (ctx.params["useAssemblyEdl"] === true) {
       ctx.log(
