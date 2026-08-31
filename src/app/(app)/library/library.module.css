@@ -1,0 +1,96 @@
+.archive {
+  display: grid;
+  gap: 1.15rem;
+}
+
+.channel {
+  padding: 0.8rem;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: var(--color-surface);
+}
+
+.channelHeader {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  width: 100%;
+  min-height: 38px;
+  padding: 0 0.1rem 0.7rem;
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.channelHeader h2 {
+  margin: 0;
+  font-size: 0.92rem;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+}
+
+.channelHeader svg {
+  flex: 0 0 auto;
+  color: var(--color-muted);
+  transition: transform 160ms ease;
+}
+
+.channelHeader[data-collapsed="true"] svg {
+  transform: rotate(-90deg);
+}
+
+.count {
+  margin-left: auto;
+  color: var(--color-faint);
+  font: 600 0.62rem/1.2 var(--font-mono);
+  text-transform: uppercase;
+}
+
+.paging {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  min-height: 42px;
+  padding-top: 0.65rem;
+}
+
+.paging p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.7rem;
+}
+
+.actions {
+  display: flex;
+  gap: 0.45rem;
+  margin-left: auto;
+}
+
+.actions button {
+  min-height: 34px;
+}
+
+@media (max-width: 560px) {
+  .channel {
+    padding: 0.7rem;
+  }
+
+  .paging {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .actions {
+    width: 100%;
+    margin-left: 0;
+  }
+
+  .actions button {
+    flex: 1;
+  }
+}
+

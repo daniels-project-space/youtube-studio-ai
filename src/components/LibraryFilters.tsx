@@ -116,7 +116,7 @@ export function LibraryFilters({
       {resultCount !== undefined ? (
         <div className={styles.resultCount} aria-live="polite">
           <strong>{resultCount}</strong>
-          <span>visible</span>
+          <span>matches</span>
         </div>
       ) : null}
     </div>

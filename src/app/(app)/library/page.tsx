@@ -20,6 +20,8 @@ import {
   type LibraryFilterState,
 } from "@/components/LibraryFilters";
 import { IconLibrary, IconChevron } from "@/components/icons";
+import { LIBRARY_PAGE_SIZE, pageLibraryGroup } from "./libraryPaging";
+import styles from "./library.module.css";
 
 /** Open lightbox = which channel group + which index within that group. */
 type LightboxTarget = { slug: string; index: number };
@@ -45,6 +47,7 @@ export default function LibraryPage() {
     to: "",
   });
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
 
   // Apply all filters + sort client-side over the query result.
@@ -178,60 +181,68 @@ export default function LibraryPage() {
           icon={<IconLibrary width={24} height={24} />}
         />
       ) : (
-        <div style={{ display: "grid", gap: "1.5rem" }}>
+        <div className={styles.archive}>
           {groups.map((g) => {
             const isCollapsed = collapsed.has(g.slug);
+            const page = pageLibraryGroup(g.videos, visibleLimits[g.slug]);
             return (
-              <section key={g.slug}>
+              <section key={g.slug} className={styles.channel}>
                 <button
                   type="button"
                   onClick={() => toggle(g.slug)}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.55rem",
-                    width: "100%",
-                    textAlign: "left",
-                    background: "transparent",
-                    border: "none",
-                    color: "inherit",
-                    font: "inherit",
-                    cursor: "pointer",
-                    padding: "0 0 0.85rem",
-                  }}
+                  className={styles.channelHeader}
+                  data-collapsed={isCollapsed}
+                  aria-expanded={!isCollapsed}
                 >
-                  <IconChevron
-                    width={16}
-                    height={16}
-                    style={{
-                      transform: isCollapsed ? "rotate(-90deg)" : "none",
-                      transition: "transform 0.15s ease",
-                      color: "var(--color-muted)",
-                    }}
-                  />
-                  <h2 style={{ fontSize: "1.05rem", fontWeight: 600, margin: 0 }}>
-                    {g.name}
-                  </h2>
-                  <span
-                    style={{
-                      fontSize: "0.74rem",
-                      fontWeight: 500,
-                      padding: "0.1rem 0.5rem",
-                      borderRadius: 999,
-                      color: "var(--color-muted)",
-                      background: "var(--color-surface)",
-                      border: "1px solid var(--color-border)",
-                    }}
-                  >
-                    {g.videos.length}
-                  </span>
+                  <IconChevron width={16} height={16} />
+                  <h2>{g.name}</h2>
+                  <span className={styles.count}>{g.videos.length} matches</span>
                 </button>
 
                 {!isCollapsed && (
-                  <VideoGrid
-                    videos={g.videos}
-                    onOpen={(v) => openLightbox(g.slug, v)}
-                  />
+                  <>
+                    <VideoGrid
+                      videos={page.visible}
+                      onOpen={(v) => openLightbox(g.slug, v)}
+                    />
+                    {page.total > LIBRARY_PAGE_SIZE ? (
+                      <div className={styles.paging}>
+                        <p aria-live="polite">
+                          Showing {page.visible.length} of {page.total}
+                        </p>
+                        <div className={styles.actions}>
+                          {page.visible.length > LIBRARY_PAGE_SIZE ? (
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              onClick={() =>
+                                setVisibleLimits((current) => ({
+                                  ...current,
+                                  [g.slug]: LIBRARY_PAGE_SIZE,
+                                }))
+                              }
+                            >
+                              Latest {LIBRARY_PAGE_SIZE}
+                            </button>
+                          ) : null}
+                          {page.remaining > 0 ? (
+                            <button
+                              type="button"
+                              className="btn-secondary"
+                              onClick={() =>
+                                setVisibleLimits((current) => ({
+                                  ...current,
+                                  [g.slug]: page.visible.length + page.nextBatchSize,
+                                }))
+                              }
+                            >
+                              Show next {page.nextBatchSize}
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    ) : null}
+                  </>
                 )}
               </section>
             );
