@@ -29,7 +29,7 @@
     "test:golden-proof-media": "node scripts/golden-proof-media-check.mjs",
     "review:image-benchmark": "tsx scripts/review-image-provider-benchmark.mts",
     "trigger:dev": "npx --yes trigger.dev@4.5.9 dev",
-    "trigger:deploy": "npx --yes trigger.dev@4.5.9 deploy"
+    "trigger:deploy": "npx --yes trigger.dev@4.5.9 deploy --native-build-server"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.81",
