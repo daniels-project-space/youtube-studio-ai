@@ -93,22 +93,29 @@ function StudioSessionGate({ state }: { state: "loading" | "unavailable" }) {
       aria-label={loading ? "Securing studio session" : "Studio connection unavailable"}
     >
       <section className={`${styles.card} glass glass-shine`}>
-        <span className={styles.mark} aria-hidden="true">
-          <StudioMark width={26} height={26} />
-        </span>
-        <span className={styles.eyebrow}>AutoStudio · private workspace</span>
-        <h1 className={styles.title}>
-          {loading ? "Securing your studio" : "Live studio connection paused"}
-        </h1>
-        <p className={styles.body}>
-          {loading
-            ? "Checking the signed connection before loading channels, media, or production records."
-            : "Your workspace is still protected, but its signed live-data connection could not be confirmed."}
-        </p>
-        <span className={styles.status} data-state={state}>
-          <span className={styles.statusDot} aria-hidden="true" />
-          {loading ? "Connecting to retained studio data" : "No live records are being shown"}
-        </span>
+        <div className={styles.visual} aria-hidden="true">
+          <span className={styles.orbit} />
+          <span className={styles.orbitInner} />
+          <span className={styles.mark}>
+            <StudioMark width={44} height={44} />
+          </span>
+          <i className={styles.sweep} />
+        </div>
+        <div className={styles.copy}>
+          <span className={styles.eyebrow}>AutoStudio / signed workspace</span>
+          <h1 className={styles.title}>
+            {loading ? "Opening the production floor" : "Live studio connection paused"}
+          </h1>
+          <p className={styles.body}>
+            {loading
+              ? "Binding the private channel ledger, retained media, and release controls to this session."
+              : "The shell is intact, but its signed live-data connection could not be confirmed."}
+          </p>
+          <span className={styles.status} data-state={state}>
+            <span className={styles.statusDot} aria-hidden="true" />
+            {loading ? "Reading production state" : "No live records are being shown"}
+          </span>
+        </div>
         {!loading ? (
           <button
             type="button"
@@ -118,9 +125,14 @@ function StudioSessionGate({ state }: { state: "loading" | "unavailable" }) {
             Retry live data
           </button>
         ) : null}
-        <p className={styles.safety}>
-          No render, schedule, or publishing action is started from this state.
-        </p>
+        <div className={styles.rail} aria-hidden="true">
+          <span data-active={loading || undefined}>Identity</span>
+          <i />
+          <span>Channels</span>
+          <i />
+          <span>Release controls</span>
+        </div>
+        <p className={styles.safety}>No render, schedule, or publishing action is started from this state.</p>
       </section>
     </main>
   );

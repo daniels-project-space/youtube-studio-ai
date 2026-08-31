@@ -7,6 +7,8 @@ import { useOwnerId } from "@/lib/owner-context";
 import { useSelectedChannel } from "@/lib/channel-context";
 import type { ChannelRow } from "@/lib/types";
 import { IconChevron } from "./icons";
+import { ChannelAvatar } from "./ChannelArt";
+import { StudioMark } from "./StudioMark";
 
 /**
  * Top-bar dropdown over the owner's channels. "All channels" is the default;
@@ -61,9 +63,22 @@ export function ChannelSwitcher() {
         aria-haspopup="listbox"
         aria-controls="channel-switcher-options"
       >
-        <span className={`channel-switcher-dot${current ? " is-selected" : ""}`} aria-hidden="true" />
+        {current ? (
+          <ChannelAvatar
+            imageKey={current.identity?.imageKey}
+            name={current.name}
+            palette={current.identity?.palette}
+            size={24}
+            radius={7}
+          />
+        ) : (
+          <span className="channel-switcher-all" aria-hidden="true">
+            <StudioMark width={16} height={16} />
+          </span>
+        )}
         <span className="channel-switcher-label">
-          {label}
+          <small>{current ? "Channel view" : "Fleet view"}</small>
+          <strong>{label}</strong>
         </span>
         <IconChevron className="channel-switcher-chevron" data-open={open ? "true" : undefined} width={15} height={15} />
       </button>
@@ -77,6 +92,7 @@ export function ChannelSwitcher() {
           <DropdownItem
             label="All channels"
             active={!selectedSlug}
+            palette={[]}
             onClick={() => {
               setSelectedSlug(null);
               setOpen(false);
@@ -87,6 +103,8 @@ export function ChannelSwitcher() {
               key={c._id}
               label={c.name}
               sub={c.template}
+              imageKey={c.identity?.imageKey}
+              palette={c.identity?.palette}
               active={c.slug === selectedSlug}
               onClick={() => {
                 setSelectedSlug(c.slug);
@@ -108,11 +126,15 @@ export function ChannelSwitcher() {
 function DropdownItem({
   label,
   sub,
+  imageKey,
+  palette,
   active,
   onClick,
 }: {
   label: string;
   sub?: string;
+  imageKey?: string;
+  palette?: string[];
   active: boolean;
   onClick: () => void;
 }) {
@@ -125,8 +147,24 @@ function DropdownItem({
       className="channel-switcher-option"
       data-active={active ? "true" : undefined}
     >
-      <span>{label}</span>
-      {sub && <small>{sub}</small>}
+      {imageKey || palette?.length ? (
+        <ChannelAvatar
+          imageKey={imageKey}
+          name={label}
+          palette={palette}
+          size={27}
+          radius={7}
+        />
+      ) : (
+        <span className="channel-switcher-option-mark" aria-hidden="true">
+          <StudioMark width={15} height={15} />
+        </span>
+      )}
+      <span className="channel-switcher-option-copy">
+        <strong>{label}</strong>
+        {sub && <small>{sub}</small>}
+      </span>
+      <i aria-hidden="true" />
     </button>
   );
 }

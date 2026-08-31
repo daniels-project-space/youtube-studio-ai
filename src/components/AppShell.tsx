@@ -17,6 +17,10 @@ export function AppShell({ children }: { children: ReactNode }) {
       <ChannelProvider>
         <OperationsAccessProvider>
           <div className="studio-shell">
+            <div className="studio-ambient" aria-hidden="true">
+              <span />
+              <span />
+            </div>
             <Sidebar />
             <div className="studio-workspace">
               <header className="studio-topbar">

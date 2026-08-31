@@ -29,22 +29,22 @@ const PRIMARY_NAV_ITEMS = [
   { href: "/runs", label: "Production", icon: <IconRuns /> },
   { href: "/schedule", label: "Schedule", icon: <IconCalendar /> },
   { href: "/library", label: "Library", icon: <IconLibrary /> },
-  { href: "/analytics", label: "Analytics", icon: <IconAnalytics /> },
 ];
 
 const TOOLBOX_NAV_GROUPS = [
   {
-    label: "Craft",
+    label: "Intelligence",
     items: [
+      { href: "/analytics", label: "Analytics", icon: <IconAnalytics /> },
       { href: "/seo", label: "Packaging research", icon: <IconSeo /> },
-      { href: "/studio-assets", label: "Studio assets", icon: <IconAssets /> },
+      { href: "/editorial-evidence", label: "Editorial evidence", icon: <IconEvidence /> },
     ],
   },
   {
-    label: "Assurance",
+    label: "Library systems",
     items: [
+      { href: "/studio-assets", label: "Studio assets", icon: <IconAssets /> },
       { href: "/golden", label: "Golden modules", icon: <IconGolden /> },
-      { href: "/editorial-evidence", label: "Editorial evidence", icon: <IconEvidence /> },
       { href: "/casefile", label: "Casefile", icon: <IconEvidence /> },
     ],
   },
@@ -123,7 +123,7 @@ export function Sidebar() {
         </span>
         <span>
           <strong>AutoStudio</strong>
-          <small>Production OS</small>
+          <small>Signal / production</small>
         </span>
       </div>
 
@@ -133,7 +133,7 @@ export function Sidebar() {
           aria-label="Workspace"
           data-nav-group="workspace"
         >
-          <span className="studio-nav-label">Workspace</span>
+          <span className="studio-nav-label">Active desks</span>
           <div className="studio-nav-items">
             {PRIMARY_NAV_ITEMS.map((item) => (
               <NavItem
@@ -155,8 +155,8 @@ export function Sidebar() {
               <IconToolbox />
             </span>
             <span className="studio-toolbox-copy">
-              <strong>Toolbox</strong>
-              <small>{activeToolboxLabel ?? "Specialist desks & labs"}</small>
+              <strong>Utility deck</strong>
+              <small>{activeToolboxLabel ?? "Specialist tools, tucked away"}</small>
             </span>
             <span className="studio-toolbox-chevron" aria-hidden="true">+</span>
           </summary>
@@ -225,8 +225,8 @@ export function Sidebar() {
                     <IconToolbox />
                   </span>
                   <span className="studio-toolbox-copy">
-                    <strong>Toolbox</strong>
-                    <small>{activeToolboxLabel ?? "8 specialist desks"}</small>
+                    <strong>Utility deck</strong>
+                    <small>{activeToolboxLabel ?? "Specialist tools"}</small>
                   </span>
                   <span className="studio-toolbox-chevron" aria-hidden="true">+</span>
                 </summary>
@@ -259,6 +259,13 @@ export function Sidebar() {
       </nav>
 
       <div className="studio-sidebar-footer">
+        <div className="studio-rail-status" aria-label="Release posture">
+          <span aria-hidden="true" />
+          <div>
+            <strong>Private by default</strong>
+            <small>Release gates armed</small>
+          </div>
+        </div>
         <NavItem {...SETTINGS_ITEM} />
       </div>
     </aside>
