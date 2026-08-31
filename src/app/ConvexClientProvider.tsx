@@ -7,6 +7,7 @@ import {
   useConvexAuth,
 } from "convex/react";
 import styles from "./StudioSessionGate.module.css";
+import { StudioMark } from "@/components/StudioMark";
 
 type TokenState = "loading" | "authenticated" | "unauthenticated";
 
@@ -92,7 +93,9 @@ function StudioSessionGate({ state }: { state: "loading" | "unavailable" }) {
       aria-label={loading ? "Securing studio session" : "Studio connection unavailable"}
     >
       <section className={`${styles.card} glass glass-shine`}>
-        <span className={styles.mark} aria-hidden="true">✦</span>
+        <span className={styles.mark} aria-hidden="true">
+          <StudioMark width={26} height={26} />
+        </span>
         <span className={styles.eyebrow}>AutoStudio · private workspace</span>
         <h1 className={styles.title}>
           {loading ? "Securing your studio" : "Live studio connection paused"}

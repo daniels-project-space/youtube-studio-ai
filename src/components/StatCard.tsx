@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { CSSProperties, ReactNode } from "react";
 
 /**
  * A single headline metric in a glass card. `accent` tints the value + a thin
@@ -18,14 +18,15 @@ export function StatCard({
   icon?: ReactNode;
 }) {
   return (
-    <div className="glass stat-card">
+    <div
+      className="glass stat-card"
+      style={{ "--stat-accent": accent } as CSSProperties}
+    >
       <div className="stat-card-heading">
         <span>{label}</span>
         {icon && <span className="stat-card-icon" style={{ color: accent }}>{icon}</span>}
       </div>
-      <div className="stat-card-value" style={{ color: accent }}>
-        {value}
-      </div>
+      <div className="stat-card-value">{value}</div>
       {hint && <div className="stat-card-hint">{hint}</div>}
     </div>
   );

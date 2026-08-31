@@ -123,6 +123,38 @@ export function IconSpark(props: IconProps) {
   );
 }
 
+export function IconToolbox(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3" y="3" width="7" height="7" rx="1.5" />
+      <rect x="14" y="3" width="7" height="7" rx="1.5" />
+      <rect x="3" y="14" width="7" height="7" rx="1.5" />
+      <path d="M14 17.5h7M17.5 14v7" />
+    </svg>
+  );
+}
+
+export function IconEvidence(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M6 3h8l4 4v14H6z" />
+      <path d="M14 3v5h5" />
+      <path d="m9 15 2 2 4-4" />
+    </svg>
+  );
+}
+
+export function IconAssets(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="4" y="4" width="13" height="13" rx="2" />
+      <path d="M8 17v3h12V8h-3" />
+      <circle cx="9" cy="9" r="1.5" />
+      <path d="m6.5 14 3-3 2.5 2 2-2 3 3" />
+    </svg>
+  );
+}
+
 export function IconGolden(props: IconProps) {
   return (
     <svg {...base(props)}>

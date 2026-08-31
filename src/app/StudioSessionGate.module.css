@@ -1,9 +1,6 @@
 .screen {
   align-items: center;
-  background:
-    radial-gradient(circle at 22% 20%, color-mix(in srgb, var(--color-accent) 10%, transparent), transparent 31rem),
-    radial-gradient(circle at 82% 76%, color-mix(in srgb, var(--color-secondary) 9%, transparent), transparent 28rem),
-    var(--color-bg);
+  background: var(--color-bg);
   box-sizing: border-box;
   color: var(--color-text);
   display: grid;
@@ -25,7 +22,7 @@
   align-items: center;
   background: color-mix(in srgb, var(--color-accent) 12%, transparent);
   border: 1px solid color-mix(in srgb, var(--color-accent) 28%, var(--color-border));
-  border-radius: 14px;
+  border-radius: 9px;
   color: var(--color-accent);
   display: inline-flex;
   font-size: 1.1rem;

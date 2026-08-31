@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
+import { createElement } from "react";
+import { renderToStaticMarkup } from "react-dom/server";
 
-import { chartDomain, type ChartPoint } from "./Chart";
+import { Chart, chartDomain, type ChartPoint } from "./Chart";
 
 const points = (...values: number[]): ChartPoint[] =>
   values.map((value, index) => ({ label: String(index), value }));
@@ -18,5 +20,16 @@ assert.equal(nonPositive.hi, 0, "negative-only deltas end at the honest zero bas
 
 const mixed = chartDomain(points(-4, 0, 10));
 assert.ok(mixed.lo < -4 && mixed.hi > 10, "mixed deltas retain padding on both sides");
+
+const markup = renderToStaticMarkup(
+  createElement(Chart, {
+    title: "Measured views",
+    series: [{ name: "Views", color: "#6ad7c1", points: points(0, 12, 29) }],
+  }),
+);
+assert.match(markup, /class="glass studio-chart"/);
+assert.match(markup, /patternUnits="userSpaceOnUse"/);
+assert.match(markup, /data-terminal-marker="Views"/);
+assert.doesNotMatch(markup, /linearGradient/);
 
 console.log("Chart domain contracts passed");

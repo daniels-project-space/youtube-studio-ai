@@ -17,7 +17,11 @@ import {
   IconTerminal,
   IconLofi,
   IconLore,
+  IconAssets,
+  IconEvidence,
+  IconToolbox,
 } from "./icons";
+import { StudioMark } from "./StudioMark";
 
 const PRIMARY_NAV_ITEMS = [
   { href: "/", label: "Studio", icon: <IconOverview /> },
@@ -33,15 +37,15 @@ const TOOLBOX_NAV_GROUPS = [
     label: "Craft",
     items: [
       { href: "/seo", label: "Packaging research", icon: <IconSeo /> },
-      { href: "/studio-assets", label: "Studio assets", icon: <IconSpark /> },
+      { href: "/studio-assets", label: "Studio assets", icon: <IconAssets /> },
     ],
   },
   {
     label: "Assurance",
     items: [
       { href: "/golden", label: "Golden modules", icon: <IconGolden /> },
-      { href: "/editorial-evidence", label: "Editorial evidence", icon: <IconSpark /> },
-      { href: "/casefile", label: "Casefile", icon: <IconSpark /> },
+      { href: "/editorial-evidence", label: "Editorial evidence", icon: <IconEvidence /> },
+      { href: "/casefile", label: "Casefile", icon: <IconEvidence /> },
     ],
   },
   {
@@ -114,7 +118,7 @@ export function Sidebar() {
     <aside className="studio-sidebar" aria-label="Studio navigation">
       <div className="studio-brand">
         <span className="studio-brand-mark">
-          <IconSpark width={19} height={19} />
+          <StudioMark width={23} height={23} />
         </span>
         <span>
           <strong>AutoStudio</strong>
@@ -147,7 +151,7 @@ export function Sidebar() {
         >
           <summary className="studio-toolbox-trigger">
             <span className="studio-nav-icon">
-              <IconSpark />
+              <IconToolbox />
             </span>
             <span className="studio-toolbox-copy">
               <strong>Toolbox</strong>

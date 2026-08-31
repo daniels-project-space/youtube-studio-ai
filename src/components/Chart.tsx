@@ -5,8 +5,8 @@ import { useId } from "react";
 /**
  * Hand-rolled SVG line chart — zero dependencies (mirrors v1's svgLineChart).
  * Renders one or more series over a shared x-axis (the data point index). Each
- * point is {label, value}; `label` drives sparse x-axis ticks. A soft gradient
- * area sits under the first series. Degrades cleanly: 0 points → a tasteful
+ * point is {label, value}; `label` drives sparse x-axis ticks. A quiet custom
+ * hatch sits under the first series. Degrades cleanly: 0 points → a tasteful
  * "no data" note; 1 point → a single marker (no line).
  *
  * Pure presentational + responsive via a viewBox (the SVG scales to its box).
@@ -83,7 +83,11 @@ export function Chart({
   );
 
   return (
-    <div className="glass" style={{ padding: "1.1rem 1.2rem" }}>
+    <div
+      className="glass studio-chart"
+      data-chart-series={series.length}
+      style={{ padding: "1.1rem 1.2rem" }}
+    >
       {title && <ChartTitle title={title} series={series} />}
       <svg
         viewBox={`0 0 ${W} ${height}`}
@@ -94,18 +98,19 @@ export function Chart({
         aria-label={title ?? "chart"}
       >
         <defs>
-          <linearGradient id={`fill-${gid}`} x1="0" y1="0" x2="0" y2="1">
-            <stop
-              offset="0%"
-              stopColor={series[0]?.color ?? "var(--color-accent)"}
-              stopOpacity="0.22"
+          <pattern
+            id={`fill-${gid}`}
+            width="8"
+            height="8"
+            patternUnits="userSpaceOnUse"
+          >
+            <path
+              d="M-2 8 8-2M4 10 10 4"
+              stroke={series[0]?.color ?? "var(--color-accent)"}
+              strokeWidth="1"
+              opacity=".09"
             />
-            <stop
-              offset="100%"
-              stopColor={series[0]?.color ?? "var(--color-accent)"}
-              stopOpacity="0"
-            />
-          </linearGradient>
+          </pattern>
         </defs>
 
         {/* Gridlines + y labels */}
@@ -120,6 +125,7 @@ export function Chart({
                 y2={gy}
                 stroke="var(--color-border)"
                 strokeWidth={1}
+                strokeDasharray="2 5"
               />
               <text
                 x={PAD.left - 8}
@@ -188,6 +194,18 @@ export function Chart({
                 <title>{`${s.name} · ${p.label}: ${formatValue(p.value)}`}</title>
               </circle>
             ))}
+            {s.points.length > 1 ? (
+              <circle
+                cx={x(s.points.length - 1)}
+                cy={y(s.points.at(-1)?.value ?? 0)}
+                r="6.5"
+                fill="none"
+                stroke={s.color}
+                strokeWidth="1"
+                opacity=".38"
+                data-terminal-marker={s.name}
+              />
+            ) : null}
           </g>
         ))}
       </svg>
@@ -246,9 +264,8 @@ function ChartTitle({
             >
               <span
                 style={{
-                  width: 9,
-                  height: 9,
-                  borderRadius: "50%",
+                  width: 16,
+                  height: 2,
                   background: s.color,
                 }}
               />
