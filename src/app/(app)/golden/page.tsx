@@ -9,7 +9,6 @@ import { certifiedFamilyAdmission } from "@/engine/certifiedFamilyAdmission";
 import { FAMILIES, FAMILY_KEYS } from "@/engine/families";
 import { MINIMUM_VIDEO_FOUNDATION_TEMPLATE } from "@/engine/minimumVideoFoundation";
 import {
-  GOLDEN_PROOF_MEDIA_CATALOG_VERSION,
   goldenProofMediaExclusion,
   goldenProofMediaInventorySummary,
   goldenProofMediaPresentation,
@@ -18,7 +17,7 @@ import {
   type GoldenProofMediaPresentation,
   type GoldenProofMediaSuccessorRequirement,
 } from "@/engine/goldenProofMedia";
-import { PageHeader, SectionTitle } from "@/components/PageHeader";
+import { PageHeader } from "@/components/PageHeader";
 import { ProductionRouteQualificationCard } from "@/components/ProductionRouteQualificationCard";
 import { GoldenImages } from "./GoldenImages";
 
@@ -206,9 +205,6 @@ export default function GoldenPipelinePage() {
   const executableCount = GOLDEN_MODULES.filter(
     (m) => catalogExecutionBinding(m.key).kind === "pipeline-module",
   ).length;
-  const registeredPrivateReleaseCount = GOLDEN_MODULES.filter(
-    (m) => catalogExecutionBinding(m.key).kind === "registered-private-release",
-  ).length;
   const receiptCount = Object.keys(GOLDEN_PROMOTION_PROOFS).length;
   const media = goldenProofMediaInventorySummary();
   const mediaSuccessorQueue = goldenProofMediaSuccessorQueue();
@@ -221,7 +217,7 @@ export default function GoldenPipelinePage() {
     <>
       <PageHeader
         title="Golden Module Catalog"
-        subtitle={`${referenceCount} reference entries · ${executableCount} executable bindings · ${registeredPrivateReleaseCount} registered private-release block${registeredPrivateReleaseCount === 1 ? "" : "s"} with no owner intake · ${receiptCount} promotion-proof record${receiptCount === 1 ? "" : "s"}. Golden media catalog v${GOLDEN_PROOF_MEDIA_CATALOG_VERSION}: ${media.reference} manifest-approved reference files · ${media.context} context-only · ${notPresentableMedia} not presentable. Reference media is not certification.`}
+        subtitle={`${GOLDEN_MODULES.length} modules · ${referenceCount} references · ${executableCount} executable bindings · ${receiptCount} promotion proofs. Evidence, execution, and creator admission remain separate.`}
       />
       <GoldenTruthOverview
         automatic={automaticAdmissions}
@@ -241,17 +237,26 @@ export default function GoldenPipelinePage() {
         if (!mods.length) return null;
         const references = mods.filter((m) => m.status === "reference").length;
         return (
-          <section key={cat} style={{ marginTop: "1.4rem" }}>
-            <SectionTitle>
-              {cat}{" "}
-              <span style={{ color: "var(--color-faint)", fontWeight: 400 }}>
-                · {references}/{mods.length} reference samples · {CATEGORY_BLURB[cat]}
+          <details
+            key={cat}
+            className="golden-category"
+            aria-label={`${cat} Golden modules`}
+          >
+            <summary className="golden-category-summary">
+              <span className="golden-category-copy">
+                <strong>{cat}</strong>
+                <span>{CATEGORY_BLURB[cat]}</span>
               </span>
-            </SectionTitle>
-            <div style={GRID}>
-              {mods.map((m) => <ModuleCard key={m.key} module={m} />)}
+              <span className="golden-category-count">
+                {mods.length} modules · {references} references
+              </span>
+            </summary>
+            <div className="golden-category-body">
+              <div style={GRID}>
+                {mods.map((m) => <ModuleCard key={m.key} module={m} />)}
+              </div>
             </div>
-          </section>
+          </details>
         );
       })}
     </>
@@ -321,28 +326,33 @@ function GoldenTruthOverview({
 
 function GoldenMediaSuccessorQueue({ items }: { items: readonly GoldenProofMediaSuccessorRequirement[] }) {
   return (
-    <div style={{ marginTop: "0.9rem", paddingTop: "0.8rem", borderTop: "1px solid var(--color-border)", display: "grid", gap: "0.55rem" }}>
-      <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", alignItems: "baseline", flexWrap: "wrap" }}>
-        <strong style={{ fontSize: "0.8rem" }}>Legacy video successor queue</strong>
-        <span style={{ ...METAT, fontSize: "0.58rem" }}>CATALOG AUDIT · NO YOUTUBE REPLACEMENT ACTION</span>
+    <details className="golden-audit-disclosure">
+      <summary>
+        <span>
+          <strong>Legacy video successor queue</strong>
+          <small>CATALOG AUDIT · NO YOUTUBE REPLACEMENT ACTION</small>
+        </span>
+        <b>{items.length}</b>
+      </summary>
+      <div className="golden-audit-body">
+        <p>
+          Retained context or quarantined samples need a repaired successor render before they can become Golden evidence. Archive bytes remain preserved; no existing upload is changed here.
+        </p>
+        <div className="golden-audit-grid">
+          {items.map((item) => (
+            <article key={item.id}>
+              <span style={{ ...DEVICE, color: item.status === "quarantined" ? "var(--color-danger)" : "var(--color-gold)" }}>
+                {item.status.toUpperCase()} · {item.family}
+              </span>
+              <strong>{item.id}</strong>
+              <span>{item.reason}</span>
+              <span>{item.requiredOutcome}</span>
+              <small>SHA-256 {item.sha256.slice(0, 12)}</small>
+            </article>
+          ))}
+        </div>
       </div>
-      <span style={{ fontSize: "0.74rem", lineHeight: 1.38, color: "var(--color-muted)" }}>
-        These are the retained context or quarantined video samples that need a repaired successor render before they could become Golden evidence. Archive-only bytes remain preserved; no existing upload is changed here.
-      </span>
-      <div style={{ display: "grid", gap: "0.45rem", gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))" }}>
-        {items.map((item) => (
-          <article key={item.id} style={{ border: "1px solid var(--color-border)", borderRadius: 10, padding: "0.65rem", display: "grid", gap: "0.28rem", background: "rgba(255,255,255,0.018)" }}>
-            <span style={{ ...DEVICE, color: item.status === "quarantined" ? "var(--color-danger)" : "var(--color-gold)" }}>
-              {item.status.toUpperCase()} · {item.family}
-            </span>
-            <strong style={{ fontSize: "0.76rem" }}>{item.id}</strong>
-            <span style={{ fontSize: "0.7rem", lineHeight: 1.36, color: "var(--color-muted)" }}>{item.reason}</span>
-            <span style={{ fontSize: "0.69rem", lineHeight: 1.34 }}>{item.requiredOutcome}</span>
-            <span style={{ ...METAT, fontSize: "0.55rem" }}>SHA-256 {item.sha256.slice(0, 12)}</span>
-          </article>
-        ))}
-      </div>
-    </div>
+    </details>
   );
 }
 
@@ -353,70 +363,37 @@ function GoldenMediaSuccessorQueue({ items }: { items: readonly GoldenProofMedia
  */
 function MinimumVideoFoundationOverview() {
   return (
-    <section
+    <details
       aria-label="Universal video foundation"
-      className="glass"
-      style={{ marginTop: "1.1rem", padding: "0.95rem" }}
+      className="glass golden-foundation"
     >
-      <div style={{ display: "flex", gap: "0.65rem", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div style={{ display: "grid", gap: "0.2rem", maxWidth: 700 }}>
-          <span style={{ ...DEVICE, color: "var(--color-secondary)" }}>UNIVERSAL VIDEO FOUNDATION · ENGINE-ENFORCED</span>
-          <strong style={{ fontSize: "0.92rem", letterSpacing: "-0.015em" }}>The baseline every automatic channel must keep.</strong>
-          <span style={{ fontSize: "0.74rem", lineHeight: 1.38, color: "var(--color-muted)" }}>
-            A format can add its own craft—storyboard, references, animation, music, evidence, or visual treatment—but it cannot omit this shared production core.
-          </span>
-        </div>
-        <span className="status-chip" style={{ whiteSpace: "nowrap" }}>{MINIMUM_VIDEO_FOUNDATION_TEMPLATE.length} NON-NEGOTIABLE STAGES</span>
+      <summary className="golden-foundation-summary">
+        <span>
+          <small>Universal video foundation · engine-enforced</small>
+          <strong>The baseline every automatic channel must keep</strong>
+        </span>
+        <b>{MINIMUM_VIDEO_FOUNDATION_TEMPLATE.length} NON-NEGOTIABLE STAGES</b>
+      </summary>
+      <div className="golden-foundation-body">
+        <p>
+          A format can add its own craft—storyboard, references, animation, music,
+          evidence, or visual treatment—but it cannot omit this shared production core.
+        </p>
+        <ol>
+          {MINIMUM_VIDEO_FOUNDATION_TEMPLATE.map((stage, index) => (
+            <li key={stage.key}>
+              <span aria-hidden="true">
+                {String(index + 1).padStart(2, "0")}
+              </span>
+              <span>
+                <strong>{stage.title}</strong>
+                <small>{stage.requirement}</small>
+              </span>
+            </li>
+          ))}
+        </ol>
       </div>
-
-      <ol
-        style={{
-          listStyle: "none",
-          padding: 0,
-          margin: "0.85rem 0 0",
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(215px, 1fr))",
-          gap: "0.55rem",
-        }}
-      >
-        {MINIMUM_VIDEO_FOUNDATION_TEMPLATE.map((stage, index) => (
-          <li
-            key={stage.key}
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.55rem minmax(0, 1fr)",
-              gap: "0.5rem",
-              padding: "0.62rem",
-              border: "1px solid var(--color-border)",
-              borderRadius: 8,
-              background: "var(--color-surface-solid)",
-            }}
-          >
-            <span
-              aria-hidden="true"
-              style={{
-                display: "grid",
-                placeItems: "center",
-                width: "1.55rem",
-                height: "1.55rem",
-                borderRadius: 999,
-                background: "color-mix(in srgb, var(--color-secondary) 16%, transparent)",
-                color: "var(--color-secondary)",
-                fontFamily: "var(--font-mono)",
-                fontSize: "0.62rem",
-                fontWeight: 700,
-              }}
-            >
-              {String(index + 1).padStart(2, "0")}
-            </span>
-            <span style={{ display: "grid", gap: "0.12rem" }}>
-              <strong style={{ fontSize: "0.72rem", lineHeight: 1.25 }}>{stage.title}</strong>
-              <span style={{ fontSize: "0.65rem", lineHeight: 1.35, color: "var(--color-muted)" }}>{stage.requirement}</span>
-            </span>
-          </li>
-        ))}
-      </ol>
-    </section>
+    </details>
   );
 }
 

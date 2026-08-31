@@ -25,6 +25,13 @@ function main(): void {
   assert.match(html, /NO YOUTUBE REPLACEMENT ACTION/);
   assert.match(html, /documotion-fordlandia-video/);
   assert.match(html, /SHA-256/);
+  assert.equal(
+    html.match(/<details/g)?.length,
+    7,
+    "five catalog disciplines plus foundation and audit evidence stay collapsed by default",
+  );
+  assert.doesNotMatch(html, /<details[^>]*\sopen(?:=|\s|>)/);
+  assert.match(html, /aria-label="Video Engines Golden modules"/);
 }
 
 main();
