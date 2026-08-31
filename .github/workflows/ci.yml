@@ -25,7 +25,11 @@ jobs:
           if [ -f pnpm-lock.yaml ]; then echo "pm=pnpm" >> "$GITHUB_OUTPUT"; else echo "pm=npm" >> "$GITHUB_OUTPUT"; fi
       - uses: pnpm/action-setup@v4
         if: steps.pm.outputs.pm == 'pnpm'
-        with: { version: 9 }
+        # pnpm-workspace.yaml uses the current allowBuilds policy format;
+        # pnpm 9 aborts while calculating its cache path before CI can install
+        # or validate anything. Keep the runner on the repository's pinned
+        # major instead of silently falling back to npm.
+        with: { version: 11 }
       - uses: actions/setup-node@v4
         with:
           node-version: 24

@@ -1,4 +1,7 @@
 allowBuilds:
-  esbuild: set this to true or false
-  protobufjs: set this to true or false
-  unrs-resolver: set this to true or false
+  # Explicitly reviewed native/build-time dependencies required by the
+  # production build and resolver stack. Everything else remains denied by
+  # pnpm's strict default.
+  esbuild: true
+  protobufjs: true
+  unrs-resolver: true
