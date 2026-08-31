@@ -21,8 +21,14 @@ import {
   readProductionRouteRuntimeEvidence,
   readProductionRouteVisualMatterEvidence,
 } from "@/engine/productionRouteQualification";
-import { routePreflightQualificationEvidence } from "@/engine/productionRouteQualificationReceipt";
+import {
+  createRoutePreflightReadyReceipt,
+  createRouteReleaseQualifiedReceipt,
+  routePreflightQualificationEvidence,
+} from "@/engine/productionRouteQualificationReceipt";
 import { buildQualityEvidence } from "@/engine/qualityEvidence";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
 
 type Stored = Record<string, unknown> & { _id: string };
 
@@ -215,7 +221,7 @@ async function main() {
   const owner = state.context("owner");
   const service = state.context("service");
   const fixture = qualificationFixture();
-  const preflightArgs = {
+  const createPreflight = (supersedesReceiptFingerprint?: string) => createRoutePreflightReadyReceipt({
     ownerId: OWNER,
     channelId: CHANNEL,
     binding: fixture.binding,
@@ -223,7 +229,9 @@ async function main() {
     inception: fixture.inception,
     runtime: fixture.runtime,
     visualMatter: fixture.visualMatter,
-  };
+    ...(supersedesReceiptFingerprint ? { supersedesReceiptFingerprint } : {}),
+  });
+  const preflightArgs = { ownerId: OWNER, channelId: CHANNEL, receipt: createPreflight() };
 
   await expectRejected(
     () => invoke(recordRoutePreflightReady, owner, preflightArgs),
@@ -259,12 +267,12 @@ async function main() {
   );
 
   const preflightTwoId = await invoke<string>(recordRoutePreflightReady, service, {
-    ...preflightArgs,
-    supersedesReceiptFingerprint: preflightOneReceipt.receiptFingerprint,
+    ownerId: OWNER,
+    channelId: CHANNEL,
+    receipt: createPreflight(preflightOneReceipt.receiptFingerprint),
   });
   assert.notEqual(preflightTwoId, preflightOneId, "a deliberate supersession writes a new immutable row");
   const preflightTwo = state.rows("productionRouteQualificationReceipts")[1]!;
-  const preflightTwoReceipt = preflightTwo.receipt as { receiptFingerprint: string };
   const currentPreflight = await invoke<Stored | null>(getCurrentRouteQualificationReceipt, owner, {
     ownerId: OWNER,
     channelId: CHANNEL,
@@ -277,33 +285,47 @@ async function main() {
     () => invoke(recordRouteReleaseQualified, service, {
       ownerId: OWNER,
       channelId: CHANNEL,
-      preflightReceiptFingerprint: preflightOneReceipt.receiptFingerprint,
-      qualification: fixture.qualification,
+      receipt: createRouteReleaseQualifiedReceipt({
+        ownerId: OWNER,
+        channelId: CHANNEL,
+        preflight: preflightOne.receipt,
+        qualification: fixture.qualification,
+      }),
     }),
     /current unsuperseded preflight/i,
   );
+  const invalidRelease = structuredClone(createRouteReleaseQualifiedReceipt({
+    ownerId: OWNER,
+    channelId: CHANNEL,
+    preflight: preflightTwo.receipt,
+    qualification: fixture.qualification,
+  })) as { quality: { calibrationComplete: boolean } };
+  invalidRelease.quality.calibrationComplete = false;
   await expectRejected(
     () => invoke(recordRouteReleaseQualified, service, {
       ownerId: OWNER,
       channelId: CHANNEL,
-      preflightReceiptFingerprint: preflightTwoReceipt.receiptFingerprint,
-      qualification: { ...fixture.qualification, automaticReady: false },
+      receipt: invalidRelease,
     }),
-    /qualified status|fingerprint|engine-derived/i,
+    /calibrationComplete|fingerprint/i,
   );
 
+  const validReleaseReceipt = createRouteReleaseQualifiedReceipt({
+    ownerId: OWNER,
+    channelId: CHANNEL,
+    preflight: preflightTwo.receipt,
+    qualification: fixture.qualification,
+  });
   const releaseId = await invoke<string>(recordRouteReleaseQualified, service, {
     ownerId: OWNER,
     channelId: CHANNEL,
-    preflightReceiptFingerprint: preflightTwoReceipt.receiptFingerprint,
-    qualification: fixture.qualification,
+    receipt: validReleaseReceipt,
   });
   assert.equal(
     await invoke<string>(recordRouteReleaseQualified, service, {
       ownerId: OWNER,
       channelId: CHANNEL,
-      preflightReceiptFingerprint: preflightTwoReceipt.receiptFingerprint,
-      qualification: fixture.qualification,
+      receipt: validReleaseReceipt,
     }),
     releaseId,
     "same release qualification payload must be idempotent",
@@ -315,12 +337,18 @@ async function main() {
   assert.equal((release.receipt as Record<string, unknown>).releaseCertificateKey, undefined, "no certificate path or raw payload is stored");
 
   await expectRejected(
-    () => invoke(recordRouteReleaseQualified, service, {
-      ownerId: OWNER,
-      channelId: CHANNEL,
-      preflightReceiptFingerprint: releaseReceipt.receiptFingerprint,
-      qualification: fixture.qualification,
-    }),
+    () => {
+      const releaseAsPreflight = structuredClone(validReleaseReceipt) as Record<string, unknown>;
+      releaseAsPreflight.preflightReceiptFingerprint = releaseReceipt.receiptFingerprint;
+      releaseAsPreflight.receiptFingerprint = sha256Hex(canonicalJson(
+        Object.fromEntries(Object.entries(releaseAsPreflight).filter(([key]) => key !== "receiptFingerprint")),
+      ));
+      return invoke(recordRouteReleaseQualified, service, {
+        ownerId: OWNER,
+        channelId: CHANNEL,
+        receipt: releaseAsPreflight,
+      });
+    },
     /cannot use another release receipt as its preflight/i,
   );
   await expectRejected(

@@ -1,8 +1,7 @@
-import { createHash } from "node:crypto";
-
 import { z } from "zod";
 
 import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
 
 /**
  * A deliberately small, provider-neutral receipt for an individual episode.
@@ -20,7 +19,7 @@ const EvidenceListSchema = z.array(z.string().min(1));
 const FingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/i, "expected SHA-256");
 
 function selfContainedPlanTopicFingerprint(topic: string): string {
-  return createHash("sha256").update(canonicalJson(topic.trim())).digest("hex");
+  return sha256Hex(canonicalJson(topic.trim()));
 }
 
 /**

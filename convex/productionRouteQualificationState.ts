@@ -6,11 +6,9 @@ import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions
 import {
   ROUTE_PREFLIGHT_READY,
   ROUTE_RELEASE_QUALIFIED,
-  assertProductionRouteQualificationReceipt,
-  createRoutePreflightReadyReceipt,
-  createRouteReleaseQualifiedReceipt,
-  type ProductionRouteQualificationReceipt,
-} from "@/engine/productionRouteQualificationReceipt";
+  assertProductionRouteQualificationReceiptWire,
+  type ProductionRouteQualificationReceiptWire,
+} from "@/engine/productionRouteQualificationReceiptWire";
 import { canonicalJson } from "@/lib/canonicalJson";
 
 /**
@@ -84,8 +82,8 @@ type ReceiptRow = {
   readonly receipt: unknown;
 };
 
-function assertReceiptRowIntegrity(row: ReceiptRow): ProductionRouteQualificationReceipt {
-  const receipt = assertProductionRouteQualificationReceipt(row.receipt);
+function assertReceiptRowIntegrity(row: ReceiptRow): ProductionRouteQualificationReceiptWire {
+  const receipt = assertProductionRouteQualificationReceiptWire(row.receipt);
   const projectionMatches = (
     row.version === receipt.version
     && row.level === receipt.level
@@ -136,7 +134,7 @@ async function recordImmutableReceipt(
   ctx: Pick<MutationCtx, "db">,
   ownerId: string,
   channelId: Id<"channels">,
-  receipt: ProductionRouteQualificationReceipt,
+  receipt: ProductionRouteQualificationReceiptWire,
 ): Promise<Id<"productionRouteQualificationReceipts">> {
   const exact = await ctx.db
     .query("productionRouteQualificationReceipts")
@@ -265,53 +263,36 @@ export const getCurrentRouteQualificationReceipt = query({
 });
 
 /**
- * Service-only first-stage write. The mutation receives only compact planner
- * contracts and writes only the sealed compact envelope; it cannot receive or
- * store provider responses, media bytes, a final master, QA, or provenance.
+ * Service-only first-stage write. Trigger fully re-derives the rich preflight
+ * before sealing this compact envelope. Convex cannot turn provider responses,
+ * media bytes, a final master, QA, or provenance into a preflight itself.
  */
 export const recordRoutePreflightReady = mutation({
   args: {
     ownerId: v.string(),
     channelId: v.id("channels"),
-    binding: v.any(),
-    planner: v.any(),
-    inception: v.any(),
-    runtime: v.any(),
-    visualMatter: v.any(),
-    supersedesReceiptFingerprint: v.optional(v.string()),
+    receipt: v.any(),
   },
   returns: v.id("productionRouteQualificationReceipts"),
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "production route preflight persistence");
     assertSafeOwnerId(args.ownerId);
     await requireOwnedChannel(ctx, args.ownerId, args.channelId, "production route preflight persistence");
-    assertContractSize(args.binding, "route binding");
-    assertContractSize(args.planner, "planner evidence");
-    assertContractSize(args.inception, "inception evidence");
-    assertContractSize(args.runtime, "runtime evidence");
-    assertContractSize(args.visualMatter, "Visual Matter evidence");
-    if (args.supersedesReceiptFingerprint !== undefined) {
-      assertFingerprint(args.supersedesReceiptFingerprint, "superseded qualification receipt fingerprint");
+    assertContractSize(args.receipt, "sealed preflight receipt");
+    const receipt = assertProductionRouteQualificationReceiptWire(args.receipt);
+    if (receipt.level !== ROUTE_PREFLIGHT_READY) {
+      throw new Error("productionRouteQualificationState: preflight persistence requires a sealed preflight receipt");
     }
-    const receipt = createRoutePreflightReadyReceipt({
-      ownerId: args.ownerId,
-      channelId: String(args.channelId),
-      binding: args.binding,
-      planner: args.planner,
-      inception: args.inception,
-      runtime: args.runtime,
-      visualMatter: args.visualMatter,
-      ...(args.supersedesReceiptFingerprint
-        ? { supersedesReceiptFingerprint: args.supersedesReceiptFingerprint }
-        : {}),
-    });
+    if (receipt.ownerId !== args.ownerId || receipt.channelId !== String(args.channelId)) {
+      throw new Error("productionRouteQualificationState: sealed preflight receipt ownership or channel binding mismatch");
+    }
     return await recordImmutableReceipt(ctx, args.ownerId, args.channelId, receipt);
   },
 });
 
 /**
- * Service-only second-stage write. It resolves one stored preflight then
- * rebuilds a release receipt from a full engine qualification. It cannot turn
+ * Service-only second-stage write. It resolves one stored preflight and
+ * persists a release receipt Trigger has fully re-derived. Convex cannot turn
  * a bare `qualified` label, review result, or provider payload into a release
  * qualification.
  */
@@ -319,25 +300,26 @@ export const recordRouteReleaseQualified = mutation({
   args: {
     ownerId: v.string(),
     channelId: v.id("channels"),
-    preflightReceiptFingerprint: v.string(),
-    qualification: v.any(),
-    supersedesReceiptFingerprint: v.optional(v.string()),
+    receipt: v.any(),
   },
   returns: v.id("productionRouteQualificationReceipts"),
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "production route release qualification persistence");
     assertSafeOwnerId(args.ownerId);
-    assertFingerprint(args.preflightReceiptFingerprint, "preflight qualification receipt fingerprint");
     await requireOwnedChannel(ctx, args.ownerId, args.channelId, "production route release qualification persistence");
-    assertContractSize(args.qualification, "full route qualification");
-    if (args.supersedesReceiptFingerprint !== undefined) {
-      assertFingerprint(args.supersedesReceiptFingerprint, "superseded qualification receipt fingerprint");
+    assertContractSize(args.receipt, "sealed release qualification receipt");
+    const receipt = assertProductionRouteQualificationReceiptWire(args.receipt);
+    if (receipt.level !== ROUTE_RELEASE_QUALIFIED) {
+      throw new Error("productionRouteQualificationState: release persistence requires a sealed release receipt");
+    }
+    if (receipt.ownerId !== args.ownerId || receipt.channelId !== String(args.channelId)) {
+      throw new Error("productionRouteQualificationState: sealed release receipt ownership or channel binding mismatch");
     }
     const preflightRow = await ctx.db
       .query("productionRouteQualificationReceipts")
       .withIndex("by_channel_receipt", (q) =>
         q.eq("channelId", args.channelId)
-          .eq("receiptFingerprint", args.preflightReceiptFingerprint),
+          .eq("receiptFingerprint", receipt.preflightReceiptFingerprint),
       )
       .unique() as ReceiptRow | null;
     if (!preflightRow || preflightRow.ownerId !== args.ownerId) {
@@ -362,15 +344,9 @@ export const recordRouteReleaseQualified = mutation({
     ) {
       throw new Error("productionRouteQualificationState: release qualification requires the current unsuperseded preflight receipt");
     }
-    const receipt = createRouteReleaseQualifiedReceipt({
-      ownerId: args.ownerId,
-      channelId: String(args.channelId),
-      preflight,
-      qualification: args.qualification,
-      ...(args.supersedesReceiptFingerprint
-        ? { supersedesReceiptFingerprint: args.supersedesReceiptFingerprint }
-        : {}),
-    });
+    if (!sameFrozenContract(preflight.binding, receipt.binding)) {
+      throw new Error("productionRouteQualificationState: release receipt does not match its stored preflight binding");
+    }
     return await recordImmutableReceipt(ctx, args.ownerId, args.channelId, receipt);
   },
 });

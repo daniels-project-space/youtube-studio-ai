@@ -42,6 +42,14 @@ function rotr(value: number, bits: number): number {
  */
 export function sha256Hex(input: string): string {
   const bytes = new TextEncoder().encode(input);
+  return sha256BytesHex(bytes);
+}
+
+/**
+ * Returns the lowercase hex SHA-256 digest of exact bytes. This keeps media
+ * integrity checks portable to Convex without changing their byte semantics.
+ */
+export function sha256BytesHex(bytes: Uint8Array): string {
   const byteLength = bytes.length;
   const bitLength = byteLength * 8;
 

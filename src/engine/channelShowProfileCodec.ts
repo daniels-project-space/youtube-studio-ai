@@ -45,8 +45,9 @@ import {
 } from "@/engine/channelFamilyManifest";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
+import { CHANNEL_SHOW_PROFILE_VERSION } from "./channelContractVersions";
 
-export const CHANNEL_SHOW_PROFILE_VERSION = "channel-show-profile/v1" as const;
+export { CHANNEL_SHOW_PROFILE_VERSION } from "./channelContractVersions";
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
 

@@ -200,6 +200,7 @@ import {
   readProductionRouteRuntimeEvidence,
   readProductionRouteVisualMatterEvidence,
 } from "@/engine/productionRouteQualification";
+import { createRoutePreflightReadyReceipt } from "@/engine/productionRouteQualificationReceipt";
 import {
   convexChannelInceptionLedger,
   initializeChannelInceptionLedger,
@@ -2270,16 +2271,21 @@ export async function executeDesignChannel(
     const qualificationVisualMatter = readProductionRouteVisualMatterEvidence({
       binding: qualificationBinding,
     });
+    const preflightReceipt = createRoutePreflightReadyReceipt({
+      ownerId,
+      channelId: String(channelId),
+      binding: qualificationBinding,
+      planner: qualificationPlanner,
+      inception: qualificationInception,
+      runtime: qualificationRuntime,
+      visualMatter: qualificationVisualMatter,
+    });
     await convex.mutation(
       productionRouteQualificationStateApi.recordRoutePreflightReady,
       {
         ownerId,
         channelId,
-        binding: qualificationBinding,
-        planner: qualificationPlanner,
-        inception: qualificationInception,
-        runtime: qualificationRuntime,
-        visualMatter: qualificationVisualMatter,
+        receipt: preflightReceipt,
       } as never,
     );
     log("sealed current route_preflight_ready receipt before provider-capable inception");

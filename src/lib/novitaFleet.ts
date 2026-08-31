@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { LTX_25_RTX_4090_VIDEO } from "@/engine/generationProfiles";
+import { sha256Hex } from "@/lib/sha256";
 
 export const NOVITA_FLEET_CONTRACT_VERSION = "2.0.0" as const;
 export const NOVITA_HARD_GPU_LIMIT = 8 as const;
@@ -455,7 +455,7 @@ export function compileImmutableRenderManifest(input: ImmutableRenderManifestInp
   if (input.jobIds.length < 1 || new Set(input.jobIds).size !== input.jobIds.length) {
     throw new NovitaAdmissionError("manifest jobs must be non-empty and unique");
   }
-  const profileSha256 = createHash("sha256").update(canonicalJson(input.profile)).digest("hex");
+  const profileSha256 = sha256Hex(canonicalJson(input.profile));
   const core = {
     contractVersion: NOVITA_FLEET_CONTRACT_VERSION,
     phase: input.phase,
@@ -466,9 +466,9 @@ export function compileImmutableRenderManifest(input: ImmutableRenderManifestInp
     maxCostUsd: input.maxCostUsd,
     expiresAt: input.expiresAt,
   };
-  const requestSha256 = createHash("sha256").update(canonicalJson(core)).digest("hex");
+  const requestSha256 = sha256Hex(canonicalJson(core));
   const unsigned = { ...core, manifestId: `${input.phase}-${requestSha256.slice(0, 32)}` };
-  const manifestSha256 = createHash("sha256").update(canonicalJson(unsigned)).digest("hex");
+  const manifestSha256 = sha256Hex(canonicalJson(unsigned));
   return { ...unsigned, manifestSha256 };
 }
 
@@ -481,7 +481,7 @@ export function sealNovitaWorkerManifest<T extends Record<string, unknown>>(
   if (Object.prototype.hasOwnProperty.call(unsigned, "manifestSha256")) {
     throw new NovitaAdmissionError("worker manifest must be unsigned before sealing");
   }
-  const manifestSha256 = createHash("sha256").update(canonicalJson(unsigned)).digest("hex");
+  const manifestSha256 = sha256Hex(canonicalJson(unsigned));
   return { ...unsigned, manifestSha256 };
 }
 

@@ -17,10 +17,12 @@ import { SOURCE_ATTRIBUTED_DATA_STORY, dataStoryInsertParams } from "./dataStory
 import type { FamilyKey } from "./families";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
+import { CHANNEL_COMPOSITION_RECEIPT_VERSION } from "./channelContractVersions";
+
+export { CHANNEL_COMPOSITION_RECEIPT_VERSION } from "./channelContractVersions";
 
 /** Catalog bookkeeping only; receipts never use a whole-catalog fingerprint. */
 export const CHANNEL_COMPOSITION_CATALOG_VERSION = "certified-channel-composition-catalog/v4" as const;
-export const CHANNEL_COMPOSITION_RECEIPT_VERSION = "certified-channel-composition-receipt/v2" as const;
 /**
  * A sealed capability plan is a new composition authority for newly admitted
  * modular channels. Legacy exact-catalog receipts keep their own version and

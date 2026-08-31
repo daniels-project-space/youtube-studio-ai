@@ -16,8 +16,9 @@ import { getNiche, getSubcategory } from "@/lib/nicheCatalog";
 import { sha256Hex } from "@/lib/sha256";
 import type { CreativeCapabilityIntent } from "@/engine/creative/creativeCapabilityCatalog";
 import type { FormatSelectionInput } from "@/engine/creative/selectFormat";
+import { CHANNEL_PROGRAM_BRIEF_VERSION } from "./channelContractVersions";
 
-export const CHANNEL_PROGRAM_BRIEF_VERSION = "channel-program-brief/v1" as const;
+export { CHANNEL_PROGRAM_BRIEF_VERSION } from "./channelContractVersions";
 export const CHANNEL_PROGRAM_BRIEF_POSITIONING_TEXT_MAX_CHARS = 1_200;
 
 const MAX_LOCALE_CHARS = 64;

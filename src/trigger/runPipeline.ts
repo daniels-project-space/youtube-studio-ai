@@ -42,7 +42,10 @@ import {
   readProductionRouteQualityEvidence,
   readProductionRouteRuntimeEvidence,
 } from "@/engine/productionRouteQualification";
-import { routePreflightQualificationEvidence } from "@/engine/productionRouteQualificationReceipt";
+import {
+  createRouteReleaseQualifiedReceipt,
+  routePreflightQualificationEvidence,
+} from "@/engine/productionRouteQualificationReceipt";
 import { automaticCreatorBriefAdmission } from "@/engine/automaticCreatorBriefAdmission";
 import {
   automaticFamilyExecutionReadinessAdmission,
@@ -2422,13 +2425,18 @@ export const runPipelineTask = task({
           provenance,
           visualMatter: preflightEvidence.visualMatter,
         });
+        const releaseReceipt = createRouteReleaseQualifiedReceipt({
+          ownerId,
+          channelId: String(payload.channelId),
+          preflight: preflightRow.receipt,
+          qualification,
+        });
         await convex.mutation(
           productionRouteQualificationStateApi.recordRouteReleaseQualified,
           {
             ownerId,
             channelId: payload.channelId as Id<"channels">,
-            preflightReceiptFingerprint: routeQualificationBenchmarkAdmission.preflightReceiptFingerprint,
-            qualification,
+            receipt: releaseReceipt,
           } as never,
         );
         log("sealed route_release_qualified receipt from exact private final-master benchmark");

@@ -7,7 +7,6 @@
  * a future renderer can consume the same package without inventing a new
  * channel family for every creative format.
  */
-import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import type { StudioAssetRecipeProjection } from "@/engine/studioAssetLibrary";
@@ -16,6 +15,7 @@ import {
   type VisualTreatmentPlan,
 } from "@/engine/visualTreatmentCatalog";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import {
   ContinuityLedgerSchema,
   DPVisualSpecSchema,
@@ -206,7 +206,7 @@ export interface VisualMatterShotDirective {
 }
 
 function sha256(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+  return sha256Hex(canonicalJson(value));
 }
 
 function requestIdentity(request: VisualMatterAssetRequest) {
@@ -254,7 +254,7 @@ export function assertVisualMatterReferenceAssetBytes(
   bytes: Uint8Array,
 ): VisualMatterReferenceAsset {
   const parsed = VisualMatterReferenceAssetSchema.parse(asset);
-  const actual = createHash("sha256").update(bytes).digest("hex");
+  const actual = sha256BytesHex(bytes);
   if (actual !== parsed.contentSha256) {
     throw new Error(`Visual Matter reference asset '${parsed.id}' bytes do not match its declared contentSha256`);
   }

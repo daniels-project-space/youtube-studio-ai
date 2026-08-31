@@ -7,9 +7,9 @@ import {
   channelProgramRouteRunSeed,
 } from "@/engine/channelProgramRoute";
 import {
-  assertChannelShowProfilePipelineCompatibility,
-  channelShowProfileFingerprint,
-} from "@/engine/channelShowProfile";
+  assertChannelShowProfileReceiptPipelineCompatibility,
+  channelShowProfileReceiptFingerprint,
+} from "@/engine/channelShowProfileCodec";
 import { resolveContentLane } from "@/engine/contentLane";
 import { hasSourceAttributedDataStoryParams } from "@/engine/dataStory";
 import {
@@ -143,7 +143,7 @@ export function reviewedDataStoryInitialRunChannelBinding(args: {
     programBrief,
   });
   assertChannelProgramRoutePipelineCompatibility({ route, programBrief, pipeline: entries });
-  const showProfile = assertChannelShowProfilePipelineCompatibility({
+  const showProfile = assertChannelShowProfileReceiptPipelineCompatibility({
     profile: identity["showProfile"],
     programBrief,
     pipeline: entries,
@@ -161,7 +161,7 @@ export function reviewedDataStoryInitialRunChannelBinding(args: {
   }
   assertInitialReviewMaterialization(entries);
   const routeSeed = channelProgramRouteRunSeed({ route, programBrief });
-  const showProfileFingerprint = channelShowProfileFingerprint(showProfile);
+  const showProfileFingerprint = channelShowProfileReceiptFingerprint(showProfile);
   const selectedCapabilityKeys = [...showProfile.selectedCapabilityKeys].sort();
   if (!requiresReviewedEvidencePackForSourceDataStory({
     route: routeSeed,
