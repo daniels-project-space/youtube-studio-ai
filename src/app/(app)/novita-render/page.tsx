@@ -1,13 +1,11 @@
 "use client";
 
-import { useEffect, useRef, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState } from "react";
 import { GENERATION_PROFILES, type GenerationProfile } from "@/engine/generationProfiles";
 import {
   assessNovitaVideoProfileRuntime,
   novitaVideoProfileIdentity,
 } from "@/engine/runtimeCapability";
-import { PageHeader, SectionTitle } from "@/components/PageHeader";
-import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
 import { useOperationsAccess } from "@/components/OperationsAccess";
 import {
   NOVITA_RENDER_STATUS_TIMEOUT_MS,
@@ -17,6 +15,7 @@ import {
   persistNovitaRenderJob,
   type PersistedNovitaRenderJob,
 } from "@/lib/novitaRenderPolling";
+import styles from "./novita-render.module.css";
 
 const CAMERA_MOVES = [
   "static", "dolly_push", "dolly_pull", "crane_up", "crane_down",
@@ -125,6 +124,14 @@ const UNAVAILABLE_FLEET_HEALTH: NovitaFleetHealth = {
 };
 
 type Phase = "idle" | "rendering-images" | "rendering-video" | "done" | "error";
+
+type LiveRenderProgress = {
+  phase: "image" | "video";
+  status: RenderStatus["status"];
+  outputs: number;
+  total: number;
+  jobId: string;
+};
 
 function newShot(i: number): ShotRow {
   return {
@@ -235,6 +242,7 @@ export default function NovitaRenderPage() {
   const [message, setMessage] = useState("");
   const [fleetHealth, setFleetHealth] = useState<NovitaFleetHealth | null>(null);
   const [recoverableJob, setRecoverableJob] = useState<PersistedNovitaRenderJob | null>(null);
+  const [renderProgress, setRenderProgress] = useState<LiveRenderProgress | null>(null);
   const activePoll = useRef<AbortController | null>(null);
   const profile = GENERATION_PROFILES[profileId];
   const exactLtx25X2Ready = hasExactLtx25X2Attestation(fleetHealth, profile);
@@ -367,6 +375,13 @@ export default function NovitaRenderPage() {
         if (status.jobId !== launch.jobId || status.phase !== launch.phase) {
           throw new Error("render bridge returned a mismatched job identity");
         }
+        setRenderProgress({
+          phase: status.phase,
+          status: status.status,
+          outputs: status.n_outputs,
+          total: status.n_jobs,
+          jobId: status.jobId,
+        });
         if (status.status === "failed") {
           finishTracking();
           throw new Error(status.error ?? `${status.phase} render failed`);
@@ -421,6 +436,13 @@ export default function NovitaRenderPage() {
   }
 
   function applyCompletedStatus(status: RenderStatus) {
+    setRenderProgress({
+      phase: status.phase,
+      status: "done",
+      outputs: status.n_outputs,
+      total: status.n_jobs,
+      jobId: status.jobId,
+    });
     if (status.phase === "image") {
       const stillKeys = status.stillKeys ?? [];
       setShots((rows) => rows.map((shot) => {
@@ -440,6 +462,13 @@ export default function NovitaRenderPage() {
     if (!recoverableJob) return;
     setProfileId(recoverableJob.profileId);
     setPhase(recoverableJob.phase === "image" ? "rendering-images" : "rendering-video");
+    setRenderProgress({
+      phase: recoverableJob.phase,
+      status: "queued",
+      outputs: 0,
+      total: shots.length,
+      jobId: recoverableJob.jobId,
+    });
     setMessage(`Resuming authenticated status tracking for ${recoverableJob.jobId}…`);
     try {
       const status = await pollRender(
@@ -450,6 +479,7 @@ export default function NovitaRenderPage() {
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setMessage(error instanceof Error ? error.message : String(error));
+      setRenderProgress((current) => current ? { ...current, status: "failed" } : current);
       setPhase("error");
     }
   }
@@ -467,6 +497,7 @@ export default function NovitaRenderPage() {
     try {
       const launch = await callRenderApi("image");
       const startedAt = Date.now();
+      setRenderProgress({ phase: "image", status: "queued", outputs: 0, total: shots.length, jobId: launch.jobId });
       const recoverySaved = rememberLaunch(launch, startedAt);
       setMessage(
         recoverySaved
@@ -482,11 +513,13 @@ export default function NovitaRenderPage() {
       });
       setShots(withStills);
       setMessage(`${status.n_outputs} verified still(s) rendered. Primary stills are ready for video.`);
+      setRenderProgress({ phase: "image", status: "done", outputs: status.n_outputs, total: status.n_jobs, jobId: status.jobId });
       finishTracking();
       setPhase("done");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setMessage(error instanceof Error ? error.message : String(error));
+      setRenderProgress((current) => current ? { ...current, status: "failed" } : current);
       setPhase("error");
     }
   }
@@ -498,6 +531,7 @@ export default function NovitaRenderPage() {
     try {
       const launch = await callRenderApi("video");
       const startedAt = Date.now();
+      setRenderProgress({ phase: "video", status: "queued", outputs: 0, total: shots.length, jobId: launch.jobId });
       const recoverySaved = rememberLaunch(launch, startedAt);
       setMessage(
         recoverySaved
@@ -510,11 +544,13 @@ export default function NovitaRenderPage() {
         throw new Error(`video render returned ${footageKeys.length}/${shots.length} clips`);
       }
       setMessage(`${footageKeys.length} verified clip(s) rendered and stored.`);
+      setRenderProgress({ phase: "video", status: "done", outputs: status.n_outputs, total: status.n_jobs, jobId: status.jobId });
       finishTracking();
       setPhase("done");
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") return;
       setMessage(error instanceof Error ? error.message : String(error));
+      setRenderProgress((current) => current ? { ...current, status: "failed" } : current);
       setPhase("error");
     }
   }
@@ -524,61 +560,66 @@ export default function NovitaRenderPage() {
 
   if (operationsAccess !== "owner") {
     return (
-      <>
-        <PageHeader
-          title="Novita Render Farm"
-          subtitle="Signed, pinned-profile jobs on the capacity-aware Novita spot fleet."
-        />
-        <OwnerOnlyNotice
+      <main className={styles.page}>
+        <RenderFleetHero
           access={operationsAccess}
-          desk="the Novita render console"
+          fleetHealth={null}
+          ready={false}
+          shotCount={0}
+          profileId="production"
         />
-      </>
+        <LockedRenderConsole access={operationsAccess} />
+      </main>
     );
   }
 
   return (
-    <>
-      <PageHeader
-        title="Novita Render Farm"
-        subtitle="Operator console for signed, pinned-profile image and image-to-video jobs on the capacity-aware Novita spot fleet."
+    <main className={styles.page}>
+      <RenderFleetHero
+        access={operationsAccess}
+        fleetHealth={fleetHealth}
+        ready={exactLtx25X2Ready}
+        shotCount={shots.length}
+        profileId={profileId}
       />
 
-      <section aria-label="Novita render admission readiness" style={{ ...CARD, marginBottom: "1rem" }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
-          <span style={LABEL}>Render admission readiness</span>
+      <section aria-label="Novita render admission readiness" className={styles.readiness}>
+        <div className={styles.readinessHeader}>
+          <div>
+            <span className={styles.eyebrow}>Admission circuit · exact profile only</span>
+            <h2>Render admission readiness</h2>
+            <p>A generic health bit cannot start paid work. The direct Trigger receipt, exact model identity, benchmark, storage, and shutdown controls must agree.</p>
+          </div>
           <span
             aria-live="polite"
-            style={{
-              fontSize: "0.74rem",
-              fontWeight: 700,
-              color: fleetHealth === null ? "var(--color-muted)" : exactLtx25X2Ready ? "#30a46c" : "#e5484d",
-            }}
+            className={styles.readinessState}
+            data-state={fleetHealth === null ? "checking" : exactLtx25X2Ready ? "ready" : "blocked"}
           >
             {fleetHealth === null ? "Checking admission…" : exactLtx25X2Ready ? "Ready" : "Not attested"}
           </span>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))", gap: "0.5rem" }}>
-          <div style={FLEET_STAT}>
-            <span style={FIELD_LABEL}>Architecture ceiling</span>
+        <div className={styles.fleetStats}>
+          <div>
+            <span>Architecture ceiling</span>
             <strong>{fleetHealth?.architecturalGpuCeiling ?? 8} GPUs</strong>
-            <span style={FAINT}>Orchestration design limit</span>
+            <small>Orchestration design limit</small>
           </div>
-          <div style={FLEET_STAT}>
-            <span style={FIELD_LABEL}>Verified provider quota</span>
+          <div>
+            <span>Verified provider quota</span>
             <strong>{fleetHealth?.verifiedGpuQuota == null ? "—" : `${fleetHealth.verifiedGpuQuota} GPUs`}</strong>
-            <span style={FAINT}>Direct Trigger attestation</span>
+            <small>Direct Trigger attestation</small>
           </div>
-          <div style={FLEET_STAT}>
-            <span style={FIELD_LABEL}>Available now</span>
+          <div>
+            <span>Available now</span>
             <strong>{fleetHealth?.effectiveGpuLimit == null ? "—" : `${fleetHealth.effectiveGpuLimit} GPUs`}</strong>
-            <span style={FAINT}>
+            <small>
               {fleetHealth?.activeGpuCount == null ? "Current quota unavailable" : `${fleetHealth.activeGpuCount} active`}
-            </span>
+            </small>
           </div>
         </div>
+        <AdmissionTrace health={attestedFleetHealth} />
         {attestedFleetHealth ? (
-          <div style={{ display: "grid", gap: "0.25rem", fontSize: "0.72rem", color: "var(--color-muted)" }}>
+          <div className={styles.attestationLedger}>
             <span>
               Contract {attestedFleetHealth.contract?.version ?? "unverified"} · dispatch {attestedFleetHealth.contract?.dispatchReady ? "ready" : "blocked"} · worker image {attestedFleetHealth.contract?.workerImageReady ? "prewarmed" : "unverified"}
             </span>
@@ -593,7 +634,7 @@ export default function NovitaRenderPage() {
             </span>
           </div>
         ) : (
-          <span style={fleetHealth === null ? FAINT : WARN}>
+          <span className={styles.admissionNote} data-warning={fleetHealth !== null}>
             {fleetHealth === null
               ? "Reading direct render admission…"
               : fleetHealth.attestation.source === "studio-static"
@@ -602,29 +643,31 @@ export default function NovitaRenderPage() {
           </span>
         )}
         {fleetHealth && fleetHealth.blockers.length > 0 && (
-          <span style={FAINT}>Blockers · {fleetHealth.blockers.map((blocker) => blocker.replaceAll("_", " ")).join(" · ")}</span>
+          <span className={styles.blockers}>Blockers · {fleetHealth.blockers.map((blocker) => blocker.replaceAll("_", " ")).join(" · ")}</span>
         )}
       </section>
 
       {recoverableJob && (
-        <section aria-label="Saved Novita render status" style={{ ...CARD, marginBottom: "1rem" }}>
-          <span style={LABEL}>Saved render status</span>
-          <strong style={{ fontSize: "0.84rem" }}>{recoverableJob.jobId}</strong>
-          <span style={FAINT}>
-            {recoverableJob.phase} · {recoverableJob.profileId} · started {new Date(recoverableJob.startedAt).toLocaleString()}
-          </span>
-          <span style={FAINT}>Only the sanitized job identity is stored. Every status request reauthorizes through Ops.</span>
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-            <button type="button" style={PRIMARY_BTN} onClick={() => void onResumeTracking()} disabled={busy}>
+        <section aria-label="Saved Novita render status" className={styles.savedJob}>
+          <span className={styles.savedMark} aria-hidden="true">↻</span>
+          <div>
+            <span className={styles.eyebrow}>Saved render status</span>
+            <strong>{recoverableJob.jobId}</strong>
+            <small>{recoverableJob.phase} · {recoverableJob.profileId} · started {new Date(recoverableJob.startedAt).toLocaleString()}</small>
+            <p>Only the sanitized job identity is stored. Every status request reauthorizes through Ops.</p>
+          </div>
+          <div className={styles.savedActions}>
+            <button type="button" className={styles.primaryButton} onClick={() => void onResumeTracking()} disabled={busy}>
               {busy ? "Checking…" : "Resume status"}
             </button>
             <button
               type="button"
-              style={SECONDARY_BTN}
+              className={styles.secondaryButton}
               disabled={busy}
               onClick={() => {
                 finishTracking();
                 setPhase("idle");
+                setRenderProgress(null);
                 setMessage("Saved status tracking dismissed. This does not cancel the remote job.");
               }}
             >
@@ -634,133 +677,252 @@ export default function NovitaRenderPage() {
         </section>
       )}
 
-      <SectionTitle>Shot list</SectionTitle>
-      <div style={{ display: "grid", gap: "0.6rem" }}>
-        {shots.map((shot, index) => (
-          <div key={shot.id} style={CARD}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: "0.35rem" }}>
-              <span style={LABEL}>Shot {index + 1} · {shot.id}</span>
-              <button type="button" onClick={() => removeShot(shot.id)} disabled={shots.length <= 1} style={SMALL_BTN}>Remove</button>
-            </div>
-            <textarea
-              placeholder="Script line / image prompt for this shot"
-              value={shot.prompt}
-              onChange={(event) => updateShot(shot.id, { prompt: event.target.value })}
-              rows={2}
-              style={TEXTAREA}
-            />
-            <div style={ROW}>
-              <label style={FIELD}>
-                <span style={FIELD_LABEL}>Camera move</span>
-                <select value={shot.cameraMove} onChange={(event) => updateShot(shot.id, { cameraMove: event.target.value as CameraMove })} style={SELECT}>
-                  {CAMERA_MOVES.map((cameraMove) => <option key={cameraMove} value={cameraMove}>{cameraMove}</option>)}
-                </select>
-              </label>
-              <label style={FIELD}>
-                <span style={FIELD_LABEL}>Shot scale</span>
-                <select value={shot.shotScale} onChange={(event) => updateShot(shot.id, { shotScale: event.target.value as ShotScale })} style={SELECT}>
-                  {SHOT_SCALES.map((shotScale) => <option key={shotScale} value={shotScale}>{shotScale}</option>)}
-                </select>
-              </label>
-              <label style={FIELD}>
-                <span style={FIELD_LABEL}>Lens</span>
-                <input type="text" value={shot.lens} onChange={(event) => updateShot(shot.id, { lens: event.target.value })} style={INPUT} />
-              </label>
-              <label style={FIELD}>
-                <span style={FIELD_LABEL}>Seconds</span>
-                <input type="number" min={1} max={30} value={shot.seconds} onChange={(event) => updateShot(shot.id, { seconds: Number(event.target.value) })} style={INPUT} />
-              </label>
-            </div>
-            <label style={{ ...FIELD, marginTop: "0.4rem" }}>
-              <span style={FIELD_LABEL}>Motion cue (subject or environment movement)</span>
-              <input type="text" value={shot.motion} onChange={(event) => updateShot(shot.id, { motion: event.target.value })} style={INPUT} placeholder="e.g. sparks fly from the anvil, cloak billows" />
-            </label>
-            {shot.cameraMove === "static" && !shot.motion.trim() && (
-              <span style={WARN}>Add a camera move or a motion cue before rendering video.</span>
-            )}
-            {shot.stillKey && <span style={READY}>Verified primary still ready</span>}
+      <RenderProgressTheatre
+        progress={renderProgress}
+        phase={phase}
+        message={message}
+        shots={shots}
+      />
+
+      <section className={styles.workstation} aria-label="Render contract workstation">
+        <div className={styles.shotDesk}>
+          <div className={styles.sectionHeading}>
+            <div><span className={styles.eyebrow}>Storyboard contract</span><h2>Shot sequence</h2></div>
+            <p>Each row becomes one content-addressed image request and, after its still is verified, one image-to-video clip.</p>
           </div>
-        ))}
-        <button type="button" onClick={addShot} disabled={busy} style={SECONDARY_BTN}>+ Add shot</button>
-      </div>
+          <div className={styles.shotList}>
+            {shots.map((shot, index) => (
+              <article key={shot.id} className={styles.shotCard} data-ready={Boolean(shot.stillKey)}>
+                <header>
+                  <span>{String(index + 1).padStart(2, "0")}</span>
+                  <div><small>Sequence frame</small><strong>{shot.id}</strong></div>
+                  <span className={styles.shotState}>{shot.stillKey ? "STILL SEALED" : "UNRENDERED"}</span>
+                  <button type="button" onClick={() => removeShot(shot.id)} disabled={shots.length <= 1}>Remove</button>
+                </header>
+                <label className={styles.promptField}>
+                  <span>Script line / image prompt</span>
+                  <textarea
+                    placeholder="Describe the exact visible shot—subject, action, setting, light, and composition"
+                    value={shot.prompt}
+                    onChange={(event) => updateShot(shot.id, { prompt: event.target.value })}
+                    rows={3}
+                  />
+                </label>
+                <div className={styles.shotControls}>
+                  <label><span>Camera move</span><select value={shot.cameraMove} onChange={(event) => updateShot(shot.id, { cameraMove: event.target.value as CameraMove })}>{CAMERA_MOVES.map((cameraMove) => <option key={cameraMove} value={cameraMove}>{cameraMove}</option>)}</select></label>
+                  <label><span>Shot scale</span><select value={shot.shotScale} onChange={(event) => updateShot(shot.id, { shotScale: event.target.value as ShotScale })}>{SHOT_SCALES.map((shotScale) => <option key={shotScale} value={shotScale}>{shotScale}</option>)}</select></label>
+                  <label><span>Lens</span><input type="text" value={shot.lens} onChange={(event) => updateShot(shot.id, { lens: event.target.value })} /></label>
+                  <label><span>Seconds</span><input type="number" min={1} max={30} value={shot.seconds} onChange={(event) => updateShot(shot.id, { seconds: Number(event.target.value) })} /></label>
+                </div>
+                <label className={styles.motionField}>
+                  <span>Motion cue · subject or environment movement</span>
+                  <input type="text" value={shot.motion} onChange={(event) => updateShot(shot.id, { motion: event.target.value })} placeholder="e.g. sparks fly from the anvil, cloak billows" />
+                </label>
+                {shot.cameraMove === "static" && !shot.motion.trim() && <span className={styles.warning}>Add a camera move or a motion cue before rendering video.</span>}
+                {shot.stillKey && <span className={styles.ready}>Verified primary still ready</span>}
+              </article>
+            ))}
+          </div>
+          <button type="button" onClick={addShot} disabled={busy} className={styles.addShot}>+ Add another shot</button>
+        </div>
 
-      <div style={{ height: "1.4rem" }} />
-      <SectionTitle>Global controls</SectionTitle>
-      <div style={GRID}>
-        <div style={CARD}>
-          <span style={LABEL}>Style</span>
-          <textarea value={style} onChange={(event) => updateImageGlobal(setStyle, event.target.value)} rows={2} style={TEXTAREA} placeholder="Global style suffix appended to every shot prompt" />
-        </div>
-        <div style={CARD}>
-          <span style={LABEL}>Negative (global)</span>
-          <textarea value={negative} onChange={(event) => updateImageGlobal(setNegative, event.target.value)} rows={2} style={TEXTAREA} />
-        </div>
-        <div style={CARD}>
-          <span style={LABEL}>Director notes</span>
-          <textarea value={director} onChange={(event) => updateImageGlobal(setDirector, event.target.value)} rows={2} style={TEXTAREA} placeholder="Global creative direction appended to every shot" />
-        </div>
-      </div>
+        <aside className={styles.contractDesk}>
+          <div className={styles.sectionHeading}>
+            <div><span className={styles.eyebrow}>Pinned controls</span><h2>Render contract</h2></div>
+          </div>
+          <div className={styles.directionFields}>
+            <label><span>Global style</span><textarea value={style} onChange={(event) => updateImageGlobal(setStyle, event.target.value)} rows={3} placeholder="Visual language appended to every shot" /></label>
+            <label><span>Negative (global)</span><textarea value={negative} onChange={(event) => updateImageGlobal(setNegative, event.target.value)} rows={3} /></label>
+            <label><span>Director notes</span><textarea value={director} onChange={(event) => updateImageGlobal(setDirector, event.target.value)} rows={3} placeholder="Creative direction appended to every shot" /></label>
+          </div>
+          <div className={styles.profileFields}>
+            <label><span>Approved profile</span><select value={profileId} onChange={(event) => updateProfile(event.target.value as ProfileId)} disabled={busy}><option value="draft">Draft</option><option value="production">Production</option><option value="hero">Hero</option></select></label>
+            <label><span>Shard count (manual console cap 3)</span><input type="number" min={1} max={3} value={nshard} onChange={(event) => setNshard(Number(event.target.value))} disabled={busy} /></label>
+          </div>
+          <div className={styles.profileCards}>
+            <article><span>Image · Z-Image Turbo</span><strong>{profile.image.width}×{profile.image.height}</strong><p>{profile.image.steps} steps · {profile.image.precision.toUpperCase()} · {profile.image.candidates} candidate(s)</p><small>Pinned revision · fallback disabled</small></article>
+            <article><span>Video · LTX-2.5 distilled x2</span><strong>{profile.video.width}×{profile.video.height} · {profile.video.fps} fps</strong><p>{profile.video.steps} steps · {profile.video.precision.toUpperCase()}</p><small>{profile.video.stageOneWidth}×{profile.video.stageOneHeight} → 2× latent upscale · FP8-cast + CPU offload · fallback disabled</small></article>
+          </div>
+          {!nshardValid && <span className={styles.warning}>Shard count must be between 1 and 3.</span>}
+          {!promptsValid && <span className={styles.warning}>Every shot needs a prompt before image rendering.</span>}
+        </aside>
+      </section>
 
-      <div style={{ height: "1.4rem" }} />
-      <SectionTitle>Immutable generation profile</SectionTitle>
-      <div style={ROW}>
-        <label style={FIELD}>
-          <span style={FIELD_LABEL}>Approved profile</span>
-          <select value={profileId} onChange={(event) => updateProfile(event.target.value as ProfileId)} style={SELECT} disabled={busy}>
-            <option value="draft">Draft</option>
-            <option value="production">Production</option>
-            <option value="hero">Hero</option>
-          </select>
-        </label>
-        <label style={FIELD}>
-          <span style={FIELD_LABEL}>Shard count (manual console cap 3)</span>
-          <input type="number" min={1} max={3} value={nshard} onChange={(event) => setNshard(Number(event.target.value))} style={INPUT} disabled={busy} />
-        </label>
-      </div>
-      <div style={{ ...GRID, marginTop: "0.65rem" }}>
-        <div style={CARD}>
-          <span style={LABEL}>Image · Z-Image Turbo</span>
-          <span style={SPEC}>{profile.image.width}×{profile.image.height} · {profile.image.steps} steps · {profile.image.precision.toUpperCase()} · {profile.image.candidates} candidate(s)</span>
-          <span style={FAINT}>Pinned revision · fallback disabled</span>
+      <section className={styles.launchDock} aria-label="Paid render launch controls">
+        <div className={styles.launchChecks}>
+          <LaunchCheck label="Fleet attested" ready={exactLtx25X2Ready} />
+          <LaunchCheck label="Prompts complete" ready={promptsValid} />
+          <LaunchCheck label="Motion declared" ready={motionValid} />
+          <LaunchCheck label="Primary stills" ready={stillsReady} />
         </div>
-        <div style={CARD}>
-          <span style={LABEL}>Video · LTX-2.5 distilled x2</span>
-          <span style={SPEC}>{profile.video.width}×{profile.video.height} · {profile.video.fps} fps · {profile.video.steps} steps · {profile.video.precision.toUpperCase()}</span>
-          <span style={FAINT}>{profile.video.stageOneWidth}×{profile.video.stageOneHeight} → 2× latent upscale · FP8-cast + CPU offload · fallback disabled</span>
+        <div className={styles.launchCopy}>
+          <span className={styles.eyebrow}>Explicit paid boundary</span>
+          <strong>Nothing launches without your confirmation.</strong>
+          <small>Each action starts paid Novita spot-GPU work. A confirmation names the phase, shot count, and pinned profile first.</small>
         </div>
-      </div>
-      {!nshardValid && <span style={WARN}>Shard count must be between 1 and 3.</span>}
-      {!promptsValid && <span style={WARN}>Every shot needs a prompt before image rendering.</span>}
-
-      <div style={{ height: "1.4rem" }} />
-      <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" onClick={onRenderImages} disabled={launchBlocked || !nshardValid || !promptsValid} style={PRIMARY_BTN}>
-          {phase === "rendering-images" ? "Rendering images…" : "Launch Image Render"}
-        </button>
-        <button type="button" onClick={onRenderVideo} disabled={launchBlocked || !nshardValid || !promptsValid || !motionValid || !stillsReady} style={PRIMARY_BTN}>
-          {phase === "rendering-video" ? "Rendering video…" : "Launch Video Render"}
-        </button>
-        {message && <span style={{ fontSize: "0.82rem", color: phase === "error" ? "#e5484d" : "var(--color-muted)" }}>{message}</span>}
-      </div>
-      <span style={FAINT}>Each launch requires confirmation because it starts paid spot-GPU work.</span>
-    </>
+        <div className={styles.launchActions}>
+          <button type="button" onClick={onRenderImages} disabled={launchBlocked || !nshardValid || !promptsValid} className={styles.primaryButton}>
+            {phase === "rendering-images" ? "Rendering images…" : "Launch Image Render"}
+          </button>
+          <button type="button" onClick={onRenderVideo} disabled={launchBlocked || !nshardValid || !promptsValid || !motionValid || !stillsReady} className={styles.primaryButton}>
+            {phase === "rendering-video" ? "Rendering video…" : "Launch Video Render"}
+          </button>
+        </div>
+      </section>
+    </main>
   );
 }
 
-const CARD: CSSProperties = { background: "var(--color-surface-solid)", border: "1px solid var(--color-border)", borderRadius: 10, padding: "0.7rem 0.8rem", display: "grid", gap: "0.4rem" };
-const GRID: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "0.6rem" };
-const ROW: CSSProperties = { display: "flex", gap: "0.6rem", flexWrap: "wrap", marginTop: "0.4rem" };
-const FIELD: CSSProperties = { display: "grid", gap: "0.25rem", minWidth: 140, flex: "1 1 140px" };
-const FIELD_LABEL: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: "0.6rem", letterSpacing: "0.04em", color: "var(--color-faint)", textTransform: "uppercase" };
-const LABEL: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: "0.66rem", letterSpacing: "0.04em", color: "var(--color-gold)", textTransform: "uppercase" };
-const INPUT: CSSProperties = { padding: "0.4rem 0.55rem", borderRadius: 6, border: "1px solid var(--color-border)", background: "var(--color-bg)", color: "var(--color-fg)", font: "inherit", fontSize: "0.82rem" };
-const SELECT: CSSProperties = { ...INPUT };
-const TEXTAREA: CSSProperties = { ...INPUT, resize: "vertical", width: "100%" };
-const WARN: CSSProperties = { fontSize: "0.72rem", color: "#e5484d", display: "block", marginTop: "0.3rem" };
-const READY: CSSProperties = { fontSize: "0.72rem", color: "#30a46c", display: "block", marginTop: "0.2rem" };
-const SPEC: CSSProperties = { fontSize: "0.82rem", color: "var(--color-fg)" };
-const FAINT: CSSProperties = { fontSize: "0.7rem", color: "var(--color-faint)", display: "block", marginTop: "0.2rem" };
-const FLEET_STAT: CSSProperties = { display: "grid", gap: "0.18rem", padding: "0.55rem 0.65rem", borderRadius: 8, border: "1px solid var(--color-border)", background: "var(--color-bg)" };
-const PRIMARY_BTN: CSSProperties = { padding: "0.55rem 1.1rem", borderRadius: 8, border: "1px solid color-mix(in srgb, var(--color-accent) 40%, transparent)", background: "var(--color-accent-soft)", color: "var(--color-fg)", font: "inherit", fontSize: "0.85rem", fontWeight: 600, cursor: "pointer" };
-const SECONDARY_BTN: CSSProperties = { padding: "0.45rem 0.9rem", borderRadius: 8, border: "1px solid var(--color-border)", background: "transparent", color: "var(--color-muted)", font: "inherit", fontSize: "0.8rem", cursor: "pointer", justifySelf: "start" };
-const SMALL_BTN: CSSProperties = { padding: "0.2rem 0.5rem", borderRadius: 6, border: "1px solid var(--color-border)", background: "transparent", color: "var(--color-faint)", font: "inherit", fontSize: "0.7rem", cursor: "pointer" };
+function RenderFleetHero({
+  access,
+  fleetHealth,
+  ready,
+  shotCount,
+  profileId,
+}: {
+  access: ReturnType<typeof useOperationsAccess>;
+  fleetHealth: NovitaFleetHealth | null;
+  ready: boolean;
+  shotCount: number;
+  profileId: ProfileId;
+}) {
+  const activeCount = fleetHealth?.activeGpuCount;
+  const state = access !== "owner" ? "locked" : fleetHealth === null ? "checking" : ready ? "ready" : "held";
+  return (
+    <header className={styles.hero}>
+      <div className={styles.heroCopy}>
+        <p className={styles.eyebrow}>Compute stage · signed render control</p>
+        <h1>Novita Render Farm</h1>
+        <p>
+          Compose a shot contract, seal image candidates, then move only verified stills
+          into LTX video. Capacity, cost, checkpoints, and every output remain visible.
+        </p>
+        <div className={styles.heroRule}>
+          <span aria-hidden="true">⌁</span>
+          <div><small>Operating rule</small><strong>Inspect first. Confirm spend second. Dispatch last.</strong></div>
+        </div>
+      </div>
+      <figure className={styles.fleetMap} data-state={state}>
+        <figcaption><span>RTX 4090 spot topology</span><small>{state.toUpperCase()}</small></figcaption>
+        <div className={styles.fleetField}>
+          <i className={styles.fleetOrbitA} aria-hidden="true" />
+          <i className={styles.fleetOrbitB} aria-hidden="true" />
+          <div className={styles.fleetCore}>
+            <span>FLEET</span><strong>{fleetHealth?.effectiveGpuLimit ?? "—"}</strong><small>available now</small>
+          </div>
+          {Array.from({ length: 8 }, (_, index) => (
+            <span
+              key={index}
+              className={styles.gpuNode}
+              data-index={index}
+              data-state={activeCount == null ? "unknown" : index < activeCount ? "active" : "idle"}
+              aria-label={`GPU slot ${index + 1}: ${activeCount == null ? "not attested" : index < activeCount ? "active" : "idle"}`}
+            >{String(index + 1).padStart(2, "0")}</span>
+          ))}
+          <div className={`${styles.fleetNode} ${styles.nodeContract}`}><span>01</span><div><small>Contract</small><strong>Signed payload</strong></div></div>
+          <div className={`${styles.fleetNode} ${styles.nodeCheckpoint}`}><span>02</span><div><small>Recovery</small><strong>R2 checkpoint</strong></div></div>
+        </div>
+      </figure>
+      <div className={styles.metricRail}>
+        <HeroMetric label="Architecture" value={`${fleetHealth?.architecturalGpuCeiling ?? 8} GPU`} note="orchestration ceiling" />
+        <HeroMetric label="Provider quota" value={fleetHealth?.verifiedGpuQuota == null ? "—" : `${fleetHealth.verifiedGpuQuota} GPU`} note="direct attestation" />
+        <HeroMetric label="Active" value={activeCount == null ? "—" : String(activeCount)} note="provider reported" />
+        <HeroMetric label="Sequence" value={access === "owner" ? `${shotCount} shot${shotCount === 1 ? "" : "s"}` : "Private"} note="current contract" />
+        <HeroMetric label="Profile" value={access === "owner" ? profileId : "Sealed"} note={ready ? "benchmark admitted" : "dispatch held"} />
+      </div>
+    </header>
+  );
+}
+
+function HeroMetric({ label, value, note }: { label: string; value: string; note: string }) {
+  return <div className={styles.heroMetric}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>;
+}
+
+function AdmissionTrace({ health }: { health: NovitaFleetHealth | null }) {
+  const stages = [
+    { index: "01", label: "Dispatch contract", detail: "Direct Trigger receipt", ready: health?.contract?.dispatchReady === true },
+    { index: "02", label: "Pinned model cache", detail: "Gemma · Z-Image · LTX", ready: Boolean(health?.models?.gemma.localCacheVerified && health.models.zImage.localCacheVerified && health.models.ltx.localCacheVerified) },
+    { index: "03", label: "Persistent recovery", detail: "Model disk + R2 checkpoint", ready: Boolean(health?.storage?.persistentModelVolumeVerified && health.controls?.r2CheckpointRecovery) },
+    { index: "04", label: "Verified shutdown", detail: "Idle reaper armed", ready: health?.controls?.verifiedReaper === true },
+  ];
+  return (
+    <div className={styles.admissionTrace} aria-label="Render admission circuit">
+      {stages.map((stage) => (
+        <div key={stage.index} data-state={stage.ready ? "ready" : health ? "held" : "unknown"}>
+          <span>{stage.index}</span><div><strong>{stage.label}</strong><small>{stage.detail}</small></div><i aria-hidden="true" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function RenderProgressTheatre({
+  progress,
+  phase,
+  message,
+  shots,
+}: {
+  progress: LiveRenderProgress | null;
+  phase: Phase;
+  message: string;
+  shots: readonly ShotRow[];
+}) {
+  const total = Math.max(progress?.total ?? shots.length, 1);
+  const outputRatio = Math.min(1, (progress?.outputs ?? 0) / total);
+  const percent = !progress ? 0
+    : progress.status === "queued" ? 12
+      : progress.status === "launching" ? 28
+        : progress.status === "running" ? Math.round(38 + outputRatio * 50)
+          : progress.status === "done" ? 100
+            : Math.max(12, Math.round(38 + outputRatio * 50));
+  const stageState = (index: number) => {
+    if (!progress) return "idle";
+    if (progress.status === "failed") return index <= Math.ceil(percent / 25) ? "failed" : "idle";
+    const threshold = [5, 20, 38, 88, 100][index];
+    return percent >= threshold ? "done" : percent >= threshold - 18 ? "active" : "idle";
+  };
+  const stages = ["Contract sealed", "Fleet dispatch", `${progress?.phase === "video" ? "Clip" : "Still"} render`, "Output verify", "R2 checkpoint"];
+  return (
+    <section className={styles.progressTheatre} data-state={phase} aria-label="Live render progress" aria-live="polite">
+      <header>
+        <div><span className={styles.eyebrow}>Live render progress</span><h2>{progress ? `${progress.phase === "image" ? "Image" : "Video"} job · ${progress.status}` : "Render stage standing by"}</h2></div>
+        <div className={styles.progressIdentity}><small>{progress?.jobId ?? "NO JOB IN FLIGHT"}</small><strong>{percent}%</strong></div>
+      </header>
+      <div className={styles.progressRail}><i style={{ width: `${percent}%` }} /></div>
+      <div className={styles.progressStages}>
+        {stages.map((stage, index) => <div key={stage} data-state={stageState(index)}><span>{String(index + 1).padStart(2, "0")}</span><strong>{stage}</strong><i aria-hidden="true" /></div>)}
+      </div>
+      <div className={styles.outputStage}>
+        <div className={styles.outputSlots}>
+          {shots.map((shot, index) => {
+            const done = Boolean(shot.stillKey) || Boolean(progress && progress.status === "done") || index < (progress?.outputs ?? 0);
+            return <span key={shot.id} data-state={done ? "done" : progress?.status === "running" && index === (progress.outputs ?? 0) ? "active" : "idle"}><i aria-hidden="true" />{shot.id}</span>;
+          })}
+        </div>
+        <p data-error={phase === "error"}>{message || "The signed job receipt, provider status, verified output count, and checkpoint state will appear here during a launch."}</p>
+      </div>
+    </section>
+  );
+}
+
+function LaunchCheck({ label, ready }: { label: string; ready: boolean }) {
+  return <span data-ready={ready}><i aria-hidden="true" />{label}</span>;
+}
+
+function LockedRenderConsole({ access }: { access: Exclude<ReturnType<typeof useOperationsAccess>, "owner"> }) {
+  return (
+    <section className={styles.lockedConsole} aria-busy={access === "checking" || undefined}>
+      <div className={styles.lockedMark} aria-hidden="true"><span>GPU</span><i /><b /></div>
+      <div className={styles.lockedCopy}>
+        <p className={styles.eyebrow}>{access === "checking" ? "Resolving signed session" : "Paid compute boundary"}</p>
+        <h2>{access === "checking" ? "Checking render authority…" : "The dispatch console is sealed."}</h2>
+        <p>{access === "checking" ? "The studio is checking the current browser session before requesting fleet capacity or saved job state." : "Open owner operations from the top bar to inspect live capacity or compose a contract. No private fleet, job, prompt, or provider request was sent."}</p>
+      </div>
+      <div className={styles.lockedRules}>
+        <div><span>01</span><strong>Capacity stays private</strong><p>Provider quota and active GPU state do not load for viewers.</p></div>
+        <div><span>02</span><strong>Prompts stay private</strong><p>Shot contracts and recoverable job handles remain owner-scoped.</p></div>
+        <div><span>03</span><strong>Spend stays explicit</strong><p>Owner access alone never launches work; each paid phase still requires confirmation.</p></div>
+      </div>
+    </section>
+  );
+}

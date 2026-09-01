@@ -30,14 +30,11 @@ assert.match(
   /operationsAccess === "owner"[\s\S]*<ThumbnailRefreshInventoryPanel/,
 );
 
-for (const path of [
-  "../app/(app)/novita-render/page.tsx",
-]) {
-  const page = read(path);
-  assert.match(page, /const operationsAccess = useOperationsAccess\(\)/);
-  assert.match(page, /if \(operationsAccess !== "owner"\) \{/);
-  assert.match(page, /<OwnerOnlyNotice/);
-}
+const novitaDesk = read("../app/(app)/novita-render/page.tsx");
+assert.match(novitaDesk, /const operationsAccess = useOperationsAccess\(\)/);
+assert.match(novitaDesk, /if \(operationsAccess !== "owner"\) \{/);
+assert.match(novitaDesk, /<LockedRenderConsole access=\{operationsAccess\}/);
+assert.match(novitaDesk, /No private fleet, job, prompt, or provider request was sent/);
 
 const casefile = read("../app/(app)/casefile/page.tsx");
 assert.match(casefile, /const operationsAccess = useOperationsAccess\(\)/);
