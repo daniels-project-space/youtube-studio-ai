@@ -26,7 +26,7 @@ const EXACT_LOCATIONS: Record<string, StudioLocation> = {
 export function studioLocationForPathname(pathname: string): StudioLocation {
   if (EXACT_LOCATIONS[pathname]) return EXACT_LOCATIONS[pathname];
   if (pathname.startsWith("/channels/")) {
-    return { area: "Channel workspace", title: "Channel detail" };
+    return { area: "Channel workspace", title: "Operating room" };
   }
   if (pathname.startsWith("/runs/")) {
     return { area: "Production", title: "Run detail" };

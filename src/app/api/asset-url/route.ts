@@ -26,10 +26,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "missing key" }, { status: 400 });
   }
 
-  // Basic ownership guard: only keys under this owner's namespace.
+  // Basic ownership guard: channel/run media must remain under this owner's
+  // namespace. Narrator auditions are the one deliberately shared collection:
+  // their immutable provider ids are exposed in the voice catalog and the
+  // audio is required by the public read-only picker. Keep this allow-list
+  // exact so it cannot become a generic R2 signing oracle.
   const ownerPrefix = `owner/${OWNER_ID}/`;
-  // Reject traversal and out-of-namespace keys.
-  if (key.includes("..") || !key.startsWith(ownerPrefix)) {
+  const sharedVoiceAudition = /^voicebank\/auditions\/[A-Za-z0-9_-]{8,64}\.mp3$/.test(key);
+  // Reject traversal and every out-of-namespace key except the curated shared
+  // audition path above.
+  if (key.includes("..") || (!key.startsWith(ownerPrefix) && !sharedVoiceAudition)) {
     return NextResponse.json({ error: "forbidden key" }, { status: 403 });
   }
 

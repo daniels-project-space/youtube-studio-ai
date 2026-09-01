@@ -11,7 +11,7 @@ assert.deepEqual(studioLocationForPathname("/channels/new"), {
 });
 assert.deepEqual(studioLocationForPathname("/channels/quiet-physics"), {
   area: "Channel workspace",
-  title: "Channel detail",
+  title: "Operating room",
 });
 assert.deepEqual(studioLocationForPathname("/runs/run_123"), {
   area: "Production",

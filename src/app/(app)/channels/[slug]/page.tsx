@@ -23,7 +23,18 @@ import { SkeletonList } from "@/components/Skeleton";
 import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
 import { LatestVideoWidget } from "@/components/LatestVideoWidget";
 import { StatsCharts } from "@/components/StatsCharts";
+import {
+  IconAnalytics,
+  IconChannels,
+  IconOverview,
+  IconSettings,
+} from "@/components/icons";
 import { fmtUsd } from "@/lib/format";
+import { blockLabel } from "@/lib/blocks";
+import {
+  LIVE_PIPELINE_PHASE_LABEL,
+  livePipelinePhaseForBlock,
+} from "@/lib/livePipelinePresentation";
 import { VOICES } from "@/lib/voices";
 import { useAssetUrl, useAssetUrlState } from "@/lib/asset-url";
 import { assessYouTubeSetup } from "@/lib/youtubeSetupStatus";
@@ -33,6 +44,7 @@ import {
   nextProjectedPlanItem,
 } from "@/lib/scheduleCalendar";
 import seoStyles from "./seo.module.css";
+import styles from "./channelHub.module.css";
 
 type ChannelDoc = {
   _id: string;
@@ -88,6 +100,7 @@ type RawRun = {
   releaseEvidenceCertificateFingerprint?: string;
   releaseEvidenceCertificateKey?: string;
   releaseEvidenceUpdatedAt?: number;
+  libraryState?: "active" | "archived";
 };
 
 type TrendRow = {
@@ -132,11 +145,11 @@ type Tab =
   | "Identity"
   | "Settings";
 const TAB_GROUPS = [
-  { label: "Overview", tabs: ["Overview"] },
-  { label: "Content", tabs: ["Week ahead", "Library"] },
-  { label: "Performance", tabs: ["Analytics", "SEO"] },
-  { label: "Setup", tabs: ["Identity", "Pipeline", "Settings"] },
-] as const satisfies ReadonlyArray<{ label: string; tabs: ReadonlyArray<Tab> }>;
+  { label: "Overview", detail: "Now", icon: IconOverview, tabs: ["Overview"] },
+  { label: "Content", detail: "Queue + masters", icon: IconChannels, tabs: ["Week ahead", "Library"] },
+  { label: "Performance", detail: "Audience + search", icon: IconAnalytics, tabs: ["Analytics", "SEO"] },
+  { label: "Setup", detail: "Identity + automation", icon: IconSettings, tabs: ["Identity", "Pipeline", "Settings"] },
+] as const;
 
 const TAB_BY_QUERY: Record<string, Tab> = {
   overview: "Overview",
@@ -155,6 +168,47 @@ const QUERY_BY_TAB = Object.fromEntries(
 
 function validatedTab(value: string | null): Tab {
   return value ? (TAB_BY_QUERY[value.toLowerCase()] ?? "Overview") : "Overview";
+}
+
+type WorkspaceSignal = {
+  label: string;
+  value: string;
+  detail?: string;
+  tone?: "ready" | "attention" | "quiet";
+};
+
+function WorkspaceIntro({
+  eyebrow,
+  title,
+  description,
+  signals,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  description: string;
+  signals: WorkspaceSignal[];
+  action?: ReactNode;
+}) {
+  return (
+    <header className={styles.workspaceIntro}>
+      <div className={styles.workspaceIntroCopy}>
+        <span>{eyebrow}</span>
+        <h2>{title}</h2>
+        <p>{description}</p>
+      </div>
+      {action && <div className={styles.workspaceIntroAction}>{action}</div>}
+      <div className={styles.workspaceSignals} aria-label={`${title} operating signals`}>
+        {signals.map((signal) => (
+          <div key={signal.label} className={styles.workspaceSignal} data-tone={signal.tone ?? "quiet"}>
+            <small>{signal.label}</small>
+            <strong>{signal.value}</strong>
+            {signal.detail && <span>{signal.detail}</span>}
+          </div>
+        ))}
+      </div>
+    </header>
+  );
 }
 
 export default function ChannelHubPage({
@@ -277,14 +331,9 @@ export default function ChannelHubPage({
     <>
       {ytStatus && (
         <div
-          className="glass"
-          style={{
-            padding: "0.7rem 1rem",
-            marginBottom: "1rem",
-            fontSize: "0.85rem",
-            border: `1px solid ${ytStatus === "connected" ? "rgba(52,211,153,0.5)" : "rgba(248,113,113,0.5)"}`,
-            color: ytStatus === "connected" ? "var(--color-ok)" : "#fca5a5",
-          }}
+          className={styles.youtubeNotice}
+          data-tone={ytStatus === "connected" ? "connected" : "attention"}
+          role="status"
         >
           {ytStatus === "connected"
             ? "✓ YouTube connected — the channel is linked and paused. Reapprove the destination and enable runs in Settings when ready."
@@ -300,37 +349,51 @@ export default function ChannelHubPage({
         fallbackKeys={[latestArtwork, plannedArtwork]}
         name={channel.name}
         palette={id.palette}
-        height={170}
+        height={226}
       >
-        <div className="channel-detail-hero-content">
-          <ChannelAvatar
-            imageKey={id.imageKey}
-            name={channel.name}
-            palette={id.palette}
-            size={76}
-            radius={18}
-          />
-          <div className="channel-detail-title">
-            <h1>{channel.name}</h1>
-            <div className="channel-detail-meta">
-              <span>{id.niche ?? channel.template}</span>
-              <span style={{ opacity: 0.5 }}>·</span>
-              <span>{channelCard.recentPublishedCount} recently published</span>
-              <span style={{ opacity: 0.5 }}>·</span>
-              <span>{channel.schedule?.frequency ?? id.cadence ?? "Cadence not set"}</span>
+        <div className={styles.heroContent}>
+          <div className={styles.heroIdentity}>
+            <ChannelAvatar
+              imageKey={id.imageKey}
+              name={channel.name}
+              palette={id.palette}
+              size={88}
+              radius={22}
+            />
+            <div className={styles.heroTitle}>
+              <span className={styles.heroKicker}>Channel operating room / {channel.language ?? "primary"}</span>
+              <h1>{channel.name}</h1>
+              <div className={styles.heroMeta}>
+                <span>{id.niche ?? channel.template}</span>
+                <i aria-hidden="true" />
+                <span>{channelCard.recentPublishedCount} published</span>
+                <i aria-hidden="true" />
+                <span>{channel.schedule?.frequency ?? id.cadence ?? "Cadence not set"}</span>
+              </div>
             </div>
           </div>
-          <StageBadge status={channel.status === "active" ? "ok" : channel.status} />
+          <div className={styles.heroDecision}>
+            <small>Next editorial move</small>
+            <strong>{nextPlan?.item.title || nextPlan?.item.topic || "Build the ready queue"}</strong>
+            <span>
+              {nextPlan?.timestamp
+                ? formatZonedScheduleTimestamp(nextPlan.timestamp, nextPlan.timeZone, { weekday: true })
+                : "No production slot reserved"}
+            </span>
+          </div>
+          <div className={styles.heroStatus}>
+            <StageBadge status={channel.status === "active" ? "ok" : channel.status} />
+          </div>
         </div>
       </ChannelBanner>
 
-      <section className="channel-operating-profile glass" aria-label="Channel operating profile">
-        <div>
+      <section className={styles.operatingProfile} aria-label="Channel operating profile">
+        <div className={styles.operatingSignal} data-tone={channel.status === "active" ? "ready" : "attention"}>
           <small>Status</small>
           <strong>{channel.status === "active" ? "Active" : channel.status}</strong>
           <span>{channelCard.lastRunStatus ? `Last run ${channelCard.lastRunStatus}` : "No run history"}</span>
         </div>
-        <div>
+        <div className={styles.operatingSignal}>
           <small>Next production</small>
           <strong>
             {nextPlan?.timestamp
@@ -345,14 +408,14 @@ export default function ChannelHubPage({
               : "Ready queue is clear"}
           </span>
         </div>
-        <div>
+        <div className={styles.operatingSignal} data-tone={readinessDone === readinessChecks.length ? "ready" : "attention"}>
           <small>Config readiness</small>
-          <strong className={readinessDone === readinessChecks.length ? "channel-ready" : "channel-incomplete"}>
+          <strong>
             {readinessDone}/{readinessChecks.length} complete
           </strong>
           <span>Identity · voice · thumbnail · pipeline · schedule</span>
         </div>
-        <div>
+        <div className={styles.operatingSignal}>
           <small>Module path</small>
           <strong>{modulePath.length} module{modulePath.length === 1 ? "" : "s"}</strong>
           <span title={modulePath.join(" → ")}>
@@ -364,7 +427,7 @@ export default function ChannelHubPage({
       {channel.inception && <ChannelInceptionProgress inception={channel.inception} />}
 
       {/* Four stable work areas keep specialist views available without a wall of peer tabs. */}
-      <div className="channel-tabs" role="tablist" aria-label="Channel sections">
+      <div className={styles.tabDeck} role="tablist" aria-label="Channel sections">
         {TAB_GROUPS.map((group) => (
           <button
             key={group.label}
@@ -373,7 +436,7 @@ export default function ChannelHubPage({
             role="tab"
             aria-selected={activeTabGroup.label === group.label}
             tabIndex={activeTabGroup.label === group.label ? 0 : -1}
-            className="channel-tab"
+            className={styles.tabButton}
             onKeyDown={(event) => {
               const currentIndex = TAB_GROUPS.indexOf(group);
               let nextIndex = currentIndex;
@@ -397,12 +460,16 @@ export default function ChannelHubPage({
               tabs?.[nextIndex]?.focus();
             }}
           >
-            {group.label}
+            <group.icon width={17} height={17} aria-hidden="true" />
+            <span>
+              <strong>{group.label}</strong>
+              <small>{group.detail}</small>
+            </span>
           </button>
         ))}
       </div>
       {activeTabGroup.tabs.length > 1 && (
-        <nav className="channel-subtabs" aria-label={`${activeTabGroup.label} views`}>
+        <nav className={styles.subTabs} aria-label={`${activeTabGroup.label} views`}>
           {activeTabGroup.tabs.map((item) => (
             <button
               key={item}
@@ -417,6 +484,7 @@ export default function ChannelHubPage({
         </nav>
       )}
 
+      <div className={styles.view} data-view={QUERY_BY_TAB[tab]}>
       {tab === "Overview" && (
         <OverviewTab
           channel={channel}
@@ -450,6 +518,7 @@ export default function ChannelHubPage({
       {tab === "Pipeline" && <PipelineTab pipeline={channel.pipeline ?? []} />}
       {tab === "Identity" && <IdentityTab id={id} budget={channel.budget} />}
       {tab === "Settings" && <SettingsTab channel={channel} />}
+      </div>
     </>
   );
 }
@@ -466,12 +535,18 @@ function ChannelInceptionProgress({
   const complete = stages.filter(
     (stage) => stage.status === "complete" || stage.status === "accepted",
   ).length;
+  const progress = stages.length ? Math.round((complete / stages.length) * 100) : 0;
 
   return (
-    <section className="channel-inception glass" aria-label="Channel setup progress">
-      <div className="channel-inception-heading">
+    <section
+      className={styles.inception}
+      aria-label="Channel setup progress"
+      data-state={inception.status}
+      style={{ "--inception-progress": `${progress}%` } as CSSProperties}
+    >
+      <div className={styles.inceptionHeading}>
         <div>
-          <small>Channel setup engine</small>
+          <small>Inception / live build</small>
           <strong>
             {inception.status === "complete"
               ? "Ready"
@@ -482,20 +557,24 @@ function ChannelInceptionProgress({
                 : "Building the channel"}
           </strong>
         </div>
-        <span>{complete}/{stages.length} stages</span>
+        <span>{progress}%</span>
       </div>
-      <div className="channel-inception-stages">
-        {stages.map((stage) => (
+      <div className={styles.inceptionProgress} aria-hidden="true"><i /></div>
+      <div className={styles.inceptionStages}>
+        {stages.map((stage, index) => (
           <div
-            className="channel-inception-stage"
+            className={styles.inceptionStage}
             data-status={stage.status}
             key={stage.key}
             title={stage.error ?? `${stage.label}: ${stage.status}`}
           >
-            <i aria-hidden="true" />
-            <span>{stage.label}</span>
+            <i aria-hidden="true">{String(index + 1).padStart(2, "0")}</i>
+            <span>
+              <strong>{stage.label}</strong>
+              <small>{stage.status.replaceAll("_", " ")}</small>
+            </span>
             {stage.error && (
-              <small className="channel-inception-stage-error" role="alert">
+              <small className={styles.inceptionStageError} role="alert">
                 {stage.error}
               </small>
             )}
@@ -524,7 +603,12 @@ function OverviewTab({
     costPerVideo: number | null;
   };
 }) {
-  const recent: RunRow[] = (runs ?? [])
+  const visibleRuns = (runs ?? []).filter((run) => run.libraryState !== "archived");
+  const recentFailures = visibleRuns
+    .filter((run) => run.status === "failed")
+    .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
+    .slice(0, 1);
+  const recent: RunRow[] = [...visibleRuns.filter((run) => run.status !== "failed").slice(0, 7), ...recentFailures]
     .map((r) => ({ ...r, channelName: channel.name, channelSlug: channel.slug }))
     .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
     .slice(0, 8);
@@ -546,19 +630,15 @@ function OverviewTab({
     { label: "Philosopher quotes", value: maxQuotes != null ? `up to ${maxQuotes}, ≥5s apart` : "≥2 attributed" },
     { label: "Outro", value: tailSec != null ? `${tailSec}s defined outro card` : "defined card" },
     { label: "Music", value: "gradual duck, fades out" },
-    { label: "Thumbnail", value: "Flux Pro · statue-right / text-left" },
+    {
+      label: "Thumbnail",
+      value: `Nano Banana · ${channel.identity?.thumbnailTemplate ?? "Style DNA + playbook"}`,
+    },
   ];
 
   return (
     <>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-          gap: "0.9rem",
-          marginBottom: "1.8rem",
-        }}
-      >
+      <section className={styles.overviewMetrics} aria-label="Channel operating metrics">
         <StatCard label="Recent runs" value={kpis.runs} hint="latest 500 maximum" />
         <StatCard label="Recent published" value={kpis.videos} accent="var(--color-secondary)" />
         <StatCard label="Recent completed" value={kpis.completed} accent="var(--color-ok)" />
@@ -580,57 +660,40 @@ function OverviewTab({
           }
         />
         <StatCard label="Budget / run" value={fmtUsd(channel.budget)} />
-      </div>
+      </section>
 
       <LatestVideoWidget ownerId={channel.ownerId} channelId={channel._id as Id<"channels">} />
 
       <StatsCharts runs={(runs ?? []) as { status: string; startedAt?: number; finishedAt?: number; costTotal?: number }[]} />
 
       {channel.identity?.persona && (
-        <section style={{ marginBottom: "1.6rem" }}>
-          <SectionTitle>Persona</SectionTitle>
-          <p
-            className="glass"
-            style={{
-              padding: "1rem 1.2rem",
-              fontSize: "0.92rem",
-              color: "var(--color-muted)",
-              lineHeight: 1.6,
-            }}
-          >
-            {channel.identity.persona}
-          </p>
+        <section className={styles.overviewSection}>
+          <div className={styles.sectionRail}><span>Channel voice</span><i /></div>
+          <blockquote className={styles.personaStatement}>{channel.identity.persona}</blockquote>
         </section>
       )}
 
-      <section style={{ marginBottom: "1.6rem" }}>
-        <SectionTitle>Pipeline configuration</SectionTitle>
-        <div
-          className="glass"
-          style={{
-            padding: "1rem 1.2rem",
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-            gap: "0.8rem 1.4rem",
-          }}
-        >
+      <section className={styles.overviewSection}>
+        <div className={styles.sectionRail}><span>Production grammar</span><i /></div>
+        <div className={styles.configurationGrid}>
           {settings.map((s) => (
-            <div key={s.label} style={{ display: "flex", flexDirection: "column", gap: "0.15rem" }}>
-              <span style={{ fontSize: "0.72rem", color: "var(--color-muted)", textTransform: "uppercase", letterSpacing: "0.04em" }}>
-                {s.label}
-              </span>
-              <span style={{ fontSize: "0.92rem", color: "var(--color-fg)", fontWeight: 500 }}>{s.value}</span>
+            <div key={s.label} className={styles.configurationItem}>
+              <span>{s.label}</span>
+              <strong>{s.value}</strong>
             </div>
           ))}
         </div>
       </section>
 
-      <section>
-        <SectionTitle>Recent runs</SectionTitle>
+      <section className={styles.overviewSection}>
+        <header className={styles.recentHeader}>
+          <div className={styles.sectionRail}><span>Recent production</span><i /></div>
+          <Link href="/runs">Open full production history →</Link>
+        </header>
         {runs === undefined ? (
           <SkeletonList rows={3} />
         ) : recent.length > 0 ? (
-          <div style={{ display: "grid", gap: "0.6rem" }}>
+          <div className={styles.recentList}>
             {recent.map((r) => (
               <RunCard key={r._id} run={r} />
             ))}
@@ -647,12 +710,12 @@ function OverviewTab({
 
 function Row({ label, hint, children }: { label: string; hint: string; children: ReactNode }) {
   return (
-    <div className="channel-setting-row">
-      <div style={{ minWidth: 0 }}>
-        <div style={{ fontSize: "0.86rem", fontWeight: 600, color: "var(--color-fg)" }}>{label}</div>
-        <div style={{ fontSize: "0.74rem", color: "var(--color-muted)", marginTop: 2 }}>{hint}</div>
+    <div className={`${styles.settingRow} channel-setting-row`}>
+      <div className={styles.settingCopy}>
+        <strong>{label}</strong>
+        <span>{hint}</span>
       </div>
-      <div className="channel-setting-control">
+      <div className={`${styles.settingControl} channel-setting-control`}>
         {children}
       </div>
     </div>
@@ -811,8 +874,8 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
 
   return (
     <section style={{ marginBottom: "1.6rem" }}>
-      <SectionTitle>Settings</SectionTitle>
-      <div className="glass" style={{ padding: "1.2rem", display: "grid", gap: "1.1rem" }}>
+      <SectionTitle>Release control + cadence</SectionTitle>
+      <div className={`${styles.settingsCard} glass`}>
         <Row label="Channel" hint={active ? "Active — eligible for scheduled + manual runs" : "Paused — auto-scheduling skips it"}>
           <button
             onClick={() => setStatus(active ? "paused" : "active")}
@@ -929,21 +992,60 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
 /* -------------------------------- Settings ------------------------------ */
 
 function SettingsTab({ channel }: { channel: ChannelDoc }) {
+  const [advancedOpen, setAdvancedOpen] = useState(false);
+  const pipeline = (channel.pipeline ?? []) as Array<{ block: string; params?: Record<string, unknown> }>;
+  const publishMode = (pipeline.find((entry) => entry.block === "upload_draft")?.params?.["publishMode"] as string) ?? "draft";
+  const scheduleEnabled = channel.schedule?.enabled !== false;
   return (
-    <div className="channel-settings-stack">
-      <ChannelSettingsCard channel={channel} />
-      <RouteQualificationBenchmarkCard channel={channel} />
-      <YouTubeConnectCard channel={channel} />
-      <details className="channel-advanced glass">
+    <div className={`${styles.settingsWorkspace} channel-settings-stack`}>
+      <WorkspaceIntro
+        eyebrow="Control room / owner decisions"
+        title="Automation with visible authority"
+        description="Release policy, spend, cadence, route proof, and the external YouTube destination are separate control surfaces. Changing one never implies approval for the others."
+        signals={[
+          { label: "Channel", value: channel.status === "active" ? "Enabled" : "Paused", detail: "Eligibility for scheduled + manual runs", tone: channel.status === "active" ? "ready" : "attention" },
+          { label: "Release", value: publishMode === "draft" ? "Private drafts" : publishMode, detail: "Main-video publishing authority", tone: publishMode === "draft" ? "ready" : "attention" },
+          { label: "Scheduler", value: scheduleEnabled ? channel.schedule?.frequency ?? "Enabled" : "Disabled", detail: `${channel.schedule?.timezone ?? "UTC"} · ${channel.schedule?.localTime ?? "time not set"}` },
+          { label: "Route", value: `${pipeline.length} modules`, detail: "Configured production chain" },
+        ]}
+      />
+
+      <nav className={styles.settingsMap} aria-label="Settings areas">
+        <a href="#release-control"><span>01</span><strong>Release control</strong><small>Spend · cadence · publishing</small></a>
+        <a href="#route-qualification-benchmark"><span>02</span><strong>Route proof</strong><small>Private final-master benchmark</small></a>
+        <a href="#youtube-destination"><span>03</span><strong>YouTube destination</strong><small>OAuth · channel · brand handoff</small></a>
+        <a href="#advanced-channel-system"><span>04</span><strong>Channel system</strong><small>Modules · identity · languages</small></a>
+      </nav>
+
+      <section id="release-control" className={styles.settingsSection} data-kind="release">
+        <div className={styles.sectionRail}><span>01 / release control</span><i /></div>
+        <ChannelSettingsCard channel={channel} />
+      </section>
+      <section className={styles.settingsSection} data-kind="qualification">
+        <div className={styles.sectionRail}><span>02 / route proof</span><i /></div>
+        <RouteQualificationBenchmarkCard channel={channel} />
+      </section>
+      <section id="youtube-destination" className={styles.settingsSection} data-kind="youtube">
+        <div className={styles.sectionRail}><span>03 / external destination</span><i /></div>
+        <YouTubeConnectCard channel={channel} />
+      </section>
+      <details
+        id="advanced-channel-system"
+        className={`${styles.settingsAdvanced} channel-advanced glass`}
+        open={advancedOpen}
+        onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
+      >
         <summary>
-          <span><strong>Advanced channel configuration</strong><small>Identity, module parameters and language variants</small></span>
+          <span><strong>04 / Channel system</strong><small>Pipeline modules, voice, niche, and separately admitted language variants</small></span>
           <span aria-hidden="true">+</span>
         </summary>
-        <div className="channel-advanced-content">
-          <PipelineModulesCard channel={channel} />
-          <AdvancedControls channel={channel} />
-          <MultiLanguageCard channel={channel} />
-        </div>
+        {advancedOpen && (
+          <div className="channel-advanced-content">
+            <PipelineModulesCard channel={channel} />
+            <AdvancedControls channel={channel} />
+            <MultiLanguageCard channel={channel} />
+          </div>
+        )}
       </details>
     </div>
   );
@@ -1056,7 +1158,7 @@ function RouteQualificationBenchmarkCard({ channel }: { channel: ChannelDoc }) {
   return (
     <section
       id="route-qualification-benchmark"
-      className="glass"
+      className={`${styles.qualificationCard} glass`}
       aria-label="Private route qualification benchmark"
       style={{ padding: "1rem" }}
     >
@@ -1302,23 +1404,23 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
 
   return (
     <section>
-      <SectionTitle>YouTube connection</SectionTitle>
-      <div className="glass" style={{ padding: "1.2rem", display: "grid", gap: "1rem" }}>
+      <SectionTitle>YouTube destination + brand handoff</SectionTitle>
+      <div className={`${styles.youtubeCard} glass`} data-oauth={setup.oauth}>
         {setup.oauth === "ready" ? (
-          <div style={{ fontSize: "0.86rem", color: "var(--color-ok)" }}>
-            ✓ Connected to <strong>{setup.targetLabel || setup.targetChannelId || "the selected YouTube channel"}</strong> — the destination and required permissions are ready.
+          <div className={styles.youtubeLead} data-tone="ready">
+            <span aria-hidden="true">✓</span><div><small>Verified destination</small><strong>{setup.targetLabel || setup.targetChannelId || "The selected YouTube channel"}</strong><p>Google returned the destination and every required permission is present.</p></div>
           </div>
         ) : setup.oauth === "incomplete" ? (
-          <div style={{ fontSize: "0.84rem", color: "#fbbf24", lineHeight: 1.5 }}>
-            ⚠ Connected to <strong>{setup.targetLabel || setup.targetChannelId || "a YouTube channel"}</strong>, but its OAuth permissions are incomplete. It is not ready for publishing, branding, or analytics until reconnected with the full scope set.
+          <div className={styles.youtubeLead} data-tone="attention">
+            <span aria-hidden="true">!</span><div><small>Permissions incomplete</small><strong>{setup.targetLabel || setup.targetChannelId || "A YouTube channel"}</strong><p>Publishing, branding, and analytics remain blocked until the full permission set is approved.</p></div>
           </div>
         ) : (
-          <div style={{ fontSize: "0.84rem", color: "var(--color-muted)" }}>
-            {connector?.status === "revoked"
+          <div className={styles.youtubeLead} data-tone="quiet">
+            <span aria-hidden="true">○</span><div><small>Destination required</small><strong>Choose the exact YouTube channel</strong><p>{connector?.status === "revoked"
               ? "YouTube access was revoked. Reconnect explicitly before this channel can publish or ingest analytics."
               : connector?.status === "error"
                 ? "The YouTube connector failed validation. Reconnect it before publishing or analytics can resume."
-              : "Not linked yet. Connect a YouTube channel so this channel can publish. (A channel must exist on YouTube first — create one manually, or try Browserbase auto-create below.)"}
+              : "Connect an existing channel, or explicitly approve creating one. No production is sent to YouTube before a destination exists."}</p></div>
           </div>
         )}
         {setup.destination === "creating" && (
@@ -1338,25 +1440,24 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
         )}
         <div
           aria-label="YouTube setup checklist"
-          style={{ display: "grid", gap: "0.55rem", padding: "0.8rem", border: "1px solid var(--color-border)", borderRadius: 10, background: "rgba(255,255,255,0.018)" }}
+          className={styles.youtubeChecklist}
         >
-          <strong style={{ fontSize: "0.82rem" }}>Setup status</strong>
+          <header><span>Destination sequence</span><strong>{setupSteps.filter((step) => step.state === "complete" || step.state === "automatic").length}/{setupSteps.length} resolved</strong></header>
           {setupSteps.map((step) => (
-            <div key={step.label} style={{ display: "grid", gridTemplateColumns: "0.9rem minmax(0, 1fr)", gap: "0.5rem", alignItems: "start" }}>
+            <div key={step.label} className={styles.youtubeStep} data-state={step.state}>
               <span
                 aria-label={step.state}
-                style={{ color: step.state === "complete" ? "var(--color-ok)" : step.state === "action" ? "#fbbf24" : "var(--color-muted)", lineHeight: 1.4 }}
               >
                 {step.state === "complete" ? "✓" : step.state === "action" ? "!" : step.state === "working" ? "●" : "·"}
               </span>
-              <div style={{ fontSize: "0.78rem", lineHeight: 1.45 }}>
-                <strong>{step.label}</strong><br />
-                <span style={{ color: "var(--color-muted)" }}>{step.detail}</span>
+              <div>
+                <strong>{step.label}</strong>
+                <p>{step.detail}</p>
               </div>
             </div>
           ))}
         </div>
-        <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
+        <div className={styles.youtubeActions}>
           <button onClick={connect} disabled={busy || !setup.canConnect} style={{ ...btn, opacity: busy || !setup.canConnect ? 0.6 : 1 }}>
             {setup.oauth === "ready" ? "Reconnect YouTube" : setup.oauth === "incomplete" || setup.oauth === "reconnect_required" ? "Reconnect with full permissions" : setup.destination === "creating" ? "Channel creation running" : "Connect YouTube"}
           </button>
@@ -1398,8 +1499,13 @@ const FLAGS: Record<string, string> = { en: "🇬🇧", de: "🇩🇪", es: "�
 
 /** Multi-language group: clone this channel into DE + ES flag-branded siblings. */
 function MultiLanguageCard({ channel }: { channel: ChannelDoc }) {
-  const groupId = channel.groupId ?? channel._id;
-  const group = useQuery(api.channels.listGroup, { groupId }) as ChannelDoc[] | undefined;
+  // A standalone channel is not an empty multilingual group. Passing its id
+  // as a synthetic group id makes the scoped Convex authorization correctly
+  // reject the read before the handler can return an empty list.
+  const group = useQuery(
+    api.channels.listGroup,
+    channel.groupId ? { groupId: channel.groupId } : "skip",
+  ) as ChannelDoc[] | undefined;
 
   const siblings = (group ?? []).filter((c) => c._id !== channel._id);
   const haveLangs = new Set([channel.language ?? "en", ...siblings.map((c) => c.language ?? "")]);
@@ -1700,36 +1806,59 @@ function AnalyticsTab({
     },
   ];
 
+  const audienceSamples = trend?.length ?? 0;
+  const costedRuns = runs.filter((run) => run.startedAt).length;
+  const completedRuns = runs.filter((run) => run.status === "ok").length;
+
   return (
-    <>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-          gap: "0.9rem",
-          marginBottom: "1.6rem",
-        }}
-      >
-        <StatCard label="Recent spend" value={fmtUsd(totalCost)} accent="var(--color-accent)" hint="latest 500 runs maximum" />
-        <StatCard
-          label="Cost / video"
-          value={costPerVideo === null ? "—" : fmtUsd(costPerVideo)}
-          accent="var(--color-accent)"
-        />
-      </div>
+    <div className={styles.analyticsWorkspace}>
+      <WorkspaceIntro
+        eyebrow="Performance desk / observed data"
+        title="Audience and unit economics"
+        description="YouTube observations and production spend stay visibly separate. Empty audience data is never filled with estimates; run cost is read from the production ledger."
+        signals={[
+          { label: "Audience window", value: audienceSamples ? `${audienceSamples} snapshots` : "Awaiting sync", detail: "Rolling 90 days", tone: audienceSamples ? "ready" : "attention" },
+          { label: "Recent spend", value: fmtUsd(totalCost), detail: "Latest 500 runs maximum" },
+          { label: "Cost / uploaded output", value: costPerVideo === null ? "Not available" : fmtUsd(costPerVideo), detail: "Spend divided by YouTube-linked outputs" },
+          { label: "Production sample", value: `${completedRuns}/${costedRuns} complete`, detail: "Completed / costed runs" },
+        ]}
+      />
 
-      <div style={{ display: "grid", gap: "1.2rem" }}>
-        <Chart title="Audience growth (90d)" series={growth} formatValue={(n) => compact(n)} />
-        <Chart title="Cost per run" series={costSeries} formatValue={(n) => `$${n.toFixed(2)}`} />
-      </div>
+      <div className={styles.analyticsLedger}>
+        <section className={styles.analyticsPanel}>
+          <div className={styles.analyticsPanelHeader}>
+            <div><span>External signal</span><h3>Audience growth</h3></div>
+            <small>90-day YouTube snapshots</small>
+          </div>
+          {trend === undefined ? (
+            <SkeletonList rows={2} />
+          ) : trend.length > 0 ? (
+            <Chart title="Subscribers + total views" series={growth} formatValue={(n) => compact(n)} />
+          ) : (
+            <div className={styles.analyticsEmpty}>
+              <strong>No audience snapshots yet</strong>
+              <p>Connect a healthy YouTube destination and let the stats-refresh task record the first verified observation.</p>
+              <Link href="?tab=settings#youtube-destination">Review YouTube destination →</Link>
+            </div>
+          )}
+        </section>
 
-      {trend !== undefined && trend.length === 0 && (
-        <p style={{ marginTop: "1rem", fontSize: "0.82rem", color: "var(--color-faint)" }}>
-          Audience metrics populate once the stats-refresh task runs (needs the
-          YouTube Data API enabled). Cost is live from your runs.
-        </p>
-      )}
-    </>
+        <section className={styles.analyticsPanel}>
+          <div className={styles.analyticsPanelHeader}>
+            <div><span>Internal ledger</span><h3>Cost per production run</h3></div>
+            <small>{costedRuns} recorded run{costedRuns === 1 ? "" : "s"}</small>
+          </div>
+          {costSeries[0].points.length > 0 ? (
+            <Chart title="Actual stage-cost rollup" series={costSeries} formatValue={(n) => `$${n.toFixed(2)}`} />
+          ) : (
+            <div className={styles.analyticsEmpty}>
+              <strong>No costed runs yet</strong>
+              <p>The ledger begins when a production run records provider and stage receipts.</p>
+            </div>
+          )}
+        </section>
+      </div>
+    </div>
   );
 }
 
@@ -1744,34 +1873,58 @@ function LibraryTab({
 }) {
   const videos = useQuery(
     api.videos.listVideos,
-    channelId ? { ownerId, channelId, limit: 500 } : "skip",
+    channelId ? { ownerId, channelId, limit: 500, includeArchived: true } : "skip",
   ) as VideoRow[] | undefined;
   const [index, setIndex] = useState<number | null>(null);
 
   if (videos === undefined) return <SkeletonList rows={3} />;
-  if (videos.length === 0)
-    return (
-      <EmptyState
-        title="No videos yet"
-        description="Finished and published videos for this channel will appear here."
-      />
-    );
+  const active = videos.filter((video) => video.libraryState !== "archived");
+  const archived = videos.filter((video) => video.libraryState === "archived");
+  const published = active.filter((video) => video.youtubeVideoId).length;
+  const evidenced = active.filter((video) => video.releaseEvidenceStatus === "release_evidence_recorded").length;
 
   return (
-    <>
-      <VideoGrid
-        videos={videos}
-        onOpen={(v) => setIndex(videos.findIndex((x) => x._id === v._id))}
+    <div className={styles.libraryWorkspace}>
+      <WorkspaceIntro
+        eyebrow="Master shelf / this channel"
+        title="Retained work, not a graveyard"
+        description="Active masters stay close to editorial work. Archived videos are hidden from this shelf without deleting their render, evidence, or recovery path."
+        signals={[
+          { label: "Active masters", value: String(active.length), detail: "Visible on this channel shelf", tone: active.length ? "ready" : "quiet" },
+          { label: "Published", value: String(published), detail: "YouTube-linked outputs" },
+          { label: "Evidence recorded", value: `${evidenced}/${active.length}`, detail: "Sealed retained-master provenance", tone: active.length > 0 && evidenced === active.length ? "ready" : "attention" },
+          { label: "Archive", value: String(archived.length), detail: "Recoverable, never deleted" },
+        ]}
+        action={<Link className={styles.workspaceActionLink} href="/library">Open full Library</Link>}
       />
-      {index !== null && index >= 0 && (
-        <Lightbox
-          videos={videos}
-          index={index}
-          onIndex={setIndex}
-          onClose={() => setIndex(null)}
-        />
+
+      {active.length === 0 ? (
+        <section className={styles.libraryEmpty}>
+          <span aria-hidden="true">◇</span>
+          <div>
+            <strong>{archived.length ? "The active shelf is clear" : "No finished masters yet"}</strong>
+            <p>{archived.length ? `${archived.length} retained master${archived.length === 1 ? " is" : "s are"} recoverable in the full Library.` : "Finished private drafts and published videos appear here after the production route records a usable final asset."}</p>
+          </div>
+          <Link href="/library">{archived.length ? "Review archive" : "Open Library"} →</Link>
+        </section>
+      ) : (
+        <>
+          <div className={styles.sectionRail}><span>Active masters / newest first</span><i /></div>
+          <VideoGrid
+            videos={active}
+            onOpen={(video) => setIndex(active.findIndex((item) => item._id === video._id))}
+          />
+          {index !== null && index >= 0 && (
+            <Lightbox
+              videos={active}
+              index={index}
+              onIndex={setIndex}
+              onClose={() => setIndex(null)}
+            />
+          )}
+        </>
       )}
-    </>
+    </div>
   );
 }
 
@@ -1840,17 +1993,29 @@ function SeoTab({ ownerId, channelId, niche }: { ownerId: string; channelId: str
 
   if (!niche)
     return (
-      <EmptyState
-        title="No niche set"
-        description="Set this channel's niche (Identity tab) to unlock competitor research and SEO intelligence."
-      />
+      <div className={seoStyles.workspace}>
+        <header className={seoStyles.header}>
+          <div className={seoStyles.headerText}>
+            <span className={seoStyles.eyebrow}>Discovery desk / channel positioning</span>
+            <h2>Search intelligence needs a defined field</h2>
+            <p>Set the channel niche before comparing titles, hooks, thumbnails, or competitor gaps. This avoids mixing unrelated markets into one false benchmark.</p>
+          </div>
+          <Link className={seoStyles.refresh} href="?tab=identity">Review identity</Link>
+        </header>
+        <div className={seoStyles.emptyPanel}>
+          <span className={seoStyles.emptySymbol} aria-hidden="true">⌁</span>
+          <strong>No niche is attached to this channel</strong>
+          <span>Identity is the source of truth; this desk will update after a niche is saved and research is refreshed.</span>
+        </div>
+      </div>
     );
   return (
     <div className={seoStyles.workspace}>
       <header className={seoStyles.header}>
         <div className={seoStyles.headerText}>
-          <span className={seoStyles.eyebrow}>Channel SEO intelligence</span>
+          <span className={seoStyles.eyebrow}>Discovery desk / observed market</span>
           <h2>{niche}</h2>
+          <p>Observed competitor language becomes reusable editorial direction here—not automatic copy, fabricated demand, or a promise of views.</p>
         </div>
         <button
           type="button"
@@ -1861,6 +2026,12 @@ function SeoTab({ ownerId, channelId, niche }: { ownerId: string; channelId: str
           {researchState.status === "queuing" ? "Queuing…" : "Refresh intelligence"}
         </button>
       </header>
+
+      <div className={seoStyles.sourceLedger} aria-label="SEO data provenance">
+        <span><small>Market frame</small><strong>{competitors === undefined ? "Loading" : `${competitors.length} competitor set${competitors.length === 1 ? "" : "s"}`}</strong></span>
+        <span><small>Reusable patterns</small><strong>{databank ? `${(databank.titleTemplates?.length ?? 0) + (databank.hookPatterns?.length ?? 0)} recorded` : "Awaiting research"}</strong></span>
+        <span><small>Decision rule</small><strong>Human-selected direction</strong></span>
+      </div>
 
       {researchState.message && (
         <p
@@ -1995,52 +2166,50 @@ function PipelineTab({
   if (pipeline.length === 0)
     return <EmptyState title="No pipeline configured" />;
   return (
-    <div style={{ display: "grid", gap: "0.5rem" }}>
+    <section className={styles.pipelineMap} aria-label="Channel production pipeline">
+      <header className={styles.pipelineHeader}>
+        <div>
+          <span>Frozen channel route</span>
+          <h2>{pipeline.length} working modules</h2>
+          <p>The route reads top to bottom. Runtime receipts live on each production run; this view is the channel&apos;s configured intent.</p>
+        </div>
+        <strong>{String(pipeline.length).padStart(2, "0")}</strong>
+      </header>
       {pipeline.map((p, i) => {
         const params = p.params as Record<string, unknown> | undefined;
         const hasParams = params && Object.keys(params).length > 0;
+        const phase = livePipelinePhaseForBlock(p.block);
+        const previousPhase = i > 0 ? livePipelinePhaseForBlock(pipeline[i - 1]!.block) : null;
         return (
-          <div
-            key={`${p.block}-${i}`}
-            className="glass"
-            style={{
-              padding: "0.8rem 1rem",
-              display: "flex",
-              alignItems: "center",
-              gap: "0.8rem",
-            }}
-          >
-            <span
-              style={{
-                fontFamily: "var(--font-mono)",
-                fontSize: "0.78rem",
-                color: "var(--color-faint)",
-                width: 24,
-              }}
-            >
-              {String(i + 1).padStart(2, "0")}
-            </span>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.9rem" }}>
-              {p.block}
-            </span>
-            {hasParams && (
-              <span
-                style={{
-                  marginLeft: "auto",
-                  fontFamily: "var(--font-mono)",
-                  fontSize: "0.72rem",
-                  color: "var(--color-muted)",
-                }}
-              >
-                {Object.entries(params!)
-                  .map(([k, v]) => `${k}=${JSON.stringify(v)}`)
-                  .join("  ")}
-              </span>
+          <div className={styles.pipelineGroup} key={`${p.block}-${i}`}>
+            {phase !== previousPhase && (
+              <div className={styles.pipelinePhase}>
+                <span>{LIVE_PIPELINE_PHASE_LABEL[phase]}</span><i />
+              </div>
             )}
+            <article className={styles.pipelineModule} data-phase={phase}>
+              <span className={styles.pipelineIndex}>{String(i + 1).padStart(2, "0")}</span>
+              <span className={styles.pipelineNode} aria-hidden="true"><i /></span>
+              <span className={styles.pipelineIdentity}>
+                <strong>{blockLabel(p.block)}</strong>
+                <small>{p.block}</small>
+              </span>
+              <span className={styles.pipelineCapability}>{LIVE_PIPELINE_PHASE_LABEL[phase]}</span>
+              {hasParams ? (
+                <details className={styles.pipelineParams}>
+                  <summary>{Object.keys(params!).length} controls</summary>
+                  <dl>
+                    {Object.entries(params!).map(([key, value]) => (
+                      <div key={key}><dt>{key}</dt><dd>{JSON.stringify(value)}</dd></div>
+                    ))}
+                  </dl>
+                </details>
+              ) : <span className={styles.pipelineDefault}>module defaults</span>}
+            </article>
           </div>
         );
       })}
-    </div>
+    </section>
   );
 }
 
@@ -2055,32 +2224,32 @@ function IdentityTab({
 }) {
   const bible = id.creativeBrief;
   return (
-    <div style={{ display: "grid", gap: "1.4rem" }}>
+    <div className={styles.identityWorkspace}>
       {bible && (
-        <section>
-          <SectionTitle>Show Bible · film crew</SectionTitle>
-          <div className="glass glass-shine" style={{ padding: "1.25rem 1.4rem", display: "grid", gap: "1rem" }}>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "1.1rem" }}>
+        <section className={styles.identitySection}>
+          <div className={styles.sectionRail}><span>Show bible / film crew</span><i /></div>
+          <div className={styles.showBible}>
+            <div className={styles.identityFieldGrid}>
               <Field label="Positioning" value={bible.positioning} />
               <Field label="Vibe" value={bible.vibe} />
               <Field label="Iconic motif" value={bible.iconicMotif} />
             </div>
             {bible.activeCrew?.length > 0 && (
-              <div>
-                <div style={{ fontSize: "0.7rem", letterSpacing: "0.06em", textTransform: "uppercase", color: "var(--color-faint)", marginBottom: "0.4rem" }}>Active crew</div>
+              <div className={styles.identitySubsection}>
+                <div className={styles.identityLabel}>Active crew</div>
                 <ChipRow items={bible.activeCrew} tone="accent" />
               </div>
             )}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "1.1rem" }}>
+            <div className={styles.identityDoctrineGrid}>
               {bible.worksInSpace?.length > 0 && (
                 <div>
-                  <div style={{ fontSize: "0.74rem", fontWeight: 600, color: "var(--color-ok)", marginBottom: "0.4rem" }}>✓ Works in this space</div>
+                  <div className={styles.identityWorks}>Works in this space</div>
                   <List items={bible.worksInSpace} />
                 </div>
               )}
               {bible.avoidInSpace?.length > 0 && (
                 <div>
-                  <div style={{ fontSize: "0.74rem", fontWeight: 600, color: "var(--color-failed)", marginBottom: "0.4rem" }}>✕ Avoid (fails here)</div>
+                  <div className={styles.identityAvoids}>Avoid in this space</div>
                   <List items={bible.avoidInSpace} />
                 </div>
               )}
@@ -2089,13 +2258,7 @@ function IdentityTab({
         </section>
       )}
       <div
-        className="glass glass-shine"
-        style={{
-          padding: "1.25rem 1.4rem",
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(160px, 1fr))",
-          gap: "1.1rem",
-        }}
+        className={styles.identityFieldGrid}
       >
         <Field label="Niche" value={id.niche ?? "—"} />
         <Field label="Cadence" value={id.cadence ?? "—"} />
@@ -2105,30 +2268,15 @@ function IdentityTab({
       </div>
 
       {id.palette && id.palette.length > 0 && (
-        <section>
-          <SectionTitle>Palette</SectionTitle>
-          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <section className={styles.identitySection}>
+          <div className={styles.sectionRail}><span>Palette</span><i /></div>
+          <div className={styles.palette}>
             {id.palette.map((c) => (
-              <div key={c} style={{ textAlign: "center" }}>
+              <div key={c} className={styles.swatch}>
                 <div
-                  style={{
-                    width: 48,
-                    height: 48,
-                    borderRadius: 10,
-                    background: c,
-                    border: "1px solid var(--color-border)",
-                  }}
+                  style={{ background: c }}
                 />
-                <div
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "0.65rem",
-                    color: "var(--color-faint)",
-                    marginTop: "0.25rem",
-                  }}
-                >
-                  {c}
-                </div>
+                <code>{c}</code>
               </div>
             ))}
           </div>
@@ -2136,25 +2284,20 @@ function IdentityTab({
       )}
 
       {id.styleGrammar && (
-        <section>
-          <SectionTitle>Style grammar</SectionTitle>
-          <p
-            className="glass"
-            style={{ padding: "1rem 1.2rem", fontSize: "0.88rem", color: "var(--color-muted)", lineHeight: 1.6 }}
-          >
-            {id.styleGrammar}
-          </p>
+        <section className={styles.identitySection}>
+          <div className={styles.sectionRail}><span>Style grammar</span><i /></div>
+          <p className={styles.styleGrammar}>{id.styleGrammar}</p>
         </section>
       )}
       {id.topicPool && id.topicPool.length > 0 && (
-        <section>
-          <SectionTitle>Topic pool</SectionTitle>
+        <section className={styles.identitySection}>
+          <div className={styles.sectionRail}><span>Topic pool</span><i /></div>
           <ChipRow items={id.topicPool} tone="secondary" />
         </section>
       )}
       {id.bannedWords && id.bannedWords.length > 0 && (
-        <section>
-          <SectionTitle>Banned words</SectionTitle>
+        <section className={styles.identitySection}>
+          <div className={styles.sectionRail}><span>Banned words</span><i /></div>
           <ChipRow items={id.bannedWords} tone="muted" />
         </section>
       )}
@@ -2166,21 +2309,9 @@ function IdentityTab({
 
 function Field({ label, value, mono }: { label: string; value: string; mono?: boolean }) {
   return (
-    <div>
-      <div
-        style={{
-          fontSize: "0.7rem",
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-          color: "var(--color-faint)",
-          marginBottom: "0.3rem",
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ fontSize: "0.95rem", fontFamily: mono ? "var(--font-mono)" : undefined }}>
-        {value}
-      </div>
+    <div className={styles.identityField} data-mono={mono ? "true" : undefined}>
+      <span>{label}</span>
+      <strong>{value}</strong>
     </div>
   );
 }
@@ -2192,26 +2323,10 @@ function ChipRow({
   items: string[];
   tone: "accent" | "secondary" | "muted";
 }) {
-  const color =
-    tone === "accent"
-      ? "var(--color-accent)"
-      : tone === "secondary"
-        ? "var(--color-secondary)"
-        : "var(--color-muted)";
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem" }}>
+    <div className={styles.chipRow} data-tone={tone}>
       {items.map((it, i) => (
-        <span
-          key={`${it}-${i}`}
-          style={{
-            fontSize: "0.76rem",
-            padding: "0.25rem 0.6rem",
-            borderRadius: 8,
-            color,
-            background: "var(--color-surface)",
-            border: "1px solid var(--color-border)",
-          }}
-        >
+        <span key={`${it}-${i}`}>
           {it}
         </span>
       ))}
@@ -2221,13 +2336,9 @@ function ChipRow({
 
 function List({ items }: { items: string[] }) {
   return (
-    <div style={{ display: "grid", gap: "0.4rem" }}>
+    <div className={styles.doctrineList}>
       {items.map((it, i) => (
-        <div
-          key={i}
-          className="glass"
-          style={{ padding: "0.7rem 0.95rem", fontSize: "0.86rem", color: "var(--color-muted)" }}
-        >
+        <div key={i}>
           {it}
         </div>
       ))}
@@ -2296,6 +2407,7 @@ function WeekAheadTab({ ownerId, channelId }: { ownerId: string; channelId: Id<"
   const del = useMutation(api.contentPlan.deleteItem);
   const reorder = useMutation(api.contentPlan.reorder);
   const [busy, setBusy] = useState(false);
+  const [removeBusyId, setRemoveBusyId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const dragId = useRef<string | null>(null);
 
@@ -2329,63 +2441,103 @@ function WeekAheadTab({ ownerId, channelId }: { ownerId: string; channelId: Id<"
     await reorder({ ids: ids as Id<"contentPlan">[] });
   };
 
+  const removeItem = async (item: PlanRow) => {
+    if (!window.confirm(`Remove “${item.title || item.topic}” from the upcoming plan?`)) return;
+    setRemoveBusyId(item._id);
+    setMsg(null);
+    try {
+      await del({ id: item._id });
+      setMsg("Plan item removed. Existing rendered masters were not affected.");
+    } catch (error) {
+      setMsg(error instanceof Error ? error.message : "The plan item could not be removed.");
+    } finally {
+      setRemoveBusyId(null);
+    }
+  };
+
+  const readyCount = plan?.filter((item) => item.status === "ready").length ?? 0;
+  const buildingCount = plan?.filter((item) => item.status !== "ready").length ?? 0;
+
   return (
-    <>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "1rem" }}>
-        <SectionTitle>Week ahead — upcoming videos</SectionTitle>
-        <button
-          onClick={generate}
-          disabled={busy}
-          className="glass"
-          style={{ padding: "0.5rem 1rem", fontSize: "0.85rem", fontWeight: 600, color: "var(--color-fg)", cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1 }}
-        >
-          {busy ? "Starting…" : "+ Plan 5 more"}
-        </button>
-      </div>
-      {msg && <p style={{ fontSize: "0.82rem", color: "var(--color-muted)", marginBottom: "0.9rem" }}>{msg}</p>}
+    <div className={styles.weekWorkspace}>
+      <WorkspaceIntro
+        eyebrow="Editorial calendar / next five moves"
+        title="Shape the queue before the render queue"
+        description="Topics, titles, descriptions, and cover directions are arranged here. Dragging changes editorial priority; it does not silently publish or delete a finished master."
+        signals={[
+          { label: "Planned", value: plan === undefined ? "Loading" : String(plan.length), detail: "Upcoming editorial slots" },
+          { label: "Ready", value: String(readyCount), detail: "Topic + cover complete", tone: readyCount ? "ready" : "quiet" },
+          { label: "Building", value: String(buildingCount), detail: "Planner still working", tone: buildingCount ? "attention" : "quiet" },
+        ]}
+        action={(
+          <button type="button" onClick={generate} disabled={busy} className={styles.workspaceActionButton}>
+            <span aria-hidden="true">＋</span>{busy ? "Starting planner…" : "Plan 5 more"}
+          </button>
+        )}
+      />
+      {msg && <p className={styles.workspaceNotice} role="status">{msg}</p>}
 
       {plan === undefined ? (
         <SkeletonList rows={3} />
       ) : plan.length === 0 ? (
-        <EmptyState title="No upcoming videos planned yet" description="Click “Plan 5 more” to pre-build topics, thumbnails and descriptions." />
+        <section className={styles.weekEmpty}>
+          <div className={styles.weekEmptySlots} aria-hidden="true">
+            {[1, 2, 3, 4, 5].map((slot) => <span key={slot}>{String(slot).padStart(2, "0")}</span>)}
+          </div>
+          <div>
+            <strong>The editorial runway is open</strong>
+            <p>Build five researched options with distinct titles, descriptions, and channel-specific Nano Banana cover directions.</p>
+          </div>
+          <button type="button" onClick={generate} disabled={busy} className={styles.workspaceActionButton}>
+            {busy ? "Starting planner…" : "Build the first five"}
+          </button>
+        </section>
       ) : (
-        <div style={{ display: "grid", gap: "0.8rem" }}>
-          {plan.map((p) => (
-            <div
+        <section className={styles.weekQueue} aria-label="Upcoming editorial queue">
+          <div className={styles.sectionRail}><span>Priority order / drag to rearrange</span><i /></div>
+          <div className={styles.weekRows}>
+          {plan.map((p, index) => (
+            <article
               key={p._id}
               draggable
               onDragStart={() => { dragId.current = p._id; }}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => onDrop(p._id)}
-              className="glass channel-week-row"
+              className={`${styles.weekRow} channel-week-row`}
             >
+              <span className={styles.weekIndex}>{String(index + 1).padStart(2, "0")}</span>
               <AssetImg k={p.thumbnailKey} alt={p.title ?? p.topic} className="channel-week-thumb" />
-              <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", minWidth: 0 }}>
-                <span style={{ fontSize: "0.95rem", fontWeight: 600, color: "var(--color-fg)" }}>{p.title || p.topic}</span>
+              <div className={styles.weekCopy}>
+                <strong>{p.title || p.topic}</strong>
                 {p.title && p.title !== p.topic && (
-                  <span style={{ fontSize: "0.75rem", color: "var(--color-muted)" }}>{p.topic}</span>
+                  <span>{p.topic}</span>
                 )}
                 {p.description && (
-                  <span style={{ fontSize: "0.8rem", color: "var(--color-muted)", lineHeight: 1.45, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
+                  <p>
                     {p.description}
-                  </span>
+                  </p>
                 )}
-                <span style={{ fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.04em", color: p.status === "ready" ? "var(--color-ok)" : "var(--color-muted)" }}>
-                  {p.status === "ready" ? "● ready" : "○ generating…"}
-                </span>
+              </div>
+              <div className={styles.weekState} data-ready={p.status === "ready"}>
+                <span>{p.status === "ready" ? "Ready" : "Building"}</span>
+                <small>{p.scheduledAt ? new Date(p.scheduledAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "Unpinned"}</small>
               </div>
               <button
-                onClick={() => del({ id: p._id })}
-                title="Delete"
-                style={{ background: "none", border: "none", color: "var(--color-muted)", fontSize: "1.1rem", cursor: "pointer", padding: "0.4rem" }}
+                type="button"
+                onClick={() => void removeItem(p)}
+                disabled={removeBusyId === p._id}
+                title="Remove from upcoming plan"
+                aria-label={`Remove ${p.title || p.topic} from upcoming plan`}
+                className={styles.weekRemove}
               >
-                ✕
+                {removeBusyId === p._id ? "…" : "×"}
               </button>
-            </div>
+            </article>
           ))}
-        </div>
+          </div>
+        </section>
       )}
-    </>
+    </div>
   );
 }
 

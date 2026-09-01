@@ -21,7 +21,7 @@ assert.doesNotMatch(terminalError, /removeItem\(PENDING_BUILD_STORAGE_KEY\)/);
 assert.doesNotMatch(terminalError, /submitPending|fetch\(/, "a blocker must not redispatch provider work");
 assert.match(wizard, /href=\{`\/channels\/\$\{encodeURIComponent\(activeBuild\.slug\)\}`\}/);
 assert.match(wizard, /The exact build identity is preserved/);
-assert.match(detail, /channel-inception-stage-error[\s\S]*role="alert"/);
+assert.match(detail, /className=\{styles\.inceptionStageError\}[\s\S]*role="alert"/);
 
 // The no-Gemini policy must be legible in the creator itself: an optional
 // reference URL is retained as operator context, never presented as a live
@@ -169,6 +169,20 @@ assert.match(detail, /assessYouTubeSetup/);
 assert.match(detail, /setup\.oauth === "ready"/);
 assert.match(detail, /setup\.canAutoCreate/);
 assert.match(detail, /Google does not provide this integration a reliable completion receipt/);
+// Standalone channels are not synthetic multilingual groups. The advanced
+// system also stays unmounted until opened so its voice catalog does not fetch
+// dozens of hidden audition assets on every Settings visit.
+assert.match(detail, /channel\.groupId \? \{ groupId: channel\.groupId \} : "skip"/);
+assert.doesNotMatch(detail, /groupId:\s*channel\.groupId \?\? channel\._id/);
+assert.match(detail, /const \[advancedOpen, setAdvancedOpen\] = useState\(false\)/);
+assert.match(detail, /\{advancedOpen && \(/);
+// A channel shelf reads both collections for truthful counts but only renders
+// active masters; archived work remains recoverable from the full Library.
+assert.match(detail, /includeArchived: true/);
+assert.match(detail, /video\.libraryState !== "archived"/);
+assert.match(detail, /Archived videos are hidden from this shelf without deleting/);
+assert.match(detail, /Audience and unit economics/);
+assert.match(detail, /Shape the queue before the render queue/);
 assert.match(overview, /item\.status === "ready"/);
 assert.doesNotMatch(overview, /need review/);
 assert.match(overview, /<details className=\{`\$\{styles\.runsWidget\}/);

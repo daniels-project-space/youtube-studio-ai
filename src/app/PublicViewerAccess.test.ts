@@ -73,6 +73,12 @@ const assetRoute = source("./api/asset-url/route.ts");
 assert.doesNotMatch(assetRoute, /authorizeStudioRoute|requireStudioActor/);
 assert.match(assetRoute, /key\.startsWith\(ownerPrefix\)/);
 assert.match(assetRoute, /key\.includes\("\.\."\)/);
+assert.match(
+  assetRoute,
+  /\^voicebank\\\/auditions\\\/[A-Za-z0-9_\-\[\]\{\},]+\\\.mp3\$/,
+  "the public signer may admit only well-formed shared narrator auditions outside the owner prefix",
+);
+assert.match(assetRoute, /!key\.startsWith\(ownerPrefix\) && !sharedVoiceAudition/);
 
 for (const route of [
   "./api/novita-render/route.ts",
