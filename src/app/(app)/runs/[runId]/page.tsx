@@ -26,6 +26,16 @@ import { fmtDateTime, fmtUsd } from "@/lib/format";
 import { IconChevron, IconExternal } from "@/components/icons";
 import styles from "./runDetail.module.css";
 
+type ArtifactRetention = {
+  status: "awaiting_release" | "pending" | "processing" | "completed" | "blocked";
+  releaseAt?: number;
+  retainUntil?: number;
+  scheduledAt: number;
+  completedAt?: number;
+  removedObjects?: number;
+  retainedObjectCount?: number;
+};
+
 export default function RunDetailPage({
   params,
 }: {
@@ -45,6 +55,9 @@ export default function RunDetailPage({
     api.assets.listForRun,
     run ? { runId: runId as Id<"runs"> } : "skip",
   ) as RunMediaAsset[] | undefined;
+  const artifactRetention = useQuery(api.runArtifactRetentions.getForRun, {
+    runId: runId as Id<"runs">,
+  }) as ArtifactRetention | null | undefined;
 
   // Fetch the run's channel to derive the expected (planned) block list. We
   // skip the query until we know the channelId.
@@ -186,6 +199,8 @@ export default function RunDetailPage({
         )}
       </section>
 
+      <ArtifactRetentionStrip retention={artifactRetention} legacy={planSource === "legacy"} />
+
       {(run.status === "awaiting_factual_review" || run.status === "factual_review_blocked") && (
         <FactualReviewPanel runId={String(run._id)} />
       )}
@@ -241,6 +256,50 @@ export default function RunDetailPage({
       <section id="run-console" className={`${styles.consoleSection} ${styles.anchorTarget}`}>
         <LogConsole runId={run._id} runStatus={run.status} />
       </section>
+    </div>
+  );
+}
+
+function ArtifactRetentionStrip({
+  retention,
+  legacy,
+}: {
+  retention: ArtifactRetention | null | undefined;
+  legacy: boolean;
+}) {
+  const [observedAt] = useState(() => Date.now());
+  if (retention === undefined) {
+    return <div className={styles.retentionStrip} data-status="loading" aria-label="Loading artifact retention" />;
+  }
+  if (!retention) {
+    return (
+      <div className={styles.retentionStrip} data-status="untracked">
+        <span className={styles.retentionGlyph} aria-hidden="true">◇</span>
+        <div><small>Artifact lifecycle</small><strong>{legacy ? "Legacy record" : "Not scheduled yet"}</strong></div>
+        <p>{legacy ? "No destructive cleanup is inferred for this older run." : "Artifacts remain untouched until the upload stage records a release-aware schedule."}</p>
+      </div>
+    );
+  }
+
+  const presentation = retention.status === "awaiting_release"
+    ? { title: "Held until release", detail: "Private draft · no deletion date", tone: "waiting" }
+    : retention.status === "pending"
+      ? { title: "Working files retained", detail: retention.retainUntil ? `Until ${fmtDateTime(retention.retainUntil)}` : "Release + 14 days", tone: "active" }
+      : retention.status === "processing"
+        ? { title: "Verifying before cleanup", detail: "Certificates and retained bytes are being checked", tone: "processing" }
+        : retention.status === "completed"
+          ? { title: "Intermediates cleared", detail: `${retention.removedObjects ?? 0} removed · final master kept`, tone: "complete" }
+          : { title: "Cleanup blocked safely", detail: "All recoverable files remain in storage", tone: "blocked" };
+  const progress = retention.retainUntil && retention.retainUntil > retention.scheduledAt
+    ? Math.max(0, Math.min(100, ((observedAt - retention.scheduledAt) / (retention.retainUntil - retention.scheduledAt)) * 100))
+    : retention.status === "completed" ? 100 : 0;
+
+  return (
+    <div className={styles.retentionStrip} data-status={presentation.tone}>
+      <span className={styles.retentionGlyph} aria-hidden="true">◌</span>
+      <div><small>Artifact lifecycle</small><strong>{presentation.title}</strong></div>
+      <div className={styles.retentionTrack} aria-hidden="true"><i style={{ width: `${progress}%` }} /></div>
+      <p>{presentation.detail}</p>
     </div>
   );
 }

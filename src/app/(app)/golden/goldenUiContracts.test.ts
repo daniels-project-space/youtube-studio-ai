@@ -8,11 +8,11 @@ const styles = readFileSync(`${here}/golden.module.css`, "utf8");
 const images = readFileSync(`${here}/GoldenImages.tsx`, "utf8");
 const imageStyles = readFileSync(`${here}/GoldenImages.module.css`, "utf8");
 
-assert.match(page, /Production standards · evidence atlas/i);
-assert.match(page, /A beautiful sample never certifies a production route\./);
+assert.match(page, /Quality standards/i);
+assert.match(page, /Only tested routes can be promoted\./);
 assert.match(page, /Golden module admission assay/);
 assert.match(page, /Five production disciplines/);
-assert.match(page, /Open one chapter at a time\./);
+assert.match(page, /Open a module to inspect its tests and examples\./);
 assert.match(page, /data-empty=\{receiptCount === 0\}/);
 assert.match(page, /data-warning=\{executionIsWarning\}/);
 assert.match(page, /CATALOG ONLY · NOT COMPILER-EXECUTABLE · NOT PROMOTED/);

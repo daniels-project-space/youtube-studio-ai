@@ -67,6 +67,20 @@
 .videoLink { display: inline-flex; align-items: center; gap: 0.32rem; color: var(--color-secondary); font-weight: 700; text-decoration: none; }
 .errorPanel { margin-top: 0.7rem; padding: 0.8rem 0.95rem; border: 1px solid color-mix(in srgb,var(--color-failed) 36%,transparent); border-radius: 8px; color: var(--color-failed); background: color-mix(in srgb,var(--color-failed) 5%,transparent); font-family: var(--font-mono); font-size: 0.73rem; line-height: 1.55; white-space: pre-wrap; }
 
+.retentionStrip { --retention-tone: var(--color-faint); display: grid; min-width: 0; grid-template-columns: auto minmax(10rem,.75fr) minmax(8rem,1.25fr) minmax(12rem,1fr); align-items: center; gap: .72rem; min-height: 56px; margin: -.7rem 0 1.35rem; padding: .62rem .78rem; border: 1px solid var(--color-border); border-radius: 12px; background: linear-gradient(110deg,color-mix(in srgb,var(--retention-tone) 7%,transparent),rgba(10,15,25,.52)); }
+.retentionStrip[data-status="active"], .retentionStrip[data-status="waiting"] { --retention-tone: var(--color-secondary); }
+.retentionStrip[data-status="processing"] { --retention-tone: var(--color-running); }
+.retentionStrip[data-status="complete"] { --retention-tone: var(--color-ok); }
+.retentionStrip[data-status="blocked"] { --retention-tone: var(--color-failed); }
+.retentionStrip[data-status="loading"] { min-height: 56px; background: linear-gradient(90deg,rgba(255,255,255,.025),rgba(255,255,255,.06),rgba(255,255,255,.025)); background-size: 220% 100%; animation: retention-load 1.6s ease-in-out infinite; }
+.retentionGlyph { display: grid; width: 25px; height: 25px; place-items: center; border: 1px solid color-mix(in srgb,var(--retention-tone) 48%,transparent); border-radius: 50%; color: var(--retention-tone); font-size: .76rem; box-shadow: 0 0 20px color-mix(in srgb,var(--retention-tone) 14%,transparent); }
+.retentionStrip > div:nth-child(2) { display: grid; min-width: 0; gap: .18rem; }
+.retentionStrip small { color: var(--retention-tone); font: 700 .5rem/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+.retentionStrip strong { overflow: hidden; font-size: .72rem; font-weight: 660; text-overflow: ellipsis; white-space: nowrap; }
+.retentionStrip p { overflow: hidden; margin: 0; color: var(--color-faint); font-size: .62rem; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+.retentionTrack { height: 2px; overflow: hidden; background: rgba(243,240,232,.07); }
+.retentionTrack i { display: block; height: 100%; background: linear-gradient(90deg,color-mix(in srgb,var(--retention-tone) 60%,transparent),var(--retention-tone)); transition: width 420ms ease; }
+
 .publishedSection { position: relative; display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: start; gap: 0.7rem; margin: 0 0 1.6rem; }
 .publishedDisclosure { min-width: 0; overflow: hidden; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .publishedDisclosure > summary { display: flex; min-height: 64px; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.7rem 0.85rem; cursor: pointer; list-style: none; }
@@ -89,6 +103,7 @@
 .consoleSection { margin-top: 1.7rem; }
 
 @keyframes receipt-scan { 0%,100% { opacity: 0.25; } 50% { opacity: 1; } }
+@keyframes retention-load { 0% { background-position: 100% 0; } 100% { background-position: -120% 0; } }
 
 @media (max-width: 1120px) {
   .summaryGrid { grid-template-columns: repeat(3,minmax(0,1fr)); }
@@ -102,6 +117,8 @@
   .heroProgress { max-width: none; }
   .publishedSection { grid-template-columns: 1fr; }
   .youtubeReceiptLink { width: fit-content; }
+  .retentionStrip { grid-template-columns: auto minmax(0,1fr); }
+  .retentionTrack, .retentionStrip p { grid-column: 2; width: 100%; text-align: left; }
 }
 
 @media (max-width: 540px) {
@@ -124,4 +141,6 @@
 @media (prefers-reduced-motion: reduce) {
   .backLink, .progressTrack i { transition: none; }
   .heroProgress[data-live="true"] .progressTrack i::after { animation: none; }
+  .retentionStrip[data-status="loading"] { animation: none; }
+  .retentionTrack i { transition: none; }
 }

@@ -168,6 +168,7 @@ assert.throws(
 );
 
 const lofi = readFileSync(join(process.cwd(), "src/trigger/blocks/lofiBlocks.ts"), "utf8");
+const retentionSweeper = readFileSync(join(process.cwd(), "src/trigger/runArtifactRetentionSweeper.ts"), "utf8");
 const shortReviewHelper = lofi.slice(
   lofi.indexOf("async function persistShortReleaseEvidence"),
   lofi.indexOf("export const shortsSpinoff"),
@@ -196,13 +197,18 @@ assert.match(
 );
 assert.match(
   lofi,
-  /loadDurableShortReleaseCertificate\(ctx\)[\s\S]*?additionalCertificates:[\s\S]*?keepKinds: \["video", "thumbnail", "derived_short"\]/,
-  "cleanup must retain a completed Short's independent release evidence and Library asset",
+  /loadDurableShortReleaseCertificate\(ctx\)[\s\S]*?additionalCertificateKeys: shortRelease \? \[shortRelease\.certificateKey\] : \[\]/,
+  "cleanup scheduling must retain a completed Short's independent release certificate",
 );
 assert.match(
-  lofi,
-  /loadDurableShortReleaseCertificate\(ctx\)[\s\S]*?verifyFinalMasterNarrationAuditIfPresent\([\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence\([\s\S]*?getObjectIntegrity/,
-  "cleanup must revalidate the derivative narration audit and stream/hash durable Short bytes before deletion",
+  retentionSweeper,
+  /additionalCertificateKeys\.map[\s\S]*?parseFinalMasterReleaseCertificateBytes[\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence\([\s\S]*?getObjectIntegrity/,
+  "the deferred sweeper must reload derivative certificates and stream/hash durable Short bytes before deletion",
+);
+assert.match(
+  retentionSweeper,
+  /keepKinds: \["video", "thumbnail", "derived_short"\]/,
+  "deferred cleanup must retain the Short's Library asset row",
 );
 assert.match(
   lofi,

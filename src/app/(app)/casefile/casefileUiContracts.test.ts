@@ -7,16 +7,16 @@ const page = readFileSync(`${here}/page.tsx`, "utf8");
 const styles = readFileSync(`${here}/casefile.module.css`, "utf8");
 
 assert.match(page, /function CasefileHero/);
-assert.match(page, /Turn evidence into a shot-by-shot case\./);
+assert.match(page, /<h1>Casefiles<\/h1>/);
 assert.match(page, /Evidence route/);
 assert.match(page, /No render · no spend · no publish/,
   "the editorial-only authority boundary must stay explicit");
 assert.match(page, /casefileEvidenceLocks\(selected\)/,
   "the evidence map must remain derived from persisted episode bindings");
 assert.match(page, /Recorded bindings for this case/);
-assert.match(page, /A missing record is shown as missing/);
+assert.match(page, /styles\.lockMissing/);
 assert.match(page, /function LockedCasefileRoom/);
-assert.match(page, /No private casefile request was sent/);
+assert.match(page, /Case records remain unloaded until the recorded YouTube owner is verified/);
 assert.match(page, /fetch\("\/api\/casefile-episodes"/,
   "intake and review actions must remain connected to the real route");
 assert.match(page, /parseSourceProofAttachments/,

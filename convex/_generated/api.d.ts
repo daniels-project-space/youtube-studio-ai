@@ -34,6 +34,7 @@ import type * as publishContinuationState from "../publishContinuationState.js";
 import type * as publishIntents from "../publishIntents.js";
 import type * as reviewedEvidencePacks from "../reviewedEvidencePacks.js";
 import type * as runArtifacts from "../runArtifacts.js";
+import type * as runArtifactRetentions from "../runArtifactRetentions.js";
 import type * as runLogs from "../runLogs.js";
 import type * as runStages from "../runStages.js";
 import type * as runs from "../runs.js";
@@ -83,6 +84,7 @@ declare const fullApi: ApiFromModules<{
   publishIntents: typeof publishIntents;
   reviewedEvidencePacks: typeof reviewedEvidencePacks;
   runArtifacts: typeof runArtifacts;
+  runArtifactRetentions: typeof runArtifactRetentions;
   runLogs: typeof runLogs;
   runStages: typeof runStages;
   runs: typeof runs;

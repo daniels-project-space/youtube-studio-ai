@@ -9,10 +9,10 @@ const styles = readFileSync(`${here}/settings.module.css`, "utf8");
 assert.match(page, /function SettingsHero/,
   "settings must own a channel-specific governance composition");
 assert.match(page, /Control boundary map/);
-assert.match(page, /Set the boundaries automation cannot cross\./);
+assert.match(page, /Changes require confirmation/);
 assert.match(page, /function LockedGovernanceRoom/);
-assert.match(page, /No private governance records requested/);
-assert.match(page, /Private ledgers stay private/);
+assert.match(page, /Publishing, account, and policy mutations remain disabled/);
+assert.match(page, /Ledgers private/);
 
 for (const tab of ["account", "production", "publishing", "learning"]) {
   assert.match(page, new RegExp(`id: "${tab}"`), `missing ${tab} governance room`);

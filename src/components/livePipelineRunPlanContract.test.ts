@@ -9,8 +9,8 @@ const pipeline = read("src/components/LivePipeline.tsx");
 const runDetail = read("src/app/(app)/runs/[runId]/page.tsx");
 
 assert.match(pipeline, /planSource\?: "frozen" \| "legacy"/);
-assert.match(pipeline, /Stage plan is locked to this run/);
-assert.match(pipeline, /Legacy run plan inferred from the current channel configuration/);
+assert.match(pipeline, /Waiting for the next stage/);
+assert.match(pipeline, /Using the saved legacy plan/);
 
 assert.match(runDetail, /api\.runs\.getRunPresentation/);
 assert.match(runDetail, /run\.pipeline\?\.entries\.length/);

@@ -15,7 +15,7 @@ assert.match(page, /editorialEvidenceSummary\(selected\?\.packet\)/,
   "the matrix must use persisted receipt fields rather than inferred readiness");
 assert.match(page, /Source snapshots/);
 assert.match(page, /function LockedEvidenceVault/);
-assert.match(page, /No private evidence request was sent/);
+assert.match(page, /Source snapshots and review fingerprints remain unloaded/);
 assert.match(page, /Evidence only · supervised runs/);
 assert.match(page, /fetch\("\/api\/editorial-evidence-packets"/);
 assert.match(page, /invalidatePreview/,

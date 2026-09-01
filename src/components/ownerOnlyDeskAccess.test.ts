@@ -34,7 +34,7 @@ const novitaDesk = read("../app/(app)/novita-render/page.tsx");
 assert.match(novitaDesk, /const operationsAccess = useOperationsAccess\(\)/);
 assert.match(novitaDesk, /if \(operationsAccess !== "owner"\) \{/);
 assert.match(novitaDesk, /<LockedRenderConsole access=\{operationsAccess\}/);
-assert.match(novitaDesk, /No private fleet, job, prompt, or provider request was sent/);
+assert.match(novitaDesk, /Fleet capacity, jobs, and prompts remain unloaded/);
 
 const casefile = read("../app/(app)/casefile/page.tsx");
 assert.match(casefile, /const operationsAccess = useOperationsAccess\(\)/);
@@ -43,7 +43,7 @@ assert.match(
   /operationsAccess !== "owner" \? \([\s\S]*<LockedCasefileRoom/,
   "the custom Casefile shell must keep its private workspace behind the owner branch",
 );
-assert.match(casefile, /No private casefile request was sent/);
+assert.match(casefile, /Case records remain unloaded until the recorded YouTube owner is verified/);
 
 const editorialEvidence = read("../app/(app)/editorial-evidence/page.tsx");
 assert.match(editorialEvidence, /const operationsAccess = useOperationsAccess\(\)/);
@@ -52,7 +52,7 @@ assert.match(
   /operationsAccess !== "owner" \? \([\s\S]*<LockedEvidenceVault/,
   "the custom Evidence shell must keep receipts and review controls behind the owner branch",
 );
-assert.match(editorialEvidence, /No private evidence request was sent/);
+assert.match(editorialEvidence, /Source snapshots and review fingerprints remain unloaded/);
 
 const studioAssets = read("../app/(app)/studio-assets/page.tsx");
 assert.match(studioAssets, /const operationsAccess = useOperationsAccess\(\)/);
@@ -61,7 +61,7 @@ assert.match(
   /operationsAccess !== "owner" \? \([\s\S]*<LockedAssetRegistry/,
   "the custom asset shell must keep registry inventory and actions behind the owner branch",
 );
-assert.match(studioAssets, /No private asset request was sent/);
+assert.match(studioAssets, /Approvals, adapters, and private previews remain unloaded/);
 
 for (const path of [
   "../app/(app)/studio-assets/page.tsx",
@@ -89,7 +89,7 @@ assert.ok(
 assert.match(settings, /operationsAccess !== "owner" \? \([\s\S]*<LockedGovernanceRoom/);
 assert.match(
   settings,
-  /No private governance records requested/,
+  /Publishing, account, and policy mutations remain disabled/,
   "viewer settings must explain that owner ledgers were not fetched",
 );
 assert.match(settings, /if \(operationsAccess !== "owner"\) return;/);

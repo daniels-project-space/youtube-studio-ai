@@ -18,7 +18,7 @@ import {
   createPackageToOpeningPlan,
   createPackageToOpeningReceipt,
 } from "@/engine/packageToOpening";
-import { pruneRunObjectsWithVerifiedFinalMasterEvidence } from "@/trigger/blocks/lofiBlocks";
+import { pruneRunObjectsWithVerifiedFinalMasterEvidence } from "@/lib/runArtifactPrune";
 
 const keyPrefix = "owner/alice/channel/casefile/";
 const runId = "run-byte-evidence";

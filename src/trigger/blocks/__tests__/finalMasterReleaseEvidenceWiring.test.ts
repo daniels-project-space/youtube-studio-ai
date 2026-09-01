@@ -95,6 +95,8 @@ const narrated = readFileSync(join(process.cwd(), "src/trigger/blocks/narratedBl
 const lofi = readFileSync(join(process.cwd(), "src/trigger/blocks/lofiBlocks.ts"), "utf8");
 const dispatcher = readFileSync(join(process.cwd(), "src/lib/publishDispatcher.ts"), "utf8");
 const publishIntents = readFileSync(join(process.cwd(), "convex/publishIntents.ts"), "utf8");
+const retentionPrune = readFileSync(join(process.cwd(), "src/lib/runArtifactPrune.ts"), "utf8");
+const retentionSweeper = readFileSync(join(process.cwd(), "src/trigger/runArtifactRetentionSweeper.ts"), "utf8");
 const releaseCertificateDeclaration = narrated.indexOf("let finalMasterReleaseCertificate:");
 const productionReleaseGate = narrated.indexOf("if (productionQa) {", releaseCertificateDeclaration);
 const receiptCreation = narrated.indexOf("createVisualReviewReleaseReceipt(");
@@ -349,9 +351,19 @@ assert.match(
   "public and scheduled releases must still use the existing authenticated channel-policy gate",
 );
 assert.match(
-  lofi,
+  retentionPrune,
   /pruneRunObjectsWithVerifiedFinalMasterEvidence[\s\S]*?retainedFinalMasterReleaseObjectKeys\([\s\S]*?verifyFinalMasterReleaseEvidenceObjects\([\s\S]*?deleteObjects\(deletable\)/,
-  "cleanup must re-read the certificate's manifest, receipt, and frame bytes before deleting intermediates",
+  "the retention worker must re-read the certificate's manifest, receipt, and frame bytes before deleting intermediates",
+);
+assert.match(
+  lofi,
+  /runArtifactRetentions\.schedule[\s\S]*?release \+ 14 days/,
+  "pipeline cleanup must schedule release-aware retention instead of deleting uploaded-run intermediates immediately",
+);
+assert.match(
+  retentionSweeper,
+  /claimDue[\s\S]*?pruneRunObjectsWithVerifiedFinalMasterEvidence[\s\S]*?assets\.pruneRun[\s\S]*?runArtifactRetentions\.complete/,
+  "the leased sweeper must prune verified R2 objects and matching asset rows before completing its durable ledger",
 );
 
 console.log("final-master release evidence wiring test passed");

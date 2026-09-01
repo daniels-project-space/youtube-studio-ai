@@ -11,11 +11,11 @@ async function main() {
   ]);
   const manifest = JSON.parse(manifestBytes) as { entries: Array<{ id: string; status: string }> };
 
-  assert.match(page, /Lore Short Reference Archive/);
+  assert.match(page, /Lore Short archive/);
   assert.match(page, /Reference media/);
   assert.match(page, /open-weight LTX 2\.5 Novita runtime/);
   assert.match(page, /Historical samples remain retained for audit/);
-  assert.match(page, /Every narrated beat must earn its own drawn scene/);
+  assert.match(page, /Draw every narrated beat/);
   assert.match(page, /The route must draw beyond the opening/);
   assert.match(page, /opening references cannot be recycled across later narration/);
   assert.match(page, /function AdmissionNode/);

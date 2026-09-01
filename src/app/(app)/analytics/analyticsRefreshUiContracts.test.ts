@@ -9,8 +9,8 @@ const query = readFileSync(join(root, "convex/analytics.ts"), "utf8");
 // Analytics health must be driven by the owner-scoped connector/cursor
 // projection, not by browser guesses or the obsolete global API-key message.
 assert.match(page, /useQuery\(api\.analytics\.refreshStatus, \{ ownerId \}\)/);
-assert.match(page, /Source integrity/);
-assert.match(page, /Can these observations be trusted/);
+assert.match(page, /Data health/);
+assert.match(page, /Refresh status and access scope/);
 assert.match(page, /analyticsRefreshHealth\(row\)/);
 assert.match(page, /analyticsRefreshFleetHealth\(rows\)/);
 assert.match(page, /Fleet refresh ledger/);

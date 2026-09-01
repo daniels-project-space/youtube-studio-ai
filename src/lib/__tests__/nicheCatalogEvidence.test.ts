@@ -10,7 +10,7 @@ assert(NICHES.length > 0, "the catalog must retain its deterministic planning ch
 
 const creatorPath = join(process.cwd(), "src/app/(app)/channels/new/page.tsx");
 const creatorSource = readFileSync(creatorPath, "utf8");
-assert.match(creatorSource, /NICHE_CATALOG_EVIDENCE\.label/);
+assert.match(creatorSource, /planning seed/);
 assert.doesNotMatch(creatorSource, /\$\{n\.rpm\}\s*RPM/);
 assert.doesNotMatch(creatorSource, /s\.searchVolume/);
 assert.doesNotMatch(creatorSource, /s\.rpm/);

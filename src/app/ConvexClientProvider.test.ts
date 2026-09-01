@@ -33,7 +33,7 @@ assert.match(
 );
 assert.match(
   source,
-  /No render, schedule, or publishing action is started from this state\./,
+  /Rendering and publishing stay paused\./,
   "the connection fallback must state that it does not fabricate or start work",
 );
 assert.match(

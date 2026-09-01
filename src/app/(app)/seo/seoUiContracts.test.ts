@@ -10,9 +10,9 @@ assert.match(page, /function PackagingHero/,
   "the standalone SEO desk must own its packaging-lab composition");
 assert.match(page, /Territory map/);
 assert.match(page, /Selection does not mutate channel identity/);
-assert.match(page, /Pixel-level thumbnail claims stay unavailable until visual evidence actually exists/);
+assert.match(page, /Metadata is not pixel evidence/);
 assert.match(page, /function ResearchEvidenceLedger/);
-assert.match(page, /Stored visual guide reports text overlay/,
+assert.match(page, /Visual attributes stored/,
   "a measured state must explain the stored visual claim instead of contradicting itself");
 assert.match(page, /modeled views/,
   "tag overlap must be presented as a model rather than a promised audience outcome");

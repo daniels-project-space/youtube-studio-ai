@@ -14,7 +14,7 @@ async function main(): Promise<void> {
     assert.match(source, new RegExp(`room === "${room}"`), `missing isolated ${room} room`);
   }
   assert.match(source, /function LockedAssetRegistry/);
-  assert.match(source, /No private asset request was sent/);
+  assert.match(source, /Approvals, adapters, and private previews remain unloaded/);
   assert.match(source, /Registry locked/,
     "viewer mode must not imply that a private registry request is loading");
   assert.doesNotMatch(source, /<PageHeader/);

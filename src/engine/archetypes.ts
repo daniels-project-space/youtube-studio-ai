@@ -50,7 +50,7 @@ const LOFI: PipelineEntry[] = [
   { block: "qa_visual" },
   { block: "upload_draft" },
   { block: "notify" },
-  { block: "cleanup" }, // keep only the finished video + thumbnail; drop all intermediates
+  { block: "cleanup" }, // retain working artifacts through release + 14 days, then prune with verified evidence
 ];
 
 // Narrated base (Stage-3 blocks). Footage-driven; metadata + qa precede
@@ -94,7 +94,7 @@ const NARRATED: PipelineEntry[] = [
   { block: "qa_visual" },
   { block: "upload_draft" },
   { block: "notify" },
-  { block: "cleanup" }, // keep only the finished video + thumbnail; drop all intermediates
+  { block: "cleanup" }, // retain working artifacts through release + 14 days, then prune with verified evidence
 ];
 
 // Deterministic scene-compiler base. It intentionally keeps the established

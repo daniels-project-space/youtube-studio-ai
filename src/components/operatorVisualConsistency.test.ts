@@ -47,7 +47,7 @@ assert.match(runsModel, /export function diagnoseRunFailure/);
 assert.match(runs, /className=\{styles\.runFailure\}/);
 assert.match(runsCss, /\.runFailure b/);
 assert.match(runsModel, /matching\.slice\(0, safeLimit\)/);
-assert.match(runs, /Showing \{projection\.visible\.length\} of \{projection\.matching\.length\}/);
+assert.match(runs, /\{projection\.visible\.length\} of \{projection\.matching\.length\}/);
 assert.match(runs, /Load \{Math\.min\(INITIAL_VISIBLE_RUNS, projection\.remaining\)\}/);
 assert.match(runsCss, /grid-template-columns: repeat\(6,\s*minmax\(0,\s*1fr\)\)/);
 assert.match(runsCss, /@media \(max-width: 820px\)/);

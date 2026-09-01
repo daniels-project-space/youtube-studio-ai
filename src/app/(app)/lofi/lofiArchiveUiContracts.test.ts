@@ -16,7 +16,7 @@ async function main() {
   assert.match(page, /Reference media/);
   assert.match(page, /Read the scene without copying it\./);
   assert.match(page, /Reference-to-release path/);
-  assert.match(page, /Study the grammar\. Never inherit the identity\./);
+  assert.match(page, /Study composition\. Keep the identity original\./);
   assert.match(page, /Historical samples remain retained for audit/);
   assert.doesNotMatch(page, /Ghibli|Gemini|Kling|Topaz|★ GOLDEN/i);
   assert.doesNotMatch(page, /<video\b/);

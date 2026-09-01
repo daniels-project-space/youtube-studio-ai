@@ -17,8 +17,6 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { ConvexHttpClient } from "convex/browser";
-
 import { api } from "../convex/_generated/api";
 import type { Doc, Id } from "../convex/_generated/dataModel";
 import { generateFalNanoBananaAvatarImageWithReceipt } from "@/lib/falNanoBananaAvatar";
@@ -37,7 +35,6 @@ import { hydrateEnv } from "@/lib/vault";
 
 const OWNER_ID = "owner_daniel";
 const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL ?? "https://astute-camel-689.convex.cloud";
-const STUDIO_URL = "https://youtube-studio-ai.vercel.app";
 const VERSION = "nano-avatar-20260901-v1";
 const MAX_ATTEMPTS = 1;
 const MAX_TOTAL_USD = 0.36;
@@ -140,17 +137,11 @@ function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
-async function viewerClient(): Promise<ConvexHttpClient> {
-  const response = await fetch(`${STUDIO_URL}/api/auth/convex-token`);
-  if (!response.ok) throw new Error(`viewer token request failed (${response.status})`);
-  const payload = await response.json() as { token?: string };
-  if (!payload.token) throw new Error("viewer token response omitted token");
-  const client = new ConvexHttpClient(CONVEX_URL);
-  client.setAuth(payload.token);
-  return client;
+function studioClient(): StudioConvexHttpClient {
+  return new StudioConvexHttpClient(CONVEX_URL);
 }
 
-async function channels(client: ConvexHttpClient): Promise<Channel[]> {
+async function channels(client: StudioConvexHttpClient): Promise<Channel[]> {
   return await client.query(api.channels.listChannels, { ownerId: OWNER_ID }) as Channel[];
 }
 
@@ -180,7 +171,7 @@ async function generate(): Promise<void> {
     throw new Error(`generation requires --confirm-max-spend-usd=${MAX_TOTAL_USD.toFixed(2)}`);
   }
   await mkdir(OUTPUT_DIR, { recursive: true });
-  const selected = targetedChannels(await channels(await viewerClient()));
+  const selected = targetedChannels(await channels(studioClient()));
   const manifest: RefreshManifest = {
     contractVersion: "channel-avatar-refresh/v1",
     ownerId: OWNER_ID,
@@ -275,7 +266,7 @@ async function apply(): Promise<void> {
   }
 
   if (!process.env.R2_ACCESS_KEY_ID) await hydrateEnv("cloudflare");
-  const reader = await viewerClient();
+  const reader = studioClient();
   const before = await channels(reader);
   for (const row of manifest.rows) {
     if (
@@ -337,7 +328,7 @@ async function apply(): Promise<void> {
     console.log(`APPLIED ${row.name}: ${row.oldKey} -> ${row.newKey}`);
   }
 
-  const after = await channels(await viewerClient());
+  const after = await channels(studioClient());
   for (const row of manifest.rows) {
     const channel = after.find((candidate) => candidate._id === row.channelId);
     if (channel?.identity.imageKey !== row.newKey) {
@@ -351,7 +342,7 @@ async function apply(): Promise<void> {
 }
 
 async function dryRun(): Promise<void> {
-  const selected = targetedChannels(await channels(await viewerClient()));
+  const selected = targetedChannels(await channels(studioClient()));
   for (const { channel, identity } of selected) {
     console.log(`${channel.name}\n  ${channel.identity?.imageKey ?? "no current avatar"}\n  ${avatarPrompt(identity)}\n`);
   }

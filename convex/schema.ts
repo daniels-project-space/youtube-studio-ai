@@ -1153,6 +1153,48 @@ export default defineSchema({
     .index("by_channel_kind", ["channelId", "kind"])
     .index("by_run", ["runId"]),
 
+  // Release-aware deletion ledger for per-run media. A successful upload
+  // schedules this row; it never deletes bytes itself. The Trigger sweeper
+  // claims due rows with a fenced lease, reloads every content-addressed
+  // release certificate from R2, and only then removes intermediates. Private
+  // drafts deliberately have no retainUntil until a real release is known.
+  runArtifactRetentions: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    version: v.literal("run-artifact-retention/v1"),
+    keyPrefix: v.string(),
+    certificateKey: v.string(),
+    additionalCertificateKeys: v.array(v.string()),
+    keepNames: v.array(v.string()),
+    releaseMode: v.union(
+      v.literal("private_draft"),
+      v.literal("scheduled"),
+      v.literal("public"),
+    ),
+    releaseAt: v.optional(v.number()),
+    retainUntil: v.optional(v.number()),
+    status: v.union(
+      v.literal("awaiting_release"),
+      v.literal("pending"),
+      v.literal("processing"),
+      v.literal("completed"),
+      v.literal("blocked"),
+    ),
+    attempts: v.number(),
+    leaseToken: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    scheduledAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+    removedObjects: v.optional(v.number()),
+    retainedObjectCount: v.optional(v.number()),
+    retainedReleaseEvidence: v.optional(v.array(v.string())),
+    lastError: v.optional(v.string()),
+  })
+    .index("by_run", ["runId"])
+    .index("by_owner_status_retain_until", ["ownerId", "status", "retainUntil"]),
+
   // Immutable, owner-operated reusable recipe/adapter catalog. Media bytes
   // remain in R2; a Studio entry carries only a content-addressed resource
   // reference and evidence-bound compatibility metadata. Lifecycle changes

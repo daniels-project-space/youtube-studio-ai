@@ -18,8 +18,8 @@ assert.match(videoTypes, /releaseEvidenceStatus:\s*ReleaseEvidenceStatus/);
 assert.match(card, /ReleaseEvidenceBadge/);
 assert.match(card, /Master evidence/);
 assert.match(card, /status=\{video\.releaseEvidenceStatus\}/);
-assert.match(library, /Pipeline completion and retained master evidence are shown separately/);
-assert.match(library, /Historical outputs remain visible/);
-assert.match(library, /labelled unverified/);
+assert.match(library, /Verified marks a saved final master/);
+assert.match(library, /Hidden videos you can restore/);
+assert.match(library, /role="tab" aria-selected=\{collection === "archived"\}/);
 
 console.log("Library release-evidence truthfulness contract passed");

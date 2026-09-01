@@ -84,6 +84,7 @@ import {
   visualReviewReleaseReceiptKey,
   type FinalMasterReleaseCertificate,
 } from "@/lib/finalMasterReleaseCertificate";
+import { scheduleRunArtifactRetention } from "@/lib/runArtifactRetention";
 import {
   assertFinalMasterNarrationTranscriptAuditBinding,
   FINAL_MASTER_NARRATION_TRANSCRIPT_AUDIT_VERSION,
@@ -180,7 +181,7 @@ import {
   readBytes,
   writeBytes,
 } from "@/lib/files";
-import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity, headObjectMetadata, listObjects, deleteObjects, publicUrl } from "@/lib/storage";
+import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity, headObjectMetadata, publicUrl } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 import { join } from "node:path";
@@ -2900,75 +2901,6 @@ async function verifyShortReleaseEvidenceForUpload(args: {
  * Any absent, overwritten, or mismatched review-evidence object preserves the
  * entire run namespace instead of deleting the last recoverable proof.
  */
-export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
-  keyPrefix: string;
-  runId: string;
-  certificateKey: string;
-  certificate: FinalMasterReleaseCertificate;
-  /** Additional independently certified derivative masters (for example a Short). */
-  additionalCertificates?: readonly {
-    certificateKey: string;
-    certificate: FinalMasterReleaseCertificate;
-  }[];
-  keepNames: readonly string[];
-  getObjectBytes: (key: string) => Promise<Uint8Array>;
-  getObjectIntegrity: (key: string) => Promise<{ sha256: string; byteLength: number }>;
-  listObjects: (prefix: string) => Promise<string[]>;
-  deleteObjects: (keys: string[]) => Promise<number>;
-}): Promise<{
-  cleaned: boolean;
-  removedObjects: number;
-  retainedReleaseEvidence: string[];
-  retainedObjectCount: number;
-  error?: string;
-}> {
-  try {
-    const certificates = [
-      { certificateKey: args.certificateKey, certificate: args.certificate },
-      ...(args.additionalCertificates ?? []),
-    ];
-    const retainedSets = await Promise.all(
-      certificates.map(async ({ certificateKey, certificate }) => {
-        const retained = retainedFinalMasterReleaseObjectKeys({
-          keyPrefix: args.keyPrefix,
-          runId: args.runId,
-          certificateKey,
-          certificate,
-        });
-        await verifyFinalMasterReleaseEvidenceObjects({
-          certificate,
-          getObjectBytes: args.getObjectBytes,
-          getObjectIntegrity: args.getObjectIntegrity,
-        });
-        return retained;
-      }),
-    );
-    const retainedReleaseEvidence = [...new Set(retainedSets.flat())].sort();
-    const prefix = `${args.keyPrefix}runs/${args.runId}/`;
-    const keep = new Set([
-      ...args.keepNames.map((name) => `${prefix}${name.replace(/^\/+/, "")}`),
-      ...retainedReleaseEvidence,
-    ]);
-    const all = await args.listObjects(prefix);
-    const deletable = all.filter((key) => !keep.has(key));
-    const deleted = await args.deleteObjects(deletable);
-    return {
-      cleaned: true,
-      removedObjects: deleted,
-      retainedReleaseEvidence,
-      retainedObjectCount: all.length - deletable.length,
-    };
-  } catch (error) {
-    return {
-      cleaned: false,
-      removedObjects: 0,
-      retainedReleaseEvidence: [],
-      retainedObjectCount: 0,
-      error: error instanceof Error ? error.message : String(error),
-    };
-  }
-}
-
 export const uploadDraft: Block = {
   id: "upload_draft",
   consumes: [
@@ -2976,7 +2908,7 @@ export const uploadDraft: Block = {
     "qualityEvidence", "thumbnailKey", "thumbnailPublishable",
     "finalMasterReleaseCertificateKey",
   ],
-  produces: ["youtubeVideoId", "watchUrl", "youtubePrivacy"],
+  produces: ["youtubeVideoId", "watchUrl", "youtubePrivacy", "artifactRetentionRelease"],
   run: async (ctx) => {
     // Keep historical seeds inspectable, but never let a route-bearing legacy
     // fictional run cross a new publication boundary as generic nonfiction.
@@ -3311,6 +3243,16 @@ export const uploadDraft: Block = {
       youtubeVideoId: dispatched.videoId,
       watchUrl: dispatched.watchUrl,
       youtubePrivacy: dispatched.privacyStatus,
+      artifactRetentionRelease: {
+        releaseMode:
+          publishMode === "scheduled"
+            ? "scheduled"
+            : publishMode === "public"
+              ? "public"
+              : "private_draft",
+        uploadedAt: Date.now(),
+        ...(publishAtMs === undefined ? {} : { scheduledPublishAt: publishAtMs }),
+      },
     };
   },
 };
@@ -3335,84 +3277,82 @@ export const notify: Block = {
 /* ------------------------------ 12. cleanup ----------------------------- */
 
 /**
- * Storage minimiser — runs LAST (after a successful upload) and deletes every
- * intermediate artifact for the run, keeping the finished video + thumbnail
- * and the content-addressed final-master release evidence. Removes the matching
- * R2 objects (narration, music, pre-overlay video, captions, stock segments,
- * keyframes, loop unit, …) AND the intermediate asset rows, so the library
- * keeps the final video and auditable proof of its QA. Generic (uses
- * ctx.keyPrefix + runId) → reusable by EVERY channel/archetype. Non-fatal: a
- * cleanup failure never fails an already-uploaded run.
+ * Release-aware storage lifecycle — runs LAST after a successful upload but
+ * never destroys media in the pipeline worker. It seals an immutable cleanup
+ * schedule instead: private drafts wait for a real release, scheduled uploads
+ * retain through publish time + 14 days, and public uploads retain for 14 days.
+ * A separate leased sweeper re-reads every release certificate and retained
+ * evidence object immediately before it removes intermediates.
  */
 export const cleanup: Block = {
   id: "cleanup",
   consumes: [
     "watchUrl",
     "finalMasterReleaseCertificateKey",
+    "artifactRetentionRelease",
   ], // gated on a successful upload — never runs on a failed render
-  produces: ["cleaned", "removedObjects"],
+  produces: ["cleaned", "removedObjects", "artifactRetention"],
   run: async (ctx) => {
     const keepNames = (ctx.params["keep"] as string[] | undefined) ?? ["final.mp4", "thumbnail.jpg"];
-    let pruning: Awaited<ReturnType<typeof pruneRunObjectsWithVerifiedFinalMasterEvidence>>;
-    try {
-      const { certificateKey, durableCertificate } = await loadDurableFinalMasterReleaseCertificate(ctx);
-      const shortRelease = await loadDurableShortReleaseCertificate(ctx);
-      if (shortRelease) {
-        await verifyFinalMasterNarrationAuditIfPresent(
-          shortRelease.durableCertificate,
-          "cleanup",
-        );
-      }
-      pruning = await pruneRunObjectsWithVerifiedFinalMasterEvidence({
-        keyPrefix: ctx.keyPrefix,
-        runId: ctx.runId,
-        certificateKey,
-        certificate: durableCertificate,
-        ...(shortRelease
-          ? {
-              additionalCertificates: [
-                {
-                  certificateKey: shortRelease.certificateKey,
-                  certificate: shortRelease.durableCertificate,
-                },
-              ],
-            }
-          : {}),
-        keepNames,
-        getObjectBytes,
-        getObjectIntegrity,
-        listObjects,
-        deleteObjects,
-      });
-    } catch (error) {
-      ctx.log(
-        `cleanup: release evidence revalidation failed; preserving all run objects: ${error instanceof Error ? error.message : error}`,
+    const { certificateKey } = await loadDurableFinalMasterReleaseCertificate(ctx);
+    const shortRelease = await loadDurableShortReleaseCertificate(ctx);
+    if (shortRelease) {
+      await verifyFinalMasterNarrationAuditIfPresent(
+        shortRelease.durableCertificate,
+        "cleanup retention scheduling",
       );
-      return { cleaned: false, removedObjects: 0 };
     }
-    if (!pruning.cleaned) {
-      // The proof bytes are re-read immediately before destructive cleanup.
-      // Preserve the entire namespace and its asset rows on any validation or
-      // storage gap; a successful earlier upload is not proof that the retained
-      // evidence is still available now.
-      ctx.log(`cleanup: release evidence revalidation failed; preserving all run objects: ${pruning.error ?? "unknown error"}`);
-      return { cleaned: false, removedObjects: 0 };
+    const release = ctx.store["artifactRetentionRelease"] as {
+      releaseMode?: unknown;
+      uploadedAt?: unknown;
+      scheduledPublishAt?: unknown;
+    } | undefined;
+    const releaseMode = release?.releaseMode;
+    if (
+      releaseMode !== "private_draft" &&
+      releaseMode !== "scheduled" &&
+      releaseMode !== "public"
+    ) {
+      throw new Error("cleanup: upload did not provide a valid artifact retention release mode");
     }
-    const removed = pruning.removedObjects;
+    const uploadedAt = Number(release?.uploadedAt);
+    const scheduledPublishAt = release?.scheduledPublishAt === undefined
+      ? undefined
+      : Number(release.scheduledPublishAt);
+    const retention = scheduleRunArtifactRetention({
+      releaseMode,
+      uploadedAt,
+      ...(scheduledPublishAt === undefined ? {} : { scheduledPublishAt }),
+    });
+    const durable = await convex().mutation(api.runArtifactRetentions.schedule, {
+      ownerId: ctx.ownerId,
+      channelId: ctx.channelId as Id<"channels">,
+      runId: ctx.runId as Id<"runs">,
+      keyPrefix: ctx.keyPrefix,
+      certificateKey,
+      additionalCertificateKeys: shortRelease ? [shortRelease.certificateKey] : [],
+      keepNames,
+      releaseMode,
+      uploadedAt,
+      scheduledPublishAt,
+    });
+    if (!durable) throw new Error("cleanup: artifact retention schedule was not persisted");
     ctx.log(
-      `cleanup: removed ${removed} intermediate object(s); kept ${pruning.retainedObjectCount} ` +
-        `(${keepNames.join(", ")}; ${pruning.retainedReleaseEvidence.length} final-master evidence object(s))`,
+      retention.status === "awaiting_release"
+        ? "cleanup: retained all run artifacts until this private draft has a real release time"
+        : `cleanup: retained all run artifacts until ${new Date(retention.retainUntil as number).toISOString()} (release + 14 days)`,
     );
-    try {
-      const n = await convex().mutation(api.assets.pruneRun, {
-        runId: ctx.runId as Id<"runs">,
-        keepKinds: ["video", "thumbnail", "derived_short"],
-      });
-      ctx.log(`cleanup: pruned ${n} intermediate asset row(s)`);
-    } catch (e) {
-      ctx.log(`cleanup: asset prune failed (non-fatal): ${e instanceof Error ? e.message : e}`);
-    }
-    return { cleaned: true, removedObjects: removed };
+    return {
+      cleaned: false,
+      removedObjects: 0,
+      artifactRetention: {
+        version: retention.version,
+        status: retention.status,
+        releaseMode: retention.releaseMode,
+        releaseAt: retention.releaseAt,
+        retainUntil: retention.retainUntil,
+      },
+    };
   },
 };
 

@@ -16,14 +16,14 @@ const studioAssets = readFileSync(join(root, "src/app/(app)/studio-assets/page.t
 // not its colors or layout implementation.
 assert.match(casefile, /casefileEvidenceLocks\(selected\)/);
 assert.match(casefile, /Recorded bindings for this case/);
-assert.match(casefile, /A missing record is shown as missing/);
+assert.match(casefile, /styles\.lockMissing/);
 
 assert.match(editorialEvidence, /editorialEvidenceSummary\(selected\?\.packet\)/);
 assert.match(editorialEvidence, /Selected immutable receipt/);
 assert.match(editorialEvidence, /source snapshots/);
 
 assert.match(seo, /function ResearchEvidenceLedger/);
-assert.match(seo, /Only persisted research is represented here/);
+assert.match(seo, /Saved metadata only/);
 assert.match(seo, /Metadata only/);
 
 for (const desk of [casefile, editorialEvidence, studioAssets]) {
