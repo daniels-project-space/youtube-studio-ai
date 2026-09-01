@@ -154,9 +154,9 @@
 
 .lockedCopy { display: grid; gap: 8px; }
 .lockedCopy h2 { margin: 0; color: var(--asset-ink); font-family: var(--font-display, Georgia, serif); font-size: clamp(1.7rem, 3vw, 2.45rem); font-weight: 540; letter-spacing: -0.045em; }
-.lockedCopy > p:last-child { margin: 0; color: #a39aaf; font-size: 0.76rem; line-height: 1.55; }
+.lockedCopy > p:last-of-type { margin: 0; color: #a39aaf; font-size: 0.76rem; line-height: 1.55; }
 .lockedRules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid #3a3046; border-radius: 13px; }
-.lockedRules > div { display: grid; gap: 6px; min-height: 140px; padding: 15px; }
+.lockedRules > div { display: grid; align-content: center; gap: 6px; min-height: 64px; padding: 15px; }
 .lockedRules > div + div { border-left: 1px solid #3a3046; }
 .lockedRules span { color: var(--asset-violet); font: 0.56rem/1 var(--font-mono, ui-monospace, monospace); }
 .lockedRules strong { color: #ddd6e6; font-size: 0.71rem; }

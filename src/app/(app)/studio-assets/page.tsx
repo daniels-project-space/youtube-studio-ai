@@ -283,14 +283,15 @@ function LockedAssetRegistry({ access }: { access: Exclude<ReturnType<typeof use
     <section className={styles.lockedRegistry} aria-live={access === "checking" ? "polite" : undefined}>
       <div className={styles.registrySeal} aria-hidden="true"><span>ASSET</span><i /><b /></div>
       <div className={styles.lockedCopy}>
-        <p className={styles.eyebrow}>{access === "checking" ? "Resolving signed session" : "Reuse registry protected"}</p>
-        <h2>{access === "checking" ? "Checking registry authority…" : "The asset registry is closed."}</h2>
-        <p>{access === "checking" ? "The studio is checking this browser before reading any owner-scoped asset evidence." : "Open owner operations from the top bar to inspect approvals, adapters, and short-lived previews. No private asset request was sent."}</p>
+        <p className={styles.eyebrow}>{access === "checking" ? "Checking access" : "Private workspace"}</p>
+        <h2>{access === "checking" ? "Checking owner…" : "Owner verification required"}</h2>
+        <p>{access === "checking" ? "Reading this browser session." : "Approvals, adapters, and private previews remain unloaded."}</p>
+        {access !== "checking" ? <a href="/api/operations/authorize" className="studio-button">Verify with YouTube</a> : null}
       </div>
       <div className={styles.lockedRules}>
-        <div><span>01</span><strong>Identity does not travel</strong><p>Channel and series material stays inside its sealed compatibility boundary.</p></div>
-        <div><span>02</span><strong>Catalog is not runtime</strong><p>A model card never becomes installed weights or render permission.</p></div>
-        <div><span>03</span><strong>Preview is deliberate</strong><p>Approved images receive a short-lived URL only after an owner click.</p></div>
+        <div><span>01</span><strong>Channel-bound identity</strong></div>
+        <div><span>02</span><strong>Verified runtime</strong></div>
+        <div><span>03</span><strong>Short-lived previews</strong></div>
       </div>
     </section>
   );

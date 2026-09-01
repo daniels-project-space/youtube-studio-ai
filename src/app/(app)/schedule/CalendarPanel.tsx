@@ -173,7 +173,7 @@ function CalendarChip({ event }: { event: CalendarEvent }) {
       }}
       title={`${event.title} — ${event.channel} — ${eventStatusLabel(event)} — ${event.pinned ? "pinned" : "projected"}`}
     >
-      {event.slug ? <Link href={channelHref(event.slug, "week-ahead")}>{content}</Link> : content}
+      {event.slug ? <Link href={channelHref(event.slug, "week-ahead", event.id)}>{content}</Link> : content}
     </div>
   );
 }

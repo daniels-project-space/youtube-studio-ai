@@ -20,6 +20,8 @@ assert.match(page, /Month map/);
 assert.match(page, /Cadence controls/);
 assert.match(board, /aspectRatio="16 \/ 9"/,
   "the operational week board must show packaging artwork at a legible video ratio");
+assert.match(board, /event\.type === "planned" \? event\.id : undefined/,
+  "planned calendar cards must carry the exact plan item into the channel workspace");
 assert.match(styles, /prefers-reduced-motion: reduce/,
   "schedule motion must expose a reduced-motion path");
 assert.doesNotMatch(page, /<PageHeader/,

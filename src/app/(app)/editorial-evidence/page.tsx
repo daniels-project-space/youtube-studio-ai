@@ -122,14 +122,15 @@ function LockedEvidenceVault({ access }: { access: Exclude<ReturnType<typeof use
     <section className={styles.lockedVault} aria-live={access === "checking" ? "polite" : undefined}>
       <div className={styles.vaultMark} aria-hidden="true"><span>SHA</span><i /><b /></div>
       <div className={styles.vaultCopy}>
-        <p className={styles.eyebrow}>{access === "checking" ? "Resolving signed session" : "Evidence archive protected"}</p>
-        <h2>{access === "checking" ? "Checking vault authority…" : "The proof vault is closed."}</h2>
-        <p>{access === "checking" ? "The studio is checking this browser before requesting any private receipts." : "Open owner operations from the top bar to inspect source snapshots and review fingerprints. No private evidence request was sent."}</p>
+        <p className={styles.eyebrow}>{access === "checking" ? "Checking access" : "Private workspace"}</p>
+        <h2>{access === "checking" ? "Checking owner…" : "Owner verification required"}</h2>
+        <p>{access === "checking" ? "Reading this browser session." : "Source snapshots and review fingerprints remain unloaded."}</p>
+        {access !== "checking" ? <a href="/api/operations/authorize" className="studio-button">Verify with YouTube</a> : null}
       </div>
       <div className={styles.vaultRules}>
-        <div><span>01</span><strong>No synthetic proof</strong><p>Search results and model summaries never count as source snapshots.</p></div>
-        <div><span>02</span><strong>No silent approval</strong><p>Every persisted packet names the human review and timestamp.</p></div>
-        <div><span>03</span><strong>No release authority</strong><p>Receipts cannot render, spend, schedule, or publish by themselves.</p></div>
+        <div><span>01</span><strong>Source snapshots</strong></div>
+        <div><span>02</span><strong>Named reviewers</strong></div>
+        <div><span>03</span><strong>No release access</strong></div>
       </div>
     </section>
   );

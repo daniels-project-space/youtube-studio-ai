@@ -87,7 +87,11 @@ function DayEventCard({ event }: { event: CalendarEvent }) {
   return (
     <Link
       className={styles.dayEvent}
-      href={channelHref(event.slug, event.type === "planned" ? "week-ahead" : undefined)}
+      href={channelHref(
+        event.slug,
+        event.type === "planned" ? "week-ahead" : undefined,
+        event.type === "planned" ? event.id : undefined,
+      )}
       style={{ borderLeftColor: event.color }}
     >
       <MediaPreview

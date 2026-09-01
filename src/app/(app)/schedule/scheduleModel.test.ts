@@ -158,6 +158,10 @@ assert.deepEqual(
   "selected-channel mode excludes every other channel",
 );
 assert.equal(channelHref("tokyo/essays", "week-ahead"), "/channels/tokyo%2Fessays?tab=week-ahead");
+assert.equal(
+  channelHref("tokyo/essays", "week-ahead", "plan:item/1"),
+  "/channels/tokyo%2Fessays?tab=week-ahead&plan=plan%3Aitem%2F1#plan-plan%3Aitem%2F1",
+);
 
 const operationalChannels: ChannelRow[] = [
   {

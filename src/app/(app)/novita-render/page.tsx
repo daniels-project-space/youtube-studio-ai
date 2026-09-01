@@ -910,14 +910,15 @@ function LockedRenderConsole({ access }: { access: Exclude<ReturnType<typeof use
     <section className={styles.lockedConsole} aria-busy={access === "checking" || undefined}>
       <div className={styles.lockedMark} aria-hidden="true"><span>GPU</span><i /><b /></div>
       <div className={styles.lockedCopy}>
-        <p className={styles.eyebrow}>{access === "checking" ? "Resolving signed session" : "Paid compute boundary"}</p>
-        <h2>{access === "checking" ? "Checking render authority…" : "The dispatch console is sealed."}</h2>
-        <p>{access === "checking" ? "The studio is checking the current browser session before requesting fleet capacity or saved job state." : "Open owner operations from the top bar to inspect live capacity or compose a contract. No private fleet, job, prompt, or provider request was sent."}</p>
+        <p className={styles.eyebrow}>{access === "checking" ? "Checking access" : "Paid compute"}</p>
+        <h2>{access === "checking" ? "Checking owner…" : "Owner verification required"}</h2>
+        <p>{access === "checking" ? "Reading this browser session." : "Fleet capacity, jobs, and prompts remain unloaded."}</p>
+        {access !== "checking" ? <a href="/api/operations/authorize" className="studio-button">Verify with YouTube</a> : null}
       </div>
       <div className={styles.lockedRules}>
-        <div><span>01</span><strong>Capacity stays private</strong><p>Provider quota and active GPU state do not load for viewers.</p></div>
-        <div><span>02</span><strong>Prompts stay private</strong><p>Shot contracts and recoverable job handles remain owner-scoped.</p></div>
-        <div><span>03</span><strong>Spend stays explicit</strong><p>Owner access alone never launches work; each paid phase still requires confirmation.</p></div>
+        <div><span>01</span><strong>Private capacity</strong></div>
+        <div><span>02</span><strong>Private prompts</strong></div>
+        <div><span>03</span><strong>Explicit spend</strong></div>
       </div>
     </section>
   );

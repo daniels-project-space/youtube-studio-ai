@@ -182,18 +182,19 @@ function LockedCasefileRoom({ access }: { access: Exclude<ReturnType<typeof useO
     <section className={styles.lockedRoom} aria-live={access === "checking" ? "polite" : undefined}>
       <div className={styles.lockedSeal} aria-hidden="true"><span>PRIVATE</span><i /></div>
       <div className={styles.lockedCopy}>
-        <p className={styles.eyebrow}>{access === "checking" ? "Resolving signed session" : "Chain of custody protected"}</p>
-        <h2>{access === "checking" ? "Checking case-room authority…" : "The case room is sealed."}</h2>
+        <p className={styles.eyebrow}>{access === "checking" ? "Checking access" : "Private workspace"}</p>
+        <h2>{access === "checking" ? "Checking owner…" : "Owner verification required"}</h2>
         <p>
           {access === "checking"
-            ? "The studio is checking the current browser session before requesting any private episode records."
-            : "Open owner operations from the top bar to inspect immutable evidence packets. No private casefile request was sent."}
+            ? "Reading this browser session."
+            : "Case records remain unloaded until the recorded YouTube owner is verified."}
         </p>
+        {access !== "checking" ? <a href="/api/operations/authorize" className="studio-button">Verify with YouTube</a> : null}
       </div>
       <div className={styles.lockedProtocol}>
-        <div><span>01</span><strong>Sources stay private</strong><p>Case packets and rights locators are not loaded in viewer mode.</p></div>
-        <div><span>02</span><strong>Reviews stay human</strong><p>No evidence or cinematic approval is inferred from access state.</p></div>
-        <div><span>03</span><strong>Rendering stays elsewhere</strong><p>This room cannot spend, dispatch a GPU, or publish.</p></div>
+        <div><span>01</span><strong>Sources private</strong></div>
+        <div><span>02</span><strong>Human review</strong></div>
+        <div><span>03</span><strong>No render access</strong></div>
       </div>
     </section>
   );

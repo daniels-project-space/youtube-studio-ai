@@ -262,10 +262,10 @@
 
 .vaultCopy { display: grid; gap: 8px; }
 .vaultCopy h2 { margin: 0; color: var(--proof-ink); font-family: var(--font-display, Georgia, serif); font-size: clamp(1.7rem, 3vw, 2.45rem); font-weight: 540; letter-spacing: -0.045em; }
-.vaultCopy > p:last-child { margin: 0; color: #90a4a1; font-size: 0.76rem; line-height: 1.55; }
+.vaultCopy > p:last-of-type { margin: 0; color: #90a4a1; font-size: 0.76rem; line-height: 1.55; }
 
 .vaultRules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid #283b39; border-radius: 13px; }
-.vaultRules > div { display: grid; gap: 6px; min-height: 138px; padding: 15px; }
+.vaultRules > div { display: grid; align-content: center; gap: 6px; min-height: 64px; padding: 15px; }
 .vaultRules > div + div { border-left: 1px solid #283b39; }
 .vaultRules span { color: var(--proof-cyan); font: 0.57rem/1 var(--font-mono, ui-monospace, monospace); }
 .vaultRules strong { color: #d2e1df; font-size: 0.72rem; }

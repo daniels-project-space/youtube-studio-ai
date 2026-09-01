@@ -87,7 +87,7 @@ function UpcomingCard({
         <h3>{event.title}</h3>
         <div className={styles.itemLinks}>
           <span style={{ color: event.color }}>{event.channel}</span>
-          <Link href={channelHref(event.slug, "week-ahead")}>Open item ↗</Link>
+          <Link href={channelHref(event.slug, "week-ahead", event.id)}>Open item ↗</Link>
           <Link href={channelHref(event.slug, "settings")}>Channel settings</Link>
         </div>
       </div>

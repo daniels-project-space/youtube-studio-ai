@@ -120,10 +120,19 @@ const STATUS_LABEL: Record<PlanReadiness | "published", string> = {
   published: "Published",
 };
 
-export function channelHref(slug?: string, tab?: "week-ahead" | "settings") {
+export function channelHref(
+  slug?: string,
+  tab?: "week-ahead" | "settings",
+  planId?: string,
+) {
   if (!slug) return "/channels";
   const base = `/channels/${encodeURIComponent(slug)}`;
-  return tab ? `${base}?tab=${tab}` : base;
+  const query = new URLSearchParams();
+  if (tab) query.set("tab", tab);
+  if (planId) query.set("plan", planId);
+  const search = query.size ? `?${query.toString()}` : "";
+  const hash = planId ? `#plan-${encodeURIComponent(planId)}` : "";
+  return `${base}${search}${hash}`;
 }
 
 export function frequencyLabel(frequency: string) {

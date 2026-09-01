@@ -592,14 +592,15 @@ function LockedGovernanceRoom({
   return (
     <section className={styles.lockedRoom} aria-busy={access === "checking" || undefined}>
       <header>
-        <div><span>Signed control boundary</span><h2>{access === "checking" ? "Checking owner authority" : "Owner changes remain closed"}</h2></div>
-        <p>{access === "checking" ? "The studio is resolving the current signed session." : "Use the top-bar control to open mutations. Inspection mode has not requested approval history, account secrets, or learning proposals."}</p>
+        <div><span>Private controls</span><h2>{access === "checking" ? "Checking owner…" : "Owner verification required"}</h2></div>
+        <p>{access === "checking" ? "Reading this browser session." : "Publishing, account, and policy mutations remain disabled."}</p>
       </header>
       <div className={styles.lockedGrid}>
-        <div><span>01</span><strong>Policy remains visible</strong><p>Automation status, cadence, connector health, release mode, and budget stay inspectable.</p></div>
-        <div><span>02</span><strong>Private ledgers stay private</strong><p>Publishing approvals and learning reconciliation are not fetched in this state.</p></div>
-        <div><span>03</span><strong>Confirm important changes</strong><p>Owner approval is required.</p></div>
+        <div><span>01</span><strong>Policy visible</strong></div>
+        <div><span>02</span><strong>Ledgers private</strong></div>
+        <div><span>03</span><strong>Changes confirmed</strong></div>
       </div>
+      {access !== "checking" ? <a href="/api/operations/authorize" className="studio-button">Verify with YouTube</a> : null}
       {channel && <a href={`/channels/${channel.slug}`}>Open {channel.name} operating room ↗</a>}
     </section>
   );

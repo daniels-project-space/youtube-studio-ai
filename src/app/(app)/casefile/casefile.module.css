@@ -383,7 +383,7 @@
   letter-spacing: -0.045em;
 }
 
-.lockedCopy > p:last-child {
+.lockedCopy > p:last-of-type {
   margin: 0;
   color: #9e978d;
   font-size: 0.78rem;
@@ -399,8 +399,9 @@
 
 .lockedProtocol > div {
   display: grid;
+  align-content: center;
   gap: 6px;
-  min-height: 140px;
+  min-height: 64px;
   padding: 16px;
 }
 

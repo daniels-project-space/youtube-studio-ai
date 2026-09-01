@@ -273,9 +273,9 @@
 .lockedMark b { width: 158px; height: 1px; }
 .lockedCopy { display: grid; gap: 8px; }
 .lockedCopy h2 { margin: 0; color: var(--fleet-ink); font-family: var(--font-display, Georgia, serif); font-size: clamp(1.7rem, 3vw, 2.45rem); font-weight: 540; letter-spacing: -0.045em; }
-.lockedCopy > p:last-child { margin: 0; color: #92a2b5; font-size: 0.74rem; line-height: 1.58; }
+.lockedCopy > p:last-of-type { margin: 0; color: #92a2b5; font-size: 0.74rem; line-height: 1.58; }
 .lockedRules { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid #2b3d50; border-radius: 13px; }
-.lockedRules > div { display: grid; gap: 6px; min-height: 140px; padding: 15px; }
+.lockedRules > div { display: grid; align-content: center; gap: 6px; min-height: 64px; padding: 15px; }
 .lockedRules > div + div { border-left: 1px solid #2b3d50; }
 .lockedRules span { color: var(--fleet-blue); font: 0.55rem/1 var(--font-mono, ui-monospace, monospace); }
 .lockedRules strong { color: #d3dde7; font-size: 0.68rem; }

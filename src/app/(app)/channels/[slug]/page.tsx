@@ -1,6 +1,6 @@
 "use client";
 
-import { use, useState, useRef, type CSSProperties, type ReactNode } from "react";
+import { use, useEffect, useState, useRef, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -222,6 +222,7 @@ export default function ChannelHubPage({
   const searchParams = useSearchParams();
   const [viewStartedAt] = useState(() => Date.now());
   const tab = validatedTab(searchParams.get("tab"));
+  const selectedPlanId = searchParams.get("plan");
   const activeTabGroup = TAB_GROUPS.find((group) => group.tabs.some((item) => item === tab)) ?? TAB_GROUPS[0];
   const ytStatus = searchParams.get("yt");
   const ytGot = searchParams.get("got");
@@ -229,6 +230,7 @@ export default function ChannelHubPage({
   const selectTab = (next: Tab) => {
     const query = new URLSearchParams(searchParams.toString());
     query.set("tab", QUERY_BY_TAB[next]);
+    query.delete("plan");
     router.replace(`/channels/${encodeURIComponent(slug)}?${query.toString()}`, { scroll: false });
   };
 
@@ -509,7 +511,7 @@ export default function ChannelHubPage({
         />
       )}
       {tab === "Week ahead" && channelId && (
-        <WeekAheadTab ownerId={ownerId} channelId={channelId} />
+        <WeekAheadTab ownerId={ownerId} channelId={channelId} selectedPlanId={selectedPlanId} />
       )}
       {tab === "Library" && (
         <LibraryTab ownerId={ownerId} channelId={channelId} />
@@ -2400,9 +2402,20 @@ type PlanRow = {
   thumbnailKey?: string;
   status: string;
   scheduledAt?: number;
+  scheduledRunId?: Id<"runs">;
+  scheduledFailure?: string;
+  generationError?: string;
 };
 
-function WeekAheadTab({ ownerId, channelId }: { ownerId: string; channelId: Id<"channels"> }) {
+function WeekAheadTab({
+  ownerId,
+  channelId,
+  selectedPlanId,
+}: {
+  ownerId: string;
+  channelId: Id<"channels">;
+  selectedPlanId: string | null;
+}) {
   const plan = useQuery(api.contentPlan.listPlan, { ownerId, channelId }) as PlanRow[] | undefined;
   const del = useMutation(api.contentPlan.deleteItem);
   const reorder = useMutation(api.contentPlan.reorder);
@@ -2410,6 +2423,18 @@ function WeekAheadTab({ ownerId, channelId }: { ownerId: string; channelId: Id<"
   const [removeBusyId, setRemoveBusyId] = useState<string | null>(null);
   const [msg, setMsg] = useState<string | null>(null);
   const dragId = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!plan || !selectedPlanId) return;
+    const target = document.getElementById(`plan-${selectedPlanId}`);
+    if (!target) return;
+    const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const frame = window.requestAnimationFrame(() => {
+      target.scrollIntoView({ behavior: reducedMotion ? "auto" : "smooth", block: "center" });
+      target.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [plan, selectedPlanId]);
 
   const generate = async () => {
     setBusy(true);
@@ -2499,6 +2524,9 @@ function WeekAheadTab({ ownerId, channelId }: { ownerId: string; channelId: Id<"
           {plan.map((p, index) => (
             <article
               key={p._id}
+              id={`plan-${p._id}`}
+              tabIndex={-1}
+              data-selected={selectedPlanId === String(p._id) || undefined}
               draggable
               onDragStart={() => { dragId.current = p._id; }}
               onDragOver={(e) => e.preventDefault()}
@@ -2511,11 +2539,6 @@ function WeekAheadTab({ ownerId, channelId }: { ownerId: string; channelId: Id<"
                 <strong>{p.title || p.topic}</strong>
                 {p.title && p.title !== p.topic && (
                   <span>{p.topic}</span>
-                )}
-                {p.description && (
-                  <p>
-                    {p.description}
-                  </p>
                 )}
               </div>
               <div className={styles.weekState} data-ready={p.status === "ready"}>
@@ -2532,6 +2555,31 @@ function WeekAheadTab({ ownerId, channelId }: { ownerId: string; channelId: Id<"
               >
                 {removeBusyId === p._id ? "…" : "×"}
               </button>
+              <details className={styles.weekDetails} open={selectedPlanId === String(p._id) || undefined}>
+                <summary>
+                  <span>Item details</span>
+                  <small>{p.scheduledRunId ? "Production attached" : "Plan brief"}</small>
+                </summary>
+                <div className={styles.weekDetailBody}>
+                  <div className={styles.weekDetailGrid}>
+                    <div><small>Brief</small><strong>{p.description || p.topic}</strong></div>
+                    <div><small>Cover</small><strong>{p.thumbnailKey ? "Ready" : "Pending"}</strong></div>
+                    <div><small>Production</small><strong>{p.scheduledRunId ? "Recorded" : p.status === "ready" ? "Queued" : "Not started"}</strong></div>
+                  </div>
+                  <div className={styles.weekDetailActions}>
+                    {p.scheduledRunId ? (
+                      <Link href={`/runs/${encodeURIComponent(p.scheduledRunId)}`}>
+                        Open script, visuals, narration and master
+                      </Link>
+                    ) : (
+                      <span>Production files appear here after the run starts.</span>
+                    )}
+                    {(p.scheduledFailure || p.generationError) && (
+                      <p role="alert">{p.scheduledFailure || p.generationError}</p>
+                    )}
+                  </div>
+                </div>
+              </details>
             </article>
           ))}
           </div>

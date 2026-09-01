@@ -228,6 +228,10 @@ assert.match(detail, /video\.libraryState !== "archived"/);
 assert.match(detail, /Open active videos or restore archived ones/);
 assert.match(detail, /YouTube performance and production spend/);
 assert.match(detail, /Reorder topics or create five more/);
+assert.match(detail, /selectedPlanId=\{selectedPlanId\}/,
+  "channel plan links must carry an exact selected item into the week-ahead workspace");
+assert.match(detail, /Open script, visuals, narration and master/,
+  "a scheduled plan with a run must expose its persisted production record");
 assert.match(overview, /item\.status === "ready"/);
 assert.doesNotMatch(overview, /need review/);
 assert.match(overview, /<details className=\{`\$\{styles\.runsWidget\}/);
