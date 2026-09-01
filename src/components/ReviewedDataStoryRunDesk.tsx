@@ -186,14 +186,21 @@ export function ReviewedDataStoryRunDesk() {
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>Supervised factual lane</p>
-          <h2 id="reviewed-data-story-heading">Reviewed Data Story</h2>
+          <h2 id="reviewed-data-story-heading">Move one receipt into a review-paused episode.</h2>
           <p>
             Save a human-reviewed, source-first ledger for one sealed channel, then intentionally start one
             private review-paused episode. Cadence never selects this content and a saved ledger never publishes by itself.
           </p>
         </div>
-        <span className={styles.badge}>Owner action required</span>
+        <span className={styles.badge}>Manual admission</span>
       </header>
+
+      <div className={styles.laneTrace} aria-label="Reviewed Data Story admission route">
+        <div data-state={selectedChannel ? "ready" : "waiting"}><span>01</span><strong>Sealed channel</strong><small>{selectedChannel ? selectedChannel.name : "Choose route"}</small><i /></div>
+        <div data-state={selectedPack ? "ready" : "waiting"}><span>02</span><strong>Reviewed ledger</strong><small>{selectedPack ? "Receipt held" : "Save evidence"}</small><i /></div>
+        <div data-state="manual"><span>03</span><strong>Private run</strong><small>Owner starts once</small><i /></div>
+        <div data-state="pause"><span>04</span><strong>Human pause</strong><small>Narration + graph</small><i /></div>
+      </div>
 
       <div className={styles.grid}>
         <label>
@@ -215,7 +222,7 @@ export function ReviewedDataStoryRunDesk() {
       </div>
 
       <details className={styles.details}>
-        <summary>Save a new reviewed source ledger</summary>
+        <summary><span>Ledger intake</span> Save a new reviewed source ledger</summary>
         <p>Use exact source snapshots and named review receipts. The server derives the route, Show Profile, topic binding, and pack fingerprint; it rejects unreviewed or mismatched data.</p>
         <label>
           <span>Source ledger JSON</span>

@@ -32,7 +32,6 @@ assert.match(
 
 for (const path of [
   "../app/(app)/studio-assets/page.tsx",
-  "../app/(app)/editorial-evidence/page.tsx",
   "../app/(app)/novita-render/page.tsx",
 ]) {
   const page = read(path);
@@ -49,6 +48,15 @@ assert.match(
   "the custom Casefile shell must keep its private workspace behind the owner branch",
 );
 assert.match(casefile, /No private casefile request was sent/);
+
+const editorialEvidence = read("../app/(app)/editorial-evidence/page.tsx");
+assert.match(editorialEvidence, /const operationsAccess = useOperationsAccess\(\)/);
+assert.match(
+  editorialEvidence,
+  /operationsAccess !== "owner" \? \([\s\S]*<LockedEvidenceVault/,
+  "the custom Evidence shell must keep receipts and review controls behind the owner branch",
+);
+assert.match(editorialEvidence, /No private evidence request was sent/);
 
 for (const path of [
   "../app/(app)/studio-assets/page.tsx",

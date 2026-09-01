@@ -2,10 +2,9 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ReviewedDataStoryRunDesk } from "@/components/ReviewedDataStoryRunDesk";
-import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
 import { useOperationsAccess } from "@/components/OperationsAccess";
 import { editorialEvidenceSummary } from "@/lib/editorialDeskEvidence";
-import styles from "../editorial-desk.module.css";
+import styles from "./editorial-evidence.module.css";
 
 type EvidencePacket = Record<string, unknown> & {
   subject?: string;
@@ -42,25 +41,6 @@ const claimTemplate = JSON.stringify([
   },
 ], null, 2);
 
-const card: React.CSSProperties = {
-  border: "1px solid var(--border, #273142)",
-  borderRadius: 14,
-  padding: 18,
-  background: "linear-gradient(140deg, rgba(19,26,38,.94), rgba(10,15,24,.94))",
-};
-
-const textarea: React.CSSProperties = {
-  width: "100%",
-  minHeight: 170,
-  resize: "vertical",
-  borderRadius: 10,
-  border: "1px solid var(--border, #273142)",
-  background: "#0c111b",
-  color: "#e8edf5",
-  padding: 12,
-  font: "12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace",
-};
-
 function parseArray(raw: string, name: string): unknown[] {
   try {
     const parsed = JSON.parse(raw);
@@ -75,6 +55,97 @@ function formattedTimestamp(value: string | undefined): string {
   if (!value) return "Not recorded";
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleString();
+}
+
+function EvidenceHero({
+  access,
+  selected,
+  packetCount,
+}: {
+  access: ReturnType<typeof useOperationsAccess>;
+  selected: StoredPacket | null;
+  packetCount: number;
+}) {
+  const summary = editorialEvidenceSummary(selected?.packet);
+  const reviewerReady = Boolean(summary.reviewerId && summary.reviewId);
+  return (
+    <section className={styles.hero} aria-busy={access === "checking" || undefined}>
+      <div className={styles.heroCopy}>
+        <p className={styles.eyebrow}>Editorial evidence / proof matrix</p>
+        <h1>Nothing enters the script without a receipt.</h1>
+        <p>
+          Snapshot the source. Approve the exact claim. Name the reviewer. The
+          resulting fingerprint is the editorial object—not a model summary.
+        </p>
+        <div className={styles.boundaryNote}>
+          <span aria-hidden="true">≋</span>
+          <div><small>Authority boundary</small><strong>Evidence only · supervised runs only</strong></div>
+        </div>
+      </div>
+      <div className={styles.proofMatrix}>
+        <div className={styles.matrixHeader}><span>Selected immutable receipt</span><small>{selected?.subject ?? "No receipt selected"}</small></div>
+        <div className={styles.matrixField}>
+          <ProofNode index="01" label="Source snapshots" value={selected ? String(summary.sourceCount).padStart(2, "0") : "—"} state={selected ? "held" : "waiting"} />
+          <ProofNode index="02" label="Approved claims" value={selected ? String(summary.claimCount).padStart(2, "0") : "—"} state={selected ? "held" : "waiting"} />
+          <ProofNode index="03" label="Named reviewer" value={summary.reviewerId ?? "—"} state={reviewerReady ? "held" : "waiting"} />
+          <div className={styles.matrixReceipt} data-state={selected ? "held" : "waiting"}>
+            <span>IMMUTABLE</span>
+            <strong>{selected ? "RECEIPT HELD" : "AWAITING PACKET"}</strong>
+            <small>{selected?.contentFingerprint?.slice(0, 18) ?? "sha256 / pending"}</small>
+          </div>
+          <i className={styles.matrixLineA} aria-hidden="true" />
+          <i className={styles.matrixLineB} aria-hidden="true" />
+          <i className={styles.matrixLineC} aria-hidden="true" />
+        </div>
+      </div>
+      <div className={styles.metricRail}>
+        <EvidenceMetric index="01" label="Receipts" value={String(packetCount).padStart(2, "0")} detail="private archive" />
+        <EvidenceMetric index="02" label="Snapshots" value={selected ? String(summary.sourceCount).padStart(2, "0") : "—"} detail="stored SHA-256" />
+        <EvidenceMetric index="03" label="Claims" value={selected ? String(summary.claimCount).padStart(2, "0") : "—"} detail="approved language" />
+        <EvidenceMetric index="04" label="Reviewer" value={summary.reviewerId ?? "Unassigned"} detail="named human" />
+        <EvidenceMetric index="05" label="Authority" value={access === "owner" ? "Open" : access === "checking" ? "Checking" : "Locked"} detail="signed session" />
+      </div>
+    </section>
+  );
+}
+
+function ProofNode({ index, label, value, state }: { index: string; label: string; value: string; state: "held" | "waiting" }) {
+  return (
+    <div className={styles.proofNode} data-state={state}>
+      <span>{index}</span><div><small>{label}</small><strong>{value}</strong></div><i aria-hidden="true" />
+    </div>
+  );
+}
+
+function EvidenceMetric({ index, label, value, detail }: { index: string; label: string; value: string; detail: string }) {
+  return <div className={styles.metric}><span>{index} / {label}</span><strong>{value}</strong><small>{detail}</small></div>;
+}
+
+function LockedEvidenceVault({ access }: { access: Exclude<ReturnType<typeof useOperationsAccess>, "owner"> }) {
+  return (
+    <section className={styles.lockedVault} aria-live={access === "checking" ? "polite" : undefined}>
+      <div className={styles.vaultMark} aria-hidden="true"><span>SHA</span><i /><b /></div>
+      <div className={styles.vaultCopy}>
+        <p className={styles.eyebrow}>{access === "checking" ? "Resolving signed session" : "Evidence archive protected"}</p>
+        <h2>{access === "checking" ? "Checking vault authority…" : "The proof vault is closed."}</h2>
+        <p>{access === "checking" ? "The studio is checking this browser before requesting any private receipts." : "Open owner operations from the top bar to inspect source snapshots and review fingerprints. No private evidence request was sent."}</p>
+      </div>
+      <div className={styles.vaultRules}>
+        <div><span>01</span><strong>No synthetic proof</strong><p>Search results and model summaries never count as source snapshots.</p></div>
+        <div><span>02</span><strong>No silent approval</strong><p>Every persisted packet names the human review and timestamp.</p></div>
+        <div><span>03</span><strong>No release authority</strong><p>Receipts cannot render, spend, schedule, or publish by themselves.</p></div>
+      </div>
+    </section>
+  );
+}
+
+function BuilderHeading() {
+  return (
+    <div className={styles.builderHeading}>
+      <span>NEW</span>
+      <div><p>Immutable receipt builder</p><h2>Assemble the exact reviewed record.</h2><small>Changing any field clears the validated preview, so a saved receipt cannot drift from its fingerprint.</small></div>
+    </div>
+  );
 }
 
 /**
@@ -183,61 +254,21 @@ export default function EditorialEvidencePage() {
     set(value);
   };
 
-  if (operationsAccess !== "owner") {
-    return (
-      <div className={styles.desk}>
-        <header className={styles.header}>
-          <p className={styles.eyebrow}>Private editorial workflow</p>
-          <h1>Factual evidence desk</h1>
-          <p>Immutable evidence receipts for supervised factual explainers.</p>
-        </header>
-        <OwnerOnlyNotice
-          access={operationsAccess}
-          desk="the factual evidence desk"
-        />
-      </div>
-    );
-  }
-
   return (
     <div className={styles.desk}>
-      <header className={styles.header}>
-        <p className={styles.eyebrow}>Private editorial workflow</p>
-        <h1>Factual evidence desk</h1>
-        <p>
-          Turn a human-reviewed source set and approved claims into one immutable evidence receipt for supervised factual explainers. Casefile’s source-use rights and reconstruction rules remain separate. This desk cannot create a channel, render, spend, or publish.
-        </p>
-      </header>
+      <EvidenceHero access={operationsAccess} selected={selected} packetCount={packets.length} />
 
-      <section className={styles.summary} aria-label="Evidence receipt status">
-        <div className={styles.summaryCopy}>
-          <small>Selected immutable receipt</small>
-          <strong>{selected?.subject ?? "No saved receipt selected"}</strong>
-          <span>{selected ? "This is a persisted editorial receipt; edits require a newly validated review." : "Validate an exact source-and-claim packet before its named reviewer can save it."}</span>
-        </div>
-        <dl className={styles.summaryMeta}>
-          <div>
-            <dt>Source snapshots</dt>
-            <dd>{selected ? `${selectedSummary.sourceCount} recorded` : "—"}</dd>
-          </div>
-          <div>
-            <dt>Approved claims</dt>
-            <dd>{selected ? `${selectedSummary.claimCount} recorded` : "—"}</dd>
-          </div>
-          <div>
-            <dt>Reviewer</dt>
-            <dd>{selectedSummary.reviewerId ?? "Not recorded"}</dd>
-          </div>
-        </dl>
-      </section>
+      {operationsAccess !== "owner" ? (
+        <LockedEvidenceVault access={operationsAccess} />
+      ) : (<>
 
       <div className={styles.workspace}>
-        <aside style={{ ...card }} className={styles.library}>
+        <aside className={`${styles.surface} ${styles.library}`}>
           <div className={styles.libraryHeader}>
             <strong>Saved review receipts</strong>
             <span>{packets.length} recorded</span>
           </div>
-          {packets.length === 0 ? <span style={{ color: "#8d9aad", fontSize: 13 }}>No private evidence packets saved yet.</span> : <div className={styles.recordList}>{packets.map((packet) => {
+          {packets.length === 0 ? <span className={styles.emptyLibrary}>No private evidence packets saved yet.</span> : <div className={styles.recordList}>{packets.map((packet) => {
             const packetSummary = editorialEvidenceSummary(packet.packet);
             return (
               <button
@@ -254,66 +285,80 @@ export default function EditorialEvidencePage() {
           })}</div>}
         </aside>
 
-        <section style={{ ...card }} className={styles.operatorPane}>
-          <h2 style={{ margin: 0, fontSize: 19 }}>Build a review receipt</h2>
-          <p style={{ margin: 0, color: "#aeb9cb", fontSize: 13, lineHeight: 1.5 }}>Use immutable source snapshots. The source SHA-256 is required; it is not a model summary or a search result.</p>
+        <section className={`${styles.surface} ${styles.operatorPane}`}>
+          <BuilderHeading />
 
-          <label style={{ display: "grid", gap: 6, fontSize: 13 }}>Subject
-            <input aria-label="Evidence packet subject" value={subject} onChange={(event) => updateText(setSubject)(event.target.value)} placeholder="What this factual explainer is about" style={{ borderRadius: 8, border: "1px solid #273142", background: "#0c111b", color: "#e8edf5", padding: "10px 11px" }} />
-          </label>
-          <label style={{ display: "grid", gap: 6, fontSize: 13 }}>Reviewed sources JSON
-            <textarea aria-label="Reviewed sources JSON" style={textarea} value={sources} onChange={(event) => updateText(setSources)(event.target.value)} />
-          </label>
-          <label style={{ display: "grid", gap: 6, fontSize: 13 }}>Approved claims JSON
-            <textarea aria-label="Approved claims JSON" style={textarea} value={claims} onChange={(event) => updateText(setClaims)(event.target.value)} />
-          </label>
+          <section className={styles.formModule}>
+            <div className={styles.moduleTitle}><span>01</span><div><strong>Story scope</strong><small>Name the one factual explainer this receipt covers.</small></div></div>
+            <label className={styles.field}>Subject
+              <input aria-label="Evidence packet subject" value={subject} onChange={(event) => updateText(setSubject)(event.target.value)} placeholder="What this factual explainer is about" />
+            </label>
+          </section>
 
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-            <label style={{ display: "grid", gap: 6, fontSize: 13 }}>Reviewer id
-              <input aria-label="Editorial reviewer id" value={reviewerId} onChange={(event) => updateText(setReviewerId)(event.target.value)} placeholder="editor-…" style={{ borderRadius: 8, border: "1px solid #273142", background: "#0c111b", color: "#e8edf5", padding: "10px 11px" }} />
-            </label>
-            <label style={{ display: "grid", gap: 6, fontSize: 13 }}>Review id
-              <input aria-label="Editorial review id" value={reviewId} onChange={(event) => updateText(setReviewId)(event.target.value)} placeholder="review-…" style={{ borderRadius: 8, border: "1px solid #273142", background: "#0c111b", color: "#e8edf5", padding: "10px 11px" }} />
-            </label>
-          </div>
-          <label style={{ display: "grid", gap: 6, fontSize: 13 }}>Review timestamp (UTC ISO 8601)
-            <div style={{ display: "flex", gap: 8 }}>
-              <input aria-label="Editorial review timestamp" value={reviewedAt} onChange={(event) => updateText(setReviewedAt)(event.target.value)} placeholder="2026-08-20T12:34:56.000Z" style={{ minWidth: 0, flex: 1, borderRadius: 8, border: "1px solid #273142", background: "#0c111b", color: "#e8edf5", padding: "10px 11px" }} />
-              <button type="button" onClick={() => updateText(setReviewedAt)(new Date().toISOString())}>Use now</button>
+          <section className={styles.formModule}>
+            <div className={styles.moduleTitle}><span>02</span><div><strong>Source + claim sets</strong><small>Each source snapshot needs its SHA-256; each approved claim points back to it.</small></div></div>
+            <div className={styles.evidenceInputs}>
+              <label className={styles.field}>Reviewed sources JSON
+                <textarea aria-label="Reviewed sources JSON" className={styles.textarea} value={sources} onChange={(event) => updateText(setSources)(event.target.value)} />
+              </label>
+              <label className={styles.field}>Approved claims JSON
+                <textarea aria-label="Approved claims JSON" className={styles.textarea} value={claims} onChange={(event) => updateText(setClaims)(event.target.value)} />
+              </label>
             </div>
-          </label>
+          </section>
 
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, alignItems: "center" }}>
-            <button type="button" disabled={busy} onClick={() => { void validate(); }}>Validate exact packet</button>
-            <label style={{ display: "flex", gap: 8, alignItems: "center", color: "#b6c8e4", fontSize: 13 }}>
-              <input type="checkbox" checked={reviewerConfirmed} onChange={(event) => setReviewerConfirmed(event.target.checked)} />
-              I confirm this is the named editor’s approved review.
+          <section className={styles.formModule}>
+            <div className={styles.moduleTitle}><span>03</span><div><strong>Human review signature</strong><small>The named editor, review id, and timestamp become part of the fingerprinted packet.</small></div></div>
+            <div className={styles.reviewGrid}>
+              <label className={styles.field}>Reviewer id
+                <input aria-label="Editorial reviewer id" value={reviewerId} onChange={(event) => updateText(setReviewerId)(event.target.value)} placeholder="editor-…" />
+              </label>
+              <label className={styles.field}>Review id
+                <input aria-label="Editorial review id" value={reviewId} onChange={(event) => updateText(setReviewId)(event.target.value)} placeholder="review-…" />
+              </label>
+            </div>
+            <label className={styles.field}>Review timestamp (UTC ISO 8601)
+              <div className={styles.timestampRow}>
+                <input aria-label="Editorial review timestamp" value={reviewedAt} onChange={(event) => updateText(setReviewedAt)(event.target.value)} placeholder="2026-08-20T12:34:56.000Z" />
+                <button type="button" className={styles.utilityAction} onClick={() => updateText(setReviewedAt)(new Date().toISOString())}>Use now</button>
+              </div>
             </label>
-            <button type="button" disabled={busy || !preview || !reviewerConfirmed} onClick={() => { void admit(); }}>Save private receipt</button>
-          </div>
+          </section>
 
-          {preview && <section className={styles.ledger} style={{ borderColor: "#315a91", background: "#0d1a2c" }} aria-label="Validated packet preview">
-            <strong style={{ fontSize: 13, color: "#b9d6ff" }}>Validated immutable packet</strong>
-            <code style={{ color: "#9fc0ff", overflowWrap: "anywhere", fontSize: 12 }}>{String(preview.contentFingerprint)}</code>
-            <details><summary style={{ cursor: "pointer", color: "#b6c8e4", fontSize: 13 }}>Inspect exact packet JSON</summary><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 11, color: "#d9e5f5" }}>{JSON.stringify(preview, null, 2)}</pre></details>
+          <section className={styles.commitModule}>
+            <div className={styles.commitCopy}><span>04</span><div><strong>Validate, confirm, save</strong><small>The authoritative API rebuilds the exact packet before persistence.</small></div></div>
+            <div className={styles.actionRow}>
+              <button type="button" className={styles.validateAction} disabled={busy} onClick={() => { void validate(); }}>Validate exact packet</button>
+              <label className={styles.confirmation}>
+                <input type="checkbox" checked={reviewerConfirmed} onChange={(event) => setReviewerConfirmed(event.target.checked)} />
+                <span>I confirm this is the named editor’s approved review.</span>
+              </label>
+              <button type="button" className={styles.saveAction} disabled={busy || !preview || !reviewerConfirmed} onClick={() => { void admit(); }}>Save private receipt</button>
+            </div>
+          </section>
+
+          {preview && <section className={styles.validatedPacket} aria-label="Validated packet preview">
+            <span>VALIDATED</span><strong>Immutable packet ready for named confirmation</strong>
+            <code>{String(preview.contentFingerprint)}</code>
+            <details><summary>Inspect exact packet JSON</summary><pre>{JSON.stringify(preview, null, 2)}</pre></details>
           </section>}
 
           {selected && <section className={styles.savedAudit} aria-label="Saved packet audit">
-            <strong style={{ fontSize: 14 }}>Selected saved receipt</strong>
-            <span style={{ color: "#aeb9cb", fontSize: 13 }}>{selected.subject} · {selected.reviewId} · {new Date(selected.createdAt).toLocaleString()}</span>
+            <div className={styles.savedAuditHeading}><span>ARCHIVED</span><strong>Selected saved receipt</strong><small>{selected.subject} · {selected.reviewId} · {new Date(selected.createdAt).toLocaleString()}</small></div>
             <div className={styles.receiptMetrics}>
               <span className={styles.receiptMetric}><small>Sources</small><strong>{selectedSummary.sourceCount} recorded</strong></span>
               <span className={styles.receiptMetric}><small>Claims</small><strong>{selectedSummary.claimCount} recorded</strong></span>
               <span className={styles.receiptMetric}><small>Reviewer</small><strong>{selectedSummary.reviewerId ?? "Not recorded"}</strong></span>
               <span className={styles.receiptMetric}><small>Reviewed</small><strong title={selectedSummary.reviewedAt}>{formattedTimestamp(selectedSummary.reviewedAt)}</strong></span>
             </div>
-            <code style={{ color: "#9fc0ff", overflowWrap: "anywhere", fontSize: 12 }}>{selected.contentFingerprint}</code>
-            <details><summary style={{ cursor: "pointer", color: "#b6c8e4", fontSize: 13 }}>Inspect persisted audit packet</summary><pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere", fontSize: 11, color: "#d9e5f5" }}>{JSON.stringify(selected.packet, null, 2)}</pre></details>
+            <code className={styles.fingerprint}>{selected.contentFingerprint}</code>
+            <details className={styles.auditDetails}><summary>Inspect persisted audit packet</summary><pre>{JSON.stringify(selected.packet, null, 2)}</pre></details>
           </section>}
         </section>
       </div>
-      <ReviewedDataStoryRunDesk />
-      {message && <p role="status" className={styles.statusMessage} style={{ ...card, color: message.startsWith("Saved") || message.startsWith("The exact") ? "#9be2b3" : "#ffb8b8" }}>{message}</p>}
+      <div className={styles.supervisedLane}><ReviewedDataStoryRunDesk /></div>
+      {message && <p role="status" className={`${styles.surface} ${styles.statusMessage}`} data-tone={message.startsWith("Saved") || message.startsWith("The exact") ? "success" : "error"}>{message}</p>}
+      </>)}
     </div>
   );
 }
