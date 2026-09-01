@@ -23,7 +23,7 @@ export function OwnerOnlyNotice({
         <p>
           {checking
             ? `Confirming whether this browser may open ${desk}.`
-            : `Unlock operations in the top bar to open ${desk}. No private data request was sent.`}
+            : `Verify the owner channel in the top bar to open ${desk}. No private data request was sent.`}
         </p>
       </div>
     </section>

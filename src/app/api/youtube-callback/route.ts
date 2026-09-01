@@ -4,7 +4,13 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { hydrateEnv } from "@/lib/vault";
-import { exchangeCode, getChannelMine, YT_SCOPES } from "@/lib/youtube";
+import {
+  exchangeCode,
+  exchangeOwnerSessionCode,
+  getChannelMine,
+  getVideoChannelIds,
+  YT_SCOPES,
+} from "@/lib/youtube";
 import { encryptSecret } from "@/lib/secretEnvelope";
 import {
   verifyYouTubeOAuthState,
@@ -14,6 +20,17 @@ import {
   requireInternalQuerySecret,
   youtubeConnectorAad,
 } from "@/lib/youtubeConnector";
+import {
+  isOperationsOAuthState,
+  OPERATIONS_OAUTH_NONCE_COOKIE,
+  verifyOperationsOAuthState,
+} from "@/lib/operationsOAuthState";
+import { isKnownOperationsOwnerChannel } from "@/lib/operationsOwnerIdentity";
+import {
+  createOperatorSessionToken,
+  sessionCookieOptions,
+  STUDIO_SESSION_COOKIE,
+} from "@/lib/operatorSession";
 
 /**
  * GET /api/youtube-callback?code=&state=<signed browser-bound payload>
@@ -38,11 +55,85 @@ function redirectAndClearNonce(url: string): NextResponse {
   return response;
 }
 
+function redirectAndClearOperationsNonce(url: string): NextResponse {
+  const response = NextResponse.redirect(url);
+  response.cookies.set(OPERATIONS_OAUTH_NONCE_COOKIE, "", {
+    httpOnly: true,
+    secure: new URL(BASE).protocol === "https:",
+    sameSite: "lax",
+    path: "/api/youtube-callback",
+    maxAge: 0,
+  });
+  return response;
+}
+
+async function completeOperationsOAuth(
+  request: NextRequest,
+  code: string,
+  state: string,
+): Promise<NextResponse> {
+  try {
+    try {
+      await hydrateEnv("youtube");
+    } catch {
+      // Continue when the managed runtime already exposes the provider env;
+      // token exchange below remains the fail-closed configuration check.
+    }
+    verifyOperationsOAuthState({
+      state,
+      nonce: request.cookies.get(OPERATIONS_OAUTH_NONCE_COOKIE)?.value,
+    });
+    const { accessToken } = await exchangeOwnerSessionCode(code, REDIRECT_URI);
+    const selected = await getChannelMine(accessToken);
+    const ownerId = process.env.STUDIO_OWNER_ID ?? "owner_daniel";
+    const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
+    if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL not configured");
+    const convex = new ConvexHttpClient(url);
+    const [connectors, channels, recentRuns] = await Promise.all([
+      convex.query(api.youtubeAuth.linkStatus, { ownerId }),
+      convex.query(api.channels.listChannels, { ownerId }),
+      convex.query(api.runs.listRecent, { ownerId, limit: 100 }),
+    ]);
+    const publishedVideoChannelIds = await getVideoChannelIds(
+      accessToken,
+      recentRuns.flatMap((run) => run.youtubeVideoId ? [run.youtubeVideoId] : []),
+    );
+    const authorized = isKnownOperationsOwnerChannel({
+      selectedChannelId: selected?.id,
+      connectors,
+      createdDestinations: channels.map((channel) => ({
+        ytChannelId: channel.youtubeCreated?.ytChannelId,
+      })),
+      publishedVideoChannelIds,
+      configuredChannelIds: process.env.STUDIO_OWNER_YOUTUBE_CHANNEL_IDS,
+    });
+    if (!authorized) {
+      return redirectAndClearOperationsNonce(`${BASE}/?operations=denied`);
+    }
+
+    const response = redirectAndClearOperationsNonce(`${BASE}/?operations=verified`);
+    response.cookies.set(
+      STUDIO_SESSION_COOKIE,
+      await createOperatorSessionToken(),
+      sessionCookieOptions(request.url),
+    );
+    return response;
+  } catch {
+    return redirectAndClearOperationsNonce(`${BASE}/?operations=error`);
+  }
+}
+
 export async function GET(request: NextRequest) {
   const sp = new URL(request.url).searchParams;
   const code = sp.get("code");
   const state = sp.get("state");
   const oauthErr = sp.get("error");
+  if (isOperationsOAuthState(state)) {
+    if (oauthErr || !code) {
+      return redirectAndClearOperationsNonce(`${BASE}/?operations=cancelled`);
+    }
+    return completeOperationsOAuth(request, code, state);
+  }
   if (oauthErr || !code || !state) {
     return redirectAndClearNonce(`${BASE}/channels?yt=error`);
   }

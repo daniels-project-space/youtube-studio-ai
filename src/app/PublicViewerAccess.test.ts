@@ -35,9 +35,16 @@ assert.match(convexToken, /cross-origin token request refused/);
 
 const elevationRoute = source("./api/operations/elevation/route.ts");
 assert.match(elevationRoute, /sameOriginMutation\(request\)/);
-assert.match(elevationRoute, /verifyOperationsElevationSecret\(secret\)/);
 assert.match(elevationRoute, /STUDIO_SESSION_COOKIE/);
 assert.match(elevationRoute, /httpOnly|sessionCookieOptions/);
+assert.doesNotMatch(elevationRoute, /export async function POST|secret|password/i);
+
+const operationsAuthorize = source("./api/operations/authorize/route.ts");
+assert.match(operationsAuthorize, /createOperationsOAuthState\(\)/);
+assert.match(operationsAuthorize, /getOwnerSessionConsentUrl\(REDIRECT_URI, state\)/);
+assert.match(operationsAuthorize, /OPERATIONS_OAUTH_NONCE_COOKIE/);
+assert.match(operationsAuthorize, /httpOnly: true/);
+assert.match(operationsAuthorize, /cross-origin owner verification refused/);
 
 const appShell = source("../components/AppShell.tsx");
 assert.match(appShell, /<OperationsAccess\s*\/>/);
@@ -50,6 +57,10 @@ assert.match(operationsAccess, /event\.shiftKey/);
 assert.match(operationsAccess, /previous\?\.focus\(\)/);
 assert.match(operationsAccess, /Operations request timed out/);
 assert.match(operationsAccess, /requestAbortRef\.current\?\.abort/);
+assert.match(operationsAccess, /href="\/api\/operations\/authorize"/);
+assert.match(operationsAccess, /Continue with YouTube/);
+assert.match(operationsAccess, /one-use Google token/);
+assert.doesNotMatch(operationsAccess, /type="password"|current-password|Operations key|secret/i);
 
 const convexProvider = source("./ConvexClientProvider.tsx");
 assert.match(
@@ -113,6 +124,11 @@ const oauthCallback = source("./api/youtube-callback/route.ts");
 assert.match(oauthCallback, /verifyYouTubeOAuthState\(/);
 assert.match(oauthCallback, /encryptSecret\(/);
 assert.match(oauthCallback, /requireInternalQuerySecret\(/);
+assert.match(oauthCallback, /isOperationsOAuthState\(state\)/);
+assert.match(oauthCallback, /verifyOperationsOAuthState\(/);
+assert.match(oauthCallback, /isKnownOperationsOwnerChannel\(/);
+assert.match(oauthCallback, /createOperatorSessionToken\(\)/);
+assert.match(oauthCallback, /publishedVideoChannelIds/);
 
 assert.doesNotMatch(
   source("./api/youtube-connect/route.ts"),

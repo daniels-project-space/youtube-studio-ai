@@ -39,7 +39,7 @@ export function QualityLearningPanel({
       {state === "loading" ? (
         <div style={empty}>Loading settled audience evidence…</div>
       ) : state === "locked" ? (
-        <div style={empty}>Unlock operations to review owner-only learning proposals. Existing channel production is unchanged.</div>
+        <div style={empty}>Verify the owner channel to review owner-only learning proposals. Existing channel production is unchanged.</div>
       ) : state === "unavailable" ? (
         <div style={empty}>Quality learning is unavailable right now. Existing channel production is unchanged.</div>
       ) : visible.length === 0 ? (

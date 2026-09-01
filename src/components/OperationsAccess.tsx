@@ -5,12 +5,12 @@ import {
   type KeyboardEvent,
   type ReactNode,
   type SetStateAction,
-  type SyntheticEvent,
   useContext,
   useEffect,
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 
 export type OperationsAccessState =
   | "checking"
@@ -90,7 +90,6 @@ export function OperationsAccess() {
   const requestAbortRef = useRef<AbortController | null>(null);
   const { state: access, setState: setAccess } = useOperationsAccessContext();
   const [open, setOpen] = useState(false);
-  const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -100,12 +99,32 @@ export function OperationsAccess() {
   }, []);
 
   useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const outcome = params.get("operations");
+    if (!outcome) return;
+    if (outcome !== "verified") {
+      setError(
+        outcome === "cancelled"
+          ? "Owner verification was cancelled."
+          : outcome === "denied"
+            ? "That YouTube channel is not bound to this studio. Choose a recorded owner channel."
+            : "Owner verification could not be completed.",
+      );
+      setOpen(true);
+    }
+    params.delete("operations");
+    params.delete("detail");
+    const query = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+  }, []);
+
+  useEffect(() => {
     if (!open) return;
     const previous = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : triggerRef.current;
     const frame = window.requestAnimationFrame(() => {
-      const first = dialogRef.current?.querySelector<HTMLElement>("input:not(:disabled)")
+      const first = dialogRef.current?.querySelector<HTMLElement>("a[href]")
         ?? dialogRef.current?.querySelector<HTMLElement>("button:not(:disabled)");
       first?.focus();
     });
@@ -120,7 +139,6 @@ export function OperationsAccess() {
     requestAbortRef.current = null;
     setBusy(false);
     setOpen(false);
-    setSecret("");
     setError("");
   }
 
@@ -138,41 +156,6 @@ export function OperationsAccess() {
         if (requestAbortRef.current === controller) requestAbortRef.current = null;
       },
     };
-  }
-
-  async function unlock(event: SyntheticEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!secret || busy) return;
-    setBusy(true);
-    setError("");
-    const request = beginRequest();
-    try {
-      const response = await fetch("/api/operations/elevation", {
-        method: "POST",
-        cache: "no-store",
-        credentials: "same-origin",
-        headers: {
-          Accept: "application/json",
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ secret }),
-        signal: request.controller.signal,
-      });
-      const body = await readResponse(response);
-      if (!response.ok || body.elevated !== true || body.role !== "owner") {
-        throw new Error(body.error ?? "Operations could not be unlocked");
-      }
-      setSecret("");
-      setAccess("owner");
-      window.location.reload();
-    } catch (reason) {
-      if (request.controller.signal.reason instanceof DOMException
-        && request.controller.signal.reason.message === "Operations dialog closed") return;
-      setError(reason instanceof Error ? reason.message : "Operations could not be unlocked");
-    } finally {
-      request.finish();
-      setBusy(false);
-    }
   }
 
   async function lock() {
@@ -242,15 +225,15 @@ export function OperationsAccess() {
           setError("");
           setOpen(true);
         }}
-        title={unlocked ? "Owner operations are unlocked" : "Unlock settings, scheduling, rendering and publishing controls"}
+        title={unlocked ? "Owner operations are verified" : "Verify the owner channel for settings, scheduling, rendering and publishing controls"}
       >
         <span className="operations-access-dot" aria-hidden="true" />
         <span className="operations-access-label">
-          {unlocked ? "Operations unlocked" : access === "checking" ? "Checking access" : "Unlock operations"}
+          {unlocked ? "Owner verified" : access === "checking" ? "Checking access" : "Verify owner"}
         </span>
       </button>
 
-      {open ? (
+      {open ? createPortal((
         <div
           className="operations-access-backdrop"
           role="presentation"
@@ -276,12 +259,12 @@ export function OperationsAccess() {
             </button>
             <span className="operations-access-eyebrow">Optional owner controls</span>
             <h2 id="operations-access-title">
-              {unlocked ? "Operations are unlocked" : "Unlock operating controls"}
+              {unlocked ? "Owner controls are active" : "Verify with a recorded YouTube channel"}
             </h2>
             <p>
               {unlocked
                 ? "Owner controls are available in this browser session."
-                : "The studio stays readable. Unlock only when you need settings, schedules, OAuth, renders or publishing."}
+                : "The studio stays readable. To change settings, schedules, OAuth, renders or publishing, choose a YouTube channel already bound to this studio."}
             </p>
             <p className="operations-access-safety">
               Paid render and publish review gates remain enforced.
@@ -292,29 +275,21 @@ export function OperationsAccess() {
                 {busy ? "Locking…" : "Lock operations"}
               </button>
             ) : (
-              <form onSubmit={unlock} className="operations-access-form">
-                <label htmlFor="operations-key">Operations key</label>
-                <input
-                  id="operations-key"
-                  name="operations-key"
-                  type="password"
-                  autoComplete="current-password"
-                  value={secret}
-                  onChange={(event) => setSecret(event.target.value)}
-                  autoFocus
-                  required
-                  disabled={busy}
-                />
-                <button type="submit" disabled={busy || !secret}>
-                  {busy ? "Unlocking…" : "Unlock operations"}
-                </button>
-              </form>
+              <div className="operations-access-choice">
+                <a className="operations-access-primary" href="/api/operations/authorize">
+                  Continue with YouTube
+                </a>
+                <small>
+                  The one-use Google token resolves the selected channel only. It is not stored;
+                  the studio keeps an HttpOnly owner session after a match.
+                </small>
+              </div>
             )}
 
             {error ? <p className="operations-access-error" role="alert">{error}</p> : null}
           </section>
         </div>
-      ) : null}
+      ), document.body) : null}
     </>
   );
 }

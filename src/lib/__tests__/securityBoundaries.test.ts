@@ -9,12 +9,16 @@ import {
   verifyYouTubeOAuthState,
 } from "@/lib/youtubeOAuthState";
 import {
+  createOperationsOAuthState,
+  verifyOperationsOAuthState,
+} from "@/lib/operationsOAuthState";
+import { isKnownOperationsOwnerChannel } from "@/lib/operationsOwnerIdentity";
+import {
   authorizeStudioRoute,
   createOperatorSessionToken,
   getStudioActor,
   requireStudioActor,
   STUDIO_SESSION_COOKIE,
-  verifyOperationsElevationSecret,
 } from "@/lib/operatorSession";
 import {
   validateBridgeCompletion,
@@ -26,7 +30,6 @@ process.env.YOUTUBE_OAUTH_STATE_SECRET = Buffer.alloc(32, 9).toString(
   "base64url",
 );
 process.env.STUDIO_SESSION_SECRET = Buffer.alloc(32, 11).toString("base64url");
-process.env.STUDIO_OPERATOR_TOKEN = "operations-test-key";
 process.env.STUDIO_INTERNAL_API_TOKEN = "service-test-token";
 process.env.STUDIO_OWNER_ID = "owner-test";
 
@@ -95,8 +98,41 @@ async function main() {
     /expired/,
   );
 
-  assert.equal(verifyOperationsElevationSecret("operations-test-key"), true);
-  assert.equal(verifyOperationsElevationSecret("wrong-key"), false);
+  const operationsOAuth = createOperationsOAuthState({ now, ttlMs: 60_000 });
+  assert.deepEqual(
+    verifyOperationsOAuthState({
+      state: operationsOAuth.state,
+      nonce: operationsOAuth.nonce,
+      now: now + 30_000,
+    }),
+    operationsOAuth.payload,
+  );
+  assert.throws(
+    () => verifyOperationsOAuthState({
+      state: operationsOAuth.state,
+      nonce: "wrong-browser",
+      now: now + 30_000,
+    }),
+    /browser/,
+  );
+  assert.equal(isKnownOperationsOwnerChannel({
+    selectedChannelId: "UC-owner",
+    connectors: [{ ytChannelId: "UC-owner", status: "active" }],
+    createdDestinations: [],
+    publishedVideoChannelIds: [],
+  }), true);
+  assert.equal(isKnownOperationsOwnerChannel({
+    selectedChannelId: "UC-revoked",
+    connectors: [{ ytChannelId: "UC-revoked", status: "revoked" }],
+    createdDestinations: [],
+    publishedVideoChannelIds: [],
+  }), false);
+  assert.equal(isKnownOperationsOwnerChannel({
+    selectedChannelId: "UC-published-owner",
+    connectors: [],
+    createdDestinations: [],
+    publishedVideoChannelIds: ["UC-published-owner"],
+  }), true);
 
   const session = await createOperatorSessionToken();
   const sessionRequest = new Request("https://studio.test/api/secure", {

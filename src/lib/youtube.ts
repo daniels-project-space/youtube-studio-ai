@@ -91,6 +91,10 @@ export const YT_SCOPES = [
   "https://www.googleapis.com/auth/yt-analytics.readonly",
 ].join(" ");
 
+/** Minimal identity scope for replacing the old manual operations-key prompt. */
+export const YT_OWNER_SESSION_SCOPES =
+  "https://www.googleapis.com/auth/youtube.readonly";
+
 /**
  * Build the Google consent URL for connecting a channel. `state` carries our
  * channelId back to the callback; `redirectUri` MUST be registered on the OAuth
@@ -105,6 +109,27 @@ export function getConsentUrl(redirectUri: string, state: string): string {
     scope: YT_SCOPES,
     access_type: "offline",
     prompt: "consent select_account",
+    include_granted_scopes: "true",
+    state,
+  });
+  return `https://accounts.google.com/o/oauth2/v2/auth?${p.toString()}`;
+}
+
+/**
+ * Build a no-password owner-verification consent URL. The access token is used
+ * once to resolve the selected YouTube channel and is never persisted.
+ */
+export function getOwnerSessionConsentUrl(
+  redirectUri: string,
+  state: string,
+): string {
+  const p = new URLSearchParams({
+    client_id: reqEnv("YOUTUBE_CLIENT_ID"),
+    redirect_uri: redirectUri,
+    response_type: "code",
+    scope: YT_OWNER_SESSION_SCOPES,
+    access_type: "online",
+    prompt: "select_account",
     include_granted_scopes: "true",
     state,
   });
@@ -146,6 +171,39 @@ export async function exchangeCode(
   };
 }
 
+/** Exchange a one-use owner verification code without requiring a refresh token. */
+export async function exchangeOwnerSessionCode(
+  code: string,
+  redirectUri: string,
+): Promise<{ accessToken: string; grantedScopes: string[] }> {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: reqEnv("YOUTUBE_CLIENT_ID"),
+      client_secret: reqEnv("YOUTUBE_CLIENT_SECRET"),
+      code,
+      redirect_uri: redirectUri,
+      grant_type: "authorization_code",
+    }),
+  });
+  const json = (await res.json()) as {
+    access_token?: string;
+    scope?: string;
+    error?: string;
+    error_description?: string;
+  };
+  if (!res.ok || !json.access_token) {
+    throw new YouTubeError(
+      `owner verification exchange failed: ${json.error ?? res.status} ${json.error_description ?? ""}`,
+    );
+  }
+  return {
+    accessToken: json.access_token,
+    grantedScopes: (json.scope ?? "").split(/\s+/).filter(Boolean),
+  };
+}
+
 /** The authenticated user's selected YouTube channel (id + title). */
 export async function getChannelMine(
   accessToken: string,
@@ -157,6 +215,35 @@ export async function getChannelMine(
   const json = (await res.json()) as { items?: { id: string; snippet?: { title?: string } }[] };
   const item = json.items?.[0];
   return item ? { id: item.id, title: item.snippet?.title ?? "" } : null;
+}
+
+/** Resolve the public channel owners of retained YouTube video ids, in bounded batches. */
+export async function getVideoChannelIds(
+  accessToken: string,
+  videoIds: string[],
+): Promise<string[]> {
+  const ids = [...new Set(videoIds.map((value) => value.trim()).filter(Boolean))].slice(0, 100);
+  const channelIds = new Set<string>();
+  for (let offset = 0; offset < ids.length; offset += 50) {
+    const batch = ids.slice(offset, offset + 50);
+    const params = new URLSearchParams({ part: "snippet", id: batch.join(",") });
+    const res = await fetch(`https://www.googleapis.com/youtube/v3/videos?${params.toString()}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const json = (await res.json()) as {
+      items?: Array<{ snippet?: { channelId?: string } }>;
+      error?: { message?: string };
+    };
+    if (!res.ok) {
+      throw new YouTubeError(
+        `video owner lookup failed: ${json.error?.message ?? res.status}`,
+      );
+    }
+    for (const item of json.items ?? []) {
+      if (item.snippet?.channelId) channelIds.add(item.snippet.channelId);
+    }
+  }
+  return [...channelIds];
 }
 
 /**

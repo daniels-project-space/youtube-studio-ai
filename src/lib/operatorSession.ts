@@ -33,20 +33,6 @@ function safeEqualText(actual: string, expected: string): boolean {
   return a.byteLength === b.byteLength && timingSafeEqual(a, b);
 }
 
-/**
- * Verify the high-entropy secret used only to elevate the already-readable
- * studio into its short-lived operations mode. This is deliberately not an
- * application login: an invalid or missing secret never prevents viewer access.
- */
-export function verifyOperationsElevationSecret(secret: string): boolean {
-  const expected = process.env.STUDIO_OPERATOR_TOKEN;
-  if (!expected) {
-    throw new StudioAuthError("operations elevation is not configured", 503);
-  }
-  if (!secret || secret.length > 4_096) return false;
-  return safeEqualText(secret, expected);
-}
-
 export async function createOperatorSessionToken(): Promise<string> {
   return new SignJWT({ role: "owner" })
     .setProtectedHeader({ alg: "HS256" })

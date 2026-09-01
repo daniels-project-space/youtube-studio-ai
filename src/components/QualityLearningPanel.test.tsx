@@ -38,7 +38,7 @@ const lockedHtml = renderToStaticMarkup(createElement(QualityLearningPanel, {
   channelNames: new Map(),
   insights: [],
 }));
-assert.match(lockedHtml, /Unlock operations to review owner-only learning proposals/);
+assert.match(lockedHtml, /Verify the owner channel to review owner-only learning proposals/);
 assert.doesNotMatch(lockedHtml, /unavailable right now/i);
 
 console.log("quality learning panel tests passed");
