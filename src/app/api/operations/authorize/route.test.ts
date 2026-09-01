@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { NextRequest } from "next/server";
 import { GET } from "./route";
 import {
+  operationsOAuthSuccessPath,
   OPERATIONS_OAUTH_NONCE_COOKIE,
   verifyOperationsOAuthState,
 } from "@/lib/operationsOAuthState";
@@ -21,7 +22,8 @@ async function main() {
   assert.equal(crossOrigin.status, 403);
   assert.equal(crossOrigin.headers.get("set-cookie"), null);
 
-  const response = await GET(new NextRequest(endpoint, {
+  const channelId = "jh75m19d3zv3yxm17z8cv0tw7n7d62vq";
+  const response = await GET(new NextRequest(`${endpoint}?channelId=${channelId}`, {
     headers: { "Sec-Fetch-Site": "same-origin" },
   }));
   assert.equal(response.status, 307);
@@ -38,7 +40,13 @@ async function main() {
   assert.match(setCookie, /HttpOnly/i);
   assert.match(setCookie, /SameSite=Lax/i);
   const nonce = setCookie.match(new RegExp(`${OPERATIONS_OAUTH_NONCE_COOKIE}=([^;]+)`))?.[1];
-  assert.equal(verifyOperationsOAuthState({ state, nonce }).purpose, "owner-session");
+  const verified = verifyOperationsOAuthState({ state, nonce });
+  assert.equal(verified.purpose, "owner-session");
+  assert.equal(verified.youtubeChannelId, channelId);
+  assert.equal(
+    operationsOAuthSuccessPath(verified),
+    `/api/youtube-connect?channelId=${channelId}`,
+  );
   console.log("Operations YouTube authorization start tests passed");
 }
 

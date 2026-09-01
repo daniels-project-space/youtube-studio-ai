@@ -22,6 +22,7 @@ import {
 } from "@/lib/youtubeConnector";
 import {
   isOperationsOAuthState,
+  operationsOAuthSuccessPath,
   OPERATIONS_OAUTH_NONCE_COOKIE,
   verifyOperationsOAuthState,
 } from "@/lib/operationsOAuthState";
@@ -79,7 +80,7 @@ async function completeOperationsOAuth(
       // Continue when the managed runtime already exposes the provider env;
       // token exchange below remains the fail-closed configuration check.
     }
-    verifyOperationsOAuthState({
+    const oauthState = verifyOperationsOAuthState({
       state,
       nonce: request.cookies.get(OPERATIONS_OAUTH_NONCE_COOKIE)?.value,
     });
@@ -111,7 +112,9 @@ async function completeOperationsOAuth(
       return redirectAndClearOperationsNonce(`${BASE}/?operations=denied`);
     }
 
-    const response = redirectAndClearOperationsNonce(`${BASE}/?operations=verified`);
+    const response = redirectAndClearOperationsNonce(
+      new URL(operationsOAuthSuccessPath(oauthState), BASE).toString(),
+    );
     response.cookies.set(
       STUDIO_SESSION_COOKIE,
       await createOperatorSessionToken(),

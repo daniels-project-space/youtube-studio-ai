@@ -32,6 +32,11 @@ export async function GET(request: NextRequest) {
   try {
     actor = await requireStudioActor(request);
   } catch (error) {
+    if (error instanceof StudioAuthError && error.status === 401) {
+      const authorize = new URL("/api/operations/authorize", request.url);
+      authorize.searchParams.set("channelId", channelId);
+      return NextResponse.redirect(authorize);
+    }
     return NextResponse.json(
       { error: "privileged studio authorization required" },
       { status: error instanceof StudioAuthError ? error.status : 401 },

@@ -34,7 +34,8 @@ export async function GET(request: NextRequest) {
       // Local and managed deployments may already expose the provider env.
       // The consent-url builder below still fails closed if it is absent.
     }
-    const { state, nonce } = createOperationsOAuthState();
+    const youtubeChannelId = new URL(request.url).searchParams.get("channelId") ?? undefined;
+    const { state, nonce } = createOperationsOAuthState({ youtubeChannelId });
     const response = NextResponse.redirect(
       getOwnerSessionConsentUrl(REDIRECT_URI, state),
     );

@@ -10,6 +10,7 @@ import {
 } from "@/lib/youtubeOAuthState";
 import {
   createOperationsOAuthState,
+  operationsOAuthSuccessPath,
   verifyOperationsOAuthState,
 } from "@/lib/operationsOAuthState";
 import { isKnownOperationsOwnerChannel } from "@/lib/operationsOwnerIdentity";
@@ -98,7 +99,11 @@ async function main() {
     /expired/,
   );
 
-  const operationsOAuth = createOperationsOAuthState({ now, ttlMs: 60_000 });
+  const operationsOAuth = createOperationsOAuthState({
+    now,
+    ttlMs: 60_000,
+    youtubeChannelId: "channel-a",
+  });
   assert.deepEqual(
     verifyOperationsOAuthState({
       state: operationsOAuth.state,
@@ -106,6 +111,18 @@ async function main() {
       now: now + 30_000,
     }),
     operationsOAuth.payload,
+  );
+  assert.equal(
+    operationsOAuthSuccessPath(operationsOAuth.payload),
+    "/api/youtube-connect?channelId=channel-a",
+  );
+  assert.equal(
+    operationsOAuthSuccessPath(createOperationsOAuthState({ now }).payload),
+    "/?operations=verified",
+  );
+  assert.throws(
+    () => createOperationsOAuthState({ now, youtubeChannelId: "../escape" }),
+    /continuation channel is invalid/,
   );
   assert.throws(
     () => verifyOperationsOAuthState({

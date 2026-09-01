@@ -40,7 +40,7 @@ assert.match(elevationRoute, /httpOnly|sessionCookieOptions/);
 assert.doesNotMatch(elevationRoute, /export async function POST|secret|password/i);
 
 const operationsAuthorize = source("./api/operations/authorize/route.ts");
-assert.match(operationsAuthorize, /createOperationsOAuthState\(\)/);
+assert.match(operationsAuthorize, /createOperationsOAuthState\(\{ youtubeChannelId \}\)/);
 assert.match(operationsAuthorize, /getOwnerSessionConsentUrl\(REDIRECT_URI, state\)/);
 assert.match(operationsAuthorize, /OPERATIONS_OAUTH_NONCE_COOKIE/);
 assert.match(operationsAuthorize, /httpOnly: true/);
@@ -134,6 +134,16 @@ assert.doesNotMatch(
   source("./api/youtube-connect/route.ts"),
   /operator-login/,
   "privileged OAuth denial must not resurrect the retired login page",
+);
+assert.match(
+  source("./api/youtube-connect/route.ts"),
+  /new URL\("\/api\/operations\/authorize", request\.url\)/,
+  "an unauthenticated Connect action must enter owner verification instead of rendering a raw 401",
+);
+assert.match(
+  oauthCallback,
+  /operationsOAuthSuccessPath\(oauthState\)/,
+  "successful owner verification must continue the requested YouTube connection",
 );
 
 console.log("Public viewer access boundary regression tests passed");

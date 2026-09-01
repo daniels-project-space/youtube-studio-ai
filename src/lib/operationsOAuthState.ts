@@ -11,6 +11,17 @@ export interface OperationsOAuthStatePayload {
   nonce: string;
   issuedAt: number;
   expiresAt: number;
+  /** Optional Studio channel whose full YouTube consent should begin next. */
+  youtubeChannelId?: string;
+}
+
+const STUDIO_CHANNEL_ID_PATTERN = /^[A-Za-z0-9_-]{8,128}$/;
+
+function assertStudioChannelId(value: string): string {
+  if (!STUDIO_CHANNEL_ID_PATTERN.test(value)) {
+    throw new Error("operations OAuth continuation channel is invalid");
+  }
+  return value;
 }
 
 function sign(encodedPayload: string): string {
@@ -29,6 +40,7 @@ export function isOperationsOAuthState(state: string | null): state is string {
 export function createOperationsOAuthState(args: {
   now?: number;
   ttlMs?: number;
+  youtubeChannelId?: string;
 } = {}): { state: string; nonce: string; payload: OperationsOAuthStatePayload } {
   const now = args.now ?? Date.now();
   const ttlMs = args.ttlMs ?? OPERATIONS_OAUTH_STATE_TTL_MS;
@@ -42,6 +54,9 @@ export function createOperationsOAuthState(args: {
     nonce,
     issuedAt: now,
     expiresAt: now + ttlMs,
+    ...(args.youtubeChannelId
+      ? { youtubeChannelId: assertStudioChannelId(args.youtubeChannelId) }
+      : {}),
   };
   const encoded = Buffer.from(JSON.stringify(payload), "utf8").toString("base64url");
   return {
@@ -91,6 +106,8 @@ export function verifyOperationsOAuthState(args: {
     || payload.expiresAt - payload.issuedAt > OPERATIONS_OAUTH_STATE_TTL_MS
     || now < payload.issuedAt - 30_000
     || now > payload.expiresAt
+    || (payload.youtubeChannelId !== undefined
+      && !STUDIO_CHANNEL_ID_PATTERN.test(payload.youtubeChannelId))
   ) {
     throw new Error("expired or invalid operations OAuth state payload");
   }
@@ -104,4 +121,13 @@ export function verifyOperationsOAuthState(args: {
     throw new Error("operations OAuth state is not bound to this browser");
   }
   return payload;
+}
+
+/** A signed, bounded continuation; never accepts an arbitrary return URL. */
+export function operationsOAuthSuccessPath(
+  payload: OperationsOAuthStatePayload,
+): string {
+  if (!payload.youtubeChannelId) return "/?operations=verified";
+  const params = new URLSearchParams({ channelId: assertStudioChannelId(payload.youtubeChannelId) });
+  return `/api/youtube-connect?${params.toString()}`;
 }
