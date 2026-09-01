@@ -35,8 +35,9 @@ assert.match(detail, /className=\{styles\.inceptionStageError\}[\s\S]*role="aler
 // automatic clip-analysis or style-copying capability.
 assert.doesNotMatch(wizard, /\/api\/analyze-clip/);
 assert.doesNotMatch(wizard, /Gemini analyzes|Gemini suggests/);
-assert.match(wizard, /no automatic copying or clip analysis/);
-assert.match(wizard, /deterministic advisor/);
+assert.match(wizard, /Reference video · optional/);
+assert.match(wizard, /whose qualities you want to discuss/);
+assert.match(wizard, /cannot authorize or silently replace one/);
 assert.match(wizard, /Creator foundation: verified no-Gemini planning/);
 assert.match(wizard, /preflight\.planning\.plannerBlock/);
 assert.match(wizard, /preflight\.planning\.provenance/);
@@ -71,7 +72,7 @@ assert.match(wizard, /kind: "sports_championship_timeline" as const/);
 assert.match(wizard, /kind: "fictional_scenario" as const, profile: syntheticScenarioProfile/);
 assert.doesNotMatch(wizard, /syntheticScenario: syntheticScenarioContract\(syntheticScenarioProfile\)/);
 assert.doesNotMatch(wizard, /family === "quizyear" \? \{ quizProfile \} : \{\}/);
-assert.match(wizard, /Sample episode ideas \(optional — one per line\)/);
+assert.match(wizard, /Episode ideas · optional, one per line/);
 
 // A selectable private-review intake is not an inactive automatic family
 // pipeline in disguise. The creator must show only the registered review
@@ -110,14 +111,13 @@ assert.match(wizard, /visibleAutomaticFamilyRuntimeCheck === "ready"/);
 assert.match(wizard, /&& selectedAutomaticRuntimeReady/);
 assert.match(wizard, /Automatic setup remains locked until this completes\./);
 assert.match(wizard, /Live production readiness could not be verified\./);
-// The readable creator shell must not probe an owner-only endpoint and emit a
-// browser 401 before the signed owner session has been established.
+// Read-only coarse readiness is intentionally available before owner
+// verification; spending and durable creation remain separately gated.
 assert.match(wizard, /const operationsAccess = useOperationsAccess\(\)/);
-const ownerGuard = wizard.indexOf('if (operationsAccess !== "owner")');
 const readinessFetch = wizard.indexOf('fetch("\/api\/automatic-family-readiness"');
-assert.ok(ownerGuard >= 0, "the creator must gate owner-only readiness reads");
-assert.ok(readinessFetch > ownerGuard, "the live readiness request must occur after the owner guard");
-assert.match(wizard, /\}, \[operationsAccess\]\);/);
+assert.ok(readinessFetch >= 0, "the creator must read live readiness");
+assert.match(wizard, /const visibleAutomaticFamilyRuntimeCheck = automaticFamilyRuntimeCheck/);
+assert.doesNotMatch(wizard, /if \(operationsAccess !== "owner"\) return;[\s\S]{0,1200}automatic-family-readiness/);
 
 // Prose advice has no explicit creator length. It may use a researched niche
 // default only when that niche's normal family is the exact suggested family;

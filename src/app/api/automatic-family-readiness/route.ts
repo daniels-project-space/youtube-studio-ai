@@ -5,19 +5,16 @@ import {
 } from "@/engine/automaticFamilyExecutionReadiness";
 import { certifiedFamilyAdmission } from "@/engine/certifiedFamilyAdmission";
 import { FAMILY_KEYS } from "@/engine/families";
-import { authorizeStudioRoute } from "@/lib/operatorSession";
 
 export const runtime = "nodejs";
 
 /**
- * Owner-session endpoint for the creator UI. It exposes no credentials—only
- * whether an already-certified automatic family has its extra live renderer
- * stack available in the current execution environment.
+ * Read-only creator preflight. It exposes no credentials or account data—only
+ * whether an already-certified automatic family can currently start. Keeping
+ * this readable before owner verification prevents the wizard from advertising
+ * a route and then failing merely because its status check was gated.
  */
-export async function GET(request: Request): Promise<Response> {
-  const authFailure = await authorizeStudioRoute(request);
-  if (authFailure) return authFailure;
-
+export async function GET(): Promise<Response> {
   const families = FAMILY_KEYS
     .filter((family) => certifiedFamilyAdmission(family).automatic)
     .map((family) => {

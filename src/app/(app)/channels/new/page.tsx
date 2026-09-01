@@ -440,7 +440,6 @@ export default function NewChannelWizard() {
   const [supervisedAdmission, setSupervisedAdmission] = useState<SupervisedCreatorSelection | null>(null);
 
   useEffect(() => {
-    if (operationsAccess !== "owner") return;
     const abort = new AbortController();
     let current = true;
     void fetch("/api/automatic-family-readiness", { signal: abort.signal, cache: "no-store" })
@@ -489,13 +488,9 @@ export default function NewChannelWizard() {
       current = false;
       abort.abort();
     };
-  }, [operationsAccess]);
+  }, []);
 
-  const visibleAutomaticFamilyRuntimeCheck = operationsAccess === "checking"
-    ? "loading"
-    : operationsAccess !== "owner"
-      ? "unavailable"
-      : automaticFamilyRuntimeCheck;
+  const visibleAutomaticFamilyRuntimeCheck = automaticFamilyRuntimeCheck;
 
   const niche = getNiche(nicheKey);
   const fam = family ? getFamily(family) : undefined;
