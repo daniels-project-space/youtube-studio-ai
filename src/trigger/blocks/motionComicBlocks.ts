@@ -37,6 +37,7 @@ import {
   type MotionComicImageRequest,
   type MotionComicStoryboard,
 } from "@/lib/motionComic";
+import type { VisualAtlasIdentityAnchor } from "@/engine/visualAtlasExperiment";
 import {
   assertStoryboardCritiqueApproved,
   critiqueStoryboardText,
@@ -58,6 +59,8 @@ import { novitaCostEnvelope, type NovitaCostEnvelope } from "@/lib/novitaCostEnv
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { PRICE } from "@/engine/pricing";
 import { preflightNarrationPerformance } from "@/lib/narrationPerformance";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
 
 /**
  * Checks the complete primary + bounded-recovery art envelope before the
@@ -165,6 +168,66 @@ function comicCritiqueChannel(ctx: StageContext): ChannelCritiqueContext {
     ...(laneKey ? { contentLaneKey: laneKey } : {}),
     laneEmphasis: laneQualityPolicy(lane).emphasis,
   };
+}
+
+function motionComicAtlasIdentity(
+  ctx: StageContext,
+  resolvedStyle: string | undefined,
+): {
+  readonly channelIdentityFingerprint: string;
+  readonly identityAnchors: readonly VisualAtlasIdentityAnchor[];
+} {
+  const dna = (ctx.store["styleDNA"] as Partial<import("@/engine/creative/types").StyleDNA> | null | undefined) ?? null;
+  const identitySource = {
+    channelId: ctx.channelId,
+    styleDNA: dna,
+    styleGrammar: ctx.store["styleGrammar"] ?? null,
+    visualStyle: ctx.store["visualStyle"] ?? null,
+    resolvedStyle: resolvedStyle ?? null,
+  };
+  const channelIdentityFingerprint = sha256Hex(canonicalJson(identitySource));
+  const candidates: Array<{ role: VisualAtlasIdentityAnchor["role"]; instruction: string }> = [
+    {
+      role: "line_language",
+      instruction:
+        `Every frame uses one identical channel drawing language: ${resolvedStyle?.trim() || String(ctx.store["styleGrammar"] ?? ctx.store["visualStyle"] ?? "clean controlled comic illustration")}.`,
+    },
+    ...(dna?.palette?.length ? [{
+      role: "palette" as const,
+      instruction: `Every frame preserves the channel palette in this order: ${dna.palette.join(", ")}.`,
+    }] : []),
+    ...(dna?.recurringSubject?.trim() ? [{
+      role: "recurring_subject" as const,
+      instruction: `When the recurring subject appears, preserve this exact channel identity without substitution: ${dna.recurringSubject.trim()}.`,
+    }] : []),
+    ...(dna?.setting?.trim() ? [{
+      role: "setting" as const,
+      instruction: `All locations remain recognizably inside this channel world and material grammar: ${dna.setting.trim()}.`,
+    }] : []),
+    ...(dna?.colorGrade?.trim() ? [{
+      role: "color_grade" as const,
+      instruction: `Apply the same color grade to every frame: ${dna.colorGrade.trim()}.`,
+    }] : []),
+    ...(dna?.motifs?.length ? [{
+      role: "motif" as const,
+      instruction: `Carry the channel motifs contextually through the full sequence, not only the opening frames: ${dna.motifs.join(", ")}.`,
+    }] : []),
+  ];
+  const identityAnchors = candidates.slice(0, 32).map((candidate, index): VisualAtlasIdentityAnchor => {
+    const instruction = candidate.instruction.replace(/\s+/gu, " ").trim().slice(0, 1_600);
+    const sourceFingerprint = sha256Hex(canonicalJson({
+      channelIdentityFingerprint,
+      role: candidate.role,
+      instruction,
+    }));
+    return {
+      id: `${candidate.role}-${String(index + 1).padStart(2, "0")}-${sourceFingerprint.slice(0, 16)}`,
+      role: candidate.role,
+      instruction,
+      sourceFingerprint,
+    };
+  });
+  return Object.freeze({ channelIdentityFingerprint, identityAnchors });
 }
 
 function storyboardWords(plan: MotionComicStoryboard): number {
@@ -418,6 +481,7 @@ export const motionComicBlock: Block = {
     "videoKey", "videoLocalPath", "videoDurationSec", "narrationText", "motionComicTimeline",
     "narrationKey", "narrationLocalPath", "narrationDurationSec", "narrationTranscriptText",
     "narrationPerformanceEvidence", "sentenceTimings", "narrationStartSec",
+    "motionComicVisualAtlasPlanKey", "motionComicVisualAtlasPlanFingerprint",
   ],
   paid: true,
   run: async (ctx) => {
@@ -538,6 +602,9 @@ export const motionComicBlock: Block = {
       targetSeconds: Number(ctx.params["targetSeconds"] ?? 0) || undefined,
       ...(layoutRepair.length ? { layoutRepair } : {}),
     };
+    const atlasIdentity = motionComicAtlasIdentity(ctx, style);
+    let motionComicVisualAtlasPlanKey: string | undefined;
+    let motionComicVisualAtlasPlanFingerprint: string | undefined;
     // QUALITY GATE — settle the storyboard with the Director FIRST, at text
     // prices. castMotionComic below is then called exactly once with the
     // accepted story, so a rejected draft never costs a second paid render.
@@ -551,6 +618,32 @@ export const motionComicBlock: Block = {
       runDir,
       outPath,
       generateImage,
+      visualAtlasExperiment: {
+        ownerId: ctx.ownerId,
+        channelId: ctx.channelId,
+        channelIdentityFingerprint: atlasIdentity.channelIdentityFingerprint,
+        identityAnchors: atlasIdentity.identityAnchors,
+      },
+      onVisualAtlasExperimentPlan: async (plan) => {
+        const key = `${ctx.keyPrefix}runs/${ctx.runId}/experiments/motion-comic-visual-atlas-${plan.fingerprint}.json`;
+        await putObject(key, Buffer.from(JSON.stringify(plan)), { contentType: "application/json" });
+        await recordAsset(ctx, "visual_atlas_experiment_plan", key, {
+          fingerprint: plan.fingerprint,
+          useCase: plan.useCase,
+          frameCount: plan.frameCount,
+          variants: plan.variants.map((variant) => ({
+            gridSize: variant.gridSize,
+            tilePixels: variant.tilePixels,
+            geometryStatus: variant.geometryStatus,
+            plannedProviderCalls: variant.plannedProviderCalls,
+          })),
+          providerSpend: 0,
+          productionRouteChanged: false,
+        });
+        motionComicVisualAtlasPlanKey = key;
+        motionComicVisualAtlasPlanFingerprint = plan.fingerprint;
+        ctx.log(`motion_comic: persisted zero-spend visual-atlas experiment plan ${plan.fingerprint.slice(0, 12)}`);
+      },
       log: (m) => ctx.log(`mc: ${m}`),
     });
     const narrationPerformanceEvidence = await preflightNarrationPerformance({
@@ -603,6 +696,8 @@ export const motionComicBlock: Block = {
       sentenceTimings: res.sentenceTimings,
       narrationStartSec: res.narrationStartSec,
       motionComicTimeline: res.reviewTimeline,
+      ...(motionComicVisualAtlasPlanKey ? { motionComicVisualAtlasPlanKey } : {}),
+      ...(motionComicVisualAtlasPlanFingerprint ? { motionComicVisualAtlasPlanFingerprint } : {}),
       [COST_PATCH_KEY]: comicCost,
     };
   },

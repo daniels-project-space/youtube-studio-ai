@@ -138,11 +138,12 @@ const MUSIC_MODULE: ModuleCard = {
   stage: "audio",
   does: "Generates the background score, crossfading distinct tracks into the mix.",
   customization: {
-    capabilities: ["provider choice", "style-prompt steering", "multi-track crossfade mix"],
+    capabilities: ["provider choice", "channel sound program", "structured arrangement", "style-prompt steering", "multi-track crossfade mix"],
     knobs: [
-      { id: "provider", type: "enum", values: ["mureka", "suno"], default: "mureka", describes: "music generation provider", servesStyles: ["platform"] },
+      { id: "provider", type: "enum", values: ["mureka", "suno", "minimax_music3"], default: "mureka", describes: "music provider; MiniMax-Music3 is attribution-, license-, safeguards-, and quality-gated", servesStyles: ["platform"] },
       { id: "prompt", type: "text", maxLength: 300, default: "", describes: "music style/mood prompt (e.g. 'calm ambient, soft pads, no drums')", servesStyles: ["lofi", "ambient"] },
       { id: "trackCount", type: "number", range: [1, 8], default: 2, describes: "distinct tracks crossfaded (variety vs cost)", servesStyles: ["lofi", "long-form"] },
+      { id: "generationDurationSec", type: "number", range: [10, 300], default: 300, describes: "native channel-score duration before deterministic looping", servesStyles: ["lofi", "ambient", "documentary"] },
     ],
     presets: { lofi: { provider: "suno", trackCount: 4 } },
   },

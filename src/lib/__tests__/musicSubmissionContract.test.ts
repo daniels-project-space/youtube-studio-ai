@@ -243,6 +243,17 @@ async function main(): Promise<void> {
     assert(urls[0].includes("mureka"));
     assert(urls[1].includes("suno"));
 
+    calls = 0;
+    globalThis.fetch = async () => {
+      calls += 1;
+      throw new Error("MiniMax-Music3 must never reach a generic prompt-only provider path");
+    };
+    await assert.rejects(
+      generateMusic({ provider: "minimax_music3", prompt: "unbound prompt" }),
+      /fingerprint-bound channel music program/,
+    );
+    assert.equal(calls, 0, "MiniMax-Music3 requires its admitted program before any request");
+
     const acceptedFailure = new MusicError("accepted job later failed", { acceptedUnits: 1 });
     const charged = withMusicGenerationCost(acceptedFailure, 2, 0.12) as Error & {
       retryable?: boolean;
@@ -250,6 +261,13 @@ async function main(): Promise<void> {
     };
     assert.equal(charged.retryable, false);
     assert(Math.abs((charged.additionalObservedCostUsd ?? 0) - 0.36) < 1e-9);
+    const attestedFailure = Object.assign(new Error("accepted self-hosted job failed during persistence"), {
+      observedCostUsd: 0.031,
+    });
+    const attestedCharge = withMusicGenerationCost(attestedFailure, 0, 0.12) as Error & {
+      additionalObservedCostUsd?: number;
+    };
+    assert.equal(attestedCharge.additionalObservedCostUsd, 0.031);
 
     await acceptedMusicDownloadTimeoutIsTerminal();
     await boundedCreateTimeoutIsTerminal();

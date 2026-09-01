@@ -38,6 +38,9 @@ credentials in GitHub Actions or Vercel merely to deploy code.
 | `QWEN3_TTS_QUALITY_QUALIFIED` / `QWEN3_TTS_QUALITY_RECEIPT_SHA256` | safety | Admits Qwen3 production narration only after a reviewed audio benchmark | generated qualification receipt |
 | `SUNO_API_KEY` | feature | Suno music beds | sunoapi.org (credits: `GET /api/v1/generate/credit`) |
 | `MUREKA_API_KEY` | feature | Mureka music beds (paired fallback) | mureka.ai |
+| `MINIMAX_MUSIC3_WORKER_URL` / `MINIMAX_MUSIC3_WORKER_TOKEN` | feature | Pinned MiniMax-Music3 two-GPU Novita worker; explicit provider only | protected Novita worker deployment |
+| `MINIMAX_MUSIC3_QUALITY_QUALIFIED` / `MINIMAX_MUSIC3_QUALITY_RECEIPT_SHA256` | safety | Admits the exact Music3 worker only after native-WAV measurement and human audition | generated qualification receipt |
+| `MINIMAX_MUSIC3_LICENSE_ATTESTED` / `MINIMAX_MUSIC3_UI_ATTRIBUTION_ENABLED` / `MINIMAX_MUSIC3_DISCLOSURE_ENABLED` / `MINIMAX_MUSIC3_SAFEGUARDS_ATTESTED` | safety | License, prominent `MiniMax-Music3` UI attribution, generated-content disclosure, hosted safeguards, and operator authorization-threshold attestation | operator/legal review plus production UI and policy controls |
 | `PEXELS_API_KEY` | feature | Pexels 4K stock video | pexels.com/api |
 | `PIXABAY_API_KEY` | feature | Pixabay stock video | pixabay.com/api |
 | `VIDEVO_API_KEY` | optional | Videvo stock video | videvo.net |
@@ -55,4 +58,4 @@ Run-time presence check: `keyStatus()` / `secretsManifest()` in `keyRegistry.ts`
 
 ## Provider fallbacks (so one missing/limited key doesn't break a run)
 - **Narration:** provider choice is explicit. ElevenLabs and Fish remain the managed paths; Qwen3-TTS is an open, pinned worker path and never becomes an automatic fallback. It stays production-closed until its exact worker and quality receipt are configured.
-- **Music:** Mureka ↔ Suno automatic fallback (`generateMusic`); either key enables music.
+- **Music:** Mureka ↔ Suno automatic fallback (`generateMusic`); either key enables managed music. MiniMax-Music3 is an explicit channel-program path and never joins automatic fallback. It remains closed until every worker, quality, license, attribution, disclosure, and safeguards gate passes.

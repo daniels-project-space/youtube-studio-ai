@@ -15,25 +15,14 @@
  * Generic over the registry: register a module → its knobs auto-appear here.
  */
 import { useState } from "react";
-import type { CSSProperties } from "react";
 import { useMutation } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { configurableModules } from "@/engine/moduleRegistry";
 import { ModuleConfigPanel, type ModuleConfigValue } from "./ModuleConfigPanel";
+import styles from "./ModuleConfigSection.module.css";
 
 export type ModuleConfigMap = Record<string, ModuleConfigValue>;
-
-const cardStyle: CSSProperties = {
-  border: "1px solid var(--color-border)", borderRadius: 12,
-  background: "var(--color-surface)", padding: "1rem 1.1rem", display: "grid", gap: "0.85rem",
-};
-const titleStyle: CSSProperties = { fontSize: "0.95rem", fontWeight: 600, letterSpacing: "-0.01em" };
-const stageStyle: CSSProperties = {
-  fontFamily: "var(--font-mono)", fontSize: "0.6rem", letterSpacing: "0.1em",
-  textTransform: "uppercase", color: "var(--color-faint)",
-};
-const doesStyle: CSSProperties = { fontSize: "0.76rem", color: "var(--color-muted)", lineHeight: 1.4 };
 
 /** One module card. Convex-backed when `channelId` is set, else controlled. */
 function ModuleCard({
@@ -41,24 +30,29 @@ function ModuleCard({
   title,
   stage,
   does,
+  capabilities,
   surface,
   value,
   onChange,
   channelId,
+  index,
 }: {
   blockId: string;
   title: string;
   stage: string;
   does?: string;
+  capabilities: readonly string[];
   surface: import("@/engine/customization").CustomizationSurface;
   value: ModuleConfigValue;
   onChange?: (blockId: string, next: ModuleConfigValue) => void;
   channelId?: Id<"channels">;
+  index: number;
 }) {
   const setModuleConfig = useMutation(api.channels.setModuleConfig);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [local, setLocal] = useState<ModuleConfigValue>(value);
+  const [open, setOpen] = useState(index === 0);
 
   const handle = async (next: ModuleConfigValue) => {
     setLocal(next);
@@ -78,22 +72,30 @@ function ModuleCard({
   };
 
   return (
-    <div style={cardStyle}>
-      <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "0.5rem" }}>
-        <div>
-          <span style={stageStyle}>{stage}</span>
-          <div style={titleStyle}>{title}</div>
+    <details className={styles.module} open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+      <summary className={styles.summary}>
+        <span className={styles.index}>{String(index + 1).padStart(2, "0")}</span>
+        <div className={styles.identity}>
+          <span className={styles.stage}>{stage}</span>
+          <div className={styles.title}>{title}</div>
         </div>
-        {busy && <span style={{ fontSize: "0.68rem", color: "var(--color-accent)" }}>Saving…</span>}
+        {busy ? <span className={styles.saving}>Saving…</span> : <span className={styles.chevron} aria-hidden="true">+</span>}
+      </summary>
+      <div className={styles.body}>
+        <div className={styles.brief}>
+          {does && <p className={styles.does}>{does}</p>}
+          {capabilities.length > 0 && (
+            <ul className={styles.capabilities} aria-label={`${title} capabilities`}>
+              {capabilities.slice(0, 5).map((capability) => <li key={capability}>{capability}</li>)}
+            </ul>
+          )}
+        </div>
+        <div className={styles.controls}>
+          <ModuleConfigPanel surface={surface} value={local} onChange={handle} disabled={busy} />
+          {err && <div className={styles.error} role="alert">{err}</div>}
+        </div>
       </div>
-      {does && <div style={doesStyle}>{does}</div>}
-      <ModuleConfigPanel surface={surface} value={local} onChange={handle} disabled={busy} />
-      {err && (
-        <div style={{ fontSize: "0.72rem", color: "#fca5a5", border: "1px solid rgba(248,113,113,0.4)", borderRadius: 8, padding: "0.4rem 0.6rem" }}>
-          {err}
-        </div>
-      )}
-    </div>
+    </details>
   );
 }
 
@@ -129,25 +131,28 @@ export function ModuleConfigSection({
 
   if (mods.length === 0) {
     return (
-      <div style={{ ...cardStyle, color: "var(--color-muted)", fontSize: "0.82rem" }}>
-        No configurable modules registered yet.
+      <div className={styles.empty}>
+        <strong>No adjustable stages</strong>
+        This pipeline has no operator-facing module controls.
       </div>
     );
   }
 
   return (
-    <div style={{ display: "grid", gap: "0.85rem" }}>
-      {mods.map((m) => (
+    <div className={styles.rack}>
+      {mods.map((m, index) => (
         <ModuleCard
           key={m.blockId}
           blockId={m.blockId}
           title={m.card.title}
           stage={m.card.stage}
           does={m.card.does}
+          capabilities={m.surface.capabilities}
           surface={m.surface}
           value={current[m.blockId] ?? {}}
           onChange={channelId ? undefined : handleControlled}
           channelId={channelId}
+          index={index}
         />
       ))}
     </div>

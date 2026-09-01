@@ -52,6 +52,10 @@ import {
   createOriginalMusicProgramPlan,
   type OriginalMusicProgramPlan,
 } from "@/engine/originalMusicProgram";
+import {
+  createChannelMusicProgram,
+  type ChannelMusicProgram,
+} from "@/engine/channelMusicProgram";
 import { EpisodeGraphSchema } from "@/engine/episodeGraph";
 import { StorySpineSchema } from "@/engine/storySpine";
 import {
@@ -104,9 +108,14 @@ import {
   type MusicProvider,
   type MusicTrack,
 } from "@/lib/music";
+import {
+  assertPinnedMiniMaxMusic3Receipt,
+  generateMiniMaxMusic3,
+  type MiniMaxMusic3Receipt,
+} from "@/lib/minimaxMusic3";
 import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { notifyDraftReady } from "@/lib/telegram";
-import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, measureAudio, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio, type CaptionCue } from "@/lib/ffmpeg";
+import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, measureAudio, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudioTransparentGain, type CaptionCue } from "@/lib/ffmpeg";
 import { channelVisualReviewProfile, reviewRender, type VisualReviewResult } from "@/lib/visualReview";
 import {
   proveOnScreenText,
@@ -172,6 +181,8 @@ import {
   writeBytes,
 } from "@/lib/files";
 import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity, headObjectMetadata, listObjects, deleteObjects, publicUrl } from "@/lib/storage";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
 import { join } from "node:path";
 import { access, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -212,6 +223,8 @@ import {
 // their output transfer bounded so a stalled provider body reaches this block's
 // existing cost-carrying terminal catch instead of the whole-task timeout.
 const MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS = 300_000;
+const MINIMAX_MUSIC3_DESCRIPTION_DISCLOSURE =
+  "Music generated with MiniMax-Music3. This video contains AI-generated audio.";
 
 /* ----------------------------- helpers --------------------------------- */
 
@@ -612,6 +625,36 @@ async function recordAsset(
   } catch (e) {
     ctx.log(`recordAsset(${kind}) failed (non-fatal): ${e instanceof Error ? e.message : e}`);
   }
+}
+
+async function appendMusicGenerationDisclosure(
+  ctx: StageContext,
+  description: string,
+): Promise<string> {
+  if (ctx.store["musicProvider"] !== "minimax_music3") return description;
+  const programKey = str(ctx, "channelMusicProgramKey");
+  const receiptKey = str(ctx, "musicRuntimeReceiptKey");
+  const [programBytes, receiptBytes] = await Promise.all([
+    getObjectBytes(programKey),
+    getObjectBytes(receiptKey),
+  ]);
+  let program: unknown;
+  let receipt: unknown;
+  try {
+    program = JSON.parse(Buffer.from(programBytes).toString("utf8"));
+    receipt = JSON.parse(Buffer.from(receiptBytes).toString("utf8"));
+  } catch (error) {
+    throw new Error(
+      `MiniMax-Music3 disclosure evidence is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const admitted = assertPinnedMiniMaxMusic3Receipt(receipt, program);
+  if (description.includes(MINIMAX_MUSIC3_DESCRIPTION_DISCLOSURE)) return description;
+  ctx.log(
+    `publish package: appended required ${admitted.license.uiAttribution} generated-audio disclosure ` +
+    `from runtime receipt ${admitted.requestKey.slice(0, 12)}`,
+  );
+  return `${description.trim()}\n\n${MINIMAX_MUSIC3_DESCRIPTION_DISCLOSURE}`;
 }
 
 /* --------------------------- 1. topic_select ---------------------------- */
@@ -1105,7 +1148,10 @@ export const musicProgramPlan: Block = {
       visualStyle: visualStyle(ctx),
       motionIntent: "one calm, seamless camera movement with no abrupt cuts, flashes, or subject drift",
       audioDirection,
-      providerPreference: (ctx.params["provider"] as "suno" | "mureka" | undefined) ?? "suno",
+      // The legacy route plan predates MiniMax-Music3 and remains replayable.
+      // A MiniMax selection is bound separately by channel-music-program/v1 in
+      // the paid block; never smuggle an unsupported provider into this v1.
+      providerPreference: ctx.params["provider"] === "mureka" ? "mureka" : "suno",
     });
     ctx.log(`music_program_plan: sealed ${plan.fingerprint.slice(0, 12)} for ${plan.routeKey}`);
     return {
@@ -1553,7 +1599,14 @@ export const upscale: Block = {
 export const music: Block = {
   id: "music",
   consumes: ["topic"],
-  produces: ["musicKey", "musicProvider", "musicUrl"],
+  produces: [
+    "musicKey",
+    "musicProvider",
+    "musicUrl",
+    "channelMusicProgramKey",
+    "channelMusicProgramFingerprint",
+    "musicRuntimeReceiptKey",
+  ],
   paid: true,
   run: async (ctx) => {
     const topic = str(ctx, "topic");
@@ -1575,8 +1628,10 @@ export const music: Block = {
         [COST_PATCH_KEY]: 0,
       };
     }
-    const provider = musicProgram?.audio.providerPreference
-      ?? ((ctx.params.provider as MusicProvider) ?? "mureka");
+    const requestedProvider = ["suno", "mureka", "minimax_music3"].includes(String(ctx.params.provider))
+      ? ctx.params.provider as MusicProvider
+      : undefined;
+    const provider: MusicProvider = requestedProvider ?? musicProgram?.audio.providerPreference ?? "mureka";
     // Phase 2 grounding: "Suno generated by the STYLE OF THE CHANNEL" — the frozen
     // Style DNA audio spec (genre/instrumentation/textures/BPM/loop) is the
     // channel's locked SOUND and WINS. Priority: DNA spec > Composer crew brief
@@ -1629,6 +1684,59 @@ export const music: Block = {
     ].filter(Boolean).join(" ");
     ctx.log(`music: prompt source = ${dnaPrompt ? (arcNote ? "style DNA + composer arc" : "style DNA") : composerPrompt ? "composer brief" : "default"}${studioAudioDirection ? " + approved Studio audio direction" : ""}`);
 
+    const route = routeSeedForTopicSelection(ctx);
+    const channelIdentityFingerprint = sha256Hex(canonicalJson({
+      ownerId: ctx.ownerId,
+      channelId: ctx.channelId,
+      channelName: ctx.store["channelName"] ?? null,
+      routeFingerprint: route?.routeFingerprint ?? null,
+      styleDNA: dna,
+      musicBrief: getMusicBrief(ctx.store) ?? null,
+    }));
+    const channelMusicProgram: ChannelMusicProgram = createChannelMusicProgram({
+      channelId: String(ctx.channelId),
+      channelIdentityFingerprint,
+      family: route?.family ?? "music_loop",
+      contentLaneKey: route?.contentLaneKey ?? "music_loop",
+      topic,
+      providerPreference: provider,
+      durationSec: Number(ctx.params.generationDurationSec ?? 300),
+      genre: a?.genre,
+      instrumentation: a?.instrumentation,
+      textures: a?.textures,
+      bpmRange: a?.bpmRange,
+      moodArc: a?.moodArc,
+      composerDirection: [composerPrompt, studioAudioDirection].filter(Boolean).join(" ") || undefined,
+      targetLufs: Number(a?.loudnessLufs ?? -16),
+      bodyMusicVol: 1,
+    });
+    const channelMusicProgramKey =
+      `${ctx.keyPrefix}runs/${ctx.runId}/audio/channel-music-program-${channelMusicProgram.fingerprint}.json`;
+    await putObject(
+      channelMusicProgramKey,
+      Buffer.from(JSON.stringify(channelMusicProgram, null, 2)),
+      { contentType: "application/json" },
+    );
+    await recordAsset(ctx, "channel_music_program", channelMusicProgramKey, {
+      fingerprint: channelMusicProgram.fingerprint,
+      providerPreference: channelMusicProgram.generation.providerPreference,
+      role: channelMusicProgram.role,
+      spendUsd: 0,
+      productionMusicKey: null,
+    });
+    ctx.log(
+      `music: sealed channel sound program ${channelMusicProgram.fingerprint.slice(0, 12)} ` +
+      `(${channelMusicProgram.role}, ${channelMusicProgram.generation.sections.length} authored sections) before spend`,
+    );
+    const providerPrompt = provider === "minimax_music3"
+      ? channelMusicProgram.generation.structuredCaption
+      : [
+          prompt,
+          `Arrangement map: ${channelMusicProgram.generation.sections.map((section) =>
+            `${section.label} ${Math.round(section.startFraction * 100)}-${Math.round(section.endFraction * 100)}%: ${section.instruction}`,
+          ).join(" ")}`,
+        ].join(" ");
+
     // MULTI-TRACK MIX: a single looped 3-min track reads as stale on anything
     // longer than a few minutes. trackCount asks for N distinct clips that get
     // crossfade-concatenated (3s tri — the proven legacy-autostudio recipe)
@@ -1644,20 +1752,65 @@ export const music: Block = {
     let jobIds: string[] = [];
     let generations = 0;
     let billedGenerations = 0;
+    let billedAttestedCostUsd = 0;
     let usedProvider: MusicProvider = provider;
+    let minimaxLocalPath: string | undefined;
+    let minimaxReceipt: MiniMaxMusic3Receipt | undefined;
+    let musicRuntimeReceiptKey: string | undefined;
 
     try {
     const generateWith = async (prov: MusicProvider): Promise<void> => {
       tracks = [];
       jobIds = [];
       generations = 0;
-      if (prov === "suno") {
+      if (prov === "minimax_music3") {
+        ctx.log(
+          "music: MiniMax-Music3 — two-GPU spot worker, pinned ComfyUI/model revisions, " +
+          "prominent attribution/disclosure, durable WAV integrity, and listened-quality admission required…",
+        );
+        const result = await generateMiniMaxMusic3({
+          program: channelMusicProgram,
+          seed: Number(ctx.params.seed ?? 4_242),
+          cfgScale: Number(ctx.params.cfgScale ?? 7),
+          topK: Number(ctx.params.topK ?? 50),
+          maxCostUsd: Number(ctx.params.maxCostUsd ?? 5),
+        });
+        minimaxReceipt = result.receipt;
+        billedAttestedCostUsd = result.receipt.runtime.costUsd;
+        minimaxLocalPath = await writeBytes(join(tmp, "minimax-music3.wav"), result.audio);
+        musicRuntimeReceiptKey =
+          `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-runtime-${result.receipt.requestKey}.json`;
+        await putObject(
+          musicRuntimeReceiptKey,
+          Buffer.from(JSON.stringify(result.receipt, null, 2)),
+          { contentType: "application/json" },
+        );
+        await recordAsset(ctx, "minimax_music3_runtime_receipt", musicRuntimeReceiptKey, {
+          requestKey: result.receipt.requestKey,
+          jobId: result.receipt.jobId,
+          programFingerprint: channelMusicProgram.fingerprint,
+          modelRevision: result.receipt.modelRevision,
+          runtimeRevision: result.receipt.runtimeRevision,
+          observedCostUsd: result.receipt.runtime.costUsd,
+          uiAttribution: result.receipt.license.uiAttribution,
+          generatedContentDisclosureEnabled: result.receipt.license.generatedContentDisclosureEnabled,
+          trackHumanAuditionStatus: "pending_private_draft_review",
+        });
+        generations = 1;
+        usedProvider = "minimax_music3";
+        jobIds = [result.receipt.jobId];
+        tracks = [{
+          url: result.receipt.output.url,
+          wavUrl: result.receipt.output.url,
+          durationSec: result.receipt.durationSec,
+        }];
+      } else if (prov === "suno") {
         const gens = Math.ceil(trackCount / 2);
         for (let g = 0; g < gens && tracks.length < trackCount; g++) {
           const varied =
             g === 0
-              ? prompt
-              : `${prompt} Part ${g + 1} of a continuous mix: same instrumentation, key family and mood, a different melodic progression.`;
+              ? providerPrompt
+              : `${providerPrompt} Part ${g + 1} of a continuous mix: same instrumentation, key family and mood, a different melodic progression.`;
           ctx.log(`music: suno ${sunoModel} generation ${g + 1}/${gens} (custom mode, WAV upgrade)…`);
           const res = await generateSuno({
             prompt: varied,
@@ -1678,7 +1831,7 @@ export const music: Block = {
       } else {
         ctx.log(`music: generating via ${prov}…`);
         const res = await generateMureka({
-          prompt,
+          prompt: providerPrompt,
           model: ctx.params.model as string | undefined,
           timeoutMs: 600_000,
         });
@@ -1694,8 +1847,8 @@ export const music: Block = {
     // when the alternate provider's key is present — both produce instrumental
     // beds from the same DNA prompt. (Live case: Mureka 429 "exceeded your
     // current quota" after two renders; Suno had credits.)
-    const altProvider: MusicProvider = provider === "suno" ? "mureka" : "suno";
-    const hasProviderKey = (p: MusicProvider) =>
+    const altProvider: Exclude<MusicProvider, "minimax_music3"> = provider === "suno" ? "mureka" : "suno";
+    const hasProviderKey = (p: Exclude<MusicProvider, "minimax_music3">) =>
       p === "suno" ? Boolean(process.env.SUNO_API_KEY) : Boolean(process.env.MUREKA_API_KEY);
     try {
       await generateWith(provider);
@@ -1706,7 +1859,7 @@ export const music: Block = {
         e.safeToFallback &&
         e.acceptedUnits === 0 &&
         billedGenerations === 0;
-      if (admissionRejected && hasProviderKey(altProvider)) {
+      if (provider !== "minimax_music3" && admissionRejected && hasProviderKey(altProvider)) {
         ctx.log(`music: ${provider} is quota/billing-dead (${msg.slice(0, 120)}) — FAILING OVER to ${altProvider}`);
         usedProvider = altProvider;
         await generateWith(altProvider);
@@ -1722,18 +1875,23 @@ export const music: Block = {
     // channel's LUFS target (DNA audio.loudnessLufs, default -14 = YouTube
     // reference) — the "Suno loudness mastering" step that previously existed
     // only as an unenforced DNA field.
-    const locals: string[] = [];
-    for (let i = 0; i < tracks.length; i++) {
-      const ext = tracks[i].wavUrl ? "wav" : "mp3";
-      locals.push(await downloadTo(tracks[i].url, join(tmp, `track_${i}.${ext}`), {
-        timeoutMs: MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
-      }));
+    const locals: string[] = minimaxLocalPath ? [minimaxLocalPath] : [];
+    if (!minimaxLocalPath) {
+      for (let i = 0; i < tracks.length; i++) {
+        const ext = tracks[i].wavUrl ? "wav" : "mp3";
+        locals.push(await downloadTo(tracks[i].url, join(tmp, `track_${i}.${ext}`), {
+          timeoutMs: MUSIC_PROVIDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+        }));
+      }
     }
     const mixPath =
       locals.length > 1 ? await crossfadeConcatAudio(locals, join(tmp, "mix.mp3"), 3) : locals[0];
-    const targetLufs = Number(a?.loudnessLufs ?? -14);
-    let local = await masterAudio(mixPath, join(tmp, "music.mp3"), { lufs: targetLufs });
-    ctx.log(`music: mastered mix → loudnorm I=${targetLufs} LUFS, 320k`);
+    const targetLufs = channelMusicProgram.mix.targetLufs;
+    let local = await masterAudioTransparentGain(mixPath, join(tmp, "music.mp3"), {
+      lufs: targetLufs,
+      truePeakMaxDbtp: channelMusicProgram.mix.truePeakMaxDbtp,
+    });
+    ctx.log(`music: mastered mix → transparent constant gain I=${targetLufs} LUFS, no compressor/limiter, 320k`);
     // SELF-LOOPING FOLD: assemble stream_loops this mix for the whole render,
     // so an unproven bed would create an audible hard splice every loop. This
     // is a release gate, not optional polish: after a paid generation the
@@ -1761,6 +1919,12 @@ export const music: Block = {
       tracks: tracks.length,
       losslessTracks: wavCount,
       masteredLufs: targetLufs,
+      channelMusicProgramFingerprint: channelMusicProgram.fingerprint,
+      channelMusicProgramKey,
+      runtimeReceiptKey: musicRuntimeReceiptKey,
+      generatedContentDisclosure: usedProvider === "minimax_music3",
+      uiAttribution: minimaxReceipt?.license.uiAttribution,
+      trackHumanAuditionStatus: "pending_private_draft_review",
     });
 
     // Downstream consumers (assemble/timeline_assemble) PREFER musicKey — the
@@ -1776,14 +1940,20 @@ export const music: Block = {
       musicKey,
       musicProvider: usedProvider,
       musicUrl,
+      channelMusicProgramKey,
+      channelMusicProgramFingerprint: channelMusicProgram.fingerprint,
+      musicRuntimeReceiptKey,
       // Keep spend from successful generations made before provider failover;
       // resetting the selected provider's tracks must not erase paid work.
-      [COST_PATCH_KEY]: PRICE.musicTrackUsd * billedGenerations,
+      [COST_PATCH_KEY]: PRICE.musicTrackUsd * billedGenerations + billedAttestedCostUsd,
     };
     } catch (error) {
       // Preserve every confirmed accepted generation if a later generation,
       // download, mix, or R2 write fails. This also makes the failure terminal,
       // preventing the runner from buying the completed jobs again.
+      if (billedAttestedCostUsd > 0 && error && typeof error === "object") {
+        Object.assign(error, { observedCostUsd: billedAttestedCostUsd });
+      }
       throw withMusicGenerationCost(error, billedGenerations, PRICE.musicTrackUsd);
     }
   },
@@ -2897,6 +3067,7 @@ export const uploadDraft: Block = {
     // ("[softly]" in the hook quote) straight to a YouTube draft. The upload
     // is the final gate, so it strips regardless of upstream cache state.
     description = description.replace(/\[(?:softly|whispers?|pause|long pause|sighs?|exhales?|inhales? deeply|laughs?|chuckles?|seriously|slowly|thoughtful|curious|emphatic|excited|sarcastic|appalled|surprised)\]/gi, "").replace(/ {2,}/g, " ");
+    description = await appendMusicGenerationDisclosure(ctx, description);
     const tags = (ctx.store["tags"] as string[]) ?? [];
 
     // AUTO-CHAPTERS (metacraft.buildChapters): the chapterPlan knows exactly
@@ -3414,7 +3585,10 @@ export const shortsSpinoff: Block = {
       ownerId: ctx.ownerId,
       requiredScopes: YOUTUBE_UPLOAD_SCOPES,
     });
-    const desc = (ctx.store["description"] as string | undefined) ?? "";
+    const desc = await appendMusicGenerationDisclosure(
+      ctx,
+      (ctx.store["description"] as string | undefined) ?? "",
+    );
     const publishShort = narrativeSelection.kind === "selected"
       ? false
       : ctx.params["publishShort"] === "public";

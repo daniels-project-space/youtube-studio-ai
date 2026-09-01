@@ -1864,6 +1864,56 @@ export async function masterAudio(
 }
 
 /**
+ * Master a generated music program with one transparent, constant gain only.
+ * Unlike `masterAudio`, this path never compresses, limits, equalizes, or asks
+ * loudnorm to reshape dynamics. It first measures the complete source, proves
+ * the requested gain can respect the true-peak ceiling, applies that fixed
+ * gain, then measures the encoded result again before release.
+ */
+export async function masterAudioTransparentGain(
+  inPath: string,
+  outPath: string,
+  opts: { lufs: number; truePeakMaxDbtp?: number },
+): Promise<string> {
+  const targetLufs = Math.max(-24, Math.min(-9, opts.lufs));
+  const truePeakMaxDbtp = Math.max(-6, Math.min(-0.1, opts.truePeakMaxDbtp ?? -1));
+  const { stderr } = await run(FFMPEG, [
+    "-nostats", "-i", inPath,
+    "-map", "a:0",
+    "-filter:a", "ebur128=peak=true",
+    "-f", "null", "-",
+  ], 600_000);
+  const loudnessMatches = [...stderr.matchAll(/I:\s*(-?\d+(?:\.\d+)?)\s*LUFS/gu)];
+  const peakMatches = [...stderr.matchAll(/Peak:\s*(-?\d+(?:\.\d+)?)\s*dBFS/gu)];
+  const inputLufs = Number(loudnessMatches.at(-1)?.[1]);
+  const inputPeakDbfs = Number(peakMatches.at(-1)?.[1]);
+  if (!Number.isFinite(inputLufs) || !Number.isFinite(inputPeakDbfs)) {
+    throw new Error("transparent music master could not measure source loudness and true peak");
+  }
+  const gainDb = targetLufs - inputLufs;
+  if (inputPeakDbfs + gainDb > truePeakMaxDbtp + 0.05) {
+    throw new Error(
+      `transparent music master cannot reach ${targetLufs} LUFS without exceeding ${truePeakMaxDbtp} dBTP; ` +
+      `source is ${inputLufs.toFixed(2)} LUFS / ${inputPeakDbfs.toFixed(2)} dBFS and needs ${gainDb.toFixed(2)} dB`,
+    );
+  }
+  await run(FFMPEG, [
+    "-y", "-i", inPath,
+    "-af", `volume=${gainDb.toFixed(3)}dB`,
+    "-c:a", "libmp3lame", "-b:a", "320k", "-ar", "44100",
+    outPath,
+  ]);
+  const verification = await measureAudio(outPath);
+  if (verification.integratedLufs === null || Math.abs(verification.integratedLufs - targetLufs) > 0.65) {
+    throw new Error(
+      `transparent music master verification missed ${targetLufs} LUFS ` +
+      `(measured ${verification.integratedLufs ?? "unavailable"})`,
+    );
+  }
+  return outPath;
+}
+
+/**
  * Apply a stylized voice filter to a narration track (in-place safe — writes to
  * a new file). "radio" = vintage AM/shortwave: band-limited (≈350-3000 Hz),
  * lightly compressed + driven, a slow AM wobble, and low-level brown static bed

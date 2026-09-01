@@ -207,6 +207,12 @@ const managed: ProviderProfile = {
   quality: "production",
   allowFallback: false,
 };
+const minimaxMusic3: ProviderProfile = {
+  id: "novita-minimax-music3-qualified-production",
+  provider: "novita",
+  quality: "production",
+  allowFallback: false,
+};
 
 const contract = (
   capabilities: string[],
@@ -342,11 +348,14 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   music: contract(["audio.music_generated"], {
     optionalConsumes: ["reuseMusicKey", "musicBrief", "styleDNA", "channelName", "sceneMusicPrompt", "studioAudioRecipeProjection", "musicProgramPlan"],
-    providerProfiles: [managed],
+    providerProfiles: [managed, minimaxMusic3],
     maxCostUsd: 10,
     // Reserve both the requested generation count and one alternate-provider
     // failover. A partially completed primary attempt must never be invisible.
     maxCostUsdFor: (params) => {
+      if (params["provider"] === "minimax_music3") {
+        return boundedNumber(params["maxCostUsd"], 5, 0.01, 10);
+      }
       const tracks = Math.ceil(boundedNumber(params["trackCount"], 2, 1, 8));
       const sunoGenerations = Math.ceil(tracks / 2);
       return (sunoGenerations + 1) * PRICE.musicTrackUsd;
@@ -1210,7 +1219,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   motion_comic: contract(
     ["script.generated", "script.qa_passed", "narration.timed", "visuals.generated", "visuals.story_aligned", "master.assembled"],
     {
-      optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "visualRepair", "healHints", "healAttempt", "selfContainedStoryReceipt", "channelProgramRoute"],
+      optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "visualRepair", "healHints", "healAttempt", "selfContainedStoryReceipt", "channelProgramRoute", "styleDNA", "styleGrammar", "visualStyle"],
       providerProfiles: [managed, local],
       maxCostUsd: 40,
       // Cold-run bound includes the live direct-Novita primary/recovery panel

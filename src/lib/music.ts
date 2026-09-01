@@ -31,6 +31,8 @@ import { execFile } from "node:child_process";
 import { stat, unlink } from "node:fs/promises";
 import { promisify } from "node:util";
 
+import { hasQualifiedMiniMaxMusic3 } from "@/lib/minimaxMusic3";
+
 const execFileP = promisify(execFile);
 
 export class MusicError extends Error {
@@ -69,15 +71,18 @@ export function withMusicGenerationCost(
 ): Error {
   const failure = error instanceof Error ? error : new Error(String(error));
   const acceptedOnFailure = error instanceof MusicError ? error.acceptedUnits : 0;
+  const attestedObservedCost = typeof (error as { observedCostUsd?: unknown } | null)?.observedCostUsd === "number"
+    ? Math.max(0, Number((error as { observedCostUsd: number }).observedCostUsd))
+    : 0;
   const totalUnits = Math.max(0, Math.floor(completedUnits)) + acceptedOnFailure;
   Object.assign(failure, {
     retryable: false,
-    additionalObservedCostUsd: totalUnits * Math.max(0, unitCostUsd),
+    additionalObservedCostUsd: totalUnits * Math.max(0, unitCostUsd) + attestedObservedCost,
   });
   return failure;
 }
 
-export type MusicProvider = "mureka" | "suno";
+export type MusicProvider = "mureka" | "suno" | "minimax_music3";
 
 /* --------------------- seamless self-loop (tail→head fold) --------------------- */
 
@@ -326,7 +331,7 @@ function sunoKey(): string {
 
 /** True when the production music block has at least one supported provider. */
 export function hasMusicProvider(): boolean {
-  return Boolean(process.env.MUREKA_API_KEY || process.env.SUNO_API_KEY);
+  return Boolean(process.env.MUREKA_API_KEY || process.env.SUNO_API_KEY || hasQualifiedMiniMaxMusic3());
 }
 
 function extractAudioUrl(choice: Record<string, unknown>): string | undefined {
@@ -724,6 +729,11 @@ export async function generateMusic(args: {
   /** Progress/diagnostics. */
   log?: (msg: string) => void;
 }): Promise<MusicResult> {
+  if (args.provider === "minimax_music3") {
+    throw new MusicError(
+      "MiniMax-Music3 requires a fingerprint-bound channel music program; use generateMiniMaxMusic3 with an admitted program",
+    );
+  }
   const runSuno = () =>
     generateSuno({
       prompt: args.prompt,
@@ -735,11 +745,11 @@ export async function generateMusic(args: {
     });
   const runMureka = () => generateMureka({ prompt: args.prompt, model: args.model, timeoutMs: args.timeoutMs });
 
-  const preferred: MusicProvider = args.provider ?? "mureka";
+  const preferred: Exclude<MusicProvider, "minimax_music3"> = args.provider ?? "mureka";
   // Order providers preferred-first, then drop any whose key is missing.
-  const order: { name: MusicProvider; key: boolean; run: () => Promise<MusicResult> }[] = [
-    { name: "mureka" as MusicProvider, key: Boolean(process.env.MUREKA_API_KEY), run: runMureka },
-    { name: "suno" as MusicProvider, key: Boolean(process.env.SUNO_API_KEY), run: runSuno },
+  const order: { name: Exclude<MusicProvider, "minimax_music3">; key: boolean; run: () => Promise<MusicResult> }[] = [
+    { name: "mureka" as const, key: Boolean(process.env.MUREKA_API_KEY), run: runMureka },
+    { name: "suno" as const, key: Boolean(process.env.SUNO_API_KEY), run: runSuno },
   ]
     .sort((a, b) => (a.name === preferred ? -1 : b.name === preferred ? 1 : 0))
     .filter((p) => p.key);

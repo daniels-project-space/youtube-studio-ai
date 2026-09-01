@@ -31,7 +31,14 @@ import {
   resolveSelfContainedStoryPlan,
   type SelfContainedStoryReceiptBinding,
 } from "@/engine/selfContainedStoryReceipt";
+import {
+  createVisualAtlasExperimentPlan,
+  type VisualAtlasExperimentPlan,
+  type VisualAtlasIdentityAnchor,
+} from "@/engine/visualAtlasExperiment";
 import { agentJson } from "@/agents/mastra";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateMusic } from "@/lib/music";
@@ -651,6 +658,67 @@ export interface MotionComicResult {
   visionGraderCalls: number;
   /** Durable geometry used by post-render review and layout-only repair. */
   reviewTimeline: MotionComicReviewTimeline;
+  /**
+   * Zero-spend, content-addressed comparison plan for 2x2/4x4/8x8/16x16
+   * storyboard-atlas experiments. It is not a render or qualification claim.
+   */
+  visualAtlasExperimentPlan?: VisualAtlasExperimentPlan;
+}
+
+export function createMotionComicVisualAtlasExperiment(input: {
+  readonly ownerId: string;
+  readonly channelId: string;
+  readonly channelIdentityFingerprint: string;
+  readonly identityAnchors: readonly VisualAtlasIdentityAnchor[];
+  readonly storyboard: MotionComicStoryboard;
+}): VisualAtlasExperimentPlan {
+  const persistentIdentityAnchorIds = input.identityAnchors.map((anchor) => anchor.id);
+  const frames = input.storyboard.panels.map((panel, sequenceIndex) => ({
+    frameId: `panel-${String(sequenceIndex + 1).padStart(2, "0")}`,
+    sequenceIndex,
+    shot: panel.shot,
+    description: [
+      `Environment ${panel.visual.environment} in the ${panel.visual.era} era.`,
+      `Subjects ${panel.visual.subjects.join(", ") || "none"}.`,
+      `Objects ${panel.visual.objects.join(", ") || "none"}.`,
+      `Action ${panel.visual.action}; relations ${panel.visual.relations.join(", ") || "none"}.`,
+      `Mood ${panel.visual.mood}; lighting ${panel.visual.lighting}.`,
+    ].join(" "),
+    persistentIdentityAnchorIds,
+    visualElementIds: [
+      `environment-${panel.visual.environment}`,
+      `era-${panel.visual.era}`,
+      `action-${panel.visual.action}`,
+      `mood-${panel.visual.mood}`,
+      `lighting-${panel.visual.lighting}`,
+      ...panel.visual.subjects.map((subject) => `subject-${subject}`),
+      ...panel.visual.objects.map((object) => `object-${object}`),
+      ...panel.visual.relations.map((relation) => `relation-${relation}`),
+      ...panel.characters.map((character) => `character-${character}`),
+    ],
+    characterIds: panel.characters,
+    motion: {
+      camera: panel.shot === "wide"
+        ? "measured establishing move with stable horizon and readable geography"
+        : panel.shot === "close"
+          ? "restrained push toward the expressive subject without reframing drift"
+          : "gentle parallax move that preserves subject and object continuity",
+      subject: `${panel.visual.action.replaceAll("_", " ")} begins visibly at frame zero and continues through the take`,
+      environment: `${panel.visual.environment.replaceAll("_", " ")} secondary layers move subtly from frame zero under ${panel.visual.lighting.replaceAll("_", " ")}`,
+      beginsAtFrameZero: true as const,
+    },
+  }));
+  return createVisualAtlasExperimentPlan({
+    useCase: "storyboard_sequence",
+    ownerId: input.ownerId,
+    channelId: input.channelId,
+    channelIdentityFingerprint: input.channelIdentityFingerprint,
+    sourcePlanFingerprint: sha256Hex(canonicalJson(input.storyboard)),
+    identityAnchors: input.identityAnchors,
+    frames,
+    canvasPixels: 2_048,
+    minimumTilePixels: 512,
+  });
 }
 
 export const MOTION_COMIC_MIN_PANELS = 4;
@@ -1403,6 +1471,15 @@ export async function castMotionComic(args: {
    */
   approvedStoryReceipt?: unknown;
   storyReceiptBinding?: SelfContainedStoryReceiptBinding;
+  /** Real run/channel identity for the zero-spend storyboard-atlas plan. */
+  visualAtlasExperiment?: {
+    ownerId: string;
+    channelId: string;
+    channelIdentityFingerprint: string;
+    identityAnchors: readonly VisualAtlasIdentityAnchor[];
+  };
+  /** Persist the zero-spend plan before the first image provider call. */
+  onVisualAtlasExperimentPlan?: (plan: VisualAtlasExperimentPlan) => void | Promise<void>;
 }): Promise<MotionComicResult> {
   const log = args.log ?? (() => {});
   const brief = args.brief;
@@ -1486,6 +1563,27 @@ export async function castMotionComic(args: {
   const openingDefect = motionComicOpeningPanelDefect(plan);
   if (openingDefect) {
     throw new Error(`motionComic: ${openingDefect} — aborting before panel-art, voice, music, or page-render spend`);
+  }
+  const visualAtlasExperimentPlan = args.visualAtlasExperiment
+    ? createMotionComicVisualAtlasExperiment({
+        ...args.visualAtlasExperiment,
+        storyboard: plan,
+      })
+    : undefined;
+  if (visualAtlasExperimentPlan) {
+    await writeFile(
+      rd("visual-atlas-experiment.json"),
+      JSON.stringify(visualAtlasExperimentPlan, null, 2),
+    );
+    const viable = visualAtlasExperimentPlan.variants
+      .filter((variant) => variant.geometryStatus === "renderable")
+      .map((variant) => `${variant.gridSize}x${variant.gridSize}`)
+      .join(", ");
+    log(
+      `visual-atlas experiment ${visualAtlasExperimentPlan.fingerprint.slice(0, 12)} planned at zero spend; ` +
+      `geometry-qualified variants: ${viable}; no production route changed`,
+    );
+    await args.onVisualAtlasExperimentPlan?.(visualAtlasExperimentPlan);
   }
   const voiceOf = (s: string) => s === "narrator" ? plan.narratorVoiceId : (plan.characters.find((c) => c.id === s)?.voiceId ?? plan.narratorVoiceId);
 
@@ -1806,5 +1904,6 @@ export async function castMotionComic(args: {
     musicGenerations,
     visionGraderCalls,
     reviewTimeline,
+    ...(visualAtlasExperimentPlan ? { visualAtlasExperimentPlan } : {}),
   };
 }
