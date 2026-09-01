@@ -1,6 +1,4 @@
-import type { CSSProperties } from "react";
-
-import { PageHeader, SectionTitle } from "@/components/PageHeader";
+import styles from "./lofi.module.css";
 
 /**
  * This is an evidence archive, not an alternate renderer control surface.
@@ -14,6 +12,13 @@ const CURRENT_REFERENCE = {
   meta:
     "A retained composition reference for a warm, original coastal study scene. It is not a prompt, model preset, or publication-ready thumbnail.",
 };
+
+const IDENTITY_READS = [
+  { index: "01", title: "Breathable depth", detail: "A sheltered foreground opens into a wide horizon; production may study the spatial rhythm, never copy the scene." },
+  { index: "02", title: "Human-scale anchor", detail: "One calm focal relationship keeps the ambience legible while the environment carries most of the frame." },
+  { index: "03", title: "Slow visual cadence", detail: "Plants, water, clouds, fabric, and distant traffic suggest independent micro-motion rather than one global camera loop." },
+  { index: "04", title: "Warm / cool balance", detail: "Warm shelter and cool distance create separation without turning a retained reference into a reusable palette preset." },
+];
 
 const EXECUTION_RAILS = [
   {
@@ -36,74 +41,102 @@ const ARCHIVE_BOUNDARIES = [
   "A reference image informs an original visual grammar only when the applicable route and rights/provenance rules explicitly admit it.",
 ];
 
-const GRID: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-  gap: "0.85rem",
-  marginTop: "0.5rem",
-};
-const CARD: CSSProperties = {
-  background: "var(--color-surface-solid)",
-  border: "1px solid var(--color-border)",
-  borderRadius: 10,
-  padding: "0.8rem",
-  display: "grid",
-  gap: "0.55rem",
-};
-const LABEL: CSSProperties = {
-  fontFamily: "var(--font-mono)",
-  fontSize: "0.66rem",
-  letterSpacing: "0.06em",
-  color: "var(--color-gold)",
-  textTransform: "uppercase",
-};
-const META: CSSProperties = { fontSize: "0.8rem", lineHeight: 1.45, color: "var(--color-muted)" };
-
 export default function LofiPage() {
   return (
-    <>
-      <PageHeader
-        title="Lofi Visual Archive"
-        subtitle="Approved reference media for original ambience—not a preset gallery, third-party style target, or rendering control surface."
-      />
-
-      <SectionTitle>Current reference</SectionTitle>
-      <section style={GRID} aria-label="Current approved Lofi reference media">
-        <article style={CARD}>
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "0.5rem" }}>
-            <strong>{CURRENT_REFERENCE.title}</strong>
-            <span style={LABEL}>{CURRENT_REFERENCE.label}</span>
+    <main className={styles.page}>
+      <header className={styles.hero}>
+        <div className={styles.heroCopy}>
+          <p className={styles.eyebrow}>Music references · visual identity archive</p>
+          <h1>Lofi Visual Archive</h1>
+          <p>
+            One admitted scene, read carefully. This room translates visible composition
+            into original-production questions without turning old media into a preset.
+          </p>
+          <div className={styles.heroBoundary}>
+            <span aria-hidden="true">≈</span>
+            <div><small>Archive rule</small><strong>Study the grammar. Never inherit the identity.</strong></div>
           </div>
+        </div>
+        <figure className={styles.referenceFrame}>
           {/* eslint-disable-next-line @next/next/no-img-element -- static immutable audit media */}
-          <img
-            src={`/golden/lofi/${CURRENT_REFERENCE.file}.jpg`}
-            alt={CURRENT_REFERENCE.meta}
-            style={{ width: "100%", borderRadius: 8, background: "#000", display: "block" }}
-          />
-          <span style={META}>{CURRENT_REFERENCE.meta}</span>
-        </article>
+          <img src={`/golden/lofi/${CURRENT_REFERENCE.file}.jpg`} alt={CURRENT_REFERENCE.meta} />
+          <span className={styles.frameCornerA} aria-hidden="true" />
+          <span className={styles.frameCornerB} aria-hidden="true" />
+          <figcaption>
+            <span>{CURRENT_REFERENCE.label}</span>
+            <strong>{CURRENT_REFERENCE.title}</strong>
+            <small>Manifest-bound still · composition study only</small>
+          </figcaption>
+        </figure>
+        <div className={styles.metricRail}>
+          <ArchiveMetric label="Status" value="Reference" note="current manifest" />
+          <ArchiveMetric label="Medium" value="Still" note="no video shown" />
+          <ArchiveMetric label="Use" value="Composition" note="not a prompt target" />
+          <ArchiveMetric label="Runtime" value="None" note="no execution authority" />
+        </div>
+      </header>
+
+      <section className={styles.referenceDesk} aria-label="Current approved Lofi reference media">
+        <div className={styles.sectionHeading}>
+          <div><span className={styles.eyebrow}>Current reference</span><h2>Read the scene without copying it.</h2></div>
+          <p>{CURRENT_REFERENCE.meta}</p>
+        </div>
+        <div className={styles.identityGrid}>
+          {IDENTITY_READS.map((item) => (
+            <article key={item.index}>
+              <span>{item.index}</span>
+              <div><strong>{item.title}</strong><p>{item.detail}</p></div>
+            </article>
+          ))}
+        </div>
       </section>
 
-      <div style={{ height: "1.5rem" }} />
-      <SectionTitle>What the real route guarantees</SectionTitle>
-      <section style={GRID} aria-label="Music-loop execution guarantees">
-        {EXECUTION_RAILS.map((rail) => (
-          <article key={rail.title} style={CARD}>
-            <strong>{rail.title}</strong>
-            <span style={META}>{rail.detail}</span>
-          </article>
-        ))}
+      <section className={styles.routeDesk} aria-label="Music-loop execution guarantees">
+        <div className={styles.routeMap} aria-label="Reference-to-release evidence path">
+          <div className={styles.routeHeader}><span>Reference-to-release path</span><small>No automatic transfer</small></div>
+          <div className={styles.routeField}>
+            <RouteNode index="01" title="Archive" detail="Retained bytes" node="archive" />
+            <RouteNode index="02" title="Original brief" detail="New program plan" node="brief" />
+            <RouteNode index="03" title="Sealed route" detail="Runtime admitted" node="route" />
+            <RouteNode index="04" title="Final master" detail="Exact bytes reviewed" node="master" />
+            <i className={styles.routeLineA} aria-hidden="true" />
+            <i className={styles.routeLineB} aria-hidden="true" />
+            <i className={styles.routeLineC} aria-hidden="true" />
+            <div className={styles.routeCore}><span>ORIGINAL</span><strong>≠</strong><small>reference</small></div>
+          </div>
+        </div>
+        <div className={styles.railList}>
+          <div className={styles.sectionHeading}>
+            <div><span className={styles.eyebrow}>Execution contract</span><h2>What the real route guarantees</h2></div>
+          </div>
+          {EXECUTION_RAILS.map((rail, index) => (
+            <article key={rail.title}>
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <div><strong>{rail.title}</strong><p>{rail.detail}</p></div>
+            </article>
+          ))}
+        </div>
       </section>
 
-      <div style={{ height: "1.5rem" }} />
-      <SectionTitle>Archive boundary</SectionTitle>
-      <ul style={{ margin: "0.5rem 0 0", padding: 0, listStyle: "none", display: "grid", gap: "0.5rem" }}>
-        {ARCHIVE_BOUNDARIES.map((boundary) => (
-          <li key={boundary} className="glass" style={{ padding: "0.75rem 0.85rem", color: "var(--color-muted)", fontSize: "0.82rem", lineHeight: 1.45 }}>
-            {boundary}
-          </li>
-        ))}
-      </ul>
-    </>
+      <section className={styles.boundaryDesk}>
+        <div className={styles.sectionHeading}>
+          <div><span className={styles.eyebrow}>Archive boundary</span><h2>Retained does not mean reusable.</h2></div>
+          <p>Three hard limits keep reference material from silently becoming channel identity, generation guidance, or release evidence.</p>
+        </div>
+        <ol>
+          {ARCHIVE_BOUNDARIES.map((boundary, index) => (
+            <li key={boundary}><span>{String(index + 1).padStart(2, "0")}</span><p>{boundary}</p></li>
+          ))}
+        </ol>
+      </section>
+    </main>
   );
+}
+
+function ArchiveMetric({ label, value, note }: { label: string; value: string; note: string }) {
+  return <div className={styles.metric}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>;
+}
+
+function RouteNode({ index, title, detail, node }: { index: string; title: string; detail: string; node: string }) {
+  return <div className={styles.routeNode} data-node={node}><span>{index}</span><div><strong>{title}</strong><small>{detail}</small></div><i aria-hidden="true" /></div>;
 }

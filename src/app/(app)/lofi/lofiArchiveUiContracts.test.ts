@@ -4,8 +4,9 @@ import { join } from "node:path";
 
 async function main() {
   const root = process.cwd();
-  const [page, nicheCatalog, manifestBytes] = await Promise.all([
+  const [page, styles, nicheCatalog, manifestBytes] = await Promise.all([
     readFile(join(root, "src/app/(app)/lofi/page.tsx"), "utf8"),
+    readFile(join(root, "src/app/(app)/lofi/lofi.module.css"), "utf8"),
     readFile(join(root, "src/lib/nicheCatalog.ts"), "utf8"),
     readFile(join(root, "src/engine/goldenProofMediaManifest.json"), "utf8"),
   ]);
@@ -13,9 +14,18 @@ async function main() {
 
   assert.match(page, /Lofi Visual Archive/);
   assert.match(page, /Reference media/);
+  assert.match(page, /Read the scene without copying it\./);
+  assert.match(page, /Reference-to-release path/);
+  assert.match(page, /Study the grammar\. Never inherit the identity\./);
   assert.match(page, /Historical samples remain retained for audit/);
   assert.doesNotMatch(page, /Ghibli|Gemini|Kling|Topaz|★ GOLDEN/i);
   assert.doesNotMatch(page, /<video\b/);
+  assert.doesNotMatch(page, /<PageHeader/);
+  assert.doesNotMatch(page, /style=\{/);
+  assert.match(styles, /\.referenceFrame/);
+  assert.match(styles, /\.routeField/);
+  assert.match(styles, /\.identityGrid/);
+  assert.match(styles, /prefers-reduced-motion: reduce/);
 
   const beachCafe = manifest.entries.find((item) => item.id === "lofi-beachcafe-image");
   const meadowVideo = manifest.entries.find((item) => item.id === "lofi-meadow-video");
