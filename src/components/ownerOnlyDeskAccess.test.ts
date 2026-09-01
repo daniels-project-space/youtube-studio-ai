@@ -65,7 +65,13 @@ assert.ok(
   (settings.match(/if \(operationsAccess !== "owner"\) return;/g) ?? []).length >= 2,
   "settings reads and mutations must both wait for owner access",
 );
-assert.match(settings, /operationsAccess !== "owner" \? \([\s\S]*<OwnerOnlyNotice/);
-assert.match(settings, /operationsAccess === "owner" && \(tab === "publishing"/);
+assert.match(settings, /operationsAccess !== "owner" \? \([\s\S]*<LockedGovernanceRoom/);
+assert.match(
+  settings,
+  /No private governance records requested/,
+  "viewer settings must explain that owner ledgers were not fetched",
+);
+assert.match(settings, /if \(operationsAccess !== "owner"\) return;/);
+assert.match(settings, /\{tab === "publishing" && \(/);
 
 console.log("Owner-only desk access contracts passed");

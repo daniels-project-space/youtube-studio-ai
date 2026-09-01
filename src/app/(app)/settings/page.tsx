@@ -3,10 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
-import { PageHeader } from "@/components/PageHeader";
 import { SkeletonList } from "@/components/Skeleton";
-import { ChannelOperatingStatusStrip } from "@/components/ChannelOperatingStatusStrip";
-import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
 import { useOperationsAccess } from "@/components/OperationsAccess";
 import { useSelectedChannel } from "@/lib/channel-context";
 import { useOwnerId } from "@/lib/owner-context";
@@ -377,21 +374,15 @@ export default function SettingsPage() {
 
   return (
     <div className={styles.page}>
-      <PageHeader
-        title="Settings"
-        subtitle={operationsAccess === "owner"
-          ? "Control one channel at a time, with every production change saved to the live workspace"
-          : "Inspect current channel policy; unlock operations before changing production or account controls"}
-        actions={operationsAccess === "owner" && (tab === "publishing" || tab === "learning") ? (
-          <button
-            type="button"
-            className={styles.button}
-            onClick={() => void loadGovernance()}
-            disabled={loadingGovernance}
-          >
-            {loadingGovernance ? "Refreshing…" : "Refresh"}
-          </button>
-        ) : undefined}
+      <SettingsHero
+        access={operationsAccess}
+        channel={selectedChannel}
+        connector={connector}
+        connectorsLoading={connectors === undefined}
+        channels={channels ?? []}
+        onChannel={(slug) => setSelectedSlug(slug || null)}
+        pendingPublishing={pendingIntents.length}
+        pendingLearning={learningAttentionCount}
       />
 
       {error && (
@@ -407,41 +398,10 @@ export default function SettingsPage() {
         </div>
       )}
 
-      <section
-        className={`glass ${styles.scopeCard}`}
-        aria-label="Settings scope"
-      >
-        <div>
-          <span className={styles.eyebrow}>Editing channel</span>
-          <strong>{selectedChannel?.name ?? "Select a channel"}</strong>
-        </div>
-        <select
-          className={styles.select}
-          value={selectedChannel?.slug ?? ""}
-          onChange={(event) => setSelectedSlug(event.target.value || null)}
-          disabled={!channels?.length}
-          aria-label="Channel to configure"
-        >
-          {(channels ?? []).map((channel) => (
-            <option key={channel._id} value={channel.slug}>
-              {channel.name}
-            </option>
-          ))}
-        </select>
-      </section>
-
-      {selectedChannel && (
-        <ChannelOperatingStatusStrip
-          channel={selectedChannel}
-          connector={connector}
-          connectorLoading={connectors === undefined}
-        />
-      )}
-
       {operationsAccess !== "owner" ? (
-        <OwnerOnlyNotice
+        <LockedGovernanceRoom
           access={operationsAccess}
-          desk="channel settings, approval history, and account controls"
+          channel={selectedChannel}
         />
       ) : channels === undefined ? (
         <SkeletonList rows={4} />
@@ -451,25 +411,37 @@ export default function SettingsPage() {
         </div>
       ) : (
         <>
-          <nav
-            className={styles.tabs}
-            aria-label="Settings sections"
-            role="tablist"
-          >
-            {tabs.map((item) => (
+          <div className={styles.tabsRow}>
+            <nav
+              className={styles.tabs}
+              aria-label="Settings sections"
+              role="tablist"
+            >
+              {tabs.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tab === item.id}
+                  className={`${styles.tab} ${tab === item.id ? styles.tabActive : ""}`}
+                  onClick={() => setTab(item.id)}
+                >
+                  {item.label}
+                  {item.count ? <span>{item.count}</span> : null}
+                </button>
+              ))}
+            </nav>
+            {(tab === "publishing" || tab === "learning") && (
               <button
-                key={item.id}
                 type="button"
-                role="tab"
-                aria-selected={tab === item.id}
-                className={`${styles.tab} ${tab === item.id ? styles.tabActive : ""}`}
-                onClick={() => setTab(item.id)}
+                className={styles.button}
+                onClick={() => void loadGovernance()}
+                disabled={loadingGovernance}
               >
-                {item.label}
-                {item.count ? <span>{item.count}</span> : null}
+                {loadingGovernance ? "Refreshing…" : "Refresh receipts"}
               </button>
-            ))}
-          </nav>
+            )}
+          </div>
 
           <ChannelSettingsPanel
             key={`${selectedChannel._id}:${channelSettingsVersion(selectedChannel)}`}
@@ -489,6 +461,151 @@ export default function SettingsPage() {
         </>
       )}
     </div>
+  );
+}
+
+function SettingsHero({
+  access,
+  channel,
+  connector,
+  connectorsLoading,
+  channels,
+  onChannel,
+  pendingPublishing,
+  pendingLearning,
+}: {
+  access: ReturnType<typeof useOperationsAccess>;
+  channel: SettingsChannel | undefined;
+  connector: YoutubeConnector | undefined;
+  connectorsLoading: boolean;
+  channels: SettingsChannel[];
+  onChannel: (slug: string) => void;
+  pendingPublishing: number;
+  pendingLearning: number;
+}) {
+  const schedule = channel?.schedule;
+  const frequency = schedule?.frequency ?? channel?.identity?.cadence ?? "not set";
+  const connectorLabel = connectorsLoading
+    ? "Checking"
+    : !connector
+      ? "Not linked"
+      : connector.status !== "active"
+        ? "Reconnect"
+        : connector.scopeHealth === "healthy"
+          ? "Healthy"
+          : "Partial scopes";
+  const releaseMode = channel ? currentPublishMode(channel) : "draft";
+
+  return (
+    <section className={styles.governanceHero} aria-busy={access === "checking" || undefined}>
+      <div className={styles.heroCopy}>
+        <span className={styles.eyebrow}>Governance room / {channel?.name ?? "workspace"}</span>
+        <h1>Set the boundaries automation cannot cross.</h1>
+        <p>
+          One channel at a time: identity, spend, release authority, and learning changes.
+          Every consequential control stays explicit and every saved change reaches the live workspace.
+        </p>
+        <div className={styles.scopeControl}>
+          <span aria-hidden="true"><i /></span>
+          <label>
+            <small>Policy scope</small>
+            <select
+              className={styles.select}
+              value={channel?.slug ?? ""}
+              onChange={(event) => onChannel(event.target.value)}
+              disabled={!channels.length}
+              aria-label="Channel to configure"
+            >
+              {channels.map((candidate) => (
+                <option key={candidate._id} value={candidate.slug}>{candidate.name}</option>
+              ))}
+            </select>
+          </label>
+          <div className={styles.authorityStamp} data-open={access === "owner" || undefined}>
+            <small>Control authority</small>
+            <strong>{access === "owner" ? "Signed owner session" : access === "checking" ? "Checking session" : "Inspection only"}</strong>
+            <em>{access === "owner" ? "Mutations are available with confirmations" : "No private governance records requested"}</em>
+          </div>
+        </div>
+      </div>
+
+      <figure className={styles.policyMap}>
+        <figcaption><span>Control boundary map</span><small>Selected channel policy</small></figcaption>
+        <div className={styles.policyField}>
+          <span className={styles.policyOrbit} aria-hidden="true" />
+          <span className={styles.policyCrosshair} aria-hidden="true" />
+          <div className={styles.policyCore} data-open={access === "owner" || undefined}>
+            <small>{access === "owner" ? "OWNER" : "VIEW"}</small>
+            <strong>{access === "owner" ? "OPEN" : "LOCKED"}</strong>
+            <span>boundary</span>
+          </div>
+          <PolicyNode node="account" index="01" label="Account" value={connectorLabel} />
+          <PolicyNode node="production" index="02" label="Production" value={channel ? `$${(channel.budget ?? 0).toFixed(2)} ceiling` : "No channel"} />
+          <PolicyNode node="publishing" index="03" label="Publishing" value={releaseMode === "draft" ? "Private drafts" : releaseMode} />
+          <PolicyNode node="learning" index="04" label="Learning" value={access === "owner" ? `${pendingLearning} to review` : "Owner reviewed"} />
+        </div>
+        <div className={styles.policyLegend}><span><i /> Inspectable policy</span><span>Owner controls never load into viewer mode</span></div>
+      </figure>
+
+      <div className={styles.governanceMetrics}>
+        <GovernanceMetric index="01" label="Automation" value={channel?.status ?? "—"} detail="Persisted channel status" tone={channel?.status === "active" ? "ok" : undefined} />
+        <GovernanceMetric index="02" label="Cadence" value={frequency.replaceAll("_", " ")} detail={`${schedule?.localTime ?? "09:00"} · ${schedule?.timezone ?? "UTC"}`} />
+        <GovernanceMetric index="03" label="YouTube" value={connectorLabel} detail={connector?.ytTitle ?? "No destination bound"} tone={connector?.status === "active" && connector.scopeHealth === "healthy" ? "ok" : "warn"} />
+        <GovernanceMetric index="04" label="Release mode" value={releaseMode === "draft" ? "Private draft" : releaseMode} detail={`${pendingPublishing} approval${pendingPublishing === 1 ? "" : "s"} waiting`} />
+        <GovernanceMetric index="05" label="Run ceiling" value={channel ? `$${(channel.budget ?? 0).toFixed(2)}` : "—"} detail={`${channel?.pipeline?.length ?? 0} pipeline modules`} />
+      </div>
+    </section>
+  );
+}
+
+function PolicyNode({ node, index, label, value }: { node: string; index: string; label: string; value: string }) {
+  return (
+    <div className={styles.policyNode} data-node={node}>
+      <span>{index}</span><strong>{label}</strong><small>{value}</small>
+    </div>
+  );
+}
+
+function GovernanceMetric({
+  index,
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  index: string;
+  label: string;
+  value: string;
+  detail: string;
+  tone?: "ok" | "warn";
+}) {
+  return (
+    <div className={styles.governanceMetric} data-tone={tone}>
+      <span>{index}</span><div><small>{label}</small><strong>{value}</strong><em>{detail}</em></div>
+    </div>
+  );
+}
+
+function LockedGovernanceRoom({
+  access,
+  channel,
+}: {
+  access: ReturnType<typeof useOperationsAccess>;
+  channel: SettingsChannel | undefined;
+}) {
+  return (
+    <section className={styles.lockedRoom} aria-busy={access === "checking" || undefined}>
+      <header>
+        <div><span>Signed control boundary</span><h2>{access === "checking" ? "Checking owner authority" : "Owner changes remain closed"}</h2></div>
+        <p>{access === "checking" ? "The studio is resolving the current signed session." : "Use the top-bar control to open mutations. Inspection mode has not requested approval history, account secrets, or learning proposals."}</p>
+      </header>
+      <div className={styles.lockedGrid}>
+        <div><span>01</span><strong>Policy remains visible</strong><p>Automation status, cadence, connector health, release mode, and budget stay inspectable.</p></div>
+        <div><span>02</span><strong>Private ledgers stay private</strong><p>Publishing approvals and learning reconciliation are not fetched in this state.</p></div>
+        <div><span>03</span><strong>Mutations remain explicit</strong><p>Connect, revoke, activate, budget, release, and recovery actions require owner authority and confirmations.</p></div>
+      </div>
+      {channel && <a href={`/channels/${channel.slug}`}>Open {channel.name} operating room ↗</a>}
+    </section>
   );
 }
 

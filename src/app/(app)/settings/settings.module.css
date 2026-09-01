@@ -1,7 +1,180 @@
 .page {
   max-width: 1180px;
   margin: 0 auto;
+  padding-bottom: 2.5rem;
 }
+
+.governanceHero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(470px, 1.1fr);
+  margin-bottom: 1.35rem;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 84% 12%, rgba(245, 158, 11, 0.1), transparent 31%),
+    radial-gradient(circle at 11% 86%, rgba(255, 94, 42, 0.065), transparent 27%),
+    linear-gradient(138deg, #14130f, #090a09 65%);
+  box-shadow: 0 26px 78px rgba(0, 0, 0, 0.3);
+}
+
+.governanceHero::before {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.023) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.023) 1px, transparent 1px);
+  background-size: 46px 46px;
+  content: "";
+  mask-image: linear-gradient(90deg, transparent 8%, #000 64%, #000);
+  pointer-events: none;
+}
+
+.heroCopy,
+.policyMap,
+.governanceMetrics { position: relative; z-index: 1; }
+
+.heroCopy {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  padding: clamp(1.5rem, 3.5vw, 3rem);
+  padding-right: 1rem;
+}
+
+.heroCopy h1 {
+  max-width: 12.5ch;
+  margin: 0.65rem 0 0.82rem;
+  font-family: var(--font-display);
+  font-size: clamp(2.4rem, 4.6vw, 4.85rem);
+  font-weight: 520;
+  letter-spacing: -0.055em;
+  line-height: 0.94;
+}
+
+.heroCopy > p {
+  max-width: 58ch;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.79rem;
+  line-height: 1.65;
+}
+
+.scopeControl {
+  display: grid;
+  grid-template-columns: 34px minmax(160px, 0.8fr) minmax(180px, 1.2fr);
+  gap: 0.72rem;
+  align-items: center;
+  margin-top: 1.2rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.9rem;
+}
+.scopeControl > span:first-child {
+  position: relative;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid rgba(245, 158, 11, 0.38);
+  border-radius: 50%;
+}
+.scopeControl > span:first-child::before { position: absolute; inset: 6px; border: 1px solid rgba(245, 158, 11, 0.16); border-radius: inherit; content: ""; }
+.scopeControl > span:first-child i { width: 6px; height: 6px; border-radius: 50%; background: var(--color-amber); box-shadow: 0 0 15px rgba(245, 158, 11, 0.64); animation: authorityPulse 2.7s ease-in-out infinite; }
+.scopeControl label,
+.authorityStamp { display: grid; min-width: 0; gap: 0.2rem; }
+.scopeControl label > small,
+.authorityStamp small { color: var(--color-faint); font: 0.51rem var(--font-mono); letter-spacing: 0.09em; text-transform: uppercase; }
+.scopeControl .select { width: 100%; min-height: 35px; }
+.authorityStamp { border-left: 1px solid var(--color-border); padding-left: 0.75rem; }
+.authorityStamp strong { overflow: hidden; font-size: 0.68rem; text-overflow: ellipsis; white-space: nowrap; }
+.authorityStamp em { color: var(--color-faint); font-size: 0.55rem; font-style: normal; line-height: 1.35; }
+.authorityStamp[data-open="true"] strong { color: var(--color-ok); }
+
+.policyMap {
+  min-width: 0;
+  align-self: center;
+  margin: clamp(1.2rem, 3vw, 2.5rem);
+  margin-left: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 15px;
+  background: rgba(4, 5, 5, 0.65);
+  padding: 0.85rem;
+  backdrop-filter: blur(18px);
+}
+.policyMap figcaption,
+.policyLegend { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+.policyMap figcaption span { color: var(--color-muted); font: 0.59rem var(--font-mono); letter-spacing: 0.11em; text-transform: uppercase; }
+.policyMap figcaption small { color: var(--color-faint); font-size: 0.54rem; }
+.policyField {
+  position: relative;
+  min-height: 268px;
+  margin: 0.45rem 0;
+  overflow: hidden;
+  border-block: 1px solid var(--color-border);
+  background: radial-gradient(circle at center, rgba(245, 158, 11, 0.055), transparent 42%);
+}
+.policyOrbit { position: absolute; inset: 12% 25%; border: 1px solid rgba(245, 158, 11, 0.14); border-radius: 50%; }
+.policyOrbit::before { position: absolute; inset: 18%; border: 1px dashed rgba(255, 255, 255, 0.07); border-radius: inherit; content: ""; animation: policySpin 44s linear infinite; }
+.policyCrosshair { position: absolute; inset: 50% 8% auto; border-top: 1px solid rgba(255, 255, 255, 0.06); }
+.policyCrosshair::after { position: absolute; top: -108px; left: 50%; height: 216px; border-left: 1px solid rgba(255, 255, 255, 0.06); content: ""; }
+.policyCore { position: absolute; top: 50%; left: 50%; display: grid; width: 96px; height: 96px; place-content: center; gap: 0.12rem; border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 50%; background: #0d0e0c; text-align: center; transform: translate(-50%, -50%); }
+.policyCore small,
+.policyCore span { color: var(--color-faint); font: 0.48rem var(--font-mono); letter-spacing: 0.08em; }
+.policyCore strong { color: var(--color-amber); font: 0.72rem var(--font-mono); letter-spacing: 0.08em; }
+.policyCore[data-open="true"] { border-color: rgba(34, 197, 94, 0.35); }
+.policyCore[data-open="true"] strong { color: var(--color-ok); }
+.policyNode { position: absolute; display: grid; min-width: 128px; max-width: 156px; gap: 0.1rem; border: 1px solid var(--color-border); border-radius: 8px; background: rgba(10, 11, 10, 0.92); padding: 0.42rem 0.5rem; }
+.policyNode > span { color: var(--color-faint); font: 0.46rem var(--font-mono); }
+.policyNode strong { font-size: 0.62rem; }
+.policyNode small { overflow: hidden; color: var(--color-muted); font-size: 0.55rem; text-overflow: ellipsis; white-space: nowrap; }
+.policyNode[data-node="account"] { top: 13%; left: 5%; }
+.policyNode[data-node="production"] { top: 14%; right: 5%; }
+.policyNode[data-node="publishing"] { bottom: 12%; left: 6%; }
+.policyNode[data-node="learning"] { right: 6%; bottom: 11%; }
+.policyLegend { color: var(--color-faint); font-size: 0.52rem; }
+.policyLegend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.policyLegend i { width: 6px; height: 6px; border-radius: 50%; background: var(--color-amber); box-shadow: 0 0 8px rgba(245, 158, 11, 0.5); }
+
+.governanceMetrics {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  border-top: 1px solid var(--color-border);
+  background: rgba(2, 4, 3, 0.42);
+}
+.governanceMetric { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); gap: 0.65rem; border-right: 1px solid var(--color-border); padding: 0.82rem 0.88rem; }
+.governanceMetric:last-child { border-right: 0; }
+.governanceMetric > span { color: var(--color-faint); font: 0.49rem var(--font-mono); }
+.governanceMetric > div { display: grid; min-width: 0; gap: 0.17rem; }
+.governanceMetric small { color: var(--color-faint); font: 0.51rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.governanceMetric strong { overflow: hidden; font-family: var(--font-display); font-size: 1.15rem; font-weight: 560; text-transform: capitalize; text-overflow: ellipsis; white-space: nowrap; }
+.governanceMetric em { overflow: hidden; color: var(--color-faint); font-size: 0.54rem; font-style: normal; text-overflow: ellipsis; white-space: nowrap; }
+.governanceMetric[data-tone="ok"] strong { color: var(--color-ok); }
+.governanceMetric[data-tone="warn"] strong { color: var(--color-amber); }
+
+.lockedRoom {
+  display: grid;
+  gap: 0.8rem;
+  border: 1px solid var(--color-border);
+  border-radius: 15px;
+  background: linear-gradient(115deg, rgba(245, 158, 11, 0.04), rgba(255, 255, 255, 0.015));
+  padding: 1rem;
+}
+.lockedRoom > header { display: grid; grid-template-columns: minmax(240px, 0.8fr) minmax(280px, 1.2fr); gap: 1.2rem; align-items: end; }
+.lockedRoom > header > div { display: grid; gap: 0.14rem; }
+.lockedRoom > header span { color: var(--color-amber); font: 0.53rem var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.lockedRoom h2 { margin: 0; font-family: var(--font-display); font-size: 1.35rem; font-weight: 560; }
+.lockedRoom header p { margin: 0; color: var(--color-faint); font-size: 0.66rem; line-height: 1.5; }
+.lockedGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border: 1px solid var(--color-border); border-radius: 11px; overflow: hidden; }
+.lockedGrid > div { display: grid; gap: 0.22rem; border-right: 1px solid var(--color-border); padding: 0.78rem 0.85rem; }
+.lockedGrid > div:last-child { border-right: 0; }
+.lockedGrid span { color: var(--color-faint); font: 0.49rem var(--font-mono); }
+.lockedGrid strong { font-size: 0.7rem; }
+.lockedGrid p { margin: 0; color: var(--color-muted); font-size: 0.61rem; line-height: 1.45; }
+.lockedRoom > a { width: fit-content; color: var(--color-accent); font-size: 0.64rem; font-weight: 650; }
+
+.tabsRow { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
 
 .scopeCard {
   display: flex;
@@ -22,34 +195,38 @@
 }
 
 .eyebrow {
-  color: var(--color-muted);
-  font-size: 0.68rem;
+  color: var(--color-amber);
+  font: 700 0.57rem/1 var(--font-mono);
   font-weight: 700;
-  letter-spacing: 0.09em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
 .tabs {
-  display: flex;
-  gap: 0.35rem;
-  margin-bottom: 1.25rem;
-  padding: 0.28rem;
-  width: max-content;
+  display: grid;
+  flex: 1;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 0;
+  margin-bottom: 1.05rem;
+  padding: 0;
+  width: 100%;
   max-width: 100%;
   overflow-x: auto;
   border: 1px solid var(--color-border);
-  border-radius: 12px;
-  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.016);
 }
 
 .tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 0.42rem;
-  min-height: 34px;
-  padding: 0.42rem 0.78rem;
+  min-height: 48px;
+  padding: 0.55rem 0.78rem;
   border: 0;
-  border-radius: 9px;
+  border-right: 1px solid var(--color-border);
+  border-radius: 0;
   color: var(--color-muted);
   background: transparent;
   font: inherit;
@@ -58,6 +235,8 @@
   white-space: nowrap;
   cursor: pointer;
 }
+.tab:last-child { border-right: 0; }
+.tab::after { position: absolute; right: 0; bottom: 0; left: 0; height: 2px; background: var(--color-amber); content: ""; opacity: 0; transform: scaleX(0.25); transition: opacity 160ms ease, transform 160ms ease; }
 
 .tab span {
   min-width: 18px;
@@ -72,9 +251,10 @@
 
 .tabActive {
   color: var(--color-fg);
-  background: var(--color-surface);
-  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.18);
+  background: rgba(245, 158, 11, 0.05);
+  box-shadow: none;
 }
+.tabActive::after { opacity: 1; transform: scaleX(1); }
 
 .content,
 .stack,
@@ -90,11 +270,16 @@
 }
 
 .card {
+  position: relative;
   display: grid;
   align-content: start;
   gap: 1rem;
+  overflow: hidden;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.018);
   padding: 1.1rem;
 }
+.card::before { position: absolute; top: -1px; left: 1rem; width: 54px; height: 1px; background: var(--color-amber); content: ""; }
 
 .cardHeader,
 .queueTitle,
@@ -108,7 +293,9 @@
 .cardHeader h2,
 .sectionHeading h2 {
   margin: 0.16rem 0 0;
-  font-size: 1rem;
+  font-family: var(--font-display);
+  font-size: 1.2rem;
+  font-weight: 560;
 }
 
 .cardHeader p,
@@ -463,6 +650,19 @@
   font-size: 0.8rem;
 }
 
+@keyframes authorityPulse { 50% { opacity: 0.42; transform: scale(0.72); } }
+@keyframes policySpin { to { transform: rotate(360deg); } }
+
+@media (max-width: 1080px) {
+  .governanceHero { grid-template-columns: 1fr; }
+  .heroCopy { padding-right: clamp(1.5rem, 3.5vw, 3rem); }
+  .heroCopy h1 { max-width: 15ch; }
+  .policyMap { margin: 0 clamp(1.5rem, 3.5vw, 3rem) clamp(1.5rem, 3.5vw, 3rem); }
+  .governanceMetrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .governanceMetric:nth-child(3) { border-right: 0; }
+  .governanceMetric:nth-child(-n + 3) { border-bottom: 1px solid var(--color-border); }
+}
+
 @media (max-width: 900px) {
   .twoColumn {
     grid-template-columns: 1fr;
@@ -471,9 +671,34 @@
   .formGrid {
     grid-template-columns: repeat(2, minmax(130px, 1fr));
   }
+
+  .lockedRoom > header { grid-template-columns: 1fr; gap: 0.35rem; }
+  .lockedGrid { grid-template-columns: 1fr; }
+  .lockedGrid > div { border-right: 0; border-bottom: 1px solid var(--color-border); }
+  .lockedGrid > div:last-child { border-bottom: 0; }
 }
 
 @media (max-width: 620px) {
+  .governanceHero { margin-inline: -0.2rem; border-radius: 15px; }
+  .heroCopy { padding: 1.2rem 0.95rem; }
+  .heroCopy h1 { font-size: clamp(2.3rem, 12vw, 3.45rem); }
+  .scopeControl { grid-template-columns: 32px minmax(0, 1fr); }
+  .authorityStamp { grid-column: 2; border-top: 1px solid var(--color-border); border-left: 0; padding-top: 0.55rem; padding-left: 0; }
+  .policyMap { margin: 0 0.7rem 1rem; padding-inline: 0.6rem; }
+  .policyField { min-height: 285px; }
+  .policyNode { min-width: 110px; max-width: 128px; }
+  .policyNode[data-node="account"] { top: 12%; left: 1%; }
+  .policyNode[data-node="production"] { top: 13%; right: 1%; }
+  .policyNode[data-node="publishing"] { bottom: 10%; left: 1%; }
+  .policyNode[data-node="learning"] { right: 1%; bottom: 9%; }
+  .policyLegend { align-items: flex-start; flex-direction: column; gap: 0.3rem; }
+  .governanceMetrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .governanceMetric:nth-child(3) { border-right: 1px solid var(--color-border); }
+  .governanceMetric:nth-child(-n + 3) { border-bottom: 0; }
+  .governanceMetric:nth-child(2n) { border-right: 0; }
+  .governanceMetric:nth-child(-n + 4) { border-bottom: 1px solid var(--color-border); }
+  .tabsRow { align-items: stretch; flex-direction: column; }
+  .tabsRow > .button { align-self: flex-end; order: -1; }
   .scopeCard {
     align-items: stretch;
     flex-direction: column;
@@ -485,6 +710,7 @@
 
   .tabs {
     width: 100%;
+    grid-template-columns: repeat(4, minmax(98px, 1fr));
   }
 
   .tab {
@@ -501,4 +727,18 @@
     flex-direction: column;
     gap: 0.18rem;
   }
+}
+
+@media (max-width: 430px) {
+  .heroCopy h1 { font-size: 2.62rem; }
+  .policyCore { width: 80px; height: 80px; }
+  .governanceMetric { gap: 0.45rem; padding-inline: 0.68rem; }
+  .governanceMetric > span { display: none; }
+  .governanceMetric strong { font-size: 1rem; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scopeControl > span:first-child i,
+  .policyOrbit::before { animation: none; }
+  .tab::after { transition: none; }
 }
