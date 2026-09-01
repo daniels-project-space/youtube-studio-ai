@@ -4,8 +4,9 @@ import { join } from "node:path";
 
 async function main() {
   const root = process.cwd();
-  const [page, manifestBytes] = await Promise.all([
+  const [page, styles, manifestBytes] = await Promise.all([
     readFile(join(root, "src/app/(app)/loreshort/page.tsx"), "utf8"),
+    readFile(join(root, "src/app/(app)/loreshort/loreshort.module.css"), "utf8"),
     readFile(join(root, "src/engine/goldenProofMediaManifest.json"), "utf8"),
   ]);
   const manifest = JSON.parse(manifestBytes) as { entries: Array<{ id: string; status: string }> };
@@ -14,8 +15,19 @@ async function main() {
   assert.match(page, /Reference media/);
   assert.match(page, /open-weight LTX 2\.5 Novita runtime/);
   assert.match(page, /Historical samples remain retained for audit/);
+  assert.match(page, /Every narrated beat must earn its own drawn scene/);
+  assert.match(page, /The route must draw beyond the opening/);
+  assert.match(page, /opening references cannot be recycled across later narration/);
+  assert.match(page, /function AdmissionNode/);
   assert.doesNotMatch(page, /Rings of Power|Star Wars|Seedance|Real-ESRGAN|Replicate|★ GOLDEN/i);
   assert.doesNotMatch(page, /<video\b/);
+  assert.doesNotMatch(page, /<PageHeader/);
+  assert.doesNotMatch(page, /style=\{/);
+
+  assert.match(styles, /\.referencePlate/);
+  assert.match(styles, /\.storyboardStrip/);
+  assert.match(styles, /\.admissionField/);
+  assert.match(styles, /prefers-reduced-motion/);
 
   const smith = manifest.entries.find((item) => item.id === "loreshort-smith4k-image");
   const franchiseVideo = manifest.entries.find((item) => item.id === "loreshort-lotr-video");

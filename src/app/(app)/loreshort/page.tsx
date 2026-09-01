@@ -1,12 +1,25 @@
-import type { CSSProperties } from "react";
-import { PageHeader, SectionTitle } from "@/components/PageHeader";
+import styles from "./loreshort.module.css";
 
 const CURRENT_REFERENCE = {
   file: "smith4k",
   title: "Original blacksmith study",
-  label: "REFERENCE MEDIA",
+  label: "Reference media",
   meta: "An approved original-lore reference still retained to evaluate composition, legibility, and depth—not a reusable story, character, franchise, or renderer preset.",
 } as const;
+
+const IDENTITY_NOTES = [
+  { index: "A", title: "One legible action", detail: "The frame resolves immediately: maker, tool, object, heat, and place form one readable story beat." },
+  { index: "B", title: "Illustrated materiality", detail: "Loose ink edges, broad value shapes, and an ember focal point create a drawn record rather than photoreal spectacle." },
+  { index: "C", title: "World beyond the subject", detail: "Architecture continues behind the action so the scene feels situated, not like an isolated character card." },
+  { index: "D", title: "Depth with restraint", detail: "Foreground iron, working figure, and pale distant structures separate clearly without excessive effects." },
+] as const;
+
+const CONTINUITY_GATES = [
+  { index: "01", title: "Narration mapped", detail: "Every planned beat owns a scene requirement before generation begins." },
+  { index: "02", title: "Every beat drawn", detail: "The full story receives story-specific imagery; the opening references cannot be recycled across later narration." },
+  { index: "03", title: "Identity carried", detail: "Characters, objects, locations, palette, and illustration grammar persist across the sequence." },
+  { index: "04", title: "Final master audited", detail: "Review proves the exact edit covers the full story, not merely that candidate images exist." },
+] as const;
 
 const EXECUTION_RAILS = [
   {
@@ -29,73 +42,95 @@ const ARCHIVE_BOUNDARIES = [
   "This page does not trigger rendering, provider work, training, or publishing. The automatic creator remains the only route into an admitted production pipeline.",
 ] as const;
 
-const GRID: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-  gap: "0.85rem",
-  marginTop: "0.5rem",
-};
-const CARD: CSSProperties = {
-  background: "var(--color-surface-solid)",
-  border: "1px solid var(--color-border)",
-  borderRadius: 10,
-  padding: "0.8rem",
-  display: "grid",
-  gap: "0.55rem",
-};
-const LABEL: CSSProperties = {
-  color: "var(--color-gold)",
-  fontFamily: "var(--font-mono)",
-  fontSize: "0.62rem",
-  letterSpacing: "0.06em",
-};
-const META: CSSProperties = { color: "var(--color-muted)", fontSize: "0.82rem", lineHeight: 1.45 };
-
 export default function LoreShortPage() {
   return (
-    <>
-      <PageHeader
-        title="Lore Short Reference Archive"
-        subtitle="Reference media and route evidence for original micro-documentary lore—not a franchise gallery or a live renderer control surface."
-      />
-
-      <SectionTitle>Current reference</SectionTitle>
-      <section style={GRID} aria-label="Current approved Lore Short reference media">
-        <article style={CARD}>
-          <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "0.5rem" }}>
-            <strong>{CURRENT_REFERENCE.title}</strong>
-            <span style={LABEL}>{CURRENT_REFERENCE.label}</span>
-          </div>
+    <main className={styles.page}>
+      <header className={styles.hero}>
+        <figure className={styles.referencePlate}>
           {/* eslint-disable-next-line @next/next/no-img-element -- static immutable audit media */}
-          <img
-            src={`/golden/loreshort/${CURRENT_REFERENCE.file}.jpg`}
-            alt={CURRENT_REFERENCE.meta}
-            style={{ width: "100%", borderRadius: 8, background: "#000", display: "block" }}
-          />
-          <span style={META}>{CURRENT_REFERENCE.meta}</span>
-        </article>
+          <img src={`/golden/loreshort/${CURRENT_REFERENCE.file}.jpg`} alt={CURRENT_REFERENCE.meta} />
+          <span className={styles.registrationA} aria-hidden="true" />
+          <span className={styles.registrationB} aria-hidden="true" />
+          <figcaption><span>{CURRENT_REFERENCE.label}</span><strong>{CURRENT_REFERENCE.title}</strong><small>Manifest-bound composition reference</small></figcaption>
+        </figure>
+        <div className={styles.heroCopy}>
+          <p className={styles.eyebrow}>Lore references · shot-lineage archive</p>
+          <h1>Lore Short Reference Archive</h1>
+          <p>
+            A single admitted still can reveal composition craft. It cannot prove a story,
+            a character system, sequence continuity, a runtime, or a finished episode.
+          </p>
+          <div className={styles.heroRule}><span aria-hidden="true">✣</span><div><small>Sequence rule</small><strong>Every narrated beat must earn its own drawn scene.</strong></div></div>
+        </div>
+        <div className={styles.metricRail}>
+          <ArchiveMetric label="Artifact" value="Still" note="no video displayed" />
+          <ArchiveMetric label="Status" value="Reference" note="not promoted" />
+          <ArchiveMetric label="Story proof" value="None" note="single frame only" />
+          <ArchiveMetric label="Runtime" value="Blocked" note="benchmark missing" />
+          <ArchiveMetric label="Release" value="None" note="no final master" />
+        </div>
+      </header>
+
+      <section className={styles.identityDesk} aria-label="Current approved Lore Short reference media">
+        <div className={styles.sectionHeading}>
+          <div><span className={styles.eyebrow}>Current reference</span><h2>What this frame can—and cannot—teach.</h2></div>
+          <p>{CURRENT_REFERENCE.meta}</p>
+        </div>
+        <div className={styles.identityNotes}>
+          {IDENTITY_NOTES.map((note) => <article key={note.index}><span>{note.index}</span><div><strong>{note.title}</strong><p>{note.detail}</p></div></article>)}
+        </div>
       </section>
 
-      <div style={{ height: "1.5rem" }} />
-      <SectionTitle>What the future route must prove</SectionTitle>
-      <section style={GRID} aria-label="Lore Short route requirements">
-        {EXECUTION_RAILS.map((rail) => (
-          <article key={rail.title} style={CARD}>
-            <strong>{rail.title}</strong>
-            <span style={META}>{rail.detail}</span>
-          </article>
-        ))}
+      <section className={styles.sequenceDesk} aria-label="Lore Short full-story illustration requirements">
+        <div className={styles.sequenceCopy}>
+          <span className={styles.eyebrow}>Full-story coverage</span>
+          <h2>The route must draw beyond the opening.</h2>
+          <p>Reviewers need proof that the channel identity survives through every shot: not four strong images followed by generic filler, repeated key art, or narration with no story-specific scene.</p>
+          <div className={styles.sequenceBoundary}><span>PLAN</span><i /><span>SHOTS</span><i /><span>MASTER</span><i /><span>REVIEW</span></div>
+        </div>
+        <div className={styles.storyboardStrip}>
+          {CONTINUITY_GATES.map((gate) => (
+            <article key={gate.index}>
+              <div className={styles.frameWindow} data-index={gate.index}><span>{gate.index}</span><i aria-hidden="true" /></div>
+              <strong>{gate.title}</strong><p>{gate.detail}</p>
+            </article>
+          ))}
+        </div>
       </section>
 
-      <div style={{ height: "1.5rem" }} />
-      <SectionTitle>Archive boundary</SectionTitle>
-      <ul style={{ margin: "0.5rem 0 0", padding: 0, listStyle: "none", display: "grid", gap: "0.5rem" }}>
-        {ARCHIVE_BOUNDARIES.map((boundary) => (
-          <li key={boundary} className="glass" style={{ padding: "0.75rem 0.85rem", color: "var(--color-muted)", fontSize: "0.82rem", lineHeight: 1.45 }}>
-            {boundary}
-          </li>
-        ))}
-      </ul>
-    </>
+      <section className={styles.admissionDesk} aria-label="Lore Short route requirements">
+        <div className={styles.admissionMap}>
+          <header><span>Future route admission</span><small>All gates held</small></header>
+          <div className={styles.admissionField}>
+            <i className={styles.admissionSpine} aria-hidden="true" />
+            <AdmissionNode index="01" title="Original plan" detail="Story + critic receipt" />
+            <AdmissionNode index="02" title="Exact runtime" detail="LTX 2.5 benchmark" />
+            <AdmissionNode index="03" title="Sequence proof" detail="Every beat illustrated" />
+            <AdmissionNode index="04" title="Release evidence" detail="Final master sealed" />
+            <div className={styles.admissionSeal}><span>ROUTE</span><strong>HELD</strong><small>no creator intake</small></div>
+          </div>
+        </div>
+        <div className={styles.railList}>
+          <div className={styles.sectionHeading}><div><span className={styles.eyebrow}>Admission requirements</span><h2>What the future route must prove</h2></div></div>
+          {EXECUTION_RAILS.map((rail, index) => <article key={rail.title}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{rail.title}</strong><p>{rail.detail}</p></div></article>)}
+        </div>
+      </section>
+
+      <section className={styles.boundaryDesk}>
+        <div className={styles.sectionHeading}>
+          <div><span className={styles.eyebrow}>Archive boundary</span><h2>Reference is not inheritance.</h2></div>
+          <p>The archive keeps useful evidence visible while preventing old, franchise-linked, or unqualified material from becoming production identity.</p>
+        </div>
+        <ol>{ARCHIVE_BOUNDARIES.map((boundary, index) => <li key={boundary}><span>{String(index + 1).padStart(2, "0")}</span><p>{boundary}</p></li>)}</ol>
+      </section>
+    </main>
   );
+}
+
+function ArchiveMetric({ label, value, note }: { label: string; value: string; note: string }) {
+  return <div className={styles.metric}><span>{label}</span><strong>{value}</strong><small>{note}</small></div>;
+}
+
+function AdmissionNode({ index, title, detail }: { index: string; title: string; detail: string }) {
+  return <div className={styles.admissionNode}><span>{index}</span><div><strong>{title}</strong><small>{detail}</small></div><i aria-hidden="true" /></div>;
 }
