@@ -2250,9 +2250,13 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
 
 .channel-card-actions {
   display: grid;
-  grid-template-columns: 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 0.25rem;
   margin-top: auto;
+}
+
+.channel-card-actions .channel-account-action {
+  min-height: 40px;
 }
 
 .channel-card-secondary-actions {
@@ -3019,6 +3023,7 @@ button.video-card-open { cursor: pointer; }
   .channel-page-pagination > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .channel-page-pagination button:only-child { grid-column: 1 / -1; }
   .channel-card-actions { grid-template-columns: 1fr; }
+  .channel-card-actions .channel-account-action { min-height: 44px; }
   .channel-operating-profile { grid-template-columns: 1fr; }
   .channel-operating-profile > div { border-right: 0; border-bottom: 1px solid var(--color-border); }
   .channel-operating-profile > div:nth-child(4) { border-bottom: 0; }

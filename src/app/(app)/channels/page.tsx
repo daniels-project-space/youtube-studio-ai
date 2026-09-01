@@ -322,7 +322,6 @@ export default function ChannelsPage() {
                     </nav>
                     <div className="channel-card-account-actions">
                       <ChannelToggle id={c._id} active={autopilotEnabled} schedule={c.schedule} />
-                      {needsLink && <LinkYouTubeButton channelId={c._id} created={Boolean(c.youtubeCreated?.ytChannelId)} />}
                       {linked && c.identity?.imageKey && ytId && (
                         <SetAvatarButton imageKey={c.identity.imageKey} ytChannelId={ytId} slug={c.slug} />
                       )}
@@ -336,12 +335,11 @@ export default function ChannelsPage() {
                     <span className="studio-pulse">●</span> Setting up YouTube channel…
                   </div>
                 )}
-                {needsLink && !creating && (
-                  <div className="channel-card-notice channel-card-notice-danger">YouTube connection required</div>
-                )}
-
                 <nav className="channel-card-actions" aria-label={`${c.name} actions`}>
-                  <Link href={`/channels/${c.slug}`} className="channel-card-open">Open →</Link>
+                  {needsLink && !creating ? (
+                    <LinkYouTubeButton channelId={c._id} created={Boolean(c.youtubeCreated?.ytChannelId)} />
+                  ) : null}
+                  <Link href={`/channels/${c.slug}`} className="channel-card-open">Open channel</Link>
                 </nav>
               </article>
             );
