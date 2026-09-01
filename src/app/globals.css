@@ -2027,6 +2027,7 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
 }
 
 .channel-live-state small {
+  display: none;
   overflow: hidden;
   color: var(--color-faint);
   font-size: 0.52rem;
@@ -2994,7 +2995,7 @@ button.video-card-open { cursor: pointer; }
     padding: 0.42rem 0.52rem;
   }
   .channel-live-state > span { grid-row: auto; }
-  .channel-live-state small { text-align: right; }
+  .channel-live-state small { display: block; text-align: right; }
   .channel-page-pagination { align-items: stretch; flex-direction: column; }
   .channel-page-pagination > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .channel-page-pagination button:only-child { grid-column: 1 / -1; }

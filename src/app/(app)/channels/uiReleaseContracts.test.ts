@@ -189,6 +189,7 @@ assert.match(sidebar, /const TOOLBOX_NAV_GROUPS[\s\S]*href:\s*["']\/seo["']/);
 assert.doesNotMatch(sidebar, /Novita Render/);
 assert.match(sidebar, /MOBILE_PRIMARY_COUNT/);
 assert.match(channels, /channel-live-state/);
+assert.match(channels, /title=\{operatingState\.detail\}/);
 assert.match(channels, /channel-card-readiness/);
 assert.match(channels, /<progress[\s\S]*setup readiness/);
 assert.match(channels, /link\.status === "active"/);

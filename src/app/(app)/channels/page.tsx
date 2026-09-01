@@ -266,6 +266,7 @@ export default function ChannelsPage() {
                   <div
                     className={`channel-live-state channel-live-state-${operatingState.tone}`}
                     aria-label={`${operatingState.label}: ${operatingState.detail}`}
+                    title={operatingState.detail}
                   >
                     <span aria-hidden="true" />
                     <strong>{operatingState.label}</strong>
