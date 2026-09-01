@@ -7,6 +7,7 @@ import { fmtDateTime } from "@/lib/format";
 import { IconExternal } from "@/components/icons";
 import styles from "./ThumbnailRefreshInventoryPanel.module.css";
 import { THUMBNAIL_REFRESH_MAXIMUM_COST_USD } from "@/lib/thumbnailRefreshCandidate";
+import type { LegacyVideoRetirementReason } from "@/lib/legacyVideoCleanup";
 
 type InventoryStatus =
   | "current_golden_candidate"
@@ -41,6 +42,15 @@ type ThumbnailInventoryRow = Readonly<{
   releaseEvidenceStatus: string;
   thumbnailReplayStatus: ThumbnailReplayStatus;
   thumbnailReplayReason: string;
+  legacyCleanupAction: "keep" | "retire";
+  legacyCleanupReason: string;
+  legacyCleanupExplanation: string;
+  retirement?: {
+    id: string;
+    status?: "awaiting_approval" | "pending" | "queued" | "deleted" | "blocked";
+    error?: string;
+    verified: boolean;
+  };
   candidate?: {
     runId: string;
     status: string;
@@ -158,6 +168,8 @@ export function ThumbnailRefreshInventoryPanel({
   const [showAll, setShowAll] = useState(false);
   const [busyRunIds, setBusyRunIds] = useState<Set<string>>(() => new Set());
   const [actionMessage, setActionMessage] = useState<string | null>(null);
+  const [retirementRunId, setRetirementRunId] = useState<string | null>(null);
+  const [retirementConfirmation, setRetirementConfirmation] = useState("");
 
   const loadInventory = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch("/api/thumbnail-refresh", { cache: "no-store", signal });
@@ -192,14 +204,17 @@ export function ThumbnailRefreshInventoryPanel({
     (["queued", "running"].includes(row.candidate.status) ||
       ["pending", "queued"].includes(row.candidate.dispatchState ?? "")),
   ) ?? false;
+  const hasActiveRetirement = inventory?.some((row) =>
+    row.retirement && ["pending", "queued"].includes(row.retirement.status ?? ""),
+  ) ?? false;
 
   useEffect(() => {
-    if (!hasActiveCandidate) return;
+    if (!hasActiveCandidate && !hasActiveRetirement) return;
     const timer = window.setInterval(() => {
       void loadInventory().catch(() => undefined);
     }, 4_000);
     return () => window.clearInterval(timer);
-  }, [hasActiveCandidate, loadInventory]);
+  }, [hasActiveCandidate, hasActiveRetirement, loadInventory]);
 
   const createCandidate = async (row: ThumbnailInventoryRow) => {
     const canResumeDispatch = row.candidate &&
@@ -233,26 +248,67 @@ export function ThumbnailRefreshInventoryPanel({
     }
   };
 
+  const retireVideo = async (row: ThumbnailInventoryRow) => {
+    if (
+      !row.youtubeVideoId ||
+      row.legacyCleanupAction !== "retire" ||
+      retirementConfirmation !== row.youtubeVideoId ||
+      busyRunIds.has(row.runId)
+    ) return;
+    setBusyRunIds((current) => new Set(current).add(row.runId));
+    setActionMessage(null);
+    try {
+      const response = await fetch("/api/youtube-video-retire", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          runId: row.runId,
+          youtubeVideoId: row.youtubeVideoId,
+          reason: row.legacyCleanupReason as LegacyVideoRetirementReason,
+          confirmPermanentDeletion: retirementConfirmation,
+        }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "Could not queue permanent removal");
+      }
+      setActionMessage(`Permanent removal queued for “${row.title}”. Ownership will be rechecked first.`);
+      setRetirementRunId(null);
+      setRetirementConfirmation("");
+      await loadInventory();
+    } catch (retirementError) {
+      setActionMessage(retirementError instanceof Error
+        ? retirementError.message
+        : "Could not queue permanent removal");
+    } finally {
+      setBusyRunIds((current) => {
+        const next = new Set(current);
+        next.delete(row.runId);
+        return next;
+      });
+    }
+  };
+
   const rows = useMemo(
     () => inventory?.filter((row) => !selectedChannelSlug || row.channelSlug === selectedChannelSlug) ?? [],
     [inventory, selectedChannelSlug],
   );
   const counts = inventoryCounts(rows);
   const reviewCount = counts.legacy_unverified + counts.evidence_invalid + counts.missing_thumbnail;
+  const retirementCount = rows.filter((row) => row.legacyCleanupAction === "retire" && row.retirement?.status !== "deleted").length;
   const visible = showAll ? rows : rows.slice(0, 6);
 
   return (
     <section className={`${styles.section} glass`} aria-labelledby="thumbnail-review-title">
       <header className={styles.header}>
         <div>
-          <p className={styles.eyebrow}>Packaging evidence / retained inputs</p>
-          <h2 id="thumbnail-review-title">Thumbnail review queue</h2>
-          <p>
-            First prove what can be replayed safely. A reviewed thumbnail may update the existing YouTube video; rebuilt media must become a separate private successor draft because YouTube cannot replace video bytes in place. Legacy never means replace automatically.
-          </p>
+          <p className={styles.eyebrow}>Saved uploads</p>
+          <h2 id="thumbnail-review-title">Packaging queue</h2>
+          <p>Keep, rebuild, or remove older uploads. Every action uses the exact saved run.</p>
         </div>
         <div className={styles.counts} aria-label="Thumbnail evidence totals">
           <span data-tone="review"><small>Needs review</small><strong>{inventory === null ? "—" : reviewCount}</strong></span>
+          <span data-tone="warning"><small>Remove</small><strong>{inventory === null ? "—" : retirementCount}</strong></span>
           <span data-tone="ready"><small>Current proof</small><strong>{inventory === null ? "—" : counts.current_golden_candidate}</strong></span>
         </div>
       </header>
@@ -293,6 +349,9 @@ export function ThumbnailRefreshInventoryPanel({
                       : "Thumbnail-only replay is not safe. "}
                     {row.thumbnailReplayReason}
                   </p>
+                  {row.legacyCleanupAction === "retire" ? (
+                    <p className={styles.retirementReason}>{row.legacyCleanupExplanation}</p>
+                  ) : null}
                   <div className={styles.meta}>
                     {row.channelSlug ? <Link href={`/channels/${row.channelSlug}`}>{row.channelName}</Link> : <span>{row.channelName}</span>}
                     <span>{fmtDateTime(row.createdAt)}</span>
@@ -306,10 +365,11 @@ export function ThumbnailRefreshInventoryPanel({
                     {row.candidate ? (
                       <span>candidate: {row.candidate.status.replaceAll("_", " ")} · ${row.candidate.costTotal.toFixed(2)}</span>
                     ) : null}
+                    {row.retirement ? <span>removal: {row.retirement.status?.replaceAll("_", " ")}</span> : null}
                   </div>
                 </div>
                 <div className={styles.actions}>
-                  {row.refreshAction === "owner_review_required" && row.thumbnailReplayStatus === "ready_for_thumbnail_only" && !row.candidate ? (
+                  {row.legacyCleanupAction !== "retire" && row.refreshAction === "owner_review_required" && row.thumbnailReplayStatus === "ready_for_thumbnail_only" && !row.candidate ? (
                     <button
                       type="button"
                       className={styles.generateAction}
@@ -347,8 +407,52 @@ export function ThumbnailRefreshInventoryPanel({
                   {row.candidate ? (
                     <Link href={`/runs/${row.candidate.runId}`} className={styles.action}>Inspect candidate</Link>
                   ) : null}
+                  {row.legacyCleanupAction === "retire" && row.retirement?.status === "deleted" ? (
+                    <span className={styles.retirementDone}>Removed · absence verified</span>
+                  ) : null}
+                  {row.legacyCleanupAction === "retire" && row.retirement && ["pending", "queued"].includes(row.retirement.status ?? "") ? (
+                    <span className={styles.candidateProgress} role="status">
+                      <i aria-hidden="true" />Ownership check + removal
+                    </span>
+                  ) : null}
+                  {row.legacyCleanupAction === "retire" && row.retirement?.status === "blocked" ? (
+                    <span className={styles.candidateFailed}>{row.retirement.error ?? "Removal blocked"}</span>
+                  ) : null}
+                  {row.legacyCleanupAction === "retire" && !row.retirement && retirementRunId !== row.runId ? (
+                    <button
+                      type="button"
+                      className={styles.retireAction}
+                      onClick={() => {
+                        setRetirementRunId(row.runId);
+                        setRetirementConfirmation("");
+                      }}
+                    >Review permanent removal</button>
+                  ) : null}
+                  {row.legacyCleanupAction === "retire" && !row.retirement && retirementRunId === row.runId && row.youtubeVideoId ? (
+                    <div className={styles.retireConfirm}>
+                      <label htmlFor={`retire-${row.runId}`}>Type <code>{row.youtubeVideoId}</code></label>
+                      <input
+                        id={`retire-${row.runId}`}
+                        value={retirementConfirmation}
+                        onChange={(event) => setRetirementConfirmation(event.target.value.trim())}
+                        autoComplete="off"
+                      />
+                      <button
+                        type="button"
+                        disabled={retirementConfirmation !== row.youtubeVideoId || busyRunIds.has(row.runId)}
+                        onClick={() => void retireVideo(row)}
+                      >Permanently delete</button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRetirementRunId(null);
+                          setRetirementConfirmation("");
+                        }}
+                      >Cancel</button>
+                    </div>
+                  ) : null}
                   <Link href={`/runs/${row.runId}`} className={styles.action}>Inspect run</Link>
-                  {row.channelSlug && row.refreshAction === "owner_review_required" ? (
+                  {row.channelSlug && row.refreshAction === "owner_review_required" && row.legacyCleanupAction !== "retire" ? (
                     <Link
                       href={`/channels/${row.channelSlug}#route-qualification-benchmark`}
                       className={styles.action}

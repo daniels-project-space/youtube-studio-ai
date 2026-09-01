@@ -24,6 +24,13 @@ export type ThumbnailRefreshInventoryItem = Readonly<{
   releaseEvidenceStatus: string;
   thumbnailReplayStatus: "ready_for_thumbnail_only" | "requires_private_successor";
   thumbnailReplayReason: string;
+  legacyCleanupAction: "keep" | "retire";
+  legacyCleanupReason: string;
+  legacyCleanupExplanation: string;
+  retirementId?: string;
+  retirementStatus?: "awaiting_approval" | "pending" | "queued" | "deleted" | "blocked";
+  retirementError?: string;
+  retirementReceiptFingerprint?: string;
   candidateRunId?: string;
   candidateStatus?: string;
   candidateDispatchState?: string;

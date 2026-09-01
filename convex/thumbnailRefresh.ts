@@ -15,6 +15,7 @@ import {
   THUMBNAIL_REFRESH_MAXIMUM_COST_USD,
   thumbnailRefreshDispatchKey,
 } from "../src/lib/thumbnailRefreshCandidate";
+import { assessLegacyVideoCleanup } from "../src/lib/legacyVideoCleanup";
 
 const MAX_DISPATCH_ATTEMPTS = 3;
 type DbCtx = Pick<QueryCtx | MutationCtx, "db">;
@@ -104,12 +105,21 @@ export const listInventory = query({
           .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
           .order("desc");
 
-    const channels = new Map<string, { name: string; slug: string } | null>();
+    const channels = new Map<string, { name: string; slug: string; family?: string } | null>();
     const channelFor = async (channelId: Id<"channels">) => {
       const cacheKey = String(channelId);
       if (channels.has(cacheKey)) return channels.get(cacheKey)!;
       const channel = await ctx.db.get(channelId);
-      const value = channel ? { name: channel.name, slug: channel.slug } : null;
+      const value = channel
+        ? {
+            name: channel.name,
+            slug: channel.slug,
+            family:
+              channel.family ??
+              channel.contentLane?.family ??
+              channel.identity.programBrief?.family,
+          }
+        : null;
       channels.set(cacheKey, value);
       return value;
     };
@@ -171,6 +181,21 @@ export const listInventory = query({
         "Untitled video";
 
       const replay = replayInput.replay;
+      const cleanup = assessLegacyVideoCleanup({
+        youtubeVideoId: run.youtubeVideoId,
+        runStatus: run.status,
+        title,
+        channelFamily: channel?.family,
+        releaseEvidenceStatus: run.releaseEvidenceStatus,
+      });
+      const retirement = cleanup.action === "retire" && run.youtubeVideoId
+        ? await ctx.db
+            .query("youtubeVideoRetirements")
+            .withIndex("by_owner_video", (q) => q
+              .eq("ownerId", args.ownerId)
+              .eq("youtubeVideoId", run.youtubeVideoId!))
+            .unique()
+        : null;
       const candidate = candidates.get(String(run._id));
       const candidateAssets = candidate
         ? await ctx.db
@@ -201,6 +226,15 @@ export const listInventory = query({
         // make a deceptive "refresh" for a historic video.
         thumbnailReplayStatus: replay.status,
         thumbnailReplayReason: replay.reason,
+        legacyCleanupAction: cleanup.action,
+        legacyCleanupReason: cleanup.reason,
+        legacyCleanupExplanation: cleanup.explanation,
+        ...(retirement ? {
+          retirementId: String(retirement._id),
+          retirementStatus: retirement.status,
+          retirementError: retirement.lastError,
+          retirementReceiptFingerprint: retirement.deletionReceiptFingerprint,
+        } : {}),
         ...(candidate ? {
           candidateRunId: String(candidate._id),
           candidateStatus: candidate.status,

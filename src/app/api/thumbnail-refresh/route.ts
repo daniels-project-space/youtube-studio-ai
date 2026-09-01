@@ -85,6 +85,17 @@ export async function GET(request: Request) {
           releaseEvidenceStatus: item.releaseEvidenceStatus,
           thumbnailReplayStatus: item.thumbnailReplayStatus,
           thumbnailReplayReason: item.thumbnailReplayReason,
+          legacyCleanupAction: item.legacyCleanupAction,
+          legacyCleanupReason: item.legacyCleanupReason,
+          legacyCleanupExplanation: item.legacyCleanupExplanation,
+          ...(item.retirementId ? {
+            retirement: {
+              id: item.retirementId,
+              status: item.retirementStatus,
+              error: item.retirementError,
+              verified: Boolean(item.retirementReceiptFingerprint),
+            },
+          } : {}),
           ...(item.candidateRunId ? {
             candidate: {
               runId: item.candidateRunId,

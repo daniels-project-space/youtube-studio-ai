@@ -3,12 +3,13 @@
 .eyebrow { margin: 0 0 .3rem; color: var(--color-blueprint); font: 700 .55rem/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
 .header h2 { margin: 0; font-family: var(--font-display); font-size: 1.35rem; font-weight: 570; letter-spacing: -.03em; }
 .header p:not(.eyebrow) { max-width: 54rem; margin: .45rem 0 0; color: var(--color-muted); font-size: .75rem; line-height: 1.55; }
-.counts { display: grid; grid-template-columns: repeat(2, minmax(5.8rem,1fr)); border: 1px solid var(--color-border); border-radius: 10px; overflow: hidden; }
+.counts { display: grid; grid-template-columns: repeat(3, minmax(5.2rem,1fr)); border: 1px solid var(--color-border); border-radius: 10px; overflow: hidden; }
 .counts span { min-width: 0; display: grid; gap: .2rem; padding: .65rem .75rem; border-right: 1px solid var(--color-border); text-align: left; }
 .counts span:last-child { border-right: 0; }
 .counts small { color: var(--color-faint); font: .5rem/1 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
 .counts strong { color: var(--color-fg); font-family: var(--font-display); font-size: 1.25rem; font-weight: 570; line-height: 1; }
 .counts [data-tone="review"] strong { color: var(--color-amber); }
+.counts [data-tone="warning"] strong { color: var(--color-failed); }
 .counts [data-tone="ready"] strong { color: var(--color-secondary); }
 .state { min-height: 76px; display: grid; place-items: center; margin: .8rem 0 0; border: 1px dashed var(--color-border); border-radius: 10px; color: var(--color-faint); font-size: .72rem; }
 .actionMessage { margin: .8rem 0 0; padding: .65rem .8rem; border: 1px solid rgba(182,223,98,.22); border-radius: 8px; color: var(--color-secondary); background: rgba(182,223,98,.045); font-size: .68rem; }
@@ -30,6 +31,7 @@
 .row h3 { overflow: hidden; margin: 0; font-size: .79rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
 .rowCopy > p { display: -webkit-box; max-width: 58rem; margin: .24rem 0 0; overflow: hidden; color: var(--color-muted); font-size: .65rem; line-height: 1.43; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .rowCopy > p + p { color: var(--color-faint); }
+.rowCopy > .retirementReason { color: var(--color-failed); }
 .meta { display: flex; flex-wrap: wrap; gap: .22rem .6rem; margin-top: .42rem; color: var(--color-faint); font: .54rem/1.3 var(--font-mono); }
 .meta a { color: var(--color-blueprint); }
 .meta a:hover { color: var(--color-fg); }
@@ -49,6 +51,16 @@
 .candidateProgress i { width: 7px; height: 7px; border: 1px solid var(--color-blueprint); border-top-color: transparent; border-radius: 50%; animation: candidate-spin .85s linear infinite; }
 .candidateReady { border-color: rgba(182,223,98,.25); color: var(--color-secondary); }
 .candidateFailed { border-color: rgba(251,113,133,.24); color: var(--color-failed); }
+.retireAction { min-height: 31px; padding: .35rem .5rem; border: 1px solid rgba(251,113,133,.32); border-radius: 7px; color: var(--color-failed); background: rgba(251,113,133,.055); font-size: .61rem; font-weight: 650; cursor: pointer; }
+.retireAction:hover { border-color: var(--color-failed); background: rgba(251,113,133,.1); }
+.retireConfirm { min-width: 14rem; display: grid; grid-template-columns: 1fr auto; gap: .32rem; padding: .5rem; border: 1px solid rgba(251,113,133,.28); border-radius: 8px; background: rgba(251,113,133,.045); }
+.retireConfirm label { grid-column: 1 / -1; color: var(--color-muted); font-size: .56rem; }
+.retireConfirm code { color: var(--color-fg); font-family: var(--font-mono); }
+.retireConfirm input { grid-column: 1 / -1; min-width: 0; height: 30px; padding: 0 .45rem; border: 1px solid var(--color-border-strong); border-radius: 6px; color: var(--color-fg); background: var(--color-canvas); font: .62rem/1 var(--font-mono); }
+.retireConfirm button { min-height: 29px; padding: .3rem .45rem; border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-muted); background: transparent; font-size: .56rem; cursor: pointer; }
+.retireConfirm button:first-of-type { border-color: rgba(251,113,133,.35); color: var(--color-failed); }
+.retireConfirm button:disabled { opacity: .4; cursor: not-allowed; }
+.retirementDone { display: inline-flex; justify-content: center; padding: .42rem .5rem; border: 1px solid rgba(182,223,98,.25); border-radius: 7px; color: var(--color-secondary); font: .58rem/1.25 var(--font-mono); }
 @keyframes candidate-spin { to { transform: rotate(1turn); } }
 .more { width: fit-content; margin-top: .7rem; }
 
@@ -62,8 +74,12 @@
   .counts { width: 100%; }
   .row { grid-template-columns: 1fr; }
   .preview { max-width: none; }
-  .actions { grid-column: auto; }
-  .action { flex: 1; }
+  .actions { grid-column: auto; display: grid; width: 100%; }
+  .action,
+  .generateAction,
+  .retireAction { width: 100%; min-height: 36px; }
+  .retireConfirm { width: 100%; min-width: 0; }
+  .retireConfirm button { min-height: 36px; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1995,6 +1995,51 @@ export default defineSchema({
     .index("by_channel", ["channelId"])
     .index("by_owner", ["ownerId"]),
 
+  // Durable ledger for the narrow, explicitly approved retirement of legacy
+  // YouTube uploads. The external DELETE is reconciled by re-reading YouTube;
+  // a retry after a lost provider response therefore completes the same row
+  // instead of inventing a second side effect.
+  youtubeVideoRetirements: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    youtubeVideoId: v.string(),
+    reason: v.union(
+      v.literal("failed_run_uploaded"),
+      v.literal("channel_identity_mismatch"),
+      v.literal("unqualified_family_legacy"),
+    ),
+    connectorId: v.id("youtubeAuth"),
+    connectorVersion: v.number(),
+    expectedYoutubeChannelId: v.string(),
+    planFingerprint: v.string(),
+    dispatchKey: v.string(),
+    approval: v.optional(v.any()),
+    approvalFingerprint: v.optional(v.string()),
+    status: v.union(
+      v.literal("awaiting_approval"),
+      v.literal("pending"),
+      v.literal("queued"),
+      v.literal("deleted"),
+      v.literal("blocked"),
+    ),
+    dispatchAttempts: v.number(),
+    dispatchTriggerRunId: v.optional(v.string()),
+    providerVideoChannelId: v.optional(v.string()),
+    providerPrivacyStatus: v.optional(v.string()),
+    providerOutcome: v.optional(
+      v.union(v.literal("deleted"), v.literal("already_absent")),
+    ),
+    absenceVerifiedAt: v.optional(v.number()),
+    deletionReceiptFingerprint: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_video", ["ownerId", "youtubeVideoId"])
+    .index("by_owner_status", ["ownerId", "status"])
+    .index("by_run", ["runId"]),
+
   // Encrypted YouTube resumable-upload capabilities. A row is bound to one
   // owner/channel/upload key so retries can query the remote byte range and
   // continue after a Trigger worker restart without crossing account lines.

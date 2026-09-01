@@ -246,6 +246,77 @@ export async function getVideoChannelIds(
   return [...channelIds];
 }
 
+export type YouTubeVideoIdentity = Readonly<{
+  id: string;
+  channelId: string;
+  title: string;
+  privacyStatus?: string;
+}>;
+
+/** Resolve one exact video before a destructive channel-bound action. */
+export async function getVideoIdentity(
+  accessToken: string,
+  videoId: string,
+): Promise<YouTubeVideoIdentity | null> {
+  const params = new URLSearchParams({
+    part: "snippet,status",
+    id: videoId,
+  });
+  const response = await fetch(
+    `https://www.googleapis.com/youtube/v3/videos?${params.toString()}`,
+    { headers: { Authorization: `Bearer ${accessToken}` } },
+  );
+  const json = (await response.json()) as {
+    items?: Array<{
+      id?: string;
+      snippet?: { channelId?: string; title?: string };
+      status?: { privacyStatus?: string };
+    }>;
+    error?: { message?: string };
+  };
+  if (!response.ok) {
+    throw new YouTubeError(
+      `video identity lookup failed: ${json.error?.message ?? response.status}`,
+    );
+  }
+  const item = json.items?.[0];
+  if (!item?.id) return null;
+  if (!item.snippet?.channelId) {
+    throw new YouTubeError("video identity lookup omitted the owner channel");
+  }
+  return {
+    id: item.id,
+    channelId: item.snippet.channelId,
+    title: item.snippet.title ?? "",
+    privacyStatus: item.status?.privacyStatus,
+  };
+}
+
+/**
+ * Delete one YouTube video. Callers must first bind and verify its owner
+ * channel; a 404 is safe idempotent reconciliation after a lost response.
+ */
+export async function deleteVideo(
+  accessToken: string,
+  videoId: string,
+): Promise<"deleted" | "already_absent"> {
+  const response = await fetch(
+    `https://www.googleapis.com/youtube/v3/videos?id=${encodeURIComponent(videoId)}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    },
+  );
+  if (response.status === 404) return "already_absent";
+  if (!response.ok) {
+    const body = await response.text().catch(() => "");
+    throw new YouTubeError(
+      `video deletion failed: HTTP ${response.status} ${body.slice(0, 220)}`,
+    );
+  }
+  return "deleted";
+}
+
 /**
  * Apply channel branding (description / country / default language / keywords +
  * optional banner) via the official API. Fetches current brandingSettings first

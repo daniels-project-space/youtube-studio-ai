@@ -13,8 +13,8 @@ const library = read("src/app/(app)/library/page.tsx");
 // remains server-resolved from opaque run ids, and neither the browser nor the
 // candidate endpoint receives authority to overwrite the source/YouTube image.
 assert.match(panel, /fetch\("\/api\/thumbnail-refresh"/);
-assert.match(panel, /Legacy never means replace automatically/);
-assert.match(panel, /separate private successor draft/);
+assert.match(panel, /row\.legacyCleanupAction !== "retire"/);
+assert.match(panel, /Thumbnail-only replay is not safe/);
 assert.match(panel, /Inspect run/);
 assert.match(panel, /Exact thumbnail inputs retained/);
 assert.match(panel, /private successor required/);
