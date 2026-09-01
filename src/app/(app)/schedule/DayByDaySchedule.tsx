@@ -97,7 +97,7 @@ function DayEventCard({ event }: { event: CalendarEvent }) {
         fallbackSrc={event.youtubeVideoId ? youtubeThumb(event.youtubeVideoId) : undefined}
         fallbackSource="youtube"
         alt=""
-        aspectRatio="1 / 1"
+        aspectRatio="16 / 9"
         unavailableLabel="Preview unavailable"
       />
       <span className={styles.dayEventCopy}>

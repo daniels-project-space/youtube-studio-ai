@@ -1,13 +1,12 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type CSSProperties } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
-import { PageHeader } from "@/components/PageHeader";
 import { SkeletonList } from "@/components/Skeleton";
 import { useOwnerId } from "@/lib/owner-context";
-import { scheduledTimestampForDay } from "@/lib/scheduleCalendar";
+import { civilDayKey, scheduledTimestampForDay } from "@/lib/scheduleCalendar";
 import { CalendarPanel } from "./CalendarPanel";
 import {
   ChannelScheduleEditor,
@@ -106,11 +105,27 @@ export default function SchedulePage() {
   const summary = {
     ready: plannedEvents.filter((event) => event.readiness === "ready").length,
     attention: plannedEvents.filter((event) => event.readiness === "attention").length,
+    pinned: plannedEvents.filter((event) => event.pinned).length,
     nextSevenDays: calendar.flat.filter((event) => {
       const timestamp = event.date.getTime();
       return timestamp >= today.getTime() && timestamp < weekEnd;
     }).length,
   };
+  const rhythm = Array.from({ length: 14 }, (_, index) => {
+    const date = new Date(today.getFullYear(), today.getMonth(), today.getDate() + index);
+    const dayEvents = calendar.flat.filter((event) => civilDayKey(event.date) === civilDayKey(date));
+    return {
+      date,
+      count: dayEvents.length,
+      attention: dayEvents.some((event) => event.readiness === "attention"),
+      ready: dayEvents.filter((event) => event.readiness === "ready").length,
+    };
+  });
+  const rhythmPeak = Math.max(1, ...rhythm.map((day) => day.count));
+  const nextEvent = upcoming[0];
+  const scopeName = effectiveScope === "all"
+    ? "Fleet"
+    : channelById.get(effectiveScope)?.name ?? "Channel";
   const loading = plan === undefined || publishedHistory === undefined || channels === undefined;
 
   const pinEvent = async (event: CalendarEvent, isoDay: string) => {
@@ -146,58 +161,112 @@ export default function SchedulePage() {
 
   return (
     <>
-      <PageHeader title="Schedule" />
-
       <section
-        className={`${styles.controlDeck} glass`}
+        className={styles.scheduleHero}
         aria-label="Calendar scope and summary"
         aria-busy={loading}
       >
-        <label className={styles.scopeControl}>
-          <span>Channel</span>
-          <select
-            className={styles.scopeSelect}
-            value={effectiveScope}
-            onChange={(event) => setScope(event.target.value)}
-            aria-label="Filter calendar by channel"
-            disabled={loading}
-          >
-            <option value="all">All channels</option>
-            {(channels ?? []).map((channel) => <option key={channel._id} value={channel._id}>{channel.name}</option>)}
-          </select>
-        </label>
-        <div className={styles.metrics}>
-          <Metric value={loading ? "—" : summary.nextSevenDays} label="Next 7 days" />
-          <Metric value={loading ? "—" : summary.ready} label="Ready" tone={loading ? undefined : "ok"} />
-          <Metric
-            value={loading ? "—" : summary.attention}
-            label="Attention"
-            tone={!loading && summary.attention ? "warn" : undefined}
-          />
+        <div className={styles.heroGrid}>
+          <div className={styles.heroCopy}>
+            <span className={styles.eyebrow}>Release clock / {scopeName}</span>
+            <h1>Shape the week before production shapes it for you.</h1>
+            <p>
+              See the fleet&apos;s publishing rhythm, protect ready work from collisions,
+              and pin exceptions without losing each channel&apos;s local cadence.
+            </p>
+            <div className={styles.nextRelease} data-empty={!nextEvent || undefined}>
+              <span className={styles.nextReleaseSignal} aria-hidden="true"><i /></span>
+              <span>
+                <small>{loading ? "Reading release ledger" : nextEvent ? "Next handoff" : "Runway clear"}</small>
+                <strong>{loading ? "Binding schedules…" : nextEvent?.title ?? "No planned release in this scope"}</strong>
+                <em>
+                  {nextEvent
+                    ? `${nextEvent.channel} · ${nextEvent.pinned ? "pinned" : "cadence projected"}`
+                    : "Build the next episode from a channel room."}
+                </em>
+              </span>
+            </div>
+          </div>
+
+          <div className={styles.rhythmPanel} aria-label="Fourteen day release rhythm">
+            <div className={styles.rhythmHeader}>
+              <span>14-day release signal</span>
+              <small>{loading ? "—" : `${rhythm.reduce((sum, day) => sum + day.count, 0)} handoffs`}</small>
+            </div>
+            <div className={styles.rhythmPlot}>
+              {rhythm.map((day, index) => (
+                <span
+                  className={styles.rhythmDay}
+                  data-today={index === 0 || undefined}
+                  data-attention={day.attention || undefined}
+                  key={civilDayKey(day.date)}
+                  title={`${day.date.toLocaleDateString("en-GB", { day: "numeric", month: "short" })}: ${day.count} release${day.count === 1 ? "" : "s"}, ${day.ready} ready`}
+                >
+                  <i
+                    style={{ "--rhythm-height": `${Math.max(day.count ? 18 : 3, (day.count / rhythmPeak) * 100)}%` } as CSSProperties}
+                  />
+                  <small>{day.date.toLocaleDateString("en-GB", { weekday: "narrow" })}</small>
+                  <em>{day.date.getDate()}</em>
+                </span>
+              ))}
+            </div>
+            <div className={styles.rhythmLegend}>
+              <span><i data-tone="ready" /> Ready runway</span>
+              <span><i data-tone="attention" /> Needs intervention</span>
+              <span>Height = releases per day</span>
+            </div>
+          </div>
+        </div>
+
+        <div className={styles.heroControls}>
+          <label className={styles.scopeControl}>
+            <span>Calendar scope</span>
+            <select
+              className={styles.scopeSelect}
+              value={effectiveScope}
+              onChange={(event) => setScope(event.target.value)}
+              aria-label="Filter calendar by channel"
+              disabled={loading}
+            >
+              <option value="all">All channels</option>
+              {(channels ?? []).map((channel) => <option key={channel._id} value={channel._id}>{channel.name}</option>)}
+            </select>
+          </label>
+
+          <nav className={styles.viewTabs} aria-label="Schedule view" role="tablist">
+            {([
+              ["week", "Seven-day board"],
+              ["month", "Month map"],
+              ["cadence", "Cadence controls"],
+            ] as const).map(([value, label]) => (
+              <button
+                type="button"
+                key={value}
+                role="tab"
+                data-active={scheduleView === value}
+                aria-selected={scheduleView === value}
+                onClick={() => {
+                  setScheduleView(value);
+                  if (value !== "month") setOffset(0);
+                }}
+              >
+                {label}
+              </button>
+            ))}
+          </nav>
+
+          <div className={styles.metrics}>
+            <Metric value={loading ? "—" : summary.nextSevenDays} label="7-day handoffs" />
+            <Metric value={loading ? "—" : summary.ready} label="Ready" tone={loading ? undefined : "ok"} />
+            <Metric value={loading ? "—" : summary.pinned} label="Pinned" />
+            <Metric
+              value={loading ? "—" : summary.attention}
+              label="Intervene"
+              tone={!loading && summary.attention ? "warn" : undefined}
+            />
+          </div>
         </div>
       </section>
-
-      <nav className={styles.viewTabs} aria-label="Schedule view" role="tablist">
-        {([
-          ["week", "Day by day"],
-          ["month", "Month"],
-          ["cadence", "Channel cadence"],
-        ] as const).map(([value, label]) => (
-          <button
-            type="button"
-            key={value}
-            role="tab"
-            data-active={scheduleView === value}
-            aria-selected={scheduleView === value}
-            onClick={() => {
-              setScheduleView(value);
-              if (value !== "month") setOffset(0);
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </nav>
 
       {notice && (
         <div className={notice.tone === "error" ? styles.noticeError : styles.noticeOk} role="status">
