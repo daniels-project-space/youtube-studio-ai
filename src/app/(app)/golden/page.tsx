@@ -1,4 +1,3 @@
-import type { CSSProperties } from "react";
 import { GOLDEN_MODULES, type GoldenModule } from "@/engine/golden";
 import {
   catalogExecutionAvailability,
@@ -17,9 +16,9 @@ import {
   type GoldenProofMediaPresentation,
   type GoldenProofMediaSuccessorRequirement,
 } from "@/engine/goldenProofMedia";
-import { PageHeader } from "@/components/PageHeader";
 import { ProductionRouteQualificationCard } from "@/components/ProductionRouteQualificationCard";
 import { GoldenImages } from "./GoldenImages";
+import styles from "./golden.module.css";
 
 /* ============================ proof data ============================== *
  * Each module shows AT MOST its two best examples (take2). Arrays are
@@ -214,11 +213,59 @@ export default function GoldenPipelinePage() {
   const blockedAdmissions = admissions.filter((admission) => admission.mode === "blocked");
   const notPresentableMedia = media.historical + media.quarantined + media.duplicate;
   return (
-    <>
-      <PageHeader
-        title="Golden Module Catalog"
-        subtitle={`${GOLDEN_MODULES.length} modules · ${referenceCount} references · ${executableCount} executable bindings · ${receiptCount} promotion proofs. Evidence, execution, and creator admission remain separate.`}
-      />
+    <main className={styles.page}>
+      <header className={styles.hero}>
+        <div className={styles.heroCopy}>
+          <p className={styles.eyebrow}>Production standards · evidence atlas</p>
+          <h1>Golden Module Catalog</h1>
+          <p>
+            The reference shelf, runnable machinery, promotion receipts, and creator-ready
+            routes are different things. This desk makes every boundary visible.
+          </p>
+          <div className={styles.heroRule}>
+            <span aria-hidden="true">G</span>
+            <div>
+              <small>Admission rule</small>
+              <strong>A beautiful sample never certifies a production route.</strong>
+            </div>
+          </div>
+        </div>
+        <div className={styles.assay} aria-label="Golden module admission assay">
+          <div className={styles.assayHeader}>
+            <span>Live registry assay</span>
+            <small>{GOLDEN_MODULES.length} catalog records</small>
+          </div>
+          <div className={styles.assayField}>
+            <div className={`${styles.assayNode} ${styles.nodeCatalog}`}>
+              <span>01</span><div><small>Catalog</small><strong>{GOLDEN_MODULES.length} modules</strong></div>
+            </div>
+            <div className={`${styles.assayNode} ${styles.nodeExecution}`}>
+              <span>02</span><div><small>Runnable binding</small><strong>{executableCount} connected</strong></div>
+            </div>
+            <div className={`${styles.assayNode} ${styles.nodeProof}`} data-empty={receiptCount === 0}>
+              <span>03</span><div><small>Promotion receipt</small><strong>{receiptCount} recorded</strong></div>
+            </div>
+            <div className={`${styles.assayNode} ${styles.nodeAdmission}`}>
+              <span>04</span><div><small>Family admission</small><strong>{automaticAdmissions.length} automatic</strong></div>
+            </div>
+            <div className={styles.assayCore} data-empty={receiptCount === 0}>
+              <span>GOLDEN</span>
+              <strong>{receiptCount}</strong>
+              <small>promoted</small>
+            </div>
+            <i className={styles.assayTrackA} aria-hidden="true" />
+            <i className={styles.assayTrackB} aria-hidden="true" />
+            <i className={styles.assayTrackC} aria-hidden="true" />
+          </div>
+        </div>
+        <div className={styles.metricRail}>
+          <HeroMetric label="Catalog" value={GOLDEN_MODULES.length} note="registered standards" />
+          <HeroMetric label="Reference" value={referenceCount} note="candidate modules" />
+          <HeroMetric label="Executable" value={executableCount} note="pipeline bindings" />
+          <HeroMetric label="Proof media" value={media.reference} note="inspectable artifacts" />
+          <HeroMetric label="Promoted" value={receiptCount} note="immutable receipts" />
+        </div>
+      </header>
       <GoldenTruthOverview
         automatic={automaticAdmissions}
         supervised={supervisedAdmissions}
@@ -230,7 +277,15 @@ export default function GoldenPipelinePage() {
         mediaSuccessorQueue={mediaSuccessorQueue}
       />
       <MinimumVideoFoundationOverview />
-      {CATEGORY_ORDER.map((cat) => {
+      <section className={styles.catalogIntro}>
+        <div>
+          <span>Standards library</span>
+          <h2>Five production disciplines</h2>
+        </div>
+        <p>Open one chapter at a time. Each module exposes its runtime state, evidence boundary, quality gates, and no more than two inspectable examples.</p>
+      </section>
+      <div className={styles.chapters}>
+      {CATEGORY_ORDER.map((cat, categoryIndex) => {
         const mods = GOLDEN_MODULES
           .filter((m) => (CATEGORY[m.key] ?? "Post-production") === cat)
           .sort((a, b) => catalogStatusRank(a.status) - catalogStatusRank(b.status));
@@ -239,27 +294,41 @@ export default function GoldenPipelinePage() {
         return (
           <details
             key={cat}
-            className="golden-category"
+            className={styles.chapter}
             aria-label={`${cat} Golden modules`}
           >
-            <summary className="golden-category-summary">
-              <span className="golden-category-copy">
+            <summary className={styles.chapterSummary}>
+              <span className={styles.chapterIndex}>{String(categoryIndex + 1).padStart(2, "0")}</span>
+              <span className={styles.chapterCopy}>
                 <span role="heading" aria-level={2}>{cat}</span>
-                <span>{CATEGORY_BLURB[cat]}</span>
+                <small>{CATEGORY_BLURB[cat]}</small>
               </span>
-              <span className="golden-category-count">
-                {mods.length} modules · {references} references
+              <span className={styles.chapterMeter} aria-hidden="true">
+                <i style={{ width: `${Math.max(8, Math.round((references / mods.length) * 100))}%` }} />
               </span>
+              <span className={styles.chapterCount}>{mods.length} modules · {references} references</span>
+              <span className={styles.chapterToggle} aria-hidden="true">+</span>
             </summary>
-            <div className="golden-category-body">
-              <div style={GRID}>
+            <div className={styles.chapterBody}>
+              <div className={styles.moduleGrid}>
                 {mods.map((m) => <ModuleCard key={m.key} module={m} />)}
               </div>
             </div>
           </details>
         );
       })}
-    </>
+      </div>
+    </main>
+  );
+}
+
+function HeroMetric({ label, value, note }: { label: string; value: number; note: string }) {
+  return (
+    <div className={styles.heroMetric}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{note}</small>
+    </div>
   );
 }
 
@@ -285,19 +354,19 @@ function GoldenTruthOverview({
   mediaSuccessorQueue: readonly GoldenProofMediaSuccessorRequirement[];
 }) {
   return (
-    <section aria-label="Golden evidence and channel admission truth" className="glass" style={{ marginTop: "1.1rem", padding: "0.95rem" }}>
-      <div style={{ display: "flex", gap: "0.65rem", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div style={{ display: "grid", gap: "0.2rem", maxWidth: 690 }}>
-          <span style={{ ...DEVICE, color: "var(--color-gold)" }}>TRUTH LAYER · EVIDENCE ≠ EXECUTION ≠ CHANNEL ADMISSION</span>
-          <strong style={{ fontSize: "0.92rem", letterSpacing: "-0.015em" }}>What can be seen, what can run, and what a creator can actually start.</strong>
-          <span style={{ fontSize: "0.74rem", lineHeight: 1.38, color: "var(--color-muted)" }}>
+    <section aria-label="Golden evidence and channel admission truth" className={styles.truthDesk}>
+      <div className={styles.truthHeader}>
+        <div>
+          <span className={styles.label}>Truth layer · evidence ≠ execution ≠ channel admission</span>
+          <h2>What can be seen, what can run, and what a creator can actually start.</h2>
+          <p>
             Media below is manifest-bound reference or context material. A module earns Golden status only from a separate immutable promotion proof; a registered executable then still needs an admitted channel route.
-          </span>
+          </p>
         </div>
-        <span className="status-chip" style={{ whiteSpace: "nowrap" }}>{promotionProofCount === 0 ? "NO GOLDEN PROMOTIONS RECORDED" : `${promotionProofCount} PROMOTION PROOF${promotionProofCount === 1 ? "" : "S"} RECORDED`}</span>
+        <span className={styles.promotionState} data-empty={promotionProofCount === 0}>{promotionProofCount === 0 ? "NO GOLDEN PROMOTIONS RECORDED" : `${promotionProofCount} PROMOTION PROOF${promotionProofCount === 1 ? "" : "S"} RECORDED`}</span>
       </div>
 
-      <div style={TRUTH_METRIC_GRID}>
+      <div className={styles.truthMetrics}>
         <TruthMetric label="Promotion proof records" value={promotionProofCount} note="Required before a module may be called Golden" tone="warning" />
         <TruthMetric label="Manifest reference media" value={referenceMediaCount} note="Inspectable samples, never a promotion receipt" tone="gold" />
         <TruthMetric label="Context-only media" value={contextMediaCount} note="Visible with an explicit use limitation" tone="neutral" />
@@ -306,19 +375,24 @@ function GoldenTruthOverview({
 
       <GoldenMediaSuccessorQueue items={mediaSuccessorQueue} />
 
-      <div style={{ marginTop: "0.9rem", paddingTop: "0.8rem", borderTop: "1px solid var(--color-border)", display: "grid", gap: "0.55rem" }}>
-        <div style={{ display: "flex", justifyContent: "space-between", gap: "0.5rem", alignItems: "baseline", flexWrap: "wrap" }}>
-          <strong style={{ fontSize: "0.8rem" }}>Creator channel admission</strong>
-          <span style={{ ...METAT, fontSize: "0.58rem" }}>CERTIFIED FAMILY ADMISSION · LIVE CATALOG EVALUATION</span>
+      <div className={styles.admissionDesk}>
+        <div className={styles.sectionHeading}>
+          <div>
+            <span className={styles.label}>Live catalog evaluation</span>
+            <h3>Creator channel admission</h3>
+          </div>
+          <small>Certified family policy · not a route receipt</small>
         </div>
-        <div style={ADMISSION_GRID}>
+        <div className={styles.admissionGrid}>
           <AdmissionGroup mode="automatic" title="Automatic" admissions={automatic} />
           <AdmissionGroup mode="supervised" title="Supervised / private" admissions={supervised} />
           <AdmissionGroup mode="blocked" title="Blocked" admissions={blocked} />
         </div>
-        <ProductionRouteQualificationCard
-          unavailableMessage="No persisted per-channel qualification receipt is connected to the Golden catalog. The family-admission groups above are live catalog policy, not a live route qualification."
-        />
+        <div className={styles.qualificationWrap}>
+          <ProductionRouteQualificationCard
+            unavailableMessage="No persisted per-channel qualification receipt is connected to the Golden catalog. The family-admission groups above are live catalog policy, not a live route qualification."
+          />
+        </div>
       </div>
     </section>
   );
@@ -326,22 +400,24 @@ function GoldenTruthOverview({
 
 function GoldenMediaSuccessorQueue({ items }: { items: readonly GoldenProofMediaSuccessorRequirement[] }) {
   return (
-    <details className="golden-audit-disclosure">
-      <summary>
+    <details className={styles.successorQueue}>
+      <summary className={styles.successorSummary}>
+        <span className={styles.queueSymbol} aria-hidden="true">↻</span>
         <span>
           <strong>Legacy video successor queue</strong>
           <small>CATALOG AUDIT · NO YOUTUBE REPLACEMENT ACTION</small>
         </span>
         <b>{items.length}</b>
+        <span className={styles.queueToggle} aria-hidden="true">+</span>
       </summary>
-      <div className="golden-audit-body">
+      <div className={styles.successorBody}>
         <p>
           Retained context or quarantined samples need a repaired successor render before they can become Golden evidence. Archive bytes remain preserved; no existing upload is changed here.
         </p>
-        <div className="golden-audit-grid">
+        <div className={styles.successorGrid}>
           {items.map((item) => (
-            <article key={item.id}>
-              <span style={{ ...DEVICE, color: item.status === "quarantined" ? "var(--color-danger)" : "var(--color-gold)" }}>
+            <article key={item.id} data-status={item.status}>
+              <span className={styles.queueStatus}>
                 {item.status.toUpperCase()} · {item.family}
               </span>
               <strong>{item.id}</strong>
@@ -365,16 +441,18 @@ function MinimumVideoFoundationOverview() {
   return (
     <details
       aria-label="Universal video foundation"
-      className="glass golden-foundation"
+      className={styles.foundation}
     >
-      <summary className="golden-foundation-summary">
-        <span>
+      <summary className={styles.foundationSummary}>
+        <span className={styles.foundationMark} aria-hidden="true">08</span>
+        <span className={styles.foundationCopy}>
           <small>Universal video foundation · engine-enforced</small>
           <strong>The baseline every automatic channel must keep</strong>
         </span>
         <b>{MINIMUM_VIDEO_FOUNDATION_TEMPLATE.length} NON-NEGOTIABLE STAGES</b>
+        <span className={styles.foundationToggle} aria-hidden="true">+</span>
       </summary>
-      <div className="golden-foundation-body">
+      <div className={styles.foundationBody}>
         <p>
           A format can add its own craft—storyboard, references, animation, music,
           evidence, or visual treatment—but it cannot omit this shared production core.
@@ -408,12 +486,11 @@ function TruthMetric({
   note: string;
   tone: "gold" | "warning" | "neutral";
 }) {
-  const color = tone === "gold" ? "var(--color-gold)" : tone === "warning" ? "var(--color-warning)" : "var(--color-secondary)";
   return (
-    <div style={{ ...CARD, minHeight: 91, borderColor: tone === "warning" ? "rgba(245,158,11,0.36)" : undefined }}>
-      <span style={{ ...DEVICE, color }}>{label}</span>
-      <strong style={{ fontSize: "1.18rem", lineHeight: 1, color }}>{value}</strong>
-      <span style={{ fontSize: "0.66rem", lineHeight: 1.35, color: "var(--color-muted)" }}>{note}</span>
+    <div className={styles.truthMetric} data-tone={tone}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+      <small>{note}</small>
     </div>
   );
 }
@@ -427,18 +504,17 @@ function AdmissionGroup({
   title: string;
   admissions: readonly FamilyAdmission[];
 }) {
-  const tone = mode === "automatic" ? "var(--color-ok)" : mode === "supervised" ? "var(--color-gold)" : "var(--color-warning)";
   const emptyMessage = mode === "supervised" ? "No private-review family is registered." : mode === "blocked" ? "No families are blocked." : "No automatic family is admitted.";
   return (
-    <div style={{ ...CARD, gap: "0.45rem", alignContent: "start", borderColor: `color-mix(in srgb, ${tone} 40%, var(--color-border))` }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: "0.4rem" }}>
-        <span style={{ ...DEVICE, color: tone }}>{title}</span>
-        <strong style={{ fontSize: "0.88rem", color: tone }}>{admissions.length}</strong>
+    <div className={styles.admissionGroup} data-mode={mode}>
+      <div className={styles.admissionHead}>
+        <span>{title}</span>
+        <strong>{admissions.length}</strong>
       </div>
       {admissions.length === 0 ? (
-        <span style={{ fontSize: "0.68rem", color: "var(--color-muted)" }}>{emptyMessage}</span>
+        <span className={styles.emptyAdmission}>{emptyMessage}</span>
       ) : (
-        <div style={{ display: "grid", gap: "0.38rem" }}>
+        <div className={styles.admissionList}>
           {admissions.map((admission) => {
             const family = FAMILIES[admission.family];
             const detail = mode === "automatic"
@@ -449,9 +525,9 @@ function AdmissionGroup({
                   : "Private human review only"
                 : admission.blockers[0] ?? "Automatic admission is not registered.";
             return (
-              <div key={admission.family} title={detail} style={{ display: "grid", gap: "0.1rem", paddingTop: "0.35rem", borderTop: "1px solid var(--color-border)" }}>
-                <span style={{ fontSize: "0.7rem", fontWeight: 600, color: "var(--color-fg)" }}>{family.label}</span>
-                <span style={{ ...METAT, lineHeight: 1.32, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>{detail}</span>
+              <div key={admission.family} title={detail}>
+                <span>{family.label}</span>
+                <small>{detail}</small>
               </div>
             );
           })}
@@ -460,26 +536,6 @@ function AdmissionGroup({
     </div>
   );
 }
-
-const GRID: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fill, minmax(280px, 1fr))",
-  gap: "0.7rem",
-  marginTop: "0.5rem",
-};
-
-const TRUTH_METRIC_GRID: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))",
-  gap: "0.5rem",
-  marginTop: "0.75rem",
-};
-
-const ADMISSION_GRID: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(210px, 1fr))",
-  gap: "0.5rem",
-};
 
 /* ----------------------------- module card ----------------------------- */
 
@@ -491,18 +547,18 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
   const promotionProof = GOLDEN_PROMOTION_PROOFS[m.key];
   const executionIsWarning = execution.kind === "catalog-only" || execution.kind === "registered-private-release";
   return (
-    <article className={`glass lift${isReference ? " golden-glow" : ""}`} style={{ padding: "0.8rem 0.9rem", display: "flex", flexDirection: "column" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.4rem", marginBottom: "0.35rem" }}>
-        <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.56rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--color-faint)" }}>{m.stage}</span>
+    <article className={styles.moduleCard} data-reference={isReference}>
+      <div className={styles.moduleHead}>
+        <span>{m.stage}</span>
         {isReference
-          ? <span className="golden-chip">REFERENCE CANDIDATE</span>
+          ? <span className={styles.moduleStatus} data-tone="reference">REFERENCE CANDIDATE</span>
           : isRegistered
-            ? <span className="status-chip">REGISTERED · NO INTAKE</span>
-            : <span className="status-chip">ACTIVE</span>}
+            ? <span className={styles.moduleStatus} data-tone="registered">REGISTERED · NO INTAKE</span>
+            : <span className={styles.moduleStatus} data-tone="active">ACTIVE</span>}
       </div>
 
-      <h3 style={{ margin: 0, fontSize: "0.96rem", fontWeight: 600, letterSpacing: "-0.015em", lineHeight: 1.2 }}>{m.title}</h3>
-      <div style={{ marginTop: "0.25rem", fontFamily: "var(--font-mono)", fontSize: "0.56rem", color: executionIsWarning ? "var(--color-warning)" : "var(--color-secondary)" }}>
+      <h3>{m.title}</h3>
+      <div className={styles.executionBinding} data-warning={executionIsWarning}>
         {execution.kind === "pipeline-module"
           ? `EXECUTABLE BINDING · ${execution.executableIds.join(" · ")} · NOT PROMOTED`
           : execution.kind === "registered-private-release"
@@ -511,19 +567,19 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
               ? `EXTERNAL TASK · ${execution.executableIds.join(" · ")} · NOT PROMOTED`
             : "CATALOG ONLY · NOT COMPILER-EXECUTABLE · NOT PROMOTED"}
       </div>
-      <div style={{ marginTop: "0.25rem", display: "grid", gap: "0.13rem", padding: "0.35rem 0.45rem", borderRadius: 6, background: "var(--color-surface-solid)", border: "1px solid var(--color-border)" }}>
-        <span style={{ ...DEVICE, color: availability.state === "blocked" ? "var(--color-warning)" : availability.state === "private-review-only" ? "var(--color-gold)" : "var(--color-secondary)" }}>{availability.label}</span>
-        <span style={{ fontSize: "0.64rem", lineHeight: 1.32, color: "var(--color-muted)" }}>{availability.detail}</span>
-        <span style={{ ...METAT, marginTop: "0.04rem" }}>
+      <div className={styles.availability} data-state={availability.state}>
+        <span>{availability.label}</span>
+        <p>{availability.detail}</p>
+        <small>
           PROMOTION EVIDENCE · {promotionProof ? `RECORD ${promotionProof.verifiedAt}` : "NO PRODUCTION-PROMOTION RECEIPT RECORDED"}
-        </span>
+        </small>
       </div>
-      <p style={{ margin: "0.3rem 0 0.5rem", fontSize: "0.78rem", lineHeight: 1.4, color: "var(--color-secondary)" }}>{blurb(m.how)}</p>
+      <p className={styles.moduleBlurb}>{blurb(m.how)}</p>
 
-      <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: "0.22rem" }}>
+      <ul className={styles.gates}>
         {m.gates.slice(0, 3).map((g) => (
-          <li key={g} style={{ display: "flex", gap: "0.4rem", alignItems: "baseline", fontSize: "0.7rem", lineHeight: 1.3, color: "var(--color-muted)" }}>
-            <span style={{ color: isReference || isRegistered ? "var(--color-gold)" : "var(--color-secondary)", fontSize: "0.62rem", flex: "0 0 auto" }}>▪</span>
+          <li key={g}>
+            <span aria-hidden="true">↳</span>
             <span>{g}</span>
           </li>
         ))}
@@ -536,21 +592,14 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
 
 /* ----------------------------- proof strips ---------------------------- */
 
-const STRIP: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "0.4rem", marginTop: "0.65rem", paddingTop: "0.6rem", borderTop: "1px solid var(--color-border)" };
-const CARD: CSSProperties = { background: "var(--color-surface-solid)", border: "1px solid var(--color-border)", borderRadius: 7, padding: "0.4rem 0.5rem", display: "grid", gap: "0.2rem" };
-const DEVICE: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: "0.54rem", letterSpacing: "0.04em", color: "var(--color-gold)", textTransform: "uppercase" };
-const LINE3: CSSProperties = { fontSize: "0.7rem", lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" };
-const METAT: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: "0.54rem", color: "var(--color-faint)" };
-const MEDIA: CSSProperties = { width: "100%", borderRadius: 5, background: "#000" };
-
 function textStrip(items: TextProof[]) {
   return (
-    <div style={STRIP}>
+    <div className={styles.proofStrip}>
       {take2(items).map((p, i) => (
-        <div key={i} style={CARD}>
-          <span style={DEVICE}>{p.device}</span>
-          <span style={LINE3}>{p.line}</span>
-          <span style={METAT}>{p.channel} · {p.note}</span>
+        <div key={i} className={styles.proofCard}>
+          <span className={styles.proofDevice}>{p.device}</span>
+          <span className={styles.proofLine}>{p.line}</span>
+          <span className={styles.proofMeta}>{p.channel} · {p.note}</span>
         </div>
       ))}
     </div>
@@ -560,7 +609,7 @@ function textStrip(items: TextProof[]) {
 function MediaArtifactLabel({ media }: { media: GoldenProofMediaPresentation }) {
   const label = media.status === "context" ? "CONTEXT ONLY" : "MANIFEST REFERENCE";
   return (
-    <span style={{ ...METAT, color: media.status === "context" ? "var(--color-warning)" : "var(--color-faint)" }}>
+    <span className={styles.artifactLabel} data-context={media.status === "context"}>
       {label} · {media.id} · SHA-256 {media.sha256.slice(0, 12)}…
     </span>
   );
@@ -568,14 +617,14 @@ function MediaArtifactLabel({ media }: { media: GoldenProofMediaPresentation }) 
 
 function videoStrip(items: readonly VideoProof[]) {
   return (
-    <div style={STRIP}>
+    <div className={styles.proofStrip}>
       {take2(items).map((p) => (
-        <div key={p.media.id} style={CARD}>
-          <span style={DEVICE}>{p.device}</span>
+        <div key={p.media.id} className={styles.proofCard}>
+          <span className={styles.proofDevice}>{p.device}</span>
           { }
-          <video controls preload="none" poster={p.poster?.url} src={p.media.url} style={MEDIA} />
+          <video controls preload="none" poster={p.poster?.url} src={p.media.url} className={styles.proofMedia} />
           <MediaArtifactLabel media={p.media} />
-          <span style={METAT}>{p.meta}</span>
+          <span className={styles.proofMeta}>{p.meta}</span>
         </div>
       ))}
     </div>
@@ -601,18 +650,16 @@ function PackageOpeningEvidenceStrip() {
     },
   ];
   return (
-    <div aria-label="Structural package-to-opening evidence flow; not semantic equivalence proof" style={STRIP}>
+    <div aria-label="Structural package-to-opening evidence flow; not semantic equivalence proof" className={styles.proofFlow}>
       {stages.map((stage, index) => (
-        <div key={stage.label} style={{ ...CARD, position: "relative", overflow: "hidden", minHeight: 106 }}>
-          <span style={DEVICE}>{stage.label}</span>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.38rem", minHeight: 35 }}>
-            <span aria-hidden="true" style={{ display: "grid", width: 28, height: 28, placeItems: "center", borderRadius: 999, color: "#071018", background: "var(--color-gold)", fontFamily: "var(--font-mono)", fontSize: "0.66rem", fontWeight: 700 }}>
-              {index + 1}
-            </span>
-            <strong style={{ fontSize: "0.76rem", letterSpacing: "-0.01em" }}>{stage.title}</strong>
+        <div key={stage.label} className={styles.flowStage}>
+          <span className={styles.proofDevice}>{stage.label}</span>
+          <div>
+            <span aria-hidden="true">{index + 1}</span>
+            <strong>{stage.title}</strong>
           </div>
-          <span style={LINE3}>{stage.detail}</span>
-          <span style={METAT}>{index === 2 ? "STRUCTURAL WITNESS · NOT A SEMANTIC JUDGE" : "CONTENT-ADDRESSED RECEIPT"}</span>
+          <span className={styles.proofLine}>{stage.detail}</span>
+          <span className={styles.proofMeta}>{index === 2 ? "STRUCTURAL WITNESS · NOT A SEMANTIC JUDGE" : "CONTENT-ADDRESSED RECEIPT"}</span>
         </div>
       ))}
     </div>
@@ -647,18 +694,16 @@ function NarratedStoryCoverageStrip() {
     },
   ];
   return (
-    <div aria-label="Final-master narrated-story coverage evidence flow; not visual shot-realization proof" style={STRIP}>
+    <div aria-label="Final-master narrated-story coverage evidence flow; not visual shot-realization proof" className={styles.proofFlow}>
       {stages.map((stage, index) => (
-        <div key={stage.label} style={{ ...CARD, position: "relative", overflow: "hidden", minHeight: 106 }}>
-          <span style={DEVICE}>{stage.label}</span>
-          <div style={{ display: "flex", alignItems: "center", gap: "0.38rem", minHeight: 35 }}>
-            <span aria-hidden="true" style={{ display: "grid", width: 28, height: 28, placeItems: "center", borderRadius: 999, color: "#071018", background: "var(--color-gold)", fontFamily: "var(--font-mono)", fontSize: "0.66rem", fontWeight: 700 }}>
-              {index + 1}
-            </span>
-            <strong style={{ fontSize: "0.76rem", letterSpacing: "-0.01em" }}>{stage.title}</strong>
+        <div key={stage.label} className={styles.flowStage}>
+          <span className={styles.proofDevice}>{stage.label}</span>
+          <div>
+            <span aria-hidden="true">{index + 1}</span>
+            <strong>{stage.title}</strong>
           </div>
-          <span style={LINE3}>{stage.detail}</span>
-          <span style={METAT}>{stage.note}</span>
+          <span className={styles.proofLine}>{stage.detail}</span>
+          <span className={styles.proofMeta}>{stage.note}</span>
         </div>
       ))}
     </div>
@@ -678,11 +723,11 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
     case "quiz": return videoStrip(QUIZ_PROOFS);
     case "cinematic": return (
       <>
-        <p role="status" style={{ margin: "0.5rem 0 0", fontFamily: "var(--font-mono)", fontSize: "0.56rem", letterSpacing: "0.06em", color: "var(--color-warning)" }}>
+        <p role="status" className={styles.holdLabel}>
           CONTEXT ONLY · NOT GOLDEN EVIDENCE
         </p>
         <GoldenImages images={take2(CINEMATIC_PROOFS)} />
-        <p role="status" style={{ margin: "0.5rem 0 0", fontSize: "0.68rem", lineHeight: 1.35, color: "var(--color-warning)" }}>
+        <p role="status" className={styles.holdCopy}>
           {CINEMATIC_IDENTITY_HOLD}
         </p>
       </>
@@ -691,7 +736,7 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
       return (
         <>
           {videoStrip(DOCU_PROOFS)}
-          <p role="status" style={{ margin: "0.5rem 0 0", fontSize: "0.68rem", lineHeight: 1.35, color: "var(--color-warning)" }}>
+          <p role="status" className={styles.holdCopy}>
             {DOCU_INTEGRITY_HOLD}
           </p>
         </>
@@ -708,19 +753,19 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
     case "shorts": return textStrip(SHORTS_PROOFS);
     case "lofi":
       return (
-        <div style={STRIP}>
+        <div className={styles.proofStrip}>
           {take2(LOFI_PROOFS).map((p) => (
-            <div key={p.media.id} style={CARD}>
-              <span style={DEVICE}>{p.device}</span>
+            <div key={p.media.id} className={styles.proofCard}>
+              <span className={styles.proofDevice}>{p.device}</span>
               {p.media.kind === "video" ? (
 
-                <video controls preload="none" poster={p.poster?.url} src={p.media.url} style={MEDIA} />
+                <video controls preload="none" poster={p.poster?.url} src={p.media.url} className={styles.proofMedia} />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element -- static proof still
-                <img src={p.media.url} alt={p.meta} style={{ ...MEDIA, display: "block" }} />
+                <img src={p.media.url} alt={p.meta} className={styles.proofMedia} />
               )}
               <MediaArtifactLabel media={p.media} />
-              <span style={METAT}>{p.meta}</span>
+              <span className={styles.proofMeta}>{p.meta}</span>
             </div>
           ))}
         </div>
@@ -729,13 +774,13 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
       const clip = referenceMedia("whiteboard-chiquita-video", "video");
       const poster = referenceMedia("whiteboard-chiquita-image", "image");
       return (
-        <div style={STRIP}>
-          <div style={{ ...CARD, gridColumn: "1 / -1" }}>
-            <span style={DEVICE}>reference proxy · drawn cinema · 720p</span>
+        <div className={styles.proofStrip}>
+          <div className={`${styles.proofCard} ${styles.proofCardWide}`}>
+            <span className={styles.proofDevice}>reference proxy · drawn cinema · 720p</span>
             { }
-            <video controls preload="none" poster={poster.url} src={clip.url} style={MEDIA} />
+            <video controls preload="none" poster={poster.url} src={clip.url} className={styles.proofMedia} />
             <MediaArtifactLabel media={clip} />
-            <span style={METAT}>Chiquita and the Banana Republic — every beat drawn in time with the voice</span>
+            <span className={styles.proofMeta}>Chiquita and the Banana Republic — every beat drawn in time with the voice</span>
           </div>
         </div>
       );
@@ -744,13 +789,13 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
       const clip = contextMedia("comic-comic3d-video", "video");
       const poster = contextMedia("comic-comic3d-image", "image");
       return (
-        <div style={STRIP}>
-          <div style={{ ...CARD, gridColumn: "1 / -1" }}>
-            <span style={{ ...DEVICE, color: "var(--color-warning)" }}>context-only · retained 3D drawn comic · 1080p</span>
+        <div className={styles.proofStrip}>
+          <div className={`${styles.proofCard} ${styles.proofCardWide}`}>
+            <span className={`${styles.proofDevice} ${styles.warningText}`}>context-only · retained 3D drawn comic · 1080p</span>
             { }
-            <video controls preload="none" poster={poster.url} src={clip.url} style={MEDIA} />
+            <video controls preload="none" poster={poster.url} src={clip.url} className={styles.proofMedia} />
             <MediaArtifactLabel media={clip} />
-            <span style={{ ...METAT, color: "var(--color-warning)" }}>Legacy sample retained for craft context only: its blank opening disqualifies it as Golden proof until a fresh reviewed master replaces it.</span>
+            <span className={`${styles.proofMeta} ${styles.warningText}`}>Legacy sample retained for craft context only: its blank opening disqualifies it as Golden proof until a fresh reviewed master replaces it.</span>
           </div>
         </div>
       );
@@ -763,14 +808,14 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
     // audio
     case "narration":
       return (
-        <div style={STRIP}>
+        <div className={styles.proofStrip}>
           {take2(VOICE_PROOFS).map((p) => (
-            <div key={p.media.id} style={CARD}>
-              <span style={DEVICE}>{p.device}</span>
+            <div key={p.media.id} className={styles.proofCard}>
+              <span className={styles.proofDevice}>{p.device}</span>
               { }
-              <audio controls preload="none" src={p.media.url} style={{ width: "100%", height: 30 }} />
+              <audio controls preload="none" src={p.media.url} className={styles.proofAudio} />
               <MediaArtifactLabel media={p.media} />
-              <span style={METAT}>{p.meta}</span>
+              <span className={styles.proofMeta}>{p.meta}</span>
             </div>
           ))}
         </div>

@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 
-import GoldenPipelinePage from "./page";
-
-function main(): void {
+async function main(): Promise<void> {
+  const require = createRequire(import.meta.url);
+  require.extensions[".css"] = (module) => {
+    const classes = new Proxy({}, { get: (_target, key) => String(key) });
+    module.exports = { __esModule: true, default: classes };
+  };
+  const { default: GoldenPipelinePage } = await import("./page");
   const html = renderToStaticMarkup(createElement(GoldenPipelinePage));
 
   assert.match(html, /Golden evidence and channel admission truth/);
@@ -39,5 +44,4 @@ function main(): void {
   assert.match(html, /aria-label="Video Engines Golden modules"/);
 }
 
-main();
-console.log("golden truth surface tests passed");
+main().then(() => console.log("golden truth surface tests passed"));
