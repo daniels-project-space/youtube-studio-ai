@@ -156,13 +156,25 @@ function authoredShotMapping(): void {
     ],
   };
   const shotQaReport = {
-    version: "1.0.0" as const,
+    version: "1.1.0" as const,
     required: true as const,
     graderRan: true as const,
     passed: true as const,
-    shots: ["shot-a", "shot-b"].map((shotId) => ({
+    shots: ["shot-a", "shot-b"].map((shotId, index) => ({
       shotId, score: 0.9, threshold: 0.8, semanticAlignment: 0.9, continuity: 0.9,
       motionIntegrity: 0.9, artifactFree: 0.9, notes: [],
+      temporalDynamism: {
+        contract: "ltx-shot-temporal-qa/v1" as const,
+        source: "ffmpeg/freezedetect" as const,
+        verdict: "pass" as const,
+        maxFreezeFraction: 0.04,
+        maxStaticHoldSec:
+          (shotRenderManifest.items[index]!.t1 - shotRenderManifest.items[index]!.t0) * 0.04,
+        maxFrozenHoldSec: 0,
+        openingFrozenHoldSec: 0,
+        frozenIntervals: [],
+        violatingIntervals: [],
+      },
     })),
   };
   const visualCoverage = {

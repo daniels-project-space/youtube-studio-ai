@@ -102,24 +102,95 @@ export const ShotRenderManifestSchema = z.object({
   )).min(1),
 });
 
-export const ShotQaReportSchema = z.object({
+const ShotQaGradeSchema = z.object({
+  shotId: z.string().min(1),
+  score: z.number().min(0).max(1),
+  threshold: z.number().min(0).max(1),
+  semanticAlignment: z.number().min(0).max(1),
+  continuity: z.number().min(0).max(1),
+  motionIntegrity: z.number().min(0).max(1),
+  artifactFree: z.number().min(0).max(1),
+  /** Required whenever the rendered shot had a terminalStillKey. */
+  terminalFrameAlignment: z.number().min(0).max(1).optional(),
+  notes: z.array(z.string()),
+});
+
+const TemporalDynamismIntervalSchema = z.object({
+  startSec: z.number().finite().nonnegative(),
+  endSec: z.number().finite().positive(),
+  durationSec: z.number().finite().positive(),
+}).refine(
+  (interval) => interval.endSec > interval.startSec,
+  "temporal-dynamism interval must have positive ordered duration",
+);
+
+export const LtxShotTemporalQaEvidenceSchema = z.object({
+  contract: z.literal("ltx-shot-temporal-qa/v1"),
+  source: z.literal("ffmpeg/freezedetect"),
+  verdict: z.literal("pass"),
+  maxFreezeFraction: z.number().positive().max(0.2),
+  maxStaticHoldSec: z.number().positive(),
+  maxFrozenHoldSec: z.number().finite().nonnegative(),
+  openingFrozenHoldSec: z.number().finite().nonnegative(),
+  frozenIntervals: z.array(TemporalDynamismIntervalSchema),
+  violatingIntervals: z.array(TemporalDynamismIntervalSchema).length(0),
+  detail: z.string().min(1).optional(),
+}).superRefine((evidence, ctx) => {
+  const graceSec = 0.05;
+  const longestMeasured = evidence.frozenIntervals.reduce(
+    (longest, interval) => Math.max(longest, interval.durationSec),
+    0,
+  );
+  if (Math.abs(longestMeasured - evidence.maxFrozenHoldSec) > 0.01) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["maxFrozenHoldSec"],
+      message: "accepted LTX temporal evidence maximum does not match its measured intervals",
+    });
+  }
+  if (evidence.openingFrozenHoldSec > evidence.maxFrozenHoldSec + 0.01) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["openingFrozenHoldSec"],
+      message: "accepted LTX opening hold cannot exceed the measured maximum hold",
+    });
+  }
+  if (evidence.maxFrozenHoldSec > evidence.maxStaticHoldSec + graceSec) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["maxFrozenHoldSec"],
+      message: "accepted LTX temporal evidence exceeds its static-hold limit",
+    });
+  }
+});
+
+const LegacyShotQaReportSchema = z.object({
   version: z.literal("1.0.0"),
   required: z.literal(true),
   graderRan: z.literal(true),
   passed: z.literal(true),
-  shots: z.array(z.object({
-    shotId: z.string().min(1),
-    score: z.number().min(0).max(1),
-    threshold: z.number().min(0).max(1),
-    semanticAlignment: z.number().min(0).max(1),
-    continuity: z.number().min(0).max(1),
-    motionIntegrity: z.number().min(0).max(1),
-    artifactFree: z.number().min(0).max(1),
-    /** Required whenever the rendered shot had a terminalStillKey. */
-    terminalFrameAlignment: z.number().min(0).max(1).optional(),
-    notes: z.array(z.string()),
+  shots: z.array(ShotQaGradeSchema).min(1),
+});
+
+const CurrentShotQaReportSchema = z.object({
+  version: z.literal("1.1.0"),
+  required: z.literal(true),
+  graderRan: z.literal(true),
+  passed: z.literal(true),
+  shots: z.array(ShotQaGradeSchema.extend({
+    temporalDynamism: LtxShotTemporalQaEvidenceSchema,
   })).min(1),
 });
+
+/**
+ * v1 remains parseable so retained evidence can still be inspected. It cannot
+ * authorize a new assembly: validateQualifiedShotRender requires the v1.1
+ * deterministic motion receipt for every accepted LTX take.
+ */
+export const ShotQaReportSchema = z.discriminatedUnion("version", [
+  LegacyShotQaReportSchema,
+  CurrentShotQaReportSchema,
+]);
 
 export const VisualCoverageSchema = z.object({
   version: z.literal("1.0.0"),
@@ -153,6 +224,11 @@ export function validateQualifiedShotRender(args: {
   const manifest = ShotRenderManifestSchema.parse(args.manifest);
   const qaReport = ShotQaReportSchema.parse(args.qaReport);
   const coverage = VisualCoverageSchema.parse(args.coverage);
+  if (qaReport.version !== "1.1.0") {
+    throw new Error(
+      "qualified shot render requires shot QA v1.1 deterministic temporal evidence; rerun qa_shots for this retained render",
+    );
+  }
   const epsilon = 0.02;
   const seen = new Set<string>();
   for (let index = 0; index < manifest.items.length; index++) {
@@ -173,11 +249,19 @@ export function validateQualifiedShotRender(args: {
     throw new Error("qualified shot render QA count does not match manifest count");
   }
   qaReport.shots.forEach((grade, index) => {
-    if (grade.shotId !== manifest.items[index].shotId) {
+    const item = manifest.items[index];
+    if (grade.shotId !== item.shotId) {
       throw new Error(`qualified shot render QA identity/order mismatch at ${index}`);
     }
     if (grade.score < grade.threshold) {
       throw new Error(`qualified shot render QA score is below threshold for ${grade.shotId}`);
+    }
+    const measuredDurationSec = grade.temporalDynamism.maxStaticHoldSec /
+      grade.temporalDynamism.maxFreezeFraction;
+    if (Math.abs(measuredDurationSec - (item.t1 - item.t0)) > 0.25) {
+      throw new Error(
+        `qualified shot render temporal evidence duration does not bind ${grade.shotId}`,
+      );
     }
   });
   if (

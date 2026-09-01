@@ -23,6 +23,26 @@ latent upscale configuration is the standing standard across all three
 generation profiles (draft/production/hero); no per-style resolution
 variants exist or are planned outside a new paid benchmark run.
 
+## Frozen-opening root cause and release boundary
+
+The upstream LTX ComfyUI maintainer traced the reported one-to-two-second
+motionless opening to a VAE canvas that was not divisible by 32 (the reporter
+had changed the sample workflow to `720×1280`). See
+[ComfyUI-LTXVideo issue #384](https://github.com/Lightricks/ComfyUI-LTXVideo/issues/384).
+
+This repository prevents that failure at two independent boundaries:
+
+1. Generation-profile and direct-render admission require the `640×352`
+   stage-one canvas to be divisible by 32 and its exact `1280×704` latent-x2
+   output to be divisible by 64. A `720×1280` request fails before provider
+   spend.
+2. `qa_shots` decodes every returned take with FFmpeg `freezedetect` before
+   subjective vision grading. The profile's `maxFreezeFraction` is enforced,
+   an opening freeze is retained explicitly, and only a passing
+   `ltx-shot-temporal-qa/v1` receipt can enter shot QA v1.1 and authorize
+   assembly. Unavailable evidence fails closed; a measured freeze enters the
+   bounded targeted-repair loop with its exact duration.
+
 ## Required cached component manifest
 
 | ID | Relative model path | SHA-256 | Bytes |

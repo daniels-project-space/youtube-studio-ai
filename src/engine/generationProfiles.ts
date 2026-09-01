@@ -50,11 +50,40 @@ const ProfileSchema = z.object({
     stageOneWidth: z.number().int().positive(),
     stageOneHeight: z.number().int().positive(),
     candidates: z.number().int().min(1).max(3),
+  }).superRefine((video, ctx) => {
+    // LTX's VAE operates on 32-pixel tiles. The official distilled x2 path
+    // therefore needs a 32-aligned stage-one canvas and a 64-aligned encoded
+    // canvas. This is the upstream cause of the familiar 720x1280 I2V defect
+    // where the first one or two seconds can remain motionless.
+    if (video.stageOneWidth % 32 !== 0 || video.stageOneHeight % 32 !== 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["stageOneWidth"],
+        message: `LTX stage-one dimensions ${video.stageOneWidth}x${video.stageOneHeight} must both be divisible by 32`,
+      });
+    }
+    if (video.width % 64 !== 0 || video.height % 64 !== 0) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["width"],
+        message: `LTX distilled x2 output dimensions ${video.width}x${video.height} must both be divisible by 64`,
+      });
+    }
+    if (
+      video.width !== video.stageOneWidth * video.spatialUpscaleFactor ||
+      video.height !== video.stageOneHeight * video.spatialUpscaleFactor
+    ) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["spatialUpscaleFactor"],
+        message: "LTX output dimensions must be the exact native latent x2 of stage one",
+      });
+    }
   }),
   qa: z.object({
     imageMinScore: z.number().min(0).max(1),
     shotMinScore: z.number().min(0).max(1),
-    maxFreezeFraction: z.number().min(0).max(0.2),
+    maxFreezeFraction: z.number().positive().max(0.2),
     required: z.literal(true),
   }),
   allowFallback: z.literal(false),

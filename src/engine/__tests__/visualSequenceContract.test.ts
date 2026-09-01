@@ -73,8 +73,20 @@ const renderManifest = {
   ],
 };
 
+const passingTemporalDynamism = {
+  contract: "ltx-shot-temporal-qa/v1" as const,
+  source: "ffmpeg/freezedetect" as const,
+  verdict: "pass" as const,
+  maxFreezeFraction: 0.04,
+  maxStaticHoldSec: 0.12,
+  maxFrozenHoldSec: 0,
+  openingFrozenHoldSec: 0,
+  frozenIntervals: [],
+  violatingIntervals: [],
+};
+
 const shotQaReport = {
-  version: "1.0.0" as const,
+  version: "1.1.0" as const,
   required: true as const,
   graderRan: true as const,
   passed: true as const,
@@ -87,6 +99,7 @@ const shotQaReport = {
     motionIntegrity: 0.93,
     artifactFree: 0.96,
     notes: [],
+    temporalDynamism: passingTemporalDynamism,
   })),
 };
 

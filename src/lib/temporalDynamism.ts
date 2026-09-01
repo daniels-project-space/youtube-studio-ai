@@ -163,12 +163,16 @@ export function measureTemporalDynamism(opts: MeasureTemporalDynamismOptions): T
   }
   const durationSec = Math.max(0, finite(opts.durationSec));
   const noise = finite(opts.noiseTolerance, DEFAULT_NOISE_TOLERANCE);
+  // Honour stricter short-form/LTX shot budgets below the generic 0.5s
+  // detector floor. Decoding at 4fps gives a practical 0.25s resolution; the
+  // existing threshold grace still absorbs one-frame boundary noise.
+  const detectionMinSec = Math.min(DETECTION_MIN_SEC, threshold);
   const result = spawnSync(
     FFMPEG,
     [
       "-hide_banner",
       "-i", opts.videoPath,
-      "-vf", `fps=4,freezedetect=n=${Math.max(0, Math.min(1, noise))}:d=${DETECTION_MIN_SEC}`,
+      "-vf", `fps=4,freezedetect=n=${Math.max(0, Math.min(1, noise))}:d=${detectionMinSec}`,
       "-an",
       "-f", "null", "-",
     ],

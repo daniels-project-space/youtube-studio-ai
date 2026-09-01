@@ -75,6 +75,10 @@ import { LtxCreativeAdapterInputSchema } from "@/lib/ltxCreativeAdapter";
 import { parseNarrativeSeriesAcceptedCharacterAdapters } from "@/lib/narrativeSeriesRunAdmission";
 import { assertLtxVideoOutputProofSet } from "@/lib/ltxVideoProof";
 import {
+  measureLtxShotTemporalQa,
+  type LtxShotTemporalQaEvidence,
+} from "@/lib/ltxShotTemporalQa";
+import {
   renderImages,
   renderVideo,
   secondsToFrames,
@@ -93,7 +97,7 @@ import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
 const EPSILON = 0.02;
 const STANDARD_NOVITA_ASSET_QA_REVIEW_VERSION = "standard-novita-asset-qa/v1";
-const STANDARD_NOVITA_SHOT_QA_REVIEW_VERSION = "standard-novita-shot-qa/v1";
+const STANDARD_NOVITA_SHOT_QA_REVIEW_VERSION = "standard-novita-shot-qa/v2";
 
 type RejectedVisualAttemptParent = {
   attemptFingerprint: string;
@@ -1748,7 +1752,12 @@ export const qaShots: Block = {
     const tmp = await makeRunTempDir(`${ctx.runId}_shot_qa`);
     const localClips: string[] = [];
     const footageKeys: string[] = [];
-    const grades: Array<z.infer<typeof ShotGradeSchema> & { shotId: string; score: number; threshold: number }> = [];
+    const grades: Array<z.infer<typeof ShotGradeSchema> & {
+      shotId: string;
+      score: number;
+      threshold: number;
+      temporalDynamism: LtxShotTemporalQaEvidence & { verdict: "pass" };
+    }> = [];
     let repairRenderCostUsd = 0;
     let graderCalls = 0;
     ctx.log(
@@ -1785,6 +1794,7 @@ export const qaShots: Block = {
           await writeBytes(local, await getObjectBytes(clipKey));
           const media = await probe(local);
           let grade: z.infer<typeof ShotGradeSchema> | undefined;
+          let temporalDynamism: LtxShotTemporalQaEvidence | undefined;
           let score = 0;
           let failure: string | undefined;
           let repairNotes: string[] = [];
@@ -1802,100 +1812,125 @@ export const qaShots: Block = {
                 `qa_shots FAILED ${shot.id}: media duration ${media.durationSec.toFixed(3)}s != expected ${expectedMediaSec.toFixed(3)}s`;
               repairNotes = ["The clip duration does not match the authored shot duration."];
             } else {
-              const sampleTimes = [
-                Math.min(0.08, Math.max(0, media.durationSec / 10)),
-                media.durationSec * 0.5,
-                Math.max(0, media.durationSec - Math.max(0.08, 2 / profile.video.fps)),
-              ];
-              const frames: string[] = [];
-              for (let frameIndex = 0; frameIndex < sampleTimes.length; frameIndex++) {
-                const frame = join(tmp, `${shot.id}${suffix}_f${frameIndex}.jpg`);
-                await grabFrame(local, sampleTimes[frameIndex], frame);
-                frames.push(frame);
+              temporalDynamism = measureLtxShotTemporalQa({
+                videoPath: local,
+                durationSec: media.durationSec,
+                fps: profile.video.fps,
+                maxFreezeFraction: profile.qa.maxFreezeFraction,
+              });
+              if (temporalDynamism.verdict === "unavailable") {
+                throw qualityRecoveryFailure(
+                  `qa_shots FAILED ${shot.id}: deterministic temporal evidence is unavailable (${temporalDynamism.detail ?? "unknown FFmpeg failure"})`,
+                  { repairRenderCostUsd, graderCalls },
+                );
               }
-              if (frames.length !== 3) throw new Error(`qa_shots FAILED ${shot.id}: could not extract start/middle/end frames`);
-              const referenceBatchSize = NOVITA_VISUAL_QA_MAX_IMAGES_PER_GRADER_CALL - frames.length;
-              const referenceBatches = Array.from(
-                { length: novitaVisualQaReferenceBatchCount(referencePaths.length, frames.length) },
-                (_, batchIndex) => referencePaths.slice(batchIndex * referenceBatchSize, (batchIndex + 1) * referenceBatchSize),
-              );
-              const batchGrades: Array<z.infer<typeof ShotGradeSchema>> = [];
-              for (const referenceBatch of referenceBatches) {
-                graderCalls++;
-                const raw = await visionLocal({
-                  prompt:
-                    `You are the REQUIRED final grader for one generated documentary shot. ` +
-                    (referenceBatch.length
-                      ? `The first ${referenceBatch.length} image(s) are locked Visual Matter reference anchors. Do NOT score them; use them to judge the three rendered frames that follow. `
-                      : "") +
-                    `The final three images are the START, MIDDLE, and END frames in chronological order.\nLiteral story content: ${shot.literalContent}\n` +
-                    `Story purpose: ${shot.coveragePurpose}\nRequired motion: ${spec.motionPrompt}\n` +
-                    `First-frame constraint: ${spec.firstFrameConstraint}\nLast-frame constraint: ${spec.lastFrameConstraint}\n` +
-                    `Continuity lock: ${spec.continuityState}\nNegative constraints: ${spec.negativePrompt}\n` +
-                    (visualDirective ? `Visual Matter acceptance lock (MANDATORY): ${visualDirective.qaCriteria}\n` : "") +
-                    `Channel-adaptive visual identity policy (MANDATORY):\n${channelQuality.brief}\n` +
-                    channelQuality.critiqueBrief +
-                    `Required pass thresholds: overall >= ${thresholds.score.toFixed(3)}, semantic >= ${thresholds.semanticAlignment.toFixed(3)}, ` +
-                    `continuity >= ${thresholds.continuity.toFixed(3)}, motion >= ${thresholds.motionIntegrity.toFixed(3)}, ` +
-                    `artifact-free >= ${thresholds.artifactFree.toFixed(3)}.\n` +
-                    `Score 0..1: semanticAlignment (literal story match in all frames), continuity (identity/era/wardrobe/props/` +
-                    `lighting remain coherent), motionIntegrity (the ordered frames demonstrate the requested action/camera move ` +
-                    `without freezing or direction errors), artifactFree (no warping, morphing, duplicate limbs, text, watermark, ` +
-                    `broken geometry, or temporal corruption). Return STRICT JSON only: {"semanticAlignment":0.0,` +
-                    `"continuity":0.0,"motionIntegrity":0.0,"artifactFree":0.0,"notes":["concrete observations"]}.`,
-                  imagePaths: [...referenceBatch, ...frames],
-                  json: true,
-                  maxTokens: VISION_GATE_MAX_TOKENS,
-                });
-                batchGrades.push(ShotGradeSchema.parse(parseJsonLoose(raw)));
-              }
-              grade = {
-                semanticAlignment: Math.min(...batchGrades.map((entry) => entry.semanticAlignment)),
-                continuity: Math.min(...batchGrades.map((entry) => entry.continuity)),
-                motionIntegrity: Math.min(...batchGrades.map((entry) => entry.motionIntegrity)),
-                artifactFree: Math.min(...batchGrades.map((entry) => entry.artifactFree)),
-                notes: [...new Set(batchGrades.flatMap((entry) => entry.notes))].slice(0, 8),
-              };
-              if (terminalAnchor) {
-                const terminalReference = join(tmp, `${shot.id}_terminal_${terminalAnchor.terminalAnchorShotId}.png`);
-                await writeBytes(terminalReference, await getObjectBytes(terminalAnchor.terminalStillKey));
-                graderCalls++;
-                const rawTerminal = await visionLocal({
-                  prompt:
-                    "You are the REQUIRED endpoint-continuity grader. The first image is the actual LAST frame of a rendered LTX clip. " +
-                    "The second image is the independently quality-selected opening frame of its next continuous shot. " +
-                    "Score whether the rendered last frame has actually arrived at the approved subject identity, wardrobe, props, location, lighting, composition, and camera handoff. " +
-                    "Do not give credit for a merely similar mood. Return STRICT JSON only: {\"terminalFrameAlignment\":0.0,\"notes\":[\"concrete observations\"]}.",
-                  imagePaths: [frames[2]!, terminalReference],
-                  json: true,
-                  maxTokens: VISION_GATE_MAX_TOKENS,
-                });
-                const terminalGrade = TerminalFrameGradeSchema.parse(parseJsonLoose(rawTerminal));
-                grade = {
-                  ...grade,
-                  terminalFrameAlignment: terminalGrade.terminalFrameAlignment,
-                  notes: [...new Set([...grade.notes, ...terminalGrade.notes])].slice(0, 8),
-                };
-              }
-              score = videoScore(grade);
-              const passed =
-                score >= thresholds.score &&
-                grade.semanticAlignment >= thresholds.semanticAlignment &&
-                grade.continuity >= thresholds.continuity &&
-                grade.motionIntegrity >= thresholds.motionIntegrity &&
-                grade.artifactFree >= thresholds.artifactFree &&
-                (!terminalAnchor || (grade.terminalFrameAlignment ?? 0) >= thresholds.continuity);
-              if (!passed) {
+              if (temporalDynamism.verdict === "fail") {
                 failure =
-                  `qa_shots FAILED ${shot.id}: score=${score.toFixed(3)} threshold=${thresholds.score.toFixed(3)} ` +
-                  `(semantic=${grade.semanticAlignment}, continuity=${grade.continuity}, motion=${grade.motionIntegrity}, artifact=${grade.artifactFree}, ` +
-                  `terminal=${grade.terminalFrameAlignment ?? "not-required"})`;
-                repairNotes = grade.notes;
+                  `qa_shots FAILED ${shot.id}: frozen visual hold ${temporalDynamism.maxFrozenHoldSec.toFixed(3)}s ` +
+                  `exceeds ${temporalDynamism.maxStaticHoldSec.toFixed(3)}s ` +
+                  `(opening hold ${temporalDynamism.openingFrozenHoldSec.toFixed(3)}s)`;
+                repairNotes = [
+                  temporalDynamism.openingFrozenHoldSec > 0
+                    ? `The take is frozen for ${temporalDynamism.openingFrozenHoldSec.toFixed(2)} seconds from its opening frame. Motion and camera action must begin immediately.`
+                    : `The take contains a ${temporalDynamism.maxFrozenHoldSec.toFixed(2)} second frozen interval. Preserve continuous authored motion throughout.`,
+                ];
+              }
+              if (!failure) {
+                const sampleTimes = [
+                  Math.min(0.08, Math.max(0, media.durationSec / 10)),
+                  media.durationSec * 0.5,
+                  Math.max(0, media.durationSec - Math.max(0.08, 2 / profile.video.fps)),
+                ];
+                const frames: string[] = [];
+                for (let frameIndex = 0; frameIndex < sampleTimes.length; frameIndex++) {
+                  const frame = join(tmp, `${shot.id}${suffix}_f${frameIndex}.jpg`);
+                  await grabFrame(local, sampleTimes[frameIndex], frame);
+                  frames.push(frame);
+                }
+                if (frames.length !== 3) throw new Error(`qa_shots FAILED ${shot.id}: could not extract start/middle/end frames`);
+                const referenceBatchSize = NOVITA_VISUAL_QA_MAX_IMAGES_PER_GRADER_CALL - frames.length;
+                const referenceBatches = Array.from(
+                  { length: novitaVisualQaReferenceBatchCount(referencePaths.length, frames.length) },
+                  (_, batchIndex) => referencePaths.slice(batchIndex * referenceBatchSize, (batchIndex + 1) * referenceBatchSize),
+                );
+                const batchGrades: Array<z.infer<typeof ShotGradeSchema>> = [];
+                for (const referenceBatch of referenceBatches) {
+                  graderCalls++;
+                  const raw = await visionLocal({
+                    prompt:
+                      `You are the REQUIRED final grader for one generated documentary shot. ` +
+                      (referenceBatch.length
+                        ? `The first ${referenceBatch.length} image(s) are locked Visual Matter reference anchors. Do NOT score them; use them to judge the three rendered frames that follow. `
+                        : "") +
+                      `The final three images are the START, MIDDLE, and END frames in chronological order.\nLiteral story content: ${shot.literalContent}\n` +
+                      `Story purpose: ${shot.coveragePurpose}\nRequired motion: ${spec.motionPrompt}\n` +
+                      `First-frame constraint: ${spec.firstFrameConstraint}\nLast-frame constraint: ${spec.lastFrameConstraint}\n` +
+                      `Continuity lock: ${spec.continuityState}\nNegative constraints: ${spec.negativePrompt}\n` +
+                      (visualDirective ? `Visual Matter acceptance lock (MANDATORY): ${visualDirective.qaCriteria}\n` : "") +
+                      `Channel-adaptive visual identity policy (MANDATORY):\n${channelQuality.brief}\n` +
+                      channelQuality.critiqueBrief +
+                      `Required pass thresholds: overall >= ${thresholds.score.toFixed(3)}, semantic >= ${thresholds.semanticAlignment.toFixed(3)}, ` +
+                      `continuity >= ${thresholds.continuity.toFixed(3)}, motion >= ${thresholds.motionIntegrity.toFixed(3)}, ` +
+                      `artifact-free >= ${thresholds.artifactFree.toFixed(3)}.\n` +
+                      `Score 0..1: semanticAlignment (literal story match in all frames), continuity (identity/era/wardrobe/props/` +
+                      `lighting remain coherent), motionIntegrity (the ordered frames demonstrate the requested action/camera move ` +
+                      `without freezing or direction errors), artifactFree (no warping, morphing, duplicate limbs, text, watermark, ` +
+                      `broken geometry, or temporal corruption). Return STRICT JSON only: {"semanticAlignment":0.0,` +
+                      `"continuity":0.0,"motionIntegrity":0.0,"artifactFree":0.0,"notes":["concrete observations"]}.`,
+                    imagePaths: [...referenceBatch, ...frames],
+                    json: true,
+                    maxTokens: VISION_GATE_MAX_TOKENS,
+                  });
+                  batchGrades.push(ShotGradeSchema.parse(parseJsonLoose(raw)));
+                }
+                grade = {
+                  semanticAlignment: Math.min(...batchGrades.map((entry) => entry.semanticAlignment)),
+                  continuity: Math.min(...batchGrades.map((entry) => entry.continuity)),
+                  motionIntegrity: Math.min(...batchGrades.map((entry) => entry.motionIntegrity)),
+                  artifactFree: Math.min(...batchGrades.map((entry) => entry.artifactFree)),
+                  notes: [...new Set(batchGrades.flatMap((entry) => entry.notes))].slice(0, 8),
+                };
+                if (terminalAnchor) {
+                  const terminalReference = join(tmp, `${shot.id}_terminal_${terminalAnchor.terminalAnchorShotId}.png`);
+                  await writeBytes(terminalReference, await getObjectBytes(terminalAnchor.terminalStillKey));
+                  graderCalls++;
+                  const rawTerminal = await visionLocal({
+                    prompt:
+                      "You are the REQUIRED endpoint-continuity grader. The first image is the actual LAST frame of a rendered LTX clip. " +
+                      "The second image is the independently quality-selected opening frame of its next continuous shot. " +
+                      "Score whether the rendered last frame has actually arrived at the approved subject identity, wardrobe, props, location, lighting, composition, and camera handoff. " +
+                      "Do not give credit for a merely similar mood. Return STRICT JSON only: {\"terminalFrameAlignment\":0.0,\"notes\":[\"concrete observations\"]}.",
+                    imagePaths: [frames[2]!, terminalReference],
+                    json: true,
+                    maxTokens: VISION_GATE_MAX_TOKENS,
+                  });
+                  const terminalGrade = TerminalFrameGradeSchema.parse(parseJsonLoose(rawTerminal));
+                  grade = {
+                    ...grade,
+                    terminalFrameAlignment: terminalGrade.terminalFrameAlignment,
+                    notes: [...new Set([...grade.notes, ...terminalGrade.notes])].slice(0, 8),
+                  };
+                }
+                score = videoScore(grade);
+                const passed =
+                  score >= thresholds.score &&
+                  grade.semanticAlignment >= thresholds.semanticAlignment &&
+                  grade.continuity >= thresholds.continuity &&
+                  grade.motionIntegrity >= thresholds.motionIntegrity &&
+                  grade.artifactFree >= thresholds.artifactFree &&
+                  (!terminalAnchor || (grade.terminalFrameAlignment ?? 0) >= thresholds.continuity);
+                if (!passed) {
+                  failure =
+                    `qa_shots FAILED ${shot.id}: score=${score.toFixed(3)} threshold=${thresholds.score.toFixed(3)} ` +
+                    `(semantic=${grade.semanticAlignment}, continuity=${grade.continuity}, motion=${grade.motionIntegrity}, artifact=${grade.artifactFree}, ` +
+                    `terminal=${grade.terminalFrameAlignment ?? "not-required"})`;
+                  repairNotes = grade.notes;
+                }
               }
             }
           }
 
-          const accepted = !failure && grade !== undefined;
+          const accepted = !failure && grade !== undefined && temporalDynamism?.verdict === "pass";
           const checkpointedGradeNotes = checkpointNotes(
             grade?.notes ?? repairNotes,
             accepted
@@ -1955,9 +1990,22 @@ export const qaShots: Block = {
           await checkpointStandardVisualAttempt(ctx, visualAttempt);
 
           if (accepted) {
+            if (!temporalDynamism || temporalDynamism.verdict !== "pass") {
+              throw new Error(`qa_shots accepted ${shot.id} without passing deterministic temporal evidence`);
+            }
+            const passedTemporalDynamism = {
+              ...temporalDynamism,
+              verdict: "pass" as const,
+            };
             localClips.push(local);
             footageKeys.push(clipKey);
-            grades.push({ ...grade!, shotId: shot.id, score, threshold: thresholds.score });
+            grades.push({
+              ...grade!,
+              shotId: shot.id,
+              score,
+              threshold: thresholds.score,
+              temporalDynamism: passedTemporalDynamism,
+            });
             ctx.log(`qa_shots: ${shot.id} passed @ ${score.toFixed(3)} after ${repairAttempts} automatic repair(s)`);
             break;
           }
@@ -2043,7 +2091,7 @@ export const qaShots: Block = {
       throw new Error(`qa_shots coverage mismatch: mapped=${mappedSec}, total=${manifest.durationSec}`);
     }
     const shotQaReport = ShotQaReportSchema.parse({
-      version: "1.0.0",
+      version: "1.1.0",
       required: true,
       graderRan: true,
       passed: true,

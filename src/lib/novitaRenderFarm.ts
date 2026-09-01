@@ -383,7 +383,7 @@ export const NOVITA_RENDER_FARM_MODULE = {
   rules: [
     "Video frames are ALWAYS 8n+1 (LTX/Wan temporal requirement) — seconds are rounded to the nearest valid frame count, never truncated silently.",
     "Every shot needs a motion cue (cameraMove !== 'static' OR a non-empty motion field) — a shot with neither is a still, not a video shot.",
-    "width/height MUST be a multiple of 32 (VAE tiling requirement) — never submitted unrounded.",
+    "LTX stage-one width/height MUST be divisible by 32 and the distilled-x2 output by 64 (VAE tiling requirement) — a 720x1280 canvas is rejected before spend, never rounded silently.",
     "nshard is capped at 8 and the direct controller may admit fewer from its live provider-attested quota — a request above the hard ceiling fails validate(), it does not silently clamp.",
     "NO cross-engine fallback: a failed shard retries the SAME engine/pod pattern, then fails loud.",
     "R2-backed checkpoint resume — workers skip uploaded jobs recorded in the manifest-bound checkpoint; deterministic leases and artifact metadata close the hard-kill gap before requeue.",
