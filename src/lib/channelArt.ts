@@ -1,17 +1,17 @@
 /**
  * Production channel-art generation.
  *
- * Avatar and banner are independent, versioned Imagecraft jobs. Every generated
- * candidate is durable in R2 before it is judged; only an accepted candidate is
- * returned. The selected avatar is additionally center-cropped to a square and
- * written with an immutable key after it passes both the full-size and tiny-icon
- * checks. There is deliberately no provider fallback in this module.
+ * Avatar and banner are independent, versioned jobs. Avatars use the sealed
+ * Fal-hosted square Nano Banana identity route; banners use Novita Imagecraft. Every
+ * candidate is durable in R2 before it is judged, and there is no provider
+ * fallback. Only an accepted candidate is returned.
  */
 import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { PRICE } from "@/engine/pricing";
+import { generateFalNanoBananaAvatarImageWithReceipt } from "@/lib/falNanoBananaAvatar";
 import {
   downloadTo,
   DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
@@ -21,6 +21,10 @@ import { imageToJpeg } from "@/lib/ffmpeg";
 import { parseJsonLoose } from "@/lib/gemini";
 import { renderNovitaImage, type NovitaRenderLifecycle } from "@/lib/novitaMedia";
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
+import {
+  NANO_BANANA_AVATAR_PROFILE,
+  type NanoBananaAvatarReceipt,
+} from "@/lib/nanoBananaAvatarContract";
 import { channelKey, putObject } from "@/lib/storage";
 import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
@@ -52,14 +56,24 @@ export interface ChannelArtRenderRequest {
   lifecycle?: NovitaRenderLifecycle;
 }
 
+export interface ChannelAvatarRenderRequest {
+  prompt: string;
+  idempotencyContext: string;
+}
+
 export interface ChannelArtRuntime {
   hasJudge(): boolean;
   renderImage(request: ChannelArtRenderRequest): Promise<{ url: string; key: string }>;
+  renderAvatar(request: ChannelAvatarRenderRequest): Promise<{
+    bytes: Uint8Array;
+    receipt: NanoBananaAvatarReceipt;
+  }>;
   download(url: string, path: string, options?: { timeoutMs?: number }): Promise<unknown>;
   makeTempDir(prefix: string): Promise<string>;
   toJpeg(input: string, output: string, width: number, height: number): Promise<unknown>;
   judge(request: { kind: ArtKind; prompt: string; imagePaths: string[] }): Promise<unknown>;
   readBytes(path: string): Promise<Uint8Array>;
+  writeBytes(path: string, bytes: Uint8Array): Promise<void>;
   putImmutable(key: string, bytes: Uint8Array, contentType: string): Promise<string>;
   createVersion(kind: ArtKind): string;
 }
@@ -131,6 +145,7 @@ const DEFAULT_RUNTIME: ChannelArtRuntime = {
     const rendered = await renderNovitaImage(request);
     return { url: rendered.url, key: rendered.key };
   },
+  renderAvatar: generateFalNanoBananaAvatarImageWithReceipt,
   download: downloadTo,
   makeTempDir: makeRunTempDir,
   toJpeg: imageToJpeg,
@@ -146,6 +161,10 @@ const DEFAULT_RUNTIME: ChannelArtRuntime = {
   readBytes: async (path) => {
     const { readFile } = await import("node:fs/promises");
     return new Uint8Array(await readFile(path));
+  },
+  writeBytes: async (path, bytes) => {
+    const { writeFile } = await import("node:fs/promises");
+    await writeFile(path, bytes);
   },
   putImmutable: (key, bytes, contentType) =>
     putObject(key, bytes, { contentType, ifNoneMatch: "*" }),
@@ -171,9 +190,13 @@ export function avatarPrompt(id: ArtIdentity, notes: string[] = []): string {
     id.vibe ? `mood: ${id.vibe}` : "",
     id.styleGrammar ?? "",
     paletteClause(id.palette),
-    "CRITICAL COMPOSITION: one bold subject, face/front perfectly centered, symmetrical, tight " +
-      "head-and-shoulders framing, all essential detail inside the central circular crop, strong " +
-      "silhouette and contrast at 48px, bright legible focal lighting, no text, no letters, no words",
+    "CRITICAL IDENTITY COMPOSITION: this is not a scene, banner, thumbnail, room, landscape, desk, " +
+      "or establishing shot. Use one bold emblem or one iconic portrait only. Keep it perfectly centered; " +
+      "let the subject occupy 68-78% of the square; keep every essential feature inside the central " +
+      "circular crop; use no more than three dominant shapes; preserve strong silhouette, simple " +
+      "negative space, and high contrast at 32-48px. Bespoke editorial identity mark with restrained " +
+      "material character, never a generic glossy app icon. No text, letters, words, initials, border " +
+      "ring, watermark, miniature objects, or background storytelling",
     notes.length ? `FIX every issue from the prior attempt: ${notes.join("; ")}` : "",
   ]
     .filter(Boolean)
@@ -209,8 +232,10 @@ function judgePrompt(kind: ArtKind, id: ArtIdentity): string {
       "the same art downsampled to 48px and enlarged for inspection. YouTube displays it as a circle.",
       "Pass only when the subject remains instantly recognizable at tiny size, its face/front is",
       "centered with all essential detail inside the circular crop, contrast is strong, and there is",
-      "no visible text or lettering. Return strict JSON:",
-      '{"score":0..1,"circleSafe":boolean,"tinyLegible":boolean,"noText":boolean,"issues":string[]}',
+      "no visible text or lettering. Reject miniature scenes, rooms, desks, landscapes, city views,",
+      "multi-object storytelling, generic glossy app icons, and any mark that needs fine detail to",
+      "explain itself. Return strict JSON:",
+      '{"score":0..1,"circleSafe":boolean,"tinyLegible":boolean,"singleMark":boolean,"noScene":boolean,"noText":boolean,"issues":string[]}',
     ].join(" ");
   }
   return [
@@ -238,7 +263,7 @@ function parseCritique(kind: ArtKind, raw: unknown): {
   }
   const score = Math.max(0, Math.min(1, verdict.score));
   const checks = kind === "avatar"
-    ? (["circleSafe", "tinyLegible", "noText"] as const)
+    ? (["circleSafe", "tinyLegible", "singleMark", "noScene", "noText"] as const)
     : (["safeArea", "noText"] as const);
   const failedChecks = checks.filter((check) => verdict[check] !== true);
   const issues = Array.isArray(verdict.issues)
@@ -444,6 +469,166 @@ async function directArt(args: {
   };
 }
 
+async function directNanoBananaAvatar(args: {
+  ownerId: string;
+  slug: string;
+  identity: ArtIdentity;
+  version: string;
+  maxAttempts: number;
+  runtime: ChannelArtRuntime;
+  log: Logger;
+}): Promise<AcceptedArt> {
+  const { ownerId, slug, identity, version, runtime, log } = args;
+  if (!runtime.hasJudge()) {
+    throw new Error("channelArt: avatar quality judge is unavailable; refusing to generate");
+  }
+
+  const prefix = channelKey(ownerId, slug, `art/avatar/${version}`);
+  const temp = await runtime.makeTempDir(`channel-art-${slug}-avatar`);
+  const candidates: Array<ArtCandidate & { receipt: NanoBananaAvatarReceipt }> = [];
+
+  let loop: Awaited<ReturnType<typeof produceAndCritique<ArtCandidate & {
+    receipt: NanoBananaAvatarReceipt;
+  }>>>;
+  try {
+    loop = await produceAndCritique<ArtCandidate & { receipt: NanoBananaAvatarReceipt }>({
+      label: "channel-art-avatar",
+      threshold: SCORE_THRESHOLD.avatar,
+      maxIters: args.maxAttempts,
+      log,
+      produce: async (priorIssues, attempt) => {
+        const id = `avatar-candidate-${String(attempt).padStart(2, "0")}`;
+        const generated = await runtime.renderAvatar({
+          prompt: avatarPrompt(identity, priorIssues),
+          idempotencyContext: `${ownerId}/${slug}/art/avatar/${version}/${id}`,
+        });
+        const sourceKey = `${prefix}/${id}.source`;
+        const receiptKey = `${prefix}/${id}.receipt.json`;
+        await runtime.putImmutable(
+          sourceKey,
+          generated.bytes,
+          generated.receipt.sourceContentType,
+        );
+        await runtime.putImmutable(
+          receiptKey,
+          manifestBytes(generated.receipt),
+          "application/json",
+        );
+        const sourcePath = join(temp, `${id}.png`);
+        await runtime.writeBytes(sourcePath, generated.bytes);
+        const candidate = {
+          ...(await prepareCandidate("avatar", {
+            key: sourceKey,
+            url: "",
+            sourcePath,
+            judgedPaths: [],
+            attempt,
+          }, runtime)),
+          receipt: generated.receipt,
+        };
+        candidates.push(candidate);
+        return candidate;
+      },
+      critique: async (candidate) => parseCritique("avatar", await runtime.judge({
+        kind: "avatar",
+        prompt: judgePrompt("avatar", identity),
+        imagePaths: candidate.judgedPaths,
+      })),
+    });
+  } catch (error) {
+    if (candidates.length > 0) {
+      await runtime.putImmutable(
+        `${prefix}/rejection.json`,
+        manifestBytes({
+          schemaVersion: 2,
+          status: "rejected",
+          kind: "avatar",
+          providerRoute: NANO_BANANA_AVATAR_PROFILE.route,
+          version,
+          error: error instanceof Error ? error.message : String(error),
+          candidates: candidates.map(({ key, attempt, receipt }) => ({
+            key,
+            attempt,
+            responseSha256: receipt.responseSha256,
+          })),
+        }),
+        "application/json",
+      );
+    }
+    throw error;
+  }
+
+  if (!loop.accepted) {
+    await runtime.putImmutable(
+      `${prefix}/rejection.json`,
+      manifestBytes({
+        schemaVersion: 2,
+        status: "rejected",
+        kind: "avatar",
+        providerRoute: NANO_BANANA_AVATAR_PROFILE.route,
+        version,
+        threshold: SCORE_THRESHOLD.avatar,
+        candidates: candidates.map((candidate, index) => ({
+          key: candidate.key,
+          attempt: candidate.attempt,
+          responseSha256: candidate.receipt.responseSha256,
+          critique: loop.history[index],
+        })),
+      }),
+      "application/json",
+    );
+    throw new Error(
+      `channelArt: avatar rejected after ${loop.iterations} attempts (best score ${loop.critique.score.toFixed(2)})`,
+    );
+  }
+
+  const selectedKey = `${prefix}/approved.jpg`;
+  await runtime.putImmutable(
+    selectedKey,
+    await runtime.readBytes(loop.value.judgedPaths[0]),
+    "image/jpeg",
+  );
+  await runtime.putImmutable(
+    `${prefix}/approval.json`,
+    manifestBytes({
+      schemaVersion: 2,
+      status: "approved",
+      kind: "avatar",
+      contractVersion: NANO_BANANA_AVATAR_PROFILE.contractVersion,
+      providerRoute: NANO_BANANA_AVATAR_PROFILE.route,
+      version,
+      threshold: SCORE_THRESHOLD.avatar,
+      score: loop.critique.score,
+      attempts: loop.iterations,
+      sourceKey: loop.value.key,
+      outputKey: selectedKey,
+      providerReceipt: loop.value.receipt,
+      candidates: candidates.map((candidate, index) => ({
+        key: candidate.key,
+        attempt: candidate.attempt,
+        responseSha256: candidate.receipt.responseSha256,
+        critique: loop.history[index],
+      })),
+    }),
+    "application/json",
+  );
+
+  log("channelArt: avatar approved", {
+    version,
+    providerRoute: NANO_BANANA_AVATAR_PROFILE.route,
+    score: loop.critique.score,
+    attempts: loop.iterations,
+    sourceKey: loop.value.key,
+    outputKey: selectedKey,
+  });
+  return {
+    key: selectedKey,
+    sourceKey: loop.value.key,
+    score: loop.critique.score,
+    attempts: loop.iterations,
+  };
+}
+
 function validateSelection(options: ChannelArtOptions): void {
   if (options.avatar === false && !options.existing?.imageKey) {
     throw new Error("channelArt: avatar=false requires existing.imageKey");
@@ -486,6 +671,26 @@ function providerAdmission(
   };
 }
 
+function avatarProviderAdmission(args: {
+  maxAttempts: number;
+  options: ChannelArtOptions;
+  runtime: ChannelArtRuntime;
+}): void {
+  if (args.runtime !== DEFAULT_RUNTIME) return;
+  if (args.options.maxProviderSpendUsd === undefined) {
+    throw new Error("channelArt: avatar requires an explicit aggregate provider budget before paid generation");
+  }
+  const required = Number((
+    args.maxAttempts * NANO_BANANA_AVATAR_PROFILE.admissionCeilingUsd
+  ).toFixed(9));
+  if (args.options.maxProviderSpendUsd + Number.EPSILON < required) {
+    throw new Error(
+      `channelArt: avatar budget $${args.options.maxProviderSpendUsd.toFixed(3)} is below ` +
+        `the ${args.maxAttempts}-attempt Nano Banana ceiling $${required.toFixed(3)}`,
+    );
+  }
+}
+
 /**
  * Generate one independently leased art asset. Channel Inception uses this so
  * avatar and banner provider spend is checkpointed under the correct stage.
@@ -506,8 +711,21 @@ export async function generateChannelArtAsset(
   }
   const version = versionFor(kind, options, runtime);
   const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
+  if (kind === "avatar") {
+    avatarProviderAdmission({ maxAttempts, options, runtime });
+    log("channelArt: generating versioned avatar through Fal Nano Banana", { version });
+    return (await directNanoBananaAvatar({
+      ownerId,
+      slug,
+      identity,
+      version,
+      maxAttempts,
+      runtime,
+      log,
+    })).key;
+  }
   const admission = providerAdmission({ kind, maxAttempts, options, runtime });
-  log(`channelArt: generating versioned ${kind} through Novita Imagecraft`, { version });
+  log("channelArt: generating versioned banner through Novita Imagecraft", { version });
   return (await directArt({
     ownerId,
     slug,
@@ -515,9 +733,7 @@ export async function generateChannelArtAsset(
     identity,
     version,
     maxAttempts,
-    prompt: (issues) => kind === "avatar"
-      ? avatarPrompt(identity, issues)
-      : bannerPrompt(identity, issues),
+    prompt: (issues) => bannerPrompt(identity, issues),
     runtime,
     ...admission,
     log,
@@ -555,18 +771,15 @@ export async function generateChannelArt(
   // Sequential by design: if the avatar fails closed, do not spend on a banner.
   if (generateAvatar) {
     const version = versionFor("avatar", options, runtime);
-    log("channelArt: generating versioned avatar through Novita Imagecraft", { version });
-    const admission = providerAdmission({ kind: "avatar", maxAttempts, options, runtime });
-    imageKey = (await directArt({
+    log("channelArt: generating versioned avatar through Fal Nano Banana", { version });
+    avatarProviderAdmission({ maxAttempts, options, runtime });
+    imageKey = (await directNanoBananaAvatar({
       ownerId,
       slug,
-      kind: "avatar",
       identity,
       version,
       maxAttempts,
-      prompt: (issues) => avatarPrompt(identity, issues),
       runtime,
-      ...admission,
       log,
     })).key;
   }

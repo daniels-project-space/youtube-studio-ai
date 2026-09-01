@@ -43,8 +43,8 @@ export const CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD: Readonly<
   "channel-inception-positioning": 0.6,
   "channel-inception-seo": 0.45,
   "channel-inception-voice": 0.75,
-  // Three judged Novita Imagecraft candidates at the exact $0.35 worker cap.
-  "channel-inception-avatar": 1.05,
+  // Three judged square Nano Banana candidates at the fail-closed $0.04 cap.
+  "channel-inception-avatar": 0.12,
   "channel-inception-banner": 1.05,
   "channel-inception-thumbnails": 1.4,
   "channel-inception-pipeline": 0.6,
@@ -320,13 +320,13 @@ export const CHANNEL_INCEPTION_MODULE_CONTRACTS: readonly ChannelInceptionModule
   },
   {
     key: "channel-inception-avatar",
-    version: "1.0.0",
+    version: "1.1.0",
     certification: "contract",
     catalogStatus: "reference",
     stage: "inception/brand",
     title: "Channel Avatar",
     purpose:
-      "Preserve approved avatars or create versioned candidates with circular-crop and tiny-size legibility evidence.",
+      "Preserve approved avatars or create receipt-bound square Fal Nano Banana identity marks with circular-crop and tiny-size legibility evidence.",
     requiredDependencies: ["channel-inception-positioning"],
     optionalDependencies: [],
     supportedFamilies: ALL_FAMILIES,
@@ -335,7 +335,9 @@ export const CHANNEL_INCEPTION_MODULE_CONTRACTS: readonly ChannelInceptionModule
     outputs: ["avatar-candidate-or-protected-reference", "avatar-qa-receipt"],
     gates: [
       "protected existing avatar is never overwritten",
+      "generated candidates use the sealed Fal Nano Banana avatar route without fallback",
       "candidate passes circular crop and tiny-size recognition",
+      "candidate is one identity mark rather than a miniature scene",
       "candidate is text-free and content-addressed",
     ],
   },
