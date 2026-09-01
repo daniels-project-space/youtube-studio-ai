@@ -16,6 +16,7 @@ import { fmtDateTime, fmtUsd } from "@/lib/format";
 import styles from "./runs.module.css";
 import {
   INITIAL_VISIBLE_RUNS,
+  diagnoseRunFailure,
   projectRunHistory,
   RUN_FILTER_LABEL,
   RUN_FILTERS,
@@ -134,6 +135,9 @@ export default function RunsPage() {
 
 function ProductionRunRow({ run, index }: { run: RunRow; index: number }) {
   const live = run.status === "running" || run.status === "queued";
+  const failure = run.status === "failed" && run.error
+    ? diagnoseRunFailure(run.error)
+    : null;
   return (
     <Link href={`/runs/${run._id}`} className={styles.runRow} data-status={run.status}>
       <span className={styles.runIndex}>{String(index + 1).padStart(2, "0")}</span>
@@ -141,7 +145,13 @@ function ProductionRunRow({ run, index }: { run: RunRow; index: number }) {
       <span className={styles.runIdentity}>
         <strong>{run.channelName}</strong>
         <small>{fmtDateTime(run.startedAt)} · {run._id.slice(0, 8)}</small>
-        {run.status === "failed" && run.error && <span>{run.error}</span>}
+        {failure && (
+          <span className={styles.runFailure} title={run.error} role="note">
+            <b>{failure.faultDomain}</b>
+            <span>{failure.cause}</span>
+            <em>{failure.nextAction}</em>
+          </span>
+        )}
       </span>
       <span className={styles.runStatus}><StageBadge status={run.status} /></span>
       <span className={styles.runDatum}><small>Elapsed</small><strong className={live ? styles.liveValue : undefined}><Elapsed from={run.startedAt} to={live ? undefined : run.finishedAt} /></strong></span>

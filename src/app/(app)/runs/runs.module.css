@@ -83,10 +83,37 @@
 .runSignal i { width: 5px; height: 5px; border-radius: 50%; background: var(--row-tone); }
 .runRow[data-status="running"] .runSignal::after { position: absolute; inset: -5px; border: 1px solid color-mix(in srgb,var(--row-tone) 35%,transparent); border-radius: 50%; content: ""; animation: run-signal 1.8s ease-out infinite; }
 .runIdentity { display: grid; min-width: 0; gap: 0.18rem; }
-.runIdentity strong, .runIdentity small, .runIdentity > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.runIdentity strong, .runIdentity small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .runIdentity strong { font-size: 0.75rem; font-weight: 650; }
 .runIdentity small { color: var(--color-faint); font: 0.59rem/1 var(--font-mono); }
-.runIdentity > span { color: var(--color-failed); font-size: 0.58rem; }
+.runFailure {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.18rem 0.42rem;
+  margin-top: 0.1rem;
+}
+.runFailure b {
+  padding: 0.13rem 0.28rem;
+  border: 1px solid color-mix(in srgb, var(--color-failed) 34%, var(--color-border));
+  border-radius: 999px;
+  color: var(--color-failed);
+  background: color-mix(in srgb, var(--color-failed) 7%, transparent);
+  font: 700 0.48rem/1 var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.runFailure span,
+.runFailure em {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.runFailure span { color: color-mix(in srgb, var(--color-failed) 88%, var(--color-fg)); font-size: 0.58rem; }
+.runFailure em { grid-column: 2; color: var(--color-faint); font-size: 0.54rem; font-style: normal; }
 .runStatus { justify-self: start; }
 .runDatum { display: grid; gap: 0.2rem; }
 .runDatum small { color: var(--color-faint); font: 700 0.48rem/1 var(--font-mono); letter-spacing: 0.07em; text-transform: uppercase; }
@@ -138,6 +165,8 @@
   .runDatum:nth-of-type(5) { grid-column: 3; }
   .runDatum:nth-of-type(6) { grid-column: 4; }
   .runOpen { display: none; }
+  .runFailure { grid-column: 1 / -1; }
+  .runFailure em { grid-column: 1 / -1; white-space: normal; }
 }
 
 @media (prefers-reduced-motion: reduce) {
