@@ -1516,14 +1516,15 @@ export default function NewChannelWizard() {
                     {calibration.calibrated && calibration.sources.length ? (
                       <>
                         <strong style={{ fontSize: "0.82rem" }}>
-                          Original mechanics calibrated from {calibration.sources.join(" · ")}
+                          Calibrated · {calibration.sources.length} reviewed references
                         </strong>
-                        <span style={muted}>
-                          These are reviewable production mechanics, never a style-copying instruction or a promise of another channel’s audience.
-                        </span>
-                        <ul style={{ margin: 0, paddingLeft: "1.1rem", display: "grid", gap: "0.2rem", fontSize: "0.78rem", color: "var(--color-muted)" }}>
-                          {calibration.standards.map((standard) => <li key={standard}>{standard}</li>)}
-                        </ul>
+                        <details>
+                          <summary style={{ color: "var(--color-blueprint)", cursor: "pointer", fontSize: "0.68rem" }}>View quality standards</summary>
+                          <span style={{ ...muted, display: "block", marginTop: "0.4rem" }}>References: {calibration.sources.join(" · ")}</span>
+                          <ul style={{ margin: "0.35rem 0 0", paddingLeft: "1.1rem", display: "grid", gap: "0.2rem", fontSize: "0.72rem", color: "var(--color-muted)" }}>
+                            {calibration.standards.map((standard) => <li key={standard}>{standard}</li>)}
+                          </ul>
+                        </details>
                       </>
                     ) : (
                       <span style={muted}>No usable reference-quality calibration is registered for this family. Automatic release remains unavailable until one is proven.</span>
@@ -1922,7 +1923,11 @@ export default function NewChannelWizard() {
         <span>{STEP_META[step]?.label} · {step + 1} of {STEP_META.length}</span>
         {step < 3
           ? <button onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext} style={{ ...btnPrimary, opacity: canNext ? 1 : 0.5 }}>Next</button>
-          : supervisedAdmission
+          : operationsAccess !== "owner"
+            ? operationsAccess === "checking"
+              ? <button disabled style={{ ...btnPrimary, opacity: 0.5 }}>Checking owner…</button>
+              : <a href="/api/operations/authorize" style={btnPrimary}>Verify owner to save</a>
+            : supervisedAdmission
             ? supervisedAdmission.reviewHref
               ? <Link href={supervisedAdmission.reviewHref} style={btnPrimary}>Open private review desk</Link>
               : <button disabled style={{ ...btnPrimary, opacity: 0.5 }}>Private review package required</button>

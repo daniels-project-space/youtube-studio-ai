@@ -143,6 +143,7 @@ assert.match(wizard, /Private quality-control render/);
 assert.match(wizard, /status signal · no preview frames yet/);
 assert.match(wizard, /STAGE_DESCRIPTIONS/);
 assert.match(wizard, /executionAuthorized \? "Authorized" : "Plan only"/);
+assert.match(wizard, /href="\/api\/operations\/authorize"[\s\S]*Verify owner to save/);
 assert.match(wizard, /Choose the exact Qwen CustomVoice speaker before starting channel setup/);
 assert.match(wizard, /f\.key !== "qwenSpeaker" \|\| paramOverrides\[m\.block\]\?\.\["ttsProvider"\] === "qwen3"/);
 assert.match(wizardCss, /\.nicheGrid/);
@@ -154,8 +155,8 @@ assert.match(wizardCss, /prefers-reduced-motion/);
 // that production review will enforce. This is original craft calibration, not
 // a visual/style clone or an audience-performance promise.
 assert.match(wizard, /referenceQualityContractFor/);
-assert.match(wizard, /Original mechanics calibrated from/);
-assert.match(wizard, /never a style-copying instruction or a promise of another channel’s audience/);
+assert.match(wizard, /Calibrated · \{calibration\.sources\.length\} reviewed references/);
+assert.match(wizard, /View quality standards/);
 assert.match(wizard, /No usable reference-quality calibration is registered/);
 
 // Companion Shorts are the default growth layer for a newly created narrated

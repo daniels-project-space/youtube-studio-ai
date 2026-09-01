@@ -393,7 +393,7 @@
 
 @media (max-width: 820px) {
   .signalHero { min-height: 0; grid-template-columns: 1fr; }
-  .signalDial { width: min(72vw, 280px); }
+  .signalDial { width: min(50vw, 185px); }
   .workbench { grid-template-columns: 1fr; }
   .operatingDeck { grid-template-columns: 1fr; }
   .masterWidget { grid-column: auto; }
