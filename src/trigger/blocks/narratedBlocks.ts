@@ -49,7 +49,7 @@ import {
 } from "@/engine/referenceQualityMechanicsRegistry";
 import {
   selfContainedStoryPlanEvidenceFromReceipt,
-  selfContainedStoryVisualReviewLocksFromReceipt,
+  selfContainedStoryVisualReviewPlanFromReceipt,
 } from "@/engine/selfContainedStoryQualityEvidence";
 import {
   DATA_STORY_MIN_SOURCED_NUMERIC_SENTENCES,
@@ -3683,6 +3683,8 @@ export const qaVisual: Block = {
       channelName: opt(ctx, "channelName"),
       persona: opt(ctx, "persona"),
       styleGrammar: opt(ctx, "styleGrammar"),
+      styleDNA: ctx.store["styleDNA"],
+      showBible: ctx.store["showBible"],
       // P1-1: the channel's own critic doctrine now reaches the mandatory
       // holistic gate. P1-17: the lane supplies what this lane's critic must
       // actively scrutinise.
@@ -3751,16 +3753,20 @@ export const qaVisual: Block = {
     // retained. The locks remain sampled evidence, never visual-coverage
     // overclaiming, and are derived only from the immutable plan + renderer
     // timing contract already in this run.
-    let selfContainedStoryVisualLocks: readonly VisualReviewCreativeLock[] = [];
+    let selfContainedStoryVisualPlan: {
+      readonly creativeLocks: readonly VisualReviewCreativeLock[];
+      readonly requiredEvidenceFrames: readonly import("@/lib/visualReview").VisualReviewFrame[];
+    } = { creativeLocks: [], requiredEvidenceFrames: [] };
     if (ctx.store["selfContainedStoryReceipt"] !== undefined) {
       try {
-        selfContainedStoryVisualLocks = selfContainedStoryVisualReviewLocksFromReceipt({
+        selfContainedStoryVisualPlan = selfContainedStoryVisualReviewPlanFromReceipt({
           receipt: ctx.store["selfContainedStoryReceipt"],
           route: rawProgramRoute,
           topic,
           contentLaneKey: contentLane.key,
           sentenceTimings: ctx.store["sentenceTimings"],
           narrationStartSec: Number(ctx.store["narrationStartSec"]),
+          whiteboardRenderSchedule: ctx.store["whiteboardRenderSchedule"],
         });
       } catch (error) {
         const detail = error instanceof Error ? error.message : String(error);
@@ -3816,6 +3822,9 @@ export const qaVisual: Block = {
       ? ShotRenderManifestSchema.parse(ctx.store["shotRenderManifest"])
       : undefined;
     const cinematicSequencePresent = cinematicBinding !== undefined;
+    if (cinematicSequencePresent && selfContainedStoryVisualPlan.requiredEvidenceFrames.length) {
+      throw new Error("qa_visual FAILED: one final master cannot claim both cinematic and whiteboard renderer authority");
+    }
     const cinematicReceiptEvidence = cinematicBinding
       ? [
           `cinematicSequence=${cinematicBinding.scenePlan.sequenceFingerprint}`,
@@ -3856,7 +3865,8 @@ export const qaVisual: Block = {
     qaCost = qaVisualCost(
       ctx.params,
       cinematicFinalMasterQaAdmission?.reviewCostUsd,
-      cinematicFinalMasterQaReviewPlan?.completeFocusFrameCount,
+      (cinematicFinalMasterQaReviewPlan?.completeFocusFrameCount ?? 0) +
+        selfContainedStoryVisualPlan.requiredEvidenceFrames.length,
     );
     const cinematicBodyOffsetSec = ctx.store["introApplied"] === true && Number(ctx.store["introSec"]) > 0
       ? Number(ctx.store["introSec"])
@@ -3956,6 +3966,9 @@ export const qaVisual: Block = {
       serializedVisualReviewContext,
     ].filter(Boolean).join("; ") || undefined;
     const reviewReferenceCriteria = [
+      ...(channelReviewProfile.identityReferenceCriterion
+        ? [channelReviewProfile.identityReferenceCriterion]
+        : []),
       ...casefileCinematicReferenceCriteria,
       ...referenceQualityVisualCriteria,
       ...visualTreatmentCriteria,
@@ -3990,7 +4003,7 @@ export const qaVisual: Block = {
       creativeLocks: [
         ...visualMatterLocks,
         ...cinematicReviewLocks,
-        ...selfContainedStoryVisualLocks,
+        ...selfContainedStoryVisualPlan.creativeLocks,
         ...storySpineVisualLocks,
       ],
       focusWindows: [...repairFocus, ...cinematicFocus],
@@ -4022,11 +4035,18 @@ export const qaVisual: Block = {
       // A source-bound cinematic sequence has an accepted receipt for every
       // planned join. Its final review must inspect every one at 2fps; the
       // ordinary cap still applies to untrusted reactive defect windows.
-      requireCompleteFocusCoverage: cinematicSequencePresent,
+      requireCompleteFocusCoverage:
+        cinematicSequencePresent || selfContainedStoryVisualPlan.requiredEvidenceFrames.length > 0,
       ...(cinematicFinalMasterQaReviewPlan
         ? {
             completeFocusWindows: cinematicFocus,
             expectedCompleteFocusFrameCount: cinematicFinalMasterQaReviewPlan.completeFocusFrameCount,
+          }
+        : {}),
+      ...(selfContainedStoryVisualPlan.requiredEvidenceFrames.length
+        ? {
+            completeFocusFrames: selfContainedStoryVisualPlan.requiredEvidenceFrames,
+            expectedCompleteFocusFrameCount: selfContainedStoryVisualPlan.requiredEvidenceFrames.length,
           }
         : {}),
       log: (message) => ctx.log(message),

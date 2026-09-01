@@ -98,13 +98,18 @@ assert.match(
 );
 assert.match(
   qaVisual,
-  /selfContainedStoryVisualReviewLocksFromReceipt\([\s\S]{0,650}sentenceTimings:[\s\S]{0,240}narrationStartSec:/,
-  "QA must derive plan-bound final-master visual locks from the sealed receipt and renderer timing map",
+  /selfContainedStoryVisualReviewPlanFromReceipt\([\s\S]{0,650}sentenceTimings:[\s\S]{0,240}narrationStartSec:[\s\S]{0,240}whiteboardRenderSchedule:/,
+  "QA must derive plan-bound final-master locks and exact whiteboard evidence from the sealed receipt and renderer schedule",
 );
 assert.match(
   qaVisual,
-  /creativeLocks: \[[\s\S]{0,320}selfContainedStoryVisualLocks/,
+  /creativeLocks: \[[\s\S]{0,320}selfContainedStoryVisualPlan\.creativeLocks/,
   "every self-contained panel lock must feed the actual visual-review evidence plan rather than a logging-only path",
+);
+assert.match(
+  qaVisual,
+  /completeFocusFrames: selfContainedStoryVisualPlan\.requiredEvidenceFrames/,
+  "every renderer-authored whiteboard trace/completion sample must bypass the generic focus cap",
 );
 assert.match(
   qaVisual,

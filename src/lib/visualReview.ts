@@ -12,6 +12,7 @@ import type {
   VisualRepairSignal,
 } from "@/engine/healer";
 import {
+  COMPLETE_VISUAL_REVIEW_MAX_FRAMES,
   completeVisualReviewFocusTimes,
   FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST,
 } from "@/engine/visualReviewBudget";
@@ -212,6 +213,10 @@ export interface ChannelVisualReviewProfileInput {
   channelName?: string;
   persona?: string;
   styleGrammar?: string;
+  /** Frozen machine-readable channel identity from channel inception. */
+  styleDNA?: unknown;
+  /** Frozen showrunner doctrines and iconic motif for this channel. */
+  showBible?: unknown;
   qualityDimensions?: string[];
   /** Full QualityBar criteria, not merely short dimension IDs. */
   qualityCriteria?: readonly string[];
@@ -237,6 +242,8 @@ export interface ChannelVisualReviewProfile {
   criticEmphasis: string[];
   /** Bounded full quality-bar criteria, ready to hand to the reviewer. */
   qualityCriteria: string[];
+  /** Required sampled-batch attestation of this channel's own visual identity. */
+  identityReferenceCriterion?: VisualReviewReferenceCriterion;
 }
 
 const CHANNEL_REQUIREMENTS: Readonly<Record<string, {
@@ -318,6 +325,21 @@ function compactReviewContext(value: string | undefined, max: number): string | 
   return compact || undefined;
 }
 
+function recordValue(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : undefined;
+}
+
+function compactStringArray(value: unknown, maxItems: number, maxChars: number): string[] {
+  return Array.isArray(value)
+    ? value
+        .flatMap((item) => typeof item === "string" ? [compactReviewContext(item, maxChars)] : [])
+        .filter((item): item is string => Boolean(item))
+        .slice(0, maxItems)
+    : [];
+}
+
 function normalizeReferenceCriteria(value: unknown): {
   criteria: NormalizedVisualReviewReferenceCriterion[];
   error?: string;
@@ -381,6 +403,49 @@ export function channelVisualReviewProfile(
   const channelName = compactReviewContext(input.channelName, 120);
   const persona = compactReviewContext(input.persona, 180);
   const styleGrammar = compactReviewContext(input.styleGrammar, 240);
+  const styleDNA = recordValue(input.styleDNA);
+  const showBible = recordValue(input.showBible);
+  const recurringSubject = compactReviewContext(
+    typeof styleDNA?.["recurringSubject"] === "string" ? styleDNA["recurringSubject"] : undefined,
+    120,
+  );
+  const setting = compactReviewContext(
+    typeof styleDNA?.["setting"] === "string" ? styleDNA["setting"] : undefined,
+    120,
+  );
+  const composition = compactReviewContext(
+    typeof styleDNA?.["composition"] === "string" ? styleDNA["composition"] : undefined,
+    100,
+  );
+  const colorGrade = compactReviewContext(
+    typeof styleDNA?.["colorGrade"] === "string" ? styleDNA["colorGrade"] : undefined,
+    90,
+  );
+  const motionDiscipline = compactReviewContext(
+    typeof styleDNA?.["motionDiscipline"] === "string" ? styleDNA["motionDiscipline"] : undefined,
+    100,
+  );
+  const palette = compactStringArray(styleDNA?.["palette"], 6, 24);
+  const motifs = compactStringArray(styleDNA?.["motifs"], 5, 48);
+  const variationAxes = compactStringArray(styleDNA?.["variationAxes"], 3, 40);
+  const motionVocabulary = compactStringArray(styleDNA?.["motionVocabulary"], 4, 40);
+  const visualAvoid = compactStringArray(styleDNA?.["visualAvoid"], 4, 48);
+  const positioning = compactReviewContext(
+    typeof showBible?.["positioning"] === "string" ? showBible["positioning"] : undefined,
+    120,
+  );
+  const vibe = compactReviewContext(
+    typeof showBible?.["vibe"] === "string" ? showBible["vibe"] : undefined,
+    100,
+  );
+  const iconicMotif = compactReviewContext(
+    typeof showBible?.["iconicMotif"] === "string" ? showBible["iconicMotif"] : undefined,
+    100,
+  );
+  const dpDoctrine = compactReviewContext(
+    typeof showBible?.["dpDoctrine"] === "string" ? showBible["dpDoctrine"] : undefined,
+    100,
+  );
   const qualityDimensions = (input.qualityDimensions ?? [])
     .map((dimension) => compactReviewContext(dimension, 60))
     .filter((dimension): dimension is string => Boolean(dimension))
@@ -394,6 +459,9 @@ export function channelVisualReviewProfile(
     channelName ? `Channel: ${channelName}` : "",
     persona ? `Audience/persona: ${persona}` : "",
     styleGrammar ? `Style grammar: ${styleGrammar}` : "",
+    recurringSubject ? `Recurring subject: ${recurringSubject}` : "",
+    setting ? `Recurring setting: ${setting}` : "",
+    iconicMotif ? `Iconic motif: ${iconicMotif}` : "",
     `Content lane: ${laneKey}${renderer ? ` via ${renderer}` : ""}`,
     qualityDimensions.length ? `Channel quality priorities: ${qualityDimensions.join(", ")}` : "",
   ].filter(Boolean).join("; ");
@@ -405,6 +473,35 @@ export function channelVisualReviewProfile(
     .map((item) => compactReviewContext(item, 240))
     .filter((item): item is string => Boolean(item))
     .slice(0, 4);
+  const identityContract = compactReviewContext([
+    channelName ? `channel ${channelName}` : "",
+    recurringSubject ? `recurring subject ${recurringSubject}` : "",
+    setting ? `world ${setting}` : "",
+    palette.length ? `palette ${palette.join(", ")}` : "",
+    composition ? `composition ${composition}` : "",
+    colorGrade ? `grade ${colorGrade}` : "",
+    motifs.length ? `motifs ${motifs.join(", ")}` : "",
+    visualAvoid.length ? `must avoid ${visualAvoid.join(", ")}` : "",
+    iconicMotif ? `iconic motif ${iconicMotif}` : "",
+    vibe ? `vibe ${vibe}` : "",
+    variationAxes.length ? `allowed variation ${variationAxes.join(", ")}` : "",
+    motionVocabulary.length ? `motion vocabulary ${motionVocabulary.join(", ")}` : "",
+    motionDiscipline ? `motion discipline ${motionDiscipline}` : "",
+    dpDoctrine ? `camera doctrine ${dpDoctrine}` : "",
+    positioning ? `positioning ${positioning}` : "",
+    styleGrammar ? `style grammar ${styleGrammar}` : "",
+  ].filter(Boolean).join("; "), 490);
+  const identityReferenceCriterion = identityContract
+    ? {
+        id: "channel-visual-identity",
+        scope: "global" as const,
+        criterion: compactReviewContext(
+          `Described channel identity (not pixel comparison to unseen references): ${identityContract}. ` +
+          "In every broad batch, visible subjects, world, palette, composition, grade, motifs, and camera treatment must stay compatible. Not every motif must appear in every batch, but contradiction or generic unrelated drift must fail.",
+          700,
+        )!,
+      }
+    : undefined;
   return {
     ...(channelWorld ? { channelWorld } : {}),
     expectedStructure: requirement.expected,
@@ -412,6 +509,7 @@ export function channelVisualReviewProfile(
     ...(criticDoctrine ? { criticDoctrine } : {}),
     criticEmphasis,
     qualityCriteria,
+    ...(identityReferenceCriterion ? { identityReferenceCriterion } : {}),
   };
 }
 
@@ -586,6 +684,13 @@ export interface ReviewRenderOptions {
    * untrusted defect range cannot enlarge this pre-reserved provider plan.
    */
   completeFocusWindows?: readonly VisualReviewWindow[];
+  /**
+   * Exact, pre-authored evidence timestamps that must survive extraction. This
+   * is used when one meaningful state per event is stronger and cheaper than
+   * indiscriminately sampling an entire long window (for example every
+   * whiteboard hand trace plus each completed cumulative panel).
+   */
+  completeFocusFrames?: readonly Pick<VisualReviewFrame, "tSec">[];
   /**
    * Optional pre-render witness for a sealed complete-focus plan. A mismatch
    * fails before evidence extraction/provider work rather than spending under
@@ -803,6 +908,33 @@ export function planVisualReviewEvidence(input: {
  */
 export function planCompleteFocusEvidence(durationSec: number, windows: readonly VisualReviewWindow[]): VisualReviewFrame[] {
   return completeVisualReviewFocusTimes(durationSec, windows)
+    .map((tSec, index) => ({
+      id: `c${String(index + 1).padStart(3, "0")}`,
+      tSec,
+      selectionReasons: ["focus"],
+    }));
+}
+
+function normalizeCompleteFocusFrames(
+  durationSec: number,
+  frames: readonly Pick<VisualReviewFrame, "tSec">[],
+): VisualReviewFrame[] {
+  const byTimestamp = new Map<string, number>();
+  for (const [index, frame] of frames.entries()) {
+    const raw = Number(frame.tSec);
+    if (!Number.isFinite(raw) || raw < 0 || raw > durationSec) {
+      throw new Error(`visualReview complete-focus frame ${index} falls outside the final master`);
+    }
+    const tSec = roundTime(raw);
+    byTimestamp.set(tSec.toFixed(1), tSec);
+    if (byTimestamp.size > COMPLETE_VISUAL_REVIEW_MAX_FRAMES) {
+      throw new Error(
+        `visualReview complete-focus frame plan exceeds its ${COMPLETE_VISUAL_REVIEW_MAX_FRAMES}-frame safety limit`,
+      );
+    }
+  }
+  return [...byTimestamp.values()]
+    .sort((left, right) => left - right)
     .map((tSec, index) => ({
       id: `c${String(index + 1).padStart(3, "0")}`,
       tSec,
@@ -1558,7 +1690,16 @@ export async function reviewRender(
     ? opts.completeFocusWindows ?? intent.focusWindows ?? []
     : [];
   const requiredFocusFrames = requireCompleteFocusCoverage
-    ? planCompleteFocusEvidence(durationSec, sealedCompleteFocusWindows)
+    ? (() => {
+        const byTimestamp = new Map<string, VisualReviewFrame>();
+        for (const frame of [
+          ...planCompleteFocusEvidence(durationSec, sealedCompleteFocusWindows),
+          ...normalizeCompleteFocusFrames(durationSec, opts.completeFocusFrames ?? []),
+        ]) {
+          byTimestamp.set(frame.tSec.toFixed(1), frame);
+        }
+        return [...byTimestamp.values()].sort((left, right) => left.tSec - right.tSec);
+      })()
     : [];
   if (opts.expectedCompleteFocusFrameCount !== undefined) {
     const expected = Number(opts.expectedCompleteFocusFrameCount);
@@ -1699,7 +1840,10 @@ export async function reviewRender(
   }
   const focusCandidates = [...candidatesByTimestamp.values()]
     .sort((left, right) => left.tSec - right.tSec)
-    .filter((candidate) => !broad.some((frame) => Math.abs(frame.descriptor.tSec - candidate.tSec) < 0.11))
+    // Exact renderer-event evidence is authored on the reviewer's one-decimal
+    // clock. A nearby broad frame (for example 15.2s instead of a 15.1s hand
+    // trace) is not the same state and may not discharge the sealed sample.
+    .filter((candidate) => !broad.some((frame) => Math.abs(frame.descriptor.tSec - candidate.tSec) < 0.01))
     .map((candidate, index) => ({ ...candidate, id: `x${String(index + 1).padStart(3, "0")}` }));
   const focused = focusCandidates.length
     ? await extractFrames(videoPath, focusCandidates, opts.runId, "focus", log)
@@ -1736,7 +1880,7 @@ export async function reviewRender(
   );
   const allFrames = allExtracted.map((frame) => frame.descriptor);
   const missingFocusFrameCount = requiredFocusFrames.filter((requiredFrame) =>
-    !allFrames.some((frame) => Math.abs(frame.tSec - requiredFrame.tSec) < 0.11),
+    !allFrames.some((frame) => Math.abs(frame.tSec - requiredFrame.tSec) < 0.01),
   ).length;
   const reviewFingerprint = fingerprint(intent, durationSec, allFrames, sourceSha256);
   let evidence: VisualReviewEvidence = {

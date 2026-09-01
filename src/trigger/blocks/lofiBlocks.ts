@@ -2423,6 +2423,8 @@ async function persistShortReleaseEvidence(args: {
     channelName: opt(ctx, "channelName"),
     persona: opt(ctx, "persona"),
     styleGrammar: opt(ctx, "styleGrammar"),
+    styleDNA: ctx.store["styleDNA"],
+    showBible: ctx.store["showBible"],
     ...(criticDoctrine ? { criticDoctrine } : {}),
     laneEmphasis: laneQuality.emphasis,
     qualityDimensions: (qualityBar?.dimensions ?? []).flatMap((dimension) =>
@@ -2485,6 +2487,9 @@ async function persistShortReleaseEvidence(args: {
         { startSec: 0, endSec: Math.min(durationSec, 6), reason: "reviewer" },
         { startSec: Math.max(0, durationSec - 5), endSec: durationSec, reason: "reviewer" },
       ],
+      ...(channelProfile.identityReferenceCriterion
+        ? { referenceCriteria: [channelProfile.identityReferenceCriterion] }
+        : {}),
     },
     {
       runId: ctx.runId,

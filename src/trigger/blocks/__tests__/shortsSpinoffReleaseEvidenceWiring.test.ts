@@ -40,6 +40,9 @@ assert.equal(short.costAndLatency.paid, true, "the mandatory post-transform revi
 assert(short.costAndLatency.maxCostUsdFor, "the Short release review must have a bounded declared cost");
 assert.equal(short.qualityContract.required, true, "Short release evidence must be a fail-closed quality contract");
 assert.equal(short.qualityContract.failClosed, true);
+for (const key of ["styleDNA", "showBible"]) {
+  assert(key in short.optionalConsumes, `Short final review must retain frozen channel identity input ${key}`);
+}
 assert(
   short.securityAndSideEffects.effects.includes("publish_media"),
   "the publishing side effect remains visible to policy/approval controls",

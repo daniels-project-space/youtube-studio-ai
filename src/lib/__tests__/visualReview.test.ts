@@ -112,6 +112,24 @@ async function main(): Promise<void> {
     channelName: "Silent Night Stories",
     persona: "Comic history fans",
     styleGrammar: "inked panels; restrained captions",
+    styleDNA: {
+      recurringSubject: "a silver-haired archivist carrying a brass lantern",
+      setting: "midnight municipal archives",
+      palette: ["#101827", "#d6b35a", "#ede7d8"],
+      composition: "archivist anchored on the left third with evidence depth behind",
+      colorGrade: "deep indigo shadows and restrained brass highlights",
+      motifs: ["brass lantern", "catalogue cards"],
+      variationAxes: ["archive room", "weather"],
+      motionVocabulary: ["paper drift", "lantern sway"],
+      motionDiscipline: "locked rostrum camera with deliberate panel pushes only",
+      visualAvoid: ["generic neon cyberpunk", "flat emoji icons"],
+    },
+    showBible: {
+      positioning: "quiet visual investigations of forgotten civic history",
+      vibe: "nocturnal, precise, quietly uncanny",
+      iconicMotif: "the archivist raises a brass lantern over one decisive record",
+      dpDoctrine: "light the evidence, not empty decoration",
+    },
     qualityDimensions: ["identity", "footage"],
     qualityCriteria: [
       "footage: Every visual change must clarify or advance the current spoken point; decorative novelty is a defect.",
@@ -126,6 +144,12 @@ async function main(): Promise<void> {
   );
   assert.match(comicProfile.channelWorld ?? "", /Silent Night Stories/, "frozen channel identity must reach the reviewer");
   assert.equal(comicProfile.qualityCriteria.length, 2, "full QualityBar criteria must survive the channel-review profile");
+  assert.equal(comicProfile.identityReferenceCriterion?.id, "channel-visual-identity");
+  assert.match(
+    comicProfile.identityReferenceCriterion?.criterion ?? "",
+    /silver-haired archivist.*midnight municipal archives.*#101827/i,
+    "the typed identity gate must carry concrete recurring subject, world, and palette instead of only a channel name",
+  );
 
   const whiteboardProfile = channelVisualReviewProfile({
     contentLaneKey: "whiteboard_explainer",
@@ -195,6 +219,36 @@ async function main(): Promise<void> {
     /REFERENCE-MECHANICS CRITERIA/,
     "an unopted generic QualityBar review must not demand typed reference receipts or turn a normal reviewer pass into needs_human",
   );
+
+  let identityPrompt = "";
+  const identityReview = await reviewRender(fixture, 18, {
+    title: "Channel identity receipt fixture",
+    expectTitleCard: false,
+    expectedStructure: comicProfile.expectedStructure,
+    referenceCriteria: [comicProfile.identityReferenceCriterion!],
+  }, {
+    runId: "visual-review-channel-identity",
+    reviewer: async (input) => {
+      identityPrompt = input.prompt;
+      return JSON.stringify({
+        defects: [],
+        referenceCriteria: [{
+          id: "channel-visual-identity",
+          verdict: "pass",
+          evidenceFrameIds: [input.frames[0]!.id],
+        }],
+        summary: "Every sampled batch remains compatible with the described channel identity.",
+      });
+    },
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(identityReview.verdict, "pass");
+  assert.equal(identityReview.referenceCriteriaComplete, true);
+  assert.match(identityPrompt, /channel-visual-identity/);
+  assert.match(identityPrompt, /silver-haired archivist/i);
+  assert.match(identityPrompt, /not pixel comparison to unseen references/i);
 
   let failedBatchCalls = 0;
   await assert.rejects(

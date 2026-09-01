@@ -9,7 +9,11 @@ import {
   type SelfContainedStoryReceipt,
 } from "@/engine/selfContainedStoryReceipt";
 import { sha256Hex } from "@/lib/sha256";
-import type { VisualReviewCreativeLock } from "@/lib/visualReview";
+import {
+  WhiteboardRenderScheduleSchema,
+  type WhiteboardRenderSchedule,
+} from "@/lib/whiteboardSync";
+import type { VisualReviewCreativeLock, VisualReviewFrame } from "@/lib/visualReview";
 
 export const SELF_CONTAINED_STORY_PLAN_EVIDENCE_VERSION =
   "self-contained-story-plan-evidence/v1" as const;
@@ -134,47 +138,157 @@ function timedWindow(start: number, end: number, narrationStartSec: number, labe
   return { startSec, endSec };
 }
 
-function whiteboardLocks(
+export interface SelfContainedStoryVisualReviewPlan {
+  readonly creativeLocks: readonly VisualReviewCreativeLock[];
+  /** Exact renderer-authored samples that production review must not truncate. */
+  readonly requiredEvidenceFrames: readonly VisualReviewFrame[];
+}
+
+function whiteboardLayerExpectation(
+  layer: Extract<SelfContainedStoryReceipt, { storyKind: "whiteboard-storyboard/v1" }>["story"]["panels"][number]["layers"][number],
+): string {
+  return layer.kind === "label"
+    ? `hand-lettered label ${JSON.stringify(layer.text ?? "")}`
+    : `${layer.role ?? "planned"} drawing ${JSON.stringify(layer.draw ?? "")}`;
+}
+
+function validateWhiteboardRendererSchedule(
   receipt: Extract<SelfContainedStoryReceipt, { storyKind: "whiteboard-storyboard/v1" }>,
   timings: readonly TimedText[],
   narrationStartSec: number,
-): readonly VisualReviewCreativeLock[] {
+  renderSchedule: unknown,
+): WhiteboardRenderSchedule {
   const words = timings.flatMap((timing) => textTokens(timing.text).map((token) => ({
     token,
     start: timing.start,
     end: timing.end,
   })));
   let wordCursor = 0;
-  return Object.freeze(receipt.story.panels.map((panel, index) => {
+  for (const panel of receipt.story.panels) {
     const expectedTokens = textTokens(panel.narration);
     if (!expectedTokens.length) throw new Error(`whiteboard panel ${panel.idx} has no narratable text`);
-    const first = words[wordCursor];
-    if (!first) throw new Error(`whiteboard panel ${panel.idx} is absent from its renderer timing map`);
-    let last = first;
+    if (!words[wordCursor]) throw new Error(`whiteboard panel ${panel.idx} is absent from its renderer timing map`);
     for (const token of expectedTokens) {
       const observed = words[wordCursor];
       if (!observed || observed.token !== token) {
         throw new Error(`whiteboard panel ${panel.idx} narration timing diverges from the sealed storyboard`);
       }
-      last = observed;
       wordCursor += 1;
     }
-    const layers = panel.layers
-      .map((layer) => layer.kind === "label" ? `label \"${layer.text ?? ""}\"` : layer.draw ?? layer.cue ?? "planned drawing")
-      .filter(Boolean)
-      .slice(0, 8)
-      .join("; ");
-    const window = timedWindow(first.start, last.end, narrationStartSec, `whiteboard panel ${panel.idx}`);
-    return {
-      shotId: `self-contained-whiteboard-panel-${panel.idx}`,
-      ...window,
-      expected: `Whiteboard panel ${panel.idx + 1}: ${layers || "the sealed planned drawing"}.`,
+  }
+  if (wordCursor !== words.length) {
+    throw new Error("whiteboard renderer timing map contains narration beyond the sealed storyboard");
+  }
+  const schedule = WhiteboardRenderScheduleSchema.parse(renderSchedule);
+  if (schedule.storyReceiptFingerprint !== receipt.fingerprint) {
+    throw new Error("whiteboard renderer schedule does not bind the sealed story receipt");
+  }
+  if (Math.abs(schedule.narrationStartSec - narrationStartSec) > 0.001) {
+    throw new Error("whiteboard renderer schedule narration offset diverges from final QA");
+  }
+  if (schedule.panels.length !== receipt.story.panels.length) {
+    throw new Error("whiteboard renderer schedule omitted a sealed panel");
+  }
+  for (const [panelIndex, scheduledPanel] of schedule.panels.entries()) {
+    const panel = receipt.story.panels[panelIndex];
+    if (
+      !panel || scheduledPanel.idx !== panel.idx ||
+      scheduledPanel.endMs <= scheduledPanel.startMs ||
+      (panelIndex > 0 && scheduledPanel.startMs < schedule.panels[panelIndex - 1]!.endMs) ||
+      scheduledPanel.layers.length !== panel.layers.length
+    ) {
+      throw new Error(`whiteboard renderer schedule diverges from sealed panel ${panelIndex}`);
+    }
+    for (const [layerIndex, scheduledLayer] of scheduledPanel.layers.entries()) {
+      if (
+        scheduledLayer.layerIdx !== layerIndex ||
+        scheduledLayer.kind !== panel.layers[layerIndex]?.kind ||
+        scheduledLayer.drawStartMs < Math.max(scheduledPanel.startMs, scheduledLayer.cueStartMs) ||
+        scheduledLayer.drawEndMs <= scheduledLayer.drawStartMs ||
+        scheduledLayer.handSampleMs <= scheduledLayer.drawStartMs ||
+        scheduledLayer.handSampleMs >= scheduledLayer.drawEndMs ||
+        scheduledLayer.handLingerEndMs < scheduledLayer.drawEndMs ||
+        scheduledLayer.handLingerEndMs > scheduledPanel.endMs ||
+        (layerIndex > 0 && scheduledLayer.drawStartMs < scheduledPanel.layers[layerIndex - 1]!.handLingerEndMs)
+      ) {
+        throw new Error(`whiteboard renderer schedule diverges from sealed layer ${panelIndex}.${layerIndex}`);
+      }
+    }
+    const lastVisibleEnd = Math.max(...scheduledPanel.layers.map((layer) => layer.handLingerEndMs));
+    if (
+      scheduledPanel.completionSampleMs <= lastVisibleEnd ||
+      scheduledPanel.completionSampleMs >= scheduledPanel.endMs
+    ) {
+      throw new Error(`whiteboard renderer schedule lacks a completed hold for sealed panel ${panelIndex}`);
+    }
+  }
+  return schedule;
+}
+
+function whiteboardReviewPlan(
+  receipt: Extract<SelfContainedStoryReceipt, { storyKind: "whiteboard-storyboard/v1" }>,
+  timings: readonly TimedText[],
+  narrationStartSec: number,
+  renderSchedule: unknown,
+): SelfContainedStoryVisualReviewPlan {
+  const schedule = validateWhiteboardRendererSchedule(receipt, timings, narrationStartSec, renderSchedule);
+  const creativeLocks: VisualReviewCreativeLock[] = [];
+  const requiredEvidenceFrames: VisualReviewFrame[] = [];
+  for (const [panelIndex, scheduledPanel] of schedule.panels.entries()) {
+    const panel = receipt.story.panels[panelIndex]!;
+    for (const [layerIndex, scheduledLayer] of scheduledPanel.layers.entries()) {
+      const layer = panel.layers[layerIndex]!;
+      const startSec = Number((narrationStartSec + scheduledLayer.drawStartMs / 1_000).toFixed(3));
+      const endSec = Number((narrationStartSec + scheduledLayer.handLingerEndMs / 1_000).toFixed(3));
+      const sampleSec = Number((narrationStartSec + scheduledLayer.handSampleMs / 1_000).toFixed(3));
+      creativeLocks.push({
+        shotId: `self-contained-whiteboard-panel-${panel.idx}-layer-${layerIndex}`,
+        startSec,
+        endSec,
+        expected: `Whiteboard panel ${panel.idx + 1}, layer ${layerIndex + 1}: ${whiteboardLayerExpectation(layer)} at narration cue ${JSON.stringify(layer.cue)}.`,
+        acceptanceCriteria: [
+          "The exact planned drawing or label is visibly being traced by the hand, not popping in as a finished asset.",
+          "The active layer stays legible and inside the board without painting over an earlier person, fact, or label.",
+        ],
+      });
+      requiredEvidenceFrames.push({
+        id: `whiteboard-p${panel.idx}-l${layerIndex}-trace`,
+        tSec: sampleSec,
+        selectionReasons: ["focus"],
+      });
+    }
+    const completionSec = Number((narrationStartSec + scheduledPanel.completionSampleMs / 1_000).toFixed(3));
+    const allLayers = panel.layers.map((layer, layerIndex) =>
+      `${layerIndex + 1}. ${whiteboardLayerExpectation(layer)}`,
+    ).join("; ");
+    creativeLocks.push({
+      shotId: `self-contained-whiteboard-panel-${panel.idx}-complete`,
+      startSec: Math.max(0, Number((completionSec - 0.2).toFixed(3))),
+      endSec: Number((completionSec + 0.2).toFixed(3)),
+      expected: `Completed cumulative whiteboard panel ${panel.idx + 1}; every sealed layer must remain visible: ${allLayers}.`,
       acceptanceCriteria: [
-        "The planned whiteboard drawing or label is visibly present and inside the canvas.",
-        "The panel is intentional, legible, and not a blank, duplicated, or broken canvas.",
+        "Every planned layer is visibly complete, legible, and simultaneously retained in the cumulative board state.",
+        "The completed panel is composed and information-dense, with no blank, duplicated, clipped, or overwritten element.",
       ],
-    } satisfies VisualReviewCreativeLock;
-  }));
+    });
+    requiredEvidenceFrames.push({
+      id: `whiteboard-p${panel.idx}-complete`,
+      tSec: completionSec,
+      selectionReasons: ["focus"],
+    });
+  }
+  return {
+    creativeLocks: Object.freeze(creativeLocks),
+    requiredEvidenceFrames: Object.freeze(requiredEvidenceFrames),
+  };
+}
+
+export function whiteboardRenderScheduleRequiredEvidenceFrameCount(value: unknown): number {
+  const schedule = WhiteboardRenderScheduleSchema.parse(value);
+  return new Set(schedule.panels.flatMap((panel) => [
+    ...panel.layers.map((layer) => (schedule.narrationStartSec + layer.handSampleMs / 1_000).toFixed(1)),
+    (schedule.narrationStartSec + panel.completionSampleMs / 1_000).toFixed(1),
+  ])).size;
 }
 
 function comicLocks(
@@ -227,7 +341,20 @@ export function selfContainedStoryVisualReviewLocksFromReceipt(input: {
   readonly contentLaneKey: string;
   readonly sentenceTimings: unknown;
   readonly narrationStartSec: number;
+  readonly whiteboardRenderSchedule?: unknown;
 }): readonly VisualReviewCreativeLock[] {
+  return selfContainedStoryVisualReviewPlanFromReceipt(input).creativeLocks;
+}
+
+export function selfContainedStoryVisualReviewPlanFromReceipt(input: {
+  readonly receipt: unknown;
+  readonly route: unknown;
+  readonly topic: unknown;
+  readonly contentLaneKey: string;
+  readonly sentenceTimings: unknown;
+  readonly narrationStartSec: number;
+  readonly whiteboardRenderSchedule?: unknown;
+}): SelfContainedStoryVisualReviewPlan {
   if (!Number.isFinite(input.narrationStartSec) || input.narrationStartSec < 0) {
     throw new Error("self-contained visual review requires a valid renderer-declared narration start");
   }
@@ -235,12 +362,22 @@ export function selfContainedStoryVisualReviewLocksFromReceipt(input: {
   // Lore's native plan has no current narration renderer contract. It remains
   // unadmitted, and must not be forced through a whiteboard/comic timing
   // assertion it cannot truthfully emit when that lane is revisited later.
-  if (receipt.storyKind === "lore-plan/v1") return Object.freeze([]);
+  if (receipt.storyKind === "lore-plan/v1") {
+    return { creativeLocks: Object.freeze([]), requiredEvidenceFrames: Object.freeze([]) };
+  }
   const timings = parseTimedText(input.sentenceTimings);
   if (receipt.storyKind === "whiteboard-storyboard/v1") {
-    return whiteboardLocks(receipt, timings, input.narrationStartSec);
+    return whiteboardReviewPlan(
+      receipt,
+      timings,
+      input.narrationStartSec,
+      input.whiteboardRenderSchedule,
+    );
   }
-  return comicLocks(receipt, timings, input.narrationStartSec);
+  return {
+    creativeLocks: comicLocks(receipt, timings, input.narrationStartSec),
+    requiredEvidenceFrames: Object.freeze([]),
+  };
 }
 
 /**

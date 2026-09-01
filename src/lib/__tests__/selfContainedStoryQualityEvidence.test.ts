@@ -11,6 +11,7 @@ import {
 import {
   selfContainedStoryNarrationText,
   selfContainedStoryPlanEvidenceFromReceipt,
+  selfContainedStoryVisualReviewPlanFromReceipt,
   selfContainedStoryVisualReviewLocksFromReceipt,
 } from "@/engine/selfContainedStoryQualityEvidence";
 import { sha256Hex } from "@/lib/sha256";
@@ -182,8 +183,8 @@ const whiteboard = createSelfContainedStoryReceipt({
         idx: 0,
         narration: "A clock measured water.",
         layers: [
-          { kind: "art", draw: "a brass water clock", color: "black", cue: "clock", box: [0.1, 0.2, 0.3, 0.3] },
-          { kind: "art", draw: "water flows", color: "red", cue: "water", box: [0.4, 0.2, 0.2, 0.2] },
+          { kind: "art", role: "hero", draw: "a brass water clock", color: "black", cue: "clock", box: [0.1, 0.2, 0.3, 0.3] },
+          { kind: "art", role: "evidence", draw: "water flows", color: "red", cue: "water", box: [0.4, 0.2, 0.2, 0.2] },
         ],
       },
       {
@@ -203,12 +204,39 @@ const whiteboardBinding = assertBridge({
   lane: { key: "whiteboard_explainer", renderer: "whiteboard_scribe" },
   expectedCounts: { beatCount: 2, shotCount: 2, panelCount: 2, artLayerCount: 3, spokenLineCount: 2 },
 });
-const whiteboardVisualLocks = selfContainedStoryVisualReviewLocksFromReceipt({
+const whiteboardRenderSchedule = {
+  version: "whiteboard-render-schedule/v1" as const,
+  narrationStartSec: 2.6,
+  storyReceiptFingerprint: whiteboard.fingerprint,
+  panels: [
+    {
+      idx: 0,
+      startMs: 0,
+      endMs: 1_500,
+      completionSampleMs: 1_100,
+      layers: [
+        { layerIdx: 0, kind: "art" as const, cueStartMs: 100, drawStartMs: 100, drawEndMs: 500, handLingerEndMs: 600, handSampleMs: 300 },
+        { layerIdx: 1, kind: "art" as const, cueStartMs: 550, drawStartMs: 650, drawEndMs: 950, handLingerEndMs: 1_000, handSampleMs: 800 },
+      ],
+    },
+    {
+      idx: 1,
+      startMs: 1_500,
+      endMs: 3_000,
+      completionSampleMs: 2_400,
+      layers: [
+        { layerIdx: 0, kind: "label" as const, cueStartMs: 1_600, drawStartMs: 1_700, drawEndMs: 2_100, handLingerEndMs: 2_100, handSampleMs: 1_900 },
+      ],
+    },
+  ],
+};
+const whiteboardVisualPlan = selfContainedStoryVisualReviewPlanFromReceipt({
   receipt: whiteboard,
   route: whiteboardRoute,
   topic: whiteboardTopic,
   contentLaneKey: "whiteboard_explainer",
   narrationStartSec: 2.6,
+  whiteboardRenderSchedule,
   sentenceTimings: [
     { text: "A", start: 0, end: 0.1 },
     { text: "clock", start: 0.1, end: 0.3 },
@@ -220,13 +248,27 @@ const whiteboardVisualLocks = selfContainedStoryVisualReviewLocksFromReceipt({
     { text: "time", start: 1.45, end: 1.7 },
   ],
 });
+const whiteboardVisualLocks = whiteboardVisualPlan.creativeLocks;
 assert.deepEqual(
   whiteboardVisualLocks.map((lock) => [lock.shotId, lock.startSec, lock.endSec]),
   [
-    ["self-contained-whiteboard-panel-0", 2.6, 3.4],
-    ["self-contained-whiteboard-panel-1", 3.5, 4.3],
+    ["self-contained-whiteboard-panel-0-layer-0", 2.7, 3.2],
+    ["self-contained-whiteboard-panel-0-layer-1", 3.25, 3.6],
+    ["self-contained-whiteboard-panel-0-complete", 3.5, 3.9],
+    ["self-contained-whiteboard-panel-1-layer-0", 4.3, 4.7],
+    ["self-contained-whiteboard-panel-1-complete", 4.8, 5.2],
   ],
-  "every sealed whiteboard panel maps to an exact final-master visual-review window",
+  "every sealed whiteboard layer and completed cumulative panel maps to an exact renderer-authored final-review window",
+);
+assert.match(
+  whiteboardVisualLocks[0]!.expected,
+  /hero drawing "a brass water clock"/i,
+  "hero/evidence/reaction meaning must survive the sealed receipt into the final reviewer",
+);
+assert.deepEqual(
+  whiteboardVisualPlan.requiredEvidenceFrames.map((frame) => frame.tSec),
+  [2.9, 3.4, 3.7, 4.5, 5],
+  "the complete plan samples every hand trace plus every finished panel without truncating later layers",
 );
 
 const comicTopic = "The observatory that heard a signal";

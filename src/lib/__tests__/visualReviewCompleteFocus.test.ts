@@ -35,6 +35,31 @@ async function main(): Promise<void> {
   assert.equal(result.evidence.coverage.requiredFocusFrameCount, 3);
   assert.equal(result.evidence.coverage.missingFocusFrameCount, 0);
 
+  const exactWhiteboardSamples = [3.3, 9.7, 15.1];
+  const exactSamples = await reviewRender(fixture, 18, {
+    title: "Exact renderer-event evidence fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-exact-complete-focus-frames",
+    required: true,
+    reviewer,
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+    requireCompleteFocusCoverage: true,
+    completeFocusFrames: exactWhiteboardSamples.map((tSec) => ({ tSec })),
+    expectedCompleteFocusFrameCount: exactWhiteboardSamples.length,
+    sourceSha256: sourceSha256A,
+  });
+  assert.equal(exactSamples.evidence.coverage.requiredFocusFrameCount, exactWhiteboardSamples.length);
+  assert.equal(exactSamples.evidence.coverage.missingFocusFrameCount, 0);
+  for (const tSec of exactWhiteboardSamples) {
+    assert.ok(
+      exactSamples.evidence.frames.some((frame) => Math.abs(frame.tSec - tSec) < 0.01),
+      `renderer-authored frame ${tSec}s must survive the ordinary focus cap`,
+    );
+  }
+
   // Every retained evidence frame must have reached the reviewer. The full
   // sealed schedule intentionally exceeds a single provider request, so this
   // proves chunking rather than representative-frame sampling.
@@ -140,6 +165,19 @@ async function main(): Promise<void> {
     "a timing/count mismatch must fail before any reviewer/provider call",
   );
   assert.equal(mismatchReviewerCalls, 0);
+
+  await assert.rejects(
+    () => reviewRender(fixture, 18, { title: "Out-of-master exact evidence" }, {
+      runId: "visual-review-exact-frame-out-of-range",
+      reviewer,
+      persistEvidence: false,
+      requireCompleteFocusCoverage: true,
+      completeFocusFrames: [{ tSec: 18.5 }],
+      expectedCompleteFocusFrameCount: 1,
+    }),
+    /falls outside the final master/,
+    "a renderer schedule cannot be clamped onto unrelated final-master bytes",
+  );
 
   const differentMaster = await reviewRender(fixture, 18, {
     title: "Complete cinematic focus fixture",

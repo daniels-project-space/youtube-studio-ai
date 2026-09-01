@@ -129,8 +129,8 @@ assert.match(
 );
 assert.match(
   qaSource,
-  /requireCompleteFocusCoverage: cinematicSequencePresent/,
-  "source-bound cinematic masters must review every declared cut window instead of honoring the generic focus-frame cap",
+  /requireCompleteFocusCoverage:\s*cinematicSequencePresent \|\| selfContainedStoryVisualPlan\.requiredEvidenceFrames\.length > 0/,
+  "source-bound cinematic cuts and renderer-authored whiteboard events must bypass the generic focus-frame cap",
 );
 assert.match(
   qaSource,

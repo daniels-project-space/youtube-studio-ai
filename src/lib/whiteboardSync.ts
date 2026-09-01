@@ -111,6 +111,28 @@ export interface SyncLayer {
   cueStartMs: number;
 }
 export interface SyncPanel { idx: number; startMs: number; endMs: number; layers: SyncLayer[] }
+export const WHITEBOARD_RENDER_SCHEDULE_VERSION = "whiteboard-render-schedule/v1" as const;
+export const WhiteboardRenderScheduleSchema = z.object({
+  version: z.literal(WHITEBOARD_RENDER_SCHEDULE_VERSION),
+  narrationStartSec: z.number().finite().nonnegative(),
+  storyReceiptFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  panels: z.array(z.object({
+    idx: z.number().int().min(0).max(15),
+    startMs: z.number().finite().nonnegative(),
+    endMs: z.number().finite().positive(),
+    completionSampleMs: z.number().finite().nonnegative(),
+    layers: z.array(z.object({
+      layerIdx: z.number().int().min(0).max(23),
+      kind: z.enum(["art", "label"]),
+      cueStartMs: z.number().finite().nonnegative(),
+      drawStartMs: z.number().finite().nonnegative(),
+      drawEndMs: z.number().finite().positive(),
+      handLingerEndMs: z.number().finite().positive(),
+      handSampleMs: z.number().finite().nonnegative(),
+    })).min(1).max(24),
+  })).min(1).max(16),
+});
+export type WhiteboardRenderSchedule = z.infer<typeof WhiteboardRenderScheduleSchema>;
 export interface WhiteboardSyncResult {
   outPath: string;
   /** The authored source used by the deterministic write-on renderer. */
@@ -123,6 +145,8 @@ export interface WhiteboardSyncResult {
   /** Source-relative per-word cues from the local forced alignment. */
   sentenceTimings: Array<{ text: string; start: number; end: number }>;
   panels: SyncPanel[];
+  /** Exact renderer-authored hand-trace and completed-panel evidence times. */
+  renderSchedule: WhiteboardRenderSchedule;
   durationMs: number;
   /** Characters sent to TTS during this invocation (zero when the cache hit). */
   ttsCharactersGenerated: number;
@@ -1185,6 +1209,7 @@ export async function castWhiteboardSync(args: {
     width: brief.width ?? 1920, height: brief.height ?? Math.round((brief.width ?? 1920) * 9 / 16),
     prerollSec: 2.6, fps: 25, audioEndMs: audioEnd, tailMs: 1800, panels: tlPanels,
     boardMode: chalk ? "chalk" : "white", board, ink, accent,
+    ...(approved.receipt ? { storyReceiptFingerprint: approved.receipt.fingerprint } : {}),
   };
   const timelinePath = join(args.runDir, "timeline.json");
   await writeFile(timelinePath, JSON.stringify(timeline, null, 2), "utf8");
@@ -1194,6 +1219,47 @@ export async function castWhiteboardSync(args: {
   const hand = join(ASSET_DIR, "hand.png");
   log("rendering synced scribe…");
   await runPy([join("scripts", "wb_scribe_sync.py"), timelinePath, outPath, hand], log);
+  const renderSchedule = WhiteboardRenderScheduleSchema.parse(
+    JSON.parse(await readFile(`${outPath}.draw-receipt.json`, "utf8")),
+  );
+  if (Math.abs(renderSchedule.narrationStartSec - timeline.prerollSec) > 0.001) {
+    throw new Error("whiteboardSync: renderer schedule narration offset diverges from the authored timeline");
+  }
+  if (renderSchedule.storyReceiptFingerprint !== approved.receipt?.fingerprint) {
+    throw new Error("whiteboardSync: renderer schedule does not bind the approved story receipt");
+  }
+  if (renderSchedule.panels.length !== tlPanels.length) {
+    throw new Error("whiteboardSync: renderer schedule omitted an authored panel");
+  }
+  for (const [panelIndex, scheduled] of renderSchedule.panels.entries()) {
+    const authored = tlPanels[panelIndex];
+    if (
+      !authored || scheduled.idx !== authored.idx ||
+      scheduled.startMs !== authored.startMs || scheduled.endMs !== authored.endMs ||
+      scheduled.layers.length !== authored.layers.length
+    ) {
+      throw new Error(`whiteboardSync: renderer schedule diverges from authored panel ${panelIndex}`);
+    }
+    for (const [layerIndex, layer] of scheduled.layers.entries()) {
+      const authoredLayer = authored.layers[layerIndex];
+      if (
+        !authoredLayer || layer.layerIdx !== layerIndex || layer.kind !== authoredLayer.kind ||
+        Math.abs(layer.cueStartMs - authoredLayer.cueStartMs) > 1 ||
+        layer.drawStartMs < scheduled.startMs || layer.drawEndMs <= layer.drawStartMs ||
+        layer.handSampleMs <= layer.drawStartMs || layer.handSampleMs >= layer.drawEndMs ||
+        layer.handLingerEndMs < layer.drawEndMs || layer.handLingerEndMs > scheduled.endMs
+      ) {
+        throw new Error(`whiteboardSync: renderer schedule has invalid layer ${panelIndex}.${layerIndex}`);
+      }
+    }
+    const lastVisibleEnd = Math.max(...scheduled.layers.map((layer) => layer.handLingerEndMs));
+    if (
+      scheduled.completionSampleMs <= lastVisibleEnd ||
+      scheduled.completionSampleMs >= scheduled.endMs
+    ) {
+      throw new Error(`whiteboardSync: renderer schedule lacks a completed hold for panel ${panelIndex}`);
+    }
+  }
   log(`whiteboardSync done → ${outPath}`);
   return {
     outPath,
@@ -1208,6 +1274,7 @@ export async function castWhiteboardSync(args: {
       end: word.end / 1000,
     })),
     panels: tlPanels,
+    renderSchedule,
     durationMs: 2600 + audioEnd + 1800,
     ttsCharactersGenerated,
     artAssets,

@@ -11,6 +11,7 @@ import {
 } from "./pricing";
 import { novitaCinematicQaMaxGraderCallsPerShot } from "./novitaVisualQaBudget";
 import { cinematicFinalMasterQaVisualReviewPlanFromStore } from "./cinematicFinalMasterQaAdmission";
+import { whiteboardRenderScheduleRequiredEvidenceFrameCount } from "./selfContainedStoryQualityEvidence";
 import {
   NARRATION_COLD_OPEN_MAX_CHARS,
   narrationChapterHeadingCharacterCeiling,
@@ -391,7 +392,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // channel-aware without treating them as an inherited pass.
     optionalConsumes: [
       "description", "tags", "qualityBar", "contentLane", "channelName", "persona",
-      "styleGrammar", "criticDoctrine", "topic", "niche",
+      "styleGrammar", "styleDNA", "showBible", "criticDoctrine", "topic", "niche",
       // Present only for sealed serialized narrative routes. A derivative
       // Short reads the complete Story Spine/Graph to select one bound beat;
       // ordinary channels retain their established opening-window behavior.
@@ -570,7 +571,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   qa_visual: contract(["master.quality_passed"], {
     optionalConsumes: [
-      "narrationDurationSec", "narrationPerformanceEvidence", "script", "sentenceTimings", "styleDNA", "introApplied", "healHints", "palette",
+      "narrationDurationSec", "narrationPerformanceEvidence", "script", "sentenceTimings", "styleDNA", "showBible", "introApplied", "healHints", "palette",
       "tags", "strategy", "thumbnailer", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec", "loopSeamDiff",
       "overlaysDropped", "qualityBar", "description", "musicKey", "channelName", "niche", "persona", "styleGrammar", "topic", "family",
@@ -607,6 +608,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Casefile provenance, and now verifies renderer-declared readable text.
       // These remain optional because each is specific to a different lane.
       "narrationKey", "narrationLocalPath", "narrationTranscriptText", "narrationStartSec", "onScreenTextCues", "quizShortOpeningHook",
+      // Exact hand-trace and completed-panel samples emitted by the
+      // deterministic whiteboard renderer. Production QA binds these to the
+      // sealed story receipt before reserving any reviewer work.
+      "whiteboardRenderSchedule",
       "casefileEvidenceShotMapAdmission", "casefileSourceAdmission", "sourceBoundStorySpine",
       // New route-bearing runs seal this immutable identity into the generic
       // final-QA evidence binding. Route-less historical runs stay compatible.
@@ -634,16 +639,21 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "packageToOpening", "packageToOpeningOmission",
     ],
     providerProfiles: [managed, local],
-    // The exact receipt narrows this before Novita starts. Preserve the normal
-    // $5 QA ceiling: an oversized cinematic plan is rejected early rather than
-    // silently expanding the channel's established QA authority.
-    maxCostUsd: 5,
+    // Cinematic cuts and whiteboard layers both carry exact pre-authored review
+    // evidence. The larger ceiling preserves complete review for the maximum
+    // 16-panel/24-layer receipt instead of silently truncating later drawings.
+    maxCostUsd: 12,
     maxCostUsdFor: (params, context) => {
       const cinematicPlan = cinematicFinalMasterQaVisualReviewPlanFromStore(context?.store);
+      const whiteboardFrameCount = context?.store?.["whiteboardRenderSchedule"] === undefined
+        ? 0
+        : whiteboardRenderScheduleRequiredEvidenceFrameCount(
+            context.store["whiteboardRenderSchedule"],
+          );
       return qaVisualCost(
         params,
         cinematicPlan?.admission.reviewCostUsd,
-        cinematicPlan?.completeFocusFrameCount,
+        (cinematicPlan?.completeFocusFrameCount ?? 0) + whiteboardFrameCount,
       );
     },
     qualityRequired: true,

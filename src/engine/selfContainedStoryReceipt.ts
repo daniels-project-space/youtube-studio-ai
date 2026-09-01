@@ -67,6 +67,8 @@ function selfContainedStoryFamilyContract(family: SelfContainedStoryFamily) {
 
 const WhiteboardLayerSchema = z.object({
   kind: z.enum(["art", "label"]),
+  /** Semantic board role survives the plan→receipt→renderer→review chain. */
+  role: z.enum(["hero", "evidence", "reaction"]).optional(),
   draw: nonEmptyText(1_200).optional(),
   text: nonEmptyText(280).optional(),
   color: z.enum(["black", "red"]),

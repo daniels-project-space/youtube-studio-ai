@@ -111,6 +111,11 @@ function costPatches(): void {
     PRICE.qaBaseUsd * 54,
     "the largest admitted broad/focus plan must reserve every final-review two-image batch",
   );
+  assert.equal(
+    qaVisualCost({ visualReviewFrames: 72, visualReviewFocusFrames: 36 }, 0, 400),
+    PRICE.qaBaseUsd * 254,
+    "the maximum sealed whiteboard layer/panel schedule must reserve every exact reviewer batch",
+  );
   assert.throws(
     () => qaVisualCost({ visualReviewFrames: 73 }),
     /refusing to silently change requested final-review coverage/,

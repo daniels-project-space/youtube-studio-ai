@@ -47,6 +47,10 @@ ART_HAND_LINGER = float(os.environ.get("WB_ART_HAND_LINGER", 1.0))
 # as an image that disappears as soon as its last stroke lands.  Keep the hand
 # at that final pen point briefly; the scheduler accounts for this duration.
 FINAL_ART_HAND_LINGER = float(os.environ.get("WB_FINAL_ART_HAND_LINGER", 2.4))
+# The final cumulative board state is evidence too. Reserve a stable completed
+# hold after every layer has finished so final QA can inspect the entire panel,
+# including a last label, without sampling a half-drawn frame.
+FINAL_PANEL_HOLD = float(os.environ.get("WB_FINAL_PANEL_HOLD", 0.6))
 SPEED    = float(os.environ.get("WB_SPEED", 1400)) * (W * H) / (1280 * 720)  # ink px/s, scaled to resolution
 FLOOR    = 1.0                                            # s — hard floor if a panel is overcrowded
 MARKER = "public/fonts/PermanentMarker.ttf"
@@ -197,7 +201,7 @@ def fit_panel_boxes(layers, grow=1.22, x0=0.045, y0=0.175, x1=0.955, y1=0.96, ma
 def build_panel(p):
     fit_panel_boxes(p["layers"])
     layers = []
-    for l in p["layers"]:
+    for layer_idx, l in enumerate(p["layers"]):
         # The typed storyboard contract calls handwritten layers `label`, while
         # older local plans used `text`. Normalize both at the raster boundary
         # so retained legacy proof plans cannot disappear merely because of an
@@ -215,6 +219,7 @@ def build_panel(p):
         layers.append({
             "kind": kind, "iy": iy, "ix": ix, "order": order, "traj": traj,
             "col": col[iy, ix], "ink": int(len(iy)), "cue": l["cueStartMs"],
+            "layer_idx": layer_idx,
             # The hand sprite is intentionally large. Keep its decorative
             # footprint away from any visible label, even while the next art
             # layer is being drawn, so a completed annotation never appears
@@ -256,10 +261,10 @@ def build_panel(p):
     for L in layers:
         L["start"] = max(prev, L["cue"])
         prev = L["start"] + L["draw"] + L["hand_linger"]
-    if prev > p["endMs"]:
+    if prev + FINAL_PANEL_HOLD * 1000 > p["endMs"]:
         raise RuntimeError(
             f"whiteboard panel {p['idx']} cannot fit {len(layers)} cue-aligned visible hand-drawing events "
-            f"inside its narration window; extend/split the beat rather than advancing a drawing before its cue"
+            f"plus a completed hold inside its narration window; extend/split the beat rather than advancing a drawing before its cue"
         )
     return layers
 
@@ -275,6 +280,36 @@ if HEADER:
     hm, hc = raster_label(HEADER, TL.get("headerBox", [0.16, 0.035, 0.68, 0.092]), "black")
     hiy, hix, horder, htraj = trace(hm, reading=True); hcol = hc[hiy, hix]
 panels = TL["panels"]; audio_end = TL.get("audioEndMs", 60000); tail = TL.get("tailMs", 1800)
+# Resolve every raster-dependent draw duration before the first video frame.
+# This receipt is the exact schedule the frame loop below executes; final QA
+# uses one mid-trace sample per layer plus one cumulative completion sample per
+# panel, so later board elements cannot be silently omitted from review.
+scheduled_panels = []
+for p in panels:
+    scheduled_layers = panel_layers(p)
+    last_visible_end = max(L["start"] + L["draw"] + L["hand_linger"] for L in scheduled_layers)
+    scheduled_panels.append({
+        "idx": p["idx"],
+        "startMs": p["startMs"],
+        "endMs": p["endMs"],
+        "completionSampleMs": last_visible_end + FINAL_PANEL_HOLD * 500,
+        "layers": [{
+            "layerIdx": L["layer_idx"],
+            "kind": L["kind"],
+            "cueStartMs": L["cue"],
+            "drawStartMs": L["start"],
+            "drawEndMs": L["start"] + L["draw"],
+            "handLingerEndMs": L["start"] + L["draw"] + L["hand_linger"],
+            "handSampleMs": L["start"] + L["draw"] * 0.5,
+        } for L in scheduled_layers],
+    })
+with open(OUT + ".draw-receipt.json", "w", encoding="utf-8") as schedule_file:
+    json.dump({
+        "version": "whiteboard-render-schedule/v1",
+        "narrationStartSec": PRE,
+        **({"storyReceiptFingerprint": TL["storyReceiptFingerprint"]} if TL.get("storyReceiptFingerprint") else {}),
+        "panels": scheduled_panels,
+    }, schedule_file, separators=(",", ":"))
 total = PRE + (audio_end + tail) / 1000.0; nframes = int(total * FPS)
 frames = OUT + "_frames"; os.makedirs(frames, exist_ok=True)
 

@@ -108,7 +108,7 @@ export const PRICE = {
   /**
    * Conservative non-Google spend for one final-master lock/cut verdict. This
    * is the complete one-Groq/one-fal logical review, not a per-frame price.
-   * The normal twelve-shot sequence stays inside qa_visual's existing $5 cap.
+   * The normal twelve-shot sequence stays inside qa_visual's explicit release-review cap.
    */
   cinematicFinalMasterQaReviewUsd: rate(
     "PRICE_CINEMATIC_FINAL_MASTER_QA_REVIEW_USD",
@@ -162,16 +162,17 @@ export function cinematicFinalMasterQaReviewCost(reviewCallCount: unknown): numb
 export function qaVisualCost(
   params: Readonly<Record<string, unknown>>,
   cinematicFinalMasterQaCostUsd: unknown = 0,
-  cinematicCompleteFocusFrameCount: unknown = 0,
+  completeFocusFrameCount: unknown = 0,
 ): number {
   const { broadFrames, focusFrames } = qaVisualReviewFrameLimits(params);
-  const completeFocusFrames = Number(cinematicCompleteFocusFrameCount);
+  const completeFocusFrames = Number(completeFocusFrameCount);
   if (!Number.isInteger(completeFocusFrames) || completeFocusFrames < 0) {
-    throw new Error("cinematic complete-focus frame count must be a non-negative integer");
+    throw new Error("complete-focus frame count must be a non-negative integer");
   }
   // The evidence review performs a broad pass plus a regular/reactive re-watch.
-  // A cinematic route adds its sealed complete-focus frames to that second
-  // pass. The provider limit is shared with execution, so an explicit block
+  // A cinematic route adds every sealed cut/lock frame; a whiteboard route
+  // adds one exact hand-trace frame per layer and one completed state per
+  // panel. The provider limit is shared with execution, so an explicit block
   // cost covers every permitted call rather than a larger hidden batch.
   const evidenceBatches = qaVisualReviewProviderCallCount({
     broadFrames,

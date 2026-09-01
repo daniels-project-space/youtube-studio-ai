@@ -29,6 +29,9 @@ assert("videoKey" in qa.consumes, "qa_visual must bind its release certificate t
 for (const key of ["footageKeys", "thirdPartyStockEvidence"]) {
   assert(key in qa.optionalConsumes, `qa_visual must declare optional stock-provenance input ${key}`);
 }
+for (const key of ["styleDNA", "showBible", "whiteboardRenderSchedule"]) {
+  assert(key in qa.optionalConsumes, `qa_visual must declare channel/renderer evidence input ${key}`);
+}
 for (const key of [
   "studioLtxCreativeAdapterSelection",
   "studioLtxCreativeAdapterSelectionsByShot",
@@ -114,6 +117,16 @@ assert.match(
   narrated,
   /createVisualReviewReleaseReceipt\([\s\S]*?createFinalMasterReleaseCertificate\([\s\S]*?finalMasterReleaseCertificateKey/,
   "QA must persist the verdict-bearing visual-review receipt before creating the master-bound release certificate",
+);
+assert.match(
+  narrated,
+  /selfContainedStoryVisualReviewPlanFromReceipt\([\s\S]*?whiteboardRenderSchedule: ctx\.store\["whiteboardRenderSchedule"\][\s\S]*?completeFocusFrames: selfContainedStoryVisualPlan\.requiredEvidenceFrames/,
+  "whiteboard final QA must bind the renderer schedule and preserve every exact layer/panel evidence frame",
+);
+assert.match(
+  narrated,
+  /styleDNA: ctx\.store\["styleDNA"\][\s\S]*?showBible: ctx\.store\["showBible"\][\s\S]*?channelReviewProfile\.identityReferenceCriterion/,
+  "final QA must turn the frozen channel identity into a typed reviewer criterion",
 );
 assert.match(
   narrated,

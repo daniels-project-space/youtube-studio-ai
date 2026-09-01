@@ -112,6 +112,20 @@ async function main(): Promise<void> {
         WB_FINAL_ART_HAND_LINGER: "0.01",
       },
     });
+    const drawReceipt = JSON.parse(await readFile(`${out}.draw-receipt.json`, "utf8")) as {
+      version: string;
+      panels: Array<{ completionSampleMs: number; layers: Array<{ layerIdx: number; handSampleMs: number }> }>;
+    };
+    assert.equal(drawReceipt.version, "whiteboard-render-schedule/v1");
+    assert.deepEqual(
+      drawReceipt.panels[0]?.layers.map((layer) => layer.layerIdx),
+      [0, 1],
+      "the renderer must retain an exact hand-trace schedule for every authored layer",
+    );
+    assert.ok(
+      Number(drawReceipt.panels[0]?.completionSampleMs) > Number(drawReceipt.panels[0]?.layers.at(-1)?.handSampleMs),
+      "the renderer must reserve a cumulative completed-panel sample after the last trace",
+    );
     const frame = await readFile(`${out}_frames/00079.png`);
     const inspection = await execFileAsync("python3", [
       "-c",

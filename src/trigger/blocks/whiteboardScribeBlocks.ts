@@ -437,7 +437,7 @@ export const whiteboardScribe: Block = {
   produces: [
     "videoKey", "videoLocalPath", "videoDurationSec", "narrationText", "onScreenTextCues",
     "narrationKey", "narrationLocalPath", "narrationDurationSec", "narrationTranscriptText",
-    "narrationPerformanceEvidence", "sentenceTimings", "narrationStartSec",
+    "narrationPerformanceEvidence", "sentenceTimings", "narrationStartSec", "whiteboardRenderSchedule",
   ],
   paid: true,
   run: async (ctx) => {
@@ -709,6 +709,7 @@ export const whiteboardScribe: Block = {
       narrationPerformanceEvidence,
       sentenceTimings: res.sentenceTimings,
       narrationStartSec: res.narrationStartSec,
+      whiteboardRenderSchedule: res.renderSchedule,
       onScreenTextCues,
       [COST_PATCH_KEY]: scribeCost,
     };

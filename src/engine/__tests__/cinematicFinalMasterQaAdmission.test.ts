@@ -151,7 +151,7 @@ assert.equal(
 assert.ok(normalEnvelope < 5);
 
 // A large sealed reveal is admitted as a complete 2fps plan, then rejected by
-// qa_visual's absolute $5 ceiling before a future Novita renderer may start.
+// qa_visual's absolute $12 ceiling before a future Novita renderer may start.
 const oversizedCreativeLocks = CinematicCreativeLocksSchema.parse({
   version: "cinematic-case-sequence/v1",
   sequenceFingerprint: "c".repeat(64),
@@ -216,7 +216,7 @@ assert.throws(
         cinematicEditDecisionList: oversizedEditDecisionList,
       },
     }),
-  /configured envelope .* exceeds its absolute \$5\.00 ceiling/,
+  /configured envelope .* exceeds its absolute \$12\.00 ceiling/,
 );
 
 console.log("cinematic final-master QA admission tests passed");
