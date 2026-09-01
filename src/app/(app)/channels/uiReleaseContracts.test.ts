@@ -5,6 +5,11 @@ import { join } from "node:path";
 const root = process.cwd();
 const wizard = readFileSync(join(root, "src/app/(app)/channels/new/page.tsx"), "utf8");
 const wizardCss = readFileSync(join(root, "src/app/(app)/channels/new/newChannel.module.css"), "utf8");
+const globalCss = readFileSync(join(root, "src/app/globals.css"), "utf8");
+const overviewCss = readFileSync(join(root, "src/app/(app)/Overview.module.css"), "utf8");
+const analyticsCss = readFileSync(join(root, "src/app/(app)/analytics/analytics.module.css"), "utf8");
+const settingsCss = readFileSync(join(root, "src/app/(app)/settings/settings.module.css"), "utf8");
+const artifactRailCss = readFileSync(join(root, "src/components/ArtifactWorkRail.module.css"), "utf8");
 const detail = readFileSync(join(root, "src/app/(app)/channels/[slug]/page.tsx"), "utf8");
 const channels = readFileSync(join(root, "src/app/(app)/channels/page.tsx"), "utf8");
 const overview = readFileSync(join(root, "src/app/(app)/page.tsx"), "utf8");
@@ -104,6 +109,14 @@ assert.match(wizard, /automaticFamilyRuntimeCheck === "ready"/);
 assert.match(wizard, /&& selectedAutomaticRuntimeReady/);
 assert.match(wizard, /Automatic setup remains locked until this completes\./);
 assert.match(wizard, /Live production readiness could not be verified\./);
+// The readable creator shell must not probe an owner-only endpoint and emit a
+// browser 401 before the signed owner session has been established.
+assert.match(wizard, /const operationsAccess = useOperationsAccess\(\)/);
+const ownerGuard = wizard.indexOf('if (operationsAccess !== "owner")');
+const readinessFetch = wizard.indexOf('fetch("\/api\/automatic-family-readiness"');
+assert.ok(ownerGuard >= 0, "the creator must gate owner-only readiness reads");
+assert.ok(readinessFetch > ownerGuard, "the live readiness request must occur after the owner guard");
+assert.match(wizard, /\}, \[operationsAccess\]\);/);
 
 // Prose advice has no explicit creator length. It may use a researched niche
 // default only when that niche's normal family is the exact suggested family;
@@ -211,6 +224,18 @@ assert.doesNotMatch(recentVideos, /youtube\.com\/watch/);
 assert.match(settings, /\/api\/channel-settings/);
 assert.match(settings, /\/api\/youtube-revoke/);
 
+// High-frequency navigation and channel-management actions must remain usable
+// touch targets on both desktop and the mobile bottom-navigation layout.
+assert.match(globalCss, /\.channel-card-title > a\s*\{[\s\S]*?min-height: 36px/);
+assert.match(globalCss, /\.channel-card-secondary-actions a\s*\{[\s\S]*?min-height: 38px/);
+assert.match(globalCss, /\.channel-account-action\s*\{[\s\S]*?min-height: 38px/);
+assert.match(globalCss, /\.channel-card-actions a\s*\{[\s\S]*?min-height: 40px/);
+assert.match(scheduleCss, /\.itemLinks a\s*\{[\s\S]*?min-height: 36px/);
+assert.match(overviewCss, /\.sectionHeading > a,[\s\S]*?min-height: 36px/);
+assert.match(analyticsCss, /\.healthCopy > a\s*\{[\s\S]*?min-height: 36px/);
+assert.match(settingsCss, /\.lockedRoom > a\s*\{[\s\S]*?min-height: 36px/);
+assert.match(artifactRailCss, /\.action > a,[\s\S]*?min-height: 36px/);
+
 function remValue(selector: string, property: "font" | "font-size") {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
   const body = scheduleCss.match(new RegExp(`${escaped}\\s*\\{([\\s\\S]*?)\\}`))?.[1];
@@ -223,7 +248,7 @@ function remValue(selector: string, property: "font" | "font-size") {
 for (const [selector, property] of [
   [".dayColumnHeader span", "font-size"],
   [".dayColumnHeader small", "font"],
-  [".dayEmpty", "font-size"],
+  [".dayEmpty", "font"],
   [".dayEventTime", "font"],
   [".dayEventCopy > strong", "font-size"],
   [".dayEventMeta > span:first-child", "font-size"],

@@ -53,6 +53,7 @@ import {
   findCertifiedChannelComposition,
 } from "@/engine/channelCompositionCatalog";
 import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
+import { useOperationsAccess } from "@/components/OperationsAccess";
 import styles from "./newChannel.module.css";
 
 type Phase = "form" | "building" | "error";
@@ -347,6 +348,7 @@ function previewBlocks(
 
 export default function NewChannelWizard() {
   const router = useRouter();
+  const operationsAccess = useOperationsAccess();
   const [phase, setPhase] = useState<Phase>("form");
   const [step, setStep] = useState(0); // 0 niche, 1 format, 2 details, 3 review
   const [error, setError] = useState<string | null>(null);
@@ -438,6 +440,15 @@ export default function NewChannelWizard() {
   const [supervisedAdmission, setSupervisedAdmission] = useState<SupervisedCreatorSelection | null>(null);
 
   useEffect(() => {
+    if (operationsAccess === "checking") {
+      setAutomaticFamilyRuntimeCheck("loading");
+      return;
+    }
+    if (operationsAccess !== "owner") {
+      setAutomaticFamilyRuntime({});
+      setAutomaticFamilyRuntimeCheck("unavailable");
+      return;
+    }
     const abort = new AbortController();
     let current = true;
     void fetch("/api/automatic-family-readiness", { signal: abort.signal, cache: "no-store" })
@@ -486,7 +497,7 @@ export default function NewChannelWizard() {
       current = false;
       abort.abort();
     };
-  }, []);
+  }, [operationsAccess]);
 
   const niche = getNiche(nicheKey);
   const fam = family ? getFamily(family) : undefined;

@@ -172,7 +172,15 @@
 .lockedGrid span { color: var(--color-faint); font: 0.49rem var(--font-mono); }
 .lockedGrid strong { font-size: 0.7rem; }
 .lockedGrid p { margin: 0; color: var(--color-muted); font-size: 0.61rem; line-height: 1.45; }
-.lockedRoom > a { width: fit-content; color: var(--color-accent); font-size: 0.64rem; font-weight: 650; }
+.lockedRoom > a {
+  width: fit-content;
+  min-height: 36px;
+  display: inline-flex;
+  align-items: center;
+  color: var(--color-accent);
+  font-size: 0.64rem;
+  font-weight: 650;
+}
 
 .tabsRow { display: flex; align-items: flex-start; justify-content: space-between; gap: 0.75rem; }
 

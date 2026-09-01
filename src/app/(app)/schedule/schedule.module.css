@@ -701,7 +701,7 @@
   border: 1px dashed rgba(255, 255, 255, 0.055);
   border-radius: 9px;
   color: var(--color-faint);
-  font: 0.6rem var(--font-mono);
+  font: 0.72rem var(--font-mono);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -880,6 +880,12 @@
   flex-wrap: wrap;
   color: var(--color-muted);
   font-size: 0.67rem;
+}
+
+.itemLinks a {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
 }
 
 .itemLinks a:hover { color: var(--color-fg); }

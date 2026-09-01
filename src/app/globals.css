@@ -1938,6 +1938,12 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
   flex: 1;
 }
 
+.channel-card-title > a {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+}
+
 .channel-card-title h2 {
   overflow: hidden;
   font-family: var(--font-sans);
@@ -2063,7 +2069,7 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
 
 .channel-card-details > summary {
   display: flex;
-  min-height: 34px;
+  min-height: 40px;
   align-items: center;
   justify-content: space-between;
   gap: 0.6rem;
@@ -2185,7 +2191,7 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
 
 .channel-card-secondary-actions a {
   display: grid;
-  min-height: 29px;
+  min-height: 38px;
   place-items: center;
   border: 1px solid var(--color-border);
   border-radius: 6px;
@@ -2205,7 +2211,7 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
 
 .channel-account-action {
   min-width: 0;
-  min-height: 30px;
+  min-height: 38px;
   padding: 0.35rem 0.45rem;
   overflow: hidden;
   cursor: pointer;
@@ -2234,7 +2240,7 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 31px;
+  min-height: 40px;
   padding: 0.38rem 0.28rem;
   overflow: hidden;
   border: 1px solid var(--color-border);

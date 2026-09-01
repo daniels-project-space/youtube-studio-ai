@@ -46,6 +46,13 @@
   text-decoration: none;
 }
 
+.action > a,
+.action > button {
+  display: inline-flex;
+  min-height: 36px;
+  align-items: center;
+}
+
 .action:hover {
   text-decoration: underline;
 }
