@@ -35,7 +35,7 @@ export interface VoiceProviderSelectionReceipt {
   version: "voice-provider-selection/v1";
   ownerId: string;
   channelId: string;
-  provider: "elevenlabs";
+  provider: VoiceCastingProvider;
   voiceId: string;
   score: number;
   selectedAt: number;
@@ -52,7 +52,7 @@ export interface VoiceLocalColdOpenReceipt {
   version: "voice-local-cold-open/v1";
   ownerId: string;
   channelId: string;
-  provider: "elevenlabs";
+  provider: VoiceCastingProvider;
   voiceId: string;
   measuredAt: number;
   textFingerprint: string;
@@ -62,6 +62,8 @@ export interface VoiceLocalColdOpenReceipt {
   wordsPerSec: number;
   integratedLufs: number;
 }
+
+export type VoiceCastingProvider = "elevenlabs" | "qwen3";
 
 export interface PersistedVoiceCasting {
   voiceId: string;
@@ -170,6 +172,7 @@ export function makeVoiceProviderSelectionReceipt(args: {
   voiceId: string;
   score: number;
   selectedAt: number;
+  provider?: VoiceCastingProvider;
   shortlisted: unknown[];
   selection: unknown;
 }): VoiceProviderSelectionReceipt {
@@ -178,7 +181,7 @@ export function makeVoiceProviderSelectionReceipt(args: {
     version: "voice-provider-selection/v1",
     ownerId: args.ownerId,
     channelId: args.channelId,
-    provider: "elevenlabs",
+    provider: args.provider ?? "elevenlabs",
     voiceId: args.voiceId,
     score: args.score,
     selectedAt: args.selectedAt,
@@ -199,6 +202,7 @@ export function makeVoiceLocalColdOpenReceipt(args: {
   channelId: string;
   voiceId: string;
   measuredAt: number;
+  provider?: VoiceCastingProvider;
   text: string;
   physics: unknown;
   audioFingerprint: string;
@@ -210,7 +214,7 @@ export function makeVoiceLocalColdOpenReceipt(args: {
     version: "voice-local-cold-open/v1",
     ownerId: args.ownerId,
     channelId: args.channelId,
-    provider: "elevenlabs",
+    provider: args.provider ?? "elevenlabs",
     voiceId: args.voiceId,
     measuredAt: args.measuredAt,
     textFingerprint: channelInceptionContentSha256(args.text),
@@ -272,7 +276,7 @@ export function validateVoiceProviderSelectionReceipt(args: {
   return Boolean(
     cast && receipt && receipt.version === "voice-provider-selection/v1" &&
     receipt.ownerId === args.ownerId && receipt.channelId === args.channelId &&
-    receipt.provider === "elevenlabs" && receipt.voiceId === cast.voiceId &&
+    (receipt.provider === "elevenlabs" || receipt.provider === "qwen3") && receipt.voiceId === cast.voiceId &&
     receipt.score === cast.score && receipt.selectedAt === cast.at &&
     score(receipt.score) && current(receipt.selectedAt, now) &&
     Number.isInteger(receipt.shortlistedCount) && receipt.shortlistedCount >= 1 &&
@@ -322,6 +326,7 @@ export function validateVoiceLocalColdOpenReceipt(args: {
   ownerId: string;
   channelId: string;
   voiceId: string;
+  provider?: VoiceCastingProvider;
   now?: number;
 }): args is { receipt: VoiceLocalColdOpenReceipt; ownerId: string; channelId: string; voiceId: string; now?: number } {
   const receipt = args.receipt;
@@ -329,7 +334,8 @@ export function validateVoiceLocalColdOpenReceipt(args: {
   return Boolean(
     receipt && receipt.version === "voice-local-cold-open/v1" &&
     receipt.ownerId === args.ownerId && receipt.channelId === args.channelId &&
-    receipt.provider === "elevenlabs" && receipt.voiceId === args.voiceId &&
+    (receipt.provider === "elevenlabs" || receipt.provider === "qwen3") &&
+    (!args.provider || receipt.provider === args.provider) && receipt.voiceId === args.voiceId &&
     current(receipt.measuredAt, now) && sha256(receipt.textFingerprint) &&
     sha256(receipt.physicsFingerprint) && sha256(receipt.audioFingerprint) &&
     Number.isFinite(receipt.durationSec) && receipt.durationSec >= 2 && receipt.durationSec <= 60 &&
@@ -355,7 +361,11 @@ export function validateVoiceCastingReadinessReceipt(args: {
   });
   const providerMetadata = validateVoiceProviderSelectionReceipt(args) && validateVoiceLocalColdOpenReceipt({
     receipt: args.cast.localColdOpenReceipt,
-    ownerId: args.ownerId, channelId: args.channelId, voiceId: args.cast.voiceId, now: args.now,
+    ownerId: args.ownerId,
+    channelId: args.channelId,
+    voiceId: args.cast.voiceId,
+    provider: args.cast.providerSelectionReceipt.provider,
+    now: args.now,
   });
   return legacy || providerMetadata;
 }

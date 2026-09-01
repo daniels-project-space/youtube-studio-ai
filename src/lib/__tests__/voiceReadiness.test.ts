@@ -152,6 +152,27 @@ function main(): void {
     voiceId,
     castScore: 7,
   }).ok, true);
+  const qwenAudition = makeVoicecraftAuditionEvidence({
+    channelId,
+    provider: "qwen3",
+    voiceId: "Aiden",
+    castScore: 8,
+    castJudgedAt,
+  });
+  assert.equal(validateVoiceQualityEvidence({
+    evidence: qwenAudition,
+    channelId,
+    provider: "qwen3",
+    voiceId: "Aiden",
+    castScore: 8,
+  }).ok, true, "an open Qwen speaker still requires exact channel/voice audition evidence");
+  assert.equal(validateVoiceQualityEvidence({
+    evidence: qwenAudition,
+    channelId,
+    provider: "fish",
+    voiceId: "Aiden",
+    castScore: 8,
+  }).ok, false, "Qwen evidence cannot authorize a managed-provider take");
 
   const pipeline = [{
     block: "narration_tts",

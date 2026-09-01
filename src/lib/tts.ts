@@ -1,8 +1,17 @@
-/**
- * Narration TTS — Fish Audio (ported from autostudio/pipelines/tts.py). Maps a
- * channel voice key / niche to a Fish Audio reference voice, synthesizes mp3,
- * and returns the bytes. Pure helper; the `narration_tts` block wraps it.
- */
+/** Shared managed/open narration seam. Every provider returns MP3 bytes and
+ * must preserve at-most-once paid submission semantics. */
+import {
+  synthQwenNarration,
+  type QwenTtsReceipt,
+} from "@/lib/qwenTts";
+
+export type TtsProvider = "fish" | "elevenlabs" | "qwen3";
+
+export function normalizeTtsProvider(value: unknown): TtsProvider {
+  const provider = typeof value === "string" ? value.trim().toLowerCase() : "fish";
+  if (provider === "fish" || provider === "elevenlabs" || provider === "qwen3") return provider;
+  throw new TtsError(`Unsupported narration TTS provider: ${provider || "missing"}`);
+}
 
 // Verified Fish Audio reference voices (from autostudio VOICE_MAP).
 const VOICE_MAP: Record<string, string> = {
@@ -199,7 +208,7 @@ export async function synthNarration(args: {
   niche?: string;
   /** Speaking-rate multiplier 0.5–2.0 (1.0 = the voice's native pace). */
   speed?: number;
-  /** TTS engine: fish (default) | elevenlabs (v3 expressive, audio tags). */
+  /** TTS engine: fish (default) | elevenlabs | qwen3 (attested open worker). */
   provider?: string;
   elevenVoiceId?: string;
   /** ElevenLabs render settings (narration physics) — ignored by Fish. */
@@ -208,8 +217,30 @@ export async function synthNarration(args: {
   stitch?: TtsStitch;
   onRequestId?: (id: string) => void;
   onBillableCharacters?: (characters: number) => void;
+  qwenSpeaker?: string;
+  qwenLanguage?: string;
+  qwenInstruction?: string;
+  qwenSeed?: number;
+  qwenMaxCostUsd?: number;
+  onQwenReceipt?: (receipt: QwenTtsReceipt) => void;
 }): Promise<Uint8Array> {
-  if (args.provider === "elevenlabs") return synthElevenLabs(args);
+  const provider = normalizeTtsProvider(args.provider);
+  if (provider === "elevenlabs") return synthElevenLabs(args);
+  if (provider === "qwen3") {
+    const text = stripAudioTags(args.text);
+    const audio = await synthQwenNarration({
+      text,
+      speaker: args.qwenSpeaker ?? args.voiceId ?? "",
+      language: args.qwenLanguage,
+      instruction: args.qwenInstruction,
+      speed: args.speed,
+      seed: args.qwenSeed,
+      maxCostUsd: args.qwenMaxCostUsd ?? Math.max(0.02, text.length / 1_000),
+      onReceipt: args.onQwenReceipt,
+    });
+    args.onBillableCharacters?.(text.length);
+    return audio;
+  }
   const key = process.env.FISH_AUDIO_API_KEY;
   if (!key) throw new TtsError("FISH_AUDIO_API_KEY is not configured");
   const reference_id = resolveVoiceId(args.voiceId, args.niche);

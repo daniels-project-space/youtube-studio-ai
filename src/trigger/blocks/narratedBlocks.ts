@@ -10,6 +10,7 @@
  */
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { canonicalJson } from "@/lib/canonicalJson";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -148,7 +149,17 @@ import {
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
-import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
+import { synthNarration, hasFishKey, normalizeTtsProvider, stripAudioTags } from "@/lib/tts";
+import {
+  hasQwenTtsConfig,
+  hasQualifiedQwenTts,
+  qwenTtsReadiness,
+  QWEN3_TTS_MODEL,
+  QWEN3_TTS_MODEL_REVISION,
+  QWEN3_TTS_SPEAKERS,
+  resolveQwenTtsLanguage,
+  type QwenTtsReceipt,
+} from "@/lib/qwenTts";
 import { narrationPhysics } from "@/lib/voicecraft";
 import {
   assertNarrationPerformanceEvidence,
@@ -1034,24 +1045,32 @@ export const narrationTts: Block = {
   run: async (ctx) => {
     assertScriptApprovedForNarration(ctx.store["scriptApproved"]);
     const quality = qualityProfile(ctx.params["qualityProfile"]);
-    // TTS engine: fish (default) or elevenlabs (v3 expressive â€” PERFORMS inline
-    // [audio tags] the script writer placed; tags survive sanitization here but
-    // are stripped from all DISPLAY surfaces below).
-    const ttsProvider = (ctx.params["ttsProvider"] as string) || "fish";
+    // Unknown providers must fail before spend; they must never inherit the
+    // historical Fish fallback just because a string was misspelled.
+    const ttsProvider = normalizeTtsProvider(ctx.params["ttsProvider"]);
     const elevenVoiceId = ctx.params["elevenVoiceId"] as string | undefined;
     // sanitizeSpoken strips any markdown/slashes/stage-directions that slipped
     // through script_gen so the voice never reads a symbol aloud.
     const text = sanitizeSpoken(str(ctx, "narrationText"), { keepAudioTags: ttsProvider === "elevenlabs" });
     // Count provider-accepted TTS responses rather than estimating from the
-    // final script. The local cold-open evidence is deliberately not a second
-    // remote model call, so thumbnail-only Google permission cannot leak here.
+    // final script. The provider-rendered cold-open is counted separately, and
+    // thumbnail-only Google permission cannot leak into any narration call.
     let billableTtsCharacters = 0;
+    let qwenObservedCostUsd = 0;
     const onBillableCharacters = (characters: number) => {
       billableTtsCharacters += characters;
     };
     try {
     if (ttsProvider === "elevenlabs") {
       if (!process.env.ELEVENLABS_API_KEY) throw new Error("narration_tts: ELEVENLABS_API_KEY missing");
+    } else if (ttsProvider === "qwen3") {
+      const readiness = qwenTtsReadiness();
+      if (!hasQwenTtsConfig()) {
+        throw new Error(`narration_tts: Qwen3 worker is not configured (${readiness.blockers.join("; ")})`);
+      }
+      if (quality === "production" && !hasQualifiedQwenTts()) {
+        throw new Error(`narration_tts: Qwen3 production qualification is not current (${readiness.blockers.join("; ")})`);
+      }
     } else if (!hasFishKey()) {
       throw new Error("narration_tts: FISH_AUDIO_API_KEY missing (vault service 'fish-audio')");
     }
@@ -1084,13 +1103,79 @@ export const narrationTts: Block = {
     const elevenSettings = ttsProvider === "elevenlabs"
       ? { stability: physics.stability, ...(physics.style ? { style: physics.style } : {}) }
       : undefined;
+    const qwenSpeaker = ttsProvider === "qwen3"
+      ? String(ctx.params["qwenSpeaker"] ?? voiceId ?? "").trim()
+      : undefined;
+    if (ttsProvider === "qwen3" && !(QWEN3_TTS_SPEAKERS as readonly string[]).includes(qwenSpeaker ?? "")) {
+      throw new Error(`narration_tts: Qwen3 requires one pinned CustomVoice speaker (${QWEN3_TTS_SPEAKERS.join(", ")})`);
+    }
+    const qwenLanguage = resolveQwenTtsLanguage(ctx.params["language"] ?? ctx.params["locale"]);
+    const qwenInstruction = ttsProvider === "qwen3"
+      ? String(ctx.params["qwenInstruction"] ?? [dnaPacing?.delivery, dnaPacing?.pacing, physics.archetype]
+          .filter(Boolean)
+          .join(". "))
+      : undefined;
+    const qwenReceipts: QwenTtsReceipt[] = [];
+    const onQwenReceipt = (receipt: QwenTtsReceipt) => {
+      qwenReceipts.push(receipt);
+      qwenObservedCostUsd += receipt.runtime.costUsd;
+    };
 
     // COLD-OPEN GATE — production requires a persisted >=7 human audition, an
     // explicit voice, and physical evidence from the real take. Draft is the
     // only profile that may opt out. Google/Gemini is thumbnail-only.
     const gateEnabled = ctx.params["voiceGate"] !== false;
     const castScore = Number(ctx.params["voiceCastScore"] ?? Number.NaN);
-    const selectedVoiceId = ttsProvider === "elevenlabs" ? (elevenVoiceId ?? voiceId) : voiceId;
+    const selectedVoiceId = ttsProvider === "elevenlabs"
+      ? (elevenVoiceId ?? voiceId)
+      : ttsProvider === "qwen3"
+        ? qwenSpeaker
+        : voiceId;
+    const synthSelectedNarration = (
+      value: string,
+      stitch?: Parameters<typeof synthNarration>[0]["stitch"],
+    ) => {
+      const qwenRemainingCostUsd = Math.max(0, Number(ctx.stageBudgetUsd ?? 0) - qwenObservedCostUsd);
+      if (ttsProvider === "qwen3" && qwenRemainingCostUsd < 0.02) {
+        throw new Error("narration_tts: Qwen3 stage budget has no remaining provider envelope");
+      }
+      return synthNarration({
+      text: value,
+      voiceId: selectedVoiceId,
+      niche,
+      speed,
+      provider: ttsProvider,
+      elevenVoiceId: selectedVoiceId,
+      eleven: elevenSettings ? { ...elevenSettings, seed: elevenSeed } : undefined,
+      stitch,
+      qwenSpeaker,
+      qwenLanguage,
+      qwenInstruction,
+      qwenSeed: 4_242,
+      qwenMaxCostUsd: ttsProvider === "qwen3" ? qwenRemainingCostUsd : undefined,
+      onQwenReceipt,
+      onBillableCharacters,
+      });
+    };
+    const bindQwenProviderEvidence = <T extends object>(evidence: T): T & {
+      providerEvidence?: Record<string, unknown>;
+    } => ttsProvider === "qwen3"
+      ? {
+          ...evidence,
+          providerEvidence: {
+            schema: "qwen3-tts-narration-batch/v1",
+            provider: "qwen3",
+            model: QWEN3_TTS_MODEL,
+            revision: QWEN3_TTS_MODEL_REVISION,
+            speaker: qwenSpeaker,
+            language: qwenLanguage,
+            requestCount: qwenReceipts.length,
+            totalCostUsd: qwenObservedCostUsd,
+            receiptSha256: createHash("sha256").update(canonicalJson(qwenReceipts)).digest("hex"),
+            receipts: qwenReceipts,
+          },
+        }
+      : evidence;
     assertVoiceGatePreconditions({
       profile: quality,
       gateEnabled,
@@ -1113,16 +1198,7 @@ export const narrationTts: Block = {
         throw new Error("narration_tts: production cold-open probe is empty");
       }
       const coldOpenPath = join(tmp, "cold_open_local_evidence.mp3");
-      const coldOpenBytes = await synthNarration({
-        text: coldOpenText,
-        voiceId: selectedVoiceId,
-        niche,
-        speed,
-        provider: ttsProvider,
-        elevenVoiceId: selectedVoiceId,
-        eleven: elevenSettings ? { ...elevenSettings, seed: elevenSeed } : undefined,
-        onBillableCharacters,
-      });
+      const coldOpenBytes = await synthSelectedNarration(coldOpenText);
       await writeBytes(coldOpenPath, coldOpenBytes);
       const evidence = await preflightNarrationPerformance({
         audioPath: coldOpenPath,
@@ -1209,7 +1285,7 @@ export const narrationTts: Block = {
               nextText: i < items.length - 1 ? speakOf(items[i + 1]) : undefined,
             }
           : undefined;
-        const bytes = await synthNarration({ text: speak, voiceId: selectedVoiceId, niche, speed, provider: ttsProvider, elevenVoiceId: selectedVoiceId, eleven: elevenSettings ? { ...elevenSettings, seed: elevenSeed } : undefined, stitch, onBillableCharacters });
+        const bytes = await synthSelectedNarration(speak, stitch);
         const p = join(tmp, `utt_${i}.mp3`);
         await writeBytes(p, bytes);
         let dur = 0;
@@ -1283,10 +1359,10 @@ export const narrationTts: Block = {
         // are deliberately absent from the display-only narrationText.  Final
         // QA must compare against this exact source, not a nearby script.
         narrationTranscriptText,
-        narrationPerformanceEvidence,
+        narrationPerformanceEvidence: bindQwenProviderEvidence(narrationPerformanceEvidence),
         sentenceTimings,
         chapterPlan,
-        [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0),
+        [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd),
       };
     }
 
@@ -1319,7 +1395,7 @@ export const narrationTts: Block = {
             nextText: i < sentences.length - 1 ? sentences[i + 1] : undefined,
           }
         : undefined;
-      const bytes = await synthNarration({ text: s, voiceId: selectedVoiceId, niche, speed, provider: ttsProvider, elevenVoiceId: selectedVoiceId, eleven: elevenSettings ? { ...elevenSettings, seed: elevenSeed } : undefined, stitch, onBillableCharacters });
+      const bytes = await synthSelectedNarration(s, stitch);
       const p = join(tmp, `sent_${i}.mp3`);
       await writeBytes(p, bytes);
       let dur = 0;
@@ -1402,19 +1478,20 @@ export const narrationTts: Block = {
       narrationDurationSec: durationSec,
       narrationLocalPath: local,
       narrationTranscriptText: text,
-      narrationPerformanceEvidence,
+      narrationPerformanceEvidence: bindQwenProviderEvidence(narrationPerformanceEvidence),
       sentenceTimings,
       // Declared in `produces`, so it must ALWAYS be returned â€” an empty plan
       // means "no chapter cards". (chapterCards:false channels hit the engine's
       // undefined-produce guard here on their very first render.)
       chapterPlan: [],
-      [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0),
+      [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd),
     };
     } catch (error) {
       const observedCostUsd = narrationTtsCost(
         ttsProvider,
         billableTtsCharacters,
         0,
+        qwenObservedCostUsd,
       );
       if (observedCostUsd <= 0) throw error;
       // The provider work has already happened. Make the failure terminal so an

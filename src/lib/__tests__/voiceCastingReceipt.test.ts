@@ -132,6 +132,52 @@ assert.equal(validateVoiceCastingReadinessReceipt({
   channelId,
 }), false, "provider metadata may not substitute for a fingerprinted real take");
 
+const qwenProviderSelectionReceipt = makeVoiceProviderSelectionReceipt({
+  ownerId,
+  channelId,
+  provider: "qwen3",
+  voiceId: "Aiden",
+  score: 7.8,
+  selectedAt: judgedAt,
+  shortlisted: [{ name: "Aiden", score: 7.8, reasons: ["native_language:english"] }],
+  selection: { provider: "qwen3", voiceId: "Aiden", method: "metadata-only" },
+});
+const qwenLocalColdOpenReceipt = makeVoiceLocalColdOpenReceipt({
+  ownerId,
+  channelId,
+  provider: "qwen3",
+  voiceId: "Aiden",
+  measuredAt: judgedAt,
+  text: "A measured open changes the whole story.",
+  physics: { speed: 0.96, archetype: "narrator-teacher" },
+  audioFingerprint: "b".repeat(64),
+  durationSec: 3.8,
+  wordsPerSec: 1.9,
+  integratedLufs: -17.8,
+});
+assert.equal(validateVoiceCastingReadinessReceipt({
+  cast: {
+    voiceId: "Aiden",
+    score: 7.8,
+    at: judgedAt,
+    providerSelectionReceipt: qwenProviderSelectionReceipt,
+    localColdOpenReceipt: qwenLocalColdOpenReceipt,
+  },
+  ownerId,
+  channelId,
+}), true, "Qwen casting is ready only when metadata and measured cold-open receipts name the same provider");
+assert.equal(validateVoiceCastingReadinessReceipt({
+  cast: {
+    voiceId: "Aiden",
+    score: 7.8,
+    at: judgedAt,
+    providerSelectionReceipt: qwenProviderSelectionReceipt,
+    localColdOpenReceipt: { ...qwenLocalColdOpenReceipt, provider: "elevenlabs" },
+  },
+  ownerId,
+  channelId,
+}), false, "cross-provider casting receipts must fail closed");
+
 for (const relativePath of ["convex/schema.ts", "convex/channels.ts"]) {
   const source = readFileSync(join(process.cwd(), relativePath), "utf8");
   assert.match(source, /auditionReceipt:\s*v\.optional\(v\.object\(\{/);
@@ -143,6 +189,7 @@ for (const relativePath of ["convex/schema.ts", "convex/channels.ts"]) {
   assert.match(source, /version:\s*v\.literal\("voice-provider-selection\/v1"\)/);
   assert.match(source, /localColdOpenReceipt:\s*v\.optional\(v\.object\(\{/);
   assert.match(source, /version:\s*v\.literal\("voice-local-cold-open\/v1"\)/);
+  assert.match(source, /providerRenderReceipt:\s*v\.optional\(qwenTtsReceiptValidator\)/);
 }
 
 console.log("voice casting receipt tests passed");

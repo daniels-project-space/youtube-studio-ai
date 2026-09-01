@@ -501,7 +501,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
           ? narrationChapterHeadingCharacterCeiling()
           : 0);
       const provider = String(params["ttsProvider"] ?? "fish").toLowerCase();
-      const rate = provider === "elevenlabs" ? PRICE.ttsElevenPerKCharUsd : PRICE.ttsPerKCharUsd;
+      const rate = provider === "elevenlabs"
+        ? PRICE.ttsElevenPerKCharUsd
+        : provider === "qwen3"
+          ? PRICE.ttsQwenMaxPerKCharUsd
+          : PRICE.ttsPerKCharUsd;
       return (
         (maxCharacters * rate) / 1_000 +
         2 * PRICE.visionGraderUsd

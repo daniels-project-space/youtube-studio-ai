@@ -2,6 +2,7 @@ import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions
 import { v } from "convex/values";
 import type { QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
+import { qwenTtsReceiptValidator, voiceCastingProviderValidator } from "./voiceCastingValidators";
 import { moduleSurface, configurableModules } from "@/engine/moduleRegistry";
 import { validateKnobs, type KnobValues, type KnobValue } from "@/engine/customization";
 import {
@@ -457,7 +458,7 @@ const identityValidator = v.object({
         version: v.literal("voice-provider-selection/v1"),
         ownerId: v.string(),
         channelId: v.string(),
-        provider: v.literal("elevenlabs"),
+        provider: voiceCastingProviderValidator,
         voiceId: v.string(),
         score: v.number(),
         selectedAt: v.number(),
@@ -469,7 +470,7 @@ const identityValidator = v.object({
         version: v.literal("voice-local-cold-open/v1"),
         ownerId: v.string(),
         channelId: v.string(),
-        provider: v.literal("elevenlabs"),
+        provider: voiceCastingProviderValidator,
         voiceId: v.string(),
         measuredAt: v.number(),
         textFingerprint: v.string(),
@@ -479,6 +480,7 @@ const identityValidator = v.object({
         wordsPerSec: v.number(),
         integratedLufs: v.number(),
       })),
+      providerRenderReceipt: v.optional(qwenTtsReceiptValidator),
     }),
   ),
   voiceId: v.optional(v.string()),

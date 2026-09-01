@@ -1,4 +1,10 @@
 import { narrationPhysicsFor, type NarrationPhysics } from "@/engine/golden";
+import {
+  QWEN3_TTS_SPEAKER_PROFILES,
+  QWEN3_TTS_SPEAKERS,
+  type QwenTtsLanguage,
+  type QwenTtsSpeaker,
+} from "@/lib/qwenTts";
 import { listAccountVoices, type AccountVoice } from "@/lib/voicecraft";
 
 export interface ProviderVoiceCandidate {
@@ -10,7 +16,7 @@ export interface ProviderVoiceCandidate {
 }
 
 export interface DeterministicVoiceCast {
-  provider: "elevenlabs";
+  provider: "elevenlabs" | "qwen3";
   voiceId: string;
   name: string;
   character: string;
@@ -63,16 +69,24 @@ function candidateRecord(voice: AccountVoice): ProviderVoiceCandidate {
 export function selectVoiceFromProviderMetadata(args: {
   voices: readonly ProviderVoiceCandidate[];
   niche?: string;
+  provider?: DeterministicVoiceCast["provider"];
+  requiredVoiceId?: string;
+  targetLanguage?: string;
 }): DeterministicVoiceCast {
   const physics = narrationPhysicsFor(args.niche);
   const spec = physics.cast;
+  const provider = args.provider ?? "elevenlabs";
+  const requiredVoiceId = args.requiredVoiceId?.trim();
+  const targetLanguage = normalized(args.targetLanguage);
   const ranked = args.voices
+    .filter((voice) => !requiredVoiceId || voice.voiceId === requiredVoiceId)
     .map((voice) => {
       const labels = Object.fromEntries(Object.entries(voice.labels).map(([key, value]) => [normalized(key), normalized(value)]));
       const gender = labels["gender"];
       const age = labels["age"];
       const accent = labels["accent"];
       const useCase = labels["use case"] ?? labels["usecase"];
+      const nativeLanguage = labels["native language"] ?? labels["native_language"];
       const description = normalized(`${voice.name} ${voice.category} ${voice.description ?? ""} ${Object.values(labels).join(" ")}`);
       if (spec.gender !== "any" && gender && !includes(gender, spec.gender) && gender !== "neutral") return undefined;
       if (!ageCompatible(spec.age, age)) return undefined;
@@ -96,9 +110,13 @@ export function selectVoiceFromProviderMetadata(args: {
         score += 0.85;
         reasons.push(`use_case:${useCase}`);
       }
-      if (/professional|cloned|premade/.test(normalized(voice.category))) {
+      if (/professional|cloned|premade|premium|customvoice/.test(normalized(voice.category))) {
         score += 0.4;
         reasons.push(`category:${normalized(voice.category)}`);
+      }
+      if (targetLanguage && nativeLanguage && includes(nativeLanguage, targetLanguage)) {
+        score += 0.75;
+        reasons.push(`native_language:${nativeLanguage}`);
       }
       const archetypeMatch = normalized(physics.archetype)
         .split(" ")
@@ -116,11 +134,11 @@ export function selectVoiceFromProviderMetadata(args: {
   if (!winner || winner.score < 7) {
     throw new Error(
       `deterministic_voice_cast: no provider-declared voice meets the metadata-fit minimum for ${physics.archetype}; ` +
-      "add a correctly labelled ElevenLabs voice or use an explicit human-reviewed cast",
+      `select a compatible ${provider} voice or use an explicit human-reviewed cast`,
     );
   }
   return {
-    provider: "elevenlabs",
+    provider,
     voiceId: winner.voice.voiceId,
     name: winner.voice.name,
     character: spec.character,
@@ -135,5 +153,53 @@ export async function selectDeterministicElevenVoice(args: { niche?: string }): 
   return selectVoiceFromProviderMetadata({
     voices: (await listAccountVoices()).map(candidateRecord),
     niche: args.niche,
+  });
+}
+
+function qwenCandidate(speaker: QwenTtsSpeaker): ProviderVoiceCandidate {
+  const profile = QWEN3_TTS_SPEAKER_PROFILES[speaker];
+  const description = normalized(profile.description);
+  const gender = description.includes("female") ? "female" : description.includes("male") ? "male" : "neutral";
+  const age = /young|youthful/.test(description) ? "young" : "";
+  const accent = description.includes("american")
+    ? "american"
+    : description.includes("beijing")
+      ? "beijing"
+      : description.includes("chengdu")
+        ? "chengdu"
+        : "";
+  return {
+    voiceId: speaker,
+    name: speaker.replaceAll("_", " "),
+    category: "premium CustomVoice",
+    labels: {
+      gender,
+      ...(age ? { age } : {}),
+      ...(accent ? { accent } : {}),
+      "native language": profile.nativeLanguage,
+    },
+    description: profile.description,
+  };
+}
+
+/**
+ * Exact Qwen CustomVoice pre-cast from the official nine-speaker catalog.
+ * The provider-rendered cold open and production take still have to pass their
+ * separate physical-audio gates before this selection is usable.
+ */
+export function selectDeterministicQwenVoice(args: {
+  niche?: string;
+  speaker: string;
+  language: QwenTtsLanguage;
+}): DeterministicVoiceCast {
+  if (!(QWEN3_TTS_SPEAKERS as readonly string[]).includes(args.speaker)) {
+    throw new Error(`deterministic_voice_cast: unsupported Qwen CustomVoice speaker ${args.speaker || "missing"}`);
+  }
+  return selectVoiceFromProviderMetadata({
+    voices: QWEN3_TTS_SPEAKERS.map(qwenCandidate),
+    niche: args.niche,
+    provider: "qwen3",
+    requiredVoiceId: args.speaker,
+    targetLanguage: args.language,
   });
 }

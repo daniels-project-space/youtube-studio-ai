@@ -142,6 +142,8 @@ assert.match(wizard, /Private quality-control render/);
 assert.match(wizard, /status signal · no preview frames yet/);
 assert.match(wizard, /STAGE_DESCRIPTIONS/);
 assert.match(wizard, /executionAuthorized \? "Authorized" : "Plan only"/);
+assert.match(wizard, /Choose the exact Qwen CustomVoice speaker before starting channel setup/);
+assert.match(wizard, /f\.key !== "qwenSpeaker" \|\| paramOverrides\[m\.block\]\?\.\["ttsProvider"\] === "qwen3"/);
 assert.match(wizardCss, /\.nicheGrid/);
 assert.match(wizardCss, /\.buildWorkspace/);
 assert.match(wizardCss, /@media \(max-width: 680px\)/);

@@ -34,6 +34,8 @@ credentials in GitHub Actions or Vercel merely to deploy code.
 | `TRIGGER_SECRET_KEY` | infra | Trigger.dev task invocation/runtime (not the CI deploy token) | Trigger dashboard |
 | `ELEVENLABS_API_KEY` | feature | ElevenLabs v3 narration (preferred) | elevenlabs.io |
 | `FISH_AUDIO_API_KEY` | feature | Fish Audio narration (fallback) | fish.audio |
+| `QWEN3_TTS_WORKER_URL` / `QWEN3_TTS_WORKER_TOKEN` | feature | Attested open Qwen3-TTS CustomVoice worker; Trigger runtime only (no generic vault fallback) | protected Novita worker deployment |
+| `QWEN3_TTS_QUALITY_QUALIFIED` / `QWEN3_TTS_QUALITY_RECEIPT_SHA256` | safety | Admits Qwen3 production narration only after a reviewed audio benchmark | generated qualification receipt |
 | `SUNO_API_KEY` | feature | Suno music beds | sunoapi.org (credits: `GET /api/v1/generate/credit`) |
 | `MUREKA_API_KEY` | feature | Mureka music beds (paired fallback) | mureka.ai |
 | `PEXELS_API_KEY` | feature | Pexels 4K stock video | pexels.com/api |
@@ -52,5 +54,5 @@ credentials in GitHub Actions or Vercel merely to deploy code.
 Run-time presence check: `keyStatus()` / `secretsManifest()` in `keyRegistry.ts`.
 
 ## Provider fallbacks (so one missing/limited key doesn't break a run)
-- **Narration:** ElevenLabs preferred → Fish fallback (`synthNarration`).
+- **Narration:** provider choice is explicit. ElevenLabs and Fish remain the managed paths; Qwen3-TTS is an open, pinned worker path and never becomes an automatic fallback. It stays production-closed until its exact worker and quality receipt are configured.
 - **Music:** Mureka ↔ Suno automatic fallback (`generateMusic`); either key enables music.

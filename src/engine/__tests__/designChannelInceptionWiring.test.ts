@@ -15,6 +15,7 @@ const route = readFileSync(join(root, "src/app/api/build-channel/route.ts"), "ut
 const newChannelUi = readFileSync(join(root, "src/app/(app)/channels/new/page.tsx"), "utf8");
 const pipelineRunner = readFileSync(join(root, "src/trigger/runPipeline.ts"), "utf8");
 const showProfileCodec = readFileSync(join(root, "src/engine/channelShowProfileCodec.ts"), "utf8");
+const channelVoiceCasting = readFileSync(join(root, "src/lib/channelVoiceCasting.ts"), "utf8");
 
 assert.match(entrypoint, /executeDesignChannel\(payload/);
 assert.match(entrypoint, /maxAttempts:\s*3/);
@@ -207,6 +208,7 @@ for (const executor of [
   "synthShowBible",
   "optimizeTopics",
   "selectDeterministicElevenVoice",
+  "selectDeterministicQwenVoice",
   "preflightNarrationPerformance",
   "generateChannelArt",
   "architectPipeline",
@@ -217,6 +219,12 @@ for (const executor of [
 assert.match(coordinator, /familyPolicy\.voiceOwnership === "family-engine"/);
 assert.match(coordinator, /makeVoiceProviderSelectionReceipt/);
 assert.match(coordinator, /makeVoiceLocalColdOpenReceipt/);
+assert.match(coordinator, /synthQwenNarration/);
+assert.match(coordinator, /providerRenderReceipt/);
+assert.match(coordinator, /localColdOpenReceipt \?\? qualifiedCast\.coldOpenReceipt/);
+assert.match(channelVoiceCasting, /runtime config must|configured\["ttsProvider"\] \?\? params\["ttsProvider"\]/);
+assert.match(channelVoiceCasting, /Qwen3 channel inception requires an explicit CustomVoice speaker/);
+assert.match(channelVoiceCasting, /audioSha256 === cast\.localColdOpenReceipt\.audioFingerprint/);
 assert.match(coordinator, /validateVoiceCastingReadinessReceipt/);
 assert.match(coordinator, /validatePipelineVoiceWiring/);
 assert.match(coordinator, /voiceColdOpenEvidence/);

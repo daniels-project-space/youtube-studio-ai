@@ -1,0 +1,61 @@
+import { v } from "convex/values";
+
+export const voiceCastingProviderValidator = v.union(
+  v.literal("elevenlabs"),
+  v.literal("qwen3"),
+);
+
+/** Durable attestation emitted by the pinned private Qwen3-TTS worker. */
+export const qwenTtsReceiptValidator = v.object({
+  schema: v.literal("qwen3-tts-worker/v1"),
+  requestKey: v.string(),
+  model: v.literal("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"),
+  revision: v.literal("0c0e3051f131929182e2c023b9537f8b1c68adfe"),
+  qwenTtsPackageVersion: v.literal("0.1.1"),
+  transformersVersion: v.literal("4.57.3"),
+  dtype: v.literal("bfloat16"),
+  attention: v.literal("flash_attention_2"),
+  textSha256: v.string(),
+  instructionSha256: v.string(),
+  speaker: v.union(
+    v.literal("Vivian"),
+    v.literal("Serena"),
+    v.literal("Uncle_Fu"),
+    v.literal("Dylan"),
+    v.literal("Eric"),
+    v.literal("Ryan"),
+    v.literal("Aiden"),
+    v.literal("Ono_Anna"),
+    v.literal("Sohee"),
+  ),
+  language: v.union(
+    v.literal("Auto"),
+    v.literal("Chinese"),
+    v.literal("English"),
+    v.literal("Japanese"),
+    v.literal("Korean"),
+    v.literal("German"),
+    v.literal("French"),
+    v.literal("Russian"),
+    v.literal("Portuguese"),
+    v.literal("Spanish"),
+    v.literal("Italian"),
+  ),
+  seed: v.number(),
+  audioSha256: v.string(),
+  audioFormat: v.literal("mp3"),
+  sampleRateHz: v.literal(24_000),
+  durationSec: v.number(),
+  runtime: v.object({
+    provider: v.literal("novita"),
+    gpu: v.literal("RTX 4090"),
+    capacityMode: v.literal("spot"),
+    persistentCache: v.literal(true),
+    idleShutdownSeconds: v.number(),
+    gpuSeconds: v.number(),
+    gpuRateUsdPerSecond: v.number(),
+    startupUsd: v.number(),
+    storageUsd: v.number(),
+    costUsd: v.number(),
+  }),
+});

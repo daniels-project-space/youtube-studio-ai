@@ -145,6 +145,29 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     description: "Synthesizes the voiceover, pauses, and chapter cards.",
     optional: false,
     params: [
+      {
+        key: "ttsProvider", label: "Voice engine", type: "select",
+        options: [
+          { value: "elevenlabs", label: "ElevenLabs v3 · expressive" },
+          { value: "qwen3", label: "Qwen3-TTS · open 4090 worker" },
+        ],
+        help: "New-channel casting supports ElevenLabs or a qualified Qwen worker. Existing Fish channels need separately reviewed cast evidence.",
+      },
+      {
+        key: "qwenSpeaker", label: "Qwen speaker", type: "select",
+        options: [
+          { value: "Aiden", label: "Aiden · clear American male" },
+          { value: "Ryan", label: "Ryan · dynamic English male" },
+          { value: "Serena", label: "Serena · warm female" },
+          { value: "Uncle_Fu", label: "Uncle Fu · seasoned low male" },
+          { value: "Vivian", label: "Vivian · bright female" },
+          { value: "Dylan", label: "Dylan · clear Beijing male" },
+          { value: "Eric", label: "Eric · lively Chengdu male" },
+          { value: "Ono_Anna", label: "Ono Anna · playful Japanese female" },
+          { value: "Sohee", label: "Sohee · warm Korean female" },
+        ],
+        help: "Required with Qwen3-TTS. Channel setup measures a real cold-open and binds the result to this exact speaker.",
+      },
       { key: "sentenceGapSec", label: "Pause between sentences (sec)", type: "number", min: 0, max: 3, step: 0.05, help: "Base silence between sentences (jittered for a human feel)." },
       { key: "ttsSpeed", label: "Speaking rate", type: "number", min: 0.85, max: 1.15, step: 0.01, help: "Voice speed multiplier (0.9 = slower, deliberate)." },
       {

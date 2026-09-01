@@ -67,6 +67,13 @@ export const PRICE = {
   // ElevenLabs v3 is ~20-50x Fish per character — the flat Fish rate made the
   // budget guard blind exactly when the premium voice was cast.
   ttsElevenPerKCharUsd: rate("PRICE_TTS_ELEVEN_PER_KCHAR_USD", 0.12),
+  /**
+   * Planning ceiling for the self-hosted Qwen3 worker. Runtime spend comes
+   * only from its provider/GPU lifecycle receipts; this deliberately high
+   * per-character projection prevents an unbenchmarked open route from being
+   * admitted on an optimistic RTX real-time-factor guess.
+   */
+  ttsQwenMaxPerKCharUsd: rate("PRICE_TTS_QWEN_MAX_PER_KCHAR_USD", 1),
   /** Fal public rates. Per-output cost is derived from the selected model and
    * actual dimensions; none of these is a universal per-image fallback. */
   falSchnellUsdPerMegapixel: falRates.schnellUsdPerMegapixel,
@@ -211,6 +218,7 @@ export function narrationTtsCost(
   provider: string,
   billableCharacters: number,
   audioJudgeCalls: number,
+  qwenObservedCostUsd = 0,
 ): number {
   const characters = Number.isFinite(billableCharacters)
     ? Math.max(0, billableCharacters)
@@ -218,7 +226,12 @@ export function narrationTtsCost(
   const judges = Number.isFinite(audioJudgeCalls)
     ? Math.max(0, Math.floor(audioJudgeCalls))
     : 0;
-  const ttsRate = provider.toLowerCase() === "elevenlabs"
+  const normalizedProvider = provider.toLowerCase();
+  if (normalizedProvider === "qwen3") {
+    const observed = Number.isFinite(qwenObservedCostUsd) ? Math.max(0, qwenObservedCostUsd) : 0;
+    return observed + judges * PRICE.visionGraderUsd;
+  }
+  const ttsRate = normalizedProvider === "elevenlabs"
     ? PRICE.ttsElevenPerKCharUsd
     : PRICE.ttsPerKCharUsd;
   return (characters * ttsRate) / 1_000 + judges * PRICE.visionGraderUsd;

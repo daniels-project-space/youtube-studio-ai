@@ -3,7 +3,7 @@ import type { PipelineEntry } from "@/engine/types";
 export const VOICE_QUALITY_EVIDENCE_SCHEMA = "voice-quality-evidence/v1" as const;
 export const LEGACY_CAST_TO_RUN_MAX_MS = 24 * 60 * 60 * 1000;
 
-export type VoiceProvider = "elevenlabs" | "fish";
+export type VoiceProvider = "elevenlabs" | "fish" | "qwen3";
 
 export interface VoiceQualityScores {
   register: number;
@@ -138,7 +138,7 @@ export function validateVoiceQualityEvidence(args: {
   if (typeof value["channelId"] !== "string" || value["channelId"] !== args.channelId) {
     return { ok: false, reason: "voice-quality evidence does not match the current channel" };
   }
-  if (value["provider"] !== "elevenlabs" && value["provider"] !== "fish") {
+  if (value["provider"] !== "elevenlabs" && value["provider"] !== "fish" && value["provider"] !== "qwen3") {
     return { ok: false, reason: "voice-quality evidence provider is invalid" };
   }
   if (value["provider"] !== args.provider) {

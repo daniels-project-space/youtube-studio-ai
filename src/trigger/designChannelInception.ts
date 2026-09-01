@@ -44,8 +44,23 @@ import { optimizeTopics } from "@/lib/topicOptimizer";
 import { channelPrefix, headObjectMetadata, putObject } from "@/lib/storage";
 import { makeRunTempDir, writeBytes } from "@/lib/files";
 import { preflightNarrationPerformance } from "@/lib/narrationPerformance";
-import { selectDeterministicElevenVoice } from "@/lib/deterministicVoiceCast";
+import {
+  selectDeterministicElevenVoice,
+  selectDeterministicQwenVoice,
+} from "@/lib/deterministicVoiceCast";
 import { renderNarration } from "@/lib/voicecraft";
+import {
+  hasQualifiedQwenTts,
+  qwenTtsReadiness,
+  synthQwenNarration,
+  type QwenTtsReceipt,
+} from "@/lib/qwenTts";
+import {
+  channelVoiceCastingProvider,
+  qwenChannelCastingReceiptMatches,
+  resolveRequestedChannelVoice,
+  type PersistedChannelVoiceCast as VoiceCastingSlim,
+} from "@/lib/channelVoiceCasting";
 import {
   buildAndPersistQuizYearFoundation,
   buildQuizYearFoundation,
@@ -120,10 +135,6 @@ import {
   makeVoiceProviderSelectionReceipt,
   validateVoiceCastingReadinessReceipt,
   voiceCastingOutputFingerprint,
-  type VoiceCastingAuditionReceipt,
-  type VoiceColdOpenReceipt,
-  type VoiceLocalColdOpenReceipt,
-  type VoiceProviderSelectionReceipt,
 } from "@/lib/voiceCastingReceipt";
 import {
   positioningIdentityProjection,
@@ -242,19 +253,6 @@ export interface DesignChannelArgs extends Omit<DesignOptions, "family" | "progr
 export interface DesignChannelRuntime {
   runId: string;
   attempt: number;
-}
-
-interface VoiceCastingSlim {
-  voiceId: string;
-  name?: string;
-  character?: string;
-  score: number;
-  why?: string;
-  at: number;
-  auditionReceipt?: VoiceCastingAuditionReceipt;
-  coldOpenReceipt?: VoiceColdOpenReceipt;
-  providerSelectionReceipt?: VoiceProviderSelectionReceipt;
-  localColdOpenReceipt?: VoiceLocalColdOpenReceipt;
 }
 
 type PersistedChannelProgramBrief = Omit<ChannelProgramBrief, "sampleTopics"> & {
@@ -1105,11 +1103,13 @@ function wireVoiceReadiness(
   };
   if (!validateVoiceCastingReadinessReceipt(voiceCastingValidation)) return { pipeline, wired: [] };
   const qualifiedCast = voiceCastingValidation.cast;
+  const provider = channelVoiceCastingProvider(qualifiedCast);
+  const coldOpenEvidence = qualifiedCast.localColdOpenReceipt ?? qualifiedCast.coldOpenReceipt;
   const wired: string[] = [];
   const voiceCastEvidence = qualifiedCast.providerSelectionReceipt
     ? makeProviderMetadataSelectionEvidence({
         channelId: String(channelId),
-        provider: "elevenlabs",
+        provider,
         voiceId: qualifiedCast.voiceId,
         castScore: qualifiedCast.score,
         castJudgedAt: qualifiedCast.at,
@@ -1125,14 +1125,19 @@ function wireVoiceReadiness(
   const narration = pipeline.find((entry) => entry.block === "narration_tts");
   if (narration) {
     const params = (narration.params ?? {}) as Record<string, unknown>;
-    if (params.qualityProfile !== "draft" && (!params.ttsProvider || params.ttsProvider === "elevenlabs")) {
+    if (params.qualityProfile !== "draft") {
+      const cleanParams = { ...params };
+      delete cleanParams["elevenVoiceId"];
+      delete cleanParams["qwenSpeaker"];
       narration.params = {
-        ...params,
-        ttsProvider: "elevenlabs",
-        elevenVoiceId: qualifiedCast.voiceId,
+        ...cleanParams,
+        ttsProvider: provider,
+        ...(provider === "qwen3"
+          ? { qwenSpeaker: qualifiedCast.voiceId }
+          : { elevenVoiceId: qualifiedCast.voiceId }),
         voiceCastScore: qualifiedCast.score,
         voiceCastEvidence,
-        voiceColdOpenEvidence: qualifiedCast.coldOpenReceipt,
+        voiceColdOpenEvidence: coldOpenEvidence,
         voiceReadinessStatus: "qualified",
       };
       wired.push("narration_tts");
@@ -1140,13 +1145,16 @@ function wireVoiceReadiness(
   }
   const whiteboard = pipeline.find((entry) => entry.block === "whiteboard_scribe");
   if (whiteboard) {
+    if (provider !== "elevenlabs") {
+      throw new Error("whiteboard_scribe cannot consume a Qwen3 channel cast until its renderer has an attested Qwen audio path");
+    }
     whiteboard.params = {
       ...(whiteboard.params ?? {}),
       ttsProvider: "elevenlabs",
       elevenVoiceId: qualifiedCast.voiceId,
       voiceCastScore: qualifiedCast.score,
       voiceCastEvidence,
-      voiceColdOpenEvidence: qualifiedCast.coldOpenReceipt,
+      voiceColdOpenEvidence: coldOpenEvidence,
       voiceReadinessStatus: "qualified",
     };
     wired.push("whiteboard_scribe");
@@ -1165,6 +1173,8 @@ function validatePipelineVoiceWiring(
     return { ok: false, reason: "qualified audition and cold-open voice proof is missing" };
   }
   const qualified = validation.cast;
+  const provider = channelVoiceCastingProvider(qualified);
+  const coldOpenEvidence = qualified.localColdOpenReceipt ?? qualified.coldOpenReceipt;
   const consumers = pipeline.filter(
     (entry) => entry.block === "narration_tts" || entry.block === "whiteboard_scribe",
   );
@@ -1176,17 +1186,18 @@ function validatePipelineVoiceWiring(
     const evidence = validateVoiceQualityEvidence({
       evidence: params["voiceCastEvidence"],
       channelId: String(channelId),
-      provider: "elevenlabs",
+      provider,
       voiceId: qualified.voiceId,
       castScore: qualified.score,
     });
+    const wiredVoice = provider === "qwen3" ? params["qwenSpeaker"] : params["elevenVoiceId"];
     if (
-      params["ttsProvider"] !== "elevenlabs" ||
-      params["elevenVoiceId"] !== qualified.voiceId ||
+      params["ttsProvider"] !== provider ||
+      wiredVoice !== qualified.voiceId ||
       params["voiceCastScore"] !== qualified.score ||
       params["voiceReadinessStatus"] !== "qualified" ||
       channelInceptionContentSha256(params["voiceColdOpenEvidence"]) !==
-        channelInceptionContentSha256(qualified.coldOpenReceipt) ||
+        channelInceptionContentSha256(coldOpenEvidence) ||
       !evidence.ok
     ) {
       return { ok: false, reason: `${consumer.block} is not wired to the admitted channel voice proof` };
@@ -2243,6 +2254,13 @@ export async function executeDesignChannel(
   if (!plannedShowProfile) {
     throw new Error("new channel inception requires a sealed channel show profile");
   }
+  const channelVoiceRequest = plan.familyPolicy.voiceOwnership === "channel-cast"
+    ? resolveRequestedChannelVoice({
+        pipeline: design.pipeline,
+        moduleConfig: requestedModuleConfig,
+        locale: plan.requestSnapshot.programBrief.locale,
+      })
+    : undefined;
   // Seal the first qualification stage from the exact, route-bound inception
   // artifacts. It authorizes only a later explicitly approved private benchmark
   // probe; normal cadence still needs a separate final-master release receipt.
@@ -2753,14 +2771,25 @@ export async function executeDesignChannel(
         execute: async () => delegatedVoiceProof,
       });
     } else {
+      const requestedVoice = channelVoiceRequest;
+      if (!requestedVoice) {
+        throw new Error("channel-cast inception is missing its sealed voice-provider request");
+      }
       const loadVoice = async () => {
         const cast = asIdentity((await currentChannel(convex, channelId)).identity).voiceCasting;
+        const providerRenderReceipt = cast?.providerRenderReceipt;
         const validation = {
           cast,
           ownerId,
           channelId: String(channelId),
         };
-        return validateVoiceCastingReadinessReceipt(validation)
+        const providerMatches = Boolean(cast && channelVoiceCastingProvider(cast) === requestedVoice.provider);
+        const qwenReceiptMatches = requestedVoice.provider !== "qwen3" || (
+          hasQualifiedQwenTts() &&
+          cast?.voiceId === requestedVoice.qwenSpeaker &&
+          Boolean(cast && qwenChannelCastingReceiptMatches(cast))
+        );
+        return providerMatches && qwenReceiptMatches && validateVoiceCastingReadinessReceipt(validation)
           ? {
               value: validation.cast,
               evidence: {
@@ -2770,6 +2799,9 @@ export async function executeDesignChannel(
                 ...(validation.cast.localColdOpenReceipt
                   ? { localColdOpenReceipt: validation.cast.localColdOpenReceipt }
                   : { coldOpenReceipt: validation.cast.coldOpenReceipt }),
+                ...(providerRenderReceipt
+                  ? { providerRenderReceipt }
+                  : {}),
               },
               outputFingerprint: voiceCastingOutputFingerprint(validation.cast),
             }
@@ -2784,7 +2816,19 @@ export async function executeDesignChannel(
           // masquerade as a listened Gemini audition: an actual provider take
           // is immediately measured below, and production narration still runs
           // its own local performance + final transcript evidence gates.
-          const cast = await selectDeterministicElevenVoice({ niche: seoIdentity.niche });
+          if (requestedVoice.provider === "qwen3" && !hasQualifiedQwenTts()) {
+            const readiness = qwenTtsReadiness();
+            throw new Error(
+              `channel inception: Qwen3 is selected but its worker qualification is not current (${readiness.blockers.join("; ")})`,
+            );
+          }
+          const cast = requestedVoice.provider === "qwen3"
+            ? selectDeterministicQwenVoice({
+                niche: seoIdentity.niche,
+                speaker: requestedVoice.qwenSpeaker ?? "",
+                language: requestedVoice.qwenLanguage ?? "English",
+              })
+            : await selectDeterministicElevenVoice({ niche: seoIdentity.niche });
           const judgedAt = Date.now();
           const providerSelectionReceipt = makeVoiceProviderSelectionReceipt({
             ownerId,
@@ -2792,6 +2836,7 @@ export async function executeDesignChannel(
             voiceId: cast.voiceId,
             score: cast.selectionScore,
             selectedAt: judgedAt,
+            provider: cast.provider,
             shortlisted: cast.shortlisted,
             selection: {
               voiceId: cast.voiceId,
@@ -2799,18 +2844,31 @@ export async function executeDesignChannel(
               character: cast.character,
               why: cast.why,
               physics: cast.physics,
+              ...(requestedVoice.qwenLanguage ? { language: requestedVoice.qwenLanguage } : {}),
             },
           });
           const sampleTopic = seoIdentity.topicPool[0] ?? seoIdentity.niche;
           const coldOpenText =
             `${sampleTopic} looks simple until one overlooked detail changes the whole picture. ` +
             `Follow that detail carefully, because it reveals what most explanations leave out.`;
-          const coldOpenBytes = await renderNarration({
-            text: coldOpenText,
-            elevenVoiceId: cast.voiceId,
-            physics: cast.physics,
-            seed: 4242,
-          });
+          let providerRenderReceipt: QwenTtsReceipt | undefined;
+          const coldOpenBytes = cast.provider === "qwen3"
+            ? await synthQwenNarration({
+                text: coldOpenText,
+                speaker: cast.voiceId,
+                language: requestedVoice.qwenLanguage,
+                instruction: cast.character,
+                speed: cast.physics.speed,
+                seed: 4_242,
+                maxCostUsd: voiceStage.maximumCostUsd,
+                onReceipt: (receipt) => { providerRenderReceipt = receipt; },
+              })
+            : await renderNarration({
+                text: coldOpenText,
+                elevenVoiceId: cast.voiceId,
+                physics: cast.physics,
+                seed: 4242,
+              });
           const coldOpenDir = await makeRunTempDir(`${runtime.runId}_voice_inception`);
           const coldOpenPath = `${coldOpenDir}/cold_open.mp3`;
           await writeBytes(coldOpenPath, coldOpenBytes);
@@ -2824,6 +2882,7 @@ export async function executeDesignChannel(
             channelId: String(channelId),
             voiceId: cast.voiceId,
             measuredAt: Date.now(),
+            provider: cast.provider,
             text: coldOpenText,
             physics: cast.physics,
             audioFingerprint: createHash("sha256").update(coldOpenBytes).digest("hex"),
@@ -2844,6 +2903,7 @@ export async function executeDesignChannel(
             at: judgedAt,
             providerSelectionReceipt,
             localColdOpenReceipt,
+            ...(providerRenderReceipt ? { providerRenderReceipt } : {}),
           };
           await mergeIdentity(convex, channelId, { voiceCasting: slim });
           return {
@@ -2851,6 +2911,7 @@ export async function executeDesignChannel(
             evidence: {
               providerSelectionReceipt: slim.providerSelectionReceipt,
               localColdOpenReceipt: slim.localColdOpenReceipt,
+              ...(slim.providerRenderReceipt ? { providerRenderReceipt: slim.providerRenderReceipt } : {}),
             },
             outputFingerprint: voiceCastingOutputFingerprint(slim),
           };

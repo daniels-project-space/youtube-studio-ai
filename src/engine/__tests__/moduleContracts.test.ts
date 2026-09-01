@@ -573,6 +573,16 @@ function configurationSpecificCostEnvelopes(): void {
     Math.abs(narrationEnvelope - expectedNarrationEnvelope) < 1e-12,
     "narration reservation must cover both cold-open attempts and bounded chapter headings",
   );
+  const qwenNarrationEnvelope = envelope("narration_tts", {
+    targetSeconds: 180,
+    ttsProvider: "qwen3",
+    chapterCards: true,
+  });
+  assert.equal(
+    qwenNarrationEnvelope,
+    (narrationCharacters / 1_000) * PRICE.ttsQwenMaxPerKCharUsd + 2 * PRICE.visionGraderUsd,
+    "unbenchmarked Qwen narration must reserve its conservative 4090 ceiling, never the Fish rate",
+  );
 
   const whiteboardPanels = whiteboardPanelsForTargetSeconds(132);
   const whiteboardCharacters = whiteboardNarrationCharacterCeiling(

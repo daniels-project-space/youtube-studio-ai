@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { qwenTtsReceiptValidator, voiceCastingProviderValidator } from "./voiceCastingValidators";
 import {
   CHANNEL_COMPOSITION_RECEIPT_VERSION,
   CHANNEL_PROGRAM_BRIEF_VERSION,
@@ -172,7 +173,7 @@ export default defineSchema({
             version: v.literal("voice-provider-selection/v1"),
             ownerId: v.string(),
             channelId: v.string(),
-            provider: v.literal("elevenlabs"),
+            provider: voiceCastingProviderValidator,
             voiceId: v.string(),
             score: v.number(),
             selectedAt: v.number(),
@@ -184,7 +185,7 @@ export default defineSchema({
             version: v.literal("voice-local-cold-open/v1"),
             ownerId: v.string(),
             channelId: v.string(),
-            provider: v.literal("elevenlabs"),
+            provider: voiceCastingProviderValidator,
             voiceId: v.string(),
             measuredAt: v.number(),
             textFingerprint: v.string(),
@@ -194,6 +195,7 @@ export default defineSchema({
             wordsPerSec: v.number(),
             integratedLufs: v.number(),
           })),
+          providerRenderReceipt: v.optional(qwenTtsReceiptValidator),
     }),
   ),
       // Persona reference material for tone-matched generation (competitor-
