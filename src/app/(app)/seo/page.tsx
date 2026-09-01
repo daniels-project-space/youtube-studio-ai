@@ -5,6 +5,7 @@ import {
   useMemo,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from "react";
 import { useQuery } from "convex/react";
 import { useSearchParams } from "next/navigation";
@@ -12,7 +13,6 @@ import { api } from "../../../../convex/_generated/api";
 import { useOwnerId } from "@/lib/owner-context";
 import { useSelectedChannel } from "@/lib/channel-context";
 import type { ChannelRow } from "@/lib/types";
-import { PageHeader, SectionTitle } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
 import { compact } from "@/components/Chart";
@@ -183,14 +183,14 @@ export function SeoWorkspace({
           ) : null}
         </header>
       ) : (
-        <PageHeader
-          title="SEO intelligence"
-          subtitle="A channel-specific brief built from stored search and competitor evidence"
-          actions={
-            niche ? (
-              <ResearchButton niche={niche} channelId={channelNiche ? selectedChannel?._id : undefined} />
-            ) : undefined
-          }
+        <PackagingHero
+          selectedChannel={selectedChannel}
+          niche={niche}
+          niches={availableNiches}
+          intel={intel}
+          databank={databank}
+          competitors={competitors}
+          onSelectNiche={selectedChannel ? undefined : setManualNiche}
         />
       )}
 
@@ -322,6 +322,129 @@ export function SeoWorkspace({
   );
 }
 
+function PackagingHero({
+  selectedChannel,
+  niche,
+  niches,
+  intel,
+  databank,
+  competitors,
+  onSelectNiche,
+}: {
+  selectedChannel: ChannelWithNiche | undefined;
+  niche: string | null;
+  niches: string[];
+  intel: SeoIntel | null | undefined;
+  databank: SeoDatabankRow | null | undefined;
+  competitors: CompetitorRow[] | undefined;
+  onSelectNiche?: (niche: string) => void;
+}) {
+  const competitorVideos = competitors?.reduce(
+    (sum, competitor) => sum + competitor.topVideos.length,
+    0,
+  ) ?? 0;
+  const guide = intel?.thumbnailStyleGuide;
+  const visualMeasured = Boolean(
+    guide &&
+    guide.visualEvidenceStatus !== "metadata_only" &&
+    guide.evidenceSource !== "youtube_data_api_v3_metadata" &&
+    typeof guide.hasTextOverlayPct === "number",
+  );
+
+  return (
+    <section className={styles.packagingHero}>
+      <div className={styles.heroCopy}>
+        <span className={styles.eyebrow}>Packaging lab / {selectedChannel?.name ?? niche ?? "fleet"}</span>
+        <h1>Find the angle before you write the title.</h1>
+        <p>
+          Turn stored search language and competitor metadata into a next-upload brief.
+          Pixel-level thumbnail claims stay unavailable until visual evidence actually exists.
+        </p>
+        <div className={styles.heroHandoff} data-ready={Boolean(niche) || undefined}>
+          <span aria-hidden="true"><i /></span>
+          <div>
+            <small>{niche ? "Territory in focus" : "Choose a research territory"}</small>
+            <strong>{niche ?? "No niche is bound to the packaging desk"}</strong>
+            <em>
+              {selectedChannel
+                ? `${selectedChannel.name} · channel identity binding`
+                : niche
+                  ? "Fleet research view · no channel identity is being changed"
+                  : "Select a stored territory below to inspect its evidence."}
+            </em>
+          </div>
+          {niche ? (
+            <ResearchButton niche={niche} channelId={selectedChannel?.niche ? selectedChannel._id : undefined} />
+          ) : null}
+        </div>
+      </div>
+
+      <figure className={styles.territoryMap}>
+        <figcaption>
+          <span>Territory map</span>
+          <small>{niches.length} identity-bound niches</small>
+        </figcaption>
+        <div className={styles.territoryField}>
+          <span className={styles.territoryOrbit} aria-hidden="true" />
+          <span className={styles.territoryAxis} aria-hidden="true" />
+          {niches.slice(0, 8).map((item, index) => (
+            <button
+              type="button"
+              key={item}
+              data-index={index}
+              data-active={item === niche || undefined}
+              className={styles.territoryNode}
+              onClick={() => onSelectNiche?.(item)}
+              disabled={!onSelectNiche && item !== niche}
+            >
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <strong>{item}</strong>
+            </button>
+          ))}
+          {!niches.length && <span className={styles.territoryEmpty}>No channel territories configured</span>}
+          <div className={styles.territoryCore}>
+            <small>PACKAGING</small>
+            <strong>{niche ? "FOCUS" : "MAP"}</strong>
+            <span>{niche ? "bound" : "waiting"}</span>
+          </div>
+        </div>
+        <div className={styles.mapLegend}>
+          <span><i /> Stored channel identity</span>
+          <span>Selection does not mutate channel identity</span>
+        </div>
+      </figure>
+
+      <div className={styles.packagingMetrics}>
+        <PackagingMetric index="01" label="Search record" value={!niche ? "Waiting" : intel === undefined ? "Reading" : intel ? "Stored" : "Absent"} detail={!niche ? "Select a territory" : intel ? `${intel.topTags.length} tags · ${intel.topTitlePatterns.length} patterns` : "No persisted signals"} />
+        <PackagingMetric index="02" label="Strategy record" value={!niche ? "Waiting" : databank === undefined ? "Reading" : databank ? "Stored" : "Absent"} detail={!niche ? "Select a territory" : databank ? `${databank.titleTemplates.length} title routes` : "No persisted databank"} />
+        <PackagingMetric index="03" label="Competitor sample" value={!niche ? "Waiting" : competitors === undefined ? "Reading" : `${competitorVideos} videos`} detail={!niche ? "Select a territory" : competitors ? `${competitors.length} channels` : "No persisted sample"} />
+        <PackagingMetric index="04" label="Thumbnail pixels" value={visualMeasured ? "Measured" : "Unavailable"} detail={visualMeasured ? "Visual attributes stored" : "Metadata is not pixel evidence"} tone={visualMeasured ? "ok" : "warn"} />
+      </div>
+    </section>
+  );
+}
+
+function PackagingMetric({
+  index,
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  index: string;
+  label: string;
+  value: string;
+  detail: string;
+  tone?: "ok" | "warn";
+}) {
+  return (
+    <div className={styles.packagingMetric} data-tone={tone}>
+      <span>{index}</span>
+      <div><small>{label}</small><strong>{value}</strong><em>{detail}</em></div>
+    </div>
+  );
+}
+
 type SeoIntel = {
   optimalTitleLen: number;
   topTags: unknown[];
@@ -436,7 +559,9 @@ function ResearchEvidenceLedger({
           ? `${guide.sampledVideoCount} sampled video${guide.sampledVideoCount === 1 ? "" : "s"}; ${metadataOnly ? "pixels and overlay text were not measured" : "stored guide available"}.`
           : metadataOnly
             ? "The stored guide is metadata-only; thumbnail pixels and overlay text were not measured."
-            : "No stored visual measurement is available.",
+            : visualState === "Measured" && typeof guide?.hasTextOverlayPct === "number"
+              ? `Stored visual guide reports text overlay in ${guide.hasTextOverlayPct}% of the sample; the sample count is not persisted.`
+              : "No stored visual measurement is available.",
       measured: visualState === "Measured",
     },
   ];
@@ -495,17 +620,17 @@ function SeoFocus({
         : `${intel.thumbnailStyleGuide.hasTextOverlayPct}% use text`;
 
   return (
-    <section className={`glass overview-panel seo-focus ${styles.focus}`}>
-      <div className="panel-heading">
+    <section className={styles.focus}>
+      <div className={styles.focusHeader}>
         <span>
           <small>Use next</small>
           <h2>Focus for the next upload</h2>
         </span>
-        <span className="seo-focus-source">
+        <span>
           {channelName ?? "All channels"} · {niche}
         </span>
       </div>
-      <div className="seo-focus-grid">
+      <div className={styles.focusGrid}>
         <div>
           <small>Title target</small>
           <strong>
@@ -581,42 +706,19 @@ function ResearchButton({
   }
 
   return (
-    <div style={{ display: "grid", gap: "0.35rem", justifyItems: "end" }}>
+    <div className={styles.researchActionWrap} data-state={state}>
       <button
         type="button"
         onClick={run}
         disabled={state === "loading"}
-        className="lift"
+        className={styles.researchAction}
         title="Mines this niche via the competitor-intelligence engine. Requires the intelligence engine (Trigger.dev + YouTube Data API key) to be activated."
-        style={{
-          display: "inline-flex",
-          alignItems: "center",
-          gap: "0.45rem",
-          padding: "0.55rem 0.95rem",
-          borderRadius: 12,
-          background: "var(--color-accent-soft)",
-          border: "1px solid var(--color-border-strong)",
-          color: "var(--color-accent)",
-          font: "inherit",
-          fontSize: "0.86rem",
-          fontWeight: 600,
-          cursor: state === "loading" ? "wait" : "pointer",
-          opacity: state === "loading" ? 0.7 : 1,
-        }}
       >
         <IconSpark width={16} height={16} />
         {state === "loading" ? "Starting…" : "Research now"}
       </button>
       {msg && (
-        <span
-          style={{
-            fontSize: "0.74rem",
-            maxWidth: 280,
-            textAlign: "right",
-            color:
-              state === "error" ? "var(--color-failed)" : "var(--color-muted)",
-          }}
-        >
+        <span className={styles.researchStatus}>
           {msg}
         </span>
       )}
@@ -653,41 +755,25 @@ function NicheSelector({
     );
   }
   return (
-    <div
-      className="glass"
-      style={{
-        padding: compactMode ? "0.7rem 0.9rem" : "1.1rem 1.2rem",
-        display: "flex",
-        alignItems: "center",
-        gap: "0.7rem",
-        flexWrap: "wrap",
-      }}
-    >
-      <span style={{ fontSize: "0.84rem", color: "var(--color-muted)" }}>
-        Niche:
-      </span>
-      {niches.map((n) => (
-        <button
-          key={n}
-          type="button"
-          onClick={() => onSelect(n)}
-          style={{
-            padding: "0.35rem 0.75rem",
-            borderRadius: 999,
-            border: "1px solid var(--color-border)",
-            background:
-              n === current
-                ? "var(--color-accent-soft)"
-                : "var(--color-surface)",
-            color: n === current ? "var(--color-accent)" : "var(--color-muted)",
-            font: "inherit",
-            fontSize: "0.82rem",
-            cursor: "pointer",
-          }}
-        >
-          {n}
-        </button>
-      ))}
+    <div className={compactMode ? styles.nicheRail : styles.nicheChooser}>
+      <div className={styles.nicheChooserCopy}>
+        <span>{compactMode ? "Switch territory" : "Research territories"}</span>
+        {!compactMode && <><h2>Choose the market before reading the signals.</h2><p>These territories come from channel identities already stored in the workspace.</p></>}
+      </div>
+      <div className={styles.nicheOptions}>
+        {niches.map((n, index) => (
+          <button
+            key={n}
+            type="button"
+            onClick={() => onSelect(n)}
+            data-active={n === current || undefined}
+          >
+            <span>{String(index + 1).padStart(2, "0")}</span>
+            <strong>{n}</strong>
+            <i>↗</i>
+          </button>
+        ))}
+      </div>
     </div>
   );
 }
@@ -705,37 +791,15 @@ function NicheIntelligence({ intel }: { intel: SeoIntel }) {
     guide.notes.toLowerCase().startsWith("minimal guide");
 
   return (
-    <section>
-      <SectionTitle>Niche intelligence</SectionTitle>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))",
-          gap: "1rem",
-        }}
-      >
+    <section className={styles.signalRoom}>
+      <SeoSectionHeading eyebrow="Language evidence" title="Search and packaging signals" detail="Stored metadata patterns, clearly separated from visual thumbnail measurement." />
+      <div className={styles.intelligenceGrid}>
         <Panel title="Optimal title length">
-          <div
-            style={{
-              fontFamily: "var(--font-display)",
-              fontSize: "2rem",
-              fontWeight: 600,
-              color: "var(--color-accent)",
-            }}
-          >
+          <div className={styles.titleLength}>
             {intel.optimalTitleLen}
-            <span style={{ fontSize: "0.9rem", color: "var(--color-muted)" }}>
-              {" "}
-              chars
-            </span>
+            <span> chars</span>
           </div>
-          <div
-            style={{
-              marginTop: "0.5rem",
-              fontSize: "0.8rem",
-              color: "var(--color-faint)",
-            }}
-          >
+          <div className={styles.titleLengthNote}>
             Avg {compact(intel.avgViewsTop50)} · median{" "}
             {compact(intel.medianViewsTop50)} views (top 50)
           </div>
@@ -754,37 +818,22 @@ function NicheIntelligence({ intel }: { intel: SeoIntel }) {
         </Panel>
 
         <Panel title="Thumbnail style guide">
-          <div
-            style={{ display: "flex", gap: "0.4rem", marginBottom: "0.6rem" }}
-          >
+          <div className={styles.paletteStrip}>
             {guide.dominantColors.slice(0, 6).map((c, i) => (
               <span
                 key={i}
                 title={c}
-                style={{
-                  width: 22,
-                  height: 22,
-                  borderRadius: 6,
-                  background: c,
-                  border: "1px solid var(--color-border)",
-                }}
+                style={{ background: c }}
               />
             ))}
           </div>
-          <div style={{ fontSize: "0.8rem", color: "var(--color-muted)" }}>
+          <div className={styles.guideState}>
             {metadataOnly || typeof guide.hasTextOverlayPct !== "number"
               ? "Visual thumbnail attributes: not measured from metadata"
               : `Text overlay: ${guide.hasTextOverlayPct}% of top thumbnails`}
           </div>
           {guide.notes && (
-            <p
-              style={{
-                margin: "0.5rem 0 0",
-                fontSize: "0.82rem",
-                color: "var(--color-faint)",
-                lineHeight: 1.5,
-              }}
-            >
+            <p className={styles.guideNote}>
               {guide.notes}
             </p>
           )}
@@ -799,27 +848,14 @@ function NicheIntelligence({ intel }: { intel: SeoIntel }) {
 function SeoDatabank({ databank }: { databank: SeoDatabankRow }) {
   const attribution = databank.sourceAttribution;
   return (
-    <section>
-      <SectionTitle>Strategy databank</SectionTitle>
+    <section className={styles.strategyRoom}>
+      <SeoSectionHeading eyebrow="Pattern library" title="Strategy databank" detail="Reusable structures extracted from the stored sample; gaps remain hypotheses until separately tested." />
       {attribution && (
-        <p
-          style={{
-            margin: "0 0 0.7rem",
-            color: "var(--color-faint)",
-            fontSize: "0.8rem",
-            lineHeight: 1.45,
-          }}
-        >
+        <p className={styles.attributionNote}>
           Source: YouTube Data API v3 metadata from {attribution.topPerformersAnalysed} top performers. Visual, opening-hook, and demand-gap claims remain unavailable without separate evidence.
         </p>
       )}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))",
-          gap: "1rem",
-        }}
-      >
+      <div className={styles.strategyGrid}>
         <Panel title="Title templates">
           <List items={databank.titleTemplates} mono />
         </Panel>
@@ -857,61 +893,34 @@ function ViewEstimateWidget({
   const estimate = useQuery(api.seo.viewEstimate, { ownerId, niche, tags });
 
   return (
-    <section>
-      <SectionTitle>View estimate</SectionTitle>
-      <div
-        className="glass"
-        style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.85rem" }}
-      >
-        <label style={{ fontSize: "0.82rem", color: "var(--color-muted)" }}>
-          Enter comma-separated tags to estimate views for this niche:
+    <section className={styles.estimateRoom}>
+      <SeoSectionHeading eyebrow="Scenario lens" title="Tag-overlap estimate" detail="A bounded comparison to the stored niche sample—not a promise of audience demand." />
+      <div className={styles.estimateWorkbench}>
+        <label>
+          <span>Candidate tag set</span>
+          <small>Comma-separated; the calculation stays within this stored niche.</small>
           <input
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             placeholder="lofi, study beats, chill, focus"
-            style={{
-              display: "block",
-              width: "100%",
-              marginTop: "0.5rem",
-              padding: "0.6rem 0.75rem",
-              borderRadius: 10,
-              background: "var(--color-surface)",
-              border: "1px solid var(--color-border)",
-              color: "var(--color-fg)",
-              font: "inherit",
-              fontSize: "0.88rem",
-            }}
           />
         </label>
 
         {tags.length > 0 && estimate && (
-          <div
-            style={{
-              display: "flex",
-              alignItems: "baseline",
-              gap: "0.75rem",
-              flexWrap: "wrap",
-            }}
-          >
-            <span
-              style={{
-                fontFamily: "var(--font-display)",
-                fontSize: "2rem",
-                fontWeight: 600,
-                color: "var(--color-secondary)",
-              }}
-            >
+          <div className={styles.estimateResult}>
+            <span>
               {compact(estimate.estimatedViews)}
             </span>
-            <span style={{ fontSize: "0.82rem", color: "var(--color-muted)" }}>
-              estimated views ·{" "}
+            <span>
+              modeled views ·{" "}
               {estimate.source === "tag_overlap"
                 ? `tag overlap (${estimate.matches} matches)`
                 : "niche fallback"}
             </span>
           </div>
         )}
+        {tags.length === 0 && <div className={styles.estimateIdle}><span>∿</span><strong>Waiting for a candidate tag set</strong><small>No scenario is calculated from an empty input.</small></div>}
       </div>
     </section>
   );
@@ -943,8 +952,8 @@ function CompetitorTopVideos({
     .slice(0, 10);
 
   return (
-    <section>
-      <SectionTitle>Competitor top videos</SectionTitle>
+    <section className={styles.competitorRoom}>
+      <SeoSectionHeading eyebrow="Observed market" title="Competitor top videos" detail="Ranked YouTube metadata from the persisted research sample." />
       {top.length === 0 ? (
         <EmptyState
           title="No competitor videos yet"
@@ -952,55 +961,26 @@ function CompetitorTopVideos({
           icon={<IconExternal width={24} height={24} />}
         />
       ) : (
-        <div
-          className="glass"
-          style={{ padding: "0.5rem", display: "grid", gap: "0.25rem" }}
-        >
-          {top.map((v) => (
+        <div className={styles.competitorLedger}>
+          {top.map((v, index) => (
             <a
               key={v.youtubeVideoId}
               href={`https://www.youtube.com/watch?v=${v.youtubeVideoId}`}
               target="_blank"
               rel="noopener noreferrer"
-              className="lift"
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "1rem",
-                padding: "0.6rem 0.7rem",
-                borderRadius: 10,
-                color: "inherit",
-                textDecoration: "none",
-              }}
+              className={styles.competitorRow}
             >
-              <div style={{ minWidth: 0 }}>
-                <div
-                  style={{
-                    fontSize: "0.88rem",
-                    overflow: "hidden",
-                    textOverflow: "ellipsis",
-                    whiteSpace: "nowrap",
-                  }}
-                >
+              <span>{String(index + 1).padStart(2, "0")}</span>
+              <div>
+                <strong>
                   {v.title}
-                </div>
-                <div
-                  style={{ fontSize: "0.74rem", color: "var(--color-faint)" }}
-                >
-                  {v.channelName}
-                </div>
+                </strong>
+                <small>{v.channelName}</small>
               </div>
-              <span
-                style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: "0.82rem",
-                  color: "var(--color-accent)",
-                  whiteSpace: "nowrap",
-                }}
-              >
+              <em>
                 {compact(v.views)} views
-              </span>
+              </em>
+              <i>↗</i>
             </a>
           ))}
         </div>
@@ -1016,19 +996,11 @@ function Panel({
   children,
 }: {
   title: string;
-  children: React.ReactNode;
+  children: ReactNode;
 }) {
   return (
-    <div className="glass" style={{ padding: "1rem 1.1rem" }}>
-      <div
-        style={{
-          fontSize: "0.72rem",
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-          color: "var(--color-muted)",
-          marginBottom: "0.7rem",
-        }}
-      >
+    <div className={styles.researchPanel}>
+      <div className={styles.researchPanelTitle}>
         {title}
       </div>
       {children}
@@ -1039,24 +1011,12 @@ function Panel({
 function ChipList({ items, accent }: { items: string[]; accent?: boolean }) {
   if (items.length === 0)
     return (
-      <span style={{ fontSize: "0.8rem", color: "var(--color-faint)" }}>—</span>
+      <span className={styles.emptyValue}>—</span>
     );
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
+    <div className={styles.chipList} data-accent={accent || undefined}>
       {items.map((it, i) => (
-        <span
-          key={i}
-          style={{
-            padding: "0.2rem 0.55rem",
-            borderRadius: 999,
-            fontSize: "0.76rem",
-            background: accent
-              ? "var(--color-accent-soft)"
-              : "var(--color-surface)",
-            color: accent ? "var(--color-accent)" : "var(--color-muted)",
-            border: "1px solid var(--color-border)",
-          }}
-        >
+        <span key={i}>
           {it}
         </span>
       ))}
@@ -1067,32 +1027,33 @@ function ChipList({ items, accent }: { items: string[]; accent?: boolean }) {
 function List({ items, mono }: { items: string[]; mono?: boolean }) {
   if (items.length === 0)
     return (
-      <span style={{ fontSize: "0.8rem", color: "var(--color-faint)" }}>—</span>
+      <span className={styles.emptyValue}>—</span>
     );
   return (
-    <ul
-      style={{
-        margin: 0,
-        padding: 0,
-        listStyle: "none",
-        display: "grid",
-        gap: "0.45rem",
-      }}
-    >
+    <ul className={styles.patternList} data-mono={mono || undefined}>
       {items.map((it, i) => (
-        <li
-          key={i}
-          style={{
-            fontSize: "0.82rem",
-            color: "var(--color-fg)",
-            lineHeight: 1.4,
-            fontFamily: mono ? "var(--font-mono)" : "inherit",
-          }}
-        >
-          {it}
+        <li key={i}>
+          <span>{String(i + 1).padStart(2, "0")}</span><strong>{it}</strong>
         </li>
       ))}
     </ul>
+  );
+}
+
+function SeoSectionHeading({
+  eyebrow,
+  title,
+  detail,
+}: {
+  eyebrow: string;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <header className={styles.roomHeading}>
+      <div><span>{eyebrow}</span><h2>{title}</h2></div>
+      <p>{detail}</p>
+    </header>
   );
 }
 
