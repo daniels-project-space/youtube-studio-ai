@@ -18,8 +18,10 @@
   overflow: hidden;
   border: 1px solid #332d27;
   border-radius: 22px;
-  background: #0d0d0c;
+  background: linear-gradient(135deg,rgba(26,19,22,.88),rgba(8,12,22,.82) 65%);
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.25);
+  backdrop-filter: blur(18px) saturate(128%);
+  -webkit-backdrop-filter: blur(18px) saturate(128%);
 }
 
 .hero::before {
@@ -38,14 +40,14 @@
   position: relative;
   z-index: 1;
   display: flex;
-  min-height: 444px;
+  min-height: 360px;
   flex-direction: column;
   justify-content: center;
-  padding: 56px 50px 46px;
+  padding: 42px 40px 38px;
   border-right: 1px solid #2b2824;
   background:
     linear-gradient(115deg, rgba(255, 107, 67, 0.09), transparent 48%),
-    #0f0f0e;
+    rgba(18,17,25,.62);
 }
 
 .eyebrow {

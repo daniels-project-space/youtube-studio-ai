@@ -7,10 +7,12 @@
   border: 1px solid var(--color-border);
   border-radius: 18px;
   background:
-    radial-gradient(circle at 83% 13%, rgba(131, 169, 255, 0.13), transparent 30%),
-    radial-gradient(circle at 10% 84%, rgba(255, 94, 42, 0.075), transparent 28%),
-    linear-gradient(137deg, #121311, #080a09 64%);
+    radial-gradient(circle at 83% 13%, rgba(115, 221, 255, 0.15), transparent 30%),
+    radial-gradient(circle at 10% 84%, rgba(255, 115, 86, 0.09), transparent 28%),
+    linear-gradient(137deg, rgba(16,20,34,.88), rgba(7,11,21,.84) 64%);
   box-shadow: 0 26px 75px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(18px) saturate(132%);
+  -webkit-backdrop-filter: blur(18px) saturate(132%);
 }
 
 .packagingHero::before {
@@ -98,7 +100,7 @@
   margin-left: 0;
   border: 1px solid var(--color-border);
   border-radius: 15px;
-  background: rgba(4, 5, 6, 0.65);
+  background: linear-gradient(145deg,rgba(255,255,255,.05),transparent 36%),rgba(7,10,20,.68);
   padding: 0.85rem;
   backdrop-filter: blur(18px);
 }
@@ -132,7 +134,7 @@
   gap: 0.12rem;
   border: 1px solid rgba(131, 169, 255, 0.25);
   border-radius: 50%;
-  background: #0b0e0d;
+  background: #0b1120;
   text-align: center;
   transform: translate(-50%, -50%);
 }
@@ -147,7 +149,7 @@
   gap: 0.1rem;
   border: 1px solid var(--color-border);
   border-radius: 8px;
-  background: rgba(10, 12, 12, 0.92);
+  background: rgba(13, 18, 31, 0.9);
   color: var(--color-muted);
   cursor: pointer;
   padding: 0.42rem 0.5rem;
@@ -177,7 +179,7 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   border-top: 1px solid var(--color-border);
-  background: rgba(2, 4, 4, 0.42);
+  background: linear-gradient(90deg,rgba(115,221,255,.035),rgba(255,115,86,.028)),rgba(5,9,18,.5);
 }
 .packagingMetric { display: grid; min-width: 0; grid-template-columns: auto minmax(0, 1fr); gap: 0.7rem; border-right: 1px solid var(--color-border); padding: 0.86rem 1rem; }
 .packagingMetric:last-child { border-right: 0; }

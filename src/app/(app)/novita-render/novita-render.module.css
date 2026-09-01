@@ -22,8 +22,10 @@
   overflow: hidden;
   border: 1px solid var(--fleet-line);
   border-radius: 22px;
-  background: #080d13;
+  background: linear-gradient(135deg,rgba(8,22,38,.88),rgba(9,12,23,.82) 64%);
   box-shadow: 0 30px 90px rgba(0, 0, 0, 0.26);
+  backdrop-filter: blur(18px) saturate(135%);
+  -webkit-backdrop-filter: blur(18px) saturate(135%);
 }
 
 .hero::before {
@@ -41,10 +43,10 @@
   position: relative;
   z-index: 2;
   display: flex;
-  min-height: 432px;
+  min-height: 360px;
   flex-direction: column;
   justify-content: center;
-  padding: 54px 48px 46px;
+  padding: 42px 40px 38px;
   border-right: 1px solid var(--fleet-line);
   background: linear-gradient(128deg, rgba(40, 110, 184, 0.12), transparent 58%);
 }

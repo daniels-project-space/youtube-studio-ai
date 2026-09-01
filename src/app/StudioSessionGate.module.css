@@ -7,10 +7,11 @@
   overflow: hidden;
   color: var(--color-fg);
   background:
-    linear-gradient(rgba(235, 232, 218, 0.024) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(235, 232, 218, 0.024) 1px, transparent 1px),
-    radial-gradient(circle at 70% 18%, rgba(255, 112, 70, 0.1), transparent 30rem),
-    #080a09;
+    linear-gradient(rgba(115, 221, 255, 0.026) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(115, 221, 255, 0.026) 1px, transparent 1px),
+    radial-gradient(circle at 70% 18%, rgba(167, 139, 250, 0.14), transparent 30rem),
+    radial-gradient(circle at 18% 84%, rgba(255, 115, 86, 0.1), transparent 25rem),
+    #050710;
   background-size: 52px 52px, 52px 52px, auto, auto;
 }
 
@@ -32,12 +33,15 @@
   width: min(100%, 56rem);
   display: grid;
   grid-template-columns: minmax(180px, 0.72fr) minmax(0, 1.28fr);
-  gap: clamp(1.7rem, 5vw, 4rem);
+  gap: clamp(1.3rem, 4vw, 3rem);
   align-items: center;
-  padding: clamp(1.5rem, 5vw, 4rem);
-  border-radius: 18px;
-  background: rgba(14, 17, 14, 0.92);
+  padding: clamp(1.4rem, 4vw, 3rem);
+  border-radius: 24px;
+  background:
+    linear-gradient(135deg, rgba(115,221,255,0.055), transparent 42%),
+    rgba(10,14,24,0.78);
   box-shadow: 0 30px 100px rgba(0, 0, 0, 0.42);
+  backdrop-filter: blur(28px) saturate(145%);
 }
 
 .card::before {
@@ -63,7 +67,7 @@
 .orbitInner {
   position: absolute;
   inset: 7%;
-  border: 1px dashed rgba(182, 223, 98, 0.24);
+  border: 1px dashed rgba(115, 221, 255, 0.3);
   border-radius: 50%;
   animation: gate-spin 24s linear infinite;
 }
@@ -77,8 +81,8 @@
   width: 7px;
   height: 7px;
   border-radius: 50%;
-  background: var(--color-secondary);
-  box-shadow: 0 0 20px rgba(182, 223, 98, 0.7);
+  background: var(--color-blueprint);
+  box-shadow: 0 0 20px rgba(115, 221, 255, 0.7);
 }
 
 .orbitInner {
@@ -114,7 +118,7 @@
   position: absolute;
   inset: 0;
   border-radius: 50%;
-  background: conic-gradient(from 24deg, transparent 0 86%, rgba(182, 223, 98, 0.13));
+  background: conic-gradient(from 24deg, transparent 0 86%, rgba(115, 221, 255, 0.14));
   animation: gate-spin 7s linear infinite;
 }
 
@@ -128,10 +132,10 @@
 }
 
 .title {
-  max-width: 12ch;
+  max-width: 11ch;
   margin: 0;
   font-family: var(--font-display);
-  font-size: clamp(2rem, 5vw, 3.8rem);
+  font-size: clamp(2rem, 4.6vw, 3.35rem);
   font-weight: 560;
   letter-spacing: -0.045em;
   line-height: 0.98;

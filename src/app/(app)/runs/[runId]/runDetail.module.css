@@ -1,4 +1,4 @@
-.page { display: grid; min-width: 0; gap: 0; padding-bottom: 2rem; }
+.page { display: grid; min-width: 0; gap: .7rem; padding-bottom: 2rem; }
 .anchorTarget { scroll-margin-top: 5rem; }
 
 .backLink { display: inline-flex; align-items: center; gap: 0.34rem; color: var(--color-faint); font-size: 0.67rem; font-weight: 650; text-decoration: none; transition: color 140ms ease, transform 140ms ease; }
@@ -17,9 +17,11 @@
   margin-bottom: 0;
   padding: 0.8rem 1rem 1rem;
   overflow: hidden;
-  border-top: 1px solid var(--color-border);
-  border-bottom: 1px solid var(--color-border);
-  background: linear-gradient(105deg,color-mix(in srgb,var(--hero-tone) 5%,transparent),transparent 62%);
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  background: linear-gradient(145deg,rgba(255,255,255,.05),transparent 35%),linear-gradient(105deg,color-mix(in srgb,var(--hero-tone) 10%,transparent),rgba(12,16,27,.68) 62%);
+  box-shadow: var(--shadow-card);
+  backdrop-filter: blur(16px);
 }
 .runHero[data-status="running"] { --hero-tone: var(--color-running); }
 .runHero[data-status="queued"] { --hero-tone: var(--color-queued); }
@@ -38,7 +40,7 @@
 .heroCopy p { display: flex; min-width: 0; flex-wrap: wrap; align-items: center; gap: 0.45rem; margin: 0.1rem 0 0; color: var(--color-faint); font-size: 0.64rem; }
 .heroCopy p i { width: 3px; height: 3px; border-radius: 50%; background: var(--hero-tone); }
 .runId { max-width: min(100%,30rem); overflow: hidden; font-family: var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.heroProgress { display: grid; min-width: 0; gap: 0.45rem; padding: 0.72rem 0.82rem; border: 1px solid var(--color-border); border-radius: 8px; background: rgba(5,8,6,0.52); }
+.heroProgress { display: grid; min-width: 0; gap: 0.45rem; padding: 0.72rem 0.82rem; border: 1px solid var(--color-border); border-radius: 12px; background: rgba(7,11,21,.66); }
 .heroProgress > div:first-child { display: flex; align-items: baseline; justify-content: space-between; gap: 1rem; }
 .heroProgress small { color: var(--color-faint); font: 700 0.51rem/1 var(--font-mono); letter-spacing: 0.09em; text-transform: uppercase; }
 .heroProgress strong { color: var(--hero-tone); font: 650 0.78rem/1 var(--font-mono); }
@@ -56,8 +58,8 @@
 .runMap small { overflow: hidden; color: var(--color-faint); font: 0.57rem/1.2 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 
 .summarySection { margin-bottom: 1.35rem; }
-.summaryGrid { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); overflow: hidden; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
-.field { display: grid; min-width: 0; gap: 0.34rem; padding: 0.72rem 0.8rem; border-right: 1px solid var(--color-border); }
+.summaryGrid { display: grid; grid-template-columns: repeat(6,minmax(0,1fr)); gap: .35rem; }
+.field { display: grid; min-width: 0; gap: 0.34rem; padding: 0.72rem 0.8rem; border: 1px solid var(--color-border); border-radius: 11px; background: rgba(222,235,255,.025); }
 .field:last-child { border-right: 0; }
 .fieldLabel { color: var(--color-faint); font: 700 0.52rem/1 var(--font-mono); letter-spacing: 0.09em; text-transform: uppercase; }
 .fieldValue { display: flex; min-height: 1.2rem; align-items: center; gap: 0.32rem; overflow: hidden; color: var(--color-muted); font-size: 0.72rem; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }

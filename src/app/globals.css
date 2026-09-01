@@ -2044,7 +2044,11 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
   gap: 0.58rem;
   padding: 0.7rem;
   overflow: hidden;
-  box-shadow: none;
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.05), transparent 34%),
+    linear-gradient(120deg, rgba(115,221,255,.025), rgba(167,139,250,.025) 62%, rgba(255,115,86,.02)),
+    rgba(12,16,27,.68);
+  box-shadow: var(--shadow-card);
   transition: border-color 180ms ease, transform 180ms ease, background 180ms ease;
 }
 
@@ -2064,7 +2068,7 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
 }
 
 .channel-card-attention {
-  border-color: rgba(248, 113, 113, 0.28);
+  border-color: var(--color-border);
 }
 
 .channel-card-preview-label {

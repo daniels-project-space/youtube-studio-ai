@@ -17,6 +17,7 @@ import { RecentVideos } from "@/components/RecentVideos";
 import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
 import {
   IconCalendar,
+  IconAnalytics,
   IconChannels,
   IconRuns,
   IconSpark,
@@ -34,11 +35,32 @@ type PlanRow = {
   scheduledAt?: number;
 };
 
+type AnalyticsOverview = {
+  totalSubscribers: number;
+  totalViews: number;
+  totalCost: number;
+  planningCost: number;
+  videoCount: number;
+  channelCount: number;
+};
+
+type YoutubeLinkRow = {
+  channelId: string;
+  status: string;
+  scopeHealth?: string;
+  ytChannelId?: string;
+};
+
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
   minimumFractionDigits: 2,
   maximumFractionDigits: 2,
+});
+
+const compact = new Intl.NumberFormat("en-US", {
+  notation: "compact",
+  maximumFractionDigits: 1,
 });
 
 const scheduleDate = new Intl.DateTimeFormat("en-GB", {
@@ -68,6 +90,12 @@ export default function OverviewPage() {
     | undefined;
   const plan = useQuery(api.contentPlan.listPlanByOwner, { ownerId }) as
     | PlanRow[]
+    | undefined;
+  const analyticsOverview = useQuery(api.analytics.overview, { ownerId }) as
+    | AnalyticsOverview
+    | undefined;
+  const youtubeLinks = useQuery(api.youtubeAuth.linkStatus, { ownerId }) as
+    | YoutubeLinkRow[]
     | undefined;
 
   const filterByChannel = <T extends { channelSlug: string }>(rows?: T[]) =>
@@ -110,6 +138,14 @@ export default function OverviewPage() {
     .slice(0, 4);
   const activeChannelCount =
     channelsFiltered?.filter((channel) => channel.status === "active").length ?? 0;
+  const youtubeReadyChannelIds = new Set(
+    (youtubeLinks ?? [])
+      .filter((link) => link.status === "active" && link.scopeHealth === "healthy" && link.ytChannelId)
+      .map((link) => link.channelId),
+  );
+  const disconnectedChannels = youtubeLinks === undefined
+    ? undefined
+    : (channelsFiltered ?? []).filter((channel) => !youtubeReadyChannelIds.has(channel._id));
   const loading =
     channels === undefined ||
     recent === undefined ||
@@ -118,7 +154,9 @@ export default function OverviewPage() {
   const activeCount = activeFiltered?.length ?? 0;
   const selectedName = selectedSlug
     ? channelsFiltered?.[0]?.name ?? "Selected channel"
-    : "the full channel fleet";
+    : loading
+      ? "Loading fleet"
+      : `${activeChannelCount} active · ${activeCount} in production`;
 
   return (
     <div className={styles.dashboard}>
@@ -186,6 +224,13 @@ export default function OverviewPage() {
         <Metric index="04" label="Recorded spend" value={loading ? "—" : usd.format(recordedSpend)} note="latest 50 runs" />
       </section>
 
+      <OperatingDeck
+        failed={failed}
+        overdue={overdue}
+        disconnectedChannels={disconnectedChannels}
+        analytics={analyticsOverview}
+      />
+
       <ChannelRelay channels={channelsFiltered} loading={channels === undefined} />
 
       <section className={styles.workbench} aria-label="Current production and release queue">
@@ -251,19 +296,19 @@ export default function OverviewPage() {
         <summary>
           <span className={styles.runsSummaryMark} aria-hidden="true"><IconRuns width={17} height={17} /></span>
           <span>
-            <small>Production ledger</small>
+            <small>Runs</small>
             <strong>Recent runs</strong>
           </span>
           <span className={styles.runSummaryMeta}>
             {failed.length > 0 && <em>{failed.length} require inspection</em>}
-            <small>{recentFiltered?.length ?? 0} retained</small>
+            <small>{recentFiltered?.length ?? 0} shown</small>
           </span>
           <i aria-hidden="true" />
         </summary>
         <div className={styles.runsBody}>
           <div className={styles.runsBodyHeader}>
-            <span>Newest production receipts</span>
-            <Link href="/runs">Open full ledger <span aria-hidden="true">↗</span></Link>
+            <span>Latest run activity</span>
+            <Link href="/runs">All runs <span aria-hidden="true">↗</span></Link>
           </div>
           {recent === undefined ? (
             <SkeletonList rows={4} />
@@ -274,7 +319,7 @@ export default function OverviewPage() {
               ))}
             </div>
           ) : (
-            <CompactEmpty icon={<IconRuns width={20} height={20} />} title="No run receipts yet" detail="Every real production will leave an inspectable record here." />
+            <CompactEmpty icon={<IconRuns width={20} height={20} />} title="No runs yet" detail="Active and completed runs appear here." />
           )}
         </div>
       </details>
@@ -311,7 +356,7 @@ function SignalDial({
         </div>
       </div>
       <figcaption>
-        <span>Signal integrity</span>
+          <span>Run success</span>
         <strong>{loading ? "Calibrating" : successRate === null ? "Awaiting history" : successRate >= 90 ? "Stable" : "Review advised"}</strong>
       </figcaption>
     </figure>
@@ -343,6 +388,62 @@ function Metric({
   );
 }
 
+function OperatingDeck({
+  failed,
+  overdue,
+  disconnectedChannels,
+  analytics,
+}: {
+  failed: RunRow[];
+  overdue: PlanRow[];
+  disconnectedChannels?: ChannelRow[];
+  analytics?: AnalyticsOverview;
+}) {
+  const issueCount = failed.length + overdue.length + (disconnectedChannels?.length ?? 0);
+  return (
+    <section className={styles.operatingDeck} aria-label="Studio overview controls and insights">
+      <details className={`${styles.insightWidget} ${styles.issueWidget} glass`}>
+        <summary>
+          <span className={styles.widgetGlyph} data-tone={issueCount > 0 ? "attention" : "ready"} aria-hidden="true"><i /></span>
+          <span><small>Issues</small><strong>{issueCount || "Clear"}</strong></span>
+          <b>{issueCount > 0 ? "Review" : "Healthy"}</b>
+          <i aria-hidden="true" />
+        </summary>
+        <div className={styles.widgetBody}>
+          <Link href="/runs"><span>Failed runs</span><strong>{failed.length}</strong></Link>
+          <Link href="/schedule"><span>Overdue releases</span><strong>{overdue.length}</strong></Link>
+          <Link href="/channels"><span>YouTube links</span><strong>{disconnectedChannels === undefined ? "—" : `${disconnectedChannels.length} need work`}</strong></Link>
+        </div>
+      </details>
+
+      <details className={`${styles.insightWidget} ${styles.analyticsWidget} glass`}>
+        <summary>
+          <span className={styles.widgetGlyph} data-tone="analytics" aria-hidden="true"><IconAnalytics width={18} height={18} /></span>
+          <span><small>Audience</small><strong>{analytics ? compact.format(analytics.totalViews) : "—"}</strong></span>
+          <b>Views</b>
+          <i aria-hidden="true" />
+        </summary>
+        <div className={styles.widgetBody}>
+          <span><span>Subscribers</span><strong>{analytics ? compact.format(analytics.totalSubscribers) : "—"}</strong></span>
+          <span><span>Published</span><strong>{analytics?.videoCount ?? "—"}</strong></span>
+          <span><span>Total recorded spend</span><strong>{analytics ? usd.format(analytics.totalCost) : "—"}</strong></span>
+          <Link href="/analytics" className={styles.widgetOpen}>Open analytics <b aria-hidden="true">↗</b></Link>
+        </div>
+      </details>
+
+      <section className={`${styles.masterWidget} glass`} aria-labelledby="master-controls-title">
+        <header><small>Master controls</small><strong id="master-controls-title">Operate</strong></header>
+        <nav aria-label="Master studio controls">
+          <Link href="/runs"><IconRuns width={16} height={16} /><span>Production</span></Link>
+          <Link href="/schedule"><IconCalendar width={16} height={16} /><span>Schedule</span></Link>
+          <Link href="/channels"><IconChannels width={16} height={16} /><span>Channels</span></Link>
+          <Link href="/analytics"><IconAnalytics width={16} height={16} /><span>Analytics</span></Link>
+        </nav>
+      </section>
+    </section>
+  );
+}
+
 function ChannelRelay({
   channels,
   loading,
@@ -355,11 +456,11 @@ function ChannelRelay({
     <section className={styles.relay} aria-labelledby="channel-relay-title">
       <header className={styles.sectionHeading}>
         <div>
-          <span>Identity in motion</span>
-          <h2 id="channel-relay-title">Channel relay</h2>
+          <span>Channels</span>
+          <h2 id="channel-relay-title">Channel overview</h2>
         </div>
-        <p>The fleet moves slowly; hover or focus to hold it.</p>
-        <Link href="/channels">Explore every channel <span aria-hidden="true">↗</span></Link>
+        <p>Open a channel to manage its identity and production.</p>
+        <Link href="/channels">All channels <span aria-hidden="true">↗</span></Link>
       </header>
 
       <div className={styles.relayViewport} data-static={relayChannels.length < 2 ? "true" : undefined}>
@@ -381,7 +482,7 @@ function ChannelRelay({
         ) : (
           <Link href="/channels/new" className={styles.emptyRelay}>
             <IconChannels width={25} height={25} />
-            <span><strong>Build the first channel identity</strong><small>Opportunity, art direction, pipeline, and a QC-reviewed test render.</small></span>
+            <span><strong>Create the first channel</strong><small>Set its identity, format, and test render.</small></span>
             <i aria-hidden="true">↗</i>
           </Link>
         )}
@@ -403,20 +504,19 @@ function RelayCard({ channel, clone = false }: { channel: ChannelRow; clone?: bo
         fallbackKeys={[identity?.imageKey]}
         name={channel.name}
         palette={identity?.palette}
-        aspectRatio="16 / 8.2"
-      >
-        <div className={styles.relayCardScrim}>
-          <span className={styles.relayNumber}>{channel.status === "active" ? "ON AIR" : channel.status.toUpperCase()}</span>
-          <div className={styles.relayIdentity}>
-            <ChannelAvatar imageKey={identity?.imageKey} name={channel.name} palette={identity?.palette} size={46} radius={12} />
-            <span>
-              <strong>{channel.name}</strong>
-              <small>{identity?.niche || identity?.persona || channel.template}</small>
-            </span>
-          </div>
-          <span className={styles.relayOpen}>Open show <i aria-hidden="true">↗</i></span>
+        aspectRatio="16 / 7.5"
+      />
+      <div className={styles.relayCardBody}>
+        <span className={styles.relayNumber}>{channel.status === "active" ? "ON AIR" : channel.status.toUpperCase()}</span>
+        <div className={styles.relayIdentity}>
+          <ChannelAvatar imageKey={identity?.imageKey} name={channel.name} palette={identity?.palette} size={42} radius={11} />
+          <span>
+            <strong>{channel.name}</strong>
+            <small>{identity?.niche || identity?.persona || channel.template}</small>
+          </span>
         </div>
-      </ChannelBanner>
+        <span className={styles.relayOpen}>Open channel <i aria-hidden="true">↗</i></span>
+      </div>
     </Link>
   );
 }

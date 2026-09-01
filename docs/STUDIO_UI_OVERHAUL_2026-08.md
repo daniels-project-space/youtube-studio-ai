@@ -20,6 +20,14 @@ keyboard path, and captured visual result have all been reviewed.
   and spacing primitives rather than inventing another card dialect.
 - Validate at 390, 768, 1280, and 1728 CSS-pixel widths and inspect captures,
   not merely DOM assertions.
+- Run three complete visual passes over every route and reachable subpanel
+  before calling the overhaul complete: structure and hierarchy, page-specific
+  interaction and identity, then final density/motion/accessibility polish.
+- Use the spectral frosted-glass language across the whole application, not
+  only channel screens. Reserve the strongest blur and edge light for controls
+  and elevated layers; keep reading surfaces calmer and maintain WCAG contrast.
+- Prefer compact visual state, symbols, charts, progress, and controls to
+  explanatory prose. Decorative copy may not displace a real status or action.
 
 ## Daily desks
 
@@ -30,6 +38,17 @@ reel, live production signal, schedule horizon, channel health, release alerts,
 and recent masters. The reel moves slowly without hijacking scroll; its controls
 remain explicit and accessible. Avoid duplicating the full Runs or Analytics
 pages.
+
+#### Advanced Studio starting-page restructure
+
+Treat the initial Studio screen as its own multi-pass product stage. Replace
+fake or atmospheric text and text-over-image treatments with a real overview of
+issues, runs, channels, schedule risk, YouTube readiness, recorded spend, and
+analytics. Present these as compact animated widgets backed by live queries;
+only widgets with useful detail expand, and every control routes to or performs
+a real operator action. Add master controls for Production, Schedule, Channels,
+and Analytics, validate empty/error/loading states, and inspect the expanded and
+collapsed layouts at every target viewport.
 
 ### Channels `/channels`
 

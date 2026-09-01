@@ -7,7 +7,11 @@
   gap: 1.2rem;
   margin-top: -0.45rem;
   padding: .72rem 0;
-  border-block: 1px solid var(--color-border);
+  border: 1px solid var(--color-border);
+  border-radius: 15px;
+  background: linear-gradient(110deg,var(--color-blueprint-soft),var(--color-violet-soft)),rgba(10,14,25,.58);
+  padding: .7rem .8rem;
+  backdrop-filter: blur(16px);
 }
 
 .collectionTabs {
@@ -56,7 +60,7 @@
 .workshopBody > section { margin: 1rem 0 0; }
 
 .archive { display: grid; gap: .85rem; }
-.channel { position: relative; padding: .8rem; border: 1px solid var(--color-border); border-radius: 13px; background: var(--color-surface); }
+.channel { position: relative; padding: .8rem; border: 1px solid var(--color-border); border-radius: 16px; background: linear-gradient(145deg,rgba(255,255,255,.045),transparent 36%),rgba(12,16,27,.68); box-shadow: var(--shadow-card); backdrop-filter: blur(14px); }
 .channel::before { content: ""; position: absolute; top: -1px; left: 1rem; width: 42px; height: 1px; background: var(--color-accent); }
 
 .channelHeader { width: 100%; min-height: 42px; display: flex; align-items: center; gap: .58rem; padding: 0 .15rem .72rem; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
@@ -71,7 +75,7 @@
 .actions { display: flex; gap: .45rem; margin-left: auto; }
 .actions button { min-height: 34px; }
 
-.changeToast { position: fixed; z-index: 90; right: 1.2rem; bottom: 1.2rem; width: min(420px, calc(100vw - 2rem)); display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: .65rem; padding: .72rem .8rem; border: 1px solid var(--color-border-strong); border-radius: 11px; color: var(--color-fg); background: #171b16; box-shadow: 0 22px 70px rgba(0,0,0,.48); }
+.changeToast { position: fixed; z-index: 90; right: 1.2rem; bottom: 1.2rem; width: min(420px, calc(100vw - 2rem)); display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: .65rem; padding: .72rem .8rem; border: 1px solid var(--color-border-strong); border-radius: 14px; color: var(--color-fg); background: rgba(12,16,27,.9); box-shadow: 0 22px 70px rgba(0,0,0,.48); backdrop-filter: blur(20px); }
 .changeToast > span { min-width: 0; display: grid; gap: .12rem; }
 .changeToast strong { font-size: .72rem; }
 .changeToast small { overflow: hidden; color: var(--color-faint); font-size: .61rem; text-overflow: ellipsis; white-space: nowrap; }

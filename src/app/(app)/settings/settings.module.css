@@ -13,10 +13,12 @@
   border: 1px solid var(--color-border);
   border-radius: 18px;
   background:
-    radial-gradient(circle at 84% 12%, rgba(245, 158, 11, 0.1), transparent 31%),
-    radial-gradient(circle at 11% 86%, rgba(255, 94, 42, 0.065), transparent 27%),
-    linear-gradient(138deg, #14130f, #090a09 65%);
+    radial-gradient(circle at 84% 12%, rgba(243, 189, 88, 0.13), transparent 31%),
+    radial-gradient(circle at 11% 86%, rgba(167, 139, 250, 0.075), transparent 27%),
+    linear-gradient(138deg, rgba(20,19,30,.88), rgba(8,11,21,.84) 65%);
   box-shadow: 0 26px 78px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(18px) saturate(130%);
+  -webkit-backdrop-filter: blur(18px) saturate(130%);
 }
 
 .governanceHero::before {
@@ -98,7 +100,7 @@
   margin-left: 0;
   border: 1px solid var(--color-border);
   border-radius: 15px;
-  background: rgba(4, 5, 5, 0.65);
+  background: linear-gradient(145deg,rgba(255,255,255,.05),transparent 36%),rgba(10,11,20,.7);
   padding: 0.85rem;
   backdrop-filter: blur(18px);
 }
@@ -118,13 +120,13 @@
 .policyOrbit::before { position: absolute; inset: 18%; border: 1px dashed rgba(255, 255, 255, 0.07); border-radius: inherit; content: ""; animation: policySpin 44s linear infinite; }
 .policyCrosshair { position: absolute; inset: 50% 8% auto; border-top: 1px solid rgba(255, 255, 255, 0.06); }
 .policyCrosshair::after { position: absolute; top: -108px; left: 50%; height: 216px; border-left: 1px solid rgba(255, 255, 255, 0.06); content: ""; }
-.policyCore { position: absolute; top: 50%; left: 50%; display: grid; width: 96px; height: 96px; place-content: center; gap: 0.12rem; border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 50%; background: #0d0e0c; text-align: center; transform: translate(-50%, -50%); }
+.policyCore { position: absolute; top: 50%; left: 50%; display: grid; width: 96px; height: 96px; place-content: center; gap: 0.12rem; border: 1px solid rgba(245, 158, 11, 0.25); border-radius: 50%; background: #10121e; text-align: center; transform: translate(-50%, -50%); }
 .policyCore small,
 .policyCore span { color: var(--color-faint); font: 0.48rem var(--font-mono); letter-spacing: 0.08em; }
 .policyCore strong { color: var(--color-amber); font: 0.72rem var(--font-mono); letter-spacing: 0.08em; }
 .policyCore[data-open="true"] { border-color: rgba(34, 197, 94, 0.35); }
 .policyCore[data-open="true"] strong { color: var(--color-ok); }
-.policyNode { position: absolute; display: grid; min-width: 128px; max-width: 156px; gap: 0.1rem; border: 1px solid var(--color-border); border-radius: 8px; background: rgba(10, 11, 10, 0.92); padding: 0.42rem 0.5rem; }
+.policyNode { position: absolute; display: grid; min-width: 128px; max-width: 156px; gap: 0.1rem; border: 1px solid var(--color-border); border-radius: 10px; background: rgba(15, 18, 31, 0.9); padding: 0.42rem 0.5rem; }
 .policyNode > span { color: var(--color-faint); font: 0.46rem var(--font-mono); }
 .policyNode strong { font-size: 0.62rem; }
 .policyNode small { overflow: hidden; color: var(--color-muted); font-size: 0.55rem; text-overflow: ellipsis; white-space: nowrap; }

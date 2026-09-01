@@ -13,17 +13,17 @@
 
 .signalHero {
   position: relative;
-  min-height: 360px;
+  min-height: 248px;
   display: grid;
-  grid-template-columns: minmax(0, 1.35fr) minmax(280px, 0.65fr);
+  grid-template-columns: minmax(0, 1.45fr) minmax(190px, 0.55fr);
   align-items: center;
-  gap: clamp(2rem, 5vw, 5rem);
-  padding: clamp(1.5rem, 4vw, 3.4rem);
+  gap: clamp(1.25rem, 4vw, 3rem);
+  padding: clamp(1.3rem, 3vw, 2.25rem);
   overflow: hidden;
   background:
-    radial-gradient(circle at 82% 26%, rgba(182, 223, 98, 0.09), transparent 22rem),
-    linear-gradient(108deg, rgba(255, 112, 70, 0.055), transparent 42%),
-    #0f130f;
+    radial-gradient(circle at 84% 24%, rgba(115, 221, 255, 0.1), transparent 18rem),
+    linear-gradient(112deg, rgba(169, 240, 107, 0.065), rgba(167,139,250,.045) 55%, rgba(255,115,86,.055)),
+    rgba(10, 15, 25, .78);
 }
 
 .signalHero::before {
@@ -36,15 +36,7 @@
   background: var(--color-accent);
 }
 
-.signalHero::after {
-  content: "LIVE / RELEASE / EVIDENCE";
-  position: absolute;
-  right: 1.2rem;
-  bottom: 1rem;
-  color: rgba(243, 240, 232, 0.16);
-  font: 0.51rem/1 var(--font-mono);
-  letter-spacing: 0.18em;
-}
+.signalHero::after { content: none; }
 
 .signalCopy { position: relative; z-index: 1; }
 
@@ -69,10 +61,10 @@
 .liveKicker[data-live="true"] i { animation: live-breathe 1.8s ease-in-out infinite; }
 
 .signalCopy h2 {
-  max-width: 18ch;
-  margin: 1rem 0 0;
+  max-width: 22ch;
+  margin: .78rem 0 0;
   font-family: var(--font-display);
-  font-size: clamp(2.25rem, 5vw, 4.6rem);
+  font-size: clamp(2.05rem, 4.2vw, 3.65rem);
   font-weight: 550;
   line-height: 0.96;
   letter-spacing: -0.052em;
@@ -80,13 +72,13 @@
 
 .signalCopy > p {
   max-width: 58ch;
-  margin: 1rem 0 0;
+  margin: .72rem 0 0;
   color: var(--color-muted);
   font-size: 0.86rem;
   line-height: 1.65;
 }
 
-.heroActions { margin-top: 1.35rem; }
+.heroActions { margin-top: 1rem; }
 
 .textAction {
   display: inline-flex;
@@ -103,7 +95,7 @@
 .signalDial {
   position: relative;
   z-index: 1;
-  width: min(100%, 310px);
+  width: min(100%, 205px);
   display: grid;
   gap: 0.75rem;
   justify-self: center;
@@ -118,10 +110,10 @@
   place-items: center;
   border-radius: 50%;
   background:
-    radial-gradient(circle, #111510 0 42%, transparent 43%),
-    conic-gradient(var(--color-secondary) 0 var(--dial-progress), rgba(243, 240, 232, 0.065) var(--dial-progress) 360deg);
+    radial-gradient(circle, #0d1220 0 42%, transparent 43%),
+    conic-gradient(var(--color-secondary) 0 var(--dial-progress), rgba(222, 235, 255, 0.075) var(--dial-progress) 360deg);
   mask: radial-gradient(circle, black 0 63%, transparent 63.5% 68%, black 68.5%);
-  box-shadow: 0 0 80px rgba(182, 223, 98, 0.05);
+  box-shadow: 0 0 70px rgba(115,221,255,.09);
 }
 
 .dialGraphic::before,
@@ -148,7 +140,7 @@
   border: 1px solid var(--color-border-strong);
   border-radius: 50%;
   text-align: center;
-  background: #10140f;
+  background: #0d1220;
 }
 
 .dialCore small,
@@ -189,7 +181,7 @@
 .metricRail {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  border-block: 1px solid var(--color-border);
+  gap: .4rem;
 }
 
 .metric {
@@ -198,10 +190,12 @@
   grid-template-columns: auto minmax(0, 1fr);
   gap: 0.7rem;
   padding: 1rem clamp(0.7rem, 2vw, 1.25rem);
-  border-right: 1px solid var(--color-border);
+  border: 1px solid var(--color-border);
+  border-radius: 13px;
+  background: rgba(222,235,255,.025);
 }
 
-.metric:last-child { border-right: 0; }
+.metric:last-child { border-right: 1px solid var(--color-border); }
 .metric > span { color: var(--color-faint); font: 0.52rem/1 var(--font-mono); }
 .metric > div { min-width: 0; display: grid; gap: 0.2rem; }
 .metric small { color: var(--color-faint); font: 0.58rem/1 var(--font-mono); letter-spacing: 0.07em; text-transform: uppercase; }
@@ -210,6 +204,37 @@
 .metric[data-tone="live"] strong { color: var(--color-secondary); }
 .metric[data-tone="warn"] strong,
 .metric[data-tone="warn"] p { color: var(--color-amber); }
+
+.operatingDeck { display: grid; grid-template-columns: minmax(0,.75fr) minmax(0,.75fr) minmax(320px,1.5fr); gap: .65rem; }
+
+.insightWidget,
+.masterWidget { min-width: 0; overflow: hidden; }
+.insightWidget > summary { display: grid; grid-template-columns: auto minmax(0,1fr) auto auto; align-items: center; gap: .65rem; min-height: 86px; padding: .78rem .85rem; cursor: pointer; list-style: none; }
+.insightWidget > summary::-webkit-details-marker { display: none; }
+.widgetGlyph { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--color-border); border-radius: 12px; color: var(--color-blueprint); background: var(--color-blueprint-soft); }
+.widgetGlyph i { width: 8px; height: 8px; border-radius: 50%; background: currentColor; box-shadow: 0 0 0 5px color-mix(in srgb,currentColor 12%,transparent); }
+.widgetGlyph[data-tone="attention"] { color: var(--color-failed); background: color-mix(in srgb,var(--color-failed) 8%,transparent); }
+.widgetGlyph[data-tone="ready"] { color: var(--color-secondary); background: var(--color-secondary-soft); }
+.insightWidget > summary > span:nth-child(2) { display: grid; min-width: 0; gap: .12rem; }
+.insightWidget small,
+.masterWidget small { color: var(--color-faint); font: 700 .52rem/1 var(--font-mono); letter-spacing: .1em; text-transform: uppercase; }
+.insightWidget > summary strong { overflow: hidden; font-family: var(--font-display); font-size: 1.45rem; font-weight: 570; text-overflow: ellipsis; white-space: nowrap; }
+.insightWidget > summary b { color: var(--color-muted); font-size: .61rem; font-weight: 640; }
+.insightWidget > summary > i { width: 24px; height: 24px; display: grid; place-items: center; border: 1px solid var(--color-border); border-radius: 50%; font-style: normal; }
+.insightWidget > summary > i::after { content: "+"; color: var(--color-accent); }
+.insightWidget[open] > summary > i::after { content: "−"; }
+.widgetBody { display: grid; gap: .3rem; padding: .2rem .7rem .7rem; border-top: 1px solid var(--color-border); }
+.widgetBody > a:not(.widgetOpen),
+.widgetBody > span { min-height: 38px; display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .45rem .5rem; border-radius: 9px; color: var(--color-muted); background: rgba(222,235,255,.025); font-size: .64rem; }
+.widgetBody > a:hover { color: var(--color-fg); background: rgba(222,235,255,.055); }
+.widgetBody strong { color: var(--color-fg); font: 650 .64rem/1 var(--font-mono); }
+.widgetOpen { min-height: 38px; display: flex; align-items: center; justify-content: space-between; padding: .38rem .5rem; color: var(--color-blueprint); font-size: .64rem; font-weight: 650; }
+.masterWidget { display: grid; grid-template-columns: minmax(100px,.35fr) minmax(0,1fr); align-items: center; gap: .6rem; padding: .7rem; }
+.masterWidget header { display: grid; gap: .18rem; padding-left: .2rem; }
+.masterWidget header strong { font-family: var(--font-display); font-size: 1.16rem; font-weight: 570; }
+.masterWidget nav { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .35rem; }
+.masterWidget nav a { min-width: 0; min-height: 62px; display: grid; place-items: center; align-content: center; gap: .35rem; padding: .5rem .35rem; border: 1px solid var(--color-border); border-radius: 11px; color: var(--color-muted); background: rgba(222,235,255,.025); font-size: .59rem; font-weight: 650; transition: transform 160ms ease,border-color 160ms ease,color 160ms ease,background 160ms ease; }
+.masterWidget nav a:hover { color: var(--color-fg); border-color: var(--color-border-strong); background: linear-gradient(145deg,var(--color-blueprint-soft),var(--color-violet-soft)); transform: translateY(-2px); }
 
 .relay { min-width: 0; display: grid; gap: 0.8rem; }
 
@@ -253,18 +278,19 @@
 .relayViewport[data-static="true"] .relayTrack { width: 100%; animation: none; }
 .relaySet { display: flex; gap: 0.8rem; padding-right: 0.8rem; }
 
-.relayCard { width: clamp(285px, 29vw, 390px); display: block; flex: 0 0 auto; border-radius: 16px; transition: transform 180ms ease, filter 180ms ease; }
+.relayCard { width: clamp(285px, 26vw, 360px); display: grid; flex: 0 0 auto; overflow: hidden; border: 1px solid var(--color-border); border-radius: 17px; background: linear-gradient(145deg,rgba(255,255,255,.045),transparent 38%),rgba(12,16,27,.7); box-shadow: var(--shadow-card); transition: transform 180ms ease, filter 180ms ease,border-color 180ms ease; }
 .relayCard:hover,
-.relayCard:focus-visible { transform: translateY(-3px); filter: saturate(1.08); }
-.relayCard > div { height: 100%; border-radius: 16px !important; }
+.relayCard:focus-visible { border-color: var(--color-border-strong); transform: translateY(-3px); filter: saturate(1.08); }
+.relayCard > div:first-child { border-radius: 0 !important; }
 
-.relayCardScrim { height: 100%; display: grid; align-content: space-between; padding: 0.85rem; }
-.relayNumber { width: fit-content; padding: 0.25rem 0.4rem; border: 1px solid rgba(255,255,255,.22); border-radius: 6px; color: rgba(255,255,255,.82); background: rgba(4,5,4,.45); font: 0.51rem/1 var(--font-mono); letter-spacing: .12em; backdrop-filter: blur(10px); }
+.relayCardBody { display: grid; grid-template-columns: auto minmax(0,1fr); align-items: center; gap: .55rem .65rem; padding: .72rem .78rem; }
+.relayNumber { grid-column: 1 / -1; width: fit-content; padding: 0.2rem 0.38rem; border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-secondary); background: var(--color-secondary-soft); font: 0.5rem/1 var(--font-mono); letter-spacing: .11em; }
 .relayIdentity { display: flex; min-width: 0; align-items: center; gap: 0.65rem; }
+.relayCardBody .relayIdentity { grid-column: 1 / -1; }
 .relayIdentity > span { min-width: 0; display: grid; flex: 1; gap: 0.12rem; }
-.relayIdentity strong { overflow: hidden; font-family: var(--font-display); font-size: 1.12rem; font-weight: 570; text-overflow: ellipsis; white-space: nowrap; text-shadow: 0 2px 15px rgba(0,0,0,.65); }
-.relayIdentity small { overflow: hidden; color: rgba(255,255,255,.7); font-size: 0.62rem; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
-.relayOpen { display: flex; align-items: center; justify-content: space-between; margin-top: 0.7rem; padding-top: 0.55rem; border-top: 1px solid rgba(255,255,255,.18); color: rgba(255,255,255,.74); font-size: 0.61rem; font-weight: 650; }
+.relayIdentity strong { overflow: hidden; font-family: var(--font-display); font-size: 1.04rem; font-weight: 570; text-overflow: ellipsis; white-space: nowrap; }
+.relayIdentity small { overflow: hidden; color: var(--color-muted); font-size: 0.62rem; text-overflow: ellipsis; text-transform: capitalize; white-space: nowrap; }
+.relayOpen { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; padding-top: 0.52rem; border-top: 1px solid var(--color-border); color: var(--color-muted); font-size: 0.61rem; font-weight: 650; }
 
 .relaySkeletons { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 0.8rem; }
 .relaySkeletons span { min-height: 185px; border: 1px solid var(--color-border); border-radius: 16px; background: linear-gradient(100deg, var(--color-surface), var(--color-surface-raised), var(--color-surface)); background-size: 220% 100%; animation: relay-shimmer 1.7s linear infinite; }
@@ -357,8 +383,10 @@
 @media (max-width: 1080px) {
   .signalHero { grid-template-columns: minmax(0, 1fr) minmax(230px, .55fr); }
   .metricRail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .metric:nth-child(2) { border-right: 0; }
+  .metric:nth-child(2) { border-right: 1px solid var(--color-border); }
   .metric:nth-child(-n + 2) { border-bottom: 1px solid var(--color-border); }
+  .operatingDeck { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .masterWidget { grid-column: 1 / -1; }
   .sectionHeading { grid-template-columns: minmax(0, 1fr) auto; }
   .sectionHeading p { display: none; }
 }
@@ -367,6 +395,8 @@
   .signalHero { min-height: 0; grid-template-columns: 1fr; }
   .signalDial { width: min(72vw, 280px); }
   .workbench { grid-template-columns: 1fr; }
+  .operatingDeck { grid-template-columns: 1fr; }
+  .masterWidget { grid-column: auto; }
 }
 
 @media (max-width: 620px) {
@@ -377,8 +407,10 @@
   .heroActions { align-items: stretch; flex-direction: column; }
   .textAction { justify-content: center; }
   .metricRail { grid-template-columns: 1fr; }
-  .metric { border-right: 0; border-bottom: 1px solid var(--color-border); }
-  .metric:last-child { border-bottom: 0; }
+  .metric { border-right: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+  .metric:last-child { border-bottom: 1px solid var(--color-border); }
+  .masterWidget { grid-template-columns: 1fr; }
+  .masterWidget nav { grid-template-columns: repeat(2,minmax(0,1fr)); }
   .sectionHeading { align-items: start; }
   .sectionHeading > a { max-width: 9rem; text-align: right; }
   .relayCard { width: 82vw; }
@@ -399,5 +431,6 @@
   .relayViewport { overflow-x: auto; mask-image: none; }
   .activeRow,
   .queueRow,
-  .relayCard { transition: none; }
+  .relayCard,
+  .masterWidget nav a { transition: none; }
 }

@@ -104,16 +104,16 @@ function StudioSessionGate({ state }: { state: "loading" | "unavailable" }) {
         <div className={styles.copy}>
           <span className={styles.eyebrow}>AutoStudio / signed workspace</span>
           <h1 className={styles.title}>
-            {loading ? "Opening the production floor" : "Live studio connection paused"}
+            {loading ? "Opening Studio" : "Studio offline"}
           </h1>
           <p className={styles.body}>
             {loading
-              ? "Binding the private channel ledger, retained media, and release controls to this session."
-              : "The shell is intact, but its signed live-data connection could not be confirmed."}
+              ? "Loading channels, runs, and release controls."
+              : "Live production data could not be reached."}
           </p>
           <span className={styles.status} data-state={state}>
             <span className={styles.statusDot} aria-hidden="true" />
-            {loading ? "Reading production state" : "No live records are being shown"}
+            {loading ? "Syncing production" : "No live records shown"}
           </span>
         </div>
         {!loading ? (
@@ -130,9 +130,9 @@ function StudioSessionGate({ state }: { state: "loading" | "unavailable" }) {
           <i />
           <span>Channels</span>
           <i />
-          <span>Release controls</span>
+          <span>Release</span>
         </div>
-        <p className={styles.safety}>No render, schedule, or publishing action is started from this state.</p>
+        <p className={styles.safety}>Rendering and publishing stay paused.</p>
       </section>
     </main>
   );

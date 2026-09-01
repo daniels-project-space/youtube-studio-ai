@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { MinimumVideoFoundationCard } from "@/components/MinimumVideoFoundationCard";
-import { NICHE_CATALOG_EVIDENCE, NICHES, getNiche } from "@/lib/nicheCatalog";
+import { NICHES, getNiche } from "@/lib/nicheCatalog";
 import { nichePreset } from "@/engine/golden";
 import {
   FAMILIES,
@@ -1250,7 +1250,7 @@ export default function NewChannelWizard() {
         <div className={styles.heroCopy}>
           <span className={styles.eyebrow}>New channel</span>
           <h1>Create a channel</h1>
-          <p>Choose a niche and production format.</p>
+          <p>Pick a market. Choose a proven route.</p>
           <div className={styles.heroFacts}>
             <span><i />Private first</span>
             <span><i />One bounded QC proof</span>
@@ -1298,15 +1298,22 @@ export default function NewChannelWizard() {
       {step === 0 && (
         <section>
           <header className={styles.sectionIntro}>
-            <div><span>01 / niche</span><h2>Choose a territory</h2><p>Sets the audience, sources, and episode space.</p></div>
-            <strong className={styles.sectionCount}>{NICHES.length} researched territories</strong>
+            <div><span>01 / niche</span><h2>Choose a territory</h2><p>What should this channel own?</p></div>
+            <strong className={styles.sectionCount}>{NICHES.length} markets</strong>
           </header>
           <div className={styles.nicheGrid}>
           {NICHES.map((n, index) => {
             const on = n.key === nicheKey;
             const defaultFamilyReadiness = automaticFamilyCreatorReadiness(n.defaultFamily);
             return (
-              <button key={n.key} onClick={() => pickNiche(n.key)} className={styles.nicheCard} data-active={on ? "true" : undefined} aria-pressed={on}>
+              <button
+                key={n.key}
+                onClick={() => pickNiche(n.key)}
+                className={styles.nicheCard}
+                data-active={on ? "true" : undefined}
+                aria-pressed={on}
+                title={`${n.blurb}${!defaultFamilyReadiness.ready && defaultFamilyReadiness.blockers[0] ? ` Held: ${defaultFamilyReadiness.blockers[0]}` : ""}`}
+              >
                 <span className={styles.nicheMark}><NicheGlyph index={index} /></span>
                 <span className={styles.nicheCopy}>
                   <span className={styles.nicheTop}><strong>{n.label}</strong><small>{String(index + 1).padStart(2, "0")}</small></span>
@@ -1322,7 +1329,7 @@ export default function NewChannelWizard() {
           </div>
           {niche && (
             <div className={styles.subcategoryBar}>
-              <span>{NICHE_CATALOG_EVIDENCE.label} · choose the narrower planning lane</span>
+              <span>Focus the territory</span>
               <select value={subcategory} onChange={(e) => setSubcategory(e.target.value)} style={selStyle}>
                 {niche.subcategories.map((s) => <option key={s.id} value={s.name}>{s.name} — planning seed</option>)}
               </select>
@@ -1335,8 +1342,8 @@ export default function NewChannelWizard() {
       {step === 1 && (
         <section className={styles.formatPage}>
           <header className={styles.sectionIntro}>
-            <div><span>02 / format</span><h2>Choose a production route</h2><p>Only tested, available formats can continue.</p></div>
-            <strong className={styles.sectionCount}>{FAMILY_KEYS.length} registered routes</strong>
+            <div><span>02 / format</span><h2>Choose a production route</h2><p>Only routes this system can run are selectable.</p></div>
+            <strong className={styles.sectionCount}>{FAMILY_KEYS.length} routes</strong>
           </header>
           {fam ? <section className={styles.selectedRoute}>
             <div className={styles.routeIdentity}><small>Selected creator route</small><h2>{fam.label}</h2><p>{fam.description}</p></div>
@@ -1349,7 +1356,7 @@ export default function NewChannelWizard() {
           </section> : <div className={styles.noRoute}><strong>Choose an admitted route</strong><span>The territory’s default format is currently held. Open the catalog and make an explicit compatible choice.</span></div>}
 
           <details className={styles.routeCatalog} open={!fam}>
-            <summary><span><strong>{fam ? "Change creator route" : "Browse creator routes"}</strong><small>Available, supervised, and blocked formats stay separated by their real admission state.</small></span><b>{FAMILY_KEYS.length} routes +</b></summary>
+            <summary><span><strong>{fam ? "Change route" : "Browse routes"}</strong><small>Ready, review-only, and held formats.</small></span><b>{FAMILY_KEYS.length} +</b></summary>
             <div className={styles.routeGrid}>
             {FAMILY_KEYS.map((k) => {
               const f = FAMILIES[k]; const on = k === family;
@@ -1402,28 +1409,28 @@ export default function NewChannelWizard() {
           ) : null}
           <div className={styles.briefPanel}>
           <div className={styles.briefFields}>
-          <label style={lblStyle}><span style={capStyle}>Channel name (optional — auto-generated if blank)</span>
+          <label style={lblStyle}><span style={capStyle}>Channel name · optional</span>
             <input value={name} onChange={(e) => {
               setName(e.target.value);
               if (!normalizeYoutubeChannelName(e.target.value)) setAutoYoutube(false);
             }} placeholder="e.g. Stoic Truths" style={inpStyle} /></label>
-          <label style={lblStyle}><span style={capStyle}>Reference video URL (optional — retained as operator context; no automatic copying or clip analysis)</span>
+          <label style={lblStyle}><span style={capStyle}>Reference video · optional</span>
             <input value={clipUrl} onChange={(e) => setClipUrl(e.target.value)} placeholder="paste a YouTube link whose qualities you want to discuss" style={inpStyle} />
           </label>
-          <label style={lblStyle}><span style={capStyle}>Describe the channel in words (the deterministic advisor suggests a compatible format and production contract)</span>
+          <label style={lblStyle}><span style={capStyle}>Channel idea</span>
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <input value={concept} onChange={(e) => setConcept(e.target.value)} placeholder="e.g. calm daily stoicism lessons over cinematic nature b-roll" style={{ ...inpStyle, flex: 1 }} />
               <button onClick={suggest} disabled={!concept.trim() || suggesting} style={{ ...btnGhost, opacity: !concept.trim() || suggesting ? 0.5 : 1, whiteSpace: "nowrap" }}>{suggesting ? "Thinking…" : "Suggest"}</button>
             </div>
           </label>
           <label style={lblStyle}>
-            <span style={capStyle}>Intended audience (optional, but use it when age, learning level, or viewer role changes the format)</span>
+            <span style={capStyle}>Audience · optional</span>
             <input value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="e.g. preschool children ages 3–5, or curious adults new to finance" style={inpStyle} />
           </label>
           <label style={lblStyle}>
-            <span style={capStyle}>Sample episode ideas (optional — one per line)</span>
+            <span style={capStyle}>Episode ideas · optional, one per line</span>
             <textarea value={sampleTopicsText} onChange={(e) => setSampleTopicsText(e.target.value)} rows={3} placeholder={"e.g. A gentle bedtime treasure hunt\nA first counting adventure"} style={{ ...inpStyle, resize: "vertical" }} />
-            <span style={muted}>{sampleTopics.length}/12 examples. They are bound into the durable channel program and help the advisor select the right capability and safety path.</span>
+            <span style={muted}>{sampleTopics.length}/12 examples</span>
           </label>
           </div>
           <aside className={styles.briefAside}>
@@ -1472,11 +1479,11 @@ export default function NewChannelWizard() {
       {step === 2 && (
         <section className={styles.detailsPage}>
           <header className={styles.sectionIntro}>
-            <div><span>03 / setup</span><h2>Build the channel</h2><p>Set identity, schedule, modules, and budget.</p></div>
+            <div><span>03 / setup</span><h2>Build the channel</h2><p>Identity, cadence, tools, and limits.</p></div>
             <strong className={styles.sectionCount}>{fam?.label ?? "route required"}</strong>
           </header>
           <div className={styles.room}>
-            <header className={styles.roomHeader}><div><small>03A / program behavior</small><strong>Format, voice, cadence, and authority</strong></div><span>Bound into the durable channel design</span></header>
+            <header className={styles.roomHeader}><div><small>03A / channel system</small><strong>Format, voice, cadence, authority</strong></div><span>Saved with the channel</span></header>
             {duration?.inputUnit !== "fixed" && duration && (
               <Row label="Target length">
                 <input
@@ -1764,7 +1771,7 @@ export default function NewChannelWizard() {
             </div>
           ) : (
             <div className={styles.room}>
-              <header className={styles.roomHeader}><div><small>03B / optional modules</small><strong>Only the tools this channel actually needs</strong></div><span>Editable later</span></header>
+              <header className={styles.roomHeader}><div><small>03B / tools</small><strong>Optional modules</strong></div><span>Editable later</span></header>
               <div className={styles.moduleToggleGrid}>
               {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Companion Short when eligible (9:16, private)"], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)"]] as [keyof Toggles, string][]).map(([k, lbl]) => (
                 <label key={k} className={styles.moduleToggle}>
@@ -1803,7 +1810,7 @@ export default function NewChannelWizard() {
       {step === 3 && fam && (
         <section className={styles.reviewPage}>
           <header className={styles.sectionIntro}>
-            <div><span>04 / review</span><h2>Review &amp; create</h2><p>Confirm setup, spend, test render, and publishing.</p></div>
+            <div><span>04 / review</span><h2>Review &amp; create</h2><p>Confirm scope, cost, proof, and release authority.</p></div>
             <strong className={styles.sectionCount}>{approveSetupSpend ? "execution requested" : "plan only"}</strong>
           </header>
           {!fam.available && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {fam.label}: visual engine “{fam.visualEngine}” not built yet — channel will be created as a DRAFT until it ships.</div>}

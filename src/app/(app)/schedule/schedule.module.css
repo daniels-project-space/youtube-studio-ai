@@ -5,9 +5,11 @@
   border: 1px solid var(--color-border);
   border-radius: 18px;
   background:
-    radial-gradient(circle at 82% 10%, rgba(255, 94, 42, 0.11), transparent 34%),
-    linear-gradient(135deg, rgba(19, 22, 18, 0.98), rgba(8, 10, 9, 0.96) 62%);
+    radial-gradient(circle at 82% 10%, rgba(115, 221, 255, 0.12), transparent 34%),
+    linear-gradient(135deg, rgba(16, 21, 34, 0.88), rgba(8, 12, 22, 0.84) 62%, rgba(29,18,30,.76));
   box-shadow: 0 22px 60px rgba(0, 0, 0, 0.28);
+  backdrop-filter: blur(18px) saturate(132%);
+  -webkit-backdrop-filter: blur(18px) saturate(132%);
 }
 
 .scheduleHero::before {
@@ -29,14 +31,14 @@
   grid-template-columns: minmax(320px, 0.84fr) minmax(470px, 1.16fr);
   gap: clamp(1.5rem, 4vw, 4rem);
   align-items: end;
-  padding: clamp(1.35rem, 2.6vw, 2.4rem);
+  padding: clamp(1.15rem, 2.3vw, 2rem);
 }
 
 .heroCopy h1 {
   max-width: 680px;
   margin: 0.55rem 0 0.72rem;
   font-family: var(--font-display);
-  font-size: clamp(2rem, 3.6vw, 4.2rem);
+  font-size: clamp(2rem, 3.4vw, 3.55rem);
   font-weight: 520;
   letter-spacing: -0.045em;
   line-height: 0.98;
@@ -117,7 +119,7 @@
   min-width: 0;
   border: 1px solid var(--color-border);
   border-radius: 14px;
-  background: rgba(4, 7, 6, 0.62);
+  background: linear-gradient(145deg,rgba(255,255,255,.05),transparent 36%),rgba(6, 10, 19, 0.7);
   padding: 0.9rem 0.92rem 0.72rem;
   backdrop-filter: blur(16px);
 }
@@ -194,7 +196,7 @@
   z-index: 1;
   min-height: 64px;
   border-top: 1px solid var(--color-border);
-  background: rgba(3, 5, 4, 0.46);
+  background: linear-gradient(90deg,rgba(115,221,255,.035),rgba(167,139,250,.025)),rgba(6, 9, 18, 0.52);
   padding: 0.6rem 0.8rem;
 }
 
@@ -226,6 +228,7 @@
   border-radius: 9px;
   outline: none;
   background: rgba(10, 10, 11, 0.72);
+  backdrop-filter: blur(12px);
   color: var(--color-fg);
   font: inherit;
   font-size: 0.8rem;

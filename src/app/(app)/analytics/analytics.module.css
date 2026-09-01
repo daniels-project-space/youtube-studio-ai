@@ -12,10 +12,12 @@
   border: 1px solid var(--color-border);
   border-radius: 18px;
   background:
-    radial-gradient(circle at 88% 9%, rgba(125, 211, 192, 0.12), transparent 32%),
-    radial-gradient(circle at 12% 82%, rgba(131, 169, 255, 0.075), transparent 28%),
-    linear-gradient(135deg, #101510, #080b09 62%);
+    radial-gradient(circle at 88% 9%, rgba(115, 221, 255, 0.14), transparent 32%),
+    radial-gradient(circle at 12% 82%, rgba(167, 139, 250, 0.1), transparent 28%),
+    linear-gradient(135deg, rgba(15,21,33,.88), rgba(7,11,21,.84) 62%);
   box-shadow: 0 28px 80px rgba(0, 0, 0, 0.3);
+  backdrop-filter: blur(18px) saturate(132%);
+  -webkit-backdrop-filter: blur(18px) saturate(132%);
 }
 
 .learningHero::before {
@@ -125,7 +127,7 @@
   margin-left: 0;
   border: 1px solid var(--color-border);
   border-radius: 15px;
-  background: rgba(2, 6, 4, 0.66);
+  background: linear-gradient(145deg,rgba(255,255,255,.05),transparent 35%),rgba(6,11,20,.68);
   padding: 0.85rem 0.9rem 0.68rem;
   backdrop-filter: blur(18px);
 }
@@ -160,7 +162,7 @@
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   border-top: 1px solid var(--color-border);
-  background: rgba(2, 5, 3, 0.4);
+  background: linear-gradient(90deg,rgba(115,221,255,.035),rgba(167,139,250,.03)),rgba(5,9,18,.52);
 }
 
 .heroMetric {
