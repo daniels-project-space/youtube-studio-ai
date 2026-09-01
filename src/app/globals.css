@@ -2828,6 +2828,25 @@ button.video-card-open { cursor: pointer; }
   gap: 0.4rem;
 }
 
+.channel-check-control {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 0.48rem;
+  padding: 0 0.2rem;
+  color: var(--color-muted);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.channel-check-control input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+  min-height: 18px;
+  margin: 0;
+  accent-color: var(--color-accent);
+}
+
 .channel-week-row {
   display: grid;
   grid-template-columns: minmax(150px, 200px) minmax(0, 1fr) auto;

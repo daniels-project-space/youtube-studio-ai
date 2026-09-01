@@ -35,13 +35,24 @@ const defaultRoutes = [
 const staticRoutes = process.env.UI_AUDIT_ROUTES
   ? process.env.UI_AUDIT_ROUTES.split(",").map((route) => route.trim()).filter(Boolean)
   : defaultRoutes;
+const CHANNEL_DETAIL_TABS = [
+  "week-ahead",
+  "library",
+  "analytics",
+  "seo",
+  "identity",
+  "pipeline",
+  "settings",
+];
 const viewports = [
   { id: "desktop", width: 1440, height: 1000 },
   { id: "mobile", width: 390, height: 844 },
 ];
 
 function routeId(route) {
-  return route === "/" ? "studio" : route.slice(1).replaceAll("/", "--");
+  return route === "/"
+    ? "studio"
+    : route.slice(1).replace(/[/?=&]+/gu, "--").replace(/-+$/gu, "");
 }
 
 async function pageInventory(page) {
@@ -57,7 +68,10 @@ async function pageInventory(page) {
     const controls = Array.from(document.querySelectorAll("button, a, input, select, textarea, summary"))
       .filter(visible)
       .map((element) => {
-        const box = element.getBoundingClientRect();
+        const effectiveTarget = element.matches('input[type="checkbox"], input[type="radio"]')
+          ? element.closest("label") ?? element
+          : element;
+        const box = effectiveTarget.getBoundingClientRect();
         const studioControl = Boolean(element.closest(".studio-shell"));
         const touchTarget = studioControl && (
           element.matches("button, input, select, textarea, summary")
@@ -65,9 +79,10 @@ async function pageInventory(page) {
         );
         return {
           tag: element.tagName.toLowerCase(),
-          label: text(element) || element.getAttribute("aria-label") || element.getAttribute("placeholder") || "",
+          label: text(effectiveTarget) || element.getAttribute("aria-label") || element.getAttribute("placeholder") || "",
           width: Math.round(box.width),
           height: Math.round(box.height),
+          effectiveTarget: effectiveTarget === element ? element.tagName.toLowerCase() : effectiveTarget.tagName.toLowerCase(),
           disabled: "disabled" in element ? Boolean(element.disabled) : false,
           studioControl,
           touchTarget,
@@ -215,14 +230,18 @@ const browser = await chromium.launch({
 });
 const records = [];
 const discovered = { channels: new Set(), runs: new Set() };
+let dynamicRoutes = [];
 try {
   for (const viewport of viewports) {
     for (const route of staticRoutes) {
       await captureRoute(browser, viewport, route, discovered, records);
     }
   }
-  const dynamicRoutes = [
-    ...Array.from(discovered.channels).slice(0, 1),
+  const channelRoute = Array.from(discovered.channels)[0];
+  dynamicRoutes = [
+    ...(channelRoute
+      ? [channelRoute, ...CHANNEL_DETAIL_TABS.map((tab) => `${channelRoute}?tab=${tab}`)]
+      : []),
     ...Array.from(discovered.runs).slice(0, 1),
   ];
   for (const viewport of viewports) {
@@ -245,7 +264,7 @@ const auditedRecords = records.map((record) => {
   return { ...record, smallTouchTargets };
 });
 const report = {
-  contract: "studio-ui-fifth-pass-audit/v1",
+  contract: "studio-ui-seventh-pass-audit/v2",
   baseUrl,
   capturedAt: new Date().toISOString(),
   routes: auditedRecords,
@@ -260,7 +279,7 @@ const failures = auditedRecords.filter((record) =>
     || record.smallTouchTargets.length,
 );
 console.log(`Captured ${records.length} route/viewport states in ${outputDir}`);
-console.log(`Dynamic routes: ${[...discovered.channels, ...discovered.runs].join(", ") || "none visible"}`);
+console.log(`Dynamic routes: ${dynamicRoutes.join(", ") || "none visible"}`);
 console.log(`Audit failures: ${failures.length}`);
 if (failures.length) {
   for (const failure of failures) {

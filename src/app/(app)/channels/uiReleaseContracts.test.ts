@@ -19,6 +19,7 @@ const settings = readFileSync(join(root, "src/app/(app)/settings/page.tsx"), "ut
 const sidebar = readFileSync(join(root, "src/components/Sidebar.tsx"), "utf8");
 const scheduleCss = readFileSync(join(root, "src/app/(app)/schedule/schedule.module.css"), "utf8");
 const designer = readFileSync(join(root, "src/engine/designer.ts"), "utf8");
+const auditScript = readFileSync(join(root, "scripts/ui-fifth-pass-audit.mjs"), "utf8");
 
 const terminalError = wizard.match(/const terminalError = \(message: string\) => \{([\s\S]*?)\n    \};/)?.[1];
 assert.ok(terminalError, "terminal build recovery handler must exist");
@@ -197,6 +198,13 @@ assert.match(channels, /link\.scopeHealth === "healthy"/);
 assert.match(channels, /OAuth scopes unverified/);
 assert.match(channels, /\?tab=seo/);
 assert.match(detail, /Refresh intelligence/);
+assert.match(detail, /className="channel-check-control"[\s\S]*Made for kids/);
+assert.match(detail, /className="channel-check-control"[\s\S]*Scheduler enabled/);
+assert.match(globalCss, /\.channel-check-control[\s\S]*min-height: 44px/);
+assert.match(auditScript, /const CHANNEL_DETAIL_TABS = \[[\s\S]*"week-ahead"[\s\S]*"library"[\s\S]*"analytics"[\s\S]*"seo"[\s\S]*"identity"[\s\S]*"pipeline"[\s\S]*"settings"/);
+assert.match(auditScript, /studio-ui-seventh-pass-audit\/v2/);
+assert.match(auditScript, /CHANNEL_DETAIL_TABS\.map\(\(tab\) => `\$\{channelRoute\}\?tab=\$\{tab\}`\)/);
+assert.match(auditScript, /input\[type="checkbox"\][\s\S]*closest\("label"\)/);
 // A connector with partial scopes is not a ready destination just because it
 // has a token. The detail surface must use the same conservative state model
 // as the channel list, preserve the manual profile-picture handoff, and never

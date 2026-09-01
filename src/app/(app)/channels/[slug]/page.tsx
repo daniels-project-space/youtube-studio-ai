@@ -974,8 +974,8 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
         </Row>
         <Row label="Content declarations" hint="Required upload audience setting and scheduler enable switch">
           <div style={{ display: "flex", gap: "1rem", alignItems: "center", fontSize: "0.78rem" }}>
-            <label><input type="checkbox" checked={madeForKids} onChange={(e) => setMadeForKids(e.target.checked)} /> Made for kids</label>
-            <label><input type="checkbox" checked={scheduleEnabled} onChange={(e) => setScheduleEnabled(e.target.checked)} /> Scheduler enabled</label>
+            <label className="channel-check-control"><input type="checkbox" checked={madeForKids} onChange={(e) => setMadeForKids(e.target.checked)} /> Made for kids</label>
+            <label className="channel-check-control"><input type="checkbox" checked={scheduleEnabled} onChange={(e) => setScheduleEnabled(e.target.checked)} /> Scheduler enabled</label>
             <button onClick={saveSchedule} disabled={busy} style={ctlBtn}>Save scheduler</button>
           </div>
         </Row>

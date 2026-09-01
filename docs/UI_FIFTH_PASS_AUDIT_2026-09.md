@@ -8,7 +8,7 @@ This is the acceptance contract for the full Studio surface. It treats the produ
 2. **Identity:** each route uses a visual system that explains its job (territory maps, production ledgers, release clocks, evidence chains, asset registries), while sharing typography, spacing, color tokens, and interaction states.
 3. **Motion and status:** motion communicates live work, selection, progress, or causality. Reduced-motion mode removes nonessential animation without hiding state.
 4. **Function and authority:** every visible action is connected to real data or a real flow. Spend, publish, OAuth, ownership, and destructive actions retain explicit safety boundaries. Viewer access is not a second password gate.
-5. **Visual and interaction QA:** every route is captured at 1440×1000 and 390×844, disclosures are expanded, one real channel and run are traversed, and the audit fails on browser errors, HTTP errors, horizontal overflow, or undersized mobile controls.
+5. **Visual and interaction QA:** every route is captured at 1440×1000 and 390×844, disclosures are expanded, one real run and all eight views of one real channel are traversed, and the audit fails on browser errors, HTTP errors, horizontal overflow, or undersized mobile controls.
 
 ## Page-by-page rationale
 
@@ -17,7 +17,7 @@ This is the acceptance contract for the full Studio surface. It treats the produ
 | Studio `/` | Decide what needs attention now | Slow identity carousel, production pulse, compact fleet signals, and a bounded next-action queue | Production ledger expands in place; carousel controls remain usable on touch; links lead to fleet, runs, calendar, and ledger rather than duplicating their content |
 | Channels `/channels` | Compare channel health and manage identities | Artwork-first fleet cards with channel-specific palette, avatar, banner, status, cadence, and output signals | Each Manage panel owns YouTube connection, autopilot, schedule, SEO, settings, and destructive controls; destructive actions remain owner-gated |
 | New channel `/channels/new` | Build a coherent channel and prove it can render | Territory atlas → format route → creative brief → staged build; animated receipt rail and private proof window expose real progress | Niche catalog, route catalog, brief, modules, and build/QC stages are separate decisions; the sticky action rail never covers the final mobile content |
-| Channel room `/channels/[slug]` | Understand one channel as a show bible and operating room | Channel art establishes identity before metrics; cadence, recent output, pipeline topology, and configuration follow in causal order | Identity, YouTube, automation, schedule, SEO, creative profile, recent production, pipeline parameters, and configuration remain distinct sections rather than one settings dump |
+| Channel room `/channels/[slug]` | Understand one channel as a show bible and operating room | Channel art establishes identity before metrics; cadence, recent output, pipeline topology, and configuration follow in causal order | Overview, Week Ahead, Library, Analytics, SEO, Identity, Pipeline, and Settings are captured as separate responsive states; identity, YouTube, automation, schedule, SEO, creative profile, recent production, pipeline parameters, and configuration remain distinct sections rather than one settings dump |
 | Production `/runs` | Triage current and historical work | A receipt-led production ledger prioritizes state, stage, channel, progress, cost, and evidence over decorative cards | Filters and run rows preserve direct traversal to one chain of custody; no render or publish mutation is triggered by audit traversal |
 | Run room `/runs/[runId]` | Trace one video from source to delivery | Status-toned hero, progress receipt, pipeline map, retained-media workbench, and delivery proof | Published-video disclosure, every media receipt, source link, master preview, pipeline modules, and logs stay inspectable on mobile with full-size targets |
 | Release clock `/schedule` | Resolve timing and cadence conflicts | Seven-day bars and month map make temporal density visible before exact timestamps | Seven-day board, month map, cadence controls, channel filter, exact-date disclosure, and item settings are independently reachable |
@@ -36,7 +36,7 @@ This is the acceptance contract for the full Studio surface. It treats the produ
 
 ## Automated acceptance
 
-Run `npm run audit:ui`. By default it audits the production alias and writes full-page screenshots plus `report.json` to `/tmp/ysa-ui-audit/pass5`. `UI_AUDIT_BASE_URL`, `UI_AUDIT_OUTPUT_DIR`, `UI_AUDIT_CHROMIUM`, and `UI_AUDIT_ROUTES` can target a preview or a bounded route set.
+Run `npm run audit:ui`. By default it audits the production alias and writes full-page screenshots plus `report.json` to `/tmp/ysa-ui-audit/pass5`. The complete matrix is 52 responsive states: 17 static routes, eight real channel views, and one real run detail at desktop and mobile widths. `UI_AUDIT_BASE_URL`, `UI_AUDIT_OUTPUT_DIR`, `UI_AUDIT_CHROMIUM`, and `UI_AUDIT_ROUTES` can target a preview or a bounded route set.
 
 The audit is read-only. It does not click OAuth start, spend, publish, delete, archive, or other mutations. A successful report requires:
 
