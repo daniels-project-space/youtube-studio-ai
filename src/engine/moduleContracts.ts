@@ -551,7 +551,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   stock_footage: contract(["visuals.sourced"], {
     optionalConsumes: [
       "reuseFootageKeys", "reuseThirdPartyStockEvidence", "narrationDurationSec", "narrationText", "cutSheet", "styleDNA", "healHints",
-      "visualBrief", "signatureClips", "niche", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment",
+      "visualBrief", "signatureClips", "niche", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment", "studioReusableMediaPlan",
+      "chapterPlan", "channelModuleConfig",
     ],
   }),
   entity_imagery: contract(["visuals.entities"], {
@@ -577,6 +578,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Rights provenance is optional for historical runs, but when present
       // assembly verifies the selected staged input set before encoding.
       "footageKeys", "thirdPartyStockEvidence", "footageOnScreenTextCues",
+      "studioReusableMediaUsedAssetFingerprints", "studioReusableMediaAssetFingerprintByFootageOrdinal",
+      "studioReusableMediaScreenSecondsByFootageOrdinal", "studioReusableMediaActualUsage", "studioReusableMediaPlan",
+      "studioReusableMediaCaptureCandidates",
     ],
     providerProfiles: [local],
     qualityRequired: true,
@@ -640,7 +644,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "packageToOpeningPlan", "thumbnailDescription", "quizPlan",
       // Optional immutable provenance from stock_footage. Production final QA
       // re-checks it before binding it into the release certificate.
-      "footageKeys", "thirdPartyStockEvidence",
+      "footageKeys", "thirdPartyStockEvidence", "studioReusableMediaPlan",
+      "studioReusableMediaActualUsage", "studioReusableMediaAcceptedCaptureCandidates",
       // Optional because legacy renderer paths plan internally. When present,
       // final QA rebinds this sealed plan to the active route/lane/topic as
       // plan-only provenance; it is never treated as final-master coverage.
@@ -908,6 +913,14 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   // fresh camera/motion/prompt material is necessary. It has no provider and
   // cannot expose raw assets, LoRA paths, or guide pixels to a planner.
   studio_asset_resolve: contract(["studio.asset_resolution"], {
+    providerProfiles: [local],
+    maxCostUsd: 0,
+  }),
+  // Serializable channel episode claim and actual-media selection. It runs
+  // before a visual source and can emit only a byte-bound, channel-scoped plan
+  // under the 40%/every-third-original contract.
+  studio_reusable_media_resolve: contract(["studio.reusable_media_resolution"], {
+    optionalConsumes: ["topic", "niche", "family", "narrationDurationSec"],
     providerProfiles: [local],
     maxCostUsd: 0,
   }),

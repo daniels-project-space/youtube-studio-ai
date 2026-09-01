@@ -457,6 +457,8 @@ export async function assembleBeatBody(args: {
   /** Preserve in-world source audio. `required` rejects any silent source take. */
   bodyAudioMode?: "off" | "available" | "required";
   preset?: string;
+  /** Exact accepted segment timing, emitted only after the black-frame gate. */
+  onSegmentAccepted?: (input: { index: number; screenSeconds: number }) => void;
 }): Promise<string> {
   const { clipPaths, targetSec, tmpDir } = args;
   if (clipPaths.length === 0) throw new FfmpegError("assembleBeatBody: no clips");
@@ -520,7 +522,7 @@ export async function assembleBeatBody(args: {
     let segLen = Math.min(dur, planned && planned > 0 ? planned : maxSeg);
     // trim the last clip so we don't overshoot the target by much
     if (total + segLen > targetSec) segLen = Math.max(0.5, targetSec - total + 0.5);
-    segLen = Math.min(segLen, dur); // never exceed the clip's real length
+    segLen = Math.min(segLen, dur, planned && planned > 0 ? planned : Number.POSITIVE_INFINITY); // never exceed source or plan
     if (segLen < 0.4) {
       if (planned && planned > 0) continue; // a tiny PLANNED seg skips, not aborts
       break;
@@ -618,6 +620,7 @@ export async function assembleBeatBody(args: {
     } catch {
       /* probe failure → keep the segment (validateRender still backstops) */
     }
+    args.onSegmentAccepted?.({ index: i, screenSeconds: segLen });
     segFiles.push(sf);
     total += segLen;
   }

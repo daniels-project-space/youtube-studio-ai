@@ -26,6 +26,7 @@ import { quizShortReleaseBlocks } from "@/trigger/blocks/quizShortReleaseBlocks"
 import { documentaryCollageShortBlocks } from "@/trigger/blocks/documentaryCollageShortBlocks";
 import { VISUAL_MATTER_BLOCKS } from "@/trigger/blocks/visualMatterBlocks";
 import { STUDIO_ASSET_LIBRARY_BLOCKS } from "@/trigger/blocks/studioAssetLibraryBlocks";
+import { STUDIO_REUSABLE_MEDIA_BLOCKS } from "@/trigger/blocks/studioReusableMediaBlocks";
 import { episodeGraphBlocks } from "@/trigger/blocks/episodeGraphBlocks";
 import { learningContractBlocks } from "@/trigger/blocks/learningContractBlocks";
 import { curriculumEpisodeSeedBlocks } from "@/trigger/blocks/curriculumEpisodeSeedBlocks";
@@ -113,6 +114,9 @@ export function registerAllBlocks(): void {
   // Owner-scoped approved recipe lookup. This remains provider-free and only
   // exposes recipe text to preproduction; adapters/guide bytes stay fenced.
   for (const b of STUDIO_ASSET_LIBRARY_BLOCKS) register(b);
+  // Actual episode media has its own channel-scoped, cadence-bound resolver;
+  // it never inherits the looser recipe/adapter compatibility surface above.
+  for (const b of STUDIO_REUSABLE_MEDIA_BLOCKS) register(b);
   // Script-synced motion-graphics inserts (visual_inserts): Remotion data viz
   // planned from the numbers the narration actually speaks.
   for (const b of insertBlocks) register(b);

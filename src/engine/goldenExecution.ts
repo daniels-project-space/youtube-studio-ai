@@ -250,6 +250,7 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
       // camera/motion/prompt recipes before Visual Matter plans fresh work;
       // adapters and IC-LoRA guide bytes never enter a generic prompt path.
       "studio_asset_resolve",
+      "studio_reusable_media_resolve",
       // Post-keyframe-QA selection proof for the one direct LTX standard-LoRA
       // path. The worker re-verifies its pinned manifest before spending.
       "studio_ltx_adapter_resolve",

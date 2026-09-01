@@ -1282,6 +1282,71 @@ export default defineSchema({
     .index("by_owner", ["ownerId"])
     .index("by_owner_candidate", ["ownerId", "candidateFingerprint"]),
 
+  // Actual episode media is deliberately separate from recipe/adapter assets.
+  // Every row is immutable, channel-scoped, byte-bound, provenance-bound, and
+  // admitted only after a passing final-master certificate has been reloaded.
+  studioReusableMediaAssets: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    sourceRunId: v.id("runs"),
+    version: v.literal("studio-reusable-media/v1"),
+    logicalId: v.string(),
+    fingerprint: v.string(),
+    kind: v.string(),
+    status: v.union(v.literal("approved"), v.literal("deprecated"), v.literal("revoked")),
+    contentSha256: v.string(),
+    entry: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_channel", ["channelId"])
+    .index("by_channel_content_sha256", ["channelId", "contentSha256"])
+    .index("by_owner_fingerprint", ["ownerId", "fingerprint"])
+    .index("by_owner_channel_logical_id", ["ownerId", "channelId", "logicalId"]),
+
+  // One serializable episode ordinal per channel/run. The frozen claim binds
+  // both the 40% calculation and every-third-video originality decision, so a
+  // retry cannot change its asset set or cadence position.
+  studioReusableMediaEpisodeClaims: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    version: v.literal("studio-reusable-media-plan/v1"),
+    episodeOrdinal: v.number(),
+    claimRequestFingerprint: v.string(),
+    policyFingerprint: v.string(),
+    planFingerprint: v.string(),
+    plan: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_channel", ["channelId"])
+    .index("by_run", ["runId"])
+    .index("by_owner_channel_ordinal", ["ownerId", "channelId", "episodeOrdinal"]),
+
+  // Certificate-bound observations are the only counter used for cooldown and
+  // lifetime reuse limits. A planned selection that never reached release does
+  // not consume or teach the bank.
+  studioReusableMediaUsageObservations: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    assetFingerprint: v.string(),
+    planFingerprint: v.string(),
+    usageFingerprint: v.string(),
+    certificateFingerprint: v.string(),
+    finalMasterSha256: v.string(),
+    episodeOrdinal: v.number(),
+    screenSeconds: v.number(),
+    usage: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_channel", ["channelId"])
+    .index("by_run", ["runId"])
+    .index("by_channel_asset", ["channelId", "assetFingerprint"])
+    .index("by_owner_usage_asset", ["ownerId", "usageFingerprint", "assetFingerprint"]),
+
   // Topic dedup memory.
   topicMemory: defineTable({
     ownerId: v.string(),

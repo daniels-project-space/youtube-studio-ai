@@ -1023,6 +1023,47 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     });
   }
 
+  // Claim the channel's immutable media-reuse episode ordinal immediately
+  // before its first visual source can be selected or rendered. Every route
+  // receives the same provider-free decision point: sensitive and unknown
+  // formats emit an explicit original-only plan, eligible Stoic/ambient lanes
+  // can reuse at most 40%, and every third episode is forced fully original.
+  if (!pipeline.some((entry) => entry.block === "studio_reusable_media_resolve")) {
+    const visualSourceBlocks = [
+      "signature_clips",
+      "stock_footage",
+      "entity_imagery",
+      "keyframes",
+      "loop_clips",
+      "visual_matter_references",
+      "novita_render_images",
+      "gen_footage",
+      "scene_compiler",
+      "whiteboard_scribe",
+      "motion_comic",
+      "lore_short",
+      "quiz_year",
+      "documotion_short",
+    ];
+    const visualSourceIndices = visualSourceBlocks
+      .map((block) => pipeline.findIndex((entry) => entry.block === block))
+      .filter((index) => index >= 0);
+    if (visualSourceIndices.length) {
+      const nicheKey = opts.programBrief?.nicheKey ?? opts.nicheKey;
+      const subcategory = opts.programBrief?.subcategory ?? opts.subcategory;
+      pipeline.splice(Math.min(...visualSourceIndices), 0, {
+        block: "studio_reusable_media_resolve",
+        params: {
+          family: opts.family,
+          targetTimelineSeconds: lenSec,
+          perAssetMaximumScreenSeconds: 12,
+          ...(nicheKey ? { nicheKey } : {}),
+          ...(subcategory ? { subcategory } : {}),
+        },
+      });
+    }
+  }
+
   // Reuse approved presentation language only at the explicit blocks that can
   // consume it: music direction, quote cards, data graphics, and the bounded
   // title→body transition. The resolver

@@ -20,6 +20,10 @@ async function main(): Promise<void> {
   assert.doesNotMatch(source, /<PageHeader/);
   assert.doesNotMatch(source, /<OwnerOnlyNotice/);
   assert.match(source, /Read-only evidence inventory/i);
+  assert.match(source, /Channel media bank/i);
+  assert.match(source, /Release-proven clips/i);
+  assert.match(source, /40% maximum · every third episode original/i);
+  assert.match(source, /Same channel only/i);
   assert.match(source, /Reviewed candidates awaiting approval/i);
   assert.match(source, /Approve for this channel/i);
   assert.match(source, /Approve proven recipes for the same channel/i);
@@ -76,6 +80,8 @@ async function main(): Promise<void> {
   assert.match(api, /Cache-Control": "private, no-store/);
   assert.doesNotMatch(api, /r2Key:\s*preview/);
   assert.match(api, /listStudioAssetLibraryInventory/);
+  assert.match(api, /listStudioReusableMediaInventory/);
+  assert.match(api, /reusableMedia/);
   assert.match(api, /listStudioAssetPromotionCandidates/);
   assert.match(api, /getStudioAssetPromotionCandidateForApproval/);
   assert.match(api, /approveStudioAssetPromotionCandidateForOwner/);

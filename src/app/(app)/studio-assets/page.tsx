@@ -42,6 +42,24 @@ type StudioAsset = {
   controlGuide?: { controlKind: string; targetId: string };
 };
 
+type StudioReusableMedia = {
+  logicalId: string;
+  fingerprint: string;
+  channelId: string;
+  family: string;
+  kind: string;
+  title: string;
+  status: "approved" | "deprecated" | "revoked";
+  editorialTags: string[];
+  evergreen: boolean;
+  durationSec?: number;
+  contentType: string;
+  qualityScore: number;
+  maximumLifetimeUses: number;
+  cooldownEpisodes: number;
+  sourceOrigin: "third_party_stock" | "studio_generated";
+};
+
 type CuratedLtxCatalogItem = {
   id: string;
   label: string;
@@ -328,6 +346,7 @@ export default function StudioAssetsPage() {
   const operationsAccess = useOperationsAccess();
   const [room, setRoom] = useState<AssetRoom>("approved");
   const [assets, setAssets] = useState<StudioAsset[]>([]);
+  const [reusableMedia, setReusableMedia] = useState<StudioReusableMedia[]>([]);
   const [candidates, setCandidates] = useState<StudioAssetPromotionCandidate[]>([]);
   const [curatedLtxCatalog, setCuratedLtxCatalog] = useState<CuratedLtxCatalogItem[]>([]);
   const [visualTreatmentCatalog, setVisualTreatmentCatalog] = useState<VisualTreatmentCatalogItem[]>([]);
@@ -352,6 +371,7 @@ export default function StudioAssetsPage() {
       const payload = await response.json() as {
         ok?: boolean;
         assets?: StudioAsset[];
+        reusableMedia?: StudioReusableMedia[];
         candidates?: StudioAssetPromotionCandidate[];
         curatedLtxCatalog?: CuratedLtxCatalogItem[];
         visualTreatmentCatalog?: VisualTreatmentCatalogItem[];
@@ -363,6 +383,7 @@ export default function StudioAssetsPage() {
       };
       if (!response.ok || !payload.ok) throw new Error(payload.error ?? "Could not load Studio assets");
       setAssets(payload.assets ?? []);
+      setReusableMedia(payload.reusableMedia ?? []);
       setCandidates(payload.candidates ?? []);
       setCuratedLtxCatalog(payload.curatedLtxCatalog ?? []);
       setVisualTreatmentCatalog(payload.visualTreatmentCatalog ?? []);
@@ -457,18 +478,18 @@ export default function StudioAssetsPage() {
   }, [operationsAccess, refresh]);
 
   const summary = useMemo(() => ({
-    approved: assets.filter((asset) => asset.status === "approved").length,
+    approved: assets.filter((asset) => asset.status === "approved").length + reusableMedia.filter((asset) => asset.status === "approved").length,
     pending: candidates.length,
-    reusable: assets.filter((asset) => asset.scope === "owned_studio").length,
+    reusable: assets.filter((asset) => asset.scope === "owned_studio").length + reusableMedia.length,
     ltx: curatedLtxCatalog.filter((candidate) => candidate.adapterClass === "standard_lora").length,
     control: curatedLtxCatalog.filter((candidate) => candidate.adapterClass === "ic_lora").length,
-  }), [assets, candidates, curatedLtxCatalog]);
+  }), [assets, candidates, curatedLtxCatalog, reusableMedia]);
   const feedbackByAsset = useMemo(
     () => new Map(releaseFeedback.map((feedback) => [feedback.assetEntryFingerprint, feedback])),
     [releaseFeedback],
   );
   const roomCounts: Record<AssetRoom, number> = {
-    approved: assets.length,
+    approved: assets.length + reusableMedia.length,
     decisions: candidates.length,
     identity: acceptedCharacterLoRAs.length,
     runtime: (directLtxRuntime ? 1 : 0) + (musicVideoA2Vid ? 1 : 0),
@@ -511,12 +532,47 @@ export default function StudioAssetsPage() {
       <AssetRoomIntro room={room} />
 
       {loading ? <div className={styles.empty}>Loading Studio asset registry…</div> : null}
-      {!loading && room === "approved" && !message && assets.length === 0 ? (
+      {!loading && room === "approved" && !message && assets.length === 0 && reusableMedia.length === 0 ? (
         <div className={styles.empty}>
           <strong>No approved Studio assets yet.</strong>
           <span>Assets appear here only after an evidence-backed promotion. A missing asset tells the pipeline to create a new reviewed candidate; it never borrows another channel’s material.</span>
         </div>
       ) : null}
+
+      {!loading && room === "approved" && reusableMedia.length ? <section className={styles.catalog} aria-labelledby="studio-reusable-media-bank">
+        <div className={styles.catalogHead}>
+          <div>
+            <span className={styles.kind}>Channel media bank</span>
+            <h2 id="studio-reusable-media-bank">Release-proven clips</h2>
+          </div>
+          <p>40% maximum · every third episode original</p>
+        </div>
+        <div className={styles.grid}>
+          {reusableMedia.map((asset) => <article className={styles.card} key={asset.fingerprint}>
+            <div className={styles.cardHead}>
+              <div>
+                <span className={styles.kind}>{kindLabel(asset.kind)}</span>
+                <h2>{asset.title}</h2>
+              </div>
+              <span className={asset.status === "approved" ? styles.approved : styles.muted}>{asset.status}</span>
+            </div>
+            <p className={styles.execution}>Channel-only media · release QA passed</p>
+            <dl className={styles.meta}>
+              <div><dt>Duration</dt><dd>{asset.durationSec ? `${asset.durationSec.toFixed(1)} sec` : "still"}</dd></div>
+              <div><dt>Quality</dt><dd>{asset.qualityScore.toFixed(1)}/10</dd></div>
+              <div><dt>Reuse limit</dt><dd>{asset.maximumLifetimeUses} releases · {asset.cooldownEpisodes}-episode gap</dd></div>
+              <div><dt>Evidence</dt><dd title={asset.fingerprint}>{shortHash(asset.fingerprint)}</dd></div>
+            </dl>
+            <div className={styles.tags} aria-label="Media compatibility">
+              <span>{kindLabel(asset.family)}</span>
+              <span>{asset.sourceOrigin === "third_party_stock" ? "rights bound" : "studio generated"}</span>
+              {asset.evergreen ? <span>evergreen</span> : null}
+              {asset.editorialTags.slice(0, 4).map((tag) => <span key={tag}>{kindLabel(tag)}</span>)}
+            </div>
+            <p className={styles.feedback}>Same channel only · selected clips stay below the sealed timeline ceiling.</p>
+          </article>)}
+        </div>
+      </section> : null}
 
       {!loading && room === "decisions" && candidates.length ? <section className={styles.catalog} aria-labelledby="studio-asset-candidate-approvals">
         <div className={styles.catalogHead}>

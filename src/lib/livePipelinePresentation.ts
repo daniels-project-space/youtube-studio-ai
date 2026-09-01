@@ -51,6 +51,7 @@ const VISUAL_BLOCKS = new Set([
   "gen_footage",
   "signature_clips",
   "studio_asset_resolve",
+  "studio_reusable_media_resolve",
   "visual_matter",
   "visual_matter_references",
   "novita_render_images",

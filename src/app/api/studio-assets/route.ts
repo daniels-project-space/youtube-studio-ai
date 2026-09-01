@@ -27,6 +27,7 @@ import {
 } from "@/lib/finalMasterReleaseCertificate";
 import { getObjectBytes, getObjectIntegrity, presignDownload } from "@/lib/storage";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
+import { listStudioReusableMediaInventory } from "@/lib/studioReusableMediaRuntime";
 
 export const runtime = "nodejs";
 
@@ -82,8 +83,9 @@ export async function GET(request: Request) {
         { headers: { "Cache-Control": "private, no-store" } },
       );
     }
-    const [assets, candidates, releaseFeedback, acceptedCharacterLoRAs, directLtxRuntime, activeMusicVideoA2VidAdmissions] = await Promise.all([
+    const [assets, reusableMedia, candidates, releaseFeedback, acceptedCharacterLoRAs, directLtxRuntime, activeMusicVideoA2VidAdmissions] = await Promise.all([
       listStudioAssetLibraryInventory({ client, ownerId: actor.ownerId }),
+      listStudioReusableMediaInventory({ client, ownerId: actor.ownerId }),
       listStudioAssetPromotionCandidates({ client, ownerId: actor.ownerId }),
       listStudioAssetReleaseFeedback({ client, ownerId: actor.ownerId }),
       listAcceptedCharacterLoRAInventory({ client, ownerId: actor.ownerId }),
@@ -122,6 +124,7 @@ export async function GET(request: Request) {
     return NextResponse.json({
       ok: true,
       assets,
+      reusableMedia,
       candidates,
       releaseFeedback,
       acceptedCharacterLoRAs,

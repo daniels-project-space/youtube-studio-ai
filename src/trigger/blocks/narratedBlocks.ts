@@ -238,6 +238,14 @@ import {
   studioPostproductionRecipeProjectionFromUnknown,
 } from "@/engine/studioAssetLibrary";
 import {
+  STUDIO_REUSABLE_MEDIA_VERSION,
+  StudioReusableMediaActualUsageSchema,
+  StudioReusableMediaCaptureCandidateSchema,
+  assertStudioReusableMediaPlan,
+  createStudioReusableMediaEntry,
+  createStudioReusableMediaUsageReceipt,
+} from "@/engine/studioReusableMedia";
+import {
   createStudioAssetPromotionCandidates,
   createStudioPostproductionPromotionCandidates,
 } from "@/engine/studioAssetPromotion";
@@ -249,6 +257,10 @@ import {
   recordStudioAssetPromotionCandidates,
   recordStudioAssetReleaseUsage,
 } from "@/lib/studioAssetLibraryRuntime";
+import {
+  recordStudioReusableMediaEntry,
+  recordStudioReusableMediaUsage,
+} from "@/lib/studioReusableMediaRuntime";
 import {
   channelVisualReviewProfile,
   finalMasterTranscriptCues,
@@ -284,6 +296,8 @@ import {
   parseThirdPartyStockEvidenceManifestBytes,
   thirdPartyStockEvidenceManifestKey,
   thirdPartyStockEvidenceManifestSha256,
+  type ThirdPartyStockEvidenceManifest,
+  type ThirdPartyStockSource,
   type ThirdPartyStockEvidenceReference,
 } from "@/lib/thirdPartyStockEvidence";
 import { createFinalMasterQualityEvidenceBinding } from "@/lib/finalMasterQualityEvidenceBinding";
@@ -441,6 +455,16 @@ function str(ctx: StageContext, key: string): string {
 function opt(ctx: StageContext, key: string): string | undefined {
   const v = ctx.store[key];
   return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+
+function reusableMediaEditorialTags(...values: unknown[]): string[] {
+  return [...new Set(values
+    .filter((value): value is string => typeof value === "string")
+    .flatMap((value) => value.toLowerCase().split(/[^a-z0-9]+/u))
+    .map((value) => value.replace(/^[^a-z]+/u, ""))
+    .filter((value) => value.length >= 2)
+    .slice(0, 32))]
+    .sort();
 }
 
 function programRouteForNarratedBlock(
@@ -1507,7 +1531,15 @@ export const narrationTts: Block = {
 export const stockFootage: Block = {
   id: "stock_footage",
   consumes: ["topic", "script"],
-  produces: ["footageClips", "footageKeys", "thirdPartyStockEvidence"],
+  produces: [
+    "footageClips",
+    "footageKeys",
+    "thirdPartyStockEvidence",
+    "studioReusableMediaUsedAssetFingerprints",
+    "studioReusableMediaAssetFingerprintByFootageOrdinal",
+    "studioReusableMediaScreenSecondsByFootageOrdinal",
+    "studioReusableMediaCaptureCandidates",
+  ],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
     const scenarioVisualTreatment = resolveScenarioVisualTreatmentForRoute({
@@ -1527,14 +1559,14 @@ export const stockFootage: Block = {
     // is what lets timeline_assemble run on a SEPARATE large-2x worker (the P1→P2
     // render-split) — the render child rehydrates footageClips from footageKeys —
     // and it also makes this block resume-restorable instead of re-downloading.
-    const uploadFootageKeys = async (paths: string[]): Promise<{ key: string; sha256: string }[]> => {
+    const uploadFootageKeys = async (paths: string[]): Promise<{ key: string; sha256: string; byteLength: number }[]> => {
       // Parallel (pool of 4): the sequential loop over 100-160 clips added
       // minutes of pure upload wait per run. Order-preserving via mapPool.
       return mapPool(paths, 4, async (p, i) => {
         const key = `${ctx.keyPrefix}footage/run/${ctx.runId}/clip_${i}.mp4`;
         const bytes = await readBytes(p);
         await putObject(key, bytes, { contentType: "video/mp4" });
-        return { key, sha256: createHash("sha256").update(bytes).digest("hex") };
+        return { key, sha256: createHash("sha256").update(bytes).digest("hex"), byteLength: bytes.byteLength };
       });
     };
     // RENDER-GROUP REUSE: a language sibling reuses the base render's footage from
@@ -1568,7 +1600,15 @@ export const stockFootage: Block = {
       // cleanup proceed without losing a sibling's release evidence.
       const thirdPartyStockEvidence = await persistThirdPartyStockEvidence({ ctx, manifest });
       ctx.log(`stock_footage: REUSED ${clips.length} footage clips + sealed source evidence from base render`);
-      return { footageClips: clips, footageKeys: reuseKeys, thirdPartyStockEvidence };
+      return {
+        footageClips: clips,
+        footageKeys: reuseKeys,
+        thirdPartyStockEvidence,
+        studioReusableMediaUsedAssetFingerprints: [],
+        studioReusableMediaAssetFingerprintByFootageOrdinal: clips.map(() => null),
+        studioReusableMediaScreenSecondsByFootageOrdinal: clips.map(() => null),
+        studioReusableMediaCaptureCandidates: [],
+      };
     }
     if (!hasAnyFootageProvider()) {
       throw new Error("stock_footage: no footage provider configured (vault service 'pexels' at minimum)");
@@ -1597,12 +1637,58 @@ export const stockFootage: Block = {
       getCutSheet(ctx.store),
     );
     const PER_CLIP = bodyMaxSeg;
+    const reusablePlan = ctx.store["studioReusableMediaPlan"] === undefined
+      ? undefined
+      : assertStudioReusableMediaPlan(ctx.store["studioReusableMediaPlan"]);
+    if (reusablePlan && (
+      reusablePlan.ownerId !== ctx.ownerId
+      || reusablePlan.channelId !== ctx.channelId
+      || reusablePlan.runId !== ctx.runId
+    )) {
+      throw new Error("stock_footage: reusable-media plan belongs to another owner, channel, or run");
+    }
+    const tmp = await makeRunTempDir(ctx.runId);
+    const chapterPlanForReuse = ctx.store["chapterPlan"];
+    const chapterMode = Array.isArray(chapterPlanForReuse) && chapterPlanForReuse.length > 0;
+    const timelineAssemblyConfig = ctx.store["channelModuleConfig"] as Record<string, Record<string, unknown>> | undefined;
+    const typedEdlEnabled = timelineAssemblyConfig?.["timeline_assemble"]?.["useAssemblyEdl"] === true;
+    const reusableSelections = chapterMode || typedEdlEnabled ? [] : reusablePlan?.selections ?? [];
+    if (reusablePlan?.selections.length && reusableSelections.length === 0) {
+      ctx.log(
+        `stock_footage: media bank not consumed because ${chapterMode ? "chapter assembly" : "typed EDL assembly"} ` +
+          "does not yet carry exact per-asset screen-time receipts",
+      );
+    }
+    const reusableClips = reusablePlan
+      ? await mapPool(reusableSelections, 4, async (selection, index) => {
+          if (!selection.contentType.startsWith("video/")) {
+            throw new Error(`stock_footage: reusable media ${selection.logicalId} is not a video`);
+          }
+          const bytes = await getObjectBytes(selection.r2Key);
+          const contentSha256 = createHash("sha256").update(bytes).digest("hex");
+          if (contentSha256 !== selection.contentSha256) {
+            throw new Error(`stock_footage: reusable media ${selection.logicalId} failed byte-integrity verification`);
+          }
+          return {
+            path: await writeBytes(join(tmp, `studio_reuse_${index}.mp4`), bytes),
+            selection,
+          };
+        })
+      : [];
+    const reusableCoverageSec = reusableClips.reduce(
+      (sum, item) => sum + item.selection.plannedScreenSeconds,
+      0,
+    );
+    if (reusableCoverageSec > targetSec * 0.4 + 0.001) {
+      throw new Error("stock_footage: reusable media exceeds the hard 40% timeline ceiling");
+    }
+    const freshTargetSec = Math.max(1, targetSec - reusableCoverageSec);
     // Size the query count assuming clips are OFTEN SHORTER than the cap, so we
     // over-provision DISTINCT clips and the body never repeats one.
     const SEG = Math.max(5, Math.round(bodyMaxSeg * 0.65));
     // Long-form (15-35 min) needs many more distinct clips; bound cost/time.
     const queryCap = narrationSec > 600 ? 160 : 110;
-    const nQueries = Math.min(queryCap, Math.max(12, Math.ceil(targetSec / SEG)));
+    const nQueries = Math.min(queryCap, Math.max(12, Math.ceil(freshTargetSec / SEG)));
 
     // Mood/theme context from the ACTUAL narration so both the query-gen and the
     // relevance gate judge fit against the video's content, not just the topic
@@ -1643,10 +1729,12 @@ export const stockFootage: Block = {
     const built = await buildFootageQueries(brief, nQueries, extras);
     const queries = [...dpQueries, ...built].filter((q, i, a) => q && a.indexOf(q) === i).slice(0, nQueries);
     if (dpQueries.length) ctx.log(`stock_footage: led with ${dpQueries.length} DP brief queries`);
-    ctx.log(`stock_footage: ${queries.length} queries, target ${targetSec.toFixed(0)}s coverage`);
+    ctx.log(
+      `stock_footage: ${queries.length} queries, target ${freshTargetSec.toFixed(0)}s fresh coverage` +
+        (reusableCoverageSec > 0 ? ` + ${reusableCoverageSec.toFixed(0)}s sealed channel reuse` : ""),
+    );
 
     // Worker scratch dir (NEVER a dev box / VPS) + cross-video ledger from R2.
-    const tmp = await makeRunTempDir(ctx.runId);
     const ledgerKey = `${ctx.keyPrefix}footage/used_clips.json`;
     const contribKey = `${ctx.keyPrefix}footage/run/${ctx.runId}/picked.json`;
     const usedIds = new Set<string>();
@@ -1671,7 +1759,7 @@ export const stockFootage: Block = {
     const cast = await castFootage({
       brief,
       queries,
-      targetSec,
+      targetSec: freshTargetSec,
       perClipSec: PER_CLIP,
       usedClipIds: usedIds,
       excludedClipIds: rejectedClipIds,
@@ -1700,7 +1788,28 @@ export const stockFootage: Block = {
     // the separate signature_clips block when the architect enabled it). Footage
     // SELECTION lives here; signature GENERATION is its own block.
     const sigClips = (ctx.store["signatureClips"] as string[] | undefined) ?? [];
-    const stagedInputs = [
+    type StagedFootageInput =
+      | {
+          path: string;
+          origin: "third_party_stock";
+          source: ThirdPartyStockSource;
+          acquiredAt: number;
+          reusableAssetFingerprint?: string;
+          captureCandidate?: {
+            title: string;
+            durationSec: number;
+            relevanceScore: number;
+            editorialTags: string[];
+            evergreen: boolean;
+          };
+        }
+      | {
+          path: string;
+          origin: "studio_generated";
+          sourceLabel: string;
+          reusableAssetFingerprint?: string;
+        };
+    const freshInputs: StagedFootageInput[] = [
       ...sigClips.map((path) => ({
         path,
         origin: "studio_generated" as const,
@@ -1711,8 +1820,46 @@ export const stockFootage: Block = {
         origin: "third_party_stock" as const,
         source: clip.source,
         acquiredAt: clip.acquiredAt,
+        ...(clip.score >= 8
+          ? {
+              captureCandidate: {
+                title: clip.query.slice(0, 160),
+                durationSec: clip.durationSec,
+                relevanceScore: clip.score,
+                editorialTags: reusableMediaEditorialTags(topic, clip.query, opt(ctx, "niche")),
+                evergreen: natureMode,
+              },
+            }
+          : {}),
       })),
     ];
+    const reusableInputs: StagedFootageInput[] = reusableClips.map(({ path, selection }) =>
+      selection.source.origin === "third_party_stock"
+        ? {
+            path,
+            origin: "third_party_stock",
+            source: selection.source.source,
+            acquiredAt: selection.source.acquiredAt,
+            reusableAssetFingerprint: selection.assetFingerprint,
+          }
+        : {
+            path,
+            origin: "studio_generated",
+            sourceLabel: selection.source.sourceLabel,
+            reusableAssetFingerprint: selection.assetFingerprint,
+          },
+    );
+    // Spread reusable material through the fresh cut. It may never become a
+    // repeated opening slab, and two fresh clips precede each banked clip.
+    const stagedInputs: StagedFootageInput[] = [];
+    let reusableIndex = 0;
+    freshInputs.forEach((input, index) => {
+      stagedInputs.push(input);
+      if ((index + 1) % 2 === 0 && reusableIndex < reusableInputs.length) {
+        stagedInputs.push(reusableInputs[reusableIndex++]!);
+      }
+    });
+    while (reusableIndex < reusableInputs.length) stagedInputs.push(reusableInputs[reusableIndex++]!);
     const clips = stagedInputs.map((input) => input.path);
     if (sigClips.length) {
       ctx.log(`stock_footage: HYBRID — ${sigClips.length} signature clip(s) prepended`);
@@ -1742,13 +1889,148 @@ export const stockFootage: Block = {
       }),
     };
     const thirdPartyStockEvidence = await persistThirdPartyStockEvidence({ ctx, manifest });
+    const studioReusableMediaCaptureCandidates = stagedInputs
+      .map((input, ordinal) => {
+        if (input.origin !== "third_party_stock" || !input.captureCandidate) return null;
+        const staged = uploaded[ordinal];
+        if (!staged) throw new Error(`stock_footage: upload result missing candidate ordinal ${ordinal}`);
+        return {
+          sourceKey: staged.key,
+          contentSha256: staged.sha256,
+          byteLength: staged.byteLength,
+          contentType: "video/mp4",
+          durationSec: input.captureCandidate.durationSec,
+          title: input.captureCandidate.title,
+          editorialTags: input.captureCandidate.editorialTags,
+          evergreen: input.captureCandidate.evergreen,
+          sourceEvidenceOrdinal: ordinal,
+          relevanceScore: input.captureCandidate.relevanceScore,
+        };
+      })
+      .filter((candidate): candidate is NonNullable<typeof candidate> => candidate !== null)
+      .sort((left, right) => right.relevanceScore - left.relevanceScore || left.contentSha256.localeCompare(right.contentSha256))
+      .slice(0, 8);
+    const studioReusableMediaUsedAssetFingerprints = stagedInputs
+      .flatMap((input) => input.reusableAssetFingerprint ? [input.reusableAssetFingerprint] : []);
+    const plannedScreenSecondsByAsset = new Map(
+      reusablePlan?.selections.map((selection) => [selection.assetFingerprint, selection.plannedScreenSeconds]) ?? [],
+    );
+    const studioReusableMediaScreenSecondsByFootageOrdinal = stagedInputs.map((input) =>
+      input.reusableAssetFingerprint
+        ? plannedScreenSecondsByAsset.get(input.reusableAssetFingerprint) ?? null
+        : null,
+    );
+    const studioReusableMediaAssetFingerprintByFootageOrdinal = stagedInputs.map((input) =>
+      input.reusableAssetFingerprint ?? null,
+    );
     return {
       footageClips: clips,
       footageKeys: uploaded.map((item) => item.key),
       thirdPartyStockEvidence,
+      studioReusableMediaUsedAssetFingerprints,
+      studioReusableMediaAssetFingerprintByFootageOrdinal,
+      studioReusableMediaScreenSecondsByFootageOrdinal,
+      studioReusableMediaCaptureCandidates,
     };
   },
 };
+
+async function persistPassingStudioReusableMedia(input: {
+  ctx: StageContext;
+  plan: unknown;
+  candidates: readonly unknown[];
+  stockManifest: unknown;
+  finalMasterSha256: string;
+  certificateFingerprint: string;
+  visualReviewReceiptFingerprint: string;
+  qualityEvidenceFingerprint: string;
+  finalMasterVisualScore: number;
+  finalMasterVisualMinimumScore: number;
+}): Promise<number> {
+  const plan = assertStudioReusableMediaPlan(input.plan);
+  if (plan.policy.mode !== "timeline") return 0;
+  const stockManifest = assertThirdPartyStockEvidenceManifest(input.stockManifest);
+  const unique = [...new Map(input.candidates.map((value) => {
+    const candidate = StudioReusableMediaCaptureCandidateSchema.parse(value);
+    return [candidate.contentSha256, candidate] as const;
+  })).values()].slice(0, 8);
+  const tmp = await makeRunTempDir(`${input.ctx.runId}_media_bank`);
+  let recorded = 0;
+  for (const [index, candidate] of unique.entries()) {
+    const sourceEvidence = stockManifest.inputs[candidate.sourceEvidenceOrdinal];
+    if (
+      !sourceEvidence
+      || sourceEvidence.origin !== "third_party_stock"
+      || sourceEvidence.footageKey !== candidate.sourceKey
+      || sourceEvidence.footageSha256 !== candidate.contentSha256
+    ) {
+      throw new Error(`qa_visual: reusable-media candidate ${index} does not match its release-bound source evidence`);
+    }
+    const bytes = await getObjectBytes(candidate.sourceKey);
+    const contentSha256 = createHash("sha256").update(bytes).digest("hex");
+    if (contentSha256 !== candidate.contentSha256 || bytes.byteLength !== candidate.byteLength) {
+      throw new Error(`qa_visual: reusable-media candidate ${index} changed after stock selection`);
+    }
+    const local = await writeBytes(join(tmp, `candidate_${index}.mp4`), bytes);
+    const media = await probe(local);
+    if (!media.hasVideo || !Number.isFinite(media.durationSec) || media.durationSec <= 0) {
+      throw new Error(`qa_visual: reusable-media candidate ${index} has no measurable video stream`);
+    }
+    const durableKey = `${input.ctx.keyPrefix}studio-media/${candidate.contentSha256}.mp4`;
+    await putObject(durableKey, bytes, { contentType: candidate.contentType });
+    const entry = createStudioReusableMediaEntry({
+      version: STUDIO_REUSABLE_MEDIA_VERSION,
+      logicalId: `media_${candidate.contentSha256.slice(0, 24)}`,
+      ownerId: input.ctx.ownerId,
+      channelId: input.ctx.channelId,
+      family: plan.policy.family,
+      ...(plan.policy.nicheKey ? { nicheKey: plan.policy.nicheKey } : {}),
+      ...(plan.policy.subcategory ? { subcategory: plan.policy.subcategory } : {}),
+      kind: plan.policy.family === "sleep" ? "ambient_video" : "b_roll_video",
+      status: "approved",
+      title: candidate.title,
+      editorialTags: candidate.editorialTags,
+      evergreen: candidate.evergreen,
+      resource: {
+        r2Key: durableKey,
+        contentSha256: candidate.contentSha256,
+        contentType: candidate.contentType,
+        byteLength: bytes.byteLength,
+        durationSec: media.durationSec,
+        ...(media.width ? { width: media.width } : {}),
+        ...(media.height ? { height: media.height } : {}),
+      },
+      source: {
+        origin: "third_party_stock",
+        source: sourceEvidence.source,
+        acquiredAt: sourceEvidence.acquiredAt,
+        relevanceScore: candidate.relevanceScore,
+      },
+      origin: {
+        sourceRunId: input.ctx.runId,
+        finalMasterSha256: input.finalMasterSha256,
+        finalMasterReleaseCertificateFingerprint: input.certificateFingerprint,
+        visualReviewReceiptFingerprint: input.visualReviewReceiptFingerprint,
+        qualityEvidenceFingerprint: input.qualityEvidenceFingerprint,
+      },
+      quality: {
+        hardGateReady: true,
+        calibrationComplete: true,
+        finalMasterVisualScore: input.finalMasterVisualScore,
+        finalMasterVisualMinimumScore: input.finalMasterVisualMinimumScore,
+      },
+      maximumLifetimeUses: 6,
+      cooldownEpisodes: 2,
+    });
+    await recordStudioReusableMediaEntry({
+      client: convex(),
+      ownerId: input.ctx.ownerId,
+      entry,
+    });
+    recorded++;
+  }
+  return recorded;
+}
 
 export const entityImagery: Block = {
   id: "entity_imagery",
@@ -2420,6 +2702,8 @@ export const timelineAssemble: Block = {
     "preOverlayLocalPath",
     "onScreenTextCues",
     "studioPostproductionDecision",
+    "studioReusableMediaActualUsage",
+    "studioReusableMediaAcceptedCaptureCandidates",
   ],
   run: async (ctx) => {
     const scenarioVisualTreatment = resolveScenarioVisualTreatmentForRoute({
@@ -2460,9 +2744,15 @@ export const timelineAssemble: Block = {
       studioTransitionPreset: studioTransitionRecipe.transitionPreset,
       studioSourceEntryFingerprints: studioTransitionRecipe.sourceEntryFingerprints,
     });
+    let studioReusableMediaActualUsage = ctx.store["studioReusableMediaActualUsage"] === undefined
+      ? null
+      : StudioReusableMediaActualUsageSchema.parse(ctx.store["studioReusableMediaActualUsage"]);
+    let studioReusableMediaAcceptedCaptureCandidates: unknown[] = [];
     const withStudioPostproductionDecision = <T extends Record<string, unknown>>(patch: T) => ({
       ...patch,
       studioPostproductionDecision,
+      studioReusableMediaActualUsage,
+      studioReusableMediaAcceptedCaptureCandidates,
     });
     // Rights evidence is checked before either assembly path can start an
     // expensive encode. It binds the selected stock input set, not a claim of
@@ -2519,6 +2809,10 @@ export const timelineAssemble: Block = {
     // Params-only is the configuration the render-parity matrix proves.
     // ========================================================================
     if (ctx.params["useAssemblyEdl"] === true) {
+      const reusableUsed = ctx.store["studioReusableMediaUsedAssetFingerprints"];
+      if (Array.isArray(reusableUsed) && reusableUsed.length > 0) {
+        throw new Error("timeline_assemble: typed EDL cutover cannot consume reusable media without exact per-asset screen-time receipts");
+      }
       ctx.log(
         "timeline_assemble: useAssemblyEdl=true for this channel — composing through the standalone " +
           "Assembly EDL module (assembleViaEdl) instead of the legacy god-block path. " +
@@ -2597,11 +2891,74 @@ export const timelineAssemble: Block = {
     // Interleave entity images (Ken Burns) amongst the stock b-roll so named
     // figures (e.g. Marcus Aurelius) appear when relevant.
     const entity = authoredManifest || cinematicFootageManifest ? [] : ((ctx.store["entityClips"] as string[] | undefined) ?? []);
+    const reusableScreenSecondsRaw = ctx.store["studioReusableMediaScreenSecondsByFootageOrdinal"];
+    const reusableScreenSeconds = reusableScreenSecondsRaw === undefined
+      ? undefined
+      : (() => {
+          if (!Array.isArray(reusableScreenSecondsRaw) || reusableScreenSecondsRaw.length !== (footage?.length ?? 0)) {
+            throw new Error("timeline_assemble: reusable-media screen-time map must align with footage ordinals");
+          }
+          return reusableScreenSecondsRaw.map((value) => {
+            if (value === null) return null;
+            const seconds = Number(value);
+            if (!Number.isFinite(seconds) || seconds <= 0 || seconds > 60) {
+              throw new Error("timeline_assemble: reusable-media screen time must be null or a positive value up to 60 seconds");
+            }
+            return seconds;
+          });
+        })();
+    const reusableAssetFingerprintsRaw = ctx.store["studioReusableMediaAssetFingerprintByFootageOrdinal"];
+    const reusableAssetFingerprints = reusableAssetFingerprintsRaw === undefined
+      ? undefined
+      : (() => {
+          if (!Array.isArray(reusableAssetFingerprintsRaw) || reusableAssetFingerprintsRaw.length !== (footage?.length ?? 0)) {
+            throw new Error("timeline_assemble: reusable-media asset map must align with footage ordinals");
+          }
+          return reusableAssetFingerprintsRaw.map((value) => {
+            if (value === null) return null;
+            if (typeof value !== "string" || !/^[a-f0-9]{64}$/iu.test(value)) {
+              throw new Error("timeline_assemble: reusable-media asset map contains an invalid fingerprint");
+            }
+            return value;
+          });
+        })();
+    const captureCandidatesRaw = ctx.store["studioReusableMediaCaptureCandidates"];
+    const captureCandidateByFootageOrdinal = new Map<number, unknown>();
+    if (captureCandidatesRaw !== undefined) {
+      if (!Array.isArray(captureCandidatesRaw)) {
+        throw new Error("timeline_assemble: reusable-media capture candidates must be an array");
+      }
+      for (const rawCandidate of captureCandidatesRaw) {
+        const candidate = StudioReusableMediaCaptureCandidateSchema.parse(rawCandidate);
+        if (candidate.sourceEvidenceOrdinal >= (footage?.length ?? 0)) {
+          throw new Error("timeline_assemble: reusable-media capture candidate points outside footage ordinals");
+        }
+        captureCandidateByFootageOrdinal.set(candidate.sourceEvidenceOrdinal, candidate);
+      }
+    }
     const clips: string[] = [];
+    const clipReusableScreenSeconds: Array<number | null> = [];
+    const clipReusableAssetFingerprints: Array<string | null> = [];
+    const clipCaptureCandidates: Array<unknown | null> = [];
     const maxn = Math.max(footage?.length ?? 0, entity.length);
     for (let k = 0; k < maxn; k++) {
-      if (footage?.[k]) clips.push(footage[k]);
-      if (entity[k]) clips.push(entity[k]);
+      if (footage?.[k]) {
+        clips.push(footage[k]);
+        clipReusableScreenSeconds.push(reusableScreenSeconds?.[k] ?? null);
+        clipReusableAssetFingerprints.push(reusableAssetFingerprints?.[k] ?? null);
+        clipCaptureCandidates.push(captureCandidateByFootageOrdinal.get(k) ?? null);
+      }
+      if (entity[k]) {
+        clips.push(entity[k]);
+        clipReusableScreenSeconds.push(null);
+        clipReusableAssetFingerprints.push(null);
+        clipCaptureCandidates.push(null);
+      }
+    }
+    if (clipReusableAssetFingerprints.some((fingerprint, index) =>
+      (fingerprint === null) !== (clipReusableScreenSeconds[index] === null),
+    )) {
+      throw new Error("timeline_assemble: reusable-media asset and screen-time maps disagree");
     }
     if (authoredManifest && Math.abs(authoredManifest.durationSec - narrationSec) > 0.02) {
       throw new Error(
@@ -2862,6 +3219,9 @@ export const timelineAssemble: Block = {
         height: H,
       });
     } else if (chapterPlan && chapterPlan.length > 0) {
+      if (clipReusableScreenSeconds.some((seconds) => seconds !== null)) {
+        throw new Error("timeline_assemble: chapter assembly cannot consume reusable media without exact window receipts");
+      }
       ctx.log(`timeline_assemble: chapter mode â€” ${chapterPlan.filter((w) => w.kind === "card").length} chapter cards`);
       const chapBg = brandCardBg;
       let chapNo = 0;
@@ -2903,6 +3263,8 @@ export const timelineAssemble: Block = {
       });
     } else {
       ctx.log(`timeline_assemble: beat-body from ${clips.length} clips (${footage?.length ?? 0} footage + ${entity.length} entity) @ ${W}x${H}â€¦`);
+      const actualScreenSecondsByAsset = new Map<string, number>();
+      const acceptedCaptureCandidates = new Map<string, unknown>();
       concat = await assembleBeatBody({
         clipPaths: clips,
         outPath: join(tmp, "body.mp4"),
@@ -2915,7 +3277,36 @@ export const timelineAssemble: Block = {
         // per-clip screen time matches stock_footage's coverage credit (PER_CLIP=25)
         // so the gathered footage fills the full length without the body looping.
         maxSegSec: bodyMaxSeg,
+        segDurationsSec: clipReusableScreenSeconds.map((seconds) => seconds ?? bodyMaxSeg),
+        onSegmentAccepted: ({ index, screenSeconds }) => {
+          const assetFingerprint = clipReusableAssetFingerprints[index];
+          if (assetFingerprint) {
+            actualScreenSecondsByAsset.set(
+              assetFingerprint,
+              (actualScreenSecondsByAsset.get(assetFingerprint) ?? 0) + screenSeconds,
+            );
+          }
+          const captureCandidate = clipCaptureCandidates[index];
+          if (captureCandidate) {
+            const parsed = StudioReusableMediaCaptureCandidateSchema.parse(captureCandidate);
+            acceptedCaptureCandidates.set(parsed.contentSha256, parsed);
+          }
+        },
       });
+      studioReusableMediaAcceptedCaptureCandidates = [...acceptedCaptureCandidates.values()];
+      if (actualScreenSecondsByAsset.size > 0) {
+        const plan = assertStudioReusableMediaPlan(ctx.store["studioReusableMediaPlan"]);
+        const uses = [...actualScreenSecondsByAsset.entries()]
+          .map(([assetFingerprint, screenSeconds]) => ({ assetFingerprint, screenSeconds }))
+          .sort((left, right) => left.assetFingerprint.localeCompare(right.assetFingerprint));
+        studioReusableMediaActualUsage = StudioReusableMediaActualUsageSchema.parse({
+          planFingerprint: plan.fingerprint,
+          uses,
+          reusedTimelineSeconds: uses.reduce((sum, use) => sum + use.screenSeconds, 0),
+        });
+      } else {
+        studioReusableMediaActualUsage = null;
+      }
     }
 
     // Music bed (full during the intro, ducked low under narration). Prefer the
@@ -5691,19 +6082,20 @@ export const qaVisual: Block = {
     // pre-compose check: a stale/missing sidecar cannot be omitted from a
     // production release after the master has been rendered.
     let thirdPartyStockEvidence: ThirdPartyStockEvidenceReference | undefined;
+    let thirdPartyStockEvidenceManifest: ThirdPartyStockEvidenceManifest | undefined;
     const thirdPartyStockEvidenceRaw = ctx.store["thirdPartyStockEvidence"];
     if (thirdPartyStockEvidenceRaw !== undefined) {
       const footageKeys = ctx.store["footageKeys"];
       if (!Array.isArray(footageKeys) || footageKeys.some((key) => typeof key !== "string")) {
         throw new Error("qa_visual: third-party stock evidence requires ordered footageKeys");
       }
-      thirdPartyStockEvidence = (
-        await loadThirdPartyStockEvidence({
-          evidence: thirdPartyStockEvidenceRaw,
-          consumer: "qa_visual",
-          footageKeys,
-        })
-      ).reference;
+      const loadedStockEvidence = await loadThirdPartyStockEvidence({
+        evidence: thirdPartyStockEvidenceRaw,
+        consumer: "qa_visual",
+        footageKeys,
+      });
+      thirdPartyStockEvidence = loadedStockEvidence.reference;
+      thirdPartyStockEvidenceManifest = loadedStockEvidence.manifest;
     }
     // The package plan is a non-paid, pre-thumbnail contract. Bind it to the
     // exact current inputs and final thumbnail bytes here, after final-master
@@ -5968,6 +6360,64 @@ export const qaVisual: Block = {
     });
     if (await sha256ShotAnalysisSource(video) !== finalMasterSha256AfterVisualReview) {
       throw new Error("qa_visual FAILED: final master changed while its durable release evidence was being persisted");
+    }
+    const reusableMediaPlanRaw = ctx.store["studioReusableMediaPlan"];
+    if (reusableMediaPlanRaw !== undefined) {
+      const reusableMediaPlan = assertStudioReusableMediaPlan(reusableMediaPlanRaw);
+      const actualUsageRaw = ctx.store["studioReusableMediaActualUsage"];
+      const actualUsage = actualUsageRaw === undefined || actualUsageRaw === null
+        ? null
+        : StudioReusableMediaActualUsageSchema.parse(actualUsageRaw);
+      if (actualUsage && actualUsage.uses.length > 0) {
+        const usage = createStudioReusableMediaUsageReceipt({
+          plan: reusableMediaPlan,
+          finalMasterSha256: finalMasterSha256AfterVisualReview,
+          certificateFingerprint: durableFinalMasterReleaseCertificate.certificateFingerprint,
+          actualUsage,
+        });
+        // Unlike ranking feedback, this observation owns hard cooldown and
+        // lifetime limits. A release that used banked media may not proceed if
+        // its usage receipt cannot be durably recorded.
+        await recordStudioReusableMediaUsage({
+          client: convex(),
+          ownerId: ctx.ownerId,
+          channelId: ctx.channelId,
+          runId: ctx.runId,
+          usage,
+        });
+        ctx.log(
+          `qa_visual: reusable-media usage sealed (${actualUsage.uses.length} clip(s), ` +
+            `${Math.round(usage.reusedTimelineFraction * 100)}% timeline)`,
+        );
+      }
+      const captureCandidates = Array.isArray(ctx.store["studioReusableMediaAcceptedCaptureCandidates"])
+        ? ctx.store["studioReusableMediaAcceptedCaptureCandidates"] as unknown[]
+        : [];
+      const mediaVisualScore = finalMasterQualityEvidence.qualityEvidence.axes.visual.score;
+      const mediaVisualMinimum = finalMasterQualityEvidence.qualityEvidence.axes.visual.minimumScore;
+      if (
+        captureCandidates.length > 0
+        && typeof mediaVisualScore === "number"
+        && typeof mediaVisualMinimum === "number"
+        && mediaVisualScore >= mediaVisualMinimum
+      ) {
+        if (!thirdPartyStockEvidenceManifest) {
+          throw new Error("qa_visual: reusable-media candidates require reloaded stock provenance");
+        }
+        const recorded = await persistPassingStudioReusableMedia({
+          ctx,
+          plan: reusableMediaPlan,
+          candidates: captureCandidates,
+          stockManifest: thirdPartyStockEvidenceManifest,
+          finalMasterSha256: finalMasterSha256AfterVisualReview,
+          certificateFingerprint: durableFinalMasterReleaseCertificate.certificateFingerprint,
+          visualReviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+          qualityEvidenceFingerprint: finalMasterQualityEvidence.qualityEvidenceFingerprint,
+          finalMasterVisualScore: mediaVisualScore,
+          finalMasterVisualMinimumScore: mediaVisualMinimum,
+        });
+        if (recorded > 0) ctx.log(`qa_visual: saved ${recorded} approved channel-scoped reusable media clip(s)`);
+      }
     }
     if (studioAssetReleaseUsage) {
       try {
