@@ -33,7 +33,6 @@ assert.match(
 for (const path of [
   "../app/(app)/studio-assets/page.tsx",
   "../app/(app)/editorial-evidence/page.tsx",
-  "../app/(app)/casefile/page.tsx",
   "../app/(app)/novita-render/page.tsx",
 ]) {
   const page = read(path);
@@ -41,6 +40,15 @@ for (const path of [
   assert.match(page, /if \(operationsAccess !== "owner"\) \{/);
   assert.match(page, /<OwnerOnlyNotice/);
 }
+
+const casefile = read("../app/(app)/casefile/page.tsx");
+assert.match(casefile, /const operationsAccess = useOperationsAccess\(\)/);
+assert.match(
+  casefile,
+  /operationsAccess !== "owner" \? \([\s\S]*<LockedCasefileRoom/,
+  "the custom Casefile shell must keep its private workspace behind the owner branch",
+);
+assert.match(casefile, /No private casefile request was sent/);
 
 for (const path of [
   "../app/(app)/studio-assets/page.tsx",

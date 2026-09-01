@@ -1,13 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
 import { useOperationsAccess } from "@/components/OperationsAccess";
 import {
   casefileEvidenceLocks,
   type CasefileEvidenceEpisode,
 } from "@/lib/editorialDeskEvidence";
-import styles from "../editorial-desk.module.css";
+import styles from "./casefile.module.css";
 
 type Episode = CasefileEvidenceEpisode & {
   _id: string;
@@ -23,16 +22,6 @@ const stages = [
   ["awaiting_cinematic_review", "4. Cinematic review"],
   ["render_admitted", "5. Render package"],
 ] as const;
-
-const textarea: React.CSSProperties = {
-  width: "100%", minHeight: 180, resize: "vertical", borderRadius: 10,
-  border: "1px solid var(--border, #273142)", background: "#0c111b", color: "#e8edf5",
-  padding: 12, font: "12px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace",
-};
-const card: React.CSSProperties = {
-  border: "1px solid var(--border, #273142)", borderRadius: 14, padding: 18,
-  background: "linear-gradient(140deg, rgba(19,26,38,.94), rgba(10,15,24,.94))",
-};
 
 function parseObject(raw: string, label: string): Record<string, unknown> {
   try {
@@ -109,6 +98,133 @@ function updatedLabel(updatedAt: number): string {
     : `Updated ${date.toLocaleString()}`;
 }
 
+function CasefileHero({
+  access,
+  selected,
+  episodeCount,
+  activeStage,
+  recordedLockCount,
+  stageLabel,
+}: {
+  access: ReturnType<typeof useOperationsAccess>;
+  selected: Episode | null;
+  episodeCount: number;
+  activeStage: number;
+  recordedLockCount: number;
+  stageLabel: string;
+}) {
+  return (
+    <section className={styles.hero} aria-busy={access === "checking" || undefined}>
+      <div className={styles.heroCopy}>
+        <p className={styles.eyebrow}>Casefile / chain of custody</p>
+        <h1>Turn evidence into a shot-by-shot case.</h1>
+        <p className={styles.heroIntro}>
+          Sources enter first. Every claim, image, cut, and review stays bound to
+          the same immutable case before a render can be admitted.
+        </p>
+        <div className={styles.heroBoundary}>
+          <span aria-hidden="true">⌁</span>
+          <div>
+            <small>Room boundary</small>
+            <strong>No render · no spend · no publish</strong>
+          </div>
+        </div>
+      </div>
+
+      <div className={styles.chainPanel}>
+        <div className={styles.chainHeader}>
+          <span>Evidence route</span>
+          <small>{selected?.caseId ?? "No case selected"}</small>
+        </div>
+        <ol className={styles.chain}>
+          {stages.map(([status, label], index) => {
+            const state = index < activeStage
+              ? "recorded"
+              : index === activeStage
+                ? "current"
+                : "waiting";
+            return (
+              <li key={status} data-state={state}>
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                  <strong>{label.replace(/^\d+\.\s*/, "")}</strong>
+                  <small>{state === "recorded" ? "Fingerprint held" : state === "current" ? "Open gate" : "Sealed"}</small>
+                </div>
+                <i aria-hidden="true" />
+              </li>
+            );
+          })}
+        </ol>
+        <div className={styles.caseSeal} aria-hidden="true">
+          <span>CF</span>
+          <i />
+        </div>
+      </div>
+
+      <div className={styles.metricRail}>
+        <CaseMetric index="01" label="Casefiles" value={String(episodeCount).padStart(2, "0")} detail="immutable records" />
+        <CaseMetric index="02" label="Current gate" value={stageLabel.replace(/^\d+\.\s*/, "")} detail={selected ? humanizeStatus(selected.status) : "source intake"} />
+        <CaseMetric index="03" label="Bindings" value={String(recordedLockCount).padStart(2, "0")} detail="stored receipts" />
+        <CaseMetric index="04" label="Authority" value={access === "owner" ? "Open" : access === "checking" ? "Checking" : "Locked"} detail="signed owner session" />
+      </div>
+    </section>
+  );
+}
+
+function CaseMetric({ index, label, value, detail }: { index: string; label: string; value: string; detail: string }) {
+  return (
+    <div className={styles.metric}>
+      <span>{index} / {label}</span>
+      <strong>{value}</strong>
+      <small>{detail}</small>
+    </div>
+  );
+}
+
+function LockedCasefileRoom({ access }: { access: Exclude<ReturnType<typeof useOperationsAccess>, "owner"> }) {
+  return (
+    <section className={styles.lockedRoom} aria-live={access === "checking" ? "polite" : undefined}>
+      <div className={styles.lockedSeal} aria-hidden="true"><span>PRIVATE</span><i /></div>
+      <div className={styles.lockedCopy}>
+        <p className={styles.eyebrow}>{access === "checking" ? "Resolving signed session" : "Chain of custody protected"}</p>
+        <h2>{access === "checking" ? "Checking case-room authority…" : "The case room is sealed."}</h2>
+        <p>
+          {access === "checking"
+            ? "The studio is checking the current browser session before requesting any private episode records."
+            : "Open owner operations from the top bar to inspect immutable evidence packets. No private casefile request was sent."}
+        </p>
+      </div>
+      <div className={styles.lockedProtocol}>
+        <div><span>01</span><strong>Sources stay private</strong><p>Case packets and rights locators are not loaded in viewer mode.</p></div>
+        <div><span>02</span><strong>Reviews stay human</strong><p>No evidence or cinematic approval is inferred from access state.</p></div>
+        <div><span>03</span><strong>Rendering stays elsewhere</strong><p>This room cannot spend, dispatch a GPU, or publish.</p></div>
+      </div>
+    </section>
+  );
+}
+
+function OperatorHeading({ index, title, detail }: { index: string; title: string; detail: string }) {
+  return (
+    <div className={styles.operatorHeading}>
+      <span>{index}</span>
+      <div>
+        <p>Current evidence gate</p>
+        <h2>{title}</h2>
+        <small>{detail}</small>
+      </div>
+    </div>
+  );
+}
+
+function ModuleHeading({ tag, title }: { tag: string; title: string }) {
+  return (
+    <div className={styles.moduleHeading}>
+      <span>{tag}</span>
+      <h3>{title}</h3>
+    </div>
+  );
+}
+
 /** Private editor desk for the immutable Casefile → cinematic render handoff. */
 export default function CasefilePage() {
   const operationsAccess = useOperationsAccess();
@@ -182,50 +298,20 @@ export default function CasefilePage() {
     ? stages.find(([status]) => status === selected.status)?.[1] ?? humanizeStatus(selected.status)
     : "New source packet";
 
-  if (operationsAccess !== "owner") {
-    return (
-      <div className={styles.desk}>
-        <header className={styles.header}>
-          <p className={styles.eyebrow}>Private editorial workflow</p>
-          <h1>Casefile cinematic desk</h1>
-          <p>Evidence-led cinematic handoffs with immutable review gates.</p>
-        </header>
-        <OwnerOnlyNotice
-          access={operationsAccess}
-          desk="the Casefile cinematic desk"
-        />
-      </div>
-    );
-  }
-
   return (
     <div className={styles.desk}>
-      <header className={styles.header}>
-        <p className={styles.eyebrow}>Private editorial workflow</p>
-        <h1>Casefile cinematic desk</h1>
-        <p>
-          Build an evidence-led cinematic sequence in two phases: lock real sources and causal shot coverage first, then approve the faceless-mannequin multi-shot treatment. This desk cannot render, spend, or publish.
-        </p>
-      </header>
+      <CasefileHero
+        access={operationsAccess}
+        selected={selected}
+        episodeCount={episodes.length}
+        activeStage={activeStage}
+        recordedLockCount={recordedLockCount}
+        stageLabel={selectedStageLabel}
+      />
 
-      <section className={styles.summary} aria-label="Casefile workflow status">
-        <div className={styles.summaryCopy}>
-          <small>Selected handoff</small>
-          <strong>{selected?.caseId ?? "Start with a source packet"}</strong>
-          <span>{selected ? `Currently at ${selectedStageLabel}.` : "No case is selected yet; only a reviewed source packet can open one."}</span>
-        </div>
-        <div className={styles.stageRail} aria-label="Immutable handoff path">
-          {stages.map(([status, label], index) => (
-            <div
-              key={status}
-              className={`${styles.stage} ${index <= activeStage ? styles.stageReached : ""} ${index === activeStage ? styles.stageCurrent : ""}`}
-            >
-              <strong>{label}</strong>
-              <span>{index < activeStage ? "Recorded" : index === activeStage ? "Current gate" : "Not reached"}</span>
-            </div>
-          ))}
-        </div>
-      </section>
+      {operationsAccess !== "owner" ? (
+        <LockedCasefileRoom access={operationsAccess} />
+      ) : (<>
 
       {selected && <section className={styles.ledger} aria-label="Recorded Casefile evidence bindings">
         <div className={styles.ledgerHeader}>
@@ -247,12 +333,12 @@ export default function CasefilePage() {
       </section>}
 
       <div className={styles.workspace}>
-        <aside style={{ ...card }} className={styles.library}>
+        <aside className={`${styles.surface} ${styles.library}`}>
           <div className={styles.libraryHeader}>
             <strong>Casefiles</strong>
             <span>{episodes.length} recorded</span>
           </div>
-          {episodes.length === 0 ? <span style={{ color: "#8d9aad", fontSize: 13 }}>No source-admitted Casefile episodes yet.</span> : <div className={styles.recordList}>{episodes.map((episode) => (
+          {episodes.length === 0 ? <span className={styles.emptyLibrary}>No source-admitted Casefile episodes yet.</span> : <div className={styles.recordList}>{episodes.map((episode) => (
               <button
                 key={episode._id}
                 type="button"
@@ -266,103 +352,99 @@ export default function CasefilePage() {
           ))}</div>}
         </aside>
 
-        <section style={{ ...card }} className={styles.operatorPane}>
+        <section className={`${styles.surface} ${styles.operatorPane}`}>
           {!selected && <>
-            <h2 style={{ margin: 0, fontSize: 19 }}>1. Admit a source packet</h2>
-            <p style={{ margin: 0, color: "#aeb9cb", fontSize: 13 }}>Paste the editor-approved Casefile Source Packet. The server checks every claim’s primary source, visual rights usage, and the review fingerprint before it stores anything.</p>
-            <textarea aria-label="Casefile source packet JSON" style={textarea} value={sourcePacket} onChange={(event) => setSourcePacket(event.target.value)} placeholder='{"version":"casefile-source-packet/v1", ...}' />
-            <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("admit_source", { sourcePacket: parseObject(sourcePacket, "Source packet") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>
+            <OperatorHeading index="01" title="Admit a source packet" detail="Paste the editor-approved Casefile Source Packet. The server checks every claim’s primary source, visual-rights usage, and review fingerprint before it stores anything." />
+            <textarea aria-label="Casefile source packet JSON" className={styles.textarea} value={sourcePacket} onChange={(event) => setSourcePacket(event.target.value)} placeholder='{"version":"casefile-source-packet/v1", ...}' />
+            <button type="button" className={styles.primaryAction} disabled={actionDisabled} onClick={() => { try { void submit("admit_source", { sourcePacket: parseObject(sourcePacket, "Source packet") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>
               Admit source packet
             </button>
           </>}
 
           {selected?.status === "source_admitted" && <>
-            <h2 style={{ margin: 0, fontSize: 19 }}>2. Attach locked planning artifacts</h2>
-            <p style={{ margin: 0, color: "#aeb9cb", fontSize: 13 }}>Paste the private Story Spine output as <code>{'{ "sceneManifest": {...}, "shotList": [...] }'}</code>. This freezes the exact targets the evidence editor will approve.</p>
-            <textarea aria-label="Casefile planning package JSON" style={textarea} value={planning} onChange={(event) => setPlanning(event.target.value)} placeholder='{ "sceneManifest": { ... }, "shotList": [ ... ] }' />
-            <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("attach_planning", { episodeId: selected._id, ...parsePlanning(planning) }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Lock planning artifacts</button>
+            <OperatorHeading index="02" title="Attach locked planning artifacts" detail="Paste the private Story Spine output. This freezes the exact scene and shot targets the evidence editor will approve." />
+            <textarea aria-label="Casefile planning package JSON" className={styles.textarea} value={planning} onChange={(event) => setPlanning(event.target.value)} placeholder='{ "sceneManifest": { ... }, "shotList": [ ... ] }' />
+            <button type="button" className={styles.primaryAction} disabled={actionDisabled} onClick={() => { try { void submit("attach_planning", { episodeId: selected._id, ...parsePlanning(planning) }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Lock planning artifacts</button>
           </>}
 
           {selected?.status === "awaiting_evidence_review" && <>
-            <h2 style={{ margin: 0, fontSize: 19 }}>3. Admit claim-to-shot evidence map</h2>
-            <p style={{ margin: 0, color: "#aeb9cb", fontSize: 13 }}>Paste the evidence editor’s signed map. Each factual claim must bind to the exact Scene Manifest/ShotPlan ids and retain a no-gore, no-unsupported-recreation policy.</p>
-            <textarea aria-label="Casefile evidence map JSON" style={textarea} value={evidenceMap} onChange={(event) => setEvidenceMap(event.target.value)} placeholder='{"version":"casefile-evidence-shot-map/v1", ...}' />
-            <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("admit_evidence_map", { episodeId: selected._id, evidenceShotMapInput: parseObject(evidenceMap, "Evidence map") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Admit evidence map</button>
+            <OperatorHeading index="03" title="Admit the claim-to-shot map" detail="Each factual claim must bind to exact Scene Manifest and ShotPlan ids while retaining the no-gore, no-unsupported-recreation policy." />
+            <textarea aria-label="Casefile evidence map JSON" className={styles.textarea} value={evidenceMap} onChange={(event) => setEvidenceMap(event.target.value)} placeholder='{"version":"casefile-evidence-shot-map/v1", ...}' />
+            <button type="button" className={styles.primaryAction} disabled={actionDisabled} onClick={() => { try { void submit("admit_evidence_map", { episodeId: selected._id, evidenceShotMapInput: parseObject(evidenceMap, "Evidence map") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Admit evidence map</button>
           </>}
 
           {selected?.status === "awaiting_cinematic_direction" && <>
-            <section style={{ border: "1px solid #294468", borderRadius: 11, padding: 14, display: "grid", gap: 10, background: "rgba(17,37,62,.32)" }}>
-              <h2 style={{ margin: 0, fontSize: 17 }}>Optional: bind the reviewed narration and evidence ledger</h2>
-              <p style={{ margin: 0, color: "#b9c8da", fontSize: 13, lineHeight: 1.5 }}>
+            <section className={styles.optionalModule}>
+              <ModuleHeading tag="Optional binding" title="Reviewed narration + evidence ledger" />
+              <p className={styles.moduleCopy}>
                 Use this stricter factual route only when the editor has reviewed the full timed Story Spine and a narrative-evidence ledger. The system binds every narration shot to the approved Casefile claims and sources, then carries the ledger through cinematic review and final QA. This desk cannot render, spend, or publish.
               </p>
               {selected.workflow?.sourceBoundStorySpine ? <>
-                <strong style={{ color: "#9be2b3", fontSize: 13 }}>Source-bound Story Spine attached</strong>
-                {selected.workflow.sourceBoundStorySpine.storySpineFingerprint && <code style={{ color: "#9fc0ff", overflowWrap: "anywhere" }}>{selected.workflow.sourceBoundStorySpine.storySpineFingerprint}</code>}
+                <strong className={styles.recordedText}>Source-bound Story Spine attached</strong>
+                {selected.workflow.sourceBoundStorySpine.storySpineFingerprint && <code className={styles.fingerprint}>{selected.workflow.sourceBoundStorySpine.storySpineFingerprint}</code>}
               </> : <>
-                <textarea aria-label="Source-bound Story Spine JSON" style={{ ...textarea, minHeight: 260 }} value={sourceBoundStorySpine} onChange={(event) => setSourceBoundStorySpine(event.target.value)} placeholder='{"version":"story-spine/v1", "timedScript": { ... }, "narrativeBeats": [ ... ], "shotList": [ ... ], ...}' />
-                <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("attach_source_bound_story_spine", { episodeId: selected._id, storySpine: parseObject(sourceBoundStorySpine, "Source-bound Story Spine") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze source-bound Story Spine</button>
+                <textarea aria-label="Source-bound Story Spine JSON" className={`${styles.textarea} ${styles.textareaTall}`} value={sourceBoundStorySpine} onChange={(event) => setSourceBoundStorySpine(event.target.value)} placeholder='{"version":"story-spine/v1", "timedScript": { ... }, "narrativeBeats": [ ... ], "shotList": [ ... ], ...}' />
+                <button type="button" className={styles.secondaryAction} disabled={actionDisabled} onClick={() => { try { void submit("attach_source_bound_story_spine", { episodeId: selected._id, storySpine: parseObject(sourceBoundStorySpine, "Source-bound Story Spine") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze source-bound Story Spine</button>
               </>}
               {selected.workflow?.narrativeEvidenceLedger ? <>
-                <strong style={{ color: "#9be2b3", fontSize: 13 }}>Reviewed Narrative Evidence Ledger attached</strong>
-                {selected.workflow.narrativeEvidenceLedger.contentFingerprint && <code style={{ color: "#9fc0ff", overflowWrap: "anywhere" }}>{selected.workflow.narrativeEvidenceLedger.contentFingerprint}</code>}
-                <small style={{ color: "#9eadc1" }}>It will be derived into the signed cinematic direction; replacing it requires a fresh Casefile revision.</small>
+                <strong className={styles.recordedText}>Reviewed Narrative Evidence Ledger attached</strong>
+                {selected.workflow.narrativeEvidenceLedger.contentFingerprint && <code className={styles.fingerprint}>{selected.workflow.narrativeEvidenceLedger.contentFingerprint}</code>}
+                <small className={styles.moduleNote}>It will be derived into the signed cinematic direction; replacing it requires a fresh Casefile revision.</small>
               </> : <>
-                <textarea aria-label="Narrative evidence annotations JSON" style={{ ...textarea, minHeight: 260 }} value={narrativeEvidenceLedger} onChange={(event) => setNarrativeEvidenceLedger(event.target.value)} placeholder='{"claims":[{"id":"…", "approvedText":"…", "assertionState":"…", "confidence":"…", "uncertainty":{…}, "causalRole":"…", "supports":[{"sourceIds":[…], "upstreamClaimIds":[…]}], "allowedVisualTreatments":[…]}], "relations":[]}' />
-                <textarea aria-label="Narrative evidence editorial review JSON" style={{ ...textarea, minHeight: 110 }} value={narrativeEvidenceReview} onChange={(event) => setNarrativeEvidenceReview(event.target.value)} placeholder='{"reviewerId":"reviewer-…", "reviewId":"narrative-ledger-review-…", "reviewedAt":"2026-08-20T12:00:00.000Z"}' />
-                <button type="button" disabled={actionDisabled || !selected.workflow?.sourceBoundStorySpine} onClick={() => { try { const input = parseObject(narrativeEvidenceLedger, "Narrative evidence annotations"); void submit("attach_narrative_evidence_ledger", { episodeId: selected._id, claims: requiredClaims(input), ...(input.relations === undefined ? {} : { relations: requiredRelations(input.relations) }), review: parseObject(narrativeEvidenceReview, "Narrative evidence review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze Narrative Evidence Ledger</button>
-                {!selected.workflow?.sourceBoundStorySpine && <small style={{ color: "#f4c785" }}>Freeze the matching source-bound Story Spine first. This prevents a ledger from being attached to a different narration timeline.</small>}
+                <textarea aria-label="Narrative evidence annotations JSON" className={`${styles.textarea} ${styles.textareaTall}`} value={narrativeEvidenceLedger} onChange={(event) => setNarrativeEvidenceLedger(event.target.value)} placeholder='{"claims":[{"id":"…", "approvedText":"…", "assertionState":"…", "confidence":"…", "uncertainty":{…}, "causalRole":"…", "supports":[{"sourceIds":[…], "upstreamClaimIds":[…]}], "allowedVisualTreatments":[…]}], "relations":[]}' />
+                <textarea aria-label="Narrative evidence editorial review JSON" className={`${styles.textarea} ${styles.textareaCompact}`} value={narrativeEvidenceReview} onChange={(event) => setNarrativeEvidenceReview(event.target.value)} placeholder='{"reviewerId":"reviewer-…", "reviewId":"narrative-ledger-review-…", "reviewedAt":"2026-08-20T12:00:00.000Z"}' />
+                <button type="button" className={styles.secondaryAction} disabled={actionDisabled || !selected.workflow?.sourceBoundStorySpine} onClick={() => { try { const input = parseObject(narrativeEvidenceLedger, "Narrative evidence annotations"); void submit("attach_narrative_evidence_ledger", { episodeId: selected._id, claims: requiredClaims(input), ...(input.relations === undefined ? {} : { relations: requiredRelations(input.relations) }), review: parseObject(narrativeEvidenceReview, "Narrative evidence review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze Narrative Evidence Ledger</button>
+                {!selected.workflow?.sourceBoundStorySpine && <small className={styles.warning}>Freeze the matching source-bound Story Spine first. This prevents a ledger from being attached to a different narration timeline.</small>}
               </>}
             </section>
-            <section style={{ border: "1px solid #294468", borderRadius: 11, padding: 14, display: "grid", gap: 10, background: "rgba(17,37,62,.32)" }}>
-              <h2 style={{ margin: 0, fontSize: 17 }}>Optional: attach reviewed reference mechanics</h2>
-              <p style={{ margin: 0, color: "#b9c8da", fontSize: 13, lineHeight: 1.5 }}>
+            <section className={styles.optionalModule}>
+              <ModuleHeading tag="Optional binding" title="Reviewed reference mechanics" />
+              <p className={styles.moduleCopy}>
                 Supply original craft rules for the opening, rhythm, narration, cuts, audio, recurring identity, and exclusions. This intake accepts text only—never reference video, frames, audio, scripts, or an automatic similarity comparison. The server derives the current attributed documentary contract and binds the packet to this exact Story Spine before it is frozen.
               </p>
               {selected.workflow?.referenceMechanicsPacket ? <>
-                <strong style={{ color: "#9be2b3", fontSize: 13 }}>Reviewed mechanics packet attached</strong>
-                {selected.workflow.referenceMechanicsPacket.contentFingerprint && <code style={{ color: "#9fc0ff", overflowWrap: "anywhere" }}>{selected.workflow.referenceMechanicsPacket.contentFingerprint}</code>}
-                <small style={{ color: "#9eadc1" }}>It will be signed into the cinematic sequence; replacing it requires a fresh immutable episode revision.</small>
+                <strong className={styles.recordedText}>Reviewed mechanics packet attached</strong>
+                {selected.workflow.referenceMechanicsPacket.contentFingerprint && <code className={styles.fingerprint}>{selected.workflow.referenceMechanicsPacket.contentFingerprint}</code>}
+                <small className={styles.moduleNote}>It will be signed into the cinematic sequence; replacing it requires a fresh immutable episode revision.</small>
               </> : <>
-                <textarea aria-label="Reference mechanics annotations JSON" style={{ ...textarea, minHeight: 260 }} value={referenceMechanics} onChange={(event) => setReferenceMechanics(event.target.value)} placeholder={'{\n  "openingPromisePayoff": { "guidance": "State one source-bound question, then earn its answer later.", "sourceIds": ["fern"] },\n  "beatVisualRhythm": { "guidance": "Change the visual only when the evidence relationship changes.", "sourceIds": ["fern"] },\n  "narrationPaceClarity": { "guidance": "Keep the causal claim legible before underscoring it.", "sourceIds": ["fern"] },\n  "cutSceneFunction": { "guidance": "Each cut reveals a fact, relationship, or consequence.", "sourceIds": ["fern"] },\n  "audioRelationship": { "guidance": "Keep narration intelligible over restrained ambience.", "sourceIds": ["fern"] },\n  "recurringIdentity": { "guidance": "Use this channel’s own faceless cast and evidence treatment.", "sourceIds": ["fern"] },\n  "exclusions": { "guidance": "No copied cases, visual identity, footage, scripts, voices, or unsupported reconstructions.", "sourceIds": ["fern"] }\n}'} />
-                <textarea aria-label="Reference mechanics editorial review JSON" style={{ ...textarea, minHeight: 110 }} value={referenceMechanicsReview} onChange={(event) => setReferenceMechanicsReview(event.target.value)} placeholder='{"id":"reference-mechanics-review-...","reviewerId":"reviewer-...","reviewedAt":"2026-08-20T12:00:00.000Z"}' />
-                <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("attach_reference_mechanics", { episodeId: selected._id, mechanics: parseObject(referenceMechanics, "Reference mechanics"), review: parseObject(referenceMechanicsReview, "Reference mechanics review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze reviewed mechanics packet</button>
+                <textarea aria-label="Reference mechanics annotations JSON" className={`${styles.textarea} ${styles.textareaTall}`} value={referenceMechanics} onChange={(event) => setReferenceMechanics(event.target.value)} placeholder={'{\n  "openingPromisePayoff": { "guidance": "State one source-bound question, then earn its answer later.", "sourceIds": ["fern"] },\n  "beatVisualRhythm": { "guidance": "Change the visual only when the evidence relationship changes.", "sourceIds": ["fern"] },\n  "narrationPaceClarity": { "guidance": "Keep the causal claim legible before underscoring it.", "sourceIds": ["fern"] },\n  "cutSceneFunction": { "guidance": "Each cut reveals a fact, relationship, or consequence.", "sourceIds": ["fern"] },\n  "audioRelationship": { "guidance": "Keep narration intelligible over restrained ambience.", "sourceIds": ["fern"] },\n  "recurringIdentity": { "guidance": "Use this channel’s own faceless cast and evidence treatment.", "sourceIds": ["fern"] },\n  "exclusions": { "guidance": "No copied cases, visual identity, footage, scripts, voices, or unsupported reconstructions.", "sourceIds": ["fern"] }\n}'} />
+                <textarea aria-label="Reference mechanics editorial review JSON" className={`${styles.textarea} ${styles.textareaCompact}`} value={referenceMechanicsReview} onChange={(event) => setReferenceMechanicsReview(event.target.value)} placeholder='{"id":"reference-mechanics-review-...","reviewerId":"reviewer-...","reviewedAt":"2026-08-20T12:00:00.000Z"}' />
+                <button type="button" className={styles.secondaryAction} disabled={actionDisabled} onClick={() => { try { void submit("attach_reference_mechanics", { episodeId: selected._id, mechanics: parseObject(referenceMechanics, "Reference mechanics"), review: parseObject(referenceMechanicsReview, "Reference mechanics review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze reviewed mechanics packet</button>
               </>}
             </section>
-            <h2 style={{ margin: 0, fontSize: 19 }}>4. Draft cinematic coverage</h2>
-            <p style={{ margin: 0, color: "#aeb9cb", fontSize: 13 }}>Paste the compact direction card: causal question, visual world, and original faceless mannequin wardrobe/silhouette locks. The system writes the actual multi-shot, tension, cut, and continuity draft.</p>
-            <textarea aria-label="Cinematic direction JSON" style={textarea} value={direction} onChange={(event) => setDirection(event.target.value)} placeholder='{"version":"cinematic-case-direction/v1", ...}' />
-            <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("draft_cinematic_sequence", { episodeId: selected._id, direction: parseObject(direction, "Cinematic direction") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Create review draft</button>
+            <OperatorHeading index="04" title="Draft cinematic coverage" detail="Bind the causal question, visual world, and original faceless cast before the system writes multi-shot tension, cuts, and continuity." />
+            <textarea aria-label="Cinematic direction JSON" className={styles.textarea} value={direction} onChange={(event) => setDirection(event.target.value)} placeholder='{"version":"cinematic-case-direction/v1", ...}' />
+            <button type="button" className={styles.primaryAction} disabled={actionDisabled} onClick={() => { try { void submit("draft_cinematic_sequence", { episodeId: selected._id, direction: parseObject(direction, "Cinematic direction") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Create review draft</button>
           </>}
 
           {selected?.status === "awaiting_cinematic_review" && <>
-            <h2 style={{ margin: 0, fontSize: 19 }}>5. Finalize cinematic review</h2>
-            <p style={{ margin: 0, color: "#aeb9cb", fontSize: 13 }}>The editor review must bind the current source packet, evidence map, and draft sequence fingerprint. Any wardrobe, timing, claim, or cut change requires a new review.</p>
-            {selected.workflow?.cinematicDraft?.sequenceContentFingerprint && <code style={{ color: "#9fc0ff", overflowWrap: "anywhere" }}>{selected.workflow.cinematicDraft.sequenceContentFingerprint}</code>}
-            <section style={{ border: "1px solid #294468", borderRadius: 11, padding: 14, display: "grid", gap: 10, background: "rgba(17,37,62,.32)" }}>
-              <h3 style={{ margin: 0, fontSize: 16 }}>Bind approved source-proof media</h3>
-              <p style={{ margin: 0, color: "#b9c8da", fontSize: 13, lineHeight: 1.5 }}>
+            <OperatorHeading index="05" title="Finalize cinematic review" detail="Bind the current source packet, evidence map, and draft fingerprint. Any wardrobe, timing, claim, or cut change requires a new review." />
+            {selected.workflow?.cinematicDraft?.sequenceContentFingerprint && <code className={styles.fingerprint}>{selected.workflow.cinematicDraft.sequenceContentFingerprint}</code>}
+            <section className={styles.optionalModule}>
+              <ModuleHeading tag="Required media proof" title="Bind approved source-proof media" />
+              <p className={styles.moduleCopy}>
                 For every source-proof shot, attach the exact approved asset, rights locator, SHA-256, and approval receipt. The server derives the source packet and provenance binding; this desk cannot substitute a different source or approve generated evidence.
               </p>
               {sourceProofMediaAttached ? <>
-                <strong style={{ color: "#9be2b3", fontSize: 13 }}>Approved source-proof media are frozen into this review draft</strong>
-                <small style={{ color: "#9eadc1" }}>Replacing an asset requires a fresh immutable Casefile revision and a new cinematic review.</small>
+                <strong className={styles.recordedText}>Approved source-proof media are frozen into this review draft</strong>
+                <small className={styles.moduleNote}>Replacing an asset requires a fresh immutable Casefile revision and a new cinematic review.</small>
               </> : <>
-                <textarea aria-label="Source-proof media attachments JSON" style={{ ...textarea, minHeight: 220 }} value={sourceProofMedia} onChange={(event) => setSourceProofMedia(event.target.value)} placeholder={'[{\n  "shotId": "cinematic-shot-…",\n  "sourceId": "source-…",\n  "assetId": "asset-…",\n  "rightsEvidenceLocator": "https://…",\n  "assetUrl": "https://…",\n  "assetSha256": "…",\n  "approvalReceiptId": "source-proof-receipt-…"\n}]'} />
-                <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("attach_source_proof_media", { episodeId: selected._id, attachments: parseSourceProofAttachments(sourceProofMedia) }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze approved source-proof media</button>
+                <textarea aria-label="Source-proof media attachments JSON" className={`${styles.textarea} ${styles.textareaMedia}`} value={sourceProofMedia} onChange={(event) => setSourceProofMedia(event.target.value)} placeholder={'[{\n  "shotId": "cinematic-shot-…",\n  "sourceId": "source-…",\n  "assetId": "asset-…",\n  "rightsEvidenceLocator": "https://…",\n  "assetUrl": "https://…",\n  "assetSha256": "…",\n  "approvalReceiptId": "source-proof-receipt-…"\n}]'} />
+                <button type="button" className={styles.secondaryAction} disabled={actionDisabled} onClick={() => { try { void submit("attach_source_proof_media", { episodeId: selected._id, attachments: parseSourceProofAttachments(sourceProofMedia) }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze approved source-proof media</button>
               </>}
             </section>
-            <textarea aria-label="Cinematic editorial review JSON" style={textarea} value={review} onChange={(event) => setReview(event.target.value)} placeholder='{"id":"cinematic-sequence-review-...", "decision":"approved", ...}' />
-            <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("finalize_cinematic_sequence", { episodeId: selected._id, editorialReview: parseObject(review, "Cinematic review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Finalize render package</button>
+            <textarea aria-label="Cinematic editorial review JSON" className={styles.textarea} value={review} onChange={(event) => setReview(event.target.value)} placeholder='{"id":"cinematic-sequence-review-...", "decision":"approved", ...}' />
+            <button type="button" className={styles.primaryAction} disabled={actionDisabled} onClick={() => { try { void submit("finalize_cinematic_sequence", { episodeId: selected._id, editorialReview: parseObject(review, "Cinematic review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Finalize render package</button>
           </>}
 
           {selected?.status === "render_admitted" && <>
-            <h2 style={{ margin: 0, fontSize: 19 }}>Render package admitted</h2>
-            <p style={{ margin: 0, color: "#b6c8e4", lineHeight: 1.55 }}>This episode now has a fingerprint-bound LTX-ready multi-shot plan with {selected.workflow?.cinematicAdmission?.generatedSceneCount ?? 0} generated scenes. It remains private review only. Rendering still needs a separately approved, budgeted Novita action and final independent footage review.</p>
+            <OperatorHeading index="05" title="Render package admitted" detail={`This episode now has a fingerprint-bound LTX-ready multi-shot plan with ${selected.workflow?.cinematicAdmission?.generatedSceneCount ?? 0} generated scenes.`} />
+            <p className={styles.admittedNote}>It remains private review only. Rendering still needs a separately approved, budgeted Novita action and final independent footage review.</p>
           </>}
         </section>
       </div>
-      {message && <p role="status" className={styles.statusMessage} style={{ ...card, color: message.startsWith("Saved") ? "#9be2b3" : "#ffb8b8" }}>{message}</p>}
+      {message && <p role="status" className={`${styles.surface} ${styles.statusMessage}`} data-tone={message.startsWith("Saved") ? "success" : "error"}>{message}</p>}
+      </>)}
     </div>
   );
 }
