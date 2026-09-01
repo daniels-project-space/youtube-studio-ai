@@ -21,10 +21,18 @@ import {
   shortRetentionManifestForStrategy,
 } from "@/engine/documentaryCollageShort";
 import { parseShortStrategyManifest, shortRenderDurationSec } from "@/engine/shortStrategyManifest";
-import { craftDocuMotion, hasDocumotion } from "@/lib/documotion";
+import {
+  craftDocuMotion,
+  hasDocumotion,
+  type DocuImageRequest,
+} from "@/lib/documotion";
 import { makeRunTempDir } from "@/lib/files";
 import { putObject, putObjectFromFile } from "@/lib/storage";
 import { safeFrameForDocuLayout } from "@/remotion/docuLayout";
+import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
+import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
+import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
+import { PRICE } from "@/engine/pricing";
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -234,13 +242,22 @@ export const documotionShort: Block = {
   produces: ["videoKey", "videoLocalPath", "videoDurationSec", "documotionVerdict", "documotionRender"],
   paid: true,
   run: async (ctx) => {
-    if (!hasDocumotion()) {
-      throw new Error("documotion_short: Gemini and Nano Banana/FAL configuration are required; no crop fallback is allowed");
+    if (!hasDocumotion({ requiresPlanning: false }) || !hasNovitaRenderFarmConfig()) {
+      throw new Error("documotion_short: the attested Novita image and documentary review capabilities are required; no generic image fallback is allowed");
     }
     const topic = textFromStore(ctx, "topic");
     const manifest = parseShortStrategyManifest(ctx.store["beatManifest"]);
     const styleId = typeof ctx.params["styleId"] === "string" ? ctx.params["styleId"] : "archival_collage";
     const plan = docuPlanForDocumentaryCollageShort(manifest, styleId);
+    const generatedAssetCallCeiling = plan.shots.reduce(
+      (total, shot) => total + (shot.assets?.length ?? 0) * 2,
+      0,
+    );
+    novitaCostEnvelope({
+      label: "documotion_short",
+      imageJobs: generatedAssetCallCeiling,
+      maxCostUsd: ctx.stageBudgetUsd,
+    });
     const runDir = await makeRunTempDir(ctx.runId, "documotion_short");
     const outPath = join(runDir, "final.mp4");
     const targetDurationSec = shortRenderDurationSec(manifest);
@@ -264,6 +281,18 @@ export const documotionShort: Block = {
       `documotion_short: native portrait render ${targetDurationSec.toFixed(1)}s, ${plan.shots.length} locked beats, ` +
       `style=${styleId}, verifier refine rounds=${maxRefineRounds}`,
     );
+    const generateImage = createAttestedNovitaImageGenerator<DocuImageRequest>({
+      prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/documotion-art`,
+      id: (request) => request.id,
+      profileId: "production",
+      maxCostUsd: PRICE.novitaImageMaxUsd,
+      lifecycle: {
+        ownerId: ctx.ownerId,
+        channelId: ctx.channelId,
+        runId: ctx.runId,
+        blockId: "documotion_short",
+      },
+    });
     const result = await craftDocuMotion({
       topic,
       style: styleId,
@@ -274,6 +303,7 @@ export const documotionShort: Block = {
       plan,
       lockShotDurations: true,
       maxRefineRounds,
+      generateImage,
       log: (message) => ctx.log(`documotion_short: ${message}`),
     });
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;

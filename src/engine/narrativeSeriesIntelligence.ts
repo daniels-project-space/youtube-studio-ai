@@ -879,13 +879,17 @@ export const CharacterSheetViewSchema = z.enum(CHARACTER_SHEET_VIEWS);
 export type CharacterSheetView = z.infer<typeof CharacterSheetViewSchema>;
 
 /**
- * Nano Banana Pro is intentionally limited to a one-time script-derived
- * character-sheet dataset. It is not a normal still/image source here. The
- * Studio has no OpenAI image-generation route, including for future LoRA data.
+ * Future script-derived character sheets are admitted only with an exact
+ * ERNIE/Novita provider receipt. This policy does not assert that the route is
+ * live; the production worker must still prove its durable lease and artifact
+ * attestation before any dataset can be sealed.
  */
 export const CharacterSheetSourcePolicySchema = z.discriminatedUnion("kind", [
   z.object({
-    kind: z.literal("nano_banana_pro_character_sheet_exception"),
+    kind: z.literal("attested_ernie_character_sheet"),
+    provider: z.literal("novita"),
+    route: z.literal("ernie-image-novita-4090"),
+    providerReceiptRequired: z.literal(true),
     outputUse: z.literal("one_time_script_derived_character_lora_dataset_only"),
     ordinaryProductionVisualUseProhibited: z.literal(true),
   }).strict(),
@@ -902,7 +906,7 @@ export const SealedCharacterLoRAPolicySchema = z.object({
   state: z.literal("sealed"),
   characterLoRATrainingEnabled: z.boolean(),
   automaticAdmissionEnabled: z.boolean(),
-  nanoBananaProCharacterSheetExceptionEnabled: z.boolean(),
+  attestedErnieCharacterSheetEnabled: z.boolean(),
   perCharacterSpendCapCents: currencyCents,
 }).strict();
 export type SealedCharacterLoRAPolicy = z.infer<typeof SealedCharacterLoRAPolicySchema>;
@@ -911,8 +915,8 @@ function sourcePolicyIsAllowed(
   policy: SealedCharacterLoRAPolicy,
   source: CharacterSheetSourcePolicy,
 ): boolean {
-  if (source.kind === "nano_banana_pro_character_sheet_exception") {
-    return policy.nanoBananaProCharacterSheetExceptionEnabled;
+  if (source.kind === "attested_ernie_character_sheet") {
+    return policy.attestedErnieCharacterSheetEnabled;
   }
   return true;
 }

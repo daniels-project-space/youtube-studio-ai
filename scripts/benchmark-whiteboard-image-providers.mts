@@ -1,7 +1,7 @@
 /**
  * One-prompt, one-image-per-model comparison for Whiteboard art selection.
  *
- * This is deliberately separate from the production Nano Banana Pro adapter:
+ * This is deliberately separate from the production attested Novita adapter:
  * benchmark outputs are local review material only and may never enter a
  * release master. A cheaper model can graduate only after a receipt-bound
  * adapter, deterministic visual review, and an explicit policy change.

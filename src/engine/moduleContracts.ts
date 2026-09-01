@@ -27,7 +27,6 @@ import {
   whiteboardNarrationCharacterCeiling,
   whiteboardPanelsForTargetSeconds,
 } from "../lib/whiteboardSync";
-import { NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE } from "../lib/nanoBananaWhiteboardArtContract";
 import type {
   ModuleContractOverride,
   ModuleCostContext,
@@ -110,10 +109,9 @@ function whiteboardCostCeiling(
   context: Readonly<ModuleCostContext> | undefined,
 ): number {
   const seconds = targetSeconds(params, context, 132);
-  // Keep this contract on the same bounded Pro-art and narration helpers as
-  // whiteboardScribe. The live art route is sealed Nano Banana Pro; charging
-  // it at a lower-tier planning rate would admit a run that cannot fund its
-  // actual provider-bound art sequence.
+  // Keep this contract on the same bounded direct-worker and narration helpers
+  // as whiteboardScribe. Every art layer owns one conservative one-worker
+  // envelope; observed teardown receipts replace the bound at runtime.
   const panels = whiteboardPanelsForTargetSeconds(seconds);
   const characters = whiteboardNarrationCharacterCeiling(
     panels,
@@ -125,7 +123,7 @@ function whiteboardCostCeiling(
     params["elevenVoiceId"].trim().length > 0;
   const ttsRate = usesEleven ? PRICE.ttsElevenPerKCharUsd : PRICE.ttsPerKCharUsd;
   return (
-    whiteboardImageCallCeiling(panels) * NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE.admissionCeilingUsd +
+    whiteboardImageCallCeiling(panels) * PRICE.novitaImageMaxUsd +
     (characters / 1_000) * ttsRate
   );
 }
@@ -1139,11 +1137,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     {
       optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "voiceId", "ttsProvider", "palette", "musicKey", "musicUrl", "selfContainedStoryReceipt", "channelProgramRoute"],
       providerProfiles: [managed, local],
-      // 16 panels × five sealed Nano Banana Pro images ($12.08 ceiling), plus
+      // 16 panels × five sealed one-worker image envelopes, plus
       // the full premium TTS ceiling. Upstream music is charged by its own
       // block. This must stay above the actual maximum, not a cheaper model.
-      maxCostUsd: 15,
-      // Cold-run bound mirrors the engine's exact Pro-art and narration
+      maxCostUsd: 31,
+      // Cold-run bound mirrors the engine's exact image-worker and narration
       // ceilings. Upstream music is charged by its own block.
       maxCostUsdFor: (params, context) => whiteboardCostCeiling(params, context),
       qualityRequired: true,

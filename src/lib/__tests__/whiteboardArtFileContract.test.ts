@@ -6,7 +6,7 @@ assert.equal(whiteboardArtFileExtension("image/jpeg"), "jpg");
 assert.equal(whiteboardArtFileExtension("image/webp"), "webp");
 assert.throws(
   () => whiteboardArtFileExtension("image/gif"),
-  /unsupported Nano Banana Pro art content type image\/gif/,
+  /unsupported attested art content type image\/gif/,
 );
 
 console.log("whiteboard art file contract: PASS");

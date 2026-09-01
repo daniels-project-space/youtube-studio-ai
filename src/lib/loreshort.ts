@@ -2,8 +2,8 @@
  * LORESHORT — standalone lore micro-doc engine (GoT "Histories & Lore" style) with
  * GENUINE AI 3D camera moves, as a reusable module.
  *
- * Claude first-person narration + per-beat LAYERED-DEPTH scene prompts → non-Google
- * art → ElevenLabs PER-LINE TTS (for exact beat timing) → LTX image-to-video camera
+ * Claude first-person narration + per-beat LAYERED-DEPTH scene prompts → explicitly
+ * injected attested art → ElevenLabs PER-LINE TTS (for exact beat timing) → LTX image-to-video camera
  * moves (Replicate LTX-distilled / Wan 2.2) → optional Real-ESRGAN 2K upscale → ffmpeg
  * beat-cut edit (fit each shot to its narration line + breath, dissolve, title, grade).
  * Every stage caches to output/loreshort/<slug>/ → fully resumable.
@@ -11,12 +11,10 @@
  * Art SUB-STYLES are swappable (cinematic concept-art, watercolour+pencil, …) so the
  * SAME engine renders any lore in any look. Visual-only; narration muxed at the end.
  *
- * PROVIDERS ARE INJECTED (see LoreShortDeps). Called with no deps — the CLI /
- * proof-gallery path — every provider above is the default and behaviour is
- * unchanged. The pipeline block (src/trigger/blocks/loreShortBlocks.ts) injects
- * the attested Novita render farm, the channel's cast voice and an R2 publish
- * sink, so nothing paid escapes the cost-attestation rail and nothing depends on
- * a VPS filesystem.
+ * PROVIDERS ARE INJECTED (see LoreShortDeps). Art is deliberately mandatory:
+ * there is no hidden FAL or generic-image fallback. The production pipeline
+ * injects the attested Novita render farm, the channel's cast voice and an R2
+ * publish sink, so nothing paid escapes the cost-attestation rail.
  */
 import { writeFile, readFile, mkdir, copyFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
@@ -26,7 +24,6 @@ import { bootstrapSecrets } from "./bootstrap";
 import { claudeJsonPro, hasAnthropicKey } from "./anthropic";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "./vision";
 import { synthNarration } from "./tts";
-import { generateFalImage } from "./falImage";
 import { ffprobeDuration } from "./ffmpeg";
 import {
   resolveSelfContainedStoryPlan,
@@ -116,11 +113,10 @@ export const LORESHORT_MODULE = {
     introSec: "title-card seconds", pause: "breath between beats", dissolve: "crossfade seconds",
   },
   needs: { // environment
-    // Claude is required for story planning. FAL / ELEVENLABS / REPLICATE are
-    // only required by the DEFAULT implementations —
-    // an injected caller (LoreShortDeps) supplies its own providers and neither
-    // token is demanded. See the secret computation in craftLoreShort.
-    secrets: ["ANTHROPIC_API_KEY", "FAL_KEY (default art only)", "ELEVENLABS_API_KEY (default TTS only)", "REPLICATE_API_TOKEN (default i2v/upscale only)"],
+    // Claude is required for self-planning; ElevenLabs and Replicate are used
+    // only by the remaining default implementations. Image generation has no
+    // default credential because callers must inject an attested route.
+    secrets: ["ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY (default TTS only)", "REPLICATE_API_TOKEN (default i2v/upscale only)"],
     tools: ["ffmpeg", "ffprobe"],
     note: "Render is nginx-INDEPENDENT (all Replicate inputs are base64 data URIs). The DEFAULT publish sink copies to cfg.webDir and returns cfg.host; an injected `publish` dep (the pipeline block) writes to R2 instead and needs no web host at all.",
   },
@@ -184,7 +180,8 @@ export interface LorePlan {
 
 /**
  * Is the engine's own (non-injectable) story planner configured? LoreCraft uses
- * Claude for text planning; the visual analysis route is pinned to Groq/FAL.
+ * Claude for text planning; visual analysis is pinned to the non-Google
+ * final-review boundary.
  */
 export function hasLoreShort(options: { requiresStoryboard?: boolean } = {}): boolean {
   // A sealed, externally settled story never reaches the Claude planner. Keep
@@ -323,16 +320,14 @@ export interface LoreShortResult { videoPath: string; url: string; scenes: LoreS
 
 /* ── INJECTION SEAM ───────────────────────────────────────────────────────────
  *
- * The engine used to reach four paid providers itself (FAL for art, Replicate
+ * The engine used to reach four paid providers itself (a generic image route, Replicate
  * LTX/Seedance for i2v, Replicate Real-ESRGAN for upscale, ElevenLabs for TTS) and to
  * "publish" by copying into an nginx docroot. None of that survives on a
  * Trigger.dev cloud worker, and the Replicate calls bypassed the pipeline's
  * cost-attestation rail entirely.
  *
- * Every one of those is now a caller-supplied callback with the ORIGINAL
- * implementation as its default, so:
- *   - a standalone CLI / proof-gallery run that calls craftLoreShort(cfg) with
- *     no deps uses non-Google FAL art plus the remaining local defaults;
+ * Every mutable pixel provider is now caller-supplied, so:
+ *   - a standalone CLI / proof-gallery run must name its image provider;
  *   - the pipeline block injects the attested Novita render farm, the
  *     pipeline's cast voice, and an R2 sink instead.
  *
@@ -376,7 +371,7 @@ export interface LoreShortDeps {
   approvedStoryReceipt?: unknown;
   /** Exact lane/route/brief/topic binding expected for approvedStoryReceipt. */
   storyReceiptBinding?: SelfContainedStoryReceiptBinding;
-  /** Beat art. Default: non-Google FAL image route. */
+  /** Beat art. Required and injected so every paid image stays attested. */
   generateImage?: (request: LoreArtRequest) => Promise<Buffer | Uint8Array>;
   /** Image→video camera move. Default: Replicate LTX/Seedance/Wan. */
   generateClip?: (request: LoreClipRequest) => Promise<Buffer | Uint8Array>;
@@ -413,17 +408,17 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
   });
   const approvedPlan = approved.plan as LorePlan | undefined;
   const style = SUB_STYLES[cfg.subStyle] ?? SUB_STYLES.cinematic;
-  // Only demand the secrets the DEFAULT implementations still in play actually
-  // need. An injected caller (the pipeline block) supplies its own attested
-  // providers, so requiring a FAL/Replicate/ElevenLabs token would fail a run
-  // that never touches those fallbacks. Claude remains required for the story
+  if (!deps.generateImage) {
+    throw new Error("loreshort: an explicit attested image generator is required");
+  }
+  const generateImage = deps.generateImage;
+  // Only demand the secrets the remaining default implementations actually
+  // need. Art has no default by design. Claude remains required for the story
   // planner; visual analysis is explicitly limited to non-Google providers.
   const usesReplicate = !deps.generateClip || cfg.upscale === "realesrgan";
-  const usesFalImage = !deps.generateImage;
   await bootstrapSecrets(() => {}, {
     required: [
       ...(approved.receiptSupplied ? [] : ["ANTHROPIC_API_KEY"]),
-      ...(usesFalImage ? ["FAL_KEY"] : []),
       ...(deps.synthLine ? [] : ["ELEVENLABS_API_KEY"]),
       ...(usesReplicate ? ["REPLICATE_API_TOKEN"] : []),
     ],
@@ -473,9 +468,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
     if (existsSync(out)) return;
     const text = `${scenes[i].shot ? scenes[i].shot.toUpperCase() + " SHOT. " : ""}${style.art}\nCompose in THREE clear depth layers (close foreground / midground subject / deep background). SCENE: ${scenes[i].visual}`;
     try {
-      const bytes = deps.generateImage
-        ? await deps.generateImage({ id: `${cfg.slug}-scene-${i}`, index: i, prompt: text })
-        : await generateFalImage({ prompt: text, aspectRatio: "16:9", imageSize: "2K", tier: "pro" });
+      const bytes = await generateImage({ id: `${cfg.slug}-scene-${i}`, index: i, prompt: text });
       await writeFile(out, Buffer.from(bytes));
       log(`art ${i} ✓`);
     } catch (e) {

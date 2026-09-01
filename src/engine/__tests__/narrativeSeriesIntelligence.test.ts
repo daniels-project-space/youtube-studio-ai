@@ -241,7 +241,7 @@ const policy = {
   state: "sealed" as const,
   characterLoRATrainingEnabled: true,
   automaticAdmissionEnabled: true,
-  nanoBananaProCharacterSheetExceptionEnabled: true,
+  attestedErnieCharacterSheetEnabled: true,
   perCharacterSpendCapCents: 400,
 };
 const sheetPlan = createCharacterSheetDatasetPlan({
@@ -256,12 +256,15 @@ const sheetPlan = createCharacterSheetDatasetPlan({
   },
   scriptTreatmentFingerprint: digest("f"),
   sourcePolicy: {
-    kind: "nano_banana_pro_character_sheet_exception",
+    kind: "attested_ernie_character_sheet",
+    provider: "novita",
+    route: "ernie-image-novita-4090",
+    providerReceiptRequired: true,
     outputUse: "one_time_script_derived_character_lora_dataset_only",
     ordinaryProductionVisualUseProhibited: true,
   },
 });
-assert.equal(sheetPlan.sourcePolicy.kind, "nano_banana_pro_character_sheet_exception");
+assert.equal(sheetPlan.sourcePolicy.kind, "attested_ernie_character_sheet");
 assert.equal(sheetPlan.requiredViews.length, 6);
 
 const dataset = createCharacterSheetDatasetManifest({
@@ -382,6 +385,15 @@ assert.equal(
   }).success,
   false,
   "OpenAI image candidates are not a supported character-sheet source",
+);
+assert.equal(
+  CharacterSheetSourcePolicySchema.safeParse({
+    kind: "nano_banana_pro_character_sheet_exception",
+    outputUse: "one_time_script_derived_character_lora_dataset_only",
+    ordinaryProductionVisualUseProhibited: true,
+  }).success,
+  false,
+  "Nano Banana must remain thumbnail-only",
 );
 
 console.log("NARRATIVE SERIES INTELLIGENCE TESTS PASS");

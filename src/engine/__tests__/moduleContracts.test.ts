@@ -30,7 +30,6 @@ import {
   bananaUnitRate,
   qaVisualCost,
 } from "@/engine/pricing";
-import { NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE } from "@/lib/nanoBananaWhiteboardArtContract";
 import {
   whiteboardNarrationCharacterCeiling,
   whiteboardPanelsForTargetSeconds,
@@ -580,7 +579,7 @@ function configurationSpecificCostEnvelopes(): void {
     whiteboardPanels,
     Math.round(132 * 3.1),
   );
-  const whiteboardArt = whiteboardPanels * 5 * NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE.admissionCeilingUsd;
+  const whiteboardArt = whiteboardPanels * 5 * PRICE.novitaImageMaxUsd;
   assert.equal(
     envelope("whiteboard_scribe", { targetSeconds: 132 }),
     whiteboardArt + (whiteboardCharacters / 1_000) * PRICE.ttsPerKCharUsd,
@@ -607,11 +606,11 @@ function configurationSpecificCostEnvelopes(): void {
     "motion-comic reservation must cover art, dialogue, music, and lettering graders",
   );
 
-  const maxWhiteboardArt = 16 * 5 * NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE.admissionCeilingUsd;
+  const maxWhiteboardArt = 16 * 5 * PRICE.novitaImageMaxUsd;
   const maxWhiteboardPremiumTts = (16 * 120 * 12 / 1_000) * PRICE.ttsElevenPerKCharUsd;
   assert.ok(
     (MODULE_CONTRACTS.whiteboard_scribe.maxCostUsd ?? 0) >= maxWhiteboardArt + maxWhiteboardPremiumTts,
-    "whiteboard hard cap must cover all 16 panels, five Nano Banana Pro art assets each, and premium narration",
+    "whiteboard hard cap must cover all 16 panels, five direct Novita image workers each, and premium narration",
   );
 
   assert.equal(

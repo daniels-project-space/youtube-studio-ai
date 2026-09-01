@@ -13,7 +13,7 @@ import {
 
 // P2-5 (GOLDEN_MODULE_AUDIT_2026-08.md): "whiteboard" was never test-run
 // directly. castWhiteboardSync's full orchestration needs a non-Google planner + Fish Audio
-// + sealed Nano Banana Pro art credentials and shells out to Python, but its actual
+// + an injected attested Novita image renderer and shells out to Python, but its actual
 // spend-bounding gates — panel count clamp, per-panel image ceiling,
 // narration/TTS character ceiling — are pure, exported, and directly
 // testable. This exercises those real ceilings plus the readiness gate's
@@ -146,7 +146,7 @@ console.log("whiteboardSyncCeilings.test.ts: panel/image/narration spend ceiling
 /* ------------------------------ readiness gate ----------------------------*/
 //
 // hasWhiteboardSync() is the local renderer gate: it is a genuine AND across
-// the required storyboard planner and Fish Audio TTS. Nano Banana Pro is
+// the required storyboard planner and Fish Audio TTS. The Novita worker is
 // enforced by the paid art block just before its first provider submission,
 // rather than being hidden in this reusable local helper.
 const GATE_VARS = ["ANTHROPIC_API_KEY", "OPENROUTER_API_KEY", "FISH_AUDIO_API_KEY", "ELEVENLABS_API_KEY"] as const;

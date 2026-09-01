@@ -199,7 +199,8 @@ async function routingProof(): Promise<void> {
     "src/trigger/planWeekAhead.ts": /generateNanoBananaImageWithReceipt/,
     "src/trigger/blocks/intelligenceBlocks.ts": /generateNanoBananaImageWithReceipt/,
     "src/trigger/blocks/motionComicBlocks.ts": /createAttestedNovitaImageGenerator/,
-    "src/trigger/blocks/whiteboardScribeBlocks.ts": /generateNanoBananaProWhiteboardArtWithReceipt/,
+    "src/trigger/blocks/whiteboardScribeBlocks.ts": /renderAttestedNovitaImageBytes/,
+    "src/trigger/blocks/documentaryCollageShortBlocks.ts": /createAttestedNovitaImageGenerator/,
     "src/trigger/blocks/loreShortBlocks.ts": /createAttestedNovitaImageGenerator/,
     "src/trigger/blocks/lofiBlocks.ts": /renderNovitaImage/,
   };
@@ -210,11 +211,19 @@ async function routingProof(): Promise<void> {
     join(process.cwd(), "src/trigger/blocks/whiteboardScribeBlocks.ts"),
     "utf8",
   );
+  assert.doesNotMatch(whiteboardSource, /generateNanoBanana|FAL_KEY|fal\.run/,
+    "Whiteboard renderer art must stay on its attested Novita route");
+  const documotionSource = await readFile(join(process.cwd(), "src/lib/documotion.ts"), "utf8");
   assert.doesNotMatch(
-    whiteboardSource,
-    /\bcreateAttestedNovitaImageGenerator\b|\brenderNovitaImage\b/,
-    "Whiteboard art must stay on its sealed Nano Banana Pro route rather than falling back to Novita",
+    documotionSource,
+    /generateBananaImage|generateFalImage|getDepthMap|fal-ai\/birefnet|fal-ai\/imageutils\/marigold-depth/,
+    "DocuMotion must not hide paid image, cutout, or depth providers behind its injected Novita route",
   );
+  assert.match(documotionSource, /removeChromaBackground/,
+    "DocuMotion foreground isolation must remain a local compositing step");
+  const loreSource = await readFile(join(process.cwd(), "src/lib/loreshort.ts"), "utf8");
+  assert.doesNotMatch(loreSource, /generateFalImage|FAL_KEY/,
+    "LoreShort must require its injected attested image dependency");
   const triggerConfig = await readFile(join(process.cwd(), "trigger.config.ts"), "utf8");
   assert.match(triggerConfig, /FORWARDED_ENV[\s\S]*"GEMINI_API_KEY"/,
     "Trigger deploys must forward the direct Nano Banana credential when present");
@@ -241,7 +250,7 @@ async function main(): Promise<void> {
   await rejectedAttestationStillAccounts();
   await providerReceiptSurvivesDeliveryCrash();
   await routingProof();
-  console.log("PRODUCTION IMAGE ROUTING PASS: strict Nano thumbnails; Novita footage stays attested and fail-closed");
+  console.log("PRODUCTION IMAGE ROUTING PASS: Nano is thumbnail-only; renderer art is attested Novita and fail-closed");
 }
 
 main().catch((error) => {

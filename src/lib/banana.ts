@@ -29,28 +29,18 @@ import {
   nanoBananaThumbnailPromptCostUsd,
   type NanoBananaImageReceipt,
 } from "@/lib/nanoBananaThumbnailContract";
-import {
-  NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE,
-  assertNanoBananaProWhiteboardArtReceipt,
-  nanoBananaProWhiteboardArtCostUsd,
-  type NanoBananaProWhiteboardArtReceipt,
-} from "@/lib/nanoBananaWhiteboardArtContract";
 
 export {
   NANO_BANANA_THUMBNAIL_PROFILE,
   type NanoBananaImageReceipt,
 } from "@/lib/nanoBananaThumbnailContract";
-export {
-  NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE,
-  type NanoBananaProWhiteboardArtReceipt,
-} from "@/lib/nanoBananaWhiteboardArtContract";
 
 /**
  * MODEL TIERS. Pro (gemini-3-pro-image, ~$0.13/img) remains available for
  * explicitly sealed image-asset contracts. Flash (classic Nano Banana,
  * ~$0.04/img) remains the generic picture-only route where FAL is admitted.
- * Whiteboard is intentionally excluded: it uses the dedicated, receipt-bound
- * Nano Banana Pro contract below and never falls back to a lower tier.
+ * Non-thumbnail renderer art is intentionally excluded and must use an
+ * attested Novita image dependency at its owning block boundary.
  * BANANA_FORCE_MODEL overrides everything (emergency pin).
  */
 /** Billed-generation counters (by tier) — pipeline blocks report real cost from
@@ -101,13 +91,6 @@ export function hasNanoBanana(): boolean {
   return isGeminiRuntimeEnabled() && Boolean(process.env.GEMINI_API_KEY || process.env.VAULT_ACCESS_TOKEN);
 }
 
-/** Whiteboard-specific readiness. This is not a generic Gemini capability. */
-export function hasNanoBananaProWhiteboardArt(): boolean {
-  // Whiteboard Nano Banana Pro is deliberately routed through Fal. A Google
-  // AI credential must never make this capability available.
-  return Boolean(process.env.FAL_KEY || process.env.VAULT_ACCESS_TOKEN);
-}
-
 /**
  * Keep the Gemini credential inside the only admitted caller. Generic worker
  * bootstrap must never make this credential available to scripts, planners,
@@ -125,17 +108,6 @@ async function hydrateSealedNanoBananaThumbnailCredential(): Promise<void> {
   }
   if (!process.env.GEMINI_API_KEY) {
     throw new Error("nano banana thumbnail: GEMINI_API_KEY is not configured in the sealed thumbnail vault service");
-  }
-}
-
-async function hydrateSealedNanoBananaWhiteboardArtCredential(): Promise<void> {
-  if (!process.env.FAL_KEY) {
-    await hydrateEnv("fal");
-  }
-  if (!process.env.FAL_KEY) {
-    throw new Error(
-      "Nano Banana Pro Whiteboard art: FAL_KEY is not configured in the sealed image-asset vault service",
-    );
   }
 }
 
@@ -356,11 +328,6 @@ export interface BananaImageArgs {
 export interface NanoBananaImageResult {
   bytes: Buffer;
   receipt: NanoBananaImageReceipt;
-}
-
-export interface NanoBananaProWhiteboardArtResult {
-  bytes: Buffer;
-  receipt: NanoBananaProWhiteboardArtReceipt;
 }
 
 interface GeminiImageResult {
@@ -694,188 +661,6 @@ export async function generateNanoBananaImage(
   },
 ): Promise<Buffer> {
   return (await generateNanoBananaImageWithReceipt(args)).bytes;
-}
-
-/**
- * Whiteboard's only admitted art generator. It pins Nano Banana Pro at 2K,
- * records the exact provider response, and deliberately exposes no model or
- * lower-tier fallback selector to the Whiteboard renderer.
- */
-export async function generateNanoBananaProWhiteboardArtWithReceipt(
-  args: Pick<BananaImageArgs, "prompt" | "maxProviderAttempts"> & {
-    /** Durable run/art scope included in the receipt-bound request hash. */
-    idempotencyContext: string;
-  },
-): Promise<NanoBananaProWhiteboardArtResult> {
-  await hydrateSealedNanoBananaWhiteboardArtCredential();
-  const profile = NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE;
-  const prompt = profile.allowText ? args.prompt : args.prompt + NO_TEXT_CLAUSE;
-  const promptUtf8Bytes = Buffer.byteLength(prompt, "utf8");
-  if (promptUtf8Bytes > profile.maxPromptUtf8Bytes) {
-    throw new Error(
-      `Nano Banana Pro Whiteboard art prompt is ${promptUtf8Bytes} UTF-8 bytes; ` +
-        `the sealed maximum is ${profile.maxPromptUtf8Bytes}`,
-    );
-  }
-  const endpoint = `https://fal.run/${profile.model}`;
-  const body = {
-    prompt,
-    num_images: 1,
-    aspect_ratio: profile.aspectRatio,
-    output_format: "png",
-    safety_tolerance: "4",
-    sync_mode: false,
-    resolution: profile.imageSize,
-    limit_generations: true,
-    // A render must be reproducible from the sealed briefing, not live web data.
-    enable_web_search: false,
-  } as const;
-  const providerRequestCanonicalJson = canonicalJson({
-    apiVersion: profile.apiVersion,
-    endpoint,
-    model: profile.model,
-    operation: "text_to_image",
-    context: args.idempotencyContext,
-    body,
-  });
-  let response: Response | undefined;
-  const attempts = Math.max(1, Math.min(2, args.maxProviderAttempts ?? 1));
-  for (let attempt = 0; attempt < attempts; attempt++) {
-    try {
-      response = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          Authorization: `Key ${process.env.FAL_KEY}`,
-          "content-type": "application/json",
-        },
-        body: JSON.stringify(body),
-        signal: AbortSignal.timeout(180_000),
-      });
-    } catch (error) {
-      throw new BananaImageSubmissionError(
-        "Fal Nano Banana Pro submission transport failed without a durable response; refusing automatic resubmission",
-        { cause: error },
-      );
-    }
-    if (response.status !== 429 || attempt + 1 >= attempts) break;
-    await new Promise((resolve) => setTimeout(resolve, 4_000));
-  }
-  if (!response) throw new Error("Fal Nano Banana Pro did not produce a provider response");
-  const raw = await response.text();
-  let json: {
-    images?: Array<{ url?: string; content_type?: string; file_name?: string }>;
-    description?: string;
-  };
-  try {
-    json = raw ? JSON.parse(raw) as typeof json : {};
-  } catch (error) {
-    throw new BananaImageSubmissionError(
-      `Fal Nano Banana Pro returned an unreadable HTTP ${response.status} response; refusing automatic resubmission`,
-      { status: response.status, cause: error },
-    );
-  }
-  if (response.status === 429) {
-    throw new BananaImageSubmissionError("Fal Nano Banana Pro exhausted explicit pre-spend rate-limit rejection(s)", {
-      status: 429,
-    });
-  }
-  if (!response.ok) {
-    // Fal returns a short, useful validation/safety explanation for 4xx
-    // rejections. Preserve a bounded normalized form so an operator can repair
-    // the sealed request without exposing credentials or blindly resubmitting.
-    const providerDetail = typeof json.description === "string"
-      ? json.description.replace(/\s+/g, " ").trim().slice(0, 400)
-      : "";
-    throw new BananaImageSubmissionError(
-      `Fal Nano Banana Pro returned HTTP ${response.status}${providerDetail ? `: ${providerDetail}` : ""} without a durable image; refusing automatic resubmission`,
-      { status: response.status },
-    );
-  }
-  const image = json.images?.[0];
-  if (!image?.url || !/^https:\/\//.test(image.url)) {
-    throw new BananaImageSubmissionError(
-      "Fal Nano Banana Pro accepted the request but returned no durable HTTPS image URL; refusing automatic resubmission",
-      { status: response.status },
-    );
-  }
-  let imageResponse: Response;
-  try {
-    imageResponse = await fetch(image.url, { signal: AbortSignal.timeout(120_000) });
-  } catch (error) {
-    throw new BananaImageSubmissionError(
-      "Fal Nano Banana Pro image download failed after an accepted request; refusing automatic resubmission",
-      { cause: error },
-    );
-  }
-  if (!imageResponse.ok) {
-    throw new BananaImageSubmissionError(
-      `Fal Nano Banana Pro image download returned HTTP ${imageResponse.status} after an accepted request; refusing automatic resubmission`,
-      { status: imageResponse.status },
-    );
-  }
-  const byteLength = Number(imageResponse.headers.get("content-length") ?? "0");
-  if (Number.isFinite(byteLength) && byteLength > 32 * 1024 * 1024) {
-    throw new Error("Fal Nano Banana Pro returned an image over the 32 MiB Whiteboard asset limit");
-  }
-  const bytes = Buffer.from(await imageResponse.arrayBuffer());
-  if (bytes.length === 0 || bytes.length > 32 * 1024 * 1024) {
-    throw new Error("Fal Nano Banana Pro returned an empty or oversized Whiteboard image");
-  }
-  const dimensions = rasterImageDimensions(bytes);
-  const declaredContentType = (image.content_type ?? imageResponse.headers.get("content-type") ?? "")
-    .split(";", 1)[0]
-    .trim()
-    .toLowerCase()
-    .replace(/^image\/jpg$/, "image/jpeg");
-  if (declaredContentType && declaredContentType !== dimensions.contentType) {
-    throw new Error(
-      `Fal Nano Banana Pro declared ${declaredContentType} but returned ${dimensions.contentType} bytes`,
-    );
-  }
-  const providerResponseMetadataCanonicalJson = canonicalJson({
-    status: response.status,
-    requestId: response.headers.get("x-fal-request-id") ?? response.headers.get("x-request-id") ?? null,
-    description: json.description ?? "",
-    image: {
-      contentType: image.content_type ?? null,
-      fileName: image.file_name ?? null,
-      url: image.url,
-    },
-  });
-  const providerRequestSha256 = sha256(`nano-banana-provider\0${providerRequestCanonicalJson}`);
-  const providerResponseMetadataSha256 = sha256(
-    `nano-banana-response-metadata\0${providerResponseMetadataCanonicalJson}`,
-  );
-  const costUsd = nanoBananaProWhiteboardArtCostUsd();
-  recordImageUsage({
-    provider: profile.provider,
-    model: profile.model,
-    route: profile.route,
-    images: 1,
-    width: dimensions.width,
-    height: dimensions.height,
-    costUsd,
-  });
-  bananaCounters.pro++;
-  const receipt = assertNanoBananaProWhiteboardArtReceipt({
-    provider: profile.provider,
-    model: profile.model,
-    apiVersion: profile.apiVersion,
-    route: profile.route,
-    width: dimensions.width,
-    height: dimensions.height,
-    promptUtf8Bytes,
-    outputCostUsd: profile.outputImageUsd,
-    costUsd,
-    sourceContentType: dimensions.contentType,
-    providerRequestCanonicalJson,
-    providerRequestSha256,
-    providerResponseMetadataCanonicalJson,
-    providerResponseMetadataSha256,
-    responseSha256: sha256(bytes),
-    createdAt: Date.now(),
-  });
-  return { bytes, receipt };
 }
 
 export async function generateBananaImage(args: BananaImageArgs): Promise<Buffer> {

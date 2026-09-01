@@ -6,7 +6,7 @@
  *
  * The deterministic "write-on" reveal uses no video model: it traces the real
  * ink of each layer and reveals it under a moving hand. The bounded paid path
- * is caller-injected, attested Nano Banana Pro layer art plus TTS.
+ * is caller-injected, attested Novita layer art plus TTS.
  *
  * Pipeline (one castWhiteboardSync() call):
  *   1. STORYBOARD — the non-Google structured planner designs the topic as PANELS, each a STACK OF
@@ -22,8 +22,8 @@
  *      before each panel cuts; a persistent frame + topic header are drawn once;
  *      ffmpeg muxes the narration.
  *
- * Deps: ANTHROPIC_API_KEY or OPENROUTER_API_KEY (storyboard), sealed Nano
- * Banana Pro art admission,
+ * Deps: ANTHROPIC_API_KEY or OPENROUTER_API_KEY (storyboard), sealed Novita
+ * image-worker admission,
  * FISH_AUDIO_API_KEY (default TTS) or ELEVENLABS_API_KEY (a selected
  * ElevenLabs voice), and python3
  * with faster-whisper + numpy/scipy/scikit-image/Pillow (the renderer + aligner).
@@ -57,9 +57,9 @@ import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 import { synthNarration } from "@/lib/tts";
 import { preflightPythonRenderer } from "@/lib/pydeps";
 import {
-  assertNanoBananaProWhiteboardArtReceipt,
-  type NanoBananaProWhiteboardArtReceipt,
-} from "@/lib/nanoBananaWhiteboardArtContract";
+  assertAttestedWhiteboardArtReceipt,
+  type AttestedWhiteboardArtReceipt,
+} from "@/lib/attestedWhiteboardArtContract";
 import { rasterImageDimensions } from "@/lib/imageDimensions";
 import { z } from "zod";
 
@@ -163,7 +163,7 @@ export interface WhiteboardArtRequest {
 
 export interface WhiteboardGeneratedArt {
   bytes: Buffer;
-  receipt: NanoBananaProWhiteboardArtReceipt;
+  receipt: AttestedWhiteboardArtReceipt;
 }
 
 /**
@@ -177,7 +177,7 @@ export function whiteboardArtFileExtension(contentType: string): "png" | "jpg" |
     case "image/jpeg": return "jpg";
     case "image/webp": return "webp";
     default:
-      throw new Error(`whiteboardSync: unsupported Nano Banana Pro art content type ${contentType}`);
+      throw new Error(`whiteboardSync: unsupported attested art content type ${contentType}`);
   }
 }
 
@@ -222,7 +222,7 @@ export interface WhiteboardArtAsset {
   localPath: string;
   contentSha256: string;
   contentType: string;
-  receipt: NanoBananaProWhiteboardArtReceipt;
+  receipt: AttestedWhiteboardArtReceipt;
 }
 
 export type WhiteboardImageGenerator = (request: WhiteboardArtRequest) => Promise<WhiteboardGeneratedArt>;
@@ -1062,14 +1062,14 @@ export async function castWhiteboardSync(args: {
     const recordArt = async (receiptInput: unknown) => {
       const bytes = await readFile(out);
       const contentSha256 = createHash("sha256").update(bytes).digest("hex");
-      const receipt = assertNanoBananaProWhiteboardArtReceipt(receiptInput, contentSha256);
+      const receipt = assertAttestedWhiteboardArtReceipt(receiptInput, contentSha256);
       const dimensions = rasterImageDimensions(bytes);
       if (
         receipt.width !== dimensions.width ||
         receipt.height !== dimensions.height ||
         receipt.sourceContentType !== dimensions.contentType
       ) {
-        throw new Error(`whiteboardSync: ${fn} bytes do not match their Nano Banana Pro receipt geometry`);
+        throw new Error(`whiteboardSync: ${fn} bytes do not match their attested receipt geometry`);
       }
       artAssets.push({
         id: artId,
@@ -1081,17 +1081,17 @@ export async function castWhiteboardSync(args: {
       l.art = fn;
     };
     if (existsSync(out)) {
-      // A cache without a matching receipt may be a pre-migration Novita asset
-      // or a partial local write after a paid request. Never repurchase it on a
-      // retry and never let it enter a Nano Banana Pro Whiteboard master.
+      // A cache without a matching receipt may be a pre-migration asset or a
+      // partial local write after a paid request. Never repurchase it on a
+      // retry and never let it enter an attested Whiteboard master.
       if (!existsSync(receiptPath)) {
-        throw new Error(`whiteboardSync: cached ${fn} has no Nano Banana Pro receipt; refusing reuse or regeneration`);
+        throw new Error(`whiteboardSync: cached ${fn} has no attested provider receipt; refusing reuse or regeneration`);
       }
       await recordArt(JSON.parse(await readFile(receiptPath, "utf8")));
       return;
     }
     if (existsSync(receiptPath)) {
-      throw new Error(`whiteboardSync: ${artId} has a Nano Banana Pro receipt but no local bytes; refusing a duplicate paid submission`);
+      throw new Error(`whiteboardSync: ${artId} has an attested provider receipt but no local bytes; refusing a duplicate paid submission`);
     }
     const isScene = isSceneJob({ l });
     const prompt = whiteboardArtPrompt({
@@ -1117,7 +1117,7 @@ export async function castWhiteboardSync(args: {
       throw e;
     }
     const contentSha256 = createHash("sha256").update(generated.bytes).digest("hex");
-    const receipt = assertNanoBananaProWhiteboardArtReceipt(generated.receipt, contentSha256);
+    const receipt = assertAttestedWhiteboardArtReceipt(generated.receipt, contentSha256);
     fn = `${artId}.${whiteboardArtFileExtension(receipt.sourceContentType)}`;
     out = join(args.runDir, fn);
     // Publish bytes first, then their receipt. If either I/O step fails after
@@ -1128,7 +1128,7 @@ export async function castWhiteboardSync(args: {
       await writeFile(receiptPath, JSON.stringify(receipt));
     } catch (error) {
       const persistenceError = new Error(
-        `whiteboardSync: paid ${fn} could not be persisted with its Nano Banana Pro receipt`,
+        `whiteboardSync: paid ${fn} could not be persisted with its attested provider receipt`,
         { cause: error },
       ) as Error & { retryable?: boolean };
       persistenceError.retryable = false;

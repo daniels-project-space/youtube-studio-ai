@@ -3,13 +3,13 @@
 import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
-import { generateNanoBananaProWhiteboardArtWithReceipt } from "../src/lib/banana.ts";
+import { renderAttestedNovitaImageBytes } from "../src/lib/novitaMedia.ts";
+import { attestedWhiteboardArtReceiptFromNovita } from "../src/lib/attestedWhiteboardArtContract.ts";
 import { castWhiteboardSync } from "../src/lib/whiteboardSync.ts";
 
-// This proof is intentionally Fal-only for Nano Banana Pro artwork. The
-// caller injects only the two named secrets into this one child process; never
-// hydrate the generic provider catalogue or a direct Google image credential.
-for (const key of ["FAL_KEY", "ELEVENLABS_API_KEY"]) {
+// This proof uses the same attested direct-worker route as production. It
+// never hydrates the generic provider catalogue or a Google image credential.
+for (const key of ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN", "ELEVENLABS_API_KEY"]) {
   if (!process.env[key]) throw new Error(`Whiteboard smoke requires ${key} from the scoped vault child process`);
 }
 
@@ -28,7 +28,7 @@ if (!["banana-republic", "finance-fees"].includes(SMOKE_CASE)) {
 const RUN_DIR = join(process.cwd(), "output", "whiteboard", SMOKE_RUN_ID);
 
 // A deliberately authored, renderer-only test board. It lets the smoke prove
-// the Nano Banana Pro → ElevenLabs → Whisper → deterministic-scribe path when
+// the attested Novita → ElevenLabs → Whisper → deterministic-scribe path when
 // a remote planner is unavailable. It is never a substitute for the sealed
 // story receipt used by a publishable channel run.
 const BANANA_REPUBLIC_SMOKE_PLAN = {
@@ -241,17 +241,31 @@ try {
   runDir: RUN_DIR,
   outPath: join(RUN_DIR, "out.mp4"),
   // This is a local renderer smoke only, never a publishable channel run. It
-  // uses the exact same attested Nano Banana Pro art contract as the real
+  // uses the exact same attested Novita art contract as the real
   // whiteboard_scribe block so a legacy helper cannot quietly exercise a
   // retired image path or make unreceipted art.
-  generateImage: async (request) => await generateNanoBananaProWhiteboardArtWithReceipt({
-    prompt: request.prompt,
-    maxProviderAttempts: 1,
-    // A new proof run or changed literal art direction must never reuse a
-    // provider response keyed for an earlier request with the same layer ID.
-    // The exact prompt is also receipt-bound downstream.
-    idempotencyContext: `local-whiteboard-smoke-v3:${SMOKE_RUN_ID}:${request.id}:${createHash("sha256").update(request.prompt).digest("hex").slice(0, 16)}:seed-${request.seed}`,
-  }),
+  generateImage: async (request) => {
+    const promptHash = createHash("sha256").update(request.prompt).digest("hex").slice(0, 16);
+    const rendered = await renderAttestedNovitaImageBytes({
+      prefix: `local-whiteboard-smoke/${SMOKE_RUN_ID}`,
+      id: `${request.id}-${promptHash}`,
+      prompt: request.prompt,
+      negativePrompt: request.negativePrompt,
+      seed: request.seed,
+      profileId: "production",
+      maxCostUsd: 0.35,
+      lifecycle: {
+        ownerId: "local-whiteboard-smoke",
+        channelId: `local-${SMOKE_RUN_ID}`,
+        runId: SMOKE_RUN_ID,
+        blockId: "whiteboard_scribe",
+      },
+    });
+    return {
+      bytes: rendered.bytes,
+      receipt: attestedWhiteboardArtReceiptFromNovita(rendered),
+    };
+  },
   ...(useSuppliedPlan ? { plan: selectedSmoke.plan } : {}),
     log: (m) => console.error("[wb]", m),
   });

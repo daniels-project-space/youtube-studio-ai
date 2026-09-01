@@ -8,7 +8,7 @@
  * the final `videoKey` directly (mirrors the lofi `assemble` block).
  *
  * Deterministic write-on reveal uses no video model; its bounded paid path is
- * per-layer attested Nano Banana Pro art plus TTS. Resolution-configurable (1080p
+ * per-layer attested Novita art plus TTS. Resolution-configurable (1080p
  * default, 2K via `width`).
  *
  * RUNTIME NOTE: the renderer shells out to python3 with faster-whisper +
@@ -57,10 +57,10 @@ import {
 } from "@/engine/selfContainedStoryReceipt";
 import type { CritiquedSelfContainedStory } from "@/engine/selfContainedStoryPlanning";
 import {
-  generateNanoBananaProWhiteboardArtWithReceipt,
-  hasNanoBananaProWhiteboardArt,
-} from "@/lib/banana";
-import { NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE } from "@/lib/nanoBananaWhiteboardArtContract";
+  renderAttestedNovitaImageBytes,
+} from "@/lib/novitaMedia";
+import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
+import { attestedWhiteboardArtReceiptFromNovita } from "@/lib/attestedWhiteboardArtContract";
 import { PRICE } from "@/engine/pricing";
 import { buildWhiteboardOnScreenTextCues } from "@/lib/whiteboardOnScreenTextCues";
 import { preflightNarrationPerformance } from "@/lib/narrationPerformance";
@@ -70,32 +70,32 @@ import { preflightNarrationPerformance } from "@/lib/narrationPerformance";
  * reservation before a single direct worker can be provisioned. `budgetUsd`
  * is run-wide and must never be used as a substitute for this stage envelope.
  */
-export interface WhiteboardNanoBananaProArtStageEnvelope {
-  label: "whiteboard_scribe:nano-banana-pro";
+export interface WhiteboardNovitaArtStageEnvelope {
+  label: "whiteboard_scribe:novita-image";
   imageJobs: number;
   imageMaxCostUsd: number;
 }
 
-export function whiteboardNanoBananaProArtStageEnvelope(
+export function whiteboardNovitaArtStageEnvelope(
   panelCount: unknown,
   stageBudgetUsd: number | undefined,
-): WhiteboardNanoBananaProArtStageEnvelope {
+): WhiteboardNovitaArtStageEnvelope {
   if (
     typeof stageBudgetUsd !== "number" ||
     !Number.isFinite(stageBudgetUsd) ||
     stageBudgetUsd <= 0
   ) {
-    throw new Error("whiteboard_scribe requires a positive compiler-signed stage budget before Nano Banana Pro art can start");
+    throw new Error("whiteboard_scribe requires a positive compiler-signed stage budget before Novita art can start");
   }
   const panels = whiteboardPanelCount(panelCount);
   const imageJobs = whiteboardImageCallCeiling(panels);
-  const imageMaxCostUsd = imageJobs * NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE.admissionCeilingUsd;
+  const imageMaxCostUsd = imageJobs * PRICE.novitaImageMaxUsd;
   if (stageBudgetUsd + Number.EPSILON < imageMaxCostUsd) {
     throw new Error(
-      `whiteboard_scribe requires a $${imageMaxCostUsd.toFixed(4)} Nano Banana Pro envelope before art can start`,
+      `whiteboard_scribe requires a $${imageMaxCostUsd.toFixed(4)} Novita image envelope before art can start`,
     );
   }
-  return { label: "whiteboard_scribe:nano-banana-pro", imageJobs, imageMaxCostUsd };
+  return { label: "whiteboard_scribe:novita-image", imageJobs, imageMaxCostUsd };
 }
 
 function convex(): ConvexHttpClient {
@@ -250,7 +250,7 @@ export function whiteboardStoryboardDefects(
     }
   }
   // Keep the Golden visual grammar inside the text-only Director loop, so a
-  // sparse plan is rewritten before a Nano Banana Pro image is purchased.
+  // sparse plan is rewritten before an attested image worker is purchased.
   issues.push(...whiteboardGoldenStyleDefects(plan));
   return issues.slice(0, 8);
 }
@@ -482,9 +482,9 @@ export const whiteboardScribe: Block = {
         requiresStoryboard: approvedStoryReceipt === undefined,
         ttsProvider: usesElevenLabsVoice ? "elevenlabs" : "fish",
       }) ||
-      !hasNanoBananaProWhiteboardArt()
+      !hasNovitaRenderFarmConfig()
     ) {
-      throw new Error("whiteboard_scribe: the selected TTS and sealed Nano Banana Pro art capabilities are unavailable");
+      throw new Error("whiteboard_scribe: the selected TTS and attested Novita image capabilities are unavailable");
     }
 
     // Grounding facts: prefer real research notes; else the channel's brief look.
@@ -528,13 +528,13 @@ export const whiteboardScribe: Block = {
     // rendering the first layer. A custom/legacy invocation with no signed
     // stage reservation now fails closed instead of consuming the run budget
     // one panel at a time.
-    const nanoBananaProEnvelope = whiteboardNanoBananaProArtStageEnvelope(
+    const novitaArtEnvelope = whiteboardNovitaArtStageEnvelope(
       panels ?? whiteboardPanelCount(undefined),
       ctx.stageBudgetUsd,
     );
     ctx.log(
-      `whiteboard_scribe: admitted ${nanoBananaProEnvelope.imageJobs} Nano Banana Pro art asset(s) ` +
-      `($${nanoBananaProEnvelope.imageMaxCostUsd.toFixed(4)} within the signed stage budget)`,
+      `whiteboard_scribe: admitted ${novitaArtEnvelope.imageJobs} attested Novita art asset(s) ` +
+      `($${novitaArtEnvelope.imageMaxCostUsd.toFixed(4)} within the signed stage budget)`,
     );
 
     // DETERMINISTIC dir (scoped): whiteboardSync's per-layer art cache is
@@ -544,18 +544,28 @@ export const whiteboardScribe: Block = {
     const outPath = join(runDir, "final.mp4");
     ctx.log(`whiteboard_scribe: drawing synced explainer "${topic.slice(0, 60)}" @ ${width}x${height} (style ${styleId})…`);
 
-    let nanoBananaProArtCostUsd = 0;
+    let novitaArtCostUsd = 0;
     const generateImage = async (request: WhiteboardArtRequest) => {
-      const generated = await generateNanoBananaProWhiteboardArtWithReceipt({
+      const generated = await renderAttestedNovitaImageBytes({
+        prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/whiteboard-art-source`,
+        id: request.id,
         prompt: request.prompt,
-        maxProviderAttempts: 1,
-        // The native endpoint provides no accepted-job handle. Bind every
-        // request to the run, layer, and deterministic seed for auditability,
-        // but never auto-resubmit an ambiguous paid attempt.
-        idempotencyContext: `${ctx.ownerId}:${ctx.channelId}:${ctx.runId}:whiteboard:${request.id}:seed-${request.seed}`,
+        negativePrompt: request.negativePrompt,
+        seed: request.seed,
+        profileId: "production",
+        maxCostUsd: PRICE.novitaImageMaxUsd,
+        lifecycle: {
+          ownerId: ctx.ownerId,
+          channelId: ctx.channelId,
+          runId: ctx.runId,
+          blockId: "whiteboard_scribe",
+        },
       });
-      nanoBananaProArtCostUsd += generated.receipt.costUsd;
-      return generated;
+      novitaArtCostUsd += generated.costUsd;
+      return {
+        bytes: generated.bytes,
+        receipt: attestedWhiteboardArtReceiptFromNovita(generated),
+      };
     };
     const brief: WhiteboardSyncBrief = {
       topic, facts, styleId, artStyle: visualBrief?.promptStyle,
@@ -598,7 +608,7 @@ export const whiteboardScribe: Block = {
       const bytes = await readFile(art.localPath);
       const artifactSha256 = createHash("sha256").update(bytes).digest("hex");
       if (artifactSha256 !== art.contentSha256 || artifactSha256 !== art.receipt.responseSha256) {
-        throw new Error(`whiteboard_scribe: ${art.id} art bytes no longer match their Nano Banana Pro receipt`);
+        throw new Error(`whiteboard_scribe: ${art.id} art bytes no longer match their attested provider receipt`);
       }
       const imageKey = `${whiteboardArtPrefix}/${art.id}.png`;
       const receiptKey = `${whiteboardArtPrefix}/${art.id}.receipt.json`;
@@ -627,7 +637,7 @@ export const whiteboardScribe: Block = {
         providerReceiptKey: receiptKey,
       });
     }
-    const artCost = nanoBananaProArtCostUsd;
+    const artCost = novitaArtCostUsd;
     const usedEleven = ttsProvider === "elevenlabs" && Boolean(elevenVoiceId);
     const ttsCost =
       (res.ttsCharactersGenerated / 1000) *
@@ -636,7 +646,7 @@ export const whiteboardScribe: Block = {
     // fallback charge merely because this is a paid-capable block.
     const scribeCost = artCost + ttsCost;
     ctx.log(
-      `whiteboard_scribe: attested Nano Banana Pro art $${artCost.toFixed(4)} + ` +
+      `whiteboard_scribe: attested Novita art $${artCost.toFixed(4)} + ` +
       `${res.ttsCharactersGenerated} TTS chars = $${scribeCost.toFixed(4)}`,
     );
 
@@ -691,8 +701,8 @@ export const whiteboardScribe: Block = {
       durationSec: videoDurationSec,
       engine: "whiteboard_scribe",
       panels: res.panels.length,
-      imageProvider: "fal-nano-banana-pro",
-      imageProviderModel: NANO_BANANA_PRO_WHITEBOARD_ART_PROFILE.model,
+      imageProvider: "novita-local-z-image-turbo",
+      imageProviderModel: res.artAssets[0]?.receipt.model,
       whiteboardArtAssets: res.artAssets.length,
     });
     ctx.log(`whiteboard_scribe ✓ → ${videoKey} (${videoDurationSec}s, ${res.panels.length} panels)`);

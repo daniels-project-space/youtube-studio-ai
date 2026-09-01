@@ -440,15 +440,7 @@ export default function NewChannelWizard() {
   const [supervisedAdmission, setSupervisedAdmission] = useState<SupervisedCreatorSelection | null>(null);
 
   useEffect(() => {
-    if (operationsAccess === "checking") {
-      setAutomaticFamilyRuntimeCheck("loading");
-      return;
-    }
-    if (operationsAccess !== "owner") {
-      setAutomaticFamilyRuntime({});
-      setAutomaticFamilyRuntimeCheck("unavailable");
-      return;
-    }
+    if (operationsAccess !== "owner") return;
     const abort = new AbortController();
     let current = true;
     void fetch("/api/automatic-family-readiness", { signal: abort.signal, cache: "no-store" })
@@ -498,6 +490,12 @@ export default function NewChannelWizard() {
       abort.abort();
     };
   }, [operationsAccess]);
+
+  const visibleAutomaticFamilyRuntimeCheck = operationsAccess === "checking"
+    ? "loading"
+    : operationsAccess !== "owner"
+      ? "unavailable"
+      : automaticFamilyRuntimeCheck;
 
   const niche = getNiche(nicheKey);
   const fam = family ? getFamily(family) : undefined;
@@ -1222,7 +1220,7 @@ export default function NewChannelWizard() {
 
   const selectedAutomaticRuntimeReady = Boolean(
     family
-      && automaticFamilyRuntimeCheck === "ready"
+      && visibleAutomaticFamilyRuntimeCheck === "ready"
       && automaticFamilyRuntime[family]?.ready === true,
   );
   const canNext = step === 0
@@ -1384,11 +1382,11 @@ export default function NewChannelWizard() {
             })}
             </div>
           </details>
-          {automaticFamilyRuntimeCheck === "loading" ? (
+          {visibleAutomaticFamilyRuntimeCheck === "loading" ? (
             <p style={{ color: "var(--color-muted)", fontSize: "0.74rem", margin: "-0.2rem 0 0.2rem" }}>
               Checking live production foundations. Automatic setup remains locked until this completes.
             </p>
-          ) : automaticFamilyRuntimeCheck === "unavailable" ? (
+          ) : visibleAutomaticFamilyRuntimeCheck === "unavailable" ? (
             <p style={{ color: "var(--color-failed)", fontSize: "0.74rem", margin: "-0.2rem 0 0.2rem" }}>
               Live production readiness could not be verified. Automatic setup remains locked; refresh and try again.
             </p>

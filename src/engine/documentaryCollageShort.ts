@@ -664,7 +664,10 @@ function assetBriefsForShot(
     case "collage_pan":
       return [...make("bg", 1, "text-free collage board background"), ...make("image", 6, "tall archival collage photograph")];
     case "depth_parallax":
-      return make("image", 1, "single sharp deep-focus documentary plate");
+      return [
+        ...make("bg", 1, "wide sharp deep-focus documentary environment plate with clean negative space for the matching near subject"),
+        ...make("fg", 1, "matching nearest foreground subject or prop, same era angle light palette and lens as the environment plate"),
+      ];
     case "quote_card":
       return make("bg", 1, "text-free atmospheric conclusion plate with negative space");
     default:
@@ -673,8 +676,10 @@ function assetBriefsForShot(
   })();
   const primaryRole: DocuAssetBrief["role"] = kind === "parallax_portrait"
     ? "fg"
-    : ["evidence_board", "photo_slide", "collage_pan", "depth_parallax"].includes(kind)
+    : ["evidence_board", "photo_slide", "collage_pan"].includes(kind)
       ? "image"
+      : kind === "depth_parallax"
+        ? "fg"
       : "bg";
   const primary = assets.find((asset) => asset.role === primaryRole) ?? assets[0];
   if (!primary) throw new Error(`documentary collage Short shot ${shotIndex + 1} has no renderer asset`);

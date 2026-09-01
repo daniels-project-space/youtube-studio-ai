@@ -213,16 +213,11 @@ function directGoogleRuntimeOwnersStaySealed(): void {
     "the sealed thumbnail boundary must present its opaque capability");
   assert.match(banana, /hydrateEnv\(["']gemini["']\s*,\s*\{/,
     "the sealed thumbnail adapter, not generic bootstrap, must hydrate its own credential");
-  const whiteboardAdapter = banana.slice(
-    banana.indexOf("export async function generateNanoBananaProWhiteboardArtWithReceipt"),
-    banana.indexOf("export async function generateBananaImage"),
+  assert.doesNotMatch(
+    banana,
+    /generateNanoBananaProWhiteboard|NanoBananaProWhiteboard|whiteboard-art-provider/,
+    "the thumbnail-only Nano boundary must not retain a Whiteboard renderer adapter",
   );
-  assert.match(whiteboardAdapter, /hydrateSealedNanoBananaWhiteboardArtCredential\(\)/,
-    "the Whiteboard Pro-art adapter must keep its own credential boundary");
-  assert.match(whiteboardAdapter, /https:\/\/fal\.run\//,
-    "the Whiteboard Pro-art adapter must use Fal");
-  assert.doesNotMatch(whiteboardAdapter, /GEMINI_API_KEY|generativelanguage\.googleapis\.com|generateGeminiImage/,
-    "the Whiteboard Pro-art adapter must not retain a direct Google boundary");
   assert.doesNotMatch(banana, /["']sealed_thumbnail["']/,
     "a string literal must never forge the sealed thumbnail capability");
 

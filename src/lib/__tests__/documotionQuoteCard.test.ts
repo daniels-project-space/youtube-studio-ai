@@ -219,7 +219,10 @@ async function assertSourceContract(): Promise<void> {
   assert.match(docuSource, /quoteEmphasis/, "emphasis must ride the already-required planning response");
   assert.match(remotionSource, /planQuoteCardLayout/, "the production component must use the tested responsive planner");
   assert.match(remotionSource, /data-docu-quote-text/, "the production card must expose its actual measured quote box");
-  assert.match(docuSource, /maxProviderAttempts: 1/, "the outer quality loop must own the bounded provider retry budget");
+  assert.match(docuSource, /for \(let attempt = 0; attempt < 2; attempt\+\+\)/,
+    "the outer quality loop must own the bounded two-attempt image budget");
+  assert.match(docuSource, /id: `s\$\{i\}-\$\{a\.id\}-a\$\{attempt \+ 1\}`/,
+    "each bounded replacement must have a distinct durable provider identity");
   const cachedPlanNormalization = docuSource.indexOf("plan = normalizeDocuPlan(JSON.parse");
   const cachedPlanValidation = docuSource.indexOf(
     "const cachedProblems = validatePlan(plan",

@@ -5,21 +5,21 @@ import {
   motionComicNovitaImageStageEnvelope,
 } from "@/trigger/blocks/motionComicBlocks";
 import {
-  whiteboardNanoBananaProArtStageEnvelope,
+  whiteboardNovitaArtStageEnvelope,
 } from "@/trigger/blocks/whiteboardScribeBlocks";
 
 function whiteboardEnvelopeIsAllOrNothing(): void {
-  const full = whiteboardNanoBananaProArtStageEnvelope(16, 31);
+  const full = whiteboardNovitaArtStageEnvelope(16, 31);
   assert.equal(full.imageJobs, 80);
-  assert.equal(full.imageMaxCostUsd, 80 * 0.15);
+  assert.equal(full.imageMaxCostUsd, 80 * PRICE.novitaImageMaxUsd);
   assert.throws(
-    () => whiteboardNanoBananaProArtStageEnvelope(16, undefined),
+    () => whiteboardNovitaArtStageEnvelope(16, undefined),
     /compiler-signed stage budget/,
     "a direct/legacy invocation without a signed stage envelope must fail before art",
   );
   assert.throws(
-    () => whiteboardNanoBananaProArtStageEnvelope(16, full.imageMaxCostUsd - 0.0001),
-    /requires a \$12\.0000 Nano Banana Pro envelope/,
+    () => whiteboardNovitaArtStageEnvelope(16, full.imageMaxCostUsd - 0.0001),
+    /requires a \$28\.0000 Novita image envelope/,
     "the full art sequence must be admitted before the first panel is purchased",
   );
 }

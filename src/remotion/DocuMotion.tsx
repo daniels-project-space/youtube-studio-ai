@@ -794,11 +794,10 @@ const ParallaxPortraitShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ 
 };
 
 /**
- * DEPTH PARALLAX — turns ONE generated still into a living 2.5D shot. The
- * engine supplies images[0] = the full base plate and images[1..] = near depth
- * layers (alpha PNGs cut from the same image via its depth map). Each layer
- * parallaxes at a deeper rate than the base, so the camera appears to move
- * THROUGH the photograph. With no near layers it degrades to a clean Ken Burns.
+ * DEPTH PARALLAX — combines a reviewed environment plate with one or more
+ * locally keyed, composition-matched foreground planes. Each near plane moves
+ * at a deeper rate than the base, so the camera appears to travel through the
+ * reconstruction. No hidden segmentation/depth provider runs after approval.
  */
 const DepthParallaxShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed }) => {
   const frame = useCurrentFrame();

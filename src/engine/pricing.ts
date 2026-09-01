@@ -58,12 +58,6 @@ export const PRICE = {
   bananaProUsd: rate("PRICE_BANANA_PRO_USD", 0.135),
   /** Per classic Nano Banana image (gemini-2.5-flash-image). */
   bananaFlashUsd: rate("PRICE_BANANA_FLASH_USD", 0.04),
-  /**
-   * Conservative preflight ceiling for one fal.ai Nano Banana 2 Visual Matter
-   * anchor at 1K. Runtime refuses to spend unless the operator-reviewed
-   * FAL_NANO_BANANA_2_COST_USD rate is explicitly configured.
-   */
-  falNanoBanana2Usd: rate("FAL_NANO_BANANA_2_COST_USD", 0.08),
   /** Per loop-unit Topaz upscale (block comment anchor: ~$0.25). */
   topazUpscaleUsd: rate("PRICE_TOPAZ_UPSCALE_USD", 0.25),
   /** Per generated music track (Mureka/Suno). */

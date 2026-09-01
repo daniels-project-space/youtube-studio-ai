@@ -245,7 +245,7 @@ function createFixture() {
     state: "sealed" as const,
     characterLoRATrainingEnabled: true,
     automaticAdmissionEnabled: true,
-    nanoBananaProCharacterSheetExceptionEnabled: true,
+    attestedErnieCharacterSheetEnabled: true,
     perCharacterSpendCapCents: 400,
   };
   const sheetPlan = createCharacterSheetDatasetPlan({
@@ -260,7 +260,10 @@ function createFixture() {
     },
     scriptTreatmentFingerprint: digest("e"),
     sourcePolicy: {
-      kind: "nano_banana_pro_character_sheet_exception",
+      kind: "attested_ernie_character_sheet",
+      provider: "novita",
+      route: "ernie-image-novita-4090",
+      providerReceiptRequired: true,
       outputUse: "one_time_script_derived_character_lora_dataset_only",
       ordinaryProductionVisualUseProhibited: true,
     },

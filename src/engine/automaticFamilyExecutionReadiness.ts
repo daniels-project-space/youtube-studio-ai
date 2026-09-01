@@ -4,6 +4,7 @@ import { hasNanoBanana } from "@/lib/banana";
 import { hasAnyFootageProvider } from "@/lib/footage";
 import { hasMusicProvider } from "@/lib/music";
 import { hasMotionComic } from "@/lib/motionComic";
+import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { hasTopicraft } from "@/lib/topicraft";
 import { hasFishKey } from "@/lib/tts";
 import { hasNonGoogleVisionKey } from "@/lib/vision";
@@ -62,7 +63,7 @@ const LIVE_CAPABILITIES: AutomaticFamilyExecutionCapabilityReader = {
   whiteboardReady: () => hasWhiteboardSync({
     requiresStoryboard: true,
     ttsProvider: "elevenlabs",
-  }),
+  }) && hasNovitaRenderFarmConfig(),
   comicReady: () => hasMotionComic({ requiresStoryboard: true }),
   thumbnailRouteReady: () => hasNanoBanana(),
   nonGoogleVisionReady: () => hasNonGoogleVisionKey(),
@@ -123,7 +124,7 @@ export function assessAutomaticFamilyExecutionReadiness(
   }
   if (family === "whiteboard" && !capabilities.whiteboardReady()) {
     blockers.push(
-      "whiteboard automatic execution requires its non-Gemini storyboard planner, sealed ElevenLabs narration, and Nano Banana Pro art capability",
+      "whiteboard automatic execution requires its non-Gemini storyboard planner, sealed ElevenLabs narration, and attested Novita image-render capability",
     );
   }
   if (family === "comic" && !capabilities.comicReady()) {

@@ -1,5 +1,5 @@
 /**
- * DOCUMOTION — the documentary-collage MOTION engine (banana/scriptcraft
+ * DOCUMOTION — the documentary-collage MOTION engine (attested-art/scriptcraft
  * integration shape): topic + channel STYLE in → polished motion-graphics body
  * out. VISUAL CRAFT ONLY (narration / music / SFX are separate modules).
  *
@@ -9,10 +9,10 @@
  *     quote_card) and the channel WORLDS in src/remotion/docuStyles.ts
  *     (archival_collage, detective_board, …). Each world carries its image-
  *     prompting intelligence (still-style + per-role framing) and its theme.
- *   • HOW TO GET THE IMAGE IT NEEDS — per asset, a source: "generate" (Nano
- *     Banana, the default) or "archival" (a real Wikimedia photograph of a
- *     named entity, then cut out). Every generated still passes a vision gate
- *     before it enters the film (better first tries).
+ *   • HOW TO GET THE IMAGE IT NEEDS — per asset, a source: "generate" through
+ *     the caller's attested dependency or "archival" (a real Wikimedia
+ *     photograph of a named entity). Every generated still passes a vision
+ *     gate before it enters the film.
  *   • HOW TO ASSEMBLE — a Gemini-Pro plan with a cinematography doctrine
  *     (motivated camera move + varied pacing per shot), rendered by the
  *     DocuMotion Remotion composition (eased camera + 2.5D parallax, stroked
@@ -26,7 +26,7 @@
  * Speed: assets generate+gate in a concurrency pool, verifier rounds use
  * stills (not full video), only the final pass renders the full timeline.
  *
- * Deps: GEMINI_API_KEY + FAL_KEY.
+ * Deps: optional planner credential plus an explicit attested image generator.
  *
  *   import { craftDocuMotion } from "@/lib/documotion";
  *   const { outPath, verdict } = await craftDocuMotion({ topic, style: "detective_board", runDir, log });
@@ -38,8 +38,6 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { geminiJson, geminiJsonPro, parseJsonLoose } from "@/lib/gemini";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
-import { generateBananaImage } from "@/lib/banana";
-import { getDepthMap } from "@/lib/depth";
 import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
 import { searchWikimediaImageUrl } from "@/lib/wikimedia";
 import { synthNarration } from "@/lib/tts";
@@ -82,11 +80,14 @@ export function docuRenderGeometry(format: DocuFormat = "long"): DocuRenderGeome
     : { format, layout: "long", width: 1920, height: 1080, verifyWidth: 960, verifyHeight: 540 };
 }
 
-/** Banana/Gemini-image concurrency — capped to stay under image rate limits. */
+/** Direct one-worker image concurrency — capped to protect fleet capacity. */
 const ASSET_CONCURRENCY = Number(process.env.DOCU_ASSET_CONCURRENCY ?? 4);
 
-export function hasDocumotion(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY && process.env.FAL_KEY);
+export function hasDocumotion(options: { requiresPlanning?: boolean } = {}): boolean {
+  // Production documentary Shorts supply a locked strategy plan. The legacy
+  // optional planner still needs its own text-model credential, but generated
+  // pixels are always caller-injected and never inferred from FAL/Gemini keys.
+  return options.requiresPlanning === false || Boolean(process.env.GEMINI_API_KEY);
 }
 
 /* --------------------------------------------------------------- helpers -- */
@@ -452,6 +453,36 @@ export function normalizeDocuPlan(value: unknown): DocuPlan {
       throw new Error(`documotion: shot ${index} must be an object`);
     }
     const shot = valueAtIndex as Record<string, unknown>;
+    let assets = Array.isArray(shot.assets) ? shot.assets : [];
+    // Migrate an old one-plate depth shot before validation/provider work. The
+    // original id stays on the base so evidence bindings survive; the added
+    // near-plane id is deterministic and always generated as a local-keyable
+    // chroma source. New plans author this pair directly.
+    if (shot.kind === "depth_parallax") {
+      const records = assets.filter(
+        (asset): asset is Record<string, unknown> => Boolean(asset) && typeof asset === "object" && !Array.isArray(asset),
+      );
+      const hasPair = records.some((asset) => asset.role === "bg") && records.some((asset) => asset.role === "fg");
+      const legacyPlate = records.find((asset) => asset.role === "image");
+      if (!hasPair && legacyPlate) {
+        const legacyBrief = optionalText(legacyPlate.brief) ?? "the narration's concrete reconstructed moment";
+        const legacyId = optionalText(legacyPlate.id) ?? `s${index + 1}-depth`;
+        assets = [
+          {
+            ...legacyPlate,
+            id: legacyId,
+            role: "bg",
+            brief: `wide deep-focus environment plate for ${legacyBrief}; reserve the subject's position as clean negative space`,
+          },
+          {
+            id: `${legacyId}-near`,
+            role: "fg",
+            source: "generate",
+            brief: `matching nearest foreground subject or prop from ${legacyBrief}; same era, angle, light, palette, and lens as the environment plate`,
+          },
+        ];
+      }
+    }
     return {
       ...shot,
       narration: optionalText(shot.narration) ?? "",
@@ -459,7 +490,7 @@ export function normalizeDocuPlan(value: unknown): DocuPlan {
       quote: optionalText(shot.quote),
       quoteEmphasis: normalizeQuoteEmphasis(shot.quoteEmphasis),
       attribution: optionalText(shot.attribution),
-      assets: Array.isArray(shot.assets) ? shot.assets : [],
+      assets,
     } as unknown as DocuShotPlan;
   });
 
@@ -474,7 +505,7 @@ export function normalizeDocuPlan(value: unknown): DocuPlan {
 /** Per-kind asset contract: role → [min, max] count. */
 const KIND_ASSETS: Record<DocuShotKind, Partial<Record<DocuAssetRole, [number, number]>>> = {
   parallax_portrait: { bg: [1, 1], fg: [1, 1] },
-  depth_parallax: { image: [1, 1] }, // one scene; near depth layers are DERIVED
+  depth_parallax: { bg: [1, 1], fg: [1, 1] },
   geo_map: {}, // no images — real street geometry is FETCHED from geoQuery
   map_zoom: { bg: [1, 1] },
   photo_slide: { bg: [1, 1], image: [2, 3] },
@@ -611,7 +642,7 @@ function planContract(style: DocuStyleDef): string {
    }
  ]
 }
-ASSET CONTRACT per kind (exact roles): parallax_portrait: 1 bg (wide environment plate, calm centre for big type) + 1 fg (the protagonist ALONE, head/shoulders/arms inside frame, plain backdrop). depth_parallax: exactly 1 image (a cinematic scene with a CLEAR foreground subject and a separated background — the engine derives the 2.5D depth layers). geo_map: ZERO assets — supply "geoQuery" (a real place); the map is rendered from live street data. map_zoom: 1 bg (aged map/chart of the region). photo_slide: 1 bg + 2-3 image. matte_sequence: 3-4 image (full-frame scenes). collage_pan: 1 bg + 6-8 image. evidence_board: optional 1 bg (cork/board) + 3-6 image (the pinned clues/suspects/photos). object_drop: 1 bg + 0-1 fg + 1-3 cutout (single object on white). quote_card: 0-1 PICTURE-ONLY background plate with negative space; NEVER put the quote, attribution, or any lettering in its brief/image.
+ASSET CONTRACT per kind (exact roles): parallax_portrait: 1 bg (wide environment plate, calm centre for big type) + 1 fg (the protagonist ALONE, head/shoulders/arms inside frame, plain backdrop). depth_parallax: exactly 1 bg environment plate + 1 matching fg near-plane subject/prop; their briefs MUST repeat the same era, angle, light, palette, and lens so the engine can move the keyed foreground independently over the plate. geo_map: ZERO assets — supply "geoQuery" (a real place); the map is rendered from live street data. map_zoom: 1 bg (aged map/chart of the region). photo_slide: 1 bg + 2-3 image. matte_sequence: 3-4 image (full-frame scenes). collage_pan: 1 bg + 6-8 image. evidence_board: optional 1 bg (cork/board) + 3-6 image (the pinned clues/suspects/photos). object_drop: 1 bg + 0-1 fg + 1-3 cutout (single object on white). quote_card: 0-1 PICTURE-ONLY background plate with negative space; NEVER put the quote, attribution, or any lettering in its brief/image.
 SOURCE: use "archival" with a precise "query" ONLY for a real, famous, named person/place that Wikimedia certainly has (e.g. fg of "Henry Ford"); otherwise "generate".
 CUE-DRIVEN ASSETS: every asset brief must depict EXACTLY what its shot's narration line says — render the concrete image the words evoke. If the line names the crew → a scene of the crew (e.g. dark-clad figures in a dim vault corridor at night); a place from above → an aerial/overhead scene of that place; a person at a location → that person in front of that location; an object → that object. Do NOT use generic filler.
 ON-SCREEN TEXT TONE: titles/kickers/labels/circleLabels must be SHORT, dramatic and tonally on-point for a premium documentary — evocative, never awkward, literal, redundant or accidentally COMICAL. (Bad: an evidence shot titled "THE TRASH". Good: "THE SLIP", "ONE MISTAKE", "THE INSIDER".) When unsure, omit the title and let the imagery speak.`;
@@ -818,67 +849,21 @@ async function downloadTo(url: string, outPath: string): Promise<void> {
   await writeFile(outPath, Buffer.from(await r.arrayBuffer()));
 }
 
-/** BiRefNet background removal via fal.ai → alpha PNG. v2 first, then v1. */
-async function removeBackground(imgPath: string, outPng: string, log?: Logger): Promise<string> {
-  void log;
-  const key = process.env.FAL_KEY;
-  if (!key) throw new Error("documotion: FAL_KEY missing (vault service 'fal')");
-  const dataUri = `data:image/jpeg;base64,${(await readFile(imgPath)).toString("base64")}`;
-  // Do not cascade from one paid FAL model to another: a successful response
-  // followed by an unreadable CDN URL is already ambiguous spend. The caller
-  // deliberately degrades this cutout to its source image on any failure.
-  const endpoint = "fal-ai/birefnet/v2";
-  const res = await fetch(`https://fal.run/${endpoint}`, {
-    method: "POST",
-    headers: { Authorization: `Key ${key}`, "content-type": "application/json" },
-    body: JSON.stringify({ image_url: dataUri }),
-    signal: AbortSignal.timeout(120_000),
-  });
-  const j = (await res.json()) as { image?: { url?: string } };
-  if (!res.ok) throw new Error(`${endpoint} HTTP ${res.status}`);
-  const url = j?.image?.url;
-  if (!url) throw new Error(`${endpoint}: no url`);
-  await downloadTo(url, outPng);
-  return outPng;
-}
-
 /**
- * Turn ONE still into 2.5D: get its depth map, then cut a feathered NEAR layer
- * (alpha PNG) from the brightest (nearest) depth band over the full base. The
- * renderer parallaxes near-over-base for a camera-through-photo move. Best
- * effort — returns [] on any failure so the shot degrades to a Ken Burns push.
+ * Remove the deliberately requested solid-green plate locally. This keeps
+ * cutouts deterministic and provider-free after the attested still exists;
+ * no hidden paid background-removal or depth API can enter the render.
  */
-async function deriveDepthLayers(baseImg: string, outDir: string, shotIdx: number, log?: Logger): Promise<string[]> {
-  if (!process.env.FAL_KEY) return [];
-  try {
-    const dataUri = `data:image/jpeg;base64,${(await readFile(baseImg)).toString("base64")}`;
-    const depthPath = join(outDir, `s${shotIdx}_depth.png`);
-    await getDepthMap(dataUri, depthPath, log ?? (() => {}));
-    const nearPng = join(outDir, `s${shotIdx}_near.png`);
-    // depth.ts convention: BRIGHTER = NEARER. Threshold the near band, feather,
-    // scale the mask to the base, alpha-merge onto the base.
-    await run(ffmpegBin(), [
-      "-y",
-      "-i",
-      baseImg,
-      "-i",
-      depthPath,
-      "-filter_complex",
-      // Soft, wide feather on the near/far boundary so the depth cut never
-      // reads as a hard seam; scale the mask to the base, then alpha-merge.
-      "[1:v]format=gray,lutyuv=y='if(gt(val,130),255,0)',gblur=sigma=14[mtmp];" +
-        "[mtmp][0:v]scale2ref=flags=bilinear[m][base];" +
-        "[base][m]alphamerge,format=rgba[o]",
-      "-map",
-      "[o]",
-      nearPng,
-    ]);
-    log?.(`documotion depth: near layer for shot ${shotIdx}`);
-    return [nearPng];
-  } catch (e) {
-    log?.(`documotion depth: shot ${shotIdx} fell back to Ken Burns (${e instanceof Error ? e.message : e})`);
-    return [];
-  }
+export async function removeChromaBackground(imgPath: string, outPng: string): Promise<string> {
+  await run(ffmpegBin(), [
+    "-y",
+    "-i",
+    imgPath,
+    "-vf",
+    "format=rgba,colorkey=0x00FF00:0.20:0.08",
+    outPng,
+  ]);
+  return outPng;
 }
 
 export interface AssetGate {
@@ -1020,6 +1005,15 @@ export interface DocuAssetReceipt {
   approvalSha256: string;
 }
 
+export interface DocuImageRequest {
+  id: string;
+  prompt: string;
+  negativePrompt: string;
+  seed: number;
+}
+
+export type DocuImageGenerator = (request: DocuImageRequest) => Promise<Buffer>;
+
 interface AssetJob {
   shotIdx: number;
   brief: DocuAssetBrief;
@@ -1036,6 +1030,7 @@ export async function generateDocuAssets(
   log?: Logger,
   fixNotes?: Record<string, string>,
   format: DocuFormat = "long",
+  generateImage?: DocuImageGenerator,
 ): Promise<DocuAssetFile[]> {
   await mkdir(assetsDir, { recursive: true });
   const jobs: AssetJob[] = [];
@@ -1076,7 +1071,7 @@ export async function generateDocuAssets(
     let got = false;
 
     // ARCHIVAL source: a real Wikimedia photograph of a named entity.
-    if (a.source === "archival" && a.query && !externalFix) {
+    if (!needsAlpha && a.source === "archival" && a.query && !externalFix) {
       try {
         const url = await searchWikimediaImageUrl(a.query);
         if (url) {
@@ -1101,11 +1096,14 @@ export async function generateDocuAssets(
       }
     }
 
-    // GENERATE source (default + archival fallback): Banana behind the gate.
+    // GENERATE source (default + archival fallback): the caller's one explicit,
+    // attested Novita dependency. No generic image router exists here.
     if (!got) {
-      // Crisp by default; depth_parallax plates must be FULLY in focus so the
-      // engine's 2.5D parallax supplies the depth (baked bokeh fights it +
-      // leaves focus-edge artefacts when the layers move).
+      if (!generateImage) {
+        throw new Error("documotion: an explicit attested image generator is required for generated assets");
+      }
+      // Crisp by default; depth-parallax pairs must remain fully in focus so
+      // the engine controls focus and independent plane motion.
       const QUALITY = " Ultra-sharp, crisp, high detail, no motion blur.";
       const focus =
         plan.shots[i].kind === "depth_parallax"
@@ -1116,7 +1114,9 @@ export async function generateDocuAssets(
       for (let attempt = 0; attempt < 2; attempt++) {
         const prompt = buildDocuAssetPrompt({
           framingPrefix: framing.prefix,
-          pictureBrief,
+          pictureBrief: needsAlpha
+            ? `${pictureBrief}. ISOLATED CUTOUT SOURCE: place the one complete subject against a perfectly flat solid chroma green #00FF00 background, edge to edge, with no floor, scenery, shadow, gradient, spill, or green clothing`
+            : pictureBrief,
           stillStyle: style.stillStyle,
           quality: QUALITY,
           focus,
@@ -1124,14 +1124,11 @@ export async function generateDocuAssets(
           forbiddenCopy: [shot.quote, shot.attribution],
         });
         log?.(`documotion asset s${i}/${a.id} (${a.role})${fix ? ` [retry]` : ""}…`);
-        const bytes = await generateBananaImage({
+        const bytes = await generateImage({
+          id: `s${i}-${a.id}-a${attempt + 1}`,
           prompt,
-          aspectRatio: framing.ar,
-          allowText: false,
-          tier: "flash",
-          // This loop owns quality recovery. One HTTP submission per outer
-          // attempt prevents nested retries from multiplying image spend.
-          maxProviderAttempts: 1,
+          negativePrompt: "text, letters, numbers, labels, logos, watermark, UI, border, illegible crop",
+          seed: 41_000 + i * 1_000 + attempt * 101 + a.id.length,
         });
         await writeFile(rawPath, bytes);
         const gate = await gateAsset(rawPath, a.role, pictureBrief, style.label);
@@ -1155,13 +1152,12 @@ export async function generateDocuAssets(
     if (needsAlpha) {
       const cutRaw = join(assetsDir, `s${i}_${a.id}_cut.png`);
       try {
-        await removeBackground(rawPath, cutRaw, log);
+        await removeChromaBackground(rawPath, cutRaw);
         await normalizeAsset(cutRaw, finalPath, 1100);
       } catch (e) {
-        // Best-effort cutout (mirrors deriveDepthLayers): a bg-removal failure
-        // (e.g. fal 403 / no credits) degrades this fg to the full image rather
-        // than killing the whole render.
-        log?.(`documotion asset s${i}/${a.id}: bg-removal failed (${e instanceof Error ? e.message : e}) — using full image`);
+        // The verified source remains usable as a framed editorial plate; this
+        // is a local compositing fallback, never a second paid provider route.
+        log?.(`documotion asset s${i}/${a.id}: local chroma isolation failed (${e instanceof Error ? e.message : e}) — using the approved full plate`);
         await normalizeAsset(rawPath, finalPath, 1100);
       }
     } else {
@@ -1171,35 +1167,9 @@ export async function generateDocuAssets(
     return { shotIdx: i, id: a.id, role: a.role, path: finalPath, approvalSha256 };
   });
 
-  // depth_parallax: derive the near 2.5D layer from each scene's base image and
-  // append it (after the base) so buildShotSpecs orders [base, near]. Cached.
-  // Each shot's derivation is independent (own base image, own files, no ordering
-  // dependency — consumers find by shotIdx+role), so derive them concurrently.
-  const depthJobs = plan.shots
-    .map((shot, i) => ({ shot, i, base: out.find((a) => a.shotIdx === i && a.role === "image") }))
-    .filter((j) => j.shot.kind === "depth_parallax" && j.base);
-  const depthAdds = await pool(depthJobs, ASSET_CONCURRENCY, async ({ i, base }) => {
-    const baseFile = base!;
-    const nearPath = join(assetsDir, `s${i}_near.png`);
-    if (existsSync(nearPath) && !fixNotes?.[`${i}:${baseFile.id}`]) {
-      return [{
-        shotIdx: i,
-        id: `${baseFile.id}_near`,
-        role: "image" as const,
-        path: nearPath,
-        approvalSha256: await persistAssetApproval(nearPath),
-      }];
-    }
-    const layers = await deriveDepthLayers(baseFile.path, assetsDir, i, log);
-    return Promise.all(layers.map(async (p) => ({
-      shotIdx: i,
-      id: `${baseFile.id}_near`,
-      role: "image" as const,
-      path: p,
-      approvalSha256: await persistAssetApproval(p),
-    })));
-  });
-  for (const adds of depthAdds) for (const a of adds) out.push(a);
+  if (plan.shots.some((shot) => shot.kind === "depth_parallax")) {
+    log?.("documotion depth: using explicit keyed foreground + environment pairs; hidden paid depth extraction is disabled");
+  }
 
   log?.(`documotion assets: ${out.length} ready`);
   return out;
@@ -1250,7 +1220,9 @@ export async function buildShotSpecs(
       camera: o.camera ?? s.camera,
       bg: bgs[0],
       fg: fgs[0],
-      images: images.length ? images : undefined,
+      images: s.kind === "depth_parallax"
+        ? [bgs[0], fgs[0]].filter((value): value is string => Boolean(value))
+        : images.length ? images : undefined,
       cutouts: cutouts.length ? cutouts : undefined,
       title: s.title,
       kicker: s.kicker,
@@ -1501,6 +1473,8 @@ export interface CraftDocuArgs {
   plan?: DocuPlan;
   /** Keep supplied beat windows authoritative after per-shot narration is voiced. */
   lockShotDurations?: boolean;
+  /** The only permitted generated-pixel dependency for this renderer. */
+  generateImage?: DocuImageGenerator;
   log?: Logger;
 }
 
@@ -1585,7 +1559,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
 
   // 2. ASSETS (gated, pooled, cached) + GEO geometry for any geo_map shots
   let assets = await imageUsageScope.run(() =>
-    generateDocuAssets(plan, style, join(runDir, "assets"), log, undefined, geometry.format),
+    generateDocuAssets(plan, style, join(runDir, "assets"), log, undefined, geometry.format, args.generateImage),
   );
   const geoByShot: Record<number, CityGeo> = {};
   for (const [i, s] of plan.shots.entries()) {
@@ -1638,7 +1612,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     await writeFile(overridesPath, JSON.stringify(overrides, null, 2), "utf8");
     if (Object.keys(applied.assetFixes).length) {
       assets = await imageUsageScope.run(() =>
-        generateDocuAssets(plan, style, join(runDir, "assets"), log, applied.assetFixes, geometry.format),
+        generateDocuAssets(plan, style, join(runDir, "assets"), log, applied.assetFixes, geometry.format, args.generateImage),
       );
     }
   }

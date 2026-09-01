@@ -7,7 +7,7 @@
  * "published" by copying into an nginx docroot on a specific VPS. This suite
  * binds the fix so none of those four blockers can silently return:
  *
- *   1. providers are INJECTED (LoreShortDeps), defaults preserved for the CLI
+ *   1. mutable pixel providers are INJECTED (LoreShortDeps); no hidden art fallback
  *   2. the pipeline block routes every paid pixel through the ATTESTED farm
  *   3. publication is an R2 sink, not a filesystem docroot
  *   4. narration uses the channel's cast voice, not a hardcoded id
@@ -206,31 +206,31 @@ async function blockUsesAttestedProvidersAndR2(): Promise<void> {
     "the accepted story must be frozen to a content-addressed checkpoint");
 }
 
-/* ── 4. THE ENGINE KEPT ITS STANDALONE DEFAULTS ─────────────────────────────── */
+/* ── 4. THE ENGINE KEEPS SAFE DEFAULTS BUT REQUIRES ATTESTED ART ───────────── */
 async function engineDefaultsSurviveForTheCli(): Promise<void> {
   const engine = await source(ENGINE);
   const engineCode = codeOnly(engine);
 
-  // The FAL/Replicate/ElevenLabs/nginx implementations must STILL be there —
-  // the point of the inversion was to make them injectable, not to delete the
-  // standalone route.
+  // Replicate/ElevenLabs/nginx remain explicit standalone defaults, but art has
+  // no generic/FAL fallback because it cannot carry the production attestation.
   assert.match(engine, /api\.replicate\.com/, "the standalone Replicate lane must remain as the default");
-  assert.match(engine, /generateFalImage/, "the standalone art fallback must remain non-Google");
+  assert.doesNotMatch(engineCode, /generateFalImage|FAL_KEY/, "LoreShort art must have no generic FAL fallback");
+  assert.match(engine, /if \(!deps\.generateImage\)[\s\S]{0,120}explicit attested image generator is required/,
+    "standalone use must name its attested art provider before execution");
   assert.match(engine, /copyFile\(rd\("final\.mp4"\), pub\)/, "the default publish sink must remain the nginx copy");
   assert.match(engine, /provider:\s*"elevenlabs"/, "the default TTS must remain ElevenLabs");
 
   // …but they must all be BEHIND a dep check, and the secret list must be
   // conditional so an injected caller is not blocked by a token it never uses.
   assert.match(engine, /if \(deps\.generateClip\)/, "the injected clip lane must short-circuit before any Replicate call");
-  assert.match(engine, /deps\.generateImage\s*\n?\s*\?/, "art must prefer the injected generator");
+  assert.match(engine, /const generateImage = deps\.generateImage/,
+    "art generation must bind the required injected dependency once");
   assert.match(engine, /deps\.synthLine\s*\n?\s*\?/, "narration must prefer the injected synthesiser");
   assert.match(engine, /deps\.publish\s*\n?\s*\?/, "publication must prefer the injected sink");
   assert.match(engine, /const usesReplicate = !deps\.generateClip \|\| cfg\.upscale === "realesrgan"/,
     "REPLICATE_API_TOKEN must only be demanded when a Replicate path is genuinely reachable");
   assert.match(engine, /\.\.\.\(deps\.synthLine \? \[\] : \["ELEVENLABS_API_KEY"\]\)/,
     "ELEVENLABS_API_KEY must only be demanded when the default TTS is in play");
-  assert.match(engine, /\.\.\.\(usesFalImage \? \["FAL_KEY"\] : \[\]\)/,
-    "FAL_KEY must only be demanded when the non-Google art fallback is reachable");
   assert.match(engine, /if \(!deps\.publish\) await mkdir\(WEB/,
     "a cloud worker must not mkdir the nginx docroot");
 

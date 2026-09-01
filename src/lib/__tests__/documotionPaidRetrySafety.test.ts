@@ -1,98 +1,130 @@
 import assert from "node:assert/strict";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 
-import { getDepthMap } from "@/lib/depth";
+import {
+  buildShotSpecs,
+  normalizeDocuPlan,
+  removeChromaBackground,
+} from "@/lib/documotion";
 
 const renderBlockSource = readFileSync(
   new URL("../../trigger/render-block.ts", import.meta.url),
   "utf8",
 );
-const depthSource = readFileSync(new URL("../depth.ts", import.meta.url), "utf8");
 const documotionSource = readFileSync(new URL("../documotion.ts", import.meta.url), "utf8");
 const runPipelineSource = readFileSync(
   new URL("../../trigger/runPipeline.ts", import.meta.url),
   "utf8",
 );
 
-// A heavy remote child can run DocuMotion's paid FAL/TTS path. A crash/OOM is
-// therefore an ambiguous post-spend failure until durable per-operation resume
-// exists; Trigger must not replay the whole child automatically.
+function run(command: string, args: string[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
+    const stdout: Buffer[] = [];
+    const stderr: Buffer[] = [];
+    child.stdout.on("data", (chunk: Buffer) => stdout.push(chunk));
+    child.stderr.on("data", (chunk: Buffer) => stderr.push(chunk));
+    child.on("error", reject);
+    child.on("close", (code) => {
+      if (code === 0) resolve(Buffer.concat(stdout));
+      else reject(new Error(`${command} exited ${code}: ${Buffer.concat(stderr).toString("utf8").slice(-500)}`));
+    });
+  });
+}
+
+// A heavy remote child can contain paid TTS and image work. A crash/OOM is an
+// ambiguous post-spend failure until durable per-operation resume exists;
+// Trigger must not replay the whole child automatically.
 assert.match(renderBlockSource, /retry:\s*\{\s*maxAttempts:\s*1,/);
 assert.match(renderBlockSource, /must reconcile rather than make\s*\n\s*\/\/ Trigger replay the entire child attempt/i);
-
-// The parent converts a failed post-dispatch DocuMotion child into the same
-// durable reconciliation marker the runner understands. The amount is
-// explicitly unknown until the later receipt layer can authoritatively recover
-// it, and the run-level healer must not mint h+1 from that error.
 assert.match(runPipelineSource, /blockId === "documotion_short"/);
 assert.match(runPipelineSource, /provider cost is UNKNOWN and automatic replay\/heal is forbidden/);
 assert.match(runPipelineSource, /let childDispatchStarted = false/);
 assert.match(runPipelineSource, /childDispatchStarted = true/);
-assert.match(
-  runPipelineSource,
-  /result\.error\?\.includes\(PAID_STAGE_RECONCILIATION_MARKER\)/,
-);
+assert.match(runPipelineSource, /result\.error\?\.includes\(PAID_STAGE_RECONCILIATION_MARKER\)/);
 
-// The foreground-cutout helper used to try a second paid FAL model if a first
-// model's returned CDN URL failed delivery. Its caller already falls back to
-// the full image, so a single submitted model is the only safe retry boundary.
-const removeBackgroundSource = documotionSource.slice(
-  documotionSource.indexOf("async function removeBackground"),
-  documotionSource.indexOf("async function deriveDepthLayers"),
+// The renderer must own no secret paid image sub-routes. Its only generated
+// pixels arrive through the injected attested generator; cutout and camera
+// depth are local operations over those already-approved bytes.
+assert.doesNotMatch(
+  documotionSource,
+  /fal-ai\/birefnet|fal-ai\/imageutils\/marigold-depth|getDepthMap|REPLICATE_API_TOKEN|generateBananaImage|generateFalImage/,
 );
-assert.match(removeBackgroundSource, /const endpoint = "fal-ai\/birefnet\/v2"/);
-assert.doesNotMatch(removeBackgroundSource, /for \(const ep|fal-ai\/birefnet"\]/);
-assert.match(removeBackgroundSource, /await downloadTo\(url, outPng\)/);
+assert.match(documotionSource, /an explicit attested image generator is required/);
+assert.match(documotionSource, /flat solid chroma green #00FF00 background/);
+assert.match(documotionSource, /hidden paid depth extraction is disabled/);
 assert.match(
   documotionSource,
-  /bg-removal failed[\s\S]{0,300}using full image/,
-  "a one-model cutout failure must use the existing no-extra-spend full-image degradation",
+  /local chroma isolation failed[\s\S]{0,300}using the approved full plate/,
+  "a local isolation failure may degrade to the approved plate without buying replacement pixels",
 );
 
-// FAL can successfully return a billable output URL while its delivery CDN
-// fails. That must surface to DocuMotion's existing Ken-Burns degradation, not
-// submit a second paid depth prediction to Replicate.
-const originalFetch = globalThis.fetch;
-const originalFalKey = process.env.FAL_KEY;
-const requests: Array<{ url: string; method: string }> = [];
-async function main(): Promise<void> {
+async function localChromaProducesRealAlpha(): Promise<void> {
+  const dir = await mkdtemp(join(tmpdir(), "documotion-chroma-"));
   try {
-    process.env.FAL_KEY = "test-fal-key";
-    globalThis.fetch = async (input, init) => {
-      const url = String(input);
-      const method = init?.method ?? "GET";
-      requests.push({ url, method });
-      if (url === "https://fal.run/fal-ai/imageutils/marigold-depth") {
-        return new Response(JSON.stringify({ image: { url: "https://depth-cdn.test/depth.png" } }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      if (url === "https://depth-cdn.test/depth.png") {
-        return new Response("temporarily unavailable", { status: 503 });
-      }
-      throw new Error(`unexpected request ${method} ${url}`);
-    };
-
-    await assert.rejects(
-      () => getDepthMap("data:image/jpeg;base64,AA==", "/tmp/depth-never-written.png"),
-      /depth: download failed HTTP 503/,
-    );
-    assert.deepEqual(requests, [
-      { url: "https://fal.run/fal-ai/imageutils/marigold-depth", method: "POST" },
-      { url: "https://depth-cdn.test/depth.png", method: "GET" },
+    const source = join(dir, "source.png");
+    const cutout = join(dir, "cutout.png");
+    await run("ffmpeg", [
+      "-hide_banner", "-loglevel", "error", "-y",
+      "-f", "lavfi",
+      "-i", "color=c=0x00FF00:s=64x64:d=1,drawbox=x=20:y=20:w=24:h=24:color=red:t=fill",
+      "-frames:v", "1",
+      source,
     ]);
-    assert.doesNotMatch(depthSource, /api\.replicate\.com|REPLICATE_API_TOKEN|trying replicate/i);
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalFalKey === undefined) delete process.env.FAL_KEY;
-    else process.env.FAL_KEY = originalFalKey;
-  }
+    await removeChromaBackground(source, cutout);
+    const rgba = await run("ffmpeg", [
+      "-hide_banner", "-loglevel", "error",
+      "-i", cutout,
+      "-frames:v", "1",
+      "-f", "rawvideo",
+      "-pix_fmt", "rgba",
+      "pipe:1",
+    ]);
+    assert.equal(rgba.length, 64 * 64 * 4, "the keyed PNG must retain the source geometry");
+    let transparent = 0;
+    let opaque = 0;
+    for (let index = 3; index < rgba.length; index += 4) {
+      if (rgba[index] <= 8) transparent += 1;
+      if (rgba[index] >= 247) opaque += 1;
+    }
+    assert.ok(transparent > 2_500, `expected a transparent green field, saw ${transparent} pixels`);
+    assert.ok(opaque > 400, `expected the red subject to remain opaque, saw ${opaque} pixels`);
 
-  console.log("DocuMotion paid retry safety tests passed");
+    const migrated = normalizeDocuPlan({
+      title: "Depth proof",
+      styleId: "archival_collage",
+      shots: [{
+        kind: "depth_parallax",
+        narration: "The subject steps through the reconstructed room.",
+        scale: "wide",
+        beat: "camera crosses the room",
+        durationSec: 4,
+        camera: { move: "push_in", intensity: "medium" },
+        assets: [{ id: "legacy-plate", role: "image", brief: "the room and its subject", source: "generate" }],
+      }],
+    });
+    assert.deepEqual(migrated.shots[0]?.assets.map((asset) => asset.role), ["bg", "fg"]);
+    assert.equal(migrated.shots[0]?.assets[0]?.id, "legacy-plate", "legacy evidence ids must stay on the base plate");
+    assert.equal(migrated.shots[0]?.assets[1]?.id, "legacy-plate-near");
+    const specs = await buildShotSpecs(migrated, [
+      { shotIdx: 0, id: "legacy-plate", role: "bg", path: source, approvalSha256: "a".repeat(64) },
+      { shotIdx: 0, id: "legacy-plate-near", role: "fg", path: cutout, approvalSha256: "b".repeat(64) },
+    ], 4);
+    assert.equal(specs[0]?.images?.length, 2, "depth shots must reach Remotion as base + keyed near plane");
+    assert.match(specs[0]?.images?.[0] ?? "", /^data:image\/png;base64,/);
+    assert.match(specs[0]?.images?.[1] ?? "", /^data:image\/png;base64,/);
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
 }
 
-void main().catch((error: unknown) => {
+void localChromaProducesRealAlpha().then(() => {
+  console.log("DocuMotion paid-route and real-pixel local compositing tests passed");
+}).catch((error: unknown) => {
   console.error(error);
   process.exitCode = 1;
 });

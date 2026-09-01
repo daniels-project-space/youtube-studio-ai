@@ -102,20 +102,26 @@ export function OperationsAccess() {
     const params = new URLSearchParams(window.location.search);
     const outcome = params.get("operations");
     if (!outcome) return;
+    let frame: number | undefined;
     if (outcome !== "verified") {
-      setError(
-        outcome === "cancelled"
-          ? "Owner verification was cancelled."
-          : outcome === "denied"
-            ? "That YouTube channel is not bound to this studio. Choose a recorded owner channel."
-            : "Owner verification could not be completed.",
-      );
-      setOpen(true);
+      frame = window.requestAnimationFrame(() => {
+        setError(
+          outcome === "cancelled"
+            ? "Owner verification was cancelled."
+            : outcome === "denied"
+              ? "That YouTube channel is not bound to this studio. Choose a recorded owner channel."
+              : "Owner verification could not be completed.",
+        );
+        setOpen(true);
+      });
     }
     params.delete("operations");
     params.delete("detail");
     const query = params.toString();
     window.history.replaceState(null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+    return () => {
+      if (frame !== undefined) window.cancelAnimationFrame(frame);
+    };
   }, []);
 
   useEffect(() => {
