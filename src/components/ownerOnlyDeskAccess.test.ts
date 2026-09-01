@@ -31,7 +31,6 @@ assert.match(
 );
 
 for (const path of [
-  "../app/(app)/studio-assets/page.tsx",
   "../app/(app)/novita-render/page.tsx",
 ]) {
   const page = read(path);
@@ -57,6 +56,15 @@ assert.match(
   "the custom Evidence shell must keep receipts and review controls behind the owner branch",
 );
 assert.match(editorialEvidence, /No private evidence request was sent/);
+
+const studioAssets = read("../app/(app)/studio-assets/page.tsx");
+assert.match(studioAssets, /const operationsAccess = useOperationsAccess\(\)/);
+assert.match(
+  studioAssets,
+  /operationsAccess !== "owner" \? \([\s\S]*<LockedAssetRegistry/,
+  "the custom asset shell must keep registry inventory and actions behind the owner branch",
+);
+assert.match(studioAssets, /No private asset request was sent/);
 
 for (const path of [
   "../app/(app)/studio-assets/page.tsx",

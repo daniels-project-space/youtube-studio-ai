@@ -4,8 +4,21 @@ import { join } from "node:path";
 
 async function main(): Promise<void> {
   const source = await readFile(join(process.cwd(), "src/app/(app)/studio-assets/page.tsx"), "utf8");
+  const styles = await readFile(join(process.cwd(), "src/app/(app)/studio-assets/studio-assets.module.css"), "utf8");
   const api = await readFile(join(process.cwd(), "src/app/api/studio-assets/route.ts"), "utf8");
   assert.match(source, /Studio assets/i);
+  assert.match(source, /function AssetHero/);
+  assert.match(source, /Reuse what has earned the right\./);
+  assert.match(source, /function AssetRoomTabs/);
+  for (const room of ["approved", "decisions", "identity", "runtime", "catalog"]) {
+    assert.match(source, new RegExp(`room === "${room}"`), `missing isolated ${room} room`);
+  }
+  assert.match(source, /function LockedAssetRegistry/);
+  assert.match(source, /No private asset request was sent/);
+  assert.match(source, /Registry locked/,
+    "viewer mode must not imply that a private registry request is loading");
+  assert.doesNotMatch(source, /<PageHeader/);
+  assert.doesNotMatch(source, /<OwnerOnlyNotice/);
   assert.match(source, /Read-only evidence inventory/i);
   assert.match(source, /Reviewed candidates awaiting approval/i);
   assert.match(source, /Approve for this channel/i);
@@ -92,6 +105,8 @@ async function main(): Promise<void> {
   assert.match(api, /recommendedWorkflowProfiles/);
   assert.match(api, /VISUAL_TREATMENT_CATALOG/);
   assert.match(api, /activePlanningFamilies/);
+  assert.match(styles, /\.orbitField/);
+  assert.match(styles, /prefers-reduced-motion: reduce/);
   console.log("studio assets UI contracts passed");
 }
 

@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useOperationsAccess } from "@/components/OperationsAccess";
-import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
-import { PageHeader } from "@/components/PageHeader";
 import styles from "./studio-assets.module.css";
+
+type AssetRoom = "approved" | "decisions" | "identity" | "runtime" | "catalog";
 
 type StudioAsset = {
   logicalId: string;
@@ -226,8 +226,110 @@ function curatedExecutionTargetLabel(target: NonNullable<CuratedLtxCatalogItem["
   return `Dedicated ComfyUI/LTX · ${target.provider} ${target.gpuSku} · ${target.minimumVramGb} GB minimum`;
 }
 
+function AssetHero({
+  access,
+  summary,
+  runtime,
+  loading,
+  onRefresh,
+}: {
+  access: ReturnType<typeof useOperationsAccess>;
+  summary: { approved: number; pending: number; reusable: number; ltx: number; control: number };
+  runtime: DirectLtxRuntimeStatus | null;
+  loading: boolean;
+  onRefresh: () => void;
+}) {
+  return (
+    <section className={styles.hero} aria-busy={access === "checking" || (access === "owner" && loading) || undefined}>
+      <div className={styles.heroCopy}>
+        <p className={styles.eyebrow}>Studio assets / reuse registry</p>
+        <h1>Reuse what has earned the right.</h1>
+        <p>
+          Every recipe, image, adapter, and control stays bound to its review,
+          scope, and runtime proof. Similar-looking is never the same as compatible.
+        </p>
+        <div className={styles.heroActions}>
+          <button type="button" className={styles.refresh} disabled={loading || access !== "owner"} onClick={onRefresh}>{access !== "owner" ? access === "checking" ? "Checking access…" : "Registry locked" : loading ? "Reading registry…" : "Refresh registry"}</button>
+          <span>Metadata by default · previews only on owner request</span>
+        </div>
+      </div>
+      <div className={styles.registryMap}>
+        <div className={styles.registryHeader}><span>Reuse admission</span><small>scope × evidence × runtime</small></div>
+        <div className={styles.orbitField}>
+          <div className={styles.orbitCore} data-state={summary.approved ? "ready" : "empty"}><span>APPROVED</span><strong>{String(summary.approved).padStart(2, "0")}</strong><small>registry entries</small></div>
+          <RegistryNode className={styles.nodeQuality} index="01" label="Quality" value={summary.approved ? "Reviewed" : "Waiting"} />
+          <RegistryNode className={styles.nodeScope} index="02" label="Scope" value={summary.reusable ? `${summary.reusable} portable` : "Bound"} />
+          <RegistryNode className={styles.nodeRuntime} index="03" label="Runtime" value={runtime?.status === "attested" ? "Attested" : "Unattested"} />
+          <i className={styles.orbitA} aria-hidden="true" /><i className={styles.orbitB} aria-hidden="true" /><i className={styles.orbitC} aria-hidden="true" />
+        </div>
+      </div>
+      <div className={styles.metricRail}>
+        <AssetMetric index="01" label="Approved" value={String(summary.approved).padStart(2, "0")} detail="evidence-backed" />
+        <AssetMetric index="02" label="Decisions" value={String(summary.pending).padStart(2, "0")} detail="owner review" />
+        <AssetMetric index="03" label="Portable" value={String(summary.reusable).padStart(2, "0")} detail="Studio-wide" />
+        <AssetMetric index="04" label="LTX candidates" value={String(summary.ltx + summary.control).padStart(2, "0")} detail={`${summary.control} IC controls`} />
+        <AssetMetric index="05" label="Authority" value={access === "owner" ? "Open" : access === "checking" ? "Checking" : "Locked"} detail="signed session" />
+      </div>
+    </section>
+  );
+}
+
+function RegistryNode({ className, index, label, value }: { className: string; index: string; label: string; value: string }) {
+  return <div className={`${styles.registryNode} ${className}`}><span>{index}</span><div><small>{label}</small><strong>{value}</strong></div><i /></div>;
+}
+
+function AssetMetric({ index, label, value, detail }: { index: string; label: string; value: string; detail: string }) {
+  return <div className={styles.metric}><span>{index} / {label}</span><strong>{value}</strong><small>{detail}</small></div>;
+}
+
+function LockedAssetRegistry({ access }: { access: Exclude<ReturnType<typeof useOperationsAccess>, "owner"> }) {
+  return (
+    <section className={styles.lockedRegistry} aria-live={access === "checking" ? "polite" : undefined}>
+      <div className={styles.registrySeal} aria-hidden="true"><span>ASSET</span><i /><b /></div>
+      <div className={styles.lockedCopy}>
+        <p className={styles.eyebrow}>{access === "checking" ? "Resolving signed session" : "Reuse registry protected"}</p>
+        <h2>{access === "checking" ? "Checking registry authority…" : "The asset registry is closed."}</h2>
+        <p>{access === "checking" ? "The studio is checking this browser before reading any owner-scoped asset evidence." : "Open owner operations from the top bar to inspect approvals, adapters, and short-lived previews. No private asset request was sent."}</p>
+      </div>
+      <div className={styles.lockedRules}>
+        <div><span>01</span><strong>Identity does not travel</strong><p>Channel and series material stays inside its sealed compatibility boundary.</p></div>
+        <div><span>02</span><strong>Catalog is not runtime</strong><p>A model card never becomes installed weights or render permission.</p></div>
+        <div><span>03</span><strong>Preview is deliberate</strong><p>Approved images receive a short-lived URL only after an owner click.</p></div>
+      </div>
+    </section>
+  );
+}
+
+function AssetRoomTabs({ room, setRoom, counts }: { room: AssetRoom; setRoom: (room: AssetRoom) => void; counts: Record<AssetRoom, number> }) {
+  const rooms: { id: AssetRoom; label: string; detail: string }[] = [
+    { id: "approved", label: "Approved", detail: "Reusable inventory" },
+    { id: "decisions", label: "Decisions", detail: "Owner approvals" },
+    { id: "identity", label: "Identity", detail: "Series characters" },
+    { id: "runtime", label: "Runtime", detail: "Worker readiness" },
+    { id: "catalog", label: "Catalog", detail: "Quality candidates" },
+  ];
+  return (
+    <nav className={styles.roomTabs} aria-label="Studio asset rooms" role="tablist">
+      {rooms.map((item, index) => <button key={item.id} type="button" role="tab" aria-selected={room === item.id} className={room === item.id ? styles.roomTabActive : ""} onClick={() => setRoom(item.id)}><span>{String(index + 1).padStart(2, "0")}</span><div><strong>{item.label}</strong><small>{item.detail}</small></div><b>{counts[item.id]}</b></button>)}
+    </nav>
+  );
+}
+
+function AssetRoomIntro({ room }: { room: AssetRoom }) {
+  const copy: Record<AssetRoom, { eyebrow: string; title: string; detail: string }> = {
+    approved: { eyebrow: "Reusable inventory", title: "Approved visual language", detail: "Evidence-backed recipes and source assets that earned a specific compatibility boundary." },
+    decisions: { eyebrow: "Owner decision", title: "Candidates awaiting a deliberate answer", detail: "Approval rechecks the retained final-master certificate and remains restricted to its source channel." },
+    identity: { eyebrow: "Series identity", title: "Characters allowed to remain themselves", detail: "Accepted adapters can return only for the same sealed specification, dataset, runtime, and review path." },
+    runtime: { eyebrow: "Execution boundary", title: "Workers with measured readiness", detail: "Runtime evidence proves only its benchmarked path; it does not authorize dispatch, spend, or release." },
+    catalog: { eyebrow: "Descriptor catalog", title: "Candidates, controls, and treatment plans", detail: "Catalog entries describe a possible improvement. They are not installed weights and never imply render admission." },
+  };
+  const selected = copy[room];
+  return <header className={styles.roomHeader}><div><span className={styles.kind}>{selected.eyebrow}</span><h2>{selected.title}</h2></div><p>{selected.detail}</p></header>;
+}
+
 export default function StudioAssetsPage() {
   const operationsAccess = useOperationsAccess();
+  const [room, setRoom] = useState<AssetRoom>("approved");
   const [assets, setAssets] = useState<StudioAsset[]>([]);
   const [candidates, setCandidates] = useState<StudioAssetPromotionCandidate[]>([]);
   const [curatedLtxCatalog, setCuratedLtxCatalog] = useState<CuratedLtxCatalogItem[]>([]);
@@ -368,63 +470,58 @@ export default function StudioAssetsPage() {
     () => new Map(releaseFeedback.map((feedback) => [feedback.assetEntryFingerprint, feedback])),
     [releaseFeedback],
   );
-
-  if (operationsAccess !== "owner") {
-    return (
-      <div className={styles.page}>
-        <PageHeader
-          title="Studio assets"
-          subtitle="Approved reusable visual language, adapter evidence, and control guides."
-        />
-        <OwnerOnlyNotice
-          access={operationsAccess}
-          desk="the Studio asset library"
-        />
-      </div>
-    );
-  }
+  const roomCounts: Record<AssetRoom, number> = {
+    approved: assets.length,
+    decisions: candidates.length,
+    identity: acceptedCharacterLoRAs.length,
+    runtime: (directLtxRuntime ? 1 : 0) + (musicVideoA2Vid ? 1 : 0),
+    catalog: curatedLtxCatalog.length + visualTreatmentCatalog.length,
+  };
 
   return (
     <div className={styles.page}>
-      <PageHeader
-        title="Studio assets"
-        subtitle="Our self-hosted asset library for approved reusable visual language, adapter evidence, and control guides. Each entry stays owner-bound; channel and series identity material never crosses its boundary."
-        actions={<button type="button" className={styles.refresh} disabled={loading} onClick={() => { void refresh(); }}>{loading ? "Loading…" : "Refresh"}</button>}
+      <AssetHero
+        access={operationsAccess}
+        summary={summary}
+        runtime={directLtxRuntime}
+        loading={loading}
+        onRefresh={() => { void refresh(); }}
       />
 
-      <section className={styles.summary} aria-label="Studio asset summary">
-        <div><strong>{summary.approved}</strong><span>approved assets</span></div>
-        <div><strong>{summary.pending}</strong><span>reviewed candidates</span></div>
-        <div><strong>{summary.reusable}</strong><span>Studio-wide recipes</span></div>
-        <div><strong>{summary.ltx}</strong><span>official LTX LoRA candidates</span></div>
-        <div><strong>{summary.control}</strong><span>IC controls, separately gated</span></div>
+      {operationsAccess !== "owner" ? (
+        <LockedAssetRegistry access={operationsAccess} />
+      ) : (<>
+
+      <section className={styles.boundaryStrip}>
+        <span className={styles.kind}>Read-only evidence inventory</span>
+        <strong>Metadata first. Reuse only after exact compatibility.</strong>
+        <p>This is our own Studio library, not an external LTX service. The inventory is read-only except for an owner’s deliberate approval of a certificate-backed, channel-only candidate; it never uploads, downloads models, trains, renders, or publishes.</p>
+        <small>It never shows storage locations, model bytes, or persistent signed URLs; an owner may explicitly open one short-lived preview for an approved image. Official catalog entries are not installed weights or render permission; an assembly consumer is not admitted until render-parity is proven.</small>
       </section>
 
-      <section className={styles.notice}>
-        <strong>Read-only evidence inventory</strong>
-        <span>This is our own Studio library, not an external LTX service. The inventory is read-only except for an owner’s deliberate approval of a certificate-backed, channel-only candidate; it never uploads, downloads models, trains, renders, or publishes. It never shows storage locations, model bytes, or persistent signed URLs; an owner may explicitly open one short-lived preview for an approved image. Official catalog entries below are not installed weights or a render permission; an assembly consumer is not admitted until render-parity is proven.</span>
-      </section>
-
-      {!loading && directLtxRuntime ? <section className={styles.notice} aria-label="Direct LTX runtime readiness">
+      {!loading && room === "runtime" && directLtxRuntime ? <section className={styles.runtimeBanner} aria-label="Direct LTX runtime readiness">
         <strong>Direct LTX runtime · {directLtxRuntime.status === "attested" ? "benchmark admitted" : "benchmark not admitted"}</strong>
-        <span>
+        <p>
           {directLtxRuntime.status === "attested"
             ? `This owner has ${directLtxRuntime.benchmarkedProfileCount} sealed direct open-weight LTX 2.5 Novita profile${directLtxRuntime.benchmarkedProfileCount === 1 ? "" : "s"} on ${directLtxRuntime.gpuSku} (${directLtxRuntime.vramGb} GB). Every render still rechecks the exact pinned worker and release evidence.`
             : `No owner-scoped benchmark admission exists for the direct open-weight LTX 2.5 Novita worker (${directLtxRuntime.gpuSku}, ${directLtxRuntime.vramGb} GB). Catalog entries and standard LoRA candidates remain unavailable to render until an exact benchmark is reviewed and admitted.`}
-        </span>
+        </p>
       </section> : null}
 
       {message ? <p className={styles.error} role="alert">{message}</p> : null}
       {previewError ? <p className={styles.error} role="alert">{previewError}</p> : null}
-      {loading ? <div className={styles.empty}>Loading approved Studio assets…</div> : null}
-      {!loading && !message && assets.length === 0 ? (
+      <AssetRoomTabs room={room} setRoom={setRoom} counts={roomCounts} />
+      <AssetRoomIntro room={room} />
+
+      {loading ? <div className={styles.empty}>Loading Studio asset registry…</div> : null}
+      {!loading && room === "approved" && !message && assets.length === 0 ? (
         <div className={styles.empty}>
           <strong>No approved Studio assets yet.</strong>
           <span>Assets appear here only after an evidence-backed promotion. A missing asset tells the pipeline to create a new reviewed candidate; it never borrows another channel’s material.</span>
         </div>
       ) : null}
 
-      {!loading && candidates.length ? <section className={styles.catalog} aria-labelledby="studio-asset-candidate-approvals">
+      {!loading && room === "decisions" && candidates.length ? <section className={styles.catalog} aria-labelledby="studio-asset-candidate-approvals">
         <div className={styles.catalogHead}>
           <div>
             <span className={styles.kind}>Owner decision required</span>
@@ -465,7 +562,7 @@ export default function StudioAssetsPage() {
         </div>
       </section> : null}
 
-      {!loading && assets.length ? <section className={styles.grid} aria-label="Approved Studio assets">
+      {!loading && room === "approved" && assets.length ? <section className={styles.grid} aria-label="Approved Studio assets">
         {assets.map((asset) => {
           const feedback = feedbackByAsset.get(asset.fingerprint);
           return <article className={styles.card} key={asset.fingerprint}>
@@ -510,7 +607,7 @@ export default function StudioAssetsPage() {
         })}
       </section> : null}
 
-      {!loading && acceptedCharacterLoRAs.length ? <section className={styles.catalog} aria-labelledby="series-character-adapter-registry">
+      {!loading && room === "identity" && acceptedCharacterLoRAs.length ? <section className={styles.catalog} aria-labelledby="series-character-adapter-registry">
         <div className={styles.catalogHead}>
           <div>
             <span className={styles.kind}>Series identity registry</span>
@@ -542,7 +639,7 @@ export default function StudioAssetsPage() {
         </div>
       </section> : null}
 
-      {!loading && musicVideoA2Vid ? <section className={styles.catalog} aria-labelledby="music-video-engine">
+      {!loading && room === "runtime" && musicVideoA2Vid ? <section className={styles.catalog} aria-labelledby="music-video-engine">
         <div className={styles.catalogHead}>
           <div>
             <span className={styles.kind}>Future render engine</span>
@@ -578,7 +675,7 @@ export default function StudioAssetsPage() {
         </article>
       </section> : null}
 
-      {!loading && curatedLtxCatalog.length ? <section className={styles.catalog} aria-labelledby="official-ltx-quality-catalog">
+      {!loading && room === "catalog" && curatedLtxCatalog.length ? <section className={styles.catalog} aria-labelledby="official-ltx-quality-catalog">
         <div className={styles.catalogHead}>
           <div>
             <span className={styles.kind}>Official LTX catalog</span>
@@ -618,7 +715,7 @@ export default function StudioAssetsPage() {
         </div>
       </section> : null}
 
-      {!loading && visualTreatmentCatalog.length ? <section className={styles.catalog} aria-labelledby="visual-treatment-catalog">
+      {!loading && room === "catalog" && visualTreatmentCatalog.length ? <section className={styles.catalog} aria-labelledby="visual-treatment-catalog">
         <div className={styles.catalogHead}>
           <div>
             <span className={styles.kind}>Visual treatment catalog</span>
@@ -652,6 +749,11 @@ export default function StudioAssetsPage() {
         </div>
       </section> : null}
 
+      {!loading && room !== "approved" && roomCounts[room] === 0 ? <div className={styles.empty}>
+        <strong>No {room} records are available.</strong>
+        <span>The registry preserves this as an empty evidence state; it does not infer an approval, adapter, runtime, or catalog entry.</span>
+      </div> : null}
+
       {preview ? <div className={styles.previewBackdrop} role="presentation" onMouseDown={() => setPreview(null)}>
         <section
           className={styles.previewDialog}
@@ -683,6 +785,7 @@ export default function StudioAssetsPage() {
           <p className={styles.previewProof}>Image evidence · {preview.contentType} · SHA-256 {shortHash(preview.contentSha256)}</p>
         </section>
       </div> : null}
+      </>)}
     </div>
   );
 }
