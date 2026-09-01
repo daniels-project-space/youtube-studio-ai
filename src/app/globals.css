@@ -1631,11 +1631,11 @@
 
 @media (max-width: 860px) {
   .studio-shell :where(button, input, select, textarea, summary, a[class]) {
-    min-height: 44px;
+    min-height: 44px !important;
   }
 
   .studio-shell button {
-    min-width: 44px;
+    min-width: 44px !important;
   }
 
   .studio-workspace { margin-left: 0; }
