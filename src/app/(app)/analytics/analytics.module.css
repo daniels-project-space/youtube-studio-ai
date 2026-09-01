@@ -1,0 +1,403 @@
+.dashboard {
+  display: grid;
+  gap: clamp(1.35rem, 2.4vw, 2.25rem);
+  padding-bottom: 2.5rem;
+}
+
+.learningHero {
+  position: relative;
+  display: grid;
+  grid-template-columns: minmax(340px, 0.82fr) minmax(500px, 1.18fr);
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 88% 9%, rgba(125, 211, 192, 0.12), transparent 32%),
+    radial-gradient(circle at 12% 82%, rgba(131, 169, 255, 0.075), transparent 28%),
+    linear-gradient(135deg, #101510, #080b09 62%);
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.3);
+}
+
+.learningHero::before {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.024) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.024) 1px, transparent 1px);
+  background-size: 48px 48px;
+  content: "";
+  mask-image: radial-gradient(circle at 78% 38%, #000, transparent 70%);
+  pointer-events: none;
+}
+
+.heroLead,
+.efficiencyField,
+.metricRail { position: relative; z-index: 1; }
+
+.heroLead {
+  display: grid;
+  align-content: center;
+  min-width: 0;
+  padding: clamp(1.5rem, 3.5vw, 3rem);
+  padding-right: 1rem;
+}
+
+.eyebrow,
+.sectionHeading > div > span {
+  color: var(--color-secondary);
+  font: 700 0.57rem/1 var(--font-mono);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.heroLead h1 {
+  max-width: 12ch;
+  margin: 0.65rem 0 0.8rem;
+  font-family: var(--font-display);
+  font-size: clamp(2.45rem, 4.7vw, 5rem);
+  font-weight: 520;
+  letter-spacing: -0.055em;
+  line-height: 0.94;
+}
+
+.heroLead > p {
+  max-width: 57ch;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.8rem;
+  line-height: 1.65;
+}
+
+.observationState {
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr);
+  gap: 0.72rem;
+  align-items: center;
+  margin-top: 1.2rem;
+  border-top: 1px solid var(--color-border);
+  padding-top: 0.9rem;
+}
+
+.observationState > span,
+.healthGlyph {
+  position: relative;
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--color-secondary) 38%, transparent);
+  border-radius: 50%;
+}
+
+.observationState > span::before,
+.healthGlyph::before {
+  position: absolute;
+  inset: 6px;
+  border: 1px solid currentColor;
+  border-radius: inherit;
+  content: "";
+  opacity: 0.2;
+}
+
+.observationState > span i,
+.healthGlyph i {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-secondary);
+  box-shadow: 0 0 16px rgba(125, 211, 192, 0.75);
+  animation: observePulse 2.5s ease-in-out infinite;
+}
+
+.observationState[data-tone="danger"] > span,
+.observationState[data-tone="warning"] > span { border-color: rgba(245, 158, 11, 0.4); }
+.observationState[data-tone="danger"] > span i,
+.observationState[data-tone="warning"] > span i { background: var(--color-amber); box-shadow: 0 0 16px rgba(245, 158, 11, 0.7); }
+.observationState > div { display: grid; min-width: 0; gap: 0.14rem; }
+.observationState small { color: var(--color-secondary); font: 0.54rem var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.observationState strong { overflow: hidden; font-size: 0.74rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.observationState em { color: var(--color-faint); font-size: 0.61rem; font-style: normal; }
+
+.efficiencyField {
+  min-width: 0;
+  align-self: center;
+  margin: clamp(1.2rem, 3vw, 2.5rem);
+  margin-left: 0;
+  border: 1px solid var(--color-border);
+  border-radius: 15px;
+  background: rgba(2, 6, 4, 0.66);
+  padding: 0.85rem 0.9rem 0.68rem;
+  backdrop-filter: blur(18px);
+}
+
+.efficiencyField figcaption,
+.fieldLegend {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+.efficiencyField figcaption span { color: var(--color-muted); font: 0.6rem var(--font-mono); letter-spacing: 0.11em; text-transform: uppercase; }
+.efficiencyField figcaption small { color: var(--color-faint); font-size: 0.56rem; }
+.efficiencyField svg { display: block; width: 100%; height: auto; min-height: 225px; color: var(--color-fg); overflow: visible; }
+.fieldAxis { stroke: rgba(243, 240, 232, 0.14); stroke-width: 1; }
+.fieldLabel,
+.fieldNodeLabel,
+.fieldEmpty { fill: var(--color-faint); font: 8px var(--font-mono); letter-spacing: 0.08em; }
+.fieldNodeLabel { fill: var(--color-muted); letter-spacing: 0; }
+.fieldEmpty { font-size: 11px; }
+.fieldNode { transition: filter 180ms ease, opacity 180ms ease; }
+.fieldNode:hover { filter: brightness(1.4); }
+.fieldNodeHalo { fill: rgba(125, 211, 192, 0.035); stroke: rgba(125, 211, 192, 0.2); stroke-width: 1; }
+.fieldNode[data-selected="true"] .fieldNodeHalo { fill: rgba(255, 94, 42, 0.08); stroke: var(--color-accent); stroke-width: 2; }
+.fieldNode[data-selected="true"] .fieldNodeLabel { fill: var(--color-accent); }
+.fieldLegend { border-top: 1px solid var(--color-border); padding-top: 0.55rem; color: var(--color-faint); font-size: 0.53rem; }
+.fieldLegend span { display: inline-flex; align-items: center; gap: 0.35rem; }
+.fieldLegend i { width: 6px; height: 6px; border-radius: 50%; background: var(--color-secondary); box-shadow: 0 0 8px rgba(125, 211, 192, 0.5); }
+
+.metricRail {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-top: 1px solid var(--color-border);
+  background: rgba(2, 5, 3, 0.4);
+}
+
+.heroMetric {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.75rem;
+  border-right: 1px solid var(--color-border);
+  padding: 0.88rem 1rem;
+}
+.heroMetric:last-child { border-right: 0; }
+.heroMetric > span { color: var(--color-faint); font: 0.52rem var(--font-mono); }
+.heroMetric > div { display: grid; min-width: 0; gap: 0.18rem; }
+.heroMetric small { color: var(--color-faint); font: 0.54rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.heroMetric strong { overflow: hidden; font-family: var(--font-display); font-size: clamp(1.35rem, 2.6vw, 2rem); font-weight: 560; line-height: 1; text-overflow: ellipsis; white-space: nowrap; }
+.heroMetric em { color: var(--color-faint); font-size: 0.57rem; font-style: normal; }
+.heroMetric[data-tone="live"] strong { color: var(--color-secondary); }
+.heroMetric[data-tone="spend"] strong { color: var(--color-amber); }
+
+.loadingRoom { display: grid; gap: 0.8rem; }
+.loadingRoom > span { color: var(--color-muted); font-size: 0.75rem; }
+
+.sectionHeading {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(280px, 1.2fr) auto;
+  gap: 1.25rem;
+  align-items: end;
+  margin-bottom: 0.85rem;
+}
+.sectionHeading > div { display: grid; gap: 0.18rem; }
+.sectionHeading h2 { margin: 0; font-family: var(--font-display); font-size: clamp(1.35rem, 2.3vw, 1.75rem); font-weight: 560; letter-spacing: -0.035em; }
+.sectionHeading p { max-width: 68ch; margin: 0; color: var(--color-faint); font-size: 0.67rem; line-height: 1.5; }
+.sectionHeading > a { color: var(--color-muted); font-size: 0.67rem; font-weight: 650; white-space: nowrap; }
+.sectionHeading > a:hover { color: var(--color-fg); }
+
+.healthRoom,
+.comparisonRoom,
+.trendRoom,
+.competitorRoom { min-width: 0; }
+
+.healthBand {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: linear-gradient(110deg, rgba(125, 211, 192, 0.04), rgba(255, 255, 255, 0.018));
+}
+
+.healthCopy {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
+  gap: 0.8rem;
+  align-items: center;
+  padding: 0.9rem 1rem;
+}
+.healthCopy > div { display: grid; min-width: 0; gap: 0.17rem; }
+.healthCopy small { color: var(--color-faint); font: 0.53rem var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
+.healthCopy strong { font-size: 0.84rem; }
+.healthCopy p { margin: 0; color: var(--color-muted); font-size: 0.68rem; line-height: 1.45; }
+.healthCopy em { color: var(--color-faint); font-size: 0.59rem; font-style: normal; }
+.healthCopy > a { color: var(--color-accent); font-size: 0.65rem; font-weight: 650; white-space: nowrap; }
+.healthCopy[data-tone="danger"] .healthGlyph,
+.healthCopy[data-tone="warning"] .healthGlyph { border-color: rgba(245, 158, 11, 0.36); color: var(--color-amber); }
+.healthCopy[data-tone="danger"] .healthGlyph i,
+.healthCopy[data-tone="warning"] .healthGlyph i { background: var(--color-amber); box-shadow: 0 0 14px rgba(245, 158, 11, 0.58); }
+
+.healthMeasures {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(92px, 1fr));
+  border-left: 1px solid var(--color-border);
+}
+.healthMeasures > span {
+  display: grid;
+  align-content: center;
+  gap: 0.18rem;
+  min-width: 108px;
+  border-right: 1px solid var(--color-border);
+  padding: 0.75rem 0.9rem;
+}
+.healthMeasures > span:last-child { border-right: 0; }
+.healthMeasures small { color: var(--color-faint); font: 0.52rem var(--font-mono); text-transform: uppercase; }
+.healthMeasures strong { font-family: var(--font-display); font-size: 1.45rem; font-weight: 560; }
+.healthMeasures em { color: var(--color-faint); font-size: 0.55rem; font-style: normal; }
+.healthMeasures span[data-tone="warn"] strong { color: var(--color-amber); }
+
+.metricTabs {
+  display: inline-flex;
+  gap: 0.25rem;
+  margin-bottom: 0.72rem;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.018);
+  padding: 0.25rem;
+}
+.metricTabs button {
+  min-height: 33px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-faint);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.68rem;
+  padding: 0 0.72rem;
+}
+.metricTabs button:hover { color: var(--color-fg); }
+.metricTabs button[data-active="true"] { background: rgba(125, 211, 192, 0.075); color: var(--color-secondary); box-shadow: inset 0 0 0 1px rgba(125, 211, 192, 0.16); }
+
+.rankingGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.42rem;
+}
+.rankingRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 25px minmax(132px, 0.8fr) minmax(80px, 1fr) auto 18px;
+  gap: 0.62rem;
+  align-items: center;
+  min-height: 60px;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.018);
+  padding: 0.58rem 0.65rem;
+  transition: border-color 160ms ease, background 160ms ease, transform 160ms ease;
+}
+.rankingRow:hover { border-color: var(--color-border-strong); background: rgba(255, 255, 255, 0.034); transform: translateX(2px); }
+.rankingIndex { color: var(--color-faint); font: 0.54rem var(--font-mono); }
+.rankingIdentity { display: grid; min-width: 0; gap: 0.12rem; }
+.rankingIdentity strong { overflow: hidden; font-size: 0.72rem; text-overflow: ellipsis; white-space: nowrap; }
+.rankingIdentity small { overflow: hidden; color: var(--color-faint); font-size: 0.56rem; text-overflow: ellipsis; white-space: nowrap; }
+.rankingBar { height: 4px; overflow: hidden; border-radius: 99px; background: rgba(255, 255, 255, 0.04); }
+.rankingBar i { display: block; width: 100%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, rgba(125, 211, 192, 0.18), var(--color-secondary)); transform-origin: left; transition: transform 320ms cubic-bezier(0.2, 0.75, 0.2, 1); }
+.rankingValue { min-width: 54px; color: var(--color-secondary); font: 0.68rem var(--font-mono); text-align: right; }
+.rankingArrow { color: var(--color-faint); font-size: 0.62rem; }
+
+.trendSummary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin-bottom: 0.7rem;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+}
+.trendSummary > span { display: grid; gap: 0.18rem; border-right: 1px solid var(--color-border); padding: 0.72rem 0.82rem; }
+.trendSummary > span:last-child { border-right: 0; }
+.trendSummary small { color: var(--color-faint); font: 0.53rem var(--font-mono); text-transform: uppercase; }
+.trendSummary strong { font-family: var(--font-display); font-size: 1.25rem; font-weight: 560; }
+.trendSummary em { color: var(--color-faint); font-size: 0.56rem; font-style: normal; }
+.chartGrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.75rem; }
+.chartGrid :global(.studio-chart) { border-radius: 13px; background: rgba(255, 255, 255, 0.018); }
+
+.competitorBenchmarks { display: flex; gap: 1.2rem; margin-bottom: 0.65rem; color: var(--color-muted); font-size: 0.67rem; }
+.competitorBenchmarks strong { color: var(--color-fg); }
+.competitorLedger { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem; }
+.competitorRow {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 24px minmax(0, 1fr) auto 16px;
+  gap: 0.58rem;
+  align-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.018);
+  padding: 0.62rem 0.68rem;
+}
+.competitorRow:hover { border-color: var(--color-border-strong); }
+.competitorRow > span { color: var(--color-faint); font: 0.52rem var(--font-mono); }
+.competitorRow > div { display: grid; min-width: 0; gap: 0.12rem; }
+.competitorRow strong { overflow: hidden; font-size: 0.71rem; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
+.competitorRow small { overflow: hidden; color: var(--color-faint); font-size: 0.57rem; text-overflow: ellipsis; white-space: nowrap; }
+.competitorRow em { color: var(--color-accent); font: 0.61rem var(--font-mono); font-style: normal; white-space: nowrap; }
+.competitorRow > i { color: var(--color-faint); font-size: 0.6rem; font-style: normal; }
+
+@keyframes observePulse {
+  0%, 100% { opacity: 0.65; transform: scale(0.74); }
+  50% { opacity: 1; transform: scale(1); }
+}
+
+@media (max-width: 1120px) {
+  .learningHero { grid-template-columns: 1fr; }
+  .heroLead { padding-right: clamp(1.5rem, 3.5vw, 3rem); }
+  .heroLead h1 { max-width: 15ch; }
+  .efficiencyField { margin: 0 clamp(1.5rem, 3.5vw, 3rem) clamp(1.5rem, 3.5vw, 3rem); }
+  .sectionHeading { grid-template-columns: minmax(240px, 0.8fr) minmax(260px, 1.2fr); }
+  .sectionHeading > a { grid-column: 2; justify-self: start; }
+  .healthBand { grid-template-columns: 1fr; }
+  .healthMeasures { border-top: 1px solid var(--color-border); border-left: 0; }
+  .rankingGrid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 760px) {
+  .learningHero { margin-inline: -0.2rem; border-radius: 15px; }
+  .heroLead { padding: 1.2rem 0.95rem; }
+  .heroLead h1 { font-size: clamp(2.35rem, 12vw, 3.5rem); }
+  .efficiencyField { margin: 0 0.7rem 1rem; padding-inline: 0.55rem; }
+  .efficiencyField svg { min-height: 190px; }
+  .fieldLegend { align-items: flex-start; flex-direction: column; gap: 0.3rem; }
+  .metricRail { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .heroMetric:nth-child(2) { border-right: 0; }
+  .heroMetric:nth-child(-n + 2) { border-bottom: 1px solid var(--color-border); }
+  .sectionHeading { grid-template-columns: 1fr; gap: 0.35rem; }
+  .sectionHeading p { max-width: none; }
+  .sectionHeading > a { grid-column: auto; justify-self: start; }
+  .healthCopy { grid-template-columns: 34px minmax(0, 1fr); }
+  .healthCopy > a { grid-column: 2; }
+  .healthMeasures > span { min-width: 0; padding-inline: 0.6rem; }
+  .metricTabs { display: grid; width: 100%; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .rankingRow { grid-template-columns: 22px minmax(110px, 1fr) auto 15px; }
+  .rankingBar { grid-column: 2 / -1; }
+  .rankingValue { grid-column: 3; grid-row: 1; }
+  .rankingArrow { grid-column: 4; grid-row: 1; }
+  .trendSummary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .trendSummary > span:nth-child(2) { border-right: 0; }
+  .trendSummary > span:nth-child(-n + 2) { border-bottom: 1px solid var(--color-border); }
+  .chartGrid,
+  .competitorLedger { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 430px) {
+  .heroLead h1 { font-size: 2.65rem; }
+  .heroMetric { gap: 0.52rem; padding-inline: 0.72rem; }
+  .heroMetric > span { display: none; }
+  .heroMetric strong { font-size: 1.45rem; }
+  .efficiencyField figcaption { align-items: flex-start; flex-direction: column; gap: 0.18rem; }
+  .healthMeasures { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .healthMeasures em { display: none; }
+  .competitorRow { grid-template-columns: 22px minmax(0, 1fr) 14px; }
+  .competitorRow em { grid-column: 2; font-size: 0.56rem; }
+  .competitorRow > i { grid-column: 3; grid-row: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .observationState > span i,
+  .healthGlyph i { animation: none; }
+  .fieldNode,
+  .rankingRow,
+  .rankingBar i { transition: none; }
+}

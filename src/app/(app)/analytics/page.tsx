@@ -1,18 +1,16 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
 import { useSelectedChannel } from "@/lib/channel-context";
-import { PageHeader, SectionTitle } from "@/components/PageHeader";
-import { StatCard } from "@/components/StatCard";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
 import { Chart, compact, type ChartSeries } from "@/components/Chart";
-import { IconAnalytics, IconChannels, IconExternal } from "@/components/icons";
+import { IconAnalytics, IconExternal } from "@/components/icons";
 import { fmtUsd } from "@/lib/format";
 import type { VideoRow } from "@/lib/types";
 import { ArtifactWorkRail } from "@/components/ArtifactWorkRail";
@@ -26,6 +24,7 @@ import {
   analyticsRefreshHealth,
   type AnalyticsRefreshHealthInput,
 } from "@/lib/analyticsRefreshPresentation";
+import styles from "./analytics.module.css";
 
 /** Per-channel summary row shape returned by analytics.channelSummary. */
 type SummaryRow = {
@@ -156,56 +155,26 @@ export default function AnalyticsPage() {
     (summary?.some((s) => s.subscriberCount > 0 || s.totalViews > 0) ?? false);
 
   return (
-    <>
-      <PageHeader
-        title="Analytics"
-        subtitle={
-          selected
-            ? `Performance for ${selected.name}`
-            : "Views, subscribers, revenue, and cost across your channels"
-        }
+    <div className={styles.dashboard}>
+      <AnalyticsHero
+        loading={loading}
+        selected={selected}
+        rows={summary ?? []}
+        totalSubscribers={overview?.totalSubscribers ?? 0}
+        totalViews={overview?.totalViews ?? 0}
+        totalCost={overview?.totalCost ?? 0}
+        videoCount={overview?.videoCount ?? 0}
+        channelCount={overview?.channelCount ?? 0}
+        refreshRows={refreshStatus ?? []}
       />
 
       {loading ? (
-        <SkeletonList rows={4} />
+        <div className={styles.loadingRoom}>
+          <span>Binding YouTube observations, retained artifacts, and refresh receipts…</span>
+          <SkeletonList rows={4} />
+        </div>
       ) : (
-        <div style={{ display: "grid", gap: "1.75rem" }}>
-          {/* Rollup stat cards (global). */}
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-              gap: "1rem",
-            }}
-          >
-            <StatCard
-              label="Subscribers"
-              value={compact(overview?.totalSubscribers ?? 0)}
-              hint={`${overview?.channelCount ?? 0} channels`}
-              accent={C_SECONDARY}
-              icon={<IconChannels width={18} height={18} />}
-            />
-            <StatCard
-              label="Total views"
-              value={compact(overview?.totalViews ?? 0)}
-              hint="Latest snapshot"
-              accent={C_ACCENT}
-              icon={<IconAnalytics width={18} height={18} />}
-            />
-            <StatCard
-              label="Total cost"
-              value={fmtUsd(overview?.totalCost ?? 0)}
-              hint="All runs to date"
-              accent={C_AMBER}
-            />
-            <StatCard
-              label="Videos"
-              value={overview?.videoCount ?? 0}
-              hint="Published"
-              accent={C_OK}
-            />
-          </div>
-
+        <>
           <AnalyticsRefreshHealth rows={refreshStatus ?? []} selectedSlug={selected?.slug ?? null} />
 
           {/* Charts gate: nothing populated until stats-refresh has run. */}
@@ -218,8 +187,15 @@ export default function AnalyticsPage() {
           ) : selected ? (
             <PerChannelCharts row={selected} trend={trend ?? []} />
           ) : (
-            <GlobalCharts rows={summary ?? []} />
+            <FleetComparison rows={summary ?? []} />
           )}
+
+          <QualityLearningPanel
+            state={qualityLearning.state}
+            insights={qualityLearning.insights}
+            channelNames={new Map((summary ?? []).map((row) => [row.channelId, row.name]))}
+            {...(selected ? { selectedChannelId: selected.channelId } : {})}
+          />
 
           <ArtifactWorkRail
             videos={recentWork}
@@ -231,18 +207,204 @@ export default function AnalyticsPage() {
             emptyMessage="No rendered or uploaded video artifacts match this analytics scope yet."
           />
 
-          <QualityLearningPanel
-            state={qualityLearning.state}
-            insights={qualityLearning.insights}
-            channelNames={new Map((summary ?? []).map((row) => [row.channelId, row.name]))}
-            {...(selected ? { selectedChannelId: selected.channelId } : {})}
-          />
-
           {/* Competitors for the selected channel's niche. */}
           <CompetitorsSection ownerId={ownerId} selected={selected} />
-        </div>
+        </>
       )}
-    </>
+    </div>
+  );
+}
+
+function AnalyticsHero({
+  loading,
+  selected,
+  rows,
+  totalSubscribers,
+  totalViews,
+  totalCost,
+  videoCount,
+  channelCount,
+  refreshRows,
+}: {
+  loading: boolean;
+  selected: SummaryRow | null;
+  rows: SummaryRow[];
+  totalSubscribers: number;
+  totalViews: number;
+  totalCost: number;
+  videoCount: number;
+  channelCount: number;
+  refreshRows: RefreshStatusRow[];
+}) {
+  const scoped = selected ?? {
+    subscriberCount: totalSubscribers,
+    totalViews,
+    costTotal: totalCost,
+    videoCount,
+  };
+  const observations = refreshRows.map((row) => analyticsRefreshHealth(row));
+  const current = observations.filter((health) => health.state === "current").length;
+  const refreshing = observations.filter((health) => health.state === "refreshing").length;
+  const intervention = observations.filter((health) => [
+    "manual_reconciliation_required",
+    "reconnect_required",
+    "stale",
+  ].includes(health.state)).length;
+  const fleet = refreshRows.length ? analyticsRefreshFleetHealth(refreshRows) : null;
+
+  return (
+    <section className={styles.learningHero} aria-busy={loading}>
+      <div className={styles.heroLead}>
+        <span className={styles.eyebrow}>Audience observatory / {selected ? selected.name : "fleet"}</span>
+        <h1>Read behavior. Change the next episode.</h1>
+        <p>
+          Analytics is useful only when it changes a packaging, story, or release decision.
+          This room keeps observed YouTube signals separate from forecasts and production spend.
+        </p>
+        <div className={styles.observationState} data-tone={fleet?.tone ?? "quiet"}>
+          <span aria-hidden="true"><i /></span>
+          <div>
+            <small>{selected ? "Selected channel evidence" : "Fleet observation posture"}</small>
+            <strong>
+              {loading
+                ? "Reading signed analytics receipts…"
+                : selected
+                  ? `${selected.name} is isolated for diagnosis`
+                  : fleet?.label ?? "No refresh ledger yet"}
+            </strong>
+            <em>
+              {loading
+                ? "No interpretation is shown until live data binds."
+                : `${current} current · ${refreshing} refreshing · ${intervention} need intervention`}
+            </em>
+          </div>
+        </div>
+      </div>
+
+      <FleetEfficiencyField rows={rows} selectedChannelId={selected?.channelId ?? null} />
+
+      <div className={styles.metricRail}>
+        <HeroMetric
+          index="01"
+          label="Observed views"
+          value={loading ? "—" : compact(scoped.totalViews)}
+          hint={selected ? "Latest channel snapshot" : "Latest fleet snapshots"}
+        />
+        <HeroMetric
+          index="02"
+          label="Subscribers"
+          value={loading ? "—" : compact(scoped.subscriberCount)}
+          hint={selected ? "Current observed audience" : `${channelCount} channels in scope`}
+          tone="live"
+        />
+        <HeroMetric
+          index="03"
+          label="Production spend"
+          value={loading ? "—" : fmtUsd(scoped.costTotal)}
+          hint="Persisted run cost, not revenue"
+          tone="spend"
+        />
+        <HeroMetric
+          index="04"
+          label="Published inventory"
+          value={loading ? "—" : scoped.videoCount}
+          hint="Observed released videos"
+        />
+      </div>
+    </section>
+  );
+}
+
+function HeroMetric({
+  index,
+  label,
+  value,
+  hint,
+  tone,
+}: {
+  index: string;
+  label: string;
+  value: string | number;
+  hint: string;
+  tone?: "live" | "spend";
+}) {
+  return (
+    <div className={styles.heroMetric} data-tone={tone}>
+      <span>{index}</span>
+      <div>
+        <small>{label}</small>
+        <strong>{value}</strong>
+        <em>{hint}</em>
+      </div>
+    </div>
+  );
+}
+
+function FleetEfficiencyField({
+  rows,
+  selectedChannelId,
+}: {
+  rows: SummaryRow[];
+  selectedChannelId: string | null;
+}) {
+  const maxCost = Math.max(1, ...rows.map((row) => row.costTotal));
+  const maxViews = Math.max(1, ...rows.map((row) => row.totalViews));
+  const maxVideos = Math.max(1, ...rows.map((row) => row.videoCount));
+  const labelled = new Set(
+    [...rows]
+      .sort((left, right) => right.totalViews - left.totalViews)
+      .slice(0, 5)
+      .map((row) => row.channelId),
+  );
+
+  return (
+    <figure className={styles.efficiencyField}>
+      <figcaption>
+        <span>Reach / spend field</span>
+        <small>Node size = published inventory</small>
+      </figcaption>
+      <svg viewBox="0 0 720 255" role="img" aria-label="Channel reach compared with production spend">
+        <defs>
+          <pattern id="analytics-field-grid" width="48" height="42" patternUnits="userSpaceOnUse">
+            <path d="M 48 0 L 0 0 0 42" fill="none" stroke="currentColor" strokeWidth="1" opacity=".08" />
+          </pattern>
+          <radialGradient id="analytics-node" cx="35%" cy="30%">
+            <stop offset="0" stopColor="var(--color-secondary)" />
+            <stop offset="1" stopColor="rgba(125, 211, 192, .2)" />
+          </radialGradient>
+        </defs>
+        <rect x="42" y="18" width="652" height="190" rx="8" fill="url(#analytics-field-grid)" />
+        <line x1="42" y1="208" x2="694" y2="208" className={styles.fieldAxis} />
+        <line x1="42" y1="18" x2="42" y2="208" className={styles.fieldAxis} />
+        <text x="43" y="232" className={styles.fieldLabel}>LOWER SPEND</text>
+        <text x="694" y="232" textAnchor="end" className={styles.fieldLabel}>HIGHER SPEND</text>
+        <text x="28" y="110" textAnchor="middle" transform="rotate(-90 28 110)" className={styles.fieldLabel}>MORE OBSERVED REACH</text>
+        {rows.map((row) => {
+          const x = 58 + (row.costTotal / maxCost) * 614;
+          const y = 194 - (row.totalViews / maxViews) * 156;
+          const radius = 5 + Math.sqrt(row.videoCount / maxVideos) * 10;
+          const selected = row.channelId === selectedChannelId;
+          return (
+            <g key={row.channelId} data-selected={selected || undefined} className={styles.fieldNode}>
+              <circle cx={x} cy={y} r={radius + (selected ? 5 : 2)} className={styles.fieldNodeHalo} />
+              <circle cx={x} cy={y} r={radius} fill="url(#analytics-node)">
+                <title>{`${row.name}: ${compact(row.totalViews)} views · ${fmtUsd(row.costTotal)} spend · ${row.videoCount} videos`}</title>
+              </circle>
+              {(labelled.has(row.channelId) || selected) && (
+                <text x={x} y={y - radius - 7} textAnchor="middle" className={styles.fieldNodeLabel}>
+                  {row.name.length > 18 ? `${row.name.slice(0, 17)}…` : row.name}
+                </text>
+              )}
+            </g>
+          );
+        })}
+        {!rows.length && <text x="368" y="122" textAnchor="middle" className={styles.fieldEmpty}>No observed channel snapshots yet</text>}
+      </svg>
+      <div className={styles.fieldLegend}>
+        <span><i /> Observed channel</span>
+        <span>Axes use persisted totals; neither axis estimates revenue.</span>
+      </div>
+    </figure>
   );
 }
 
@@ -257,60 +419,66 @@ function AnalyticsRefreshHealth({ rows, selectedSlug }: { rows: RefreshStatusRow
   const selectedRow = selectedSlug ? rows.find((row) => row.slug === selectedSlug) : null;
   if (!rows.length || (selectedSlug && !selectedRow)) return null;
   const fleet = selectedRow ? null : analyticsRefreshFleetHealth(rows);
+  const healthRows = rows.map((row) => ({ row, health: analyticsRefreshHealth(row) }));
+  const current = healthRows.filter(({ health }) => health.state === "current").length;
+  const connected = healthRows.filter(({ health }) => health.state !== "not_connected").length;
+  const attention = healthRows.filter(({ health }) => [
+    "manual_reconciliation_required",
+    "reconnect_required",
+    "stale",
+  ].includes(health.state)).length;
   return (
-    <section>
-      <SectionTitle>Analytics data health</SectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "0.75rem" }}>
+    <section className={styles.healthRoom}>
+      <AnalyticsSectionHeading
+        eyebrow="Source integrity"
+        title="Can these observations be trusted?"
+        detail="Six-hour YouTube refresh receipts, connection scope, and ambiguous-response stops."
+      />
+      <div className={styles.healthBand}>
         {selectedRow ? [selectedRow].map((row) => {
           const health = analyticsRefreshHealth(row);
-          const color = health.tone === "ok" ? C_OK : health.tone === "running" ? C_ACCENT : health.tone === "danger" ? "var(--color-danger)" : health.tone === "warning" ? C_AMBER : "var(--color-faint)";
           return (
-            <article key={row.channelId} className="glass" style={{ padding: "1rem", display: "grid", gap: "0.45rem" }}>
-              <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "baseline" }}>
-                <strong>{row.name}</strong>
-                <span style={{ color, fontSize: "0.76rem", fontWeight: 700 }}>{health.label}</span>
+            <article key={row.channelId} className={styles.healthCopy} data-tone={health.tone}>
+              <span className={styles.healthGlyph} aria-hidden="true"><i /></span>
+              <div>
+                <small>{row.name}</small>
+                <strong>{health.label}</strong>
+                <p>{health.detail}</p>
+                <em>
+                  {row.refresh?.lastCompletedAt
+                    ? `Last completed ${new Date(row.refresh.lastCompletedAt).toLocaleString()}`
+                    : row.latestSnapshotDate
+                      ? `Latest snapshot ${row.latestSnapshotDate}`
+                      : "No completed snapshot yet"}
+                </em>
               </div>
-              <p style={{ margin: 0, color: "var(--color-muted)", fontSize: "0.84rem", lineHeight: 1.45 }}>{health.detail}</p>
-              <p style={{ margin: 0, color: "var(--color-faint)", fontSize: "0.75rem" }}>
-                {row.refresh?.lastCompletedAt
-                  ? `Last completed ${new Date(row.refresh.lastCompletedAt).toLocaleString()}`
-                  : row.latestSnapshotDate
-                    ? `Latest snapshot ${row.latestSnapshotDate}`
-                    : "No completed snapshot yet"}
-              </p>
               {(health.state === "not_connected" || health.state === "reconnect_required") && (
-                <Link href={`/channels/${row.slug}?tab=settings`} style={{ fontSize: "0.8rem" }}>Open YouTube setup →</Link>
+                <Link href={`/channels/${row.slug}?tab=settings`}>Repair YouTube setup →</Link>
               )}
             </article>
           );
         }) : (
-          <article className="glass" style={{ padding: "1rem", display: "grid", gap: "0.45rem" }}>
-            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "baseline" }}>
-              <strong>All channels</strong>
-              <span style={{ color: fleetToneColor(fleet!.tone), fontSize: "0.76rem", fontWeight: 700 }}>{fleet!.label}</span>
+          <>
+            <article className={styles.healthCopy} data-tone={fleet!.tone}>
+              <span className={styles.healthGlyph} aria-hidden="true"><i /></span>
+              <div>
+                <small>Fleet refresh ledger</small>
+                <strong>{fleet!.label}</strong>
+                <p>{fleet!.detail}</p>
+                <em>Connected channels refresh every six hours; ambiguous provider responses stop replay.</em>
+              </div>
+              {fleet!.needsAttention && <Link href="/channels">Review connections →</Link>}
+            </article>
+            <div className={styles.healthMeasures}>
+              <span><small>Current</small><strong>{current}</strong><em>trusted now</em></span>
+              <span><small>Connected</small><strong>{connected}</strong><em>of {rows.length}</em></span>
+              <span data-tone={attention ? "warn" : undefined}><small>Intervene</small><strong>{attention}</strong><em>stopped or overdue</em></span>
             </div>
-            <p style={{ margin: 0, color: "var(--color-muted)", fontSize: "0.84rem", lineHeight: 1.45 }}>{fleet!.detail}</p>
-            <p style={{ margin: 0, color: "var(--color-faint)", fontSize: "0.75rem" }}>
-              Scheduled YouTube refresh runs every six hours for connected channels.
-            </p>
-            {fleet!.needsAttention && <Link href="/channels" style={{ fontSize: "0.8rem" }}>Review channel connections →</Link>}
-          </article>
+          </>
         )}
       </div>
     </section>
   );
-}
-
-function fleetToneColor(tone: ReturnType<typeof analyticsRefreshFleetHealth>["tone"]): string {
-  return tone === "ok"
-    ? C_OK
-    : tone === "running"
-      ? C_ACCENT
-      : tone === "danger"
-        ? "var(--color-danger)"
-        : tone === "warning"
-          ? C_AMBER
-          : "var(--color-faint)";
 }
 
 /** Per-channel time-series (subs, delta, views/day, revenue/day, videos/day). */
@@ -346,87 +514,121 @@ function PerChannelCharts({
     })),
   };
   const videos: ChartSeries = {
-    name: "Videos",
+    name: "Published inventory",
     color: "var(--color-running)",
     points: trend.map((t) => ({ label: label(t.date), value: t.videoCount })),
   };
+  const first = trend[0];
+  const latest = trend.at(-1);
+  const viewChange = (latest?.totalViews ?? 0) - (first?.totalViews ?? 0);
+  const subscriberChange = (latest?.subscriberCount ?? 0) - (first?.subscriberCount ?? 0);
 
   return (
-    <section>
-      <SectionTitle>{row.name} — trends</SectionTitle>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-          gap: "1rem",
-        }}
-      >
-        <Chart title="Subscribers" series={[subs]} />
+    <section className={styles.trendRoom}>
+      <AnalyticsSectionHeading
+        eyebrow="90-day observation"
+        title={`${row.name} — momentum trace`}
+        detail="A true time sequence. Cumulative signals stay distinct from daily deltas."
+      />
+      <div className={styles.trendSummary}>
+        <span><small>Observed view change</small><strong>{viewChange >= 0 ? "+" : ""}{compact(viewChange)}</strong><em>first to latest snapshot</em></span>
+        <span><small>Subscriber change</small><strong>{subscriberChange >= 0 ? "+" : ""}{compact(subscriberChange)}</strong><em>first to latest snapshot</em></span>
+        <span><small>Evidence points</small><strong>{trend.length}</strong><em>persisted daily rows</em></span>
+        <span><small>Latest observation</small><strong>{latest?.date ?? "—"}</strong><em>not a forecast</em></span>
+      </div>
+      <div className={styles.chartGrid}>
+        <Chart title="Cumulative subscribers" series={[subs]} />
         <Chart title="Subscriber delta / day" series={[delta]} />
-        <Chart title="Views" series={[views]} />
+        <Chart title="Cumulative views" series={[views]} />
         <Chart
           title="Estimated revenue / day"
           series={[revenue]}
           formatValue={(n) => `$${n.toFixed(0)}`}
         />
-        <Chart title="Videos / day" series={[videos]} formatValue={(n) => `${Math.round(n)}`} />
+        <Chart title="Published inventory" series={[videos]} formatValue={(n) => `${Math.round(n)}`} />
       </div>
     </section>
   );
 }
 
-/** Global comparison across channels (one bar-like point per channel). */
-function GlobalCharts({ rows }: { rows: SummaryRow[] }) {
-  const subs: ChartSeries = {
-    name: "Subscribers",
-    color: C_SECONDARY,
-    points: rows.map((r) => ({ label: short(r.name), value: r.subscriberCount })),
-  };
-  const views: ChartSeries = {
-    name: "Views",
-    color: C_ACCENT,
-    points: rows.map((r) => ({ label: short(r.name), value: r.totalViews })),
-  };
-  const cost: ChartSeries = {
-    name: "Cost",
-    color: C_AMBER,
-    points: rows.map((r) => ({ label: short(r.name), value: r.costTotal })),
-  };
-  const videos: ChartSeries = {
-    name: "Videos",
-    color: C_OK,
-    points: rows.map((r) => ({ label: short(r.name), value: r.videoCount })),
-  };
+type FleetMetric = "totalViews" | "subscriberCount" | "videoCount" | "costTotal";
+
+const FLEET_METRICS: readonly { key: FleetMetric; label: string }[] = [
+  { key: "totalViews", label: "Observed views" },
+  { key: "subscriberCount", label: "Subscribers" },
+  { key: "videoCount", label: "Published" },
+  { key: "costTotal", label: "Spend" },
+];
+
+/** A categorical fleet comparison must use ranked bars, not a line that falsely
+ * suggests the channels form a time sequence. */
+function FleetComparison({ rows }: { rows: SummaryRow[] }) {
+  const [metric, setMetric] = useState<FleetMetric>("totalViews");
+  const ranked = [...rows].sort((left, right) => right[metric] - left[metric]);
+  const peak = Math.max(1, ...ranked.map((row) => row[metric]));
+  const formatMetric = (value: number) => metric === "costTotal" ? fmtUsd(value) : compact(value);
 
   return (
-    <section>
-      <SectionTitle>All channels — comparison</SectionTitle>
-      <p
-        style={{
-          margin: "-0.4rem 0 0.85rem",
-          color: "var(--color-faint)",
-          fontSize: "0.82rem",
-        }}
-      >
-        Select a channel in the top bar to see its day-by-day growth trends.
-      </p>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))",
-          gap: "1rem",
-        }}
-      >
-        <Chart title="Subscribers by channel" series={[subs]} />
-        <Chart title="Views by channel" series={[views]} />
-        <Chart
-          title="Cost by channel"
-          series={[cost]}
-          formatValue={(n) => `$${n.toFixed(0)}`}
-        />
-        <Chart title="Videos by channel" series={[videos]} formatValue={(n) => `${Math.round(n)}`} />
+    <section className={styles.comparisonRoom}>
+      <AnalyticsSectionHeading
+        eyebrow="Portfolio comparison"
+        title="Where the fleet is earning attention"
+        detail="Ranked categorical evidence—select a channel above for its actual day-by-day trace."
+      />
+      <div className={styles.metricTabs} role="tablist" aria-label="Fleet comparison metric">
+        {FLEET_METRICS.map((item) => (
+          <button
+            type="button"
+            role="tab"
+            aria-selected={metric === item.key}
+            data-active={metric === item.key || undefined}
+            key={item.key}
+            onClick={() => setMetric(item.key)}
+          >
+            {item.label}
+          </button>
+        ))}
+      </div>
+      <div className={styles.rankingGrid}>
+        {ranked.map((row, index) => (
+          <Link className={styles.rankingRow} href={`/channels/${row.slug}?tab=analytics`} key={row.channelId}>
+            <span className={styles.rankingIndex}>{String(index + 1).padStart(2, "0")}</span>
+            <span className={styles.rankingIdentity}>
+              <strong>{row.name}</strong>
+              <small>{row.niche ?? "Niche not set"} · {row.videoCount} published</small>
+            </span>
+            <span className={styles.rankingBar} aria-hidden="true">
+              <i style={{ transform: `scaleX(${Math.max(0.015, row[metric] / peak)})` }} />
+            </span>
+            <strong className={styles.rankingValue}>{formatMetric(row[metric])}</strong>
+            <span className={styles.rankingArrow}>↗</span>
+          </Link>
+        ))}
       </div>
     </section>
+  );
+}
+
+function AnalyticsSectionHeading({
+  eyebrow,
+  title,
+  detail,
+  action,
+}: {
+  eyebrow: string;
+  title: string;
+  detail: string;
+  action?: ReactNode;
+}) {
+  return (
+    <header className={styles.sectionHeading}>
+      <div>
+        <span>{eyebrow}</span>
+        <h2>{title}</h2>
+      </div>
+      <p>{detail}</p>
+      {action}
+    </header>
   );
 }
 
@@ -451,8 +653,12 @@ function CompetitorsSection({
 
   if (!selected) {
     return (
-      <section>
-        <SectionTitle>Competitors</SectionTitle>
+      <section className={styles.competitorRoom}>
+        <AnalyticsSectionHeading
+          eyebrow="Market context"
+          title="Competitor signals"
+          detail="Scoped only after a channel is selected; fleet-wide mixing would hide niche context."
+        />
         <EmptyState
           title="Select a channel"
           description="Pick a channel in the top bar to see competitor intelligence for its niche."
@@ -464,8 +670,12 @@ function CompetitorsSection({
 
   if (!niche) {
     return (
-      <section>
-        <SectionTitle>Competitors</SectionTitle>
+      <section className={styles.competitorRoom}>
+        <AnalyticsSectionHeading
+          eyebrow="Market context"
+          title="Competitor signals"
+          detail="A niche binding is required before external observations can be compared honestly."
+        />
         <EmptyState
           title="No niche set"
           description={`Set a niche for "${selected.name}" (in its identity) to unlock competitor intelligence.`}
@@ -487,8 +697,13 @@ function CompetitorsSection({
       .slice(0, 12) ?? [];
 
   return (
-    <section>
-      <SectionTitle>Competitors — {niche}</SectionTitle>
+    <section className={styles.competitorRoom}>
+      <AnalyticsSectionHeading
+        eyebrow="Market context"
+        title={`Competitors — ${niche}`}
+        detail="External top-video observations for context, never an instruction to copy."
+        action={<Link href="/seo">Open packaging research ↗</Link>}
+      />
 
       {loading ? (
         <SkeletonList rows={3} />
@@ -501,79 +716,37 @@ function CompetitorsSection({
       ) : (
         <>
           {intel && (
-            <div
-              style={{
-                display: "flex",
-                gap: "1rem",
-                flexWrap: "wrap",
-                marginBottom: "1rem",
-                fontSize: "0.84rem",
-                color: "var(--color-muted)",
-              }}
-            >
+            <div className={styles.competitorBenchmarks}>
               <span>
                 Avg views (top 50):{" "}
-                <strong style={{ color: "var(--color-fg)" }}>
-                  {compact(intel.avgViewsTop50)}
-                </strong>
+                <strong>{compact(intel.avgViewsTop50)}</strong>
               </span>
               <span>
                 Median views:{" "}
-                <strong style={{ color: "var(--color-fg)" }}>
-                  {compact(intel.medianViewsTop50)}
-                </strong>
+                <strong>{compact(intel.medianViewsTop50)}</strong>
               </span>
             </div>
           )}
-          <div
-            className="glass"
-            style={{ padding: "0.5rem", display: "grid", gap: "0.25rem" }}
-          >
-            {topVideos.map((v) => (
+          <div className={styles.competitorLedger}>
+            {topVideos.map((v, index) => (
               <a
                 key={v.youtubeVideoId}
                 href={`https://www.youtube.com/watch?v=${v.youtubeVideoId}`}
                 target="_blank"
                 rel="noopener noreferrer"
-                className="lift"
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "1rem",
-                  padding: "0.6rem 0.7rem",
-                  borderRadius: 10,
-                  color: "inherit",
-                  textDecoration: "none",
-                }}
+                className={styles.competitorRow}
               >
-                <div style={{ minWidth: 0 }}>
-                  <div
-                    style={{
-                      fontSize: "0.88rem",
-                      overflow: "hidden",
-                      textOverflow: "ellipsis",
-                      whiteSpace: "nowrap",
-                    }}
-                  >
+                <span>{String(index + 1).padStart(2, "0")}</span>
+                <div>
+                  <strong>
                     {v.title}
-                  </div>
-                  <div
-                    style={{ fontSize: "0.74rem", color: "var(--color-faint)" }}
-                  >
-                    {v.channelName}
-                  </div>
+                  </strong>
+                  <small>{v.channelName}</small>
                 </div>
-                <span
-                  style={{
-                    fontFamily: "var(--font-mono)",
-                    fontSize: "0.82rem",
-                    color: "var(--color-accent)",
-                    whiteSpace: "nowrap",
-                  }}
-                >
+                <em>
                   {compact(v.views)} views
-                </span>
+                </em>
+                <i>↗</i>
               </a>
             ))}
           </div>
@@ -581,8 +754,4 @@ function CompetitorsSection({
       )}
     </section>
   );
-}
-
-function short(name: string): string {
-  return name.length > 10 ? `${name.slice(0, 9)}…` : name;
 }

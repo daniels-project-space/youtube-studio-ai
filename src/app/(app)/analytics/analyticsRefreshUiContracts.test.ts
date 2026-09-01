@@ -9,13 +9,25 @@ const query = readFileSync(join(root, "convex/analytics.ts"), "utf8");
 // Analytics health must be driven by the owner-scoped connector/cursor
 // projection, not by browser guesses or the obsolete global API-key message.
 assert.match(page, /useQuery\(api\.analytics\.refreshStatus, \{ ownerId \}\)/);
-assert.match(page, /Analytics data health/);
+assert.match(page, /Source integrity/);
+assert.match(page, /Can these observations be trusted/);
 assert.match(page, /analyticsRefreshHealth\(row\)/);
 assert.match(page, /analyticsRefreshFleetHealth\(rows\)/);
-assert.match(page, />All channels</);
-assert.match(page, /Review channel connections/);
+assert.match(page, /Fleet refresh ledger/);
+assert.match(page, /Review connections/);
 assert.match(page, /\/channels\/\$\{row\.slug\}\?tab=settings/);
 assert.doesNotMatch(page, /YouTube Data API key/);
+
+// Portfolio comparison is categorical, so it must use ranked bars rather than
+// drawing a misleading continuous line between unrelated channels.
+assert.match(page, /function FleetComparison/);
+assert.match(page, /className=\{styles\.rankingBar\}/);
+assert.doesNotMatch(page, /function GlobalCharts/);
+assert.doesNotMatch(page, /Subscribers by channel/);
+assert.match(page, /Reach \/ spend field/);
+assert.match(page, /Cumulative views/);
+assert.match(page, /Published inventory/);
+assert.doesNotMatch(page, /<PageHeader/);
 
 const operationsCheck = page.indexOf('fetch("/api/operations/elevation"');
 const ownerLearningRead = page.indexOf('fetch("/api/learning-recommendations"');
