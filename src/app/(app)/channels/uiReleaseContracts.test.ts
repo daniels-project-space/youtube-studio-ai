@@ -105,7 +105,7 @@ assert.match(wizard, /const liveRuntime = automaticFamilyRuntime\[next\]/);
 assert.match(wizard, /live automatic foundation is unavailable/);
 assert.match(wizard, /const \[automaticFamilyRuntimeCheck, setAutomaticFamilyRuntimeCheck\]/);
 assert.match(wizard, /const selectedAutomaticRuntimeReady = Boolean\(/);
-assert.match(wizard, /automaticFamilyRuntimeCheck === "ready"/);
+assert.match(wizard, /visibleAutomaticFamilyRuntimeCheck === "ready"/);
 assert.match(wizard, /&& selectedAutomaticRuntimeReady/);
 assert.match(wizard, /Automatic setup remains locked until this completes\./);
 assert.match(wizard, /Live production readiness could not be verified\./);

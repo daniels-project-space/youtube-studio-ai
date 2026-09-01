@@ -327,6 +327,19 @@
 }
 
 @media (max-width: 780px) {
+  .sourceLink,
+  .receiptDetails summary,
+  .moreButton {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+  }
+
+  .moreButton {
+    min-width: 44px;
+    padding: 0.4rem 0;
+  }
+
   .metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }

@@ -1630,6 +1630,14 @@
 }
 
 @media (max-width: 860px) {
+  .studio-shell :where(button, input, select, textarea, summary, a[class]) {
+    min-height: 44px;
+  }
+
+  .studio-shell button {
+    min-width: 44px;
+  }
+
   .studio-workspace { margin-left: 0; }
   .studio-main { padding-bottom: calc(7rem + env(safe-area-inset-bottom)); }
   .studio-topbar { justify-content: space-between; min-height: 58px; }
@@ -1774,10 +1782,16 @@
   .studio-topbar-actions { flex: 1; gap: 0.45rem; }
   .channel-switcher { width: min(176px, 48vw); }
   .operations-access-trigger {
-    width: 38px;
-    min-width: 38px;
+    width: 44px;
+    min-width: 44px;
     padding: 0;
     justify-content: center;
+  }
+
+  /* The remote assistant's compact iframe clips at phone width and competes
+     with sticky production controls. Keep it available on larger canvases. */
+  iframe[title="JARVIS"] {
+    display: none !important;
   }
   .operations-access-label {
     position: absolute;
@@ -1880,6 +1894,12 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
   opacity: 0 !important;
   visibility: hidden !important;
   pointer-events: none !important;
+}
+
+/* The embed injects this aria-hidden editing rail outside the Studio shell.
+   It is authoring chrome, not a viewer control, and must never ship visibly. */
+[data-jarvis-universal-controls] {
+  display: none !important;
 }
 
 /* ── Channels: identity-forward operating cards ─────────────────────────── */

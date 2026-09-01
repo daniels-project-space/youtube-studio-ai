@@ -209,6 +209,7 @@
 }
 
 @media (max-width: 680px) {
+  .page { padding-bottom: calc(10rem + env(safe-area-inset-bottom)); }
   .hero { grid-template-columns: 1fr; min-height: 0; padding: .9rem .8rem; }
   .heroGlyph { display: none; }
   .hero h1 { font-size: 2rem; }
