@@ -13,6 +13,7 @@ const artifactRailCss = readFileSync(join(root, "src/components/ArtifactWorkRail
 const detail = readFileSync(join(root, "src/app/(app)/channels/[slug]/page.tsx"), "utf8");
 const channels = readFileSync(join(root, "src/app/(app)/channels/page.tsx"), "utf8");
 const overview = readFileSync(join(root, "src/app/(app)/page.tsx"), "utf8");
+const overviewModel = readFileSync(join(root, "src/lib/studioOverviewModel.ts"), "utf8");
 const recentVideos = readFileSync(join(root, "src/components/RecentVideos.tsx"), "utf8");
 const statusBanner = readFileSync(join(root, "src/components/StatusBanner.tsx"), "utf8");
 const settings = readFileSync(join(root, "src/app/(app)/settings/page.tsx"), "utf8");
@@ -232,7 +233,10 @@ assert.match(detail, /selectedPlanId=\{selectedPlanId\}/,
   "channel plan links must carry an exact selected item into the week-ahead workspace");
 assert.match(detail, /Open script, visuals, narration and master/,
   "a scheduled plan with a run must expose its persisted production record");
-assert.match(overview, /item\.status === "ready"/);
+assert.match(overview, /buildStudioOverview\(\{/,
+  "the Studio page must consume the centralized, tested readiness model");
+assert.match(overviewModel, /const readyPlans = args\.plan\.filter\(\(item\) => item\.status === "ready"\)/,
+  "the overview model must count only genuinely ready plan rows");
 assert.doesNotMatch(overview, /need review/);
 assert.match(overview, /<details className=\{`\$\{styles\.runsWidget\}/);
 assert.match(statusBanner, /run\.channelSlug === channelSlug/);

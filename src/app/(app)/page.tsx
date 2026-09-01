@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import type { CSSProperties } from "react";
+import { useState, type CSSProperties } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -19,9 +19,15 @@ import {
   IconCalendar,
   IconAnalytics,
   IconChannels,
+  IconLibrary,
   IconRuns,
   IconSpark,
 } from "@/components/icons";
+import {
+  buildStudioOverview,
+  planWorkspaceHref,
+  type StudioOverviewSnapshot,
+} from "@/lib/studioOverviewModel";
 import styles from "./Overview.module.css";
 
 type PlanRow = {
@@ -51,6 +57,16 @@ type YoutubeLinkRow = {
   ytChannelId?: string;
 };
 
+type ChannelSummaryRow = {
+  channelId: string;
+  name: string;
+  slug: string;
+  subscriberCount: number;
+  totalViews: number;
+  videoCount: number;
+  costTotal: number;
+};
+
 const usd = new Intl.NumberFormat("en-US", {
   style: "currency",
   currency: "USD",
@@ -78,6 +94,7 @@ function nextLabel(value?: number) {
 export default function OverviewPage() {
   const ownerId = useOwnerId();
   const { selectedSlug } = useSelectedChannel();
+  const [overviewAt] = useState(() => Date.now());
 
   const channels = useQuery(api.channels.listChannels, { ownerId }) as
     | ChannelRow[]
@@ -94,69 +111,69 @@ export default function OverviewPage() {
   const analyticsOverview = useQuery(api.analytics.overview, { ownerId }) as
     | AnalyticsOverview
     | undefined;
+  const channelSummaries = useQuery(api.analytics.channelSummary, { ownerId }) as
+    | ChannelSummaryRow[]
+    | undefined;
   const youtubeLinks = useQuery(api.youtubeAuth.linkStatus, { ownerId }) as
     | YoutubeLinkRow[]
     | undefined;
 
-  const filterByChannel = <T extends { channelSlug: string }>(rows?: T[]) =>
-    selectedSlug ? rows?.filter((row) => row.channelSlug === selectedSlug) : rows;
+  const activeChannelSlugs = new Set(
+    (channels ?? [])
+      .filter((channel) => channel.status === "active")
+      .map((channel) => channel.slug),
+  );
+  const filterByOperatingChannel = <T extends { channelSlug: string }>(rows?: T[]) =>
+    selectedSlug
+      ? rows?.filter((row) => row.channelSlug === selectedSlug)
+      : rows?.filter((row) => activeChannelSlugs.has(row.channelSlug));
 
-  const recentFiltered = filterByChannel(recent);
-  const activeFiltered = filterByChannel(active);
-  const planFiltered = filterByChannel(plan);
+  const recentFiltered = filterByOperatingChannel(recent);
+  const activeFiltered = filterByOperatingChannel(active);
+  const planFiltered = filterByOperatingChannel(plan);
   const channelsFiltered = selectedSlug
     ? channels?.filter((channel) => channel.slug === selectedSlug)
     : channels;
+  const operatingChannels = selectedSlug
+    ? channelsFiltered
+    : channels?.filter((channel) => channel.status === "active");
 
-  const terminal = recentFiltered?.filter(
-    (run) => run.status === "ok" || run.status === "failed",
-  );
-  const successful = terminal?.filter((run) => run.status === "ok").length ?? 0;
-  const failed = recentFiltered?.filter((run) => run.status === "failed") ?? [];
-  const recordedSpend = (recentFiltered ?? []).reduce(
-    (total, run) => total + (Number.isFinite(run.costTotal) ? run.costTotal : 0),
-    0,
-  );
-  const successRate = terminal?.length
-    ? Math.round((successful / terminal.length) * 100)
-    : null;
-
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const todayMs = today.getTime();
-  const readyPlan = (planFiltered ?? []).filter((item) => item.status === "ready");
-  const overdue = readyPlan.filter(
-    (item) => item.scheduledAt !== undefined && item.scheduledAt < todayMs,
-  );
-  const upcoming = readyPlan
-    .filter((item) => item.scheduledAt === undefined || item.scheduledAt >= todayMs)
-    .sort(
-      (a, b) =>
-        (a.scheduledAt ?? Number.MAX_SAFE_INTEGER) -
-        (b.scheduledAt ?? Number.MAX_SAFE_INTEGER),
-    )
-    .slice(0, 4);
-  const activeChannelCount =
-    channelsFiltered?.filter((channel) => channel.status === "active").length ?? 0;
-  const youtubeReadyChannelIds = new Set(
-    (youtubeLinks ?? [])
-      .filter((link) => link.status === "active" && link.scopeHealth === "healthy" && link.ytChannelId)
-      .map((link) => link.channelId),
-  );
-  const disconnectedChannels = youtubeLinks === undefined
-    ? undefined
-    : (channelsFiltered ?? []).filter((channel) => !youtubeReadyChannelIds.has(channel._id));
   const loading =
     channels === undefined ||
     recent === undefined ||
     active === undefined ||
-    plan === undefined;
-  const activeCount = activeFiltered?.length ?? 0;
+    plan === undefined ||
+    youtubeLinks === undefined;
+  const selectedSummary = selectedSlug
+    ? channelSummaries?.find((row) => row.slug === selectedSlug)
+    : undefined;
+  const effectiveAnalytics = selectedSlug
+    ? selectedSummary
+      ? {
+          totalSubscribers: selectedSummary.subscriberCount,
+          totalViews: selectedSummary.totalViews,
+          totalCost: selectedSummary.costTotal,
+          videoCount: selectedSummary.videoCount,
+        }
+      : undefined
+    : analyticsOverview;
+  const visibleSummaries = selectedSlug
+    ? channelSummaries?.filter((row) => row.slug === selectedSlug)
+    : channelSummaries;
+  const overview = buildStudioOverview({
+    channels: operatingChannels ?? [],
+    recentRuns: recentFiltered ?? [],
+    activeRuns: activeFiltered ?? [],
+    plan: planFiltered ?? [],
+    youtubeLinks: youtubeLinks ?? [],
+    now: overviewAt,
+    publishedCount: effectiveAnalytics?.videoCount,
+  });
   const selectedName = selectedSlug
     ? channelsFiltered?.[0]?.name ?? "Selected channel"
     : loading
       ? "Loading fleet"
-      : `${activeChannelCount} active · ${activeCount} in production`;
+      : `${overview.activeChannelCount} active · ${overview.activeRunCount} in production`;
 
   return (
     <div className={styles.dashboard}>
@@ -176,59 +193,12 @@ export default function OverviewPage() {
         }
       />
 
-      <section className={`${styles.signalHero} glass`} aria-labelledby="studio-signal-title">
-        <div className={styles.signalCopy}>
-          <span className={styles.liveKicker} data-live={activeCount > 0 ? "true" : undefined}>
-            <i aria-hidden="true" />
-            {loading ? "Reading the floor" : activeCount > 0 ? "Production moving" : "Floor ready"}
-          </span>
-          <h2 id="studio-signal-title">
-            {loading
-              ? "Loading studio status…"
-              : activeCount > 0
-                ? `${activeCount} ${activeCount === 1 ? "run" : "runs"} in progress`
-                : readyPlan.length > 0
-                  ? `${readyPlan.length} ready to schedule`
-                  : "Ready for the next run"}
-          </h2>
-          <p>
-            {overdue.length > 0
-              ? `${overdue.length} scheduled ${overdue.length === 1 ? "item needs" : "items need"} attention before the release rhythm slips.`
-              : failed.length > 0
-                ? `${failed.length} recent ${failed.length === 1 ? "run has" : "runs have"} a traceable failure to review.`
-                : "No failures or overdue releases."}
-          </p>
-          <div className={styles.heroActions}>
-            <Link href={activeCount > 0 ? "/runs" : "/schedule"} className="studio-button" data-variant="signal">
-              <IconRuns width={15} height={15} />
-              {activeCount > 0 ? "View runs" : "Open schedule"}
-            </Link>
-            <Link href="/channels" className={styles.textAction}>
-              View channels <span aria-hidden="true">↗</span>
-            </Link>
-          </div>
-        </div>
-
-        <SignalDial
-          successRate={successRate}
-          activeCount={activeCount}
-          readyCount={readyPlan.length}
-          loading={loading}
-        />
-      </section>
-
-      <section className={styles.metricRail} aria-label="Studio measures">
-        <Metric index="01" label="Active channels" value={loading ? "—" : activeChannelCount} note="able to produce" />
-        <Metric index="02" label="In motion" value={loading ? "—" : activeCount} note="queued or rendering" tone="live" />
-        <Metric index="03" label="Release ready" value={loading ? "—" : readyPlan.length} note={overdue.length ? `${overdue.length} overdue` : "cadence on track"} tone={overdue.length ? "warn" : undefined} />
-        <Metric index="04" label="Recorded spend" value={loading ? "—" : usd.format(recordedSpend)} note="latest 50 runs" />
-      </section>
-
-      <OperatingDeck
-        failed={failed}
-        overdue={overdue}
-        disconnectedChannels={disconnectedChannels}
-        analytics={analyticsOverview}
+      <CommandCenter
+        overview={overview}
+        loading={loading}
+        analytics={effectiveAnalytics}
+        analyticsLoading={selectedSlug ? channelSummaries === undefined : analyticsOverview === undefined}
+        channelSummaries={visibleSummaries}
       />
 
       <ChannelRelay channels={channelsFiltered} loading={channels === undefined} />
@@ -262,10 +232,10 @@ export default function OverviewPage() {
           <PanelHeading kicker="Release horizon" title="Up next" href="/schedule" action="Open calendar" />
           {plan === undefined ? (
             <SkeletonList rows={3} />
-          ) : upcoming.length > 0 ? (
+          ) : overview.upcomingPlans.length > 0 ? (
             <div className={styles.queueList}>
-              {upcoming.map((item, index) => (
-                <Link key={item._id} href="/schedule" className={styles.queueRow}>
+              {overview.upcomingPlans.slice(0, 4).map((item, index) => (
+                <Link key={item._id} href={planWorkspaceHref(item)} className={styles.queueRow}>
                   <span className={styles.rowIndex}>{String(index + 1).padStart(2, "0")}</span>
                   <time>{nextLabel(item.scheduledAt)}</time>
                   <span className={styles.rowCopy}>
@@ -300,7 +270,7 @@ export default function OverviewPage() {
             <strong>Recent runs</strong>
           </span>
           <span className={styles.runSummaryMeta}>
-            {failed.length > 0 && <em>{failed.length} require inspection</em>}
+            {overview.failedRuns.length > 0 && <em>{overview.failedRuns.length} require inspection</em>}
             <small>{recentFiltered?.length ?? 0} shown</small>
           </span>
           <i aria-hidden="true" />
@@ -327,120 +297,197 @@ export default function OverviewPage() {
   );
 }
 
-function SignalDial({
-  successRate,
-  activeCount,
-  readyCount,
+function CommandCenter({
+  overview,
   loading,
-}: {
-  successRate: number | null;
-  activeCount: number;
-  readyCount: number;
-  loading: boolean;
-}) {
-  const progress = successRate ?? 0;
-  return (
-    <figure className={styles.signalDial} aria-label={loading ? "Loading production signal" : `${progress}% recent terminal-run success rate`}>
-      <div
-        className={styles.dialGraphic}
-        style={{ "--dial-progress": `${progress * 3.6}deg` } as CSSProperties}
-      >
-        <span className={styles.dialOrbit} />
-        <span className={styles.dialNode} data-node="one" />
-        <span className={styles.dialNode} data-node="two" />
-        <span className={styles.dialNode} data-node="three" />
-        <div className={styles.dialCore}>
-          <small>Recent success</small>
-          <strong>{loading || successRate === null ? "—" : `${successRate}%`}</strong>
-          <span>{activeCount ? `${activeCount} live` : `${readyCount} ready`}</span>
-        </div>
-      </div>
-      <figcaption>
-          <span>Run success</span>
-        <strong>{loading ? "Calibrating" : successRate === null ? "Awaiting history" : successRate >= 90 ? "Stable" : "Review advised"}</strong>
-      </figcaption>
-    </figure>
-  );
-}
-
-function Metric({
-  index,
-  label,
-  value,
-  note,
-  tone,
-}: {
-  index: string;
-  label: string;
-  value: string | number;
-  note: string;
-  tone?: "live" | "warn";
-}) {
-  return (
-    <article className={styles.metric} data-tone={tone}>
-      <span>{index}</span>
-      <div>
-        <small>{label}</small>
-        <strong>{value}</strong>
-        <p>{note}</p>
-      </div>
-    </article>
-  );
-}
-
-function OperatingDeck({
-  failed,
-  overdue,
-  disconnectedChannels,
   analytics,
+  analyticsLoading,
+  channelSummaries,
 }: {
-  failed: RunRow[];
-  overdue: PlanRow[];
-  disconnectedChannels?: ChannelRow[];
-  analytics?: AnalyticsOverview;
+  overview: StudioOverviewSnapshot;
+  loading: boolean;
+  analytics?: Pick<AnalyticsOverview, "totalSubscribers" | "totalViews" | "totalCost" | "videoCount">;
+  analyticsLoading: boolean;
+  channelSummaries?: ChannelSummaryRow[];
 }) {
-  const issueCount = failed.length + overdue.length + (disconnectedChannels?.length ?? 0);
+  const decision = overview.decision;
+  const distinctIssues = overview.issues.filter((issue, index, rows) =>
+    rows.findIndex((candidate) =>
+      candidate.kind === issue.kind && candidate.title === issue.title,
+    ) === index,
+  ).slice(0, 4);
   return (
-    <section className={styles.operatingDeck} aria-label="Studio overview controls and insights">
-      <details className={`${styles.insightWidget} ${styles.issueWidget} glass`}>
-        <summary>
-          <span className={styles.widgetGlyph} data-tone={issueCount > 0 ? "attention" : "ready"} aria-hidden="true"><i /></span>
-          <span><small>Issues</small><strong>{issueCount || "Clear"}</strong></span>
-          <b>{issueCount > 0 ? "Review" : "Healthy"}</b>
-          <i aria-hidden="true" />
-        </summary>
-        <div className={styles.widgetBody}>
-          <Link href="/runs"><span>Failed runs</span><strong>{failed.length}</strong></Link>
-          <Link href="/schedule"><span>Overdue releases</span><strong>{overdue.length}</strong></Link>
-          <Link href="/channels"><span>YouTube links</span><strong>{disconnectedChannels === undefined ? "—" : `${disconnectedChannels.length} need work`}</strong></Link>
+    <section className={styles.commandCenter} aria-label="Studio control overview">
+      <article className={`${styles.decisionCard} glass`} data-tone={decision.tone}>
+        <div className={styles.decisionTopline}>
+          <span data-live={overview.activeRunCount > 0 ? "true" : undefined}><i aria-hidden="true" />{loading ? "Syncing" : decision.eyebrow}</span>
+          <small>{loading ? "—" : `${overview.issues.length} open`}</small>
         </div>
-      </details>
+        <div className={styles.decisionCopy} aria-live="polite">
+          <h2>{loading ? "Reading studio state…" : decision.title}</h2>
+          <p>{loading ? "" : decision.detail}</p>
+        </div>
+        <div className={styles.decisionActions}>
+          <Link href={loading ? "/runs" : decision.href} className="studio-button" data-variant="signal">
+            {decision.action} <span aria-hidden="true">↗</span>
+          </Link>
+          <Link href="/schedule" className={styles.textAction}>Calendar</Link>
+        </div>
+        <div className={styles.decisionMetrics} aria-label="Current studio measures">
+          <span><small>Runs</small><strong>{loading ? "—" : overview.activeRunCount}</strong></span>
+          <span><small>Ready</small><strong>{loading ? "—" : overview.readyPlanCount}</strong></span>
+          <span><small>Success</small><strong>{loading || overview.successRate === null ? "—" : `${overview.successRate}%`}</strong></span>
+          <span><small>50-run spend</small><strong>{loading ? "—" : usd.format(overview.recordedSpend)}</strong></span>
+        </div>
+      </article>
 
-      <details className={`${styles.insightWidget} ${styles.analyticsWidget} glass`}>
-        <summary>
-          <span className={styles.widgetGlyph} data-tone="analytics" aria-hidden="true"><IconAnalytics width={18} height={18} /></span>
-          <span><small>Audience</small><strong>{analytics ? compact.format(analytics.totalViews) : "—"}</strong></span>
-          <b>Views</b>
-          <i aria-hidden="true" />
-        </summary>
-        <div className={styles.widgetBody}>
-          <span><span>Subscribers</span><strong>{analytics ? compact.format(analytics.totalSubscribers) : "—"}</strong></span>
-          <span><span>Published</span><strong>{analytics?.videoCount ?? "—"}</strong></span>
-          <span><span>Total recorded spend</span><strong>{analytics ? usd.format(analytics.totalCost) : "—"}</strong></span>
-          <Link href="/analytics" className={styles.widgetOpen}>Open analytics <b aria-hidden="true">↗</b></Link>
-        </div>
-      </details>
+      <ProductionMap overview={overview} loading={loading} />
+
+      <div className={styles.widgetGrid}>
+        <details className={`${styles.dataWidget} ${styles.issueWidget} glass`}>
+          <summary>
+            <WidgetMark tone={overview.issues.length ? "attention" : "ready"} />
+            <span><small>Issues</small><strong>{loading ? "—" : overview.issues.length || "Clear"}</strong></span>
+            <i aria-hidden="true" />
+          </summary>
+          <div className={styles.issueList}>
+            {loading ? <SkeletonList rows={3} /> : overview.issues.length ? (
+              distinctIssues.map((issue) => (
+                <Link key={issue.key} href={issue.href}>
+                  <span><strong>{issue.title}</strong><small>{issue.detail}</small></span>
+                  <b aria-hidden="true">↗</b>
+                </Link>
+              ))
+            ) : (
+              <span className={styles.widgetEmpty}>No failed runs, overdue releases, or connection issues.</span>
+            )}
+          </div>
+        </details>
+
+        <section className={`${styles.dataWidget} ${styles.runWidget} glass`} aria-labelledby="run-widget-title">
+          <header>
+            <WidgetMark tone={overview.activeRunCount ? "live" : "quiet"} icon={<IconRuns width={17} height={17} />} />
+            <span><small>Runs</small><strong id="run-widget-title">{loading ? "—" : overview.activeRunCount}</strong></span>
+            <Link href="/runs" aria-label="Open all production runs">↗</Link>
+          </header>
+          <div className={styles.runSplit}>
+            <span><i data-tone="live" /><small>Rendering</small><strong>{loading ? "—" : overview.runningCount}</strong></span>
+            <span><i /><small>Queued</small><strong>{loading ? "—" : overview.queuedCount}</strong></span>
+            <span><i data-tone="attention" /><small>Failed</small><strong>{loading ? "—" : overview.failedRuns.length}</strong></span>
+          </div>
+        </section>
+
+        <section className={`${styles.dataWidget} ${styles.channelWidget} glass`} aria-labelledby="channel-widget-title">
+          <header>
+            <WidgetMark tone="channel" icon={<IconChannels width={17} height={17} />} />
+            <span><small>Channels</small><strong id="channel-widget-title">{loading ? "—" : overview.activeChannelCount}</strong></span>
+            <Link href="/channels" aria-label="Open all channels">↗</Link>
+          </header>
+          <div className={styles.channelSignal}>
+            <div aria-hidden="true">
+              {Array.from({ length: Math.max(overview.activeChannelCount, 1) }, (_, index) => (
+                <i key={index} data-ready={index < overview.activeChannelCount - overview.disconnectedChannels.length ? "true" : undefined} />
+              ))}
+            </div>
+            <span><strong>{loading ? "—" : overview.activeChannelCount - overview.disconnectedChannels.length}</strong><small>YouTube ready</small></span>
+            <span><strong>{loading ? "—" : overview.disconnectedChannels.length}</strong><small>Need link</small></span>
+          </div>
+        </section>
+
+        <details className={`${styles.dataWidget} ${styles.analyticsWidget} glass`}>
+          <summary>
+            <WidgetMark tone="analytics" icon={<IconAnalytics width={17} height={17} />} />
+            <span><small>Audience</small><strong>{analyticsLoading ? "—" : compact.format(analytics?.totalViews ?? 0)}</strong></span>
+            <i aria-hidden="true" />
+          </summary>
+          <div className={styles.analyticsBody}>
+            <div className={styles.analyticsTotals}>
+              <span><small>Subscribers</small><strong>{analyticsLoading ? "—" : compact.format(analytics?.totalSubscribers ?? 0)}</strong></span>
+              <span><small>Published</small><strong>{analyticsLoading ? "—" : analytics?.videoCount ?? 0}</strong></span>
+              <span><small>Recorded cost</small><strong>{analyticsLoading ? "—" : usd.format(analytics?.totalCost ?? 0)}</strong></span>
+            </div>
+            <AudienceBars rows={channelSummaries ?? []} loading={channelSummaries === undefined} />
+            <Link href="/analytics" className={styles.widgetOpen}>Open analytics <b aria-hidden="true">↗</b></Link>
+          </div>
+        </details>
+      </div>
 
       <section className={`${styles.masterWidget} glass`} aria-labelledby="master-controls-title">
-        <header><small>Master controls</small><strong id="master-controls-title">Operate</strong></header>
+        <header><small>Master controls</small><strong id="master-controls-title">Go directly</strong></header>
         <nav aria-label="Master studio controls">
           <Link href="/runs"><IconRuns width={16} height={16} /><span>Production</span></Link>
           <Link href="/schedule"><IconCalendar width={16} height={16} /><span>Schedule</span></Link>
           <Link href="/channels"><IconChannels width={16} height={16} /><span>Channels</span></Link>
+          <Link href="/library"><IconLibrary width={16} height={16} /><span>Library</span></Link>
           <Link href="/analytics"><IconAnalytics width={16} height={16} /><span>Analytics</span></Link>
+          <Link href="/channels/new"><IconSpark width={16} height={16} /><span>New channel</span></Link>
         </nav>
       </section>
     </section>
+  );
+}
+
+function WidgetMark({
+  tone,
+  icon,
+}: {
+  tone: "attention" | "ready" | "live" | "quiet" | "channel" | "analytics";
+  icon?: React.ReactNode;
+}) {
+  return <span className={styles.widgetGlyph} data-tone={tone} aria-hidden="true">{icon ?? <i />}</span>;
+}
+
+function ProductionMap({ overview, loading }: { overview: StudioOverviewSnapshot; loading: boolean }) {
+  const stages = [
+    { label: "Channels", value: overview.activeChannelCount },
+    { label: "Planning", value: overview.planBuildingCount },
+    { label: "Runs", value: overview.activeRunCount },
+    { label: "Ready", value: overview.readyPlanCount },
+    { label: "Published", value: overview.publishedCount },
+  ];
+  return (
+    <figure className={`${styles.productionMap} glass`} aria-label="Live production map">
+      <figcaption>
+        <span><small>Production map</small><strong>Flow</strong></span>
+        <Link href="/runs">Open production <b aria-hidden="true">↗</b></Link>
+      </figcaption>
+      <div className={styles.mapGraphic} aria-hidden="true" data-live={overview.activeRunCount > 0 ? "true" : undefined}>
+        <svg viewBox="0 0 640 150" preserveAspectRatio="none">
+          <defs>
+            <linearGradient id="overview-flow-gradient" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0" stopColor="var(--color-blueprint)" />
+              <stop offset=".48" stopColor="var(--color-secondary)" />
+              <stop offset="1" stopColor="var(--color-accent)" />
+            </linearGradient>
+          </defs>
+          <path className={styles.mapGhost} d="M20 104C106 104 110 42 194 42S278 118 364 118 452 60 620 60" />
+          <path className={styles.mapLine} d="M20 104C106 104 110 42 194 42S278 118 364 118 452 60 620 60" />
+          {[20, 170, 320, 470, 620].map((x, index) => <circle key={x} className={styles.mapNode} data-index={index} cx={x} cy={[104, 46, 111, 78, 60][index]} r="5" />)}
+        </svg>
+      </div>
+      <ol className={styles.mapLegend}>
+        {stages.map((stage, index) => (
+          <li key={stage.label}><span>{String(index + 1).padStart(2, "0")}</span><small>{stage.label}</small><strong>{loading ? "—" : stage.value}</strong></li>
+        ))}
+      </ol>
+    </figure>
+  );
+}
+
+function AudienceBars({ rows, loading }: { rows: ChannelSummaryRow[]; loading: boolean }) {
+  const visible = rows.slice().sort((left, right) => right.totalViews - left.totalViews).slice(0, 4);
+  const max = Math.max(...visible.map((row) => row.totalViews), 1);
+  if (loading) return <div className={styles.audienceLoading} aria-label="Loading channel analytics" />;
+  if (!visible.length) return <span className={styles.widgetEmpty}>No persisted YouTube analytics yet.</span>;
+  return (
+    <div className={styles.audienceBars} aria-label="Views by channel">
+      {visible.map((row) => (
+        <Link href={`/channels/${encodeURIComponent(row.slug)}`} key={row.channelId}>
+          <span><small>{row.name}</small><b>{compact.format(row.totalViews)}</b></span>
+          <i><b style={{ "--bar-width": `${Math.max(3, (row.totalViews / max) * 100)}%` } as CSSProperties} /></i>
+        </Link>
+      ))}
+    </div>
   );
 }
 
