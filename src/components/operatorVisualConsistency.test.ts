@@ -24,6 +24,9 @@ const livePipeline = read("src/components/LivePipeline.tsx");
 const livePipelineCss = read("src/components/LivePipeline.module.css");
 const runDetail = read("src/app/(app)/runs/[runId]/page.tsx");
 const runDetailCss = read("src/app/(app)/runs/[runId]/runDetail.module.css");
+const logConsole = read("src/components/LogConsole.tsx");
+const logConsoleCss = read("src/components/LogConsole.module.css");
+const releaseEvidenceBadge = read("src/components/ReleaseEvidenceBadge.tsx");
 
 // A shared header is the visual anchor for the main operator pages. Its action
 // state must be structural, not a page-specific style hack.
@@ -43,8 +46,8 @@ assert.match(runsModel, /export const INITIAL_VISIBLE_RUNS = 12/);
 assert.match(runsModel, /matching\.slice\(0, safeLimit\)/);
 assert.match(runs, /Showing \{projection\.visible\.length\} of \{projection\.matching\.length\}/);
 assert.match(runs, /Load \{Math\.min\(INITIAL_VISIBLE_RUNS, projection\.remaining\)\}/);
-assert.match(runsCss, /grid-template-columns: repeat\(6, minmax\(0, 1fr\)\)/);
-assert.match(runsCss, /@media \(max-width: 980px\)/);
+assert.match(runsCss, /grid-template-columns: repeat\(6,\s*minmax\(0,\s*1fr\)\)/);
+assert.match(runsCss, /@media \(max-width: 820px\)/);
 
 // The Library’s count derives from its actual filtered rows, never an invented
 // activity metric, and the toolbar keeps explicit labels for every control.
@@ -95,11 +98,16 @@ assert.match(globalCss, /:has\(\.owner-only-notice:not\(\[data-access-state="che
 
 // Live work is a receipt-backed workbench: it groups real stages into phases,
 // retains per-stage inspection, and does not suggest an invented render stream.
-assert.match(livePipeline, /Production workbench/);
+assert.match(livePipeline, /Run route monitor/);
 assert.match(livePipeline, /summarizeLivePipelinePhases/);
 assert.match(livePipeline, /<StageRow inputs=\{stage\.inputs\} outputs=\{stage\.outputs\} error=\{stage\.error\}/);
 assert.match(livePipeline, /data-status=\{status\}/);
+assert.match(livePipeline, /receiptPercent/);
+assert.match(livePipeline, /persisted stage receipts/);
+assert.doesNotMatch(livePipeline, /render stream/i);
 assert.match(livePipelineCss, /\.phaseStrip/);
+assert.match(livePipelineCss, /\.receiptMeter/);
+assert.match(livePipelineCss, /prefers-reduced-motion/);
 assert.match(livePipelineCss, /\.stageToggle/);
 assert.match(livePipelineCss, /@media \(max-width: 520px\)/);
 
@@ -111,8 +119,23 @@ assert.match(runDetail, /<LivePipeline nodes=\{nodes\}/);
 assert.match(runDetail, /<LogConsole runId=\{run\._id\}/);
 assert.match(runDetail, /styles\.summaryGrid/);
 assert.match(runDetail, /data-run-status=\{run\.status\}/);
-assert.match(runDetailCss, /grid-template-columns: repeat\(6, minmax\(0, 1fr\)\)/);
-assert.match(runDetailCss, /@media \(max-width: 680px\)/);
+assert.match(runDetail, /publishedOpen && <div className=\{styles\.publishedFrame\}/);
+assert.match(runDetail, /onToggle=\{\(event\) => setPublishedOpen\(event\.currentTarget\.open\)\}/);
+assert.match(runDetail, /ReleaseEvidenceBadge status=\{run\.releaseEvidenceStatus\} compact/);
+assert.match(runDetailCss, /grid-template-columns: repeat\(6,\s*minmax\(0,\s*1fr\)\)/);
+assert.match(runDetailCss, /@media \(max-width: 540px\)/);
+
+// The terminal is a reviewable persisted record, not a decorative code box:
+// operators can pause tail-following, jump back to the newest receipt, and
+// distinguish a live run from a completed ledger without losing line counts.
+assert.match(logConsole, /runStatus === "running" \|\| runStatus === "queued"/);
+assert.match(logConsole, /Review paused/);
+assert.match(logConsole, /Jump to latest/);
+assert.match(logConsole, /scrollHeight - el\.scrollTop - el\.clientHeight < 40/);
+assert.match(logConsoleCss, /\.line\s*\{/);
+assert.match(logConsoleCss, /@media \(max-width: 680px\)/);
+assert.match(releaseEvidenceBadge, /compact\?: boolean/);
+assert.match(releaseEvidenceBadge, /Legacy unverified/);
 
 // Opening a retained artifact is an operator action, so the Library dialog
 // must behave like a real modal rather than strand keyboard focus behind it.

@@ -40,7 +40,7 @@ export function RunMediaWorkbench({
 
   return (
     <section className={styles.section} aria-labelledby="recorded-work-title">
-      <div className={`${styles.shell} glass glass-shine`}>
+      <div className={styles.shell}>
         <header className={styles.header}>
           <div className={styles.headerCopy}>
             <p className={styles.eyebrow}>Assembly & retained work</p>

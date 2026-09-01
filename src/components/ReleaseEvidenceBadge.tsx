@@ -19,14 +19,24 @@ const COLOR = {
 export function ReleaseEvidenceBadge({
   status,
   size = "sm",
+  compact = false,
 }: {
   status?: string;
   size?: "sm" | "md";
+  compact?: boolean;
 }) {
   const normalized = normalizeReleaseEvidenceStatus(status);
   const color = COLOR[normalized];
   const pad = size === "sm" ? "0.14rem 0.48rem" : "0.24rem 0.64rem";
   const fontSize = size === "sm" ? "0.68rem" : "0.76rem";
+  const label = compact
+    ? {
+        not_ready: "Evidence pending",
+        legacy_unverified: "Legacy unverified",
+        evidence_incomplete: "Evidence incomplete",
+        release_evidence_recorded: "Evidence recorded",
+      }[normalized]
+    : releaseEvidenceStatusLabel(normalized);
 
   return (
     <span
@@ -54,7 +64,7 @@ export function ReleaseEvidenceBadge({
           flexShrink: 0,
         }}
       />
-      {releaseEvidenceStatusLabel(normalized)}
+      {label}
     </span>
   );
 }

@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
-import { EmptyState } from "./EmptyState";
 import { IconChevron, IconTerminal } from "./icons";
+import styles from "./LogConsole.module.css";
 
 /** Max lines kept in the DOM (the query is already capped server-side). */
 const TAIL_LIMIT = 500;
@@ -19,175 +19,110 @@ type LogLine = {
   seq?: number;
 };
 
-const LEVEL_COLOR: Record<string, string> = {
-  info: "var(--color-muted)",
-  warn: "var(--color-amber)",
-  error: "var(--color-failed)",
-};
-
 function fmtClock(ts: number): string {
   const d = new Date(ts);
   const pad = (n: number) => String(n).padStart(2, "0");
   return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
 }
 
-/**
- * Live, reactive console for a run's streamed `ctx.log` output. Subscribes to
- * `runLogs.listRunLogs` (chronological asc) — updates push in automatically, no
- * polling. Dark terminal look matching the design tokens, level-coloured lines,
- * auto-scroll to bottom on new lines with a "scrolled up → pause auto-scroll"
- * guard, tail-capped. Renders as a collapsible "Logs" panel.
- */
-export function LogConsole({ runId }: { runId: string }) {
+/** Reactive persisted log tail with an explicit follow/pause control. */
+export function LogConsole({ runId, runStatus }: { runId: string; runStatus?: string }) {
   const [open, setOpen] = useState(true);
+  const [following, setFollowing] = useState(true);
   const logs = useQuery(api.runLogs.listRunLogs, {
     runId: runId as Id<"runs">,
     limit: TAIL_LIMIT,
   }) as LogLine[] | undefined;
-
   const scrollRef = useRef<HTMLDivElement>(null);
-  // When true, new lines auto-scroll to the bottom. Set false once the user
-  // scrolls up, restored when they return to (near) the bottom.
   const stickRef = useRef(true);
+  const live = runStatus === "running" || runStatus === "queued";
 
   function onScroll() {
     const el = scrollRef.current;
     if (!el) return;
-    const distanceFromBottom =
-      el.scrollHeight - el.scrollTop - el.clientHeight;
-    stickRef.current = distanceFromBottom < 40;
+    const next = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+    stickRef.current = next;
+    setFollowing(next);
   }
 
-  // After each render with new lines, stick to bottom if the user hasn't
-  // scrolled away. useLayoutEffect avoids a visible jump.
+  function jumpToLatest() {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+    stickRef.current = true;
+    setFollowing(true);
+  }
+
   useLayoutEffect(() => {
     const el = scrollRef.current;
-    if (el && open && stickRef.current) {
-      el.scrollTop = el.scrollHeight;
-    }
+    if (el && open && stickRef.current) el.scrollTop = el.scrollHeight;
   }, [logs, open]);
 
-  // Re-stick when (re)opening the panel.
-  useEffect(() => {
-    if (open) stickRef.current = true;
-  }, [open]);
+  function toggleOpen() {
+    const next = !open;
+    setOpen(next);
+    if (next) {
+      stickRef.current = true;
+      setFollowing(true);
+    }
+  }
 
   const tail = (logs ?? []).slice(-TAIL_LIMIT);
   const count = logs?.length ?? 0;
+  const counts = tail.reduce(
+    (result, line) => {
+      if (line.level === "warn") result.warn += 1;
+      else if (line.level === "error") result.error += 1;
+      else result.info += 1;
+      return result;
+    },
+    { info: 0, warn: 0, error: 0 },
+  );
 
   return (
-    <div
-      className="glass"
-      style={{ overflow: "hidden", borderColor: "var(--color-border)" }}
-    >
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        style={{
-          width: "100%",
-          font: "inherit",
-          textAlign: "left",
-          cursor: "pointer",
-          background: "transparent",
-          border: "none",
-          color: "inherit",
-          display: "flex",
-          alignItems: "center",
-          gap: "0.7rem",
-          padding: "0.8rem 1.05rem",
-        }}
-      >
-        <IconTerminal width={16} height={16} style={{ color: "var(--color-faint)" }} />
-        <span style={{ fontWeight: 500, fontSize: "0.95rem", flex: 1 }}>Logs</span>
-        {count > 0 && (
-          <span
-            style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: "0.72rem",
-              color: "var(--color-faint)",
-            }}
-          >
-            {count}
-            {count >= TAIL_LIMIT ? "+" : ""} line{count === 1 ? "" : "s"}
+    <section className={styles.root} data-live={live ? "true" : undefined} aria-labelledby="run-console-title">
+      <header className={styles.header}>
+        <div className={styles.identity}>
+          <span className={styles.icon}><IconTerminal width={16} height={16} /></span>
+          <span>
+            <small>03 / reactive log tail</small>
+            <strong id="run-console-title">Run console</strong>
+            <em>{live ? "New persisted lines arrive automatically." : "The terminal record is complete unless recovery appends more lines."}</em>
           </span>
-        )}
-        <IconChevron
-          width={15}
-          height={15}
-          style={{
-            transition: "transform 0.18s ease",
-            transform: open ? "rotate(180deg)" : "none",
-            color: "var(--color-muted)",
-          }}
-        />
-      </button>
+        </div>
+        <div className={styles.headerActions}>
+          <span className={styles.feedState} data-following={following ? "true" : undefined}><i />{following ? "Following tail" : "Review paused"}</span>
+          <button type="button" className={styles.collapse} onClick={toggleOpen} aria-expanded={open}>
+            {open ? "Collapse" : "Open console"}<IconChevron width={14} height={14} data-open={open ? "true" : undefined} />
+          </button>
+        </div>
+      </header>
 
       {open && (
-        <div style={{ borderTop: "1px solid var(--color-border)" }}>
+        <div className={styles.body}>
+          <div className={styles.toolbar} aria-label="Log line summary">
+            <span><small>Lines</small><strong>{count}{count >= TAIL_LIMIT ? "+" : ""}</strong></span>
+            <span data-level="info"><small>Info</small><strong>{counts.info}</strong></span>
+            <span data-level="warn"><small>Warnings</small><strong>{counts.warn}</strong></span>
+            <span data-level="error"><small>Errors</small><strong>{counts.error}</strong></span>
+            {!following && <button type="button" onClick={jumpToLatest}>Jump to latest ↓</button>}
+          </div>
+
           {logs !== undefined && tail.length === 0 ? (
-            <div style={{ padding: "1.25rem" }}>
-              <EmptyState
-                title="No logs yet"
-                description="Streamed console output will appear here as the run executes."
-                icon={<IconTerminal width={22} height={22} />}
-              />
+            <div className={styles.empty}>
+              <span aria-hidden="true">›_</span>
+              <strong>No persisted lines yet</strong>
+              <p>The console will populate when the runner flushes its first log batch.</p>
             </div>
           ) : (
-            <div
-              ref={scrollRef}
-              onScroll={onScroll}
-              style={{
-                maxHeight: 420,
-                overflowY: "auto",
-                padding: "0.9rem 1.05rem",
-                background: "var(--color-bg)",
-                fontFamily: "var(--font-mono)",
-                fontSize: "0.76rem",
-                lineHeight: 1.65,
-              }}
-            >
+            <div ref={scrollRef} onScroll={onScroll} className={styles.lines} aria-busy={logs === undefined}>
               {logs === undefined ? (
-                <span style={{ color: "var(--color-faint)" }}>Connecting…</span>
+                <span className={styles.connecting}>Connecting to the persisted tail…</span>
               ) : (
                 tail.map((line) => (
-                  <div
-                    key={line._id}
-                    style={{
-                      display: "flex",
-                      gap: "0.7rem",
-                      whiteSpace: "pre-wrap",
-                      wordBreak: "break-word",
-                    }}
-                  >
-                    <span
-                      style={{
-                        color: "var(--color-faint)",
-                        flexShrink: 0,
-                        userSelect: "none",
-                      }}
-                    >
-                      {fmtClock(line.at)}
-                    </span>
-                    {line.block && (
-                      <span
-                        style={{
-                          color: "var(--color-secondary)",
-                          flexShrink: 0,
-                          userSelect: "none",
-                        }}
-                      >
-                        {line.block}
-                      </span>
-                    )}
-                    <span
-                      style={{
-                        color: LEVEL_COLOR[line.level] ?? "var(--color-muted)",
-                        flex: 1,
-                        minWidth: 0,
-                      }}
-                    >
-                      {line.message}
-                    </span>
+                  <div key={line._id} className={styles.line} data-level={line.level}>
+                    <time>{fmtClock(line.at)}</time>
+                    <span className={styles.block}>{line.block ?? "system"}</span>
+                    <span className={styles.message}>{line.message}</span>
                   </div>
                 ))
               )}
@@ -195,6 +130,6 @@ export function LogConsole({ runId }: { runId: string }) {
           )}
         </div>
       )}
-    </div>
+    </section>
   );
 }

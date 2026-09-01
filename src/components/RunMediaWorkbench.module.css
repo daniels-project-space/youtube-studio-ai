@@ -3,9 +3,15 @@
 }
 
 .shell {
+  position: relative;
   padding: 1.15rem;
   overflow: hidden;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+  background: linear-gradient(105deg,color-mix(in srgb,var(--color-accent) 3%,transparent),transparent 55%);
 }
+
+.shell::before { position: absolute; top: -1px; left: 1.15rem; width: 4rem; height: 1px; content: ""; background: var(--color-accent); }
 
 .header {
   display: flex;
@@ -54,7 +60,7 @@
   width: min(100%, 34rem);
   margin: 0;
   border: 1px solid var(--color-border);
-  border-radius: 0.9rem;
+  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -133,7 +139,7 @@
   min-width: 0;
   overflow: hidden;
   border: 1px solid var(--color-border);
-  border-radius: 0.9rem;
+  border-radius: 8px;
   background: color-mix(in srgb, var(--color-surface) 78%, transparent);
 }
 
