@@ -140,9 +140,9 @@ export default function ChannelsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Channel fleet / identity rooms"
+        eyebrow="Workspace"
         title="Channels"
-        subtitle="See each show as an identity, organize related channels, and understand what is ready to make or release."
+        subtitle="Create, group, and connect channels."
         actions={
           <div className="channel-page-actions">
             <Link
@@ -172,7 +172,7 @@ export default function ChannelsPage() {
       ) : channels.length === 0 ? (
         <EmptyState
           title="No channels yet"
-          description="Channels created by the pipeline (or the seed script) will appear here."
+          description="Create your first channel."
           icon={<IconChannels width={24} height={24} />}
         />
       ) : visible.length === 0 ? (

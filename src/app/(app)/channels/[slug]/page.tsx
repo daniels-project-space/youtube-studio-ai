@@ -361,7 +361,7 @@ export default function ChannelHubPage({
               radius={22}
             />
             <div className={styles.heroTitle}>
-              <span className={styles.heroKicker}>Channel operating room / {channel.language ?? "primary"}</span>
+              <span className={styles.heroKicker}>Channel · {channel.language ?? "primary"}</span>
               <h1>{channel.name}</h1>
               <div className={styles.heroMeta}>
                 <span>{id.niche ?? channel.template}</span>
@@ -373,7 +373,7 @@ export default function ChannelHubPage({
             </div>
           </div>
           <div className={styles.heroDecision}>
-            <small>Next editorial move</small>
+            <small>Next video</small>
             <strong>{nextPlan?.item.title || nextPlan?.item.topic || "Build the ready queue"}</strong>
             <span>
               {nextPlan?.timestamp
@@ -999,9 +999,9 @@ function SettingsTab({ channel }: { channel: ChannelDoc }) {
   return (
     <div className={`${styles.settingsWorkspace} channel-settings-stack`}>
       <WorkspaceIntro
-        eyebrow="Control room / owner decisions"
-        title="Automation with visible authority"
-        description="Release policy, spend, cadence, route proof, and the external YouTube destination are separate control surfaces. Changing one never implies approval for the others."
+        eyebrow="Settings"
+        title="Channel controls"
+        description="Publishing, budget, schedule, and YouTube."
         signals={[
           { label: "Channel", value: channel.status === "active" ? "Enabled" : "Paused", detail: "Eligibility for scheduled + manual runs", tone: channel.status === "active" ? "ready" : "attention" },
           { label: "Release", value: publishMode === "draft" ? "Private drafts" : publishMode, detail: "Main-video publishing authority", tone: publishMode === "draft" ? "ready" : "attention" },
@@ -1813,9 +1813,9 @@ function AnalyticsTab({
   return (
     <div className={styles.analyticsWorkspace}>
       <WorkspaceIntro
-        eyebrow="Performance desk / observed data"
-        title="Audience and unit economics"
-        description="YouTube observations and production spend stay visibly separate. Empty audience data is never filled with estimates; run cost is read from the production ledger."
+        eyebrow="Analytics"
+        title="Audience &amp; cost"
+        description="YouTube performance and production spend."
         signals={[
           { label: "Audience window", value: audienceSamples ? `${audienceSamples} snapshots` : "Awaiting sync", detail: "Rolling 90 days", tone: audienceSamples ? "ready" : "attention" },
           { label: "Recent spend", value: fmtUsd(totalCost), detail: "Latest 500 runs maximum" },
@@ -1837,7 +1837,7 @@ function AnalyticsTab({
           ) : (
             <div className={styles.analyticsEmpty}>
               <strong>No audience snapshots yet</strong>
-              <p>Connect a healthy YouTube destination and let the stats-refresh task record the first verified observation.</p>
+              <p>Connect YouTube to begin syncing analytics.</p>
               <Link href="?tab=settings#youtube-destination">Review YouTube destination →</Link>
             </div>
           )}
@@ -1886,9 +1886,9 @@ function LibraryTab({
   return (
     <div className={styles.libraryWorkspace}>
       <WorkspaceIntro
-        eyebrow="Master shelf / this channel"
-        title="Retained work, not a graveyard"
-        description="Active masters stay close to editorial work. Archived videos are hidden from this shelf without deleting their render, evidence, or recovery path."
+        eyebrow="Library"
+        title="Videos"
+        description="Open active videos or restore archived ones."
         signals={[
           { label: "Active masters", value: String(active.length), detail: "Visible on this channel shelf", tone: active.length ? "ready" : "quiet" },
           { label: "Published", value: String(published), detail: "YouTube-linked outputs" },
@@ -1998,7 +1998,7 @@ function SeoTab({ ownerId, channelId, niche }: { ownerId: string; channelId: str
           <div className={seoStyles.headerText}>
             <span className={seoStyles.eyebrow}>Discovery desk / channel positioning</span>
             <h2>Search intelligence needs a defined field</h2>
-            <p>Set the channel niche before comparing titles, hooks, thumbnails, or competitor gaps. This avoids mixing unrelated markets into one false benchmark.</p>
+            <p>Set a niche before comparing competitors.</p>
           </div>
           <Link className={seoStyles.refresh} href="?tab=identity">Review identity</Link>
         </header>
@@ -2015,7 +2015,7 @@ function SeoTab({ ownerId, channelId, niche }: { ownerId: string; channelId: str
         <div className={seoStyles.headerText}>
           <span className={seoStyles.eyebrow}>Discovery desk / observed market</span>
           <h2>{niche}</h2>
-          <p>Observed competitor language becomes reusable editorial direction here—not automatic copy, fabricated demand, or a promise of views.</p>
+          <p>Use observed patterns to plan the next upload.</p>
         </div>
         <button
           type="button"
@@ -2171,7 +2171,7 @@ function PipelineTab({
         <div>
           <span>Frozen channel route</span>
           <h2>{pipeline.length} working modules</h2>
-          <p>The route reads top to bottom. Runtime receipts live on each production run; this view is the channel&apos;s configured intent.</p>
+          <p>The configured production route.</p>
         </div>
         <strong>{String(pipeline.length).padStart(2, "0")}</strong>
       </header>
@@ -2461,9 +2461,9 @@ function WeekAheadTab({ ownerId, channelId }: { ownerId: string; channelId: Id<"
   return (
     <div className={styles.weekWorkspace}>
       <WorkspaceIntro
-        eyebrow="Editorial calendar / next five moves"
-        title="Shape the queue before the render queue"
-        description="Topics, titles, descriptions, and cover directions are arranged here. Dragging changes editorial priority; it does not silently publish or delete a finished master."
+        eyebrow="Plan"
+        title="Next videos"
+        description="Reorder topics or create five more."
         signals={[
           { label: "Planned", value: plan === undefined ? "Loading" : String(plan.length), detail: "Upcoming editorial slots" },
           { label: "Ready", value: String(readyCount), detail: "Topic + cover complete", tone: readyCount ? "ready" : "quiet" },
@@ -2486,7 +2486,7 @@ function WeekAheadTab({ ownerId, channelId }: { ownerId: string; channelId: Id<"
           </div>
           <div>
             <strong>The editorial runway is open</strong>
-            <p>Build five researched options with distinct titles, descriptions, and channel-specific Nano Banana cover directions.</p>
+            <p>Create five channel-specific video plans.</p>
           </div>
           <button type="button" onClick={generate} disabled={busy} className={styles.workspaceActionButton}>
             {busy ? "Starting planner…" : "Build the first five"}

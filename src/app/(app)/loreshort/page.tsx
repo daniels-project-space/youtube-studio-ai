@@ -54,13 +54,9 @@ export default function LoreShortPage() {
           <figcaption><span>{CURRENT_REFERENCE.label}</span><strong>{CURRENT_REFERENCE.title}</strong><small>Manifest-bound composition reference</small></figcaption>
         </figure>
         <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}>Lore references · shot-lineage archive</p>
-          <h1>Lore Short Reference Archive</h1>
-          <p>
-            A single admitted still can reveal composition craft. It cannot prove a story,
-            a character system, sequence continuity, a runtime, or a finished episode.
-          </p>
-          <div className={styles.heroRule}><span aria-hidden="true">✣</span><div><small>Sequence rule</small><strong>Every narrated beat must earn its own drawn scene.</strong></div></div>
+          <p className={styles.eyebrow}>Visual reference</p>
+          <h1>Lore Short archive</h1>
+          <div className={styles.heroRule}><span aria-hidden="true">✣</span><div><small>Rule</small><strong>Draw every narrated beat.</strong></div></div>
         </div>
         <div className={styles.metricRail}>
           <ArchiveMetric label="Artifact" value="Still" note="no video displayed" />
@@ -85,7 +81,7 @@ export default function LoreShortPage() {
         <div className={styles.sequenceCopy}>
           <span className={styles.eyebrow}>Full-story coverage</span>
           <h2>The route must draw beyond the opening.</h2>
-          <p>Reviewers need proof that the channel identity survives through every shot: not four strong images followed by generic filler, repeated key art, or narration with no story-specific scene.</p>
+          <p>Every shot must preserve the channel identity.</p>
           <div className={styles.sequenceBoundary}><span>PLAN</span><i /><span>SHOTS</span><i /><span>MASTER</span><i /><span>REVIEW</span></div>
         </div>
         <div className={styles.storyboardStrip}>
@@ -119,7 +115,7 @@ export default function LoreShortPage() {
       <section className={styles.boundaryDesk}>
         <div className={styles.sectionHeading}>
           <div><span className={styles.eyebrow}>Archive boundary</span><h2>Reference is not inheritance.</h2></div>
-          <p>The archive keeps useful evidence visible while preventing old, franchise-linked, or unqualified material from becoming production identity.</p>
+          <p>References inform craft, never channel identity.</p>
         </div>
         <ol>{ARCHIVE_BOUNDARIES.map((boundary, index) => <li key={boundary}><span>{String(index + 1).padStart(2, "0")}</span><p>{boundary}</p></li>)}</ol>
       </section>

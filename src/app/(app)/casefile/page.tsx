@@ -116,16 +116,12 @@ function CasefileHero({
   return (
     <section className={styles.hero} aria-busy={access === "checking" || undefined}>
       <div className={styles.heroCopy}>
-        <p className={styles.eyebrow}>Casefile / chain of custody</p>
-        <h1>Turn evidence into a shot-by-shot case.</h1>
-        <p className={styles.heroIntro}>
-          Sources enter first. Every claim, image, cut, and review stays bound to
-          the same immutable case before a render can be admitted.
-        </p>
+        <p className={styles.eyebrow}>Evidence</p>
+        <h1>Casefiles</h1>
         <div className={styles.heroBoundary}>
           <span aria-hidden="true">⌁</span>
           <div>
-            <small>Room boundary</small>
+            <small>Safety</small>
             <strong>No render · no spend · no publish</strong>
           </div>
         </div>
@@ -317,7 +313,7 @@ export default function CasefilePage() {
         <div className={styles.ledgerHeader}>
           <div>
             <h2>Recorded bindings for this case</h2>
-            <p>These are the exact evidence and review records persisted on {selected.caseId}. A missing record is shown as missing, not treated as an automatic failure.</p>
+            <p>Saved evidence for {selected.caseId}.</p>
           </div>
           <span className={styles.ledgerCount}>{recordedLockCount} recorded</span>
         </div>
@@ -354,7 +350,7 @@ export default function CasefilePage() {
 
         <section className={`${styles.surface} ${styles.operatorPane}`}>
           {!selected && <>
-            <OperatorHeading index="01" title="Admit a source packet" detail="Paste the editor-approved Casefile Source Packet. The server checks every claim’s primary source, visual-rights usage, and review fingerprint before it stores anything." />
+            <OperatorHeading index="01" title="Add sources" detail="Paste the reviewed source packet." />
             <textarea aria-label="Casefile source packet JSON" className={styles.textarea} value={sourcePacket} onChange={(event) => setSourcePacket(event.target.value)} placeholder='{"version":"casefile-source-packet/v1", ...}' />
             <button type="button" className={styles.primaryAction} disabled={actionDisabled} onClick={() => { try { void submit("admit_source", { sourcePacket: parseObject(sourcePacket, "Source packet") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>
               Admit source packet
@@ -362,13 +358,13 @@ export default function CasefilePage() {
           </>}
 
           {selected?.status === "source_admitted" && <>
-            <OperatorHeading index="02" title="Attach locked planning artifacts" detail="Paste the private Story Spine output. This freezes the exact scene and shot targets the evidence editor will approve." />
+            <OperatorHeading index="02" title="Lock the plan" detail="Attach the reviewed story spine." />
             <textarea aria-label="Casefile planning package JSON" className={styles.textarea} value={planning} onChange={(event) => setPlanning(event.target.value)} placeholder='{ "sceneManifest": { ... }, "shotList": [ ... ] }' />
             <button type="button" className={styles.primaryAction} disabled={actionDisabled} onClick={() => { try { void submit("attach_planning", { episodeId: selected._id, ...parsePlanning(planning) }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Lock planning artifacts</button>
           </>}
 
           {selected?.status === "awaiting_evidence_review" && <>
-            <OperatorHeading index="03" title="Admit the claim-to-shot map" detail="Each factual claim must bind to exact Scene Manifest and ShotPlan ids while retaining the no-gore, no-unsupported-recreation policy." />
+            <OperatorHeading index="03" title="Map claims to shots" detail="Bind each claim to its planned scene." />
             <textarea aria-label="Casefile evidence map JSON" className={styles.textarea} value={evidenceMap} onChange={(event) => setEvidenceMap(event.target.value)} placeholder='{"version":"casefile-evidence-shot-map/v1", ...}' />
             <button type="button" className={styles.primaryAction} disabled={actionDisabled} onClick={() => { try { void submit("admit_evidence_map", { episodeId: selected._id, evidenceShotMapInput: parseObject(evidenceMap, "Evidence map") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Admit evidence map</button>
           </>}
@@ -412,13 +408,13 @@ export default function CasefilePage() {
                 <button type="button" className={styles.secondaryAction} disabled={actionDisabled} onClick={() => { try { void submit("attach_reference_mechanics", { episodeId: selected._id, mechanics: parseObject(referenceMechanics, "Reference mechanics"), review: parseObject(referenceMechanicsReview, "Reference mechanics review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze reviewed mechanics packet</button>
               </>}
             </section>
-            <OperatorHeading index="04" title="Draft cinematic coverage" detail="Bind the causal question, visual world, and original faceless cast before the system writes multi-shot tension, cuts, and continuity." />
+            <OperatorHeading index="04" title="Draft coverage" detail="Set the visual world, cast, shots, and cuts." />
             <textarea aria-label="Cinematic direction JSON" className={styles.textarea} value={direction} onChange={(event) => setDirection(event.target.value)} placeholder='{"version":"cinematic-case-direction/v1", ...}' />
             <button type="button" className={styles.primaryAction} disabled={actionDisabled} onClick={() => { try { void submit("draft_cinematic_sequence", { episodeId: selected._id, direction: parseObject(direction, "Cinematic direction") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Create review draft</button>
           </>}
 
           {selected?.status === "awaiting_cinematic_review" && <>
-            <OperatorHeading index="05" title="Finalize cinematic review" detail="Bind the current source packet, evidence map, and draft fingerprint. Any wardrobe, timing, claim, or cut change requires a new review." />
+            <OperatorHeading index="05" title="Final review" detail="Approve the exact evidence map and cut." />
             {selected.workflow?.cinematicDraft?.sequenceContentFingerprint && <code className={styles.fingerprint}>{selected.workflow.cinematicDraft.sequenceContentFingerprint}</code>}
             <section className={styles.optionalModule}>
               <ModuleHeading tag="Required media proof" title="Bind approved source-proof media" />

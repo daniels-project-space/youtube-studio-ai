@@ -133,12 +133,12 @@ assert.match(wizard, /defaultFamilyReadiness\.blockers\[0\]/);
 // Channel creation is a staged operating workflow rather than a card wall.
 // The foreground route, full catalog, advanced pipeline controls, and durable
 // build receipts use explicit progressive disclosure without inventing media.
-assert.match(wizard, /Build a channel system, not a profile/);
+assert.match(wizard, /<h1>Create a channel<\/h1>/);
 assert.match(wizard, /function NicheGlyph/);
 assert.match(wizard, /<details className=\{styles\.routeCatalog\} open=\{!fam\}>/);
 assert.match(wizard, /Pipeline style controls/);
 assert.match(wizard, /showPipelineStyle && <div className=\{styles\.room\}><ModuleConfigSection/);
-assert.match(wizard, /Receipt coverage/);
+assert.match(wizard, /<small>Progress<\/small>/);
 assert.match(wizard, /Private quality-control render/);
 assert.match(wizard, /status signal · no preview frames yet/);
 assert.match(wizard, /STAGE_DESCRIPTIONS/);
@@ -224,9 +224,9 @@ assert.match(detail, /\{advancedOpen && \(/);
 // active masters; archived work remains recoverable from the full Library.
 assert.match(detail, /includeArchived: true/);
 assert.match(detail, /video\.libraryState !== "archived"/);
-assert.match(detail, /Archived videos are hidden from this shelf without deleting/);
-assert.match(detail, /Audience and unit economics/);
-assert.match(detail, /Shape the queue before the render queue/);
+assert.match(detail, /Open active videos or restore archived ones/);
+assert.match(detail, /YouTube performance and production spend/);
+assert.match(detail, /Reorder topics or create five more/);
 assert.match(overview, /item\.status === "ready"/);
 assert.doesNotMatch(overview, /need review/);
 assert.match(overview, /<details className=\{`\$\{styles\.runsWidget\}/);

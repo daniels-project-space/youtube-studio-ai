@@ -167,9 +167,9 @@ export default function LibraryPage() {
   return (
     <div className={styles.library}>
       <PageHeader
-        eyebrow="Master library / retained work"
+        eyebrow="Video library"
         title="Library"
-        subtitle="Find finished work, improve its packaging, or archive it without deleting the master. Pipeline completion and retained master evidence are shown separately."
+        subtitle="Open, repackage, or archive saved videos."
       />
 
       <section className={styles.collectionBar} aria-label="Library collections">
@@ -183,12 +183,12 @@ export default function LibraryPage() {
         </div>
         <p>
           {collection === "active"
-            ? "The working collection. Historical outputs remain visible, but are labelled unverified when retained evidence is incomplete; failed orphan renders and archived work stay out of this view."
-            : "A reversible shelf for old or removed work. Restoring a row never recreates or republishes anything."}
+            ? "Saved and published videos."
+            : "Hidden videos you can restore."}
         </p>
         <span className={styles.evidenceNote}>
           <i aria-hidden="true" />
-          Only “release evidence recorded” proves the retained final master.
+          Verified marks a saved final master.
         </span>
       </section>
 
@@ -197,8 +197,8 @@ export default function LibraryPage() {
           videos={videos === undefined ? undefined : filtered}
           onOpen={(video) => openLightbox(video.channelSlug, video)}
           title="Latest visible work"
-          description="Open a retained render or YouTube-linked release before filtering the full archive."
-          emptyMessage="No rendered or uploaded video artifacts match the selected channel and filters yet."
+          description="Open recent work."
+          emptyMessage="No saved videos match these filters."
         />
       </div> : null}
 
@@ -207,7 +207,7 @@ export default function LibraryPage() {
           <summary>
             <span className={styles.workshopIcon} aria-hidden="true"><IconSpark width={18} height={18} /></span>
             <span><small>Packaging workshop</small><strong>Review and refresh thumbnails</strong></span>
-            <p>Inspect retained candidates before spending or changing an existing YouTube video.</p>
+            <p>Compare thumbnail options.</p>
             <i aria-hidden="true" />
           </summary>
           <div className={styles.workshopBody}>

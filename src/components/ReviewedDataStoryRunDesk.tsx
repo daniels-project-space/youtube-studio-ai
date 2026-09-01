@@ -223,7 +223,7 @@ export function ReviewedDataStoryRunDesk() {
 
       <details className={styles.details}>
         <summary><span>Ledger intake</span> Save a new reviewed source ledger</summary>
-        <p>Use exact source snapshots and named review receipts. The server derives the route, Show Profile, topic binding, and pack fingerprint; it rejects unreviewed or mismatched data.</p>
+        <p>Use reviewed source snapshots for this exact channel.</p>
         <label>
           <span>Source ledger JSON</span>
           <textarea aria-label="Reviewed data-story source ledger JSON" value={ledger} onChange={(event) => setLedger(event.target.value)} disabled={busy} />

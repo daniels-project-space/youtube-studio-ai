@@ -1144,17 +1144,17 @@ export default function NewChannelWizard() {
       <main className={styles.buildPage} aria-live="polite">
         <header className={`${styles.hero} ${styles.buildHero}`}>
           <div className={styles.heroCopy}>
-            <span className={styles.eyebrow}>Channel inception / durable receipts</span>
+            <span className={styles.eyebrow}>Building channel</span>
             <h1>{(activeBuild?.displayName ?? pendingBuild?.displayName ?? name) || niche?.label || "Building channel"}</h1>
             <p>
               {buildProgress?.inceptionStatus === "planned"
-                ? "The channel plan is saved. Provider execution remains locked because setup spend was not authorized."
+                ? "Plan saved. Setup spend is not authorized."
                 : activeStage
-                  ? `${STAGE_LABELS[activeStage.moduleKey] ?? activeStage.moduleKey} is the latest persisted activity. You can leave this page and reconnect safely.`
-                  : "Creating the durable build ledger before any stage can claim work."}
+                  ? `${STAGE_LABELS[activeStage.moduleKey] ?? activeStage.moduleKey} is running.`
+                  : "Starting the build…"}
             </p>
             <div className={styles.heroFacts}>
-              <span><i />Idempotent request</span>
+              <span><i />Safe to resume</span>
               <span><i />Private by default</span>
               <span><i />Root-stage repair</span>
             </div>
@@ -1164,17 +1164,17 @@ export default function NewChannelWizard() {
 
         <section className={styles.buildWorkspace}>
           <aside className={styles.buildSummary}>
-            <small>Live build control</small>
-            <h2>{activeStage ? STAGE_LABELS[activeStage.moduleKey] ?? activeStage.moduleKey : "Opening the ledger"}</h2>
-            <p>{activeStage ? STAGE_DESCRIPTIONS[activeStage.moduleKey] ?? "Waiting for this stage to persist its next receipt." : "No provider activity is inferred until a durable stage row appears."}</p>
+            <small>Current step</small>
+            <h2>{activeStage ? STAGE_LABELS[activeStage.moduleKey] ?? activeStage.moduleKey : "Starting"}</h2>
+            <p>{activeStage ? STAGE_DESCRIPTIONS[activeStage.moduleKey] ?? "Waiting for this stage." : "Preparing stages…"}</p>
             <div className={styles.buildMeter}>
-              <div><small>Receipt coverage</small><strong>{stageRows.length ? `${completedStages}/${stageRows.length}` : "Connecting"}</strong></div>
+              <div><small>Progress</small><strong>{stageRows.length ? `${completedStages}/${stageRows.length}` : "Connecting"}</strong></div>
               <span className={styles.buildTrack} data-indeterminate={stageRows.length ? undefined : "true"} style={{ "--build-progress": `${progressPercent}%` } as CSSProperties}><i /></span>
             </div>
             <div className={styles.authorityGrid}>
               <span><small>Execution</small><strong>{buildProgress?.executionAuthorized ? "Authorized" : "Plan only"}</strong></span>
               <span><small>Private proof</small><strong>{buildProgress?.probeAuthorized ? "Authorized" : "Not authorized"}</strong></span>
-              <span><small>Build identity</small><strong>{activeBuild?.runId?.slice(0, 10) ?? "Pending receipt"}</strong></span>
+              <span><small>Build ID</small><strong>{activeBuild?.runId?.slice(0, 10) ?? "Pending"}</strong></span>
               <span><small>Recovery</small><strong>Safe to reconnect</strong></span>
             </div>
           </aside>
@@ -1197,7 +1197,7 @@ export default function NewChannelWizard() {
               <div className={styles.proofCopy}>
                 <small>Private quality-control render</small>
                 <strong>Testing the channel as a real production route</strong>
-                <p>The bounded proof stays private. Visual, timing, identity, and pipeline defects are attributed back to the responsible root stage before production admission.</p>
+                <p>The private test traces defects to their source stage.</p>
               </div>
               <div className={styles.proofVisual} aria-label="Private proof render status visualization"><span>status signal · no preview frames yet</span></div>
             </section>}
@@ -1248,9 +1248,9 @@ export default function NewChannelWizard() {
     <main className={styles.page}>
       <header className={styles.hero}>
         <div className={styles.heroCopy}>
-          <span className={styles.eyebrow}>Channel inception / certified creator route</span>
-          <h1>Build a channel system, not a profile.</h1>
-          <p>Choose the audience territory, bind a production format, author its identity and controls, then review the exact authority and receipts before anything runs.</p>
+          <span className={styles.eyebrow}>New channel</span>
+          <h1>Create a channel</h1>
+          <p>Choose a niche and production format.</p>
           <div className={styles.heroFacts}>
             <span><i />Private first</span>
             <span><i />One bounded QC proof</span>
@@ -1298,7 +1298,7 @@ export default function NewChannelWizard() {
       {step === 0 && (
         <section>
           <header className={styles.sectionIntro}>
-            <div><span>01 / audience territory</span><h2>What world should this channel own?</h2><p>This is not a visual preset. The territory seeds the audience promise, evidence needs, default route, and repeatable episode space.</p></div>
+            <div><span>01 / niche</span><h2>Choose a territory</h2><p>Sets the audience, sources, and episode space.</p></div>
             <strong className={styles.sectionCount}>{NICHES.length} researched territories</strong>
           </header>
           <div className={styles.nicheGrid}>
@@ -1335,7 +1335,7 @@ export default function NewChannelWizard() {
       {step === 1 && (
         <section className={styles.formatPage}>
           <header className={styles.sectionIntro}>
-            <div><span>02 / certified format</span><h2>Bind the promise to a real production route.</h2><p>Only a creator route with matching runtime foundations can advance. A blocked format remains visible for diagnosis but cannot quietly substitute another style.</p></div>
+            <div><span>02 / format</span><h2>Choose a production route</h2><p>Only tested, available formats can continue.</p></div>
             <strong className={styles.sectionCount}>{FAMILY_KEYS.length} registered routes</strong>
           </header>
           {fam ? <section className={styles.selectedRoute}>
@@ -1472,7 +1472,7 @@ export default function NewChannelWizard() {
       {step === 2 && (
         <section className={styles.detailsPage}>
           <header className={styles.sectionIntro}>
-            <div><span>03 / channel system</span><h2>Author the repeatable operating system.</h2><p>Identity, schedule, quality calibration, optional modules, spend authority, and the private proof are separate decisions. Advanced controls stay secondary.</p></div>
+            <div><span>03 / setup</span><h2>Build the channel</h2><p>Set identity, schedule, modules, and budget.</p></div>
             <strong className={styles.sectionCount}>{fam?.label ?? "route required"}</strong>
           </header>
           <div className={styles.room}>
@@ -1803,7 +1803,7 @@ export default function NewChannelWizard() {
       {step === 3 && fam && (
         <section className={styles.reviewPage}>
           <header className={styles.sectionIntro}>
-            <div><span>04 / authority review</span><h2>Read the whole channel before it exists.</h2><p>Confirm the identity, production contract, spend authority, private proof, release boundaries, and every active module. Saving a plan is not provider authorization.</p></div>
+            <div><span>04 / review</span><h2>Review &amp; create</h2><p>Confirm setup, spend, test render, and publishing.</p></div>
             <strong className={styles.sectionCount}>{approveSetupSpend ? "execution requested" : "plan only"}</strong>
           </header>
           {!fam.available && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {fam.label}: visual engine “{fam.visualEngine}” not built yet — channel will be created as a DRAFT until it ships.</div>}

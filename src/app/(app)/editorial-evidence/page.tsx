@@ -71,15 +71,11 @@ function EvidenceHero({
   return (
     <section className={styles.hero} aria-busy={access === "checking" || undefined}>
       <div className={styles.heroCopy}>
-        <p className={styles.eyebrow}>Editorial evidence / proof matrix</p>
-        <h1>Nothing enters the script without a receipt.</h1>
-        <p>
-          Snapshot the source. Approve the exact claim. Name the reviewer. The
-          resulting fingerprint is the editorial object—not a model summary.
-        </p>
+        <p className={styles.eyebrow}>Sources &amp; claims</p>
+        <h1>Editorial evidence</h1>
         <div className={styles.boundaryNote}>
           <span aria-hidden="true">≋</span>
-          <div><small>Authority boundary</small><strong>Evidence only · supervised runs only</strong></div>
+          <div><small>Access</small><strong>Evidence only · supervised runs</strong></div>
         </div>
       </div>
       <div className={styles.proofMatrix}>

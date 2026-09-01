@@ -77,17 +77,17 @@ export function LivePipeline({
                 : failed
                   ? "A recorded stage needs attention before release can continue"
                   : complete === nodes.length
-                    ? "Every planned stage has reported a receipt"
+                    ? "All stages complete"
                     : planSource === "frozen"
-                      ? "Stage plan is locked to this run; waiting for the next verified receipt"
-                      : "Legacy run plan inferred from the current channel configuration"}
+                      ? "Waiting for the next stage"
+                      : "Using the saved legacy plan"}
             </small>
           </span>
         </div>
         <div className={styles.summaryMetrics} aria-label="Production progress">
           <span>
             <strong>{complete}/{nodes.length}</strong>
-            <small>reported</small>
+            <small>complete</small>
           </span>
           <span>
             <strong>{phaseSummaries.filter((phase) => phase.state === "complete").length}/{phaseSummaries.length}</strong>
@@ -106,15 +106,15 @@ export function LivePipeline({
         </div>
       </header>
 
-      <div className={styles.receiptMeter} style={{ "--pipeline-receipts": `${receiptPercent}%` } as CSSProperties} aria-label={`${receiptPercent}% of planned stages have terminal receipts`}>
-        <i /><span>{receiptPercent}% receipt coverage</span>
+      <div className={styles.receiptMeter} style={{ "--pipeline-receipts": `${receiptPercent}%` } as CSSProperties} aria-label={`${receiptPercent}% of planned stages complete`}>
+        <i /><span>{receiptPercent}% complete</span>
       </div>
 
       {active && (
         <section className={styles.activeStage} aria-label="Current persisted stage">
           <span className={styles.activeGlyph} aria-hidden="true"><i /><i /><i /></span>
           <div>
-            <small>Current persisted activity</small>
+            <small>Now running</small>
             <strong>{blockLabel(active.block)}</strong>
             <span>{LIVE_PIPELINE_PHASE_LABEL[livePipelinePhaseForBlock(active.block)]} · {active.block}</span>
           </div>
@@ -132,7 +132,7 @@ export function LivePipeline({
             </div>
             <div className={styles.phaseProgress}>
               <strong>{summary.verified}/{summary.total}</strong>
-              <span>receipts</span>
+              <span>done</span>
             </div>
             <span className={styles.phaseCaption}>{describeLivePipelinePhase(summary)}</span>
           </div>

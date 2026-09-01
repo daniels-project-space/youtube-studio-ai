@@ -50,18 +50,18 @@ export default function RunsPage() {
     <div className={styles.page}>
       <header className={styles.hero}>
         <div>
-          <span>Production ledger / newest first</span>
-          <h1>Every run, with its receipts intact</h1>
-          <p>Follow active work, isolate failures, and open the exact pipeline, media, evidence, and console record behind any output.</p>
+          <span>Production</span>
+          <h1>Runs</h1>
+          <p>Watch progress, inspect failures, and open saved output.</p>
         </div>
         <div className={styles.heroMark} aria-hidden="true"><i /><span>RUN</span><i /></div>
       </header>
 
       <section className={styles.operatingSignals} aria-label="Production operating signals">
-        <div data-tone={failedCount ? "attention" : "quiet"}><small>Attention</small><strong>{failedCount}</strong><span>Failed retained records</span></div>
-        <div data-tone="ready"><small>Completed</small><strong>{completedCount}</strong><span>Terminal successful runs</span></div>
-        <div><small>YouTube outputs</small><strong>{outputCount}</strong><span>Destination-linked videos</span></div>
-        <div><small>Recorded spend</small><strong>{fmtUsd(totalCost)}</strong><span>Latest 200 records</span></div>
+        <div data-tone={failedCount ? "attention" : "quiet"}><small>Failed</small><strong>{failedCount}</strong><span>Needs review</span></div>
+        <div data-tone="ready"><small>Completed</small><strong>{completedCount}</strong><span>Successful</span></div>
+        <div><small>On YouTube</small><strong>{outputCount}</strong><span>Linked videos</span></div>
+        <div><small>Spend</small><strong>{fmtUsd(totalCost)}</strong><span>Last 200 runs</span></div>
       </section>
 
       <section
@@ -92,13 +92,13 @@ export default function RunsPage() {
         <>
           <div className={styles.listHeader}>
             <div>
-              <span>Production records</span>
+              <span>Runs</span>
               <h2>{RUN_FILTER_LABEL[filter]}</h2>
               <p aria-live="polite">
-                Showing {projection.visible.length} of {projection.matching.length} matching records
+                {projection.visible.length} of {projection.matching.length}
               </p>
             </div>
-            <span>Exact stage detail opens on each row</span>
+            <span>Select a run for details</span>
           </div>
           <div className={styles.list}>
             {projection.visible.map((run, index) => (

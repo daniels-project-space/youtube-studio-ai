@@ -8,7 +8,7 @@ async function main(): Promise<void> {
   const api = await readFile(join(process.cwd(), "src/app/api/studio-assets/route.ts"), "utf8");
   assert.match(source, /Studio assets/i);
   assert.match(source, /function AssetHero/);
-  assert.match(source, /Reuse what has earned the right\./);
+  assert.match(source, /<h1>Studio assets<\/h1>/);
   assert.match(source, /function AssetRoomTabs/);
   for (const room of ["approved", "decisions", "identity", "runtime", "catalog"]) {
     assert.match(source, new RegExp(`room === "${room}"`), `missing isolated ${room} room`);
@@ -22,8 +22,7 @@ async function main(): Promise<void> {
   assert.match(source, /Read-only evidence inventory/i);
   assert.match(source, /Reviewed candidates awaiting approval/i);
   assert.match(source, /Approve for this channel/i);
-  assert.match(source, /rechecks its retained release evidence/i);
-  assert.match(source, /Nothing becomes Studio-wide automatically/i);
+  assert.match(source, /Approve proven recipes for the same channel/i);
   assert.match(source, /action: "approve-candidate"/);
   assert.match(source, /persistent signed URLs/);
   assert.match(source, /short-lived preview for an approved image/);
@@ -50,7 +49,7 @@ async function main(): Promise<void> {
   assert.match(source, /Dedicated ComfyUI\/LTX/i);
   assert.match(source, /RTX 5090/i);
   assert.match(source, /Self-hosted open-weight LTX 2\.5 candidate/);
-  assert.match(source, /our own Studio library, not an external LTX service/i);
+  assert.match(source, /Browse approved Studio assets/i);
   assert.match(source, /Persistent character adapters/i);
   assert.match(source, /acceptedCharacterLoRAs/);
   assert.match(source, /accepted for reuse/i);
@@ -63,7 +62,7 @@ async function main(): Promise<void> {
   assert.match(source, /Direct LTX runtime/i);
   assert.match(source, /benchmark not admitted/i);
   assert.match(source, /owner-scoped benchmark admission/i);
-  assert.match(source, /32 GB VRAM/i);
+  assert.match(source, /minimumVramGb/);
   assert.match(source, /executionTarget/);
   assert.match(source, /Final-master signal/i);
   assert.match(source, /demonstrated tie-break evidence/i);

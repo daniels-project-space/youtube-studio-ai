@@ -5,7 +5,7 @@ export function PageHeader({
   title,
   subtitle,
   actions,
-  eyebrow = "Operating desk",
+  eyebrow,
 }: {
   title: string;
   subtitle?: ReactNode;
@@ -18,10 +18,12 @@ export function PageHeader({
       data-has-actions={actions ? "true" : "false"}
     >
       <div className="page-header-copy">
-        <span className="page-header-eyebrow">
-          <i aria-hidden="true" />
-          {eyebrow}
-        </span>
+        {eyebrow ? (
+          <span className="page-header-eyebrow">
+            <i aria-hidden="true" />
+            {eyebrow}
+          </span>
+        ) : null}
         <h1>{title}</h1>
         {subtitle && <p>{subtitle}</p>}
       </div>

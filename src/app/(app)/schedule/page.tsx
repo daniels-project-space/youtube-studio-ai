@@ -168,21 +168,17 @@ export default function SchedulePage() {
       >
         <div className={styles.heroGrid}>
           <div className={styles.heroCopy}>
-            <span className={styles.eyebrow}>Release clock / {scopeName}</span>
-            <h1>Shape the week before production shapes it for you.</h1>
-            <p>
-              See the fleet&apos;s publishing rhythm, protect ready work from collisions,
-              and pin exceptions without losing each channel&apos;s local cadence.
-            </p>
+            <span className={styles.eyebrow}>Schedule</span>
+            <h1>{scopeName}</h1>
             <div className={styles.nextRelease} data-empty={!nextEvent || undefined}>
               <span className={styles.nextReleaseSignal} aria-hidden="true"><i /></span>
               <span>
-                <small>{loading ? "Reading release ledger" : nextEvent ? "Next handoff" : "Runway clear"}</small>
-                <strong>{loading ? "Binding schedules…" : nextEvent?.title ?? "No planned release in this scope"}</strong>
+                <small>{loading ? "Loading" : nextEvent ? "Next release" : "Clear"}</small>
+                <strong>{loading ? "Loading schedule…" : nextEvent?.title ?? "No planned release"}</strong>
                 <em>
                   {nextEvent
                     ? `${nextEvent.channel} · ${nextEvent.pinned ? "pinned" : "cadence projected"}`
-                    : "Build the next episode from a channel room."}
+                    : "Create a video from a channel."}
                 </em>
               </span>
             </div>
@@ -213,7 +209,7 @@ export default function SchedulePage() {
             <div className={styles.rhythmLegend}>
               <span><i data-tone="ready" /> Ready runway</span>
               <span><i data-tone="attention" /> Needs intervention</span>
-              <span>Height = releases per day</span>
+              <span>Release count</span>
             </div>
           </div>
         </div>

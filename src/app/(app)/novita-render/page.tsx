@@ -588,7 +588,7 @@ export default function NovitaRenderPage() {
           <div>
             <span className={styles.eyebrow}>Admission circuit · exact profile only</span>
             <h2>Render admission readiness</h2>
-            <p>A generic health bit cannot start paid work. The direct Trigger receipt, exact model identity, benchmark, storage, and shutdown controls must agree.</p>
+            <p>Paid work requires verified runtime, model, storage, and shutdown.</p>
           </div>
           <span
             aria-live="polite"
@@ -688,7 +688,7 @@ export default function NovitaRenderPage() {
         <div className={styles.shotDesk}>
           <div className={styles.sectionHeading}>
             <div><span className={styles.eyebrow}>Storyboard contract</span><h2>Shot sequence</h2></div>
-            <p>Each row becomes one content-addressed image request and, after its still is verified, one image-to-video clip.</p>
+            <p>Each row creates one image and one verified video clip.</p>
           </div>
           <div className={styles.shotList}>
             {shots.map((shot, index) => (
@@ -791,15 +791,11 @@ function RenderFleetHero({
   return (
     <header className={styles.hero}>
       <div className={styles.heroCopy}>
-        <p className={styles.eyebrow}>Compute stage · signed render control</p>
+        <p className={styles.eyebrow}>GPU rendering</p>
         <h1>Novita Render Farm</h1>
-        <p>
-          Compose a shot contract, seal image candidates, then move only verified stills
-          into LTX video. Capacity, cost, checkpoints, and every output remain visible.
-        </p>
         <div className={styles.heroRule}>
           <span aria-hidden="true">⌁</span>
-          <div><small>Operating rule</small><strong>Inspect first. Confirm spend second. Dispatch last.</strong></div>
+          <div><small>Dispatch</small><strong>Inspect · confirm spend · render</strong></div>
         </div>
       </div>
       <figure className={styles.fleetMap} data-state={state}>

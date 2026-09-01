@@ -9,14 +9,14 @@ const runDesk = readFileSync(new URL("../../../components/ReviewedDataStoryRunDe
 const runStyles = readFileSync(new URL("../../../components/ReviewedDataStoryRunDesk.module.css", import.meta.url), "utf8");
 
 assert.match(page, /function EvidenceHero/);
-assert.match(page, /Nothing enters the script without a receipt\./);
+assert.match(page, /<h1>Editorial evidence<\/h1>/);
 assert.match(page, /Selected immutable receipt/);
 assert.match(page, /editorialEvidenceSummary\(selected\?\.packet\)/,
   "the matrix must use persisted receipt fields rather than inferred readiness");
 assert.match(page, /Source snapshots/);
 assert.match(page, /function LockedEvidenceVault/);
 assert.match(page, /No private evidence request was sent/);
-assert.match(page, /Evidence only · supervised runs only/);
+assert.match(page, /Evidence only · supervised runs/);
 assert.match(page, /fetch\("\/api\/editorial-evidence-packets"/);
 assert.match(page, /invalidatePreview/,
   "editing fingerprint inputs must continue to clear stale validation");

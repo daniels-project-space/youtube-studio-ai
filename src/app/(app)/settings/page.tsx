@@ -499,16 +499,12 @@ function SettingsHero({
   return (
     <section className={styles.governanceHero} aria-busy={access === "checking" || undefined}>
       <div className={styles.heroCopy}>
-        <span className={styles.eyebrow}>Governance room / {channel?.name ?? "workspace"}</span>
-        <h1>Set the boundaries automation cannot cross.</h1>
-        <p>
-          One channel at a time: identity, spend, release authority, and learning changes.
-          Every consequential control stays explicit and every saved change reaches the live workspace.
-        </p>
+        <span className={styles.eyebrow}>Settings</span>
+        <h1>{channel?.name ?? "Channel settings"}</h1>
         <div className={styles.scopeControl}>
           <span aria-hidden="true"><i /></span>
           <label>
-            <small>Policy scope</small>
+            <small>Channel</small>
             <select
               className={styles.select}
               value={channel?.slug ?? ""}
@@ -522,9 +518,9 @@ function SettingsHero({
             </select>
           </label>
           <div className={styles.authorityStamp} data-open={access === "owner" || undefined}>
-            <small>Control authority</small>
-            <strong>{access === "owner" ? "Signed owner session" : access === "checking" ? "Checking session" : "Inspection only"}</strong>
-            <em>{access === "owner" ? "Mutations are available with confirmations" : "No private governance records requested"}</em>
+            <small>Access</small>
+            <strong>{access === "owner" ? "Owner" : access === "checking" ? "Checking" : "View only"}</strong>
+            <em>{access === "owner" ? "Changes require confirmation" : "Changes unavailable"}</em>
           </div>
         </div>
       </div>
@@ -602,7 +598,7 @@ function LockedGovernanceRoom({
       <div className={styles.lockedGrid}>
         <div><span>01</span><strong>Policy remains visible</strong><p>Automation status, cadence, connector health, release mode, and budget stay inspectable.</p></div>
         <div><span>02</span><strong>Private ledgers stay private</strong><p>Publishing approvals and learning reconciliation are not fetched in this state.</p></div>
-        <div><span>03</span><strong>Mutations remain explicit</strong><p>Connect, revoke, activate, budget, release, and recovery actions require owner authority and confirmations.</p></div>
+        <div><span>03</span><strong>Confirm important changes</strong><p>Owner approval is required.</p></div>
       </div>
       {channel && <a href={`/channels/${channel.slug}`}>Open {channel.name} operating room ↗</a>}
     </section>

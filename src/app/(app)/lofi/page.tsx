@@ -46,15 +46,11 @@ export default function LofiPage() {
     <main className={styles.page}>
       <header className={styles.hero}>
         <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}>Music references · visual identity archive</p>
+          <p className={styles.eyebrow}>Visual reference</p>
           <h1>Lofi Visual Archive</h1>
-          <p>
-            One admitted scene, read carefully. This room translates visible composition
-            into original-production questions without turning old media into a preset.
-          </p>
           <div className={styles.heroBoundary}>
             <span aria-hidden="true">≈</span>
-            <div><small>Archive rule</small><strong>Study the grammar. Never inherit the identity.</strong></div>
+            <div><small>Rule</small><strong>Study composition. Keep the identity original.</strong></div>
           </div>
         </div>
         <figure className={styles.referenceFrame}>
@@ -121,7 +117,7 @@ export default function LofiPage() {
       <section className={styles.boundaryDesk}>
         <div className={styles.sectionHeading}>
           <div><span className={styles.eyebrow}>Archive boundary</span><h2>Retained does not mean reusable.</h2></div>
-          <p>Three hard limits keep reference material from silently becoming channel identity, generation guidance, or release evidence.</p>
+          <p>Reference material cannot become channel identity.</p>
         </div>
         <ol>
           {ARCHIVE_BOUNDARIES.map((boundary, index) => (

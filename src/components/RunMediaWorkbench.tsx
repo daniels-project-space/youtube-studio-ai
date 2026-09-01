@@ -43,34 +43,34 @@ export function RunMediaWorkbench({
       <div className={styles.shell}>
         <header className={styles.header}>
           <div className={styles.headerCopy}>
-            <p className={styles.eyebrow}>Assembly & retained work</p>
+            <p className={styles.eyebrow}>Output</p>
             <h2 id="recorded-work-title" className={styles.title}>
-              Recorded production work
+              Media
             </h2>
             <p className={styles.subtitle}>
               {isActiveRun
-                ? "New media appears here when a stage saves it. These are retained previews, not a live render stream."
-                : "Only media bytes retained for this run are shown here; stage receipts remain available in the production map below."}
+                ? "Saved output appears as stages finish."
+                : "Saved output from this run."}
             </p>
           </div>
 
           <dl className={styles.metrics}>
-            <Metric label="Stage receipts" value={stages === undefined ? "…" : String(stages.length)} />
+            <Metric label="Stages" value={stages === undefined ? "…" : String(stages.length)} />
             <Metric label="Verified" value={stageState.verifiedLabel} tone={stageState.tone} />
             <Metric label="Active stage" value={stageState.activeLabel} tone={stageState.tone} />
-            <Metric label="Retained media" value={assets === undefined ? "…" : String(ordered.length)} />
+            <Metric label="Files" value={assets === undefined ? "…" : String(ordered.length)} />
           </dl>
         </header>
 
         {assets === undefined ? (
           <div className={styles.loading} aria-live="polite" aria-busy="true">
-            Loading saved media receipts…
+            Loading media…
           </div>
         ) : ordered.length === 0 ? (
           <div className={styles.empty}>
             <strong>No retained media yet</strong>
             <span>
-              Media will appear after a pipeline stage successfully persists it for this run.
+              Output appears when a stage saves it.
             </span>
           </div>
         ) : (
@@ -89,7 +89,7 @@ export function RunMediaWorkbench({
               <div className={styles.moreRow}>
                 {hiddenCount > 0 && (
                   <span>
-                    Showing the newest {visible.length} of {ordered.length} retained media receipts.
+                    {visible.length} of {ordered.length} files
                   </span>
                 )}
                 <button
@@ -97,7 +97,7 @@ export function RunMediaWorkbench({
                   className={styles.moreButton}
                   onClick={() => setShowAll((current) => !current)}
                 >
-                  {showAll ? "Show recent work" : `Show all ${ordered.length} receipts`}
+                  {showAll ? "Show recent" : `Show all ${ordered.length}`}
                 </button>
               </div>
             )}
@@ -182,7 +182,7 @@ function RunMediaAssetCard({
         )}
 
         <details className={styles.receiptDetails}>
-          <summary>Media receipt</summary>
+          <summary>Storage</summary>
           <code title={asset.r2Key}>{asset.r2Key}</code>
         </details>
       </div>

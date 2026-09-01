@@ -216,17 +216,13 @@ export default function GoldenPipelinePage() {
     <main className={styles.page}>
       <header className={styles.hero}>
         <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}>Production standards · evidence atlas</p>
-          <h1>Golden Module Catalog</h1>
-          <p>
-            The reference shelf, runnable machinery, promotion receipts, and creator-ready
-            routes are different things. This desk makes every boundary visible.
-          </p>
+          <p className={styles.eyebrow}>Quality standards</p>
+          <h1>Golden modules</h1>
           <div className={styles.heroRule}>
             <span aria-hidden="true">G</span>
             <div>
-              <small>Admission rule</small>
-              <strong>A beautiful sample never certifies a production route.</strong>
+              <small>Rule</small>
+              <strong>Only tested routes can be promoted.</strong>
             </div>
           </div>
         </div>
@@ -282,7 +278,7 @@ export default function GoldenPipelinePage() {
           <span>Standards library</span>
           <h2>Five production disciplines</h2>
         </div>
-        <p>Open one chapter at a time. Each module exposes its runtime state, evidence boundary, quality gates, and no more than two inspectable examples.</p>
+        <p>Open a module to inspect its tests and examples.</p>
       </section>
       <div className={styles.chapters}>
       {CATEGORY_ORDER.map((cat, categoryIndex) => {

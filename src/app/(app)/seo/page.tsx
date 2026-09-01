@@ -354,23 +354,19 @@ function PackagingHero({
   return (
     <section className={styles.packagingHero}>
       <div className={styles.heroCopy}>
-        <span className={styles.eyebrow}>Packaging lab / {selectedChannel?.name ?? niche ?? "fleet"}</span>
-        <h1>Find the angle before you write the title.</h1>
-        <p>
-          Turn stored search language and competitor metadata into a next-upload brief.
-          Pixel-level thumbnail claims stay unavailable until visual evidence actually exists.
-        </p>
+        <span className={styles.eyebrow}>Research</span>
+        <h1>SEO &amp; packaging</h1>
         <div className={styles.heroHandoff} data-ready={Boolean(niche) || undefined}>
           <span aria-hidden="true"><i /></span>
           <div>
-            <small>{niche ? "Territory in focus" : "Choose a research territory"}</small>
-            <strong>{niche ?? "No niche is bound to the packaging desk"}</strong>
+            <small>{niche ? "Niche" : "Choose a niche"}</small>
+            <strong>{niche ?? "No niche selected"}</strong>
             <em>
               {selectedChannel
-                ? `${selectedChannel.name} · channel identity binding`
+                ? selectedChannel.name
                 : niche
-                  ? "Fleet research view · no channel identity is being changed"
-                  : "Select a stored territory below to inspect its evidence."}
+                  ? "Fleet research"
+                  : "Select a niche below."}
             </em>
           </div>
           {niche ? (
@@ -571,7 +567,7 @@ function ResearchEvidenceLedger({
       <div className={styles.evidenceLedgerHeader}>
         <small>Research evidence ledger</small>
         <h2>What this upload brief is grounded in</h2>
-        <p>Only persisted research is represented here. Metadata-only collection remains visibly limited rather than being presented as visual or audience evidence.</p>
+        <p>Saved metadata only.</p>
       </div>
       <div className={styles.evidenceRows}>
         {rows.map((row) => (
@@ -792,7 +788,7 @@ function NicheIntelligence({ intel }: { intel: SeoIntel }) {
 
   return (
     <section className={styles.signalRoom}>
-      <SeoSectionHeading eyebrow="Language evidence" title="Search and packaging signals" detail="Stored metadata patterns, clearly separated from visual thumbnail measurement." />
+      <SeoSectionHeading eyebrow="Language" title="Search signals" detail="Saved title and tag patterns." />
       <div className={styles.intelligenceGrid}>
         <Panel title="Optimal title length">
           <div className={styles.titleLength}>
@@ -849,7 +845,7 @@ function SeoDatabank({ databank }: { databank: SeoDatabankRow }) {
   const attribution = databank.sourceAttribution;
   return (
     <section className={styles.strategyRoom}>
-      <SeoSectionHeading eyebrow="Pattern library" title="Strategy databank" detail="Reusable structures extracted from the stored sample; gaps remain hypotheses until separately tested." />
+      <SeoSectionHeading eyebrow="Patterns" title="Strategy" detail="Reusable structures and open gaps." />
       {attribution && (
         <p className={styles.attributionNote}>
           Source: YouTube Data API v3 metadata from {attribution.topPerformersAnalysed} top performers. Visual, opening-hook, and demand-gap claims remain unavailable without separate evidence.
@@ -894,7 +890,7 @@ function ViewEstimateWidget({
 
   return (
     <section className={styles.estimateRoom}>
-      <SeoSectionHeading eyebrow="Scenario lens" title="Tag-overlap estimate" detail="A bounded comparison to the stored niche sample—not a promise of audience demand." />
+      <SeoSectionHeading eyebrow="Compare" title="Tag overlap" detail="Comparison to the saved niche sample." />
       <div className={styles.estimateWorkbench}>
         <label>
           <span>Candidate tag set</span>
@@ -957,7 +953,7 @@ function CompetitorTopVideos({
       {top.length === 0 ? (
         <EmptyState
           title="No competitor videos yet"
-          description="Run research to mine the top-performing competitor videos for this niche."
+          description="Run research to collect competitor videos."
           icon={<IconExternal width={24} height={24} />}
         />
       ) : (

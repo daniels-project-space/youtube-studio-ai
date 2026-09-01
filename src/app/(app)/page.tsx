@@ -123,9 +123,9 @@ export default function OverviewPage() {
   return (
     <div className={styles.dashboard}>
       <PageHeader
-        eyebrow="Production floor / live"
+        eyebrow="Live studio"
         title="Studio"
-        subtitle={`A calm operating view across ${selectedName}. Work in motion, release pressure, and channel identity—without the control-room clutter.`}
+        subtitle={selectedName}
         actions={
           <div className={styles.headerActions}>
             <Link href="/schedule" className="studio-action studio-action-secondary">
@@ -146,27 +146,27 @@ export default function OverviewPage() {
           </span>
           <h2 id="studio-signal-title">
             {loading
-              ? "Building the live picture."
+              ? "Loading studio status…"
               : activeCount > 0
-                ? `${activeCount} ${activeCount === 1 ? "story is" : "stories are"} becoming finished work.`
+                ? `${activeCount} ${activeCount === 1 ? "run" : "runs"} in progress`
                 : readyPlan.length > 0
-                  ? `${readyPlan.length} release ${readyPlan.length === 1 ? "decision" : "decisions"} ready for you.`
-                  : "Nothing is shouting. The studio is ready for its next move."}
+                  ? `${readyPlan.length} ready to schedule`
+                  : "Ready for the next run"}
           </h2>
           <p>
             {overdue.length > 0
               ? `${overdue.length} scheduled ${overdue.length === 1 ? "item needs" : "items need"} attention before the release rhythm slips.`
               : failed.length > 0
                 ? `${failed.length} recent ${failed.length === 1 ? "run has" : "runs have"} a traceable failure to review.`
-                : "Release gates remain private by default; only evidence-backed masters advance."}
+                : "No failures or overdue releases."}
           </p>
           <div className={styles.heroActions}>
             <Link href={activeCount > 0 ? "/runs" : "/schedule"} className="studio-button" data-variant="signal">
               <IconRuns width={15} height={15} />
-              {activeCount > 0 ? "Follow live work" : "Shape the next release"}
+              {activeCount > 0 ? "View runs" : "Open schedule"}
             </Link>
             <Link href="/channels" className={styles.textAction}>
-              Open channel fleet <span aria-hidden="true">↗</span>
+              View channels <span aria-hidden="true">↗</span>
             </Link>
           </div>
         </div>
@@ -209,7 +209,7 @@ export default function OverviewPage() {
               ))}
             </div>
           ) : (
-            <CompactEmpty icon={<IconRuns width={20} height={20} />} title="No active runs" detail="The next production will animate here from its first persisted stage." />
+            <CompactEmpty icon={<IconRuns width={20} height={20} />} title="No active runs" detail="New runs appear here." />
           )}
         </div>
 

@@ -255,26 +255,22 @@ function AnalyticsHero({
   return (
     <section className={styles.learningHero} aria-busy={loading}>
       <div className={styles.heroLead}>
-        <span className={styles.eyebrow}>Audience observatory / {selected ? selected.name : "fleet"}</span>
-        <h1>Read behavior. Change the next episode.</h1>
-        <p>
-          Analytics is useful only when it changes a packaging, story, or release decision.
-          This room keeps observed YouTube signals separate from forecasts and production spend.
-        </p>
+        <span className={styles.eyebrow}>YouTube analytics</span>
+        <h1>{selected ? selected.name : "Channel performance"}</h1>
         <div className={styles.observationState} data-tone={fleet?.tone ?? "quiet"}>
           <span aria-hidden="true"><i /></span>
           <div>
-            <small>{selected ? "Selected channel evidence" : "Fleet observation posture"}</small>
+            <small>{selected ? "Channel status" : "Data status"}</small>
             <strong>
               {loading
-                ? "Reading signed analytics receipts…"
+                ? "Loading YouTube data…"
                 : selected
-                  ? `${selected.name} is isolated for diagnosis`
+                  ? "Channel selected"
                   : fleet?.label ?? "No refresh ledger yet"}
             </strong>
             <em>
               {loading
-                ? "No interpretation is shown until live data binds."
+                ? ""
                 : `${current} current · ${refreshing} refreshing · ${intervention} need intervention`}
             </em>
           </div>
@@ -430,9 +426,9 @@ function AnalyticsRefreshHealth({ rows, selectedSlug }: { rows: RefreshStatusRow
   return (
     <section className={styles.healthRoom}>
       <AnalyticsSectionHeading
-        eyebrow="Source integrity"
-        title="Can these observations be trusted?"
-        detail="Six-hour YouTube refresh receipts, connection scope, and ambiguous-response stops."
+        eyebrow="Data health"
+        title="YouTube connection"
+        detail="Refresh status and access scope."
       />
       <div className={styles.healthBand}>
         {selectedRow ? [selectedRow].map((row) => {
@@ -526,9 +522,9 @@ function PerChannelCharts({
   return (
     <section className={styles.trendRoom}>
       <AnalyticsSectionHeading
-        eyebrow="90-day observation"
-        title={`${row.name} — momentum trace`}
-        detail="A true time sequence. Cumulative signals stay distinct from daily deltas."
+        eyebrow="90 days"
+        title={`${row.name} trend`}
+        detail="Daily and cumulative signals."
       />
       <div className={styles.trendSummary}>
         <span><small>Observed view change</small><strong>{viewChange >= 0 ? "+" : ""}{compact(viewChange)}</strong><em>first to latest snapshot</em></span>
@@ -571,9 +567,9 @@ function FleetComparison({ rows }: { rows: SummaryRow[] }) {
   return (
     <section className={styles.comparisonRoom}>
       <AnalyticsSectionHeading
-        eyebrow="Portfolio comparison"
-        title="Where the fleet is earning attention"
-        detail="Ranked categorical evidence—select a channel above for its actual day-by-day trace."
+        eyebrow="Channels"
+        title="Performance comparison"
+        detail="Select a channel for its daily trend."
       />
       <div className={styles.metricTabs} role="tablist" aria-label="Fleet comparison metric">
         {FLEET_METRICS.map((item) => (
@@ -655,13 +651,13 @@ function CompetitorsSection({
     return (
       <section className={styles.competitorRoom}>
         <AnalyticsSectionHeading
-          eyebrow="Market context"
+          eyebrow="Market"
           title="Competitor signals"
-          detail="Scoped only after a channel is selected; fleet-wide mixing would hide niche context."
+          detail="Select a channel to compare its niche."
         />
         <EmptyState
           title="Select a channel"
-          description="Pick a channel in the top bar to see competitor intelligence for its niche."
+          description="Choose a channel above."
           icon={<IconExternal width={24} height={24} />}
         />
       </section>
@@ -672,9 +668,9 @@ function CompetitorsSection({
     return (
       <section className={styles.competitorRoom}>
         <AnalyticsSectionHeading
-          eyebrow="Market context"
+          eyebrow="Market"
           title="Competitor signals"
-          detail="A niche binding is required before external observations can be compared honestly."
+          detail="Add a niche to compare channels."
         />
         <EmptyState
           title="No niche set"
@@ -699,9 +695,9 @@ function CompetitorsSection({
   return (
     <section className={styles.competitorRoom}>
       <AnalyticsSectionHeading
-        eyebrow="Market context"
+        eyebrow="Market"
         title={`Competitors — ${niche}`}
-        detail="External top-video observations for context, never an instruction to copy."
+        detail="Top videos in this niche."
         action={<Link href="/seo">Open packaging research ↗</Link>}
       />
 
@@ -710,7 +706,7 @@ function CompetitorsSection({
       ) : topVideos.length === 0 ? (
         <EmptyState
           title="No competitor data yet"
-          description="Run research from the SEO page (or wait for the weekly refresh) to mine this niche's top competitor videos."
+          description="Run SEO research to collect competitor videos."
           icon={<IconExternal width={24} height={24} />}
         />
       ) : (

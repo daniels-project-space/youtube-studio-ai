@@ -242,15 +242,11 @@ function AssetHero({
   return (
     <section className={styles.hero} aria-busy={access === "checking" || (access === "owner" && loading) || undefined}>
       <div className={styles.heroCopy}>
-        <p className={styles.eyebrow}>Studio assets / reuse registry</p>
-        <h1>Reuse what has earned the right.</h1>
-        <p>
-          Every recipe, image, adapter, and control stays bound to its review,
-          scope, and runtime proof. Similar-looking is never the same as compatible.
-        </p>
+        <p className={styles.eyebrow}>Reusable media &amp; recipes</p>
+        <h1>Studio assets</h1>
         <div className={styles.heroActions}>
           <button type="button" className={styles.refresh} disabled={loading || access !== "owner"} onClick={onRefresh}>{access !== "owner" ? access === "checking" ? "Checking access…" : "Registry locked" : loading ? "Reading registry…" : "Refresh registry"}</button>
-          <span>Metadata by default · previews only on owner request</span>
+          <span>Owner-only previews</span>
         </div>
       </div>
       <div className={styles.registryMap}>
@@ -495,7 +491,7 @@ export default function StudioAssetsPage() {
       <section className={styles.boundaryStrip}>
         <span className={styles.kind}>Read-only evidence inventory</span>
         <strong>Metadata first. Reuse only after exact compatibility.</strong>
-        <p>This is our own Studio library, not an external LTX service. The inventory is read-only except for an owner’s deliberate approval of a certificate-backed, channel-only candidate; it never uploads, downloads models, trains, renders, or publishes.</p>
+        <p>Browse approved Studio assets. Owner approval is explicit.</p>
         <small>It never shows storage locations, model bytes, or persistent signed URLs; an owner may explicitly open one short-lived preview for an approved image. Official catalog entries are not installed weights or render permission; an assembly consumer is not admitted until render-parity is proven.</small>
       </section>
 
@@ -527,7 +523,7 @@ export default function StudioAssetsPage() {
             <span className={styles.kind}>Owner decision required</span>
             <h2 id="studio-asset-candidate-approvals">Reviewed candidates awaiting approval</h2>
           </div>
-          <p>Each candidate came from a passing final master without reusing an existing Studio recipe. Approval rechecks its retained release evidence and keeps the result restricted to the same channel. Nothing becomes Studio-wide automatically.</p>
+          <p>Approve proven recipes for the same channel.</p>
         </div>
         <div className={styles.grid}>
           {candidates.map((candidate) => <article className={styles.card} key={candidate.candidateFingerprint}>
@@ -613,7 +609,7 @@ export default function StudioAssetsPage() {
             <span className={styles.kind}>Series identity registry</span>
             <h2 id="series-character-adapter-registry">Persistent character adapters</h2>
           </div>
-          <p>Accepted identity adapters are reused only for the same sealed character specification. This view deliberately exposes evidence metadata, never adapter paths, bytes, datasets, or a render permission.</p>
+          <p>Reuse identity adapters only with their original character.</p>
         </div>
         <div className={styles.grid}>
           {acceptedCharacterLoRAs.map((adapter) => (
@@ -645,7 +641,7 @@ export default function StudioAssetsPage() {
             <span className={styles.kind}>Future render engine</span>
             <h2 id="music-video-engine">{musicVideoA2Vid.label}</h2>
           </div>
-          <p>Designed for sealed music segments with optional approved opening and ending images. It is separate from the existing visual-loop worker, so it cannot silently reuse a text-to-video path.</p>
+          <p>Build music segments from approved audio and stills.</p>
         </div>
         <article className={styles.card}>
           <div className={styles.cardHead}>
@@ -681,7 +677,7 @@ export default function StudioAssetsPage() {
             <span className={styles.kind}>Official LTX catalog</span>
             <h2 id="official-ltx-quality-catalog">Quality and control candidates</h2>
           </div>
-          <p>Cataloged for the Studio, but unavailable until the exact evidence path shown on each card is complete. IC controls additionally require a sealed workflow and input guide, and use a dedicated Novita RTX 5090 with at least 32 GB VRAM.</p>
+          <p>Unavailable assets show their missing requirements.</p>
         </div>
         <div className={styles.grid}>
           {curatedLtxCatalog.map((candidate) => (
@@ -721,7 +717,7 @@ export default function StudioAssetsPage() {
             <span className={styles.kind}>Visual treatment catalog</span>
             <h2 id="visual-treatment-catalog">Storyboard and review profiles</h2>
           </div>
-          <p>These profiles now bind the cinematic Visual Matter plan, continuity locks, and visual review. They are not installed models or a renderer admission.</p>
+          <p>Profiles bind visual plans and continuity checks.</p>
         </div>
         <div className={styles.grid}>
           {visualTreatmentCatalog.map((treatment) => (
