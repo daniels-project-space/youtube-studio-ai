@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { PageHeader } from "@/components/PageHeader";
 import { MinimumVideoFoundationCard } from "@/components/MinimumVideoFoundationCard";
 import { NICHE_CATALOG_EVIDENCE, NICHES, getNiche } from "@/lib/nicheCatalog";
 import { nichePreset } from "@/engine/golden";
@@ -54,6 +53,7 @@ import {
   findCertifiedChannelComposition,
 } from "@/engine/channelCompositionCatalog";
 import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
+import styles from "./newChannel.module.css";
 
 type Phase = "form" | "building" | "error";
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -71,6 +71,30 @@ const STAGE_LABELS: Record<string, string> = {
   "channel-inception-probe": "Private validation render",
   "channel-inception-readiness": "Production readiness",
 };
+const STAGE_DESCRIPTIONS: Record<string, string> = {
+  "channel-inception-research": "Ground the premise, audience, and named source landscape.",
+  "channel-inception-positioning": "Lock the channel promise, difference, and repeatable editorial lane.",
+  "channel-inception-seo": "Shape discovery language without letting search terms replace the premise.",
+  "channel-inception-voice": "Audition the narrator against this channel’s pace and emotional register.",
+  "channel-inception-avatar": "Create the small-format identity mark used across the studio and YouTube.",
+  "channel-inception-banner": "Compose a channel-specific masthead with safe desktop and mobile crops.",
+  "channel-inception-thumbnails": "Build the first package language and retain reviewable candidates.",
+  "channel-inception-pipeline": "Freeze the certified production route and its cost/release boundaries.",
+  "channel-inception-probe": "Render one bounded private proof and route defects back to their source stage.",
+  "channel-inception-readiness": "Admit production only after identity, route, proof, and release checks agree.",
+};
+const BUILD_PHASES = [
+  { label: "Foundation", keys: ["channel-inception-research", "channel-inception-positioning", "channel-inception-seo"] },
+  { label: "Identity", keys: ["channel-inception-voice", "channel-inception-avatar", "channel-inception-banner"] },
+  { label: "Packaging", keys: ["channel-inception-thumbnails", "channel-inception-pipeline"] },
+  { label: "Proof & admit", keys: ["channel-inception-probe", "channel-inception-readiness"] },
+] as const;
+const STEP_META = [
+  { label: "Territory", caption: "Audience world" },
+  { label: "Format", caption: "Certified route" },
+  { label: "System", caption: "Identity + controls" },
+  { label: "Review", caption: "Authority + receipts" },
+] as const;
 
 interface ActiveBuildSession {
   runId: string;
@@ -399,6 +423,7 @@ export default function NewChannelWizard() {
   // Advanced per-module param editor: paramOverrides[blockId][key] = value.
   const [paramOverrides, setParamOverrides] = useState<Record<string, Record<string, unknown>>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showPipelineStyle, setShowPipelineStyle] = useState(false);
   // Pipeline style — per-module presets/knobs the new channel starts with
   // (validated server-side by channels.setModuleConfig in design-channel).
   const [moduleConfig, setModuleConfig] = useState<ModuleConfigMap>({});
@@ -1092,46 +1117,95 @@ export default function NewChannelWizard() {
   }, [poll, submitPending]);
 
   if (phase === "building") {
+    const stageRows = buildProgress?.stages ?? [];
+    const completedStages = stageRows.filter((stage) => stage.status === "complete" || stage.status === "accepted").length;
+    const progressPercent = stageRows.length ? Math.round((completedStages / stageRows.length) * 100) : 0;
+    const activeStage = stageRows.find((stage) => stage.status === "running");
+    const proofRunning = activeStage?.moduleKey === "channel-inception-probe";
     return (
-      <>
-        <PageHeader title="Building channel" subtitle="Live durable progress — safe to leave and return." />
-        <div className="glass" style={{ padding: "1.25rem", display: "grid", gap: "1rem", maxWidth: 760 }}>
-          <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "center" }}>
-            <div>
-              <div style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem" }}>{(activeBuild?.displayName ?? pendingBuild?.displayName ?? name) || niche?.label}</div>
-              <div style={{ color: "var(--color-muted)", fontSize: "0.78rem", marginTop: 3 }}>
-                {buildProgress
-                  ? buildProgress.inceptionStatus === "planned"
-                    ? "Plan saved — no provider spend authorized"
-                    : `${buildProgress.stages.filter((stage) => stage.status === "complete" || stage.status === "accepted").length}/${buildProgress.stages.length} stages finished`
-                  : "Creating the durable build ledger…"}
-              </div>
+      <main className={styles.buildPage} aria-live="polite">
+        <header className={`${styles.hero} ${styles.buildHero}`}>
+          <div className={styles.heroCopy}>
+            <span className={styles.eyebrow}>Channel inception / durable receipts</span>
+            <h1>{(activeBuild?.displayName ?? pendingBuild?.displayName ?? name) || niche?.label || "Building channel"}</h1>
+            <p>
+              {buildProgress?.inceptionStatus === "planned"
+                ? "The channel plan is saved. Provider execution remains locked because setup spend was not authorized."
+                : activeStage
+                  ? `${STAGE_LABELS[activeStage.moduleKey] ?? activeStage.moduleKey} is the latest persisted activity. You can leave this page and reconnect safely.`
+                  : "Creating the durable build ledger before any stage can claim work."}
+            </p>
+            <div className={styles.heroFacts}>
+              <span><i />Idempotent request</span>
+              <span><i />Private by default</span>
+              <span><i />Root-stage repair</span>
             </div>
-            <div className="studio-pulse" aria-label="Build active" style={{ fontSize: "1.5rem" }}>✦</div>
           </div>
-          {buildProgress?.stages?.length ? (
-            <div style={{ display: "grid", gap: "0.45rem" }}>
-              {buildProgress.stages.map((stage) => {
-                const done = stage.status === "complete" || stage.status === "accepted";
-                const active = stage.status === "running";
-                const failed = stage.status === "blocked" || stage.status === "failed";
-                return (
-                  <div key={stage.moduleKey} style={{ display: "grid", gridTemplateColumns: "18px minmax(0,1fr) auto", alignItems: "center", gap: "0.55rem", padding: "0.5rem 0.6rem", borderRadius: 8, background: active ? "rgba(124,124,255,0.08)" : "var(--color-surface)" }}>
-                    <span style={{ color: done ? "var(--color-ok)" : failed ? "var(--color-failed)" : active ? "var(--color-accent)" : "var(--color-faint)" }}>{done ? "✓" : failed ? "!" : active ? "●" : "○"}</span>
-                    <span style={{ fontSize: "0.82rem", fontWeight: active ? 600 : 500 }}>{STAGE_LABELS[stage.moduleKey] ?? stage.moduleKey}</span>
-                    <span style={{ color: "var(--color-muted)", fontSize: "0.7rem" }}>{stage.status}{stage.attempts > 1 ? ` · try ${stage.attempts}` : ""}</span>
-                    {stage.error && <span style={{ gridColumn: "2 / -1", color: "var(--color-failed)", fontSize: "0.72rem" }}>{stage.error}</span>}
-                  </div>
-                );
+          <div className={styles.buildSignal} aria-label="Channel build active"><span><i /><i /><i /></span></div>
+        </header>
+
+        <section className={styles.buildWorkspace}>
+          <aside className={styles.buildSummary}>
+            <small>Live build control</small>
+            <h2>{activeStage ? STAGE_LABELS[activeStage.moduleKey] ?? activeStage.moduleKey : "Opening the ledger"}</h2>
+            <p>{activeStage ? STAGE_DESCRIPTIONS[activeStage.moduleKey] ?? "Waiting for this stage to persist its next receipt." : "No provider activity is inferred until a durable stage row appears."}</p>
+            <div className={styles.buildMeter}>
+              <div><small>Receipt coverage</small><strong>{stageRows.length ? `${completedStages}/${stageRows.length}` : "Connecting"}</strong></div>
+              <span className={styles.buildTrack} data-indeterminate={stageRows.length ? undefined : "true"} style={{ "--build-progress": `${progressPercent}%` } as CSSProperties}><i /></span>
+            </div>
+            <div className={styles.authorityGrid}>
+              <span><small>Execution</small><strong>{buildProgress?.executionAuthorized ? "Authorized" : "Plan only"}</strong></span>
+              <span><small>Private proof</small><strong>{buildProgress?.probeAuthorized ? "Authorized" : "Not authorized"}</strong></span>
+              <span><small>Build identity</small><strong>{activeBuild?.runId?.slice(0, 10) ?? "Pending receipt"}</strong></span>
+              <span><small>Recovery</small><strong>Safe to reconnect</strong></span>
+            </div>
+          </aside>
+
+          <div>
+            <div className={styles.phaseRail} aria-label="Channel inception phases">
+              {BUILD_PHASES.map((phaseRow) => {
+                const rows = stageRows.filter((stage) => phaseRow.keys.some((key) => key === stage.moduleKey));
+                const complete = rows.length > 0 && rows.every((stage) => stage.status === "complete" || stage.status === "accepted");
+                const active = rows.some((stage) => stage.status === "running");
+                return <div className={styles.buildPhase} data-state={complete ? "complete" : active ? "active" : "queued"} key={phaseRow.label}>
+                  <small>{complete ? "Complete" : active ? "In progress" : "Queued"}</small>
+                  <strong>{phaseRow.label}</strong>
+                  <span>{rows.filter((stage) => stage.status === "complete" || stage.status === "accepted").length}/{phaseRow.keys.length} receipts</span>
+                </div>;
               })}
             </div>
-          ) : (
-            <div style={{ height: 4, borderRadius: 999, overflow: "hidden", background: "var(--color-surface)" }}>
-              <div className="studio-pulse" style={{ width: "35%", height: "100%", background: "var(--color-accent)" }} />
-            </div>
-          )}
-        </div>
-      </>
+
+            {proofRunning && <section className={styles.proofWindow}>
+              <div className={styles.proofCopy}>
+                <small>Private quality-control render</small>
+                <strong>Testing the channel as a real production route</strong>
+                <p>The bounded proof stays private. Visual, timing, identity, and pipeline defects are attributed back to the responsible root stage before production admission.</p>
+              </div>
+              <div className={styles.proofVisual} aria-label="Private proof render status visualization"><span>status signal · no preview frames yet</span></div>
+            </section>}
+
+            {stageRows.length ? <div className={styles.stageList}>
+              {stageRows.map((stage, index) => (
+                <div className={styles.stageRow} data-state={stage.status} key={stage.moduleKey}>
+                  <span className={styles.stageIndex}>{String(index + 1).padStart(2, "0")}</span>
+                  <span className={styles.stageCopy}>
+                    <strong>{STAGE_LABELS[stage.moduleKey] ?? stage.moduleKey}</strong>
+                    <span>{STAGE_DESCRIPTIONS[stage.moduleKey] ?? stage.executionPhase ?? "Durable channel-inception stage"}</span>
+                  </span>
+                  <span className={styles.stageState}><strong>{stage.status}</strong><small>{stage.attempts > 1 ? `attempt ${stage.attempts}` : stage.executionPhase ?? "receipt state"}</small></span>
+                  {stage.error && <span className={styles.stageError} role="alert">{stage.error}</span>}
+                </div>
+              ))}
+            </div> : <div className={styles.stageList} aria-busy="true">
+              {Object.keys(STAGE_LABELS).map((key, index) => <div className={styles.stageRow} data-state="queued" key={key}>
+                <span className={styles.stageIndex}>{String(index + 1).padStart(2, "0")}</span>
+                <span className={styles.stageCopy}><strong>{STAGE_LABELS[key]}</strong><span>{STAGE_DESCRIPTIONS[key]}</span></span>
+                <span className={styles.stageState}><strong>queued</strong><small>awaiting ledger</small></span>
+              </div>)}
+            </div>}
+          </div>
+        </section>
+      </main>
     );
   }
 
@@ -1152,31 +1226,39 @@ export default function NewChannelWizard() {
           )),
       )
       : true;
-  const stepNames = ["Niche", "Format", "Details", "Review"];
-
   return (
-    <>
-      <PageHeader title="New channel" subtitle="Pick a niche, choose a format, tune the modules — the studio designs the pipeline." />
+    <main className={styles.page}>
+      <header className={styles.hero}>
+        <div className={styles.heroCopy}>
+          <span className={styles.eyebrow}>Channel inception / certified creator route</span>
+          <h1>Build a channel system, not a profile.</h1>
+          <p>Choose the audience territory, bind a production format, author its identity and controls, then review the exact authority and receipts before anything runs.</p>
+          <div className={styles.heroFacts}>
+            <span><i />Private first</span>
+            <span><i />One bounded QC proof</span>
+            <span><i />Recoverable by design</span>
+          </div>
+        </div>
+        <div className={styles.heroGlyph} aria-hidden="true"><i /><i /><i /><span>CH</span></div>
+      </header>
 
-      {/* stepper */}
-      <div style={{ display: "flex", gap: "0.5rem", marginBottom: "1.4rem", flexWrap: "wrap" }}>
-        {stepNames.map((s, i) => (
-          <div key={s} style={{ display: "flex", alignItems: "center", gap: "0.5rem", opacity: i === step ? 1 : 0.5 }}>
-            <span style={{ width: 22, height: 22, borderRadius: 999, display: "grid", placeItems: "center", fontSize: "0.72rem", fontWeight: 700,
-              background: i <= step ? "var(--color-accent)" : "var(--color-surface)", color: i <= step ? "#0a0a0b" : "var(--color-muted)" }}>{i + 1}</span>
-            <span style={{ fontSize: "0.82rem", fontWeight: i === step ? 600 : 500 }}>{s}</span>
-            {i < stepNames.length - 1 && <span style={{ color: "var(--color-faint)" }}>›</span>}
+      <nav className={styles.stepRail} aria-label="Channel creation stages">
+        {STEP_META.map((item, index) => (
+          <div className={styles.stepNode} data-state={index === step ? "active" : index < step ? "complete" : "queued"} key={item.label} aria-current={index === step ? "step" : undefined}>
+            <span className={styles.stepIndex}>{String(index + 1).padStart(2, "0")}</span>
+            <strong>{item.label}</strong>
+            <small>{item.caption}</small>
           </div>
         ))}
-      </div>
+      </nav>
 
-      {error && <div className="glass" role="alert" style={{ padding: "0.8rem 1rem", marginBottom: "1rem", border: "1px solid rgba(248,113,113,0.4)", color: "#fca5a5", fontSize: "0.85rem", display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
-        <span style={{ display: "grid", gap: "0.25rem", minWidth: 0, flex: "1 1 320px" }}>
+      {error && <div className={styles.errorPanel} role="alert">
+        <span className={styles.errorCopy}>
           <strong>Channel setup needs attention</strong>
           <span>{error}</span>
-          {activeBuild && <small style={{ color: "var(--color-muted)" }}>The exact build identity is preserved. Provider work will not restart automatically.</small>}
+          {activeBuild && <small>The exact build identity is preserved. Provider work will not restart automatically.</small>}
         </span>
-        <span style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+        <span className={styles.errorActions}>
           {reviewHrefs.map((href) => (
             <Link key={href} href={href} style={btnPrimary}>
               {reviewHrefLabel(href)}
@@ -1196,46 +1278,61 @@ export default function NewChannelWizard() {
 
       {/* STEP 0 — niche */}
       {step === 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px,1fr))", gap: "0.8rem" }}>
-          {NICHES.map((n) => {
+        <section>
+          <header className={styles.sectionIntro}>
+            <div><span>01 / audience territory</span><h2>What world should this channel own?</h2><p>This is not a visual preset. The territory seeds the audience promise, evidence needs, default route, and repeatable episode space.</p></div>
+            <strong className={styles.sectionCount}>{NICHES.length} researched territories</strong>
+          </header>
+          <div className={styles.nicheGrid}>
+          {NICHES.map((n, index) => {
             const on = n.key === nicheKey;
             const defaultFamilyReadiness = automaticFamilyCreatorReadiness(n.defaultFamily);
             return (
-              <button key={n.key} onClick={() => pickNiche(n.key)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: "pointer",
-                border: on ? "1px solid var(--color-accent)" : "1px solid var(--color-border)", background: on ? "rgba(124,124,255,0.08)" : undefined }}>
-                <div style={{ fontSize: "1.5rem" }}>{n.icon}</div>
-                <div style={{ fontWeight: 600, marginTop: "0.4rem" }}>{n.label}</div>
-                <div style={{ display: "flex", gap: "0.4rem", margin: "0.4rem 0", fontSize: "0.72rem" }}>
-                  <span style={{ color: "var(--color-faint)" }}>Planning seed</span>
-                  <span style={{ color: n.difficulty === "Easy" ? "var(--color-ok)" : n.difficulty === "Hard" ? "var(--color-failed)" : "var(--color-accent)" }}>{n.difficulty}</span>
-                  <span style={{ color: defaultFamilyReadiness.ready ? "var(--color-ok)" : "#fbbf24" }}>
-                    {defaultFamilyReadiness.ready ? "Automatic route ready" : "Automatic start held"}
-                  </span>
-                </div>
-                <div style={{ fontSize: "0.76rem", color: "var(--color-muted)" }}>{n.blurb}</div>
+              <button key={n.key} onClick={() => pickNiche(n.key)} className={styles.nicheCard} data-active={on ? "true" : undefined} aria-pressed={on}>
+                <span className={styles.nicheMark}><NicheGlyph index={index} /></span>
+                <span className={styles.nicheCopy}>
+                  <span className={styles.nicheTop}><strong>{n.label}</strong><small>{String(index + 1).padStart(2, "0")}</small></span>
+                  <span className={styles.nicheMeta}><span>{n.difficulty}</span><span data-ready={defaultFamilyReadiness.ready ? "true" : "false"}>{defaultFamilyReadiness.ready ? "route ready" : "start held"}</span></span>
+                  <span className={styles.nicheBlurb}>{n.blurb}</span>
                 {!defaultFamilyReadiness.ready && defaultFamilyReadiness.blockers[0] ? (
-                  <div style={{ marginTop: "0.45rem", fontSize: "0.7rem", lineHeight: 1.35, color: "#fbbf24" }}>
-                    Needs before automatic creation: {defaultFamilyReadiness.blockers[0]}
-                  </div>
+                    <span className={styles.nicheBlocker}>Held: {defaultFamilyReadiness.blockers[0]}</span>
                 ) : null}
+                </span>
               </button>
             );
           })}
+          </div>
           {niche && (
-            <div className="glass" style={{ gridColumn: "1 / -1", padding: "1rem", display: "grid", gap: "0.5rem" }}>
-              <span style={{ fontSize: "0.78rem", color: "var(--color-muted)" }}>{NICHE_CATALOG_EVIDENCE.label}</span>
+            <div className={styles.subcategoryBar}>
+              <span>{NICHE_CATALOG_EVIDENCE.label} · choose the narrower planning lane</span>
               <select value={subcategory} onChange={(e) => setSubcategory(e.target.value)} style={selStyle}>
                 {niche.subcategories.map((s) => <option key={s.id} value={s.name}>{s.name} — planning seed</option>)}
               </select>
             </div>
           )}
-        </div>
+        </section>
       )}
 
       {/* STEP 1 — format */}
       {step === 1 && (
-        <div style={{ display: "grid", gap: "0.8rem" }}>
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px,1fr))", gap: "0.8rem" }}>
+        <section className={styles.formatPage}>
+          <header className={styles.sectionIntro}>
+            <div><span>02 / certified format</span><h2>Bind the promise to a real production route.</h2><p>Only a creator route with matching runtime foundations can advance. A blocked format remains visible for diagnosis but cannot quietly substitute another style.</p></div>
+            <strong className={styles.sectionCount}>{FAMILY_KEYS.length} registered routes</strong>
+          </header>
+          {fam ? <section className={styles.selectedRoute}>
+            <div className={styles.routeIdentity}><small>Selected creator route</small><h2>{fam.label}</h2><p>{fam.description}</p></div>
+            <div className={styles.routeFacts}>
+              <span><small>Visual engine</small><strong>{fam.visualEngine}</strong></span>
+              <span><small>Episode unit</small><strong>{formatFamilyDurationContract(fam.key)}</strong></span>
+              <span><small>Route state</small><strong>{supervisedAdmission ? "Private review" : "Automatic"}</strong></span>
+              <span><small>Pipeline</small><strong>{preview.length} modules</strong></span>
+            </div>
+          </section> : <div className={styles.noRoute}><strong>Choose an admitted route</strong><span>The territory’s default format is currently held. Open the catalog and make an explicit compatible choice.</span></div>}
+
+          <details className={styles.routeCatalog} open={!fam}>
+            <summary><span><strong>{fam ? "Change creator route" : "Browse creator routes"}</strong><small>Available, supervised, and blocked formats stay separated by their real admission state.</small></span><b>{FAMILY_KEYS.length} routes +</b></summary>
+            <div className={styles.routeGrid}>
             {FAMILY_KEYS.map((k) => {
               const f = FAMILIES[k]; const on = k === family;
               const automaticReadiness = automaticFamilyCreatorReadiness(k);
@@ -1253,28 +1350,29 @@ export default function NewChannelWizard() {
                   }
                 : undefined;
               const selectable = f.available && !runtimeUnavailable && (productionReady || Boolean(supervised));
-              return (
-                <button key={k} disabled={!selectable} onClick={() => selectable && selectFamily(k, undefined, supervised)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: selectable ? "pointer" : "not-allowed", opacity: selectable ? 1 : 0.55,
-                  border: on ? "1px solid var(--color-accent)" : "1px solid var(--color-border)", background: on ? "rgba(124,124,255,0.08)" : undefined }}>
-                  <div style={{ fontWeight: 600 }}>{f.label}{supervised ? <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· private review only</span> : runtimeUnavailable ? <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· live renderer unavailable — no spend</span> : !selectable && <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· automatic admission blocked — no spend</span>}</div>
-                  <div style={{ fontSize: "0.78rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{f.description}</div>
-                  {supervised
-                    ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>Select to see the private-review requirements; no automatic build, render, spend, or publish can start here.</div>
-                    : runtimeUnavailable && liveRuntime?.blockers[0]
-                      ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{liveRuntime.blockers[0]}</div>
-                      : !productionReady && automaticReadiness.blockers[0]
-                        ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{automaticReadiness.blockers[0]}</div>
-                      : liveRuntime?.scope === "live_renderer_stack"
-                        ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>Live renderer stack verified for automatic creation.</div>
-                        : liveRuntime?.scope === "universal_release_foundation"
-                          ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>Required thumbnail and final visual-QA foundation verified.</div>
+              const routeReason = supervised
+                ? "Registered private-review intake; no automatic render or publishing."
+                : runtimeUnavailable
+                  ? liveRuntime?.blockers[0] ?? "Live renderer foundation unavailable."
+                  : !productionReady
+                    ? automaticReadiness.blockers[0] ?? "Automatic creator admission is held."
+                    : liveRuntime?.scope === "live_renderer_stack"
+                      ? "Live renderer stack verified."
+                      : liveRuntime?.scope === "universal_release_foundation"
+                        ? "Thumbnail and final visual-QA foundation verified."
                         : liveRuntime?.scope === "live_pipeline_stack"
-                          ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>Required planning, media, thumbnail, and final visual-QA foundations verified.</div>
-                        : null}
+                          ? "Planning, media, thumbnail, and QA foundations verified."
+                          : "Certified route; live foundation check pending.";
+              return (
+                <button key={k} disabled={!selectable} onClick={() => selectable && selectFamily(k, undefined, supervised)} className={styles.routeCard} data-active={on ? "true" : undefined} aria-pressed={on}>
+                  <header><strong>{f.label}</strong><span className={styles.routeStatus}>{supervised ? "review only" : selectable ? "ready" : "held"}</span></header>
+                  <p>{f.description}</p>
+                  <span className={styles.routeReason}>{routeReason}</span>
                 </button>
               );
             })}
-          </div>
+            </div>
+          </details>
           {automaticFamilyRuntimeCheck === "loading" ? (
             <p style={{ color: "var(--color-muted)", fontSize: "0.74rem", margin: "-0.2rem 0 0.2rem" }}>
               Checking live production foundations. Automatic setup remains locked until this completes.
@@ -1284,6 +1382,8 @@ export default function NewChannelWizard() {
               Live production readiness could not be verified. Automatic setup remains locked; refresh and try again.
             </p>
           ) : null}
+          <div className={styles.briefPanel}>
+          <div className={styles.briefFields}>
           <label style={lblStyle}><span style={capStyle}>Channel name (optional — auto-generated if blank)</span>
             <input value={name} onChange={(e) => {
               setName(e.target.value);
@@ -1307,6 +1407,15 @@ export default function NewChannelWizard() {
             <textarea value={sampleTopicsText} onChange={(e) => setSampleTopicsText(e.target.value)} rows={3} placeholder={"e.g. A gentle bedtime treasure hunt\nA first counting adventure"} style={{ ...inpStyle, resize: "vertical" }} />
             <span style={muted}>{sampleTopics.length}/12 examples. They are bound into the durable channel program and help the advisor select the right capability and safety path.</span>
           </label>
+          </div>
+          <aside className={styles.briefAside}>
+            <small>Program brief</small>
+            <strong>{name.trim() || "Identity will be generated"}</strong>
+            <p>{concept.trim() || "Describe the repeatable viewer promise. The advisor can recommend a compatible format, but it cannot authorize or silently replace one."}</p>
+            <p>{audience.trim() ? `Audience · ${audience.trim()}` : `Territory · ${niche?.label ?? "not selected"}${subcategory ? ` / ${subcategory}` : ""}`}</p>
+            <p>{sampleTopics.length ? `${sampleTopics.length} sample episode ideas are bound into the program brief.` : "Add sample episodes when they materially clarify the safety or capability path."}</p>
+          </aside>
+          </div>
           {clipNote && <div className="glass" style={{ padding: "0.7rem 0.9rem", fontSize: "0.8rem", color: "var(--color-muted)", border: "1px solid var(--color-accent)" }}>{clipNote}</div>}
           {executableFormatAlternatives.length > 0 && (
             <div className="glass" style={{ padding: "0.8rem 0.9rem", display: "grid", gap: "0.65rem", border: "1px solid var(--color-ok)" }}>
@@ -1338,13 +1447,18 @@ export default function NewChannelWizard() {
               </div>
             </div>
           )}
-        </div>
+        </section>
       )}
 
       {/* STEP 2 — details */}
       {step === 2 && (
-        <div style={{ display: "grid", gap: "1rem", maxWidth: 720 }}>
-          <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.9rem" }}>
+        <section className={styles.detailsPage}>
+          <header className={styles.sectionIntro}>
+            <div><span>03 / channel system</span><h2>Author the repeatable operating system.</h2><p>Identity, schedule, quality calibration, optional modules, spend authority, and the private proof are separate decisions. Advanced controls stay secondary.</p></div>
+            <strong className={styles.sectionCount}>{fam?.label ?? "route required"}</strong>
+          </header>
+          <div className={styles.room}>
+            <header className={styles.roomHeader}><div><small>03A / program behavior</small><strong>Format, voice, cadence, and authority</strong></div><span>Bound into the durable channel design</span></header>
             {duration?.inputUnit !== "fixed" && duration && (
               <Row label="Target length">
                 <input
@@ -1626,20 +1740,21 @@ export default function NewChannelWizard() {
             )}
           </div>
           {supervisedAdmission ? (
-            <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.35rem", color: "var(--color-muted)", fontSize: "0.8rem" }}>
+            <div className={styles.room} style={{ color: "var(--color-muted)", fontSize: "0.8rem" }}>
               <strong style={{ color: "var(--color-fg)" }}>Production module controls are unavailable</strong>
               <span>This private-review intake does not activate optional modules, render settings, or publishing controls. Its registered review stages appear on the final review step.</span>
             </div>
           ) : (
-            <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.6rem" }}>
-              <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Advanced — optional modules</div>
+            <div className={styles.room}>
+              <header className={styles.roomHeader}><div><small>03B / optional modules</small><strong>Only the tools this channel actually needs</strong></div><span>Editable later</span></header>
+              <div className={styles.moduleToggleGrid}>
               {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Companion Short when eligible (9:16, private)"], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)"]] as [keyof Toggles, string][]).map(([k, lbl]) => (
-                <label key={k} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                <label key={k} className={styles.moduleToggle}>
                   <input type="checkbox" checked={toggles[k]} onChange={(e) => setToggles((p) => ({ ...p, [k]: e.target.checked }))} /> {lbl}
                 </label>
               ))}
               {family === "cinematic" && (
-                <label style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                <label className={styles.moduleToggle}>
                   <input
                     type="checkbox"
                     checked={toggles.visualMatter}
@@ -1660,14 +1775,19 @@ export default function NewChannelWizard() {
                   Visual Matter (mood board, character/settings sheets, storyboard locks)
                 </label>
               )}
+              </div>
             </div>
           )}
-        </div>
+        </section>
       )}
 
       {/* STEP 3 — review */}
       {step === 3 && fam && (
-        <div style={{ display: "grid", gap: "1rem", maxWidth: 760 }}>
+        <section className={styles.reviewPage}>
+          <header className={styles.sectionIntro}>
+            <div><span>04 / authority review</span><h2>Read the whole channel before it exists.</h2><p>Confirm the identity, production contract, spend authority, private proof, release boundaries, and every active module. Saving a plan is not provider authorization.</p></div>
+            <strong className={styles.sectionCount}>{approveSetupSpend ? "execution requested" : "plan only"}</strong>
+          </header>
           {!fam.available && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {fam.label}: visual engine “{fam.visualEngine}” not built yet — channel will be created as a DRAFT until it ships.</div>}
           {!automaticFamilyCreatorReadiness(fam.key).ready && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {automaticFamilyCreatorReadiness(fam.key).blockers.join(" ")}</div>}
           {supervisedAdmission && (
@@ -1679,7 +1799,7 @@ export default function NewChannelWizard() {
               {supervisedAdmission.reviewHref && <Link href={supervisedAdmission.reviewHref} style={{ ...btnGhost, justifySelf: "start" }}>Open private review desk</Link>}
             </div>
           )}
-          <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.5rem", fontSize: "0.86rem" }}>
+          <div className={styles.summaryLedger}>
             <SummaryRow k="Niche" v={`${niche?.label}${subcategory ? " · " + subcategory : ""}`} />
             <SummaryRow k="Format" v={fam.label} />
             {family === "quizyear" && <SummaryRow k="Quiz identity" v={selectedQuizProfile.label} />}
@@ -1712,18 +1832,18 @@ export default function NewChannelWizard() {
               <span>I explicitly approve automatic external publishing for this channel. This includes scheduled/public YouTube uploads and any enabled cross-posting.</span>
             </label>
           )}
-          <div className="glass" style={{ padding: "1.1rem 1.2rem" }}>
-            <div style={{ fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.6rem" }}>
+          <div className={styles.room}>
+            <header className={styles.roomHeader}><div><small>04A / route manifest</small><strong>
               {supervisedAdmission ? `Registered private-review stages (${activeReviewOnlyStages.length})` : `Designed pipeline (${preview.length} modules)`}
-            </div>
+            </strong></div><span>Execution order retained</span></header>
             {supervisedAdmission && (
               <div style={{ fontSize: "0.72rem", color: "var(--color-muted)", marginBottom: "0.6rem" }}>
                 Only these private-review stages are active. The family production pipeline is not enabled for this intake.
               </div>
             )}
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
+            <div className={styles.pipelineMap}>
               {(supervisedAdmission ? activeReviewOnlyStages : preview).map((b, i) => (
-                <span key={b + i} style={{ fontSize: "0.7rem", padding: "0.2rem 0.5rem", borderRadius: 6, background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}>{b}</span>
+                <span key={b + i}>{String(i + 1).padStart(2, "0")} · {b}</span>
               ))}
             </div>
             {supervisedAdmission && activeReviewOnlyStages.length === 0 && (
@@ -1733,7 +1853,7 @@ export default function NewChannelWizard() {
 
           {/* Advanced per-module param editor — tune any module's knobs. */}
           {!supervisedAdmission && (
-            <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.8rem" }}>
+            <div className={styles.room}>
               <button onClick={() => setShowAdvanced((s) => !s)} style={{ display: "flex", alignItems: "center", gap: "0.5rem", background: "none", border: "none", color: "var(--color-fg)", cursor: "pointer", font: "inherit", fontSize: "0.8rem", fontWeight: 600, padding: 0 }}>
                 <span style={{ transform: showAdvanced ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>›</span>
                 Advanced — tune module parameters
@@ -1771,22 +1891,18 @@ export default function NewChannelWizard() {
 
           {/* Pipeline style — per-module presets/knobs (e.g. captions on/off). */}
           {!supervisedAdmission && (
-            <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.85rem" }}>
-              <div>
-                <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Pipeline style</div>
-                <div style={{ fontSize: "0.72rem", color: "var(--color-muted)", marginTop: 2 }}>
-                  Pick a preset per module and flip toggles — wired into every render. Editable later in Settings.
-                </div>
-              </div>
-              <ModuleConfigSection value={moduleConfig} onChange={setModuleConfig} activeBlockIds={preview} />
-            </div>
+            <details className={styles.routeCatalog} open={showPipelineStyle} onToggle={(event) => setShowPipelineStyle(event.currentTarget.open)}>
+              <summary><span><strong>Pipeline style controls</strong><small>Presets and knobs for the active modules; editable later in channel Settings.</small></span><b>Open controls +</b></summary>
+              {showPipelineStyle && <div className={styles.room}><ModuleConfigSection value={moduleConfig} onChange={setModuleConfig} activeBlockIds={preview} /></div>}
+            </details>
           )}
-        </div>
+        </section>
       )}
 
       {/* nav */}
-      <div style={{ display: "flex", justifyContent: "space-between", marginTop: "1.6rem", maxWidth: 760 }}>
+      <div className={styles.navBar}>
         <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} style={{ ...btnGhost, opacity: step === 0 ? 0.4 : 1 }}>Back</button>
+        <span>{STEP_META[step]?.label} · {step + 1} of {STEP_META.length}</span>
         {step < 3
           ? <button onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext} style={{ ...btnPrimary, opacity: canNext ? 1 : 0.5 }}>Next</button>
           : supervisedAdmission
@@ -1795,7 +1911,20 @@ export default function NewChannelWizard() {
               : <button disabled style={{ ...btnPrimary, opacity: 0.5 }}>Private review package required</button>
             : <button onClick={() => void create(Date.now())} disabled={(publishMode !== "draft" || toggles.crosspost) && !approvedForPublish} style={{ ...btnPrimary, opacity: (publishMode !== "draft" || toggles.crosspost) && !approvedForPublish ? 0.5 : 1 }}>{approveSetupSpend ? "Build channel" : "Save channel plan"}</button>}
       </div>
-    </>
+    </main>
+  );
+}
+
+function NicheGlyph({ index }: { index: number }) {
+  const variant = index % 4;
+  return (
+    <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+      <circle cx="16" cy="16" r="11.5" stroke="currentColor" strokeWidth="1" opacity=".42" />
+      {variant === 0 && <><path d="M9 18.5 14 11l3.5 10 5.5-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><circle cx="9" cy="18.5" r="1.5" fill="currentColor" /><circle cx="23" cy="13" r="1.5" fill="currentColor" /></>}
+      {variant === 1 && <><path d="M9 16h14M16 9v14" stroke="currentColor" strokeWidth="1" opacity=".6" /><path d="m11 20 5-8 5 8Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /></>}
+      {variant === 2 && <><path d="M10 21c2-7 4-10 7-10 2.5 0 4 2 5 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><path d="M10 12h5M18 21h4" stroke="currentColor" strokeWidth="1" opacity=".65" /></>}
+      {variant === 3 && <><circle cx="16" cy="16" r="5" stroke="currentColor" strokeWidth="1.5" /><path d="M16 7v4M16 21v4M7 16h4M21 16h4" stroke="currentColor" strokeWidth="1.2" /></>}
+    </svg>
   );
 }
 
@@ -1846,13 +1975,13 @@ function ParamControl({ field, value, onChange }: { field: ParamField; value: un
   );
 }
 function SummaryRow({ k, v }: { k: string; v: string }) {
-  return <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem" }}><span style={{ color: "var(--color-muted)" }}>{k}</span><span style={{ fontWeight: 500, textAlign: "right" }}>{v}</span></div>;
+  return <div className={styles.summaryRow}><span>{k}</span><span>{v}</span></div>;
 }
 
-const inpStyle: CSSProperties = { padding: "0.6rem 0.8rem", borderRadius: 10, border: "1px solid var(--color-border)", background: "var(--color-surface)", color: "var(--color-fg)", font: "inherit", fontSize: "0.9rem" };
+const inpStyle: CSSProperties = { width: "100%", minWidth: 0, padding: "0.6rem 0.72rem", borderRadius: 5, border: "1px solid var(--color-border)", background: "rgba(243,240,232,0.018)", color: "var(--color-fg)", font: "inherit", fontSize: "0.86rem" };
 const selStyle: CSSProperties = { ...inpStyle, cursor: "pointer" };
 const lblStyle: CSSProperties = { display: "grid", gap: "0.4rem" };
 const capStyle: CSSProperties = { fontSize: "0.78rem", color: "var(--color-muted)" };
 const muted: CSSProperties = { fontSize: "0.8rem", color: "var(--color-muted)" };
-const btnPrimary: CSSProperties = { background: "var(--color-accent)", color: "#0a0a0b", border: "none", borderRadius: 10, padding: "0.6rem 1.4rem", fontSize: "0.9rem", fontWeight: 600, cursor: "pointer" };
-const btnGhost: CSSProperties = { background: "var(--color-surface)", color: "var(--color-fg)", border: "1px solid var(--color-border)", borderRadius: 10, padding: "0.6rem 1.4rem", fontSize: "0.9rem", cursor: "pointer" };
+const btnPrimary: CSSProperties = { display: "inline-flex", minHeight: 38, alignItems: "center", justifyContent: "center", background: "var(--color-accent)", color: "#0a0a0b", border: "none", borderRadius: 6, padding: "0.55rem 1.2rem", fontSize: "0.78rem", fontWeight: 700, cursor: "pointer", textDecoration: "none" };
+const btnGhost: CSSProperties = { display: "inline-flex", minHeight: 38, alignItems: "center", justifyContent: "center", background: "rgba(243,240,232,0.018)", color: "var(--color-fg)", border: "1px solid var(--color-border)", borderRadius: 6, padding: "0.55rem 1.2rem", fontSize: "0.78rem", cursor: "pointer", textDecoration: "none" };

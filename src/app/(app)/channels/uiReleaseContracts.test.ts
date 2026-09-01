@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 const root = process.cwd();
 const wizard = readFileSync(join(root, "src/app/(app)/channels/new/page.tsx"), "utf8");
+const wizardCss = readFileSync(join(root, "src/app/(app)/channels/new/newChannel.module.css"), "utf8");
 const detail = readFileSync(join(root, "src/app/(app)/channels/[slug]/page.tsx"), "utf8");
 const channels = readFileSync(join(root, "src/app/(app)/channels/page.tsx"), "utf8");
 const overview = readFileSync(join(root, "src/app/(app)/page.tsx"), "utf8");
@@ -94,7 +95,7 @@ assert.match(wizard, /\.\.\.automaticCapabilitySelections[\s\S]*source_attribute
 // a route the server will subsequently refuse.
 assert.match(wizard, /automaticFamilyCreatorReadiness/);
 assert.doesNotMatch(wizard, /isFamilyProductionReady\(/);
-assert.match(wizard, /automatic admission blocked — no spend/);
+assert.match(wizard, /Automatic creator admission is held/);
 assert.match(wizard, /const liveRuntime = automaticFamilyRuntime\[next\]/);
 assert.match(wizard, /live automatic foundation is unavailable/);
 assert.match(wizard, /const \[automaticFamilyRuntimeCheck, setAutomaticFamilyRuntimeCheck\]/);
@@ -111,10 +112,27 @@ assert.match(wizard, /const matchedNichePreset = niche\?\.defaultFamily === sugg
 assert.match(wizard, /selectFamily\(suggestedFamily, matchedNichePreset\?\.targetSeconds\)/);
 assert.match(wizard, /typeof d\.family !== "string" \|\| !\(d\.family in FAMILIES\)/);
 assert.match(wizard, /const defaultFamilyReadiness = automaticFamilyCreatorReadiness\(n\.defaultFamily\)/);
-assert.match(wizard, /Automatic route ready/);
-assert.match(wizard, /Automatic start held/);
-assert.match(wizard, /Needs before automatic creation:/);
+assert.match(wizard, /"route ready" : "start held"/);
+assert.match(wizard, />Held: \{defaultFamilyReadiness\.blockers\[0\]\}/);
 assert.match(wizard, /defaultFamilyReadiness\.blockers\[0\]/);
+
+// Channel creation is a staged operating workflow rather than a card wall.
+// The foreground route, full catalog, advanced pipeline controls, and durable
+// build receipts use explicit progressive disclosure without inventing media.
+assert.match(wizard, /Build a channel system, not a profile/);
+assert.match(wizard, /function NicheGlyph/);
+assert.match(wizard, /<details className=\{styles\.routeCatalog\} open=\{!fam\}>/);
+assert.match(wizard, /Pipeline style controls/);
+assert.match(wizard, /showPipelineStyle && <div className=\{styles\.room\}><ModuleConfigSection/);
+assert.match(wizard, /Receipt coverage/);
+assert.match(wizard, /Private quality-control render/);
+assert.match(wizard, /status signal · no preview frames yet/);
+assert.match(wizard, /STAGE_DESCRIPTIONS/);
+assert.match(wizard, /executionAuthorized \? "Authorized" : "Plan only"/);
+assert.match(wizardCss, /\.nicheGrid/);
+assert.match(wizardCss, /\.buildWorkspace/);
+assert.match(wizardCss, /@media \(max-width: 680px\)/);
+assert.match(wizardCss, /prefers-reduced-motion/);
 
 // Creator choice must expose the family-specific, mechanics-only quality bar
 // that production review will enforce. This is original craft calibration, not
