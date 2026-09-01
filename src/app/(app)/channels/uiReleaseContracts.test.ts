@@ -104,18 +104,18 @@ assert.match(wizard, /automaticFamilyCreatorReadiness/);
 assert.doesNotMatch(wizard, /isFamilyProductionReady\(/);
 assert.match(wizard, /Automatic creator admission is held/);
 assert.match(wizard, /const liveRuntime = automaticFamilyRuntime\[next\]/);
-assert.match(wizard, /live automatic foundation is unavailable/);
+assert.match(wizard, /is held by its creator contract/);
 assert.match(wizard, /const \[automaticFamilyRuntimeCheck, setAutomaticFamilyRuntimeCheck\]/);
 assert.match(wizard, /const selectedAutomaticRuntimeReady = Boolean\(/);
 assert.match(wizard, /visibleAutomaticFamilyRuntimeCheck === "ready"/);
 assert.match(wizard, /&& selectedAutomaticRuntimeReady/);
-assert.match(wizard, /Automatic setup remains locked until this completes\./);
-assert.match(wizard, /Live production readiness could not be verified\./);
-// Read-only coarse readiness is intentionally available before owner
+assert.match(wizard, /Setup stays locked until this completes\./);
+assert.match(wizard, /Creator contract could not be verified\./);
+// Read-only creator admission is intentionally available before owner
 // verification; spending and durable creation remain separately gated.
 assert.match(wizard, /const operationsAccess = useOperationsAccess\(\)/);
 const readinessFetch = wizard.indexOf('fetch("\/api\/automatic-family-readiness"');
-assert.ok(readinessFetch >= 0, "the creator must read live readiness");
+assert.ok(readinessFetch >= 0, "the creator must read server-owned route admission");
 assert.match(wizard, /const visibleAutomaticFamilyRuntimeCheck = automaticFamilyRuntimeCheck/);
 assert.doesNotMatch(wizard, /if \(operationsAccess !== "owner"\) return;[\s\S]{0,1200}automatic-family-readiness/);
 

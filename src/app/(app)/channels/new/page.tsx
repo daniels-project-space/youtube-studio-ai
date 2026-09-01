@@ -122,7 +122,7 @@ interface BuildProgress {
 interface AutomaticFamilyRuntimeStatus {
   family: FamilyKey;
   ready: boolean;
-  scope: "live_renderer_stack" | "universal_release_foundation" | "live_pipeline_stack";
+  scope: "creator_contract";
   blockers: readonly string[];
 }
 
@@ -462,7 +462,7 @@ export default function NewChannelWizard() {
             typeof candidate.family === "string"
             && FAMILY_KEYS.includes(candidate.family as FamilyKey)
             && typeof candidate.ready === "boolean"
-            && (candidate.scope === "live_renderer_stack" || candidate.scope === "universal_release_foundation" || candidate.scope === "live_pipeline_stack")
+            && candidate.scope === "creator_contract"
             && Array.isArray(candidate.blockers)
           ) {
             next[candidate.family as FamilyKey] = {
@@ -527,9 +527,7 @@ export default function NewChannelWizard() {
     }
     const liveRuntime = automaticFamilyRuntime[next];
     if (!supervised && liveRuntime?.ready === false) {
-      setClipNote(
-        `${FAMILIES[next].label} is admitted on paper but its live automatic foundation is unavailable: ${liveRuntime.blockers.join(" ")}`,
-      );
+      setClipNote(`${FAMILIES[next].label} is held by its creator contract: ${liveRuntime.blockers.join(" ")}`);
       return;
     }
     setFamily(next);
@@ -1373,16 +1371,12 @@ export default function NewChannelWizard() {
               const routeReason = supervised
                 ? "Registered private-review intake; no automatic render or publishing."
                 : runtimeUnavailable
-                  ? liveRuntime?.blockers[0] ?? "Live renderer foundation unavailable."
+                  ? liveRuntime?.blockers[0] ?? "Creator contract unavailable."
                   : !productionReady
                     ? automaticReadiness.blockers[0] ?? "Automatic creator admission is held."
-                    : liveRuntime?.scope === "live_renderer_stack"
-                      ? "Live renderer stack verified."
-                      : liveRuntime?.scope === "universal_release_foundation"
-                        ? "Thumbnail and final visual-QA foundation verified."
-                        : liveRuntime?.scope === "live_pipeline_stack"
-                          ? "Planning, media, thumbnail, and QA foundations verified."
-                          : "Certified route; live foundation check pending.";
+                    : liveRuntime?.scope === "creator_contract"
+                      ? "Certified route; providers preflight at build."
+                      : "Certified route; contract check pending.";
               return (
                 <button key={k} disabled={!selectable} onClick={() => selectable && selectFamily(k, undefined, supervised)} className={styles.routeCard} data-active={on ? "true" : undefined} aria-pressed={on}>
                   <header><strong>{f.label}</strong><span className={styles.routeStatus}>{supervised ? "review only" : selectable ? "ready" : "held"}</span></header>
@@ -1395,11 +1389,11 @@ export default function NewChannelWizard() {
           </details>
           {visibleAutomaticFamilyRuntimeCheck === "loading" ? (
             <p style={{ color: "var(--color-muted)", fontSize: "0.74rem", margin: "-0.2rem 0 0.2rem" }}>
-              Checking live production foundations. Automatic setup remains locked until this completes.
+              Checking the certified creator contract. Setup stays locked until this completes.
             </p>
           ) : visibleAutomaticFamilyRuntimeCheck === "unavailable" ? (
             <p style={{ color: "var(--color-failed)", fontSize: "0.74rem", margin: "-0.2rem 0 0.2rem" }}>
-              Live production readiness could not be verified. Automatic setup remains locked; refresh and try again.
+              Creator contract could not be verified. Setup remains locked; refresh and try again.
             </p>
           ) : null}
           <div className={styles.briefPanel}>
