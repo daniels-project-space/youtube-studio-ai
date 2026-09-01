@@ -191,6 +191,36 @@ export function ModuleConfigPanel({
           );
         }
 
+        if (knob.type === "text") {
+          const text = typeof current === "string" ? current : String(knob.default ?? "");
+          const maximum = knob.maxLength ?? 2_000;
+          return (
+            <Row key={knob.id} knob={knob}>
+              <div style={{ display: "grid", gap: "0.25rem", justifyItems: "end" }}>
+                <textarea
+                  value={text}
+                  disabled={disabled}
+                  maxLength={maximum}
+                  rows={3}
+                  onChange={(event) => setKnob(knob.id, event.target.value)}
+                  aria-label={knob.id}
+                  style={{
+                    ...selStyle,
+                    width: "min(420px, calc(100vw - 90px))",
+                    minHeight: 82,
+                    cursor: "text",
+                    resize: "vertical",
+                    lineHeight: 1.45,
+                  }}
+                />
+                <span style={{ color: "var(--color-faint)", fontFamily: "var(--font-mono)", fontSize: "0.58rem" }}>
+                  {text.length}/{maximum}
+                </span>
+              </div>
+            </Row>
+          );
+        }
+
         // number → slider + bound input
         const [min, max] = knob.range ?? [0, 100];
         const step = (max - min) <= 5 ? 0.1 : 1;

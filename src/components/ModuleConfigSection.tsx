@@ -36,6 +36,8 @@ function ModuleCard({
   onChange,
   channelId,
   index,
+  open,
+  onOpenChange,
 }: {
   blockId: string;
   title: string;
@@ -47,12 +49,13 @@ function ModuleCard({
   onChange?: (blockId: string, next: ModuleConfigValue) => void;
   channelId?: Id<"channels">;
   index: number;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }) {
   const setModuleConfig = useMutation(api.channels.setModuleConfig);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [local, setLocal] = useState<ModuleConfigValue>(value);
-  const [open, setOpen] = useState(index === 0);
 
   const handle = async (next: ModuleConfigValue) => {
     setLocal(next);
@@ -72,7 +75,13 @@ function ModuleCard({
   };
 
   return (
-    <details className={styles.module} open={open} onToggle={(event) => setOpen(event.currentTarget.open)}>
+    <details
+      className={styles.module}
+      open={open}
+      onToggle={(event) => {
+        if (event.currentTarget.open !== open) onOpenChange(event.currentTarget.open);
+      }}
+    >
       <summary className={styles.summary}>
         <span className={styles.index}>{String(index + 1).padStart(2, "0")}</span>
         <div className={styles.identity}>
@@ -119,6 +128,12 @@ export function ModuleConfigSection({
 }) {
   const mods = configurableModules(activeBlockIds);
   const current = channelId ? (moduleConfig ?? {}) : (value ?? {});
+  const [openBlockId, setOpenBlockId] = useState<string | null | undefined>(undefined);
+  const visibleOpenBlockId = openBlockId === undefined || (
+    openBlockId !== null && !mods.some((module) => module.blockId === openBlockId)
+  )
+    ? mods[0]?.blockId ?? null
+    : openBlockId;
 
   const handleControlled = (blockId: string, next: ModuleConfigValue) => {
     if (!onChange) return;
@@ -153,6 +168,8 @@ export function ModuleConfigSection({
           onChange={channelId ? undefined : handleControlled}
           channelId={channelId}
           index={index}
+          open={visibleOpenBlockId === m.blockId}
+          onOpenChange={(nextOpen) => setOpenBlockId(nextOpen ? m.blockId : null)}
         />
       ))}
     </div>
