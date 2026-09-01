@@ -24,7 +24,7 @@ export interface Archetype {
 }
 
 // Lofi (Template C) — 100% CLOUD engine (fal.ai stills + i2v, no local CLI):
-// scene → fal flux-pro still → fal i2v clip → seamless crossfade loop → Topaz
+// scene → reviewed Novita still → two 15s LTX FLF2V segments → Topaz
 // upscale of the loop unit → Suno music → deblur-title assemble (stream_loop the
 // unit under looped music). No narration, no separate intro card (the deblur
 // title IS the intro). durationSec is the only knob to scale length.
@@ -32,20 +32,20 @@ const LOFI: PipelineEntry[] = [
   { block: "competitor_research" },
   { block: "topic_select" },
   { block: "music_program_plan" },
-  { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 5 } },
+  { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 15 } },
   // Generate and seal the episode music before the visual loop. The current
   // distilled LTX loop does not condition on it, but the ordering gives the
   // future open-weight audio-to-video benchmark the exact mastered source
   // without re-generating audio or creating a hidden dependency.
   { block: "music", params: { provider: "suno" } },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
-  // 10s i2v clip + 1.2s crossfade self-loop → the seam blends real moving frames
-  // (not a near-frozen pop), which is the difference between a "real" seamless
-  // lofi loop and an obvious AI one.
-  { block: "loop_clips", params: { clipDurationSec: 10, visualStyle: "lofi", crossfadeSec: 2.5 } },
+  // Two independently attested 15s FLF2V segments share the exact reviewed
+  // start/end anchor. Their internal join and wraparound seam are measured
+  // before the 30s source unit can proceed to upscale.
+  { block: "loop_clips", params: { segmentCount: 2, clipDurationSec: 15, visualStyle: "lofi", loopMode: "flf2v", flfCrossfadeSec: 0.4 } },
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
   { block: "metadata" },
-  { block: "assemble", params: { durationSec: 180, deblurIntro: true } }, // 3-min test; raise for production
+  { block: "assemble", params: { durationSec: 7_200, deblurIntro: true } },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },

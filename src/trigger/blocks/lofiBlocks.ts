@@ -5,8 +5,8 @@
  * Data flow (store keys), in pipeline order:
  *   topic_select  → topic
  *   scene_planner → scenes sceneMusicPrompt
- *   keyframes     → f1JobId f2JobId f1Url f2Url f1Key
- *   loop_clips    → clip1Key clip2Key clip1Url clip2Url
+ *   keyframes     → f1Url f1Key motionPrompt
+ *   loop_clips    → loopRawKey loopRawUrl + two seam proofs
  *   upscale       → loopUnitKey loopUnitUrl loopUnitUpscaled loopUnitResolution
  *   music         → musicKey musicProvider musicUrl
  *   metadata      → title description tags
@@ -31,6 +31,7 @@
  * (and `music.params.durationSec`) — set them to 7200 for a 2h render.
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
+import { familyDurationContract, familyTimeScalingContract } from "@/engine/families";
 import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 import { PRICE, shortsSpinoffReleaseEvidenceCost } from "@/engine/pricing";
@@ -116,7 +117,7 @@ import {
 } from "@/lib/minimaxMusic3";
 import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { notifyDraftReady } from "@/lib/telegram";
-import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, measureAudio, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudioTransparentGain, type CaptionCue } from "@/lib/ffmpeg";
+import { seamlessLoopUnit, composeLoopSourceUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, measureVideoBoundaryDiff, measureAudio, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudioTransparentGain, type CaptionCue } from "@/lib/ffmpeg";
 import { channelVisualReviewProfile, reviewRender, type VisualReviewResult } from "@/lib/visualReview";
 import {
   proveOnScreenText,
@@ -1404,14 +1405,36 @@ export const keyframes: Block = {
 export const loopClips: Block = {
   id: "loop_clips",
   consumes: ["f1Key"],
-  produces: ["loopRawKey", "loopRawUrl"],
+  produces: [
+    "loopRawKey",
+    "loopRawUrl",
+    "loopSourceDurationSec",
+    "loopSourceSegmentCount",
+    "loopSourceInternalSeamDiff",
+    "loopSourceWrapSeamDiff",
+  ],
   paid: true,
   run: async (ctx) => {
-    // CLOUD REBUILD: ONE forward i2v clip via fal.ai (Kling), then a SEAMLESS
-    // crossfade self-loop (ffmpeg) — motion always plays forward, no ping-pong
-    // reversal artifacts. Replaces the Higgsfield F1→F2 / F2→F1 start+end-image
-    // pair (needs a local authed CLI). One generation per render (frugal +
-    // honours the "≤2 renders" budget).
+    // A music-loop episode owns one nominal 30-second source unit: two distinct
+    // 15-second LTX FLF2V segments sharing the same independently reviewed
+    // first/end still. The final 1–8 hour master repeats only this unit.
+    const scaling = familyTimeScalingContract("music_loop");
+    if (scaling.method !== "stream_loop") {
+      throw new Error("loop_clips: music-loop family has no stream-loop scaling contract");
+    }
+    const segmentCount = Number(ctx.params.segmentCount ?? scaling.sourceSegmentCount);
+    const segmentSeconds = Number(ctx.params.clipDurationSec ?? scaling.sourceSegmentSeconds);
+    const loopMode = String(ctx.params.loopMode ?? scaling.loopMode);
+    if (
+      segmentCount !== scaling.sourceSegmentCount
+      || segmentSeconds !== scaling.sourceSegmentSeconds
+      || loopMode !== scaling.loopMode
+    ) {
+      throw new Error(
+        `loop_clips: source contract requires ${scaling.sourceSegmentCount}×${scaling.sourceSegmentSeconds}s ${scaling.loopMode}; ` +
+        `received ${segmentCount}×${segmentSeconds}s ${loopMode}`,
+      );
+    }
     const f1Key = str(ctx, "f1Key");
     // The source track is sealed before visual generation. Distilled I2V does
     // not accept an audio-conditioning input, so do not imply that it does;
@@ -1425,16 +1448,6 @@ export const loopClips: Block = {
     const style = styleGrammar(ctx);
     const vs = visualStyle(ctx);
     const scene = scenesFromStore(ctx)[0];
-    const dur = Number(ctx.params.clipDurationSec ?? scene.durationSec ?? 5);
-    const crossfadeSec = Number(ctx.params.crossfadeSec ?? 0.8);
-    // "flf2v" (default) = first-frame==last-frame i2v: the animated clip RETURNS
-    // to its start so the elements keep moving forward (waves foam, curtains
-    // billow) AND it loops with no boomerang velocity-flip. A small crossfade is
-    // applied as a safety net (invisible if FLF2V closed the loop; smooths the
-    // seam if the model ignored the end frame). "boomerang" = forward+reversed.
-    // "crossfade" = plain self-blend loop.
-    const loopMode = (ctx.params.loopMode as string | undefined) ?? "flf2v";
-    const flf = loopMode === "flf2v";
     // PARAM SPLIT: flf's safety-net fade used to read the SHARED `crossfadeSec`
     // (pipeline: 2.5s — tuned for the plain-crossfade mode where the blend IS
     // the loop mechanism), double-exposing 2.5s of every loop into a visible
@@ -1464,53 +1477,129 @@ export const loopClips: Block = {
       extraNegative: "zoom, push in, dolly, camera move, scale change, framing change, pan, tilt",
     });
 
-    ctx.log(`loop_clips: Novita LTX-2.5 distilled x2 (loop=${loopMode}${musicKey ? `; sealed music=${musicKey.slice(-32)}` : "; legacy no-audio path"}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
+    ctx.log(`loop_clips: Novita LTX-2.5 distilled ${segmentCount}×${segmentSeconds}s (loop=${loopMode}${musicKey ? `; sealed music=${musicKey.slice(-32)}` : "; legacy no-audio path"}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
     const stageBudgetUsd = requireNovitaStageBudget(ctx.stageBudgetUsd, "loop_clips");
-    const clip = await renderNovitaI2V({
-      prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/lofi-loop`,
-      id: "loop-clip",
-      prompt: fwd.prompt,
-      negativePrompt: fwd.negativePrompt,
-      imageKey: f1Key,
-      // The actual worker receives the first still again at the final frame.
-      // This makes FLF2V a real image-conditioned loop closure, rather than a
-      // prompt-only request followed by a crossfade that hides a seam.
-      ...(flf ? { endImageKey: f1Key } : {}),
-      durationSec: dur,
-      profileId: "production",
-      ...(typeof ctx.params["ltxStyleId"] === "string" ? { styleId: ctx.params["ltxStyleId"] } : {}),
-      creativeAdapter,
+    const envelope = novitaCostEnvelope({
+      label: "loop_clips",
+      videoJobs: scaling.sourceSegmentCount,
       maxCostUsd: stageBudgetUsd,
-      lifecycle: {
-        ownerId: ctx.ownerId,
-        channelId: ctx.channelId,
-        runId: ctx.runId,
-        blockId: "loop_clips",
-      },
     });
-    if (!clip.url) throw new Error("loop_clips: Novita i2v produced no URL");
-
     const tmp = await makeRunTempDir(ctx.runId);
-    const clipLocal = await downloadTo(clip.url, join(tmp, "clip.mp4"), {
-      timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
-    });
-    ctx.log(`loop_clips: building ${loopMode} seamless loop unit…`);
-    const loopRaw = flf
-      // FLF2V already closes the loop; a short crossfade is the safety net and
-      // keeps motion FORWARD (no reversal). Own capped param — see flfCrossfadeSec.
-      ? await seamlessLoopUnit(clipLocal, join(tmp, "loopraw.mp4"), { crossfadeSec: flfCrossfadeSec })
-      : loopMode === "crossfade"
-      ? await seamlessLoopUnit(clipLocal, join(tmp, "loopraw.mp4"), { crossfadeSec })
-      : await boomerangLoopUnit(clipLocal, join(tmp, "loopraw.mp4"));
+    const clips: Awaited<ReturnType<typeof renderNovitaI2V>>[] = [];
+    const segmentPaths: string[] = [];
+    let observedClipCostUsd = 0;
+    try {
+      for (let index = 0; index < scaling.sourceSegmentCount; index++) {
+        const ordinal = index + 1;
+        const seed = Number.parseInt(
+          sha256Hex(`${ctx.runId}:lofi-loop-segment:${ordinal}`).slice(0, 8),
+          16,
+        ) % 2_147_483_647;
+        const clip = await renderNovitaI2V({
+          prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/lofi-loop`,
+          id: `loop-segment-${ordinal}`,
+          prompt: `${fwd.prompt}\nSource segment ${ordinal} of ${segmentCount}: preserve the exact subject, composition, lighting, and motion language while varying only tiny ambient micro-motion.`,
+          negativePrompt: fwd.negativePrompt,
+          imageKey: f1Key,
+          // Both segments begin and end at the same accepted still. This binds
+          // A→B and B→A continuity to real worker inputs, not prompt wording.
+          endImageKey: f1Key,
+          durationSec: segmentSeconds,
+          seed,
+          profileId: "production",
+          ...(typeof ctx.params["ltxStyleId"] === "string" ? { styleId: ctx.params["ltxStyleId"] } : {}),
+          creativeAdapter,
+          maxCostUsd: envelope.videoMaxCostUsd / scaling.sourceSegmentCount,
+          lifecycle: {
+            ownerId: ctx.ownerId,
+            channelId: ctx.channelId,
+            runId: ctx.runId,
+            blockId: "loop_clips",
+          },
+        });
+        if (!clip.url) throw new Error(`loop_clips: Novita segment ${ordinal} produced no URL`);
+        clips.push(clip);
+        observedClipCostUsd += clip.costUsd;
+        const local = await downloadTo(clip.url, join(tmp, `clip-${ordinal}.mp4`), {
+          timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+        });
+        // Each FLF2V take already closes on the accepted still. A separately
+        // capped 0.4s blend only absorbs encoder/model endpoint noise.
+        segmentPaths.push(await seamlessLoopUnit(
+          local,
+          join(tmp, `segment-${ordinal}.mp4`),
+          { crossfadeSec: flfCrossfadeSec },
+        ));
+      }
+    } catch (error) {
+      const source = error instanceof Error ? error : new Error(String(error));
+      const charged = Object.isExtensible(source) ? source : Object.assign(new Error(source.message), { cause: source });
+      const prior = Number((charged as { additionalObservedCostUsd?: unknown }).additionalObservedCostUsd ?? 0);
+      throw Object.assign(charged, {
+        additionalObservedCostUsd: (Number.isFinite(prior) && prior > 0 ? prior : 0) + observedClipCostUsd,
+        retryable: false,
+      });
+    }
+
+    if (segmentPaths.length !== scaling.sourceSegmentCount) {
+      throw new Error("loop_clips: incomplete source segment set after rendering");
+    }
+    let loopRaw: string;
+    let internalSeamDiff: number;
+    let wrapSeamDiff: number;
+    try {
+      loopRaw = await composeLoopSourceUnit({
+        segmentPaths: [segmentPaths[0], segmentPaths[1]],
+        outPath: join(tmp, "loopraw.mp4"),
+        segmentSeconds,
+        fps: 25,
+      });
+      [internalSeamDiff, wrapSeamDiff] = await Promise.all([
+        measureVideoBoundaryDiff(loopRaw, tmp, {
+          boundarySec: segmentSeconds,
+          label: "lofi-internal-seam",
+        }),
+        measureLoopSeamDiff(loopRaw, tmp),
+      ]);
+      const worstSeamDiff = Math.max(internalSeamDiff, wrapSeamDiff);
+      ctx.log(
+        `loop_clips: 30s source continuity internal=${internalSeamDiff.toFixed(4)} wrap=${wrapSeamDiff.toFixed(4)} (max ${scaling.seamMaximumDiff.toFixed(2)})`,
+      );
+      if (worstSeamDiff > scaling.seamMaximumDiff) {
+        throw new Error(
+          `loop_clips: source continuity failed (${worstSeamDiff.toFixed(4)} > ${scaling.seamMaximumDiff.toFixed(2)})`,
+        );
+      }
+    } catch (error) {
+      const source = error instanceof Error ? error : new Error(String(error));
+      const charged = Object.isExtensible(source) ? source : Object.assign(new Error(source.message), { cause: source });
+      const prior = Number((charged as { additionalObservedCostUsd?: unknown }).additionalObservedCostUsd ?? 0);
+      throw Object.assign(charged, {
+        additionalObservedCostUsd: (Number.isFinite(prior) && prior > 0 ? prior : 0) + observedClipCostUsd,
+        retryable: false,
+      });
+    }
 
     const loopRawKey = `${ctx.keyPrefix}runs/${ctx.runId}/loopraw.mp4`;
     await putObject(loopRawKey, await readBytes(loopRaw), { contentType: "video/mp4" });
-    await recordAsset(ctx, "clip", loopRawKey, { jobId: clip.jobId, model: clip.model });
+    await recordAsset(ctx, "clip", loopRawKey, {
+      jobIds: clips.map((clip) => clip.jobId),
+      models: clips.map((clip) => clip.model),
+      sourceSegmentCount: scaling.sourceSegmentCount,
+      sourceSegmentSeconds: scaling.sourceSegmentSeconds,
+      sourceUnitSeconds: scaling.sourceUnitSeconds,
+      internalSeamDiff,
+      wrapSeamDiff,
+    });
 
     return {
       loopRawKey,
       loopRawUrl: loopRaw, // local path; upscale reads it directly
-      [COST_PATCH_KEY]: clip.costUsd,
+      loopSourceDurationSec: scaling.sourceUnitSeconds,
+      loopSourceSegmentCount: scaling.sourceSegmentCount,
+      loopSourceInternalSeamDiff: internalSeamDiff,
+      loopSourceWrapSeamDiff: wrapSeamDiff,
+      [COST_PATCH_KEY]: observedClipCostUsd,
     };
   },
 };
@@ -1974,6 +2063,33 @@ export const assemble: Block = {
     // is just ffmpeg time, not another upscale. Lofi has no narration so the
     // music plays at full volume the whole way (composeWithIntro skips ducking).
     const durationSec = Number(ctx.params.durationSec ?? 90);
+    const duration = familyDurationContract("music_loop");
+    const scaling = familyTimeScalingContract("music_loop");
+    if (scaling.method !== "stream_loop") {
+      throw new Error("assemble: music-loop family has no stream-loop scaling contract");
+    }
+    if (
+      !Number.isFinite(durationSec)
+      || durationSec < duration.minimumSeconds
+      || durationSec > duration.maximumSeconds
+      || (durationSec - duration.minimumSeconds) % duration.stepSeconds !== 0
+    ) {
+      throw new Error(
+        `assemble: music-loop duration must be an authored 1–8 hour unit; received ${String(ctx.params.durationSec)}`,
+      );
+    }
+    const internalSeamDiff = Number(ctx.store["loopSourceInternalSeamDiff"]);
+    const wrapSeamDiff = Number(ctx.store["loopSourceWrapSeamDiff"]);
+    if (
+      Number(ctx.store["loopSourceDurationSec"]) !== scaling.sourceUnitSeconds
+      || Number(ctx.store["loopSourceSegmentCount"]) !== scaling.sourceSegmentCount
+      || !Number.isFinite(internalSeamDiff)
+      || !Number.isFinite(wrapSeamDiff)
+      || internalSeamDiff > scaling.seamMaximumDiff
+      || wrapSeamDiff > scaling.seamMaximumDiff
+    ) {
+      throw new Error("assemble: the exact 2×15s source unit and both continuity proofs are required");
+    }
     const musicUrl = str(ctx, "musicUrl");
     // upscale stashed the loop-unit local path in loopUnitUrl; if absent (e.g.
     // resumed run), fall back to the R2 key via a fresh download.
@@ -3627,31 +3743,29 @@ export const lofiBlocks: Block[] = [
  * Canonical lofi pipeline (ordered block entries) for a channel.
  *
  * Order (faithful to legacy lofi sequence + competitor-intelligence engine):
- *   competitor_research → scene_planner → keyframes → loop_clips
- *   → upscale(LOOP UNIT, Topaz 4K) → music → metadata(title-optimised)
- *   → assemble(stream_loop 4K unit + mux) → intro_card(overlay) → qa_light
+ *   competitor_research → music plan/music → scene_planner → keyframes
+ *   → loop_clips(2×15s) → upscale(short source unit) → metadata
+ *   → assemble(packet-looped 1–8h master) → qa_visual
  *   → thumbnail_gen(banana) → upload_draft → notify
  *
  * `competitor_research` runs first (consumes []) so nicheIntelligence /
  * seoDatabank / competitors are in the store before `metadata` optimises the
  * title and `thumbnail_gen` designs the thumbnail (real-scene/banana).
  *
- * We upscale the ~10-30s loop UNIT (not the full render), then stream_loop the
+ * We upscale the exact 30s loop UNIT (not the full render), then stream_loop the
  * 4K unit to length — so length is just a duration param, never extra GPU cost.
  */
 export const LOFI_PIPELINE = [
   { block: "competitor_research" },
   { block: "topic_select" },
   { block: "music_program_plan" },
-  { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 5 } },
-  { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
-  // crossfadeSec 2.5 only applies to loopMode:"crossfade" (the blend IS the loop
-  // there); the default flf2v path uses the capped flfCrossfadeSec safety net.
-  { block: "loop_clips", params: { clipDurationSec: 10, visualStyle: "lofi", crossfadeSec: 2.5, flfCrossfadeSec: 0.4 } },
-  { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
+  { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 15 } },
   { block: "music", params: { provider: "suno" } },
+  { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
+  { block: "loop_clips", params: { segmentCount: 2, clipDurationSec: 15, visualStyle: "lofi", loopMode: "flf2v", flfCrossfadeSec: 0.4 } },
+  { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
   { block: "metadata" },
-  { block: "assemble", params: { durationSec: 180 } }, // ← raise (e.g. 7200) for a 2h production loop
+  { block: "assemble", params: { durationSec: 7_200, deblurIntro: true } },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },

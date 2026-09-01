@@ -3,6 +3,7 @@ import {
   clampFamilyEpisodeLengthMinutes,
   familyDurationContract,
   familyEpisodeLengthError,
+  familyTimeScalingContract,
   FAMILIES,
   resolveFamilyEpisodeLengthSeconds,
   type FamilyKey,
@@ -16,7 +17,7 @@ function corrupt(
   blocks: readonly string[],
 ): PipelineEntry[] {
   return pipeline.map((entry) => blocks.includes(entry.block)
-    ? { ...entry, params: { ...(entry.params ?? {}), targetSeconds: 999, panels: 999, minSeconds: 999, maxSeconds: 999, durationSec: 999, trackCount: 99 } }
+    ? { ...entry, params: { ...(entry.params ?? {}), targetSeconds: 999, panels: 999, minSeconds: 999, maxSeconds: 999, durationSec: 999, trackCount: 99, segmentCount: 99, clipDurationSec: 3, loopMode: "boomerang" } }
     : entry,
   );
 }
@@ -32,6 +33,8 @@ function params(pipeline: readonly PipelineEntry[], block: string): Record<strin
 // contract for every channel family.
 for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
   const contract = familyDurationContract(family);
+  const scaling = familyTimeScalingContract(family);
+  assert.ok(scaling, `${family} must declare how source duration becomes final duration`);
 
   assert.equal(
     resolveFamilyEpisodeLengthSeconds(family, undefined),
@@ -177,15 +180,39 @@ for (const block of ["topic_select", "script_gen", "short_strategy", "documotion
 }
 
 {
-  const lofi = designPipeline({ family: "music_loop", lengthMinutes: 3 });
+  const lofi = designPipeline({ family: "music_loop", lengthMinutes: 120 });
   const repaired = enforceLengthContract(
-    corrupt(lofi.pipeline, ["topic_select", "assemble", "music"]),
+    corrupt(lofi.pipeline, ["topic_select", "loop_clips", "assemble", "music"]),
     lofi.episodeLengthSeconds,
     "music_loop",
   ).pipeline;
-  assert.equal(params(repaired, "topic_select").targetSeconds, 180);
-  assert.equal(params(repaired, "assemble").durationSec, 180);
-  assert.equal(params(repaired, "music").trackCount, 2);
+  assert.equal(lofi.episodeLengthSeconds, 7_200);
+  assert.equal(params(repaired, "topic_select").targetSeconds, 7_200);
+  assert.equal(params(repaired, "assemble").durationSec, 7_200);
+  assert.equal(params(repaired, "music").trackCount, 8);
+  assert.deepEqual(
+    {
+      segmentCount: params(repaired, "loop_clips").segmentCount,
+      clipDurationSec: params(repaired, "loop_clips").clipDurationSec,
+      loopMode: params(repaired, "loop_clips").loopMode,
+    },
+    { segmentCount: 2, clipDurationSec: 15, loopMode: "flf2v" },
+    "music-loop source media must remain a sealed 2×15s unit after architect repair",
+  );
+  assert.deepEqual(familyTimeScalingContract("music_loop"), {
+    method: "stream_loop",
+    finalDurationSource: "episode_contract",
+    sourceSegmentCount: 2,
+    sourceSegmentSeconds: 15,
+    sourceUnitSeconds: 30,
+    loopMode: "flf2v",
+    seamMaximumDiff: 0.12,
+    assembly: "ffmpeg_stream_loop",
+  });
+  assert.equal(resolveFamilyEpisodeLengthSeconds("music_loop", 60), 3_600);
+  assert.equal(resolveFamilyEpisodeLengthSeconds("music_loop", 480), 28_800);
+  assert.throws(() => resolveFamilyEpisodeLengthSeconds("music_loop", 59), /supports 1 hr–8 hr/);
+  assert.throws(() => resolveFamilyEpisodeLengthSeconds("music_loop", 481), /supports 1 hr–8 hr/);
 }
 
 {

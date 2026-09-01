@@ -6,6 +6,7 @@ import {
 } from "./pipelineCompiler";
 import { validatePipeline } from "./validate";
 import { comparablePipeline } from "./channelPipelineComparable";
+import { familyDurationContract, familyTimeScalingContract } from "./families";
 export { comparablePipeline } from "./channelPipelineComparable";
 
 export interface ChannelPipelineUpgradePlan {
@@ -28,7 +29,45 @@ export interface ChannelPipelineUpgradePlan {
 export function planChannelPipelineUpgrade(
   source: readonly PipelineEntry[],
 ): ChannelPipelineUpgradePlan {
-  const completed = completePipelineForPolicy(source);
+  const blocks = new Set(source.map((entry) => entry.block));
+  const isMusicLoop = blocks.has("scene_planner")
+    && blocks.has("keyframes")
+    && blocks.has("loop_clips")
+    && blocks.has("assemble")
+    && !blocks.has("timeline_assemble");
+  let prepared = [...source];
+  if (isMusicLoop) {
+    const scaling = familyTimeScalingContract("music_loop");
+    const duration = familyDurationContract("music_loop");
+    if (scaling.method !== "stream_loop") {
+      throw new Error("music-loop pipeline upgrade has no stream-loop scaling contract");
+    }
+    prepared = prepared.map((entry) => {
+      if (entry.block !== "scene_planner" && entry.block !== "loop_clips" && entry.block !== "assemble") return entry;
+      const params = { ...(entry.params ?? {}) };
+      if (entry.block === "scene_planner") params.clipDurationSec = scaling.sourceSegmentSeconds;
+      if (entry.block === "loop_clips") {
+        params.segmentCount = scaling.sourceSegmentCount;
+        params.clipDurationSec = scaling.sourceSegmentSeconds;
+        params.loopMode = scaling.loopMode;
+        params.flfCrossfadeSec = 0.4;
+        delete params.crossfadeSec;
+      }
+      if (entry.block === "assemble") {
+        const requested = Number(params.durationSec);
+        if (
+          !Number.isFinite(requested)
+          || requested < duration.minimumSeconds
+          || requested > duration.maximumSeconds
+          || (requested - duration.minimumSeconds) % duration.stepSeconds !== 0
+        ) {
+          params.durationSec = duration.defaultSeconds;
+        }
+      }
+      return { ...entry, params };
+    });
+  }
+  const completed = completePipelineForPolicy(prepared);
   const resolved = validatePipeline(completed.entries);
   const compilation = compilePipeline(resolved);
 

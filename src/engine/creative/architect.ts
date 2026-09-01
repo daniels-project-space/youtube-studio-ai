@@ -276,13 +276,14 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
   },
   {
     block: "loop_clips",
-    purpose: "Generates the seamless looping clip (FLF2V end-frame loop with crossfade safety net).",
+    purpose: "Generates the sealed two-segment looping source (FLF2V end-frame anchors with measured seams).",
     whenToUse: "Core for loop channels.",
     addable: false,
     removable: false,
     appliesTo: "loop",
     params: [
-      { key: "clipDurationSec", type: "number", min: 5, max: 12, describe: "i2v clip length." },
+      { key: "segmentCount", type: "number", min: 2, max: 2, describe: "Two source segments are required." },
+      { key: "clipDurationSec", type: "number", min: 15, max: 15, describe: "Each source segment is 15 seconds." },
       { key: "loopMode", type: "enum", options: ["flf2v", "boomerang", "crossfade"], describe: "flf2v = forward motion, first==last frame (default). boomerang only for non-directional motion." },
     ],
   },
@@ -294,7 +295,7 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
     removable: false,
     appliesTo: "loop",
     params: [
-      { key: "durationSec", type: "number", min: 60, max: 7200, describe: "Total runtime. Lofi/study mixes typically 3600+." },
+      { key: "durationSec", type: "number", min: 3600, max: 28800, describe: "One to eight hour final runtime." },
       { key: "deblurIntro", type: "boolean", describe: "Focus-pull title intro (the classic lofi open)." },
     ],
   },

@@ -237,8 +237,9 @@ function runtimeConfigurationIsCompiledBeforeSpendReservation(): void {
   const design = designPipeline({
     family: "music_loop",
     nicheKey: "lofi",
-    lengthMinutes: 3,
+    lengthMinutes: 60,
     publishMode: "draft",
+    paramOverrides: { music: { trackCount: 1 } },
   });
   const base = compilePipeline(validatePipeline(design.pipeline));
   assert.match(
@@ -330,7 +331,7 @@ function publicationNeedsApproval(): void {
     () => designPipeline({
       family: "music_loop",
       nicheKey: "lofi",
-      lengthMinutes: 3,
+      lengthMinutes: 60,
       publishMode: "public",
     }),
     /approvedForPublish/,
@@ -338,7 +339,7 @@ function publicationNeedsApproval(): void {
   assert.doesNotThrow(() => designPipeline({
     family: "music_loop",
     nicheKey: "lofi",
-    lengthMinutes: 3,
+    lengthMinutes: 60,
     publishMode: "public",
     approvedForPublish: true,
   }));
@@ -346,7 +347,7 @@ function publicationNeedsApproval(): void {
     () => designPipeline({
       family: "music_loop",
       nicheKey: "lofi",
-      lengthMinutes: 3,
+      lengthMinutes: 60,
       publishMode: "draft",
       toggles: { crosspost: true },
     }),
@@ -355,7 +356,7 @@ function publicationNeedsApproval(): void {
   const design = designPipeline({
     family: "music_loop",
     nicheKey: "lofi",
-    lengthMinutes: 3,
+    lengthMinutes: 60,
     publishMode: "draft",
   });
   const unsafe = design.pipeline.map((entry) =>

@@ -869,14 +869,15 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     engine:
       "A Style-DNA-locked Novita Z-Image Turbo still, independently reviewed by a non-Google vision provider, is the exact source frame for a certified Novita LTX-2.5 image-to-video loop. A bounded seam treatment, mastered music mix, and final visual evidence turn it into an ambient product.",
     how:
-      "scene_planner selects an authored ambient scene; keyframes refuses production before paid work unless the channel supplies a recurring subject and setting plus a configured Groq or FAL reviewer. It permits at most two Novita still attempts and reviews the accepted image for identity, visual motifs, physics, and baked-in text. That accepted still is the LTX source frame; the independent scene director names only its real, subtle moving elements. loop_clips adds a hard static-camera prompt, renders one LTX-2.5 clip from that frame, and uses an explicit loop mode. FLF2V uses a separately capped <=0.6s safety blend; crossfade and boomerang remain explicit alternatives. assemble measures the final loop unit's first/last-frame difference and retains it as evidence, then streams the unit under mastered music with a deblur title intro.",
+      "scene_planner selects an authored ambient scene; keyframes refuses production before paid work unless the channel supplies a recurring subject and setting plus a configured non-Google reviewer. It permits at most two Novita still attempts and reviews the accepted image for identity, visual motifs, physics, and baked-in text. That accepted still anchors two independently attested 15-second LTX FLF2V segments. loop_clips measures both the internal join and wraparound seam before upscale. assemble normalizes one intro unit and one plain body unit, then packet-loops those pixels under mastered music for the selected one-to-eight-hour runtime.",
     gates: [
       "production keyframes require a grounded Style DNA subject and setting before any paid image work",
       "production keyframes require Groq or FAL review; Google/Gemini is not an eligible reviewer",
       "the accepted still is reviewed for channel identity, motifs, indoor-weather physics, and no baked-in text",
-      "one exact accepted still anchors the Novita LTX-2.5 image-to-video job; the camera is explicitly locked",
-      "loop mode is explicit; FLF2V's safety blend is independently capped at 0.6 seconds",
-      "the assembled loop unit retains a measured first/last-frame difference for final QA",
+      "one exact accepted still anchors both Novita LTX-2.5 image-to-video jobs; the camera is explicitly locked",
+      "the source is exactly two nominal 15-second FLF2V segments; both receive the accepted still as their terminal keyframe",
+      "the 30-second unit must pass internal-join and wraparound SSIM gates before upscale",
+      "one-to-eight-hour masters repeat H.264 packets instead of re-encoding identical pixels for the whole runtime",
     ],
     status: "reference",
   },

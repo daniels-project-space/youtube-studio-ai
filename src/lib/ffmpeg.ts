@@ -11,7 +11,7 @@
  */
 import { spawn } from "node:child_process";
 import { stat, copyFile, writeFile, unlink } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import {
   planThumbnailText,
   type ThumbnailHeadlineLine,
@@ -203,6 +203,118 @@ export async function measureLoopSeamDiff(
   const similarity = match ? Number(match[1]) : Number.NaN;
   if (!Number.isFinite(similarity)) {
     throw new FfmpegError("loop seam measurement did not emit an SSIM score");
+  }
+  return Number(Math.max(0, Math.min(1, 1 - similarity)).toFixed(6));
+}
+
+/**
+ * Join two independently rendered loop segments into one exact-duration source
+ * unit. Each segment is retimed by a tiny deterministic factor to its nominal
+ * duration, preserving its reviewed first/end-frame closure while avoiding a
+ * 30.16s unit caused by LTX's mandatory 8n+1 frame cadence.
+ */
+export async function composeLoopSourceUnit(args: {
+  segmentPaths: readonly [string, string];
+  outPath: string;
+  segmentSeconds: number;
+  fps?: number;
+  preset?: string;
+  timeoutMs?: number;
+}): Promise<string> {
+  if (!Number.isFinite(args.segmentSeconds) || args.segmentSeconds <= 0) {
+    throw new FfmpegError("loop source segment duration must be positive and finite");
+  }
+  const fps = Math.max(1, Math.round(args.fps ?? 25));
+  const media = await Promise.all(args.segmentPaths.map((path) => probe(path)));
+  for (const [index, item] of media.entries()) {
+    if (!Number.isFinite(item.durationSec) || item.durationSec < 0.2) {
+      throw new FfmpegError(`loop source segment ${index + 1} has no usable video duration`);
+    }
+    if (!item.width || !item.height) {
+      throw new FfmpegError(`loop source segment ${index + 1} has no measurable frame geometry`);
+    }
+  }
+  if (media[0].width !== media[1].width || media[0].height !== media[1].height) {
+    throw new FfmpegError(
+      `loop source segments must share exact geometry (${media[0].width}x${media[0].height} vs ${media[1].width}x${media[1].height})`,
+    );
+  }
+  const filters = media.map((item, index) => {
+    const factor = args.segmentSeconds / item.durationSec;
+    return `[${index}:v]setpts=${factor.toFixed(9)}*PTS,fps=${fps},format=yuv420p[v${index}]`;
+  });
+  filters.push("[v0][v1]concat=n=2:v=1:a=0[outv]");
+  const totalSeconds = args.segmentSeconds * args.segmentPaths.length;
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      "-i", args.segmentPaths[0],
+      "-i", args.segmentPaths[1],
+      "-filter_complex", filters.join(";"),
+      "-map", "[outv]",
+      "-t", totalSeconds.toFixed(3),
+      "-r", String(fps),
+      "-c:v", "libx264",
+      "-preset", args.preset ?? "medium",
+      "-crf", "18",
+      "-pix_fmt", "yuv420p",
+      "-an",
+      args.outPath,
+    ],
+    args.timeoutMs ?? 900_000,
+  );
+  const output = await probe(args.outPath);
+  if (Math.abs(output.durationSec - totalSeconds) > Math.max(0.08, 2 / fps)) {
+    throw new FfmpegError(
+      `loop source unit duration ${output.durationSec.toFixed(3)}s does not match ${totalSeconds.toFixed(3)}s contract`,
+    );
+  }
+  return args.outPath;
+}
+
+/** Compare the frames immediately around one internal video join. */
+export async function measureVideoBoundaryDiff(
+  inputPath: string,
+  workDir: string,
+  opts: { boundarySec: number; sampleOffsetSec?: number; label?: string; timeoutMs?: number },
+): Promise<number> {
+  const durationSec = (await probe(inputPath)).durationSec;
+  const boundarySec = Number(opts.boundarySec);
+  const offsetSec = Math.max(0.02, opts.sampleOffsetSec ?? 0.08);
+  if (
+    !Number.isFinite(durationSec)
+    || !Number.isFinite(boundarySec)
+    || boundarySec <= offsetSec
+    || boundarySec >= durationSec - offsetSec
+  ) {
+    throw new FfmpegError(
+      `video boundary ${String(opts.boundarySec)}s is outside the measurable ${durationSec.toFixed(3)}s source`,
+    );
+  }
+  const label = (opts.label ?? "boundary").replace(/[^a-z0-9_-]/gi, "-").slice(0, 40) || "boundary";
+  const beforePath = join(workDir, `${label}-before.png`);
+  const afterPath = join(workDir, `${label}-after.png`);
+  const frameArgs = (atSec: number, outPath: string) => [
+    "-y",
+    "-i", inputPath,
+    "-ss", atSec.toFixed(3),
+    "-vframes", "1",
+    "-vf", "scale=480:-2:flags=area",
+    outPath,
+  ];
+  await Promise.all([
+    run(FFMPEG, frameArgs(boundarySec - offsetSec, beforePath), opts.timeoutMs ?? 60_000),
+    run(FFMPEG, frameArgs(boundarySec + offsetSec, afterPath), opts.timeoutMs ?? 60_000),
+  ]);
+  const { stderr } = await run(
+    FFMPEG,
+    ["-i", beforePath, "-i", afterPath, "-lavfi", "[0:v][1:v]ssim", "-f", "null", "-"],
+    opts.timeoutMs ?? 60_000,
+  );
+  const similarity = Number(/All:([0-9.]+)/.exec(stderr)?.[1] ?? Number.NaN);
+  if (!Number.isFinite(similarity)) {
+    throw new FfmpegError("video boundary measurement did not emit an SSIM score");
   }
   return Number(Math.max(0, Math.min(1, 1 - similarity)).toFixed(6));
 }
@@ -2349,6 +2461,81 @@ export async function composeMusicLoopDeblur(args: {
   // duration, and fade the audio out over the last 4s for a clean ending.
   const aFadeDur = Math.min(4, Math.max(1, args.durationSec * 0.1));
   const aFadeSt = Math.max(0, args.durationSec - aFadeDur).toFixed(2);
+  // Long mixes must not decode and re-encode the same 30 seconds for eight
+  // hours. Normalize one plain body unit and one visually identical intro unit
+  // with the same H.264/GOP contract, then concat-repeat those video packets
+  // while encoding the looped audio exactly once. Runtime scales with source
+  // complexity and final I/O, not with repeated pixel work.
+  const unitSec = 30;
+  if (args.durationSec >= unitSec) {
+    const repeats = Math.ceil(args.durationSec / unitSec);
+    const workDir = dirname(args.outPath);
+    const bodyPath = join(workDir, "music-loop-body-unit.mp4");
+    const introPath = join(workDir, "music-loop-intro-unit.mp4");
+    const concatPath = join(workDir, "music-loop-concat.txt");
+    const codec = [
+      "-c:v", "libx264",
+      "-preset", args.preset ?? "veryfast",
+      "-crf", "20",
+      "-pix_fmt", "yuv420p",
+      "-g", String(fps * unitSec),
+      "-keyint_min", String(fps * unitSec),
+      "-sc_threshold", "0",
+      "-an",
+      "-movflags", "+faststart",
+    ];
+    const baseVf = `scale=${W}:${H}:force_original_aspect_ratio=increase,crop=${W}:${H},setsar=1,fps=${fps}`;
+    await run(
+      FFMPEG,
+      [
+        "-y", "-stream_loop", "-1", "-i", args.loopUnitPath,
+        "-t", String(unitSec), "-vf", baseVf,
+        ...codec,
+        bodyPath,
+      ],
+      args.timeoutMs ?? 2_700_000,
+    );
+    await run(
+      FFMPEG,
+      [
+        "-y", "-stream_loop", "-1", "-i", args.loopUnitPath,
+        "-t", String(unitSec), "-vf", vf,
+        ...codec,
+        introPath,
+      ],
+      args.timeoutMs ?? 2_700_000,
+    );
+    for (const path of [introPath, bodyPath]) {
+      if (/[\r\n']/.test(path)) {
+        throw new FfmpegError("music-loop temporary path cannot be represented safely in a concat manifest");
+      }
+    }
+    await writeFile(
+      concatPath,
+      [
+        `file '${introPath}'`,
+        ...Array.from({ length: Math.max(0, repeats - 1) }, () => `file '${bodyPath}'`),
+      ].join("\n") + "\n",
+      "utf8",
+    );
+    await run(
+      FFMPEG,
+      [
+        "-y",
+        "-f", "concat", "-safe", "0", "-i", concatPath,
+        "-stream_loop", "-1", "-i", args.musicPath,
+        "-map", "0:v:0", "-map", "1:a:0",
+        "-t", String(args.durationSec),
+        "-c:v", "copy",
+        "-af", `afade=t=in:st=0:d=2,afade=t=out:st=${aFadeSt}:d=${aFadeDur.toFixed(2)}`,
+        "-c:a", "aac", "-b:a", "384k",
+        "-movflags", "+faststart",
+        args.outPath,
+      ],
+      args.timeoutMs ?? 2_700_000,
+    );
+    return args.outPath;
+  }
   await run(
     FFMPEG,
     [

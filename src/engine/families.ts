@@ -86,12 +86,12 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "lofi-ambient",
     available: true,
     narrated: false,
-    requiresKeys: ["suno", "replicate", "novita"],
+    requiresKeys: ["suno", "novita", "openrouter-vision"],
     // The final cover always uses the universal Nano Banana scene path with
     // deterministic local typography.
     defaultThumbnailStyle: "banana",
     // Standard production loop + final visual/audio review reservation.
-    defaultRunBudgetUsd: 3,
+    defaultRunBudgetUsd: 3.5,
   },
   sleep: {
     key: "sleep",
@@ -285,7 +285,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
  * compatibility. The creator converts its seconds controls at the edge and
  * this contract remains the authoritative validation point for every caller.
  */
-export type FamilyDurationInputUnit = "minutes" | "seconds" | "fixed";
+export type FamilyDurationInputUnit = "hours" | "minutes" | "seconds" | "fixed";
 
 export interface FamilyDurationContract {
   /** Smallest finished-master duration that preserves the format's unit. */
@@ -311,12 +311,12 @@ export const FAMILY_DURATION_CONTRACTS: Readonly<Record<FamilyKey, FamilyDuratio
     rationale: "Long-form researched narration; the timed story spine scales in one-minute units.",
   },
   music_loop: {
-    minimumSeconds: 180,
-    maximumSeconds: 3_600,
-    defaultSeconds: 180,
-    stepSeconds: 60,
-    inputUnit: "minutes",
-    rationale: "A seamless moving loop needs at least one complete listening session; longer mixes add bounded track coverage.",
+    minimumSeconds: 3_600,
+    maximumSeconds: 28_800,
+    defaultSeconds: 7_200,
+    stepSeconds: 3_600,
+    inputUnit: "hours",
+    rationale: "A sealed 30-second visual unit streams under an original mastered mix for one to eight hours.",
   },
   sleep: {
     minimumSeconds: 60,
@@ -404,7 +404,75 @@ export function familyDurationContract(family: FamilyKey): FamilyDurationContrac
   return FAMILY_DURATION_CONTRACTS[family];
 }
 
+export type FamilyTimeScalingContract =
+  | Readonly<{
+      method: "authored_timeline";
+      finalDurationSource: "episode_contract";
+    }>
+  | Readonly<{
+      method: "fixed_cadence";
+      finalDurationSource: "family_default";
+    }>
+  | Readonly<{
+      method: "stream_loop";
+      finalDurationSource: "episode_contract";
+      sourceSegmentCount: 2;
+      sourceSegmentSeconds: 15;
+      sourceUnitSeconds: 30;
+      loopMode: "flf2v";
+      seamMaximumDiff: 0.12;
+      assembly: "ffmpeg_stream_loop";
+    }>;
+
+const AUTHORED_TIMELINE = Object.freeze({
+  method: "authored_timeline",
+  finalDurationSource: "episode_contract",
+} as const);
+const FIXED_CADENCE = Object.freeze({
+  method: "fixed_cadence",
+  finalDurationSource: "family_default",
+} as const);
+
+/**
+ * Separates the requested master duration from the amount of source media a
+ * renderer must create. Most families author the whole timeline; a music loop
+ * creates one short, continuity-proven unit and repeats it at assembly time.
+ * Keeping every family in this exact record prevents a new format from
+ * inheriting the music-loop shortcut accidentally.
+ */
+export const FAMILY_TIME_SCALING_CONTRACTS: Readonly<Record<FamilyKey, FamilyTimeScalingContract>> = {
+  narrated_stock: AUTHORED_TIMELINE,
+  music_loop: Object.freeze({
+    method: "stream_loop",
+    finalDurationSource: "episode_contract",
+    sourceSegmentCount: 2,
+    sourceSegmentSeconds: 15,
+    sourceUnitSeconds: 30,
+    loopMode: "flf2v",
+    seamMaximumDiff: 0.12,
+    assembly: "ffmpeg_stream_loop",
+  }),
+  sleep: AUTHORED_TIMELINE,
+  comic: AUTHORED_TIMELINE,
+  shorts: AUTHORED_TIMELINE,
+  documentary_collage_short: AUTHORED_TIMELINE,
+  whiteboard: AUTHORED_TIMELINE,
+  loreshort: AUTHORED_TIMELINE,
+  quizyear: FIXED_CADENCE,
+  illustrated_explainer: AUTHORED_TIMELINE,
+  children_learning: AUTHORED_TIMELINE,
+  cinematic: AUTHORED_TIMELINE,
+};
+
+export function familyTimeScalingContract(family: FamilyKey): FamilyTimeScalingContract {
+  return FAMILY_TIME_SCALING_CONTRACTS[family];
+}
+
 function formatDurationSeconds(seconds: number, unit: Exclude<FamilyDurationInputUnit, "fixed">): string {
+  if (unit === "hours") {
+    const hours = seconds / 3_600;
+    return Number.isInteger(hours) ? `${hours} hr` : `${hours.toFixed(1)} hr`;
+  }
   if (unit === "minutes") {
     const minutes = seconds / 60;
     return Number.isInteger(minutes) ? `${minutes} min` : `${minutes.toFixed(1)} min`;

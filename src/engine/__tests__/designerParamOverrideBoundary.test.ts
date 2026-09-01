@@ -31,13 +31,13 @@ assert.equal(metadata.params?.injectedPrompt, undefined, "unknown direct metadat
 
 const musicLoop = designPipeline({
   family: "music_loop",
-  lengthMinutes: 10,
+  lengthMinutes: 60,
   paramOverrides: { music: { trackCount: 8 } },
 });
 const loopAssemble = musicLoop.pipeline.find((entry) => entry.block === "assemble");
 const loopMusic = musicLoop.pipeline.find((entry) => entry.block === "music");
-assert.equal(loopAssemble?.params?.durationSec, 600, "loop assembly duration is pinned to the selected family length");
-assert.equal(loopMusic?.params?.trackCount, 2, "music track count cannot outgrow the selected loop duration");
+assert.equal(loopAssemble?.params?.durationSec, 3_600, "loop assembly duration is pinned to the selected family length");
+assert.equal(loopMusic?.params?.trackCount, 8, "music track count remains inside the sealed eight-track production cap");
 
 assert.throws(
   () => designPipeline({

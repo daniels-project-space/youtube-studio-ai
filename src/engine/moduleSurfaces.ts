@@ -184,7 +184,7 @@ const SCENE_PLANNER_MODULE: ModuleCard = {
   customization: {
     capabilities: ["clip length"],
     knobs: [
-      { id: "clipDurationSec", type: "number", range: [3, 15], default: 5, describes: "per-clip length for the loop", servesStyles: ["lofi", "ambient"] },
+      { id: "clipDurationSec", type: "number", range: [15, 15], default: 15, describes: "source-segment length", servesStyles: ["lofi", "ambient"] },
     ],
     presets: {},
   },
@@ -196,9 +196,10 @@ const LOOP_CLIPS_MODULE: ModuleCard = {
   stage: "visual",
   does: "Generates the seamless looping clips.",
   customization: {
-    capabilities: ["clip length"],
+    capabilities: ["two-segment source", "measured internal and wrap seams"],
     knobs: [
-      { id: "clipDurationSec", type: "number", range: [3, 15], default: 5, describes: "per-clip length for the loop", servesStyles: ["lofi", "ambient"] },
+      { id: "segmentCount", type: "number", range: [2, 2], default: 2, describes: "sealed source-segment count", servesStyles: ["lofi", "ambient"] },
+      { id: "clipDurationSec", type: "number", range: [15, 15], default: 15, describes: "per-segment source length", servesStyles: ["lofi", "ambient"] },
     ],
     presets: {},
   },
@@ -225,8 +226,9 @@ const LOOP_ASSEMBLE_MODULE: ModuleCard = {
   stage: "build",
   does: "Loops the clip to the full runtime with a deblur intro.",
   customization: {
-    capabilities: ["channel-format runtime", "deblur intro"],
+    capabilities: ["1–8 hour runtime", "packet-loop assembly", "deblur intro"],
     knobs: [
+      { id: "durationSec", type: "number", range: [3600, 28800], default: 7200, describes: "final master duration", servesStyles: ["lofi", "ambient"] },
       { id: "deblurIntro", type: "boolean", default: true, describes: "open on a focus-pull from blur with the title", servesStyles: ["lofi"] },
     ],
     presets: {},

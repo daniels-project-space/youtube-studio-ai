@@ -124,7 +124,7 @@ async function directNovitaCallersUseOnlyTheOptInDeadline(): Promise<void> {
     "five minutes protects the 1920×1088 still and short 1280×704 LTX output without task-cap stalls");
   const lofi = await readFile(join(process.cwd(), "src/trigger/blocks/lofiBlocks.ts"), "utf8");
   const keyframeDelivery = lofi.indexOf("const local = await downloadTo(rendered.url");
-  const clipDelivery = lofi.indexOf("const clipLocal = await downloadTo(clip.url");
+  const clipDelivery = lofi.indexOf("const local = await downloadTo(clip.url", keyframeDelivery + 1);
   assert.ok(keyframeDelivery >= 0 && clipDelivery > keyframeDelivery);
   assert.match(
     lofi.slice(keyframeDelivery, keyframeDelivery + 260),

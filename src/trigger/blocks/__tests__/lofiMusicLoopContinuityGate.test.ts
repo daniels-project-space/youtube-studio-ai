@@ -6,11 +6,23 @@ import { MusicError, withMusicGenerationCost } from "@/lib/music";
 import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
 
 const source = readFileSync(join(process.cwd(), "src", "trigger", "blocks", "lofiBlocks.ts"), "utf8");
+const loopStart = source.indexOf("loopClips: Block = {");
+const upscaleStart = source.indexOf("upscale: Block = {", loopStart);
 const musicStart = source.indexOf("music: Block = {");
 const assembleStart = source.indexOf("assemble: Block = {", musicStart);
 
+assert.ok(loopStart >= 0 && upscaleStart > loopStart, "visual loop block must remain independently inspectable");
 assert.ok(musicStart >= 0 && assembleStart > musicStart, "music block must remain independently inspectable");
+const loopBlock = source.slice(loopStart, upscaleStart);
 const musicBlock = source.slice(musicStart, assembleStart);
+
+assert.match(loopBlock, /videoJobs: scaling\.sourceSegmentCount/, "both 15-second workers must be reserved before spend");
+assert.match(loopBlock, /for \(let index = 0; index < scaling\.sourceSegmentCount; index\+\+\)/, "the source must render both sealed segments");
+assert.match(loopBlock, /endImageKey: f1Key/, "each segment must return to the exact accepted still");
+assert.match(loopBlock, /await composeLoopSourceUnit\(/, "the two segments must form one exact-duration source unit");
+assert.match(loopBlock, /measureVideoBoundaryDiff\([\s\S]*?measureLoopSeamDiff\(/, "internal and wraparound seams must both be measured");
+assert.match(loopBlock, /worstSeamDiff > scaling\.seamMaximumDiff/, "a visible source seam must fail before upscale");
+assert.match(loopBlock, /additionalObservedCostUsd:[\s\S]*?retryable: false/, "post-spend source failures must retain cost and stop paid retries");
 
 assert.match(
   musicBlock,

@@ -95,6 +95,16 @@ const liveLofi: PipelineEntry[] = [
 const lofiPlan = planChannelPipelineUpgrade(liveLofi);
 assert.deepEqual(lofiPlan.retired, ["intro_card"]);
 assert(!lofiPlan.entries.some((entry) => entry.block === "intro_card"));
+assert.deepEqual(
+  lofiPlan.entries.find((entry) => entry.block === "loop_clips")?.params,
+  { visualStyle: "lofi", segmentCount: 2, clipDurationSec: 15, loopMode: "flf2v", flfCrossfadeSec: 0.4 },
+  "existing music-loop channels must migrate from the old single 10s clip to the sealed 2×15s source",
+);
+assert.equal(
+  lofiPlan.entries.find((entry) => entry.block === "assemble")?.params?.durationSec,
+  7_200,
+  "legacy three-minute LoFi probes must migrate to the two-hour authored default",
+);
 assert.equal(lofiPlan.compilation.videoRenderBinding.required, true);
 assert.equal(lofiPlan.compilation.videoRenderBinding.compliant, true);
 assert.deepEqual(

@@ -214,7 +214,7 @@ export interface FormatPreflight {
     minimumSeconds: number;
     maximumSeconds: number;
     defaultSeconds: number;
-    inputUnit: "minutes" | "seconds" | "fixed";
+    inputUnit: "hours" | "minutes" | "seconds" | "fixed";
     label: string;
     rationale: string;
     targetSeconds?: number;

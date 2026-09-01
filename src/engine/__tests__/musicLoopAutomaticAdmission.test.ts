@@ -30,7 +30,7 @@ const design = designPipeline({
   nicheKey: programBrief.nicheKey,
   programBrief,
   programRoute,
-  lengthMinutes: 30,
+  lengthMinutes: 60,
 });
 
 assertChannelProgramRoutePipelineCompatibility({

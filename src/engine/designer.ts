@@ -11,6 +11,7 @@ import {
   assertFamilyAutonomousPlanningPipeline,
   familyAutonomousPlanningCapability,
   familyDurationContract,
+  familyTimeScalingContract,
   resolveFamilyEpisodeLengthSeconds,
   familyProductionReadiness,
   type FamilyKey,
@@ -523,6 +524,15 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       // shipped the archetype's hardcoded 3-min test render.
       if (e.block === "assemble" && opts.family === "music_loop" && lenSec) {
         params.durationSec = lenSec;
+      }
+      if (e.block === "loop_clips" && opts.family === "music_loop") {
+        const scaling = familyTimeScalingContract("music_loop");
+        if (scaling.method !== "stream_loop") {
+          throw new Error("music-loop family has no sealed stream-loop scaling contract");
+        }
+        params.segmentCount = scaling.sourceSegmentCount;
+        params.clipDurationSec = scaling.sourceSegmentSeconds;
+        params.loopMode = scaling.loopMode;
       }
       // Audio is audience-facing in every family: voice, score, ambience, or
       // game/quiz sound. The final-master aesthetics review is therefore part
@@ -1368,6 +1378,15 @@ export function enforceLengthContract(
       pin("maxSeconds", envelope.maxSeconds);
     }
     if (e.block === "assemble" && family === "music_loop") pin("durationSec", lenSec);
+    if (e.block === "loop_clips" && family === "music_loop") {
+      const scaling = familyTimeScalingContract("music_loop");
+      if (scaling.method !== "stream_loop") {
+        throw new Error("music-loop family has no sealed stream-loop scaling contract");
+      }
+      pin("segmentCount", scaling.sourceSegmentCount);
+      pin("clipDurationSec", scaling.sourceSegmentSeconds);
+      pin("loopMode", scaling.loopMode);
+    }
     if (e.block === "music" && family === "music_loop") {
       const want = Math.max(2, Math.min(8, Math.ceil(lenSec / 420)));
       if (Number(p["trackCount"] ?? 0) > want) pin("trackCount", want);

@@ -338,7 +338,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: ["topic", "musicKey", "scenes", "motionPrompt", "musicProgramMotionIntent", "styleGrammar", "visualStyle"],
     providerProfiles: [{ id: "novita-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 5,
-    maxCostUsdFor: () => PRICE.novitaVideoMaxUsd,
+    // The sealed 30-second source unit is two independently attested 15-second
+    // FLF2V workers. Reserve both before either worker can start.
+    maxCostUsdFor: () => 2 * PRICE.novitaVideoMaxUsd,
   }),
   upscale: contract(["visuals.upscaled"], {
     optionalConsumes: ["loopRawKey"],
@@ -362,7 +364,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     },
   }),
   assemble: contract(["master.assembled"], {
-    optionalConsumes: ["loopUnitUrl", "musicKey", "title", "channelName", "introCardPath", "introSec", "loopUnitResolution"],
+    optionalConsumes: [
+      "loopUnitUrl", "musicKey", "title", "channelName", "introCardPath", "introSec", "loopUnitResolution",
+      "loopSourceDurationSec", "loopSourceSegmentCount", "loopSourceInternalSeamDiff", "loopSourceWrapSeamDiff",
+    ],
     providerProfiles: [local],
     qualityRequired: true,
   }),

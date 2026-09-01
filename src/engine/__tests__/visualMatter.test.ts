@@ -286,7 +286,7 @@ assert.deepEqual(
   "the designer must emit the exact bounded, pinned reference-pack configuration",
 );
 
-const lofi = designPipeline({ family: "music_loop", lengthMinutes: 3 });
+const lofi = designPipeline({ family: "music_loop", lengthMinutes: 60 });
 assert.equal(lofi.pipeline.some((entry) => entry.block === "visual_matter"), false, "lo-fi must not receive Visual Matter");
 assert.equal(
   lofi.pipeline.some((entry) => entry.block === "visual_matter_references"),

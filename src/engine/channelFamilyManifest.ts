@@ -10,6 +10,7 @@ import {
 import {
   FAMILIES,
   FAMILY_DURATION_CONTRACTS,
+  FAMILY_TIME_SCALING_CONTRACTS,
   FAMILY_KEYS,
   type Family,
   type FamilyDurationContract,
@@ -117,6 +118,7 @@ export function assertChannelFamilyManifestIntegrity(): void {
     throw new Error("channel family manifest drift: FAMILY_KEYS no longer matches FAMILIES");
   }
   assertExactFamilyKeyedRecord("FAMILY_DURATION_CONTRACTS", FAMILY_DURATION_CONTRACTS, expectedKeys);
+  assertExactFamilyKeyedRecord("FAMILY_TIME_SCALING_CONTRACTS", FAMILY_TIME_SCALING_CONTRACTS, expectedKeys);
   assertExactFamilyKeyedRecord("CONTENT_LANE_BY_FAMILY", CONTENT_LANE_BY_FAMILY, expectedKeys);
 
   const laneKeys = new Set<ContentLaneKey>();

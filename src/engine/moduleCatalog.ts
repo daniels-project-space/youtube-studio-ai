@@ -319,7 +319,8 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     description: "Generates the seamless looping clips.",
     optional: false,
     params: [
-      { key: "clipDurationSec", label: "Clip length (sec)", type: "number", min: 3, max: 15, step: 1 },
+      { key: "segmentCount", label: "Source segments", type: "number", min: 2, max: 2, step: 1 },
+      { key: "clipDurationSec", label: "Clip length (sec)", type: "number", min: 15, max: 15, step: 1 },
     ],
   },
   {

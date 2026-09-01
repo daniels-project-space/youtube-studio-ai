@@ -1475,23 +1475,42 @@ export default function NewChannelWizard() {
             <header className={styles.roomHeader}><div><small>03A / channel system</small><strong>Format, voice, cadence, authority</strong></div><span>Saved with the channel</span></header>
             {duration?.inputUnit !== "fixed" && duration && (
               <Row label="Target length">
-                <input
-                  type="number"
-                  min={duration.inputUnit === "minutes" ? duration.minimumSeconds / 60 : duration.minimumSeconds}
-                  max={duration.inputUnit === "minutes" ? duration.maximumSeconds / 60 : duration.maximumSeconds}
-                  step={duration.inputUnit === "minutes" ? duration.stepSeconds / 60 : duration.stepSeconds}
-                  value={duration.inputUnit === "minutes" ? lengthMinutes : Math.round(lengthMinutes * 60)}
-                  onChange={(e) => {
-                    const raw = Number(e.target.value);
-                    if (!Number.isFinite(raw)) return;
-                    setLengthMinutes(clampFamilyEpisodeLengthMinutes(
-                      family as FamilyKey,
-                      duration.inputUnit === "minutes" ? raw : raw / 60,
-                    ));
-                  }}
-                  style={{ ...inpStyle, width: 90 }}
-                />
-                <span style={muted}>{duration.inputUnit === "minutes" ? "min" : "sec"} · {formatFamilyDurationContract(family as FamilyKey)} authored range</span>
+                {duration.inputUnit === "hours" ? (
+                  <div className={styles.durationPicker} aria-label="Episode duration">
+                    {[1, 2, 4, 8].map((hours) => (
+                      <button
+                        key={hours}
+                        type="button"
+                        data-active={lengthMinutes === hours * 60}
+                        aria-pressed={lengthMinutes === hours * 60}
+                        onClick={() => setLengthMinutes(clampFamilyEpisodeLengthMinutes(family as FamilyKey, hours * 60))}
+                      >
+                        <strong>{hours}</strong><span>hr</span>
+                      </button>
+                    ))}
+                    <small>2 × 15 sec source · streamed</small>
+                  </div>
+                ) : (
+                  <>
+                    <input
+                      type="number"
+                      min={duration.inputUnit === "minutes" ? duration.minimumSeconds / 60 : duration.minimumSeconds}
+                      max={duration.inputUnit === "minutes" ? duration.maximumSeconds / 60 : duration.maximumSeconds}
+                      step={duration.inputUnit === "minutes" ? duration.stepSeconds / 60 : duration.stepSeconds}
+                      value={duration.inputUnit === "minutes" ? lengthMinutes : Math.round(lengthMinutes * 60)}
+                      onChange={(e) => {
+                        const raw = Number(e.target.value);
+                        if (!Number.isFinite(raw)) return;
+                        setLengthMinutes(clampFamilyEpisodeLengthMinutes(
+                          family as FamilyKey,
+                          duration.inputUnit === "minutes" ? raw : raw / 60,
+                        ));
+                      }}
+                      style={{ ...inpStyle, width: 90 }}
+                    />
+                    <span style={muted}>{duration.inputUnit === "minutes" ? "min" : "sec"} · {formatFamilyDurationContract(family as FamilyKey)} authored range</span>
+                  </>
+                )}
               </Row>
             )}
             {duration?.inputUnit === "fixed" && family && (
@@ -1821,6 +1840,8 @@ export default function NewChannelWizard() {
             <SummaryRow k="Visual engine" v={fam.visualEngine} />
             {duration && <SummaryRow k="Episode unit" v={duration.inputUnit === "fixed"
               ? formatFamilyDurationContract(family as FamilyKey)
+              : duration.inputUnit === "hours"
+                ? `${lengthMinutes / 60} hr · 2 × 15 sec sealed source`
               : duration.inputUnit === "minutes"
                 ? `${lengthMinutes} min · ${formatFamilyDurationContract(family as FamilyKey)} contract`
                 : `${Math.round(lengthMinutes * 60)} sec · ${formatFamilyDurationContract(family as FamilyKey)} contract`} />}
