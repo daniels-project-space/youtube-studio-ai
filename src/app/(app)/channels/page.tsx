@@ -289,7 +289,14 @@ export default function ChannelsPage() {
                 <details className="channel-card-details">
                   <summary>
                     <span>Manage channel</span>
-                    <small>{setupDone}/{setupChecks.length} ready</small>
+                    <span className="channel-card-readiness">
+                      <progress
+                        aria-label={`${c.name} setup readiness`}
+                        max={setupChecks.length}
+                        value={setupDone}
+                      />
+                      <small>{setupDone}/{setupChecks.length} ready</small>
+                    </span>
                   </summary>
                     <div className="channel-card-details-body">
                     <ChannelRoomSelect channelId={c._id} currentFolder={c.folder} folders={folders} />

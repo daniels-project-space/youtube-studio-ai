@@ -1906,8 +1906,8 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
 
 .channel-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 268px), 1fr));
-  gap: 0.7rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+  gap: 0.82rem;
 }
 
 .channel-card {
@@ -1918,6 +1918,22 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
   padding: 0.7rem;
   overflow: hidden;
   box-shadow: none;
+  transition: border-color 180ms ease, transform 180ms ease, background 180ms ease;
+}
+
+.channel-card:hover {
+  border-color: color-mix(in srgb, var(--color-accent) 36%, var(--color-border));
+  background: color-mix(in srgb, var(--color-panel) 97%, var(--color-accent) 3%);
+  transform: translateY(-3px);
+}
+
+.channel-card > [aria-label$=" artwork"] img {
+  transition: transform 520ms cubic-bezier(0.22, 1, 0.36, 1), filter 240ms ease;
+}
+
+.channel-card:hover > [aria-label$=" artwork"] img {
+  filter: saturate(1.04) contrast(1.02);
+  transform: scale(1.018);
 }
 
 .channel-card-attention {
@@ -1959,13 +1975,14 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
 }
 
 .channel-card-title h2 {
+  display: -webkit-box;
   overflow: hidden;
   font-family: var(--font-sans);
-  font-size: 0.88rem;
+  font-size: 0.94rem;
   font-weight: 680;
   line-height: 1.25;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .channel-card-title > a:hover h2 { color: var(--color-accent); }
@@ -2102,6 +2119,46 @@ html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
 .channel-card-details > summary > span { color: var(--color-muted); font-size: 0.65rem; font-weight: 600; }
 .channel-card-details > summary > small {
   margin-left: auto;
+  color: var(--color-faint);
+  font: 0.56rem var(--font-mono);
+  white-space: nowrap;
+}
+
+.channel-card-readiness {
+  min-width: 88px;
+  display: grid;
+  grid-template-columns: minmax(38px, 1fr) auto;
+  align-items: center;
+  gap: 0.38rem;
+  margin-left: auto;
+}
+
+.channel-card-readiness progress {
+  width: 100%;
+  height: 3px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px;
+  appearance: none;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.channel-card-readiness progress::-webkit-progress-bar {
+  border-radius: inherit;
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.channel-card-readiness progress::-webkit-progress-value {
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-ok));
+}
+
+.channel-card-readiness progress::-moz-progress-bar {
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-ok));
+}
+
+.channel-card-readiness small {
   color: var(--color-faint);
   font: 0.56rem var(--font-mono);
   white-space: nowrap;
@@ -2927,6 +2984,17 @@ button.video-card-open { cursor: pointer; }
 @media (max-width: 520px) {
   .channel-card-grid { grid-template-columns: 1fr; }
   .channel-card { padding: 0.9rem; }
+  .channel-card:hover { transform: none; }
+  .channel-card-identity { display: grid; grid-template-columns: 52px minmax(0, 1fr); }
+  .channel-card-title > a { min-height: 44px; }
+  .channel-live-state {
+    min-height: 40px;
+    grid-column: 1 / -1;
+    grid-template-columns: auto auto minmax(0, 1fr);
+    padding: 0.42rem 0.52rem;
+  }
+  .channel-live-state > span { grid-row: auto; }
+  .channel-live-state small { text-align: right; }
   .channel-page-pagination { align-items: stretch; flex-direction: column; }
   .channel-page-pagination > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .channel-page-pagination button:only-child { grid-column: 1 / -1; }
@@ -2957,4 +3025,11 @@ button.video-card-open { cursor: pointer; }
   }
   .seo-focus .panel-heading { align-items: flex-start; flex-direction: column; }
   .seo-focus-source { max-width: 100%; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .channel-card,
+  .channel-card > [aria-label$=" artwork"] img {
+    transition: none;
+  }
 }

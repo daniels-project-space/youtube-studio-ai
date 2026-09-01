@@ -60,6 +60,9 @@ for (const id of ["library-search", "library-channel", "library-status", "librar
 }
 assert.match(globalCss, /--color-failed: #fb7185/);
 assert.doesNotMatch(globalCss, /\.channel-live-state-inactive\s*\{\s*opacity:/);
+assert.match(globalCss, /\.channel-card-grid[\s\S]*min\(100%, 340px\)/);
+assert.match(globalCss, /\.channel-card-readiness progress/);
+assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-live-state[\s\S]*grid-column: 1 \/ -1/);
 
 // Visual review always uses a persisted R2 thumbnail first. The shared media
 // boundary holds a stable space while R2 resolves and only falls back to a
