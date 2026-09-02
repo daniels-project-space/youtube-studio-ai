@@ -585,6 +585,7 @@ async function main() {
       description: String(storedItem!.description),
       sceneSeed: String(storedItem!.sceneSeed),
       thumbnailKey,
+      thumbnailSource: "planner_artwork",
     },
     execution: { pipeline: [], moduleConfig: {}, seedStore: { channelName: "Test Channel" } },
     prompts: {
@@ -604,6 +605,7 @@ async function main() {
     batchId: admitted.batchId,
     itemId,
     manifest: preparation,
+    thumbnailSource: preparation.plan.thumbnailSource,
     ...preparationPointer,
   });
   assert.deepEqual(frozenPreparation, { state: "frozen", reused: false });

@@ -3,6 +3,10 @@ import {
   assertPlanWeekPreparationPointer,
   type PlanWeekPreparationPointer,
 } from "./planWeekPreparation";
+import {
+  assertPlanWeekThumbnailSource,
+  type PlanWeekThumbnailSource,
+} from "./planWeekThumbnailSource";
 
 const HOUR_MS = 60 * 60 * 1_000;
 
@@ -15,6 +19,8 @@ export interface ScheduledPlanRunPayload {
   topic: string;
   title: string;
   thumbnailKey: string;
+  /** Defaults to historic paid planner artwork when absent on legacy plans. */
+  thumbnailSource?: PlanWeekThumbnailSource;
   scheduledAt?: number;
   /** Absent only for historic plans created before weekly preparation v1. */
   preparation?: PlanWeekPreparationPointer;
@@ -88,6 +94,7 @@ export function normalizeScheduledPlanPayload(
     topic: requiredText(value.topic, "topic"),
     title: requiredText(value.title, "title"),
     thumbnailKey: requiredText(value.thumbnailKey, "thumbnail key"),
+    thumbnailSource: assertPlanWeekThumbnailSource(value.thumbnailSource ?? "planner_artwork"),
   };
   if (value.scheduledAt !== undefined) {
     normalized.scheduledAt = scheduledTimestamp(value.scheduledAt);
@@ -109,6 +116,7 @@ export function assertScheduledPlanPayloadMatches(
     "topic",
     "title",
     "thumbnailKey",
+    "thumbnailSource",
     "scheduledAt",
   ] as const) {
     if (left[key] !== right[key]) {
@@ -137,6 +145,7 @@ export function scheduledPlanSeed(value: ScheduledPlanRunPayload): Record<string
     plannedTopic: plan.topic,
     plannedTitle: plan.title,
     plannedThumbnailKey: plan.thumbnailKey,
+    plannedThumbnailSource: plan.thumbnailSource,
     ...(plan.scheduledAt !== undefined ? { scheduledPublishAt: plan.scheduledAt } : {}),
     ...(plan.preparation !== undefined ? { planWeekPreparation: plan.preparation } : {}),
   };

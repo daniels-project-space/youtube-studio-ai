@@ -343,6 +343,7 @@ export const generationScheduler = schedules.task({
             topic: admitted.topic,
             title: admitted.title,
             thumbnailKey: admitted.thumbnailKey,
+            thumbnailSource: admitted.thumbnailSource,
             ...(admitted.scheduledAt !== undefined ? { scheduledAt: admitted.scheduledAt } : {}),
             ...(admitted.preparation !== undefined ? { preparation: admitted.preparation } : {}),
           }

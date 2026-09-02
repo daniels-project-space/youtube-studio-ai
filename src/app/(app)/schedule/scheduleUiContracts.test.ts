@@ -26,6 +26,8 @@ assert.match(board, /aspectRatio="16 \/ 9"/,
   "the operational week board must show packaging artwork at a legible video ratio");
 assert.match(board, /event\.type === "planned" \? event\.id : undefined/,
   "planned calendar cards must carry the exact plan item into the channel workspace");
+assert.match(board, /event\.thumbnailSource === "rendered_video_frame"/,
+  "Lo-Fi scheduled cards must show their final-frame state instead of requesting a generic planner image");
 assert.match(styles, /prefers-reduced-motion: reduce/,
   "schedule motion must expose a reduced-motion path");
 assert.doesNotMatch(page, /<PageHeader/,

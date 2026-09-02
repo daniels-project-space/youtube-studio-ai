@@ -454,6 +454,9 @@
 .weekRow:hover { border-color: var(--color-border-strong); background: rgba(243,240,232,0.025); }
 .weekRow[data-selected="true"] { border-color: color-mix(in srgb,var(--color-blueprint) 55%,var(--color-border)); background: color-mix(in srgb,var(--color-blueprint) 7%,transparent); box-shadow: inset 3px 0 0 var(--color-blueprint), 0 12px 42px rgba(0,0,0,0.18); }
 .weekRow:active { cursor: grabbing; }
+.deferredFrameThumb { display: grid; place-content: center; gap: 0.2rem; min-height: 84px; padding: 0.55rem; border: 1px solid color-mix(in srgb, var(--color-blueprint) 42%, var(--color-border)); background: linear-gradient(135deg, color-mix(in srgb, var(--color-blueprint) 16%, transparent), rgba(10, 18, 27, 0.36)); color: var(--color-fg); text-align: center; }
+.deferredFrameThumb span { font: 650 0.67rem/1 var(--font-display); }
+.deferredFrameThumb small { color: var(--color-faint); font: 600 0.5rem/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; }
 .weekIndex { align-self: start; padding-top: 0.2rem; color: var(--color-faint); font: 700 0.52rem/1 var(--font-mono); }
 .weekCopy { display: grid; min-width: 0; gap: 0.22rem; }
 .weekCopy strong { overflow: hidden; color: var(--color-fg); font-size: 0.74rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }

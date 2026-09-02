@@ -17,6 +17,7 @@ export type PlanItem = {
   topic: string;
   title?: string;
   thumbnailKey?: string;
+  thumbnailSource?: "planner_artwork" | "rendered_video_frame";
   status: string;
   scheduledAt?: number;
   frequency?: string;
@@ -46,6 +47,7 @@ export type PublishedVideo = {
   channelId: string;
   youtubeVideoId: string;
   thumbnailKey?: string | null;
+  thumbnailSource?: "planner_artwork" | "rendered_video_frame";
   publishedAt: number;
   publicationKind: "scheduled" | "public" | "unlisted";
 };
@@ -63,6 +65,7 @@ export type CalendarEvent = {
   timeZone: string;
   youtubeVideoId?: string;
   thumbnailKey?: string | null;
+  thumbnailSource?: "planner_artwork" | "rendered_video_frame";
   status?: string;
   readiness: PlanReadiness | "published";
   id?: string;
@@ -228,6 +231,7 @@ export function buildCalendarModel({
         timestamp,
         timeZone,
         thumbnailKey: item.thumbnailKey,
+        thumbnailSource: item.thumbnailSource,
         status: item.status,
         readiness: planReadiness(item.status, item.thumbnailKey),
         id: item._id,

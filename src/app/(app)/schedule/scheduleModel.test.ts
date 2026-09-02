@@ -75,6 +75,7 @@ const plan: PlanItem[] = [
     order: 0,
     topic: "A pinned daily",
     thumbnailKey: "thumbs/daily.jpg",
+    thumbnailSource: "rendered_video_frame",
     status: "ready",
     scheduledAt: pinned!,
   },
@@ -135,6 +136,11 @@ assert.equal(civilDayKey(pinnedEvent!.date), "2026-08-08");
 assert.equal(pinnedEvent?.pinned, true, "explicit dates win over cadence projection");
 assert.equal(pinnedEvent?.timestamp, pinned, "pinned items retain the immutable stored timestamp");
 assert.equal(pinnedEvent?.timeZone, "America/New_York");
+assert.equal(
+  pinnedEvent?.thumbnailSource,
+  "rendered_video_frame",
+  "the calendar carries a Lo-Fi final-frame cover state instead of substituting a generic thumbnail",
+);
 assert.equal(
   civilDayKey(all.flat.find((event) => event.key === "video:video-a")!.date),
   "2026-08-07",

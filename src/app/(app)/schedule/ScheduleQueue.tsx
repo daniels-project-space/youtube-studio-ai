@@ -70,7 +70,12 @@ function UpcomingCard({
     : formatZonedScheduleTimestamp(event.timestamp, event.timeZone);
   return (
     <article className={`${styles.upcomingCard} glass`} style={{ borderLeftColor: event.color }}>
-      <PlanThumbnail title={event.title} thumbnailKey={event.thumbnailKey} readiness={event.readiness} />
+      <PlanThumbnail
+        title={event.title}
+        thumbnailKey={event.thumbnailKey}
+        thumbnailSource={event.thumbnailSource}
+        readiness={event.readiness}
+      />
       <div className={styles.dateBlock}>
         <span>{MONTHS[event.date.getMonth()].slice(0, 3)}</span>
         <strong>{event.date.getDate()}</strong>
@@ -111,16 +116,20 @@ function UpcomingCard({
 function PlanThumbnail({
   title,
   thumbnailKey,
+  thumbnailSource,
   readiness,
 }: {
   title: string;
   thumbnailKey?: string | null;
+  thumbnailSource?: "planner_artwork" | "rendered_video_frame";
   readiness: PlanReadiness | "published";
 }) {
   const url = useAssetUrl(thumbnailKey);
   return (
     <div className={styles.planThumbnail} data-tone={readiness}>
-      {url ? (
+      {thumbnailSource === "rendered_video_frame" ? (
+        <span aria-label={`${title} cover will use its final rendered video frame`}>Final frame</span>
+      ) : url ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img src={url} alt={`${title} thumbnail`} loading="lazy" />
       ) : (

@@ -1,9 +1,13 @@
 /**
  * `plan-week-ahead` — pre-build the upcoming-videos queue for a channel: pick N
  * fresh topics, then for each generate an SEO title, a short description, and a
- * thumbnail (the SAME native Fal Nano Banana Pro renderer as a real render),
- * and store them in the `contentPlan`
+ * thumbnail source, and store them in the `contentPlan`
  * table for the channel page's "Week ahead" section.
+ *
+ * Most channels pre-render a receipt-backed Golden thumbnail. Lo-Fi is the
+ * deliberate exception: its authentic cover cannot exist until the final
+ * video exists, so the plan freezes an exact rendered-frame requirement and
+ * never launches generic pre-render artwork.
  */
 import { task } from "@trigger.dev/sdk";
 import { AbortTaskRunError } from "@trigger.dev/sdk/v3";
@@ -52,6 +56,11 @@ import {
   planWeekPreparationManifestSha256,
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
+import {
+  isDeferredRenderedFrameSource,
+  planWeekThumbnailSourceForChannel,
+  type PlanWeekThumbnailSource,
+} from "@/lib/planWeekThumbnailSource";
 import { readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -575,6 +584,9 @@ export const planWeekAheadTask = task({
     // Freeze every non-secret editorial and runtime input before the first
     // thumbnail provider claim. This keeps the weekly queue honest: it is
     // prepared input, not a promise that a later LTX/ERNIE render already ran.
+    // A Lo-Fi item freezes an explicit final-render-frame requirement instead
+    // of paying for or showing generic planner artwork.
+    const thumbnailSourceByItemId = new Map<string, PlanWeekThumbnailSource>();
     for (const item of batchItems) {
       const manifest = buildPlanWeekPreparationManifest({
         ownerId,
@@ -601,8 +613,10 @@ export const planWeekAheadTask = task({
         batchId,
         itemId: item._id,
         manifest,
+        thumbnailSource: manifest.plan.thumbnailSource,
         ...pointer,
       });
+      thumbnailSourceByItemId.set(String(item._id), manifest.plan.thumbnailSource);
       log(`inputs frozen ${recorded.reused ? "(reused) " : ""}${String(item._id).slice(-6)}`);
     }
     const dir = join(tmpdir(), `plan_${channelId}_${batchId}`);
@@ -612,6 +626,22 @@ export const planWeekAheadTask = task({
     for (let index = 0; index < batchItems.length; index++) {
       const item = batchItems[index];
       const thumbnailKey = planThumbnailKey(ownerId, channel.slug, item._id);
+      const thumbnailSource = thumbnailSourceByItemId.get(String(item._id));
+      if (!thumbnailSource) abortTask("plan-week-ahead: item is missing its frozen thumbnail source");
+      if (isDeferredRenderedFrameSource(thumbnailSource)) {
+        const deferred = await convex.mutation(api.contentPlan.completeDeferredFramePlanItem, {
+          ownerId,
+          channelId,
+          batchId,
+          itemId: item._id,
+          thumbnailKey,
+        });
+        log(
+          `${deferred.reused ? "reused" : "deferred"} ${index + 1}/${batchItems.length}: ` +
+          `Lo-Fi cover will be derived from its final rendered frame`,
+        );
+        continue;
+      }
       const claim = await convex.mutation(api.contentPlan.claimPlanItem, {
         ownerId, channelId, batchId, itemId: item._id, claimant,
       });
@@ -972,6 +1002,10 @@ function buildPlanWeekPreparationManifest(args: {
   const sceneSeed = args.item.sceneSeed?.trim() ||
     `A physical cause-and-effect scene that communicates ${args.item.topic.trim()} through people, objects, and action.`;
   const thumbnailKey = planThumbnailKey(args.ownerId, channel.slug, args.item._id);
+  const thumbnailSource = planWeekThumbnailSourceForChannel({
+    family: channel.family,
+    contentLane: channel.contentLane,
+  });
   const moduleConfig = recordOrEmpty(channel.moduleConfig) as Record<string, Record<string, unknown>>;
   const channelProgramRoute = channelProgramRouteRunSeed({
     route: args.programRoute,
@@ -1037,6 +1071,7 @@ function buildPlanWeekPreparationManifest(args: {
       description,
       sceneSeed,
       thumbnailKey,
+      thumbnailSource,
     },
     execution: {
       pipeline: structuredClone(Array.isArray(channel.pipeline) ? channel.pipeline : []),

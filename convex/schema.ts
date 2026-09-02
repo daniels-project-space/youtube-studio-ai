@@ -912,6 +912,9 @@ export default defineSchema({
     plannedTopic: v.optional(v.string()),
     plannedTitle: v.optional(v.string()),
     plannedThumbnailKey: v.optional(v.string()),
+    plannedThumbnailSource: v.optional(
+      v.union(v.literal("planner_artwork"), v.literal("rendered_video_frame")),
+    ),
     plannedPublishAt: v.optional(v.number()),
     // Pointer to a weekly preparation packet. It is copied atomically with
     // the plan selection so a scheduled execution cannot swap to new channel
@@ -1898,6 +1901,11 @@ export default defineSchema({
     description: v.optional(v.string()),
     sceneSeed: v.optional(v.string()),
     thumbnailKey: v.optional(v.string()),
+    // `rendered_video_frame` reserves a future Lo-Fi cover without claiming a
+    // generic planner image exists. It is immutable once inputs are frozen.
+    thumbnailSource: v.optional(
+      v.union(v.literal("planner_artwork"), v.literal("rendered_video_frame")),
+    ),
     status: v.string(), // "generating" | "ready" | "failed" | "used"
     generationState: v.optional(v.string()), // pending|claimed|complete|failed
     generationAttempt: v.optional(v.number()),

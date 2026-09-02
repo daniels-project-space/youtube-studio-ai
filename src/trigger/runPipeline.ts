@@ -1229,6 +1229,7 @@ export const runPipelineTask = task({
             topic: scheduledPlan.topic,
             title: scheduledPlan.title,
             thumbnailKey: scheduledPlan.thumbnailKey,
+            thumbnailSource: scheduledPlan.thumbnailSource,
           });
           if (durableInvocation === undefined) {
             entries = structuredClone(weeklyPreparation.execution.pipeline) as PipelineEntry[];

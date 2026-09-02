@@ -8,7 +8,12 @@ import {
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { PLAN_WEEK_CONTRACT_VERSION } from "@/lib/planWeekContract";
-import { recordPlanItemPreparation } from "../../../convex/contentPlan";
+import {
+  claimPlanItem,
+  completeDeferredFramePlanItem,
+  finalizePlanBatch,
+  recordPlanItemPreparation,
+} from "../../../convex/contentPlan";
 
 const ownerId = "owner-preparation";
 const channelId = "channels:preparation";
@@ -35,6 +40,7 @@ const manifest: PlanWeekPreparationManifest = {
     description: "A practical history episode about an overlooked mechanism.",
     sceneSeed: "A battered iron lock opens over a crowded medieval market.",
     thumbnailKey,
+    thumbnailSource: "planner_artwork",
   },
   execution: {
     pipeline: [{ block: "topic_select" }, { block: "script_gen" }],
@@ -73,6 +79,7 @@ assert.equal(
     topic: manifest.plan.topic,
     title: manifest.plan.title,
     thumbnailKey,
+    thumbnailSource: "planner_artwork",
   }).prompts.script,
   manifest.prompts.script,
   "an exact content-addressed preparation packet is admissible",
@@ -91,6 +98,7 @@ assert.throws(
     topic: manifest.plan.topic,
     title: manifest.plan.title,
     thumbnailKey,
+    thumbnailSource: "planner_artwork",
   }),
   /binding mismatch/,
   "changing any frozen editorial input invalidates the original digest",
@@ -109,6 +117,7 @@ assert.throws(
     topic: manifest.plan.topic,
     title: manifest.plan.title,
     thumbnailKey,
+    thumbnailSource: "planner_artwork",
   }),
   /binding mismatch/,
   "the manifest is namespaced to its exact owner/channel/batch/item",
@@ -160,7 +169,15 @@ async function main() {
       },
     },
   };
-  const args = { ownerId, channelId, batchId, itemId, manifest, ...pointer };
+  const args = {
+    ownerId,
+    channelId,
+    batchId,
+    itemId,
+    manifest,
+    thumbnailSource: manifest.plan.thumbnailSource,
+    ...pointer,
+  };
   const first = await invoke<{ state: string; reused: boolean }>(recordPlanItemPreparation, context, args);
   assert.deepEqual(first, { state: "frozen", reused: false });
   assert.equal(item.preparationManifestSha256, pointer.manifestSha256);
@@ -171,6 +188,104 @@ async function main() {
     /binding mismatch/,
     "a service worker cannot substitute a different digest after the item is frozen",
   );
+  await assert.rejects(
+    invoke(recordPlanItemPreparation, context, { ...args, thumbnailSource: "rendered_video_frame" }),
+    /binding mismatch/,
+    "a frozen planner-artwork manifest cannot be relabeled as a rendered-frame plan",
+  );
+
+  // Lo-Fi retains a deterministic future key but explicitly blocks generic
+  // planner artwork. It becomes schedulable only as a final-render-frame job.
+  const lofiBatchId = "planBatches:lofi";
+  const lofiItemId = "contentPlan:lofi";
+  let lofiBatch: Record<string, unknown> = {
+    _id: lofiBatchId,
+    ownerId,
+    channelId,
+    channelSlug,
+    requestKey,
+    contractVersion: PLAN_WEEK_CONTRACT_VERSION,
+    itemIds: [lofiItemId],
+    topicState: "complete",
+    topicUsageCheckpointKey: "topics:lofi",
+    accountingComplete: true,
+    budgetExceeded: false,
+    actualCostUsd: 0,
+    reservedCostUsd: 1,
+    status: "running",
+  };
+  let lofiItem: Record<string, unknown> = {
+    _id: lofiItemId,
+    ownerId,
+    channelId,
+    batchId: lofiBatchId,
+    itemKey: "week-2026-09:lofi",
+    topic: "A slow rain room for deep focus",
+    title: "Slow Rain Room",
+    description: "A seamless focus session built from one retained scene.",
+    sceneSeed: "A rainy studio window glows at night.",
+    generationState: "pending",
+  };
+  const lofiThumbnailKey = `owner/${ownerId}/channel/${channelSlug}/plan/${lofiItemId}.jpg`;
+  const lofiManifest: PlanWeekPreparationManifest = {
+    ...manifest,
+    batchId: lofiBatchId,
+    itemId: lofiItemId,
+    itemKey: String(lofiItem.itemKey),
+    plan: {
+      topic: String(lofiItem.topic),
+      title: String(lofiItem.title),
+      description: String(lofiItem.description),
+      sceneSeed: String(lofiItem.sceneSeed),
+      thumbnailKey: lofiThumbnailKey,
+      thumbnailSource: "rendered_video_frame",
+    },
+  };
+  const lofiPointer = {
+    version: PLAN_WEEK_PREPARATION_VERSION,
+    manifestKey: planWeekPreparationKey(lofiManifest),
+    manifestSha256: planWeekPreparationManifestSha256(lofiManifest),
+  };
+  const lofiContext = {
+    auth: context.auth,
+    db: {
+      normalizeId: (_table: string, id: string) => id,
+      get: async (id: string) => id === channelId ? channel : id === lofiBatchId ? lofiBatch : id === lofiItemId ? lofiItem : null,
+      patch: async (id: string, patch: Record<string, unknown>) => {
+        if (id === lofiBatchId) lofiBatch = { ...lofiBatch, ...patch };
+        else lofiItem = { ...lofiItem, ...patch };
+      },
+      query: (table: string) => ({
+        withIndex: () => ({
+          collect: async () => table === "contentPlan" ? [lofiItem] : [],
+        }),
+      }),
+    },
+  };
+  await invoke(recordPlanItemPreparation, lofiContext, {
+    ownerId,
+    channelId,
+    batchId: lofiBatchId,
+    itemId: lofiItemId,
+    manifest: lofiManifest,
+    thumbnailSource: lofiManifest.plan.thumbnailSource,
+    ...lofiPointer,
+  });
+  const blockedGenericClaim = await invoke<{ state: string }>(claimPlanItem, lofiContext, {
+    ownerId, channelId, batchId: lofiBatchId, itemId: lofiItemId, claimant: "test-lofi",
+  });
+  assert.equal(blockedGenericClaim.state, "blocked");
+  const deferred = await invoke<{ state: string; reused: boolean }>(completeDeferredFramePlanItem, lofiContext, {
+    ownerId, channelId, batchId: lofiBatchId, itemId: lofiItemId, thumbnailKey: lofiThumbnailKey,
+  });
+  assert.deepEqual(deferred, { state: "ready", reused: false, thumbnailKey: lofiThumbnailKey });
+  assert.equal(lofiItem.generationState, "deferred_to_final_render");
+  assert.equal(lofiItem.usageCheckpointKey, undefined);
+  assert.equal(lofiItem.thumbnailSource, "rendered_video_frame");
+  const finalized = await invoke<{ status: string; planned: number; actualCostUsd: number }>(finalizePlanBatch, lofiContext, {
+    ownerId, channelId, batchId: lofiBatchId,
+  });
+  assert.deepEqual(finalized, { status: "ready", planned: 1, actualCostUsd: 0 });
 }
 
 main()

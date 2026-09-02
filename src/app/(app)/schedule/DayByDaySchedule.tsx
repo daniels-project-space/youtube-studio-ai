@@ -94,16 +94,22 @@ function DayEventCard({ event }: { event: CalendarEvent }) {
       )}
       style={{ borderLeftColor: event.color }}
     >
-      <MediaPreview
-        className={styles.dayEventMedia}
-        dataTone={event.readiness}
-        assetKey={event.thumbnailKey}
-        fallbackSrc={event.youtubeVideoId ? youtubeThumb(event.youtubeVideoId) : undefined}
-        fallbackSource="youtube"
-        alt=""
-        aspectRatio="16 / 9"
-        unavailableLabel="Preview unavailable"
-      />
+      {event.thumbnailSource === "rendered_video_frame" ? (
+        <div className={styles.dayEventFramePending} aria-label="Cover will use the final rendered video frame">
+          <span>Final frame</span>
+        </div>
+      ) : (
+        <MediaPreview
+          className={styles.dayEventMedia}
+          dataTone={event.readiness}
+          assetKey={event.thumbnailKey}
+          fallbackSrc={event.youtubeVideoId ? youtubeThumb(event.youtubeVideoId) : undefined}
+          fallbackSource="youtube"
+          alt=""
+          aspectRatio="16 / 9"
+          unavailableLabel="Preview unavailable"
+        />
+      )}
       <span className={styles.dayEventCopy}>
         <span className={styles.dayEventTime}>{eventTime(event)}</span>
         <strong>{event.title}</strong>

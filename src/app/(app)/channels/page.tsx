@@ -53,6 +53,7 @@ type PlanCardRow = {
   status: string;
   scheduledAt?: number;
   thumbnailKey?: string;
+  thumbnailSource?: "planner_artwork" | "rendered_video_frame";
 };
 
 type ChannelCardArtwork = {
@@ -203,8 +204,10 @@ export default function ChannelsPage() {
               cadence: c.identity?.cadence,
               fromTimestamp: viewStartedAt,
             });
-            const planArtwork = next?.item.thumbnailKey ?? readyPlan.find(
-              (item) => item.thumbnailKey,
+            const planArtwork = (next?.item.thumbnailSource !== "rendered_video_frame"
+              ? next?.item.thumbnailKey
+              : undefined) ?? readyPlan.find(
+              (item) => item.thumbnailKey && item.thumbnailSource !== "rendered_video_frame",
             )?.thumbnailKey;
             const latestArtwork = cardData?.latestThumbnailKey;
             const previewArtwork = latestArtwork ?? planArtwork ?? c.identity?.bannerKey;

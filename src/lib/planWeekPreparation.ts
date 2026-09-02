@@ -1,4 +1,8 @@
 import { canonicalJson } from "@/lib/canonicalJson";
+import {
+  assertPlanWeekThumbnailSource,
+  type PlanWeekThumbnailSource,
+} from "@/lib/planWeekThumbnailSource";
 import { sha256Hex } from "@/lib/sha256";
 
 /**
@@ -24,6 +28,11 @@ export interface PlanWeekPreparationManifest {
     description: string;
     sceneSeed: string;
     thumbnailKey: string;
+    /**
+     * `rendered_video_frame` deliberately reserves the eventual artifact path
+     * without pretending that artwork exists before the final video does.
+     */
+    thumbnailSource: PlanWeekThumbnailSource;
   };
   /**
    * This is the non-secret input surface actually available to the execution
@@ -127,6 +136,11 @@ export function normalizePlanWeekPreparationManifest(value: unknown): PlanWeekPr
       description: requiredText(plan.description, "plan description"),
       sceneSeed: requiredText(plan.sceneSeed, "scene seed"),
       thumbnailKey: requiredText(plan.thumbnailKey, "thumbnail key"),
+      // v1 manifests written before this field existed were all paid planner
+      // artwork. Keep them executable while every new manifest is explicit.
+      thumbnailSource: assertPlanWeekThumbnailSource(
+        plan.thumbnailSource ?? "planner_artwork",
+      ),
     },
     execution: {
       pipeline: execution.pipeline,
@@ -173,6 +187,7 @@ export function assertPlanWeekPreparationManifestBinding(args: {
   topic: string;
   title: string;
   thumbnailKey: string;
+  thumbnailSource?: PlanWeekThumbnailSource;
 }): PlanWeekPreparationManifest {
   const manifest = normalizePlanWeekPreparationManifest(args.manifest);
   const pointer = assertPlanWeekPreparationPointer(args.pointer);
@@ -189,7 +204,8 @@ export function assertPlanWeekPreparationManifestBinding(args: {
     manifest.channelSlug !== args.channelSlug ||
     manifest.plan.topic !== args.topic ||
     manifest.plan.title !== args.title ||
-    manifest.plan.thumbnailKey !== args.thumbnailKey
+    manifest.plan.thumbnailKey !== args.thumbnailKey ||
+    manifest.plan.thumbnailSource !== (args.thumbnailSource ?? "planner_artwork")
   ) {
     throw new Error("plan-week preparation manifest binding mismatch");
   }

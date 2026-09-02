@@ -10,6 +10,7 @@ import {
   verifyFinalizedPlanWeekRenderReceipt,
 } from "../src/lib/planWeekRenderReceipt";
 import {
+  LEGACY_FROZEN_INPUTS_PLAN_WEEK_CONTRACT_VERSION,
   PLAN_WEEK_CONTRACT_VERSION,
   planWeekContractReservation,
 } from "../src/lib/planWeekContract";
@@ -18,6 +19,10 @@ import {
   assertPlanWeekPreparationPointer,
   PLAN_WEEK_PREPARATION_VERSION,
 } from "../src/lib/planWeekPreparation";
+import {
+  isDeferredRenderedFrameSource,
+  type PlanWeekThumbnailSource,
+} from "../src/lib/planWeekThumbnailSource";
 import {
   PLAN_WEEK_RECOVERY_GUARD_VERSION,
   assertExactFailedPlanWeekRecoveryState,
@@ -259,6 +264,7 @@ function scheduledItemPayload(item: {
   topic: string;
   title?: string;
   thumbnailKey?: string;
+  thumbnailSource?: PlanWeekThumbnailSource;
   scheduledAt?: number;
   preparationState?: string;
   preparationVersion?: string;
@@ -276,6 +282,7 @@ function scheduledItemPayload(item: {
     topic: item.topic,
     title: item.title ?? "",
     thumbnailKey: item.thumbnailKey ?? "",
+    thumbnailSource: item.thumbnailSource ?? "planner_artwork",
     ...(item.scheduledAt !== undefined ? { scheduledAt: item.scheduledAt } : {}),
     ...(hasPreparation ? {
       preparation: assertPlanWeekPreparationPointer({
@@ -292,6 +299,7 @@ function scheduledRunPayload(run: {
   plannedTopic?: string;
   plannedTitle?: string;
   plannedThumbnailKey?: string;
+  plannedThumbnailSource?: PlanWeekThumbnailSource;
   plannedPublishAt?: number;
   plannedPreparationVersion?: string;
   plannedPreparationManifestKey?: string;
@@ -307,6 +315,7 @@ function scheduledRunPayload(run: {
     topic: run.plannedTopic ?? "",
     title: run.plannedTitle ?? "",
     thumbnailKey: run.plannedThumbnailKey ?? "",
+    thumbnailSource: run.plannedThumbnailSource ?? "planner_artwork",
     ...(run.plannedPublishAt !== undefined ? { scheduledAt: run.plannedPublishAt } : {}),
     ...(hasPreparation ? {
       preparation: assertPlanWeekPreparationPointer({
@@ -325,7 +334,8 @@ async function proveReadyPlanBatches(
 ) {
   const provenBatches = await Promise.all(batches.map(async (batch) => {
     if (batch.ownerId !== args.ownerId || batch.channelId !== args.channelId ||
-        batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION ||
+        (batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION &&
+          batch.contractVersion !== LEGACY_FROZEN_INPUTS_PLAN_WEEK_CONTRACT_VERSION) ||
         batch.status !== "ready" || batch.topicState !== "complete" ||
         !batch.accountingComplete || batch.budgetExceeded) {
       return [];
@@ -338,9 +348,16 @@ async function proveReadyPlanBatches(
       ctx.db.query("planBatchUsage").withIndex("by_batch", (q) => q.eq("batchId", batch._id)).take(65),
       ctx.db.query("planWeekRenderReceipts").withIndex("by_batch", (q) => q.eq("batchId", batch._id)).take(13),
     ]);
-    if (loadedItems.some((item) => !item) || usageRows.length > 64 ||
-        renderRows.length !== expectedIds.length) return [];
+    if (loadedItems.some((item) => !item) || usageRows.length > 64) return [];
     const items = loadedItems.filter((item): item is NonNullable<typeof item> => Boolean(item));
+    // A source-frame Lo-Fi cover is deliberately not a ready planner artifact.
+    // It therefore cannot be used as a fake channel-inception preview; the
+    // scheduler consumes the frozen plan and the real cover appears only after
+    // the final video is rendered.
+    if (items.some((item) => isDeferredRenderedFrameSource(item.thumbnailSource ?? "planner_artwork"))) {
+      return [];
+    }
+    if (renderRows.length !== expectedIds.length) return [];
     const allUsageBound = usageRows.every((usage) =>
       usage.ownerId === args.ownerId && usage.channelId === args.channelId &&
       usage.batchId === batch._id && usage.accountingComplete &&
@@ -572,6 +589,7 @@ export const listPlanByOwner = query({
         topic: r.topic,
         title: r.title,
         thumbnailKey: r.thumbnailKey,
+        thumbnailSource: r.thumbnailSource,
         status: r.status,
         scheduledAt: r.scheduledAt,
         scheduledRunId: r.scheduledRunId,
@@ -1290,6 +1308,10 @@ export const recordPlanItemPreparation = mutation({
     manifest: v.any(),
     manifestKey: v.string(),
     manifestSha256: v.string(),
+    thumbnailSource: v.union(
+      v.literal("planner_artwork"),
+      v.literal("rendered_video_frame"),
+    ),
   },
   handler: async (ctx, args) => {
     await requirePlannerService(ctx);
@@ -1325,6 +1347,7 @@ export const recordPlanItemPreparation = mutation({
       topic: item.topic,
       title: item.title,
       thumbnailKey,
+      thumbnailSource: args.thumbnailSource,
     });
     if (manifest.frozenAt > Date.now() + 60_000) {
       throw new Error("plan preparation frozen timestamp is in the future");
@@ -1335,6 +1358,7 @@ export const recordPlanItemPreparation = mutation({
       item.preparationManifestKey,
       item.preparationManifestSha256,
       item.preparationFrozenAt,
+      item.thumbnailSource,
     ];
     if (existing.some((value) => value !== undefined)) {
       if (
@@ -1342,7 +1366,8 @@ export const recordPlanItemPreparation = mutation({
         item.preparationVersion !== PLAN_WEEK_PREPARATION_VERSION ||
         item.preparationManifestKey !== args.manifestKey ||
         item.preparationManifestSha256 !== args.manifestSha256 ||
-        item.preparationFrozenAt !== manifest.frozenAt
+        item.preparationFrozenAt !== manifest.frozenAt ||
+        item.thumbnailSource !== manifest.plan.thumbnailSource
       ) {
         throw new Error("plan preparation replay mismatch");
       }
@@ -1354,8 +1379,70 @@ export const recordPlanItemPreparation = mutation({
       preparationManifestKey: args.manifestKey,
       preparationManifestSha256: args.manifestSha256,
       preparationFrozenAt: manifest.frozenAt,
+      thumbnailSource: manifest.plan.thumbnailSource,
     });
     return { state: "frozen" as const, reused: false };
+  },
+});
+
+/**
+ * Admit a Lo-Fi item without manufacturing a false planner thumbnail. The
+ * stored key is a deterministic future destination only; `thumbnail_gen`
+ * creates the real, final-video-frame cover inside the scheduled run.
+ */
+export const completeDeferredFramePlanItem = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    batchId: v.id("planBatches"),
+    itemId: v.id("contentPlan"),
+    thumbnailKey: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requirePlannerService(ctx);
+    const [batch, item] = await Promise.all([ctx.db.get(args.batchId), ctx.db.get(args.itemId)]);
+    if (!batch || !item || batch.ownerId !== args.ownerId || batch.channelId !== args.channelId ||
+        item.ownerId !== args.ownerId || item.channelId !== args.channelId || item.batchId !== args.batchId) {
+      throw new Error("plan item ownership mismatch");
+    }
+    if (batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION ||
+        item.preparationState !== "inputs_frozen" ||
+        item.preparationVersion !== PLAN_WEEK_PREPARATION_VERSION ||
+        !item.preparationManifestKey || !item.preparationManifestSha256 || !item.preparationFrozenAt ||
+        !isDeferredRenderedFrameSource(item.thumbnailSource ?? "planner_artwork")) {
+      throw new Error("plan item is not an admitted deferred rendered-frame thumbnail");
+    }
+    if (batch.budgetExceeded || !batch.accountingComplete ||
+        (batch.status === "failed" && !batch.retryable)) {
+      throw new Error("plan batch is terminal before deferred rendered-frame admission");
+    }
+    const cleanKeyPart = (value: string) => value.replace(/^\/+|\/+$/g, "");
+    const expectedThumbnailKey =
+      `owner/${cleanKeyPart(args.ownerId)}/channel/${cleanKeyPart(batch.channelSlug)}/plan/${args.itemId}.jpg`;
+    const thumbnailKey = args.thumbnailKey.trim();
+    if (thumbnailKey !== expectedThumbnailKey) {
+      throw new Error("deferred rendered-frame thumbnail key does not match its admitted artifact path");
+    }
+    if (item.status === "ready") {
+      if (item.generationState !== "deferred_to_final_render" || item.thumbnailKey !== thumbnailKey ||
+          item.usageCheckpointKey !== undefined || item.generationCostUsd !== 0) {
+        throw new Error("deferred rendered-frame plan replay mismatch");
+      }
+      return { state: "ready" as const, reused: true, thumbnailKey };
+    }
+    if (item.generationProviderStartedAt !== undefined || item.generationState !== "pending") {
+      throw new Error("deferred rendered-frame item cannot replace an existing thumbnail attempt");
+    }
+    await ctx.db.patch(args.itemId, {
+      thumbnailKey,
+      status: "ready",
+      generationState: "deferred_to_final_render",
+      generationError: undefined,
+      generationRetryable: false,
+      generationCostUsd: 0,
+      usageCheckpointKey: undefined,
+    });
+    return { state: "ready" as const, reused: false, thumbnailKey };
   },
 });
 
@@ -1376,6 +1463,13 @@ export const claimPlanItem = mutation({
     }
     if (item.status === "ready" && item.thumbnailKey) {
       return { state: "complete" as const, attempt: item.generationAttempt ?? 0, thumbnailKey: item.thumbnailKey };
+    }
+    if (isDeferredRenderedFrameSource(item.thumbnailSource ?? "planner_artwork")) {
+      return {
+        state: "blocked" as const,
+        attempt: item.generationAttempt ?? 0,
+        error: "Lo-Fi cover is locked to its final rendered video frame; generic planner artwork is prohibited",
+      };
     }
     if (batch.budgetExceeded || !batch.accountingComplete ||
         (batch.status === "failed" && !batch.retryable)) {
@@ -1453,6 +1547,9 @@ export const markPlanItemProviderStarted = mutation({
         item.batchId !== args.batchId || item.ownerId !== args.ownerId || item.channelId !== args.channelId) {
       throw new Error("plan item ownership mismatch");
     }
+    if (isDeferredRenderedFrameSource(item.thumbnailSource ?? "planner_artwork")) {
+      throw new Error("Lo-Fi rendered-frame plan item cannot enter a generic thumbnail provider");
+    }
     if (item.generationAttempt !== args.attempt) throw new Error("stale plan item provider-start attempt");
     const claimant = args.claimant.slice(0, 180);
     if (item.generationProviderStartedAt !== undefined) {
@@ -1523,6 +1620,9 @@ export const completePlanItem = mutation({
     }
     if (batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION) {
       throw new Error("plan item does not belong to the active generation contract");
+    }
+    if (isDeferredRenderedFrameSource(item.thumbnailSource ?? "planner_artwork")) {
+      throw new Error("Lo-Fi rendered-frame plan item must be admitted without generic planner artwork");
     }
     if (
       item.preparationState !== "inputs_frozen" ||
@@ -1672,7 +1772,14 @@ export const finalizePlanBatch = mutation({
     const itemSetComplete = expectedItemIds.length > 0 && items.length === expectedItemIds.length &&
       expectedItemIds.every((itemId) => actualItemIds.has(itemId));
     const allReady = itemSetComplete && batch.topicState === "complete" && Boolean(batch.topicUsageCheckpointKey) &&
-      items.every((item) => item.status === "ready" && Boolean(item.thumbnailKey) && Boolean(item.usageCheckpointKey));
+      items.every((item) => {
+        const deferredFrame = isDeferredRenderedFrameSource(item.thumbnailSource ?? "planner_artwork");
+        return item.status === "ready" && Boolean(item.thumbnailKey) &&
+          (deferredFrame
+            ? item.generationState === "deferred_to_final_render" &&
+              item.usageCheckpointKey === undefined && item.generationCostUsd === 0
+            : Boolean(item.usageCheckpointKey));
+      });
     if (allReady && batch.accountingComplete && !batch.budgetExceeded) {
       await ctx.db.patch(args.batchId, {
         status: "ready",
@@ -2186,6 +2293,7 @@ export const claimNextPlanRun = mutation({
       plannedTopic: payload.topic,
       plannedTitle: payload.title,
       plannedThumbnailKey: payload.thumbnailKey,
+      plannedThumbnailSource: payload.thumbnailSource,
       ...(payload.scheduledAt !== undefined ? { plannedPublishAt: payload.scheduledAt } : {}),
       ...(payload.preparation !== undefined ? {
         plannedPreparationVersion: payload.preparation.version,

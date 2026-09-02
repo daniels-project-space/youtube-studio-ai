@@ -329,6 +329,7 @@ async function main() {
     plannedTopic: first.topic,
     plannedTitle: first.title,
     plannedThumbnailKey: first.thumbnailKey,
+    plannedThumbnailSource: "planner_artwork",
     scheduledPublishAt: first.scheduledAt,
   });
   const topicOutput = await topicSelect.run({

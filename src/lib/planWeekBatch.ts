@@ -4,6 +4,7 @@ import type { ImageUsageSummary } from "@/lib/imageUsage";
 import type { ModelUsageSummary } from "@/lib/modelUsage";
 import {
   LEGACY_PLAN_WEEK_CONTRACT_VERSION,
+  LEGACY_FROZEN_INPUTS_PLAN_WEEK_CONTRACT_VERSION,
   LEGACY_FAL_NANO_BANANA_PRO_PLAN_WEEK_CONTRACT_VERSION,
   LEGACY_GOLDEN_NANO_BANANA_PLAN_WEEK_CONTRACT_VERSION,
   PLAN_WEEK_CONTRACT_VERSION,
@@ -14,6 +15,7 @@ import {
 import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract";
 
 export {
+  LEGACY_FROZEN_INPUTS_PLAN_WEEK_CONTRACT_VERSION,
   LEGACY_PLAN_WEEK_CONTRACT_VERSION,
   PLAN_WEEK_CONTRACT_VERSION,
   PLAN_WEEK_IMAGE_UNIT_USD,
@@ -230,6 +232,7 @@ export function parsePlanWeekUsageMetadata(
     const value = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as PlanWeekUsageCheckpoint;
     if (
       value.contractVersion !== PLAN_WEEK_CONTRACT_VERSION &&
+      value.contractVersion !== LEGACY_FROZEN_INPUTS_PLAN_WEEK_CONTRACT_VERSION &&
       value.contractVersion !== LEGACY_FAL_NANO_BANANA_PRO_PLAN_WEEK_CONTRACT_VERSION &&
       value.contractVersion !== LEGACY_GOLDEN_NANO_BANANA_PLAN_WEEK_CONTRACT_VERSION &&
       value.contractVersion !== LEGACY_PLAN_WEEK_CONTRACT_VERSION

@@ -329,8 +329,10 @@ export default function ChannelHubPage({
   const readinessDone = readinessChecks.filter(Boolean).length;
   const modulePath = (channel.pipeline ?? []).map((entry) => entry.block.replaceAll("_", " "));
   const latestArtwork = channelCard.latestThumbnailKey;
-  const plannedArtwork = nextPlan?.item.thumbnailKey ?? readyPlan.find(
-    (item) => item.thumbnailKey,
+  const plannedArtwork = (nextPlan?.item.thumbnailSource !== "rendered_video_frame"
+    ? nextPlan?.item.thumbnailKey
+    : undefined) ?? readyPlan.find(
+    (item) => item.thumbnailKey && item.thumbnailSource !== "rendered_video_frame",
   )?.thumbnailKey;
 
   return (
@@ -2429,6 +2431,7 @@ type PlanRow = {
   title?: string;
   description?: string;
   thumbnailKey?: string;
+  thumbnailSource?: "planner_artwork" | "rendered_video_frame";
   status: string;
   scheduledAt?: number;
   scheduledRunId?: Id<"runs">;
@@ -2563,7 +2566,14 @@ function WeekAheadTab({
               className={`${styles.weekRow} channel-week-row`}
             >
               <span className={styles.weekIndex}>{String(index + 1).padStart(2, "0")}</span>
-              <AssetImg k={p.thumbnailKey} alt={p.title ?? p.topic} className="channel-week-thumb" />
+              {p.thumbnailSource === "rendered_video_frame" ? (
+                <div className={`${styles.deferredFrameThumb} channel-week-thumb`} aria-label="Cover will use the final rendered video frame">
+                  <span>Final frame</span>
+                  <small>after render</small>
+                </div>
+              ) : (
+                <AssetImg k={p.thumbnailKey} alt={p.title ?? p.topic} className="channel-week-thumb" />
+              )}
               <div className={styles.weekCopy}>
                 <strong>{p.title || p.topic}</strong>
                 {p.title && p.title !== p.topic && (
@@ -2592,7 +2602,7 @@ function WeekAheadTab({
                 <div className={styles.weekDetailBody}>
                   <div className={styles.weekDetailGrid}>
                     <div><small>Brief</small><strong>{p.description || p.topic}</strong></div>
-                    <div><small>Cover</small><strong>{p.thumbnailKey ? "Ready" : "Pending"}</strong></div>
+                    <div><small>Cover</small><strong>{p.thumbnailSource === "rendered_video_frame" ? "Final video frame" : p.thumbnailKey ? "Ready" : "Pending"}</strong></div>
                     <div><small>Production</small><strong>{p.scheduledRunId ? "Recorded" : p.status === "ready" ? "Queued" : "Not started"}</strong></div>
                   </div>
                   <div className={styles.weekDetailActions}>
