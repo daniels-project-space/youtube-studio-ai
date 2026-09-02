@@ -25,8 +25,8 @@
  * WRITE PATH / SIDE EFFECTS (honest accounting): the patch handed to
  * `api.channels.updateChannel` contains ONLY `styleDNA` + `qaRubric`. That
  * mutation additionally, by its own design, (a) stamps `contentLane` on legacy
- * rows, (b) forks the write onto a v2 row if the channel is LOCKED (surfaced in
- * the return value as `writeOutcome.forked`), and (c) invalidates persisted
+ * rows, (b) returns an audited `channel_locked` result without changing the
+ * row if the channel is LOCKED, and (c) invalidates persisted
  * inception proofs rooted at `channel-inception-positioning`, which sets
  * `status: "draft"` — but only for channels that actually carry an `inception`
  * ledger. Legacy pre-DNA rows have none, so (c) is a no-op for them. Run with

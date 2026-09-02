@@ -23,6 +23,7 @@ import {
   channelModuleUnlockConfirmation,
   type ChannelModuleLock,
 } from "@/lib/channelModuleLock";
+import { CHANNEL_UNLOCK_CONFIRMATION } from "@/lib/channelLockContract";
 import { useOwnerId } from "@/lib/owner-context";
 import { ModuleConfigPanel, type ModuleConfigValue } from "./ModuleConfigPanel";
 import styles from "./ModuleConfigSection.module.css";
@@ -42,6 +43,7 @@ function ModuleCard({
   channelId,
   ownerId,
   lock,
+  channelLocked = false,
   index,
   open,
   onOpenChange,
@@ -57,6 +59,7 @@ function ModuleCard({
   channelId?: Id<"channels">;
   ownerId?: string;
   lock?: ChannelModuleLock;
+  channelLocked?: boolean;
   index: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -68,7 +71,8 @@ function ModuleCard({
   const [lockBusy, setLockBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [local, setLocal] = useState<ModuleConfigValue>(value);
-  const locked = Boolean(lock);
+  const moduleLocked = Boolean(lock);
+  const locked = channelLocked || moduleLocked;
 
   const handle = async (next: ModuleConfigValue) => {
     setLocal(next);
@@ -82,6 +86,9 @@ function ModuleCard({
       if ((outcome as { state?: string }).state === "module_locked") {
         throw new Error(`\"${title}\" is locked. Unlock this exact module before changing its controls.`);
       }
+      if ((outcome as { state?: string }).state === "channel_locked") {
+        throw new Error("This channel is frozen. Unlock the channel before changing any module.");
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to save");
       setLocal(value); // revert optimistic change on rejection
@@ -91,7 +98,7 @@ function ModuleCard({
   };
 
   const changeLock = async () => {
-    if (!channelId || !ownerId || lockBusy) return;
+    if (!channelId || !ownerId || lockBusy || channelLocked) return;
     setLockBusy(true);
     setErr(null);
     try {
@@ -154,22 +161,25 @@ function ModuleCard({
           {channelId && ownerId && (
             <div className={styles.lockRow}>
               <span>
-                {locked
+                {channelLocked
+                  ? "Channel frozen"
+                  : moduleLocked
                   ? `Locked · ${new Date(lock!.lockedAt).toLocaleDateString()}`
                   : "Editable module"}
               </span>
-              <button
+              {!channelLocked && <button
                 type="button"
                 className={styles.lockButton}
-                data-locked={locked || undefined}
+                data-locked={moduleLocked || undefined}
                 disabled={busy || lockBusy}
                 onClick={changeLock}
-                title={locked
+                title={moduleLocked
                   ? `Type '${channelModuleUnlockConfirmation(blockId)}' to unlock`
                   : "Freeze this module's saved controls and pipeline entry"}
               >
-                {lockBusy ? "Working…" : locked ? "Unlock module" : "Lock module"}
+                {lockBusy ? "Working…" : moduleLocked ? "Unlock module" : "Lock module"}
               </button>
+              }
             </div>
           )}
           <ModuleConfigPanel surface={surface} value={local} onChange={handle} disabled={busy || lockBusy || locked} />
@@ -180,6 +190,69 @@ function ModuleCard({
   );
 }
 
+function ChannelLockControl({
+  channelId,
+  ownerId,
+  locked,
+  lockedAt,
+}: {
+  channelId: Id<"channels">;
+  ownerId: string;
+  locked: boolean;
+  lockedAt?: number;
+}) {
+  const lockChannel = useMutation(api.channels.lockChannel);
+  const unlockChannel = useMutation(api.channels.unlockChannel);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const changeLock = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      if (locked) {
+        const confirmation = window.prompt(
+          "Unlock this channel? Type the exact confirmation to re-enable changes.",
+          "",
+        );
+        if (confirmation === null) return;
+        await unlockChannel({ ownerId, channelId, confirmation });
+      } else {
+        const confirmed = window.confirm(
+          "Freeze this channel? All future config, pipeline, schedule, and creative changes will be rejected until you explicitly unlock it.",
+        );
+        if (!confirmed) return;
+        await lockChannel({ ownerId, channelId });
+      }
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : "Could not change the channel lock");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className={styles.channelLock} data-locked={locked || undefined}>
+      <div>
+        <strong>{locked ? "Channel frozen" : "Channel editable"}</strong>
+        <span>{locked && lockedAt ? `Since ${new Date(lockedAt).toLocaleDateString()}` : "Owner control"}</span>
+      </div>
+      <button
+        type="button"
+        className={styles.lockButton}
+        data-locked={locked || undefined}
+        disabled={busy}
+        onClick={changeLock}
+        title={locked ? `Type '${CHANNEL_UNLOCK_CONFIRMATION}' to unlock` : "Freeze all future channel changes"}
+      >
+        {busy ? "Working…" : locked ? "Unlock channel" : "Lock channel"}
+      </button>
+      {error && <div className={styles.error} role="alert">{error}</div>}
+    </div>
+  );
+}
+
 export function ModuleConfigSection({
   channelId,
   moduleConfig,
@@ -187,6 +260,8 @@ export function ModuleConfigSection({
   onChange,
   activeBlockIds,
   moduleLocks,
+  channelLocked = false,
+  channelLockedAt,
 }: {
   /** Settings mode: the channel to persist into. */
   channelId?: Id<"channels">;
@@ -200,6 +275,9 @@ export function ModuleConfigSection({
   activeBlockIds?: readonly string[];
   /** Per-module hard locks; only the channel detail settings surface receives these. */
   moduleLocks?: Record<string, ChannelModuleLock>;
+  /** Whole-channel owner lock; it overrides all per-module controls. */
+  channelLocked?: boolean;
+  channelLockedAt?: number;
 }) {
   const ownerId = useOwnerId();
   const lockAudits = useQuery(
@@ -235,6 +313,14 @@ export function ModuleConfigSection({
 
   return (
     <div className={styles.rack}>
+      {channelId && ownerId && (
+        <ChannelLockControl
+          channelId={channelId}
+          ownerId={ownerId}
+          locked={channelLocked}
+          lockedAt={channelLockedAt}
+        />
+      )}
       {mods.map((m, index) => (
         <ModuleCard
           key={m.blockId}
@@ -249,6 +335,7 @@ export function ModuleConfigSection({
           channelId={channelId}
           ownerId={channelId ? ownerId : undefined}
           lock={moduleLocks?.[m.blockId]}
+          channelLocked={channelLocked}
           index={index}
           open={visibleOpenBlockId === m.blockId}
           onOpenChange={(nextOpen) => setOpenBlockId(nextOpen ? m.blockId : null)}
@@ -260,7 +347,7 @@ export function ModuleConfigSection({
           <ol>
             {lockAudits.map((audit) => (
               <li key={audit._id}>
-                <span>{audit.blockId}</span>
+                <span>{audit.blockId === "__channel__" ? "channel" : audit.blockId}</span>
                 <span>{audit.event === "mutation_rejected" ? "blocked change" : audit.event}</span>
                 <time dateTime={new Date(audit.createdAt).toISOString()}>
                   {new Date(audit.createdAt).toLocaleDateString()}

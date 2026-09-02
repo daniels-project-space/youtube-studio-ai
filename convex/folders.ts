@@ -5,6 +5,7 @@
  */
 import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
+import { patchChannelRespectingLock } from "./channelLock";
 
 export const list = query({
   args: { ownerId: v.string() },
@@ -35,15 +36,38 @@ export const remove = mutation({
   handler: async (ctx, args) => {
     const folder = await ctx.db.get(args.folderId);
     if (!folder || folder.ownerId !== args.ownerId) return;
-    // Unfile member channels (never delete them).
+    // Unfile member channels (never delete them). A locked channel retains its
+    // organization state until the owner explicitly releases that channel lock.
     const channels = await ctx.db
       .query("channels")
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
       .collect();
-    for (const c of channels) {
-      if (c.folder === folder.name) await ctx.db.patch(c._id, { folder: undefined });
+    const members = channels.filter((channel) => channel.folder === folder.name);
+    const lockedMembers = members.filter((channel) => channel.locked === true);
+    if (lockedMembers.length) {
+      for (const c of lockedMembers) {
+        await patchChannelRespectingLock(
+          ctx,
+          c._id,
+          { folder: undefined },
+          "folders.remove unfile channel",
+        );
+      }
+      // Keep the folder too: otherwise frozen members would point at an
+      // invisible, orphaned room.
+      return { lockedSkipped: lockedMembers.length };
+    }
+    for (const c of members) {
+      const outcome = await patchChannelRespectingLock(
+        ctx,
+        c._id,
+        { folder: undefined },
+        "folders.remove unfile channel",
+      );
+      if (outcome.state === "channel_locked") return { lockedSkipped: 1 };
     }
     await ctx.db.delete(args.folderId);
+    return { lockedSkipped: 0 };
   },
 });
 
@@ -58,9 +82,31 @@ export const rename = mutation({
       .query("channels")
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
       .collect();
-    for (const c of channels) {
-      if (c.folder === folder.name) await ctx.db.patch(c._id, { folder: name });
+    const members = channels.filter((channel) => channel.folder === folder.name);
+    const lockedMembers = members.filter((channel) => channel.locked === true);
+    if (lockedMembers.length) {
+      for (const c of lockedMembers) {
+        await patchChannelRespectingLock(
+          ctx,
+          c._id,
+          { folder: name },
+          "folders.rename move channel",
+        );
+      }
+      // Keep the old name and all memberships together; a partial rename
+      // would strand a frozen channel in an orphaned room.
+      return { lockedSkipped: lockedMembers.length };
+    }
+    for (const c of members) {
+      const outcome = await patchChannelRespectingLock(
+        ctx,
+        c._id,
+        { folder: name },
+        "folders.rename move channel",
+      );
+      if (outcome.state === "channel_locked") return { lockedSkipped: 1 };
     }
     await ctx.db.patch(args.folderId, { name });
+    return { lockedSkipped: 0 };
   },
 });

@@ -14,8 +14,8 @@ export interface ChannelPipelineSyncItem {
   sourceCount: number;
   effectiveCount: number;
   fingerprint: string;
-  // "forked": the channel is locked ("done"), so the upgrade landed on its v2.
-  writeState: "not-needed" | "dry-run" | "updated" | "current" | "conflict" | "module_locked" | "forked";
+  // "channel_locked": an owner freeze refused the upgrade.
+  writeState: "not-needed" | "dry-run" | "updated" | "current" | "conflict" | "module_locked" | "channel_locked";
 }
 
 export interface ChannelPipelineSyncReport {
@@ -101,10 +101,8 @@ export async function syncChannelPipelines({
           `${channel.name}: skipped because module '${write.blockId ?? "unknown"}' is explicitly locked`,
         );
       }
-      if (write.state === "forked") {
-        log(
-          `${channel.name}: locked (done) — upgrade forked onto ${write.newChannelId ?? "a new version"}`,
-        );
+      if (write.state === "channel_locked") {
+        log(`${channel.name}: skipped because the owner locked the whole channel`);
       }
     }
   }
@@ -115,11 +113,13 @@ export async function syncChannelPipelines({
     : "skipped";
   if (!dryRun && verify) {
     const persisted = await convex.query(api.channels.listChannels, { ownerId });
-    const moduleLockedIds = new Set(
-      items.filter((item) => item.writeState === "module_locked").map((item) => item.channelId),
+    const protectedIds = new Set(
+      items
+        .filter((item) => item.writeState === "module_locked" || item.writeState === "channel_locked")
+        .map((item) => item.channelId),
     );
     const stale = persisted.filter((channel) =>
-      !moduleLockedIds.has(String(channel._id)) &&
+      !protectedIds.has(String(channel._id)) &&
       planChannelPipelineUpgrade(channel.pipeline ?? []).changed,
     );
     if (stale.length) {

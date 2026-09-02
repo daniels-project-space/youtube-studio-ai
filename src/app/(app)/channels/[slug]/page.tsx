@@ -59,6 +59,8 @@ type ChannelDoc = {
   pipeline?: { block: string; params?: unknown }[];
   moduleConfig?: Record<string, Record<string, unknown>>;
   moduleLocks?: Record<string, ChannelModuleLock>;
+  locked?: boolean;
+  lockedAt?: number;
   schedule?: {
     frequency: string;
     days?: number[];
@@ -1222,12 +1224,16 @@ function PipelineModulesCard({ channel }: { channel: ChannelDoc }) {
     <section style={{ marginBottom: "1.6rem" }}>
       <SectionTitle>Pipeline modules</SectionTitle>
       <p style={{ margin: "-0.4rem 0 0.85rem", fontSize: "0.78rem", color: "var(--color-muted)" }}>
-        Tune each module&apos;s style — changes save instantly and shape every future render.
+        {channel.locked
+          ? "Channel frozen — unlock it here before changing any module."
+          : "Tune each module&apos;s style — changes save instantly and shape every future render."}
       </p>
       <ModuleConfigSection
         channelId={cid}
         moduleConfig={channel.moduleConfig as ModuleConfigMap | undefined}
         moduleLocks={channel.moduleLocks}
+        channelLocked={channel.locked === true}
+        channelLockedAt={channel.lockedAt}
         activeBlockIds={(channel.pipeline ?? []).map((entry) => entry.block)}
       />
     </section>
@@ -1630,6 +1636,9 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
       } as Parameters<typeof update>[0]);
       if ((outcome as { state?: string; blockId?: string }).state === "module_locked") {
         throw new Error(`Module '${(outcome as { blockId?: string }).blockId ?? "unknown"}' is locked.`);
+      }
+      if ((outcome as { state?: string }).state === "channel_locked") {
+        throw new Error("This channel is frozen. Unlock it in Pipeline modules before saving settings.");
       }
       setMsg(seed.length ? `Saved · seeded ${seed.length} SEO tags.` : "Saved.");
     } catch (e) {
@@ -2652,6 +2661,9 @@ function NarratorPicker({ channel }: { channel: ChannelDoc }) {
       const outcome = await update({ channelId: channel._id as Id<"channels">, pipeline } as Parameters<typeof update>[0]);
       if ((outcome as { state?: string; blockId?: string }).state === "module_locked") {
         throw new Error(`Module '${(outcome as { blockId?: string }).blockId ?? "unknown"}' is locked.`);
+      }
+      if ((outcome as { state?: string }).state === "channel_locked") {
+        throw new Error("This channel is frozen. Unlock it in Pipeline modules before changing narration.");
       }
       setMsg(voiceId ? "Narrator cast — the next render speaks with this voice." : "Reverted to the Fish tier voice above.");
     } catch (e) {

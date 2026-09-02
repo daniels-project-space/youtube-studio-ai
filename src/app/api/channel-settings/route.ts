@@ -189,6 +189,12 @@ export async function POST(request: Request) {
         { status: 404 },
       );
     }
+    if (channel.locked === true) {
+      return NextResponse.json(
+        { ok: false, error: "channel is frozen; unlock it in Pipeline modules before changing settings" },
+        { status: 409 },
+      );
+    }
 
     if (body.action === "publish_mode") {
       if (!body.mode || !["draft", "scheduled", "public"].includes(body.mode)) {
@@ -258,6 +264,12 @@ export async function POST(request: Request) {
             ok: false,
             error: `Module '${(pipelineWrite as { blockId?: string }).blockId ?? "unknown"}' is locked. Unlock it before changing publishing mode.`,
           },
+          { status: 409 },
+        );
+      }
+      if ((pipelineWrite as { state?: string }).state === "channel_locked") {
+        return NextResponse.json(
+          { ok: false, error: "channel was frozen while this settings change was being prepared" },
           { status: 409 },
         );
       }

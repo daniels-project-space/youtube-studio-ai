@@ -78,6 +78,9 @@ export const makeMultilingualTask = task({
         `make-multilingual refused: module '${(baseWrite as { blockId?: string }).blockId ?? "unknown"}' is locked`,
       );
     }
+    if ((baseWrite as { state?: string }).state === "channel_locked") {
+      throw new Error("make-multilingual refused: the owner locked this channel");
+    }
 
     const skipped = payload.languages.filter((lang) =>
       lang === (base.language ?? "en") || haveLangs.has(lang),

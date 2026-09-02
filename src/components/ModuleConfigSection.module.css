@@ -8,6 +8,27 @@
   box-shadow: inset 0 1px color-mix(in srgb, white 4%, transparent);
 }
 
+.channelLock {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.85rem 1rem;
+  border-bottom: 1px solid var(--color-border);
+  background:
+    linear-gradient(110deg, color-mix(in srgb, var(--color-accent) 8%, transparent), transparent 62%);
+}
+
+.channelLock[data-locked="true"] {
+  background:
+    linear-gradient(110deg, color-mix(in srgb, var(--color-amber) 12%, transparent), transparent 62%);
+}
+
+.channelLock > div:first-child { display: grid; gap: 0.18rem; min-width: 0; }
+.channelLock strong { color: var(--color-fg); font-size: 0.78rem; }
+.channelLock span { color: var(--color-muted); font-family: var(--font-mono); font-size: 0.57rem; letter-spacing: 0.05em; }
+.channelLock .error { grid-column: 1 / -1; margin-top: 0; }
+
 .module {
   position: relative;
   border-bottom: 1px solid var(--color-border);
@@ -254,6 +275,8 @@
 }
 
 @media (max-width: 760px) {
+  .channelLock { grid-template-columns: minmax(0, 1fr) auto; padding: 0.75rem; }
+
   .summary {
     grid-template-columns: 52px minmax(0, 1fr) auto;
     gap: 0.7rem;

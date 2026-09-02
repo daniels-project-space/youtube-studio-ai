@@ -151,6 +151,9 @@ export const refreshShowBibleTask = task({
         `refresh-show-bible refused: module '${(channelWrite as { blockId?: string }).blockId ?? "unknown"}' is locked`,
       );
     }
+    if ((channelWrite as { state?: string }).state === "channel_locked") {
+      throw new Error("refresh-show-bible refused: the owner locked this channel");
+    }
     log("channel updated", { slug: ch.slug, crewBlocks: newPipeline.filter((e) => e.block.endsWith("_brief") || e.block === "critic_spec").length });
 
     return { ok: true, slug: ch.slug, motif: creativeBrief.iconicMotif, activeCrew: creativeBrief.activeCrew };

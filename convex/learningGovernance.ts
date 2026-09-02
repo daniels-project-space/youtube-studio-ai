@@ -1102,9 +1102,9 @@ export const approveAndActivate = mutation({
       throw new Error("learningGovernance.activate: proposal has no nextValue");
     }
     // LOCK GUARD: an approved learning recommendation is a config change like
-    // any other, so a locked ("done") channel keeps its shipped brief/playbook
-    // and the activation lands on its v2 fork instead. This path is bounded —
-    // the recommendation flips to "activated" below and cannot re-run.
+    // any other. A locked channel stays byte-for-byte unchanged and its
+    // recommendation remains approved so the owner may explicitly unlock and
+    // retry; it is never silently applied to a v2.
     let channelWrite;
     if (recommendation.target === "creative_brief") {
       if (!channel.identity || typeof proposal.nextValue !== "object") {
@@ -1113,7 +1113,7 @@ export const approveAndActivate = mutation({
       channelWrite = await patchChannelRespectingLock(ctx, channel._id, {
         identity: { ...channel.identity, creativeBrief: proposal.nextValue as never },
         learningPolicyVersion: recommendation.proposedPolicyVersion,
-      });
+      }, "learningGovernance.approveAndActivate creative brief");
     } else {
       if (typeof proposal.nextValue !== "object" || proposal.nextValue === null) {
         throw new Error("learningGovernance.activate: invalid script playbook proposal");
@@ -1121,7 +1121,10 @@ export const approveAndActivate = mutation({
       channelWrite = await patchChannelRespectingLock(ctx, channel._id, {
         scriptPlaybook: proposal.nextValue,
         learningPolicyVersion: recommendation.proposedPolicyVersion,
-      });
+      }, "learningGovernance.approveAndActivate script playbook");
+    }
+    if (channelWrite.state === "channel_locked") {
+      return { ...recommendation, channelWrite };
     }
     await ctx.db.patch(recommendation._id, {
       status: "activated",
@@ -1131,7 +1134,7 @@ export const approveAndActivate = mutation({
       updatedAt: args.approvedAt,
     });
     const activated = await ctx.db.get(recommendation._id);
-    // Additive fork signal so a caller can tell the change was redirected.
+    // Surface the exact write outcome alongside the activated recommendation.
     return activated ? { ...activated, channelWrite } : activated;
   },
 });

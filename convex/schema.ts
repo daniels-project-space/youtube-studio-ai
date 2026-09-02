@@ -360,10 +360,9 @@ export default defineSchema({
     // via buildChannelProfile({ moduleOverrides }). v.any per-block → the typed
     // Knob contract (engine/moduleRegistry) is the real validator.
     moduleConfig: v.optional(v.record(v.string(), v.any())),
-    // Per-module hard locks. Unlike the channel-level completion lock (which
-    // preserves a finished version by forking later broad edits), a module lock
-    // refuses any change to that module's saved knobs or pipeline entry until
-    // the interactive owner explicitly unlocks the exact block.
+    // Per-module hard locks. The channel-level completion lock rejects every
+    // guarded config/content edit; a module lock gives the owner the same
+    // explicit protection for one selected pipeline stage.
     moduleLocks: v.optional(
       v.record(
         v.string(),
@@ -442,15 +441,15 @@ export default defineSchema({
     ),
     // CHANNEL LOCK ("done"). Set MANUALLY and explicitly by the operator via
     // channels.lockChannel — never auto-detected from status/progress. While
-    // locked === true no config/content write lands on this row: every guarded
-    // mutation forks the change onto a v2 row (see convex/channelLock.ts) so the
-    // finished channel is frozen exactly as it shipped. Clearing it is equally
-    // manual — channels.unlockChannel, owner identity + typed confirmation only.
+    // locked === true means every guarded config/content mutation is rejected
+    // and append-only audited (see convex/channelLock.ts). Clearing it is
+    // equally manual — channels.unlockChannel, owner identity + typed
+    // confirmation only.
     locked: v.optional(v.boolean()),
     lockedAt: v.optional(v.number()),
     lockedBy: v.optional(v.string()),
-    // Fork lineage. Set on a v2+ row to the locked ancestor it was forked from;
-    // versionNumber is 1 for an original channel and parent+1 for each fork.
+    // Historical lineage from the retired fork-on-write lock implementation.
+    // New channel locks never create a successor automatically.
     parentChannelId: v.optional(v.id("channels")),
     versionNumber: v.optional(v.number()),
   })
@@ -458,13 +457,13 @@ export default defineSchema({
     .index("by_owner_slug", ["ownerId", "slug"])
     .index("by_group", ["groupId"])
     .index("by_youtube_channel_id", ["youtubeCreated.ytChannelId"])
-    // Lets the lock guard find a locked channel's editable fork head without a
-    // table scan, so repeated edits reuse v2 instead of spawning v3, v4, v5…
+    // Retained for reading historical channel lineage; no current lock flow
+    // creates a fork.
     .index("by_parent", ["parentChannelId"]),
 
-  // Append-only provenance for owner lock/unlock actions and every rejected
-  // persisted module mutation. A rejected write returns a discriminated
-  // outcome instead of throwing so its audit event commits atomically.
+  // Append-only provenance for owner whole-channel/module locks and every
+  // rejected guarded mutation. A rejected write returns a discriminated outcome
+  // instead of throwing so its audit event commits atomically.
   channelModuleLockAudits: defineTable({
     ownerId: v.string(),
     channelId: v.id("channels"),

@@ -92,6 +92,9 @@ export const architectPipelineTask = task({
           `architect pipeline update refused: module '${(write as { blockId?: string }).blockId ?? "unknown"}' is locked`,
         );
       }
+      if ((write as { state?: string }).state === "channel_locked") {
+        throw new Error("architect pipeline update refused: the owner locked this channel");
+      }
       log(`APPLIED: ${arch.report.applied.length} op(s); pipeline now ${arch.pipeline.length} blocks`);
     } else {
       log("DRY RUN — nothing written");

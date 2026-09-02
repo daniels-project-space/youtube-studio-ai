@@ -11,13 +11,16 @@ import {
   isChannelModuleLocked,
 } from "@/lib/channelModuleLock";
 import {
+  lockChannel,
   lockModule,
   listModuleLockAudits,
   setModuleConfig,
+  unlockChannel,
   unlockModule,
   updateChannel,
   updatePipelineIfCurrent,
 } from "../../../convex/channels";
+import { patchChannelRespectingLock } from "../../../convex/channelLock";
 
 const initialPipeline: PipelineEntry[] = [
   { block: "metadata", params: { tags: ["history"], titleCase: "sentence" } },
@@ -81,6 +84,7 @@ const lockedChannel = {
   pipeline: initialPipeline,
   moduleConfig: { metadata: { preset: "search-first" } },
   moduleLocks: { metadata: metadataLock },
+  locked: false,
 };
 const serviceContext = {
   auth: {
@@ -145,6 +149,23 @@ assert.deepEqual(blockedGenericPipeline, {
 });
 assert.equal(audits.length, 3);
 assert.equal(audits[2]?.operation, "channels.updateChannel pipeline write");
+
+lockedChannel.locked = true;
+(lockedChannel as { moduleLocks: Record<string, unknown> }).moduleLocks = {};
+const blockedWholeChannel = await patchChannelRespectingLock(
+  serviceContext as never,
+  lockedChannel._id,
+  { budget: 9 },
+  "test.service channel change",
+);
+assert.deepEqual(blockedWholeChannel, {
+  state: "channel_locked",
+  channelId: lockedChannel._id,
+});
+assert.equal(audits.length, 4);
+assert.equal(audits[3]?.event, "mutation_rejected");
+assert.equal(audits[3]?.blockId, "__channel__");
+assert.equal(audits[3]?.operation, "test.service channel change");
 
 await assert.rejects(
   invoke(lockModule, serviceContext, {
@@ -213,6 +234,34 @@ assert.deepEqual(unlocked, { locked: false, blockId: "metadata" });
 assert.equal(ownerAudits[1]?.event, "unlocked");
 assert.equal((ownerChannel.moduleLocks as Record<string, unknown> | undefined)?.metadata, undefined);
 
+const wholeLocked = await invoke<{
+  locked: boolean;
+  lockedAt: number;
+  lockedBy: string;
+}>(
+  lockChannel,
+  ownerContext,
+  { ownerId: "owner_daniel", channelId: ownerChannel._id },
+);
+assert.equal(wholeLocked.locked, true);
+assert.equal(wholeLocked.lockedBy, "owner_daniel");
+assert.ok(wholeLocked.lockedAt > 0);
+assert.equal(ownerAudits[2]?.event, "locked");
+assert.equal(ownerAudits[2]?.blockId, "__channel__");
+
+const wholeUnlocked = await invoke<{ locked: boolean }>(
+  unlockChannel,
+  ownerContext,
+  {
+    ownerId: "owner_daniel",
+    channelId: ownerChannel._id,
+    confirmation: "UNLOCK CHANNEL",
+  },
+);
+assert.deepEqual(wholeUnlocked, { locked: false });
+assert.equal(ownerAudits[3]?.event, "unlocked");
+assert.equal(ownerAudits[3]?.blockId, "__channel__");
+
 const storedAuditRows = [
   {
     _id: "channelModuleLockAudits:2",
@@ -265,7 +314,10 @@ assert.match(source("convex/channels.ts"), /export const lockModule = mutation/)
 assert.match(source("convex/channels.ts"), /export const unlockModule = mutation/);
 assert.match(source("convex/channels.ts"), /export const listModuleLockAudits = query/);
 assert.match(source("convex/channels.ts"), /firstLockedModulePipelineChange/);
+assert.match(source("convex/channelLock.ts"), /state: "channel_locked"/);
+assert.doesNotMatch(source("convex/channelLock.ts"), /insertChannelFork/);
 assert.match(source("src/components/ModuleConfigSection.tsx"), /Lock module/);
+assert.match(source("src/components/ModuleConfigSection.tsx"), /Lock channel/);
 assert.match(source("src/components/ModuleConfigSection.tsx"), /channelModuleUnlockConfirmation/);
 assert.match(source("src/components/ModuleConfigSection.tsx"), /Recent lock activity/);
 assert.match(source("src/trigger/designChannelInception.ts"), /channel inception module configuration refused/);

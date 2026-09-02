@@ -65,12 +65,17 @@ export function ChannelFolderWorkspace({
     setBusy(true);
     setMessage(null);
     try {
-      await renameFolder({
+      const result = await renameFolder({
         ownerId,
         folderId: folder._id as Id<"channelFolders">,
         name,
       });
-      if (selectedFolder === folder.name) onSelect(name);
+      const lockedSkipped = (result as { lockedSkipped?: number } | null)?.lockedSkipped ?? 0;
+      if (lockedSkipped) {
+        setMessage("Room was not renamed because it contains a frozen channel.");
+      } else if (selectedFolder === folder.name) {
+        onSelect(name);
+      }
       setEditingId(null);
       setRenameDraft("");
     } catch {
@@ -89,11 +94,16 @@ export function ChannelFolderWorkspace({
     setBusy(true);
     setMessage(null);
     try {
-      await removeFolder({
+      const result = await removeFolder({
         ownerId,
         folderId: folder._id as Id<"channelFolders">,
       });
-      if (selectedFolder === folder.name) onSelect(null);
+      const lockedSkipped = (result as { lockedSkipped?: number } | null)?.lockedSkipped ?? 0;
+      if (lockedSkipped) {
+        setMessage("Room was not removed because it contains a frozen channel.");
+      } else if (selectedFolder === folder.name) {
+        onSelect(null);
+      }
       setArmedRemove(null);
     } catch {
       setMessage("The folder could not be removed. Its channels were not changed.");
@@ -110,9 +120,12 @@ export function ChannelFolderWorkspace({
     setBusy(true);
     setMessage(null);
     try {
-      await updateChannel({ channelId: id as Id<"channels">, folder: folderName ?? "" });
+      const outcome = await updateChannel({ channelId: id as Id<"channels">, folder: folderName ?? "" });
+      if ((outcome as { state?: string }).state === "channel_locked") {
+        throw new Error("channel locked");
+      }
     } catch {
-      setMessage("The channel could not be moved.");
+      setMessage("The channel could not be moved because it is frozen.");
     } finally {
       setBusy(false);
     }

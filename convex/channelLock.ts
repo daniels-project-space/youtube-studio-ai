@@ -1,60 +1,23 @@
 /**
- * CHANNEL LOCK — the single choke point for every write that lands on a
- * `channels` row.
+ * CHANNEL LOCK — the single guard for every operator-authored channel write.
  *
- * A channel is marked "done" MANUALLY (channels.lockChannel). From that moment
- * the row is frozen: no config/content edit may modify it. Rather than erroring
- * — which would strand the operator's edit — a guarded write is FORKED onto a
- * new channel row ("v2") that carries the attempted change, links back to the
- * locked parent via `parentChannelId`, and becomes the editable head. The locked
- * v1 is left byte-for-byte untouched.
- *
- * Repeated edits reuse the existing unlocked fork head instead of spawning a new
- * row each time; a fresh row only appears when the whole chain is locked. That
- * bound matters — several callers (bulk maintenance, background sync) would
- * otherwise fork on every pass forever.
+ * A channel marked done is immutable. Unlike the retired fork-on-write design,
+ * a locked row now rejects every guarded change until its interactive owner
+ * explicitly unlocks it. This is intentionally a hard stop: an agent must not
+ * get a silent v2 merely because it attempted a later optimisation.
  */
 import type { MutationCtx } from "./_generated/server";
-import type { Doc, Id } from "./_generated/dataModel";
+import type { Id } from "./_generated/dataModel";
+import {
+  CHANNEL_LOCK_AUDIT_BLOCK_ID,
+  channelMutationAuditActor,
+  recordChannelLockAudit,
+} from "./channelLockAudit";
 
-/**
- * Discriminated result mirroring the codebase's existing "the write did not do
- * what you asked" convention (see channels.updatePipelineIfCurrent's `state`).
- * `channelId` is always the row the caller ASKED to write.
- */
+/** Discriminated outcome so callers can stop without mistaking rejection for success. */
 export type ChannelWriteOutcome =
-  | { forked: false; channelId: Id<"channels"> }
-  | { forked: true; channelId: Id<"channels">; newChannelId: Id<"channels"> };
-
-/** Defensive bound on a corrupted/cyclic parentChannelId chain. */
-const MAX_FORK_CHAIN_DEPTH = 32;
-/** Defensive bound on slug disambiguation attempts. */
-const MAX_FORK_SLUG_ATTEMPTS = 200;
-
-/**
- * Fields a fork must NEVER inherit.
- *
- * - `_id` / `_creationTime`: Convex system fields.
- * - lock state: the fork is the new EDITABLE head, so it starts unlocked.
- * - `youtubeCreated`: `assertYoutubeChannelIdUniqueBinding`
- *   (convex/youtubeCreationClaims.ts) throws when two channel rows project the
- *   same ytChannelId. A fork has not been created on YouTube yet.
- * - `groupId` / `groupRole`: a multi-language group must keep exactly one
- *   "base" (src/trigger/blocks/bundleBlocks.ts filters on it). A fork is a new
- *   standalone channel until the operator regroups it.
- */
-const NON_INHERITED_FORK_FIELDS: readonly string[] = [
-  "_id",
-  "_creationTime",
-  "locked",
-  "lockedAt",
-  "lockedBy",
-  "parentChannelId",
-  "versionNumber",
-  "youtubeCreated",
-  "groupId",
-  "groupRole",
-];
+  | { state: "updated"; channelId: Id<"channels"> }
+  | { state: "channel_locked"; channelId: Id<"channels"> };
 
 export function isChannelLocked(
   channel: { locked?: boolean } | null | undefined,
@@ -63,9 +26,9 @@ export function isChannelLocked(
 }
 
 /**
- * Refuse a write that cannot be meaningfully forked (a delete, or a mid-flight
- * service state-machine write). Forking those would either lose the operator's
- * intent or spawn an unbounded number of rows, so blocking is the safe default.
+ * Use for state-machine/delete paths where the caller cannot return a durable
+ * discriminated outcome. Operator-authored updates should use the patch helper
+ * below so their rejected attempt is auditable.
  */
 export function assertChannelWritable(
   channel: { _id: Id<"channels">; locked?: boolean },
@@ -74,173 +37,53 @@ export function assertChannelWritable(
   if (isChannelLocked(channel)) {
     throw new Error(
       `channel ${channel._id} is locked (marked done); ${operation} is refused. ` +
-        `Unlock it explicitly via channels.unlockChannel to proceed.`,
+        "Unlock it explicitly via channels.unlockChannel to proceed.",
     );
   }
 }
 
-/** "my-channel-v2" → "my-channel"; "My Show v3" → "My Show". */
-function stripVersionSuffix(value: string, style: "slug" | "name"): string {
-  return value.replace(style === "slug" ? /-v\d+$/ : /\s+v\d+$/i, "");
-}
-
 /**
- * Allocate a slug that is free for this owner, reusing the same
- * `by_owner_slug` uniqueness lookup channels.createChannel upserts on.
- */
-async function uniqueForkSlug(
-  ctx: MutationCtx,
-  ownerId: string,
-  attemptedSlug: string,
-  versionNumber: number,
-): Promise<string> {
-  const base = stripVersionSuffix(attemptedSlug, "slug") || attemptedSlug;
-  for (let attempt = 0; attempt < MAX_FORK_SLUG_ATTEMPTS; attempt++) {
-    const candidate =
-      attempt === 0 ? `${base}-v${versionNumber}` : `${base}-v${versionNumber}-${attempt + 1}`;
-    const clash = await ctx.db
-      .query("channels")
-      .withIndex("by_owner_slug", (q) => q.eq("ownerId", ownerId).eq("slug", candidate))
-      .first();
-    if (!clash) return candidate;
-  }
-  throw new Error(`unable to allocate a unique fork slug from '${attemptedSlug}'`);
-}
-
-/**
- * Walk down the fork chain to the first descendant that is not locked.
- * Returns null when every row in the chain is locked — the caller then creates
- * a new fork.
- */
-async function unlockedForkHead(
-  ctx: MutationCtx,
-  channel: Doc<"channels">,
-): Promise<Doc<"channels"> | null> {
-  let current = channel;
-  const seen = new Set<string>([String(current._id)]);
-  for (let depth = 0; depth < MAX_FORK_CHAIN_DEPTH; depth++) {
-    if (!isChannelLocked(current)) return current;
-    const children = (
-      await ctx.db
-        .query("channels")
-        .withIndex("by_parent", (q) => q.eq("parentChannelId", current._id))
-        .collect()
-    ).filter((child) => child.ownerId === current.ownerId && !seen.has(String(child._id)));
-    if (children.length === 0) return null;
-    // Deterministic descent so concurrent writers converge on the same head.
-    children.sort(
-      (a, b) =>
-        (a.versionNumber ?? 0) - (b.versionNumber ?? 0) || a._creationTime - b._creationTime,
-    );
-    current = children[0]!;
-    seen.add(String(current._id));
-  }
-  throw new Error(`channel fork chain from ${channel._id} exceeds the supported depth`);
-}
-
-/** Copy the locked parent, apply the attempted change on top, insert as v(n+1). */
-async function insertChannelFork(
-  ctx: MutationCtx,
-  parent: Doc<"channels">,
-  patch: Record<string, unknown>,
-): Promise<Id<"channels">> {
-  const versionNumber = (parent.versionNumber ?? 1) + 1;
-  const next: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(parent)) {
-    if (NON_INHERITED_FORK_FIELDS.includes(key)) continue;
-    next[key] = value;
-  }
-  for (const [key, value] of Object.entries(patch)) {
-    if (NON_INHERITED_FORK_FIELDS.includes(key)) continue;
-    next[key] = value;
-  }
-
-  // Ownership never transfers on a fork, whatever the attempted patch said.
-  next.ownerId = parent.ownerId;
-  next.parentChannelId = parent._id;
-  next.versionNumber = versionNumber;
-  next.locked = false;
-
-  const attemptedName = typeof next.name === "string" && next.name ? next.name : parent.name;
-  next.name = `${stripVersionSuffix(attemptedName, "name")} v${versionNumber}`;
-  const attemptedSlug = typeof next.slug === "string" && next.slug ? next.slug : parent.slug;
-  next.slug = await uniqueForkSlug(ctx, parent.ownerId, attemptedSlug, versionNumber);
-
-  // A patch uses `undefined` to mean "clear this field"; an insert just omits it.
-  for (const key of Object.keys(next)) {
-    if (next[key] === undefined) delete next[key];
-  }
-
-  return await ctx.db.insert(
-    "channels",
-    next as unknown as Parameters<MutationCtx["db"]["insert"]>[1] & Doc<"channels">,
-  );
-}
-
-/**
- * Apply `patch` to `channelId`, honouring the channel lock.
- *
- * Unlocked → a plain patch, `{ forked: false }`.
- * Locked   → the target row is NOT touched; the patch lands on its editable
- *            fork head (created on first attempt) and the caller gets
- *            `{ forked: true, newChannelId }`.
+ * Apply an operator-authored patch only while the channel remains editable.
+ * A rejection is returned, rather than thrown, so the lock audit commits in
+ * the same transaction and workers can stop cleanly.
  */
 export async function patchChannelRespectingLock(
   ctx: MutationCtx,
   channelId: Id<"channels">,
   patch: Record<string, unknown>,
+  operation: string,
 ): Promise<ChannelWriteOutcome> {
   const channel = await ctx.db.get(channelId);
   if (!channel) throw new Error(`channel not found: ${channelId}`);
 
-  if (!isChannelLocked(channel)) {
-    await ctx.db.patch(channelId, patch);
-    return { forked: false, channelId };
+  if (isChannelLocked(channel)) {
+    await recordChannelLockAudit(ctx, {
+      ownerId: channel.ownerId,
+      channelId: channel._id,
+      blockId: CHANNEL_LOCK_AUDIT_BLOCK_ID,
+      event: "mutation_rejected",
+      operation,
+      actor: await channelMutationAuditActor(ctx),
+      reason: `channel is locked; unlock it explicitly before ${operation}`,
+    });
+    return { state: "channel_locked", channelId };
   }
 
-  const head = await unlockedForkHead(ctx, channel);
-  if (head) {
-    await ctx.db.patch(head._id, patch);
-    return { forked: true, channelId, newChannelId: head._id };
-  }
-  const newChannelId = await insertChannelFork(ctx, channel, patch);
-  return { forked: true, channelId, newChannelId };
+  await ctx.db.patch(channelId, patch);
+  return { state: "updated", channelId };
 }
 
 /**
- * Fields that record an EXTERNAL FACT about a channel rather than
- * operator-authored content/config — something that already happened outside
- * the app, not an edit to the channel's identity, pipeline, creative brief,
- * or schedule. A field belongs here only if ALL of the following hold:
- *
- *   1. The write records a fact about the outside world (e.g. "a real
- *      YouTube channel now exists for this row"), not a change to what the
- *      channel IS.
- *   2. The field is already in NON_INHERITED_FORK_FIELDS above — forking
- *      would DROP or misrepresent the fact, so forking is not an option.
- *   3. Refusing the write would strand an already-completed, irreversible
- *      external side effect, not merely defer an in-app edit.
- *
- * `youtubeCreated` is the first and, as of this writing, only member: it is
- * the exactly-once receipt that a real YouTube channel was created at the
- * provider (see convex/youtubeCreationClaims.ts markCreated). Do not add a
- * field here without re-checking all three conditions — this allowlist is
- * the entire size of the channel-lock exception; widening it silently would
- * silently widen what can bypass the lock.
+ * Fields that record an external fact rather than an operator-authored channel
+ * change. A field belongs here only when the event already happened outside
+ * the app and refusing it would strand an irreversible provider receipt.
  */
 const EXTERNAL_FACT_FIELDS: readonly string[] = ["youtubeCreated"];
 
 /**
- * Patch a channel with an EXTERNAL FACT field (see EXTERNAL_FACT_FIELDS),
- * bypassing the lock guard entirely — no fork, no block, even when the
- * channel is locked.
- *
- * This is deliberately narrower than patchChannelRespectingLock: every key
- * in `patch` must be on the EXTERNAL_FACT_FIELDS allowlist or this throws.
- * Use it only for writes that record something that already happened
- * outside the app; never for operator-authored content. Content/config
- * writes must go through patchChannelRespectingLock (or assertChannelWritable
- * for non-patch writes) so a locked channel forks instead of being mutated.
+ * Record an allowlisted external fact even when a channel is locked. This is
+ * deliberately narrower than patchChannelRespectingLock; config, identity,
+ * pipeline, schedule, and creative changes never bypass the lock.
  */
 export async function patchChannelExternalFact(
   ctx: MutationCtx,
@@ -253,11 +96,7 @@ export async function patchChannelExternalFact(
   if (disallowed.length > 0) {
     throw new Error(
       `patchChannelExternalFact: field(s) ${disallowed.join(", ")} are not on the ` +
-        `EXTERNAL_FACT_FIELDS allowlist (convex/channelLock.ts). This helper bypasses ` +
-        `the channel lock, so only fields that record an external fact — not operator ` +
-        `content — may be written this way. Add to the allowlist deliberately after ` +
-        `re-checking the three conditions documented above, or use ` +
-        `patchChannelRespectingLock instead.`,
+        "EXTERNAL_FACT_FIELDS allowlist (convex/channelLock.ts).",
     );
   }
   const channel = await ctx.db.get(channelId);

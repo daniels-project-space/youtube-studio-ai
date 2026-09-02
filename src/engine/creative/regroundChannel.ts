@@ -131,7 +131,7 @@ export interface RegroundDeps {
   log?: RegroundLogger;
 }
 
-export type RegroundSkipReason = "already-grounded" | "channel-not-found";
+export type RegroundSkipReason = "already-grounded" | "channel-not-found" | "channel-locked";
 
 export type RegroundResult =
   | { ok: false; reason: RegroundSkipReason; wrote: false }
@@ -144,7 +144,7 @@ export type RegroundResult =
       fields: RegroundPatchField[];
       confidence: number;
       groundingGaps: string[];
-      /** Whatever the write path returned (e.g. Convex's fork outcome). */
+      /** Whatever the write path returned (e.g. Convex's accepted update). */
       writeOutcome?: unknown;
     };
 
@@ -279,6 +279,16 @@ export async function regroundChannelCore(
   }
 
   const writeOutcome = await deps.patchChannel(args.channelId, patch);
+  if (
+    typeof writeOutcome === "object" &&
+    writeOutcome !== null &&
+    (writeOutcome as { state?: unknown }).state === "channel_locked"
+  ) {
+    log("reground: skipped because the owner locked this channel", {
+      channelId: args.channelId,
+    });
+    return { ok: false, reason: "channel-locked", wrote: false };
+  }
   log("reground: wrote styleDNA + qaRubric ONLY", {
     channelId: args.channelId,
     confidence: styleDNA.confidence,

@@ -55,12 +55,17 @@ import {
   patchChannelRespectingLock,
 } from "./channelLock";
 import {
+  CHANNEL_LOCK_AUDIT_BLOCK_ID,
+  channelMutationAuditActor,
+  recordChannelLockAudit,
+} from "./channelLockAudit";
+import { CHANNEL_UNLOCK_CONFIRMATION } from "../src/lib/channelLockContract";
+import {
   channelModuleLockFor,
   channelModuleUnlockConfirmation,
   createChannelModuleLock,
   firstLockedModulePipelineChange,
   isChannelModuleLocked,
-  type ChannelModuleLock,
 } from "@/lib/channelModuleLock";
 import {
   assertContentLaneMatchesFamily,
@@ -310,13 +315,6 @@ async function channelMutationRole(ctx: {
 }
 
 /**
- * Typed confirmation for the unlock path, mirroring contentPlan's
- * OPERATIONAL_CALENDAR_MAINTENANCE_CONFIRMATION convention. Combined with the
- * role check below it makes unlocking unmistakably human-initiated.
- */
-const CHANNEL_UNLOCK_CONFIRMATION = "UNLOCK CHANNEL";
-
-/**
  * Lock/unlock are OPERATOR-ONLY. `identityScope` (studioFunctions) resolves the
  * caller to exactly one of "owner" | "viewer" | "service"; every automated path
  * — Trigger tasks, crons, the channel-inception orchestrator, agents — presents
@@ -336,43 +334,6 @@ async function requireChannelOwnerActor(
   return identity.subject;
 }
 
-async function channelMutationAuditActor(
-  ctx: { auth: { getUserIdentity: () => Promise<unknown> } },
-): Promise<string> {
-  const identity = (await ctx.auth.getUserIdentity()) as
-    | { role?: unknown; subject?: unknown }
-    | null;
-  const role = typeof identity?.role === "string" ? identity.role : "unknown";
-  const subject = typeof identity?.subject === "string" ? identity.subject : "unknown";
-  return `${role}:${subject}`.slice(0, 220);
-}
-
-async function recordChannelModuleLockAudit(
-  ctx: MutationCtx,
-  input: {
-    ownerId: string;
-    channelId: Doc<"channels">["_id"];
-    blockId: string;
-    event: "locked" | "unlocked" | "mutation_rejected";
-    operation: string;
-    actor: string;
-    reason?: string;
-    lock?: ChannelModuleLock | null;
-  },
-): Promise<void> {
-  await ctx.db.insert("channelModuleLockAudits", {
-    ownerId: input.ownerId,
-    channelId: input.channelId,
-    blockId: input.blockId,
-    event: input.event,
-    operation: input.operation,
-    actor: input.actor,
-    ...(input.reason ? { reason: input.reason.slice(0, 500) } : {}),
-    ...(input.lock ? { lock: input.lock } : {}),
-    createdAt: Date.now(),
-  });
-}
-
 /**
  * Persist a module-lock rejection rather than throwing. Convex mutations are
  * atomic, so an exception would roll the audit row back with the rejected
@@ -385,7 +346,7 @@ async function rejectLockedModuleMutation(
   operation: string,
 ): Promise<{ state: "module_locked"; blockId: string }> {
   const lock = channelModuleLockFor(channel.moduleLocks, blockId);
-  await recordChannelModuleLockAudit(ctx, {
+  await recordChannelLockAudit(ctx, {
     ownerId: channel.ownerId,
     channelId: channel._id,
     blockId,
@@ -838,11 +799,15 @@ export const createChannel = mutation({
     };
 
     if (existing) {
-      // LOCK GUARD: a re-seed of a finished channel must not rewrite it. The
-      // doc lands on its editable fork head instead and we return THAT id, so
-      // the caller transparently keeps working against the live version.
-      const outcome = await patchChannelRespectingLock(ctx, existing._id, doc);
-      return outcome.forked ? outcome.newChannelId : existing._id;
+      // A locked slug is immutable. This legacy mutation returns an id, so it
+      // keeps the existing id while the guarded re-seed is audit-recorded.
+      const outcome = await patchChannelRespectingLock(
+        ctx,
+        existing._id,
+        doc,
+        "channels.createChannel reseed",
+      );
+      return outcome.channelId;
     }
 
     return await ctx.db.insert("channels", doc);
@@ -1128,15 +1093,18 @@ export const updateChannel = mutation({
       }),
     ),
   },
-  // A locked channel is never edited in place: the change is forked onto a v2
-  // row and its id is returned so callers can see the redirect.
+  // A locked channel is never edited in place: the request returns a durable
+  // rejection and no v2 is created.
   returns: v.union(
     v.object({ forked: v.literal(false) }),
-    v.object({ forked: v.literal(true), newChannelId: v.id("channels") }),
     v.object({
       forked: v.literal(false),
       state: v.literal("module_locked"),
       blockId: v.string(),
+    }),
+    v.object({
+      forked: v.literal(false),
+      state: v.literal("channel_locked"),
     }),
   ),
   handler: async (ctx, args) => {
@@ -1222,10 +1190,14 @@ export const updateChannel = mutation({
         patch.status = "draft";
       }
     }
-    // LOCK GUARD: forks onto a v2 row when this channel is marked done.
-    const outcome = await patchChannelRespectingLock(ctx, channelId, patch);
-    return outcome.forked
-      ? { forked: true as const, newChannelId: outcome.newChannelId }
+    const outcome = await patchChannelRespectingLock(
+      ctx,
+      channelId,
+      patch,
+      "channels.updateChannel",
+    );
+    return outcome.state === "channel_locked"
+      ? { forked: false as const, state: "channel_locked" as const }
       : { forked: false as const };
   },
 });
@@ -1248,10 +1220,8 @@ export const updatePipelineIfCurrent = mutation({
       v.literal("current"),
       v.literal("conflict"),
       v.literal("module_locked"),
-      // The channel was locked: the upgrade landed on its v2 fork instead.
-      v.literal("forked"),
+      v.literal("channel_locked"),
     ),
-    newChannelId: v.optional(v.id("channels")),
     blockId: v.optional(v.string()),
   }),
   handler: async (ctx, args) => {
@@ -1307,12 +1277,15 @@ export const updatePipelineIfCurrent = mutation({
       patch.inception = invalidated;
       patch.status = "draft";
     }
-    // LOCK GUARD: forks onto a v2 row when this channel is marked done.
-    const outcome = await patchChannelRespectingLock(ctx, args.channelId, patch);
-    if (outcome.forked) {
-      return { state: "forked" as const, newChannelId: outcome.newChannelId };
-    }
-    return { state: "updated" as const };
+    const outcome = await patchChannelRespectingLock(
+      ctx,
+      args.channelId,
+      patch,
+      "channels.updatePipelineIfCurrent",
+    );
+    return outcome.state === "channel_locked"
+      ? { state: "channel_locked" as const }
+      : { state: "updated" as const };
   },
 });
 
@@ -1586,14 +1559,18 @@ export const setModuleConfig = mutation({
     blockId: v.string(),
     config: v.record(v.string(), v.any()),
   },
-  // A locked channel is never edited in place: the change is forked onto a v2.
+  // A locked channel is never edited in place: the request returns a durable
+  // rejection and no v2 is created.
   returns: v.union(
     v.object({ forked: v.literal(false) }),
-    v.object({ forked: v.literal(true), newChannelId: v.id("channels") }),
     v.object({
       forked: v.literal(false),
       state: v.literal("module_locked"),
       blockId: v.string(),
+    }),
+    v.object({
+      forked: v.literal(false),
+      state: v.literal("channel_locked"),
     }),
   ),
   handler: async (ctx, args) => {
@@ -1633,10 +1610,14 @@ export const setModuleConfig = mutation({
         patch.status = "draft";
       }
     }
-    // LOCK GUARD: forks onto a v2 row when this channel is marked done.
-    const outcome = await patchChannelRespectingLock(ctx, args.channelId, patch);
-    return outcome.forked
-      ? { forked: true as const, newChannelId: outcome.newChannelId }
+    const outcome = await patchChannelRespectingLock(
+      ctx,
+      args.channelId,
+      patch,
+      "channels.setModuleConfig",
+    );
+    return outcome.state === "channel_locked"
+      ? { forked: false as const, state: "channel_locked" as const }
       : { forked: false as const };
   },
 });
@@ -1695,7 +1676,7 @@ export const lockModule = mutation({
     });
     const moduleLocks = { ...(channel.moduleLocks ?? {}), [args.blockId]: lock };
     await ctx.db.patch(channel._id, { moduleLocks });
-    await recordChannelModuleLockAudit(ctx, {
+    await recordChannelLockAudit(ctx, {
       ownerId: channel.ownerId,
       channelId: channel._id,
       blockId: args.blockId,
@@ -1744,7 +1725,7 @@ export const unlockModule = mutation({
     await ctx.db.patch(channel._id, {
       moduleLocks: Object.keys(remainingModuleLocks).length ? remainingModuleLocks : undefined,
     });
-    await recordChannelModuleLockAudit(ctx, {
+    await recordChannelLockAudit(ctx, {
       ownerId: channel.ownerId,
       channelId: channel._id,
       blockId: args.blockId,
@@ -1784,7 +1765,7 @@ export const listModuleLockAudits = query({
 
 /**
  * Mark a channel DONE. Explicit and manual — nothing auto-detects "finished".
- * From here every guarded write forks onto a v2 instead of touching this row.
+ * From here every guarded config/content write is hard-rejected until unlock.
  *
  * Operator-only (see requireChannelOwnerActor): no scheduled task, Trigger job,
  * or agent can reach it, and the same is true of unlockChannel below, keeping
@@ -1821,6 +1802,14 @@ export const lockChannel = mutation({
       lockedBy: actor,
       versionNumber,
     });
+    await recordChannelLockAudit(ctx, {
+      ownerId: channel.ownerId,
+      channelId: channel._id,
+      blockId: CHANNEL_LOCK_AUDIT_BLOCK_ID,
+      event: "locked",
+      operation: "channels.lockChannel",
+      actor,
+    });
     return { locked: true as const, lockedAt, lockedBy: actor, versionNumber };
   },
 });
@@ -1839,7 +1828,7 @@ export const unlockChannel = mutation({
   },
   returns: v.object({ locked: v.literal(false) }),
   handler: async (ctx, args) => {
-    await requireChannelOwnerActor(ctx, "channels.unlockChannel");
+    const actor = await requireChannelOwnerActor(ctx, "channels.unlockChannel");
     if (args.confirmation !== CHANNEL_UNLOCK_CONFIRMATION) {
       throw new Error(
         `channels.unlockChannel requires confirmation '${CHANNEL_UNLOCK_CONFIRMATION}'`,
@@ -1853,6 +1842,14 @@ export const unlockChannel = mutation({
       locked: false,
       lockedAt: undefined,
       lockedBy: undefined,
+    });
+    await recordChannelLockAudit(ctx, {
+      ownerId: channel.ownerId,
+      channelId: channel._id,
+      blockId: CHANNEL_LOCK_AUDIT_BLOCK_ID,
+      event: "unlocked",
+      operation: "channels.unlockChannel",
+      actor,
     });
     return { locked: false as const };
   },
