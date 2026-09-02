@@ -53,8 +53,9 @@ const ProfileSchema = z.object({
   }).superRefine((video, ctx) => {
     // LTX's VAE operates on 32-pixel tiles. The official distilled x2 path
     // therefore needs a 32-aligned stage-one canvas and a 64-aligned encoded
-    // canvas. This is the upstream cause of the familiar 720x1280 I2V defect
-    // where the first one or two seconds can remain motionless.
+    // canvas. Alignment prevents geometry failures, but it does not itself
+    // guarantee early motion: the LTX I2V directing contract and temporal QA
+    // own the documented frozen-opening failure mode.
     if (video.stageOneWidth % 32 !== 0 || video.stageOneHeight % 32 !== 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,

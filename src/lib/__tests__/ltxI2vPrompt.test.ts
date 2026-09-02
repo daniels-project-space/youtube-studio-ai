@@ -21,6 +21,8 @@ const source = {
 const directed = applyLtxI2vPromptContract(source);
 assert.match(directed.motion, new RegExp(LTX_I2V_PROMPT_CONTRACT_VERSION));
 assert.match(directed.motion, /Source-frame anchor/);
+assert.match(directed.motion, /Opening motion: from the first rendered frames/);
+assert.match(directed.motion, /Do not hold the source image as an establishing still/);
 assert.match(directed.motion, /Action onset/);
 assert.match(directed.motion, /Continuous development/);
 assert.match(directed.motion, /End beat/);
@@ -52,6 +54,27 @@ assert.deepEqual(
   applyLtxI2vPromptContract(terminalDirected),
   terminalDirected,
   "a terminal-frame contract must remain intact on a recovery retry",
+);
+
+const legacyV4 = {
+  ...directed,
+  id: "cinematic-shot-legacy-v4",
+  prompt: directed.prompt
+    .replace(`[${LTX_I2V_PROMPT_CONTRACT_VERSION} style=${DEFAULT_LTX_STYLE_ID}]`, "[ltx-i2v-directing/v4 style=cinematic_heist_noir]")
+    .replace(/^Opening motion:.*\n/m, ""),
+  motion: directed.motion
+    .replace(`[${LTX_I2V_PROMPT_CONTRACT_VERSION} style=${DEFAULT_LTX_STYLE_ID}]`, "[ltx-i2v-directing/v4 style=cinematic_heist_noir]")
+    .replace(/^Opening motion:.*\n/m, ""),
+};
+const upgradedLegacyV4 = applyLtxI2vPromptContract(legacyV4);
+assert.equal(hasCompleteLtxI2vPromptContract(upgradedLegacyV4), true);
+assert.match(upgradedLegacyV4.motion, /Opening motion: from the first rendered frames/);
+assert.match(upgradedLegacyV4.motion, /mannequin folds the timetable and looks toward the departure board/);
+assert.ok(!upgradedLegacyV4.prompt.includes("ltx-i2v-directing\/v4"), "a v4 take must be rebuilt with the first-frame motion clause rather than reused");
+assert.throws(
+  () => applyLtxI2vPromptContract({ ...legacyV4, id: "cinematic-shot-legacy-v4-style-mismatch" }, "anime"),
+  /bound to a different or unsupported visual style; expected anime/,
+  "a v4 take must not be rebound under a different visual style while adding opening motion",
 );
 assert.throws(
   () => applyLtxI2vPromptContract({ ...directed, endStillKey: "stills/a-terminal.png" }),

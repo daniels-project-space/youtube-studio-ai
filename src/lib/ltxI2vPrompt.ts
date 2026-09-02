@@ -17,12 +17,14 @@ import { getLtxStyle, LTX_STYLES } from "@/engine/ltxStylePresets";
  * *labels* REQUIRED_CONTRACT_CLAUSES checks for never change, only the prose
  * merged inside them.
  */
-export const LTX_I2V_PROMPT_CONTRACT_VERSION = "ltx-i2v-directing/v4" as const;
+export const LTX_I2V_PROMPT_CONTRACT_VERSION = "ltx-i2v-directing/v5" as const;
 
 const CONTRACT_MARKER_PREFIX = "[ltx-i2v-directing/";
 const LEGACY_V3_MARKER = "[ltx-i2v-directing/v3]";
+const LEGACY_V4_VERSION = "ltx-i2v-directing/v4";
 const REQUIRED_CONTRACT_CLAUSES = [
   "Source-frame anchor:",
+  "Opening motion:",
   "Action onset:",
   "Continuous development:",
   "End beat:",
@@ -30,10 +32,17 @@ const REQUIRED_CONTRACT_CLAUSES = [
   "Do not generate narration, dialogue, score, lyrics, or musical cues;",
   "Keep the take cinematic and physically plausible.",
 ] as const;
+const LEGACY_REQUIRED_CONTRACT_CLAUSES = REQUIRED_CONTRACT_CLAUSES.filter(
+  (clause) => clause !== "Opening motion:",
+);
 const TERMINAL_FRAME_CLAUSE = "Terminal-frame anchor:";
 
 function markerForStyle(styleId: string): string {
   return `[${LTX_I2V_PROMPT_CONTRACT_VERSION} style=${styleId}]`;
+}
+
+function markerForVersion(version: string, styleId: string): string {
+  return `[${version} style=${styleId}]`;
 }
 
 function clean(value: string | undefined, fallback: string): string {
@@ -66,10 +75,25 @@ export function hasCompleteLtxI2vPromptContract(
 }
 
 function hasCompleteLegacyV3PromptContract(shot: Pick<Shot, "prompt" | "motion" | "endStillKey">): boolean {
-  return REQUIRED_CONTRACT_CLAUSES.every((clause) => shot.motion.includes(clause)) &&
+  return LEGACY_REQUIRED_CONTRACT_CLAUSES.every((clause) => shot.motion.includes(clause)) &&
     shot.motion.includes(LEGACY_V3_MARKER) &&
     shot.prompt.includes(LEGACY_V3_MARKER) &&
     (!shot.endStillKey || shot.motion.includes(TERMINAL_FRAME_CLAUSE));
+}
+
+function hasCompleteLegacyV4PromptContract(
+  shot: Pick<Shot, "prompt" | "motion" | "endStillKey">,
+  styleId: string,
+): boolean {
+  const marker = markerForVersion(LEGACY_V4_VERSION, styleId);
+  return LEGACY_REQUIRED_CONTRACT_CLAUSES.every((clause) => shot.motion.includes(clause)) &&
+    shot.motion.includes(marker) &&
+    shot.prompt.includes(marker) &&
+    (!shot.endStillKey || shot.motion.includes(TERMINAL_FRAME_CLAUSE));
+}
+
+function legacyActionOnset(motion: string): string | undefined {
+  return motion.match(/Action onset:\s*([\s\S]+?)(?=\n(?:Continuous development|End beat|Diegetic soundscape):|$)/)?.[1];
 }
 
 function visualPromptBeforeContract(prompt: string): string {
@@ -93,6 +117,8 @@ export function applyLtxI2vPromptContract(shot: Shot, styleId?: string): Shot {
   const style = getLtxStyle(styleId);
   const marker = markerForStyle(style.id);
   let upgradingLegacyV3 = false;
+  let upgradingLegacyV4 = false;
+  let preservedAction: string | undefined;
   if (shot.motion.includes(CONTRACT_MARKER_PREFIX)) {
     if (shot.motion.includes(marker)) {
       if (!hasCompleteLtxI2vPromptContract(shot, style.id)) {
@@ -102,24 +128,29 @@ export function applyLtxI2vPromptContract(shot: Shot, styleId?: string): Shot {
       }
       return shot;
     }
-    if (!shot.motion.includes(LEGACY_V3_MARKER)) {
+    if (hasCompleteLegacyV4PromptContract(shot, style.id)) {
+      upgradingLegacyV4 = true;
+      preservedAction = legacyActionOnset(shot.motion);
+    } else if (!shot.motion.includes(LEGACY_V3_MARKER)) {
       throw new Error(
         `LTX I2V prompt contract is bound to a different or unsupported visual style; expected ${style.id}`,
       );
-    }
-    if (!hasCompleteLegacyV3PromptContract(shot)) {
+    } else if (!hasCompleteLegacyV3PromptContract(shot)) {
       throw new Error(
         "legacy LTX I2V prompt contract is incomplete and cannot be safely upgraded to the current style-bound contract",
       );
+    } else {
+      upgradingLegacyV3 = true;
     }
-    upgradingLegacyV3 = true;
   }
   const visual = clean(visualPromptBeforeContract(shot.prompt), "the supplied source frame");
   // A v3 contract replaced the original free-form motion in `shot.motion`.
-  // Do not leak that prior style doctrine back into a v4 prompt during the
-  // one safe migration path; a fresh, bounded action is more faithful than a
-  // stacked and contradictory directing instruction.
-  const action = clean(upgradingLegacyV3 ? undefined : shot.motion, "subtle natural motion appropriate to the shot");
+  // Its migration gets a fresh bounded action; a v4 migration retains the
+  // explicitly recorded action onset and adds the new opening-motion clause.
+  const action = clean(
+    upgradingLegacyV3 ? undefined : (upgradingLegacyV4 ? preservedAction : shot.motion),
+    "subtle natural motion appropriate to the shot",
+  );
   const camera = clean(shot.cameraInstruction ?? shot.cameraMove, "the planned camera position");
   const scale = clean(shot.shotScale, "the planned composition");
   const lens = clean(shot.lens, "the planned lens");
@@ -127,6 +158,7 @@ export function applyLtxI2vPromptContract(shot: Shot, styleId?: string): Shot {
   const contract = [
     marker,
     `Source-frame anchor: begin exactly from the supplied image; preserve the visible subject, faceless identity treatment, wardrobe, palette, props, environment, lighting, ${scale} framing, and ${lens}. Visual world appearance doctrine: ${style.promptGuidance.appearance}`,
+    `Opening motion: from the first rendered frames, show observable ${action}. Do not hold the source image as an establishing still; movement must be legible within the opening beat.`,
     `Action onset: ${action}`,
     `Continuous development: perform one coherent physical action in the same place and time while the camera executes ${camera}; no jump cut, subject replacement, wardrobe/prop swap, time skip, or invented event. Visual world camera doctrine: ${style.promptGuidance.cameraDoctrine} Visual world lighting and color doctrine: ${style.promptGuidance.lightingColor}`,
     "End beat: settle into a readable result or reaction that follows from the action while preserving the source-frame continuity locks.",
