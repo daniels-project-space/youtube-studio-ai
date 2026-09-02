@@ -40,7 +40,7 @@ assert.match(panel, /Reviewed ERNIE batch/);
 assert.match(panel, /New thumbnails/);
 assert.match(panel, /ernieBatch=reviewed/);
 assert.match(panel, /Reviewed native ERNIE thumbnails/);
-assert.match(panel, /Apply all 30/);
+assert.match(panel, /Replace all 30 now/);
 assert.match(panel, /confirmReplaceAll/);
 assert.match(panel, /APPLY 30/);
 assert.match(route, /requireStudioActor/);
@@ -66,5 +66,6 @@ assert.match(ernieBatchTask, /assertNativePng/);
 assert.match(ernieBatchTask, /youtubeThumbnailReplacementTriggerRequest/);
 assert.match(ernieBatchTask, /candidateArtifactSha256 !== item\.artifactSha256/);
 assert.match(library, /ThumbnailRefreshInventoryPanel selectedChannelSlug=\{selectedSlug\}/);
+assert.match(library, /id="thumbnail-refresh"[\s\S]*open/);
 
 console.log("Thumbnail refresh inventory UI contracts passed");

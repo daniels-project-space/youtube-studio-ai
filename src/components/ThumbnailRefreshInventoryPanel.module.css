@@ -21,13 +21,6 @@
 .ernieBatchAction { min-height: 29px; padding: .32rem .55rem; border: 1px solid rgba(95,225,255,.44); border-radius: 7px; color: var(--color-primary); background: rgba(95,225,255,.065); font-size: .6rem; font-weight: 720; cursor: pointer; white-space: nowrap; }
 .ernieBatchAction:hover { border-color: var(--color-primary); color: var(--color-fg); background: rgba(95,225,255,.12); }
 .ernieBatchAction:disabled { opacity: .5; cursor: wait; }
-.ernieBatchConfirm { display: grid; grid-template-columns: minmax(7rem,1fr) auto auto; align-items: center; gap: .3rem; min-width: 25rem; }
-.ernieBatchConfirm label { color: var(--color-muted); font-size: .55rem; white-space: nowrap; }
-.ernieBatchConfirm code { color: var(--color-fg); font-family: var(--font-mono); }
-.ernieBatchConfirm input { min-width: 0; height: 28px; padding: 0 .4rem; border: 1px solid var(--color-border-strong); border-radius: 6px; color: var(--color-fg); background: var(--color-canvas); font: .6rem/1 var(--font-mono); }
-.ernieBatchConfirm button { min-height: 28px; padding: .28rem .42rem; border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-muted); background: transparent; font-size: .55rem; cursor: pointer; white-space: nowrap; }
-.ernieBatchConfirm button:first-of-type { border-color: rgba(95,225,255,.4); color: var(--color-primary); }
-.ernieBatchConfirm button:disabled { opacity: .42; cursor: not-allowed; }
 .ernieGallery { margin-top: .75rem; padding: .65rem 0 .1rem; border-top: 1px solid rgba(95,225,255,.16); }
 .ernieGallery > header { display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; padding: 0 .1rem .5rem; }
 .ernieGallery > header span { color: var(--color-fg); font-size: .68rem; font-weight: 720; }
@@ -124,10 +117,6 @@
   .ernieBatch { align-items: stretch; flex-direction: column; }
   .ernieBatch > div:first-child { flex-wrap: wrap; }
   .ernieBatchAction { width: 100%; min-height: 36px; }
-  .ernieBatchConfirm { grid-template-columns: 1fr auto; min-width: 0; width: 100%; }
-  .ernieBatchConfirm label,
-  .ernieBatchConfirm input { grid-column: 1 / -1; }
-  .ernieBatchConfirm button { min-height: 36px; }
   .ernieGalleryRail { grid-auto-columns: minmax(12.5rem, 78vw); }
 }
 
