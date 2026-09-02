@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -31,6 +31,10 @@ import styles from "./library.module.css";
 /** Open lightbox = which channel group + which index within that group. */
 type LightboxTarget = { slug: string; index: number };
 type CollectionMode = "active" | "archived";
+type ReviewedThumbnailPreview = {
+  sourceRunId: string;
+  previewUrl: string;
+};
 
 export default function LibraryPage() {
   const ownerId = useOwnerId();
@@ -59,10 +63,47 @@ export default function LibraryPage() {
   const [collection, setCollection] = useState<CollectionMode>("active");
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
   const [recentChange, setRecentChange] = useState<{ video: VideoRow; state: CollectionMode } | null>(null);
+  const [reviewedThumbnailUrls, setReviewedThumbnailUrls] = useState<ReadonlyMap<string, string>>(() => new Map());
+
+  useEffect(() => {
+    if (operationsAccess !== "owner") {
+      setReviewedThumbnailUrls(new Map());
+      return;
+    }
+    const controller = new AbortController();
+    const loadReviewedPreviews = async () => {
+      const response = await fetch("/api/thumbnail-refresh?ernieBatch=reviewed", {
+        cache: "no-store",
+        credentials: "same-origin",
+        signal: controller.signal,
+      });
+      const body = await response.json() as {
+        ok?: boolean;
+        ernieBatch?: { candidates?: ReviewedThumbnailPreview[] };
+      };
+      if (!response.ok || !body.ok || !Array.isArray(body.ernieBatch?.candidates)) return;
+      setReviewedThumbnailUrls(new Map(
+        body.ernieBatch.candidates
+          .filter((candidate) => typeof candidate.sourceRunId === "string" && typeof candidate.previewUrl === "string")
+          .map((candidate) => [candidate.sourceRunId, candidate.previewUrl]),
+      ));
+    };
+    void loadReviewedPreviews().catch(() => undefined);
+    const refresh = window.setInterval(() => void loadReviewedPreviews().catch(() => undefined), 240_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(refresh);
+    };
+  }, [operationsAccess]);
+
+  const libraryVideos = useMemo<VideoRow[] | undefined>(() => videos?.map((video) => {
+    const reviewedThumbnailUrl = reviewedThumbnailUrls.get(video._id);
+    return reviewedThumbnailUrl ? { ...video, reviewedThumbnailUrl } : video;
+  }), [reviewedThumbnailUrls, videos]);
 
   // Apply all filters + sort client-side over the query result.
   const filtered = useMemo<VideoRow[]>(() => {
-    if (!videos) return [];
+    if (!libraryVideos) return [];
     const fromMs = filters.from ? new Date(filters.from).getTime() : null;
     // `to` is inclusive → push to end-of-day.
     const toMs = filters.to
@@ -70,7 +111,7 @@ export default function LibraryPage() {
       : null;
     const needle = filters.search.trim().toLowerCase();
 
-    const out = videos.filter((v) => {
+    const out = libraryVideos.filter((v) => {
       if ((v.libraryState ?? "active") !== collection) return false;
       // Global ChannelSwitcher wins; the filter dropdown narrows further.
       if (selectedSlug && v.channelSlug !== selectedSlug) return false;
@@ -93,7 +134,7 @@ export default function LibraryPage() {
       return b.createdAt - a.createdAt;
     });
     return out;
-  }, [videos, filters, selectedSlug, collection]);
+  }, [libraryVideos, filters, selectedSlug, collection]);
 
   // Group by channel, preserving the sorted order within each group.
   const groups = useMemo(() => {
@@ -129,9 +170,9 @@ export default function LibraryPage() {
     setLightbox({ slug, index: Math.max(0, index) });
   };
 
-  const loading = videos === undefined || channels === undefined;
-  const activeCount = videos?.filter((video) => (video.libraryState ?? "active") === "active").length ?? 0;
-  const archivedCount = videos?.filter((video) => video.libraryState === "archived").length ?? 0;
+  const loading = libraryVideos === undefined || channels === undefined;
+  const activeCount = libraryVideos?.filter((video) => (video.libraryState ?? "active") === "active").length ?? 0;
+  const archivedCount = libraryVideos?.filter((video) => video.libraryState === "archived").length ?? 0;
 
   const changeLibraryState = async (video: VideoRow, state: CollectionMode) => {
     if (busyIds.has(video._id)) return;
@@ -194,7 +235,7 @@ export default function LibraryPage() {
 
       {collection === "active" ? <div className={styles.latestRail}>
         <ArtifactWorkRail
-          videos={videos === undefined ? undefined : filtered}
+          videos={libraryVideos === undefined ? undefined : filtered}
           onOpen={(video) => openLightbox(video.channelSlug, video)}
           title="Latest visible work"
           description="Open recent work."

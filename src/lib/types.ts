@@ -86,6 +86,8 @@ export type VideoRow = {
   title: string;
   /** r2Key of the generated thumbnail asset; presign via /api/asset-url. */
   thumbnailKey: string | null;
+  /** Owner-only, SHA-pinned reviewed replacement preview for this exact run. */
+  reviewedThumbnailUrl?: string;
   /** r2Key of the rendered video asset; lightbox <video> fallback. */
   videoKey: string | null;
   /** claude_flux thumbnail intelligence (surfaced in the lightbox). */

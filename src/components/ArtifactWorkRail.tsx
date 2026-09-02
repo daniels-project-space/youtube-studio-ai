@@ -90,6 +90,7 @@ function ArtifactCard({
         className={styles.media}
         emptyClassName={styles.mediaFallback}
         assetKey={video.thumbnailKey}
+        reviewedSrc={video.reviewedThumbnailUrl}
         fallbackSrc={video.youtubeVideoId ? youtubeThumb(video.youtubeVideoId) : undefined}
         fallbackSource="youtube"
         alt={video.title}
@@ -98,7 +99,7 @@ function ArtifactCard({
             <StageBadge status={video.status} size="sm" />
             {state === "ready" && source !== "unavailable" && (
               <span className={styles.sourceBadge}>
-                {source === "r2" ? "R2 preview" : source === "youtube" ? "YouTube preview" : "Public preview"}
+                {source === "reviewed" ? "Reviewed ERNIE" : source === "r2" ? "R2 preview" : source === "youtube" ? "YouTube preview" : "Public preview"}
               </span>
             )}
           </div>

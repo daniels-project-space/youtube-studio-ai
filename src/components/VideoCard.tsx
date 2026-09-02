@@ -39,6 +39,7 @@ export function VideoCard({
         imageClassName="video-card-image"
         emptyClassName="video-card-placeholder"
         assetKey={video.thumbnailKey}
+        reviewedSrc={video.reviewedThumbnailUrl}
         fallbackSrc={video.youtubeVideoId ? youtubeThumb(video.youtubeVideoId) : undefined}
         fallbackSource="youtube"
         alt={video.title}

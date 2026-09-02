@@ -16,6 +16,8 @@ const daySchedule = read("src/app/(app)/schedule/DayByDaySchedule.tsx");
 // accessible loading/error state; surfaces do not each invent a new fallback.
 assert.match(preview, /useAssetUrlState/);
 assert.match(preview, /selectMediaPreview/);
+assert.match(preview, /reviewedSrc/);
+assert.match(preview, /source: "reviewed"/);
 assert.match(preview, /data-preview-source=/);
 assert.match(preview, /data-preview-state=/);
 assert.match(preview, /aria-busy=/);
@@ -36,8 +38,11 @@ for (const source of [videoCard, rail, daySchedule]) {
 // Status and proof badges remain tied to their actual persisted fields rather
 // than being replaced by a preview's source label.
 assert.match(videoCard, /ReleaseEvidenceBadge/);
+assert.match(videoCard, /reviewedSrc=\{video\.reviewedThumbnailUrl\}/);
 assert.match(videoCard, /status=\{video\.releaseEvidenceStatus\}/);
 assert.match(rail, /ReleaseEvidenceBadge/);
+assert.match(rail, /reviewedSrc=\{video\.reviewedThumbnailUrl\}/);
+assert.match(rail, /Reviewed ERNIE/);
 assert.match(rail, /status=\{video\.releaseEvidenceStatus\}/);
 assert.match(rail, /state === "ready" && source !== "unavailable"/);
 assert.match(rail, /aria-label=\{`\$\{title\} video artifacts`\}/);

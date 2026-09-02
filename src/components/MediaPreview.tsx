@@ -24,6 +24,7 @@ export type MediaPreviewPresentation = {
  */
 export function MediaPreview({
   assetKey,
+  reviewedSrc,
   alt,
   fallbackSrc,
   fallbackSource = "fallback",
@@ -39,6 +40,8 @@ export function MediaPreview({
   overlay,
 }: {
   assetKey?: string | null;
+  /** Owner-authorized, immutable reviewed replacement preview. */
+  reviewedSrc?: string | null;
   alt: string;
   fallbackSrc?: string | null;
   fallbackSource?: "youtube" | "fallback";
@@ -54,11 +57,12 @@ export function MediaPreview({
   overlay?: (presentation: MediaPreviewPresentation) => ReactNode;
 }) {
   const signedAsset = useAssetUrlState(assetKey);
+  const [reviewedFailedSrc, setReviewedFailedSrc] = useState<string | null>(null);
   const [r2FailedKey, setR2FailedKey] = useState<string | null>(null);
   const [fallbackFailedSrc, setFallbackFailedSrc] = useState<string | null>(null);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
 
-  const selection = selectMediaPreview({
+  const fallbackSelection = selectMediaPreview({
     assetKey,
     signedUrl: signedAsset.url,
     signedState: signedAsset.status,
@@ -67,6 +71,9 @@ export function MediaPreview({
     fallbackImageFailed: Boolean(fallbackSrc && fallbackFailedSrc === fallbackSrc),
     fallbackSource,
   });
+  const selection = reviewedSrc && reviewedFailedSrc !== reviewedSrc
+    ? { source: "reviewed" as const, src: reviewedSrc, state: "loading" as const }
+    : fallbackSelection;
   const state = selection.src && loadedSrc === selection.src
     ? "ready"
     : selection.state;
@@ -94,6 +101,10 @@ export function MediaPreview({
           decoding="async"
           onLoad={() => setLoadedSrc(selection.src)}
           onError={() => {
+            if (selection.source === "reviewed" && reviewedSrc) {
+              setReviewedFailedSrc(reviewedSrc);
+              return;
+            }
             if (selection.source === "r2" && assetKey) {
               setR2FailedKey(assetKey);
               return;

@@ -1,7 +1,7 @@
 export type SignedAssetPreviewState = "idle" | "loading" | "ready" | "error";
 
 /** The source that is actually on screen, not an artifact quality judgement. */
-export type MediaPreviewSource = "r2" | "youtube" | "fallback" | "unavailable";
+export type MediaPreviewSource = "reviewed" | "r2" | "youtube" | "fallback" | "unavailable";
 
 export type MediaPreviewState = "loading" | "ready" | "unavailable";
 
@@ -31,7 +31,7 @@ export function selectMediaPreview({
   r2ImageFailed: boolean;
   fallbackSrc?: string | null;
   fallbackImageFailed: boolean;
-  fallbackSource?: Exclude<MediaPreviewSource, "r2" | "unavailable">;
+  fallbackSource?: Exclude<MediaPreviewSource, "reviewed" | "r2" | "unavailable">;
 }): MediaPreviewSelection {
   const usableFallback = fallbackSrc && !fallbackImageFailed
     ? { source: fallbackSource, src: fallbackSrc, state: "loading" as const }
