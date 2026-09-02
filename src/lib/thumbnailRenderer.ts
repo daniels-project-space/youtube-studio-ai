@@ -18,6 +18,10 @@ import {
   trustedThumbnailTextZoneResolution,
   type ThumbnailTextZoneResolution,
 } from "@/lib/thumbnailSafeZone";
+import {
+  GOLDEN_THUMBNAIL_CRAFT_RULES,
+  OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES,
+} from "@/lib/thumbnailGoldenStandard";
 
 export type ThumbnailFont = "serif" | "sans" | "impact" | "marker" | "bebas" | "rounded";
 export type ThumbnailTreatment = "plate" | "sticker" | "stamp" | "neon" | "clean";
@@ -39,7 +43,7 @@ export interface ThumbnailTypographySpec {
   lines: ThumbnailHeadlineLine[];
   subtitle?: string;
   footerLabel?: string;
-  badgePlacement?: "bottomCenter" | "topRight";
+  badgePlacement?: "bottomCenter" | "bottomRight" | "topRight";
   font?: ThumbnailFont;
   uppercase?: boolean;
   treatment?: ThumbnailTreatment;
@@ -123,8 +127,12 @@ export function buildThumbnailImageRequest(scene: ThumbnailSceneSpec): Thumbnail
     scene.accentColor ? `Accent color: ${scene.accentColor}` : "",
     `Physical scene: ${scene.description}`,
     scene.composition ? `Composition: ${scene.composition}` : "",
-    `Put the dominant hero on the side opposite the ${zone} safe zone, filling 55-70% of the frame`,
-    `Keep the ${zone} 42% darker, simple, and genuinely empty for a later local overlay`,
+    `Put the dominant hero on the side opposite the ${zone} safe zone, filling 60-75% of the frame and crop it aggressively at the outer edge`,
+    `Keep the ${zone} 42% darker and graphically simple for a later local overlay; avoid a dead 50/50 split`,
+    `Let one meaningful hero contour or atmospheric layer intrude 6-10% into the ${zone} safe zone so the scene and typography will feel intentionally interlocked`,
+    "Build clear foreground, hero, and background depth; avoid a centered product-render composition",
+    `Approved Golden craft standard: ${GOLDEN_THUMBNAIL_CRAFT_RULES.join(" ")}`,
+    `Owner-selected A/B preference standard: ${OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES.join(" ")}`,
     "The scene alone must communicate the subject at phone size; use at most three visual elements",
     scene.requiredVisualDirectives?.length
       ? `Non-negotiable visual treatment: ${scene.requiredVisualDirectives.join(" ")}`

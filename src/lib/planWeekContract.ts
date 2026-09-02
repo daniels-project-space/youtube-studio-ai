@@ -1,7 +1,11 @@
-import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract";
+import { FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaProThumbnailContract";
 
 /** Fresh admissions. Provider and creative-route migrations must bump this. */
-export const PLAN_WEEK_CONTRACT_VERSION = "plan-week-v4-golden-nano-banana" as const;
+export const PLAN_WEEK_CONTRACT_VERSION = "plan-week-v5-golden-fal-nano-banana-pro" as const;
+
+/** Read/recovery compatibility for the former direct-Google thumbnail route. */
+export const LEGACY_GOLDEN_NANO_BANANA_PLAN_WEEK_CONTRACT_VERSION =
+  "plan-week-v4-golden-nano-banana" as const;
 
 /**
  * Read/recovery compatibility only. No fresh batch may ever be admitted under
@@ -11,10 +15,12 @@ export const LEGACY_PLAN_WEEK_CONTRACT_VERSION = "plan-week-v3-attested-novita" 
 
 export type PlanWeekContractVersion =
   | typeof PLAN_WEEK_CONTRACT_VERSION
+  | typeof LEGACY_GOLDEN_NANO_BANANA_PLAN_WEEK_CONTRACT_VERSION
   | typeof LEGACY_PLAN_WEEK_CONTRACT_VERSION;
 
 /** Admission only; actual Nano Banana receipt cost remains exact. */
-export const PLAN_WEEK_IMAGE_UNIT_USD = NANO_BANANA_THUMBNAIL_PROFILE.admissionCeilingUsd;
+export const PLAN_WEEK_IMAGE_UNIT_USD =
+  FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE.admissionCeilingUsd;
 /** Admission ceilings for one Golden pattern instantiation and one mobile/reference judge. */
 export const PLAN_WEEK_THUMBNAIL_CONCEPT_UNIT_USD = 0.01;
 export const PLAN_WEEK_THUMBNAIL_QA_UNIT_USD = 0.003;

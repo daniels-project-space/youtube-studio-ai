@@ -200,7 +200,7 @@ async function main() {
   }, channelId);
   const ctx = testContext(db, ownerId);
   const reservation = planWeekReservation(5);
-  assert.equal(reservation.imageUnitUsd, 0.04);
+  assert.equal(reservation.imageUnitUsd, 0.15);
   assert.equal(reservation.thumbnailConceptUsd, 0.05);
   assert.equal(reservation.thumbnailQaUsd, 0.015);
   assert.equal(reservation.thumbnailModelUsd, 0.08);

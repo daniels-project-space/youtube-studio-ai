@@ -219,6 +219,7 @@ export async function putObjectFromFile(
     ContentLength: size,
     ContentType: opts.contentType,
     Metadata: opts.metadata,
+    IfNoneMatch: opts.ifNoneMatch,
   });
   await getR2Client().send(command);
   return key;

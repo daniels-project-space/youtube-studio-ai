@@ -60,6 +60,19 @@ type Phase = "form" | "building" | "error";
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const ACTIVE_BUILD_STORAGE_KEY = "youtube-studio:active-channel-build:v1";
 const PENDING_BUILD_STORAGE_KEY = "youtube-studio:pending-channel-build:v1";
+// Keep first contact focused on formats with real, distinct operating paths.
+// The complete planning catalog remains one deliberate action away; no niche
+// is removed or made less selectable by this presentation layer.
+const FEATURED_NICHE_KEYS = new Set([
+  "lofi",
+  "educational",
+  "finance",
+  "technology",
+  "psychology",
+  "crime",
+  "history",
+  "motivation",
+]);
 const STAGE_LABELS: Record<string, string> = {
   "channel-inception-research": "Research evidence",
   "channel-inception-positioning": "Channel positioning",
@@ -426,6 +439,7 @@ export default function NewChannelWizard() {
   const [paramOverrides, setParamOverrides] = useState<Record<string, Record<string, unknown>>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showPipelineStyle, setShowPipelineStyle] = useState(false);
+  const [showAllNiches, setShowAllNiches] = useState(false);
   // Pipeline style — per-module presets/knobs the new channel starts with
   // (validated server-side by channels.setModuleConfig in design-channel).
   const [moduleConfig, setModuleConfig] = useState<ModuleConfigMap>({});
@@ -1237,6 +1251,11 @@ export default function NewChannelWizard() {
           )),
       )
       : true;
+  const selectedNicheOutsideFeatured = Boolean(nicheKey && !FEATURED_NICHE_KEYS.has(nicheKey));
+  const visibleNiches = showAllNiches || selectedNicheOutsideFeatured
+    ? NICHES
+    : NICHES.filter((candidate) => FEATURED_NICHE_KEYS.has(candidate.key));
+  const hiddenNicheCount = NICHES.length - visibleNiches.length;
   return (
     <main className={styles.page}>
       <header className={styles.hero}>
@@ -1292,10 +1311,11 @@ export default function NewChannelWizard() {
         <section>
           <header className={styles.sectionIntro}>
             <div><span>01 / niche</span><h2>Choose a territory</h2><p>What should this channel own?</p></div>
-            <strong className={styles.sectionCount}>{NICHES.length} markets</strong>
+            <strong className={styles.sectionCount}>{showAllNiches ? "all territories" : "featured territories"}</strong>
           </header>
-          <div className={styles.nicheGrid}>
-          {NICHES.map((n, index) => {
+          <div id="channel-territory-grid" className={styles.nicheGrid}>
+          {visibleNiches.map((n) => {
+            const index = NICHES.indexOf(n);
             const on = n.key === nicheKey;
             const defaultFamilyReadiness = automaticFamilyCreatorReadiness(n.defaultFamily);
             return (
@@ -1320,6 +1340,18 @@ export default function NewChannelWizard() {
             );
           })}
           </div>
+          {hiddenNicheCount > 0 && (
+            <button
+              type="button"
+              className={styles.showMoreNiches}
+              onClick={() => setShowAllNiches(true)}
+              aria-expanded={showAllNiches}
+              aria-controls="channel-territory-grid"
+            >
+              <span>More territories</span>
+              <small>+{hiddenNicheCount}</small>
+            </button>
+          )}
           {niche && (
             <div className={styles.subcategoryBar}>
               <span>Focus the territory</span>

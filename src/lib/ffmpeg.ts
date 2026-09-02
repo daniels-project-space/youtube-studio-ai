@@ -59,6 +59,125 @@ const FFMPEG = process.env.FFMPEG_BIN ?? "ffmpeg";
 const FFPROBE = process.env.FFPROBE_BIN ?? "ffprobe";
 
 /**
+ * Compare the same bounded regions in two still images with FFmpeg SSIM.
+ * Returns the weakest region so callers cannot hide a large alteration behind
+ * a mostly unchanged canvas.
+ */
+export async function measureImageRegionSsim(
+  firstPath: string,
+  secondPath: string,
+  regions: readonly { x: number; y: number; width: number; height: number }[],
+  opts: { canvasWidth?: number; canvasHeight?: number; timeoutMs?: number } = {},
+): Promise<number> {
+  const canvasWidth = opts.canvasWidth ?? 1_280;
+  const canvasHeight = opts.canvasHeight ?? 720;
+  if (
+    !Number.isInteger(canvasWidth) || canvasWidth < 1 ||
+    !Number.isInteger(canvasHeight) || canvasHeight < 1 ||
+    !regions.length
+  ) {
+    throw new FfmpegError("image-region SSIM requires a positive canvas and at least one region");
+  }
+  const scores: number[] = [];
+  for (const region of regions) {
+    if (
+      ![region.x, region.y, region.width, region.height].every(Number.isInteger) ||
+      region.x < 0 || region.y < 0 || region.width < 1 || region.height < 1 ||
+      region.x + region.width > canvasWidth || region.y + region.height > canvasHeight
+    ) {
+      throw new FfmpegError("image-region SSIM received an out-of-bounds crop");
+    }
+    const filter =
+      `[0:v]scale=${canvasWidth}:${canvasHeight}:flags=area,` +
+      `crop=${region.width}:${region.height}:${region.x}:${region.y}[a];` +
+      `[1:v]scale=${canvasWidth}:${canvasHeight}:flags=area,` +
+      `crop=${region.width}:${region.height}:${region.x}:${region.y}[b];` +
+      "[a][b]ssim";
+    const { stderr } = await run(
+      FFMPEG,
+      ["-i", firstPath, "-i", secondPath, "-lavfi", filter, "-f", "null", "-"],
+      opts.timeoutMs ?? 60_000,
+    );
+    const similarity = Number(/All:([0-9.]+)/.exec(stderr)?.[1] ?? Number.NaN);
+    if (!Number.isFinite(similarity)) {
+      throw new FfmpegError("image-region measurement did not emit an SSIM score");
+    }
+    scores.push(Math.max(0, Math.min(1, similarity)));
+  }
+  return Number(Math.min(...scores).toFixed(6));
+}
+
+/** Return the weakest flat-colour score across bounded regions (1 = uniform). */
+export async function measureImageRegionUniformity(
+  imagePath: string,
+  regions: readonly { x: number; y: number; width: number; height: number }[],
+  opts: { timeoutMs?: number } = {},
+): Promise<number> {
+  if (!regions.length) throw new FfmpegError("image uniformity requires at least one region");
+  const scores: number[] = [];
+  for (const region of regions) {
+    if (
+      ![region.x, region.y, region.width, region.height].every(Number.isInteger) ||
+      region.x < 0 || region.y < 0 || region.width < 1 || region.height < 1
+    ) {
+      throw new FfmpegError("image uniformity received an invalid crop");
+    }
+    const filter =
+      `crop=${region.width}:${region.height}:${region.x}:${region.y},` +
+      "signalstats,metadata=print";
+    const { stderr } = await run(
+      FFMPEG,
+      ["-i", imagePath, "-vf", filter, "-frames:v", "1", "-f", "null", "-"],
+      opts.timeoutMs ?? 60_000,
+    );
+    const value = (key: string): number =>
+      Number(new RegExp(`lavfi\\.signalstats\\.${key}=([0-9.]+)`).exec(stderr)?.[1] ?? Number.NaN);
+    const ranges = [value("YMAX") - value("YMIN"), value("UMAX") - value("UMIN"), value("VMAX") - value("VMIN")];
+    if (!ranges.every(Number.isFinite)) {
+      throw new FfmpegError("image uniformity measurement did not emit bounded signal statistics");
+    }
+    scores.push(Math.max(0, Math.min(1, 1 - Math.max(...ranges) / 255)));
+  }
+  return Number(Math.min(...scores).toFixed(6));
+}
+
+/**
+ * Composite provider-rendered typography from a chroma matte over an immutable
+ * source frame. This never typesets locally; it only removes the sealed matte
+ * colour around the lettering returned by the provider.
+ */
+export async function compositeProviderTypographyOverlay(args: {
+  baseFramePath: string;
+  providerOverlayPath: string;
+  outPath: string;
+  width?: number;
+  height?: number;
+  matteColor?: string;
+  timeoutMs?: number;
+}): Promise<string> {
+  const width = args.width ?? 1_280;
+  const height = args.height ?? 720;
+  const matte = (args.matteColor ?? "#00ff00").replace(/^#/u, "0x");
+  if (!Number.isInteger(width) || width < 1 || !Number.isInteger(height) || height < 1) {
+    throw new FfmpegError("provider typography composite requires positive integer dimensions");
+  }
+  const filter =
+    `[0:v]scale=${width}:${height}:flags=lanczos[base];` +
+    `[1:v]scale=${width}:${height}:flags=lanczos,format=rgba,` +
+    `colorkey=${matte}:0.48:0.08[type];` +
+    "[base][type]overlay=0:0:format=auto,format=yuvj420p[out]";
+  await run(
+    FFMPEG,
+    [
+      "-y", "-i", args.baseFramePath, "-i", args.providerOverlayPath,
+      "-filter_complex", filter, "-map", "[out]", "-frames:v", "1", "-q:v", "2", args.outPath,
+    ],
+    args.timeoutMs ?? 60_000,
+  );
+  return args.outPath;
+}
+
+/**
  * Lightweight duration probe (seconds); returns 0 on any failure and never
  * throws. The shared version of the one-liner several render libs each
  * re-implemented (lofi/loreshort/motionComic). Respects FFPROBE_BIN.
@@ -2829,14 +2948,42 @@ export async function regionLuma(path: string, xFrac: number, wFrac: number): Pr
     execFile(/* turbopackIgnore: true */ FFMPEG,
       [
         "-v", "error", "-i", path,
-        "-vf", `crop=iw*${wFrac}:ih:iw*${xFrac}:0,scale=1:1,format=gray`,
-        "-f", "rawvideo", "-frames:v", "1", "-",
+        "-vf", `crop=iw*${wFrac}:ih:iw*${xFrac}:0,signalstats,metadata=print:file=-`,
+        "-frames:v", "1", "-f", "null", "-",
       ],
-      { encoding: "buffer", maxBuffer: 4096 },
-      (err, stdout) => {
-        const buf = stdout as unknown as Buffer;
-        if (err || !buf || buf.length === 0) return resolve(NaN);
-        resolve(buf[0]);
+      { encoding: "utf8", maxBuffer: 64 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) return resolve(Number.NaN);
+        const mean = Number(/lavfi\.signalstats\.YAVG=([0-9.]+)/u.exec(`${stdout}\n${stderr}`)?.[1]);
+        resolve(Number.isFinite(mean) ? mean : Number.NaN);
+      },
+    );
+  });
+}
+
+/** Mean luminance (0-255) of an exact rectangular still-image region. */
+export async function imageRegionLuma(
+  path: string,
+  region: { x: number; y: number; width: number; height: number },
+): Promise<number> {
+  const { x, y, width, height } = region;
+  if (
+    ![x, y, width, height].every(Number.isInteger) ||
+    x < 0 || y < 0 || width < 1 || height < 1
+  ) return Number.NaN;
+  const { execFile } = await import("node:child_process");
+  return new Promise((resolve) => {
+    execFile(/* turbopackIgnore: true */ FFMPEG,
+      [
+        "-v", "error", "-i", path,
+        "-vf", `crop=${width}:${height}:${x}:${y},signalstats,metadata=print:file=-`,
+        "-frames:v", "1", "-f", "null", "-",
+      ],
+      { encoding: "utf8", maxBuffer: 64 * 1024 },
+      (err, stdout, stderr) => {
+        if (err) return resolve(Number.NaN);
+        const mean = Number(/lavfi\.signalstats\.YAVG=([0-9.]+)/u.exec(`${stdout}\n${stderr}`)?.[1]);
+        resolve(Number.isFinite(mean) ? mean : Number.NaN);
       },
     );
   });
@@ -2948,11 +3095,11 @@ export async function titleCard(args: {
  * ~14 chars/line so ≤8-word titles fit.
  */
 const CLOUD_FONTS = {
-  sans: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-  serif: "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
-  impact: "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
-  bebas: "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
-  marker: "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-BoldOblique.ttf",
+  sans: join(process.cwd(), "public/fonts/Anton.ttf"),
+  serif: join(process.cwd(), "public/fonts/DMSerifDisplay.ttf"),
+  impact: join(process.cwd(), "public/fonts/Anton.ttf"),
+  bebas: join(process.cwd(), "public/fonts/BebasNeue.ttf"),
+  marker: join(process.cwd(), "public/fonts/PermanentMarker.ttf"),
   rounded: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 };
 
@@ -3004,7 +3151,7 @@ const THUMBNAIL_TEXT_STYLES: Record<ThumbnailTextObject, Omit<ResolvedThumbnailT
   neon_sign: { font: "rounded", casing: "upper", tracking: 0, fontScale: 0.9, surface: "none", effect: "glow" },
   spray_paint: { font: "marker", casing: "upper", tracking: 0, fontScale: 0.94, surface: "none", effect: "spray" },
   stamp_ink: { font: "marker", casing: "upper", tracking: 0, fontScale: 0.96, surface: "none", effect: "double_stamp" },
-  movie_poster: { font: "bebas", casing: "upper", tracking: 1, fontScale: 0.8, surface: "none", effect: "bevel" },
+  movie_poster: { font: "impact", casing: "upper", tracking: 0, fontScale: 1, surface: "none", effect: "bevel" },
   ransom_note: { font: "sans", casing: "configured", tracking: 0, fontScale: 0.72, surface: "letter_tiles", effect: "hard_shadow" },
   carved: { font: "serif", casing: "upper", tracking: 0, fontScale: 0.92, surface: "none", effect: "carved" },
 };
@@ -3023,6 +3170,26 @@ export function resolveThumbnailTextStyle(args: {
   if (isThumbnailTextObject(args.textObject)) {
     const motif = THUMBNAIL_TEXT_STYLES[args.textObject];
     return { ...motif, motif: args.textObject, font: args.font ?? motif.font };
+  }
+  // Style DNA predates explicit text-object motifs. Infer the strongest physical
+  // treatment for older channels while preserving deliberately invalid values as
+  // the legacy compatibility path.
+  if (args.textObject === undefined) {
+    const inferredMotif: ThumbnailTextObject = args.treatment === "plate"
+      ? "block_plate"
+      : args.treatment === "sticker"
+        ? "grunge_sticker"
+        : args.treatment === "stamp"
+          ? "stamp_ink"
+          : args.treatment === "neon"
+            ? "neon_sign"
+            : args.font === "bebas" || args.font === "impact"
+              ? "movie_poster"
+              : args.font === "serif"
+                ? "spaced_elegant"
+                : "block_plate";
+    const motif = THUMBNAIL_TEXT_STYLES[inferredMotif];
+    return { ...motif, motif: inferredMotif, font: args.font ?? motif.font };
   }
   const treatment = args.treatment ?? "plate";
   const legacy: Omit<ResolvedThumbnailTextStyle, "motif" | "font"> = treatment === "plate"
@@ -3043,7 +3210,7 @@ export interface ThumbnailTextOverlayArgs {
   position?: ThumbnailTextZone;
   subtitle?: string;
   footerLabel?: string;
-  badgePlacement?: "bottomCenter" | "topRight";
+  badgePlacement?: "bottomCenter" | "bottomRight" | "topRight";
   textColor?: string;
   baseColor?: string;
   accentColor?: string;
@@ -3231,7 +3398,7 @@ export function buildThumbnailTextFilterGraph(args: ThumbnailTextOverlayArgs): s
     } else if (style.effect === "bevel") {
       addText(line, { text: tracked, color: "black@0.72", fontSize, xOffset: baseOffset + 6, yOffset: 7, borderWidth: 7, borderColor: "black@0.55" });
       addText(line, { text: tracked, color: payoff ? accent : "white", fontSize, xOffset: baseOffset, borderWidth: 5, borderColor: `${accent}@0.78` });
-      addText(line, { text: tracked, color: payoff ? "white" : "0xfff1c2", fontSize, xOffset: baseOffset - 2, yOffset: -2, borderWidth: 1, borderColor: "white@0.55" });
+      addText(line, { text: tracked, color: payoff ? accent : "white", fontSize, xOffset: baseOffset - 2, yOffset: -2, borderWidth: 1, borderColor: "white@0.42" });
     } else if (style.effect === "carved") {
       addText(line, { text: tracked, color: "white@0.34", fontSize, xOffset: baseOffset - 3, yOffset: -3, borderWidth: 2, borderColor: "white@0.25" });
       addText(line, { text: tracked, color: "black@0.76", fontSize, xOffset: baseOffset + 4, yOffset: 5, borderWidth: 4, borderColor: "black@0.66" });
@@ -3262,11 +3429,16 @@ export function buildThumbnailTextFilterGraph(args: ThumbnailTextOverlayArgs): s
       ? `box=1:boxcolor=${baseColor}@0.82:boxborderw=10:`
       : "";
     const badgeAtTop = args.badgePlacement === "topRight" || Boolean(args.footerLabel);
+    const badgePosition = badgeAtTop
+      ? `x=w-text_w-44:y=38`
+      : args.badgePlacement === "bottomRight"
+        ? `x=w-text_w-62:y=h-104`
+        : `x=(w-text_w)/2:y=h*0.92`;
     filters.push(
       `drawtext=fontfile=${CLOUD_FONTS.sans}:text='${escapeDrawtext(args.subtitle.toUpperCase())}':expansion=none:` +
       `fontcolor=white@0.9:fontsize=30:${badge}borderw=2:bordercolor=black:` +
       `shadowcolor=black@0.9:shadowx=2:shadowy=2:` +
-      (badgeAtTop ? `x=w-text_w-44:y=38` : `x=(w-text_w)/2:y=h*0.92`),
+      badgePosition,
     );
   }
   if (args.footerLabel) {

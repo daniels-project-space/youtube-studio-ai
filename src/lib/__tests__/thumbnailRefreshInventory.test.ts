@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 
 import {
   assessThumbnailRefreshEvidence,
+  createErnieNovitaThumbnailCurrentCandidateEvidence,
+  createLofiThumbnailCurrentCandidateEvidence,
   createThumbnailCurrentCandidateEvidence,
 } from "@/lib/thumbnailRefreshInventory";
 
@@ -96,6 +98,88 @@ assert.throws(
   }),
   /SHA-256 receipts/,
   "current provenance cannot be minted without byte and provider receipts",
+);
+
+const lofiEvidence = createLofiThumbnailCurrentCandidateEvidence({
+  ownerId,
+  channelId,
+  runId,
+  r2Key,
+  artifactSha256: "d".repeat(64),
+  sourceVideoKey: "owner/owner-alice/channel/lofi/runs/run-2026-08-22/loop-unit-4k.mp4",
+  sourceFrameSha256: "e".repeat(64),
+  sourceFrameTimeSec: 12,
+  sourceWidth: 3_840,
+  sourceHeight: 2_160,
+  providerRequestSha256: "f".repeat(64),
+  providerResponseSha256: "1".repeat(64),
+});
+assert.equal(
+  assessThumbnailRefreshEvidence({
+    ownerId,
+    channelId,
+    runId,
+    kind: "thumbnail",
+    r2Key,
+    meta: { thumbnailCurrentCandidateEvidence: lofiEvidence },
+  }).status,
+  "current_golden_candidate",
+  "a truthful 4K Lo-Fi render-frame receipt is admitted without pretending Nano Banana generated it",
+);
+assert.throws(
+  () => createLofiThumbnailCurrentCandidateEvidence({
+    ownerId,
+    channelId,
+    runId,
+    r2Key,
+    artifactSha256: "d".repeat(64),
+    sourceVideoKey: "lofi-1080p.mp4",
+    sourceFrameSha256: "e".repeat(64),
+    sourceFrameTimeSec: 12,
+    sourceWidth: 1_920,
+    sourceHeight: 1_080,
+    providerRequestSha256: "f".repeat(64),
+    providerResponseSha256: "1".repeat(64),
+  }),
+  /truthful 4K/,
+  "the Lo-Fi route must not label a sub-4K source as 4K",
+);
+
+const ernieEvidence = createErnieNovitaThumbnailCurrentCandidateEvidence({
+  ownerId,
+  channelId,
+  runId,
+  r2Key,
+  artifactSha256: "2".repeat(64),
+  providerRequestSha256: "3".repeat(64),
+  providerResponseSha256: "4".repeat(64),
+  modelRevision: "5".repeat(40),
+});
+assert.equal(
+  assessThumbnailRefreshEvidence({
+    ownerId,
+    channelId,
+    runId,
+    kind: "thumbnail",
+    r2Key,
+    meta: { thumbnailCurrentCandidateEvidence: ernieEvidence },
+  }).status,
+  "current_golden_candidate",
+  "a fully native ERNIE thumbnail may enter the same replacement gate only with exact receipt evidence",
+);
+assert.throws(
+  () => createErnieNovitaThumbnailCurrentCandidateEvidence({
+    ownerId,
+    channelId,
+    runId,
+    r2Key,
+    artifactSha256: "2".repeat(64),
+    providerRequestSha256: "3".repeat(64),
+    providerResponseSha256: "4".repeat(64),
+    modelRevision: "not-immutable",
+  }),
+  /immutable request\/receipt hashes/,
+  "the ERNIE marker requires a pinned model revision rather than a mutable model name",
 );
 
 console.log("THUMBNAIL REFRESH INVENTORY PASS");

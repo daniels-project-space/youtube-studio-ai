@@ -82,6 +82,32 @@
 .nicheCard[data-active="true"] .nicheBlurb { display: block; }
 .nicheBlocker { display: none; overflow: hidden; color: var(--color-amber); font-size: .54rem; line-height: 1.3; white-space: nowrap; text-overflow: ellipsis; }
 .nicheCard[data-active="true"] .nicheBlocker { display: block; }
+.showMoreNiches {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: .45rem;
+  width: fit-content;
+  margin-top: .65rem;
+  padding: .46rem .7rem;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  color: var(--color-muted);
+  background: rgba(222,235,255,.025);
+  cursor: pointer;
+  font-size: .64rem;
+  font-weight: 650;
+  transition: border-color 160ms ease, background 160ms ease, color 160ms ease, transform 160ms ease;
+}
+.showMoreNiches:hover,
+.showMoreNiches:focus-visible {
+  border-color: color-mix(in srgb,var(--creator-tone) 48%,var(--color-border));
+  color: var(--color-fg);
+  background: color-mix(in srgb,var(--creator-tone) 7%,transparent);
+  transform: translateY(-1px);
+}
+.showMoreNiches small { color: var(--creator-tone); font: 700 .56rem/1 var(--font-mono); }
 .subcategoryBar { display: grid; grid-template-columns: minmax(0,1fr) minmax(220px,390px); align-items: center; gap: 1rem; margin-top: .65rem; padding: .72rem .82rem; border: 1px solid color-mix(in srgb,var(--creator-tone) 26%,var(--color-border)); border-radius: 14px; background: linear-gradient(110deg,color-mix(in srgb,var(--creator-tone) 7%,transparent),rgba(12,16,27,.64)); }
 .subcategoryBar span { color: var(--color-faint); font-size: .65rem; }
 

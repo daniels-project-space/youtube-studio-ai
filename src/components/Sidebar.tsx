@@ -133,7 +133,7 @@ export function Sidebar() {
           aria-label="Workspace"
           data-nav-group="workspace"
         >
-          <span className="studio-nav-label">Active desks</span>
+          <span className="studio-nav-label">Workspace</span>
           <div className="studio-nav-items">
             {PRIMARY_NAV_ITEMS.map((item) => (
               <NavItem
@@ -155,8 +155,8 @@ export function Sidebar() {
               <IconToolbox />
             </span>
             <span className="studio-toolbox-copy">
-              <strong>Utility deck</strong>
-              <small>{activeToolboxLabel ?? "Specialist tools, tucked away"}</small>
+              <strong>Tools</strong>
+              {activeToolboxLabel ? <small>{activeToolboxLabel}</small> : null}
             </span>
             <span className="studio-toolbox-chevron" aria-hidden="true">+</span>
           </summary>
@@ -225,8 +225,8 @@ export function Sidebar() {
                     <IconToolbox />
                   </span>
                   <span className="studio-toolbox-copy">
-                    <strong>Utility deck</strong>
-                    <small>{activeToolboxLabel ?? "Specialist tools"}</small>
+                    <strong>Tools</strong>
+                    {activeToolboxLabel ? <small>{activeToolboxLabel}</small> : null}
                   </span>
                   <span className="studio-toolbox-chevron" aria-hidden="true">+</span>
                 </summary>
@@ -262,8 +262,8 @@ export function Sidebar() {
         <div className="studio-rail-status" aria-label="Release posture">
           <span aria-hidden="true" />
           <div>
-            <strong>Private by default</strong>
-            <small>Release gates armed</small>
+            <strong>Draft mode</strong>
+            <small>Approval required to release</small>
           </div>
         </div>
         <NavItem {...SETTINGS_ITEM} />

@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaProThumbnailContract";
 import {
   finalizedPlanWeekRenderReceiptFixture,
   legacyPlanWeekProviderReceiptFixture,
@@ -8,7 +10,9 @@ import {
 import {
   PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA,
   isFinalizedPlanWeekRenderReceipt,
+  makePlanWeekFalNanoBananaProProviderRenderReceipt,
   makePlanWeekProviderRenderReceipt,
+  planWeekFalNanoBananaProRequestContext,
   planWeekArtifactHeadMatches,
   planWeekProviderEvidenceSha256,
   validatePlanWeekProviderRenderReceipt,
@@ -37,6 +41,63 @@ async function main(): Promise<void> {
   assert.equal(receipt.model, "gemini-2.5-flash-image");
   assert.equal(validatePlanWeekProviderRenderReceipt(receipt, scope), true);
   assert.equal(await verifyPlanWeekProviderReceiptCryptography(receipt), true);
+
+  const falProfile = FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE;
+  const falSourceKey = "owners/owner-1/channels/channel-1/plan/item-1/source.json";
+  const falPrompt = `Native scene with exact headline "$1K/MO" then "CASH ENGINE".`;
+  const falRequestCanonicalJson = canonicalJson({
+    apiVersion: falProfile.apiVersion,
+    context: planWeekFalNanoBananaProRequestContext(scope, falSourceKey),
+    endpoint: falProfile.model,
+    body: {
+      prompt: falPrompt,
+      num_images: 1,
+      aspect_ratio: falProfile.aspectRatio,
+      output_format: "png",
+      safety_tolerance: "4",
+      resolution: falProfile.resolution,
+      limit_generations: true,
+      enable_web_search: false,
+    },
+  });
+  const falResponseMetadataCanonicalJson = canonicalJson({
+    requestId: "fal-plan-week-fixture",
+    description: "",
+    image: { width: 2048, height: 1152, content_type: "image/png" },
+  });
+  const falReceipt = makePlanWeekFalNanoBananaProProviderRenderReceipt(scope, {
+    provider: falProfile.provider,
+    model: falProfile.model,
+    apiVersion: falProfile.apiVersion,
+    providerRequestId: "fal-plan-week-fixture",
+    route: falProfile.route,
+    width: 2_048,
+    height: 1_152,
+    promptUtf8Bytes: Buffer.byteLength(falPrompt, "utf8"),
+    expectedWords: ["$1K/MO", "CASH ENGINE"],
+    outputCostUsd: falProfile.outputImageUsd,
+    costUsd: falProfile.outputImageUsd,
+    sourceContentType: "image/png",
+    providerRequestCanonicalJson: falRequestCanonicalJson,
+    providerRequestSha256: createHash("sha256")
+      .update(`fal-nano-banana-pro-provider\0${falRequestCanonicalJson}`)
+      .digest("hex"),
+    providerResponseMetadataCanonicalJson: falResponseMetadataCanonicalJson,
+    providerResponseMetadataSha256: createHash("sha256")
+      .update(`fal-nano-banana-pro-response-metadata\0${falResponseMetadataCanonicalJson}`)
+      .digest("hex"),
+    responseSha256: "7".repeat(64),
+    createdAt: 1_900_000_000_000,
+    sourceKey: falSourceKey,
+  });
+  assert.equal(falReceipt.version, "plan-week-provider-render/v3");
+  assert.equal(validatePlanWeekProviderRenderReceipt(falReceipt, scope), true);
+  assert.equal(await verifyPlanWeekProviderReceiptCryptography(falReceipt), true);
+  assert.equal(
+    validatePlanWeekProviderRenderReceipt({ ...falReceipt, expectedWords: ["CHANGED"] }, scope),
+    false,
+    "native copy evidence must remain bound to the purchased provider prompt",
+  );
 
   const wrongModel = structuredClone(receipt);
   (wrongModel as { model: string }).model = "gemini-image-unpinned";

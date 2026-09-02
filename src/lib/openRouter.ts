@@ -1,10 +1,9 @@
 /**
  * Pinned OpenRouter boundary for the YouTube factory.
  *
- * The router is deliberately model- and provider-pinned: a generic OpenRouter
- * fallback could otherwise select Google-hosted capacity, which is prohibited
- * for planning and vision. Nano Banana thumbnails retain their separately
- * sealed exception and do not pass through this boundary.
+ * The router is deliberately model- and provider-pinned to Gemini 3.7 Flash
+ * through OpenRouter. Nano Banana image generation remains a separate Fal
+ * boundary and does not pass through this text/vision client.
  */
 import { recordModelUsage } from "@/lib/modelUsage";
 import type { ModelCallKind } from "@/lib/modelUsage";
@@ -14,8 +13,8 @@ const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 // These bounded limits allow the pinned reviewer to finish one operational
 // batch without turning a slow body into a synthetic "no text" outcome.
 const OPENROUTER_REQUEST_TIMEOUT_MS = 180_000;
-// The final Qwen reviewer can return headers before its constrained JSON body
-// is ready. Four minutes aborted a real two-frame final-review response after
+// A final reviewer can return headers before its constrained JSON body is
+// ready. Four minutes previously aborted a real two-frame response after
 // an HTTP 200; six minutes remains a hard bound while allowing the admitted
 // model to finish a complete receipt instead of manufacturing a false failure.
 const OPENROUTER_RESPONSE_BODY_TIMEOUT_MS = 360_000;
@@ -41,14 +40,11 @@ export class OpenRouterGenerationOutcomeUnknownError extends Error {
 }
 
 export const OPENROUTER_MODELS = {
-  // The shared structured-planning route needs a model that leaves a final
-  // answer after reasoning. The larger Qwen route is independently health
-  // checked with JSON output and is also the pinned final vision reviewer.
-  intelligence: "qwen/qwen3.6-27b",
-  creative: "mistralai/ministral-8b-2512",
-  visionBulk: "mistralai/ministral-3b-2512",
-  visionStandard: "mistralai/ministral-8b-2512",
-  visionFinal: "qwen/qwen3.6-27b",
+  intelligence: "google/gemini-3.7-flash",
+  creative: "google/gemini-3.7-flash",
+  visionBulk: "google/gemini-3.7-flash",
+  visionStandard: "google/gemini-3.7-flash",
+  visionFinal: "google/gemini-3.7-flash",
 } as const;
 
 export type OpenRouterModelKey = keyof typeof OPENROUTER_MODELS;
@@ -60,12 +56,18 @@ type OpenRouterMessage = {
 
 export type OpenRouterProviderPreferences = {
   only: string[];
-  allow_fallbacks: false;
+  allow_fallbacks: boolean;
   require_parameters: true;
   data_collection: "deny";
 };
 
 const PROVIDERS: Record<string, OpenRouterProviderPreferences> = {
+  "google/gemini-3.7-flash": {
+    only: ["google-ai-studio", "google-vertex"],
+    allow_fallbacks: true,
+    require_parameters: true,
+    data_collection: "deny",
+  },
   "mistralai/ministral-3b-2512": {
     only: ["mistral"],
     allow_fallbacks: false,
@@ -74,15 +76,6 @@ const PROVIDERS: Record<string, OpenRouterProviderPreferences> = {
   },
   "mistralai/ministral-8b-2512": {
     only: ["mistral"],
-    allow_fallbacks: false,
-    require_parameters: true,
-    data_collection: "deny",
-  },
-  "qwen/qwen3.6-27b": {
-    // CoreWeave is the currently available non-Google host for the JSON-mode
-    // final visual-review route. Keep this pin fail-closed: a host change is
-    // a deliberate policy update, never an implicit fallback.
-    only: ["coreweave"],
     allow_fallbacks: false,
     require_parameters: true,
     data_collection: "deny",
@@ -103,11 +96,8 @@ function configured(key: OpenRouterModelKey): string {
   const envKey = `OPENROUTER_${key.replace(/[A-Z]/g, (letter) => `_${letter}`).toUpperCase()}_MODEL`;
   const model = process.env[envKey]?.trim() || OPENROUTER_MODELS[key];
   assertNoOpenAiModel(model);
-  if (/\b(?:google|gemini)\b/i.test(model)) {
-    throw new Error(`OpenRouter ${key} model must not be Google/Gemini: ${model}`);
-  }
   if (!PROVIDERS[model]) {
-    throw new Error(`OpenRouter ${key} model is not an approved pinned non-Google route: ${model}`);
+    throw new Error(`OpenRouter ${key} model is not an approved pinned route: ${model}`);
   }
   return model;
 }
@@ -160,7 +150,7 @@ export async function openRouterChat(args: {
   const key = process.env.OPENROUTER_API_KEY?.trim();
   if (!key) throw new Error("OpenRouter requires OPENROUTER_API_KEY");
   const provider = PROVIDERS[args.model];
-  if (!provider) throw new Error(`OpenRouter model is not an approved pinned non-Google route: ${args.model}`);
+  if (!provider) throw new Error(`OpenRouter model is not an approved pinned route: ${args.model}`);
   const controller = new AbortController();
   const requestDeadline = setTimeout(() => controller.abort(), OPENROUTER_REQUEST_TIMEOUT_MS);
   let response: Response;
@@ -281,6 +271,6 @@ export async function openRouterJson<T>(args: {
 export function openRouterProviderPreferences(model: string): OpenRouterProviderPreferences {
   assertNoOpenAiModel(model);
   const provider = PROVIDERS[model];
-  if (!provider) throw new Error(`OpenRouter model is not an approved pinned non-Google route: ${model}`);
+  if (!provider) throw new Error(`OpenRouter model is not an approved pinned route: ${model}`);
   return provider;
 }

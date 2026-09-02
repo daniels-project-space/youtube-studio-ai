@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState, type CSSProperties } from "react";
+import Link from "next/link";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -18,6 +19,7 @@ import {
   CHANNEL_COLORS,
   buildCalendarModel,
   buildChannelColors,
+  channelHref,
   publishedTimestampRange,
   type CalendarEvent,
   type ChannelRow,
@@ -170,18 +172,29 @@ export default function SchedulePage() {
           <div className={styles.heroCopy}>
             <span className={styles.eyebrow}>Schedule</span>
             <h1>{scopeName}</h1>
-            <div className={styles.nextRelease} data-empty={!nextEvent || undefined}>
-              <span className={styles.nextReleaseSignal} aria-hidden="true"><i /></span>
-              <span>
-                <small>{loading ? "Loading" : nextEvent ? "Next release" : "Clear"}</small>
-                <strong>{loading ? "Loading schedule…" : nextEvent?.title ?? "No planned release"}</strong>
-                <em>
-                  {nextEvent
-                    ? `${nextEvent.channel} · ${nextEvent.pinned ? "pinned" : "cadence projected"}`
-                    : "Create a video from a channel."}
-                </em>
-              </span>
-            </div>
+            {nextEvent ? (
+              <Link
+                className={styles.nextRelease}
+                href={channelHref(nextEvent.slug, "week-ahead", nextEvent.id)}
+                aria-label={`Open ${nextEvent.title} production details`}
+              >
+                <span className={styles.nextReleaseSignal} aria-hidden="true"><i /></span>
+                <span>
+                  <small>Next release · open details</small>
+                  <strong>{nextEvent.title}</strong>
+                  <em>{`${nextEvent.channel} · ${nextEvent.pinned ? "pinned" : "cadence projected"}`}</em>
+                </span>
+              </Link>
+            ) : (
+              <div className={styles.nextRelease} data-empty>
+                <span className={styles.nextReleaseSignal} aria-hidden="true"><i /></span>
+                <span>
+                  <small>{loading ? "Loading" : "Clear"}</small>
+                  <strong>{loading ? "Loading schedule…" : "No planned release"}</strong>
+                  <em>Create a video from a channel.</em>
+                </span>
+              </div>
+            )}
           </div>
 
           <div className={styles.rhythmPanel} aria-label="Fourteen day release rhythm">

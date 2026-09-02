@@ -136,6 +136,11 @@ assert.match(wizard, /defaultFamilyReadiness\.blockers\[0\]/);
 // build receipts use explicit progressive disclosure without inventing media.
 assert.match(wizard, /<h1>Create a channel<\/h1>/);
 assert.match(wizard, /function NicheGlyph/);
+assert.match(wizard, /const FEATURED_NICHE_KEYS = new Set\(/);
+assert.match(wizard, /const \[showAllNiches, setShowAllNiches\] = useState\(false\)/);
+assert.match(wizard, /const visibleNiches = showAllNiches \|\| selectedNicheOutsideFeatured/);
+assert.match(wizard, /More territories/);
+assert.match(wizard, /id="channel-territory-grid"/);
 assert.match(wizard, /<details className=\{styles\.routeCatalog\} open=\{!fam\}>/);
 assert.match(wizard, /Pipeline style controls/);
 assert.match(wizard, /showPipelineStyle && <div className=\{styles\.room\}><ModuleConfigSection/);
@@ -148,6 +153,7 @@ assert.match(wizard, /href="\/api\/operations\/authorize"[\s\S]*Verify owner to 
 assert.match(wizard, /Choose the exact Qwen CustomVoice speaker before starting channel setup/);
 assert.match(wizard, /f\.key !== "qwenSpeaker" \|\| paramOverrides\[m\.block\]\?\.\["ttsProvider"\] === "qwen3"/);
 assert.match(wizardCss, /\.nicheGrid/);
+assert.match(wizardCss, /\.showMoreNiches/);
 assert.match(wizardCss, /\.buildWorkspace/);
 assert.match(wizardCss, /@media \(max-width: 680px\)/);
 assert.match(wizardCss, /prefers-reduced-motion/);
@@ -183,6 +189,10 @@ assert.doesNotMatch(wizard, /window\.location.*reviewHrefs|router\.push\(.*revie
 
 assert.doesNotMatch(sidebar, /health-dot-ready/);
 assert.doesNotMatch(sidebar, /Live production workspace/);
+assert.doesNotMatch(sidebar, /Specialist tools, tucked away/);
+assert.match(sidebar, />Workspace<\/span>/);
+assert.match(sidebar, /<strong>Tools<\/strong>/);
+assert.match(sidebar, /<strong>Draft mode<\/strong>/);
 // The rail keeps production primary and preserves packaging research in the
 // disclosed specialist toolbox. Channel cards still own their guarded actions.
 assert.match(sidebar, /href:\s*["']\/runs["']/);
@@ -204,7 +214,10 @@ assert.match(detail, /className="channel-check-control"[\s\S]*Made for kids/);
 assert.match(detail, /className="channel-check-control"[\s\S]*Scheduler enabled/);
 assert.match(globalCss, /\.channel-check-control[\s\S]*min-height: 44px/);
 assert.match(auditScript, /const CHANNEL_DETAIL_TABS = \[[\s\S]*"week-ahead"[\s\S]*"library"[\s\S]*"analytics"[\s\S]*"seo"[\s\S]*"identity"[\s\S]*"pipeline"[\s\S]*"settings"/);
-assert.match(auditScript, /studio-ui-seventh-pass-audit\/v2/);
+assert.match(auditScript, /studio-ui-seventh-pass-audit\/v3/);
+assert.match(auditScript, /const blockingFixedIframes = record\.inventory\?\.iframes\?\.filter/);
+assert.match(auditScript, /frame\.position === "fixed"/);
+assert.match(auditScript, /record\.blockingFixedIframes\.length/);
 assert.match(auditScript, /CHANNEL_DETAIL_TABS\.map\(\(tab\) => `\$\{channelRoute\}\?tab=\$\{tab\}`\)/);
 assert.match(auditScript, /input\[type="checkbox"\][\s\S]*closest\("label"\)/);
 // A connector with partial scopes is not a ready destination just because it

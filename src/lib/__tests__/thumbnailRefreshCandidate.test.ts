@@ -4,6 +4,7 @@ import {
   THUMBNAIL_REFRESH_DISPATCH_VERSION,
   THUMBNAIL_REFRESH_MAXIMUM_COST_USD,
   assertThumbnailRefreshCandidateDispatch,
+  thumbnailErnieBatchImportApprovalSubject,
   thumbnailRefreshCandidateApprovalSubject,
   thumbnailRefreshDispatchKey,
   thumbnailRefreshTriggerRequest,
@@ -62,5 +63,31 @@ assert.throws(
   () => thumbnailRefreshCandidateApprovalSubject({ ...identity, maximumCostUsd: 0.41, dispatchKey }),
   /cost authority/,
 );
+
+const ernieSubject = thumbnailErnieBatchImportApprovalSubject({
+  ownerId: identity.ownerId,
+  channelId: identity.channelId,
+  sourceRunId: identity.sourceRunId,
+  candidateRunId: identity.candidateRunId,
+  replayFingerprint: identity.replayFingerprint,
+  r2Key: "owner/owner-thumb/channel/history/runs/candidate-thumb-run/thumbnail.jpg",
+  artifactSha256: "b".repeat(64),
+  providerRequestSha256: "c".repeat(64),
+  providerResponseSha256: "d".repeat(64),
+});
+const ernieApproval = issueStudioActionApproval({
+  action: "thumbnail-ernie-batch-import",
+  ownerId: identity.ownerId,
+  subject: ernieSubject,
+  actor: `authenticated-operator:${identity.ownerId}`,
+  evidence: "owner requested import of this QA-passed native ERNIE thumbnail candidate",
+  now: 1_000,
+});
+assert.equal(verifyStudioActionApproval(ernieApproval, {
+  action: "thumbnail-ernie-batch-import",
+  ownerId: identity.ownerId,
+  subject: ernieSubject,
+  now: 1_100,
+}), true);
 
 console.log("thumbnail refresh candidate contract: PASS");

@@ -22,7 +22,10 @@ export type ThumbnailRefreshInventoryItem = Readonly<{
   refreshAction: "no_refresh_action" | "owner_review_required";
   evidenceReason: string;
   releaseEvidenceStatus: string;
-  thumbnailReplayStatus: "ready_for_thumbnail_only" | "requires_private_successor";
+  thumbnailReplayStatus:
+    | "ready_for_thumbnail_only"
+    | "ready_for_private_successor"
+    | "private_successor_unavailable";
   thumbnailReplayReason: string;
   legacyCleanupAction: "keep" | "retire";
   legacyCleanupReason: string;
@@ -37,6 +40,11 @@ export type ThumbnailRefreshInventoryItem = Readonly<{
   candidateDispatchLastError?: string;
   candidateCostTotal?: number;
   candidateThumbnailKey?: string | null;
+  replacementId?: string;
+  replacementStatus?: "awaiting_approval" | "pending" | "queued" | "applied" | "blocked";
+  replacementError?: string;
+  replacementReceiptFingerprint?: string;
+  replacementAppliedAt?: number;
 }>;
 
 // This is deliberately a narrow bridge until an authorized Convex codegen
@@ -45,6 +53,7 @@ const thumbnailRefreshApi = (api as unknown as {
   readonly thumbnailRefresh: {
     readonly listInventory: never;
     readonly createCandidateShell: never;
+    readonly importErnieBatchCandidate: never;
     readonly claimCandidateApproval: never;
     readonly getCandidateDispatch: never;
     readonly markCandidateDispatchQueued: never;

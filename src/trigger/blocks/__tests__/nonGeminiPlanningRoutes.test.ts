@@ -38,6 +38,10 @@ assert.match(weekAhead, /hasAnthropicKey/, "week-ahead planning must use the per
 assert.match(narrated, /claudeJson/, "narrated quality enhancements must use the permitted text planner");
 assert.match(compliance, /claudeJson/, "compliance review must use the permitted text planner");
 assert.match(metacraft, /claudeJson/, "metadata package must use the permitted text planner");
-assert.match(metadata, /hasNanoBanana\(\)/, "the sealed thumbnail capability remains explicit");
+assert.match(
+  metadata,
+  /hasFalNanoBananaProThumbnail\(\)/,
+  "the sealed native-typography thumbnail capability remains explicit",
+);
 
 console.log("Non-Gemini planning route tests passed");

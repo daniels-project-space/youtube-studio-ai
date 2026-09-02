@@ -112,6 +112,8 @@ async function pageInventory(page) {
           y: Math.round(box.y),
           width: Math.round(box.width),
           height: Math.round(box.height),
+          position: getComputedStyle(element).position,
+          zIndex: getComputedStyle(element).zIndex,
           html: element.outerHTML.slice(0, 800),
         };
       }),
@@ -261,10 +263,16 @@ const auditedRecords = records.map((record) => {
         && (control.width < 44 || control.height < 44),
       ) ?? []
     : [];
-  return { ...record, smallTouchTargets };
+  // A fixed iframe sits above the operator surface. The Studio has no
+  // sanctioned floating-frame affordance, so treat one as a release-blocking
+  // visual regression instead of letting a geometry-only audit miss it.
+  const blockingFixedIframes = record.inventory?.iframes?.filter((frame) =>
+    frame.position === "fixed" && frame.width > 0 && frame.height > 0,
+  ) ?? [];
+  return { ...record, smallTouchTargets, blockingFixedIframes };
 });
 const report = {
-  contract: "studio-ui-seventh-pass-audit/v2",
+  contract: "studio-ui-seventh-pass-audit/v3",
   baseUrl,
   capturedAt: new Date().toISOString(),
   routes: auditedRecords,
@@ -276,7 +284,8 @@ const failures = auditedRecords.filter((record) =>
     || record.inventory?.overflow?.horizontal
     || record.pageErrors?.length
     || record.consoleErrors?.length
-    || record.smallTouchTargets.length,
+    || record.smallTouchTargets.length
+    || record.blockingFixedIframes.length,
 );
 console.log(`Captured ${records.length} route/viewport states in ${outputDir}`);
 console.log(`Dynamic routes: ${dynamicRoutes.join(", ") || "none visible"}`);
@@ -291,6 +300,9 @@ if (failures.length) {
       ...(failure.consoleErrors ?? []),
       ...(failure.smallTouchTargets ?? []).map((control) =>
         `${control.tag} ${control.width}x${control.height} ${control.label}`,
+      ),
+      ...(failure.blockingFixedIframes ?? []).map((frame) =>
+        `fixed iframe ${frame.width}x${frame.height} ${frame.title || frame.src}`,
       ),
     ].filter(Boolean);
     console.log(`${failure.viewport} ${failure.route}: ${reasons.join("; ")}`);

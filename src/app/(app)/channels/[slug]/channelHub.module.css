@@ -517,14 +517,20 @@
 .youtubeChecklist { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 0; border: 1px solid var(--color-border); border-radius: 9px; background: rgba(243,240,232,0.012); }
 .youtubeChecklist > header { display: flex; grid-column: 1 / -1; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.6rem 0.72rem; border-bottom: 1px solid var(--color-border); }
 .youtubeChecklist > header span, .youtubeChecklist > header strong { color: var(--color-faint); font: 700 0.49rem/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
-.youtubeStep { display: grid; grid-template-columns: 1.2rem minmax(0,1fr); align-content: start; gap: 0.48rem; min-width: 0; min-height: 128px; padding: 0.75rem; border-right: 1px solid var(--color-border); }
+.youtubeStep { min-width: 0; border-right: 1px solid var(--color-border); }
 .youtubeStep:last-child { border-right: 0; }
-.youtubeStep > span { display: grid; width: 18px; height: 18px; place-items: center; border: 1px solid var(--color-border); border-radius: 50%; color: var(--color-faint); font: 700 0.47rem/1 var(--font-mono); }
-.youtubeStep[data-state="complete"] > span { border-color: color-mix(in srgb,var(--color-ok) 40%,var(--color-border)); color: var(--color-ok); }
-.youtubeStep[data-state="action"] > span, .youtubeStep[data-state="working"] > span { border-color: color-mix(in srgb,var(--color-amber) 40%,var(--color-border)); color: var(--color-amber); }
-.youtubeStep > div { display: grid; align-content: start; gap: 0.3rem; }
-.youtubeStep strong { font-size: 0.69rem; font-weight: 650; }
+.youtubeStep summary { display: grid; grid-template-columns: 1.2rem minmax(0,1fr) auto; align-items: center; gap: 0.48rem; min-height: 58px; padding: 0.68rem 0.75rem; cursor: pointer; list-style: none; }
+.youtubeStep summary::-webkit-details-marker { display: none; }
+.youtubeStep summary > span { display: grid; width: 18px; height: 18px; place-items: center; border: 1px solid var(--color-border); border-radius: 50%; color: var(--color-faint); font: 700 0.47rem/1 var(--font-mono); }
+.youtubeStep[data-state="complete"] summary > span { border-color: color-mix(in srgb,var(--color-ok) 40%,var(--color-border)); color: var(--color-ok); }
+.youtubeStep[data-state="action"] summary > span, .youtubeStep[data-state="working"] summary > span { border-color: color-mix(in srgb,var(--color-amber) 40%,var(--color-border)); color: var(--color-amber); }
+.youtubeStep strong { overflow: hidden; font-size: 0.69rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.youtubeStep small { color: var(--color-faint); font: 650 0.47rem/1 var(--font-mono); letter-spacing: 0.07em; text-transform: uppercase; }
 .youtubeStep p { margin: 0; color: var(--color-faint); font-size: 0.62rem; line-height: 1.5; }
+.youtubeStep > p { padding: 0 0.75rem 0.75rem 2.43rem; }
+.youtubeNote { width: fit-content; color: var(--color-faint); font-size: 0.68rem; }
+.youtubeNote summary { cursor: pointer; color: var(--color-muted); font: 650 0.56rem/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; }
+.youtubeNote p { max-width: 720px; margin: 0.55rem 0 0; line-height: 1.5; }
 .youtubeActions { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem; }
 
 .overviewMetrics {
@@ -766,9 +772,13 @@
   .workspaceSignals { grid-template-columns: 1fr; }
   .workspaceSignal { border-right: 0; border-bottom: 1px solid var(--color-border); }
   .workspaceSignal:last-child { border-bottom: 0; }
-  .settingsMap { grid-template-columns: 1fr; }
-  .settingsMap a { border-right: 0; border-bottom: 1px solid var(--color-border); }
-  .settingsMap a:last-child { border-bottom: 0; }
+  .settingsMap { grid-template-columns: none; grid-auto-columns: minmax(138px,72%); grid-auto-flow: column; overflow-x: auto; scroll-snap-type: x proximity; scrollbar-width: none; }
+  .settingsMap::-webkit-scrollbar { display: none; }
+  .settingsMap a { border-right: 1px solid var(--color-border); border-bottom: 0; scroll-snap-align: start; }
+  .settingsMap a:nth-child(2) { border-right: 1px solid var(--color-border); }
+  .settingsMap a:nth-child(-n + 2) { border-bottom: 0; }
+  .settingsMap a:last-child { border-right: 0; }
+  .settingsMap small { display: none; }
   .weekRow { grid-template-columns: 1.25rem 78px minmax(0,1fr) 1.45rem; padding-right: 0.36rem; }
   .weekDetailGrid { grid-template-columns: 1fr 1fr; }
   .weekDetailGrid > div { border-bottom: 1px solid var(--color-border); }

@@ -1,21 +1,33 @@
 import { v } from "convex/values";
 
-import type { Id } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import {
   assessThumbnailRefreshEvidence,
   type ThumbnailRefreshAsset,
 } from "../src/lib/thumbnailRefreshInventory";
+import { thumbnailGatePassed, type ThumbnailGateVerdict } from "../src/engine/qualityPolicy";
 import { assessThumbnailRefreshReplay } from "../src/lib/thumbnailRefreshReplay";
 import { normalizeReleaseEvidenceStatus } from "../src/lib/releaseEvidenceStatus";
 import { RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
 import {
   THUMBNAIL_REFRESH_DISPATCH_VERSION,
   THUMBNAIL_REFRESH_MAXIMUM_COST_USD,
+  thumbnailErnieBatchImportApprovalSubject,
   thumbnailRefreshDispatchKey,
 } from "../src/lib/thumbnailRefreshCandidate";
+import {
+  studioActionApprovalFingerprint,
+  verifyStudioActionApproval,
+  type StudioActionApprovalReceipt,
+} from "../src/lib/studioActionApproval";
 import { assessLegacyVideoCleanup } from "../src/lib/legacyVideoCleanup";
+import {
+  assessThumbnailRefreshSuccessor,
+  type ThumbnailRefreshSuccessorMaterial,
+} from "../src/lib/thumbnailRefreshSuccessor";
+import type { ThumbnailRefreshReplayMaterial } from "../src/lib/thumbnailRefreshReplay";
 
 const MAX_DISPATCH_ATTEMPTS = 3;
 type DbCtx = Pick<QueryCtx | MutationCtx, "db">;
@@ -57,6 +69,124 @@ async function replayForRun(
   };
 }
 
+type RefreshMaterial = ThumbnailRefreshReplayMaterial | ThumbnailRefreshSuccessorMaterial;
+
+function assertThumbnailRefreshKeepSource(
+  run: { status: string; youtubeVideoId?: string; releaseEvidenceStatus?: string },
+  channel: Doc<"channels">,
+  title: string,
+) {
+  const cleanup = assessLegacyVideoCleanup({
+    youtubeVideoId: run.youtubeVideoId,
+    runStatus: run.status,
+    title,
+    channelFamily:
+      channel.family ??
+      channel.contentLane?.family ??
+      channel.identity.programBrief?.family,
+    releaseEvidenceStatus: run.releaseEvidenceStatus,
+  });
+  if (cleanup.action !== "keep") {
+    throw new Error("Retired legacy videos cannot purchase replacement thumbnails");
+  }
+}
+
+function stageOutputText(
+  stages: readonly { block: string; outputs?: unknown }[],
+  blocks: readonly string[],
+  key: string,
+): string | undefined {
+  const values = stages
+    .filter((stage) => blocks.includes(stage.block))
+    .map((stage) => text(record(stage.outputs)?.[key]))
+    .filter((value): value is string => Boolean(value));
+  return values.length === 1 ? values[0] : undefined;
+}
+
+async function refreshMaterialForRun(
+  ctx: DbCtx,
+  ownerId: string,
+  run: {
+    _id: Id<"runs">;
+    channelId: Id<"channels">;
+    pipelineInvocationSnapshot?: unknown;
+    pipelineInvocationSha256?: string;
+  },
+  prefetched?: {
+    channel?: Doc<"channels"> | null;
+    assets?: Doc<"assets">[];
+  },
+): Promise<{
+  status: "ready_for_thumbnail_only" | "ready_for_private_successor" | "private_successor_unavailable";
+  reason: string;
+  material?: RefreshMaterial;
+  stages: Array<{ block: string; outputs?: unknown }>;
+  title: string;
+}> {
+  const [{ stages, replay }, channel, assets] = await Promise.all([
+    replayForRun(ctx, ownerId, run),
+    prefetched?.channel !== undefined ? prefetched.channel : ctx.db.get(run.channelId),
+    prefetched?.assets !== undefined
+      ? prefetched.assets
+      : ctx.db.query("assets").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
+  ]);
+  const metadataTitle = stageOutputText(stages, ["metadata", "quiz_metadata"], "title");
+  const thumbnail = assets.find((asset) => asset.kind === "thumbnail");
+  const thumbnailMeta = record(thumbnail?.meta);
+  const title = metadataTitle ??
+    text(thumbnailMeta?.thumbnailTitle) ??
+    text(thumbnailMeta?.title) ??
+    channel?.name ??
+    "Untitled video";
+  if (replay.status === "ready_for_thumbnail_only") {
+    return {
+      status: replay.status,
+      reason: replay.reason,
+      material: replay.material,
+      stages,
+      title,
+    };
+  }
+  if (!channel || channel.ownerId !== ownerId) {
+    return {
+      status: "private_successor_unavailable",
+      reason: "The retained video's channel is unavailable.",
+      stages,
+      title,
+    };
+  }
+  const video = assets.find((asset) => asset.kind === "video");
+  const successor = assessThumbnailRefreshSuccessor({
+    ownerId,
+    channelId: String(channel._id),
+    runId: String(run._id),
+    title,
+    topic: stageOutputText(stages, ["topic_select", "quiz_topic_plan"], "topic"),
+    sourceVideoKey: video?.r2Key,
+    channel: {
+      ownerId: channel.ownerId,
+      channelId: String(channel._id),
+      name: channel.name,
+      status: channel.status,
+      family: channel.family,
+      contentLane: channel.contentLane,
+      pipeline: channel.pipeline,
+      styleDNA: channel.styleDNA,
+      thumbnailPlaybook: channel.thumbnailPlaybook,
+      identity: channel.identity,
+    },
+  });
+  return {
+    status: successor.status,
+    reason: successor.reason,
+    ...(successor.status === "ready_for_private_successor"
+      ? { material: successor.material }
+      : {}),
+    stages,
+    title,
+  };
+}
+
 async function assertFinishedSource(
   ctx: DbCtx,
   run: { _id: Id<"runs">; status: string; youtubeVideoId?: string },
@@ -76,6 +206,23 @@ function assertNow(now: number) {
   if (!Number.isSafeInteger(now) || now < 0) {
     throw new Error("thumbnail refresh timestamp is invalid");
   }
+}
+
+function validR2Key(value: string) {
+  return /^[A-Za-z0-9][A-Za-z0-9._/-]{0,767}$/.test(value) && !value.includes("..");
+}
+
+function validErnieThumbnailQa(value: unknown): value is ThumbnailGateVerdict {
+  if (!record(value)) return false;
+  const verdict = value as Partial<ThumbnailGateVerdict>;
+  return typeof verdict.textOk === "boolean" &&
+    typeof verdict.faceClear === "boolean" &&
+    Number.isFinite(verdict.punch) &&
+    Number.isFinite(verdict.styleMatch) &&
+    Number.isFinite(verdict.storyMatch) &&
+    typeof verdict.uiClean === "boolean" &&
+    typeof verdict.reason === "string" &&
+    thumbnailGatePassed(verdict as ThumbnailGateVerdict);
 }
 
 /**
@@ -105,23 +252,13 @@ export const listInventory = query({
           .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
           .order("desc");
 
-    const channels = new Map<string, { name: string; slug: string; family?: string } | null>();
+    const channels = new Map<string, Doc<"channels"> | null>();
     const channelFor = async (channelId: Id<"channels">) => {
       const cacheKey = String(channelId);
       if (channels.has(cacheKey)) return channels.get(cacheKey)!;
       const channel = await ctx.db.get(channelId);
-      const value = channel
-        ? {
-            name: channel.name,
-            slug: channel.slug,
-            family:
-              channel.family ??
-              channel.contentLane?.family ??
-              channel.identity.programBrief?.family,
-          }
-        : null;
-      channels.set(cacheKey, value);
-      return value;
+      channels.set(cacheKey, channel);
+      return channel;
     };
 
     const rows: Array<Record<string, unknown>> = [];
@@ -165,27 +302,20 @@ export const listInventory = query({
           : null,
       );
 
-      const [channel, replayInput] = await Promise.all([
-        channelFor(run.channelId),
-        replayForRun(ctx, args.ownerId, run),
-      ]);
-      const stages = replayInput.stages;
-      const metadataStage = stages.find((stage) => stage.block === "metadata" || stage.block === "quiz_metadata");
-      const metadata = record(metadataStage?.outputs);
-      const thumbnailMeta = record(thumbnail?.meta);
-      const title =
-        text(metadata?.title) ??
-        text(thumbnailMeta?.thumbnailTitle) ??
-        text(thumbnailMeta?.title) ??
-        channel?.name ??
-        "Untitled video";
-
-      const replay = replayInput.replay;
+      const channel = await channelFor(run.channelId);
+      const refreshMaterial = await refreshMaterialForRun(ctx, args.ownerId, run, {
+        channel,
+        assets,
+      });
+      const title = refreshMaterial.title;
       const cleanup = assessLegacyVideoCleanup({
         youtubeVideoId: run.youtubeVideoId,
         runStatus: run.status,
         title,
-        channelFamily: channel?.family,
+        channelFamily:
+          channel?.family ??
+          channel?.contentLane?.family ??
+          channel?.identity.programBrief?.family,
         releaseEvidenceStatus: run.releaseEvidenceStatus,
       });
       const retirement = cleanup.action === "retire" && run.youtubeVideoId
@@ -204,6 +334,14 @@ export const listInventory = query({
             .collect()
         : [];
       const candidateThumbnail = candidateAssets.find((asset) => asset.kind === "thumbnail");
+      const replacement = candidate
+        ? await ctx.db
+            .query("youtubeThumbnailReplacements")
+            .withIndex("by_owner_candidate", (q) => q
+              .eq("ownerId", args.ownerId)
+              .eq("candidateRunId", candidate._id as Id<"runs">))
+            .unique()
+        : null;
 
       rows.push({
         runId: run._id,
@@ -224,8 +362,8 @@ export const listInventory = query({
         // A legacy thumbnail may be regenerated only from the same frozen
         // package/route/style inputs. Never use the current channel config to
         // make a deceptive "refresh" for a historic video.
-        thumbnailReplayStatus: replay.status,
-        thumbnailReplayReason: replay.reason,
+        thumbnailReplayStatus: refreshMaterial.status,
+        thumbnailReplayReason: refreshMaterial.reason,
         legacyCleanupAction: cleanup.action,
         legacyCleanupReason: cleanup.reason,
         legacyCleanupExplanation: cleanup.explanation,
@@ -242,6 +380,13 @@ export const listInventory = query({
           candidateDispatchLastError: candidate.thumbnailRefreshDispatchLastError,
           candidateCostTotal: candidate.costTotal,
           candidateThumbnailKey: candidateThumbnail?.r2Key ?? null,
+        } : {}),
+        ...(replacement ? {
+          replacementId: String(replacement._id),
+          replacementStatus: replacement.status,
+          replacementError: replacement.lastError,
+          replacementReceiptFingerprint: replacement.applicationReceiptFingerprint,
+          replacementAppliedAt: replacement.appliedAt,
         } : {}),
       });
     }
@@ -271,11 +416,14 @@ export const createCandidateShell = mutation({
       throw new Error("thumbnail refresh source is not owned by this operator");
     }
     await assertFinishedSource(ctx, source);
-    const { replay } = await replayForRun(ctx, args.ownerId, source);
-    if (replay.status !== "ready_for_thumbnail_only") {
-      throw new Error(replay.reason);
+    const refreshMaterial = await refreshMaterialForRun(ctx, args.ownerId, source);
+    if (!refreshMaterial.material) throw new Error(refreshMaterial.reason);
+    const sourceChannel = await ctx.db.get(source.channelId);
+    if (!sourceChannel || sourceChannel.ownerId !== args.ownerId) {
+      throw new Error("thumbnail refresh channel is unavailable");
     }
-    const replayFingerprint = replay.material.replayFingerprint;
+    assertThumbnailRefreshKeepSource(source, sourceChannel, refreshMaterial.title);
+    const replayFingerprint = refreshMaterial.material.replayFingerprint;
     const dispatchKey = thumbnailRefreshDispatchKey({
       ownerId: args.ownerId,
       sourceRunId: String(source._id),
@@ -329,6 +477,157 @@ export const createCandidateShell = mutation({
       candidateStatus: "queued",
       dispatchState: "awaiting_approval",
     };
+  },
+});
+
+/**
+ * Admit one ERNIE-Novita batch result as a private thumbnail candidate.
+ *
+ * This is intentionally not a shortcut around the refresh or YouTube flows:
+ * the source remains unchanged, the final artifact must carry exact ERNIE and
+ * typography provenance, QA must pass, and an immutable signed owner receipt
+ * names this one candidate/artifact.  Applying it to YouTube remains the
+ * separate `youtubeThumbnailReplacements` approval path.
+ */
+export const importErnieBatchCandidate = mutation({
+  args: {
+    ownerId: v.string(),
+    sourceRunId: v.id("runs"),
+    candidateRunId: v.id("runs"),
+    r2Key: v.string(),
+    evidence: v.any(),
+    qa: v.any(),
+    batchReceiptKey: v.string(),
+    batchResultKey: v.string(),
+    costTotal: v.number(),
+    approval: v.any(),
+    approvalFingerprint: v.string(),
+    now: v.number(),
+  },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "ERNIE thumbnail batch candidate import");
+    assertNow(args.now);
+    if (
+      !validR2Key(args.r2Key) ||
+      !validR2Key(args.batchReceiptKey) ||
+      !validR2Key(args.batchResultKey) ||
+      !Number.isFinite(args.costTotal) || args.costTotal < 0 ||
+      args.costTotal > THUMBNAIL_REFRESH_MAXIMUM_COST_USD ||
+      !/^[a-f0-9]{64}$/.test(args.approvalFingerprint) ||
+      !validErnieThumbnailQa(args.qa)
+    ) throw new Error("ERNIE thumbnail batch import payload is invalid or did not pass production QA");
+    const [source, candidate] = await Promise.all([
+      ctx.db.get(args.sourceRunId),
+      ctx.db.get(args.candidateRunId),
+    ]);
+    if (
+      !source || source.ownerId !== args.ownerId ||
+      !candidate || candidate.ownerId !== args.ownerId ||
+      candidate.channelId !== source.channelId ||
+      candidate.thumbnailRefreshSourceRunId !== source._id ||
+      candidate.status !== "queued" ||
+      candidate.thumbnailRefreshDispatchState !== "awaiting_approval" ||
+      !candidate.thumbnailRefreshReplayFingerprint
+    ) throw new Error("ERNIE thumbnail batch candidate/source binding is invalid or no longer importable");
+    const channel = await ctx.db.get(candidate.channelId);
+    if (!channel || channel.ownerId !== args.ownerId) {
+      throw new Error("ERNIE thumbnail batch candidate channel is unavailable");
+    }
+    const refreshMaterial = await refreshMaterialForRun(ctx, args.ownerId, source, { channel });
+    if (
+      !refreshMaterial.material ||
+      refreshMaterial.material.replayFingerprint !== candidate.thumbnailRefreshReplayFingerprint
+    ) throw new Error("ERNIE thumbnail batch source material changed after candidate allocation");
+    assertThumbnailRefreshKeepSource(source, channel, refreshMaterial.title);
+    // ERNIE owns the complete native thumbnail, including typography. Keep the
+    // verified source PNG intact: this route never sends it through a local
+    // title compositor or visual reinterpretation step.
+    const expectedKey = `owner/${args.ownerId}/channel/${channel.slug}/runs/${candidate._id}/thumbnail.png`;
+    if (args.r2Key !== expectedKey) {
+      throw new Error("ERNIE thumbnail batch artifact key is not bound to this candidate run");
+    }
+    const assessment = assessThumbnailRefreshEvidence({
+      ownerId: args.ownerId,
+      channelId: String(channel._id),
+      runId: String(candidate._id),
+      kind: "thumbnail",
+      r2Key: args.r2Key,
+      meta: { thumbnailCurrentCandidateEvidence: args.evidence },
+    } satisfies ThumbnailRefreshAsset);
+    const proof = record(args.evidence);
+    const artifactSha256 = typeof proof?.artifactSha256 === "string" ? proof.artifactSha256 : "";
+    const providerRequestSha256 = typeof proof?.providerRequestSha256 === "string"
+      ? proof.providerRequestSha256
+      : "";
+    const providerResponseSha256 = typeof proof?.providerResponseSha256 === "string"
+      ? proof.providerResponseSha256
+      : "";
+    if (
+      assessment.status !== "current_golden_candidate" ||
+      proof?.providerRoute !== "ernie-image-novita-4090" ||
+      !/^[a-f0-9]{64}$/.test(artifactSha256) ||
+      !/^[a-f0-9]{64}$/.test(providerRequestSha256) ||
+      !/^[a-f0-9]{64}$/.test(providerResponseSha256)
+    ) throw new Error("ERNIE thumbnail batch evidence is not an admitted native ERNIE candidate");
+    const approval = args.approval as StudioActionApprovalReceipt;
+    const subject = thumbnailErnieBatchImportApprovalSubject({
+      ownerId: args.ownerId,
+      channelId: String(channel._id),
+      sourceRunId: String(source._id),
+      candidateRunId: String(candidate._id),
+      replayFingerprint: candidate.thumbnailRefreshReplayFingerprint,
+      r2Key: args.r2Key,
+      artifactSha256,
+      providerRequestSha256,
+      providerResponseSha256,
+    });
+    if (
+      studioActionApprovalFingerprint(approval) !== args.approvalFingerprint ||
+      !verifyStudioActionApproval(approval, {
+        action: "thumbnail-ernie-batch-import",
+        ownerId: args.ownerId,
+        subject,
+        persistedReceiptFingerprint: args.approvalFingerprint,
+      })
+    ) throw new Error("ERNIE thumbnail batch import owner approval is invalid or changed");
+    const existing = (await ctx.db
+      .query("assets")
+      .withIndex("by_run", (q) => q.eq("runId", candidate._id))
+      .collect())
+      .filter((asset) => asset.kind === "thumbnail");
+    if (existing.length) throw new Error("ERNIE thumbnail batch candidate already has a thumbnail artifact");
+    const assetId = await ctx.db.insert("assets", {
+      ownerId: args.ownerId,
+      channelId: channel._id,
+      runId: candidate._id,
+      kind: "thumbnail",
+      r2Key: args.r2Key,
+      meta: {
+        strategy: "ernie_novita_batch",
+        contentType: "image/png",
+        thumbnailTitle: refreshMaterial.title,
+        providerRoute: "ernie-image-novita-4090",
+        providerRequestSha256,
+        providerResponseSha256,
+        batchReceiptKey: args.batchReceiptKey,
+        batchResultKey: args.batchResultKey,
+        qa: args.qa,
+        thumbnailCurrentCandidateEvidence: args.evidence,
+      },
+    });
+    await ctx.db.patch(candidate._id, {
+      status: "ok",
+      finishedAt: args.now,
+      costTotal: args.costTotal,
+      error: undefined,
+      leaseExpiresAt: undefined,
+      thumbnailRefreshDispatchState: "consumed",
+      thumbnailRefreshDispatchUpdatedAt: args.now,
+      thumbnailRefreshDispatchQueueDeadlineAt: undefined,
+      thumbnailRefreshDispatchLastError: undefined,
+    });
+    return { assetId, candidateRunId: candidate._id, status: "ok" };
   },
 });
 
@@ -587,17 +886,18 @@ export const getCandidateExecution = query({
       throw new Error("thumbnail refresh source/candidate binding is invalid");
     }
     await assertFinishedSource(ctx, source);
-    const { replay } = await replayForRun(ctx, args.ownerId, source);
-    if (
-      replay.status !== "ready_for_thumbnail_only" ||
-      replay.material.replayFingerprint !== candidate.thumbnailRefreshReplayFingerprint
-    ) {
-      throw new Error("thumbnail refresh source replay is no longer byte-identical to the candidate claim");
-    }
     const channel = await ctx.db.get(candidate.channelId);
     if (!channel || channel.ownerId !== args.ownerId) {
       throw new Error("thumbnail refresh channel is unavailable");
     }
-    return { candidate, source, channelSlug: channel.slug, material: replay.material };
+    const refreshMaterial = await refreshMaterialForRun(ctx, args.ownerId, source, { channel });
+    if (
+      !refreshMaterial.material ||
+      refreshMaterial.material.replayFingerprint !== candidate.thumbnailRefreshReplayFingerprint
+    ) {
+      throw new Error("thumbnail refresh source or snapshotted successor changed from the candidate claim");
+    }
+    assertThumbnailRefreshKeepSource(source, channel, refreshMaterial.title);
+    return { candidate, source, channelSlug: channel.slug, material: refreshMaterial.material };
   },
 });

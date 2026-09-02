@@ -8,10 +8,10 @@
  *   metadata_optimized  → base metadata + title optimised against the databank
  *                         + competitor titles + power words, plus an
  *                         overlap-weighted view estimate. Replaces `metadata`.
- *   thumbnail_gen       → one Style-DNA/playbook route: text-free flash base →
- *                         deterministic local typography → one production QA
- *                         alarm. Every execution is pinned to Nano Banana;
- *                         failures never swap renderers or emit a card fallback.
+ *   thumbnail_gen       → one Style-DNA/playbook route: non-Lo-Fi uses a
+ *                         native Fal Nano Banana Pro design; Lo-Fi alone uses its
+ *                         exact rendered 4K scene and asks Nano Banana for its
+ *                         minimal type. The production QA alarm gates both.
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";
@@ -25,9 +25,19 @@ import {
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { makeRunTempDir, readBytes } from "@/lib/files";
-import { createThumbnailCurrentCandidateEvidence } from "@/lib/thumbnailRefreshInventory";
-import { putObject } from "@/lib/storage";
+import { fileExists, makeRunTempDir, readBytes, writeBytes } from "@/lib/files";
+import {
+  createLofiThumbnailCurrentCandidateEvidence,
+  createThumbnailCurrentCandidateEvidence,
+} from "@/lib/thumbnailRefreshInventory";
+import { getObjectBytes, putObject } from "@/lib/storage";
+import {
+  LOFI_RENDER_THUMBNAIL_CONTRACT,
+  lofiNanoBananaEditPrompt,
+  measureLofiThumbnailBackgroundSsim,
+  measureLofiTypographyMatteUniformity,
+  prepareLofiThumbnailReference,
+} from "@/lib/lofiThumbnail";
 import {
   beginThumbnailPaidWork,
   openThumbnailCheckpoint,
@@ -37,12 +47,17 @@ import {
   thumbnailRequestHash,
   type ThumbnailNanoBananaEvidence,
 } from "@/lib/thumbnailCheckpoint";
+import { FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaProThumbnailContract";
 import {
-  generateNanoBananaImageWithReceipt,
-  hasNanoBanana,
-  NANO_BANANA_THUMBNAIL_PROFILE,
-} from "@/lib/banana";
+  generateFalNanoBananaProThumbnailWithReceipt,
+  hasFalNanoBananaProThumbnail,
+} from "@/lib/falNanoBananaProThumbnail";
+import {
+  generateFalNanoBananaLofiThumbnailWithReceipt,
+  hasFalNanoBananaLofiThumbnail,
+} from "@/lib/falNanoBananaLofiThumbnail";
 import { craftMetadata } from "@/lib/metacraft";
+import { compositeProviderTypographyOverlay } from "@/lib/ffmpeg";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { hasVisionKey } from "@/lib/vision";
 import {
@@ -930,6 +945,376 @@ export const thumbnailGen: Block = {
       ? Math.min(3, Math.floor(requestedIters))
       : Math.min(2, laneQuality.maxCritiqueIters);
 
+    // Lo-Fi reads the normal playbook but never mutates it. Its isolated side
+    // lane supplies the exact 15-second 4K render frame to Nano Banana as an
+    // image reference and asks the model for only its truthful 4K emblem.
+    // Every other family continues through the usual picture-only branch.
+    if (String(ctx.store["family"] ?? "") === "music_loop") {
+      const referenceTmp = await makeRunTempDir(ctx.runId, "lofi-thumbnail-reference");
+      const finalLocalPath = typeof ctx.store["videoLocalPath"] === "string"
+        ? ctx.store["videoLocalPath"]
+        : undefined;
+      const videoKey = typeof ctx.store["videoKey"] === "string" ? ctx.store["videoKey"] : undefined;
+      const loopUnitKey = typeof ctx.store["loopUnitKey"] === "string" ? ctx.store["loopUnitKey"] : undefined;
+      let sourcePath: string;
+      let sourceVideoKey: string;
+      if (finalLocalPath && videoKey && await fileExists(finalLocalPath)) {
+        sourcePath = finalLocalPath;
+        sourceVideoKey = videoKey;
+      } else if (videoKey) {
+        sourcePath = await writeBytes(join(referenceTmp, "lofi-final-video.mp4"), await getObjectBytes(videoKey));
+        sourceVideoKey = videoKey;
+      } else if (loopUnitKey) {
+        sourcePath = await writeBytes(join(referenceTmp, "lofi-loop-unit.mp4"), await getObjectBytes(loopUnitKey));
+        sourceVideoKey = loopUnitKey;
+      } else {
+        throw new Error("thumbnail_gen: Lo-Fi requires its rendered final or retained 4K loop unit");
+      }
+
+      const reference = await prepareLofiThumbnailReference({
+        videoPath: sourcePath,
+        tmpDir: referenceTmp,
+      });
+      const lofiPlaybook: ThumbnailPlaybook = {
+        ...effectivePlaybook,
+        rules: [
+          "The attached image is the exact 15-second frame from this video's rendered 4K Lo-Fi scene and must remain the recognizable background.",
+          "Show one truthful custom 4K quality emblem in the bottom-right corner.",
+          "Preserve the rendered scene as the dominant artwork at mobile size.",
+          "Render a custom quality symbol with no box, pill, card, banner, or shading panel behind it.",
+        ],
+        avoid: [
+          "separately generated replacement artwork",
+          "headlines, mood labels, titles, subtitles, or any writing other than 4K",
+          "large panels, arrows, faces, stickers, or generic clickbait objects",
+          "black rounded text labels, caption boxes, frosted cards, or generic UI typography",
+          "a 4K badge on source media below 3840x2160",
+        ],
+      };
+      interface LofiThumbnailAttempt {
+        outJpg: string;
+        requestHash: string;
+        backgroundSsim: number;
+        typographyMatteUniformity: number;
+        refQA: ThumbnailGateVerdict | null;
+        providerEvidence?: ThumbnailNanoBananaEvidence;
+      }
+      const lofiLoop = await produceAndCritique<LofiThumbnailAttempt>({
+        label: "thumbnail_gen:lofi_reference",
+        threshold: 1,
+        maxIters: maxThumbnailIters,
+        log: (message) => ctx.log(message),
+        channel: thumbnailChannel,
+        produce: async (priorIssues, iter) => {
+          const prompt = lofiNanoBananaEditPrompt({
+            visualLanguage: effectivePlaybook.visualLanguage,
+            priorIssues,
+            badgeTone: reference.badgeTone,
+          });
+          const requestHash = thumbnailRequestHash({
+            contract: LOFI_RENDER_THUMBNAIL_CONTRACT.version,
+            sourceVideoKey,
+            sourceFrameSha256: reference.sourceFrameSha256,
+            typographyMatteSha256: reference.typographyMatteSha256,
+            sourceFrameTimeSec: reference.sourceFrameTimeSec,
+            badge: LOFI_RENDER_THUMBNAIL_CONTRACT.badge,
+            badgeTone: reference.badgeTone,
+            prompt,
+            packageToOpeningPlanFingerprint: packageToOpening.planFingerprint,
+            critiqueIteration: iter,
+            critiqueIssues: priorIssues,
+          });
+          const tmp = await makeRunTempDir(ctx.runId, `lofi-thumbnail-${requestHash.slice(0, 20)}`);
+          const outJpg = join(tmp, "thumbnail.jpg");
+          const requestContext = thumbnailNanoBananaRequestContext({
+            keyPrefix: ctx.keyPrefix,
+            runId: ctx.runId,
+            requestHash,
+          });
+          let checkpoint = await openThumbnailCheckpoint({
+            checkpointRoot: `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,
+            requestHash,
+            localImagePath: outJpg,
+            beforeClaim: () => {
+              if (!hasFalNanoBananaLofiThumbnail()) {
+                throw new Error("thumbnail_gen: Fal Nano Banana Lo-Fi edit is not configured");
+              }
+              if (quality === "production" && !hasVisionKey()) {
+                throw new Error("thumbnail_gen: no configured production QA provider");
+              }
+            },
+          });
+          if (checkpoint.manifest) {
+            const checkpointEvidence =
+              checkpoint.manifest.version === 2 || checkpoint.manifest.version === 3
+                ? checkpoint.manifest.providerEvidence
+                : undefined;
+            if (
+              (checkpoint.manifest.version !== 2 && checkpoint.manifest.version !== 3) ||
+              checkpointEvidence?.version !== "thumbnail-lofi-fal-nano-banana-evidence/v1" ||
+              checkpointEvidence.mode !== "lofi-render-frame-reference" ||
+              checkpointEvidence.sourceFrameSha256 !== reference.sourceFrameSha256 ||
+              checkpointEvidence.typographyMatteSha256 !== reference.typographyMatteSha256
+            ) {
+              throw new Error("thumbnail_gen: Lo-Fi checkpoint lacks its exact Nano Banana reference evidence");
+            }
+            checkpointGenerationCostUsd += checkpoint.manifest.generationCostUsd;
+          } else {
+            checkpoint = await beginThumbnailPaidWork(checkpoint);
+            const spentBefore = observedImageCost();
+            const generated = await generateFalNanoBananaLofiThumbnailWithReceipt({
+              prompt,
+              referenceImage: reference.referenceImage,
+              referenceMimeType: "image/jpeg",
+              typographyMatteImage: reference.typographyMatteImage,
+              typographyMatteMimeType: "image/png",
+              idempotencyContext: requestContext,
+            });
+            nanoBananaImageCostUsd += generated.receipt.costUsd;
+            const providerImagePath = join(tmp, "nano-banana-provider-image");
+            await writeBytes(providerImagePath, generated.bytes);
+            await compositeProviderTypographyOverlay({
+              baseFramePath: reference.referenceFramePath,
+              providerOverlayPath: providerImagePath,
+              outPath: outJpg,
+              width: LOFI_RENDER_THUMBNAIL_CONTRACT.outputWidth,
+              height: LOFI_RENDER_THUMBNAIL_CONTRACT.outputHeight,
+              matteColor: LOFI_RENDER_THUMBNAIL_CONTRACT.typographyMatteColor,
+            });
+            const typographyMatteUniformity = await measureLofiTypographyMatteUniformity({
+              providerOverlayPath: providerImagePath,
+            });
+            const backgroundSsim = await measureLofiThumbnailBackgroundSsim({
+              referenceFramePath: reference.referenceFramePath,
+              candidatePath: outJpg,
+            });
+            const providerEvidence: ThumbnailNanoBananaEvidence = {
+              version: "thumbnail-lofi-fal-nano-banana-evidence/v1",
+              requestContext,
+              receipt: generated.receipt,
+              mode: "lofi-render-frame-reference",
+              sourceFrameSha256: reference.sourceFrameSha256,
+              typographyMatteSha256: reference.typographyMatteSha256,
+              typographyMatteUniformity,
+              backgroundSsim,
+              expectedText: [LOFI_RENDER_THUMBNAIL_CONTRACT.badge],
+            };
+            const iterationSpend = Math.max(0, observedImageCost() - spentBefore);
+            checkpointGenerationCostUsd += iterationSpend;
+            checkpoint = await saveThumbnailGenerationCheckpoint(
+              checkpoint,
+              iterationSpend,
+              providerEvidence,
+            );
+          }
+
+          const providerEvidence =
+            checkpoint.manifest?.version === 2 || checkpoint.manifest?.version === 3
+              ? checkpoint.manifest.providerEvidence
+              : undefined;
+          if (providerEvidence?.version !== "thumbnail-lofi-fal-nano-banana-evidence/v1") {
+            throw new Error("thumbnail_gen: Lo-Fi checkpoint lacks Fal typography-overlay evidence");
+          }
+          const typographyMatteUniformity = providerEvidence.typographyMatteUniformity;
+          const backgroundSsim = await measureLofiThumbnailBackgroundSsim({
+            referenceFramePath: reference.referenceFramePath,
+            candidatePath: outJpg,
+          });
+          if (Math.abs(backgroundSsim - providerEvidence.backgroundSsim) > 0.002) {
+            throw new Error("thumbnail_gen: Lo-Fi checkpoint background-preservation evidence drifted");
+          }
+          if (
+            typographyMatteUniformity < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumTypographyMatteUniformity ||
+            backgroundSsim < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumBackgroundSsim
+          ) {
+            ctx.log(
+              `thumbnail_gen: rejected Lo-Fi overlay because matte uniformity ${typographyMatteUniformity.toFixed(6)} ` +
+              `or frame SSIM ${backgroundSsim.toFixed(6)} is below its preservation threshold`,
+            );
+            return {
+              outJpg,
+              requestHash,
+              backgroundSsim,
+              typographyMatteUniformity,
+              refQA: null,
+              providerEvidence,
+            };
+          }
+
+          const qaRequestHash = thumbnailRequestHash({
+            contract: "lofi-thumbnail-mobile-reference-qa/v1",
+            candidateRequestHash: requestHash,
+            title,
+            playbookRules: lofiPlaybook.rules,
+            referenceThumbs,
+          });
+          let refQA: ThumbnailGateVerdict | null = null;
+          const cachedQa = checkpoint.manifest?.qa;
+          if (cachedQa?.completed && cachedQa.requestHash === qaRequestHash) {
+            const verdict = cachedQa.verdict as Partial<ThumbnailGateVerdict> | null;
+            checkpointQaCostUsd += cachedQa.costUsd;
+            if (
+              verdict &&
+              typeof verdict.textOk === "boolean" &&
+              typeof verdict.faceClear === "boolean" &&
+              Number.isFinite(verdict.punch) &&
+              Number.isFinite(verdict.styleMatch) &&
+              Number.isFinite(verdict.storyMatch) &&
+              typeof verdict.uiClean === "boolean" &&
+              typeof verdict.reason === "string"
+            ) refQA = verdict as ThumbnailGateVerdict;
+            else if (verdict !== null) throw new Error("thumbnail_gen: cached Lo-Fi QA verdict is invalid");
+          } else {
+            const qaSpentBefore = observedQaCost();
+            try {
+              refQA = await runThumbnailMobileReferenceQa({
+                outJpg,
+                tmpDir: tmp,
+                title,
+                niche,
+                playbook: lofiPlaybook,
+                referenceUrls: referenceThumbs,
+                brandContext: {
+                  ...(qaBrandContext ?? {}),
+                  route: LOFI_RENDER_THUMBNAIL_CONTRACT.route,
+                  sourceFrameTimeSec: reference.sourceFrameTimeSec,
+                  sourceResolution: `${reference.sourceWidth}x${reference.sourceHeight}`,
+                  exactRequiredText: [LOFI_RENDER_THUMBNAIL_CONTRACT.badge],
+                  badgeTone: reference.badgeTone,
+                },
+                log: ctx.log,
+              });
+            } catch (error) {
+              ctx.log(`thumbnail_gen: Lo-Fi mobile QA errored: ${error instanceof Error ? error.message : error}`);
+            }
+            const qaSpend = Math.max(0, observedQaCost() - qaSpentBefore);
+            checkpointQaCostUsd += qaSpend;
+            checkpoint = await saveThumbnailQaCheckpoint(checkpoint, {
+              requestHash: qaRequestHash,
+              verdict: refQA,
+              costUsd: qaSpend,
+            });
+          }
+          return {
+            outJpg,
+            requestHash,
+            backgroundSsim,
+            typographyMatteUniformity,
+            refQA,
+            providerEvidence:
+              checkpoint.manifest?.version === 2 || checkpoint.manifest?.version === 3
+                ? checkpoint.manifest.providerEvidence
+                : undefined,
+          };
+        },
+        critique: async (attempt, iter) => {
+          if (
+            attempt.typographyMatteUniformity < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumTypographyMatteUniformity ||
+            attempt.backgroundSsim < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumBackgroundSsim
+          ) {
+            return {
+              score: Math.min(attempt.typographyMatteUniformity, attempt.backgroundSsim),
+              pass: false,
+              issues: [
+                "Preserve the supplied daytime/nighttime, palette, lighting, objects, and composition exactly; change pixels only where the bottom-right 4K emblem is drawn.",
+                "Do not add a panel, pill, banner, card, or shading block behind the 4K emblem.",
+              ],
+            };
+          }
+          const verdict = attempt.refQA;
+          if (!verdict) return { score: iter === 1 ? 1 : 0, pass: true, issues: [] };
+          if (thumbnailGatePassed(verdict)) return { score: 1, pass: true, issues: [] };
+          const numeric = (verdict.punch + verdict.styleMatch + verdict.storyMatch) / 30;
+          const issues = [
+            verdict.reason,
+            verdict.textOk ? "" : "show only the exact characters 4K and no other writing",
+            verdict.uiClean ? "" : "remove extra text, watermark, clipping, or YouTube UI collisions",
+            verdict.styleMatch >= 7 ? "" : "preserve the attached Lo-Fi scene and the channel's read-only thumbnail style",
+            verdict.storyMatch >= 7 ? "" : "make the supplied video frame remain the obvious background",
+          ].map((issue) => String(issue ?? "").trim()).filter(Boolean).slice(0, 5);
+          return { score: numeric, pass: false, issues };
+        },
+      });
+      const winner = lofiLoop.value;
+      const outJpg = winner.outJpg;
+      const refQA = winner.refQA;
+      if (winner.backgroundSsim < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumBackgroundSsim) {
+        throw new Error(
+          `thumbnail_gen: Lo-Fi Nano Banana changed the rendered frame ` +
+            `(SSIM ${winner.backgroundSsim.toFixed(6)} < ` +
+            `${LOFI_RENDER_THUMBNAIL_CONTRACT.minimumBackgroundSsim.toFixed(3)})`,
+        );
+      }
+      if (winner.typographyMatteUniformity < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumTypographyMatteUniformity) {
+        throw new Error(
+          `thumbnail_gen: Lo-Fi Nano Banana did not return a clean typography matte ` +
+            `(uniformity ${winner.typographyMatteUniformity.toFixed(6)} < ` +
+            `${LOFI_RENDER_THUMBNAIL_CONTRACT.minimumTypographyMatteUniformity.toFixed(3)})`,
+        );
+      }
+      assertThumbnailGate(quality, refQA, "Lo-Fi Nano Banana 15-second-frame candidate");
+      const passed = refQA !== null && thumbnailGatePassed(refQA);
+      const publishable = quality === "production" ? true : passed;
+      const strategy = publishable ? "lofi_nano_banana_15s_reference" : "lofi_nano_banana_reference_belowbar";
+      const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
+      const thumbnailBytes = await readBytes(outJpg);
+      const artifactSha256 = createHash("sha256").update(thumbnailBytes).digest("hex");
+      const providerEvidence = winner.providerEvidence;
+      if (!providerEvidence) throw new Error("thumbnail_gen: Lo-Fi winner lacks provider evidence");
+      const thumbnailCurrentCandidateEvidence = publishable
+        ? createLofiThumbnailCurrentCandidateEvidence({
+            ownerId: ctx.ownerId,
+            channelId: ctx.channelId,
+            runId: ctx.runId,
+            r2Key: thumbnailKey,
+            artifactSha256,
+            sourceVideoKey,
+            sourceFrameSha256: reference.sourceFrameSha256,
+            sourceFrameTimeSec: reference.sourceFrameTimeSec,
+            sourceWidth: reference.sourceWidth,
+            sourceHeight: reference.sourceHeight,
+            providerRequestSha256: providerEvidence.receipt.providerRequestSha256,
+            providerResponseSha256: providerEvidence.receipt.responseSha256,
+          })
+        : undefined;
+      await putObject(thumbnailKey, thumbnailBytes, {
+        contentType: "image/jpeg",
+        metadata: {
+          "thumbnail-request-sha256": winner.requestHash,
+          "thumbnail-provider-route": providerEvidence.receipt.route,
+          "thumbnail-side-lane": LOFI_RENDER_THUMBNAIL_CONTRACT.route,
+          "thumbnail-source-frame-sha256": reference.sourceFrameSha256,
+        },
+      });
+      await recordAsset(ctx, "thumbnail", thumbnailKey, {
+        strategy,
+        pattern: "nano-banana-15s-video-reference",
+        publishable,
+        thumbnailTitle: title,
+        thumbnailDescription,
+        providerRoute: providerEvidence.receipt.route,
+        sideLane: LOFI_RENDER_THUMBNAIL_CONTRACT.route,
+        providerRequestSha256: providerEvidence.receipt.providerRequestSha256,
+        providerResponseSha256: providerEvidence.receipt.responseSha256,
+        sourceVideoKey,
+        sourceFrameTimeSec: reference.sourceFrameTimeSec,
+        sourceResolution: `${reference.sourceWidth}x${reference.sourceHeight}`,
+        backgroundSsim: winner.backgroundSsim,
+        typographyMatteUniformity: winner.typographyMatteUniformity,
+        ...(thumbnailCurrentCandidateEvidence ? { thumbnailCurrentCandidateEvidence } : {}),
+      });
+      ctx.log(
+        `thumbnail_gen: Lo-Fi Nano Banana edit from exact ${reference.sourceFrameTimeSec}s ` +
+        `${reference.sourceWidth}x${reference.sourceHeight} frame passed mobile QA`,
+      );
+      return {
+        thumbnailKey,
+        strategy,
+        thumbnailPublishable: publishable,
+        [COST_PATCH_KEY]: thumbnailCost(),
+      };
+    }
+
     interface ThumbnailAttempt {
       outJpg: string;
       requestHash: string;
@@ -947,8 +1332,8 @@ export const thumbnailGen: Block = {
       produce: async (priorIssues, iter): Promise<ThumbnailAttempt> => {
         const requestHash = thumbnailRequestHash({
           contract: thumbnailScenarioVisualTreatmentBinding
-            ? "thumbnail-gen-checkpoint-v5-nano-banana-scenario-treatment"
-            : "thumbnail-gen-checkpoint-v4-nano-banana-only",
+            ? "thumbnail-gen-checkpoint-v6-fal-nano-banana-pro-native-scenario-treatment"
+            : "thumbnail-gen-checkpoint-v5-fal-nano-banana-pro-native",
           title,
           thumbnailDescription,
           packageToOpeningPlanFingerprint: packageToOpening.planFingerprint,
@@ -957,7 +1342,7 @@ export const thumbnailGen: Block = {
           pattern,
           playbook: effectivePlaybook,
           patternIndex: idx,
-          providerRoute: NANO_BANANA_THUMBNAIL_PROFILE,
+          providerRoute: FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE,
           ...(serializedEpisodeContext
             ? { serializedEpisodeContextFingerprint: serializedEpisodeContext.fingerprint }
             : {}),
@@ -985,8 +1370,8 @@ export const thumbnailGen: Block = {
             ? { scenarioVisualTreatmentBinding: thumbnailScenarioVisualTreatmentBinding }
             : {}),
           beforeClaim: () => {
-            if (!hasNanoBanana()) {
-              throw new Error("thumbnail_gen: Nano Banana is not configured");
+            if (!hasFalNanoBananaProThumbnail()) {
+              throw new Error("thumbnail_gen: Fal Nano Banana Pro is not configured");
             }
             if (quality === "production" && !hasVisionKey()) {
               throw new Error("thumbnail_gen: no configured production QA provider");
@@ -1019,20 +1404,20 @@ export const thumbnailGen: Block = {
         } else {
           checkpoint = await beginThumbnailPaidWork(checkpoint);
           let nanoBananaProviderEvidence: ThumbnailNanoBananaEvidence | undefined;
-          const generateScene = async (
-            request: import("@/lib/thumbnailRenderer").ThumbnailImageRequest,
-          ): Promise<Buffer> => {
-            const generated = await generateNanoBananaImageWithReceipt({
+          const generateDesignedThumbnail = async (
+            request: import("@/lib/thumbnailLab").DesignedThumbnailRequest,
+          ): Promise<Uint8Array> => {
+            const generated = await generateFalNanoBananaProThumbnailWithReceipt({
               prompt: request.prompt,
-              aspectRatio: request.aspectRatio,
-              maxProviderAttempts: 1,
               idempotencyContext: nanoBananaRequestContext,
             });
             nanoBananaImageCostUsd += generated.receipt.costUsd;
             nanoBananaProviderEvidence = {
-              version: "thumbnail-nano-banana-evidence/v1",
+              version: "thumbnail-fal-nano-banana-pro-evidence/v1",
               requestContext: nanoBananaRequestContext,
               receipt: generated.receipt,
+              mode: "native-scene-and-typography",
+              expectedWords: request.expectWords,
             };
             return generated.bytes;
           };
@@ -1042,11 +1427,12 @@ export const thumbnailGen: Block = {
             title,
             scriptHint,
             sceneSeed: thumbnailDescription,
+            channelName: thumbnailChannel.channelName ?? "channel",
             playbook: effectivePlaybook,
             outJpg,
             tmpDir: tmp,
             idx,
-            generateScene,
+            generateDesignedThumbnail,
             log: ctx.log,
             ...(dnaThumb?.subject ? { sceneMandate: dnaThumb.subject } : {}),
             ...(priorIssues.length ? { priorIssues } : {}),
@@ -1071,8 +1457,8 @@ export const thumbnailGen: Block = {
         // swaps in a generic card.
         const qaRequestHash = thumbnailRequestHash({
           contract: thumbnailScenarioVisualTreatmentBinding
-            ? "thumbnail-mobile-reference-qa-v3-scenario-treatment"
-            : "thumbnail-mobile-reference-qa-v2-exact-accounting",
+            ? "thumbnail-mobile-reference-qa-v4-native-copy-ocr-scenario-treatment"
+            : "thumbnail-mobile-reference-qa-v3-native-copy-ocr",
           candidateRequestHash: requestHash,
           quality,
           title,
@@ -1082,6 +1468,12 @@ export const thumbnailGen: Block = {
           playbookRules: effectivePlaybook.rules,
           playbookAvoid: effectivePlaybook.avoid,
           referenceThumbs,
+          expectedWords:
+            checkpoint.manifest?.version === 2 || checkpoint.manifest?.version === 3
+              ? checkpoint.manifest.providerEvidence?.version === "thumbnail-fal-nano-banana-pro-evidence/v1"
+                ? checkpoint.manifest.providerEvidence.expectedWords
+                : undefined
+              : undefined,
           ...(thumbnailScenarioVisualTreatmentBinding
             ? {
                 scenarioVisualTreatment: thumbnailScenarioVisualTreatmentBinding,
@@ -1141,6 +1533,12 @@ export const thumbnailGen: Block = {
               playbook: effectivePlaybook,
               referenceUrls: referenceThumbs,
               brandContext: qaBrandContext,
+              expectedWords:
+                checkpoint.manifest?.version === 2 || checkpoint.manifest?.version === 3
+                  ? checkpoint.manifest.providerEvidence?.version === "thumbnail-fal-nano-banana-pro-evidence/v1"
+                    ? checkpoint.manifest.providerEvidence.expectedWords
+                    : undefined
+                  : undefined,
               ...(thumbnailVisualTreatment
                 ? { visualTreatmentCriteria: thumbnailVisualTreatment.reviewCriteria }
                 : {}),

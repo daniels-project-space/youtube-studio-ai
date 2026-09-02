@@ -1,6 +1,5 @@
 /**
- * Provider-routed VISION client — the replacement for retired Google vision
- * calls. Every image-understanding call in the
+ * Provider-routed VISION client. Every image-understanding call in the
  * pipeline goes through visionLocal()/visionUrls(), which:
  *
  *   1. DOWNSCALES frames (ffmpeg → ≤768px JPEG) before base64-inlining —
@@ -9,17 +8,9 @@
  *   2. CACHES verdicts by content hash (prompt + image bytes) — verify→heal
  *      →re-verify loops, retried blocks and dev re-renders stop re-billing
  *      identical questions.
- *   3. ANSWERS WITHOUT THINKING by default (reasoning_effort "none" on Groq) —
- *      the <think> pass cost ~32x the completion tokens and ~8x the latency of a
- *      gate call while producing measurably WORSE and less repeatable verdicts.
- *      See VISION_REASONING_EFFORT for the A/B numbers.
- *   4. ROUTES to the cheapest available provider, in VISION_PROVIDERS order
- *      (default "openrouter"):
- *        groq   → Qwen 3.6 27B (current production multimodal model)
- *        fal    → any-llm/vision (provider-routed; exact usage not exposed)
- *
- * Gemini is deliberately excluded. Its sole approved product role is sealed
- * Nano Banana thumbnail image generation, never analysis or review.
+ *   3. Uses one pinned application route instead of provider-specific fallbacks.
+ *   4. ROUTES every review through the pinned Gemini 3.7 Flash model on
+ *      OpenRouter (default VISION_PROVIDERS="openrouter").
  *
  * Contract preserved from the former local-vision adapter: returns the model's RAW TEXT
  * (JSON text when json:true — callers keep parsing with parseJsonLoose, which
@@ -38,7 +29,7 @@ import {
 import { recordModelUsage } from "@/lib/modelUsage";
 import { hasOpenRouterKey, openRouterChat, openRouterModel } from "@/lib/openRouter";
 
-/** Exact image limit for one non-Google vision-provider request. */
+/** Exact image limit for one OpenRouter vision-provider request. */
 export const VISION_MAX_IMAGES_PER_REQUEST = NON_GOOGLE_VISION_MAX_IMAGES_PER_REQUEST;
 
 export class VisionError extends Error {
@@ -49,8 +40,8 @@ export class VisionError extends Error {
 }
 
 /**
- * Groq's `reasoning_effort` accepts exactly two values on GROQ_VISION_MODEL:
- * "none" (answer immediately) or "default" (run the internal <think> pass first).
+ * Compatibility hint retained for existing callers; the pinned OpenRouter
+ * Gemini route ignores provider-specific Groq reasoning controls.
  */
 export type VisionReasoningEffort = "none" | "default";
 
@@ -68,7 +59,7 @@ export interface VisionLocalArgs {
    * ("none") — see that constant for the A/B evidence behind the default.
    */
   reasoningEffort?: VisionReasoningEffort;
-  /** Restrict this review to specific providers. Use this for certified no-Google gates. */
+  /** Restrict this review to specific application providers. */
   providers?: readonly VisionProvider[];
   /** Cost/quality lane: cheap triage, normal analysis, or a final admission. */
   tier?: VisionTier;
@@ -79,13 +70,13 @@ export interface VisionLocalArgs {
   maxAttemptsPerProvider?: number;
 }
 
-/** Gemini is intentionally not a vision provider; it is sealed to Nano Banana thumbnail pixels. */
+/** OpenRouter is the single application vision boundary. */
 export type VisionProvider = "openrouter";
 export type VisionTier = "bulk" | "standard" | "final";
 
 /**
- * Final-master review uses a more constrained Qwen receipt route than general
- * vision. Keep direct callers on its same envelope so they cannot bypass the
+ * Final-master review uses a constrained receipt route. Keep direct callers
+ * on its same envelope so they cannot bypass the
  * visual-review batch planner with a larger final-tier request.
  */
 function maxImagesForVisionTier(tier: VisionTier | undefined): number {
@@ -94,12 +85,12 @@ function maxImagesForVisionTier(tier: VisionTier | undefined): number {
     : VISION_MAX_IMAGES_PER_REQUEST;
 }
 
-/** Is an approved non-Google vision provider available? */
+/** Is the approved OpenRouter vision provider available? */
 export function hasVisionKey(): boolean {
   return providerChain().length > 0;
 }
 
-/** True only when an independent non-Google reviewer is available. */
+/** Compatibility name: true when the independent OpenRouter reviewer is available. */
 export function hasNonGoogleVisionKey(): boolean {
   return providerChain(["openrouter"]).length > 0;
 }
@@ -118,8 +109,7 @@ function providerChain(allowed?: readonly VisionProvider[]): VisionProvider[] {
   if (chain.length === 0 && !warnedNoVisionProviders) {
     warnedNoVisionProviders = true;
     console.warn(
-      "[vision] !!! vision QA DISABLED (no providers) — set OPENROUTER_API_KEY; " +
-        "Gemini is reserved for sealed Nano Banana thumbnail generation",
+      "[vision] !!! vision QA DISABLED (no providers) — set OPENROUTER_API_KEY",
     );
   }
   return chain;
@@ -216,7 +206,7 @@ async function cachePut(key: string, text: string): Promise<void> {
  * ------------------------------------------------------------------ */
 
 const GROQ_VISION_MODEL =
-  process.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b";
+  process.env.GROQ_VISION_MODEL || "legacy-groq-vision-disabled";
 /** Groq caps vision requests at 5 images — beyond that, sample evenly. */
 const GROQ_MAX_IMAGES = 5;
 
@@ -442,7 +432,7 @@ async function openRouterVision(
 ): Promise<string> {
   if (images.length > VISION_MAX_IMAGES_PER_REQUEST) {
     throw new VisionError(
-      `non-Google vision requests may contain at most ${VISION_MAX_IMAGES_PER_REQUEST} images`,
+      `OpenRouter vision requests may contain at most ${VISION_MAX_IMAGES_PER_REQUEST} images`,
     );
   }
   const key = opts.tier === "bulk" ? "visionBulk" : opts.tier === "final" ? "visionFinal" : "visionStandard";
@@ -471,7 +461,7 @@ function sampleEvenly<T>(items: T[], max: number): T[] {
 }
 
 /* ------------------------------------------------------------------ *
- * Public API — local/remote image inputs → raw non-Google model text.
+ * Public API — local/remote image inputs → raw pinned OpenRouter model text.
  * ------------------------------------------------------------------ */
 
 async function visionBuffers(
@@ -490,7 +480,7 @@ async function visionBuffers(
   if (buffers.length === 0) throw new VisionError("no readable images");
   if (buffers.length > VISION_MAX_IMAGES_PER_REQUEST) {
     throw new VisionError(
-      `non-Google vision requests may contain at most ${VISION_MAX_IMAGES_PER_REQUEST} images`,
+      `OpenRouter vision requests may contain at most ${VISION_MAX_IMAGES_PER_REQUEST} images`,
     );
   }
   const chain = providerChain(args.providers);
@@ -535,7 +525,7 @@ async function visionBuffers(
   throw new VisionError(`all vision providers failed: ${errors.join(" | ")}`);
 }
 
-/** Local image files + prompt → raw non-Google model text. */
+/** Local image files + prompt → raw pinned OpenRouter model text. */
 export async function visionLocal(args: VisionLocalArgs): Promise<string> {
   const maxImages = maxImagesForVisionTier(args.tier);
   if (args.imagePaths.length > maxImages) {
@@ -553,7 +543,7 @@ export async function visionLocal(args: VisionLocalArgs): Promise<string> {
   return visionBuffers(args.prompt, buffers, args);
 }
 
-/** Remote image URLs + prompt → raw non-Google model text. */
+/** Remote image URLs + prompt → raw pinned OpenRouter model text. */
 export async function visionUrls(args: {
   prompt: string;
   imageUrls: string[];

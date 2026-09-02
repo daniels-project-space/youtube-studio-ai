@@ -51,8 +51,12 @@ function contextImage(id: string, alt: string): ImageProof {
 }
 
 const PROOFS: ImageProof[] = [
-  referenceImage("thumbnail-drawn-image", "The Drawn Past — The Dancing Plague"),
+  referenceImage("thumbnail-hannibal-image", "Rome's Worst Nightmare"),
+  referenceImage("thumbnail-rich-image", "How the Rich Hide Money"),
+  referenceImage("thumbnail-samurai-image", "Kyoto Burns"),
+  referenceImage("thumbnail-scandal-image", "Sold for Lies"),
   referenceImage("thumbnail-stoic-anger-image", "The Quiet Stoic — Anger Is Weakness"),
+  referenceImage("thumbnail-stoic-memento-image", "The Quiet Stoic — Memento Mori"),
 ];
 
 const CINEMATIC_PROOFS: ImageProof[] = [
@@ -65,10 +69,10 @@ const CINEMATIC_IDENTITY_HOLD =
 
 interface VideoProof { media: GoldenProofMediaPresentation; poster?: GoldenProofMediaPresentation; device: string; meta: string }
 
-function videoProof(mediaId: string, posterId: string, device: string, meta: string): VideoProof {
+function videoProof(mediaId: string, posterId: string | undefined, device: string, meta: string): VideoProof {
   return {
     media: referenceMedia(mediaId, "video"),
-    poster: referenceMedia(posterId, "image"),
+    poster: posterId ? referenceMedia(posterId, "image") : undefined,
     device,
     meta,
   };
@@ -84,7 +88,10 @@ function contextClipProof(mediaId: string, posterId: string, device: string, met
 }
 
 const DOCU_PROOFS: VideoProof[] = [
-  videoProof("documotion-robbery-video", "documotion-robbery-image", "reference proxy · robbery noir · 720p", "The Vault — the Antwerp diamond heist"),
+  // The paired still was explicitly rejected as thumbnail craft evidence. The
+  // video remains a reference, but must render without promoting that still as
+  // its poster.
+  videoProof("documotion-robbery-video", undefined, "reference proxy · robbery noir · 720p", "The Vault — the Antwerp diamond heist"),
 ];
 
 const FORDLANDIA_EXCLUSION = goldenProofMediaExclusion("documotion-fordlandia-video");
@@ -768,7 +775,7 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
       );
     case "whiteboard": {
       const clip = referenceMedia("whiteboard-chiquita-video", "video");
-      const poster = referenceMedia("whiteboard-chiquita-image", "image");
+      const poster = contextMedia("whiteboard-chiquita-image", "image");
       return (
         <div className={styles.proofStrip}>
           <div className={`${styles.proofCard} ${styles.proofCardWide}`}>

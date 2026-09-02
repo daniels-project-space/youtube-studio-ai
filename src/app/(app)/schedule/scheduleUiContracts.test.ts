@@ -15,6 +15,10 @@ assert.match(page, /summary\.pinned/,
   "the schedule header must distinguish pinned exceptions from cadence projections");
 assert.match(page, /api\.contentPlan\.setScheduledAt/,
   "the redesigned exact-date control must remain connected to the scheduling mutation");
+assert.match(page, /Open \$\{nextEvent\.title\} production details/,
+  "the next scheduled release must open its exact production record");
+assert.match(page, /channelHref\(nextEvent\.slug, "week-ahead", nextEvent\.id\)/,
+  "the next-release summary must preserve the planned item identity");
 assert.match(page, /Seven-day board/);
 assert.match(page, /Month map/);
 assert.match(page, /Cadence controls/);

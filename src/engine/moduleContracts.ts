@@ -446,7 +446,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   thumbnail_gen: contract(["package.thumbnail"], {
     requiredConsumes: ["title", "thumbnailDescription", "topic", "packageToOpeningPlan"],
     optionalConsumes: [
-      "channelName", "topic", "f1Url", "f1Key", "f1ThumbnailBaseProvenance", "styleGrammar", "styleDNA", "family", "persona",
+      "channelName", "topic", "f1Url", "f1Key", "f1ThumbnailBaseProvenance", "loopUnitKey", "loopUnitResolution",
+      "videoKey", "videoLocalPath", "videoDurationSec", "styleGrammar", "styleDNA", "family", "persona",
       "thumbnailIdentity", "nicheIntel", "niche", "seoDatabank", "competitors", "healHints", "plannedThumbnailKey",
       "narrationText", "thumbnailPlaybook", "script", "quizPlan",
       "serializedProgramEpisodeContext",

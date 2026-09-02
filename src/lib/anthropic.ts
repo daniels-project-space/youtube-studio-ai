@@ -1,10 +1,9 @@
 /**
  * Claude JSON completion seam.
  *
- * The historical Claude seam now prefers the pinned, non-Google OpenRouter
- * fleet when it is configured. Keeping the public function names avoids a
- * risky caller-by-caller migration while moving ordinary channel intelligence
- * to GPT-OSS 20B and creative work to Ministral 3 8B.
+ * The historical Claude seam now prefers pinned Gemini 3.7 Flash through
+ * OpenRouter. Keeping the public function names avoids a risky caller-by-caller
+ * migration while removing the runtime dependency on Claude.
  */
 import {
   getOrCreateModelResponse,

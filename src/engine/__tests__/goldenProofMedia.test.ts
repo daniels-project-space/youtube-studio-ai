@@ -13,6 +13,7 @@ import {
   goldenProofMediaPresentation,
   goldenProofMediaSuccessorQueue,
 } from "@/engine/goldenProofMedia";
+import { APPROVED_GOLDEN_THUMBNAIL_IDS } from "@/lib/thumbnailGoldenStandard";
 
 function goldenFiles(directory: string): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
@@ -52,12 +53,23 @@ function main(): void {
 
   const summary = goldenProofMediaInventorySummary();
   assert.deepEqual(summary, {
-    reference: 19,
-    context: 6,
-    historical: 29,
+    reference: 21,
+    context: 7,
+    historical: 26,
     quarantined: 2,
     duplicate: 5,
   });
+  for (const id of APPROVED_GOLDEN_THUMBNAIL_IDS) {
+    assert.equal(goldenProofMediaEntry(id).status, "reference", `${id} is an owner-approved thumbnail craft reference`);
+  }
+  for (const id of ["thumbnail-drawn-image", "documotion-robbery-image"] as const) {
+    assert.equal(goldenProofMediaEntry(id).status, "historical", `${id} was explicitly rejected as thumbnail craft evidence`);
+  }
+  assert.equal(
+    goldenProofMediaEntry("whiteboard-chiquita-image").status,
+    "context",
+    "the rejected whiteboard still may only contextualize its paired motion proof",
+  );
   const eligible = GOLDEN_PROOF_MEDIA_MANIFEST.entries.filter((entry) => entry.status === "reference" || entry.status === "context");
   assert.equal(new Set(eligible.map((entry) => entry.sha256)).size, eligible.length, "presentable Golden media must never reuse the same bytes");
 

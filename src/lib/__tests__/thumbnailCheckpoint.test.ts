@@ -11,6 +11,8 @@ import {
   type ScenarioVisualTreatmentThumbnailBinding,
 } from "@/engine/scenarioVisualTreatment";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaLofiThumbnailContract";
+import { FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaProThumbnailContract";
 import {
   NANO_BANANA_THUMBNAIL_PROFILE,
   nanoBananaThumbnailCostUsd,
@@ -177,6 +179,96 @@ async function nanoEvidenceSurvivesRemoteRecovery(root: string): Promise<void> {
       ? restored.manifest.providerEvidence?.receipt.route
       : undefined,
     "nano-banana-flash",
+  );
+}
+
+async function nativeProEvidenceBindsPromptAndCopy(root: string): Promise<void> {
+  const io = new MemoryCheckpointIo();
+  const requestHash = thumbnailRequestHash({ title: "Native Pro receipt", pattern: 1 });
+  const requestContext = thumbnailNanoBananaRequestContext({
+    keyPrefix: "owner/o/channel/c/",
+    runId: "run-native-pro-1",
+    requestHash,
+  });
+  const profile = FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE;
+  const prompt = `Scene with headline "$1K/MO" then "CASH ENGINE".`;
+  const providerRequestCanonicalJson = canonicalJson({
+    apiVersion: profile.apiVersion,
+    context: requestContext,
+    endpoint: profile.model,
+    body: {
+      prompt,
+      num_images: 1,
+      aspect_ratio: profile.aspectRatio,
+      output_format: "png",
+      safety_tolerance: "4",
+      resolution: profile.resolution,
+      limit_generations: true,
+      enable_web_search: false,
+    },
+  });
+  const providerResponseMetadataCanonicalJson = canonicalJson({
+    requestId: "fal-native-pro-response",
+    description: "",
+    image: { width: 2048, height: 1152, content_type: "image/png" },
+  });
+  const evidence = {
+    version: "thumbnail-fal-nano-banana-pro-evidence/v1" as const,
+    requestContext,
+    mode: "native-scene-and-typography" as const,
+    expectedWords: ["$1K/MO", "CASH ENGINE"],
+    receipt: {
+      provider: profile.provider,
+      model: profile.model,
+      apiVersion: profile.apiVersion,
+      providerRequestId: "fal-native-pro-response",
+      route: profile.route,
+      width: 2_048,
+      height: 1_152,
+      promptUtf8Bytes: Buffer.byteLength(prompt, "utf8"),
+      outputCostUsd: profile.outputImageUsd,
+      costUsd: profile.outputImageUsd,
+      sourceContentType: "image/png",
+      providerRequestCanonicalJson,
+      providerRequestSha256: createHash("sha256")
+        .update(`fal-nano-banana-pro-provider\0${providerRequestCanonicalJson}`)
+        .digest("hex"),
+      providerResponseMetadataCanonicalJson,
+      providerResponseMetadataSha256: createHash("sha256")
+        .update(`fal-nano-banana-pro-response-metadata\0${providerResponseMetadataCanonicalJson}`)
+        .digest("hex"),
+      responseSha256: "8".repeat(64),
+      createdAt: 1_900_000_000_000,
+    },
+  };
+  const localImagePath = join(root, "native-pro", "thumbnail.jpg");
+  await mkdir(join(root, "native-pro"), { recursive: true });
+  let session = await openThumbnailCheckpoint({
+    checkpointRoot: "owner/o/channel/c/runs/run-native-pro-1/thumbnail-checkpoints",
+    requestHash,
+    localImagePath,
+  }, io);
+  session = await beginThumbnailPaidWork(session, io);
+  await writeFile(localImagePath, Buffer.from("native Pro thumbnail bytes"));
+  session = await saveThumbnailGenerationCheckpoint(session, evidence.receipt.costUsd, evidence, io);
+  const restoredEvidence = session.manifest?.version === 2 || session.manifest?.version === 3
+    ? session.manifest.providerEvidence
+    : undefined;
+  assert.equal(restoredEvidence?.version, "thumbnail-fal-nano-banana-pro-evidence/v1");
+  assert.deepEqual(
+    restoredEvidence?.version === "thumbnail-fal-nano-banana-pro-evidence/v1"
+      ? restoredEvidence.expectedWords
+      : undefined,
+    ["$1K/MO", "CASH ENGINE"],
+  );
+  await assert.rejects(
+    saveThumbnailGenerationCheckpoint(
+      session,
+      evidence.receipt.costUsd,
+      { ...evidence, expectedWords: ["MUTATED COPY"] },
+      io,
+    ),
+    /provider evidence is invalid/,
   );
 }
 
@@ -516,6 +608,110 @@ async function incompleteClaimFailsClosed(root: string): Promise<void> {
   );
 }
 
+async function lofiReferenceEvidenceBindsInputFrame(root: string): Promise<void> {
+  const io = new MemoryCheckpointIo();
+  const requestHash = thumbnailRequestHash({ lane: "lofi-15s-reference", iteration: 1 });
+  const requestContext = thumbnailNanoBananaRequestContext({
+    keyPrefix: "owner/o/channel/lofi/",
+    runId: "run-lofi-reference",
+    requestHash,
+  });
+  const profile = FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE;
+  const reference = Buffer.from("exact-resized-15-second-reference-frame");
+  const sourceFrameSha256 = createHash("sha256").update(reference).digest("hex");
+  const typographyMatte = Buffer.from("exact-chroma-typography-matte");
+  const typographyMatteSha256 = createHash("sha256").update(typographyMatte).digest("hex");
+  const prompt = "Edit the reference. Add exactly \"4K\". No other text.";
+  const providerRequestCanonicalJson = canonicalJson({
+    apiVersion: profile.apiVersion,
+    context: requestContext,
+    endpoint: profile.model,
+    body: {
+      prompt,
+      num_images: 1,
+      aspect_ratio: profile.aspectRatio,
+      output_format: "png",
+      safety_tolerance: "4",
+      image_urls: [
+        `data:image/png;base64,${typographyMatte.toString("base64")}`,
+        `data:image/jpeg;base64,${reference.toString("base64")}`,
+      ],
+      limit_generations: true,
+    },
+  });
+  const providerResponseMetadataCanonicalJson = canonicalJson({
+    requestId: "lofi-reference-response",
+    description: "fixture",
+    image: { url: "https://fal.media/fixture.png", content_type: "image/png" },
+  });
+  const evidence = {
+    version: "thumbnail-lofi-fal-nano-banana-evidence/v1" as const,
+    requestContext,
+    mode: "lofi-render-frame-reference" as const,
+    sourceFrameSha256,
+    typographyMatteSha256,
+    typographyMatteUniformity: 0.991,
+    backgroundSsim: 0.999,
+    expectedText: ["4K"],
+    receipt: {
+      provider: profile.provider,
+      model: profile.model,
+      apiVersion: profile.apiVersion,
+      providerRequestId: "lofi-reference-response",
+      route: profile.route,
+      width: profile.accountingWidth,
+      height: profile.accountingHeight,
+      promptUtf8Bytes: Buffer.byteLength(prompt, "utf8"),
+      referenceSha256: sourceFrameSha256,
+      typographyMatteSha256,
+      outputCostUsd: profile.outputImageUsd,
+      costUsd: profile.outputImageUsd,
+      sourceContentType: "image/png",
+      providerRequestCanonicalJson,
+      providerRequestSha256: createHash("sha256")
+        .update(`fal-nano-banana-lofi-provider\0${providerRequestCanonicalJson}`)
+        .digest("hex"),
+      providerResponseMetadataCanonicalJson,
+      providerResponseMetadataSha256: createHash("sha256")
+        .update(`fal-nano-banana-lofi-response-metadata\0${providerResponseMetadataCanonicalJson}`)
+        .digest("hex"),
+      responseSha256: "9".repeat(64),
+      createdAt: 1_900_000_000_000,
+    },
+  };
+  const localImagePath = join(root, "lofi-reference", "thumbnail.jpg");
+  await mkdir(join(root, "lofi-reference"), { recursive: true });
+  let session = await openThumbnailCheckpoint({
+    checkpointRoot: "owner/o/channel/lofi/runs/run-lofi-reference/thumbnail-checkpoints",
+    requestHash,
+    localImagePath,
+  }, io);
+  session = await beginThumbnailPaidWork(session, io);
+  await writeFile(localImagePath, Buffer.from("Nano Banana Lo-Fi edit"));
+  session = await saveThumbnailGenerationCheckpoint(session, evidence.receipt.costUsd, evidence, io);
+  const restoredEvidence = session.manifest?.version === 2 || session.manifest?.version === 3
+    ? session.manifest.providerEvidence
+    : undefined;
+  assert.equal(restoredEvidence?.version, "thumbnail-lofi-fal-nano-banana-evidence/v1");
+  assert.equal(
+    restoredEvidence?.version === "thumbnail-lofi-fal-nano-banana-evidence/v1"
+      ? restoredEvidence.mode
+      : undefined,
+    "lofi-render-frame-reference",
+  );
+
+  await assert.rejects(
+    saveThumbnailGenerationCheckpoint(
+      session,
+      evidence.receipt.costUsd,
+      { ...evidence, sourceFrameSha256: "0".repeat(64) },
+      io,
+    ),
+    /provider evidence is invalid/,
+    "the paid checkpoint must reject a Lo-Fi evidence record detached from its inline frame bytes",
+  );
+}
+
 async function main(): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "thumbnail-checkpoint-test-"));
   try {
@@ -526,6 +722,8 @@ async function main(): Promise<void> {
     await uploadFailureUsesLocalCheckpoint(root);
     await incompleteClaimFailsClosed(root);
     await nanoEvidenceSurvivesRemoteRecovery(root);
+    await nativeProEvidenceBindsPromptAndCopy(root);
+    await lofiReferenceEvidenceBindsInputFrame(root);
     console.log("thumbnail checkpoint tests: ok");
   } finally {
     await rm(root, { recursive: true, force: true });

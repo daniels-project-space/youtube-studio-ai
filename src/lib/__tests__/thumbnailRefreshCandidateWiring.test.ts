@@ -9,6 +9,7 @@ const convex = read("convex/thumbnailRefresh.ts");
 const route = read("src/app/api/thumbnail-refresh/route.ts");
 const task = read("src/trigger/thumbnailRefreshCandidate.ts");
 const replay = read("src/lib/thumbnailRefreshReplay.ts");
+const successor = read("src/lib/thumbnailRefreshSuccessor.ts");
 const moduleContracts = read("src/engine/moduleContracts.ts");
 
 assert.match(schema, /thumbnailRefreshSourceRunId: v\.optional\(v\.id\("runs"\)\)/);
@@ -20,7 +21,15 @@ assert.match(convex, /export const createCandidateShell = mutation/);
 assert.match(convex, /await requireStudioServiceIdentity\(ctx, args\.ownerId, "thumbnail refresh candidate shell"\)/);
 assert.match(convex, /thumbnailRefreshSourceRunId: source\._id/);
 assert.match(convex, /thumbnailRefreshDispatchState: "awaiting_approval"/);
-assert.match(convex, /replay\.material\.replayFingerprint/);
+assert.match(convex, /material: replay\.material/);
+assert.match(convex, /refreshMaterial\.material\.replayFingerprint/);
+assert.match(convex, /assessThumbnailRefreshSuccessor/);
+assert.match(convex, /ready_for_private_successor/);
+assert.match(convex, /Retired legacy videos cannot purchase replacement thumbnails/);
+assert.match(convex, /export const importErnieBatchCandidate = mutation/);
+assert.match(convex, /thumbnail-ernie-batch-import/);
+assert.match(convex, /providerRoute !== "ernie-image-novita-4090"/);
+assert.match(convex, /thumbnailRefreshDispatchState: "consumed"/);
 assert.match(convex, /pipelineInvocationSha256: run\.pipelineInvocationSha256/);
 assert.match(convex, /export const consumeCandidateDispatch = mutation/);
 assert.doesNotMatch(
@@ -76,5 +85,8 @@ for (const key of [
 assert.match(moduleContracts, /const iterations[\s\S]*Math\.min\(3/);
 assert.match(moduleContracts, /return iterations \* \(/);
 assert.match(replay, /hashPipelineInvocation\(normalized\) === input\.pipelineInvocationSha256/);
+assert.match(successor, /one current thumbnail module/);
+assert.match(successor, /createPackageToOpeningPlan/);
+assert.match(successor, /replayFingerprint: sha256Hex\(canonicalJson\(materialWithoutFingerprint\)\)/);
 
 console.log("thumbnail refresh candidate wiring: PASS");

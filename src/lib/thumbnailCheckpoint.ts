@@ -10,6 +10,14 @@ import {
 } from "@/engine/scenarioVisualTreatment";
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
+  FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE,
+  type FalNanoBananaLofiThumbnailReceipt,
+} from "@/lib/falNanoBananaLofiThumbnailContract";
+import {
+  FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE,
+  type FalNanoBananaProThumbnailReceipt,
+} from "@/lib/falNanoBananaProThumbnailContract";
+import {
   NANO_BANANA_THUMBNAIL_PROFILE,
   nanoBananaThumbnailCostUsd,
   nanoBananaThumbnailPromptCostUsd,
@@ -36,11 +44,36 @@ interface LegacyThumbnailCheckpointManifest {
   qa?: ThumbnailQaCheckpoint;
 }
 
-export interface ThumbnailNanoBananaEvidence {
+export interface ThumbnailDirectNanoBananaEvidence {
   version: "thumbnail-nano-banana-evidence/v1";
   requestContext: string;
   receipt: NanoBananaImageReceipt;
 }
+
+export interface ThumbnailLofiFalNanoBananaEvidence {
+  version: "thumbnail-lofi-fal-nano-banana-evidence/v1";
+  requestContext: string;
+  receipt: FalNanoBananaLofiThumbnailReceipt;
+  mode: "lofi-render-frame-reference";
+  sourceFrameSha256: string;
+  typographyMatteSha256: string;
+  typographyMatteUniformity: number;
+  backgroundSsim: number;
+  expectedText: readonly string[];
+}
+
+export interface ThumbnailFalNanoBananaProEvidence {
+  version: "thumbnail-fal-nano-banana-pro-evidence/v1";
+  requestContext: string;
+  receipt: FalNanoBananaProThumbnailReceipt;
+  mode: "native-scene-and-typography";
+  expectedWords: readonly string[];
+}
+
+export type ThumbnailNanoBananaEvidence =
+  | ThumbnailDirectNanoBananaEvidence
+  | ThumbnailLofiFalNanoBananaEvidence
+  | ThumbnailFalNanoBananaProEvidence;
 
 interface CurrentThumbnailCheckpointManifest {
   version: 2 | 3;
@@ -161,7 +194,188 @@ function validNanoBananaEvidence(
   requestHash: string,
 ): value is ThumbnailNanoBananaEvidence {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
-  const evidence = value as ThumbnailNanoBananaEvidence;
+  if ((value as { version?: unknown }).version === "thumbnail-fal-nano-banana-pro-evidence/v1") {
+    const evidence = value as ThumbnailFalNanoBananaProEvidence;
+    const receipt = evidence.receipt;
+    const profile = FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE;
+    if (
+      evidence.mode !== "native-scene-and-typography" ||
+      typeof evidence.requestContext !== "string" ||
+      evidence.requestContext.length > 8_192 ||
+      !Array.isArray(evidence.expectedWords) ||
+      evidence.expectedWords.length < 1 || evidence.expectedWords.length > 2 ||
+      !evidence.expectedWords.every((item) =>
+        typeof item === "string" && item.trim().length > 0 && item.length <= 64
+      ) ||
+      !receipt ||
+      receipt.provider !== profile.provider ||
+      receipt.model !== profile.model ||
+      receipt.apiVersion !== profile.apiVersion ||
+      receipt.route !== profile.route ||
+      (receipt.providerRequestId !== null &&
+        (typeof receipt.providerRequestId !== "string" ||
+          !receipt.providerRequestId.trim() || receipt.providerRequestId.length > 256)) ||
+      !Number.isInteger(receipt.width) || receipt.width < 1_024 || receipt.width > 4_096 ||
+      !Number.isInteger(receipt.height) || receipt.height < 576 || receipt.height > 4_096 ||
+      Math.abs(receipt.width / receipt.height - 16 / 9) > 0.04 ||
+      !Number.isInteger(receipt.promptUtf8Bytes) || receipt.promptUtf8Bytes < 1 ||
+      receipt.promptUtf8Bytes > profile.maxPromptUtf8Bytes ||
+      receipt.outputCostUsd !== profile.outputImageUsd ||
+      receipt.costUsd !== profile.outputImageUsd ||
+      receipt.costUsd > profile.admissionCeilingUsd + Number.EPSILON ||
+      !/^image\/(?:png|jpeg|webp)$/iu.test(receipt.sourceContentType) ||
+      !SHA256.test(receipt.providerRequestSha256) ||
+      !SHA256.test(receipt.providerResponseMetadataSha256) ||
+      !SHA256.test(receipt.responseSha256) ||
+      typeof receipt.providerRequestCanonicalJson !== "string" ||
+      receipt.providerRequestCanonicalJson.length > 200_000 ||
+      typeof receipt.providerResponseMetadataCanonicalJson !== "string" ||
+      receipt.providerResponseMetadataCanonicalJson.length > 100_000 ||
+      !Number.isFinite(receipt.createdAt) || receipt.createdAt <= 0
+    ) return false;
+    try {
+      const context = JSON.parse(evidence.requestContext) as Record<string, unknown>;
+      const request = JSON.parse(receipt.providerRequestCanonicalJson) as Record<string, unknown>;
+      const body = request["body"] as Record<string, unknown>;
+      const prompt = body?.["prompt"];
+      const responseMetadata = JSON.parse(
+        receipt.providerResponseMetadataCanonicalJson,
+      ) as Record<string, unknown>;
+      return canonicalJson(context) === evidence.requestContext &&
+        context["contractVersion"] === "thumbnail-gen-nano-banana-context/v1" &&
+        context["requestHash"] === requestHash &&
+        typeof context["keyPrefix"] === "string" && Boolean((context["keyPrefix"] as string).trim()) &&
+        typeof context["runId"] === "string" && Boolean((context["runId"] as string).trim()) &&
+        canonicalJson(request) === receipt.providerRequestCanonicalJson &&
+        request["apiVersion"] === profile.apiVersion &&
+        request["context"] === evidence.requestContext &&
+        request["endpoint"] === profile.model &&
+        typeof prompt === "string" &&
+        Buffer.byteLength(prompt, "utf8") === receipt.promptUtf8Bytes &&
+        evidence.expectedWords.every((item) => prompt.includes(`"${item.toUpperCase()}"`)) &&
+        body["image_urls"] === undefined &&
+        body["num_images"] === 1 &&
+        body["aspect_ratio"] === profile.aspectRatio &&
+        body["output_format"] === "png" &&
+        body["safety_tolerance"] === "4" &&
+        body["resolution"] === profile.resolution &&
+        body["limit_generations"] === true &&
+        body["enable_web_search"] === false &&
+        canonicalJson(responseMetadata) === receipt.providerResponseMetadataCanonicalJson &&
+        responseMetadata["requestId"] === receipt.providerRequestId &&
+        createHash("sha256")
+          .update(`fal-nano-banana-pro-provider\0${receipt.providerRequestCanonicalJson}`)
+          .digest("hex") === receipt.providerRequestSha256 &&
+        createHash("sha256")
+          .update(`fal-nano-banana-pro-response-metadata\0${receipt.providerResponseMetadataCanonicalJson}`)
+          .digest("hex") === receipt.providerResponseMetadataSha256;
+    } catch {
+      return false;
+    }
+  }
+  if ((value as { version?: unknown }).version === "thumbnail-lofi-fal-nano-banana-evidence/v1") {
+    const evidence = value as ThumbnailLofiFalNanoBananaEvidence;
+    const receipt = evidence.receipt;
+    const profile = FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE;
+    if (
+      evidence.mode !== "lofi-render-frame-reference" ||
+      typeof evidence.requestContext !== "string" ||
+      evidence.requestContext.length > 8_192 ||
+      !SHA256.test(evidence.sourceFrameSha256) ||
+      !SHA256.test(evidence.typographyMatteSha256) ||
+      !Number.isFinite(evidence.typographyMatteUniformity) ||
+      evidence.typographyMatteUniformity < 0 || evidence.typographyMatteUniformity > 1 ||
+      !Number.isFinite(evidence.backgroundSsim) ||
+      evidence.backgroundSsim < 0 || evidence.backgroundSsim > 1 ||
+      !Array.isArray(evidence.expectedText) ||
+      evidence.expectedText.length !== 1 ||
+      evidence.expectedText[0] !== "4K" ||
+      !evidence.expectedText.every((item) =>
+        typeof item === "string" && item.trim().length > 0 && item.length <= 64
+      ) ||
+      !receipt ||
+      receipt.provider !== profile.provider ||
+      receipt.model !== profile.model ||
+      receipt.apiVersion !== profile.apiVersion ||
+      receipt.route !== profile.route ||
+      (receipt.providerRequestId !== null &&
+        (typeof receipt.providerRequestId !== "string" ||
+          !receipt.providerRequestId.trim() || receipt.providerRequestId.length > 256)) ||
+      !Number.isInteger(receipt.width) || receipt.width < 512 || receipt.width > 4_096 ||
+      !Number.isInteger(receipt.height) || receipt.height < 288 || receipt.height > 4_096 ||
+      Math.abs(receipt.width / receipt.height - 16 / 9) > 0.04 ||
+      !Number.isInteger(receipt.promptUtf8Bytes) || receipt.promptUtf8Bytes < 1 ||
+      receipt.promptUtf8Bytes > profile.maxPromptUtf8Bytes ||
+      receipt.referenceSha256 !== evidence.sourceFrameSha256 ||
+      receipt.typographyMatteSha256 !== evidence.typographyMatteSha256 ||
+      receipt.outputCostUsd !== profile.outputImageUsd ||
+      receipt.costUsd !== profile.outputImageUsd ||
+      receipt.costUsd > profile.admissionCeilingUsd + Number.EPSILON ||
+      !/^image\/(?:png|jpeg|webp)$/iu.test(receipt.sourceContentType) ||
+      !SHA256.test(receipt.providerRequestSha256) ||
+      !SHA256.test(receipt.providerResponseMetadataSha256) ||
+      !SHA256.test(receipt.responseSha256) ||
+      typeof receipt.providerRequestCanonicalJson !== "string" ||
+      receipt.providerRequestCanonicalJson.length > 3_000_000 ||
+      typeof receipt.providerResponseMetadataCanonicalJson !== "string" ||
+      receipt.providerResponseMetadataCanonicalJson.length > 100_000 ||
+      !Number.isFinite(receipt.createdAt) || receipt.createdAt <= 0
+    ) return false;
+    try {
+      const context = JSON.parse(evidence.requestContext) as Record<string, unknown>;
+      const request = JSON.parse(receipt.providerRequestCanonicalJson) as Record<string, unknown>;
+      const body = request["body"] as Record<string, unknown>;
+      const prompt = body?.["prompt"];
+      const imageUrls = body?.["image_urls"] as unknown[];
+      const matteDataUri = imageUrls?.[0];
+      const referenceDataUri = imageUrls?.[1];
+      const referenceDataUriMatch = typeof referenceDataUri === "string"
+        ? /^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/]+={0,2})$/iu.exec(referenceDataUri)
+        : null;
+      const matteDataUriMatch = typeof matteDataUri === "string"
+        ? /^data:(image\/png);base64,([A-Za-z0-9+/]+={0,2})$/iu.exec(matteDataUri)
+        : null;
+      const responseMetadata = JSON.parse(
+        receipt.providerResponseMetadataCanonicalJson,
+      ) as Record<string, unknown>;
+      return canonicalJson(context) === evidence.requestContext &&
+        context["contractVersion"] === "thumbnail-gen-nano-banana-context/v1" &&
+        context["requestHash"] === requestHash &&
+        typeof context["keyPrefix"] === "string" && Boolean((context["keyPrefix"] as string).trim()) &&
+        typeof context["runId"] === "string" && Boolean((context["runId"] as string).trim()) &&
+        canonicalJson(request) === receipt.providerRequestCanonicalJson &&
+        request["apiVersion"] === profile.apiVersion &&
+        request["context"] === evidence.requestContext &&
+        request["endpoint"] === profile.model &&
+        typeof prompt === "string" &&
+        Buffer.byteLength(prompt, "utf8") === receipt.promptUtf8Bytes &&
+        evidence.expectedText.every((item) => prompt.includes(`"${item}"`)) &&
+        Array.isArray(imageUrls) && imageUrls.length === 2 &&
+        Boolean(referenceDataUriMatch) && Boolean(matteDataUriMatch) &&
+        createHash("sha256")
+          .update(Buffer.from(referenceDataUriMatch?.[2] ?? "", "base64"))
+          .digest("hex") === evidence.sourceFrameSha256 &&
+        createHash("sha256")
+          .update(Buffer.from(matteDataUriMatch?.[2] ?? "", "base64"))
+          .digest("hex") === evidence.typographyMatteSha256 &&
+        body["num_images"] === 1 &&
+        body["aspect_ratio"] === profile.aspectRatio &&
+        body["output_format"] === "png" &&
+        body["safety_tolerance"] === "4" &&
+        body["limit_generations"] === true &&
+        canonicalJson(responseMetadata) === receipt.providerResponseMetadataCanonicalJson &&
+        responseMetadata["requestId"] === receipt.providerRequestId &&
+        createHash("sha256")
+          .update(`fal-nano-banana-lofi-provider\0${receipt.providerRequestCanonicalJson}`)
+          .digest("hex") === receipt.providerRequestSha256 &&
+        createHash("sha256")
+          .update(`fal-nano-banana-lofi-response-metadata\0${receipt.providerResponseMetadataCanonicalJson}`)
+          .digest("hex") === receipt.providerResponseMetadataSha256;
+    } catch {
+      return false;
+    }
+  }
+  const evidence = value as ThumbnailDirectNanoBananaEvidence;
   const receipt = evidence.receipt;
   if (
     evidence.version !== "thumbnail-nano-banana-evidence/v1" ||
@@ -215,7 +429,10 @@ function validNanoBananaEvidence(
       receipt.providerResponseMetadataCanonicalJson,
     ) as Record<string, unknown>;
     const usageMetadata = responseMetadata["usageMetadata"] as Record<string, unknown>;
-    return canonicalJson(context) === evidence.requestContext &&
+    return Array.isArray(parts) && parts.length === 1 &&
+      typeof prompt === "string" &&
+      prompt.includes("ABSOLUTE RULE — PICTURE ONLY, NO TEXT") &&
+      canonicalJson(context) === evidence.requestContext &&
       context["contractVersion"] === "thumbnail-gen-nano-banana-context/v1" &&
       context["requestHash"] === requestHash &&
       typeof context["keyPrefix"] === "string" && Boolean((context["keyPrefix"] as string).trim()) &&
@@ -226,10 +443,8 @@ function validNanoBananaEvidence(
       request["operation"] === "generateContent" &&
       request["context"] === evidence.requestContext &&
       Array.isArray(contents) && contents.length === 1 &&
-      Array.isArray(parts) && parts.length === 1 &&
       typeof prompt === "string" &&
       Buffer.byteLength(prompt, "utf8") === receipt.promptUtf8Bytes &&
-      prompt.includes("ABSOLUTE RULE — PICTURE ONLY, NO TEXT") &&
       Array.isArray(modalities) && modalities.length === 1 && modalities[0] === "IMAGE" &&
       imageConfig?.["aspectRatio"] === NANO_BANANA_THUMBNAIL_PROFILE.aspectRatio &&
       imageConfig?.["imageSize"] === undefined &&

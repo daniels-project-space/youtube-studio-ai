@@ -14,26 +14,40 @@
  *     three named, executable patterns. Stored on the channel — the "devises
  *     rules out of that" loop, made durable.
  *  3. TOURNAMENT — per video, instantiate an executable pattern into a real
- *     candidate (text-free base art + exact local compositor type)
+ *     candidate (native Nano Banana Pro scene + physical typography)
  *     and judge it
  *     COMPARATIVELY against the verified references in a simulated feed.
  *     The winner ships; scores + reasons persist.
  */
+import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseJsonLoose } from "@/lib/gemini";
-import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
+import {
+  hasVisionKey,
+  visionLocal,
+  VISION_GATE_MAX_TOKENS,
+  type VisionTier,
+} from "@/lib/vision";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { imageToJpeg } from "@/lib/ffmpeg";
+import { buildThumbBrief, type ThumbBriefArgs } from "@/lib/banana";
+import { readThumbnailOcr, thumbnailOcrMatchesExpected } from "@/lib/thumbnailOcr";
 import {
   renderThumbnail,
   type GenerateScene,
+  type ThumbnailRenderSpec,
   type ThumbnailRenderResult,
 } from "@/lib/thumbnailRenderer";
+import {
+  GOLDEN_THUMBNAIL_CRAFT_RULES,
+  OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES,
+} from "@/lib/thumbnailGoldenStandard";
 import { downloadTo } from "@/lib/files";
 import type { StyleDNA } from "@/engine/creative/types";
 import type { FamilyKey } from "@/engine/families";
 import type { ThumbnailGateVerdict } from "@/engine/qualityPolicy";
 import type { ThumbnailTextZone } from "@/lib/thumbnailLayout";
+import { trustedThumbnailTextZoneResolution } from "@/lib/thumbnailSafeZone";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
@@ -372,6 +386,10 @@ export async function runThumbnailMobileReferenceQa(args: {
   referenceUrls?: readonly string[];
   brandContext?: Record<string, unknown> | null;
   visualTreatmentCriteria?: readonly string[];
+  /** Exact native copy planned before generation. OCR must find every item. */
+  expectedWords?: readonly string[];
+  /** Final admission may select the stronger pinned reviewer explicitly. */
+  qaTier?: VisionTier;
   log?: Logger;
 }): Promise<ThumbnailGateVerdict> {
   if (!hasVisionKey()) {
@@ -381,7 +399,10 @@ export async function runThumbnailMobileReferenceQa(args: {
   const mobileJpg = join(args.tmpDir, "thumbnail_mobile_168.jpg");
   await imageToJpeg(args.outJpg, mobileJpg, 168, 94);
   const refPaths: string[] = [];
-  const referenceUrls = [...new Set(args.referenceUrls ?? [])].filter(Boolean).slice(0, 4);
+  // The pinned final reviewer accepts two images total: candidate + one
+  // reference. Fast comparative review accepts the broader four-ref strip.
+  const referenceLimit = args.qaTier === "final" ? 1 : 4;
+  const referenceUrls = [...new Set(args.referenceUrls ?? [])].filter(Boolean).slice(0, referenceLimit);
   for (let index = 0; index < referenceUrls.length; index++) {
     try {
       refPaths.push(await downloadTo(referenceUrls[index], join(args.tmpDir, `qa_ref_${index}.jpg`)));
@@ -405,11 +426,20 @@ export async function runThumbnailMobileReferenceQa(args: {
       `Video title: "${args.title}"${args.niche ? `, niche: ${args.niche}` : ""}.\n` +
       (args.brandContext ? `CHANNEL STYLE DNA: ${JSON.stringify(args.brandContext)}.\n` : "") +
       `FULL GOLDEN PLAYBOOK RULES:\n- ${args.playbook.rules.join("\n- ")}\n` +
+      `USER-APPROVED GOLDEN CRAFT BAR:\n- ${GOLDEN_THUMBNAIL_CRAFT_RULES.join("\n- ")}\n` +
+      `OWNER-SELECTED A/B PREFERENCES (generalize the craft, never copy a selected scene):\n- ` +
+      `${OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES.join("\n- ")}\n` +
       (args.playbook.avoid.length
         ? `REJECTED ANTI-PATTERNS:\n- ${args.playbook.avoid.join("\n- ")}\n`
         : "") +
       `Judge the candidate against the production gate:\n` +
-      `(1) textOk: every visible word is correctly spelled and readable at THIS size.\n` +
+      `(1) textOk: every visible word is correctly spelled and readable at THIS size.` +
+      (args.expectedWords?.length
+        ? ` The pre-render plan requires EXACTLY ${args.expectedWords.map((word) => `"${word}"`).join(" and ")}; ` +
+          `a synonym, expanded/shortened number, changed unit, or different payoff word is false. ` +
+          `Beyond that exact headline, only ONE compact instance of the channel name may appear as the identity badge; ` +
+          `a repeated channel name, subtitle, tagline, or supporting sentence makes textOk false.\n`
+        : "\n") +
       `(2) faceClear: any intended face is clear and undistorted (true when no face is intended).\n` +
       `(3) Rate punch, styleMatch, and storyMatch 1-10` +
       (refPaths.length ? ` against the reference set.\n` : `.\n`) +
@@ -417,17 +447,55 @@ export async function runThumbnailMobileReferenceQa(args: {
       (requiresVisualTreatmentVerdict
         ? `(5) visualTreatmentCompliant: evaluate ALL of these non-negotiable treatment criteria against the actual candidate; false if any fail:\n- ${visualTreatmentCriteria.join("\n- ")}\n`
         : "") +
-      `Return ONLY JSON {"textOk":boolean,"faceClear":boolean,"punch":1-10,"styleMatch":1-10,` +
+      `Return ONLY JSON {"textOk":boolean,"transcribedText":["every visible text item exactly as read"],` +
+      `"faceClear":boolean,"punch":1-10,"styleMatch":1-10,` +
       `"storyMatch":1-10,"uiClean":boolean,` +
       (requiresVisualTreatmentVerdict ? `"visualTreatmentCompliant":boolean,` : "") +
       `"reason":"..."}.`,
     imagePaths: [mobileJpg, ...refPaths],
     json: true,
     maxTokens: VISION_GATE_MAX_TOKENS,
+    tier: args.qaTier,
   });
   const verdict = parseJsonLoose<Partial<ThumbnailGateVerdict>>(raw);
+  const reasonValue = verdict.reason as unknown;
+  const reason = typeof reasonValue === "string"
+    ? reasonValue
+    : reasonValue && typeof reasonValue === "object"
+      ? JSON.stringify(reasonValue).slice(0, 2_000)
+      : "judge omitted its reason";
+  let copyVerified = !args.expectedWords?.length;
+  let ocrReason = "";
+  if (args.expectedWords?.length) {
+    const transcriptValue = (verdict as Partial<ThumbnailGateVerdict> & {
+      transcribedText?: unknown;
+    }).transcribedText;
+    const transcript = Array.isArray(transcriptValue)
+      ? transcriptValue.filter((item): item is string => typeof item === "string").join("\n")
+      : typeof transcriptValue === "string" ? transcriptValue : "";
+    const transcriptMatch = thumbnailOcrMatchesExpected({
+      ocrText: transcript,
+      expectedWords: args.expectedWords,
+    });
+    try {
+      const ocrText = await readThumbnailOcr(args.outJpg);
+      const ocr = thumbnailOcrMatchesExpected({ ocrText, expectedWords: args.expectedWords });
+      copyVerified = ocr.exact || transcriptMatch.exact;
+      if (!copyVerified) {
+        ocrReason = `independent text reads miss exact planned copy: ${ocr.missing.join(", ")} ` +
+          `(OCR: ${ocr.normalizedOcr || "nothing"}; vision transcript: ${transcriptMatch.normalizedOcr || "nothing"})`;
+      }
+    } catch (error) {
+      copyVerified = transcriptMatch.exact;
+      if (!copyVerified) {
+        ocrReason = `exact planned copy was not verified (OCR: ` +
+          `${error instanceof Error ? error.message : String(error)}; ` +
+          `vision transcript: ${transcriptMatch.normalizedOcr || "nothing"})`;
+      }
+    }
+  }
   return {
-    textOk: verdict.textOk === true,
+    textOk: verdict.textOk === true && copyVerified,
     faceClear: verdict.faceClear === true,
     punch: Number(verdict.punch ?? 0),
     styleMatch: Number(verdict.styleMatch ?? 0),
@@ -436,7 +504,7 @@ export async function runThumbnailMobileReferenceQa(args: {
     ...(requiresVisualTreatmentVerdict
       ? { visualTreatmentCompliant: verdict.visualTreatmentCompliant === true }
       : {}),
-    reason: String(verdict.reason ?? "judge omitted its reason"),
+    reason: [reason, ocrReason].filter(Boolean).join(" | "),
   };
 }
 
@@ -724,6 +792,14 @@ export interface TournamentResult {
 
 export interface ThumbnailCandidateRenderResult extends ThumbnailRenderResult {
   pattern: string;
+  /** Planned copy retained for independent post-render OCR. */
+  expectedWords?: string[];
+  /**
+   * Exact text-free scene / deterministic-typography split. Batch providers
+   * use this persisted plan to render the already-art-directed scene without
+   * asking a second model to re-plan the thumbnail.
+   */
+  renderSpec?: ThumbnailRenderSpec;
   concept: {
     heroProp: string | null;
     background: string | null;
@@ -732,10 +808,22 @@ export interface ThumbnailCandidateRenderResult extends ThumbnailRenderResult {
   };
 }
 
+export interface DesignedThumbnailRequest {
+  /** Complete one-pass Nano Banana Pro art-direction prompt, including exact copy. */
+  prompt: string;
+  brief: ThumbBriefArgs;
+  expectWords: string[];
+}
+
+export type GenerateDesignedThumbnail = (
+  request: DesignedThumbnailRequest,
+) => Promise<Uint8Array>;
+
 /** Instantiate ONE pattern into a finished candidate (base + typography). */
 export async function renderCandidate(args: {
   pattern: ThumbPattern;
   title: string;
+  channelName?: string;
   scriptHint?: string;
   /** Topicraft's already-judged physical story moment. The Golden pattern may
    * compose it, but must not replace its actors, objects, action, or causal beat. */
@@ -758,13 +846,26 @@ export async function renderCandidate(args: {
   visualTreatment?: ThumbnailVisualTreatment;
   /** Explicit production still route. There is deliberately no provider fallback. */
   generateScene?: GenerateScene;
+  /** Proven Nano Banana Pro one-pass route: scene + physical typography. */
+  generateDesignedThumbnail?: GenerateDesignedThumbnail;
   log?: Logger;
 }): Promise<ThumbnailCandidateRenderResult> {
   // TWO-PASS DESIGN: the LAYOUT is decided FIRST (which zone the text owns),
   // the image is generated WITH that zone deliberately reserved as negative
   // space, then the text lands in its planned home — never fighting the image.
-  const inst = await claudeJson<{ heroProp?: string; background?: string; details?: string[]; fluxPrompt?: string; textPropsJson?: string; textZone?: string }>({
-    maxTokens: 1000,
+  const inst = await claudeJson<{
+    heroProp?: string;
+    background?: string;
+    details?: string[];
+    fluxPrompt?: string;
+    textPropsJson?: string;
+    textZone?: string;
+    layoutMode?: "split" | "centered_hero";
+  }>({
+    // The native design brief needs enough room for structured scene and hook
+    // planning before the JSON response closes.
+    maxTokens: 3000,
+    tier: "pro",
     temperature: 0.75,
     system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
     prompt:
@@ -789,10 +890,15 @@ export async function renderCandidate(args: {
       `PATTERN "${args.pattern.name}": ${args.pattern.fluxRecipe}\n` +
       `TEXT TEMPLATE: ${JSON.stringify(args.pattern.textRecipe)}\n` +
       `FULL GOLDEN PLAYBOOK RULES:\n- ${args.playbook.rules.join("\n- ")}\n` +
+      `OWNER-SELECTED A/B PREFERENCES (generalize composition only):\n- ` +
+      `${OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES.join("\n- ")}\n` +
       (args.playbook.avoid.length
         ? `FULL PLAYBOOK AVOID LIST:\n- ${args.playbook.avoid.join("\n- ")}\n\n`
         : "\n") +
-      `STEP 1 — LAYOUT: choose textZone ("left"|"right"|"upperLeft"|"upperRight") — where the typography will live.\n` +
+      `STEP 2 — fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY — ` +
+      `STEP 1 — LAYOUT: choose layoutMode ("split" or "centered_hero") and textZone ("left"|"right"|"upperLeft"|"upperRight"|"upperCenter"). ` +
+      `Use split by default for copy-dense hooks: large hero opposite the text zone. Choose centered_hero only when a centered face, object, or peak-action silhouette is materially stronger; then compose the scene and native type around that silhouette, never as a symmetrical title card.\n` +
+      `STEP 2 — fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY — ` +
       `STEP 2 — fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY — ` +
       `never reproduce its literal scene). ENERGY TIER = "${args.playbook.energy ?? "bold"}":\n` +
       (args.playbook.energy === "spectacle"
@@ -806,33 +912,47 @@ export async function renderCandidate(args: {
           : `BOLD: grounded but dramatic — one striking focal subject at heroic scale, charged atmosphere (storm ` +
             `light, golden hour blaze, deep shadow), strong tension or payoff in the frame. Punchy, never generic.\n`) +
       `Keep ONLY the channel's palette + grade + finish from its world — the SCENE must be new each time. ` +
-      `Hyper-saturated, volumetric light. COMPOSED FOR THE LAYOUT: the subject occupies the side OPPOSITE the ` +
-      `textZone (large, partially cropped for scale); the textZone 40% is clean darker negative space. ` +
-      `TEXT-FREE image (no words/letters).\n` +
+      `Hyper-saturated, volumetric light. COMPOSED FOR THE CHOSEN LAYOUT: split = subject opposite textZone with a clean darker 40% type field; centered_hero = hero centered at peak action with asymmetric supporting depth and protected type pockets around its silhouette. ` +
+      `The final native design may contain ONLY the exact planned headline and compact channel badge—no other ` +
+      `words, letters, numbers, equations, financial symbols, signs, labels, documents with writing, or logos.\n` +
       `NARRATIVE COHERENCE (hard requirement): the scene must LITERALLY ENACT the topic so a viewer instantly ` +
       `reads what the video is about - subjects ACTING OUT the idea (for "conquering anxiety": a stoic statue ` +
       `laying a steadying hand on a crumbling statue shoulder; for "market crash": a figure watching a collapsing ` +
       `red line tear through the floor). NEVER decorative abstraction (random dust, glows, floating objects) that ` +
       `does not tell the story. Test: cover the text - does the image alone communicate the topic?\n` +
+      `CLICK SPECTACLE (hard requirement): freeze the ONE most consequential physical transformation at its peak—` +
+      `rupture, avalanche, reversal, collision, escape, exposure, or impossible reveal. Make the cause and payoff visible ` +
+      `in one glance. The hero must feel dangerous, surprising, or nearly impossible, never like a polished product render. ` +
+      `For money topics, dramatize the exact input-to-payoff mechanism rather than showing generic coins or charts.\n` +
       `STEP 2b - BUILD THE SCENE IN NAMED STAGES (how the top 1% compose):\n` +
       `heroProp: the ONE dominant subject - 55-75% of the frame, emotionally charged, AGGRESSIVELY cropped with edges bleeding off frame (phone-screen scale) ` +
-      `(a cracked marble face glaring, a grumpy mogul portrait, a war elephant chest-on). Hero sits on the side ` +
-      `OPPOSITE the textZone.\n` +
+      `(a cracked marble face glaring, a grumpy mogul portrait, a war elephant chest-on). In split mode it sits opposite textZone; in centered_hero mode it anchors the middle while the hook uses a clear outer pocket.\n` +
       `background: a SEPARATE supporting layer behind the hero - darker, simpler, with depth (torn tabloid strips, ` +
       `a blurred crowd in red, a burning skyline, a storm sky). It frames the hero, never competes.\n` +
-      `details: 1-3 NON-TEXTUAL SYMBOLIC story-carrying additions ON or AROUND the hero that make the click irresistible ` +
+      `details: 1-2 NON-TEXTUAL story-carrying additions ON or AROUND the hero that make the click irresistible ` +
       `(fire reflected in glasses lenses, a glowing crack across the chest, a red zigzag crash line). ` +
       `Never request newspapers, signs, posters, labels, screens, letters, words, or any other textual prop. ` +
       `Each detail must deepen the SAME story - nothing random.\n` +
-      `STEP 3 — textPropsJson: the template as a JSON-ENCODED STRING with placeholders replaced (line texts: 1-3 ` +
-      `punchy words each, ≤5 words total, NOT restating the title - every line must be a real English hook word, NEVER meta-words like "omit"/"none"; ` +
-      `numberCallout: a REAL number from the topic, or LEAVE THE KEY OUT of the JSON entirely when none exists; set "position" to your chosen textZone).\n` +
-      `Return STRICT JSON {"heroProp":string,"background":string,"details":string[],"textPropsJson":string,"textZone":string}.`,
+      `STEP 3 — textPropsJson: the template as a JSON-ENCODED STRING with placeholders replaced. The finished ` +
+      `thumbnail may have at most TWO visual text lines total, including numberCallout. Before choosing copy, silently ` +
+      `generate SIX distinct hooks and score each for curiosity gap, emotional tension, concrete specificity, visual synergy, ` +
+      `instant mobile comprehension, and honest payoff. Select only the strongest winner; do not output the alternatives. ` +
+      `Reject any hook that merely labels the topic, sounds instructional, or could fit 100 unrelated videos. If numberCallout is used, ` +
+      `return exactly ONE supporting line (it may contain 1-2 words). Use ≤4 words total. Write a sharp curiosity, ` +
+      `danger, conflict, vivid mechanism, or payoff hook—not a mechanical ` +
+      `summary and not the title restated. The hook and image must create a knowledge gap that earns the click honestly. ` +
+      `Name the memorable story object or tension (for example "MONEY MACHINE"), not filler such as "EXACT MATH", ` +
+      `"HOW IT WORKS", "THE TRUTH", "EXPLAINED", or "REVEALED". ` +
+      `Every line must contain real English hook copy, never meta-words like "omit"/"none". ` +
+      `numberCallout: use a REAL number only when it strengthens the hook, preserving every material currency sign and ` +
+      `time unit (for example "$1K/MO", never bare "1000"); otherwise leave the key out. Set "position" to textZone.\n` +
+      `Return STRICT JSON {"heroProp":string,"background":string,"details":string[],"textPropsJson":string,"textZone":string,"layoutMode":"split"|"centered_hero"}.`,
   });
   // STAGED COMPOSITION: hero prop -> background -> story details, assembled
   // deterministically so generators receive named layers, not a prose blob.
   if (inst.heroProp) {
     inst.fluxPrompt =
+      `LAYOUT MODE: ${inst.layoutMode === "centered_hero" ? "centered hero at peak action; reserve asymmetric clean pockets around its silhouette for native typography" : "split composition; hero opposite the chosen type zone"}. ` +
       `HERO PROP (dominant, 30-50% of frame, cropped close): ${inst.heroProp}. ` +
       `BACKGROUND (separate supporting layer behind the hero - darker, simpler, depth): ${inst.background ?? "deep dark gradient"}. ` +
       `STORY DETAILS (symbolic, on/around the hero): ${(inst.details ?? []).join("; ") || "none"}.`;
@@ -871,9 +991,9 @@ export async function renderCandidate(args: {
     delete textProps["numberCallout"];
   }
 
-  // UNIVERSAL ENGINE: every provider renders scene pixels only. Typography is
-  // always local and deterministic, so a provider/environment switch cannot
-  // reintroduce misspellings or a more expensive Pro typography request.
+  // Nano Banana Pro owns the complete non-LoFi composition, including native
+  // typography. The compositor below remains only for explicit legacy/manual
+  // callers that do not supply the native route.
   const numberCallout = textProps["numberCallout"]
     ? String(textProps["numberCallout"])
     : undefined;
@@ -891,33 +1011,81 @@ export async function renderCandidate(args: {
       payoff: !numberCallout && index === payoffIdx,
     })),
   ];
-  const rendered = await renderThumbnail({
-    spec: {
-      scene: {
-        description: inst.fluxPrompt,
-        imageStyle: vl.imageStyle,
-        palette: [vl.baseColor, vl.accentColor].filter((color): color is string => Boolean(color)),
-        accentColor: vl.accentColor,
-        composition: (vl as { composition?: string }).composition,
-        textZone: zone,
-        visualAvoid: args.playbook.avoid,
-        ...(args.visualTreatment?.providerPromptRequirements?.length
-          ? { requiredVisualDirectives: args.visualTreatment.providerPromptRequirements }
-          : {}),
+  if (args.generateDesignedThumbnail) {
+    const channelName = args.channelName?.trim() || String(textProps["badge"] ?? "channel");
+    const brief: ThumbBriefArgs = {
+      channelName,
+      imageStyle: vl.imageStyle,
+      palette: [vl.baseColor, vl.accentColor].filter((color): color is string => Boolean(color)),
+      accentColor: vl.accentColor,
+      textObject: vl.textObject
+        ?? (vl.treatment === "sticker" ? "grunge_sticker"
+          : vl.treatment === "stamp" ? "stamp_ink"
+            : vl.treatment === "neon" ? "neon_sign"
+              : vl.treatment === "plate" ? "block_plate"
+                : vl.font === "serif" ? "paint_smear"
+                  : "movie_poster"),
+      composition: vl.composition,
+      scene: inst.fluxPrompt,
+      lines: overlayLines,
+      badge: channelName,
+    };
+    const expectWords = overlayLines.map((line) => line.text);
+    const prompt =
+      `${buildThumbBrief(brief)} USER-APPROVED GOLDEN CRAFT BAR: ${GOLDEN_THUMBNAIL_CRAFT_RULES.join(" ")} ` +
+      `OWNER-SELECTED A/B PREFERENCES: ${OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES.join(" ")}`;
+    const providerPath = join(args.tmpDir, `thumbnail_designed_${args.idx}.png`);
+    await writeFile(providerPath, await args.generateDesignedThumbnail({ prompt, brief, expectWords }));
+    // This normalization only scales provider pixels to the delivery contract;
+    // Nano Banana Pro already owns every scene and typography pixel.
+    await imageToJpeg(providerPath, args.outJpg, 1_280, 720);
+    const zoneResolution = trustedThumbnailTextZoneResolution(zone);
+    args.log?.(`thumbnailLab: candidate ${args.idx + 1} "${args.pattern.name}" rendered (Nano Banana Pro native design)`);
+    return {
+      path: args.outJpg,
+      basePath: providerPath,
+      baseSource: "generated",
+      requestedTextZone: zone,
+      resolvedTextZone: zone,
+      zoneResolution,
+      pattern: args.pattern.name,
+      expectedWords: expectWords,
+      concept: {
+        heroProp: inst.heroProp?.trim() || null,
+        background: inst.background?.trim() || null,
+        details: (inst.details ?? []).map((detail) => detail.trim()).filter(Boolean),
+        scenePrompt: inst.fluxPrompt,
       },
-      typography: {
-        lines: overlayLines,
-        subtitle: args.visualTreatment?.disclosureBadge ?? (String(textProps["badge"] ?? "") || undefined),
-        baseColor: vl.baseColor,
-        accentColor: vl.accentColor,
-        badgePlacement: args.visualTreatment?.disclosureBadge ? "topRight" : undefined,
-        badgeStyle: args.visualTreatment?.disclosureBadge ? "pill" : vl.badgeStyle,
-        font: vl.font ?? "sans",
-        uppercase: textProps["uppercase"] !== false,
-        treatment: vl.treatment,
-        textObject: vl.textObject,
-      },
+    };
+  }
+  const renderSpec: ThumbnailRenderSpec = {
+    scene: {
+      description: inst.fluxPrompt,
+      imageStyle: vl.imageStyle,
+      palette: [vl.baseColor, vl.accentColor].filter((color): color is string => Boolean(color)),
+      accentColor: vl.accentColor,
+      composition: (vl as { composition?: string }).composition,
+      textZone: zone,
+      visualAvoid: args.playbook.avoid,
+      ...(args.visualTreatment?.providerPromptRequirements?.length
+        ? { requiredVisualDirectives: args.visualTreatment.providerPromptRequirements }
+        : {}),
     },
+    typography: {
+      lines: overlayLines,
+      subtitle: args.visualTreatment?.disclosureBadge ?? (String(textProps["badge"] ?? "") || undefined),
+      baseColor: vl.baseColor,
+      accentColor: vl.accentColor,
+      badgePlacement: args.visualTreatment?.disclosureBadge ? "topRight" : "bottomRight",
+      badgeStyle: args.visualTreatment?.disclosureBadge ? "pill" : vl.badgeStyle,
+      font: vl.font ?? "sans",
+      uppercase: textProps["uppercase"] !== false,
+      treatment: vl.treatment,
+      textObject: vl.textObject,
+    },
+  };
+  const rendered = await renderThumbnail({
+    spec: renderSpec,
     outJpg: args.outJpg,
     tmpDir: args.tmpDir,
     generateScene: args.generateScene,
@@ -929,6 +1097,8 @@ export async function renderCandidate(args: {
   return {
     ...rendered,
     pattern: args.pattern.name,
+    expectedWords: overlayLines.map((line) => line.text),
+    renderSpec,
     concept: {
       heroProp: inst.heroProp?.trim() || null,
       background: inst.background?.trim() || null,
@@ -943,6 +1113,10 @@ export async function judgeTournament(args: {
   refs: VerifiedRef[];
   title: string;
   tmpDir: string;
+  /** Bypass the verdict cache for deliberate blind A/B regression trials. */
+  noCache?: boolean;
+  /** Final admission is limited to a two-candidate comparison. */
+  tier?: VisionTier;
   log?: Logger;
 }): Promise<TournamentResult> {
   const n = args.candidates.length;
@@ -952,20 +1126,30 @@ export async function judgeTournament(args: {
   for (let i = 0; i < n; i++) {
     smalls.push(await imageToJpeg(args.candidates[i].path, join(args.tmpDir, `cand_${i}_small.jpg`), 480, 270));
   }
+  const referenceContext = refPaths.length > 0
+    ? ` Images ${n + 1}-${n + refPaths.length} are REAL thumbnails of the highest-view videos in this niche ` +
+      `(the competition in the same feed).`
+    : " There are no reference images in this blind A/B comparison.";
   const raw = await visionLocal({
     prompt:
       `FEED SIMULATION. Images 1-${n} are CANDIDATE thumbnails for the video "${args.title}". ` +
-      `Images ${n + 1}-${n + refPaths.length} are REAL thumbnails of the highest-view videos in this niche ` +
-      `(the competition in the same feed).\n` +
+      `${referenceContext}\n` +
+      `Judge the candidates blind: do not infer an owner preference or reward image order. ` +
       `For each candidate: clickScore 1-10 (would it WIN the click in this feed), beatsRefs = how many of the ` +
       `references it visually out-competes, strengths, and the ONE fix that would most raise its score. ` +
-      `Judge composition, instant readability, number/text impact, color authority, and premium feel. ` +
+      `Apply this user-approved golden craft bar:\n- ${GOLDEN_THUMBNAIL_CRAFT_RULES.join("\n- ")}\n` +
+      `Apply these cross-video traits extracted from explicit owner A/B selections:\n- ` +
+      `${OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES.join("\n- ")}\n` +
+      `Judge composition, instant readability, hook compression, peak-action emotion, cause-and-consequence ` +
+      `story proof, eye path, headline impact, color authority, mobile legibility, and premium feel. ` +
       `Be harsh — 8+ means it genuinely belongs among the winners.\n` +
       `Return STRICT JSON {"candidates":[{"idx":1-based,"clickScore":1-10,"beatsRefs":number,"strengths":string,"fix":string}],` +
       `"winner":1-based,"why":string}.`,
     imagePaths: [...smalls, ...refPaths],
     json: true,
     maxTokens: 1800,
+    noCache: args.noCache,
+    tier: args.tier,
   });
   const parsed = parseJsonLoose<{
     candidates?: { idx?: number; clickScore?: number; beatsRefs?: number; strengths?: string; fix?: string }[];

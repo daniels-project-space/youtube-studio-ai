@@ -56,20 +56,20 @@ async function main(): Promise<void> {
     );
     assert.equal(requests.length, 3, "oversized final review rejects before image fetch/provider work");
     assert.deepEqual(requests.map((request) => request.model), [
-      "mistralai/ministral-3b-2512",
-      "mistralai/ministral-8b-2512",
-      "qwen/qwen3.6-27b",
+      "google/gemini-3.7-flash",
+      "google/gemini-3.7-flash",
+      "google/gemini-3.7-flash",
     ]);
     for (const request of requests) {
       const provider = request.provider as { allow_fallbacks?: unknown; only?: unknown; data_collection?: unknown };
-      assert.equal(provider.allow_fallbacks, false);
+      assert.equal(provider.allow_fallbacks, true);
       assert.equal(provider.data_collection, "deny");
-      assert.ok(Array.isArray(provider.only) && provider.only.length === 1);
+      assert.deepEqual(provider.only, ["google-ai-studio", "google-vertex"]);
     }
     assert.deepEqual(
       (requests[2]?.provider as { only?: unknown }).only,
-      ["coreweave"],
-      "final visual review stays on its explicit, currently supported non-Google host",
+      ["google-ai-studio", "google-vertex"],
+      "final visual review stays on the pinned OpenRouter Gemini provider pair",
     );
   } finally {
     global.fetch = originalFetch;

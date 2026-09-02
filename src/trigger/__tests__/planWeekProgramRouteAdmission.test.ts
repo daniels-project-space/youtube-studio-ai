@@ -99,8 +99,8 @@ for (const [boundary, index] of [
   ["api.contentPlan.reservePlanBatch", taskSource.indexOf("api.contentPlan.reservePlanBatch")],
   ["await optimizeTopics({", taskSource.indexOf("await optimizeTopics({")],
   [
-    "generateNanoBananaImageWithReceipt",
-    taskSource.lastIndexOf("generateNanoBananaImageWithReceipt("),
+    "generateFalNanoBananaProThumbnailWithReceipt",
+    taskSource.lastIndexOf("generateFalNanoBananaProThumbnailWithReceipt("),
   ],
 ] as const) {
   assert.ok(index >= 0, `expected ${boundary} in the plan-week worker`);
@@ -113,6 +113,8 @@ assert.ok(
   taskSource.indexOf("programDirective: routeAdmission.programDirective") > routeAdmissionIndex,
   "the provider planner must receive the route-derived topic directive",
 );
+assert.match(taskSource, /FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE/);
+assert.match(taskSource, /makePlanWeekFalNanoBananaProProviderRenderReceipt/);
 
 const apiSource = readFileSync(new URL("../../app/api/plan-week/route.ts", import.meta.url), "utf8");
 assert.match(apiSource, /tasks\.trigger\("plan-week-ahead"/);

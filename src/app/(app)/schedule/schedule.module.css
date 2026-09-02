@@ -61,7 +61,14 @@
   margin-top: 1.15rem;
   border-top: 1px solid var(--color-border);
   padding-top: 0.9rem;
+  color: inherit;
+  text-decoration: none;
 }
+
+a.nextRelease { transition: border-color 160ms ease, transform 160ms ease; }
+a.nextRelease:hover { border-color: color-mix(in srgb, var(--color-accent) 56%, var(--color-border)); }
+a.nextRelease:hover strong { color: var(--color-accent); }
+a.nextRelease:focus-visible { border-radius: 8px; outline: 2px solid var(--color-secondary); outline-offset: 5px; }
 
 .nextReleaseSignal {
   position: relative;

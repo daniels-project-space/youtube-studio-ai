@@ -114,13 +114,13 @@ export function planThumbnailText(args: {
   const uppercase = args.uppercase !== false;
   const sideZone = /left|right/i.test(zone);
   const zoneWidth = sideZone
-    ? Math.min(570, Math.floor(width * 0.45))
+    ? Math.min(650, Math.floor(width * 0.51))
     : width - safeInset * 2;
   const platePadding = 16;
   const maxTextWidth = zoneWidth - platePadding * 2;
   const tracking = args.tracking ?? 0;
   const fontScale = Math.max(0.5, Math.min(1.5, args.fontScale ?? 1));
-  const maxEm = (sideZone ? 16 : 24) * GLYPH_WIDTH_RATIO;
+  const maxEm = (sideZone ? 18 : 24) * GLYPH_WIDTH_RATIO;
   const wrapped = args.lines.flatMap((line) => wrapLine(line, maxEm, uppercase, tracking));
   const lines = wrapped.length ? wrapped : [{ text: "WATCH", accent: false }];
   const maxBlockHeight = height - safeInset * 2 - 70;
@@ -132,7 +132,7 @@ export function planThumbnailText(args: {
   const byHeight = Math.floor(
     maxBlockHeight / (scales.reduce((sum, scale) => sum + scale, 0) * 1.18 * fontScale),
   );
-  const baseFontSize = Math.max(20, Math.min(104, byWidth, byHeight));
+  const baseFontSize = Math.max(20, Math.min(128, byWidth, byHeight));
   const fontSizes = scales.map((scale) => Math.floor(baseFontSize * scale));
   const lineHeights = fontSizes.map((fontSize) => Math.ceil(fontSize * fontScale * 1.18));
   const blockHeight = lineHeights.reduce((sum, lineHeight) => sum + lineHeight, 0);

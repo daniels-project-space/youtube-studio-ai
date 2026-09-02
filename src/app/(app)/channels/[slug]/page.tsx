@@ -1166,7 +1166,7 @@ function RouteQualificationBenchmarkCard({ channel }: { channel: ChannelDoc }) {
     >
       <SectionTitle>Route qualification</SectionTitle>
       <p style={{ margin: "-0.35rem 0 0.85rem", fontSize: "0.79rem", lineHeight: 1.45, color: "var(--color-muted)" }}>
-        For supervised or newly-qualified routes only. This runs the exact creative and final-QA chain privately to prove the route. It cannot upload, publish, or change this channel&apos;s normal schedule.
+        Private end-to-end proof for new or supervised routes. It never uploads or changes the schedule.
       </p>
       <div style={{ display: "flex", gap: "0.55rem", alignItems: "center", flexWrap: "wrap" }}>
         <label style={{ display: "grid", gap: "0.22rem", fontSize: "0.68rem", color: "var(--color-muted)" }}>
@@ -1253,6 +1253,7 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
   const activeConnector = connector?.status === "active" ? connector : undefined;
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  const [expandedSetupStep, setExpandedSetupStep] = useState<number | null>(null);
 
   const connect = () => {
     if (!setup.canConnect) return;
@@ -1403,6 +1404,7 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
         : "The automatic branding attempt waits for a healthy OAuth connection.",
     },
   ];
+  const activeSetupStep = setupSteps.findIndex((step) => step.state === "action" || step.state === "working");
 
   return (
     <section>
@@ -1410,19 +1412,19 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
       <div className={`${styles.youtubeCard} glass`} data-oauth={setup.oauth}>
         {setup.oauth === "ready" ? (
           <div className={styles.youtubeLead} data-tone="ready">
-            <span aria-hidden="true">✓</span><div><small>Verified destination</small><strong>{setup.targetLabel || setup.targetChannelId || "The selected YouTube channel"}</strong><p>Google returned the destination and every required permission is present.</p></div>
+            <span aria-hidden="true">✓</span><div><small>Verified destination</small><strong>{setup.targetLabel || setup.targetChannelId || "The selected YouTube channel"}</strong><p>Publishing, branding, and analytics are ready.</p></div>
           </div>
         ) : setup.oauth === "incomplete" ? (
           <div className={styles.youtubeLead} data-tone="attention">
-            <span aria-hidden="true">!</span><div><small>Permissions incomplete</small><strong>{setup.targetLabel || setup.targetChannelId || "A YouTube channel"}</strong><p>Publishing, branding, and analytics remain blocked until the full permission set is approved.</p></div>
+            <span aria-hidden="true">!</span><div><small>Permissions incomplete</small><strong>{setup.targetLabel || setup.targetChannelId || "A YouTube channel"}</strong><p>Reconnect once to restore publishing and analytics.</p></div>
           </div>
         ) : (
           <div className={styles.youtubeLead} data-tone="quiet">
             <span aria-hidden="true">○</span><div><small>Destination required</small><strong>Choose the exact YouTube channel</strong><p>{connector?.status === "revoked"
-              ? "YouTube access was revoked. Reconnect explicitly before this channel can publish or ingest analytics."
+              ? "Access was revoked. Reconnect before publishing."
               : connector?.status === "error"
-                ? "The YouTube connector failed validation. Reconnect it before publishing or analytics can resume."
-              : "Connect an existing channel, or explicitly approve creating one. No production is sent to YouTube before a destination exists."}</p></div>
+                ? "The connection failed validation. Reconnect before publishing."
+              : "Connect an existing channel or approve creating one."}</p></div>
           </div>
         )}
         {setup.destination === "creating" && (
@@ -1445,18 +1447,30 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
           className={styles.youtubeChecklist}
         >
           <header><span>Destination sequence</span><strong>{setupSteps.filter((step) => step.state === "complete" || step.state === "automatic").length}/{setupSteps.length} resolved</strong></header>
-          {setupSteps.map((step) => (
-            <div key={step.label} className={styles.youtubeStep} data-state={step.state}>
-              <span
-                aria-label={step.state}
-              >
-                {step.state === "complete" ? "✓" : step.state === "action" ? "!" : step.state === "working" ? "●" : "·"}
-              </span>
-              <div>
+          {setupSteps.map((step, index) => (
+            <details
+              key={step.label}
+              className={styles.youtubeStep}
+              data-state={step.state}
+              open={expandedSetupStep === index || (expandedSetupStep === null && index === activeSetupStep)}
+              onToggle={(event) => {
+                const isOpen = event.currentTarget.open;
+                setExpandedSetupStep((current) => isOpen
+                  ? index
+                  : current === index || current === null
+                    ? -1
+                    : current);
+              }}
+            >
+              <summary>
+                <span aria-label={step.state}>
+                  {step.state === "complete" ? "✓" : step.state === "action" ? "!" : step.state === "working" ? "●" : "·"}
+                </span>
                 <strong>{step.label}</strong>
-                <p>{step.detail}</p>
-              </div>
-            </div>
+                <small>{step.state === "complete" ? "Ready" : step.state === "working" ? "Working" : step.state === "action" ? "Action" : "Waiting"}</small>
+              </summary>
+              <p>{step.detail}</p>
+            </details>
           ))}
         </div>
         <div className={styles.youtubeActions}>
@@ -1480,16 +1494,16 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
           )}
         </div>
         {setup.oauth !== "ready" && (
-          <p style={{ fontSize: "0.74rem", color: "var(--color-faint)", margin: 0 }}>
-            <strong>Connect</strong> links a channel via Google (instant, in your browser — switch to the target
-            channel on youtube.com first). <strong>Auto-create</strong> is only offered before any destination or
-            connector exists, because creating a second external channel is irreversible.
-          </p>
+          <details className={styles.youtubeNote}>
+            <summary>Connection rules</summary>
+            <p><strong>Connect</strong> opens Google for the selected channel. Auto-create is only available before a destination exists because channel creation is irreversible.</p>
+          </details>
         )}
         {setup.oauth === "ready" && (
-          <p style={{ fontSize: "0.74rem", color: "var(--color-faint)", margin: 0 }}>
-            A new or rotated YouTube connector intentionally pauses this app channel. Review release authority in Settings before enabling automation.
-          </p>
+          <details className={styles.youtubeNote}>
+            <summary>Connection rules</summary>
+            <p>A new or rotated connector pauses this channel until release authority is reviewed.</p>
+          </details>
         )}
         {msg && <p aria-live="polite" style={{ fontSize: "0.8rem", color: "var(--color-muted)", margin: 0 }}>{msg}</p>}
       </div>

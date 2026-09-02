@@ -106,6 +106,15 @@ export async function GET(request: Request) {
               thumbnailPresent: Boolean(item.candidateThumbnailKey),
             },
           } : {}),
+          ...(item.replacementId ? {
+            replacement: {
+              id: item.replacementId,
+              status: item.replacementStatus,
+              error: item.replacementError,
+              verified: Boolean(item.replacementReceiptFingerprint),
+              appliedAt: item.replacementAppliedAt,
+            },
+          } : {}),
         })),
       },
       { headers: { "Cache-Control": "private, no-store" } },

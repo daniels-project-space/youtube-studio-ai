@@ -5,7 +5,7 @@
  * files. These helpers give each run an isolated temp dir and stream remote
  * assets to disk without buffering whole videos in app memory.
  */
-import { mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
+import { access, mkdtemp, mkdir, writeFile, readFile, rm } from "node:fs/promises";
 import { createWriteStream } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -35,6 +35,16 @@ export async function makeRunTempDir(runId: string, scope?: string): Promise<str
 /** Ensure a directory exists. */
 export async function ensureDir(dir: string): Promise<void> {
   await mkdir(dir, { recursive: true });
+}
+
+/** Read-only existence check for a run-local artifact. */
+export async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Best-effort recursive cleanup of a temp dir (never throws). */

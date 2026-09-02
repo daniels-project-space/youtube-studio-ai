@@ -351,7 +351,7 @@ interface GeminiImageResult {
 
 type SealedNanoBananaGeneration = {
   purpose: GeminiRuntimePurpose;
-  /** Direct Google calls are reserved for the legacy sealed thumbnail route. */
+  /** Direct Google calls are reserved for sealed thumbnail asset routes. */
   profile: typeof NANO_BANANA_THUMBNAIL_PROFILE;
   promptCostUsd: (promptTokenCount: number) => number;
   costUsd: (promptTokenCount: number) => number;
@@ -615,6 +615,13 @@ export async function generateNanoBananaImageWithReceipt(
       requiredDimensions: [profile.providerOutputWidth, profile.providerOutputHeight],
     },
   });
+  return sealNanoBananaThumbnailResult(generated);
+}
+
+function sealNanoBananaThumbnailResult(
+  generated: GeminiImageResult,
+): NanoBananaImageResult {
+  const profile = NANO_BANANA_THUMBNAIL_PROFILE;
   if (generated.model !== profile.model || generated.route !== profile.route) {
     throw new Error("nano banana thumbnail route escaped its pinned provider profile");
   }

@@ -1,4 +1,5 @@
 import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract";
+import { FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaLofiThumbnailContract";
 
 /**
  * A compact, durable provenance marker for a thumbnail produced by the
@@ -12,6 +13,10 @@ import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract
  */
 export const THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION =
   "thumbnail-current-candidate-evidence/v1" as const;
+export const LOFI_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION =
+  "lofi-thumbnail-current-candidate-evidence/v1" as const;
+export const ERNIE_NOVITA_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION =
+  "ernie-novita-thumbnail-current-candidate-evidence/v1" as const;
 
 export type ThumbnailCurrentCandidateEvidence = {
   version: typeof THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION;
@@ -28,6 +33,57 @@ export type ThumbnailCurrentCandidateEvidence = {
   /** The pipeline admitted this exact candidate for its normal draft flow. */
   publishable: true;
   /** Provenance-only: never an owner acceptance or an external replacement. */
+  reviewState: "candidate_only";
+};
+
+export type LofiThumbnailCurrentCandidateEvidence = {
+  version: typeof LOFI_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION;
+  ownerId: string;
+  channelId: string;
+  runId: string;
+  r2Key: string;
+  artifactSha256: string;
+  generatorModule: "thumbnail_gen";
+  contractVersion: "lofi-nano-banana-reference-thumbnail/v1";
+  providerRoute: typeof FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE.route;
+  sideLane: "nano-banana-lofi-video-reference";
+  sourceVideoKey: string;
+  sourceFrameSha256: string;
+  sourceFrameTimeSec: number;
+  sourceWidth: number;
+  sourceHeight: number;
+  providerRequestSha256: string;
+  providerResponseSha256: string;
+  publishable: true;
+  reviewState: "candidate_only";
+};
+
+/**
+ * Proof for a native ERNIE BF16 thumbnail, including ERNIE's own exact
+ * typography. No local typography compositor is permitted on this route:
+ * the stored pixels are exactly the pixels ERNIE rendered and QA accepted.
+ */
+export type ErnieNovitaThumbnailCurrentCandidateEvidence = {
+  version: typeof ERNIE_NOVITA_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION;
+  ownerId: string;
+  channelId: string;
+  runId: string;
+  r2Key: string;
+  artifactSha256: string;
+  generatorModule: "thumbnail_gen";
+  contractVersion: "ernie-novita-thumbnail-scene/v1";
+  providerRoute: "ernie-image-novita-4090";
+  providerRequestSha256: string;
+  providerResponseSha256: string;
+  modelRepository: "Comfy-Org/ERNIE-Image";
+  modelRevision: string;
+  qualityProfile: "hq";
+  sourceWidth: 1376;
+  sourceHeight: 768;
+  promptEnhancer: true;
+  delivery: "native-ernie-bf16";
+  typographyRenderer: "ernie-native-typography/v1";
+  publishable: true;
   reviewState: "candidate_only";
 };
 
@@ -110,8 +166,136 @@ export function createThumbnailCurrentCandidateEvidence(
   };
 }
 
-function parseEvidence(value: unknown): ThumbnailCurrentCandidateEvidence | null {
+export function createLofiThumbnailCurrentCandidateEvidence(
+  value: Omit<
+    LofiThumbnailCurrentCandidateEvidence,
+    "version" | "generatorModule" | "contractVersion" | "providerRoute" | "sideLane" | "publishable" | "reviewState"
+  >,
+): LofiThumbnailCurrentCandidateEvidence {
+  if (
+    !nonEmpty(value.ownerId) ||
+    !nonEmpty(value.channelId) ||
+    !nonEmpty(value.runId) ||
+    !nonEmpty(value.r2Key) ||
+    !nonEmpty(value.sourceVideoKey) ||
+    !sha256(value.artifactSha256) ||
+    !sha256(value.sourceFrameSha256) ||
+    !sha256(value.providerRequestSha256) ||
+    !sha256(value.providerResponseSha256) ||
+    !Number.isFinite(value.sourceFrameTimeSec) ||
+    value.sourceFrameTimeSec < 0 ||
+    !Number.isInteger(value.sourceWidth) ||
+    value.sourceWidth < 3_840 ||
+    !Number.isInteger(value.sourceHeight) ||
+    value.sourceHeight < 2_160
+  ) {
+    throw new Error("Lo-Fi thumbnail evidence requires a bound, truthful 4K rendered-video frame");
+  }
+  return {
+    ...value,
+    version: LOFI_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION,
+    generatorModule: "thumbnail_gen",
+    contractVersion: "lofi-nano-banana-reference-thumbnail/v1",
+    providerRoute: FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE.route,
+    sideLane: "nano-banana-lofi-video-reference",
+    publishable: true,
+    reviewState: "candidate_only",
+  };
+}
+
+export function createErnieNovitaThumbnailCurrentCandidateEvidence(
+  value: Omit<
+    ErnieNovitaThumbnailCurrentCandidateEvidence,
+    "version" | "generatorModule" | "contractVersion" | "providerRoute" |
+    "modelRepository" | "qualityProfile" | "sourceWidth" | "sourceHeight" |
+    "promptEnhancer" | "delivery" | "typographyRenderer" | "publishable" | "reviewState"
+  >,
+): ErnieNovitaThumbnailCurrentCandidateEvidence {
+  if (
+    !nonEmpty(value.ownerId) ||
+    !nonEmpty(value.channelId) ||
+    !nonEmpty(value.runId) ||
+    !nonEmpty(value.r2Key) ||
+    !sha256(value.artifactSha256) ||
+    !sha256(value.providerRequestSha256) ||
+    !sha256(value.providerResponseSha256) ||
+    typeof value.modelRevision !== "string" || !/^[a-f0-9]{40}$/.test(value.modelRevision)
+  ) {
+    throw new Error("ERNIE Novita thumbnail evidence requires bound identities and immutable request/receipt hashes");
+  }
+  return {
+    ...value,
+    version: ERNIE_NOVITA_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION,
+    generatorModule: "thumbnail_gen",
+    contractVersion: "ernie-novita-thumbnail-scene/v1",
+    providerRoute: "ernie-image-novita-4090",
+    modelRepository: "Comfy-Org/ERNIE-Image",
+    qualityProfile: "hq",
+    sourceWidth: 1376,
+    sourceHeight: 768,
+    promptEnhancer: true,
+    delivery: "native-ernie-bf16",
+    typographyRenderer: "ernie-native-typography/v1",
+    publishable: true,
+    reviewState: "candidate_only",
+  };
+}
+
+function parseEvidence(
+  value: unknown,
+): ThumbnailCurrentCandidateEvidence | LofiThumbnailCurrentCandidateEvidence |
+  ErnieNovitaThumbnailCurrentCandidateEvidence | null {
   if (!isRecord(value)) return null;
+  if (value.version === ERNIE_NOVITA_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION) {
+    if (
+      !nonEmpty(value.ownerId) ||
+      !nonEmpty(value.channelId) ||
+      !nonEmpty(value.runId) ||
+      !nonEmpty(value.r2Key) ||
+      !sha256(value.artifactSha256) ||
+      value.generatorModule !== "thumbnail_gen" ||
+      value.contractVersion !== "ernie-novita-thumbnail-scene/v1" ||
+      value.providerRoute !== "ernie-image-novita-4090" ||
+      !sha256(value.providerRequestSha256) ||
+      !sha256(value.providerResponseSha256) ||
+      value.modelRepository !== "Comfy-Org/ERNIE-Image" ||
+      typeof value.modelRevision !== "string" || !/^[a-f0-9]{40}$/.test(value.modelRevision) ||
+      value.qualityProfile !== "hq" ||
+      value.sourceWidth !== 1376 ||
+      value.sourceHeight !== 768 ||
+      value.promptEnhancer !== true ||
+      value.delivery !== "native-ernie-bf16" ||
+      value.typographyRenderer !== "ernie-native-typography/v1" ||
+      value.publishable !== true ||
+      value.reviewState !== "candidate_only"
+    ) return null;
+    return value as unknown as ErnieNovitaThumbnailCurrentCandidateEvidence;
+  }
+  if (value.version === LOFI_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION) {
+    if (
+      !nonEmpty(value.ownerId) ||
+      !nonEmpty(value.channelId) ||
+      !nonEmpty(value.runId) ||
+      !nonEmpty(value.r2Key) ||
+      !sha256(value.artifactSha256) ||
+      value.generatorModule !== "thumbnail_gen" ||
+      value.contractVersion !== "lofi-nano-banana-reference-thumbnail/v1" ||
+      value.providerRoute !== FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE.route ||
+      value.sideLane !== "nano-banana-lofi-video-reference" ||
+      !nonEmpty(value.sourceVideoKey) ||
+      !sha256(value.sourceFrameSha256) ||
+      !sha256(value.providerRequestSha256) ||
+      !sha256(value.providerResponseSha256) ||
+      !Number.isFinite(value.sourceFrameTimeSec) ||
+      !Number.isInteger(value.sourceWidth) ||
+      Number(value.sourceWidth) < 3_840 ||
+      !Number.isInteger(value.sourceHeight) ||
+      Number(value.sourceHeight) < 2_160 ||
+      value.publishable !== true ||
+      value.reviewState !== "candidate_only"
+    ) return null;
+    return value as unknown as LofiThumbnailCurrentCandidateEvidence;
+  }
   if (
     value.version !== THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION ||
     !nonEmpty(value.ownerId) ||
@@ -179,6 +363,10 @@ export function assessThumbnailRefreshEvidence(
   return {
     status: "current_golden_candidate",
     action: "no_refresh_action",
-    reason: "Current Golden generator provenance is recorded. This is still not an owner acceptance or an external thumbnail replacement.",
+    reason: evidence.version === LOFI_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION
+      ? "Current Lo-Fi 15-second-frame Nano Banana provenance is recorded. This is still not an owner acceptance or an external thumbnail replacement."
+      : evidence.version === ERNIE_NOVITA_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION
+        ? "Current ERNIE-Novita native-image and native-typography provenance is recorded. This is still not an owner acceptance or an external thumbnail replacement."
+        : "Current Golden generator provenance is recorded. This is still not an owner acceptance or an external thumbnail replacement.",
   };
 }

@@ -848,8 +848,18 @@ export async function setVideoThumbnail(
   imageBytes: Uint8Array,
   contentType = "image/jpeg",
   refreshToken: string,
-): Promise<void> {
+): Promise<{ kind: string; itemCount: number }> {
   const accessToken = await getAccessToken(refreshToken);
+  return setVideoThumbnailWithAccessToken(videoId, imageBytes, contentType, accessToken);
+}
+
+/** Apply one already-authorized thumbnail without refreshing the grant twice. */
+export async function setVideoThumbnailWithAccessToken(
+  videoId: string,
+  imageBytes: Uint8Array,
+  contentType: string,
+  accessToken: string,
+): Promise<{ kind: string; itemCount: number }> {
   const res = await fetch(
     `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}`,
     {
@@ -866,6 +876,14 @@ export async function setVideoThumbnail(
     const t = await res.text().catch(() => "");
     throw new YouTubeError(`thumbnails.set HTTP ${res.status}: ${t.slice(0, 220)}`);
   }
+  const body = await res.json().catch(() => ({})) as {
+    kind?: unknown;
+    items?: unknown;
+  };
+  return {
+    kind: typeof body.kind === "string" ? body.kind : "youtube#thumbnailSetResponse",
+    itemCount: Array.isArray(body.items) ? body.items.length : 0,
+  };
 }
 
 /** The authenticated channel's id (channels.list mine=true). */

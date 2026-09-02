@@ -41,6 +41,38 @@ const planWeekNanoBananaProviderReceipt = v.object({
   createdAt: v.number(),
 });
 
+const planWeekFalNanoBananaProProviderReceipt = v.object({
+  version: v.literal("plan-week-provider-render/v3"),
+  ownerId: v.string(),
+  channelId: v.string(),
+  batchId: v.string(),
+  itemId: v.string(),
+  attempt: v.number(),
+  requestKey: v.string(),
+  checkpointKey: v.string(),
+  destinationKey: v.string(),
+  provider: v.literal("fal"),
+  route: v.literal("fal-nano-banana-pro-native-thumbnail"),
+  sourceKey: v.string(),
+  sourceContentType: v.string(),
+  model: v.literal("fal-ai/nano-banana-pro"),
+  apiVersion: v.literal("fal-model-api/v1"),
+  providerRequestId: v.union(v.string(), v.null()),
+  profileId: v.literal("fal-nano-banana-pro-thumbnail/v1"),
+  width: v.number(),
+  height: v.number(),
+  promptUtf8Bytes: v.number(),
+  expectedWords: v.array(v.string()),
+  outputCostUsd: v.literal(0.15),
+  costUsd: v.number(),
+  requestSha256: v.string(),
+  requestCanonicalJson: v.string(),
+  providerResponseMetadataCanonicalJson: v.string(),
+  providerResponseMetadataSha256: v.string(),
+  responseSha256: v.string(),
+  createdAt: v.number(),
+});
+
 /** Read-only compatibility for immutable receipts created before the migration. */
 const planWeekLegacyNovitaProviderReceipt = v.object({
   version: v.literal("plan-week-provider-render/v1"),
@@ -1944,6 +1976,7 @@ export default defineSchema({
     destinationKey: v.string(),
     providerRequestSha256: v.string(),
     providerReceipt: v.union(
+      planWeekFalNanoBananaProProviderReceipt,
       planWeekNanoBananaProviderReceipt,
       planWeekLegacyNovitaProviderReceipt,
     ),
@@ -2039,6 +2072,45 @@ export default defineSchema({
     .index("by_owner_video", ["ownerId", "youtubeVideoId"])
     .index("by_owner_status", ["ownerId", "status"])
     .index("by_run", ["runId"]),
+
+  // Explicit owner acceptance ledger for applying a QA-passed private
+  // thumbnail candidate to one exact YouTube video. Candidate bytes, connector
+  // version, account identity, and source run are frozen before dispatch.
+  youtubeThumbnailReplacements: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    sourceRunId: v.id("runs"),
+    candidateRunId: v.id("runs"),
+    youtubeVideoId: v.string(),
+    connectorId: v.id("youtubeAuth"),
+    connectorVersion: v.number(),
+    expectedYoutubeChannelId: v.string(),
+    candidateThumbnailKey: v.string(),
+    candidateArtifactSha256: v.string(),
+    planFingerprint: v.string(),
+    dispatchKey: v.string(),
+    approval: v.optional(v.any()),
+    approvalFingerprint: v.optional(v.string()),
+    status: v.union(
+      v.literal("awaiting_approval"),
+      v.literal("pending"),
+      v.literal("queued"),
+      v.literal("applied"),
+      v.literal("blocked"),
+    ),
+    dispatchAttempts: v.number(),
+    dispatchTriggerRunId: v.optional(v.string()),
+    providerKind: v.optional(v.string()),
+    providerItemCount: v.optional(v.number()),
+    appliedAt: v.optional(v.number()),
+    applicationReceiptFingerprint: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_candidate", ["ownerId", "candidateRunId"])
+    .index("by_owner_video", ["ownerId", "youtubeVideoId"])
+    .index("by_owner_status", ["ownerId", "status"]),
 
   // Encrypted YouTube resumable-upload capabilities. A row is bound to one
   // owner/channel/upload key so retries can query the remote byte range and

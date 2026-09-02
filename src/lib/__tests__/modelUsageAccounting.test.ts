@@ -56,14 +56,14 @@ function exactPriceFromProviderTokens(): void {
   // 250 output/reasoning @ 2.50/M.
   close(priced.costUsd ?? -1, 0.001088, "Gemini modality/cache price");
 
-  const groq = priceModelUsage({
-    provider: "groq",
-    model: "qwen/qwen3.6-27b",
+  const openRouterFlash = priceModelUsage({
+    provider: "openrouter",
+    model: "google/gemini-3.7-flash",
     kind: "vision",
     inputTokens: 1_000,
     outputTokens: 100,
   });
-  close(groq.costUsd ?? -1, 0.0009, "Groq token price");
+  close(openRouterFlash.costUsd ?? -1, 0.001125, "OpenRouter Gemini Flash token price");
 
   const claude = priceModelUsage({
     provider: "anthropic",
@@ -565,8 +565,8 @@ async function explicitAndFailedCostsAreAuthoritative(): Promise<void> {
   const exactConceptCost = priceModelUsage(conceptUsage).costUsd;
   assert.notEqual(exactConceptCost, undefined);
   const pricedVisionUsage = {
-    provider: "groq",
-    model: "qwen/qwen3.6-27b",
+    provider: "openrouter",
+    model: "google/gemini-3.7-flash",
     kind: "vision" as const,
     inputTokens: 1_000,
     outputTokens: 100,

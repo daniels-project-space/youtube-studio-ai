@@ -196,8 +196,11 @@ async function routingProof(): Promise<void> {
 
   const explicitInjection: Record<string, RegExp> = {
     "src/lib/thumbnailRenderer.ts": /generateNanoBananaImage/,
-    "src/trigger/planWeekAhead.ts": /generateNanoBananaImageWithReceipt/,
-    "src/trigger/blocks/intelligenceBlocks.ts": /generateNanoBananaImageWithReceipt/,
+    // Week-ahead uses the sealed native Nano Banana Pro thumbnail adapter,
+    // not the retired generic Nano helper. Its request and source receipt are
+    // persisted before the Golden/mobile quality gate can accept an artifact.
+    "src/trigger/planWeekAhead.ts": /generateFalNanoBananaProThumbnailWithReceipt/,
+    "src/trigger/blocks/intelligenceBlocks.ts": /generateFalNanoBananaProThumbnailWithReceipt/,
     "src/trigger/blocks/motionComicBlocks.ts": /createAttestedNovitaImageGenerator/,
     "src/trigger/blocks/whiteboardScribeBlocks.ts": /renderAttestedNovitaImageBytes/,
     "src/trigger/blocks/documentaryCollageShortBlocks.ts": /createAttestedNovitaImageGenerator/,
@@ -207,6 +210,13 @@ async function routingProof(): Promise<void> {
   for (const [relative, expected] of Object.entries(explicitInjection)) {
     assert.match(await readFile(join(process.cwd(), relative), "utf8"), expected);
   }
+  const planWeekSource = await readFile(join(process.cwd(), "src/trigger/planWeekAhead.ts"), "utf8");
+  assert.match(planWeekSource, /FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE/);
+  assert.match(planWeekSource, /makePlanWeekFalNanoBananaProProviderRenderReceipt/);
+  assert.match(planWeekSource, /persistNanoBananaSourceCheckpoint/);
+  const intelligenceSource = await readFile(join(process.cwd(), "src/trigger/blocks/intelligenceBlocks.ts"), "utf8");
+  assert.match(intelligenceSource, /FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE/);
+  assert.match(intelligenceSource, /mode: "native-scene-and-typography"/);
   const whiteboardSource = await readFile(
     join(process.cwd(), "src/trigger/blocks/whiteboardScribeBlocks.ts"),
     "utf8",

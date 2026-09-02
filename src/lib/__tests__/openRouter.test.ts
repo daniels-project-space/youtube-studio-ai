@@ -50,8 +50,8 @@ async function main(): Promise<void> {
     assert.equal(hasAnthropicKey(), true, "existing capability guards must accept the OpenRouter intelligence route");
     assert.equal(
       OPENROUTER_MODELS.intelligence,
-      "qwen/qwen3.6-27b",
-      "shared structured planning stays on the verified high-capacity non-Google route",
+      "google/gemini-3.7-flash",
+      "shared structured planning stays on the pinned Gemini 3.7 Flash route",
     );
     process.env.OPENROUTER_INTELLIGENCE_MODEL = "openai/gpt-oss-20b";
     assert.throws(
@@ -81,9 +81,9 @@ async function main(): Promise<void> {
     assert.equal(flash.model, OPENROUTER_MODELS.intelligence);
     assert.equal(creative.model, OPENROUTER_MODELS.creative);
     for (const payload of [flash, creative]) {
-      assert.equal(payload.provider.allow_fallbacks, false);
+      assert.equal(payload.provider.allow_fallbacks, true);
       assert.equal(payload.provider.data_collection, "deny");
-      assert.ok(Array.isArray(payload.provider.only) && payload.provider.only.length === 1);
+      assert.deepEqual(payload.provider.only, ["google-ai-studio", "google-vertex"]);
       assert.equal(payload.response_format.type, "json_object");
     }
 

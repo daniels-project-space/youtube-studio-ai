@@ -6,6 +6,10 @@ import {
   nanoBananaThumbnailPromptCostUsd,
   type NanoBananaImageReceipt,
 } from "@/lib/nanoBananaThumbnailContract";
+import {
+  FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE,
+  type FalNanoBananaProThumbnailReceipt,
+} from "@/lib/falNanoBananaProThumbnailContract";
 import type { NovitaImageProviderReceipt } from "@/lib/novitaMedia";
 
 const SHA256 = /^[a-f0-9]{64}$/;
@@ -83,6 +87,30 @@ export interface PlanWeekNanoBananaProviderRenderReceipt extends PlanWeekRenderS
   createdAt: number;
 }
 
+export interface PlanWeekFalNanoBananaProProviderRenderReceipt extends PlanWeekRenderScope {
+  version: "plan-week-provider-render/v3";
+  provider: "fal";
+  route: typeof FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE.route;
+  sourceKey: string;
+  sourceContentType: string;
+  model: typeof FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE.model;
+  apiVersion: typeof FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE.apiVersion;
+  providerRequestId: string | null;
+  profileId: typeof FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE.contractVersion;
+  width: number;
+  height: number;
+  promptUtf8Bytes: number;
+  expectedWords: string[];
+  outputCostUsd: typeof FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE.outputImageUsd;
+  costUsd: number;
+  requestSha256: string;
+  requestCanonicalJson: string;
+  providerResponseMetadataCanonicalJson: string;
+  providerResponseMetadataSha256: string;
+  responseSha256: string;
+  createdAt: number;
+}
+
 /** Existing immutable rows remain readable; no new render path creates this shape. */
 export interface LegacyPlanWeekNovitaProviderRenderReceipt extends PlanWeekRenderScope {
   version: "plan-week-provider-render/v1";
@@ -106,11 +134,21 @@ export interface LegacyPlanWeekNovitaProviderRenderReceipt extends PlanWeekRende
 }
 
 export type PlanWeekProviderRenderReceipt =
+  | PlanWeekFalNanoBananaProProviderRenderReceipt
   | PlanWeekNanoBananaProviderRenderReceipt
   | LegacyPlanWeekNovitaProviderRenderReceipt;
 
+export type PlanWeekThumbnailProviderRenderReceipt =
+  | PlanWeekFalNanoBananaProProviderRenderReceipt
+  | PlanWeekNanoBananaProviderRenderReceipt;
+
 export type PlanWeekNanoBananaSourceReceipt = NanoBananaImageReceipt & {
   sourceKey: string;
+};
+
+export type PlanWeekFalNanoBananaProSourceReceipt = FalNanoBananaProThumbnailReceipt & {
+  sourceKey: string;
+  expectedWords: string[];
 };
 
 export interface PlanWeekArtifactReceipt {
@@ -129,6 +167,26 @@ export function planWeekNanoBananaRequestContext(
 ): string {
   return canonicalJson({
     contractVersion: NANO_BANANA_THUMBNAIL_PROFILE.contractVersion,
+    scope: {
+      ownerId: scope.ownerId,
+      channelId: scope.channelId,
+      batchId: scope.batchId,
+      itemId: scope.itemId,
+      attempt: scope.attempt,
+      requestKey: scope.requestKey,
+      checkpointKey: scope.checkpointKey,
+      destinationKey: scope.destinationKey,
+    },
+    sourceKey,
+  });
+}
+
+export function planWeekFalNanoBananaProRequestContext(
+  scope: PlanWeekRenderScope,
+  sourceKey: string,
+): string {
+  return canonicalJson({
+    contractVersion: FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE.contractVersion,
     scope: {
       ownerId: scope.ownerId,
       channelId: scope.channelId,
@@ -180,6 +238,41 @@ export function makePlanWeekProviderRenderReceipt(
   return receipt;
 }
 
+export function makePlanWeekFalNanoBananaProProviderRenderReceipt(
+  scope: PlanWeekRenderScope,
+  rendered: PlanWeekFalNanoBananaProSourceReceipt,
+): PlanWeekFalNanoBananaProProviderRenderReceipt {
+  const profile = FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE;
+  const receipt: PlanWeekFalNanoBananaProProviderRenderReceipt = {
+    version: "plan-week-provider-render/v3",
+    ...scope,
+    provider: profile.provider,
+    route: profile.route,
+    sourceKey: rendered.sourceKey,
+    sourceContentType: rendered.sourceContentType,
+    model: rendered.model,
+    apiVersion: rendered.apiVersion,
+    providerRequestId: rendered.providerRequestId,
+    profileId: profile.contractVersion,
+    width: rendered.width,
+    height: rendered.height,
+    promptUtf8Bytes: rendered.promptUtf8Bytes,
+    expectedWords: rendered.expectedWords,
+    outputCostUsd: rendered.outputCostUsd,
+    costUsd: rendered.costUsd,
+    requestSha256: rendered.providerRequestSha256,
+    requestCanonicalJson: rendered.providerRequestCanonicalJson,
+    providerResponseMetadataCanonicalJson: rendered.providerResponseMetadataCanonicalJson,
+    providerResponseMetadataSha256: rendered.providerResponseMetadataSha256,
+    responseSha256: rendered.responseSha256,
+    createdAt: rendered.createdAt,
+  };
+  if (!validatePlanWeekProviderRenderReceipt(receipt, scope)) {
+    throw new Error("invalid plan-week Fal Nano Banana Pro provider receipt");
+  }
+  return receipt;
+}
+
 function validScope(
   value: PlanWeekProviderRenderReceipt,
   expected?: Partial<PlanWeekRenderScope>,
@@ -194,7 +287,7 @@ function validScope(
     value.destinationKey,
     value.sourceKey,
     value.model,
-    value.version === "plan-week-provider-render/v2" ? value.apiVersion : value.modelRevision,
+    value.version === "plan-week-provider-render/v1" ? value.modelRevision : value.apiVersion,
     value.profileId,
   ];
   if (
@@ -306,6 +399,67 @@ function validateNanoBananaReceipt(
     validateNanoBananaResponseMetadata(value);
 }
 
+function validateFalNanoBananaProReceipt(
+  value: PlanWeekFalNanoBananaProProviderRenderReceipt,
+  expected?: Partial<PlanWeekRenderScope>,
+): boolean {
+  const profile = FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE;
+  if (
+    value.version !== "plan-week-provider-render/v3" ||
+    value.provider !== profile.provider ||
+    value.route !== profile.route ||
+    value.model !== profile.model ||
+    value.apiVersion !== profile.apiVersion ||
+    value.profileId !== profile.contractVersion ||
+    !Number.isInteger(value.width) || value.width < 1_024 || value.width > 4_096 ||
+    !Number.isInteger(value.height) || value.height < 576 || value.height > 4_096 ||
+    Math.abs(value.width / value.height - 16 / 9) > 0.04 ||
+    !Number.isInteger(value.promptUtf8Bytes) || value.promptUtf8Bytes < 1 ||
+    value.promptUtf8Bytes > profile.maxPromptUtf8Bytes ||
+    !Array.isArray(value.expectedWords) ||
+    value.expectedWords.length < 1 || value.expectedWords.length > 2 ||
+    !value.expectedWords.every((word) =>
+      typeof word === "string" && word.trim().length > 0 && word.length <= 64
+    ) ||
+    value.outputCostUsd !== profile.outputImageUsd ||
+    value.costUsd !== profile.outputImageUsd ||
+    !/^image\/(?:png|jpeg|webp)$/iu.test(value.sourceContentType) ||
+    (value.providerRequestId !== null &&
+      (typeof value.providerRequestId !== "string" || !value.providerRequestId.trim() ||
+        value.providerRequestId.length > 256)) ||
+    typeof value.providerResponseMetadataCanonicalJson !== "string" ||
+    value.providerResponseMetadataCanonicalJson.length > 100_000 ||
+    !SHA256.test(value.providerResponseMetadataSha256) ||
+    !SHA256.test(value.responseSha256) ||
+    !validScope(value, expected)
+  ) return false;
+  try {
+    const request = JSON.parse(value.requestCanonicalJson) as Record<string, unknown>;
+    const body = request["body"] as Record<string, unknown>;
+    const prompt = body?.["prompt"];
+    const metadata = JSON.parse(value.providerResponseMetadataCanonicalJson) as Record<string, unknown>;
+    return canonicalJson(request) === value.requestCanonicalJson &&
+      request["apiVersion"] === profile.apiVersion &&
+      request["context"] === planWeekFalNanoBananaProRequestContext(value, value.sourceKey) &&
+      request["endpoint"] === profile.model &&
+      typeof prompt === "string" &&
+      new TextEncoder().encode(prompt).byteLength === value.promptUtf8Bytes &&
+      value.expectedWords.every((word) => prompt.includes(`"${word.toUpperCase()}"`)) &&
+      body["image_urls"] === undefined &&
+      body["num_images"] === 1 &&
+      body["aspect_ratio"] === profile.aspectRatio &&
+      body["output_format"] === "png" &&
+      body["safety_tolerance"] === "4" &&
+      body["resolution"] === profile.resolution &&
+      body["limit_generations"] === true &&
+      body["enable_web_search"] === false &&
+      canonicalJson(metadata) === value.providerResponseMetadataCanonicalJson &&
+      metadata["requestId"] === value.providerRequestId;
+  } catch {
+    return false;
+  }
+}
+
 function validateLegacyNovitaReceipt(
   value: LegacyPlanWeekNovitaProviderRenderReceipt,
   expected?: Partial<PlanWeekRenderScope>,
@@ -372,6 +526,12 @@ export function validatePlanWeekProviderRenderReceipt(
 ): receipt is PlanWeekProviderRenderReceipt {
   if (!receipt || typeof receipt !== "object" || Array.isArray(receipt)) return false;
   const version = (receipt as { version?: unknown }).version;
+  if (version === "plan-week-provider-render/v3") {
+    return validateFalNanoBananaProReceipt(
+      receipt as PlanWeekFalNanoBananaProProviderRenderReceipt,
+      expected,
+    );
+  }
   if (version === "plan-week-provider-render/v2") {
     return validateNanoBananaReceipt(
       receipt as PlanWeekNanoBananaProviderRenderReceipt,
@@ -448,6 +608,14 @@ export async function verifyPlanWeekProviderReceiptCryptography(
   receipt: PlanWeekProviderRenderReceipt,
 ): Promise<boolean> {
   if (!validatePlanWeekProviderRenderReceipt(receipt)) return false;
+  if (receipt.version === "plan-week-provider-render/v3") {
+    const [requestHash, metadataHash] = await Promise.all([
+      sha256(`fal-nano-banana-pro-provider\0${receipt.requestCanonicalJson}`),
+      sha256(`fal-nano-banana-pro-response-metadata\0${receipt.providerResponseMetadataCanonicalJson}`),
+    ]);
+    return requestHash === receipt.requestSha256 &&
+      metadataHash === receipt.providerResponseMetadataSha256;
+  }
   if (receipt.version === "plan-week-provider-render/v2") {
     const [requestHash, metadataHash] = await Promise.all([
       sha256(`nano-banana-provider\0${receipt.requestCanonicalJson}`),
@@ -526,7 +694,7 @@ export function samePlanWeekArtifactReceipt(
 }
 
 export function planWeekProviderReceiptImageUsage(receipt: PlanWeekProviderRenderReceipt) {
-  if (receipt.version === "plan-week-provider-render/v2") {
+  if (receipt.version === "plan-week-provider-render/v2" || receipt.version === "plan-week-provider-render/v3") {
     return {
       provider: receipt.provider,
       model: receipt.model,
@@ -551,7 +719,7 @@ export function planWeekProviderReceiptImageUsage(receipt: PlanWeekProviderRende
 export function planWeekProviderEvidenceSha256(
   receipt: PlanWeekProviderRenderReceipt,
 ): string {
-  return receipt.version === "plan-week-provider-render/v2"
+  return receipt.version === "plan-week-provider-render/v2" || receipt.version === "plan-week-provider-render/v3"
     ? receipt.responseSha256
     : receipt.billingReceiptSha256;
 }
@@ -620,7 +788,8 @@ export function planWeekArtifactHeadMatches(args: {
   artifact: PlanWeekArtifactReceipt;
 }): boolean {
   const { head, checkpointKey, provider, artifact } = args;
-  const evidenceMetadataKey = provider.version === "plan-week-provider-render/v2"
+  const evidenceMetadataKey = provider.version === "plan-week-provider-render/v2" ||
+    provider.version === "plan-week-provider-render/v3"
     ? PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerEvidenceSha256
     : PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256;
   return Boolean(

@@ -24,6 +24,8 @@ import {
   THUMBNAIL_TEXT_OBJECTS,
 } from "@/lib/ffmpeg";
 import { buildStyleDnaPlaybook } from "@/lib/thumbnailLab";
+import { GOLDEN_THUMBNAIL_CRAFT_RULES } from "@/lib/thumbnailGoldenStandard";
+import { thumbnailOcrMatchesExpected } from "@/lib/thumbnailOcr";
 import { planThumbnailText, type ThumbnailTextZone } from "@/lib/thumbnailLayout";
 import {
   buildThumbnailImageRequest,
@@ -99,6 +101,22 @@ function assertFamilyPolicy(): void {
   }
 }
 
+function assertNativeCopyOcrGate(): void {
+  assert.deepEqual(
+    thumbnailOcrMatchesExpected({
+      ocrText: "$1K/MO\nCASH ENGINE\nINVESTORY",
+      expectedWords: ["$1K/MO", "CASH ENGINE"],
+    }),
+    { exact: true, missing: [], normalizedOcr: "$1K/MO CASH ENGINE INVESTORY" },
+  );
+  const mutated = thumbnailOcrMatchesExpected({
+    ocrText: "$1,000/M0\nCASH LOOP\nINVESTORY",
+    expectedWords: ["$1K/MO", "CASH ENGINE"],
+  });
+  assert.equal(mutated.exact, false, "provider-mutated native copy must fail closed");
+  assert.deepEqual(mutated.missing, ["$1K/MO", "CASH ENGINE"]);
+}
+
 function assertSceneTypographySplit(): void {
   const spec: ThumbnailRenderSpec = {
     scene: {
@@ -126,6 +144,12 @@ function assertSceneTypographySplit(): void {
   assert.doesNotMatch(prompt, /DEFEND YOUR|PEACE|QUIET STOIC/i);
   assert.match(prompt, /no text, letters, words, numbers/i);
   assert.match(prompt, /left 42%/i);
+  assert.match(prompt, /avoid a dead 50\/50 split/i);
+  assert.match(prompt, /intrude 6-10%/i);
+  assert.ok(
+    GOLDEN_THUMBNAIL_CRAFT_RULES.every((rule) => prompt.includes(rule)),
+    "provider scene prompt must carry every user-approved Golden craft rule",
+  );
 
   const treatedRequest = buildThumbnailImageRequest({
     ...spec.scene,
@@ -194,6 +218,25 @@ function assertMotifImplementations(): void {
     "legacy",
     "unknown persisted motif data must degrade before rendering rather than crash after paid scene generation",
   );
+  assert.equal(
+    resolveThumbnailTextStyle({ treatment: "clean", font: "bebas" }).motif,
+    "movie_poster",
+    "older clean condensed Style DNA must inherit a physical Golden text motif",
+  );
+  assert.equal(
+    resolveThumbnailTextStyle({ treatment: "stamp", font: "marker" }).motif,
+    "stamp_ink",
+    "older stamped Style DNA must inherit the executable ink motif",
+  );
+
+  const cornerBadgeGraph = buildThumbnailTextFilterGraph({
+    title: "MARKET CRASH",
+    lines: [{ text: "MARKET CRASH", payoff: true }],
+    subtitle: "INVESTORY",
+    badgePlacement: "bottomRight",
+  });
+  assert.match(cornerBadgeGraph, /text='INVESTORY'.*x=w-text_w-62:y=h-104/,
+    "compact channel identity belongs in the lower-right corner by default");
 
   const speechGraph = buildThumbnailTextFilterGraph({
     title: "STAY HARD",
@@ -359,7 +402,7 @@ async function assertRenderedLayout(): Promise<void> {
       fontScale: spaced.fontScale,
     });
     assert.ok(longPlan.lines.length >= 3, "overlong unbroken words must hard-wrap before rendering");
-    assert.ok(longPlan.lines.every((line) => line.x + line.width <= 622));
+    assert.ok(longPlan.lines.every((line) => line.x + line.width <= 704));
     await thumbnailText({
       basePath: longBase,
       outJpg: longPath,
@@ -471,12 +514,24 @@ async function assertStrictNanoBananaRoute(): Promise<void> {
       calls += 1;
       assert.match(String(input), /\/v1beta\/models\/gemini-2\.5-flash-image:generateContent/);
       const body = JSON.parse(String(init?.body)) as {
-        contents: Array<{ parts: Array<{ text: string }> }>;
+        contents: Array<{ parts: Array<{
+          text?: string;
+          inlineData?: { data: string; mimeType: string };
+        }> }>;
         generationConfig: { responseModalities: string[]; imageConfig: Record<string, string> };
       };
       assert.deepEqual(body.generationConfig.responseModalities, ["IMAGE"]);
       assert.deepEqual(body.generationConfig.imageConfig, { aspectRatio: "16:9" });
-      assert.match(body.contents[0].parts[0].text, /ABSOLUTE RULE — PICTURE ONLY, NO TEXT/);
+      if (calls === 1) {
+        assert.equal(body.contents[0].parts.length, 1);
+        assert.match(body.contents[0].parts[0].text ?? "", /ABSOLUTE RULE — PICTURE ONLY, NO TEXT/);
+      } else {
+        assert.equal(body.contents[0].parts.length, 2);
+        assert.doesNotMatch(body.contents[0].parts[0].text ?? "", /ABSOLUTE RULE — PICTURE ONLY, NO TEXT/);
+        assert.match(body.contents[0].parts[0].text ?? "", /"Night Focus"/);
+        assert.match(body.contents[0].parts[0].text ?? "", /"4K"/);
+        assert.equal(body.contents[0].parts[1].inlineData?.mimeType, "image/png");
+      }
       return new Response(JSON.stringify({
         modelVersion: "gemini-2.5-flash-image-2025-08",
         responseId: "fixture-nano-response",
@@ -516,6 +571,7 @@ async function assertStrictNanoBananaRoute(): Promise<void> {
     assert.equal(usage.records[0]?.width, 1344);
     assert.equal(usage.records[0]?.height, 768);
     assert.equal(usage.records[0]?.costUsd, 0.0390288);
+
     await assert.rejects(
       generateNanoBananaImageWithReceipt({
         prompt: "x".repeat(NANO_BANANA_THUMBNAIL_PROFILE.maxPromptUtf8Bytes),
@@ -543,6 +599,7 @@ async function main(): Promise<void> {
   process.env[GEMINI_RUNTIME_OPT_IN_ENV] = "1";
   try {
     assertFamilyPolicy();
+    assertNativeCopyOcrGate();
     assertSceneTypographySplit();
     assertMotifImplementations();
     assertSafePlans();

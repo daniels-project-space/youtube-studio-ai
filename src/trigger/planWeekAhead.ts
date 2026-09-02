@@ -1,8 +1,8 @@
 /**
  * `plan-week-ahead` — pre-build the upcoming-videos queue for a channel: pick N
  * fresh topics, then for each generate an SEO title, a short description, and a
- * thumbnail (the SAME universal renderer as a real render: one text-free flash
- * scene + deterministic local typography), and store them in the `contentPlan`
+ * thumbnail (the SAME native Fal Nano Banana Pro renderer as a real render),
+ * and store them in the `contentPlan`
  * table for the channel page's "Week ahead" section.
  */
 import { task } from "@trigger.dev/sdk";
@@ -16,10 +16,10 @@ import { optimizeTopics } from "@/lib/topicOptimizer";
 import { loadLedger } from "@/lib/performance";
 import { detectFollowups } from "@/lib/followups";
 import {
-  generateNanoBananaImageWithReceipt,
-  hasNanoBanana,
-} from "@/lib/banana";
-import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract";
+  generateFalNanoBananaProThumbnailWithReceipt,
+  hasFalNanoBananaProThumbnail,
+} from "@/lib/falNanoBananaProThumbnail";
+import { FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaProThumbnailContract";
 import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
 import {
   renderCandidate,
@@ -52,18 +52,18 @@ import { createImageUsageScope, recordImageUsage } from "@/lib/imageUsage";
 import {
   PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA,
   makePlanWeekArtifactReceipt,
-  makePlanWeekProviderRenderReceipt,
+  makePlanWeekFalNanoBananaProProviderRenderReceipt,
+  planWeekFalNanoBananaProRequestContext,
   planWeekArtifactHeadMatches,
-  planWeekNanoBananaRequestContext,
   planWeekProviderEvidenceSha256,
   planWeekProviderReceiptImageUsage,
   samePlanWeekProviderRenderReceipt,
   validatePlanWeekProviderRenderReceipt,
   verifyPlanWeekProviderReceiptCryptography,
   type PlanWeekArtifactReceipt,
-  type PlanWeekNanoBananaProviderRenderReceipt,
   type PlanWeekProviderRenderReceipt,
   type PlanWeekRenderScope,
+  type PlanWeekThumbnailProviderRenderReceipt,
 } from "@/lib/planWeekRenderReceipt";
 import {
   PLAN_WEEK_CONTRACT_VERSION,
@@ -277,7 +277,7 @@ export const planWeekAheadRecoveryPreflightTask = task({
       ok: true,
       guardVersion: PLAN_WEEK_RECOVERY_GUARD_VERSION,
       taskVersion: ctx.run.version,
-      providerRoute: NANO_BANANA_THUMBNAIL_PROFILE.route,
+      providerRoute: FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE.route,
       batchId: invocation.recovery.batchId,
       itemIds: invocation.recovery.itemIds,
     };
@@ -381,7 +381,7 @@ export const planWeekAheadTask = task({
 
     let itemIds = admitted.itemIds as Id<"contentPlan">[] | undefined;
     if (admitted.topicState !== "complete") {
-      if (!hasAnthropicKey() || !hasNanoBanana()) {
+      if (!hasAnthropicKey() || !hasFalNanoBananaProThumbnail()) {
         const modelScope = createModelUsageScope();
         const imageScope = createImageUsageScope();
         const checkpoint = buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot());
@@ -394,7 +394,7 @@ export const planWeekAheadTask = task({
         });
         const error = !hasAnthropicKey()
           ? "plan-week-ahead: Anthropic topic provider is not configured"
-          : "plan-week-ahead: Nano Banana thumbnail provider is not configured";
+          : "plan-week-ahead: Fal Nano Banana Pro thumbnail provider is not configured";
         await convex.mutation(api.contentPlan.failPlanTopics, {
           ownerId, channelId, batchId, attempt: admitted.topicAttempt,
           usageCheckpointKey, error, retryable: true,
@@ -1064,7 +1064,8 @@ async function recoverThumbnailCheckpoint(
   const providerRequestSha256 = head.metadata[
     PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerRequestSha256
   ]?.trim();
-  const evidenceMetadataKey = providerReceipt.version === "plan-week-provider-render/v2"
+  const evidenceMetadataKey = providerReceipt.version === "plan-week-provider-render/v2" ||
+    providerReceipt.version === "plan-week-provider-render/v3"
     ? PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerEvidenceSha256
     : PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256;
   const providerEvidenceSha256 = head.metadata[evidenceMetadataKey]?.trim();
@@ -1230,7 +1231,7 @@ async function persistThumbnailCheckpoint(args: {
 
 interface PlanWeekNanoBananaSourceCheckpoint {
   version: "plan-week-nano-banana-source/v1";
-  providerReceipt: PlanWeekNanoBananaProviderRenderReceipt;
+  providerReceipt: PlanWeekThumbnailProviderRenderReceipt;
   imageBase64: string;
 }
 
@@ -1244,7 +1245,7 @@ async function loadNanoBananaSourceCheckpoint(
   sourceKey: string,
   scope: PlanWeekRenderScope,
 ): Promise<{
-  providerReceipt: PlanWeekNanoBananaProviderRenderReceipt;
+  providerReceipt: PlanWeekThumbnailProviderRenderReceipt;
   imageBytes: Buffer;
 } | null> {
   let stored: Uint8Array;
@@ -1271,7 +1272,8 @@ async function loadNanoBananaSourceCheckpoint(
     parsed.imageBase64.length % 4 !== 0 ||
     !/^[A-Za-z0-9+/]+={0,2}$/.test(parsed.imageBase64) ||
     !validatePlanWeekProviderRenderReceipt(parsed.providerReceipt, scope) ||
-    parsed.providerReceipt.version !== "plan-week-provider-render/v2" ||
+    (parsed.providerReceipt.version !== "plan-week-provider-render/v2" &&
+      parsed.providerReceipt.version !== "plan-week-provider-render/v3") ||
     parsed.providerReceipt.sourceKey !== sourceKey ||
     !(await verifyPlanWeekProviderReceiptCryptography(parsed.providerReceipt))
   ) {
@@ -1292,7 +1294,7 @@ async function loadNanoBananaSourceCheckpoint(
 async function persistNanoBananaSourceCheckpoint(args: {
   sourceKey: string;
   scope: PlanWeekRenderScope;
-  providerReceipt: PlanWeekNanoBananaProviderRenderReceipt;
+  providerReceipt: PlanWeekThumbnailProviderRenderReceipt;
   imageBytes: Buffer;
 }): Promise<void> {
   const checkpoint: PlanWeekNanoBananaSourceCheckpoint = {
@@ -1346,7 +1348,7 @@ async function persistNanoBananaSourceCheckpoint(args: {
 
 /**
  * One production-gated plan thumbnail through the same Golden playbook
- * instantiation, Nano Banana scene route, local typography, and comparative
+ * instantiation, native Fal Nano Banana Pro design route, and comparative
  * mobile QA used by thumbnail_gen.
  */
 async function genThumb(o: {
@@ -1380,8 +1382,8 @@ async function genThumb(o: {
   artifactReceipt: PlanWeekArtifactReceipt;
   usageCheckpoint: PlanWeekUsageCheckpoint;
 }> {
-  if (!o.providerReceipt && !hasNanoBanana()) {
-    throw new Error("plan thumbnail Nano Banana provider is not configured");
+  if (!o.providerReceipt && !hasFalNanoBananaProThumbnail()) {
+    throw new Error("plan thumbnail Fal Nano Banana Pro provider is not configured");
   }
   if (!hasAnthropicKey()) {
     throw new Error("plan thumbnail Golden pattern instantiation provider is not configured");
@@ -1398,37 +1400,40 @@ async function genThumb(o: {
     seed: o.id,
   });
   let providerReceipt = o.providerReceipt;
-  const generateScene = providerReceipt
-    ? async () => {
-        recordImageUsage(planWeekProviderReceiptImageUsage(providerReceipt!));
-        const bytes = providerReceipt!.version === "plan-week-provider-render/v2"
-          ? (await loadNanoBananaSourceCheckpoint(
-              providerReceipt!.sourceKey,
-              o.receiptScope,
-            ))?.imageBytes
-          : Buffer.from(await getObjectBytes(providerReceipt!.sourceKey));
-        if (!bytes) {
-          throw new InvalidPlanCheckpointError("durable Nano Banana source checkpoint is missing");
-        }
-        if (!bytes.length || bytes.length > 30 * 1024 * 1024) {
-          throw new Error("plan thumbnail provider source is outside the 1B..30MiB contract");
-        }
-        return bytes;
-      }
-    : async (request: import("@/lib/thumbnailRenderer").ThumbnailImageRequest) => {
+  const loadProviderBytes = async (): Promise<Buffer> => {
+    if (!providerReceipt) throw new InvalidPlanCheckpointError("plan thumbnail provider receipt is missing");
+    recordImageUsage(planWeekProviderReceiptImageUsage(providerReceipt));
+    const bytes = providerReceipt.version === "plan-week-provider-render/v2" ||
+      providerReceipt.version === "plan-week-provider-render/v3"
+      ? (await loadNanoBananaSourceCheckpoint(providerReceipt.sourceKey, o.receiptScope))?.imageBytes
+      : Buffer.from(await getObjectBytes(providerReceipt.sourceKey));
+    if (!bytes) {
+      throw new InvalidPlanCheckpointError("durable Nano Banana source checkpoint is missing");
+    }
+    if (!bytes.length || bytes.length > 30 * 1024 * 1024) {
+      throw new Error("plan thumbnail provider source is outside the 1B..30MiB contract");
+    }
+    return bytes;
+  };
+  const generateScene = providerReceipt && providerReceipt.version !== "plan-week-provider-render/v3"
+    ? async () => loadProviderBytes()
+    : undefined;
+  const generateDesignedThumbnail = providerReceipt?.version === "plan-week-provider-render/v3"
+    ? async () => loadProviderBytes()
+    : !providerReceipt
+      ? async (request: import("@/lib/thumbnailLab").DesignedThumbnailRequest) => {
         if (!o.onProviderReceipt) {
           throw new Error("plan thumbnail provider receipt persistence is not configured");
         }
         await o.beforeProviderSpend();
-        const rendered = await generateNanoBananaImageWithReceipt({
+        const rendered = await generateFalNanoBananaProThumbnailWithReceipt({
           prompt: request.prompt,
-          aspectRatio: request.aspectRatio,
-          maxProviderAttempts: 1,
-          idempotencyContext: planWeekNanoBananaRequestContext(o.receiptScope, o.sourceKey),
+          idempotencyContext: planWeekFalNanoBananaProRequestContext(o.receiptScope, o.sourceKey),
         });
-        const receipt = makePlanWeekProviderRenderReceipt(o.receiptScope, {
+        const receipt = makePlanWeekFalNanoBananaProProviderRenderReceipt(o.receiptScope, {
           ...rendered.receipt,
           sourceKey: o.sourceKey,
+          expectedWords: request.expectWords,
         });
         providerReceipt = receipt;
         let receiptError: unknown;
@@ -1456,17 +1461,20 @@ async function genThumb(o: {
           );
         }
         return rendered.bytes;
-      };
-  await renderCandidate({
+      }
+      : undefined;
+  const candidate = await renderCandidate({
     pattern,
     title: o.title,
+    channelName: o.channelName,
     scriptHint: o.topic,
     sceneSeed: scene,
     playbook: o.playbook,
     outJpg,
     tmpDir: o.dir,
     idx: patternIndex,
-    generateScene,
+    ...(generateScene ? { generateScene } : {}),
+    ...(generateDesignedThumbnail ? { generateDesignedThumbnail } : {}),
     log: o.log,
   });
   if (!providerReceipt) {
@@ -1478,8 +1486,11 @@ async function genThumb(o: {
     throw new Error("plan thumbnail artifact is outside the 1B..30MiB contract");
   }
   const artifactSha256 = createHash("sha256").update(artifactBytes).digest("hex");
+  const expectedWords = providerReceipt.version === "plan-week-provider-render/v3"
+    ? providerReceipt.expectedWords
+    : candidate.expectedWords;
   const qaRequestSha256 = thumbnailRequestHash({
-    contract: "plan-week-golden-mobile-reference-qa-v1",
+    contract: "plan-week-golden-mobile-reference-qa-v2-native-copy-ocr",
     providerRequestSha256: providerReceipt.requestSha256,
     candidateSha256: artifactSha256,
     title: o.title,
@@ -1489,6 +1500,7 @@ async function genThumb(o: {
     patternIndex,
     playbook: o.playbook,
     referenceUrls: o.playbook.refsUsed.map((reference) => reference.url),
+    expectedWords,
   });
   const beforeQa = o.usageSnapshot();
   const verdict = await runThumbnailMobileReferenceQa({
@@ -1499,6 +1511,7 @@ async function genThumb(o: {
     playbook: o.playbook,
     referenceUrls: o.playbook.refsUsed.map((reference) => reference.url),
     brandContext: o.brandContext,
+    expectedWords,
     log: o.log,
   });
   const usageCheckpoint = o.usageSnapshot();
@@ -1522,7 +1535,8 @@ async function genThumb(o: {
   await persistPlanWeekThumbnailQaCheckpoint(o.qaKey, qaCheckpoint);
   const qaCheckpointSha256 = planWeekThumbnailQaCheckpointSha256(qaCheckpoint);
   const artifactCreatedAt = Math.max(Date.now(), providerReceipt.createdAt, qaCheckpoint.createdAt);
-  const providerEvidenceKey = providerReceipt.version === "plan-week-provider-render/v2"
+  const providerEvidenceKey = providerReceipt.version === "plan-week-provider-render/v2" ||
+    providerReceipt.version === "plan-week-provider-render/v3"
     ? PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerEvidenceSha256
     : PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256;
   try {

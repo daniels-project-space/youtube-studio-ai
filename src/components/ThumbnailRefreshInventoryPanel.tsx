@@ -17,7 +17,8 @@ type InventoryStatus =
 
 type ThumbnailReplayStatus =
   | "ready_for_thumbnail_only"
-  | "requires_private_successor";
+  | "ready_for_private_successor"
+  | "private_successor_unavailable";
 
 type CandidateDispatchState =
   | "awaiting_approval"
@@ -58,6 +59,13 @@ type ThumbnailInventoryRow = Readonly<{
     error?: string;
     costTotal: number;
     thumbnailPresent: boolean;
+  };
+  replacement?: {
+    id: string;
+    status?: "awaiting_approval" | "pending" | "queued" | "applied" | "blocked";
+    error?: string;
+    verified: boolean;
+    appliedAt?: number;
   };
 }>;
 
@@ -170,6 +178,8 @@ export function ThumbnailRefreshInventoryPanel({
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [retirementRunId, setRetirementRunId] = useState<string | null>(null);
   const [retirementConfirmation, setRetirementConfirmation] = useState("");
+  const [replacementRunId, setReplacementRunId] = useState<string | null>(null);
+  const [replacementConfirmation, setReplacementConfirmation] = useState("");
 
   const loadInventory = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch("/api/thumbnail-refresh", { cache: "no-store", signal });
@@ -207,14 +217,17 @@ export function ThumbnailRefreshInventoryPanel({
   const hasActiveRetirement = inventory?.some((row) =>
     row.retirement && ["pending", "queued"].includes(row.retirement.status ?? ""),
   ) ?? false;
+  const hasActiveReplacement = inventory?.some((row) =>
+    row.replacement && ["pending", "queued"].includes(row.replacement.status ?? ""),
+  ) ?? false;
 
   useEffect(() => {
-    if (!hasActiveCandidate && !hasActiveRetirement) return;
+    if (!hasActiveCandidate && !hasActiveRetirement && !hasActiveReplacement) return;
     const timer = window.setInterval(() => {
       void loadInventory().catch(() => undefined);
     }, 4_000);
     return () => window.clearInterval(timer);
-  }, [hasActiveCandidate, hasActiveRetirement, loadInventory]);
+  }, [hasActiveCandidate, hasActiveReplacement, hasActiveRetirement, loadInventory]);
 
   const createCandidate = async (row: ThumbnailInventoryRow) => {
     const canResumeDispatch = row.candidate &&
@@ -289,6 +302,48 @@ export function ThumbnailRefreshInventoryPanel({
     }
   };
 
+  const applyCandidate = async (row: ThumbnailInventoryRow) => {
+    if (
+      !row.youtubeVideoId ||
+      !row.candidate ||
+      row.candidate.status !== "ok" ||
+      replacementConfirmation !== row.youtubeVideoId ||
+      busyRunIds.has(row.runId)
+    ) return;
+    setBusyRunIds((current) => new Set(current).add(row.runId));
+    setActionMessage(null);
+    try {
+      const response = await fetch("/api/thumbnail-refresh/accept", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceRunId: row.runId,
+          candidateRunId: row.candidate.runId,
+          youtubeVideoId: row.youtubeVideoId,
+          confirmYoutubeVideoId: replacementConfirmation,
+        }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "Could not apply the thumbnail");
+      }
+      setActionMessage(`YouTube update queued for “${row.title}”. The exact account and candidate will be rechecked.`);
+      setReplacementRunId(null);
+      setReplacementConfirmation("");
+      await loadInventory();
+    } catch (replacementError) {
+      setActionMessage(replacementError instanceof Error
+        ? replacementError.message
+        : "Could not apply the thumbnail");
+    } finally {
+      setBusyRunIds((current) => {
+        const next = new Set(current);
+        next.delete(row.runId);
+        return next;
+      });
+    }
+  };
+
   const rows = useMemo(
     () => inventory?.filter((row) => !selectedChannelSlug || row.channelSlug === selectedChannelSlug) ?? [],
     [inventory, selectedChannelSlug],
@@ -346,7 +401,9 @@ export function ThumbnailRefreshInventoryPanel({
                   <p>
                     {row.thumbnailReplayStatus === "ready_for_thumbnail_only"
                       ? "Exact thumbnail inputs retained. "
-                      : "Thumbnail-only replay is not safe. "}
+                      : row.thumbnailReplayStatus === "ready_for_private_successor"
+                        ? "Current thumbnail module snapshotted. "
+                        : "Thumbnail candidate is unavailable. "}
                     {row.thumbnailReplayReason}
                   </p>
                   {row.legacyCleanupAction === "retire" ? (
@@ -360,7 +417,9 @@ export function ThumbnailRefreshInventoryPanel({
                     <span>
                       {row.thumbnailReplayStatus === "ready_for_thumbnail_only"
                         ? "exact thumbnail replay eligible"
-                        : "private successor required"}
+                        : row.thumbnailReplayStatus === "ready_for_private_successor"
+                          ? "private successor ready"
+                          : "channel setup required"}
                     </span>
                     {row.candidate ? (
                       <span>candidate: {row.candidate.status.replaceAll("_", " ")} · ${row.candidate.costTotal.toFixed(2)}</span>
@@ -369,7 +428,7 @@ export function ThumbnailRefreshInventoryPanel({
                   </div>
                 </div>
                 <div className={styles.actions}>
-                  {row.legacyCleanupAction !== "retire" && row.refreshAction === "owner_review_required" && row.thumbnailReplayStatus === "ready_for_thumbnail_only" && !row.candidate ? (
+                  {row.legacyCleanupAction !== "retire" && row.refreshAction === "owner_review_required" && row.thumbnailReplayStatus !== "private_successor_unavailable" && !row.candidate ? (
                     <button
                       type="button"
                       className={styles.generateAction}
@@ -378,7 +437,7 @@ export function ThumbnailRefreshInventoryPanel({
                     >
                       {busyRunIds.has(row.runId)
                         ? "Reserving candidate…"
-                        : `Render new candidate · ≤$${THUMBNAIL_REFRESH_MAXIMUM_COST_USD.toFixed(2)}`}
+                        : `${row.thumbnailReplayStatus === "ready_for_private_successor" ? "Render private successor" : "Render new candidate"} · ≤$${THUMBNAIL_REFRESH_MAXIMUM_COST_USD.toFixed(2)}`}
                     </button>
                   ) : null}
                   {dispatchCanResume ? (
@@ -400,6 +459,50 @@ export function ThumbnailRefreshInventoryPanel({
                   ) : null}
                   {row.candidate?.status === "ok" ? (
                     <span className={styles.candidateReady}>Candidate ready for comparison</span>
+                  ) : null}
+                  {row.replacement?.status === "applied" && row.replacement.verified ? (
+                    <span className={styles.replacementDone}>Live on YouTube · receipt verified</span>
+                  ) : null}
+                  {row.replacement && ["pending", "queued"].includes(row.replacement.status ?? "") ? (
+                    <span className={styles.candidateProgress} role="status">
+                      <i aria-hidden="true" />Account check + YouTube update
+                    </span>
+                  ) : null}
+                  {row.replacement?.status === "blocked" ? (
+                    <span className={styles.candidateFailed}>{row.replacement.error ?? "YouTube update blocked"}</span>
+                  ) : null}
+                  {row.candidate?.status === "ok" && row.youtubeVideoId && !row.replacement && replacementRunId !== row.runId ? (
+                    <button
+                      type="button"
+                      className={styles.acceptAction}
+                      onClick={() => {
+                        setReplacementRunId(row.runId);
+                        setReplacementConfirmation("");
+                      }}
+                    >Use on YouTube</button>
+                  ) : null}
+                  {row.candidate?.status === "ok" && row.youtubeVideoId && !row.replacement && replacementRunId === row.runId ? (
+                    <div className={styles.acceptConfirm}>
+                      <label htmlFor={`accept-${row.runId}`}>Confirm video <code>{row.youtubeVideoId}</code></label>
+                      <input
+                        id={`accept-${row.runId}`}
+                        value={replacementConfirmation}
+                        onChange={(event) => setReplacementConfirmation(event.target.value.trim())}
+                        autoComplete="off"
+                      />
+                      <button
+                        type="button"
+                        disabled={replacementConfirmation !== row.youtubeVideoId || busyRunIds.has(row.runId)}
+                        onClick={() => void applyCandidate(row)}
+                      >Apply thumbnail</button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setReplacementRunId(null);
+                          setReplacementConfirmation("");
+                        }}
+                      >Cancel</button>
+                    </div>
                   ) : null}
                   {row.candidate?.status === "failed" ? (
                     <span className={styles.candidateFailed}>Candidate stopped — inspect evidence</span>

@@ -70,6 +70,45 @@ export function thumbnailRefreshCandidateApprovalSubject(args: {
   return `thumbnail-refresh-candidate:${digest}`;
 }
 
+/**
+ * The ERNIE batch receives no authority from the ordinary refresh outbox. Its
+ * imported artifact is approved only after the exact native-scene receipt and
+ * final compositor bytes are known, then still needs the separate YouTube
+ * replacement acceptance flow before any external thumbnail changes.
+ */
+export function thumbnailErnieBatchImportApprovalSubject(args: {
+  ownerId: string;
+  channelId: string;
+  sourceRunId: string;
+  candidateRunId: string;
+  replayFingerprint: string;
+  r2Key: string;
+  artifactSha256: string;
+  providerRequestSha256: string;
+  providerResponseSha256: string;
+}): string {
+  if (
+    !/^[a-f0-9]{64}$/.test(args.replayFingerprint) ||
+    !/^[a-f0-9]{64}$/.test(args.artifactSha256) ||
+    !/^[a-f0-9]{64}$/.test(args.providerRequestSha256) ||
+    !/^[a-f0-9]{64}$/.test(args.providerResponseSha256)
+  ) {
+    throw new Error("ERNIE thumbnail batch import receipt identity is invalid");
+  }
+  const digest = sha256Hex(canonicalJson({
+    ownerId: required(args.ownerId, "owner"),
+    channelId: required(args.channelId, "channel"),
+    sourceRunId: required(args.sourceRunId, "source run"),
+    candidateRunId: required(args.candidateRunId, "candidate run"),
+    replayFingerprint: args.replayFingerprint,
+    r2Key: required(args.r2Key, "artifact key"),
+    artifactSha256: args.artifactSha256,
+    providerRequestSha256: args.providerRequestSha256,
+    providerResponseSha256: args.providerResponseSha256,
+  }));
+  return `thumbnail-ernie-batch-import:${digest}`;
+}
+
 export function assertThumbnailRefreshCandidateDispatch(
   value: unknown,
 ): ThumbnailRefreshCandidateDispatch {

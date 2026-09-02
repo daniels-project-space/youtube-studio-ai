@@ -3746,11 +3746,13 @@ export const lofiBlocks: Block[] = [
  *   competitor_research → music plan/music → scene_planner → keyframes
  *   → loop_clips(2×15s) → upscale(short source unit) → metadata
  *   → assemble(packet-looped 1–8h master) → qa_visual
- *   → thumbnail_gen(banana) → upload_draft → notify
+ *   → thumbnail_gen(Nano Banana edit of exact 15s 4K frame) → upload_draft → notify
  *
  * `competitor_research` runs first (consumes []) so nicheIntelligence /
  * seoDatabank / competitors are in the store before `metadata` optimises the
- * title and `thumbnail_gen` designs the thumbnail (real-scene/banana).
+ * title and `thumbnail_gen` uses the exact rendered frame at 15 seconds as a
+ * Nano Banana reference edit. The normal thumbnail playbook is read-only and
+ * non-Lo-Fi families keep the usual picture-only generation route.
  *
  * We upscale the exact 30s loop UNIT (not the full render), then stream_loop the
  * 4K unit to length — so length is just a duration param, never extra GPU cost.
