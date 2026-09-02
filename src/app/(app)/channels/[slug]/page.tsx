@@ -2279,34 +2279,52 @@ function IdentityTab({
       </section>
       {bible && (
         <section className={styles.identitySection}>
-          <div className={styles.sectionRail}><span>Show bible / film crew</span><i /></div>
-          <div className={styles.showBible}>
-            <div className={styles.identityFieldGrid}>
-              <Field label="Positioning" value={bible.positioning} />
-              <Field label="Vibe" value={bible.vibe} />
-              <Field label="Iconic motif" value={bible.iconicMotif} />
-            </div>
+          <div className={styles.sectionRail}><span>Channel identity</span><i /></div>
+          <div className={styles.identitySnapshot}>
+            <Field label="Vibe" value={bible.vibe} />
+            <Field label="Signature" value={bible.iconicMotif} />
             {bible.activeCrew?.length > 0 && (
-              <div className={styles.identitySubsection}>
-                <div className={styles.identityLabel}>Active crew</div>
+              <div className={styles.identityCrew}>
+                <span>Active crew</span>
                 <ChipRow items={bible.activeCrew} tone="accent" />
               </div>
             )}
-            <div className={styles.identityDoctrineGrid}>
-              {bible.worksInSpace?.length > 0 && (
-                <div>
-                  <div className={styles.identityWorks}>Works in this space</div>
-                  <List items={bible.worksInSpace} />
-                </div>
-              )}
-              {bible.avoidInSpace?.length > 0 && (
-                <div>
-                  <div className={styles.identityAvoids}>Avoid in this space</div>
-                  <List items={bible.avoidInSpace} />
-                </div>
-              )}
-            </div>
           </div>
+          <details className={styles.identityDetails}>
+            <summary>
+              <span>Show rules</span>
+              <small>Positioning, style, topic pool, and guardrails</small>
+            </summary>
+            <div className={styles.showBible}>
+              <Field label="Positioning" value={bible.positioning} />
+              {id.styleGrammar && (
+                <div className={styles.identityDetailBlock}>
+                  <div className={styles.identityLabel}>Style grammar</div>
+                  <p className={styles.styleGrammar}>{id.styleGrammar}</p>
+                </div>
+              )}
+              {id.topicPool && id.topicPool.length > 0 && (
+                <div className={styles.identityDetailBlock}>
+                  <div className={styles.identityLabel}>Topic pool</div>
+                  <ChipRow items={id.topicPool} tone="secondary" />
+                </div>
+              )}
+              <div className={styles.identityDoctrineGrid}>
+                {bible.worksInSpace?.length > 0 && (
+                  <div>
+                    <div className={styles.identityWorks}>Works in this space</div>
+                    <List items={bible.worksInSpace} />
+                  </div>
+                )}
+                {bible.avoidInSpace?.length > 0 && (
+                  <div>
+                    <div className={styles.identityAvoids}>Avoid in this space</div>
+                    <List items={bible.avoidInSpace} />
+                  </div>
+                )}
+              </div>
+            </div>
+          </details>
         </section>
       )}
       <div
@@ -2335,18 +2353,6 @@ function IdentityTab({
         </section>
       )}
 
-      {id.styleGrammar && (
-        <section className={styles.identitySection}>
-          <div className={styles.sectionRail}><span>Style grammar</span><i /></div>
-          <p className={styles.styleGrammar}>{id.styleGrammar}</p>
-        </section>
-      )}
-      {id.topicPool && id.topicPool.length > 0 && (
-        <section className={styles.identitySection}>
-          <div className={styles.sectionRail}><span>Topic pool</span><i /></div>
-          <ChipRow items={id.topicPool} tone="secondary" />
-        </section>
-      )}
       {id.bannedWords && id.bannedWords.length > 0 && (
         <section className={styles.identitySection}>
           <div className={styles.sectionRail}><span>Banned words</span><i /></div>

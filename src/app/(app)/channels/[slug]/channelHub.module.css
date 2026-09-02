@@ -654,7 +654,7 @@
 .pipelineParams dt { color: var(--color-faint); font: 0.49rem/1 var(--font-mono); }
 .pipelineParams dd { overflow: hidden; margin: 0.2rem 0 0; color: var(--color-muted); font: 0.56rem/1.3 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 
-.identityWorkspace { display: grid; gap: 1.55rem; }
+.identityWorkspace { display: grid; gap: 1rem; }
 .identitySection { display: grid; gap: 0; }
 .bannerRefresh { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.78rem 0.82rem; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .bannerRefresh > div { display: grid; min-width: 0; gap: 0.22rem; }
@@ -666,7 +666,17 @@
 .bannerRefreshButton:disabled { cursor: not-allowed; opacity: 0.55; }
 .bannerRefresh p { max-width: 19rem; margin: 0; color: var(--color-ok); font-size: 0.59rem; line-height: 1.35; text-align: right; }
 .bannerRefresh p[data-tone="error"] { color: var(--color-failed); }
-.showBible { display: grid; gap: 1.2rem; padding: 0.85rem 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.identitySnapshot { display: grid; grid-template-columns: repeat(3,minmax(0,1fr)); border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.identityCrew { display: grid; min-width: 0; align-content: start; gap: 0.48rem; padding: 0.7rem 0.8rem; }
+.identityCrew > span { color: var(--color-faint); font: 700 0.5rem/1 var(--font-mono); letter-spacing: 0.09em; text-transform: uppercase; }
+.identityDetails { border-bottom: 1px solid var(--color-border); }
+.identityDetails summary { display: flex; min-height: 42px; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.58rem 0.8rem; cursor: pointer; list-style: none; }
+.identityDetails summary::-webkit-details-marker { display: none; }
+.identityDetails summary::after { color: var(--color-blueprint); content: "+"; font: 700 0.8rem/1 var(--font-mono); }
+.identityDetails[open] summary::after { content: "−"; }
+.identityDetails summary > span { color: var(--color-muted); font-size: 0.69rem; font-weight: 650; }
+.identityDetails summary > small { margin-left: auto; color: var(--color-faint); font: 0.52rem/1.25 var(--font-mono); text-align: right; }
+.showBible { display: grid; gap: 0.85rem; padding: 0.8rem; border-top: 1px solid var(--color-border); background: rgba(243,240,232,0.012); }
 .identityFieldGrid { display: grid; grid-template-columns: repeat(auto-fit,minmax(155px,1fr)); gap: 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .showBible > .identityFieldGrid { border: 0; }
 .identityField { display: grid; min-width: 0; gap: 0.35rem; padding: 0.7rem 0.8rem; border-right: 1px solid var(--color-border); }
@@ -674,8 +684,8 @@
 .identityField span, .identityLabel { color: var(--color-faint); font: 700 0.5rem/1 var(--font-mono); letter-spacing: 0.09em; text-transform: uppercase; }
 .identityField strong { color: var(--color-muted); font-size: 0.73rem; font-weight: 580; line-height: 1.4; }
 .identityField[data-mono="true"] strong { font-family: var(--font-mono); font-size: 0.64rem; }
-.identitySubsection { padding: 0 0.8rem; }
 .identityLabel { margin-bottom: 0.5rem; }
+.identityDetailBlock { padding: 0.15rem 0; }
 .identityDoctrineGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 0; border-top: 1px solid var(--color-border); }
 .identityDoctrineGrid > div { padding: 0.85rem; border-right: 1px solid var(--color-border); }
 .identityDoctrineGrid > div:last-child { border-right: 0; }
@@ -695,7 +705,7 @@
 .swatch { display: grid; grid-template-columns: 34px auto; align-items: center; gap: 0.5rem; padding: 0.32rem 0.55rem 0.32rem 0.32rem; border: 1px solid var(--color-border); border-radius: 8px; }
 .swatch > div { width: 34px; height: 34px; border: 1px solid rgba(255,255,255,0.12); border-radius: 6px; }
 .swatch code { color: var(--color-faint); font: 0.55rem/1 var(--font-mono); }
-.styleGrammar { margin: 0; padding: 0.75rem 0 0.75rem 1rem; border-left: 1px solid var(--color-blueprint); color: var(--color-muted); font-family: var(--font-display); font-size: 0.92rem; line-height: 1.55; }
+.styleGrammar { margin: 0; padding: 0.62rem 0 0.62rem 0.85rem; border-left: 1px solid var(--color-blueprint); color: var(--color-muted); font-family: var(--font-display); font-size: 0.82rem; line-height: 1.5; }
 
 @keyframes channel-view-in {
   from { opacity: 0; transform: translateY(6px); }
@@ -782,6 +792,10 @@
   .identityDoctrineGrid { grid-template-columns: 1fr; }
   .identityDoctrineGrid > div { border-right: 0; border-bottom: 1px solid var(--color-border); }
   .identityDoctrineGrid > div:last-child { border-bottom: 0; }
+  .identitySnapshot { grid-template-columns: 1fr; }
+  .identitySnapshot > * { border-bottom: 1px solid var(--color-border); }
+  .identitySnapshot > *:last-child { border-bottom: 0; }
+  .identityDetails summary > small { display: none; }
   .bannerRefresh { align-items: start; flex-direction: column; }
   .bannerRefresh > div:last-child { width: 100%; justify-items: stretch; }
   .bannerRefreshButton { width: 100%; }
