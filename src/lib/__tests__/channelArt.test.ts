@@ -198,6 +198,43 @@ function assertIdentityDerivationUsesTheChannelWorld(): void {
   assert.doesNotMatch(prompt, /coastal storybook/i);
 }
 
+function assertNameBoundWorldsRepairStaleImportedIdentity(): void {
+  const seaside = bannerPrompt(channelArtIdentityFromSource({
+    name: "Seaside Ghibli Lofi",
+    identity: {
+      persona: "a solitary anime-style figure seated at a rain-streaked window desk",
+      styleGrammar: "anime aesthetic, cozy interior, rain on window, warm lamp glow",
+      palette: ["#0d0d1a", "#1e1b2e"],
+      niche: "Lo-Fi Music",
+      creativeBrief: { iconicMotif: "rain-streaked window desk", vibe: "tender solitude" },
+    },
+    styleDNA: {
+      setting: "a rainy neon bedroom", composition: "desk by a rainy window", motifs: ["rain", "coffee cup"],
+      visualAvoid: ["bright daylight"],
+    },
+  }));
+  assert.match(seaside, /hand-painted seaside study/i);
+  assert.match(seaside, /turquoise surf/i);
+  assert.match(seaside, /DO NOT INTRODUCE:.*rainy neon bedroom/i);
+  assert.doesNotMatch(seaside, /anime aesthetic, cozy interior, rain on window/i);
+
+  const investory = bannerPrompt(channelArtIdentityFromSource({
+    name: "Investory",
+    identity: {
+      persona: "a calm finance narrator", styleGrammar: "lifestyle desk photography", niche: "Finance",
+      creativeBrief: { iconicMotif: "a steaming espresso cup", vibe: "quiet focus" },
+    },
+    styleDNA: {
+      setting: "a well-lit study at midnight with a coffee cup", composition: "a lifestyle desk", motifs: ["coffee cup"],
+      visualAvoid: [],
+    },
+  }));
+  assert.match(investory, /archival market archive/i);
+  assert.match(investory, /bronze key/i);
+  assert.match(investory, /DO NOT INTRODUCE:.*coffee desk/i);
+  assert.doesNotMatch(investory, /lifestyle desk photography/i);
+}
+
 function assertPromptContracts(): void {
   const avatar = avatarPrompt(IDENTITY);
   assert.match(avatar, /circular crop/i);
@@ -470,6 +507,7 @@ async function assertDefaultProviderHasNoFallback(): Promise<void> {
 async function main(): Promise<void> {
   assertPromptContracts();
   assertIdentityDerivationUsesTheChannelWorld();
+  assertNameBoundWorldsRepairStaleImportedIdentity();
   await assertApprovedIndependentOutputs();
   await assertMissingJudgeFailsBeforeSpend();
   await assertRejectedCandidateNeverReturns();

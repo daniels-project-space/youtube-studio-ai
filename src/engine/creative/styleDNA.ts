@@ -146,7 +146,23 @@ const GENERIC_TELLS = [
  * Trustworthy facts the model must not be allowed to fudge — folded into the
  * critique so a draft with no locked identity or generic filler can never pass.
  */
-function deterministicIssues(raw: RawDNA, narrated: boolean): string[] {
+function nameWorldIssues(raw: RawDNA, channelName: string): string[] {
+  const name = channelName.toLowerCase();
+  const world = [raw.recurringSubject, raw.setting, raw.composition, ...(raw.motifs ?? [])]
+    .join(" ")
+    .toLowerCase();
+  const issues: string[] = [];
+  if (/\b(seaside|coast(?:al)?|ocean|shore|beach|harbour|harbor)\b/u.test(name) &&
+      !/\b(seaside|coast(?:al)?|ocean|shore|beach|cove|surf|pier|harbour|harbor)\b/u.test(world)) {
+    issues.push("channel name promises a coastal world, but the DNA does not visibly contain ocean/coast/seaside evidence");
+  }
+  if (/\bchalk\b/u.test(name) && !/\bchalk\b/u.test(world)) {
+    issues.push("channel name promises chalk-based explanation, but the DNA contains no chalk evidence");
+  }
+  return issues;
+}
+
+function deterministicIssues(raw: RawDNA, narrated: boolean, channelName: string): string[] {
   const issues: string[] = [];
   if (!raw.recurringSubject?.trim()) issues.push("recurringSubject is empty — the channel has no locked identity");
   if (!raw.setting?.trim()) issues.push("setting is empty — no recurring world to anchor every video");
@@ -158,6 +174,7 @@ function deterministicIssues(raw: RawDNA, narrated: boolean): string[] {
   for (const tell of GENERIC_TELLS) {
     if (blob.includes(tell)) issues.push(`generic phrasing "${tell}" — replace with something specific to THIS channel`);
   }
+  issues.push(...nameWorldIssues(raw, channelName));
   return issues;
 }
 
@@ -285,6 +302,7 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
     `Distil the STYLE DNA for a faceless YouTube channel — the single, frozen,`,
     `machine-readable definition of "good" that EVERY video must conform to.`,
     `Name: ${input.name}`,
+    `CHANNEL-NAME IDENTITY CONTRACT: the name is a visual promise. If it contains a concrete world or material word, the recurringSubject, setting, composition, and motifs must make that promise visibly undeniable. Never retain a prior show's world after a rename.`,
     `Format (family): ${input.family}`,
     programBriefText
       ? `DECLARED CHANNEL PROGRAM — CANON, not a suggestion. Every recurring subject, setting, motif, narrative and packaging decision must express this exact program; research may improve execution but may not replace it:\n${programBriefText}`
@@ -349,7 +367,7 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
         });
       },
       critique: async (raw) => {
-        const det = deterministicIssues(raw, narrated);
+        const det = deterministicIssues(raw, narrated, input.name);
         let llmScore = det.length ? 0.5 : 0.8;
         let llmIssues: string[] = [];
         try {
