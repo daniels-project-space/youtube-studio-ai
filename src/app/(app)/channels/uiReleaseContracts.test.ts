@@ -208,6 +208,9 @@ assert.match(channels, /channel-live-state/);
 assert.match(channels, /title=\{operatingState\.detail\}/);
 assert.match(channels, /channel-card-readiness/);
 assert.match(channels, /<progress[\s\S]*setup readiness/);
+assert.match(channels, /const identityArtwork = c\.identity\?\.bannerKey/);
+assert.match(channels, /const previewArtwork = identityArtwork \?\? latestArtwork \?\? planArtwork/);
+assert.match(channels, /className="channel-card-banner"/);
 assert.match(channels, /link\.status === "active"/);
 assert.match(channels, /link\.scopeHealth === "healthy"/);
 assert.match(channels, /OAuth scopes unverified/);
@@ -268,6 +271,8 @@ assert.match(globalCss, /\.channel-card-title > a\s*\{[\s\S]*?min-height: 36px/)
 assert.match(globalCss, /\.channel-card-secondary-actions a\s*\{[\s\S]*?min-height: 38px/);
 assert.match(globalCss, /\.channel-account-action\s*\{[\s\S]*?min-height: 38px/);
 assert.match(globalCss, /\.channel-card-actions a\s*\{[\s\S]*?min-height: 40px/);
+assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*?\.channel-card-banner \{ aspect-ratio: 16 \/ 6 !important/);
+assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*?\.channel-card-actions \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
 assert.match(scheduleCss, /\.itemLinks a\s*\{[\s\S]*?min-height: 36px/);
 assert.match(overviewCss, /\.sectionHeading > a,[\s\S]*?min-height: 36px/);
 assert.match(analyticsCss, /\.healthCopy > a\s*\{[\s\S]*?min-height: 36px/);

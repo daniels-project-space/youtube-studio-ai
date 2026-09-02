@@ -3096,7 +3096,8 @@ button.video-card-open { cursor: pointer; }
 
 @media (max-width: 520px) {
   .channel-card-grid { grid-template-columns: 1fr; }
-  .channel-card { padding: 0.9rem; }
+  .channel-card { gap: 0.48rem; padding: 0.7rem; }
+  .channel-card-banner { aspect-ratio: 16 / 6 !important; border-radius: 12px !important; }
   .channel-card:hover { transform: none; }
   .channel-card-identity { display: grid; grid-template-columns: 52px minmax(0, 1fr); }
   .channel-card-title > a { min-height: 44px; }
@@ -3111,7 +3112,8 @@ button.video-card-open { cursor: pointer; }
   .channel-page-pagination { align-items: stretch; flex-direction: column; }
   .channel-page-pagination > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .channel-page-pagination button:only-child { grid-column: 1 / -1; }
-  .channel-card-actions { grid-template-columns: 1fr; }
+  .channel-card-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .channel-card-actions > :only-child { grid-column: 1 / -1; }
   .channel-card-actions .channel-account-action { min-height: 44px; }
   .channel-operating-profile { grid-template-columns: 1fr; }
   .channel-operating-profile > div { border-right: 0; border-bottom: 1px solid var(--color-border); }

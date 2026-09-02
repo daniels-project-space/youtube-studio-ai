@@ -210,7 +210,12 @@ export default function ChannelsPage() {
               (item) => item.thumbnailKey && item.thumbnailSource !== "rendered_video_frame",
             )?.thumbnailKey;
             const latestArtwork = cardData?.latestThumbnailKey;
-            const previewArtwork = latestArtwork ?? planArtwork ?? c.identity?.bannerKey;
+            // The fleet view is primarily an identity map, not a grid of video
+            // packaging. Lead with the channel's own art and retain real
+            // render/plan artwork as a truthful fallback when legacy identity
+            // art is missing.
+            const identityArtwork = c.identity?.bannerKey;
+            const previewArtwork = identityArtwork ?? latestArtwork ?? planArtwork;
             const setupChecks = [
               linked,
               Boolean(c.identity?.imageKey && c.identity?.niche),
@@ -243,13 +248,14 @@ export default function ChannelsPage() {
               >
                 <ChannelBanner
                   bannerKey={previewArtwork}
-                  fallbackKeys={[planArtwork, c.identity?.bannerKey]}
+                  fallbackKeys={[latestArtwork, planArtwork]}
                   name={c.name}
                   palette={c.identity?.palette}
                   aspectRatio="16 / 7"
+                  className="channel-card-banner"
                 >
                   <span className="channel-card-preview-label">
-                    {latestArtwork ? "Latest render" : planArtwork ? "Planned thumbnail" : "Channel artwork"}
+                    {identityArtwork ? "Channel identity" : latestArtwork ? "Latest render" : planArtwork ? "Planned thumbnail" : "Channel artwork"}
                   </span>
                 </ChannelBanner>
                 <div className="channel-card-identity">

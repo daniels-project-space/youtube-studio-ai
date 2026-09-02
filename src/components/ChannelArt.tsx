@@ -110,6 +110,7 @@ export function ChannelBanner({
   palette,
   height = 160,
   aspectRatio,
+  className,
   children,
 }: {
   bannerKey?: string | null;
@@ -118,12 +119,15 @@ export function ChannelBanner({
   palette?: string[];
   height?: number;
   aspectRatio?: string;
+  /** Optional surface-specific treatment; the media and R2 fallback behavior stays shared. */
+  className?: string;
   children?: React.ReactNode;
 }) {
   const { url, onError } = useFallbackAssetUrl([bannerKey, ...fallbackKeys]);
   return (
     <div
       aria-label={`${name} artwork`}
+      className={className}
       style={{
         position: "relative",
         height: aspectRatio ? undefined : height,
