@@ -22,6 +22,7 @@ import {
 import {
   CHANNEL_PAGE_SIZE,
   channelsVisibleForFolder,
+  isMainFleetChannel,
   pageChannels,
 } from "./channelCardVisibility";
 
@@ -128,6 +129,7 @@ export default function ChannelsPage() {
     publishReadyLinks.map((link) => [link.channelId, link.ytChannelId ?? null]),
   );
 
+  const mainFleetCount = (channels ?? []).filter(isMainFleetChannel).length;
   const visible = channelsVisibleForFolder(channels ?? [], openFolder);
   const fleetPage = pageChannels(visible, visibleLimit);
   const readyPlanBySlug = new Map<string, PlanCardRow[]>();
@@ -161,6 +163,7 @@ export default function ChannelsPage() {
           channels={channels}
           folders={folders}
           selectedFolder={openFolder}
+          standaloneCount={mainFleetCount}
           onSelect={(folder) => {
             setOpenFolder(folder);
             setVisibleLimit(CHANNEL_PAGE_SIZE);
@@ -178,8 +181,8 @@ export default function ChannelsPage() {
         />
       ) : visible.length === 0 ? (
         <EmptyState
-          title="No channels in this folder"
-          description="Choose All channels or drag an account into this folder."
+          title={openFolder ? "No channels in this room" : "No standalone channels"}
+          description={openFolder ? "Move a channel into this room to operate it here." : "Multi-language channel families are available from their room."}
           icon={<IconChannels width={24} height={24} />}
         />
       ) : (

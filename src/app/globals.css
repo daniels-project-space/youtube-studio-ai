@@ -1203,10 +1203,10 @@
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 1.25rem;
+  gap: 1rem;
   min-width: 0;
-  margin-bottom: 1.45rem;
-  padding: 0.25rem 0 1.2rem;
+  margin-bottom: 1rem;
+  padding: 0.15rem 0 0.82rem;
   border-bottom: 1px solid color-mix(in srgb, var(--color-border) 86%, transparent);
 }
 
@@ -1231,10 +1231,10 @@
   display: inline-flex;
   align-items: center;
   gap: 0.45rem;
-  margin-bottom: 0.35rem;
+  margin-bottom: 0.26rem;
   color: var(--color-accent);
-  font: 700 0.57rem/1 var(--font-mono);
-  letter-spacing: 0.14em;
+  font: 700 0.64rem/1 var(--font-mono);
+  letter-spacing: 0.1em;
   text-transform: uppercase;
 }
 
@@ -1246,18 +1246,18 @@
 
 .page-header h1 {
   font-family: var(--font-display);
-  font-size: clamp(1.9rem, 3.4vw, 3rem);
+  font-size: clamp(1.7rem, 2.6vw, 2.5rem);
   font-weight: 560;
   line-height: 1;
   letter-spacing: -0.04em;
 }
 
 .page-header p {
-  margin: 0.42rem 0 0;
+  margin: 0.32rem 0 0;
   max-width: 66ch;
   color: #c2c9da;
-  font-size: 0.82rem;
-  line-height: 1.55;
+  font-size: 0.88rem;
+  line-height: 1.4;
 }
 
 .page-header-actions,
@@ -1927,7 +1927,7 @@
 
 .channel-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
   gap: 0.65rem;
 }
 

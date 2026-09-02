@@ -2,20 +2,22 @@ import assert from "node:assert/strict";
 import {
   CHANNEL_PAGE_SIZE,
   channelsVisibleForFolder,
+  isMainFleetChannel,
   pageChannels,
 } from "./channelCardVisibility";
 
 const channels = [
   { id: "unfiled", folder: undefined },
-  { id: "stoic-en", folder: "Stoic Truths Multi" },
-  { id: "stoic-de", folder: "Stoic Truths Multi" },
+  { id: "stoic-en", folder: "Stoic Truths Multi", groupId: "stoic-group" },
+  { id: "stoic-de", folder: "Stoic Truths Multi", groupId: "stoic-group" },
+  { id: "legacy-group", folder: undefined, groupId: "recoverable-group" },
   { id: "stale", folder: "Removed folder" },
 ];
 
 assert.deepEqual(
   channelsVisibleForFolder(channels, null).map((channel) => channel.id),
-  ["unfiled", "stoic-en", "stoic-de", "stale"],
-  "the default fleet view must show every channel, including foldered and stale-folder rows",
+  ["unfiled", "legacy-group", "stale"],
+  "the default fleet view must omit multi-language members already in a room while retaining reachable standalone, legacy, and stale-folder rows",
 );
 assert.deepEqual(
   channelsVisibleForFolder(channels, "Stoic Truths Multi").map((channel) => channel.id),
@@ -23,6 +25,8 @@ assert.deepEqual(
   "an open folder is an explicit filter",
 );
 assert.deepEqual(channelsVisibleForFolder(channels, "Empty"), []);
+assert.equal(isMainFleetChannel(channels[3]), true,
+  "an incomplete legacy grouping must remain reachable from the main fleet");
 
 const fleet = Array.from({ length: 13 }, (_, index) => ({ id: `channel-${index + 1}` }));
 const firstPage = pageChannels(fleet);

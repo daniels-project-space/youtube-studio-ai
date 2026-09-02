@@ -439,38 +439,27 @@ function WidgetMark({
 
 function ProductionMap({ overview, loading }: { overview: StudioOverviewSnapshot; loading: boolean }) {
   const stages = [
-    { label: "Channels", value: overview.activeChannelCount },
-    { label: "Planning", value: overview.planBuildingCount },
-    { label: "Runs", value: overview.activeRunCount },
-    { label: "Ready", value: overview.readyPlanCount },
-    { label: "Published", value: overview.publishedCount },
+    { label: "Channels", value: overview.activeChannelCount, href: "/channels" },
+    { label: "Planning", value: overview.planBuildingCount, href: "/schedule" },
+    { label: "Runs", value: overview.activeRunCount, href: "/runs", active: overview.activeRunCount > 0 },
+    { label: "Ready", value: overview.readyPlanCount, href: "/schedule", active: overview.readyPlanCount > 0 },
+    { label: "Published", value: overview.publishedCount, href: "/library" },
   ];
   return (
-    <figure className={`${styles.productionMap} glass`} aria-label="Live production map">
+    <section className={`${styles.productionMap} glass`} aria-label="Production flow">
       <figcaption>
-        <span><small>Production map</small><strong>Flow</strong></span>
+        <span><small>Production flow</small><strong>Live route</strong></span>
         <Link href="/runs">Open production <b aria-hidden="true">↗</b></Link>
       </figcaption>
-      <div className={styles.mapGraphic} aria-hidden="true" data-live={overview.activeRunCount > 0 ? "true" : undefined}>
-        <svg viewBox="0 0 640 150" preserveAspectRatio="none">
-          <defs>
-            <linearGradient id="overview-flow-gradient" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0" stopColor="var(--color-blueprint)" />
-              <stop offset=".48" stopColor="var(--color-secondary)" />
-              <stop offset="1" stopColor="var(--color-accent)" />
-            </linearGradient>
-          </defs>
-          <path className={styles.mapGhost} d="M20 104C106 104 110 42 194 42S278 118 364 118 452 60 620 60" />
-          <path className={styles.mapLine} d="M20 104C106 104 110 42 194 42S278 118 364 118 452 60 620 60" />
-          {[20, 170, 320, 470, 620].map((x, index) => <circle key={x} className={styles.mapNode} data-index={index} cx={x} cy={[104, 46, 111, 78, 60][index]} r="5" />)}
-        </svg>
-      </div>
-      <ol className={styles.mapLegend}>
-        {stages.map((stage, index) => (
-          <li key={stage.label}><span>{String(index + 1).padStart(2, "0")}</span><small>{stage.label}</small><strong>{loading ? "—" : stage.value}</strong></li>
+      <nav className={styles.flowSteps} aria-label="Production flow destinations">
+        {stages.map((stage) => (
+          <Link key={stage.label} href={stage.href} data-active={stage.active || undefined}>
+            <small>{stage.label}</small>
+            <strong>{loading ? "—" : stage.value}</strong>
+          </Link>
         ))}
-      </ol>
-    </figure>
+      </nav>
+    </section>
   );
 }
 

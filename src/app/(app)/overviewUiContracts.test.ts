@@ -20,12 +20,14 @@ for (const href of ["/runs", "/schedule", "/channels", "/library", "/analytics",
   assert.match(page, new RegExp(`href=\\"${href.replace("/", "\\/")}\\"`),
     `master control ${href} must remain a real route`);
 }
-assert.match(page, /<svg viewBox="0 0 640 150"/,
-  "the production map must remain a custom vector signal, not decorative stock media");
-assert.match(css, /\.mapGraphic\[data-live="true"\] \.mapLine \{ animation:/,
-  "live production must visibly animate the map");
-assert.match(css, /@media \(prefers-reduced-motion: reduce\)[\s\S]*\.mapLine,[\s\S]*animation: none !important/,
-  "the animated command canvas must honor reduced motion");
+assert.match(page, /className=\{styles\.flowSteps\}/,
+  "the production overview must use compact, data-backed flow destinations");
+assert.match(page, /href: "\/channels"[\s\S]*href: "\/schedule"[\s\S]*href: "\/runs"[\s\S]*href: "\/library"/,
+  "each production-flow measure must route to its real operating surface");
+assert.doesNotMatch(page, /<svg viewBox="0 0 640 150"/,
+  "the production overview must not spend space on a decorative pipeline graphic");
+assert.match(css, /\.flowSteps \{ display: grid; grid-template-columns: repeat\(5, minmax\(0, 1fr\)\)/,
+  "production flow must remain a compact five-stage route");
 assert.match(css, /\.relayTrack \{[^}]*animation: relay-move 240s linear infinite/,
   "the channel relay must move slowly enough to remain readable");
 assert.match(css, /\.dataWidget > header > a \{ width: 44px; height: 44px; \}/,

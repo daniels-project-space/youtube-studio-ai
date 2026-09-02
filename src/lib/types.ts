@@ -61,6 +61,11 @@ export type ChannelRow = {
   budget: number;
   identity?: ChannelIdentity;
   pipeline?: { block: string; params?: unknown }[];
+  /** A multilingual family is operated through its room/group surface rather
+   * than being duplicated among standalone fleet cards. */
+  groupId?: string;
+  groupRole?: string;
+  language?: string;
   youtubeCreated?: { ytChannelId?: string; handle?: string; url?: string; createdAt: number; status?: string };
 };
 

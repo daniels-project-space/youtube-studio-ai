@@ -17,11 +17,13 @@ export function ChannelFolderWorkspace({
   channels,
   folders,
   selectedFolder,
+  standaloneCount,
   onSelect,
 }: {
   channels: FolderChannel[];
   folders: FolderRow[];
   selectedFolder: string | null;
+  standaloneCount: number;
   onSelect: (name: string | null) => void;
 }) {
   const ownerId = useOwnerId();
@@ -172,8 +174,8 @@ export function ChannelFolderWorkspace({
           onDrop={(event) => void dropChannel(event, null)}
         >
           <span className={styles.folderMark} aria-hidden="true"><AllGlyph /></span>
-          <span><strong>All channels</strong><small>Complete fleet</small></span>
-          <i>{channels.length}</i>
+          <span><strong>Main channels</strong><small>Standalone fleet</small></span>
+          <i>{standaloneCount}</i>
         </button>
 
         {folders.map((folder) => {

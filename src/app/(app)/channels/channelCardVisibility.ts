@@ -1,8 +1,14 @@
 export type FolderAwareChannel = {
   folder?: string | null;
+  groupId?: string | null;
 };
 
 export const CHANNEL_PAGE_SIZE = 8;
+
+/** A multilingual member leaves the main fleet only once its room can surface it. */
+export function isMainFleetChannel(channel: FolderAwareChannel): boolean {
+  return !channel.groupId || !channel.folder;
+}
 
 export type ChannelPage<T> = {
   visible: T[];
@@ -12,15 +18,16 @@ export type ChannelPage<T> = {
 };
 
 /**
- * A null folder is the unfiltered fleet view. Folder chips are filters, not
- * containers that are allowed to make channels disappear from the landing
- * page.
+ * A null folder is the standalone fleet view. A multi-language member leaves
+ * that grid only after it belongs to a real room, so a legacy/incomplete group
+ * assignment never makes the channel unreachable. An explicit room selection
+ * always exposes its real members.
  */
 export function channelsVisibleForFolder<T extends FolderAwareChannel>(
   channels: readonly T[],
   openFolder: string | null,
 ): T[] {
-  if (openFolder === null) return [...channels];
+  if (openFolder === null) return channels.filter(isMainFleetChannel);
   return channels.filter((channel) => channel.folder === openFolder);
 }
 
