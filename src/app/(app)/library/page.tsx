@@ -203,11 +203,11 @@ export default function LibraryPage() {
       </div> : null}
 
       {collection === "active" ? (
-        <details className={`${styles.packagingWorkshop} glass`}>
+        <details id="thumbnail-refresh" className={`${styles.packagingWorkshop} glass`} open>
           <summary>
             <span className={styles.workshopIcon} aria-hidden="true"><IconSpark width={18} height={18} /></span>
-            <span><small>Packaging workshop</small><strong>Review and refresh thumbnails</strong></span>
-            <p>Compare thumbnail options.</p>
+            <span><small>30 reviewed ERNIE thumbnails</small><strong>Ready to preview and apply</strong></span>
+            <p>Replace the current YouTube images.</p>
             <i aria-hidden="true" />
           </summary>
           <div className={styles.workshopBody}>
