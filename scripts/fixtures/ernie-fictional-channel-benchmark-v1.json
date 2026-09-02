@@ -1,0 +1,31 @@
+{
+  "version": 1,
+  "label": "fictional-channel-benchmark-01",
+  "jobs": [
+    {
+      "id": "jobs-keynote-one-more-thing",
+      "seed": 310001,
+      "prompt": "1376x768 premium YouTube thumbnail for the fictional motivational channel SIGNAL & SOUL. A recognisable Steve Jobs at a 2000s keynote, black mock-neck, stands hard-cropped at the right edge at the instant he reveals a tiny glowing device under one hard white spotlight. His face and raised hand are intensely readable. A vast black stage and one blurred audience row supply depth; no Apple logo, UI, watermark, or extra props. The native physical headline ONE MORE THING is huge, clean ivory, and treated as an illuminated keynote placard in the dark left field; it must read in under one second. Make this a decisive, original editorial moment with one hero, one reveal, and one depth layer—never a flat 50/50 poster. ERNIE itself renders every visible glyph. Render exactly these words: ONE MORE THING and one compact SIGNAL & SOUL badge away from the timestamp corner. No other writing."
+    },
+    {
+      "id": "lorecraft-ring-chose",
+      "seed": 310002,
+      "prompt": "1376x768 premium YouTube thumbnail for fictional fantasy-lore channel LORECRAFT, telling a Lord of the Rings lore story. A single ancient gold ring dominates the foreground at a dramatic diagonal, half-buried in black volcanic ash; inside its reflection, a small cloaked traveller crosses a fiery mountain pass toward a distant burning tower. Render tactile illustrated fantasy, inked parchment texture, smoke, molten orange, and deep shadow—not a videogame screenshot or collage of characters. The native physical headline THE RING CHOSE is oversized, battered gold letterpress on a dark left field, fully readable at phone size. One ring, one traveller consequence, one distant tower; clear foreground, hero, background depth. ERNIE itself renders every visible glyph. Render exactly these words: THE RING CHOSE and one compact LORECRAFT badge away from the timestamp corner. No other writing, logos, or watermark."
+    },
+    {
+      "id": "lorecraft-forgotten-jedi",
+      "seed": 310003,
+      "prompt": "1376x768 premium YouTube thumbnail for fictional watercolor-lore channel LORECRAFT, telling a Star Wars lore story. An original lone Jedi archivist in a weathered cloak stands centered beneath a giant translucent blue holographic star map, gripping a dim blue energy blade as a red eclipse consumes a distant planet. Use hand-painted watercolor, ink wash, luminous pigment blooms, paper grain, and cinematic negative space—not photoreal, game UI, a franchise logo, or copied actor likeness. The native physical headline FORGOTTEN JEDI is huge and high-contrast, painted as a torn watercolor title object in the left field without touching the hero. Make the star map, hero, and eclipsed planet read as three clear depth layers. ERNIE itself renders every visible glyph. Render exactly these words: FORGOTTEN JEDI and one compact LORECRAFT badge away from the timestamp corner. No other writing or watermark."
+    },
+    {
+      "id": "stoic-stop-chasing",
+      "seed": 310004,
+      "prompt": "1376x768 premium YouTube thumbnail for fictional stoic relationships channel THE STILL MIND. A solitary composed man stands at the right edge in dark rain, deliberately lowering an unsent letter into a fireproof box while a distant woman-shaped silhouette walks toward warm daylight across a rain-slick street. The story is self-respect and honest boundaries, never manipulation or control: he chooses not to chase, and her choice remains her own. Use charcoal, deep navy, restrained amber, rain texture, strong diagonal reflections, and cinematic editorial realism. The native physical headline STOP CHASING is huge, bright ivory, and carved into a wet-black metal placard in the left field, instantly readable on mobile. One emotionally readable hero and one distant consequence detail; no dating-app UI, slogans, or generic luxury scene. ERNIE itself renders every visible glyph. Render exactly these words: STOP CHASING and one compact THE STILL MIND badge away from the timestamp corner. No other writing or watermark."
+    },
+    {
+      "id": "casefile-dummy-heist",
+      "seed": 310005,
+      "prompt": "1376x768 premium YouTube thumbnail for fictional real-heist narration channel MIDNIGHT CASEFILE. In a rain-dark museum service alley, an ordinary mannequin in a stolen guard uniform is wheeled toward a van while a detective's flashlight catches its blank face and a real police evidence tag flaps from its sleeve. A small security-camera lens glows in the distant background as the consequence proof. Use photoreal true-crime editorial lighting, wet asphalt reflections, teal-black shadows, one sharp red evidence accent, and a bold diagonal from headline to mannequin to van. The native physical headline DUMMY HEIST is oversized white evidence-stencil lettering pressed into a black case-file strip on the left, fully readable at phone size. One mannequin hero, one detective-light action, one van proof; never a game poster, dashboard, or generic masked criminal. ERNIE itself renders every visible glyph. Render exactly these words: DUMMY HEIST and one compact MIDNIGHT CASEFILE badge away from the timestamp corner. No other writing, logo, or watermark."
+    }
+  ]
+}

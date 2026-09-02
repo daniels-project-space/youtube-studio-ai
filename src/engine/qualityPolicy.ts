@@ -24,7 +24,11 @@ export function thumbnailGatePassed(verdict: ThumbnailGateVerdict): boolean {
     verdict.punch >= 7 &&
     verdict.styleMatch >= 7 &&
     verdict.storyMatch >= 7 &&
-    verdict.uiClean;
+    verdict.uiClean &&
+    // When a channel-specific visual-treatment/identity review was requested,
+    // a negative verdict is a hard production failure. Undefined remains
+    // compatible with legacy generic channels that do not have such a review.
+    verdict.visualTreatmentCompliant !== false;
 }
 
 /**

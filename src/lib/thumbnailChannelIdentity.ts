@@ -1,6 +1,22 @@
 import type { ThumbnailPlaybook, VisualLanguage } from "@/lib/thumbnailLab";
 
 /**
+ * A channel identity cannot be a collection of aspirational prompt prose.
+ * This is the small, reviewable subset that must survive all the way from
+ * playbook resolution to art direction, provider prompting, and the mobile
+ * admission gate.  `requiredSceneEvidence` describes visible facts, not
+ * stylistic preferences; `reviewCriteria` is deliberately phrased so the
+ * reviewer can answer true/false from pixels at browse size.
+ */
+export interface ThumbnailIdentityContract {
+  version: "thumbnail-channel-identity/v1";
+  profile: string;
+  requiredSceneEvidence: readonly string[];
+  prohibitedVisualPatterns: readonly string[];
+  reviewCriteria: readonly string[];
+}
+
+/**
  * Channel-specific visual truths that are stronger than a generic thumbnail
  * pattern. They are applied at render time as an additive guard, so a stored
  * research playbook still owns its references, palette and composition while
@@ -11,6 +27,7 @@ type IdentityProfile = Readonly<{
   rules: readonly string[];
   avoid: readonly string[];
   visualLanguage?: Partial<VisualLanguage>;
+  contract: ThumbnailIdentityContract;
 }>;
 
 const PROFILES: readonly IdentityProfile[] = [
@@ -30,6 +47,23 @@ const PROFILES: readonly IdentityProfile[] = [
       imageStyle: "premium realistic financial editorial photograph, tactile real-world materials, decisive human-scale consequence, restrained navy-black and gold grade",
       composition: "full_scene",
     },
+    contract: {
+      version: "thumbnail-channel-identity/v1",
+      profile: "investory-editorial-realism",
+      requiredSceneEvidence: [
+        "A believable adult human decision or tactile financial artifact visibly enacts the title's exact wealth mechanism.",
+        "The scene still communicates a concrete financial consequence when the headline is covered.",
+        "The dominant material reads as photographed paper, property, cash-flow object, or human-scale evidence rather than a digital asset.",
+      ],
+      prohibitedVisualPatterns: [
+        "Generic floating coins, neon market charts, holographic dashboards, anonymous gold bars, luxury filler, video-game art, or a glossy 3D product render.",
+      ],
+      reviewCriteria: [
+        "The exact financial mechanism in the title is visibly enacted by a believable human or tactile real-world artifact, not merely named by the headline.",
+        "With the headline mentally covered, the image communicates a specific financial consequence rather than generic money, coins, charts, or luxury imagery.",
+        "The candidate reads as grounded financial editorial realism and contains no game UI, neon finance cliché, or product-render aesthetic.",
+      ],
+    },
   },
   {
     names: ["gratitude springs"],
@@ -46,6 +80,22 @@ const PROFILES: readonly IdentityProfile[] = [
     visualLanguage: {
       imageStyle: "hyperreal cinematic meditation photography, natural water and atmospheric light, tactile human or environmental serenity, restrained blue and moonlit contrast",
       composition: "full_scene",
+    },
+    contract: {
+      version: "thumbnail-channel-identity/v1",
+      profile: "gratitude-springs-human-sanctuary",
+      requiredSceneEvidence: [
+        "A serene human or environmental sanctuary visibly expresses the episode's exact emotional promise.",
+        "Water, mist, light, foliage, sky, or quiet human presence is used as a tactile calm cue where it fits the topic.",
+      ],
+      prohibitedVisualPatterns: [
+        "A repeated rock-pile or paired-stones hero for an unrelated topic, synthetic wellness UI, plastic 3D props, or generic spa stock.",
+      ],
+      reviewCriteria: [
+        "The calm scene expresses the video's specific emotional promise instead of relying on a repeated stones motif.",
+        "If stones appear, they are incidental scenery rather than the dominant hero unless the title makes grounding or balance the literal subject.",
+        "The image reads as dignified, tactile meditation photography rather than synthetic wellness stock or fantasy-game art.",
+      ],
     },
   },
   {
@@ -64,6 +114,23 @@ const PROFILES: readonly IdentityProfile[] = [
       imageStyle: "premium hand-drawn editorial chalkboard illustration with an active human chalk hand, charcoal board grain, bright chalk dust and physically drawn causal diagrams",
       composition: "full_scene",
     },
+    contract: {
+      version: "thumbnail-channel-identity/v1",
+      profile: "chalk-compound-causal-teaching",
+      requiredSceneEvidence: [
+        "A human hand is visibly drawing the explanation in white chalk on a tactile dark board.",
+        "For tax videos, a hand-drawn allocation visibly connects the take-home share and tax share in one causal teaching diagram.",
+        "The board, chalk dust, and diagram carry the educational story even when the headline is covered.",
+      ],
+      prohibitedVisualPatterns: [
+        "A chalkless illustration, passive board, glossy 3D icons, game UI, neon HUD, generic classroom clip art, tiny equations, or disconnected symbols.",
+      ],
+      reviewCriteria: [
+        "A human hand is actively drawing with white chalk on a real-looking dark tactile board; chalk is not a small decorative prop.",
+        "For a tax topic, the board contains one readable non-textual causal allocation that makes the tax split or take-home consequence visually clear without the headline.",
+        "All supporting marks read as one coherent hand-drawn chalk explanation with dust and erased edges, never as a game interface, glossy icon set, or unrelated diagram.",
+      ],
+    },
   },
   {
     names: ["inked histories"],
@@ -81,6 +148,22 @@ const PROFILES: readonly IdentityProfile[] = [
       imageStyle: "original high-craft historical ink-and-charcoal editorial illustration on aged paper, tactile cross-hatching, dramatic chiaroscuro and restrained ember-gold proof accents",
       composition: "full_scene",
     },
+    contract: {
+      version: "thumbnail-channel-identity/v1",
+      profile: "inked-histories-engraved-action",
+      requiredSceneEvidence: [
+        "One human historical action, artifact recovery, danger, discovery, or consequence is visibly staged at the peak moment.",
+        "Tactile cross-hatching, aged paper, charcoal depth, and a restrained ember-gold or rust proof detail anchor the illustration.",
+      ],
+      prohibitedVisualPatterns: [
+        "AAA adventure-game key art, glossy 3D character models, RPG inventory props, comic-panel grids, speech bubbles, UI overlays, or decorative artifact-only scenes.",
+      ],
+      reviewCriteria: [
+        "The candidate is an authored historical ink-and-charcoal illustration with tangible cross-hatching and aged physical print texture, not a photoreal adventure-game or glossy poster image.",
+        "A single historical action, danger, discovery, or consequence is clear at mobile size; a disconnected relic or decorative object alone is insufficient.",
+        "Any ember-gold or rust accent acts as one restrained proof detail and does not overwhelm the historic ink language.",
+      ],
+    },
   },
   {
     names: ["lofi", "lo-fi"],
@@ -93,6 +176,21 @@ const PROFILES: readonly IdentityProfile[] = [
     visualLanguage: {
       imageStyle: "exact immutable rendered Lo-Fi video frame with a compact 4K quality emblem only",
       composition: "full_scene",
+    },
+    contract: {
+      version: "thumbnail-channel-identity/v1",
+      profile: "lofi-rendered-frame-only",
+      requiredSceneEvidence: [
+        "The dominant artwork is the exact still sampled from this video's completed rendered scene.",
+        "Only one truthful compact 4K quality emblem may be added in its reserved corner.",
+      ],
+      prohibitedVisualPatterns: [
+        "A separately generated generic scene, replacement illustration, headline, mood label, or alteration outside the allowed 4K emblem.",
+      ],
+      reviewCriteria: [
+        "The thumbnail artwork is the exact finished-video frame rather than a regenerated or generic Lo-Fi image.",
+        "No added copy or image alteration appears outside one truthful compact 4K emblem in its reserved corner.",
+      ],
     },
   },
 ];
@@ -124,6 +222,7 @@ export function applyThumbnailChannelIdentity(args: {
       ...args.playbook.visualLanguage,
       ...profile.visualLanguage,
     },
+    identityContract: profile.contract,
     rules: unique([...args.playbook.rules, ...profile.rules]),
     avoid: unique([...args.playbook.avoid, ...profile.avoid]),
   };

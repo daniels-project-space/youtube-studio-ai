@@ -41,6 +41,15 @@ const chalk = policyFor("Chalk & Compound");
 assert.match(chalk.rules.join(" "), /hand actively drawing/i);
 assert.match(chalk.rules.join(" "), /tax mechanism/i);
 assert.match(chalk.avoid.join(" "), /chalkless illustration/i);
+assert.equal(chalk.identityContract?.profile, "chalk-compound-causal-teaching");
+assert.ok(
+  chalk.identityContract?.reviewCriteria.some((criterion) => /actively drawing with white chalk/i.test(criterion)),
+  "Chalk & Compound needs a pixel-verifiable active-chalk requirement, not only prompt prose",
+);
+assert.ok(
+  chalk.identityContract?.reviewCriteria.some((criterion) => /tax split or take-home consequence/i.test(criterion)),
+  "Tax thumbnails must prove the causal allocation with the headline covered",
+);
 
 const inked = policyFor("Inked Histories");
 assert.match(inked.visualLanguage?.imageStyle ?? "", /historical ink-and-charcoal/i);
@@ -49,6 +58,7 @@ assert.match(inked.avoid.join(" "), /video-game concept art/i);
 const lofi = policyFor("Night LoFi");
 assert.match(lofi.rules.join(" "), /exact sampled frame/i);
 assert.match(lofi.avoid.join(" "), /separately generated generic Lo-Fi scene/i);
+assert.equal(lofi.identityContract?.profile, "lofi-rendered-frame-only");
 
 assert.equal(policyFor("Unrelated Channel"), base, "unmatched channel records must remain untouched");
 

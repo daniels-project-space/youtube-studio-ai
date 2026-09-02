@@ -496,6 +496,11 @@ function failClosedQualityGuards(): void {
     false,
     "a Golden candidate requires an explicit visual-treatment verdict",
   );
+  assert.throws(
+    () => assertThumbnailGate("production", { ...passingThumbnail, visualTreatmentCompliant: false }, "identity fixture"),
+    /failed the production gate/,
+    "a channel-specific identity review must fail closed when required visual evidence is absent",
+  );
   assert.throws(() => assertThumbnailGate("production", null, "fixture"), /no required production QA verdict/);
   assert.throws(
     () => assertThumbnailGate("production", { ...passingThumbnail, storyMatch: 6 }, "fixture"),

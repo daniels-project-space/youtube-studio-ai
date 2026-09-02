@@ -48,7 +48,10 @@ import type { FamilyKey } from "@/engine/families";
 import type { ThumbnailGateVerdict } from "@/engine/qualityPolicy";
 import type { ThumbnailTextZone } from "@/lib/thumbnailLayout";
 import { trustedThumbnailTextZoneResolution } from "@/lib/thumbnailSafeZone";
-import { applyThumbnailChannelIdentity } from "@/lib/thumbnailChannelIdentity";
+import {
+  applyThumbnailChannelIdentity,
+  type ThumbnailIdentityContract,
+} from "@/lib/thumbnailChannelIdentity";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
@@ -135,6 +138,12 @@ export interface ThumbnailPlaybook {
   energy?: "spectacle" | "bold" | "cozy_pop";
   /** Channel-constant visual language (font/treatment/colors/image style). */
   visualLanguage?: VisualLanguage;
+  /**
+   * A profile-specific must-show/must-not-show contract. It is attached at the
+   * central resolver, reaches both design routes, and converts to a strict
+   * mobile reviewer verdict. Stored legacy playbooks remain compatible.
+   */
+  identityContract?: ThumbnailIdentityContract;
   rules: string[];
   avoid: string[];
   patterns: ThumbPattern[];
@@ -423,7 +432,10 @@ export async function runThumbnailMobileReferenceQa(args: {
       );
     }
   }
-  const visualTreatmentCriteria = (args.visualTreatmentCriteria ?? [])
+  const visualTreatmentCriteria = [
+    ...(args.playbook.identityContract?.reviewCriteria ?? []),
+    ...(args.visualTreatmentCriteria ?? []),
+  ]
     .map((criterion) => criterion.trim())
     .filter(Boolean)
     .slice(0, 8);
@@ -861,6 +873,12 @@ export async function renderCandidate(args: {
   generateDesignedThumbnail?: GenerateDesignedThumbnail;
   log?: Logger;
 }): Promise<ThumbnailCandidateRenderResult> {
+  const identityContract = args.playbook.identityContract;
+  const identityDirection = identityContract
+    ? `CHANNEL IDENTITY CONTRACT (non-negotiable; reject a scene that misses any visible fact):\n` +
+      `MUST SHOW:\n- ${identityContract.requiredSceneEvidence.join("\n- ")}\n` +
+      `MUST NOT SHOW:\n- ${identityContract.prohibitedVisualPatterns.join("\n- ")}`
+    : "";
   // TWO-PASS DESIGN: the LAYOUT is decided FIRST (which zone the text owns),
   // the image is generated WITH that zone deliberately reserved as negative
   // space, then the text lands in its planned home — never fighting the image.
@@ -893,6 +911,7 @@ export async function renderCandidate(args: {
       (args.visualTreatment?.artDirectionRules?.length
         ? `NON-NEGOTIABLE VISUAL TREATMENT (apply every rule; this overrides pattern inspiration and generic CTR conventions):\n- ${args.visualTreatment.artDirectionRules.join("\n- ")}\n`
         : "") +
+      (identityDirection ? `${identityDirection}\n` : "") +
       `${args.sceneMandate ? `MANDATORY SCENE (operator/DNA-locked - NOT inspiration, NOT optional): the heroProp MUST be exactly this subject, adapted to this topic: ${args.sceneMandate}. Invent background and details AROUND it - never replace it.\n` : ""}` +
       (args.sceneSeed
         ? `TOPICRAFT-JUDGED STORY MOMENT (mandatory grounding): ${args.sceneSeed}. Preserve its actors, objects, physical action, and cause/effect. The pattern controls composition and styling; it may not substitute a different story.\n`
@@ -1043,7 +1062,7 @@ export async function renderCandidate(args: {
     };
     const expectWords = overlayLines.map((line) => line.text);
     const prompt =
-      `${buildThumbBrief(brief)} USER-APPROVED GOLDEN CRAFT BAR: ${GOLDEN_THUMBNAIL_CRAFT_RULES.join(" ")} ` +
+      `${buildThumbBrief(brief)} ${identityDirection} USER-APPROVED GOLDEN CRAFT BAR: ${GOLDEN_THUMBNAIL_CRAFT_RULES.join(" ")} ` +
       `OWNER-SELECTED A/B PREFERENCES: ${OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES.join(" ")}`;
     const providerPath = join(args.tmpDir, `thumbnail_designed_${args.idx}.png`);
     await writeFile(providerPath, await args.generateDesignedThumbnail({ prompt, brief, expectWords }));
@@ -1078,8 +1097,14 @@ export async function renderCandidate(args: {
       composition: (vl as { composition?: string }).composition,
       textZone: zone,
       visualAvoid: args.playbook.avoid,
-      ...(args.visualTreatment?.providerPromptRequirements?.length
-        ? { requiredVisualDirectives: args.visualTreatment.providerPromptRequirements }
+      ...(identityContract || args.visualTreatment?.providerPromptRequirements?.length
+        ? {
+            requiredVisualDirectives: [
+              ...(identityContract?.requiredSceneEvidence ?? []),
+              ...(identityContract?.prohibitedVisualPatterns.map((item) => `Never show ${item}`) ?? []),
+              ...(args.visualTreatment?.providerPromptRequirements ?? []),
+            ],
+          }
         : {}),
     },
     typography: {
