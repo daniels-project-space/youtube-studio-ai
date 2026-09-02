@@ -42,6 +42,10 @@ import {
   GOLDEN_THUMBNAIL_CRAFT_RULES,
   OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES,
 } from "@/lib/thumbnailGoldenStandard";
+import {
+  scoreThumbnailStoryInterest,
+  STORY_INTEREST_DOCTRINE,
+} from "@/lib/thumbnailStoryInterest";
 import { downloadTo } from "@/lib/files";
 import type { StyleDNA } from "@/engine/creative/types";
 import type { FamilyKey } from "@/engine/families";
@@ -80,7 +84,7 @@ export const RESEARCH_PRINCIPLES = [
   "Consistent per-channel styling lifts subscriber CTR 15-20%: lock palette + text position family; vary the hero object and the number.",
   "Honest framing only — false-promise thumbnails decay channel-wide recommendations.",
   "THE 120px SQUINT TEST: most first views are ~120px wide on mobile — mood, subject, and text must all survive there; if it's a muddy blur, the design is wrong.",
-  "SAFE ZONES: never place text/key elements in the bottom-right (duration timestamp) or bottom-left (chapter markers) corners; keep critical content off extreme edges.",
+  "SAFE ZONES: never place HEADLINE text or key story elements in the bottom-right (duration timestamp) or bottom-left (chapter markers) corners; keep critical content off extreme edges. The compact channel badge is the one deliberate exception — it is always bottom-right, sized and inset so the duration pill overlapping it costs nothing.",
   "Max 6 words on the image, and saturate beyond real life — thumbnails compete with bright UI.",
 ] as const;
 
@@ -115,7 +119,8 @@ export interface VisualLanguage {
    * delegated to the scene model. */
   textObject?:
     | "torn_strip" | "paint_smear" | "censor_bar" | "grunge_sticker" | "spaced_elegant" | "block_plate"
-    | "neon_sign" | "spray_paint" | "stamp_ink" | "movie_poster" | "ransom_note" | "carved";
+    | "neon_sign" | "spray_paint" | "stamp_ink" | "movie_poster" | "ransom_note" | "carved"
+    | "scene_forged";
   /** cutout_collage = hero is a die-cut PHOTO cutout over a designed collage
    * background (the anti-AI-look device for commentary/persona channels);
    * full_scene = one continuous rendered scene. */
@@ -503,13 +508,41 @@ export async function runThumbnailMobileReferenceQa(args: {
     try {
       const ocrText = await readThumbnailOcr(args.outJpg);
       const ocr = thumbnailOcrMatchesExpected({ ocrText, expectedWords: args.expectedWords });
-      copyVerified = ocr.exact || transcriptMatch.exact;
+      // An art-direction word rendered INTO the artwork ("HUGE", "PAYOFF") adds
+      // no missing copy, so presence checks alone score it exact and ship it.
+      // Either reader seeing one is damning; a vision transcript cannot
+      // disprove an extra word that is physically in the pixels.
+      const leaked = [...new Set([...ocr.leaked, ...transcriptMatch.leaked])];
+      // A misspelling only blocks when neither reader saw the correct string:
+      // the vision transcript is the tie-breaker against noisy OCR on
+      // deliberately stylized type.
+      const misspelled = ocr.misspelled
+        .filter((defect) => !transcriptMatch.normalizedOcr.includes(defect.expected));
+      copyVerified = (ocr.matched || transcriptMatch.matched)
+        && leaked.length === 0
+        && misspelled.length === 0;
       if (!copyVerified) {
-        ocrReason = `independent text reads miss exact planned copy: ${ocr.missing.join(", ")} ` +
+        const faults: string[] = [];
+        if (!ocr.matched && !transcriptMatch.matched) {
+          faults.push(`missing planned copy: ${ocr.missing.join(", ")}`);
+        }
+        if (leaked.length) {
+          faults.push(
+            `the artwork renders art-direction instruction words instead of obeying them: ` +
+            `${leaked.join(", ")} — write ONLY the planned headline copy`,
+          );
+        }
+        if (misspelled.length) {
+          faults.push(
+            `misspelled headline copy: ` +
+            `${misspelled.map((d) => `"${d.observed}" should read "${d.expected}"`).join(", ")}`,
+          );
+        }
+        ocrReason = `${faults.join("; ")} ` +
           `(OCR: ${ocr.normalizedOcr || "nothing"}; vision transcript: ${transcriptMatch.normalizedOcr || "nothing"})`;
       }
     } catch (error) {
-      copyVerified = transcriptMatch.exact;
+      copyVerified = transcriptMatch.matched && transcriptMatch.leaked.length === 0;
       if (!copyVerified) {
         ocrReason = `exact planned copy was not verified (OCR: ` +
           `${error instanceof Error ? error.message : String(error)}; ` +
@@ -740,7 +773,7 @@ export async function distillPlaybook(args: {
       `stamp=hollow archival border, neon=glowing type for night/synth worlds, clean=pure premium type), ` +
       `"baseColor":"#hex","accentColor":"#hex" — colors MUST come from THIS channel's palette; NEVER default to ` +
       `gold/yellow unless it is genuinely this channel's color, ` +
-      `"textObject":"torn_strip"|"paint_smear"|"censor_bar"|"grunge_sticker"|"spaced_elegant"|"block_plate"|"neon_sign"|"spray_paint"|"stamp_ink"|"movie_poster"|"ransom_note"|"carved" (the channel SIGNATURE motif for the deterministic LOCAL typography layer; it must never appear in fluxRecipe or become a textual scene prop), "imageStyle":"<=12 words — the base-image rendering style (e.g. 'painterly anime watercolor', 'vintage ink ` +
+      `"textObject":"torn_strip"|"paint_smear"|"censor_bar"|"grunge_sticker"|"spaced_elegant"|"block_plate"|"neon_sign"|"spray_paint"|"stamp_ink"|"movie_poster"|"ransom_note"|"carved"|"scene_forged" (scene_forged = the headline takes the scene's own plane, angle, lighting and symmetry while staying the most prominent graphic; pick it for cinematic, atmospheric or photographic worlds where the type should belong to the picture rather than sit on it) (the channel SIGNATURE motif for the deterministic LOCAL typography layer; it must never appear in fluxRecipe or become a textual scene prop), "imageStyle":"<=12 words — the base-image rendering style (e.g. 'painterly anime watercolor', 'vintage ink ` +
       `engraving', 'hyperreal cinematic 3D', 'retro screenprint poster')","badgeStyle":"center"|"pill","composition":"cutout_collage"|"full_scene" (cutout_collage = the hero is a clean die-cut PHOTO cutout with crisp edges pasted OVER a designed collage background of torn clippings/photos/graphic shapes - real photographic grain, magazine-composite feel; PICK THIS for commentary/persona/drama/expose channels because continuous AI scenes read fake there. full_scene = one continuous rendered scene for painterly/cinematic worlds),` +
       `"uppercase":boolean}. THE RULE: if another channel could wear this language, it is WRONG — diverge hard.\n` +
       `1. rules: 6-8 HARD rules for this channel's thumbnails — specific (sizes, positions, counts, colors), ` +
@@ -882,7 +915,11 @@ export async function renderCandidate(args: {
   // TWO-PASS DESIGN: the LAYOUT is decided FIRST (which zone the text owns),
   // the image is generated WITH that zone deliberately reserved as negative
   // space, then the text lands in its planned home — never fighting the image.
-  const inst = await claudeJson<{
+  // STORY-INTEREST LIFT: corrections fed back into a second instantiation when
+  // the first concept scores as a weak or inert subject. Text-only, so a dull
+  // idea is replaced before any image is paid for.
+  let storyLift: readonly string[] = [];
+  const instantiate = async () => claudeJson<{
     heroProp?: string;
     background?: string;
     details?: string[];
@@ -899,6 +936,14 @@ export async function renderCandidate(args: {
     system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
     prompt:
       `Instantiate this thumbnail PATTERN for the video "${args.title}".\n` +
+      // Story interest is decided BEFORE layout and scene invention: craft
+      // cannot rescue a subject nobody cares about.
+      `${STORY_INTEREST_DOCTRINE.join("\n")}\n` +
+      (storyLift.length
+        ? `THE PREVIOUS CONCEPT WAS REJECTED AS A WEAK SUBJECT, not a weak execution. The craft was fine; the story ` +
+          `was not worth telling. Choose a genuinely more interesting subject for this same video:\n` +
+          `${storyLift.map((lift) => `- ${lift}`).join("\n")}\n`
+        : "") +
       // Regenerate feedback comes FIRST so it cannot be buried under the
       // standing pattern rules — this is the whole point of the critique loop.
       ((args.priorIssues ?? []).length
@@ -925,10 +970,16 @@ export async function renderCandidate(args: {
       (args.playbook.avoid.length
         ? `FULL PLAYBOOK AVOID LIST:\n- ${args.playbook.avoid.join("\n- ")}\n\n`
         : "\n") +
-      `STEP 2 — fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY — ` +
       `STEP 1 — LAYOUT: choose layoutMode ("split" or "centered_hero") and textZone ("left"|"right"|"upperLeft"|"upperRight"|"upperCenter"). ` +
-      `Use split by default for copy-dense hooks: large hero opposite the text zone. Choose centered_hero only when a centered face, object, or peak-action silhouette is materially stronger; then compose the scene and native type around that silhouette, never as a symmetrical title card.\n` +
-      `STEP 2 — fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY — ` +
+      `These are EQUAL options — pick the one this specific image is strongest in, not a default. ` +
+      `split: large hero opposite the text zone, best for copy-dense hooks and asymmetric action. ` +
+      `centered_hero: the hero owns the middle and stares the viewer down — a confrontational, symmetrical, ` +
+      `one-point-perspective frame with the subject at peak action dead centre. This is a POWERFUL choice, not a ` +
+      `fallback: use it when the subject is a face, a mask, a barrel-on object, a doorway, a corridor, or any ` +
+      `head-on moment that gains force from being met square. Build real depth and tension around it (converging ` +
+      `lines, foreground occlusion, atmosphere) and land the type in the clean pockets above or beside the ` +
+      `silhouette. The only thing to avoid is a flat, empty, evenly-lit title card with a small object floating ` +
+      `in the middle — symmetry itself is welcome when the image is charged.\n` +
       `STEP 2 — fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY — ` +
       `never reproduce its literal scene). ENERGY TIER = "${args.playbook.energy ?? "bold"}":\n` +
       (args.playbook.energy === "spectacle"
@@ -978,6 +1029,66 @@ export async function renderCandidate(args: {
       `time unit (for example "$1K/MO", never bare "1000"); otherwise leave the key out. Set "position" to textZone.\n` +
       `Return STRICT JSON {"heroProp":string,"background":string,"details":string[],"textPropsJson":string,"textZone":string,"layoutMode":"split"|"centered_hero"}.`,
   });
+
+  let inst = await instantiate();
+  // Score the SUBJECT, not the execution. Every other gate in this module
+  // checks whether the candidate was rendered correctly; this one asks whether
+  // the story was worth rendering at all, and buys one text-only retry rather
+  // than a beautifully executed image of something boring.
+  const plannedHeadline = (): string[] => {
+    try {
+      const parsed = JSON.parse(inst.textPropsJson ?? "{}") as Record<string, unknown>;
+      const lines = (parsed["lines"] as { text?: string }[] | undefined) ?? [];
+      return [
+        ...(parsed["numberCallout"] ? [String(parsed["numberCallout"])] : []),
+        ...lines.map((line) => String(line?.text ?? "")),
+      ].filter(Boolean);
+    } catch {
+      return [];
+    }
+  };
+  let storyInterest = scoreThumbnailStoryInterest({
+    title: args.title,
+    heroProp: inst.heroProp,
+    headlineWords: plannedHeadline(),
+    sceneSeed: args.sceneSeed,
+  });
+  if (storyInterest.verdict !== "compelling" && storyInterest.liftPrompts.length) {
+    args.log?.(
+      `thumbnailLab: story interest ${storyInterest.score}/100 (${storyInterest.verdict}) — ` +
+      `${storyInterest.reasons.join("; ")}; re-planning the subject before paying for an image`,
+    );
+    storyLift = storyInterest.liftPrompts;
+    const lifted = await instantiate();
+    const liftedScore = scoreThumbnailStoryInterest({
+      title: args.title,
+      heroProp: lifted.heroProp,
+      headlineWords: (() => {
+        try {
+          const parsed = JSON.parse(lifted.textPropsJson ?? "{}") as Record<string, unknown>;
+          const lines = (parsed["lines"] as { text?: string }[] | undefined) ?? [];
+          return [
+            ...(parsed["numberCallout"] ? [String(parsed["numberCallout"])] : []),
+            ...lines.map((line) => String(line?.text ?? "")),
+          ].filter(Boolean);
+        } catch {
+          return [];
+        }
+      })(),
+      sceneSeed: args.sceneSeed,
+    });
+    // Only keep the replacement if it is actually a better subject — a retry
+    // that scores worse must not overwrite a merely-weak original.
+    if (liftedScore.score > storyInterest.score) {
+      inst = lifted;
+      storyInterest = liftedScore;
+      args.log?.(`thumbnailLab: story interest lifted to ${liftedScore.score}/100 (${liftedScore.verdict})`);
+    } else {
+      args.log?.(
+        `thumbnailLab: story re-plan scored ${liftedScore.score}/100, no better than ${storyInterest.score} — keeping the original concept`,
+      );
+    }
+  }
   // STAGED COMPOSITION: hero prop -> background -> story details, assembled
   // deterministically so generators receive named layers, not a prose blob.
   if (inst.heroProp) {

@@ -32,7 +32,7 @@ export const OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES = [
   "Show cause and consequence together: one close hero action plus one smaller proof detail that completes the story.",
   "Bring one consequential hand, object, rupture, or release into the near foreground so the viewer feels the action before decoding the subject.",
   "Use a strong diagonal or edge crop to pull the eye from hook to hero to consequence in under one second.",
-  "Allow a centered hero only for a genuinely stronger peak-action image; arrange supporting type around its silhouette and never turn it into a default symmetrical poster.",
+  "A centered hero is a first-class composition, not a fallback: when the subject is met head-on at peak action — a face, a mask, a barrel-on object, a doorway or a corridor — centre it, build converging depth and foreground tension around it, and arrange the type in the clean pockets around its silhouette. Symmetry is welcome when the frame is charged; the only failure is a flat, evenly-lit title card with a small object floating in the middle.",
   "Do not let a detached signboard or flat black text panel become the composition. Typography must share the scene's material, light, motion, or negative space while leaving the hero dominant.",
   "Keep headline contrast immediate and physical while preserving one clean hierarchy; do not let background lore compete.",
 ] as const;

@@ -26,6 +26,10 @@ import {
 import { buildStyleDnaPlaybook } from "@/lib/thumbnailLab";
 import { GOLDEN_THUMBNAIL_CRAFT_RULES } from "@/lib/thumbnailGoldenStandard";
 import { thumbnailOcrMatchesExpected } from "@/lib/thumbnailOcr";
+import {
+  scoreThumbnailStoryInterest,
+  STORY_INTEREST_DOCTRINE,
+} from "@/lib/thumbnailStoryInterest";
 import { planThumbnailText, type ThumbnailTextZone } from "@/lib/thumbnailLayout";
 import {
   buildThumbnailImageRequest,
@@ -107,7 +111,14 @@ function assertNativeCopyOcrGate(): void {
       ocrText: "$1K/MO\nCASH ENGINE\nINVESTORY",
       expectedWords: ["$1K/MO", "CASH ENGINE"],
     }),
-    { exact: true, missing: [], normalizedOcr: "$1K/MO CASH ENGINE INVESTORY" },
+    {
+      matched: true,
+      exact: true,
+      missing: [],
+      misspelled: [],
+      leaked: [],
+      normalizedOcr: "$1K/MO CASH ENGINE INVESTORY",
+    },
   );
   const mutated = thumbnailOcrMatchesExpected({
     ocrText: "$1,000/M0\nCASH LOOP\nINVESTORY",
@@ -115,6 +126,59 @@ function assertNativeCopyOcrGate(): void {
   });
   assert.equal(mutated.exact, false, "provider-mutated native copy must fail closed");
   assert.deepEqual(mutated.missing, ["$1K/MO", "CASH ENGINE"]);
+
+  // LEAK GUARD: an art-direction word baked into the artwork adds no missing
+  // copy, so a presence-only check scores it exact and ships it. This is the
+  // defect that put "HUGE" on an Inked Histories thumbnail and "PAYOFF" on an
+  // Investory one.
+  const leak = thumbnailOcrMatchesExpected({
+    ocrText: "EMPTY\nBY DAWN\nHUGE\nINKED HISTORIES",
+    expectedWords: ["EMPTY", "BY DAWN"],
+  });
+  assert.deepEqual(leak.missing, [], "the leaked word does not remove any planned copy");
+  assert.equal(leak.matched, true, "presence-only checking cannot see this defect");
+  assert.deepEqual(leak.leaked, ["HUGE"], "instruction words rendered as artwork must be reported");
+  assert.equal(leak.exact, false, "a rendered instruction word must fail closed");
+
+  // A channel that genuinely plans one of those words is unaffected.
+  const planned = thumbnailOcrMatchesExpected({
+    ocrText: "THE PAYOFF\nEXPLAINED",
+    expectedWords: ["THE PAYOFF", "EXPLAINED"],
+  });
+  assert.deepEqual(planned.leaked, [], "planned copy must never be treated as a leak");
+  assert.equal(planned.exact, true);
+
+  // SPELLING GUARD: the fuzzy allowance exists so stylized type is not read as
+  // absent copy, but silently passing a near-miss ships a misspelled thumbnail.
+  const misspelt = thumbnailOcrMatchesExpected({
+    ocrText: "GONE QUIETLI\nINVESTORY",
+    expectedWords: ["GONE QUIETLY"],
+  });
+  assert.deepEqual(misspelt.missing, [], "the word was attempted, not omitted");
+  assert.equal(misspelt.matched, true, "the lenient reading still finds it");
+  assert.deepEqual(
+    misspelt.misspelled,
+    [{ expected: "QUIETLY", observed: "QUIETLI" }],
+    "a word that only survived on spelling fuzz must be reported",
+  );
+  assert.equal(misspelt.exact, false, "a misspelled headline must fail closed");
+
+  const spelled = thumbnailOcrMatchesExpected({
+    ocrText: "GONE QUIETLY\nINVESTORY",
+    expectedWords: ["GONE QUIETLY"],
+  });
+  assert.deepEqual(spelled.misspelled, [], "correct spelling must not be flagged");
+  assert.equal(spelled.exact, true);
+
+  // A reader clipping the last glyph of oversized type is an OCR crop, not a
+  // spelling error. Blocking on it would fail correct thumbnails, so a strict
+  // prefix/suffix of the planned word must pass.
+  const clipped = thumbnailOcrMatchesExpected({
+    ocrText: "THE SWITCH\n60 SECON",
+    expectedWords: ["THE SWITCH", "60 SECONDS"],
+  });
+  assert.deepEqual(clipped.misspelled, [], "an OCR truncation must not be reported as a misspelling");
+  assert.equal(clipped.exact, true, "a clipped read of correct copy must not fail closed");
 }
 
 function assertSceneTypographySplit(): void {
@@ -182,6 +246,48 @@ function assertSceneTypographySplit(): void {
   }, "left"), true);
 }
 
+function assertStoryInterestIntelligence(): void {
+  // The two real candidates this gate was built from. Same channel genre, same
+  // craft quality, same centred layout — the only difference is whether the
+  // SUBJECT carries a human stake.
+  const inert = scoreThumbnailStoryInterest({
+    title: "The Bank That Was Robbed Through Its Own Wall",
+    heroProp: "a steel vault door fills the centre while two gloved hands drive a diamond core drill into its lock collar",
+    headlineWords: ["18 INCHES", "OF CONCRETE"],
+  });
+  const compelling = scoreThumbnailStoryInterest({
+    title: "The Airport Switch That Fooled Everyone",
+    heroProp: "a man in a wide-lapel 1970s suit sits dead centre facing the lens, his shoe pushing an identical briefcase across the carpet, caught mid-swap",
+    headlineWords: ["THE SWITCH", "60 SECONDS"],
+  });
+  assert.equal(compelling.verdict, "compelling", "a human caught mid-deception must score as a strong subject");
+  assert.notEqual(inert.verdict, "compelling", "a measurement of a building material must not pass as a strong subject");
+  assert.ok(
+    compelling.score > inert.score + 20,
+    `the human-stake concept must clearly outrank the inert-material one (${compelling.score} vs ${inert.score})`,
+  );
+  assert.ok(
+    inert.reasons.some((reason) => /measurement of an inert material/.test(reason)),
+    "the gate must name WHY the subject is weak, not just score it",
+  );
+  assert.ok(inert.liftPrompts.length > 0, "a weak subject must come with concrete corrections");
+
+  // A bare material with nobody acting on it is the floor case.
+  const floor = scoreThumbnailStoryInterest({
+    title: "How Vault Walls Are Built",
+    heroProp: "a thick concrete wall panel",
+    headlineWords: ["12 TONNES", "OF STEEL"],
+  });
+  assert.equal(floor.verdict, "inert", "an unattended raw material must score as inert");
+
+  // Craft words must not rescue a dull subject, and a strong subject must not
+  // be punished for lacking them.
+  assert.ok(
+    STORY_INTEREST_DOCTRINE.some((rule) => /never the story/i.test(rule)),
+    "the art director must be told outright that materials are not subjects",
+  );
+}
+
 function assertMotifImplementations(): void {
   const signatures = new Set<string>();
   const expected: Record<(typeof THUMBNAIL_TEXT_OBJECTS)[number], RegExp> = {
@@ -197,6 +303,9 @@ function assertMotifImplementations(): void {
     movie_poster: /fontcolor=black@0\.72/,
     ransom_note: /0xff8f80@0\.96:t=fill/,
     carved: /fontcolor=white@0\.34/,
+    // Scene-integrated headline: carved depth on the tall condensed face at
+    // dominant scale, distinct from `carved`'s editorial serif.
+    scene_forged: /BebasNeue\.ttf/,
   };
   for (const textObject of THUMBNAIL_TEXT_OBJECTS) {
     const style = resolveThumbnailTextStyle({ textObject });
@@ -601,7 +710,8 @@ async function main(): Promise<void> {
     assertFamilyPolicy();
     assertNativeCopyOcrGate();
     assertSceneTypographySplit();
-    assertMotifImplementations();
+    assertStoryInterestIntelligence();
+assertMotifImplementations();
     assertSafePlans();
     await assertRealCallPaths();
     await assertRenderedLayout();

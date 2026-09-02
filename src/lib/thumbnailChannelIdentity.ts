@@ -166,6 +166,76 @@ const PROFILES: readonly IdentityProfile[] = [
     },
   },
   {
+    names: ["vault breach"],
+    rules: [
+      "Vault Breach is tense photographic heist realism: show ONE decisive moment where a real security mechanism is being defeated by human hands and real tools — a diamond bit biting a lock collar, a fibre-scope fed under a door, gloved fingers on a scarred keypad, a cut bolt falling.",
+      "The channel's signature frame is head-on and centred: a one-point-perspective corridor, vault door, or hatch met square, with converging lines and hard practical light pulling the eye to the breach point at the middle of the frame.",
+      "The defeated mechanism must be legible as a mechanism — a viewer should understand what is being beaten and how, with the headline covered.",
+    ],
+    avoid: [
+      "the cartoon burglar cliché: striped tops, domino masks, swag sacks, tiptoeing silhouettes",
+      "guns, violence, or a getaway car as the subject — this channel is about the mechanism, not the shootout",
+      "generic money piles, glowing holographic security UI, video-game heist key art, or a glossy 3D vault render",
+    ],
+    visualLanguage: {
+      imageStyle: "tense photographic heist-documentary still, hard practical light, cold steel and concrete, one-point-perspective depth, fine grain",
+      composition: "full_scene",
+      textObject: "scene_forged",
+    },
+    contract: {
+      version: "thumbnail-channel-identity/v1",
+      profile: "vault-breach-mechanism-realism",
+      requiredSceneEvidence: [
+        "One real security mechanism is visibly being defeated by human hands and real tools at the decisive moment.",
+        "The frame is met head-on with converging perspective drawing the eye to the breach point.",
+        "The materials read as photographed steel, concrete, and worn metal rather than a digital or game asset.",
+      ],
+      prohibitedVisualPatterns: [
+        "Striped-top or masked cartoon burglars, swag sacks, guns, getaway-car hero shots, money piles, holographic security UI, game key art, or a glossy 3D vault render.",
+      ],
+      reviewCriteria: [
+        "A specific security mechanism is visibly being beaten by hands and tools — not merely a locked object sitting in frame.",
+        "With the headline covered, the image shows what is being defeated and roughly how.",
+        "The candidate reads as a photographic documentary still with real practical light, containing no game, neon, or 3D-render aesthetic.",
+      ],
+    },
+  },
+  {
+    names: ["the getaway files", "getaway files"],
+    rules: [
+      "The Getaway Files is a 1970s crime-caper film still: heavy 35mm grain, halation blooming off practical lights, warm faded print stock, period-accurate rooms, clothing and vehicles.",
+      "Stage one period moment of the switch, the escape, or the double-cross at its peak — a case swapped under a diner table, a hand passing keys through a car window, a face checking the mirror as the tail closes.",
+      "Frame the subject head-on and centred when the moment is a confrontation or a reveal; let the era's colour cast and lens flaws do the work rather than modern contrast.",
+    ],
+    avoid: [
+      "any modern technology, digital interface, mobile phone, or contemporary vehicle",
+      "clean digital sharpness, HDR clarity, glossy 3D renders, or video-game crime aesthetics",
+      "gun violence or gore as the subject; the tension is the scheme, not the shooting",
+    ],
+    visualLanguage: {
+      imageStyle: "1970s crime-caper film still, heavy 35mm grain, halation and warm faded print stock, period-accurate production design",
+      composition: "full_scene",
+      textObject: "scene_forged",
+    },
+    contract: {
+      version: "thumbnail-channel-identity/v1",
+      profile: "getaway-files-period-caper",
+      requiredSceneEvidence: [
+        "One period-accurate moment of a switch, escape, or double-cross is staged at its peak.",
+        "The image carries 35mm grain, halation, and a warm faded print-stock cast rather than modern digital clarity.",
+        "Every prop, garment, and vehicle in frame belongs to the era.",
+      ],
+      prohibitedVisualPatterns: [
+        "Modern technology, phones, digital interfaces, contemporary vehicles, HDR digital sharpness, glossy 3D renders, game aesthetics, or gun violence as the subject.",
+      ],
+      reviewCriteria: [
+        "The candidate reads as a photographed 1970s film still with genuine grain and halation, not a modern image with a filter applied.",
+        "A specific caper moment — a switch, an escape, a double-cross — is legible with the headline covered.",
+        "No anachronistic object appears anywhere in the frame.",
+      ],
+    },
+  },
+  {
     names: ["lofi", "lo-fi"],
     rules: [
       "Lo-Fi thumbnails must use the exact sampled frame from this video's finished rendered scene as their dominant artwork; only the truthful 4K quality emblem may be added in its reserved corner.",

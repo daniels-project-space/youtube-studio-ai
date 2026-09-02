@@ -15,32 +15,87 @@ export function normalizeThumbnailCopy(value: string): string {
     .trim();
 }
 
+/**
+ * Words that exist ONLY as art-direction instructions in the thumbnail brief.
+ * A provider that bakes one of these into the artwork has rendered the
+ * instruction instead of obeying it — the "(the payoff word, HUGE)" class of
+ * defect. Checking `missing` alone cannot catch this: a leaked word adds no
+ * missing copy, so the candidate scores exact and ships.
+ *
+ * A word here is only a leak when it is NOT part of this video's planned copy,
+ * so a channel that genuinely writes "PAYOFF" on a thumbnail is unaffected.
+ */
+export const PROMPT_INSTRUCTION_LEAK_WORDS = [
+  "HUGE", "PAYOFF", "ACCENT", "HEADLINE", "SUBTITLE", "BADGE", "HEROPROP",
+  "BACKGROUND", "TEXTZONE", "PLACEHOLDER", "UPPERCASE", "PALETTE", "TEMPLATE",
+  "LOREM", "IPSUM", "OMIT", "CAPTION", "KEYLINE", "COMPOSITION", "THUMBNAIL",
+] as const;
+
 export function thumbnailOcrMatchesExpected(args: {
   ocrText: string;
   expectedWords: readonly string[];
-}): { exact: boolean; missing: string[]; normalizedOcr: string } {
+}): {
+  matched: boolean;
+  exact: boolean;
+  missing: string[];
+  misspelled: { expected: string; observed: string }[];
+  leaked: string[];
+  normalizedOcr: string;
+} {
   const normalizedOcr = normalizeThumbnailCopy(args.ocrText);
   const observedTokens = normalizedOcr.split(" ").filter(Boolean);
-  const missing = args.expectedWords
-    .map((word) => normalizeThumbnailCopy(word))
-    .filter((word) => {
-      if (!word || normalizedOcr.includes(word)) return false;
-      const expectedTokens = word.split(" ").filter(Boolean);
-      return !expectedTokens.every((expected) => {
-        // Currency, percentages, ratios, and compact number callouts are
-        // semantic claims: never fuzzy-match them.
-        if (/[^A-Z]/u.test(expected) || /\d/u.test(expected)) {
-          return observedTokens.includes(expected);
-        }
-        const allowance = expected.length >= 7 ? 2 : expected.length >= 4 ? 1 : 0;
-        return observedTokens.some((observed) =>
-          /^[A-Z]+$/u.test(observed) &&
-          Math.abs(observed.length - expected.length) <= allowance &&
-          levenshtein(observed, expected) <= allowance
-        );
-      });
-    });
-  return { exact: missing.length === 0, missing, normalizedOcr };
+  // Anything the channel actually planned is legitimate copy, never a leak.
+  const plannedTokens = new Set(
+    args.expectedWords.flatMap((word) => normalizeThumbnailCopy(word).split(" ")).filter(Boolean),
+  );
+  const leaked = PROMPT_INSTRUCTION_LEAK_WORDS
+    .filter((word) => !plannedTokens.has(word) && observedTokens.includes(word));
+  const missing: string[] = [];
+  // A word the provider ATTEMPTED but spelled wrong. The fuzzy allowance below
+  // exists so stylized type is not mistaken for absent copy — but silently
+  // passing a near-miss also ships "GONE QUIETLI". Record every word that only
+  // survived on fuzz so the caller can fail closed on a genuine misspelling.
+  const misspelled: { expected: string; observed: string }[] = [];
+  for (const raw of args.expectedWords) {
+    const word = normalizeThumbnailCopy(raw);
+    if (!word || normalizedOcr.includes(word)) continue;
+    let wordMissing = false;
+    for (const expected of word.split(" ").filter(Boolean)) {
+      if (observedTokens.includes(expected)) continue;
+      // Currency, percentages, ratios, and compact number callouts are
+      // semantic claims: never fuzzy-match them.
+      if (/[^A-Z]/u.test(expected) || /\d/u.test(expected)) {
+        wordMissing = true;
+        continue;
+      }
+      const allowance = expected.length >= 7 ? 2 : expected.length >= 4 ? 1 : 0;
+      const nearMiss = observedTokens.find((observed) =>
+        /^[A-Z]+$/u.test(observed) &&
+        Math.abs(observed.length - expected.length) <= allowance &&
+        levenshtein(observed, expected) <= allowance
+      );
+      // A near miss that is a strict PREFIX or SUFFIX of the planned word is an
+      // OCR crop, not a spelling error — readers routinely clip the last glyph
+      // of oversized type. A real misspelling substitutes a character
+      // ("QUIETLI" for "QUIETLY"), which survives this filter.
+      const truncation = nearMiss
+        && (expected.startsWith(nearMiss) || expected.endsWith(nearMiss))
+        && nearMiss.length < expected.length;
+      if (nearMiss && !truncation) misspelled.push({ expected, observed: nearMiss });
+      else if (!nearMiss) wordMissing = true;
+    }
+    if (wordMissing) missing.push(word);
+  }
+  return {
+    // `matched` keeps the historical lenient reading: every planned word is
+    // present, spelling fuzz allowed. `exact` is the strict contract.
+    matched: missing.length === 0,
+    exact: missing.length === 0 && misspelled.length === 0 && leaked.length === 0,
+    missing,
+    misspelled,
+    leaked,
+    normalizedOcr,
+  };
 }
 
 function levenshtein(left: string, right: string): number {

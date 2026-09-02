@@ -3146,6 +3146,7 @@ export const THUMBNAIL_TEXT_OBJECTS = [
   "movie_poster",
   "ransom_note",
   "carved",
+  "scene_forged",
 ] as const;
 
 export type ThumbnailTextObject = typeof THUMBNAIL_TEXT_OBJECTS[number];
@@ -3184,6 +3185,10 @@ const THUMBNAIL_TEXT_STYLES: Record<ThumbnailTextObject, Omit<ResolvedThumbnailT
   movie_poster: { font: "impact", casing: "upper", tracking: 0, fontScale: 1, surface: "none", effect: "bevel" },
   ransom_note: { font: "sans", casing: "configured", tracking: 0, fontScale: 0.72, surface: "letter_tiles", effect: "hard_shadow" },
   carved: { font: "serif", casing: "upper", tracking: 0, fontScale: 0.92, surface: "none", effect: "carved" },
+  // Scene-integrated headline. The native provider route owns the perspective,
+  // scene lighting and occlusion; the local compositor approximates it with the
+  // tall condensed face at dominant scale and carved depth rather than a plate.
+  scene_forged: { font: "bebas", casing: "upper", tracking: 0, fontScale: 1.08, surface: "none", effect: "carved" },
 };
 
 export function isThumbnailTextObject(value: unknown): value is ThumbnailTextObject {

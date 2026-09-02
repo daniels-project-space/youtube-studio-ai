@@ -114,8 +114,8 @@ async function hydrateSealedNanoBananaThumbnailCredential(): Promise<void> {
 /** The proven craft contract — prepended to EVERY brief. */
 export const BANANA_RULES =
   "Rules: 1280x720 YouTube thumbnail. The hero fills 55-75% of the frame, aggressively cropped. " +
-  "Typography is HUGE (owns 25-40% of the frame), ultra-bold, rendered as a designed physical object " +
-  "(plate, smear, strip, slab or sticker) made of the scene's material world, with one PAYOFF word 2-4x " +
+  "Typography is enormous (owns 25-40% of the frame), ultra-bold, rendered as a designed physical object " +
+  "(plate, smear, strip, slab or sticker) made of the scene's material world, with one dominant word 2-4x " +
   "larger than the rest. HARD RULE: text NEVER covers the hero's face or eyes - beside, above or across " +
   "the body only. Spelling EXACTLY as quoted - every visible word must be a correctly spelled real word. " +
   "Everything must read at 120px on a phone. No play buttons, no UI, no watermarks, no extra small text.";
@@ -134,6 +134,7 @@ export const TEXT_OBJECT_LANGUAGE: Record<string, string> = {
   movie_poster: "as cinematic title-card lettering with metallic bevel and rim light, embedded in the scene atmosphere, blockbuster one-sheet gravity",
   ransom_note: "with each letter cut from a different magazine page in a different font and color, glued unevenly with visible tape and shadows",
   carved: "physically carved into the scene's dominant material (stone, wood, steel) with real chisel depth, the cuts catching the key light",
+  scene_forged: "as MONUMENTAL TYPOGRAPHY that belongs to the scene's light without becoming an object in it. It stays type - never a plaque, signboard, carved block, banner, engraved slab or any prop lying in the scene - and it owns 25-40% of the frame as the largest, hardest-edged, highest-contrast graphic present. It borrows the picture's world: the SAME key light, colour temperature and falloff as the hero, the scene's own atmosphere drifting across the letter faces (mist, spray, dust, smoke, bloom), a faint reflection or glow where the scene would give one, and a slight shared perspective tilt that agrees with the scene's dominant plane while staying fronto-parallel enough to read instantly. It sits on the scene's own axis: where the composition is symmetrical the headline is centred and balanced on that axis rather than pushed to one side. Every letter stays fully legible - atmosphere may pass OVER the type, but no object may cover any letter",
 };
 
 export interface ThumbBriefArgs {
@@ -161,17 +162,31 @@ export function buildThumbBrief(a: ThumbBriefArgs): string {
   const collage = a.composition === "cutout_collage"
     ? " COMPOSITION: the hero is a die-cut PHOTO cutout with a crisp edge pasted OVER a designed collage background (torn clippings, photos, graphic shapes, paper texture, hard cut shadows) - real photographic grain, magazine composite, NEVER a continuous smooth AI scene."
     : "";
-  const headline = a.lines
-    .map((l) => `"${l.text.toUpperCase()}"${l.payoff ? " (the payoff word, HUGE)" : ""}${l.accent ? " (accent color)" : ""}`)
-    .join(" then ");
+  // The exact copy and the art direction for it are kept in SEPARATE sentences.
+  // Annotating a quoted string in place ("WORD" (the payoff word, HUGE)) puts an
+  // instruction inside the run the model has just been told to spell verbatim,
+  // and providers render the annotation as artwork — confirmed on both Nano
+  // Banana 2 and Nano Banana Pro. Never reintroduce an inline parenthetical here.
+  const quoted = (value: string) => `"${value.toUpperCase()}"`;
+  const headline = a.lines.map((l) => quoted(l.text)).join(" then ");
+  const dominant = a.lines.find((l) => l.payoff);
+  const accented = a.lines.filter((l) => l.accent);
+  const emphasis =
+    (dominant ? ` Set ${quoted(dominant.text)} 2-4x larger than the other copy so it dominates.` : "") +
+    (accented.length
+      ? ` Render ${accented.map((l) => quoted(l.text)).join(" and ")} in the accent color.`
+      : "");
   return (
     `${BANANA_RULES} Channel "${a.channelName.toUpperCase()}"` +
     `${a.imageStyle ? ` (signature look, obey strictly: ${a.imageStyle}` : " ("}` +
     `${a.palette?.length ? `, palette ${a.palette.join(" / ")}` : ""}` +
     `${a.accentColor ? `, accent ${a.accentColor}` : ""}).` +
     `${collage} Scene: ${a.scene}` +
-    ` Headline: ${headline} - placed clear of all faces.${typeClause}` +
-    ` Small badge pill "${a.badge.toUpperCase()}" in a corner away from the text.`
+    ` Headline — render EXACTLY these words and no others: ${headline}, placed clear of all faces.` +
+    ` No other word, label, annotation or description from these instructions may appear in the image.` +
+    `${emphasis}${typeClause}` +
+    ` Small badge pill "${a.badge.toUpperCase()}" in the BOTTOM-RIGHT corner — always that corner, never any` +
+    ` other, inset from both edges, compact and secondary, with the headline and hero kept clear of it.`
   );
 }
 
