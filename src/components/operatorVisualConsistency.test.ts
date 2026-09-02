@@ -68,7 +68,7 @@ assert.match(globalCss, /--color-failed: #fb7185/);
 assert.doesNotMatch(globalCss, /\.channel-live-state-inactive\s*\{\s*opacity:/);
 assert.match(globalCss, /\.channel-live-state small[\s\S]*display: none/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-live-state small \{ display: block/);
-assert.match(globalCss, /\.channel-card-grid[\s\S]*min\(100%, 250px\)/);
+assert.match(globalCss, /\.channel-card-grid[\s\S]*min\(100%, 220px\)/);
 assert.match(globalCss, /\.channel-card-readiness progress/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-live-state[\s\S]*grid-column: 1 \/ -1/);
 

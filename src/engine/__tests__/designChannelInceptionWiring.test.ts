@@ -232,6 +232,12 @@ assert.doesNotMatch(coordinator, /\{ castVoice, gateColdOpen \}/,
   "channel inception must not route voice casting through the retired Gemini audio judge");
 assert.match(coordinator, /positioningIdentityProjection/);
 assert.match(coordinator, /seoIdentityProjection/);
+assert.match(coordinator, /worldSetting:\s*positioning\.styleDNA\.setting/,
+  "channel banners must receive the frozen Style DNA setting rather than only a generic niche prompt");
+assert.match(coordinator, /worldMotifs:\s*positioning\.styleDNA\.motifs/,
+  "channel banners must receive repeatable visual anchors for their specific channel world");
+assert.match(coordinator, /visualAvoid:\s*positioning\.styleDNA\.visualAvoid/,
+  "channel banners must retain the channel's own visual exclusions");
 assert.match(coordinator, /const voiceStage = channelInceptionStage\(plan, "channel-inception-voice"\)/);
 assert.match(coordinator, /tasks\.triggerAndWait\(\s*"plan-week-ahead"/);
 assert.match(coordinator, /const lengthSeconds = design\.episodeLengthSeconds/,

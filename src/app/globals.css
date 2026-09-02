@@ -1925,18 +1925,24 @@
 
 /* ── Channels: identity-forward operating cards ─────────────────────────── */
 
+.channel-category-list { display: grid; gap: 1rem; }
+.channel-category { min-width: 0; display: grid; gap: .42rem; }
+.channel-category-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; padding: 0 .1rem; }
+.channel-category-heading h2 { margin: 0; color: var(--color-fg); font-family: var(--font-display); font-size: 1.12rem; font-weight: 570; letter-spacing: -.025em; }
+.channel-category-heading span { min-width: 1.55rem; padding: .18rem .36rem; border: 1px solid var(--color-border); border-radius: 999px; color: var(--color-muted); font: 700 .62rem/1 var(--font-mono); text-align: center; }
+
 .channel-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 250px), 1fr));
-  gap: 0.65rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 220px), 1fr));
+  gap: 0.55rem;
 }
 
 .channel-card {
   min-width: 0;
   display: grid;
   align-content: start;
-  gap: 0.46rem;
-  padding: 0.58rem;
+  gap: 0.4rem;
+  padding: 0.5rem;
   overflow: hidden;
   background:
     linear-gradient(145deg, rgba(255,255,255,.05), transparent 34%),

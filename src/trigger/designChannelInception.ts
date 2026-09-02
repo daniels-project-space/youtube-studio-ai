@@ -2939,6 +2939,10 @@ export async function executeDesignChannel(
     niche: positioning.identity.niche,
     iconicMotif: positioning.creativeBrief.iconicMotif,
     vibe: positioning.creativeBrief.vibe,
+    worldSetting: positioning.styleDNA.setting,
+    worldComposition: positioning.styleDNA.composition,
+    worldMotifs: positioning.styleDNA.motifs,
+    visualAvoid: positioning.styleDNA.visualAvoid,
   };
   const loadAvatar = async () => {
     const imageKey = asIdentity((await currentChannel(convex, channelId)).identity).imageKey;

@@ -161,6 +161,15 @@ const IDENTITY = {
   vibe: "still confidence",
 };
 
+const SEASIDE_IDENTITY = {
+  ...IDENTITY,
+  name: "Seaside Ghibli Lofi",
+  worldSetting: "a vibrant hand-painted coastal storybook world with a deep-blue foaming ocean, piers, coves, and sunlit seaside rooms",
+  worldComposition: "wide balanced framing with a strong foreground, ocean and sky breathing room, and a calm single focal story",
+  worldMotifs: ["turquoise ocean waves", "paper lanterns", "coastal wildflowers", "a small fluffy cat"],
+  visualAvoid: ["generic headphones-at-a-desk scene", "photorealistic CGI", "harsh neon cyberpunk"],
+};
+
 function assertPromptContracts(): void {
   const avatar = avatarPrompt(IDENTITY);
   assert.match(avatar, /circular crop/i);
@@ -176,6 +185,11 @@ function assertPromptContracts(): void {
   assert.match(banner, /head no higher than 35% and the base no lower than 65%/i);
   assert.match(banner, /must fill every pixel of the canvas edge-to-edge/i);
   assert.match(banner, /absolutely no text/i);
+
+  const seasideBanner = bannerPrompt(SEASIDE_IDENTITY);
+  assert.match(seasideBanner, /LOCKED CHANNEL WORLD:.*coastal storybook/i);
+  assert.match(seasideBanner, /RECURRING WORLD ANCHORS:.*turquoise ocean waves/i);
+  assert.match(seasideBanner, /DO NOT INTRODUCE:.*generic headphones-at-a-desk scene/i);
 }
 
 async function assertApprovedIndependentOutputs(): Promise<void> {

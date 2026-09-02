@@ -36,6 +36,14 @@ export interface ArtIdentity {
   iconicMotif?: string;
   /** Show Bible vibe — the emotional/tonal signature. */
   vibe?: string;
+  /** Frozen Style DNA setting; banners must live in this actual channel world. */
+  worldSetting?: string;
+  /** Frozen Style DNA composition so channel artwork does not collapse to a generic genre scene. */
+  worldComposition?: string;
+  /** Small, repeatable Style DNA anchors that distinguish one channel from another. */
+  worldMotifs?: string[];
+  /** Channel-specific visual exclusions retained by the art prompt. */
+  visualAvoid?: string[];
 }
 
 export interface ChannelArtResult {
@@ -152,6 +160,19 @@ function paletteClause(palette?: string[]): string {
     : "cohesive cinematic color palette";
 }
 
+function worldDirectionClauses(id: ArtIdentity): string[] {
+  return [
+    id.worldSetting ? `LOCKED CHANNEL WORLD: ${id.worldSetting}` : "",
+    id.worldComposition ? `COMPOSITIONAL LANGUAGE: ${id.worldComposition}` : "",
+    id.worldMotifs?.length
+      ? `RECURRING WORLD ANCHORS: ${id.worldMotifs.slice(0, 6).join("; ")}`
+      : "",
+    id.visualAvoid?.length
+      ? `DO NOT INTRODUCE: ${id.visualAvoid.slice(0, 6).join("; ")}`
+      : "",
+  ].filter(Boolean);
+}
+
 export function avatarPrompt(id: ArtIdentity, notes: string[] = []): string {
   return [
     `Premium YouTube channel PROFILE-PICTURE icon for "${id.name}"`,
@@ -186,6 +207,7 @@ export function bannerPrompt(
     id.iconicMotif ? `featuring the channel motif: ${id.iconicMotif}` : "",
     id.styleGrammar ?? id.persona ?? "",
     paletteClause(id.palette),
+    ...worldDirectionClauses(id),
     ...extra,
     "YOUTUBE SAFE AREA: keep the focal subject and every essential detail inside the centered " +
       "1546x423 safe area of a 2560x1440 canvas; outer edges are atmospheric extension only",

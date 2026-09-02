@@ -25,6 +25,7 @@ import {
   isMainFleetChannel,
   pageChannels,
 } from "./channelCardVisibility";
+import { groupChannelsByCategory } from "./channelCategories";
 
 type ChannelSchedule = {
   frequency?: string;
@@ -132,6 +133,9 @@ export default function ChannelsPage() {
   const mainFleetCount = (channels ?? []).filter(isMainFleetChannel).length;
   const visible = channelsVisibleForFolder(channels ?? [], openFolder);
   const fleetPage = pageChannels(visible, visibleLimit);
+  const fleetGroups = openFolder === null
+    ? groupChannelsByCategory(fleetPage.visible)
+    : [{ key: "room", label: `${openFolder} room`, channels: fleetPage.visible }];
   const readyPlanBySlug = new Map<string, PlanCardRow[]>();
   for (const item of plan ?? []) {
     if (item.status !== "ready") continue;
@@ -187,8 +191,22 @@ export default function ChannelsPage() {
         />
       ) : (
         <>
-          <div className="channel-card-grid" aria-label="Channel fleet">
-          {fleetPage.visible.map((c) => {
+          <div className="channel-category-list" aria-label={openFolder ? `${openFolder} channels` : "Channel categories"}>
+          {fleetGroups.map((group) => (
+            <section
+              className="channel-category"
+              key={group.key}
+              aria-labelledby={openFolder === null ? `channel-category-${group.key}` : undefined}
+              aria-label={openFolder ? group.label : undefined}
+            >
+              {openFolder === null ? (
+                <header className="channel-category-heading">
+                  <h2 id={`channel-category-${group.key}`}>{group.label}</h2>
+                  <span>{group.channels.length}</span>
+                </header>
+              ) : null}
+              <div className="channel-card-grid" aria-label={group.label}>
+          {group.channels.map((c) => {
             const cardData = channelArtwork.find(
               (art) => art.channelId === c._id || art.channelSlug === c.slug,
             );
@@ -365,6 +383,9 @@ export default function ChannelsPage() {
               </article>
             );
           })}
+              </div>
+            </section>
+          ))}
           </div>
           {fleetPage.total > CHANNEL_PAGE_SIZE ? (
             <div className="channel-page-pagination">
