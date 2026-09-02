@@ -40,7 +40,10 @@ export function VideoCard({
         emptyClassName="video-card-placeholder"
         assetKey={video.thumbnailKey}
         reviewedSrc={video.reviewedThumbnailUrl}
-        fallbackSrc={video.youtubeVideoId ? youtubeThumb(video.youtubeVideoId) : undefined}
+        videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
+        fallbackSrc={video.thumbnailPresentation === "lofi_frame_pending"
+          ? undefined
+          : video.youtubeVideoId ? youtubeThumb(video.youtubeVideoId) : undefined}
         fallbackSource="youtube"
         alt={video.title}
         emptyContent={<IconLibrary width={28} height={28} />}

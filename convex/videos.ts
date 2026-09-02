@@ -6,6 +6,10 @@ import {
   normalizeReleaseEvidenceStatus,
   recordedReleaseEvidenceMasterKey,
 } from "../src/lib/releaseEvidenceStatus";
+import {
+  isLofiChannel,
+  selectLofiLibraryThumbnail,
+} from "../src/lib/lofiLibraryThumbnail";
 
 /**
  * Finished-videos library (Tranche 4).
@@ -108,13 +112,20 @@ export const listVideos = query({
     // Channel-name cache so we join each channel at most once.
     const channelCache = new Map<
       string,
-      { name: string; slug: string } | null
+      { name: string; slug: string; family?: string; contentLane?: unknown } | null
     >();
     const getChannel = async (channelId: Id<"channels">) => {
       const key = channelId as string;
       if (channelCache.has(key)) return channelCache.get(key)!;
       const ch = await ctx.db.get(channelId);
-      const val = ch ? { name: ch.name, slug: ch.slug } : null;
+      const val = ch
+        ? {
+            name: ch.name,
+            slug: ch.slug,
+            family: ch.family,
+            contentLane: ch.contentLane,
+          }
+        : null;
       channelCache.set(key, val);
       return val;
     };
@@ -214,6 +225,50 @@ export const listVideos = query({
             ? (runAny.estimatedViewsSource as string)
             : undefined;
 
+      const lofi = isLofiChannel({
+        family: channel?.family,
+        contentLane: channel?.contentLane,
+      });
+      let libraryThumbnailKey = thumbAsset?.r2Key ?? null;
+      let thumbnailPresentation: "lofi_rendered_frame" | "lofi_frame_pending" | undefined;
+      if (lofi) {
+        // A thumbnail refresh is intentionally a sibling run. It is safe to
+        // display a verified source-frame candidate in Studio, but it does not
+        // change the original source record or its external YouTube thumbnail.
+        const refreshRuns = await ctx.db
+          .query("runs")
+          .withIndex("by_channel_thumbnail_refresh_source", (q) => q
+            .eq("channelId", run.channelId)
+            .eq("thumbnailRefreshSourceRunId", run._id))
+          .collect();
+        const refreshCandidates = await Promise.all(refreshRuns.map(async (candidate) => {
+          const candidateThumbnail = (await ctx.db
+            .query("assets")
+            .withIndex("by_run", (q) => q.eq("runId", candidate._id))
+            .collect())
+            .find((asset) => asset.kind === "thumbnail");
+          return {
+            status: candidate.status,
+            finishedAt: candidate.finishedAt,
+            startedAt: candidate.startedAt,
+            thumbnail: candidateThumbnail
+              ? { runId: String(candidate._id), r2Key: candidateThumbnail.r2Key, meta: candidateThumbnail.meta }
+              : null,
+          };
+        }));
+        const exactFrame = selectLofiLibraryThumbnail({
+          ownerId: args.ownerId,
+          channelId: String(run.channelId),
+          sourceVideoKey: videoKey,
+          sourceThumbnail: thumbAsset
+            ? { runId: String(run._id), r2Key: thumbAsset.r2Key, meta: thumbAsset.meta }
+            : null,
+          refreshCandidates,
+        });
+        libraryThumbnailKey = exactFrame?.r2Key ?? null;
+        thumbnailPresentation = exactFrame ? "lofi_rendered_frame" : "lofi_frame_pending";
+      }
+
       rows.push({
         _id: run._id,
         status: run.status,
@@ -239,7 +294,8 @@ export const listVideos = query({
         title: title as string,
         description,
         tags,
-        thumbnailKey: thumbAsset?.r2Key ?? null,
+        thumbnailKey: libraryThumbnailKey,
+        ...(thumbnailPresentation ? { thumbnailPresentation } : {}),
         videoKey,
         thumbnailTitle:
           typeof tMeta.thumbnailTitle === "string"

@@ -91,7 +91,10 @@ function ArtifactCard({
         emptyClassName={styles.mediaFallback}
         assetKey={video.thumbnailKey}
         reviewedSrc={video.reviewedThumbnailUrl}
-        fallbackSrc={video.youtubeVideoId ? youtubeThumb(video.youtubeVideoId) : undefined}
+        videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
+        fallbackSrc={video.thumbnailPresentation === "lofi_frame_pending"
+          ? undefined
+          : video.youtubeVideoId ? youtubeThumb(video.youtubeVideoId) : undefined}
         fallbackSource="youtube"
         alt={video.title}
         overlay={({ source, state }) => (

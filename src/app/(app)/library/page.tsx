@@ -103,7 +103,12 @@ export default function LibraryPage() {
     const reviewedThumbnailUrl = operationsAccess === "owner"
       ? reviewedThumbnailUrls.get(video._id)
       : undefined;
-    return reviewedThumbnailUrl ? { ...video, reviewedThumbnailUrl } : video;
+    // The reviewed ERNIE batch predates the dedicated Lo-Fi source-frame
+    // route. Never let one of its generic scenes cover an exact frame (or the
+    // deliberate final-render fallback) in the Library.
+    return reviewedThumbnailUrl && video.thumbnailPresentation === undefined
+      ? { ...video, reviewedThumbnailUrl }
+      : video;
   }), [operationsAccess, reviewedThumbnailUrls, videos]);
 
   // Apply all filters + sort client-side over the query result.

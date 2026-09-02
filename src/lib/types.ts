@@ -86,6 +86,8 @@ export type VideoRow = {
   title: string;
   /** r2Key of the generated thumbnail asset; presign via /api/asset-url. */
   thumbnailKey: string | null;
+  /** Lo-Fi never falls back to generic artwork: show a verified frame or a paused final-render still. */
+  thumbnailPresentation?: "lofi_rendered_frame" | "lofi_frame_pending";
   /** Owner-only, SHA-pinned reviewed replacement preview for this exact run. */
   reviewedThumbnailUrl?: string;
   /** r2Key of the rendered video asset; lightbox <video> fallback. */

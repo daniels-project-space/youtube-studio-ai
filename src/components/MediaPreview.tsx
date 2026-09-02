@@ -24,6 +24,7 @@ export type MediaPreviewPresentation = {
  */
 export function MediaPreview({
   assetKey,
+  videoStillKey,
   reviewedSrc,
   alt,
   fallbackSrc,
@@ -40,6 +41,8 @@ export function MediaPreview({
   overlay,
 }: {
   assetKey?: string | null;
+  /** A paused 15-second frame from a saved final master; used only as a truthful Lo-Fi fallback. */
+  videoStillKey?: string | null;
   /** Owner-authorized, immutable reviewed replacement preview. */
   reviewedSrc?: string | null;
   alt: string;
@@ -57,12 +60,14 @@ export function MediaPreview({
   overlay?: (presentation: MediaPreviewPresentation) => ReactNode;
 }) {
   const signedAsset = useAssetUrlState(assetKey);
+  const signedVideoStill = useAssetUrlState(videoStillKey);
   const [reviewedFailedSrc, setReviewedFailedSrc] = useState<string | null>(null);
   const [r2FailedKey, setR2FailedKey] = useState<string | null>(null);
+  const [videoStillFailedKey, setVideoStillFailedKey] = useState<string | null>(null);
   const [fallbackFailedSrc, setFallbackFailedSrc] = useState<string | null>(null);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
 
-  const fallbackSelection = selectMediaPreview({
+  const imageSelection = selectMediaPreview({
     assetKey,
     signedUrl: signedAsset.url,
     signedState: signedAsset.status,
@@ -71,9 +76,19 @@ export function MediaPreview({
     fallbackImageFailed: Boolean(fallbackSrc && fallbackFailedSrc === fallbackSrc),
     fallbackSource,
   });
+  const videoStillSelection = selectMediaPreview({
+    assetKey: videoStillKey,
+    signedUrl: signedVideoStill.url,
+    signedState: signedVideoStill.status,
+    r2ImageFailed: Boolean(videoStillKey && videoStillFailedKey === videoStillKey),
+    fallbackSrc: undefined,
+    fallbackImageFailed: true,
+  });
+  const fallbackSelection = assetKey ? imageSelection : videoStillKey ? videoStillSelection : imageSelection;
   const selection = reviewedSrc && reviewedFailedSrc !== reviewedSrc
     ? { source: "reviewed" as const, src: reviewedSrc, state: "loading" as const }
     : fallbackSelection;
+  const showingVideoStill = !reviewedSrc && !assetKey && Boolean(videoStillKey) && selection.source === "r2";
   const state = selection.src && loadedSrc === selection.src
     ? "ready"
     : selection.state;
@@ -91,7 +106,7 @@ export function MediaPreview({
       data-tone={dataTone}
       aria-busy={state === "loading" || undefined}
     >
-      {selection.src && (
+      {selection.src && !showingVideoStill && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           className={joinClassNames(styles.image, imageClassName)}
@@ -112,6 +127,34 @@ export function MediaPreview({
             if (selection.source !== "unavailable" && fallbackSrc) {
               setFallbackFailedSrc(fallbackSrc);
             }
+          }}
+        />
+      )}
+      {selection.src && showingVideoStill && (
+        <video
+          className={joinClassNames(styles.image, imageClassName)}
+          src={selection.src}
+          muted
+          playsInline
+          preload="metadata"
+          aria-label={alt}
+          onLoadedMetadata={(event) => {
+            const video = event.currentTarget;
+            const duration = Number.isFinite(video.duration) ? video.duration : 0;
+            const frameTime = Math.min(15, Math.max(0, duration - 0.05));
+            if (frameTime > 0 && Math.abs(video.currentTime - frameTime) > 0.01) {
+              video.currentTime = frameTime;
+            } else {
+              video.pause();
+              setLoadedSrc(selection.src);
+            }
+          }}
+          onSeeked={(event) => {
+            event.currentTarget.pause();
+            setLoadedSrc(selection.src);
+          }}
+          onError={() => {
+            if (videoStillKey) setVideoStillFailedKey(videoStillKey);
           }}
         />
       )}
