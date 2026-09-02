@@ -524,7 +524,14 @@ export default function ChannelHubPage({
       )}
       {tab === "SEO" && <SeoTab ownerId={ownerId} channelId={channel._id} niche={id.niche} />}
       {tab === "Pipeline" && <PipelineTab pipeline={channel.pipeline ?? []} />}
-      {tab === "Identity" && <IdentityTab id={id} budget={channel.budget} />}
+      {tab === "Identity" && (
+        <IdentityTab
+          id={id}
+          budget={channel.budget}
+          slug={channel.slug}
+          locked={channel.locked === true}
+        />
+      )}
       {tab === "Settings" && <SettingsTab channel={channel} />}
       </div>
     </>
@@ -2251,13 +2258,25 @@ function PipelineTab({
 function IdentityTab({
   id,
   budget,
+  slug,
+  locked,
 }: {
   id: ChannelIdentity;
   budget: number;
+  slug: string;
+  locked: boolean;
 }) {
   const bible = id.creativeBrief;
   return (
     <div className={styles.identityWorkspace}>
+      <section className={styles.identitySection}>
+        <div className={styles.sectionRail}><span>Banner</span><i /></div>
+        <BannerRefreshControl
+          slug={slug}
+          bannerKey={id.bannerKey ?? null}
+          locked={locked}
+        />
+      </section>
       {bible && (
         <section className={styles.identitySection}>
           <div className={styles.sectionRail}><span>Show bible / film crew</span><i /></div>
@@ -2334,6 +2353,63 @@ function IdentityTab({
           <ChipRow items={id.bannedWords} tone="muted" />
         </section>
       )}
+    </div>
+  );
+}
+
+function BannerRefreshControl({
+  slug,
+  bannerKey,
+  locked,
+}: {
+  slug: string;
+  bannerKey: string | null;
+  locked: boolean;
+}) {
+  const [state, setState] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+
+  const refresh = async () => {
+    if (state === "running" || locked) return;
+    setState("running");
+    setMessage(null);
+    try {
+      const response = await fetch("/api/channel-art/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, expectedBannerKey: bannerKey }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !payload.ok) throw new Error(payload.error ?? "Could not refresh the banner");
+      setState("done");
+      setMessage("Banner refreshed from this channel’s visual world.");
+    } catch (error) {
+      setState("error");
+      setMessage(error instanceof Error ? error.message : "Could not refresh the banner");
+    }
+  };
+
+  return (
+    <div className={styles.bannerRefresh}>
+      <div>
+        <strong>Channel world artwork</strong>
+        <span>Fal Nano Banana · visual QA · ≤$0.12</span>
+      </div>
+      <div>
+        <button
+          type="button"
+          className={styles.bannerRefreshButton}
+          onClick={() => void refresh()}
+          disabled={locked || state === "running"}
+        >
+          {locked ? "Channel locked" : state === "running" ? "Refreshing…" : "Refresh banner"}
+        </button>
+        {message && (
+          <p role={state === "error" ? "alert" : "status"} data-tone={state}>
+            {message}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

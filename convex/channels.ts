@@ -1041,6 +1041,12 @@ export const deleteChannel = mutation({
 export const updateChannel = mutation({
   args: {
     channelId: v.id("channels"),
+    /**
+     * Optional compare-and-swap guard for a reviewed banner replacement. A
+     * paid candidate may be generated outside this transaction, so the final
+     * identity write must refuse to overwrite an intervening operator edit.
+     */
+    expectedBannerKey: v.optional(v.union(v.string(), v.null())),
     name: v.optional(v.string()),
     identity: v.optional(identityValidator),
     thumbnailer: v.optional(thumbnailerValidator),
@@ -1108,9 +1114,15 @@ export const updateChannel = mutation({
     }),
   ),
   handler: async (ctx, args) => {
-    const { channelId, ...rest } = args;
+    const { channelId, expectedBannerKey, ...rest } = args;
     const existing = await ctx.db.get(channelId);
     if (!existing) throw new Error(`channel not found: ${channelId}`);
+    if (
+      expectedBannerKey !== undefined &&
+      (existing.identity?.bannerKey ?? null) !== expectedBannerKey
+    ) {
+      throw new Error("channel banner changed while its reviewed replacement was rendering; inspect the current artwork and try again");
+    }
     if (rest.family !== undefined && rest.family !== existing.family && existing.family !== undefined) {
       throw new Error(
         `channel family is locked to ${existing.family}; use an explicit lane migration to change it`,

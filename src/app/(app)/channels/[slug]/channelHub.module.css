@@ -656,6 +656,16 @@
 
 .identityWorkspace { display: grid; gap: 1.55rem; }
 .identitySection { display: grid; gap: 0; }
+.bannerRefresh { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.78rem 0.82rem; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.bannerRefresh > div { display: grid; min-width: 0; gap: 0.22rem; }
+.bannerRefresh strong { color: var(--color-fg); font-size: 0.76rem; font-weight: 630; }
+.bannerRefresh span { color: var(--color-faint); font: 0.56rem/1.35 var(--font-mono); letter-spacing: 0.02em; }
+.bannerRefresh > div:last-child { justify-items: end; }
+.bannerRefreshButton { min-height: 34px; padding: 0.42rem 0.68rem; border: 1px solid color-mix(in srgb, var(--color-accent) 55%, var(--color-border)); border-radius: 8px; background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface)); color: var(--color-accent); font-size: 0.65rem; font-weight: 700; cursor: pointer; }
+.bannerRefreshButton:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 20%, var(--color-surface)); }
+.bannerRefreshButton:disabled { cursor: not-allowed; opacity: 0.55; }
+.bannerRefresh p { max-width: 19rem; margin: 0; color: var(--color-ok); font-size: 0.59rem; line-height: 1.35; text-align: right; }
+.bannerRefresh p[data-tone="error"] { color: var(--color-failed); }
 .showBible { display: grid; gap: 1.2rem; padding: 0.85rem 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .identityFieldGrid { display: grid; grid-template-columns: repeat(auto-fit,minmax(155px,1fr)); gap: 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .showBible > .identityFieldGrid { border: 0; }
@@ -772,6 +782,10 @@
   .identityDoctrineGrid { grid-template-columns: 1fr; }
   .identityDoctrineGrid > div { border-right: 0; border-bottom: 1px solid var(--color-border); }
   .identityDoctrineGrid > div:last-child { border-bottom: 0; }
+  .bannerRefresh { align-items: start; flex-direction: column; }
+  .bannerRefresh > div:last-child { width: 100%; justify-items: stretch; }
+  .bannerRefreshButton { width: 100%; }
+  .bannerRefresh p { max-width: none; text-align: left; }
   .workspaceSignals { grid-template-columns: 1fr; }
   .workspaceSignal { border-right: 0; border-bottom: 1px solid var(--color-border); }
   .workspaceSignal:last-child { border-bottom: 0; }
