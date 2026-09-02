@@ -15,10 +15,15 @@
  * Generic over the registry: register a module → its knobs auto-appear here.
  */
 import { useState } from "react";
-import { useMutation } from "convex/react";
+import { useMutation, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { configurableModules } from "@/engine/moduleRegistry";
+import {
+  channelModuleUnlockConfirmation,
+  type ChannelModuleLock,
+} from "@/lib/channelModuleLock";
+import { useOwnerId } from "@/lib/owner-context";
 import { ModuleConfigPanel, type ModuleConfigValue } from "./ModuleConfigPanel";
 import styles from "./ModuleConfigSection.module.css";
 
@@ -35,6 +40,8 @@ function ModuleCard({
   value,
   onChange,
   channelId,
+  ownerId,
+  lock,
   index,
   open,
   onOpenChange,
@@ -48,14 +55,20 @@ function ModuleCard({
   value: ModuleConfigValue;
   onChange?: (blockId: string, next: ModuleConfigValue) => void;
   channelId?: Id<"channels">;
+  ownerId?: string;
+  lock?: ChannelModuleLock;
   index: number;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const setModuleConfig = useMutation(api.channels.setModuleConfig);
+  const lockModule = useMutation(api.channels.lockModule);
+  const unlockModule = useMutation(api.channels.unlockModule);
   const [busy, setBusy] = useState(false);
+  const [lockBusy, setLockBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [local, setLocal] = useState<ModuleConfigValue>(value);
+  const locked = Boolean(lock);
 
   const handle = async (next: ModuleConfigValue) => {
     setLocal(next);
@@ -65,12 +78,46 @@ function ModuleCard({
     setBusy(true);
     setErr(null);
     try {
-      await setModuleConfig({ channelId, blockId, config: next });
+      const outcome = await setModuleConfig({ channelId, blockId, config: next });
+      if ((outcome as { state?: string }).state === "module_locked") {
+        throw new Error(`\"${title}\" is locked. Unlock this exact module before changing its controls.`);
+      }
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Failed to save");
       setLocal(value); // revert optimistic change on rejection
     } finally {
       setBusy(false);
+    }
+  };
+
+  const changeLock = async () => {
+    if (!channelId || !ownerId || lockBusy) return;
+    setLockBusy(true);
+    setErr(null);
+    try {
+      if (locked) {
+        const confirmation = window.prompt(
+          `Unlock ${title}? Type the exact confirmation to allow future changes to this module.`,
+          "",
+        );
+        if (confirmation === null) return;
+        await unlockModule({
+          ownerId,
+          channelId,
+          blockId,
+          confirmation,
+        });
+      } else {
+        const confirmed = window.confirm(
+          `Lock ${title}? Its saved controls and pipeline entry will reject changes until you explicitly unlock it.`,
+        );
+        if (!confirmed) return;
+        await lockModule({ ownerId, channelId, blockId });
+      }
+    } catch (error) {
+      setErr(error instanceof Error ? error.message : "Could not change the module lock");
+    } finally {
+      setLockBusy(false);
     }
   };
 
@@ -88,7 +135,11 @@ function ModuleCard({
           <span className={styles.stage}>{stage}</span>
           <div className={styles.title}>{title}</div>
         </div>
-        {busy ? <span className={styles.saving}>Saving…</span> : <span className={styles.chevron} aria-hidden="true">+</span>}
+        {busy || lockBusy
+          ? <span className={styles.saving}>{busy ? "Saving…" : "Securing…"}</span>
+          : locked
+            ? <span className={styles.saving} data-locked="true">Locked</span>
+            : <span className={styles.chevron} aria-hidden="true">+</span>}
       </summary>
       <div className={styles.body}>
         <div className={styles.brief}>
@@ -100,7 +151,28 @@ function ModuleCard({
           )}
         </div>
         <div className={styles.controls}>
-          <ModuleConfigPanel surface={surface} value={local} onChange={handle} disabled={busy} />
+          {channelId && ownerId && (
+            <div className={styles.lockRow}>
+              <span>
+                {locked
+                  ? `Locked · ${new Date(lock!.lockedAt).toLocaleDateString()}`
+                  : "Editable module"}
+              </span>
+              <button
+                type="button"
+                className={styles.lockButton}
+                data-locked={locked || undefined}
+                disabled={busy || lockBusy}
+                onClick={changeLock}
+                title={locked
+                  ? `Type '${channelModuleUnlockConfirmation(blockId)}' to unlock`
+                  : "Freeze this module's saved controls and pipeline entry"}
+              >
+                {lockBusy ? "Working…" : locked ? "Unlock module" : "Lock module"}
+              </button>
+            </div>
+          )}
+          <ModuleConfigPanel surface={surface} value={local} onChange={handle} disabled={busy || lockBusy || locked} />
           {err && <div className={styles.error} role="alert">{err}</div>}
         </div>
       </div>
@@ -114,6 +186,7 @@ export function ModuleConfigSection({
   value,
   onChange,
   activeBlockIds,
+  moduleLocks,
 }: {
   /** Settings mode: the channel to persist into. */
   channelId?: Id<"channels">;
@@ -125,7 +198,14 @@ export function ModuleConfigSection({
   onChange?: (next: ModuleConfigMap) => void;
   /** Only show modules actually selected in this channel's designed pipeline. */
   activeBlockIds?: readonly string[];
+  /** Per-module hard locks; only the channel detail settings surface receives these. */
+  moduleLocks?: Record<string, ChannelModuleLock>;
 }) {
+  const ownerId = useOwnerId();
+  const lockAudits = useQuery(
+    api.channels.listModuleLockAudits,
+    channelId && ownerId ? { ownerId, channelId, limit: 4 } : "skip",
+  );
   const mods = configurableModules(activeBlockIds);
   const current = channelId ? (moduleConfig ?? {}) : (value ?? {});
   const [openBlockId, setOpenBlockId] = useState<string | null | undefined>(undefined);
@@ -167,11 +247,29 @@ export function ModuleConfigSection({
           value={current[m.blockId] ?? {}}
           onChange={channelId ? undefined : handleControlled}
           channelId={channelId}
+          ownerId={channelId ? ownerId : undefined}
+          lock={moduleLocks?.[m.blockId]}
           index={index}
           open={visibleOpenBlockId === m.blockId}
           onOpenChange={(nextOpen) => setOpenBlockId(nextOpen ? m.blockId : null)}
         />
       ))}
+      {lockAudits && lockAudits.length > 0 && (
+        <details className={styles.lockAudit}>
+          <summary>Recent lock activity</summary>
+          <ol>
+            {lockAudits.map((audit) => (
+              <li key={audit._id}>
+                <span>{audit.blockId}</span>
+                <span>{audit.event === "mutation_rejected" ? "blocked change" : audit.event}</span>
+                <time dateTime={new Date(audit.createdAt).toISOString()}>
+                  {new Date(audit.createdAt).toLocaleDateString()}
+                </time>
+              </li>
+            ))}
+          </ol>
+        </details>
+      )}
     </div>
   );
 }

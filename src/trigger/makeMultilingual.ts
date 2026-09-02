@@ -66,13 +66,18 @@ export const makeMultilingualTask = task({
     // Mark the base as the group's base + ensure emit_bundle is in its pipeline so
     // its runs persist the asset bundle and fan out to siblings (idempotent).
     const basePipeline = withEmitBundle((base.pipeline ?? []) as PipelineEntry[]);
-    await convex.mutation(api.channels.updateChannel, {
+    const baseWrite = await convex.mutation(api.channels.updateChannel, {
       channelId: base._id,
       groupId,
       language: base.language ?? "en",
       groupRole: "base",
       pipeline: basePipeline,
     });
+    if ((baseWrite as { state?: string; blockId?: string }).state === "module_locked") {
+      throw new Error(
+        `make-multilingual refused: module '${(baseWrite as { blockId?: string }).blockId ?? "unknown"}' is locked`,
+      );
+    }
 
     const skipped = payload.languages.filter((lang) =>
       lang === (base.language ?? "en") || haveLangs.has(lang),

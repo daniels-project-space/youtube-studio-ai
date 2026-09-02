@@ -251,7 +251,16 @@ export async function POST(request: Request) {
           { status: 409 },
         );
       }
-      await convex.mutation(api.channels.updateChannel, { channelId, pipeline });
+      const pipelineWrite = await convex.mutation(api.channels.updateChannel, { channelId, pipeline });
+      if ((pipelineWrite as { state?: string; blockId?: string }).state === "module_locked") {
+        return NextResponse.json(
+          {
+            ok: false,
+            error: `Module '${(pipelineWrite as { blockId?: string }).blockId ?? "unknown"}' is locked. Unlock it before changing publishing mode.`,
+          },
+          { status: 409 },
+        );
+      }
       const nextChannel = { ...channel, pipeline };
       const nextConfigured = new Set(
         channelPublishConfiguration(pipeline).actions,

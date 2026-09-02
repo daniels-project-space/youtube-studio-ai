@@ -12,6 +12,7 @@ import type { ChannelIdentity, RunRow, VideoRow } from "@/lib/types";
 import type { ReleaseEvidenceStatus } from "@/lib/releaseEvidenceStatus";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
 import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
+import type { ChannelModuleLock } from "@/lib/channelModuleLock";
 import { RunCard } from "@/components/RunCard";
 import { StageBadge } from "@/components/StageBadge";
 import { StatCard } from "@/components/StatCard";
@@ -57,6 +58,7 @@ type ChannelDoc = {
   identity?: ChannelIdentity;
   pipeline?: { block: string; params?: unknown }[];
   moduleConfig?: Record<string, Record<string, unknown>>;
+  moduleLocks?: Record<string, ChannelModuleLock>;
   schedule?: {
     frequency: string;
     days?: number[];
@@ -1225,6 +1227,7 @@ function PipelineModulesCard({ channel }: { channel: ChannelDoc }) {
       <ModuleConfigSection
         channelId={cid}
         moduleConfig={channel.moduleConfig as ModuleConfigMap | undefined}
+        moduleLocks={channel.moduleLocks}
         activeBlockIds={(channel.pipeline ?? []).map((entry) => entry.block)}
       />
     </section>
@@ -1619,12 +1622,15 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
                 : p,
             )
           : undefined;
-      await update({
+      const outcome = await update({
         channelId: cid,
         identity: nextId,
         schedule: { ...channel.schedule, frequency: cadence, days },
         ...(pipelinePatch ? { pipeline: pipelinePatch } : {}),
       } as Parameters<typeof update>[0]);
+      if ((outcome as { state?: string; blockId?: string }).state === "module_locked") {
+        throw new Error(`Module '${(outcome as { blockId?: string }).blockId ?? "unknown"}' is locked.`);
+      }
       setMsg(seed.length ? `Saved · seeded ${seed.length} SEO tags.` : "Saved.");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Save failed.");
@@ -2643,7 +2649,10 @@ function NarratorPicker({ channel }: { channel: ChannelDoc }) {
         }
         return p;
       });
-      await update({ channelId: channel._id as Id<"channels">, pipeline } as Parameters<typeof update>[0]);
+      const outcome = await update({ channelId: channel._id as Id<"channels">, pipeline } as Parameters<typeof update>[0]);
+      if ((outcome as { state?: string; blockId?: string }).state === "module_locked") {
+        throw new Error(`Module '${(outcome as { blockId?: string }).blockId ?? "unknown"}' is locked.`);
+      }
       setMsg(voiceId ? "Narrator cast — the next render speaks with this voice." : "Reverted to the Fish tier voice above.");
     } catch (e) {
       setMsg(e instanceof Error ? e.message : "Save failed.");

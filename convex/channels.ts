@@ -1,6 +1,6 @@
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { v } from "convex/values";
-import type { QueryCtx } from "./_generated/server";
+import type { MutationCtx, QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { qwenTtsReceiptValidator, voiceCastingProviderValidator } from "./voiceCastingValidators";
 import { moduleSurface, configurableModules } from "@/engine/moduleRegistry";
@@ -47,12 +47,21 @@ import {
 } from "@/engine/channelShowProfileCodec";
 import { CHANNEL_COMPOSITION_RECEIPT_VERSION } from "@/engine/channelCompositionCatalog";
 import { comparablePipeline } from "@/engine/channelPipelineComparable";
+import type { PipelineEntry } from "@/engine/types";
 import { channelInceptionInvalidationRoots } from "@/engine/channelInceptionInvalidation";
 import {
   assertChannelWritable,
   isChannelLocked,
   patchChannelRespectingLock,
 } from "./channelLock";
+import {
+  channelModuleLockFor,
+  channelModuleUnlockConfirmation,
+  createChannelModuleLock,
+  firstLockedModulePipelineChange,
+  isChannelModuleLocked,
+  type ChannelModuleLock,
+} from "@/lib/channelModuleLock";
 import {
   assertContentLaneMatchesFamily,
   assertPipelineMatchesContentLane,
@@ -325,6 +334,68 @@ async function requireChannelOwnerActor(
     throw new Error(`${purpose} requires an interactive studio owner identity`);
   }
   return identity.subject;
+}
+
+async function channelMutationAuditActor(
+  ctx: { auth: { getUserIdentity: () => Promise<unknown> } },
+): Promise<string> {
+  const identity = (await ctx.auth.getUserIdentity()) as
+    | { role?: unknown; subject?: unknown }
+    | null;
+  const role = typeof identity?.role === "string" ? identity.role : "unknown";
+  const subject = typeof identity?.subject === "string" ? identity.subject : "unknown";
+  return `${role}:${subject}`.slice(0, 220);
+}
+
+async function recordChannelModuleLockAudit(
+  ctx: MutationCtx,
+  input: {
+    ownerId: string;
+    channelId: Doc<"channels">["_id"];
+    blockId: string;
+    event: "locked" | "unlocked" | "mutation_rejected";
+    operation: string;
+    actor: string;
+    reason?: string;
+    lock?: ChannelModuleLock | null;
+  },
+): Promise<void> {
+  await ctx.db.insert("channelModuleLockAudits", {
+    ownerId: input.ownerId,
+    channelId: input.channelId,
+    blockId: input.blockId,
+    event: input.event,
+    operation: input.operation,
+    actor: input.actor,
+    ...(input.reason ? { reason: input.reason.slice(0, 500) } : {}),
+    ...(input.lock ? { lock: input.lock } : {}),
+    createdAt: Date.now(),
+  });
+}
+
+/**
+ * Persist a module-lock rejection rather than throwing. Convex mutations are
+ * atomic, so an exception would roll the audit row back with the rejected
+ * write. Callers receive an explicit outcome and must not treat it as success.
+ */
+async function rejectLockedModuleMutation(
+  ctx: MutationCtx,
+  channel: Doc<"channels">,
+  blockId: string,
+  operation: string,
+): Promise<{ state: "module_locked"; blockId: string }> {
+  const lock = channelModuleLockFor(channel.moduleLocks, blockId);
+  await recordChannelModuleLockAudit(ctx, {
+    ownerId: channel.ownerId,
+    channelId: channel._id,
+    blockId,
+    event: "mutation_rejected",
+    operation,
+    actor: await channelMutationAuditActor(ctx),
+    reason: `module '${blockId}' is locked; unlock it explicitly before ${operation}`,
+    lock,
+  });
+  return { state: "module_locked", blockId };
 }
 
 async function requireInceptionService(ctx: {
@@ -1062,6 +1133,11 @@ export const updateChannel = mutation({
   returns: v.union(
     v.object({ forked: v.literal(false) }),
     v.object({ forked: v.literal(true), newChannelId: v.id("channels") }),
+    v.object({
+      forked: v.literal(false),
+      state: v.literal("module_locked"),
+      blockId: v.string(),
+    }),
   ),
   handler: async (ctx, args) => {
     const { channelId, ...rest } = args;
@@ -1071,6 +1147,25 @@ export const updateChannel = mutation({
       throw new Error(
         `channel family is locked to ${existing.family}; use an explicit lane migration to change it`,
       );
+    }
+    if (
+      rest.pipeline !== undefined &&
+      comparablePipeline(existing.pipeline ?? []) !== comparablePipeline(rest.pipeline)
+    ) {
+      const lockedBlockId = firstLockedModulePipelineChange({
+        moduleLocks: existing.moduleLocks,
+        currentPipeline: (existing.pipeline ?? []) as PipelineEntry[],
+        nextPipeline: rest.pipeline as PipelineEntry[],
+      });
+      if (lockedBlockId) {
+        const rejected = await rejectLockedModuleMutation(
+          ctx,
+          existing,
+          lockedBlockId,
+          "channels.updateChannel pipeline write",
+        );
+        return { forked: false as const, ...rejected };
+      }
     }
     const lane = channelContentLane(existing);
     // SPEND GUARD (write time, not dispatch time). Casefile's current route
@@ -1152,10 +1247,12 @@ export const updatePipelineIfCurrent = mutation({
       v.literal("updated"),
       v.literal("current"),
       v.literal("conflict"),
+      v.literal("module_locked"),
       // The channel was locked: the upgrade landed on its v2 fork instead.
       v.literal("forked"),
     ),
     newChannelId: v.optional(v.id("channels")),
+    blockId: v.optional(v.string()),
   }),
   handler: async (ctx, args) => {
     const channel = await ctx.db.get(args.channelId);
@@ -1168,6 +1265,19 @@ export const updatePipelineIfCurrent = mutation({
     }
     if (comparablePipeline(current) === comparablePipeline(args.pipeline)) {
       return { state: "current" as const };
+    }
+    const lockedBlockId = firstLockedModulePipelineChange({
+      moduleLocks: channel.moduleLocks,
+      currentPipeline: current as PipelineEntry[],
+      nextPipeline: args.pipeline as PipelineEntry[],
+    });
+    if (lockedBlockId) {
+      return await rejectLockedModuleMutation(
+        ctx,
+        channel,
+        lockedBlockId,
+        "channels.updatePipelineIfCurrent",
+      );
     }
     const lane = channelContentLane(channel);
     assertPipelineMatchesContentLane(lane, args.pipeline);
@@ -1480,12 +1590,26 @@ export const setModuleConfig = mutation({
   returns: v.union(
     v.object({ forked: v.literal(false) }),
     v.object({ forked: v.literal(true), newChannelId: v.id("channels") }),
+    v.object({
+      forked: v.literal(false),
+      state: v.literal("module_locked"),
+      blockId: v.string(),
+    }),
   ),
   handler: async (ctx, args) => {
     const existing = await ctx.db.get(args.channelId);
     if (!existing) throw new Error(`channel not found: ${args.channelId}`);
     if (!(existing.pipeline ?? []).some((entry) => entry.block === args.blockId)) {
       throw new Error(`setModuleConfig: '${args.blockId}' is not selected in this channel pipeline`);
+    }
+    if (isChannelModuleLocked(existing.moduleLocks, args.blockId)) {
+      const rejected = await rejectLockedModuleMutation(
+        ctx,
+        existing,
+        args.blockId,
+        "channels.setModuleConfig",
+      );
+      return { forked: false as const, ...rejected };
     }
 
     const next: Record<string, unknown> = { ...(existing.moduleConfig ?? {}) };
@@ -1514,6 +1638,147 @@ export const setModuleConfig = mutation({
     return outcome.forked
       ? { forked: true as const, newChannelId: outcome.newChannelId }
       : { forked: false as const };
+  },
+});
+
+/**
+ * Freeze one selected module. This is an interactive-owner operation only;
+ * workers, schedulers, APIs, and agents authenticate as service identities and
+ * cannot create a lock that would change the channel's future behavior.
+ */
+export const lockModule = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    blockId: v.string(),
+  },
+  returns: v.object({
+    locked: v.literal(true),
+    blockId: v.string(),
+    lockedAt: v.number(),
+    lockedBy: v.string(),
+  }),
+  handler: async (ctx, args) => {
+    const actor = await requireChannelOwnerActor(ctx, "channels.lockModule");
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel || channel.ownerId !== args.ownerId) {
+      throw new Error("module lock ownership mismatch");
+    }
+    // A completed channel is already immutable. Requiring its explicit unlock
+    // first preserves the original row byte-for-byte rather than treating lock
+    // metadata as an undocumented exception to the channel lock.
+    assertChannelWritable(channel, "module lock change");
+    if (!(channel.pipeline ?? []).some((entry) => entry.block === args.blockId)) {
+      throw new Error(`channels.lockModule: '${args.blockId}' is not selected in this channel pipeline`);
+    }
+    const existingLock = channelModuleLockFor(channel.moduleLocks, args.blockId);
+    if (existingLock) {
+      return {
+        locked: true as const,
+        blockId: args.blockId,
+        lockedAt: existingLock.lockedAt,
+        lockedBy: existingLock.lockedBy,
+      };
+    }
+    // A malformed persisted entry is treated as locked by the guard. Do not
+    // overwrite it here: that would convert corruption into an implicit unlock.
+    if (isChannelModuleLocked(channel.moduleLocks, args.blockId)) {
+      throw new Error(`channels.lockModule: '${args.blockId}' has malformed lock metadata; repair is required before unlock`);
+    }
+    const lockedAt = Date.now();
+    const lock = createChannelModuleLock({
+      blockId: args.blockId,
+      pipeline: (channel.pipeline ?? []) as PipelineEntry[],
+      moduleConfig: channel.moduleConfig ?? undefined,
+      lockedAt,
+      lockedBy: actor,
+    });
+    const moduleLocks = { ...(channel.moduleLocks ?? {}), [args.blockId]: lock };
+    await ctx.db.patch(channel._id, { moduleLocks });
+    await recordChannelModuleLockAudit(ctx, {
+      ownerId: channel.ownerId,
+      channelId: channel._id,
+      blockId: args.blockId,
+      event: "locked",
+      operation: "channels.lockModule",
+      actor,
+      lock,
+    });
+    return { locked: true as const, blockId: args.blockId, lockedAt, lockedBy: actor };
+  },
+});
+
+/**
+ * Release exactly one module lock. The typed confirmation includes the module
+ * id so a copied confirmation cannot unlock a different stage.
+ */
+export const unlockModule = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    blockId: v.string(),
+    confirmation: v.string(),
+  },
+  returns: v.object({ locked: v.literal(false), blockId: v.string() }),
+  handler: async (ctx, args) => {
+    const actor = await requireChannelOwnerActor(ctx, "channels.unlockModule");
+    if (args.confirmation !== channelModuleUnlockConfirmation(args.blockId)) {
+      throw new Error(
+        `channels.unlockModule requires confirmation '${channelModuleUnlockConfirmation(args.blockId)}'`,
+      );
+    }
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel || channel.ownerId !== args.ownerId) {
+      throw new Error("module unlock ownership mismatch");
+    }
+    assertChannelWritable(channel, "module unlock change");
+    const lock = channelModuleLockFor(channel.moduleLocks, args.blockId);
+    if (!lock) {
+      if (isChannelModuleLocked(channel.moduleLocks, args.blockId)) {
+        throw new Error(`channels.unlockModule: '${args.blockId}' has malformed lock metadata; repair is required`);
+      }
+      return { locked: false as const, blockId: args.blockId };
+    }
+    const remainingModuleLocks = { ...(channel.moduleLocks ?? {}) };
+    delete remainingModuleLocks[args.blockId];
+    await ctx.db.patch(channel._id, {
+      moduleLocks: Object.keys(remainingModuleLocks).length ? remainingModuleLocks : undefined,
+    });
+    await recordChannelModuleLockAudit(ctx, {
+      ownerId: channel.ownerId,
+      channelId: channel._id,
+      blockId: args.blockId,
+      event: "unlocked",
+      operation: "channels.unlockModule",
+      actor,
+      lock,
+    });
+    return { locked: false as const, blockId: args.blockId };
+  },
+});
+
+/**
+ * Compact, owner-scoped audit trail for module guard decisions. The table is
+ * append-only: rejected writes are intentionally visible alongside explicit
+ * locks and unlocks rather than being silently discarded.
+ */
+export const listModuleLockAudits = query({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel || channel.ownerId !== args.ownerId) {
+      throw new Error("module lock audit ownership mismatch");
+    }
+    const limit = Math.max(1, Math.min(25, Math.floor(args.limit ?? 8)));
+    return await ctx.db
+      .query("channelModuleLockAudits")
+      .withIndex("by_channel_created", (q) => q.eq("channelId", args.channelId))
+      .order("desc")
+      .take(limit);
   },
 });
 

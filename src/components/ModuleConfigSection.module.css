@@ -142,6 +142,86 @@
   letter-spacing: 0.06em;
 }
 
+.saving[data-locked="true"] { color: var(--color-amber); }
+
+.lockRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.7rem;
+  margin-bottom: 0.85rem;
+  padding: 0.55rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  color: var(--color-muted);
+  background: color-mix(in srgb, var(--color-surface) 74%, transparent);
+  font-family: var(--font-mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.045em;
+}
+
+.lockButton {
+  min-height: 34px;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 8px;
+  padding: 0.35rem 0.58rem;
+  color: var(--color-fg);
+  background: transparent;
+  cursor: pointer;
+  font: 600 0.62rem var(--font-mono);
+  letter-spacing: 0.035em;
+}
+
+.lockButton:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-accent) 58%, var(--color-border));
+  background: color-mix(in srgb, var(--color-accent) 10%, transparent);
+}
+
+.lockButton[data-locked="true"] {
+  color: var(--color-amber);
+  border-color: color-mix(in srgb, var(--color-amber) 46%, var(--color-border));
+}
+
+.lockButton:disabled { cursor: default; opacity: 0.58; }
+
+.lockAudit {
+  margin-top: 0.75rem;
+  border-top: 1px solid color-mix(in srgb, var(--color-ink) 9%, transparent);
+  color: var(--color-muted);
+  font-size: 0.72rem;
+}
+
+.lockAudit summary {
+  cursor: pointer;
+  padding: 0.65rem 0;
+  font-weight: 650;
+  list-style: none;
+}
+
+.lockAudit summary::-webkit-details-marker { display: none; }
+
+.lockAudit ol {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0 0 0.65rem;
+  padding: 0;
+  list-style: none;
+}
+
+.lockAudit li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 0.55rem;
+  align-items: center;
+}
+
+.lockAudit li span:first-child {
+  overflow: hidden;
+  color: var(--color-ink);
+  font-weight: 600;
+  text-overflow: ellipsis;
+}
+
 .error {
   margin-top: 0.75rem;
   border: 1px solid color-mix(in srgb, var(--color-failed) 50%, transparent);
@@ -198,6 +278,8 @@
     padding-top: 0.9rem;
     padding-left: 0;
   }
+
+  .lockRow { align-items: flex-start; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -2335,7 +2335,16 @@ export async function executeDesignChannel(
   });
   await initializeChannelInceptionLedger({ convex, channelId, plan, admission });
   for (const [blockId, config] of Object.entries(requestedModuleConfig)) {
-    await convex.mutation(api.channels.setModuleConfig, { channelId, blockId, config });
+    const moduleConfigWrite = await convex.mutation(api.channels.setModuleConfig, {
+      channelId,
+      blockId,
+      config,
+    });
+    if ((moduleConfigWrite as { state?: string; blockId?: string }).state === "module_locked") {
+      throw new Error(
+        `channel inception module configuration refused: module '${(moduleConfigWrite as { blockId?: string }).blockId ?? blockId}' is locked`,
+      );
+    }
   }
   const canonicalModuleConfig = (await currentChannel(convex, channelId) as {
     moduleConfig?: Record<string, Record<string, unknown>>;
@@ -3294,7 +3303,7 @@ export async function executeDesignChannel(
         showProfile: plannedShowProfile,
         programBrief: plan.requestSnapshot.programBrief,
       });
-      await convex.mutation(api.channels.updateChannel, {
+      const pipelineWrite = await convex.mutation(api.channels.updateChannel, {
         channelId,
         pipeline: wired.pipeline,
         architectReport: {
@@ -3308,6 +3317,11 @@ export async function executeDesignChannel(
           inceptionCertification: certification,
         },
       });
+      if ((pipelineWrite as { state?: string; blockId?: string }).state === "module_locked") {
+        throw new Error(
+          `channel inception pipeline write refused: module '${(pipelineWrite as { blockId?: string }).blockId ?? "unknown"}' is locked`,
+        );
+      }
       return {
         value: wired.pipeline,
         evidence: {
@@ -3677,7 +3691,7 @@ export async function executeDesignChannel(
             log,
           });
           if (fix) {
-            await convex.mutation(api.channels.updateChannel, {
+            const repairWrite = await convex.mutation(api.channels.updateChannel, {
               channelId,
               pipeline: completePipelineForPolicy(withLengthLaw(fix.pipeline)).entries,
               architectReport: {
@@ -3685,6 +3699,11 @@ export async function executeDesignChannel(
                 probeFix: { attempt: attemptNumber, error: error.slice(0, 200), failedBlock },
               },
             });
+            if ((repairWrite as { state?: string; blockId?: string }).state === "module_locked") {
+              throw new Error(
+                `channel inception repair refused: module '${(repairWrite as { blockId?: string }).blockId ?? "unknown"}' is locked`,
+              );
+            }
           }
           repairsApplied.push(attemptNumber);
           await checkpointProbe();

@@ -15,7 +15,7 @@ export interface ChannelPipelineSyncItem {
   effectiveCount: number;
   fingerprint: string;
   // "forked": the channel is locked ("done"), so the upgrade landed on its v2.
-  writeState: "not-needed" | "dry-run" | "updated" | "current" | "conflict" | "forked";
+  writeState: "not-needed" | "dry-run" | "updated" | "current" | "conflict" | "module_locked" | "forked";
 }
 
 export interface ChannelPipelineSyncReport {
@@ -25,6 +25,7 @@ export interface ChannelPipelineSyncReport {
   changed: number;
   applied: number;
   conflicts: number;
+  moduleLocked: number;
   verified: boolean;
   verification: "dry-run" | "skipped" | "verified";
   channels: ChannelPipelineSyncItem[];
@@ -95,6 +96,11 @@ export async function syncChannelPipelines({
       if (write.state === "conflict") {
         log(`${channel.name}: skipped because its pipeline changed during sync`);
       }
+      if (write.state === "module_locked") {
+        log(
+          `${channel.name}: skipped because module '${write.blockId ?? "unknown"}' is explicitly locked`,
+        );
+      }
       if (write.state === "forked") {
         log(
           `${channel.name}: locked (done) — upgrade forked onto ${write.newChannelId ?? "a new version"}`,
@@ -109,7 +115,11 @@ export async function syncChannelPipelines({
     : "skipped";
   if (!dryRun && verify) {
     const persisted = await convex.query(api.channels.listChannels, { ownerId });
+    const moduleLockedIds = new Set(
+      items.filter((item) => item.writeState === "module_locked").map((item) => item.channelId),
+    );
     const stale = persisted.filter((channel) =>
+      !moduleLockedIds.has(String(channel._id)) &&
       planChannelPipelineUpgrade(channel.pipeline ?? []).changed,
     );
     if (stale.length) {
@@ -130,6 +140,7 @@ export async function syncChannelPipelines({
     changed: items.filter((item) => item.changed).length,
     applied: items.filter((item) => item.writeState === "updated").length,
     conflicts: items.filter((item) => item.writeState === "conflict").length,
+    moduleLocked: items.filter((item) => item.writeState === "module_locked").length,
     verified,
     verification,
     channels: items,

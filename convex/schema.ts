@@ -360,6 +360,22 @@ export default defineSchema({
     // via buildChannelProfile({ moduleOverrides }). v.any per-block → the typed
     // Knob contract (engine/moduleRegistry) is the real validator.
     moduleConfig: v.optional(v.record(v.string(), v.any())),
+    // Per-module hard locks. Unlike the channel-level completion lock (which
+    // preserves a finished version by forking later broad edits), a module lock
+    // refuses any change to that module's saved knobs or pipeline entry until
+    // the interactive owner explicitly unlocks the exact block.
+    moduleLocks: v.optional(
+      v.record(
+        v.string(),
+        v.object({
+          version: v.literal("channel-module-lock/v1"),
+          lockedAt: v.number(),
+          lockedBy: v.string(),
+          moduleConfigFingerprint: v.string(),
+          pipelineEntryFingerprint: v.string(),
+        }),
+      ),
+    ),
     // Frozen, machine-readable Style DNA (visual/audio/narrative spec) the
     // Inception research distills once and every block must conform to. Flexible
     // (v.any) — the TS `StyleDNA` interface is the real contract. Carries a
@@ -445,6 +461,27 @@ export default defineSchema({
     // Lets the lock guard find a locked channel's editable fork head without a
     // table scan, so repeated edits reuse v2 instead of spawning v3, v4, v5…
     .index("by_parent", ["parentChannelId"]),
+
+  // Append-only provenance for owner lock/unlock actions and every rejected
+  // persisted module mutation. A rejected write returns a discriminated
+  // outcome instead of throwing so its audit event commits atomically.
+  channelModuleLockAudits: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    blockId: v.string(),
+    event: v.union(
+      v.literal("locked"),
+      v.literal("unlocked"),
+      v.literal("mutation_rejected"),
+    ),
+    operation: v.string(),
+    actor: v.string(),
+    reason: v.optional(v.string()),
+    lock: v.optional(v.any()),
+    createdAt: v.number(),
+  })
+    .index("by_channel_created", ["channelId", "createdAt"])
+    .index("by_owner_channel", ["ownerId", "channelId"]),
 
   // Durable exactly-once boundary for the irreversible Browserbase YouTube
   // channel-create click. A request can enter provider_started only once; all

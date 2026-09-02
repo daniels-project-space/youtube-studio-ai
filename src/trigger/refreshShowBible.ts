@@ -141,11 +141,16 @@ export const refreshShowBibleTask = task({
     // Ensure crew blocks are in the pipeline.
     const newPipeline = withCrew(ch.pipeline ?? [], family, payload.targetSeconds);
 
-    await convex.mutation(api.channels.updateChannel, {
+    const channelWrite = await convex.mutation(api.channels.updateChannel, {
       channelId: ch._id,
       identity: { ...identity, creativeBrief },
       pipeline: newPipeline,
     });
+    if ((channelWrite as { state?: string; blockId?: string }).state === "module_locked") {
+      throw new Error(
+        `refresh-show-bible refused: module '${(channelWrite as { blockId?: string }).blockId ?? "unknown"}' is locked`,
+      );
+    }
     log("channel updated", { slug: ch.slug, crewBlocks: newPipeline.filter((e) => e.block.endsWith("_brief") || e.block === "critic_spec").length });
 
     return { ok: true, slug: ch.slug, motif: creativeBrief.iconicMotif, activeCrew: creativeBrief.activeCrew };

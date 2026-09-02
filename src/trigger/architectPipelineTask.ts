@@ -82,11 +82,16 @@ export const architectPipelineTask = task({
     if (!arch) return { ok: false, reason: "architect agent failed (floor kept)" };
 
     if (!payload.dryRun) {
-      await convex.mutation(api.channels.updateChannel, {
+      const write = await convex.mutation(api.channels.updateChannel, {
         channelId,
         pipeline: arch.pipeline,
         architectReport: arch.report,
       });
+      if ((write as { state?: string; blockId?: string }).state === "module_locked") {
+        throw new Error(
+          `architect pipeline update refused: module '${(write as { blockId?: string }).blockId ?? "unknown"}' is locked`,
+        );
+      }
       log(`APPLIED: ${arch.report.applied.length} op(s); pipeline now ${arch.pipeline.length} blocks`);
     } else {
       log("DRY RUN — nothing written");
