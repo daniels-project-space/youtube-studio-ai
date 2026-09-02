@@ -20,7 +20,7 @@ import {
   studioActionApprovalFingerprint,
 } from "@/lib/studioActionApproval";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
-import { getObjectBytes, putObjectFromFile } from "@/lib/storage";
+import { getObjectBytes, putObject } from "@/lib/storage";
 
 config({ path: process.env.ERNIE_THUMBNAIL_STUDIO_ENV_FILE?.trim() || ".env.local" });
 
@@ -36,6 +36,7 @@ const EXECUTE = process.env.ERNIE_THUMBNAIL_IMPORT_EXECUTE === "1";
 const SHA256 = /^[a-f0-9]{64}$/;
 const ERNIE_MODEL_REVISION = "01bcb3f1acdb1454ee579d2796ecc4c156873eea";
 const ERNIE_SPOT_HOURLY_USD = 0.335;
+const PNG_SIGNATURE = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
 
 type ThumbnailGateVerdict = Readonly<{
   textOk: boolean;
@@ -126,11 +127,29 @@ function assertReview(value: unknown): asserts value is BatchReview {
       !item || typeof item.sourceRunId !== "string" || !item.sourceRunId || seen.has(item.sourceRunId) ||
       typeof item.channelId !== "string" || !item.channelId || typeof item.channelSlug !== "string" || !item.channelSlug ||
       !SHA256.test(item.scenePromptSha256) || !SHA256.test(item.finalSha256) ||
-      !SHA256.test(item.ernieSceneSha256) || typeof item.finalPath !== "string" || !item.finalPath || !item.qa
+      !SHA256.test(item.ernieSceneSha256) || item.finalSha256 !== item.ernieSceneSha256 ||
+      typeof item.finalPath !== "string" || !item.finalPath || !item.qa
     ) throw new Error("batch review includes an invalid candidate");
     assertQa(item.qa);
     seen.add(item.sourceRunId);
   }
+}
+
+/**
+ * The native-typography route has no compositor: the exact signed ERNIE PNG
+ * reviewed by QA is the exact object that may be admitted to Studio. Read the
+ * modest thumbnail asset once and retain those bytes for upload, so a changed
+ * local file cannot be labeled with an older review hash after QA completed.
+ */
+async function readVerifiedNativeErniePng(item: ReviewedArtifact): Promise<Uint8Array> {
+  const bytes = new Uint8Array(await readFile(item.finalPath));
+  if (bytes.byteLength < PNG_SIGNATURE.length || !PNG_SIGNATURE.every((byte, index) => bytes[index] === byte)) {
+    throw new Error(`${item.sourceRunId}: reviewed ERNIE artifact is not a PNG`);
+  }
+  if (sha256(bytes) !== item.finalSha256) {
+    throw new Error(`${item.sourceRunId}: reviewed ERNIE artifact bytes no longer match the QA hash`);
+  }
+  return bytes;
 }
 
 function client(): StudioConvexHttpClient {
@@ -195,6 +214,10 @@ async function main(): Promise<void> {
   const files = reviewFiles();
   const candidates = await reviewedCandidates(files);
   await assertCompleteCandidateSet(candidates);
+  // Validate source bytes even for a dry run. This turns the operator-facing
+  // review command into an immutable-artifact preflight, rather than merely a
+  // count of JSON records that happened to pass at an earlier time.
+  for (const { artifact } of candidates) await readVerifiedNativeErniePng(artifact);
   const summaryPath = join(PLAN_DIR, "review", "batch-import.json");
   await mkdir(join(PLAN_DIR, "review"), { recursive: true });
   const dryRun = candidates.map(({ artifact, controller, reviewFile }) => ({
@@ -215,6 +238,7 @@ async function main(): Promise<void> {
   const imported: Array<Record<string, unknown>> = [];
   for (const candidate of candidates) {
     const { artifact: item, controller } = candidate;
+    const finalBytes = await readVerifiedNativeErniePng(item);
     const costTotal = estimatedPerCandidateCost(candidate);
     const shell = await convex.mutation(thumbnailRefreshRuntimeApi.createCandidateShell, {
       ownerId: OWNER_ID,
@@ -237,7 +261,7 @@ async function main(): Promise<void> {
     // route may not transcode it to JPEG or add deterministic text locally.
     const r2Key = `owner/${OWNER_ID}/channel/${item.channelSlug}/runs/${candidateRunId}/thumbnail.png`;
     try {
-      await putObjectFromFile(r2Key, item.finalPath, {
+      await putObject(r2Key, finalBytes, {
         contentType: "image/png",
         metadata: {
           producer: "ernie-novita-thumbnail-scene-v1",
