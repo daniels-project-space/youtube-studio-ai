@@ -6,7 +6,7 @@
  * Set ERNIE_THUMBNAIL_IMPORT_EXECUTE=1 only after inspecting the batch review.
  */
 import { createHash } from "node:crypto";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { config } from "dotenv";
@@ -27,6 +27,11 @@ config({ path: process.env.ERNIE_THUMBNAIL_STUDIO_ENV_FILE?.trim() || ".env.loca
 const OWNER_ID = process.env.ERNIE_THUMBNAIL_OWNER_ID?.trim() || "owner_daniel";
 const PLAN_DIR = process.env.ERNIE_THUMBNAIL_PLAN_DIR?.trim() || "/tmp/ysa-ernie-thumbnail-refresh-v1";
 const REVIEW_FILE = process.env.ERNIE_THUMBNAIL_REVIEW_FILE?.trim() || join(PLAN_DIR, "review", "batch-review.json");
+const REVIEW_FILES = (process.env.ERNIE_THUMBNAIL_REVIEW_FILES ?? "")
+  .split(",")
+  .map((value) => value.trim())
+  .filter(Boolean);
+const REQUIRE_COMPLETE_SET = process.env.ERNIE_THUMBNAIL_REQUIRE_COMPLETE_SET === "1";
 const EXECUTE = process.env.ERNIE_THUMBNAIL_IMPORT_EXECUTE === "1";
 const SHA256 = /^[a-f0-9]{64}$/;
 const ERNIE_MODEL_REVISION = "01bcb3f1acdb1454ee579d2796ecc4c156873eea";
@@ -78,12 +83,29 @@ type CandidateShell = Readonly<{
   dispatchState: string;
 }>;
 
+type ReviewedCandidate = Readonly<{
+  artifact: ReviewedArtifact;
+  controller: BatchReview["controller"];
+  sourceReviewCount: number;
+  reviewFile: string;
+}>;
+
 function sha256(value: Uint8Array | string): string {
   return createHash("sha256").update(value).digest("hex");
 }
 
 function passed(qa: ThumbnailGateVerdict): boolean {
   return qa.textOk && qa.faceClear && qa.punch >= 7 && qa.styleMatch >= 7 && qa.storyMatch >= 7 && qa.uiClean;
+}
+
+function assertQa(value: unknown): asserts value is ThumbnailGateVerdict {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("candidate QA is invalid");
+  const qa = value as Partial<ThumbnailGateVerdict>;
+  if (
+    typeof qa.textOk !== "boolean" || typeof qa.faceClear !== "boolean" || typeof qa.uiClean !== "boolean" ||
+    !Number.isFinite(qa.punch) || !Number.isFinite(qa.styleMatch) || !Number.isFinite(qa.storyMatch) ||
+    typeof qa.reason !== "string" || !qa.reason.trim()
+  ) throw new Error("candidate QA lacks its complete gate verdict");
 }
 
 function assertReview(value: unknown): asserts value is BatchReview {
@@ -104,9 +126,9 @@ function assertReview(value: unknown): asserts value is BatchReview {
       !item || typeof item.sourceRunId !== "string" || !item.sourceRunId || seen.has(item.sourceRunId) ||
       typeof item.channelId !== "string" || !item.channelId || typeof item.channelSlug !== "string" || !item.channelSlug ||
       !SHA256.test(item.scenePromptSha256) || !SHA256.test(item.finalSha256) ||
-      !SHA256.test(item.ernieSceneSha256) || typeof item.finalPath !== "string" || !item.finalPath ||
-      !item.qa || !passed(item.qa)
-    ) throw new Error("batch review includes a non-admissible candidate");
+      !SHA256.test(item.ernieSceneSha256) || typeof item.finalPath !== "string" || !item.finalPath || !item.qa
+    ) throw new Error("batch review includes an invalid candidate");
+    assertQa(item.qa);
     seen.add(item.sourceRunId);
   }
 }
@@ -117,34 +139,83 @@ function client(): StudioConvexHttpClient {
   return new StudioConvexHttpClient(address);
 }
 
-function estimatedPerCandidateCost(review: BatchReview): number {
+function estimatedPerCandidateCost(candidate: ReviewedCandidate): number {
   // Novita exposes the exact elapsed worker lifetime but no per-output invoice.
   // Store the reproducible proportional spot estimate rather than fabricate a
   // provider charge. The import mutation independently caps it at $0.40.
-  const estimate = (review.controller.elapsedSeconds / 3_600 * ERNIE_SPOT_HOURLY_USD) / review.reviewed.length;
+  const estimate = (candidate.controller.elapsedSeconds / 3_600 * ERNIE_SPOT_HOURLY_USD) / candidate.sourceReviewCount;
   return Math.min(0.4, Math.max(0, Number(estimate.toFixed(6))));
 }
 
+function reviewFiles(): string[] {
+  return REVIEW_FILES.length ? REVIEW_FILES : [REVIEW_FILE];
+}
+
+async function reviewedCandidates(files: readonly string[]): Promise<ReviewedCandidate[]> {
+  const selected = new Map<string, ReviewedCandidate>();
+  for (const reviewFile of files) {
+    const review = JSON.parse(await readFile(reviewFile, "utf8")) as unknown;
+    assertReview(review);
+    for (const artifact of review.reviewed) {
+      if (!passed(artifact.qa)) continue;
+      // Review files are ordered from the original batch to later repairs. A
+      // succeeding repair deliberately supersedes the prior passing candidate
+      // for the same source run; failed repairs never displace good pixels.
+      selected.set(artifact.sourceRunId, {
+        artifact,
+        controller: review.controller,
+        sourceReviewCount: review.reviewed.length,
+        reviewFile,
+      });
+    }
+  }
+  if (!selected.size) throw new Error("no passing ERNIE thumbnail candidates were found");
+  return [...selected.values()].sort((left, right) => left.artifact.sourceRunId.localeCompare(right.artifact.sourceRunId));
+}
+
+async function assertCompleteCandidateSet(candidates: readonly ReviewedCandidate[]): Promise<void> {
+  if (!REQUIRE_COMPLETE_SET) return;
+  const manifest = JSON.parse(await readFile(join(PLAN_DIR, "manifest.json"), "utf8")) as {
+    planned?: Array<{ sourceRunId?: unknown }>;
+  };
+  if (!Array.isArray(manifest.planned) || !manifest.planned.length) {
+    throw new Error("complete-set import requires a manifest with planned non-LoFi candidates");
+  }
+  const expected = new Set(manifest.planned.map((item) => item.sourceRunId).filter((value): value is string => typeof value === "string"));
+  if (expected.size !== manifest.planned.length) throw new Error("planned manifest has duplicate or invalid source run ids");
+  const actual = new Set(candidates.map((candidate) => candidate.artifact.sourceRunId));
+  const missing = [...expected].filter((id) => !actual.has(id));
+  const unexpected = [...actual].filter((id) => !expected.has(id));
+  if (missing.length || unexpected.length) {
+    throw new Error(`complete-set ERNIE import mismatch: missing=${missing.join(",") || "none"}; unexpected=${unexpected.join(",") || "none"}`);
+  }
+}
+
 async function main(): Promise<void> {
-  const review = JSON.parse(await readFile(REVIEW_FILE, "utf8")) as unknown;
-  assertReview(review);
+  const files = reviewFiles();
+  const candidates = await reviewedCandidates(files);
+  await assertCompleteCandidateSet(candidates);
   const summaryPath = join(PLAN_DIR, "review", "batch-import.json");
-  const dryRun = review.reviewed.map((item) => ({
-    sourceRunId: item.sourceRunId,
-    channelSlug: item.channelSlug,
-    finalSha256: item.finalSha256,
-    qa: item.qa,
+  await mkdir(join(PLAN_DIR, "review"), { recursive: true });
+  const dryRun = candidates.map(({ artifact, controller, reviewFile }) => ({
+    sourceRunId: artifact.sourceRunId,
+    channelSlug: artifact.channelSlug,
+    finalSha256: artifact.finalSha256,
+    qa: artifact.qa,
+    receiptKey: controller.receiptKey,
+    reviewFile,
   }));
   if (!EXECUTE) {
-    await writeFile(summaryPath, `${JSON.stringify({ version: 1, mode: "dry_run", candidates: dryRun }, null, 2)}\n`, "utf8");
+    await writeFile(summaryPath, `${JSON.stringify({ version: 2, mode: "dry_run", reviewFiles: files, candidates: dryRun }, null, 2)}\n`, "utf8");
     console.log(JSON.stringify({ event: "dry-run", candidates: dryRun.length, summaryPath }));
     return;
   }
 
   const convex = client();
   const imported: Array<Record<string, unknown>> = [];
-  const costTotal = estimatedPerCandidateCost(review);
-  for (const item of review.reviewed) {
+  for (const candidate of candidates) {
+    const { artifact: item, controller } = candidate;
+    const costTotal = estimatedPerCandidateCost(candidate);
     const shell = await convex.mutation(thumbnailRefreshRuntimeApi.createCandidateShell, {
       ownerId: OWNER_ID,
       sourceRunId: item.sourceRunId as Id<"runs">,
@@ -188,7 +259,7 @@ async function main(): Promise<void> {
       r2Key,
       artifactSha256: item.finalSha256,
       providerRequestSha256: item.scenePromptSha256,
-      providerResponseSha256: review.controller.providerResponseSha256,
+      providerResponseSha256: controller.providerResponseSha256,
       modelRevision: ERNIE_MODEL_REVISION,
     });
     const subject = thumbnailErnieBatchImportApprovalSubject({
@@ -200,7 +271,7 @@ async function main(): Promise<void> {
       r2Key,
       artifactSha256: item.finalSha256,
       providerRequestSha256: item.scenePromptSha256,
-      providerResponseSha256: review.controller.providerResponseSha256,
+      providerResponseSha256: controller.providerResponseSha256,
     });
     const approval = issueStudioActionApproval({
       action: "thumbnail-ernie-batch-import",
@@ -217,8 +288,8 @@ async function main(): Promise<void> {
       r2Key,
       evidence,
       qa: item.qa,
-      batchReceiptKey: review.controller.receiptKey,
-      batchResultKey: review.controller.rootOutputKey,
+      batchReceiptKey: controller.receiptKey,
+      batchResultKey: controller.rootOutputKey,
       costTotal,
       approval,
       approvalFingerprint: studioActionApprovalFingerprint(approval),
@@ -226,10 +297,9 @@ async function main(): Promise<void> {
     } as never) as unknown;
     imported.push({ sourceRunId: item.sourceRunId, candidateRunId, state: "imported", result });
     await writeFile(summaryPath, `${JSON.stringify({
-      version: 1,
+      version: 2,
       mode: "executed",
-      controller: review.controller,
-      estimatedPerCandidateCostUsd: costTotal,
+      reviewFiles: files,
       imported,
     }, null, 2)}\n`, "utf8");
   }
