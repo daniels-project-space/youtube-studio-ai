@@ -4,6 +4,11 @@ import type {
   StudioActionApprovalReceipt,
 } from "@/lib/studioActionApprovalContract";
 import {
+  STUDIO_ACTION_APPROVAL_MAX_CLOCK_SKEW_MS,
+  STUDIO_ACTION_APPROVAL_MAX_TTL_MS,
+  studioActionApprovalCanonicalJson,
+} from "@/lib/studioActionApprovalCanonical";
+import {
   normalizeYoutubeChannelName,
   normalizeYoutubeHandle,
 } from "@/lib/youtubeChannelCreationClaim";
@@ -13,25 +18,7 @@ export type {
   StudioActionApprovalReceipt,
 } from "@/lib/studioActionApprovalContract";
 
-const MAX_RECEIPT_TTL_MS = 15 * 60 * 1_000;
 const DEFAULT_RECEIPT_TTL_MS = 10 * 60 * 1_000;
-const MAX_CLOCK_SKEW_MS = 30_000;
-
-function stableJson(value: unknown): string {
-  if (value === null || typeof value === "boolean" || typeof value === "string") {
-    return JSON.stringify(value);
-  }
-  if (typeof value === "number") {
-    if (!Number.isFinite(value)) throw new Error("approval values must be finite");
-    return JSON.stringify(value);
-  }
-  if (value === undefined) return '"$undefined"';
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  if (!value || typeof value !== "object") throw new Error("unsupported approval value");
-  const record = value as Record<string, unknown>;
-  return `{${Object.keys(record).sort().map((key) =>
-    `${JSON.stringify(key)}:${stableJson(record[key])}`).join(",")}}`;
-}
 
 function signingKey(): Buffer {
   const privateKey = process.env.STUDIO_CONVEX_JWT_PRIVATE_KEY;
@@ -43,7 +30,7 @@ function signingKey(): Buffer {
 }
 
 function unsigned(receipt: Omit<StudioActionApprovalReceipt, "signature">): string {
-  return stableJson(receipt);
+  return studioActionApprovalCanonicalJson(receipt);
 }
 
 function signature(receipt: Omit<StudioActionApprovalReceipt, "signature">): string {
@@ -67,7 +54,7 @@ export function issueStudioActionApproval(args: {
     throw new Error("action approval requires an authenticated operator actor");
   }
   if (!args.evidence.trim()) throw new Error("action approval evidence is required");
-  if (!Number.isFinite(ttlMs) || ttlMs < 1_000 || ttlMs > MAX_RECEIPT_TTL_MS) {
+  if (!Number.isFinite(ttlMs) || ttlMs < 1_000 || ttlMs > STUDIO_ACTION_APPROVAL_MAX_TTL_MS) {
     throw new Error("action approval TTL must be between one second and fifteen minutes");
   }
   if (
@@ -124,9 +111,9 @@ export function verifyStudioActionApproval(
       receipt as StudioActionApprovalReceipt,
     );
     if (
-      receipt.issuedAt > now + MAX_CLOCK_SKEW_MS ||
+      receipt.issuedAt > now + STUDIO_ACTION_APPROVAL_MAX_CLOCK_SKEW_MS ||
       (receipt.expiresAt < now && expected.persistedReceiptFingerprint !== receiptFingerprint) ||
-      receipt.expiresAt - receipt.issuedAt > MAX_RECEIPT_TTL_MS
+      receipt.expiresAt - receipt.issuedAt > STUDIO_ACTION_APPROVAL_MAX_TTL_MS
     ) return false;
     if (
       expected.maximumCostUsd !== undefined &&
@@ -146,7 +133,7 @@ export function verifyStudioActionApproval(
 export function studioActionApprovalFingerprint(
   receipt: StudioActionApprovalReceipt,
 ): string {
-  return createHash("sha256").update(stableJson(receipt)).digest("hex");
+  return createHash("sha256").update(studioActionApprovalCanonicalJson(receipt)).digest("hex");
 }
 
 const PROOF_FIELDS = new Set([
@@ -168,7 +155,7 @@ export function channelDesignApprovalSubject(
     Object.entries(design).filter(([key]) => key !== "ownerId" && !PROOF_FIELDS.has(key)),
   );
   const digest = createHash("sha256")
-    .update(stableJson({ ownerId, intent }))
+    .update(studioActionApprovalCanonicalJson({ ownerId, intent }))
     .digest("hex");
   return `channel-design:${digest}`;
 }
@@ -180,12 +167,12 @@ export function pipelineProbeApprovalSubject(args: {
   pipelineOverrideFingerprint: string;
   maximumCostUsd: number;
 }): string {
-  const digest = createHash("sha256").update(stableJson(args)).digest("hex");
+  const digest = createHash("sha256").update(studioActionApprovalCanonicalJson(args)).digest("hex");
   return `pipeline-probe:${digest}`;
 }
 
 export function pipelineOverrideFingerprint(pipeline: unknown): string {
-  return createHash("sha256").update(stableJson(pipeline)).digest("hex");
+  return createHash("sha256").update(studioActionApprovalCanonicalJson(pipeline)).digest("hex");
 }
 
 export function youtubeChannelApprovalSubject(args: {
@@ -207,7 +194,7 @@ export function youtubeChannelApprovalSubject(args: {
     throw new Error("YouTube channel approval binding is incomplete");
   }
   const digest = createHash("sha256")
-    .update(stableJson({
+    .update(studioActionApprovalCanonicalJson({
       ownerId: args.ownerId,
       channelId: args.channelId,
       requestKey: args.requestKey,
@@ -237,7 +224,7 @@ export function youtubeChannelCreationRequestKey(args: {
     throw new Error("YouTube channel creation request binding is incomplete");
   }
   return createHash("sha256")
-    .update(stableJson({
+    .update(studioActionApprovalCanonicalJson({
       action: "youtube-channel-create",
       ownerId: args.ownerId,
       channelId: args.channelId,
@@ -264,7 +251,7 @@ export function youtubeChannelIntentApprovalSubject(args: {
     throw new Error("YouTube channel intent approval binding is incomplete");
   }
   const digest = createHash("sha256")
-    .update(stableJson({
+    .update(studioActionApprovalCanonicalJson({
       action: "youtube-channel-create",
       ownerId: args.ownerId,
       intentKey: args.intentKey,

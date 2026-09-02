@@ -138,7 +138,6 @@ async function directNovitaCallersUseOnlyTheOptInDeadline(): Promise<void> {
   );
   for (const relative of [
     "src/lib/novitaMedia.ts",
-    "src/lib/channelArt.ts",
     "src/trigger/blocks/loreShortBlocks.ts",
     "src/trigger/blocks/genFootageBlocks.ts",
     "src/engine/forge/runtime.ts",
@@ -150,6 +149,9 @@ async function directNovitaCallersUseOnlyTheOptInDeadline(): Promise<void> {
       `${relative} bounds only its direct Novita delivery after durable output`,
     );
   }
+  const channelArt = await readFile(join(process.cwd(), "src/lib/channelArt.ts"), "utf8");
+  assert.doesNotMatch(channelArt, /renderNovitaImage|downloadTo\(|DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS/,
+    "channel art now uses the receipt-bound Fal route and must not be classified as a direct Novita delivery");
 }
 
 async function main(): Promise<void> {

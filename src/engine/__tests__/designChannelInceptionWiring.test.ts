@@ -264,8 +264,10 @@ assert.equal(
 assert(!coordinator.includes("sharedArt"), "one art stage must never hide another stage's spend");
 assert.match(coordinator, /maxProviderSpendUsd:\s*avatarStage\.maximumCostUsd/);
 assert.match(coordinator, /maxProviderSpendUsd:\s*bannerStage\.maximumCostUsd/);
-assert.match(coordinator, /blockId:\s*"channel-inception-avatar"/);
-assert.match(coordinator, /blockId:\s*"channel-inception-banner"/);
+assert.match(coordinator, /version:\s*\{ avatar: avatarStage\.inputFingerprint\.slice\(0, 20\) \}/);
+assert.match(coordinator, /version:\s*\{ banner: bannerStage\.inputFingerprint\.slice\(0, 20\) \}/);
+assert.doesNotMatch(coordinator, /providerLifecycle/,
+  "Fal banner and avatar transports own their durable idempotency context; a retired direct-worker lifecycle must not survive");
 assert.match(coordinator, /idempotencyKeys\.create\(\s*`\$\{probeStage\.idempotencyKey\}:\$\{probeRunId\}`/);
 assert.match(coordinator, /api\.runs\.claimProbeDispatchEnvelope/);
 assert.match(coordinator, /api\.runs\.createProbeRun/);
