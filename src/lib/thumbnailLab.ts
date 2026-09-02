@@ -432,7 +432,7 @@ export async function runThumbnailMobileReferenceQa(args: {
     prompt:
       `Image 1 is a CANDIDATE YouTube thumbnail rendered at real mobile browse size (~168px wide). ` +
       (refPaths.length
-        ? `Images 2-${refPaths.length + 1} are verified high-performing reference thumbnails from the same channel playbook. `
+        ? `Images 2-${refPaths.length + 1} are verified reference thumbnails selected for this channel playbook and craft review. `
         : "No reference image was reachable, so apply the same production bar without comparative evidence. ") +
       `Video title: "${args.title}"${args.niche ? `, niche: ${args.niche}` : ""}.\n` +
       (args.brandContext ? `CHANNEL STYLE DNA: ${JSON.stringify(args.brandContext)}.\n` : "") +

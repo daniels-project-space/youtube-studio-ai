@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -31,11 +31,6 @@ import styles from "./library.module.css";
 /** Open lightbox = which channel group + which index within that group. */
 type LightboxTarget = { slug: string; index: number };
 type CollectionMode = "active" | "archived";
-type ReviewedThumbnailPreview = {
-  sourceRunId: string;
-  previewUrl: string;
-};
-
 export default function LibraryPage() {
   const ownerId = useOwnerId();
   const { selectedSlug } = useSelectedChannel();
@@ -63,53 +58,10 @@ export default function LibraryPage() {
   const [collection, setCollection] = useState<CollectionMode>("active");
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
   const [recentChange, setRecentChange] = useState<{ video: VideoRow; state: CollectionMode } | null>(null);
-  const [reviewedThumbnailUrls, setReviewedThumbnailUrls] = useState<ReadonlyMap<string, string>>(() => new Map());
-
-  useEffect(() => {
-    if (operationsAccess !== "owner") {
-      // Do not synchronously cascade a render from this access-transition
-      // effect. The projection below already excludes private URLs before this
-      // deferred memory cleanup can run.
-      const clear = window.setTimeout(() => setReviewedThumbnailUrls(new Map()), 0);
-      return () => window.clearTimeout(clear);
-    }
-    const controller = new AbortController();
-    const loadReviewedPreviews = async () => {
-      const response = await fetch("/api/thumbnail-refresh?ernieBatch=reviewed", {
-        cache: "no-store",
-        credentials: "same-origin",
-        signal: controller.signal,
-      });
-      const body = await response.json() as {
-        ok?: boolean;
-        ernieBatch?: { candidates?: ReviewedThumbnailPreview[] };
-      };
-      if (!response.ok || !body.ok || !Array.isArray(body.ernieBatch?.candidates)) return;
-      setReviewedThumbnailUrls(new Map(
-        body.ernieBatch.candidates
-          .filter((candidate) => typeof candidate.sourceRunId === "string" && typeof candidate.previewUrl === "string")
-          .map((candidate) => [candidate.sourceRunId, candidate.previewUrl]),
-      ));
-    };
-    void loadReviewedPreviews().catch(() => undefined);
-    const refresh = window.setInterval(() => void loadReviewedPreviews().catch(() => undefined), 240_000);
-    return () => {
-      controller.abort();
-      window.clearInterval(refresh);
-    };
-  }, [operationsAccess]);
-
-  const libraryVideos = useMemo<VideoRow[] | undefined>(() => videos?.map((video) => {
-    const reviewedThumbnailUrl = operationsAccess === "owner"
-      ? reviewedThumbnailUrls.get(video._id)
-      : undefined;
-    // The reviewed ERNIE batch predates the dedicated Lo-Fi source-frame
-    // route. Never let one of its generic scenes cover an exact frame (or the
-    // deliberate final-render fallback) in the Library.
-    return reviewedThumbnailUrl && video.thumbnailPresentation === undefined
-      ? { ...video, reviewedThumbnailUrl }
-      : video;
-  }), [operationsAccess, reviewedThumbnailUrls, videos]);
+  // ERNIE was kept only as sealed comparison evidence. The Library always
+  // projects the retained source or a run-bound current candidate; it must
+  // never promote a frozen experimental batch as the visible replacement.
+  const libraryVideos = videos;
 
   // Apply all filters + sort client-side over the query result.
   const filtered = useMemo<VideoRow[]>(() => {
@@ -257,8 +209,8 @@ export default function LibraryPage() {
         <details id="thumbnail-refresh" className={`${styles.packagingWorkshop} glass`} open>
           <summary>
             <span className={styles.workshopIcon} aria-hidden="true"><IconSpark width={18} height={18} /></span>
-            <span><small>30 reviewed ERNIE thumbnails</small><strong>Ready to preview and apply</strong></span>
-            <p>Replace the current YouTube images.</p>
+            <span><small>Refresh exact saved runs</small><strong>Nano Banana Pro review queue</strong></span>
+            <p>Private candidate, then exact YouTube confirmation.</p>
             <i aria-hidden="true" />
           </summary>
           <div className={styles.workshopBody}>

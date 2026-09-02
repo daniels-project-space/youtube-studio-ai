@@ -69,15 +69,6 @@ type ThumbnailInventoryRow = Readonly<{
   };
 }>;
 
-type ErnieBatchPreview = Readonly<{
-  sourceRunId: string;
-  channelSlug: string;
-  channelName: string;
-  title: string;
-  youtubeVideoId: string;
-  previewUrl: string;
-}>;
-
 const STATUS_COPY: Record<InventoryStatus, { label: string; tone: string }> = {
   current_golden_candidate: { label: "Current candidate recorded", tone: "ready" },
   legacy_unverified: { label: "Legacy review needed", tone: "review" },
@@ -185,7 +176,6 @@ export function ThumbnailRefreshInventoryPanel({
   selectedChannelSlug?: string | null;
 }) {
   const [inventory, setInventory] = useState<readonly ThumbnailInventoryRow[] | null>(null);
-  const [ernieBatch, setErnieBatch] = useState<readonly ErnieBatchPreview[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [busyRunIds, setBusyRunIds] = useState<Set<string>>(() => new Set());
@@ -194,22 +184,19 @@ export function ThumbnailRefreshInventoryPanel({
   const [retirementConfirmation, setRetirementConfirmation] = useState("");
   const [replacementRunId, setReplacementRunId] = useState<string | null>(null);
   const [replacementConfirmation, setReplacementConfirmation] = useState("");
-  const [ernieBatchBusy, setErnieBatchBusy] = useState(false);
   const [lofiFrameBatchBusy, setLofiFrameBatchBusy] = useState(false);
 
   const loadInventory = useCallback(async (signal?: AbortSignal) => {
-    const response = await fetch("/api/thumbnail-refresh?ernieBatch=reviewed", { cache: "no-store", signal });
+    const response = await fetch("/api/thumbnail-refresh", { cache: "no-store", signal });
     const payload = await response.json() as {
       ok?: boolean;
       inventory?: ThumbnailInventoryRow[];
-      ernieBatch?: { candidates?: ErnieBatchPreview[] };
       error?: string;
     };
     if (!response.ok || !payload.ok || !Array.isArray(payload.inventory)) {
       throw new Error(payload.error || "Could not load thumbnail review inventory");
     }
     setInventory(payload.inventory);
-    setErnieBatch(Array.isArray(payload.ernieBatch?.candidates) ? payload.ernieBatch.candidates : []);
     setError(null);
     return payload.inventory;
   }, []);
@@ -362,38 +349,9 @@ export function ThumbnailRefreshInventoryPanel({
     }
   };
 
-  const queueReviewedErnieBatch = async () => {
-    if (ernieBatchBusy) return;
-    setErnieBatchBusy(true);
-    setActionMessage(null);
-    try {
-      const response = await fetch("/api/thumbnail-refresh/ernie-batch", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ confirmReplaceAll: "APPLY 30" }),
-      });
-      const payload = await response.json() as { ok?: boolean; error?: string; batchCount?: number };
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || "Could not queue the reviewed ERNIE thumbnail batch");
-      }
-      setActionMessage(`${payload.batchCount ?? 30} reviewed native ERNIE thumbnails queued for exact YouTube video bindings.`);
-      await loadInventory();
-    } catch (batchError) {
-      setActionMessage(batchError instanceof Error
-        ? batchError.message
-        : "Could not queue the reviewed ERNIE thumbnail batch");
-    } finally {
-      setErnieBatchBusy(false);
-    }
-  };
-
   const rows = useMemo(
     () => inventory?.filter((row) => !selectedChannelSlug || row.channelSlug === selectedChannelSlug) ?? [],
     [inventory, selectedChannelSlug],
-  );
-  const reviewedErniePreviews = useMemo(
-    () => ernieBatch.filter((item) => !selectedChannelSlug || item.channelSlug === selectedChannelSlug),
-    [ernieBatch, selectedChannelSlug],
   );
   const counts = inventoryCounts(rows);
   const reviewCount = counts.legacy_unverified + counts.evidence_invalid + counts.missing_thumbnail;
@@ -458,7 +416,7 @@ export function ThumbnailRefreshInventoryPanel({
         <div>
           <p className={styles.eyebrow}>Saved uploads</p>
           <h2 id="thumbnail-review-title">Packaging queue</h2>
-          <p>Keep, rebuild, or remove older uploads. Every action uses the exact saved run.</p>
+          <p>Private Nano Banana Pro candidates only. Originals stay untouched until you confirm an exact YouTube update.</p>
         </div>
         <div className={styles.counts} aria-label="Thumbnail evidence totals">
           <span data-tone="review"><small>Needs review</small><strong>{inventory === null ? "—" : reviewCount}</strong></span>
@@ -466,20 +424,6 @@ export function ThumbnailRefreshInventoryPanel({
           <span data-tone="ready"><small>Current proof</small><strong>{inventory === null ? "—" : counts.current_golden_candidate}</strong></span>
         </div>
       </header>
-
-      <div className={styles.ernieBatch}>
-        <div>
-          <span className={styles.ernieBatchMark} aria-hidden="true">E</span>
-          <strong>Reviewed ERNIE batch</strong>
-          <small>30 native images · exact video bindings</small>
-        </div>
-        <button
-          type="button"
-          className={styles.ernieBatchAction}
-          disabled={ernieBatchBusy}
-          onClick={() => void queueReviewedErnieBatch()}
-        >{ernieBatchBusy ? "Queueing…" : "Replace all 30 now"}</button>
-      </div>
 
       {lofiFrameCandidates.length ? (
         <div className={styles.lofiFrameBatch}>
@@ -497,34 +441,6 @@ export function ThumbnailRefreshInventoryPanel({
             ? "Queueing frames…"
             : `Render ${lofiFrameCandidates.length} exact frame${lofiFrameCandidates.length === 1 ? "" : "s"} · ≤$${(lofiFrameCandidates.length * THUMBNAIL_REFRESH_MAXIMUM_COST_USD).toFixed(2)}`}</button>
         </div>
-      ) : null}
-
-      {reviewedErniePreviews.length ? (
-        <section className={styles.ernieGallery} aria-label="Reviewed native ERNIE thumbnails">
-          <header>
-            <span>New thumbnails</span>
-            <small>{reviewedErniePreviews.length} reviewed</small>
-          </header>
-          <div className={styles.ernieGalleryRail}>
-            {reviewedErniePreviews.map((item) => (
-              <article className={styles.ernieGalleryCard} key={item.sourceRunId}>
-                <a
-                  href={`https://www.youtube.com/watch?v=${item.youtubeVideoId}`}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={`Preview replacement for ${item.title}`}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={item.previewUrl} alt={`${item.title} new thumbnail`} loading="lazy" decoding="async" />
-                </a>
-                <div>
-                  <strong title={item.title}>{item.title}</strong>
-                  <Link href={`/channels/${item.channelSlug}`}>{item.channelName}</Link>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
       ) : null}
 
       {inventory === null && !error ? <p className={styles.state}>Loading retained thumbnail evidence…</p> : null}
@@ -562,7 +478,7 @@ export function ThumbnailRefreshInventoryPanel({
                     {row.thumbnailReplayStatus === "ready_for_thumbnail_only"
                       ? "Exact thumbnail inputs retained. "
                       : row.thumbnailReplayStatus === "ready_for_private_successor"
-                        ? "Current thumbnail module snapshotted. "
+                        ? "Current Golden Nano Banana Pro module snapshotted. "
                         : "Thumbnail candidate is unavailable. "}
                     {row.thumbnailReplayReason}
                   </p>
@@ -578,7 +494,7 @@ export function ThumbnailRefreshInventoryPanel({
                       {row.thumbnailReplayStatus === "ready_for_thumbnail_only"
                         ? "exact thumbnail replay eligible"
                         : row.thumbnailReplayStatus === "ready_for_private_successor"
-                          ? "private successor ready"
+                          ? "Nano candidate ready"
                           : "channel setup required"}
                     </span>
                     {row.candidate ? (
@@ -600,8 +516,8 @@ export function ThumbnailRefreshInventoryPanel({
                         : `${lofiSourceFrame
                           ? "Render exact video frame"
                           : row.thumbnailReplayStatus === "ready_for_private_successor"
-                            ? "Render private successor"
-                            : "Render new candidate"} · ≤$${THUMBNAIL_REFRESH_MAXIMUM_COST_USD.toFixed(2)}`}
+                            ? "Render Nano candidate"
+                            : "Render Nano candidate"} · ≤$${THUMBNAIL_REFRESH_MAXIMUM_COST_USD.toFixed(2)}`}
                     </button>
                   ) : null}
                   {dispatchCanResume ? (

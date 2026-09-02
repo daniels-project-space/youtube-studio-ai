@@ -38,6 +38,7 @@ import {
   assertThumbnailGate,
   assertThumbnailStrategy,
   assertVoiceGatePreconditions,
+  thumbnailGoldenGatePassed,
   type ThumbnailGateVerdict,
 } from "@/engine/qualityPolicy";
 import { makeVoicecraftAuditionEvidence } from "@/lib/voiceReadiness";
@@ -480,6 +481,21 @@ function failClosedQualityGuards(): void {
     reason: "fixture pass",
   };
   assert.doesNotThrow(() => assertThumbnailGate("production", passingThumbnail, "fixture"));
+  assert.equal(
+    thumbnailGoldenGatePassed({ ...passingThumbnail, visualTreatmentCompliant: true, punch: 8, styleMatch: 8, storyMatch: 8 }),
+    true,
+    "an experimental provider must meet the stricter Golden candidate gate",
+  );
+  assert.equal(
+    thumbnailGoldenGatePassed({ ...passingThumbnail, visualTreatmentCompliant: true, punch: 7, styleMatch: 8, storyMatch: 8 }),
+    false,
+    "a merely production-safe result must not become a Golden comparison candidate",
+  );
+  assert.equal(
+    thumbnailGoldenGatePassed({ ...passingThumbnail, punch: 8, styleMatch: 8, storyMatch: 8 }),
+    false,
+    "a Golden candidate requires an explicit visual-treatment verdict",
+  );
   assert.throws(() => assertThumbnailGate("production", null, "fixture"), /no required production QA verdict/);
   assert.throws(
     () => assertThumbnailGate("production", { ...passingThumbnail, storyMatch: 6 }, "fixture"),

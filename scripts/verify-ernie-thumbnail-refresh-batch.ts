@@ -17,7 +17,10 @@ import { join } from "node:path";
 
 import { config } from "dotenv";
 
-import type { ThumbnailGateVerdict } from "@/engine/qualityPolicy";
+import {
+  thumbnailGoldenGatePassed,
+  type ThumbnailGateVerdict,
+} from "@/engine/qualityPolicy";
 import {
   runThumbnailMobileReferenceQa,
   type ThumbnailPlaybook,
@@ -33,6 +36,17 @@ const NATIVE_TEXT_OBJECTS = [
   "torn_strip", "paint_smear", "censor_bar", "grunge_sticker", "spaced_elegant",
   "block_plate", "neon_sign", "spray_paint", "stamp_ink", "movie_poster",
   "ransom_note", "carved",
+] as const;
+
+const GOLDEN_REFERENCE_ORIGIN = (process.env.ERNIE_THUMBNAIL_GOLDEN_REFERENCE_ORIGIN?.trim() || "https://youtube-studio-ai.vercel.app")
+  .replace(/\/+$/, "");
+
+const ERNIE_GOLDEN_VISUAL_TREATMENT_CRITERIA = [
+  "The thumbnail has one unmistakable, topic-specific hero at the peak of action and one readable consequence/proof detail; it is not a calm product pose or generic game/streaming key art.",
+  "The exact native headline is oversized, physically integrated with the scene, immediate at mobile size, and never a flat generic font on an empty split panel.",
+  "The composition has real foreground, hero, and background depth with a decisive crop or diagonal; it avoids a dead 50/50 picture-and-copy split.",
+  "The image is unmistakably aligned to its channel's visual identity and does not fall into that channel's prohibited generic motifs.",
+  "The compact channel identity is secondary and remains clear of both the hook and the bottom-right duration timestamp.",
 ] as const;
 type NativeTextObject = typeof NATIVE_TEXT_OBJECTS[number];
 
@@ -126,6 +140,19 @@ function nativeTextObject(value: string | undefined): NativeTextObject | undefin
 
 function validId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/.test(value);
+}
+
+function goldenReferenceUrl(plan: Plan): string {
+  const asset = plan.channelSlug.startsWith("inked-histories-")
+    ? "golden/hannibal.jpg"
+    : plan.channelSlug.startsWith("chalk-compound-") || plan.channelSlug.startsWith("investory-")
+      ? "golden/rich.jpg"
+      : plan.channelSlug.startsWith("gratitude-springs-")
+        ? "golden/samurai.jpg"
+        : plan.channelSlug.startsWith("the-quiet-stoic-")
+          ? "golden/stoic_memento.jpg"
+          : "golden/scandal.jpg";
+  return `${GOLDEN_REFERENCE_ORIGIN}/${asset}`;
 }
 
 function planPlaybook(plan: Plan): ThumbnailPlaybook {
@@ -238,7 +265,9 @@ async function main(): Promise<void> {
         pattern: plan.pattern,
         sceneStyle: plan.renderSpec.scene.imageStyle,
       },
+      referenceUrls: [goldenReferenceUrl(plan)],
       expectedWords: plan.expectedWords,
+      visualTreatmentCriteria: ERNIE_GOLDEN_VISUAL_TREATMENT_CRITERIA,
       qaTier: "final",
       log: (message) => console.log(`[${output.id}] ${message}`),
     });
@@ -276,7 +305,7 @@ async function main(): Promise<void> {
     event: "reviewed",
     jobId: controller.jobId,
     total: reviewed.length,
-    passing: reviewed.filter((item) => item.qa.textOk && item.qa.faceClear && item.qa.punch >= 7 && item.qa.styleMatch >= 7 && item.qa.storyMatch >= 7 && item.qa.uiClean).length,
+    passing: reviewed.filter((item) => thumbnailGoldenGatePassed(item.qa)).length,
   }));
 }
 

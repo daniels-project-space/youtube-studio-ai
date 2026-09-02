@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { config } from "dotenv";
 
 import type { Id } from "../convex/_generated/dataModel";
+import { thumbnailGoldenGatePassed } from "@/engine/qualityPolicy";
 import { createErnieNovitaThumbnailCurrentCandidateEvidence } from "@/lib/thumbnailRefreshInventory";
 import { thumbnailErnieBatchImportApprovalSubject } from "@/lib/thumbnailRefreshCandidate";
 import { thumbnailRefreshRuntimeApi } from "@/lib/thumbnailRefreshRuntime";
@@ -45,6 +46,7 @@ type ThumbnailGateVerdict = Readonly<{
   styleMatch: number;
   storyMatch: number;
   uiClean: boolean;
+  visualTreatmentCompliant?: boolean;
   reason: string;
 }>;
 
@@ -96,7 +98,7 @@ function sha256(value: Uint8Array | string): string {
 }
 
 function passed(qa: ThumbnailGateVerdict): boolean {
-  return qa.textOk && qa.faceClear && qa.punch >= 7 && qa.styleMatch >= 7 && qa.storyMatch >= 7 && qa.uiClean;
+  return thumbnailGoldenGatePassed(qa);
 }
 
 function assertQa(value: unknown): asserts value is ThumbnailGateVerdict {
@@ -104,6 +106,7 @@ function assertQa(value: unknown): asserts value is ThumbnailGateVerdict {
   const qa = value as Partial<ThumbnailGateVerdict>;
   if (
     typeof qa.textOk !== "boolean" || typeof qa.faceClear !== "boolean" || typeof qa.uiClean !== "boolean" ||
+    typeof qa.visualTreatmentCompliant !== "boolean" ||
     !Number.isFinite(qa.punch) || !Number.isFinite(qa.styleMatch) || !Number.isFinite(qa.storyMatch) ||
     typeof qa.reason !== "string" || !qa.reason.trim()
   ) throw new Error("candidate QA lacks its complete gate verdict");

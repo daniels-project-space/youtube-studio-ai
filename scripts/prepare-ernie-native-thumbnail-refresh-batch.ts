@@ -67,18 +67,39 @@ function text(value: unknown): string | undefined {
 }
 
 function sourceArtPrompt(scenePrompt: string): string {
-  // Repair plans are deliberately re-plannable. A previous native-text contract
-  // can therefore be present in their stored scene prompt. It must never be
-  // carried forward alongside a replacement headline: two exact-copy clauses
-  // give ERNIE conflicting instructions and make the QA expectation meaningless.
+  // A stored scene plan was originally written for an optional local type pass.
+  // ERNIE now owns the final native lettering, but it still needs the Golden
+  // composition constraints from that plan. Removing the safe-zone, edge-crop,
+  // and depth instructions made the ERNIE route drift into flat split panels
+  // and generic product/game-key-art scenes. Retain those requirements and
+  // convert only the overlay-specific wording to native-type wording.
+  //
+  // A previous native-text contract can also be present in a repair plan. It
+  // must not survive alongside its replacement headline: two exact-copy clauses
+  // give ERNIE conflicting instructions and make QA expectation meaningless.
   return scenePrompt
     .replace(/\.\s*No textual props or writing surfaces:[\s\S]*$/i, "")
-    .replace(/\.\s*The scene alone must communicate the subject at phone size; use at most three visual elements\.?/i, ".")
-    .replace(/\.\s*Put the dominant hero on the side opposite the [^.]+\./i, ".")
-    .replace(/\.\s*Keep the [^.]+ 42% darker and graphically simple for a later local overlay; avoid a dead 50\/50 split\./i, ".")
-    .replace(/\.\s*Let one meaningful hero contour or atmospheric layer intrude [^.]+\./i, ".")
+    .replace(/for a later local overlay/gi, "for the native headline")
+    .replace(/future type zone/gi, "native type field")
+    .replace(/baked-in AI typography or /gi, "")
     .replace(/\s*ERNIE MUST RENDER THE FINAL THUMBNAIL TYPOGRAPHY NATIVELY IN THE IMAGE;[\s\S]*$/i, "")
     .trim();
+}
+
+function channelCreativeGuardrail(plan: SourcePlan): string | undefined {
+  if (plan.channelSlug.startsWith("inked-histories-")) {
+    return "Keep the entire frame authored as an original hand-inked historical illustration: tactile cross-hatching, print texture, and expressive human action. Never make a photoreal AAA adventure-game still, a generic treasure-hunter poster, or a glossy film key art image.";
+  }
+  if (plan.channelSlug.startsWith("chalk-compound-")) {
+    return "Make the concept physically legible through authentic chalk, a human hand, and one concrete financial cause-and-consequence object such as a ledger, tax bracket, or divided allocation. Never use generic currency stock imagery, a sterile dashboard, a trading-game screen, or a disconnected abstract diagram.";
+  }
+  if (plan.channelSlug.startsWith("gratitude-springs-")) {
+    return "Make the calm feel human and varied: use a serene person, water, mist, light, foliage, sky, or intimate nature detail as the story requires. Stones are incidental scenery only, never the default hero. Avoid synthetic sci-fi rings, generic wellness stock art, and repeated rock-only compositions.";
+  }
+  if (plan.channelSlug.startsWith("investory-")) {
+    return "Ground the story in one realistic investing consequence and a believable human or physical object. Avoid random money, unrelated luxury props, game-like charts, neon finance clichés, and generic market-dashboard art.";
+  }
+  return undefined;
 }
 
 function nativePrompt(plan: SourcePlan): string {
@@ -96,12 +117,14 @@ function nativePrompt(plan: SourcePlan): string {
   if (!artPrompt) throw new Error(`${plan.sourceRunId}: source scene prompt contains no reusable visual direction`);
   const allowedWords = [...headline, ...(badge ? [badge] : [])];
   const repair = REPAIR_DIRECTIVES[plan.sourceRunId];
+  const channelGuardrail = channelCreativeGuardrail(plan);
   const differentiation = plan.channelSlug === "the-quiet-stoic-1780409262742"
     ? "Use a topic-specific peak-action silhouette and proof detail. Do not default to the same cracked marble bust unless the story action itself requires it."
     : undefined;
   return [
     artPrompt,
     differentiation ?? "",
+    channelGuardrail ?? "",
     repair ?? "",
     "ERNIE MUST RENDER THE FINAL THUMBNAIL TYPOGRAPHY NATIVELY IN THE IMAGE; no external text overlay will be added.",
     `Use an intentional integrated composition: the hero may be centered when that creates the strongest readable story, otherwise use the ${scene?.textZone ?? "left"} zone. Arrange the native typography around the hero silhouette and visual motion rather than forcing a 50/50 title panel.`,

@@ -27,6 +27,22 @@ export function thumbnailGatePassed(verdict: ThumbnailGateVerdict): boolean {
     verdict.uiClean;
 }
 
+/**
+ * A provider comparison is not eligible merely because it clears the normal
+ * production floor.  ERNIE is an experimental native-type route and must
+ * meet the owner's stricter Golden craft bar before it can become a private
+ * Studio candidate: a real visual-treatment review plus 8/10 in the three
+ * creative dimensions.  The normal Nano route retains its established
+ * production gate and its own iterative repair loop.
+ */
+export function thumbnailGoldenGatePassed(verdict: ThumbnailGateVerdict): boolean {
+  return thumbnailGatePassed(verdict) &&
+    verdict.visualTreatmentCompliant === true &&
+    verdict.punch >= 8 &&
+    verdict.styleMatch >= 8 &&
+    verdict.storyMatch >= 8;
+}
+
 export function assertThumbnailGate(
   profile: QualityProfile,
   verdict: ThumbnailGateVerdict | null,
