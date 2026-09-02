@@ -150,8 +150,11 @@ assert.match(wizard, /status signal · no preview frames yet/);
 assert.match(wizard, /STAGE_DESCRIPTIONS/);
 assert.match(wizard, /executionAuthorized \? "Authorized" : "Plan only"/);
 assert.match(wizard, /href="\/api\/operations\/authorize"[\s\S]*Verify owner to save/);
-assert.match(wizard, /Choose the exact Qwen CustomVoice speaker before starting channel setup/);
-assert.match(wizard, /f\.key !== "qwenSpeaker" \|\| paramOverrides\[m\.block\]\?\.\["ttsProvider"\] === "qwen3"/);
+// New creation must not revive the retired Qwen path. Historic records retain
+// their module receipts in the legacy catalog, but this UI only reads the
+// new-channel projection and contains no Qwen-specific controls or messaging.
+assert.match(wizard, /NEW_CHANNEL_MODULE_CATALOG\.filter/);
+assert.doesNotMatch(wizard, /Qwen|qwen3|qwenSpeaker/);
 assert.match(wizardCss, /\.nicheGrid/);
 assert.match(wizardCss, /\.showMoreNiches/);
 assert.match(wizardCss, /\.buildWorkspace/);

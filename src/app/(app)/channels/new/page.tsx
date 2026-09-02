@@ -27,7 +27,7 @@ import {
   CERTIFIED_QUIZ_PROFILE_OPTIONS,
   type CertifiedQuizProfileKey,
 } from "@/engine/certifiedQuizProfile";
-import { MODULE_CATALOG, type ParamField } from "@/engine/moduleCatalog";
+import { NEW_CHANNEL_MODULE_CATALOG, type ParamField } from "@/engine/moduleCatalog";
 import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { CHANNEL_INCEPTION_SETUP_COST_CEILING_USD } from "@/engine/channelInceptionContracts";
@@ -777,15 +777,6 @@ export default function NewChannelWizard() {
   async function create(startedAt: number) {
     setPhase("building"); setError(null); setBuildProgress(null); setReviewHrefs([]);
     try {
-      const narrationOverrides = paramOverrides["narration_tts"] ?? {};
-      if (
-        narrationOverrides["ttsProvider"] === "qwen3" &&
-        (typeof narrationOverrides["qwenSpeaker"] !== "string" || !narrationOverrides["qwenSpeaker"].trim())
-      ) {
-        setError("Choose the exact Qwen CustomVoice speaker before starting channel setup.");
-        setPhase("error");
-        return;
-      }
       // Bind the creator-visible format promise before the recoverable intent
       // is fingerprinted. Execution choices stay on `design`; this immutable
       // brief is the sole source of its family/niche/concept/audience identity.
@@ -1929,7 +1920,7 @@ export default function NewChannelWizard() {
               </button>
               {showAdvanced && (
                 <div style={{ display: "grid", gap: "0.9rem" }}>
-                  {MODULE_CATALOG.filter((m) => preview.includes(m.block)).map((m) => (
+                  {NEW_CHANNEL_MODULE_CATALOG.filter((m) => preview.includes(m.block)).map((m) => (
                     <div key={m.block} style={{ display: "grid", gap: "0.5rem", paddingBottom: "0.7rem", borderBottom: "1px solid var(--color-border)" }}>
                       <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
                         <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>{m.label}</span>
@@ -1937,15 +1928,12 @@ export default function NewChannelWizard() {
                         <span style={{ fontSize: "0.72rem", color: "var(--color-muted)" }}>{m.description}</span>
                       </div>
                       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "0.5rem 1rem" }}>
-                        {m.params
-                          .filter((f) => f.key !== "qwenSpeaker" || paramOverrides[m.block]?.["ttsProvider"] === "qwen3")
-                          .map((f) => (
+                        {m.params.map((f) => (
                           <ParamControl key={f.key} field={f}
                             value={paramOverrides[m.block]?.[f.key]}
                             onChange={(v) => setParamOverrides((p) => {
                               const block = { ...(p[m.block] ?? {}) };
                               if (v === "" || v === undefined || v === null) delete block[f.key]; else block[f.key] = v;
-                              if (f.key === "ttsProvider" && v !== "qwen3") delete block["qwenSpeaker"];
                               const next = { ...p };
                               if (Object.keys(block).length) next[m.block] = block; else delete next[m.block];
                               return next;

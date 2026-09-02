@@ -394,6 +394,27 @@ export const MODULE_CATALOG: ModuleSpec[] = [
   },
 ];
 
+/**
+ * New channels start with the currently supported narration path only. The
+ * complete catalog remains available for legacy channel records so saved runs
+ * and their render receipts stay reproducible.
+ */
+export const NEW_CHANNEL_MODULE_CATALOG: ModuleSpec[] = MODULE_CATALOG.map((module) => {
+  if (module.block !== "narration_tts") return module;
+  return {
+    ...module,
+    params: module.params
+      .filter((field) => field.key !== "qwenSpeaker")
+      .map((field) => field.key === "ttsProvider"
+        ? {
+          ...field,
+          options: field.options?.filter((option) => option.value !== "qwen3"),
+          help: "New-channel casting uses ElevenLabs expressive narration.",
+        }
+        : field),
+  };
+});
+
 const BY_BLOCK: Record<string, ModuleSpec> = Object.fromEntries(
   MODULE_CATALOG.map((m) => [m.block, m]),
 );

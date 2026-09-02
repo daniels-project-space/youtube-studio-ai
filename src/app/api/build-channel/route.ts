@@ -186,6 +186,21 @@ export async function POST(request: Request) {
     };
     // Bind the key to the operator's exact submitted intent before any server
     // normalization. This makes retries stable without allowing changed input.
+    const rawNarrationOverrides = design.paramOverrides && typeof design.paramOverrides === "object"
+      ? (design.paramOverrides as Record<string, unknown>)["narration_tts"]
+      : undefined;
+    if (
+      rawNarrationOverrides &&
+      typeof rawNarrationOverrides === "object" &&
+      (
+        (rawNarrationOverrides as Record<string, unknown>)["ttsProvider"] === "qwen3" ||
+        "qwenSpeaker" in rawNarrationOverrides
+      )
+    ) {
+      return NextResponse.json({
+        error: "New channel setup accepts ElevenLabs narration only.",
+      }, { status: 400 });
+    }
     if (!validateChannelBuildRequestKey(requestKey, design)) {
       return NextResponse.json(
         { error: "channel creation requestKey was reused with a different design" },

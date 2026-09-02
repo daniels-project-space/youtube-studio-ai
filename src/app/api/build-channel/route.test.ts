@@ -52,6 +52,21 @@ async function main() {
     });
     const design = designFor(brief);
 
+    const retiredNarrationProviderDesign = {
+      ...design,
+      paramOverrides: { narration_tts: { ttsProvider: "qwen3", qwenSpeaker: "Aiden" } },
+    };
+    const retiredNarrationProvider = await POST(request({
+      requestKey: requestKey(retiredNarrationProviderDesign),
+      design: retiredNarrationProviderDesign,
+    }));
+    assert.equal(retiredNarrationProvider.status, 400);
+    assert.match(
+      (await retiredNarrationProvider.json() as { error: string }).error,
+      /ElevenLabs narration only/,
+      "new-channel builds must refuse retired narration settings before any capability or provider work",
+    );
+
     const factualWhiteboard = await POST(request({
       requestKey: requestKey(design),
       design,
