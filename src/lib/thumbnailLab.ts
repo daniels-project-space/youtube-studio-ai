@@ -531,7 +531,7 @@ export async function acquireReferences(args: {
   log?: Logger;
 }): Promise<AcquiredRef[]> {
   const log = args.log ?? (() => {});
-  if (!hasAnthropicKey()) throw new Error("thumbnailLab: ANTHROPIC_API_KEY required");
+  if (!hasAnthropicKey()) throw new Error("thumbnailLab: OPENROUTER_API_KEY required");
   const q = await claudeJson<{ queries?: string[] }>({
     maxTokens: 400,
     temperature: 0.4,
@@ -682,7 +682,7 @@ export async function distillPlaybook(args: {
   const decon = parseJsonLoose<{ decon?: unknown[] }>(deconRaw).decon ?? [];
   log(`thumbnailLab: deconstructed ${decon.length} winning thumbnails`);
 
-  if (!hasAnthropicKey()) throw new Error("thumbnailLab: ANTHROPIC_API_KEY required for playbook synthesis");
+  if (!hasAnthropicKey()) throw new Error("thumbnailLab: OPENROUTER_API_KEY required for playbook synthesis");
   const palette = (args.dna?.thumbnail?.palette?.length ? args.dna.thumbnail.palette : args.dna?.palette) ?? [];
   const accent = palette.length >= 2 ? palette[palette.length - 2] : "#ffd400";
 

@@ -235,7 +235,6 @@ export default defineConfig({
       "@mastra/observability",
       "ai",
       "@ai-sdk/google",
-      "@ai-sdk/anthropic",
       // Browserbase + Stagehand (cloud-browser channel creation) — heavy dep tree
       // with playwright/puppeteer-core natives; install in-image, import dynamically.
       "@browserbasehq/stagehand",

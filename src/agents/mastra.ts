@@ -2,9 +2,9 @@
  * Mastra agent layer (hybrid: Mastra authors the agent calls; the block engine
  * still orchestrates the pipeline DAG; Trigger.dev runs it).
  *
- * Creative agents shared by every chunk use the configured non-Google model.
- * Gemini is deliberately not a text-agent fallback: its sole admitted use is
- * the sealed Nano Banana thumbnail module.
+ * Creative agents shared by every chunk use the pinned OpenRouter Gemini 3.7
+ * Flash route. Direct-provider SDKs are intentionally not eligible here;
+ * image generation remains separately limited to the sealed thumbnail module.
  *
  * `agentJson()` is the single entry point chunks call. It uses the Mastra agent
  * when its bundle is available (structured output validated by a zod schema,
@@ -19,8 +19,8 @@
  * image rather than being bundled.
  */
 import type { z } from "zod";
-import { assertNonGeminiModelIdentifier } from "@/lib/gemini";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { openRouterModel } from "@/lib/openRouter";
 import {
   getOrCreateModelResponse,
   modelResponseContractIdentity,
@@ -45,37 +45,29 @@ export type AgentRole =
   | "composer"
   | "critic";
 
-const CLAUDE_MODEL = process.env.MASTRA_PRODUCER_MODEL
-  ?? process.env.ANTHROPIC_CREATIVE_FAST_MODEL
-  ?? "anthropic/claude-sonnet-4-5-20250929";
-const DIRECTOR_MODEL = process.env.MASTRA_DIRECTOR_MODEL
-  ?? process.env.ANTHROPIC_CREATIVE_PRO_MODEL
-  ?? CLAUDE_MODEL;
+const FLASH_MODEL = openRouterModel("intelligence");
+const CREATIVE_MODEL = openRouterModel("creative");
 
 interface RoleConfig {
-  /** REST-fallback provider when Mastra is unavailable. */
-  provider: "claude";
+  /** Pinned creative-text provider. Mastra cannot bypass this boundary. */
+  provider: "openrouter";
   model: string;
   /**
-   * Coarse REST-fallback tier mirroring this role's Mastra model choice
-   * (CLAUDE_MODEL/"fast" roles -> "flash", DIRECTOR_MODEL/"pro" roles ->
-   * "pro"). Mastra's per-role `model` string is the source of truth when
-   * Mastra is available; this is only consulted by the REST fallback in
-   * `agentJson()` so a Mastra outage degrades gracefully instead of
-   * collapsing every role to the tier-less ("flash") default.
+   * Coarse tier for response budgeting. Both tiers resolve to the pinned
+   * OpenRouter model, while retaining the existing caller contract.
    */
   tier: "flash" | "pro";
   instructions: string;
 }
 
 /**
- * Text agents are non-Google by default. Gemini is reserved for the sealed
- * Nano Banana thumbnail module; visual judging is separately non-Google.
+ * Text agents use the pinned OpenRouter Gemini route. Image generation remains
+ * separately limited to the sealed Nano Banana thumbnail module.
  */
 const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
   producer: {
-    provider: "claude",
-    model: CLAUDE_MODEL,
+    provider: "openrouter",
+    model: FLASH_MODEL,
     tier: "flash",
     instructions:
       "You are the Producer in an autonomous YouTube content pipeline. You generate " +
@@ -83,8 +75,8 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "constraints. Always return valid structured output and nothing else.",
   },
   director: {
-    provider: "claude",
-    model: DIRECTOR_MODEL,
+    provider: "openrouter",
+    model: CREATIVE_MODEL,
     tier: "pro",
     instructions:
       "You are the Director: a senior YouTube content strategist and critic. You " +
@@ -93,8 +85,8 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "issues as structured output.",
   },
   showrunner: {
-    provider: "claude",
-    model: DIRECTOR_MODEL,
+    provider: "openrouter",
+    model: CREATIVE_MODEL,
     tier: "pro",
     instructions:
       "You are the Showrunner: you define a YouTube channel's creative essence. From a " +
@@ -104,8 +96,8 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "opinionated; generic answers are failures. Return structured output only.",
   },
   crew_director: {
-    provider: "claude",
-    model: CLAUDE_MODEL,
+    provider: "openrouter",
+    model: FLASH_MODEL,
     tier: "flash",
     instructions:
       "You are the Director (narrative). For one video you design the STRUCTURE: a " +
@@ -113,8 +105,8 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "intent of each beat, faithful to the channel's vibe. Return structured output only.",
   },
   cinematographer: {
-    provider: "claude",
-    model: CLAUDE_MODEL,
+    provider: "openrouter",
+    model: FLASH_MODEL,
     tier: "flash",
     instructions:
       "You are the Cinematographer (DP). You own the LOOK: concrete footage/keyframe " +
@@ -123,8 +115,8 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "Return structured output only.",
   },
   editor: {
-    provider: "claude",
-    model: CLAUDE_MODEL,
+    provider: "openrouter",
+    model: FLASH_MODEL,
     tier: "flash",
     instructions:
       "You are the Editor. You own CUTS & RHYTHM: cut cadence per section, transition language, " +
@@ -132,8 +124,8 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "Return structured output only.",
   },
   composer: {
-    provider: "claude",
-    model: CLAUDE_MODEL,
+    provider: "openrouter",
+    model: FLASH_MODEL,
     tier: "flash",
     instructions:
       "You are the Composer / Sound designer. You write the MUSIC generation prompt (genre, " +
@@ -142,8 +134,8 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "structured output only.",
   },
   critic: {
-    provider: "claude",
-    model: CLAUDE_MODEL,
+    provider: "openrouter",
+    model: FLASH_MODEL,
     tier: "flash",
     instructions:
       "You are the Critic / QA Director. You author the VALIDATION SPEC for one video: the " +
@@ -201,7 +193,7 @@ function recordMastraUsage(
     finiteToken(usage?.outputTokenDetails?.textTokens) ??
     (totalOutput !== undefined ? Math.max(0, totalOutput - reasoning) : undefined);
   recordModelUsage({
-    provider: configuredModel.startsWith("anthropic/") ? "anthropic" : "mastra",
+    provider: "mastra",
     model: response.response?.modelId ?? response.modelId ?? configuredModel,
     kind: "text",
     requestId: response.response?.id,
@@ -258,13 +250,12 @@ function knownPreGenerationProviderFailure(error: unknown): boolean {
 }
 
 /**
- * A loaded Mastra runtime is not evidence that its selected model can run.
- * When the direct Anthropic credential is absent, route through the existing
- * pinned OpenRouter REST fallback rather than submitting a guaranteed native
- * failure and then classifying it as an ambiguous paid generation.
+ * Mastra does not yet own an OpenRouter-only provider adapter in this app.
+ * Calling it would let the SDK select a native provider, which violates the
+ * pinned route. Keep the REST OpenRouter boundary as the sole dispatch path.
  */
-function hasDirectMastraCredential(model: string): boolean {
-  return !model.startsWith("anthropic/") || Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+function hasDirectMastraCredential(_model: string): boolean {
+  return false;
 }
 
 /**
@@ -380,11 +371,8 @@ export interface AgentJsonOptions<T> {
 export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
   const log = o.log ?? (() => {});
   const cfg = ROLE_CONFIG[o.role];
-  // A model override must never route creative text through Gemini. The only
-  // admitted Google integration lives in the receipt-bound thumbnail module.
-  assertNonGeminiModelIdentifier(cfg.model, `agentJson(${o.role})`);
   const responseContract = modelResponseContractIdentity(o.schema);
-  const requestKey = modelRequestCacheKey("mastra", cfg.model, {
+  const requestKey = modelRequestCacheKey("openrouter", cfg.model, {
     role: o.role,
     prompt: o.prompt,
     // Mastra itself uses the sealed role instructions, but this is the exact
@@ -399,7 +387,7 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
     responseContract,
   });
   return getOrCreateModelResponse(requestKey, {
-    provider: cfg.model.startsWith("anthropic/") ? "anthropic" : "mastra",
+    provider: "openrouter",
     model: cfg.model,
     kind: "text",
   }, async () => {
@@ -434,7 +422,7 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
     // REST fallback uses the same declared non-Google provider. No hidden
     // provider substitution is allowed for creative text.
     const system = o.system ?? cfg?.instructions;
-    if (!hasAnthropicKey()) throw new Error(`agentJson(${o.role}): no Mastra and no ANTHROPIC_API_KEY`);
+    if (!hasAnthropicKey()) throw new Error(`agentJson(${o.role}): OPENROUTER_API_KEY is required`);
     // Mirror the Mastra-available path's model tier here so a Mastra outage
     // degrades gracefully (fast roles -> "flash", higher-stakes roles ->
     // "pro") instead of silently collapsing every role to claudeJson's

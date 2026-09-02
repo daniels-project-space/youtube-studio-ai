@@ -124,12 +124,13 @@ function approvingFindings() {
   }));
 }
 
-function anthropicResponse(verdict: unknown) {
+function openRouterResponse(verdict: unknown) {
   return new Response(
     JSON.stringify({
-      id: "msg-source-auto-verifier-test",
-      content: [{ type: "text", text: JSON.stringify(verdict) }],
-      usage: { input_tokens: 10, output_tokens: 10 },
+      id: "or-source-auto-verifier-test",
+      model: "google/gemini-3.7-flash",
+      choices: [{ message: { content: JSON.stringify(verdict) } }],
+      usage: { prompt_tokens: 10, completion_tokens: 10 },
     }),
     { status: 200, headers: { "content-type": "application/json" } },
   );
@@ -138,14 +139,11 @@ function anthropicResponse(verdict: unknown) {
 async function main(): Promise<void> {
   const previousOpenRouterKey = process.env.OPENROUTER_API_KEY;
   const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
-  const previousModel = process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
   const originalFetch = global.fetch;
   try {
-    // Force the plain Anthropic-messages code path (not OpenRouter) so the
-    // mocked fetch below has a single, predictable request shape to assert on.
-    delete process.env.OPENROUTER_API_KEY;
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    process.env.ANTHROPIC_CREATIVE_PRO_MODEL = "claude-source-verifier-test";
+    // A retired direct credential must never bypass the pinned OpenRouter route.
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+    process.env.ANTHROPIC_API_KEY = "retired-direct-key";
 
     // --- A plausible source packet passes and produces a correctly
     // fingerprint-bound editorial review. This is the real integration proof:
@@ -156,10 +154,10 @@ async function main(): Promise<void> {
     global.fetch = (async (_input: unknown, init?: RequestInit) => {
       calls += 1;
       const request = JSON.parse(String(init?.body));
-      assert.equal(request.model, "claude-source-verifier-test");
-      assert.match(request.system, /cannot browse the internet/);
-      assert.match(request.messages[0].content, /CASEFILE_SOURCE_CANDIDATES/);
-      return anthropicResponse({ pass: true, confidence: 0.92, issues: [], findings: approvingFindings() });
+      assert.equal(request.model, "google/gemini-3.7-flash");
+      assert.match(request.messages[0].content, /cannot browse the internet/);
+      assert.match(request.messages.at(-1).content, /CASEFILE_SOURCE_CANDIDATES/);
+      return openRouterResponse({ pass: true, confidence: 0.92, issues: [], findings: approvingFindings() });
     }) as typeof fetch;
 
     const review = await autoVerifyCasefileSourcePacket(content, { now: NOW });
@@ -182,7 +180,7 @@ async function main(): Promise<void> {
 
     // --- An implausible/fabricated source packet fails closed. ---
     global.fetch = (async () =>
-      anthropicResponse({
+      openRouterResponse({
         pass: false,
         confidence: 0.2,
         issues: ["source-court-archive uses a throwaway placeholder-style domain pattern"],
@@ -201,7 +199,7 @@ async function main(): Promise<void> {
     // A verdict that claims pass:true but sits below the confidence floor
     // must still fail closed — pass alone is never sufficient.
     global.fetch = (async () =>
-      anthropicResponse({
+      openRouterResponse({
         pass: true,
         confidence: CASEFILE_SOURCE_AUTO_VERIFIER_MIN_CONFIDENCE - 0.1,
         issues: [],
@@ -215,7 +213,7 @@ async function main(): Promise<void> {
     // A verdict missing a finding for one of the expected claim/source pairs
     // is an incomplete response, not an implicit pass on the missing pair.
     global.fetch = (async () =>
-      anthropicResponse({
+      openRouterResponse({
         pass: true,
         confidence: 0.95,
         issues: [],
@@ -238,7 +236,7 @@ async function main(): Promise<void> {
     );
 
     // Missing provider key must fail closed WITHOUT ever calling a provider.
-    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
     let unexpectedCall = false;
     global.fetch = (async () => {
       unexpectedCall = true;
@@ -295,12 +293,12 @@ async function main(): Promise<void> {
     // the content, and the exact same unmodified assertCasefileSourcePacket
     // gate admits the result.
     // -----------------------------------------------------------------
-    delete process.env.OPENROUTER_API_KEY;
-    process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+    process.env.ANTHROPIC_API_KEY = "retired-direct-key";
     let autoCalls = 0;
     global.fetch = (async () => {
       autoCalls += 1;
-      return anthropicResponse({ pass: true, confidence: 0.93, issues: [], findings: approvingFindings() });
+      return openRouterResponse({ pass: true, confidence: 0.93, issues: [], findings: approvingFindings() });
     }) as typeof fetch;
 
     const autoLogs: string[] = [];
@@ -335,8 +333,6 @@ async function main(): Promise<void> {
     else process.env.OPENROUTER_API_KEY = previousOpenRouterKey;
     if (previousAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previousAnthropicKey;
-    if (previousModel === undefined) delete process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
-    else process.env.ANTHROPIC_CREATIVE_PRO_MODEL = previousModel;
   }
 }
 

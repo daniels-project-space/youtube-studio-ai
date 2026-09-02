@@ -96,7 +96,7 @@ const LORE_STORY_OUTCOME_CHECKPOINT_VERSION = "lore-short-story-outcome/v1";
  */
 export const LORE_SHORT_STORYBOARD_PLANNER = Object.freeze({
   id: "lore-short-claude-critic-plan/v1",
-  provenance: "bounded Claude lore-beat planner plus a bounded Claude storyboard critic; both settle before any image, voice, or LTX render admission",
+  provenance: "bounded OpenRouter lore-beat planner plus a bounded creative-text storyboard critic; both settle before any image, voice, or LTX render admission",
 });
 
 export interface CritiquedLorePlan {

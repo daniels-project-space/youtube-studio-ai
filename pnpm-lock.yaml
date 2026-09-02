@@ -8,9 +8,6 @@ importers:
 
   .:
     dependencies:
-      '@ai-sdk/anthropic':
-        specifier: ^3.0.81
-        version: 3.0.111(zod@3.25.76)
       '@ai-sdk/google':
         specifier: ^3.0.80
         version: 3.0.111(zod@3.25.76)
@@ -143,12 +140,6 @@ packages:
         optional: true
       express:
         optional: true
-
-  '@ai-sdk/anthropic@3.0.111':
-    resolution: {integrity: sha512-atgBW8jZPr/KuaKX5FvDIHuXBI8VCol6kVeoD4P0657+VXR73QsLogXQVN/Zt5FHtq9WzpdIZseCJiXPqkgwwA==}
-    engines: {node: '>=18'}
-    peerDependencies:
-      zod: ^3.25.76 || ^4.1.8
 
   '@ai-sdk/gateway@3.0.177':
     resolution: {integrity: sha512-U579dA3K2UcezpzJHjyw6UhctFtzFRKOSIrAgxr77teluPGP7vj8aLJpZvEEPf+JbUqbvsHRKKYZzip/+NQ89A==}
@@ -5231,12 +5222,6 @@ snapshots:
     optionalDependencies:
       '@grpc/grpc-js': 1.14.4
       express: 5.2.1
-
-  '@ai-sdk/anthropic@3.0.111(zod@3.25.76)':
-    dependencies:
-      '@ai-sdk/provider': 3.0.15
-      '@ai-sdk/provider-utils': 4.0.46(zod@3.25.76)
-      zod: 3.25.76
 
   '@ai-sdk/gateway@3.0.177(zod@3.25.76)':
     dependencies:

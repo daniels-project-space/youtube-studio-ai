@@ -8,12 +8,13 @@ import {
 import { rankFormatCandidates, recommendFormatDeterministically } from "@/engine/creative/selectFormat";
 import type { RankedFormatCandidate } from "@/engine/creative/selectFormat";
 
-function anthropicResponse(verdict: unknown) {
+function openRouterResponse(verdict: unknown) {
   return new Response(
     JSON.stringify({
-      id: "msg-format-advisor-test",
-      content: [{ type: "text", text: JSON.stringify(verdict) }],
-      usage: { input_tokens: 10, output_tokens: 10 },
+      id: "or-format-advisor-test",
+      model: "google/gemini-3.7-flash",
+      choices: [{ message: { content: JSON.stringify(verdict) } }],
+      usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
     }),
     { status: 200, headers: { "content-type": "application/json" } },
   );
@@ -33,12 +34,10 @@ const baseArgs: AdviseFormatSelectionArgs = {
 async function main(): Promise<void> {
   const previousOpenRouterKey = process.env.OPENROUTER_API_KEY;
   const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
-  const previousModel = process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
   const originalFetch = global.fetch;
   try {
-    delete process.env.OPENROUTER_API_KEY;
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    process.env.ANTHROPIC_CREATIVE_PRO_MODEL = "claude-format-advisor-test";
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+    process.env.ANTHROPIC_API_KEY = "retired-direct-key";
 
     // ------------------------------------------------------------------
     // 0. Zero behavior change to the deterministic engine: this module is
@@ -58,9 +57,9 @@ async function main(): Promise<void> {
     global.fetch = (async (_input: unknown, init?: RequestInit) => {
       calls += 1;
       const request = JSON.parse(String(init?.body));
-      assert.equal(request.model, "claude-format-advisor-test");
-      assert.match(request.messages[0].content, /FORMAT_CANDIDATES/);
-      return anthropicResponse({ family: "whiteboard", confidence: 0.82, reasoning: "The concept is a mechanism explainer." });
+      assert.equal(request.model, "google/gemini-3.7-flash");
+      assert.match(request.messages.at(-1).content, /FORMAT_CANDIDATES/);
+      return openRouterResponse({ family: "whiteboard", confidence: 0.82, reasoning: "The concept is a mechanism explainer." });
     }) as typeof fetch;
 
     const applied = await adviseFormatSelection(baseArgs);
@@ -75,7 +74,7 @@ async function main(): Promise<void> {
     // the deterministic top candidate rather than being honored.
     // ------------------------------------------------------------------
     global.fetch = (async () =>
-      anthropicResponse({ family: "cinematic", confidence: 0.95, reasoning: "Hallucinated, out-of-pool pick." })) as typeof fetch;
+      openRouterResponse({ family: "cinematic", confidence: 0.95, reasoning: "Hallucinated, out-of-pool pick." })) as typeof fetch;
     const outOfSet = await adviseFormatSelection(baseArgs);
     assert.equal(outOfSet.advisorApplied, false);
     assert.equal(outOfSet.family, tiedPool[0]!.family);
@@ -86,7 +85,7 @@ async function main(): Promise<void> {
     // valid and in-set.
     // ------------------------------------------------------------------
     global.fetch = (async () =>
-      anthropicResponse({
+      openRouterResponse({
         family: "whiteboard",
         confidence: FORMAT_ADVISOR_MIN_CONFIDENCE - 0.1,
         reasoning: "Not confident enough.",
@@ -100,7 +99,7 @@ async function main(): Promise<void> {
     // 4. A malformed/incomplete provider response falls back rather than
     // guessing.
     // ------------------------------------------------------------------
-    global.fetch = (async () => anthropicResponse({ family: "whiteboard" })) as typeof fetch;
+    global.fetch = (async () => openRouterResponse({ family: "whiteboard" })) as typeof fetch;
     const malformed = await adviseFormatSelection(baseArgs);
     assert.equal(malformed.advisorApplied, false);
     assert.equal(malformed.family, tiedPool[0]!.family);
@@ -123,7 +122,7 @@ async function main(): Promise<void> {
     // 6. Missing provider key must fall back WITHOUT ever calling a
     // provider.
     // ------------------------------------------------------------------
-    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
     let unexpectedCall = false;
     global.fetch = (async () => {
       unexpectedCall = true;
@@ -139,7 +138,7 @@ async function main(): Promise<void> {
     // 7. Fewer than two candidates must fall back WITHOUT calling a
     // provider, even with a valid key configured.
     // ------------------------------------------------------------------
-    process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
     let singleCandidateCall = false;
     global.fetch = (async () => {
       singleCandidateCall = true;
@@ -168,7 +167,7 @@ async function main(): Promise<void> {
     // ------------------------------------------------------------------
     const realRanked = rankFormatCandidates({ concept: "evidence-led archival documentary short" });
     global.fetch = (async () =>
-      anthropicResponse({
+      openRouterResponse({
         family: realRanked[0]!.family,
         confidence: 0.9,
         reasoning: "Matches the strongest deterministic signal.",
@@ -184,8 +183,6 @@ async function main(): Promise<void> {
     else process.env.OPENROUTER_API_KEY = previousOpenRouterKey;
     if (previousAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previousAnthropicKey;
-    if (previousModel === undefined) delete process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
-    else process.env.ANTHROPIC_CREATIVE_PRO_MODEL = previousModel;
   }
 }
 

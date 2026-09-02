@@ -820,7 +820,7 @@ export const topicSelect: Block = {
         generate: async (episodeNumber) => {
           if (!hasAnthropicKey()) {
             throw new Error(
-              "topic_select: serialized_program/v1 requires ANTHROPIC_API_KEY; refusing a generic Part-N fallback",
+              "topic_select: serialized_program/v1 requires OPENROUTER_API_KEY; refusing a generic Part-N fallback",
             );
           }
           const label = serializedEpisodeIdentity.seriesCount
@@ -1038,7 +1038,7 @@ export const topicSelect: Block = {
     // bets. No silent pool fallback: a missing permitted creative provider
     // fails loud (the recovery loop's job).
     if (!hasAnthropicKey()) {
-      throw new Error("topic_select: ANTHROPIC_API_KEY missing — refusing silent pool fallback");
+      throw new Error("topic_select: OPENROUTER_API_KEY missing — refusing silent pool fallback");
     }
     const competitorRows = niche
       ? await c.query(api.competitors.listCompetitors, { ownerId: ctx.ownerId, niche }).catch(() => [])

@@ -874,7 +874,7 @@ export async function synthScript(
   if (!hasAnthropicKey()) {
     // NO silent thin-fallback: a one-sentence "script" used to ship as a full
     // video. A missing script model is a real failure — surface it.
-    throw new Error("scriptGen: ANTHROPIC_API_KEY missing — no permitted creative-text provider is configured");
+    throw new Error("scriptGen: OPENROUTER_API_KEY missing — no permitted creative-text provider is configured");
   }
 
   // THE COLD OPEN COMES FIRST — crafted and judge-gated by hookcraft (lint +

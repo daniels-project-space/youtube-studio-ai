@@ -248,7 +248,7 @@ const FRAMES =
   "(7) direct_verdict — the episode's conclusion stated flat as the title";
 
 export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> {
-  if (!hasAnthropicKey()) throw new Error("metacraft: ANTHROPIC_API_KEY missing — cannot craft real metadata");
+  if (!hasAnthropicKey()) throw new Error("metacraft: OPENROUTER_API_KEY missing — cannot craft real metadata");
   const t0 = Date.now();
   const doctrine = resolveVoiceDoctrine(a.niche);
   const allowHype = doctrine?.voice === "chaos-commentator";

@@ -19,7 +19,7 @@ export function unavailableStoryboardCriticVerdict(
     score: 0,
     pass: false,
     issues: [
-      "Claude storyboard critic unavailable or returned an invalid verdict; paid rendering is blocked.",
+      "Creative-text storyboard critic unavailable or returned an invalid verdict; paid rendering is blocked.",
       ...hardIssues,
     ].slice(0, 8),
   };

@@ -22,7 +22,7 @@
  *      before each panel cuts; a persistent frame + topic header are drawn once;
  *      ffmpeg muxes the narration.
  *
- * Deps: ANTHROPIC_API_KEY or OPENROUTER_API_KEY (storyboard), sealed Novita
+ * Deps: OPENROUTER_API_KEY (storyboard), sealed Novita
  * image-worker admission,
  * FISH_AUDIO_API_KEY (default TTS) or ELEVENLABS_API_KEY (a selected
  * ElevenLabs voice), and python3

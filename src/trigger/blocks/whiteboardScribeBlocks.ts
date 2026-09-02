@@ -384,7 +384,7 @@ export async function planScribeWithCritique(
       const hard = whiteboardStoryboardDefects(plan, wantPanels, targetWords);
       const graded = await gradeStoryboard({ plan, topic: brief.topic, channel });
       if (!graded) {
-        ctx.log(`whiteboard_scribe: Claude storyboard critic unavailable — candidate ${iter} remains blocked before paid rendering`);
+        ctx.log(`whiteboard_scribe: creative-text storyboard critic unavailable — candidate ${iter} remains blocked before paid rendering`);
         return unavailableStoryboardCriticVerdict(hard);
       }
       const issues = [...hard, ...graded.issues].slice(0, 8);

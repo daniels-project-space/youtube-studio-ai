@@ -8,7 +8,7 @@ import {
 import { __setSearchWebImplementationForTests, type WebSearchResult } from "@/lib/webSearch";
 
 const NOW = new Date("2026-08-18T12:00:00.000Z");
-const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
+const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 /**
  * Realistic, classifiable, unambiguous results. Every snippet plainly
@@ -69,7 +69,7 @@ function extractPairs(promptText: string): { claimId: string; sourceId: string }
   return pairs;
 }
 
-function approvingAnthropicResponse(promptText: string): Response {
+function approvingOpenRouterResponse(promptText: string): Response {
   const pairs = extractPairs(promptText);
   const verdict = {
     pass: true,
@@ -84,9 +84,10 @@ function approvingAnthropicResponse(promptText: string): Response {
   };
   return new Response(
     JSON.stringify({
-      id: "msg-case-researcher-test",
-      content: [{ type: "text", text: JSON.stringify(verdict) }],
-      usage: { input_tokens: 10, output_tokens: 10 },
+      id: "or-case-researcher-test",
+      model: "google/gemini-3.7-flash",
+      choices: [{ message: { content: JSON.stringify(verdict) } }],
+      usage: { prompt_tokens: 10, completion_tokens: 10 },
     }),
     { status: 200, headers: { "content-type": "application/json" } },
   );
@@ -95,12 +96,10 @@ function approvingAnthropicResponse(promptText: string): Response {
 async function withStubbedEnv(fn: () => Promise<void>): Promise<void> {
   const savedOpenRouterKey = process.env.OPENROUTER_API_KEY;
   const savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
-  const savedModel = process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
   const originalFetch = global.fetch;
   try {
-    delete process.env.OPENROUTER_API_KEY;
-    process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
-    process.env.ANTHROPIC_CREATIVE_PRO_MODEL = "claude-case-researcher-test";
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+    process.env.ANTHROPIC_API_KEY = "retired-direct-key";
     await fn();
   } finally {
     global.fetch = originalFetch;
@@ -109,25 +108,24 @@ async function withStubbedEnv(fn: () => Promise<void>): Promise<void> {
     else process.env.OPENROUTER_API_KEY = savedOpenRouterKey;
     if (savedAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = savedAnthropicKey;
-    if (savedModel === undefined) delete process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
-    else process.env.ANTHROPIC_CREATIVE_PRO_MODEL = savedModel;
   }
 }
 
 async function testConvergesToValidPacket(): Promise<void> {
   await withStubbedEnv(async () => {
     let searchCalls = 0;
-    let anthropicCalls = 0;
+    let providerCalls = 0;
     __setSearchWebImplementationForTests(async () => {
       searchCalls += 1;
       return GOOD_RESULTS;
     });
     global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url === ANTHROPIC_MESSAGES_URL) {
-        anthropicCalls += 1;
-        const body = JSON.parse(String(init?.body)) as { messages: { content: string }[] };
-        return approvingAnthropicResponse(body.messages[0]!.content);
+      if (url === OPENROUTER_CHAT_URL) {
+        providerCalls += 1;
+        const body = JSON.parse(String(init?.body)) as { model: string; messages: { content: string }[] };
+        assert.equal(body.model, "google/gemini-3.7-flash");
+        return approvingOpenRouterResponse(body.messages.at(-1)!.content);
       }
       throw new Error(`unexpected fetch in test: ${url}`);
     }) as typeof fetch;
@@ -167,7 +165,7 @@ async function testConvergesToValidPacket(): Promise<void> {
     }
 
     assert.ok(searchCalls >= 1);
-    assert.ok(anthropicCalls >= 1);
+    assert.ok(providerCalls >= 1);
   });
   console.log("casefileCaseResearcher: converges to a valid, well-sourced packet on good results — passed");
 }

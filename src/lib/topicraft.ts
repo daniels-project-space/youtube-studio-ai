@@ -25,8 +25,8 @@
  *   gate silently dead (it scored via an Anthropic key with no credits).
  *
  * FULLY STANDALONE — one import surface, like banana/scriptcraft/metacraft:
- * identity in → judged bet portfolio out. Deps: ANTHROPIC_API_KEY only (vault
- * "anthropic"). Outliers ride youtubeData access when present and degrade LOUDLY
+ * identity in → judged bet portfolio out. Deps: OPENROUTER_API_KEY only.
+ * Outliers ride youtubeData access when present and degrade LOUDLY
  * to the Convex bank (loadOutlierBank — the only optional Convex touchpoint,
  * injected as a client, never required by craftTopics itself). The only
  * engine import is pure-data golden.ts doctrine; the title gate reuses the
@@ -362,7 +362,7 @@ async function semanticDedupe(
 /* ------------------------------- engine -------------------------------- */
 
 export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
-  if (!hasAnthropicKey()) throw new Error("topicraft: ANTHROPIC_API_KEY missing — cannot craft real topics without a fallback");
+  if (!hasAnthropicKey()) throw new Error("topicraft: OPENROUTER_API_KEY missing — cannot craft real topics without a fallback");
   const log = a.log ?? (() => {});
   const t0 = Date.now();
   const count = Math.max(1, a.count);

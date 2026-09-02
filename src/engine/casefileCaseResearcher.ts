@@ -577,7 +577,7 @@ async function semanticIssues(
   if (!expected.length) return []; // surfaced separately by the structural check
 
   if (!hasAnthropicKey()) {
-    return ["semantic verification unavailable: no permitted provider is configured (OPENROUTER_API_KEY or ANTHROPIC_API_KEY)"];
+    return ["semantic verification unavailable: OPENROUTER_API_KEY is not configured"];
   }
 
   const sourcesById = new Map(content.casePacket.sourceLedger.map((source) => [source.id, source]));

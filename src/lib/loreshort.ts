@@ -116,7 +116,7 @@ export const LORESHORT_MODULE = {
     // Claude is required for self-planning; ElevenLabs and Replicate are used
     // only by the remaining default implementations. Image generation has no
     // default credential because callers must inject an attested route.
-    secrets: ["ANTHROPIC_API_KEY", "ELEVENLABS_API_KEY (default TTS only)", "REPLICATE_API_TOKEN (default i2v/upscale only)"],
+    secrets: ["OPENROUTER_API_KEY", "ELEVENLABS_API_KEY (default TTS only)", "REPLICATE_API_TOKEN (default i2v/upscale only)"],
     tools: ["ffmpeg", "ffprobe"],
     note: "Render is nginx-INDEPENDENT (all Replicate inputs are base64 data URIs). The DEFAULT publish sink copies to cfg.webDir and returns cfg.host; an injected `publish` dep (the pipeline block) writes to R2 instead and needs no web host at all.",
   },
@@ -418,7 +418,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
   const usesReplicate = !deps.generateClip || cfg.upscale === "realesrgan";
   await bootstrapSecrets(() => {}, {
     required: [
-      ...(approved.receiptSupplied ? [] : ["ANTHROPIC_API_KEY"]),
+      ...(approved.receiptSupplied ? [] : ["OPENROUTER_API_KEY"]),
       ...(deps.synthLine ? [] : ["ELEVENLABS_API_KEY"]),
       ...(usesReplicate ? ["REPLICATE_API_TOKEN"] : []),
     ],

@@ -323,32 +323,33 @@ async function runnerAccountsAndReusesModelResponse(): Promise<void> {
   }
 }
 
-async function runnerReusesClaudeResponseAfterRetry(): Promise<void> {
+async function runnerReusesOpenRouterResponseAfterRetry(): Promise<void> {
   const originalFetch = globalThis.fetch;
   const originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
   const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
-  process.env.ANTHROPIC_API_KEY = "hermetic-anthropic-test-key";
-  delete process.env.OPENROUTER_API_KEY;
+  process.env.ANTHROPIC_API_KEY = "retired-direct-key";
+  process.env.OPENROUTER_API_KEY = "hermetic-openrouter-test-key";
   let fetches = 0;
-  globalThis.fetch = async (input) => {
-    assert.equal(String(input), "https://api.anthropic.com/v1/messages");
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), "https://openrouter.ai/api/v1/chat/completions");
     fetches++;
     return Response.json({
-      id: "claude-retry-response",
-      content: [{ type: "text", text: '{"value":"real"}' }],
-      usage: { input_tokens: 1_000, output_tokens: 200 },
+      id: "openrouter-retry-response",
+      model: JSON.parse(String(init?.body)).model,
+      choices: [{ message: { content: '{"value":"real"}' } }],
+      usage: { prompt_tokens: 1_000, completion_tokens: 200, total_tokens: 1_200 },
     });
   };
 
   _clear();
   let attempts = 0;
   const modelBlock: Block = {
-    id: "claude_model_accounting_test",
+    id: "openrouter_model_accounting_test",
     consumes: [],
     produces: ["x"],
     run: async () => {
       const answer = await claudeJson<{ value: string }>({
-        prompt: "same paid Claude call after retry",
+        prompt: "same paid OpenRouter call after retry",
       });
       attempts++;
       if (attempts === 1) {
@@ -365,7 +366,7 @@ async function runnerReusesClaudeResponseAfterRetry(): Promise<void> {
   try {
     const result = await runPipeline(validatePipeline([{ block: modelBlock.id }]), {
       ownerId: "owner",
-      runId: "run-claude-model-accounting",
+      runId: "run-openrouter-model-accounting",
       channelId: "channel",
       keyPrefix: "test/",
       budgetUsd: 10,
@@ -374,9 +375,9 @@ async function runnerReusesClaudeResponseAfterRetry(): Promise<void> {
     });
     assert.equal(result.ok, true);
     assert.equal(attempts, 2);
-    assert.equal(fetches, 1, "outer retry reuses the first valid paid Claude response");
-    close(result.costTotal, 0.006, "runner preserves exact first-party Claude cost");
-    close(rows.find((row) => row.status === "ok")?.cost ?? -1, 0.006, "persisted Claude stage cost");
+    assert.equal(fetches, 1, "outer retry reuses the first valid paid OpenRouter response");
+    close(result.costTotal, 0.0015, "runner preserves exact OpenRouter Gemini cost");
+    close(rows.find((row) => row.status === "ok")?.cost ?? -1, 0.0015, "persisted OpenRouter stage cost");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
@@ -419,110 +420,56 @@ async function failedSingleFlightIsNeverMemoized(): Promise<void> {
   assert.equal(creates, 2, "a rejected provider attempt is never cached as a successful response");
 }
 
-async function agentPostDispatchFailureNeverFallsBack(): Promise<void> {
+async function agentJsonUsesPinnedOpenRouterOnly(): Promise<void> {
   const originalFetch = globalThis.fetch;
   const originalAnthropicKey = process.env.ANTHROPIC_API_KEY;
   const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
-  const originalMastraProducerModel = process.env.MASTRA_PRODUCER_MODEL;
-  const originalLangfusePublicKey = process.env.LANGFUSE_PUBLIC_KEY;
-  const originalLangfuseSecretKey = process.env.LANGFUSE_SECRET_KEY;
-  const originalLangfuseBaseUrl = process.env.LANGFUSE_BASE_URL;
-  const originalConsoleWarn = console.warn;
-  const originalConsoleError = console.error;
   let fetches = 0;
   try {
-    // Import after pinning the role model so this hermetic Mastra-boundary
-    // exercise never needs a real provider credential or reaches the network.
-    process.env.ANTHROPIC_API_KEY = "hermetic-agent-schema-test-key";
-    process.env.MASTRA_PRODUCER_MODEL = "anthropic/claude-sonnet-4-5-20250929";
-    delete process.env.OPENROUTER_API_KEY;
-    delete process.env.LANGFUSE_PUBLIC_KEY;
-    delete process.env.LANGFUSE_SECRET_KEY;
-    delete process.env.LANGFUSE_BASE_URL;
-    console.warn = () => undefined;
-    console.error = () => undefined;
-    globalThis.fetch = async () => {
+    process.env.ANTHROPIC_API_KEY = "retired-direct-key";
+    process.env.OPENROUTER_API_KEY = "hermetic-openrouter-key";
+    globalThis.fetch = async (input, init) => {
+      assert.equal(String(input), "https://openrouter.ai/api/v1/chat/completions");
+      const payload = JSON.parse(String(init?.body));
+      assert.equal(payload.model, "google/gemini-3.7-flash");
       fetches++;
-      // Mastra rejects this deliberately minimal non-stream response after
-      // dispatch. It might already represent paid model work, so agentJson
-      // must surface its typed terminal outcome instead of issuing a second
-      // REST request for the same prompt.
       return Response.json({
-        id: "agent-schema-test",
-        content: [{ type: "text", text: '{"answer":42}' }],
-        usage: { input_tokens: 1, output_tokens: 1 },
+        id: "agent-router-test",
+        model: payload.model,
+        choices: [{ message: { content: '{"answer":42}' } }],
+        usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 },
       });
     };
 
-    const {
-      agentJson,
-      MastraGenerationOutcomeUnknownError,
-      parseMastraStructuredObject,
-    } = await import("@/agents/mastra");
+    const { agentJson, MastraGenerationOutcomeUnknownError, parseMastraStructuredObject } =
+      await import("@/agents/mastra");
     assert.throws(
       () => parseMastraStructuredObject({
         role: "producer",
         schema: z.object({ answer: z.number() }),
         response: {},
       }),
-      (error: unknown) => {
-        assert.ok(error instanceof MastraGenerationOutcomeUnknownError);
-        assert.equal(error.code, "mastra_generation_outcome_unknown");
-        assert.equal(error.retryable, false);
-        return true;
-      },
-      "a completed response without structured output is terminal before any REST fallback",
+      (error: unknown) => error instanceof MastraGenerationOutcomeUnknownError,
+      "a malformed native result remains terminal if a future adapter is added",
     );
     const scope = createModelUsageScope();
-    await scope.run(async () => {
-      await assert.rejects(
-        agentJson({
-          role: "producer",
-          prompt: "same prompt, intentionally different contracts",
-          schema: z.object({ answer: z.number() }),
-          log: () => undefined,
-        }),
-        (error: unknown) => {
-          assert.ok(error instanceof MastraGenerationOutcomeUnknownError);
-          assert.equal(error.code, "mastra_generation_outcome_unknown");
-          assert.equal(error.retryable, false);
-          return true;
-        },
-      );
-      await assert.rejects(
-        agentJson({
-          role: "producer",
-          prompt: "same prompt, intentionally different contracts",
-          schema: z.object({ label: z.string() }),
-          log: () => undefined,
-        }),
-        (error: unknown) => error instanceof MastraGenerationOutcomeUnknownError,
-      );
-    });
-
-    // Each distinct contract made exactly one Mastra request. Neither post-
-    // dispatch failure entered the REST fallback, so there is no duplicate
-    // provider spend.
-    assert.equal(fetches, 2, "post-dispatch Mastra failures make zero REST fallback calls");
+    const output = await scope.run(() => agentJson({
+      role: "producer",
+      prompt: "OpenRouter is the only creative-text route",
+      schema: z.object({ answer: z.number() }),
+      log: () => undefined,
+    }));
+    assert.deepEqual(output, { answer: 42 });
+    assert.equal(fetches, 1, "agent JSON uses exactly one OpenRouter request");
     const usage = scope.snapshot();
-    assert.equal(usage.calls, 0, "a rejected Mastra response is not misreported as a second REST success");
-    assert.equal(usage.cacheHits, 0, "distinct failed structured-output contracts never share a response");
+    assert.equal(usage.calls, 1);
+    assert.equal(usage.cacheHits, 0);
   } finally {
     globalThis.fetch = originalFetch;
-    console.warn = originalConsoleWarn;
-    console.error = originalConsoleError;
     if (originalAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = originalAnthropicKey;
     if (originalOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = originalOpenRouterKey;
-    if (originalMastraProducerModel === undefined) delete process.env.MASTRA_PRODUCER_MODEL;
-    else process.env.MASTRA_PRODUCER_MODEL = originalMastraProducerModel;
-    if (originalLangfusePublicKey === undefined) delete process.env.LANGFUSE_PUBLIC_KEY;
-    else process.env.LANGFUSE_PUBLIC_KEY = originalLangfusePublicKey;
-    if (originalLangfuseSecretKey === undefined) delete process.env.LANGFUSE_SECRET_KEY;
-    else process.env.LANGFUSE_SECRET_KEY = originalLangfuseSecretKey;
-    if (originalLangfuseBaseUrl === undefined) delete process.env.LANGFUSE_BASE_URL;
-    else process.env.LANGFUSE_BASE_URL = originalLangfuseBaseUrl;
   }
 }
 
@@ -722,9 +669,9 @@ async function main(): Promise<void> {
     // The old runner-retry fixture intentionally exercised generic Gemini.
     // It is now unavailable by policy; equivalent live accounting coverage
     // above uses OpenRouter, while historical Gemini receipts retain exact pricing.
-    await runnerReusesClaudeResponseAfterRetry();
+    await runnerReusesOpenRouterResponseAfterRetry();
     await failedSingleFlightIsNeverMemoized();
-    await agentPostDispatchFailureNeverFallsBack();
+    await agentJsonUsesPinnedOpenRouterOnly();
     await explicitAndFailedCostsAreAuthoritative();
     await failedTrackedUsageIsNotLost();
     console.log("MODEL USAGE ACCOUNTING TESTS PASSED");

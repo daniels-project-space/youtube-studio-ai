@@ -379,12 +379,13 @@ function approvingFindings(content: { beats: CinematicCaseSequenceInput["beats"]
   }));
 }
 
-function anthropicResponse(verdict: unknown) {
+function openRouterResponse(verdict: unknown) {
   return new Response(
     JSON.stringify({
-      id: "msg-cinematic-sequence-auto-reviewer-test",
-      content: [{ type: "text", text: JSON.stringify(verdict) }],
-      usage: { input_tokens: 10, output_tokens: 10 },
+      id: "or-cinematic-sequence-auto-reviewer-test",
+      model: "google/gemini-3.7-flash",
+      choices: [{ message: { content: JSON.stringify(verdict) } }],
+      usage: { prompt_tokens: 10, completion_tokens: 10 },
     }),
     { status: 200, headers: { "content-type": "application/json" } },
   );
@@ -393,14 +394,11 @@ function anthropicResponse(verdict: unknown) {
 async function main(): Promise<void> {
   const previousOpenRouterKey = process.env.OPENROUTER_API_KEY;
   const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
-  const previousModel = process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
   const originalFetch = global.fetch;
   try {
-    // Force the plain Anthropic-messages code path (not OpenRouter) so the
-    // mocked fetch below has a single, predictable request shape to assert on.
-    delete process.env.OPENROUTER_API_KEY;
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    process.env.ANTHROPIC_CREATIVE_PRO_MODEL = "claude-cinematic-sequence-auto-reviewer-test";
+    // A retired direct credential must never bypass the pinned OpenRouter route.
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+    process.env.ANTHROPIC_API_KEY = "retired-direct-key";
 
     const map = admittedMap();
     const fullInput = approvedSequence(map);
@@ -421,7 +419,7 @@ async function main(): Promise<void> {
     // fingerprint-bound editorial review. This is the real integration proof:
     // feed it back through cinematicCaseSequence.ts's UNMODIFIED
     // assertCinematicCaseSequence and confirm it independently re-admits.
-    global.fetch = (async () => anthropicResponse({
+    global.fetch = (async () => openRouterResponse({
       pass: true,
       confidence: 0.92,
       issues: [],
@@ -473,11 +471,11 @@ async function main(): Promise<void> {
       () => autoReviewCinematicCaseSequence(baseArgs(content)),
       /no permitted provider is configured/,
     );
-    process.env.ANTHROPIC_API_KEY = "test-key";
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
 
     // --- 4) A malformed/incomplete verdict (missing a finding) is not an
     // implicit pass on the missing shot.
-    global.fetch = (async () => anthropicResponse({
+    global.fetch = (async () => openRouterResponse({
       pass: true,
       confidence: 0.95,
       issues: [],
@@ -490,7 +488,7 @@ async function main(): Promise<void> {
 
     // --- 5) A verdict claiming pass:true below the confidence floor must
     // still fail closed — pass alone is never sufficient.
-    global.fetch = (async () => anthropicResponse({
+    global.fetch = (async () => openRouterResponse({
       pass: true,
       confidence: CINEMATIC_SEQUENCE_AUTO_REVIEWER_MIN_CONFIDENCE - 0.1,
       issues: [],
@@ -507,7 +505,7 @@ async function main(): Promise<void> {
       const findings = approvingFindings(content);
       findings[0]!.compliant = false;
       findings[0]!.reason = "Motion prompt requests a visible identifiable face.";
-      return anthropicResponse({ pass: true, confidence: 0.95, issues: [], findings });
+      return openRouterResponse({ pass: true, confidence: 0.95, issues: [], findings });
     }) as typeof fetch;
     await assert.rejects(
       () => autoReviewCinematicCaseSequence(baseArgs(content)),
@@ -573,8 +571,6 @@ async function main(): Promise<void> {
     else process.env.OPENROUTER_API_KEY = previousOpenRouterKey;
     if (previousAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previousAnthropicKey;
-    if (previousModel === undefined) delete process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
-    else process.env.ANTHROPIC_CREATIVE_PRO_MODEL = previousModel;
   }
 }
 

@@ -427,7 +427,7 @@ export async function planComicWithCritique(
       const hard = motionComicStoryboardDefects(plan, wantPanels, targetSeconds);
       const graded = await gradeStoryboard({ plan, topic: brief.topic, channel });
       if (!graded) {
-        ctx.log(`motion_comic: Claude storyboard critic unavailable — candidate ${iter} remains blocked before paid rendering`);
+        ctx.log(`motion_comic: creative-text storyboard critic unavailable — candidate ${iter} remains blocked before paid rendering`);
         return unavailableStoryboardCriticVerdict(hard);
       }
       const issues = [...hard, ...graded.issues].slice(0, 8);

@@ -244,7 +244,7 @@ export async function autoReviewCinematicCaseSequence(
   if (!hasAnthropicKey()) {
     throw new Error(
       "cinematic sequence auto-reviewer: no permitted provider is configured " +
-        "(OPENROUTER_API_KEY or ANTHROPIC_API_KEY); refusing to admit without review.",
+        "(OPENROUTER_API_KEY); refusing to admit without review.",
     );
   }
 

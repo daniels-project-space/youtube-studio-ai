@@ -10,12 +10,13 @@ import {
   creativeCapabilitySelection,
 } from "@/engine/creative/creativeCapabilityCatalog";
 
-function anthropicResponse(verdict: unknown) {
+function openRouterResponse(verdict: unknown) {
   return new Response(
     JSON.stringify({
-      id: "msg-capability-advisor-test",
-      content: [{ type: "text", text: JSON.stringify(verdict) }],
-      usage: { input_tokens: 10, output_tokens: 10 },
+      id: "or-capability-advisor-test",
+      model: "google/gemini-3.7-flash",
+      choices: [{ message: { content: JSON.stringify(verdict) } }],
+      usage: { prompt_tokens: 10, completion_tokens: 10, total_tokens: 20 },
     }),
     { status: 200, headers: { "content-type": "application/json" } },
   );
@@ -38,12 +39,10 @@ const childrenIntent = {
 async function main(): Promise<void> {
   const previousOpenRouterKey = process.env.OPENROUTER_API_KEY;
   const previousAnthropicKey = process.env.ANTHROPIC_API_KEY;
-  const previousModel = process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
   const originalFetch = global.fetch;
   try {
-    delete process.env.OPENROUTER_API_KEY;
-    process.env.ANTHROPIC_API_KEY = "test-key";
-    process.env.ANTHROPIC_CREATIVE_PRO_MODEL = "claude-capability-advisor-test";
+    process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+    process.env.ANTHROPIC_API_KEY = "retired-direct-key";
 
     // ------------------------------------------------------------------
     // 0. Zero behavior change to the unmodified catalog: resolveCreativeCapabilities()
@@ -91,11 +90,11 @@ async function main(): Promise<void> {
     global.fetch = (async (_input: unknown, init?: RequestInit) => {
       calls += 1;
       const request = JSON.parse(String(init?.body));
-      assert.equal(request.model, "claude-capability-advisor-test");
+      assert.equal(request.model, "google/gemini-3.7-flash");
       assert.match(request.messages[0].content, /ELIGIBLE_CAPABILITIES/);
       // Only the explicit_opt_in offer must ever be described to the model.
       assert.doesNotMatch(request.messages[0].content, /casefile_cinematic/);
-      return anthropicResponse({
+      return openRouterResponse({
         capability: "source_attributed_data_story",
         worthSuggesting: true,
         confidence: 0.8,
@@ -124,7 +123,7 @@ async function main(): Promise<void> {
     // never substituted in as a "helpful" suggestion.
     // ------------------------------------------------------------------
     global.fetch = (async () =>
-      anthropicResponse({
+      openRouterResponse({
         capability: "casefile_cinematic",
         worthSuggesting: true,
         confidence: 0.99,
@@ -138,7 +137,7 @@ async function main(): Promise<void> {
     // 5. worthSuggesting:false must yield no suggestion.
     // ------------------------------------------------------------------
     global.fetch = (async () =>
-      anthropicResponse({
+      openRouterResponse({
         capability: "source_attributed_data_story",
         worthSuggesting: false,
         confidence: 0.9,
@@ -152,7 +151,7 @@ async function main(): Promise<void> {
     // 6. Below-confidence-floor must yield no suggestion.
     // ------------------------------------------------------------------
     global.fetch = (async () =>
-      anthropicResponse({
+      openRouterResponse({
         capability: "source_attributed_data_story",
         worthSuggesting: true,
         confidence: CAPABILITY_ADVISOR_MIN_CONFIDENCE - 0.1,
@@ -165,7 +164,7 @@ async function main(): Promise<void> {
     // ------------------------------------------------------------------
     // 7. Malformed response yields no suggestion.
     // ------------------------------------------------------------------
-    global.fetch = (async () => anthropicResponse({ capability: "source_attributed_data_story" })) as typeof fetch;
+    global.fetch = (async () => openRouterResponse({ capability: "source_attributed_data_story" })) as typeof fetch;
     const malformed = await adviseCreativeCapabilitySelection(dataOffers, { intent: dataStoryIntent });
     assert.equal(malformed.suggestion, undefined);
     assert.match(malformed.fallbackReason ?? "", /malformed or incomplete/);
@@ -186,7 +185,7 @@ async function main(): Promise<void> {
     // 9. Missing provider key yields no suggestion WITHOUT calling a
     // provider.
     // ------------------------------------------------------------------
-    delete process.env.ANTHROPIC_API_KEY;
+    delete process.env.OPENROUTER_API_KEY;
     let unexpectedCall = false;
     global.fetch = (async () => {
       unexpectedCall = true;
@@ -204,8 +203,6 @@ async function main(): Promise<void> {
     else process.env.OPENROUTER_API_KEY = previousOpenRouterKey;
     if (previousAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
     else process.env.ANTHROPIC_API_KEY = previousAnthropicKey;
-    if (previousModel === undefined) delete process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
-    else process.env.ANTHROPIC_CREATIVE_PRO_MODEL = previousModel;
   }
 }
 

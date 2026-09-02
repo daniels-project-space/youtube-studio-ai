@@ -366,7 +366,7 @@ function registerClause(a: HookCraftArgs): string {
  * could-open-any-video hook).
  */
 export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
-  if (!hasAnthropicKey()) throw new Error("hookcraft: ANTHROPIC_API_KEY missing — no permitted creative-text provider is configured");
+  if (!hasAnthropicKey()) throw new Error("hookcraft: OPENROUTER_API_KEY missing — no permitted creative-text provider is configured");
   const skipConcreteness = a.style === "meditation";
   const deviceList = Object.entries(HOOK_DEVICES)
     .filter(([k]) => (a.style === "meditation" ? k === "you_stakes" || k === "cold_open_scene" || k === "myth_snap" : true))

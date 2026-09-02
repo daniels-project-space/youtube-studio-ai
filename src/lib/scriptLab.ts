@@ -76,7 +76,7 @@ export async function distillScriptPlaybook(args: {
 }): Promise<ScriptPlaybook> {
   const log = args.log ?? (() => {});
   if (!hasGeminiKey() || !hasAnthropicKey()) {
-    throw new Error("scriptLab: GEMINI_API_KEY + ANTHROPIC_API_KEY required");
+    throw new Error("scriptLab: GEMINI_API_KEY + OPENROUTER_API_KEY required");
   }
   const targets = args.refs.slice(0, 3);
   if (targets.length === 0) throw new Error("scriptLab: no reference videos to study");

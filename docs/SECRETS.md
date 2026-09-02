@@ -27,15 +27,14 @@ credentials in GitHub Actions or Vercel merely to deploy code.
 
 | key | tier | unlocks | obtain |
 |---|---|---|---|
-| `GEMINI_API_KEY` | core | Gemini LLM + Banana image gen | aistudio.google.com |
+| `OPENROUTER_API_KEY` | core | Pinned Gemini 3.7 Flash creative text and non-Google vision review through OpenRouter | OpenRouter dashboard; centralized `openrouter` vault service |
+| `GEMINI_API_KEY` | core | Sealed Nano Banana image capability only; never a general text-provider credential | aistudio.google.com |
 | `CONVEX_DEPLOY_KEY` | infra | GitHub-only deploy key scoped to `astute-camel-689` | Convex dashboard |
 | `TRIGGER_ACCESS_TOKEN` | infra | GitHub-only CI token for Trigger task deploys | Trigger.dev dashboard |
 | `FAL_KEY` | core | fal.ai cutouts / depth / image-to-video | fal.ai/dashboard/keys |
 | `TRIGGER_SECRET_KEY` | infra | Trigger.dev task invocation/runtime (not the CI deploy token) | Trigger dashboard |
 | `ELEVENLABS_API_KEY` | feature | ElevenLabs v3 narration (preferred) | elevenlabs.io |
 | `FISH_AUDIO_API_KEY` | feature | Fish Audio narration (fallback) | fish.audio |
-| `QWEN3_TTS_WORKER_URL` / `QWEN3_TTS_WORKER_TOKEN` | feature | Attested open Qwen3-TTS CustomVoice worker; Trigger runtime only (no generic vault fallback) | protected Novita worker deployment |
-| `QWEN3_TTS_QUALITY_QUALIFIED` / `QWEN3_TTS_QUALITY_RECEIPT_SHA256` | safety | Admits Qwen3 production narration only after a reviewed audio benchmark | generated qualification receipt |
 | `SUNO_API_KEY` | feature | Suno music beds | sunoapi.org (credits: `GET /api/v1/generate/credit`) |
 | `MUREKA_API_KEY` | feature | Mureka music beds (paired fallback) | mureka.ai |
 | `MINIMAX_MUSIC3_WORKER_URL` / `MINIMAX_MUSIC3_WORKER_TOKEN` | feature | Pinned MiniMax-Music3 two-GPU Novita worker; explicit provider only | protected Novita worker deployment |
@@ -57,5 +56,5 @@ credentials in GitHub Actions or Vercel merely to deploy code.
 Run-time presence check: `keyStatus()` / `secretsManifest()` in `keyRegistry.ts`.
 
 ## Provider fallbacks (so one missing/limited key doesn't break a run)
-- **Narration:** provider choice is explicit. ElevenLabs and Fish remain the managed paths; Qwen3-TTS is an open, pinned worker path and never becomes an automatic fallback. It stays production-closed until its exact worker and quality receipt are configured.
+- **Narration:** provider choice is explicit. ElevenLabs and Fish remain the managed paths; no unqualified worker route is an automatic fallback.
 - **Music:** Mureka ↔ Suno automatic fallback (`generateMusic`); either key enables managed music. MiniMax-Music3 is an explicit channel-program path and never joins automatic fallback. It remains closed until every worker, quality, license, attribution, disclosure, and safeguards gate passes.

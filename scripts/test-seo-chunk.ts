@@ -4,7 +4,7 @@ import type { StageContext } from "@/engine/types";
 
 async function main() {
   if (!process.env.GEMINI_API_KEY) await hydrateEnv("gemini");
-  if (!process.env.ANTHROPIC_API_KEY) await hydrateEnv("anthropic");
+  if (!process.env.OPENROUTER_API_KEY) await hydrateEnv("openrouter");
   process.env.NEXT_PUBLIC_CONVEX_URL = "https://astute-camel-689.convex.cloud";
 
   const ctx: StageContext = {

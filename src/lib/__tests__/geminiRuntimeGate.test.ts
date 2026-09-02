@@ -31,6 +31,7 @@ const GATE_ENV = [
   "BROWSERBASE_STAGEHAND_MODEL",
   "BROWSERBASE_STAGEHAND_MODEL_API_KEY",
   "MASTRA_PRODUCER_MODEL",
+  "OPENROUTER_API_KEY",
   "FAL_KEY",
 ] as const;
 
@@ -60,6 +61,7 @@ async function defaultDenyStopsEveryGeminiBoundaryBeforeNetwork(): Promise<void>
     process.env.BROWSERBASE_STAGEHAND_MODEL = "google/gemini-2.5-flash";
     process.env.BROWSERBASE_STAGEHAND_MODEL_API_KEY = "fixture-stagehand-model-key";
     process.env.MASTRA_PRODUCER_MODEL = "google/gemini-2.5-flash";
+    delete process.env.OPENROUTER_API_KEY;
     delete process.env[GEMINI_RUNTIME_OPT_IN_ENV];
     globalThis.fetch = (async () => {
       networkCalls += 1;
@@ -87,8 +89,9 @@ async function defaultDenyStopsEveryGeminiBoundaryBeforeNetwork(): Promise<void>
       return "unreachable";
     }), isDisabled);
 
-    // Import after pinning the model env so this proves creative agents do not
-    // inherit the thumbnail opt-in and cannot construct a Google route.
+    // Creative text is now OpenRouter-only. It must ignore a legacy Google
+    // model override rather than treating the sealed thumbnail capability as
+    // authority for a direct text request.
     const { agentJson } = await import("@/agents/mastra");
     await assert.rejects(
       agentJson({
@@ -96,7 +99,7 @@ async function defaultDenyStopsEveryGeminiBoundaryBeforeNetwork(): Promise<void>
         prompt: "blocked Mastra Gemini request",
         schema: z.object({ answer: z.string() }),
       }),
-      /Gemini models are sealed-image-only/,
+      /OPENROUTER_API_KEY is required/,
     );
     assert.equal(stagehandCallbackCalls, 0, "Stagehand callback must not run after the provider refusal");
     assert.equal(networkCalls, 0, "every Gemini boundary must stop before fetch");

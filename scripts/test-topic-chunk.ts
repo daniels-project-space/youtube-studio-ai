@@ -21,7 +21,7 @@ function normalize(s: string): string {
 
 async function main() {
   if (!process.env.GEMINI_API_KEY) await hydrateEnv("gemini");
-  if (!process.env.ANTHROPIC_API_KEY) await hydrateEnv("anthropic");
+  if (!process.env.OPENROUTER_API_KEY) await hydrateEnv("openrouter");
   process.env.NEXT_PUBLIC_CONVEX_URL = URL;
   const c = new ConvexHttpClient(URL);
 

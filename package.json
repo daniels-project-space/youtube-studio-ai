@@ -33,7 +33,6 @@
     "trigger:deploy": "npx --yes trigger.dev@4.5.9 deploy --native-build-server"
   },
   "dependencies": {
-    "@ai-sdk/anthropic": "^3.0.81",
     "@ai-sdk/google": "^3.0.80",
     "@aws-sdk/client-s3": "^3.1057.0",
     "@aws-sdk/s3-request-presigner": "^3.1057.0",

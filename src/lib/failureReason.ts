@@ -18,7 +18,7 @@ const RULES: { test: RegExp; reason: string; hint?: string }[] = [
   { test: /mureka|MUREKA_API_KEY/i, reason: "Mureka music key / credits missing", hint: "Check mureka credits in the vault." },
   { test: /FAL_KEY|fal[ .-]?flux|fal\.ai/i, reason: "Flux (fal.ai) key / credits missing", hint: "Check fal/FAL_KEY + balance." },
   { test: /GEMINI_API_KEY|GOOGLE_API_KEY|\bgemini\b/i, reason: "Gemini API key missing/invalid", hint: "Check gemini key in the vault." },
-  { test: /ANTHROPIC_API_KEY|anthropic|claude/i, reason: "Anthropic (Claude) key missing/invalid" },
+  { test: /OPENROUTER_API_KEY|openrouter/i, reason: "OpenRouter creative-text key missing/invalid" },
   { test: /R2_|cloudflare|S3|bucket/i, reason: "Storage (R2) credentials issue" },
   { test: /YOUTUBE|invalidTags|youtube\.upload|refresh token/i, reason: "YouTube upload rejected", hint: "Re-check tags or the YouTube OAuth token." },
   { test: /OOM|KILLED|out of memory|TASK_PROCESS_OOM/i, reason: "Render ran out of memory", hint: "Heavy encode — shorten the video or bump the machine." },

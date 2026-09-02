@@ -201,7 +201,7 @@ export async function autoVerifyCasefileSourcePacket(
   if (!hasAnthropicKey()) {
     throw new Error(
       "casefile source auto-verifier: no permitted provider is configured " +
-        "(OPENROUTER_API_KEY or ANTHROPIC_API_KEY); refusing to admit without review.",
+        "(OPENROUTER_API_KEY); refusing to admit without review.",
     );
   }
 
