@@ -80,6 +80,69 @@ if (ready.status === "ready_for_thumbnail_only") {
   assert.equal(ready.material.replayFingerprint.length, 64);
 }
 
+const lofiContentLane = { key: "lofi_music_loop", primaryRenderer: "assemble" };
+const lofiRoute = { id: "music-loop/foundation/v1", fingerprint: "lofi-route-fingerprint" };
+const lofiPackage = createPackageToOpeningPlan({
+  title,
+  thumbnailDescription,
+  topic,
+  route: lofiRoute,
+  script,
+  family: "music_loop",
+  contentLane: lofiContentLane,
+});
+const replayBaseline = input().pipelineInvocationSnapshot as PipelineInvocationSnapshot;
+const lofiSnapshot: PipelineInvocationSnapshot = {
+  ...replayBaseline,
+  entries: [
+    { block: "topic_select" },
+    { block: "script_gen" },
+    { block: "metadata" },
+    { block: "package_to_opening_plan" },
+    { block: "assemble" },
+    { block: "thumbnail_gen" },
+  ],
+  seedStore: {
+    family: "music_loop",
+    contentLane: lofiContentLane,
+    channelProgramRoute: lofiRoute,
+    styleDNA: { thumbnail: { composition: "single rendered Lo-Fi scene" } },
+  },
+};
+const lofiWithoutSource = assessThumbnailRefreshReplay({
+  ...input(),
+  pipelineInvocationSnapshot: lofiSnapshot,
+  pipelineInvocationSha256: pipelineInvocationSha256(lofiSnapshot),
+  stages: [
+    { block: "topic_select", outputs: { topic } },
+    { block: "script_gen", outputs: { script } },
+    { block: "metadata", outputs: { title, thumbnailDescription } },
+    { block: "package_to_opening_plan", outputs: { packageToOpeningPlan: lofiPackage } },
+    { block: "assemble", outputs: {} },
+  ],
+});
+assert.equal(lofiWithoutSource.status, "requires_private_successor");
+if (lofiWithoutSource.status === "requires_private_successor") {
+  assert.ok(lofiWithoutSource.missing.includes("retained rendered Lo-Fi source frame"));
+}
+
+const lofiWithSource = assessThumbnailRefreshReplay({
+  ...input(),
+  pipelineInvocationSnapshot: lofiSnapshot,
+  pipelineInvocationSha256: pipelineInvocationSha256(lofiSnapshot),
+  stages: [
+    { block: "topic_select", outputs: { topic } },
+    { block: "script_gen", outputs: { script } },
+    { block: "metadata", outputs: { title, thumbnailDescription } },
+    { block: "package_to_opening_plan", outputs: { packageToOpeningPlan: lofiPackage } },
+    { block: "assemble", outputs: { videoKey: "owner/lofi/runs/source/final.mp4" } },
+  ],
+});
+assert.equal(lofiWithSource.status, "ready_for_thumbnail_only");
+if (lofiWithSource.status === "ready_for_thumbnail_only") {
+  assert.equal(lofiWithSource.material.store.videoKey, "owner/lofi/runs/source/final.mp4");
+}
+
 const styleDriftSnapshot: PipelineInvocationSnapshot = {
     version: 1,
     ownerId,

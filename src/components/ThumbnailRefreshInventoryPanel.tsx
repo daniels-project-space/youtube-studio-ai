@@ -104,6 +104,10 @@ function youtubeThumbnailUrl(videoId: string): string {
   return `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`;
 }
 
+function isLofiChannel(row: Pick<ThumbnailInventoryRow, "channelName" | "channelSlug">): boolean {
+  return /lo[\s-]?fi/i.test(`${row.channelName} ${row.channelSlug}`);
+}
+
 function ThumbnailRefreshPreview({
   row,
   candidate = false,
@@ -191,6 +195,7 @@ export function ThumbnailRefreshInventoryPanel({
   const [replacementRunId, setReplacementRunId] = useState<string | null>(null);
   const [replacementConfirmation, setReplacementConfirmation] = useState("");
   const [ernieBatchBusy, setErnieBatchBusy] = useState(false);
+  const [lofiFrameBatchBusy, setLofiFrameBatchBusy] = useState(false);
 
   const loadInventory = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch("/api/thumbnail-refresh?ernieBatch=reviewed", { cache: "no-store", signal });
@@ -394,6 +399,58 @@ export function ThumbnailRefreshInventoryPanel({
   const reviewCount = counts.legacy_unverified + counts.evidence_invalid + counts.missing_thumbnail;
   const retirementCount = rows.filter((row) => row.legacyCleanupAction === "retire" && row.retirement?.status !== "deleted").length;
   const visible = showAll ? rows : rows.slice(0, 6);
+  const lofiFrameCandidates = rows.filter((row) =>
+    isLofiChannel(row) &&
+    row.legacyCleanupAction !== "retire" &&
+    row.refreshAction === "owner_review_required" &&
+    row.thumbnailReplayStatus !== "private_successor_unavailable" &&
+    !row.candidate,
+  );
+
+  const queueLofiFrameCandidates = async () => {
+    if (lofiFrameBatchBusy || !lofiFrameCandidates.length) return;
+    const candidateIds = new Set(lofiFrameCandidates.map((row) => row.runId));
+    setLofiFrameBatchBusy(true);
+    setBusyRunIds((current) => new Set([...current, ...candidateIds]));
+    setActionMessage(null);
+    const queued: string[] = [];
+    const failed: string[] = [];
+    try {
+      // Deliberately submit one owner-bound candidate per retained run. Each
+      // server request revalidates the exact finished video and therefore
+      // cannot convert this convenience action into a generic artwork batch.
+      for (const row of lofiFrameCandidates) {
+        try {
+          const response = await fetch("/api/thumbnail-refresh", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ sourceRunId: row.runId, confirmCandidateSpend: true }),
+          });
+          const payload = await response.json() as { ok?: boolean; error?: string };
+          if (!response.ok || !payload.ok) {
+            throw new Error(payload.error || "Could not queue the Lo-Fi frame candidate");
+          }
+          queued.push(row.title);
+        } catch (error) {
+          failed.push(`${row.title}: ${error instanceof Error ? error.message : "candidate was not queued"}`);
+        }
+      }
+      const summary = queued.length
+        ? `${queued.length} Lo-Fi render-frame ${queued.length === 1 ? "candidate" : "candidates"} queued from the retained finished videos.`
+        : "No Lo-Fi render-frame candidates were queued.";
+      setActionMessage(failed.length ? `${summary} ${failed[0]}` : summary);
+      await loadInventory();
+    } catch (error) {
+      setActionMessage(error instanceof Error ? error.message : "Could not refresh the Lo-Fi frame candidates");
+    } finally {
+      setLofiFrameBatchBusy(false);
+      setBusyRunIds((current) => {
+        const next = new Set(current);
+        for (const runId of candidateIds) next.delete(runId);
+        return next;
+      });
+    }
+  };
 
   return (
     <section className={`${styles.section} glass`} aria-labelledby="thumbnail-review-title">
@@ -423,6 +480,24 @@ export function ThumbnailRefreshInventoryPanel({
           onClick={() => void queueReviewedErnieBatch()}
         >{ernieBatchBusy ? "Queueing…" : "Replace all 30 now"}</button>
       </div>
+
+      {lofiFrameCandidates.length ? (
+        <div className={styles.lofiFrameBatch}>
+          <div>
+            <span className={styles.lofiFrameMark} aria-hidden="true">4K</span>
+            <strong>Lo-Fi source-frame refresh</strong>
+            <small>{lofiFrameCandidates.length} retained render{lofiFrameCandidates.length === 1 ? "" : "s"} · no generated scene</small>
+          </div>
+          <button
+            type="button"
+            className={styles.lofiFrameAction}
+            disabled={lofiFrameBatchBusy}
+            onClick={() => void queueLofiFrameCandidates()}
+          >{lofiFrameBatchBusy
+            ? "Queueing frames…"
+            : `Render ${lofiFrameCandidates.length} exact frame${lofiFrameCandidates.length === 1 ? "" : "s"} · ≤$${(lofiFrameCandidates.length * THUMBNAIL_REFRESH_MAXIMUM_COST_USD).toFixed(2)}`}</button>
+        </div>
+      ) : null}
 
       {reviewedErniePreviews.length ? (
         <section className={styles.ernieGallery} aria-label="Reviewed native ERNIE thumbnails">
@@ -469,9 +544,10 @@ export function ThumbnailRefreshInventoryPanel({
               ? "Generating + quality checking"
               : row.candidate?.dispatchState === "awaiting_approval"
                 ? "Candidate authorization interrupted"
-                : row.candidate?.dispatchState === "pending"
+              : row.candidate?.dispatchState === "pending"
                   ? "Delivery recovery pending"
                   : "Worker queued";
+            const lofiSourceFrame = isLofiChannel(row);
             return (
               <article className={styles.row} key={row.runId}>
                 <div className={styles.previewStack} data-has-candidate={row.candidate ? "true" : undefined}>
@@ -521,7 +597,11 @@ export function ThumbnailRefreshInventoryPanel({
                     >
                       {busyRunIds.has(row.runId)
                         ? "Reserving candidate…"
-                        : `${row.thumbnailReplayStatus === "ready_for_private_successor" ? "Render private successor" : "Render new candidate"} · ≤$${THUMBNAIL_REFRESH_MAXIMUM_COST_USD.toFixed(2)}`}
+                        : `${lofiSourceFrame
+                          ? "Render exact video frame"
+                          : row.thumbnailReplayStatus === "ready_for_private_successor"
+                            ? "Render private successor"
+                            : "Render new candidate"} · ≤$${THUMBNAIL_REFRESH_MAXIMUM_COST_USD.toFixed(2)}`}
                     </button>
                   ) : null}
                   {dispatchCanResume ? (

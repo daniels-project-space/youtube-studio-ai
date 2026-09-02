@@ -67,8 +67,11 @@ export default function LibraryPage() {
 
   useEffect(() => {
     if (operationsAccess !== "owner") {
-      setReviewedThumbnailUrls(new Map());
-      return;
+      // Do not synchronously cascade a render from this access-transition
+      // effect. The projection below already excludes private URLs before this
+      // deferred memory cleanup can run.
+      const clear = window.setTimeout(() => setReviewedThumbnailUrls(new Map()), 0);
+      return () => window.clearTimeout(clear);
     }
     const controller = new AbortController();
     const loadReviewedPreviews = async () => {
@@ -97,9 +100,11 @@ export default function LibraryPage() {
   }, [operationsAccess]);
 
   const libraryVideos = useMemo<VideoRow[] | undefined>(() => videos?.map((video) => {
-    const reviewedThumbnailUrl = reviewedThumbnailUrls.get(video._id);
+    const reviewedThumbnailUrl = operationsAccess === "owner"
+      ? reviewedThumbnailUrls.get(video._id)
+      : undefined;
     return reviewedThumbnailUrl ? { ...video, reviewedThumbnailUrl } : video;
-  }), [reviewedThumbnailUrls, videos]);
+  }), [operationsAccess, reviewedThumbnailUrls, videos]);
 
   // Apply all filters + sort client-side over the query result.
   const filtered = useMemo<VideoRow[]>(() => {

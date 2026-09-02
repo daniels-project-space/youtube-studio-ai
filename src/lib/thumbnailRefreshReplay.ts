@@ -206,6 +206,8 @@ export function assessThumbnailRefreshReplay(
   const thumbnailStore = snapshot && seedStore
     ? frozenThumbnailStore(snapshot, seedStore, input.stages)
     : null;
+  const family = text(seedStore?.family);
+  const lofiSourceKey = text(thumbnailStore?.videoKey) ?? text(thumbnailStore?.loopUnitKey);
   const missing = [
     !rawSnapshot ? "frozen pipeline invocation" : null,
     rawSnapshot && !snapshot ? "hash-verified frozen pipeline invocation" : null,
@@ -223,6 +225,9 @@ export function assessThumbnailRefreshReplay(
     !thumbnailDescription || thumbnailDescription.length < 80 ? "concrete thumbnail brief" : null,
     packageToOpeningPlan === undefined ? "package-to-opening plan" : null,
     !thumbnailStore ? "complete frozen thumbnail input store" : null,
+    family === "music_loop" && !lofiSourceKey
+      ? "retained rendered Lo-Fi source frame"
+      : null,
   ].filter((value): value is string => value !== null);
   if (missing.length || !snapshot || !seedStore || !topic || !title || !thumbnailDescription || packageToOpeningPlan === undefined || !thumbnailStore) {
     return unavailable(missing);
@@ -250,7 +255,7 @@ export function assessThumbnailRefreshReplay(
     ownerId: input.ownerId,
     channelId: input.channelId,
     runId: input.runId,
-    family: text(seedStore.family)!,
+    family: family!,
     contentLane: seedStore.contentLane,
     channelProgramRoute: seedStore.channelProgramRoute,
     styleDNA: seedStore.styleDNA,

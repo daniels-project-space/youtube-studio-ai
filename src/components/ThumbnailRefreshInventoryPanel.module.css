@@ -21,6 +21,14 @@
 .ernieBatchAction { min-height: 29px; padding: .32rem .55rem; border: 1px solid rgba(95,225,255,.44); border-radius: 7px; color: var(--color-primary); background: rgba(95,225,255,.065); font-size: .6rem; font-weight: 720; cursor: pointer; white-space: nowrap; }
 .ernieBatchAction:hover { border-color: var(--color-primary); color: var(--color-fg); background: rgba(95,225,255,.12); }
 .ernieBatchAction:disabled { opacity: .5; cursor: wait; }
+.lofiFrameBatch { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin-top: .55rem; padding: .55rem .6rem .55rem .7rem; border: 1px solid rgba(182,223,98,.24); border-radius: 10px; background: linear-gradient(100deg, rgba(182,223,98,.08), rgba(95,225,255,.035) 62%, transparent); }
+.lofiFrameBatch > div:first-child { display: flex; align-items: center; gap: .42rem; min-width: 0; }
+.lofiFrameBatch strong { color: var(--color-fg); font-size: .66rem; font-weight: 720; }
+.lofiFrameBatch small { color: var(--color-muted); font: .53rem/1 var(--font-mono); letter-spacing: .035em; white-space: nowrap; }
+.lofiFrameMark { display: grid; place-items: center; width: 23px; height: 19px; border: 1px solid rgba(182,223,98,.5); border-radius: 5px; color: var(--color-secondary); font: 800 .48rem/1 var(--font-mono); box-shadow: inset 0 0 12px rgba(182,223,98,.1); }
+.lofiFrameAction { min-height: 29px; padding: .32rem .55rem; border: 1px solid rgba(182,223,98,.5); border-radius: 7px; color: var(--color-secondary); background: rgba(182,223,98,.065); font-size: .6rem; font-weight: 720; cursor: pointer; white-space: nowrap; }
+.lofiFrameAction:hover { border-color: var(--color-secondary); color: var(--color-fg); background: rgba(182,223,98,.12); }
+.lofiFrameAction:disabled { opacity: .5; cursor: wait; }
 .ernieGallery { margin-top: .75rem; padding: .65rem 0 .1rem; border-top: 1px solid rgba(95,225,255,.16); }
 .ernieGallery > header { display: flex; align-items: baseline; justify-content: space-between; gap: .6rem; padding: 0 .1rem .5rem; }
 .ernieGallery > header span { color: var(--color-fg); font-size: .68rem; font-weight: 720; }
@@ -117,6 +125,9 @@
   .ernieBatch { align-items: stretch; flex-direction: column; }
   .ernieBatch > div:first-child { flex-wrap: wrap; }
   .ernieBatchAction { width: 100%; min-height: 36px; }
+  .lofiFrameBatch { align-items: stretch; flex-direction: column; }
+  .lofiFrameBatch > div:first-child { flex-wrap: wrap; }
+  .lofiFrameAction { width: 100%; min-height: 36px; }
   .ernieGalleryRail { grid-auto-columns: minmax(12.5rem, 78vw); }
 }
 
