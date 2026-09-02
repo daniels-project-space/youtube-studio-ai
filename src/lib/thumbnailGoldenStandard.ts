@@ -30,7 +30,9 @@ export const OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES = [
   "Prefer a two-word concrete tension or payoff hook over a longer sentence; make the decisive noun visibly dominant.",
   "Stage the hero at the peak of action with readable emotion in face, eyes, or hands—not a calm pose after the event.",
   "Show cause and consequence together: one close hero action plus one smaller proof detail that completes the story.",
+  "Bring one consequential hand, object, rupture, or release into the near foreground so the viewer feels the action before decoding the subject.",
   "Use a strong diagonal or edge crop to pull the eye from hook to hero to consequence in under one second.",
   "Allow a centered hero only for a genuinely stronger peak-action image; arrange supporting type around its silhouette and never turn it into a default symmetrical poster.",
+  "Do not let a detached signboard or flat black text panel become the composition. Typography must share the scene's material, light, motion, or negative space while leaving the hero dominant.",
   "Keep headline contrast immediate and physical while preserving one clean hierarchy; do not let background lore compete.",
 ] as const;
