@@ -505,6 +505,11 @@ export interface NovitaCreateWorkerRequestArgs {
     archive: "gzip";
     /** Short-lived, content-bound Python bootstrap source. */
     bootstrapUrl: string;
+    /** Exact worker source overlaid only after its SHA-256 is verified. */
+    workerOverlay: {
+      downloadUrl: string;
+      sha256: string;
+    };
   };
   manifestUrl: string;
   manifestSha256: string;
@@ -553,6 +558,8 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
     || !/^https:\/\//.test(args.runtimeBundle.downloadUrl)
     || args.runtimeBundle.archive !== "gzip"
     || !/^https:\/\//.test(args.runtimeBundle.bootstrapUrl)
+    || !isSha256(args.runtimeBundle.workerOverlay.sha256)
+    || !/^https:\/\//.test(args.runtimeBundle.workerOverlay.downloadUrl)
   )) {
     throw new NovitaAdmissionError("runtime bundle must use a signed HTTPS URL and SHA-256 identity");
   }
@@ -589,6 +596,8 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
         { key: "NOVITA_RUNTIME_BUNDLE_URL", value: args.runtimeBundle.downloadUrl },
         { key: "NOVITA_RUNTIME_BUNDLE_SHA256", value: args.runtimeBundle.sha256 },
         { key: "NOVITA_RUNTIME_BOOTSTRAP_URL", value: args.runtimeBundle.bootstrapUrl },
+        { key: "NOVITA_WORKER_OVERLAY_URL", value: args.runtimeBundle.workerOverlay.downloadUrl },
+        { key: "NOVITA_WORKER_OVERLAY_SHA256", value: args.runtimeBundle.workerOverlay.sha256 },
       ] : []),
     ],
   };

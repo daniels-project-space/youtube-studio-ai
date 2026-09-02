@@ -147,6 +147,7 @@ def approved_profile(profile_id: str, phase: str) -> dict[str, Any]:
             "spatialUpscalerCheckpoint": LTX_SPATIAL_UPSCALER_CHECKPOINT,
             "quantization": "fp8-cast", "offload": "cpu", "spatialUpscaleFactor": 2,
             "stageOneWidth": 640, "stageOneHeight": 352,
+            "imageGuideStrength": 0.9,
             "allowFallback": False,
         }
     # This profile is intentionally absent from every app-generation profile
@@ -167,6 +168,7 @@ def approved_profile(profile_id: str, phase: str) -> dict[str, Any]:
             "spatialUpscalerCheckpoint": LTX_SPATIAL_UPSCALER_CHECKPOINT,
             "quantization": "fp8-cast", "offload": "cpu", "spatialUpscaleFactor": 2,
             "stageOneWidth": 1280, "stageOneHeight": 704,
+            "imageGuideStrength": 0.9,
             "benchmarkOnly": True, "maxFrames": LTX_25_720P_NATIVE_X2_SMOKE_FRAMES,
             "maxSampledPeakVramMib": LTX_25_720P_NATIVE_X2_SMOKE_MAX_SAMPLED_PEAK_VRAM_MIB,
             "allowFallback": False,
@@ -1031,7 +1033,10 @@ def build_video_command(
         "--offload", str(profile["offload"]),
     ]
     if image_path:
-        command.extend(["--image", str(image_path), "0", "1.0"])
+        # A fully locked I2V start image is the documented source of 1–2s
+        # frozen openings. Keep the image recognisable while freeing the first
+        # generated frames to begin the authored action immediately.
+        command.extend(["--image", str(image_path), "0", str(profile["imageGuideStrength"])])
     if end_image_path:
         command.extend(["--image", str(end_image_path), str(int(job["frames"]) - 1), "1.0"])
     # ltx_pipelines accepts repeatable --lora flags. Legacy single-adapter

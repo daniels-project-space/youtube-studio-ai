@@ -100,6 +100,7 @@ interface DirectNovitaConfig {
   imageAuthId?: string;
   imageAccess: "private-registry" | "public-ghcr" | "public-runtime-base";
   runtimeBundle?: { key: string; sha256: string; archive: "gzip" };
+  workerOverlay?: { key: string; sha256: string };
   productId: string;
   verifiedGpuQuota: number;
   modelManifestKey: string;
@@ -380,6 +381,13 @@ function directConfig(): DirectNovitaConfig {
     sha256: requiredEnv("NOVITA_RUNTIME_BUNDLE_SHA256").toLowerCase(),
     archive: "gzip" as const,
   } : undefined;
+  const workerOverlaySha256 = imageAccess === "public-runtime-base"
+    ? requiredEnv("NOVITA_LTX_WORKER_OVERLAY_SHA256").toLowerCase()
+    : undefined;
+  const workerOverlay = workerOverlaySha256 ? {
+    key: `novita/runtime/ltx-2.5/worker-overlays/${workerOverlaySha256}.py`,
+    sha256: workerOverlaySha256,
+  } : undefined;
   if (runtimeBundle && (
     !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,767}$/.test(runtimeBundle.key)
     || runtimeBundle.key.includes("..")
@@ -387,6 +395,9 @@ function directConfig(): DirectNovitaConfig {
     || !/\.tar\.gz$/.test(runtimeBundle.key)
   )) {
     throw new NovitaAdmissionError("sealed public runtime bundle must use a safe R2 key and SHA-256 identity");
+  }
+  if (workerOverlay && !isSha256(workerOverlay.sha256)) {
+    throw new NovitaAdmissionError("sealed LTX worker overlay must use a SHA-256 identity");
   }
   const modelManifestSha256 = requiredEnv("NOVITA_MODEL_MANIFEST_SHA256").toLowerCase();
   if (!isSha256(modelManifestSha256)) {
@@ -408,6 +419,7 @@ function directConfig(): DirectNovitaConfig {
       : {}),
     imageAccess,
     ...(runtimeBundle ? { runtimeBundle } : {}),
+    ...(workerOverlay ? { workerOverlay } : {}),
     productId: requiredEnv("NOVITA_RENDER_4090_PRODUCT_ID"),
     verifiedGpuQuota: quota,
     modelManifestKey,
@@ -533,6 +545,7 @@ function makeRenderJobs(
         steps: profile.steps,
         frames: secondsToLtxFrames(shot.seconds, fps),
         fps,
+        imageGuideStrength: profile.imageGuideStrength,
         // Leave room for the 20-minute boot/deletion windows under the hard
         // two-hour worker lease. One worker has one bounded LTX clip.
         timeoutSeconds: 5_400,
@@ -765,11 +778,23 @@ async function readJsonIfPresent(key: string): Promise<Record<string, unknown> |
  * compatibility receipt deliberately inside the sealed runtime root: a
  * worker may only reuse it after re-proving the exact CUDA/Torch runtime.
  */
-export function runtimeBootstrapSource(runtimeSha256: string): string {
+export function runtimeBootstrapSource(runtimeSha256: string, workerOverlaySha256: string): string {
   return String.raw`import fcntl,hashlib,os,pathlib,shutil,tarfile,tempfile,urllib.request
 sha=${JSON.stringify(runtimeSha256)}
+expected_overlay_sha=${JSON.stringify(workerOverlaySha256)}
 root=pathlib.Path('/network/runtime/ltx-2.5-'+sha)
 compatibility=root/'.torch-cu128-2.8.0'
+def apply_worker_overlay():
+  overlay_url=os.environ.get('NOVITA_WORKER_OVERLAY_URL','')
+  overlay_sha=os.environ.get('NOVITA_WORKER_OVERLAY_SHA256','')
+  if overlay_sha!=expected_overlay_sha or len(expected_overlay_sha)!=64: raise RuntimeError('verified worker overlay identity is required')
+  target=root/'opt/novita-worker/worker.py'
+  if not target.is_file(): raise RuntimeError('runtime worker is missing before overlay')
+  with urllib.request.urlopen(overlay_url,timeout=120) as response: overlay=response.read()
+  if hashlib.sha256(overlay).hexdigest()!=expected_overlay_sha: raise RuntimeError('worker overlay SHA-256 mismatch')
+  pending=target.with_name('.worker-overlay.pending')
+  pending.write_bytes(overlay)
+  os.replace(pending,target)
 def torch_cuda_ready():
   python=root/'opt/LTX-2/.venv/bin/python'
   if not python.is_file(): return False
@@ -846,6 +871,7 @@ def exec_worker():
   python=str(root/'opt/LTX-2/.venv/bin/python')
   os.execv(python,[python,str(root/'opt/novita-worker/worker.py')])
 if runtime_ready():
+  apply_worker_overlay()
   repair_python_paths(root)
   exec_worker()
 lock=root.with_name(root.name+'.lock')
@@ -853,11 +879,13 @@ lock.parent.mkdir(parents=True,exist_ok=True)
 with lock.open('a+b') as handle:
   fcntl.flock(handle,fcntl.LOCK_EX)
   if runtime_ready():
+    apply_worker_overlay()
     repair_python_paths(root)
     exec_worker()
   if (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha:
     repair_python_paths(root)
     ensure_cuda_compatibility()
+    apply_worker_overlay()
     exec_worker()
   if root.exists(): raise RuntimeError('runtime root exists without its matching ready receipt')
   stage=pathlib.Path(tempfile.mkdtemp(prefix='.ltx-runtime-stage.',dir='/network/runtime'))
@@ -911,6 +939,7 @@ with lock.open('a+b') as handle:
     if bundle.parent!=stage: shutil.rmtree(bundle.parent,ignore_errors=True)
     os.replace(stage,root)
     ensure_cuda_compatibility()
+    apply_worker_overlay()
   except BaseException:
     shutil.rmtree(stage,ignore_errors=True)
     raise
@@ -918,12 +947,27 @@ exec_worker()
 `;
 }
 
-async function prepareRuntimeBootstrap(runtime: NonNullable<DirectNovitaConfig["runtimeBundle"]>): Promise<string> {
-  const key = `novita/runtime/bootstraps/ltx-2.5-${runtime.sha256}.py`;
+async function prepareWorkerOverlay(overlay: NonNullable<DirectNovitaConfig["workerOverlay"]>): Promise<void> {
+  const source = await getObjectBytes(overlay.key);
+  const actualSha256 = createHash("sha256").update(source).digest("hex");
+  if (actualSha256 !== overlay.sha256) {
+    throw new NovitaAdmissionError("sealed LTX worker overlay content does not match its SHA-256 identity");
+  }
+}
+
+async function prepareRuntimeBootstrap(
+  runtime: NonNullable<DirectNovitaConfig["runtimeBundle"]>,
+  workerOverlay: NonNullable<DirectNovitaConfig["workerOverlay"]>,
+): Promise<string> {
+  const key = `novita/runtime/bootstraps/ltx-2.5-${runtime.sha256}-${workerOverlay.sha256}.py`;
   try {
-    await putObject(key, runtimeBootstrapSource(runtime.sha256), {
+    await putObject(key, runtimeBootstrapSource(runtime.sha256, workerOverlay.sha256), {
       contentType: "text/x-python",
-      metadata: { "runtime-sha256": runtime.sha256, archive: runtime.archive },
+      metadata: {
+        "runtime-sha256": runtime.sha256,
+        "worker-overlay-sha256": workerOverlay.sha256,
+        archive: runtime.archive,
+      },
       ifNoneMatch: "*",
     });
   } catch (error) {
@@ -1461,9 +1505,13 @@ async function recoverOrCreateInstance(args: {
     // Finish every provider-free request preparation before the execution
     // fence. If that fence rejects, this worker has neither a dispatched
     // durable create intent nor a provider request to reconcile.
-    const runtimeBootstrapUrl = args.control.config.runtimeBundle
-      ? await prepareRuntimeBootstrap(args.control.config.runtimeBundle)
+    const runtimeBootstrapUrl = args.control.config.runtimeBundle && args.control.config.workerOverlay
+      ? await prepareRuntimeBootstrap(args.control.config.runtimeBundle, args.control.config.workerOverlay)
       : undefined;
+    if (args.control.config.runtimeBundle && !args.control.config.workerOverlay) {
+      throw new NovitaAdmissionError("public LTX runtime requires a sealed worker overlay");
+    }
+    if (args.control.config.workerOverlay) await prepareWorkerOverlay(args.control.config.workerOverlay);
     const createRequest = buildNovitaCreateWorkerRequest({
       name: args.worker.workerName,
       productId: args.control.product.id,
@@ -1481,6 +1529,12 @@ async function recoverOrCreateInstance(args: {
           sha256: args.control.config.runtimeBundle.sha256,
           archive: args.control.config.runtimeBundle.archive,
           bootstrapUrl: runtimeBootstrapUrl!,
+          workerOverlay: {
+            downloadUrl: await presignDownload(args.control.config.workerOverlay!.key, {
+              expiresIn: MANIFEST_URL_TTL_SECONDS,
+            }),
+            sha256: args.control.config.workerOverlay!.sha256,
+          },
         },
       } : {}),
       manifestUrl: await presignDownload(args.worker.manifestKey, { expiresIn: MANIFEST_URL_TTL_SECONDS }),
@@ -1876,6 +1930,9 @@ function directStatus(args: {
         : {}),
       ...(args.phase === "video" && args.cfg.profile.stageOneHeight
         ? { stageOneHeight: args.cfg.profile.stageOneHeight }
+        : {}),
+      ...(args.phase === "video" && args.cfg.profile.imageGuideStrength !== undefined
+        ? { imageGuideStrength: args.cfg.profile.imageGuideStrength }
         : {}),
       ...(videoProof ? { outputWidth: videoProof.outputWidth, outputHeight: videoProof.outputHeight } : {}),
     },

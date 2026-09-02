@@ -241,7 +241,7 @@ async function main() {
     /ltx_2_5_revision_not_benchmarked_on_rtx_4090/,
   );
 
-  const publicLtxBootstrap = runtimeBootstrapSource("a".repeat(64));
+  const publicLtxBootstrap = runtimeBootstrapSource("a".repeat(64), "b".repeat(64));
   assert.match(publicLtxBootstrap, /\.torch-cu128-2\.8\.0/);
   assert.match(publicLtxBootstrap, /torch==2\.8\.0/);
   assert.match(publicLtxBootstrap, /torchvision==0\.23\.0/);
@@ -257,6 +257,9 @@ async function main() {
   assert.match(publicLtxBootstrap, /compiler_ready\(cc\)[\s\S]*compiler_ready\(cxx\)/);
   assert.match(publicLtxBootstrap, /packages\/ltx-core\/src/);
   assert.match(publicLtxBootstrap, /packages\/ltx-pipelines\/src/);
+  assert.match(publicLtxBootstrap, /apply_worker_overlay\(\)/);
+  assert.match(publicLtxBootstrap, /NOVITA_WORKER_OVERLAY_URL/);
+  assert.match(publicLtxBootstrap, /worker overlay SHA-256 mismatch/);
 
   assert.throws(
     () => planNovitaCapacityWaves({
@@ -331,11 +334,17 @@ async function main() {
       sha256: "f".repeat(64),
       archive: "gzip",
       bootstrapUrl: "https://signed.example/ltx-runtime-bootstrap.py?signature=redacted",
+      workerOverlay: {
+        downloadUrl: "https://signed.example/ltx-worker-overlay.py?signature=redacted",
+        sha256: "e".repeat(64),
+      },
     },
   });
   assert.match(String(runtimeBundleRequest.command), /NOVITA_RUNTIME_BOOTSTRAP_URL/);
   assert(runtimeBundleRequest.envs.some((item) => item.key === "NOVITA_RUNTIME_BUNDLE_URL"));
   assert(runtimeBundleRequest.envs.some((item) => item.key === "NOVITA_RUNTIME_BOOTSTRAP_URL"));
+  assert(runtimeBundleRequest.envs.some((item) => item.key === "NOVITA_WORKER_OVERLAY_URL"));
+  assert(runtimeBundleRequest.envs.some((item) => item.key === "NOVITA_WORKER_OVERLAY_SHA256"));
   assert.throws(
     () => buildNovitaCreateWorkerRequest({ ...requestArgs, image: runtimeBaseImage, imageAuthId: undefined, publicImage: true }),
     /requires a sealed runtime bundle/,

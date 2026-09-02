@@ -237,7 +237,7 @@ class WorkerContractTests(unittest.TestCase):
         }
         command = worker.build_video_command(
             job,
-            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu"},
+            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu", "imageGuideStrength": 0.9},
             models,
             Path("/output/clip.mp4"),
             Path("/input/still.png"),
@@ -255,7 +255,7 @@ class WorkerContractTests(unittest.TestCase):
 
         endpoint_command = worker.build_video_command(
             job,
-            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu"},
+            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu", "imageGuideStrength": 0.9},
             models,
             Path("/output/endpoint.mp4"),
             Path("/input/start.png"),
@@ -265,7 +265,7 @@ class WorkerContractTests(unittest.TestCase):
         self.assertEqual(len(image_indices), 2)
         self.assertEqual(
             endpoint_command[image_indices[0]:image_indices[0] + 4],
-            ["--image", "/input/start.png", "0", "1.0"],
+            ["--image", "/input/start.png", "0", "0.9"],
         )
         self.assertEqual(
             endpoint_command[image_indices[1]:image_indices[1] + 4],
@@ -286,7 +286,7 @@ class WorkerContractTests(unittest.TestCase):
         }
         adapter_command = worker.build_video_command(
             adapter_job,
-            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu"},
+            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu", "imageGuideStrength": 0.9},
             {**models, "ltx-creative-faceless-mannequin": Path("/models/loras/faceless.safetensors")},
             Path("/output/adapter.mp4"),
             Path("/input/still.png"),
@@ -333,7 +333,7 @@ class WorkerContractTests(unittest.TestCase):
         }
         stack_command = worker.build_video_command(
             stack_job,
-            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu"},
+            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu", "imageGuideStrength": 0.9},
             {
                 **models,
                 "ltx-creative-faceless-mannequin": Path("/models/loras/faceless.safetensors"),
@@ -587,6 +587,7 @@ class WorkerContractTests(unittest.TestCase):
         self.assertEqual((profile["width"], profile["height"]), (1280, 704))
         self.assertEqual((profile["stageOneWidth"], profile["stageOneHeight"]), (640, 352))
         self.assertEqual(profile["spatialUpscaleFactor"], 2)
+        self.assertEqual(profile["imageGuideStrength"], 0.9)
         self.assertEqual(profile["quantization"], "fp8-cast")
         self.assertEqual(profile["offload"], "cpu")
 

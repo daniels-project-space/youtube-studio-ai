@@ -894,6 +894,7 @@ async function main() {
       topic: "A sealed episode topic",
       title: "A sealed episode title",
       thumbnailKey: "plans/a/thumb.png",
+      thumbnailSource: "planner_artwork",
       scheduledAt: dueNow + 86_400_000,
       preparation: {
         version: "plan-week-preparation/inputs-v1",

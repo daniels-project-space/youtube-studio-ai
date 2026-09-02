@@ -86,7 +86,7 @@ export const LTX_25_NATIVE_720P_X2_BENCHMARK_PROFILE: Ltx25Native720pX2Benchmark
     // standard-LoRA stacks and their combined quality evidence. The release
     // registry remains empty until that exact worker receives a new paid,
     // reviewed RTX 4090 proof run.
-    workerOverlaySha256: "93525478741303137728cfd25ee03f92d66c732ec621f980d35bb3e3299647ba",
+    workerOverlaySha256: "60635a520225675311200980a76181df6c4a75dcb225fb4f9d6c66d89e824ead",
     gpuSku: "RTX 4090",
     vramGb: 24,
     checkpoint: LTX_25_RTX_4090_VIDEO.checkpoint,

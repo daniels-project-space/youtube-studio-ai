@@ -49,6 +49,12 @@ const ProfileSchema = z.object({
     spatialUpscaleFactor: z.literal(2),
     stageOneWidth: z.number().int().positive(),
     stageOneHeight: z.number().int().positive(),
+    /**
+     * The starting still is a visual anchor, not a frozen opening plate.
+     * 0.9 is the LTX I2V calibration that leaves enough temporal freedom for
+     * visible motion in the opening frames while preserving the source image.
+     */
+    imageGuideStrength: z.literal(0.9),
     candidates: z.number().int().min(1).max(3),
   }).superRefine((video, ctx) => {
     // LTX's VAE operates on 32-pixel tiles. The official distilled x2 path
@@ -132,6 +138,7 @@ export const LTX_25_RTX_4090_VIDEO = Object.freeze({
   spatialUpscaleFactor: 2,
   stageOneWidth: 640,
   stageOneHeight: 352,
+  imageGuideStrength: 0.9,
 } as const);
 
 export const LTX_25_MODEL_REVISION = LTX_25_RTX_4090_VIDEO.revision;

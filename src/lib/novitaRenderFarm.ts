@@ -114,6 +114,7 @@ export interface NovitaPhaseProfile {
   spatialUpscaleFactor?: 2;
   stageOneWidth?: number;
   stageOneHeight?: number;
+  imageGuideStrength?: 0.9;
   allowFallback: false;
 }
 
@@ -185,6 +186,7 @@ export function toNovitaPhaseProfile(
           spatialUpscaleFactor: profile.video.spatialUpscaleFactor,
           stageOneWidth: profile.video.stageOneWidth,
           stageOneHeight: profile.video.stageOneHeight,
+          imageGuideStrength: profile.video.imageGuideStrength,
         }
       : {}),
     allowFallback: false,
@@ -533,7 +535,7 @@ export function hasNovitaRenderFarmConfig(): boolean {
     const usesPublicRuntimeBase = process.env.NOVITA_RENDER_WORKER_IMAGE
       === "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385";
     if (usesPublicRuntimeBase) {
-      required.push("NOVITA_RUNTIME_BUNDLE_KEY", "NOVITA_RUNTIME_BUNDLE_SHA256");
+      required.push("NOVITA_RUNTIME_BUNDLE_KEY", "NOVITA_RUNTIME_BUNDLE_SHA256", "NOVITA_LTX_WORKER_OVERLAY_SHA256");
     } else if (process.env.NOVITA_RENDER_PUBLIC_WORKER_IMAGE !== "1") {
       required.push("NOVITA_RENDER_IMAGE_AUTH_ID");
     }
@@ -626,6 +628,7 @@ export function validate(cfg: NovitaRenderCfg, phase: "image" | "video"): void {
         || profile.spatialUpscaleFactor !== expected.spatialUpscaleFactor
         || profile.stageOneWidth !== expected.stageOneWidth
         || profile.stageOneHeight !== expected.stageOneHeight
+        || profile.imageGuideStrength !== expected.imageGuideStrength
       ) {
         errs.push("video must use the exact LTX-2.5 distilled 640x352-to-1280x704 x2 RTX-4090 contract");
       }
