@@ -22,6 +22,7 @@ const payload = {
     topic: "GDP comparison",
     title: "The numbers behind GDP",
     thumbnailKey: "owner/owner-one/thumbnail.png",
+    thumbnailSource: "rendered_video_frame",
     preparation: {
       version: "plan-week-preparation/inputs-v1",
       manifestKey: "owner/owner-one/channel/economics/plan-batches/batch-one/items/item-one/preparation/inputs.json",

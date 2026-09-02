@@ -130,6 +130,7 @@ const scheduledResume = publishPipelineResumeTriggerRequest(
     plannedTopic: "Exact topic",
     plannedTitle: "Exact title",
     plannedThumbnailKey: "owner/owner-a/plans/thumb-a.jpg",
+    plannedThumbnailSource: "rendered_video_frame",
     plannedPublishAt: NEXT_ATTEMPT_AT,
   }),
 );
@@ -149,6 +150,7 @@ assert.deepEqual(scheduledResume.payload, {
     topic: "Exact topic",
     title: "Exact title",
     thumbnailKey: "owner/owner-a/plans/thumb-a.jpg",
+    thumbnailSource: "rendered_video_frame",
     scheduledAt: NEXT_ATTEMPT_AT,
   },
 });

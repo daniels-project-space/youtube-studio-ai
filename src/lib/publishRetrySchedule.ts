@@ -58,6 +58,7 @@ export interface DurablePipelineRunForPublishResume {
   plannedTopic?: string;
   plannedTitle?: string;
   plannedThumbnailKey?: string;
+  plannedThumbnailSource?: "planner_artwork" | "rendered_video_frame";
   plannedPublishAt?: number;
   plannedPreparationVersion?: string;
   plannedPreparationManifestKey?: string;
@@ -244,6 +245,7 @@ export function publishPipelineResumeTriggerRequest(
     run.plannedTopic,
     run.plannedTitle,
     run.plannedThumbnailKey,
+    run.plannedThumbnailSource,
     run.plannedPublishAt,
     run.plannedPreparationVersion,
     run.plannedPreparationManifestKey,
@@ -258,6 +260,7 @@ export function publishPipelineResumeTriggerRequest(
         topic: run.plannedTopic ?? "",
         title: run.plannedTitle ?? "",
         thumbnailKey: run.plannedThumbnailKey ?? "",
+        thumbnailSource: run.plannedThumbnailSource ?? "planner_artwork",
         ...(run.plannedPublishAt !== undefined
           ? { scheduledAt: run.plannedPublishAt }
           : {}),

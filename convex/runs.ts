@@ -1576,6 +1576,7 @@ export const listDueSerializedProgramEpisodeRetries = query({
               topic: string;
               title: string;
               thumbnailKey: string;
+              thumbnailSource?: "planner_artwork" | "rendered_video_frame";
               scheduledAt?: number;
               preparation?: { version: string; manifestKey: string; manifestSha256: string };
             }
@@ -1596,6 +1597,7 @@ export const listDueSerializedProgramEpisodeRetries = query({
             topic: run.plannedTopic ?? "",
             title: run.plannedTitle ?? "",
             thumbnailKey: run.plannedThumbnailKey ?? "",
+            thumbnailSource: run.plannedThumbnailSource ?? "planner_artwork",
             ...(run.plannedPublishAt !== undefined ? { scheduledAt: run.plannedPublishAt } : {}),
             ...(
               run.plannedPreparationVersion !== undefined ||
@@ -1616,6 +1618,7 @@ export const listDueSerializedProgramEpisodeRetries = query({
             topic: item.topic,
             title: item.title ?? "",
             thumbnailKey: item.thumbnailKey ?? "",
+            thumbnailSource: item.thumbnailSource ?? "planner_artwork",
             ...(item.scheduledAt !== undefined ? { scheduledAt: item.scheduledAt } : {}),
             ...(
               item.preparationVersion !== undefined ||

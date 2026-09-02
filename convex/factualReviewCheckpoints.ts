@@ -581,6 +581,7 @@ export const listPendingResumes = query({
         topic: string;
         title: string;
         thumbnailKey: string;
+        thumbnailSource?: "planner_artwork" | "rendered_video_frame";
         scheduledAt?: number;
         preparation?: { version: string; manifestKey: string; manifestSha256: string };
       };
@@ -623,6 +624,7 @@ export const listPendingResumes = query({
             topic: run.plannedTopic,
             title: run.plannedTitle,
             thumbnailKey: run.plannedThumbnailKey,
+            thumbnailSource: run.plannedThumbnailSource ?? "planner_artwork",
             ...(run.plannedPublishAt === undefined ? {} : { scheduledAt: run.plannedPublishAt }),
             ...(preparation ? { preparation } : {}),
           }

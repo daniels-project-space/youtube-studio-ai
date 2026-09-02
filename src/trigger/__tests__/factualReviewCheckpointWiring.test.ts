@@ -54,6 +54,11 @@ assert.match(
 );
 assert.match(
   checkpoints,
+  /thumbnailSource: run\.plannedThumbnailSource/,
+  "factual-review recovery carries the immutable Lo-Fi rendered-frame requirement",
+);
+assert.match(
+  checkpoints,
   /reapExpiredQueuedResumes[\s\S]*factualReviewResumeQueueDeadlineAt[\s\S]*factualReviewResumeState: "pending"/,
   "an accepted-but-never-started continuation is returned to the bounded factual outbox",
 );
