@@ -48,6 +48,7 @@ import type { FamilyKey } from "@/engine/families";
 import type { ThumbnailGateVerdict } from "@/engine/qualityPolicy";
 import type { ThumbnailTextZone } from "@/lib/thumbnailLayout";
 import { trustedThumbnailTextZoneResolution } from "@/lib/thumbnailSafeZone";
+import { applyThumbnailChannelIdentity } from "@/lib/thumbnailChannelIdentity";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
@@ -332,7 +333,13 @@ export function resolveGoldenThumbnailPlaybook(args: {
 }): { playbook: ThumbnailPlaybook; strategy: "playbook" | "style_dna_foundation" } {
   if (args.storedPlaybook) {
     assertExecutablePlaybook(args.storedPlaybook);
-    return { playbook: args.storedPlaybook, strategy: "playbook" };
+    return {
+      playbook: applyThumbnailChannelIdentity({
+        channelName: args.channelName,
+        playbook: args.storedPlaybook,
+      }),
+      strategy: "playbook",
+    };
   }
   const family = args.family as FamilyKey | undefined;
   if (
@@ -351,8 +358,12 @@ export function resolveGoldenThumbnailPlaybook(args: {
     family,
     channelName: args.channelName,
   });
-  assertExecutablePlaybook(playbook);
-  return { playbook, strategy: "style_dna_foundation" };
+  const identityLockedPlaybook = applyThumbnailChannelIdentity({
+    channelName: args.channelName,
+    playbook,
+  });
+  assertExecutablePlaybook(identityLockedPlaybook);
+  return { playbook: identityLockedPlaybook, strategy: "style_dna_foundation" };
 }
 
 /** Deterministically chooses the exact stored Golden pattern for one artifact. */
