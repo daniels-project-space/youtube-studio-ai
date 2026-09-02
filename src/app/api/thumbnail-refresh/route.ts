@@ -1,7 +1,12 @@
 import { NextResponse } from "next/server";
 
+import {
+  ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_KEY,
+  ERNIE_THUMBNAIL_REFRESH_BATCH_OWNER_ID,
+  assertPinnedErnieThumbnailRefreshBatch,
+} from "@/lib/ernieThumbnailRefreshBatch";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
-import { presignDownload } from "@/lib/storage";
+import { getObjectBytes, presignDownload } from "@/lib/storage";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { listThumbnailRefreshInventory } from "@/lib/thumbnailRefreshRuntime";
 import { thumbnailRefreshRuntimeApi } from "@/lib/thumbnailRefreshRuntime";
@@ -24,6 +29,32 @@ function convexClient(): StudioConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("Convex URL is not configured");
   return new StudioConvexHttpClient(url);
+}
+
+async function reviewedErnieBatchPreview(input: {
+  ownerId: string;
+  inventory: Awaited<ReturnType<typeof listThumbnailRefreshInventory>>;
+}) {
+  if (input.ownerId !== ERNIE_THUMBNAIL_REFRESH_BATCH_OWNER_ID) return null;
+  const raw = await getObjectBytes(ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_KEY, undefined, { timeoutMs: 30_000 });
+  const manifest = assertPinnedErnieThumbnailRefreshBatch(
+    JSON.parse(new TextDecoder().decode(raw)) as unknown,
+  );
+  const sourceRows = new Map(input.inventory.map((item) => [String(item.runId), item]));
+  return {
+    count: manifest.candidates.length,
+    candidates: await Promise.all(manifest.candidates.map(async (candidate) => {
+      const source = sourceRows.get(candidate.sourceRunId);
+      return {
+        sourceRunId: candidate.sourceRunId,
+        channelSlug: candidate.channelSlug,
+        channelName: source?.channelName ?? candidate.channelSlug,
+        title: source?.title ?? `Video ${candidate.youtubeVideoId}`,
+        youtubeVideoId: candidate.youtubeVideoId,
+        previewUrl: await presignDownload(candidate.ernieSceneKey, { expiresIn: 300 }),
+      };
+    })),
+  };
 }
 
 /**
@@ -66,9 +97,13 @@ export async function GET(request: Request) {
         { headers: { "Cache-Control": "private, no-store" } },
       );
     }
+    const ernieBatch = searchParams.get("ernieBatch") === "reviewed"
+      ? await reviewedErnieBatchPreview({ ownerId: actor.ownerId, inventory })
+      : null;
     return NextResponse.json(
       {
         ok: true,
+        ...(ernieBatch ? { ernieBatch } : {}),
         inventory: inventory.map((item) => ({
           runId: item.runId,
           channelId: item.channelId,

@@ -69,6 +69,15 @@ type ThumbnailInventoryRow = Readonly<{
   };
 }>;
 
+type ErnieBatchPreview = Readonly<{
+  sourceRunId: string;
+  channelSlug: string;
+  channelName: string;
+  title: string;
+  youtubeVideoId: string;
+  previewUrl: string;
+}>;
+
 const STATUS_COPY: Record<InventoryStatus, { label: string; tone: string }> = {
   current_golden_candidate: { label: "Current candidate recorded", tone: "ready" },
   legacy_unverified: { label: "Legacy review needed", tone: "review" },
@@ -172,6 +181,7 @@ export function ThumbnailRefreshInventoryPanel({
   selectedChannelSlug?: string | null;
 }) {
   const [inventory, setInventory] = useState<readonly ThumbnailInventoryRow[] | null>(null);
+  const [ernieBatch, setErnieBatch] = useState<readonly ErnieBatchPreview[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
   const [busyRunIds, setBusyRunIds] = useState<Set<string>>(() => new Set());
@@ -185,16 +195,18 @@ export function ThumbnailRefreshInventoryPanel({
   const [ernieBatchBusy, setErnieBatchBusy] = useState(false);
 
   const loadInventory = useCallback(async (signal?: AbortSignal) => {
-    const response = await fetch("/api/thumbnail-refresh", { cache: "no-store", signal });
+    const response = await fetch("/api/thumbnail-refresh?ernieBatch=reviewed", { cache: "no-store", signal });
     const payload = await response.json() as {
       ok?: boolean;
       inventory?: ThumbnailInventoryRow[];
+      ernieBatch?: { candidates?: ErnieBatchPreview[] };
       error?: string;
     };
     if (!response.ok || !payload.ok || !Array.isArray(payload.inventory)) {
       throw new Error(payload.error || "Could not load thumbnail review inventory");
     }
     setInventory(payload.inventory);
+    setErnieBatch(Array.isArray(payload.ernieBatch?.candidates) ? payload.ernieBatch.candidates : []);
     setError(null);
     return payload.inventory;
   }, []);
@@ -378,6 +390,10 @@ export function ThumbnailRefreshInventoryPanel({
     () => inventory?.filter((row) => !selectedChannelSlug || row.channelSlug === selectedChannelSlug) ?? [],
     [inventory, selectedChannelSlug],
   );
+  const reviewedErniePreviews = useMemo(
+    () => ernieBatch.filter((item) => !selectedChannelSlug || item.channelSlug === selectedChannelSlug),
+    [ernieBatch, selectedChannelSlug],
+  );
   const counts = inventoryCounts(rows);
   const reviewCount = counts.legacy_unverified + counts.evidence_invalid + counts.missing_thumbnail;
   const retirementCount = rows.filter((row) => row.legacyCleanupAction === "retire" && row.retirement?.status !== "deleted").length;
@@ -440,6 +456,34 @@ export function ThumbnailRefreshInventoryPanel({
           </div>
         )}
       </div>
+
+      {reviewedErniePreviews.length ? (
+        <section className={styles.ernieGallery} aria-label="Reviewed native ERNIE thumbnails">
+          <header>
+            <span>New thumbnails</span>
+            <small>{reviewedErniePreviews.length} reviewed</small>
+          </header>
+          <div className={styles.ernieGalleryRail}>
+            {reviewedErniePreviews.map((item) => (
+              <article className={styles.ernieGalleryCard} key={item.sourceRunId}>
+                <a
+                  href={`https://www.youtube.com/watch?v=${item.youtubeVideoId}`}
+                  target="_blank"
+                  rel="noreferrer"
+                  aria-label={`Preview replacement for ${item.title}`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={item.previewUrl} alt={`${item.title} new thumbnail`} loading="lazy" decoding="async" />
+                </a>
+                <div>
+                  <strong title={item.title}>{item.title}</strong>
+                  <Link href={`/channels/${item.channelSlug}`}>{item.channelName}</Link>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
 
       {inventory === null && !error ? <p className={styles.state}>Loading retained thumbnail evidence…</p> : null}
       {error ? <p className={styles.state} role="status">{error}</p> : null}
