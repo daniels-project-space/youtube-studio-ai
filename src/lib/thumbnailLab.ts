@@ -30,7 +30,12 @@ import {
 } from "@/lib/vision";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { imageToJpeg } from "@/lib/ffmpeg";
-import { buildThumbBrief, type ThumbBriefArgs } from "@/lib/banana";
+import {
+  buildThumbBrief,
+  resolveBadgeTreatment,
+  type BadgeTreatment,
+  type ThumbBriefArgs,
+} from "@/lib/banana";
 import { readThumbnailOcr, thumbnailOcrMatchesExpected } from "@/lib/thumbnailOcr";
 import {
   renderThumbnail,
@@ -114,6 +119,11 @@ export interface VisualLanguage {
   /** Base-image rendering style, e.g. "vintage ink engraving on parchment". */
   imageStyle?: string;
   badgeStyle?: "center" | "pill";
+  /** Channel-constant badge signature for the native provider route. Chosen
+   * once per channel and then never varied, so the corner mark is recognisable
+   * across the catalogue. Unset channels resolve deterministically from the
+   * signature type motif, then from the channel name. */
+  badgeTreatment?: BadgeTreatment;
   /** TYPE-AS-OBJECT treatment: deterministic local typography rendered with
    * a physical-design motif (plate / smear / stamp / sticker). It is never
    * delegated to the scene model. */
@@ -774,7 +784,7 @@ export async function distillPlaybook(args: {
       `"baseColor":"#hex","accentColor":"#hex" — colors MUST come from THIS channel's palette; NEVER default to ` +
       `gold/yellow unless it is genuinely this channel's color, ` +
       `"textObject":"torn_strip"|"paint_smear"|"censor_bar"|"grunge_sticker"|"spaced_elegant"|"block_plate"|"neon_sign"|"spray_paint"|"stamp_ink"|"movie_poster"|"ransom_note"|"carved"|"scene_forged" (scene_forged = the headline takes the scene's own plane, angle, lighting and symmetry while staying the most prominent graphic; pick it for cinematic, atmospheric or photographic worlds where the type should belong to the picture rather than sit on it) (the channel SIGNATURE motif for the deterministic LOCAL typography layer; it must never appear in fluxRecipe or become a textual scene prop), "imageStyle":"<=12 words — the base-image rendering style (e.g. 'painterly anime watercolor', 'vintage ink ` +
-      `engraving', 'hyperreal cinematic 3D', 'retro screenprint poster')","badgeStyle":"center"|"pill","composition":"cutout_collage"|"full_scene" (cutout_collage = the hero is a clean die-cut PHOTO cutout with crisp edges pasted OVER a designed collage background of torn clippings/photos/graphic shapes - real photographic grain, magazine-composite feel; PICK THIS for commentary/persona/drama/expose channels because continuous AI scenes read fake there. full_scene = one continuous rendered scene for painterly/cinematic worlds),` +
+      `engraving', 'hyperreal cinematic 3D', 'retro screenprint poster')","badgeStyle":"center"|"pill","badgeTreatment":"outline_pill"|"solid_pill"|"stamped_block"|"engraved_plate"|"tape_label" (the channel's PERMANENT corner signature — choose it once here from this channel's material world; it is then rendered identically on every video and never redesigned per episode),"composition":"cutout_collage"|"full_scene" (cutout_collage = the hero is a clean die-cut PHOTO cutout with crisp edges pasted OVER a designed collage background of torn clippings/photos/graphic shapes - real photographic grain, magazine-composite feel; PICK THIS for commentary/persona/drama/expose channels because continuous AI scenes read fake there. full_scene = one continuous rendered scene for painterly/cinematic worlds),` +
       `"uppercase":boolean}. THE RULE: if another channel could wear this language, it is WRONG — diverge hard.\n` +
       `1. rules: 6-8 HARD rules for this channel's thumbnails — specific (sizes, positions, counts, colors), ` +
       `derived from the evidence + principles, honoring the DNA palette.\n` +
@@ -1170,6 +1180,13 @@ export async function renderCandidate(args: {
       scene: inst.fluxPrompt,
       lines: overlayLines,
       badge: channelName,
+      // Resolved from channel constants only — never from this video — so the
+      // corner mark is byte-identical across the channel's whole catalogue.
+      badgeTreatment: resolveBadgeTreatment({
+        channelName,
+        configured: vl.badgeTreatment,
+        textObject: vl.textObject,
+      }),
     };
     const expectWords = overlayLines.map((line) => line.text);
     const prompt =

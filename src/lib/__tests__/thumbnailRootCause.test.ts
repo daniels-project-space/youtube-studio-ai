@@ -8,9 +8,12 @@ import type { StyleDNA } from "@/engine/creative/types";
 import { classifyExecutionError } from "@/engine/executionErrors";
 import { FAMILIES, type FamilyKey } from "@/engine/families";
 import {
+  BADGE_TREATMENTS,
   BananaImageSubmissionError,
+  buildThumbBrief,
   generateNanoBananaImageWithReceipt,
   NANO_BANANA_THUMBNAIL_PROFILE,
+  resolveBadgeTreatment,
 } from "@/lib/banana";
 import { GEMINI_RUNTIME_OPT_IN_ENV } from "@/lib/gemini";
 import { createImageUsageScope } from "@/lib/imageUsage";
@@ -244,6 +247,67 @@ function assertSceneTypographySplit(): void {
   assert.equal(isThumbnailBaseProvenance({
     contract: "thumbnail-base-v1", textFree: true, safeZone: "left", source: "verified-video-still",
   }, "left"), true);
+}
+
+function assertBadgeIsAChannelConstant(): void {
+  const brief = (channelName: string, over: Partial<Parameters<typeof buildThumbBrief>[0]> = {}) =>
+    buildThumbBrief({
+      channelName,
+      scene: "a hero doing something",
+      lines: [{ text: "HOOK", payoff: true }],
+      badge: channelName,
+      badgeTreatment: resolveBadgeTreatment({
+        channelName,
+        configured: (over as { badgeTreatment?: string }).badgeTreatment,
+        textObject: over.textObject,
+      }),
+      ...over,
+    });
+
+  // The badge must not vary with the video. Same channel, different episodes,
+  // different scenes and hooks — identical corner mark.
+  const episodeA = brief("Vault Breach", { scene: "a tunnel through a wall", lines: [{ text: "SIX MONTHS", payoff: true }] });
+  const episodeB = brief("Vault Breach", { scene: "a guard finding an empty box", lines: [{ text: "GONE", payoff: true }] });
+  const badgeClause = (prompt: string) => prompt.slice(prompt.indexOf("CHANNEL BADGE"));
+  assert.equal(
+    badgeClause(episodeA),
+    badgeClause(episodeB),
+    "the same channel must produce a byte-identical badge clause on every video",
+  );
+  assert.match(badgeClause(episodeA), /BOTTOM-RIGHT/, "the badge stays bottom-right");
+  assert.match(badgeClause(episodeA), /render it identically on every video/i, "the badge must be declared a fixed signature");
+
+  // Resolution is a pure function of channel constants.
+  assert.equal(
+    resolveBadgeTreatment({ channelName: "Vault Breach" }),
+    resolveBadgeTreatment({ channelName: "Vault Breach" }),
+    "badge resolution must be deterministic",
+  );
+  // An explicitly stored channel choice always wins.
+  assert.equal(
+    resolveBadgeTreatment({ channelName: "Vault Breach", configured: "tape_label", textObject: "scene_forged" }),
+    "tape_label",
+    "a channel's stored badge choice must override every derivation",
+  );
+  // Otherwise it stays within the set that is coherent with the channel's
+  // signature type motif.
+  assert.ok(
+    ["engraved_plate", "outline_pill"].includes(
+      resolveBadgeTreatment({ channelName: "Vault Breach", textObject: "scene_forged" }),
+    ),
+    "an unset badge must stay coherent with the channel's signature type motif",
+  );
+  // …and the channel name must distinguish channels that share a motif, or the
+  // badge is consistent per channel but identical across the whole catalogue.
+  const sharedMotif = ["Vault Breach", "Inked Histories", "Investory", "Gratitude Springs", "The Getaway Files"]
+    .map((name) => resolveBadgeTreatment({ channelName: name, textObject: "scene_forged" }));
+  assert.ok(
+    new Set(sharedMotif).size > 1,
+    `channels sharing a type motif must not all collapse to one badge (got ${sharedMotif.join(", ")})`,
+  );
+  // Garbage stored data must degrade to a valid treatment, never crash or leak.
+  const degraded = resolveBadgeTreatment({ channelName: "Vault Breach", configured: "not_a_real_badge" });
+  assert.ok(BADGE_TREATMENTS.includes(degraded), "unknown persisted badge data must degrade to a valid treatment");
 }
 
 function assertStoryInterestIntelligence(): void {
@@ -710,7 +774,8 @@ async function main(): Promise<void> {
     assertFamilyPolicy();
     assertNativeCopyOcrGate();
     assertSceneTypographySplit();
-    assertStoryInterestIntelligence();
+    assertBadgeIsAChannelConstant();
+assertStoryInterestIntelligence();
 assertMotifImplementations();
     assertSafePlans();
     await assertRealCallPaths();

@@ -137,6 +137,75 @@ export const TEXT_OBJECT_LANGUAGE: Record<string, string> = {
   scene_forged: "as MONUMENTAL TYPOGRAPHY that belongs to the scene's light without becoming an object in it. It stays type - never a plaque, signboard, carved block, banner, engraved slab or any prop lying in the scene - and it owns 25-40% of the frame as the largest, hardest-edged, highest-contrast graphic present. It borrows the picture's world: the SAME key light, colour temperature and falloff as the hero, the scene's own atmosphere drifting across the letter faces (mist, spray, dust, smoke, bloom), a faint reflection or glow where the scene would give one, and a slight shared perspective tilt that agrees with the scene's dominant plane while staying fronto-parallel enough to read instantly. It sits on the scene's own axis: where the composition is symmetrical the headline is centred and balanced on that axis rather than pushed to one side. Every letter stays fully legible - atmosphere may pass OVER the type, but no object may cover any letter",
 };
 
+/**
+ * The channel badge is a SIGNATURE, not a per-video design decision. Left to
+ * the provider it reinvents the pill on every render — outline here, solid
+ * there, bare text on the next one — so a channel never builds the corner
+ * recognition that lifts subscriber CTR. These treatments are described
+ * precisely enough to be reproducible, and resolved deterministically per
+ * channel below.
+ */
+export const BADGE_TREATMENTS = [
+  "outline_pill",
+  "solid_pill",
+  "stamped_block",
+  "engraved_plate",
+  "tape_label",
+] as const;
+
+export type BadgeTreatment = (typeof BADGE_TREATMENTS)[number];
+
+export const BADGE_TREATMENT_LANGUAGE: Record<BadgeTreatment, string> = {
+  outline_pill: "a compact rounded-rectangle pill with a thin accent-color outline and a fully transparent interior, the channel name inside it in small clean uppercase accent-color letters",
+  solid_pill: "a compact rounded-rectangle pill filled solid in the channel's dark base color, the channel name inside it in small clean uppercase white letters",
+  stamped_block: "a small hard-edged rectangular block with no corner radius, filled solid in the accent color, the channel name knocked out of it in the dark base color",
+  engraved_plate: "a small brushed metal plate fixed flat into the corner, the channel name engraved into its surface, the engraved cuts picking up the channel's accent color and catching the scene's key light",
+  tape_label: "a short strip of matte tape stuck down at a slight angle, the channel name hand-stamped along it in dark ink",
+};
+
+/**
+ * Resolve the badge once per channel and never per video. An explicitly stored
+ * treatment wins; otherwise it is derived from the channel's signature type
+ * motif so the corner agrees with the headline's material world; otherwise it
+ * falls back to a stable hash of the channel name. Every branch is a pure
+ * function of channel-constant inputs, so the same channel always resolves to
+ * the same badge.
+ */
+export function resolveBadgeTreatment(args: {
+  channelName: string;
+  configured?: string;
+  textObject?: string;
+}): BadgeTreatment {
+  const configured = args.configured as BadgeTreatment | undefined;
+  if (configured && BADGE_TREATMENTS.includes(configured)) return configured;
+  // Each motif offers a COHERENT SET rather than one answer. Collapsing every
+  // channel to a single treatment would make the badge consistent per channel
+  // but identical across the catalogue, which is not a signature. The channel
+  // name then picks within the set, so the corner agrees with the headline's
+  // material world AND distinguishes one channel from the next.
+  const byMotif: Record<string, readonly BadgeTreatment[]> = {
+    stamp_ink: ["stamped_block", "tape_label"],
+    censor_bar: ["stamped_block", "solid_pill"],
+    block_plate: ["stamped_block", "solid_pill"],
+    carved: ["engraved_plate", "stamped_block"],
+    scene_forged: ["engraved_plate", "outline_pill"],
+    movie_poster: ["engraved_plate", "solid_pill"],
+    torn_strip: ["tape_label", "stamped_block"],
+    ransom_note: ["tape_label", "outline_pill"],
+    grunge_sticker: ["tape_label", "solid_pill"],
+    neon_sign: ["outline_pill", "solid_pill"],
+    spaced_elegant: ["outline_pill", "engraved_plate"],
+    paint_smear: ["solid_pill", "tape_label"],
+    spray_paint: ["solid_pill", "stamped_block"],
+  };
+  const candidates = (args.textObject ? byMotif[args.textObject] : undefined) ?? BADGE_TREATMENTS;
+  let hash = 0;
+  for (const char of args.channelName.trim().toLowerCase()) {
+    hash = (hash * 31 + char.charCodeAt(0)) % 100_003;
+  }
+  return candidates[hash % candidates.length];
+}
+
 export interface ThumbBriefArgs {
   channelName: string;
   /** ≤12-word channel rendering style, e.g. "bold sumi-e ink wash on washi paper". */
@@ -147,6 +216,8 @@ export interface ThumbBriefArgs {
   textObject?: string;
   /** "cutout_collage" forces die-cut-photo-over-collage (anti-AI-look for commentary channels). */
   composition?: string;
+  /** Channel-constant badge signature. Resolved via `resolveBadgeTreatment`. */
+  badgeTreatment?: BadgeTreatment;
   /** The scene that ENACTS the topic: hero + background + story details. */
   scene: string;
   /** 1-3 headline lines; mark exactly one as the payoff (rendered 2-4x larger). */
@@ -185,8 +256,10 @@ export function buildThumbBrief(a: ThumbBriefArgs): string {
     ` Headline — render EXACTLY these words and no others: ${headline}, placed clear of all faces.` +
     ` No other word, label, annotation or description from these instructions may appear in the image.` +
     `${emphasis}${typeClause}` +
-    ` Small badge pill "${a.badge.toUpperCase()}" in the BOTTOM-RIGHT corner — always that corner, never any` +
-    ` other, inset from both edges, compact and secondary, with the headline and hero kept clear of it.`
+    ` CHANNEL BADGE (a fixed signature — render it identically on every video of this channel, never redesign it):` +
+    ` place "${a.badge.toUpperCase()}" in the BOTTOM-RIGHT corner, always that corner and never any other, inset` +
+    ` from both edges, compact and secondary, with the headline and hero kept clear of it. Render it as` +
+    ` ${BADGE_TREATMENT_LANGUAGE[a.badgeTreatment ?? resolveBadgeTreatment({ channelName: a.channelName, textObject: a.textObject })]}.`
   );
 }
 
