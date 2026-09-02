@@ -8,6 +8,7 @@ const read = (path: string) => readFileSync(join(root, path), "utf8");
 const preview = read("src/components/MediaPreview.tsx");
 const previewCss = read("src/components/MediaPreview.module.css");
 const assetImg = read("src/components/AssetImg.tsx");
+const latestVideo = read("src/components/LatestVideoWidget.tsx");
 const videoCard = read("src/components/VideoCard.tsx");
 const rail = read("src/components/ArtifactWorkRail.tsx");
 const daySchedule = read("src/app/(app)/schedule/DayByDaySchedule.tsx");
@@ -29,6 +30,12 @@ assert.match(previewCss, /prefers-reduced-motion/);
 for (const source of [assetImg, videoCard, rail, daySchedule]) {
   assert.match(source, /MediaPreview/);
 }
+
+// The channel hero is an owner-side artifact view. A legacy upload without a
+// retained thumbnail must show a paused retained-master frame, never a stale
+// public YouTube hqdefault image.
+assert.match(latestVideo, /videoStillKey=\{v\?\.videoKey/);
+assert.doesNotMatch(latestVideo, /i\.ytimg\.com|fallbackSource="youtube"/);
 
 for (const source of [videoCard, rail, daySchedule]) {
   assert.match(source, /fallbackSource="youtube"/);

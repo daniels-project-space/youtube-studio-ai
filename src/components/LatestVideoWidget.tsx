@@ -2,7 +2,7 @@
 
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { AssetImg } from "./AssetImg";
+import { MediaPreview } from "./MediaPreview";
 import { SectionTitle } from "./PageHeader";
 import { IconExternal } from "./icons";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -15,6 +15,8 @@ type VideoRow = {
   status: string;
   youtubeVideoId?: string;
   thumbnailKey?: string | null;
+  /** Retained final master. Used as a truthful still when a legacy row has no thumbnail asset. */
+  videoKey?: string | null;
   durationSec?: number;
   createdAt?: number;
 };
@@ -28,8 +30,9 @@ function fmtDur(s?: number): string {
 
 /**
  * "Latest video" hero widget — the most recently finished video for the owner
- * (or a single channel), with its real R2 custom thumbnail (private-draft safe),
- * title, duration and a YouTube watch link.
+ * (or a single channel), with the retained R2 thumbnail or a paused frame from
+ * its saved master. Public YouTube artwork is deliberately never used here:
+ * legacy uploads must remain visibly tied to the actual retained artifact.
  */
 export function LatestVideoWidget({
   ownerId,
@@ -54,12 +57,12 @@ export function LatestVideoWidget({
         className="glass latest-video-card"
       >
         <div className="latest-video-thumb" style={{ position: "relative", aspectRatio: "16 / 9", borderRadius: 10, overflow: "hidden" }}>
-          <AssetImg
-            k={v?.thumbnailKey ?? undefined}
+          <MediaPreview
+            assetKey={v?.thumbnailKey ?? undefined}
+            videoStillKey={v?.videoKey ?? undefined}
             alt={v?.title ?? "latest video"}
-            fallbackSrc={v?.youtubeVideoId ? `https://i.ytimg.com/vi/${v.youtubeVideoId}/hqdefault.jpg` : undefined}
-            fallbackSource="youtube"
             style={{ width: "100%", height: "100%" }}
+            unavailableLabel="Retained preview unavailable"
           />
           {v?.durationSec ? (
             <span
