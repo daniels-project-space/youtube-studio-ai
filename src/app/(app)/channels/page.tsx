@@ -216,6 +216,17 @@ export default function ChannelsPage() {
             // art is missing.
             const identityArtwork = c.identity?.bannerKey;
             const previewArtwork = identityArtwork ?? latestArtwork ?? planArtwork;
+            // Identity artwork already explains itself through the card name
+            // and avatar. Only label an image when it is a fallback so the
+            // fleet scan stays quiet while still being honest about artwork
+            // provenance.
+            const previewLabel = identityArtwork
+              ? null
+              : latestArtwork
+                ? "Latest render"
+                : planArtwork
+                  ? "Planned thumbnail"
+                  : "Channel artwork";
             const setupChecks = [
               linked,
               Boolean(c.identity?.imageKey && c.identity?.niche),
@@ -254,9 +265,7 @@ export default function ChannelsPage() {
                   aspectRatio="16 / 7"
                   className="channel-card-banner"
                 >
-                  <span className="channel-card-preview-label">
-                    {identityArtwork ? "Channel identity" : latestArtwork ? "Latest render" : planArtwork ? "Planned thumbnail" : "Channel artwork"}
-                  </span>
+                  {previewLabel ? <span className="channel-card-preview-label">{previewLabel}</span> : null}
                 </ChannelBanner>
                 <div className="channel-card-identity">
                   <ChannelAvatar
