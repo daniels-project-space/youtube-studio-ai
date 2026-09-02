@@ -262,7 +262,7 @@ export default function ChannelsPage() {
                   fallbackKeys={[latestArtwork, planArtwork]}
                   name={c.name}
                   palette={c.identity?.palette}
-                  aspectRatio="16 / 7"
+                  aspectRatio="16 / 6"
                   className="channel-card-banner"
                 >
                   {previewLabel ? <span className="channel-card-preview-label">{previewLabel}</span> : null}
@@ -272,8 +272,8 @@ export default function ChannelsPage() {
                     imageKey={c.identity?.imageKey}
                     name={c.name}
                     palette={c.identity?.palette}
-                    size={52}
-                    radius={12}
+                    size={44}
+                    radius={11}
                   />
                   <div className="channel-card-title">
                     <Link href={`/channels/${c.slug}`}>

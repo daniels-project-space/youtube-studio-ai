@@ -20,24 +20,6 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="studio-ambient" aria-hidden="true">
               <span />
               <span />
-              <span />
-              <svg
-                className="studio-ambient-map"
-                viewBox="0 0 1200 760"
-                preserveAspectRatio="xMidYMid slice"
-              >
-                <defs>
-                  <linearGradient id="studio-signal-gradient" x1="0" y1="0" x2="1" y2="1">
-                    <stop offset="0" stopColor="#73ddff" />
-                    <stop offset="0.5" stopColor="#a78bfa" />
-                    <stop offset="1" stopColor="#ff7356" />
-                  </linearGradient>
-                </defs>
-                <path className="studio-ambient-path" d="M-80 548C170 394 318 650 552 492S910 252 1280 402" />
-                <path className="studio-ambient-path studio-ambient-path-ghost" d="M-100 588C156 438 346 696 580 526S930 294 1300 448" />
-                <circle className="studio-ambient-node" cx="552" cy="492" r="5" />
-                <circle className="studio-ambient-node studio-ambient-node-late" cx="910" cy="332" r="4" />
-              </svg>
             </div>
             <Sidebar />
             <div className="studio-workspace">

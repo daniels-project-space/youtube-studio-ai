@@ -7,7 +7,6 @@ import {
   useConvexAuth,
 } from "convex/react";
 import styles from "./StudioSessionGate.module.css";
-import { StudioMark } from "@/components/StudioMark";
 
 type TokenState = "loading" | "authenticated" | "unauthenticated";
 
@@ -92,30 +91,16 @@ function StudioSessionGate({ state }: { state: "loading" | "unavailable" }) {
       aria-busy={loading || undefined}
       aria-label={loading ? "Securing studio session" : "Studio connection unavailable"}
     >
-      <section className={`${styles.card} glass glass-shine`}>
-        <div className={styles.visual} aria-hidden="true">
-          <span className={styles.orbit} />
-          <span className={styles.orbitInner} />
-          <span className={styles.mark}>
-            <StudioMark width={44} height={44} />
-          </span>
-          <i className={styles.sweep} />
-        </div>
-        <div className={styles.copy}>
-          <span className={styles.eyebrow}>AutoStudio / signed workspace</span>
-          <h1 className={styles.title}>
-            {loading ? "Opening Studio" : "Studio offline"}
-          </h1>
-          <p className={styles.body}>
-            {loading
-              ? "Loading channels, runs, and release controls."
-              : "Live production data could not be reached."}
-          </p>
-          <span className={styles.status} data-state={state}>
-            <span className={styles.statusDot} aria-hidden="true" />
-            {loading ? "Syncing production" : "No live records shown"}
-          </span>
-        </div>
+      <section className={styles.card}>
+        <span className={styles.status} data-state={state}>
+          <span className={styles.statusDot} aria-hidden="true" />
+          {loading ? "Connecting to production" : "Production connection unavailable"}
+        </span>
+        <p className={styles.message}>
+          {loading
+            ? "Opening your workspace…"
+            : "Live data is unavailable. Rendering and publishing remain paused until it reconnects."}
+        </p>
         {!loading ? (
           <button
             type="button"
@@ -125,14 +110,6 @@ function StudioSessionGate({ state }: { state: "loading" | "unavailable" }) {
             Retry live data
           </button>
         ) : null}
-        <div className={styles.rail} aria-hidden="true">
-          <span data-active={loading || undefined}>Identity</span>
-          <i />
-          <span>Channels</span>
-          <i />
-          <span>Release</span>
-        </div>
-        <p className={styles.safety}>Rendering and publishing stay paused.</p>
       </section>
     </main>
   );

@@ -56,6 +56,7 @@ export function LivePipeline({
   planSource?: "frozen" | "legacy";
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [selectedPhase, setSelectedPhase] = useState<LivePipelinePhase | null>(null);
   const complete = nodes.filter((node) => ["ok", "skipped"].includes(nodeStatus(node))).length;
   const failed = nodes.filter((node) => nodeStatus(node) === "failed").length;
   const active = nodes.find((node) => nodeStatus(node) === "running");
@@ -63,6 +64,16 @@ export function LivePipeline({
   const overallState = failed > 0 ? "blocked" : active ? "active" : complete === nodes.length ? "complete" : "queued";
   const receiptPercent = nodes.length ? Math.round((complete / nodes.length) * 100) : 0;
   const recordedCost = nodes.reduce((sum, node) => sum + (node.stage?.cost ?? 0), 0);
+  const blockedNode = nodes.find((node) => nodeStatus(node) === "failed");
+  const defaultInspectionPhase = blockedNode
+    ? livePipelinePhaseForBlock(blockedNode.block)
+    : active
+      ? livePipelinePhaseForBlock(active.block)
+      : null;
+  const inspectionPhase = selectedPhase ?? defaultInspectionPhase;
+  const inspectionNodes = inspectionPhase
+    ? nodes.filter((node) => livePipelinePhaseForBlock(node.block) === inspectionPhase)
+    : [];
 
   return (
     <div className={styles.root} data-state={overallState}>
@@ -77,7 +88,7 @@ export function LivePipeline({
                 : failed
                   ? "A recorded stage needs attention before release can continue"
                   : complete === nodes.length
-                    ? "All stages complete"
+                    ? "All stage receipts are recorded"
                     : planSource === "frozen"
                       ? "Waiting for the next stage"
                       : "Using the saved legacy plan"}
@@ -124,7 +135,16 @@ export function LivePipeline({
 
       <div className={styles.phaseStrip} aria-label="Production phase progress">
         {phaseSummaries.map((summary, index) => (
-          <div className={styles.phase} data-state={summary.state} key={summary.phase} title={describeLivePipelinePhase(summary)}>
+          <button
+            type="button"
+            className={styles.phase}
+            data-state={summary.state}
+            data-selected={inspectionPhase === summary.phase || undefined}
+            key={summary.phase}
+            title={describeLivePipelinePhase(summary)}
+            aria-pressed={inspectionPhase === summary.phase}
+            onClick={() => setSelectedPhase((current) => current === summary.phase ? null : summary.phase)}
+          >
             <span className={styles.phaseOrder}>{String(index + 1).padStart(2, "0")}</span>
             <div className={styles.phaseTopline}>
               <span className={styles.phaseDot} aria-hidden="true" />
@@ -132,32 +152,31 @@ export function LivePipeline({
             </div>
             <div className={styles.phaseProgress}>
               <strong>{summary.verified}/{summary.total}</strong>
-              <span>done</span>
+              <span>receipts</span>
             </div>
-            <span className={styles.phaseCaption}>{describeLivePipelinePhase(summary)}</span>
-          </div>
+          </button>
         ))}
       </div>
 
-      <div className={styles.stageList}>
-        {nodes.map((node, index) => {
+      {inspectionPhase ? (
+        <section className={styles.inspectionShelf} aria-label={`${LIVE_PIPELINE_PHASE_LABEL[inspectionPhase]} stage receipts`}>
+          <header className={styles.inspectionHeader}>
+            <span>Phase receipts</span>
+            <strong>{LIVE_PIPELINE_PHASE_LABEL[inspectionPhase]}</strong>
+            <small>{inspectionNodes.length} stages</small>
+          </header>
+          <div className={styles.stageList}>
+        {inspectionNodes.map((node) => {
           const status = nodeStatus(node);
           const phase: LivePipelinePhase = livePipelinePhaseForBlock(node.block);
-          const isPhaseStart = index === 0 || livePipelinePhaseForBlock(nodes[index - 1]!.block) !== phase;
-          const isPhaseEnd = index === nodes.length - 1 || livePipelinePhaseForBlock(nodes[index + 1]!.block) !== phase;
+          const index = nodes.indexOf(node);
           const stage = node.stage;
           const running = status === "running";
           const open = expanded === node.block;
           const hasDetail = Boolean(stage && (stage.inputs !== undefined || stage.outputs !== undefined || stage.error));
 
           return (
-            <div className={styles.stageGroup} data-phase={phase} key={node.block}>
-              {isPhaseStart && (
-                <div className={styles.phaseDivider}>
-                  <span>{LIVE_PIPELINE_PHASE_LABEL[phase]}</span>
-                  <i aria-hidden="true" />
-                </div>
-              )}
+            <div data-phase={phase} key={node.block}>
               <div className={`${styles.stageCard} glass`} data-status={status} data-open={open ? "true" : undefined}>
                 <button
                   type="button"
@@ -168,7 +187,6 @@ export function LivePipeline({
                 >
                   <span className={styles.stageTrack} aria-hidden="true">
                     <span className={`${styles.stageIndex} ${running ? "studio-pulse" : ""}`}>{index + 1}</span>
-                    {!isPhaseEnd && <span className={styles.stageLine} />}
                   </span>
                   <span className={styles.stageIdentity}>
                     <strong>{blockLabel(node.block)}</strong>
@@ -189,7 +207,11 @@ export function LivePipeline({
             </div>
           );
         })}
-      </div>
+          </div>
+        </section>
+      ) : (
+        <p className={styles.inspectionHint}>Select a phase to inspect its recorded stage receipts.</p>
+      )}
     </div>
   );
 }

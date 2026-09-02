@@ -54,6 +54,7 @@ import {
 } from "@/engine/channelCompositionCatalog";
 import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
 import { useOperationsAccess } from "@/components/OperationsAccess";
+import { NicheMotionGlyph } from "@/components/NicheMotionGlyph";
 import styles from "./newChannel.module.css";
 
 type Phase = "form" | "building" | "error";
@@ -1318,7 +1319,7 @@ export default function NewChannelWizard() {
                 aria-pressed={on}
                 title={`${n.blurb}${!defaultFamilyReadiness.ready && defaultFamilyReadiness.blockers[0] ? ` Held: ${defaultFamilyReadiness.blockers[0]}` : ""}`}
               >
-                <span className={styles.nicheMark}><NicheGlyph index={index} /></span>
+                <span className={styles.nicheMark}><NicheMotionGlyph niche={n.key} /></span>
                 <span className={styles.nicheCopy}>
                   <span className={styles.nicheTop}><strong>{n.label}</strong><small>{String(index + 1).padStart(2, "0")}</small></span>
                   <span className={styles.nicheMeta}><span>{n.difficulty}</span><span data-ready={defaultFamilyReadiness.ready ? "true" : "false"}>{defaultFamilyReadiness.ready ? "route ready" : "start held"}</span></span>
@@ -1975,19 +1976,6 @@ export default function NewChannelWizard() {
             : <button onClick={() => void create(Date.now())} disabled={(publishMode !== "draft" || toggles.crosspost) && !approvedForPublish} style={{ ...btnPrimary, opacity: (publishMode !== "draft" || toggles.crosspost) && !approvedForPublish ? 0.5 : 1 }}>{approveSetupSpend ? "Build channel" : "Save channel plan"}</button>}
       </div>
     </main>
-  );
-}
-
-function NicheGlyph({ index }: { index: number }) {
-  const variant = index % 4;
-  return (
-    <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
-      <circle cx="16" cy="16" r="11.5" stroke="currentColor" strokeWidth="1" opacity=".42" />
-      {variant === 0 && <><path d="M9 18.5 14 11l3.5 10 5.5-8" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /><circle cx="9" cy="18.5" r="1.5" fill="currentColor" /><circle cx="23" cy="13" r="1.5" fill="currentColor" /></>}
-      {variant === 1 && <><path d="M9 16h14M16 9v14" stroke="currentColor" strokeWidth="1" opacity=".6" /><path d="m11 20 5-8 5 8Z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /></>}
-      {variant === 2 && <><path d="M10 21c2-7 4-10 7-10 2.5 0 4 2 5 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /><path d="M10 12h5M18 21h4" stroke="currentColor" strokeWidth="1" opacity=".65" /></>}
-      {variant === 3 && <><circle cx="16" cy="16" r="5" stroke="currentColor" strokeWidth="1.5" /><path d="M16 7v4M16 21v4M7 16h4M21 16h4" stroke="currentColor" strokeWidth="1.2" /></>}
-    </svg>
   );
 }
 

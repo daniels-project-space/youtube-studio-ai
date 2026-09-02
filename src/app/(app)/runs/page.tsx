@@ -138,6 +138,11 @@ function ProductionRunRow({ run, index }: { run: RunRow; index: number }) {
   const failure = run.status === "failed" && run.error
     ? diagnoseRunFailure(run.error)
     : null;
+  const destination = failure
+    ? "Inspect"
+    : run.youtubeVideoId
+      ? "Output + record"
+      : "Open record";
   return (
     <Link href={`/runs/${run._id}`} className={styles.runRow} data-status={run.status}>
       <span className={styles.runIndex}>{String(index + 1).padStart(2, "0")}</span>
@@ -146,18 +151,20 @@ function ProductionRunRow({ run, index }: { run: RunRow; index: number }) {
         <strong>{run.channelName}</strong>
         <small>{fmtDateTime(run.startedAt)} · {run._id.slice(0, 8)}</small>
         {failure && (
-          <span className={styles.runFailure} title={run.error} role="note">
-            <b>{failure.faultDomain}</b>
-            <span>{failure.cause}</span>
-            <em>{failure.nextAction}</em>
+          <span
+            className={styles.runDiagnosis}
+            title={`${failure.cause} ${failure.nextAction}`}
+            aria-label={`Failure domain: ${failure.faultDomain}. Open this run for the retained diagnosis and repair direction.`}
+          >
+            {failure.faultDomain}
           </span>
         )}
       </span>
       <span className={styles.runStatus}><StageBadge status={run.status} /></span>
       <span className={styles.runDatum}><small>Elapsed</small><strong className={live ? styles.liveValue : undefined}><Elapsed from={run.startedAt} to={live ? undefined : run.finishedAt} /></strong></span>
       <span className={styles.runDatum}><small>Cost</small><strong>{fmtUsd(run.costTotal)}</strong></span>
-      <span className={styles.runEvidence}><ReleaseEvidenceBadge status={run.releaseEvidenceStatus} /></span>
-      <span className={styles.runOpen}>{run.youtubeVideoId ? "Output + record" : "Open record"}<b aria-hidden="true">→</b></span>
+      <span className={styles.runEvidence}><ReleaseEvidenceBadge status={run.releaseEvidenceStatus} compact /></span>
+      <span className={styles.runOpen}>{destination}<b aria-hidden="true">→</b></span>
     </Link>
   );
 }

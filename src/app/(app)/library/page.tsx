@@ -20,16 +20,15 @@ import {
   LibraryFilters,
   type LibraryFilterState,
 } from "@/components/LibraryFilters";
-import { IconLibrary, IconChevron, IconSpark } from "@/components/icons";
+import { IconLibrary, IconSpark } from "@/components/icons";
 import {
-  isLibraryGroupExpanded,
   LIBRARY_PAGE_SIZE,
   pageLibraryGroup,
 } from "./libraryPaging";
 import styles from "./library.module.css";
 
-/** Open lightbox = which channel group + which index within that group. */
-type LightboxTarget = { slug: string; index: number };
+/** Open lightbox = the index within the current filtered master collection. */
+type LightboxTarget = { index: number };
 type CollectionMode = "active" | "archived";
 export default function LibraryPage() {
   const ownerId = useOwnerId();
@@ -52,8 +51,7 @@ export default function LibraryPage() {
     from: "",
     to: "",
   });
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
+  const [visibleLimit, setVisibleLimit] = useState(LIBRARY_PAGE_SIZE);
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
   const [collection, setCollection] = useState<CollectionMode>("active");
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
@@ -98,38 +96,19 @@ export default function LibraryPage() {
     return out;
   }, [libraryVideos, filters, selectedSlug, collection]);
 
-  // Group by channel, preserving the sorted order within each group.
-  const groups = useMemo(() => {
-    const map = new Map<
-      string,
-      { slug: string; name: string; videos: VideoRow[] }
-    >();
-    for (const v of filtered) {
-      const g = map.get(v.channelSlug);
-      if (g) g.videos.push(v);
-      else
-        map.set(v.channelSlug, {
-          slug: v.channelSlug,
-          name: v.channelName,
-          videos: [v],
-        });
-    }
-    return [...map.values()];
-  }, [filtered]);
+  // The vault is an actual collection, not a stack of mostly-collapsed
+  // channel containers. Channel remains a first-class filter and each card
+  // keeps its channel identity, but matching masters share one dense grid.
+  const page = pageLibraryGroup(filtered, visibleLimit);
+  const matchingChannelCount = new Set(filtered.map((video) => video.channelSlug)).size;
+  const reviewCount = filtered.filter(
+    (video) => video.releaseEvidenceStatus !== "release_evidence_recorded",
+  ).length;
+  const lightboxVideos = lightbox ? filtered : [];
 
-  const toggle = (slug: string, isExpanded: boolean) =>
-    setExpandedGroups((current) => ({ ...current, [slug]: !isExpanded }));
-
-  // Videos in the currently-open lightbox group (prev/next scope).
-  const lightboxVideos = lightbox
-    ? (groups.find((g) => g.slug === lightbox.slug)?.videos ?? [])
-    : [];
-
-  const openLightbox = (slug: string, video: VideoRow) => {
-    const g = groups.find((gr) => gr.slug === slug);
-    if (!g) return;
-    const index = g.videos.findIndex((v) => v._id === video._id);
-    setLightbox({ slug, index: Math.max(0, index) });
+  const openLightbox = (video: VideoRow) => {
+    const index = filtered.findIndex((item) => item._id === video._id);
+    setLightbox({ index: Math.max(0, index) });
   };
 
   const loading = libraryVideos === undefined || channels === undefined;
@@ -146,7 +125,7 @@ export default function LibraryPage() {
         state,
       });
       setRecentChange({ video, state });
-      if (lightbox?.slug === video.channelSlug) setLightbox(null);
+      if (lightbox && filtered[lightbox.index]?._id === video._id) setLightbox(null);
     } finally {
       setBusyIds((current) => {
         const next = new Set(current);
@@ -175,42 +154,49 @@ export default function LibraryPage() {
         subtitle="Open, repackage, or archive saved videos."
       />
 
-      <section className={styles.collectionBar} aria-label="Library collections">
-        <div className={styles.collectionTabs} role="tablist" aria-label="Video collection">
-          <button type="button" role="tab" aria-selected={collection === "active"} onClick={() => setCollection("active")}>
-            <span>Active masters</span><strong>{loading ? "—" : activeCount}</strong>
-          </button>
-          <button type="button" role="tab" aria-selected={collection === "archived"} onClick={() => setCollection("archived")}>
-            <span>Archive</span><strong>{loading ? "—" : archivedCount}</strong>
-          </button>
-        </div>
-        <p>
-          {collection === "active"
-            ? "Saved and published videos."
-            : "Hidden videos you can restore."}
-        </p>
-        <span className={styles.evidenceNote}>
-          <i aria-hidden="true" />
-          Verified marks a saved final master.
-        </span>
-      </section>
+      <div className={styles.libraryDashboard}>
+        <section className={styles.collectionBar} aria-label="Library collections">
+          <div className={styles.collectionTabs} role="tablist" aria-label="Video collection">
+            <button type="button" role="tab" aria-selected={collection === "active"} onClick={() => setCollection("active")}>
+              <span>Active masters</span><strong>{loading ? "—" : activeCount}</strong>
+            </button>
+            <button type="button" role="tab" aria-selected={collection === "archived"} onClick={() => setCollection("archived")}>
+              <span>Archive</span><strong>{loading ? "—" : archivedCount}</strong>
+            </button>
+          </div>
+          <span
+            className={styles.evidenceNote}
+            title="Verified marks a saved final master"
+            aria-label="Verified marks a saved final master"
+          >
+            <i aria-hidden="true" />
+            Final-master status
+          </span>
+        </section>
+        <dl className={styles.libraryMetrics} aria-label="Current library summary">
+          <LibraryMetric label="Visible" value={loading ? "—" : String(filtered.length)} />
+          <LibraryMetric label="Channels" value={loading ? "—" : String(matchingChannelCount)} />
+          <LibraryMetric label="Review" value={loading ? "—" : String(reviewCount)} tone={reviewCount ? "attention" : "ready"} />
+        </dl>
+      </div>
 
       {collection === "active" ? <div className={styles.latestRail}>
         <ArtifactWorkRail
           videos={libraryVideos === undefined ? undefined : filtered}
-          onOpen={(video) => openLightbox(video.channelSlug, video)}
-          title="Latest visible work"
-          description="Open recent work."
+          onOpen={openLightbox}
+          title="Recent masters"
+          description="Open saved output."
           emptyMessage="No saved videos match these filters."
+          maxItems={5}
         />
       </div> : null}
 
       {collection === "active" ? (
-        <details id="thumbnail-refresh" className={`${styles.packagingWorkshop} glass`} open>
+        <details id="thumbnail-refresh" className={`${styles.packagingWorkshop} glass`}>
           <summary>
             <span className={styles.workshopIcon} aria-hidden="true"><IconSpark width={18} height={18} /></span>
-            <span><small>Refresh exact saved runs</small><strong>Nano Banana Pro review queue</strong></span>
-            <p>Private candidate, then exact YouTube confirmation.</p>
+            <span><small>Thumbnail review</small><strong>Exact saved runs</strong></span>
+            <p>Private candidates and confirmed replacements.</p>
             <i aria-hidden="true" />
           </summary>
           <div className={styles.workshopBody}>
@@ -234,90 +220,50 @@ export default function LibraryPage() {
 
       {loading ? (
         <SkeletonList rows={4} />
-      ) : groups.length === 0 ? (
+      ) : filtered.length === 0 ? (
         <EmptyState
           title={collection === "active" ? "No active masters" : "Archive is empty"}
           description={collection === "active"
-            ? "Finished and published videos will appear here, grouped by channel."
-            : "Archived masters remain recoverable here until you restore them."}
+            ? "Finished and published videos will appear here."
+            : "Hidden videos you can restore."}
           icon={<IconLibrary width={24} height={24} />}
         />
       ) : (
-        <div className={styles.archive}>
-          {groups.map((g, groupIndex) => {
-            const isExpanded = isLibraryGroupExpanded(
-              groupIndex,
-              expandedGroups[g.slug],
-            );
-            const page = pageLibraryGroup(g.videos, visibleLimits[g.slug]);
-            return (
-              <section key={g.slug} className={styles.channel}>
-                <button
-                  type="button"
-                  onClick={() => toggle(g.slug, isExpanded)}
-                  className={styles.channelHeader}
-                  data-collapsed={!isExpanded}
-                  aria-expanded={isExpanded}
-                >
-                  <IconChevron width={16} height={16} />
-                  <h2>{g.name}</h2>
-                  <span className={styles.count}>{g.videos.length} {g.videos.length === 1 ? "master" : "masters"}</span>
-                </button>
-
-                {isExpanded && (
-                  <>
-                    <VideoGrid
-                      videos={page.visible}
-                      onOpen={(v) => openLightbox(g.slug, v)}
-                      libraryAction={operationsAccess === "owner" ? {
-                        label: collection === "active" ? "Archive" : "Restore",
-                        busyIds,
-                        onAction: (video) => void changeLibraryState(video, collection === "active" ? "archived" : "active"),
-                      } : undefined}
-                    />
-                    {page.total > LIBRARY_PAGE_SIZE ? (
-                      <div className={styles.paging}>
-                        <p aria-live="polite">
-                          Showing {page.visible.length} of {page.total}
-                        </p>
-                        <div className={styles.actions}>
-                          {page.visible.length > LIBRARY_PAGE_SIZE ? (
-                            <button
-                              type="button"
-                              className="btn-secondary"
-                              onClick={() =>
-                                setVisibleLimits((current) => ({
-                                  ...current,
-                                  [g.slug]: LIBRARY_PAGE_SIZE,
-                                }))
-                              }
-                            >
-                              Latest {LIBRARY_PAGE_SIZE}
-                            </button>
-                          ) : null}
-                          {page.remaining > 0 ? (
-                            <button
-                              type="button"
-                              className="btn-secondary"
-                              onClick={() =>
-                                setVisibleLimits((current) => ({
-                                  ...current,
-                                  [g.slug]: page.visible.length + page.nextBatchSize,
-                                }))
-                              }
-                            >
-                              Show next {page.nextBatchSize}
-                            </button>
-                          ) : null}
-                        </div>
-                      </div>
-                    ) : null}
-                  </>
-                )}
-              </section>
-            );
-          })}
-        </div>
+        <section className={styles.vault} aria-labelledby="library-vault-title">
+          <header className={styles.vaultHeader}>
+            <div>
+              <span>Master vault</span>
+              <h2 id="library-vault-title">{collection === "active" ? "Saved video output" : "Archived video output"}</h2>
+            </div>
+            <p aria-live="polite">Showing {page.visible.length} of {page.total}</p>
+          </header>
+          <VideoGrid
+            videos={page.visible}
+            onOpen={openLightbox}
+            libraryAction={operationsAccess === "owner" ? {
+              label: collection === "active" ? "Archive" : "Restore",
+              busyIds,
+              onAction: (video) => void changeLibraryState(video, collection === "active" ? "archived" : "active"),
+            } : undefined}
+          />
+          {page.total > LIBRARY_PAGE_SIZE ? (
+            <div className={styles.paging}>
+              <span />
+              <div className={styles.actions}>
+                {page.visible.length > LIBRARY_PAGE_SIZE ? (
+                  <button type="button" className="btn-secondary" onClick={() => setVisibleLimit(LIBRARY_PAGE_SIZE)}>
+                    Latest {LIBRARY_PAGE_SIZE}
+                  </button>
+                ) : null}
+                {page.remaining > 0 ? (
+                  <button type="button" className="btn-secondary" onClick={() => setVisibleLimit(page.visible.length + page.nextBatchSize)}>
+                    Show next {page.nextBatchSize}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </section>
       )}
 
       {lightbox && lightboxVideos.length > 0 && (
@@ -341,4 +287,8 @@ export default function LibraryPage() {
       ) : null}
     </div>
   );
+}
+
+function LibraryMetric({ label, value, tone = "neutral" }: { label: string; value: string; tone?: "neutral" | "attention" | "ready" }) {
+  return <div data-tone={tone}><dt>{label}</dt><dd>{value}</dd></div>;
 }

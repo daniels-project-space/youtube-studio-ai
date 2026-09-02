@@ -135,7 +135,9 @@ assert.match(wizard, /defaultFamilyReadiness\.blockers\[0\]/);
 // The foreground route, full catalog, advanced pipeline controls, and durable
 // build receipts use explicit progressive disclosure without inventing media.
 assert.match(wizard, /<h1>Create a channel<\/h1>/);
-assert.match(wizard, /function NicheGlyph/);
+assert.match(wizard, /import \{ NicheMotionGlyph \} from "@\/components\/NicheMotionGlyph"/);
+assert.match(wizard, /<NicheMotionGlyph niche=\{n\.key\}/);
+assert.doesNotMatch(wizard, /function NicheGlyph/);
 assert.match(wizard, /const FEATURED_NICHE_KEYS = new Set\(/);
 assert.match(wizard, /const \[showAllNiches, setShowAllNiches\] = useState\(false\)/);
 assert.match(wizard, /const visibleNiches = showAllNiches \|\| selectedNicheOutsideFeatured/);

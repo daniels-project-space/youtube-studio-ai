@@ -1,4 +1,4 @@
-export const LIBRARY_PAGE_SIZE = 4;
+export const LIBRARY_PAGE_SIZE = 8;
 
 export type LibraryPage<T> = {
   visible: T[];
@@ -7,12 +7,7 @@ export type LibraryPage<T> = {
   nextBatchSize: number;
 };
 
-/** Open the newest matching channel by default; explicit operator choices always win. */
-export function isLibraryGroupExpanded(groupIndex: number, override?: boolean): boolean {
-  return override ?? groupIndex === 0;
-}
-
-/** Keep one desktop row visible while retaining deterministic access to every match. */
+/** Keep two dense desktop rows visible while retaining deterministic access to every match. */
 export function pageLibraryGroup<T>(items: readonly T[], requestedLimit?: number): LibraryPage<T> {
   const limit = Math.max(
     LIBRARY_PAGE_SIZE,

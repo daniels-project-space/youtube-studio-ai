@@ -33,13 +33,15 @@ assert.match(
 );
 assert.match(
   source,
-  /Rendering and publishing stay paused\./,
+  /Rendering and publishing remain paused until it reconnects\./,
   "the connection fallback must state that it does not fabricate or start work",
 );
 assert.match(
   source,
   /<StudioSessionGate state="loading" \/>/,
-  "loading and unavailable states should use the same polished, scoped shell",
+  "loading and unavailable states should use the same compact, scoped shell",
 );
+assert.doesNotMatch(source, /StudioMark|styles\.orbit|styles\.rail|glass-shine/,
+  "the connection state must remain a compact utility, not a decorative screen");
 
 console.log("Convex client auth gate regression tests passed");
