@@ -180,6 +180,9 @@ export function ThumbnailRefreshInventoryPanel({
   const [retirementConfirmation, setRetirementConfirmation] = useState("");
   const [replacementRunId, setReplacementRunId] = useState<string | null>(null);
   const [replacementConfirmation, setReplacementConfirmation] = useState("");
+  const [showErnieBatchConfirmation, setShowErnieBatchConfirmation] = useState(false);
+  const [ernieBatchConfirmation, setErnieBatchConfirmation] = useState("");
+  const [ernieBatchBusy, setErnieBatchBusy] = useState(false);
 
   const loadInventory = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch("/api/thumbnail-refresh", { cache: "no-store", signal });
@@ -344,6 +347,33 @@ export function ThumbnailRefreshInventoryPanel({
     }
   };
 
+  const queueReviewedErnieBatch = async () => {
+    if (ernieBatchBusy || ernieBatchConfirmation !== "APPLY 30") return;
+    setErnieBatchBusy(true);
+    setActionMessage(null);
+    try {
+      const response = await fetch("/api/thumbnail-refresh/ernie-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ confirmReplaceAll: ernieBatchConfirmation }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string; batchCount?: number };
+      if (!response.ok || !payload.ok) {
+        throw new Error(payload.error || "Could not queue the reviewed ERNIE thumbnail batch");
+      }
+      setActionMessage(`${payload.batchCount ?? 30} reviewed native ERNIE thumbnails queued for exact YouTube video bindings.`);
+      setShowErnieBatchConfirmation(false);
+      setErnieBatchConfirmation("");
+      await loadInventory();
+    } catch (batchError) {
+      setActionMessage(batchError instanceof Error
+        ? batchError.message
+        : "Could not queue the reviewed ERNIE thumbnail batch");
+    } finally {
+      setErnieBatchBusy(false);
+    }
+  };
+
   const rows = useMemo(
     () => inventory?.filter((row) => !selectedChannelSlug || row.channelSlug === selectedChannelSlug) ?? [],
     [inventory, selectedChannelSlug],
@@ -367,6 +397,49 @@ export function ThumbnailRefreshInventoryPanel({
           <span data-tone="ready"><small>Current proof</small><strong>{inventory === null ? "—" : counts.current_golden_candidate}</strong></span>
         </div>
       </header>
+
+      <div className={styles.ernieBatch}>
+        <div>
+          <span className={styles.ernieBatchMark} aria-hidden="true">E</span>
+          <strong>Reviewed ERNIE batch</strong>
+          <small>30 native images · exact video bindings</small>
+        </div>
+        {!showErnieBatchConfirmation ? (
+          <button
+            type="button"
+            className={styles.ernieBatchAction}
+            disabled={ernieBatchBusy}
+            onClick={() => {
+              setShowErnieBatchConfirmation(true);
+              setErnieBatchConfirmation("");
+            }}
+          >Apply all 30</button>
+        ) : (
+          <div className={styles.ernieBatchConfirm}>
+            <label htmlFor="ernie-batch-confirm">Type <code>APPLY 30</code></label>
+            <input
+              id="ernie-batch-confirm"
+              value={ernieBatchConfirmation}
+              onChange={(event) => setErnieBatchConfirmation(event.target.value.trim())}
+              autoComplete="off"
+              autoFocus
+            />
+            <button
+              type="button"
+              disabled={ernieBatchBusy || ernieBatchConfirmation !== "APPLY 30"}
+              onClick={() => void queueReviewedErnieBatch()}
+            >{ernieBatchBusy ? "Queueing…" : "Confirm all"}</button>
+            <button
+              type="button"
+              disabled={ernieBatchBusy}
+              onClick={() => {
+                setShowErnieBatchConfirmation(false);
+                setErnieBatchConfirmation("");
+              }}
+            >Cancel</button>
+          </div>
+        )}
+      </div>
 
       {inventory === null && !error ? <p className={styles.state}>Loading retained thumbnail evidence…</p> : null}
       {error ? <p className={styles.state} role="status">{error}</p> : null}

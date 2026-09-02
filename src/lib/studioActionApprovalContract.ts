@@ -8,6 +8,8 @@ export type StudioAction =
   | "thumbnail-refresh-candidate"
   /** Batch-imported, QA-passed ERNIE thumbnail candidate; source/YouTube remain untouched. */
   | "thumbnail-ernie-batch-import"
+  /** One owner-confirmed, SHA-pinned ERNIE batch; every video still gets its own durable replacement plan. */
+  | "thumbnail-ernie-batch-apply"
   | "youtube-thumbnail-replacement"
   | "youtube-video-retire"
   | "youtube-channel-create"
