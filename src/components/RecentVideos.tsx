@@ -5,7 +5,7 @@ import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { useAssetUrlState } from "@/lib/asset-url";
-import { AssetImg } from "./AssetImg";
+import { MediaPreview } from "./MediaPreview";
 import styles from "./RecentVideos.module.css";
 
 type RenderedVideo = {
@@ -31,7 +31,7 @@ function fmtDur(seconds?: number) {
   return `${minutes}:${String(rounded % 60).padStart(2, "0")}`;
 }
 
-/** Recent rendered masters. Cards always open the saved R2 video, never YouTube. */
+/** Recent rendered masters. Cards preview and open only saved R2 media, never YouTube artwork. */
 export function RecentVideos({
   ownerId,
   channelId,
@@ -104,16 +104,12 @@ export function RecentVideos({
                 aria-label={`Open R2 render: ${video.title}`}
               >
                 <div className={styles.media}>
-                  <AssetImg
-                    k={video.thumbnailKey ?? undefined}
+                  <MediaPreview
+                    assetKey={video.thumbnailKey ?? undefined}
+                    videoStillKey={video.videoKey}
                     alt=""
-                    fallbackSrc={
-                      video.youtubeVideoId
-                        ? `https://i.ytimg.com/vi/${video.youtubeVideoId}/hqdefault.jpg`
-                        : undefined
-                    }
-                    fallbackSource="youtube"
                     style={{ width: "100%", height: "100%" }}
+                    unavailableLabel="Retained preview unavailable"
                   />
                   <span className={styles.play} aria-hidden="true">▶</span>
                   {video.durationSec ? (

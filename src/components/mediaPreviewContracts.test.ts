@@ -9,6 +9,7 @@ const preview = read("src/components/MediaPreview.tsx");
 const previewCss = read("src/components/MediaPreview.module.css");
 const assetImg = read("src/components/AssetImg.tsx");
 const latestVideo = read("src/components/LatestVideoWidget.tsx");
+const recentVideos = read("src/components/RecentVideos.tsx");
 const videoCard = read("src/components/VideoCard.tsx");
 const rail = read("src/components/ArtifactWorkRail.tsx");
 const daySchedule = read("src/app/(app)/schedule/DayByDaySchedule.tsx");
@@ -36,6 +37,11 @@ for (const source of [assetImg, videoCard, rail, daySchedule]) {
 // public YouTube hqdefault image.
 assert.match(latestVideo, /videoStillKey=\{v\?\.videoKey/);
 assert.doesNotMatch(latestVideo, /i\.ytimg\.com|fallbackSource="youtube"/);
+
+// The Studio's R2-only carousel filters to saved masters, so a missing
+// thumbnail can always use that exact master as its preview source.
+assert.match(recentVideos, /videoStillKey=\{video\.videoKey\}/);
+assert.doesNotMatch(recentVideos, /i\.ytimg\.com|fallbackSource="youtube"/);
 
 for (const source of [videoCard, rail, daySchedule]) {
   assert.match(source, /fallbackSource="youtube"/);
