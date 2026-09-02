@@ -11,6 +11,7 @@ import {
   listProvenReadyPlanPage,
   markPlanItemProviderStarted,
   markPlanTopicsProviderStarted,
+  recordPlanItemPreparation,
   recordPlanBatchUsage,
   reservePlanBatch,
   savePlanTopics,
@@ -38,6 +39,12 @@ import {
 import { isFinalizedPlanWeekRenderReceipt } from "@/lib/planWeekRenderReceipt";
 import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract";
 import { PLAN_WEEK_RECOVERY_GUARD_VERSION } from "@/lib/planWeekRecoveryContract";
+import {
+  PLAN_WEEK_PREPARATION_VERSION,
+  planWeekPreparationKey,
+  planWeekPreparationManifestSha256,
+  type PlanWeekPreparationManifest,
+} from "@/lib/planWeekPreparation";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
 
@@ -559,6 +566,47 @@ async function main() {
   assert.equal(db.rows("contentPlan").length, 1);
 
   const itemId = saved.itemIds[0];
+  const storedItem = await db.get(itemId);
+  assert.ok(storedItem?.itemKey, "saved plan item has its stable batch item key");
+  const thumbnailKey = `owner/${ownerId}/channel/test-channel/plan/${itemId}.jpg`;
+  const preparation: PlanWeekPreparationManifest = {
+    version: PLAN_WEEK_PREPARATION_VERSION,
+    ownerId,
+    channelId,
+    batchId: admitted.batchId,
+    itemId,
+    itemKey: String(storedItem!.itemKey),
+    requestKey: common.requestKey,
+    channelSlug: "test-channel",
+    frozenAt: Number(storedItem!.createdAt),
+    plan: {
+      topic: String(storedItem!.topic),
+      title: String(storedItem!.title),
+      description: String(storedItem!.description),
+      sceneSeed: String(storedItem!.sceneSeed),
+      thumbnailKey,
+    },
+    execution: { pipeline: [], moduleConfig: {}, seedStore: { channelName: "Test Channel" } },
+    prompts: {
+      script: "Write the frozen planned episode.",
+      narration: "Use the planned channel voice.",
+      shotlist: "Use a purposeful shot list.",
+      visual: "Use the planned visual seed.",
+    },
+  };
+  const preparationPointer = {
+    manifestKey: planWeekPreparationKey(preparation),
+    manifestSha256: planWeekPreparationManifestSha256(preparation),
+  };
+  const frozenPreparation = await invoke<{ state: string; reused: boolean }>(recordPlanItemPreparation, ctx, {
+    ownerId,
+    channelId,
+    batchId: admitted.batchId,
+    itemId,
+    manifest: preparation,
+    ...preparationPointer,
+  });
+  assert.deepEqual(frozenPreparation, { state: "frozen", reused: false });
   const savedNow = Date.now;
   let itemNow = 1_910_000_000_000;
   Date.now = () => itemNow;
@@ -622,7 +670,6 @@ async function main() {
     /finalized provider receipt is missing/,
   );
 
-  const thumbnailKey = `owner/${ownerId}/channel/test-channel/plan/${itemId}.jpg`;
   const receiptScope = {
     ownerId,
     channelId,

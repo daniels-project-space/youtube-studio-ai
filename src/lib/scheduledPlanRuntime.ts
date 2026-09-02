@@ -1,4 +1,8 @@
 import { SCHEDULED_UPLOAD_MIN_LEAD_MS } from "./publishTiming";
+import {
+  assertPlanWeekPreparationPointer,
+  type PlanWeekPreparationPointer,
+} from "./planWeekPreparation";
 
 const HOUR_MS = 60 * 60 * 1_000;
 
@@ -12,6 +16,8 @@ export interface ScheduledPlanRunPayload {
   title: string;
   thumbnailKey: string;
   scheduledAt?: number;
+  /** Absent only for historic plans created before weekly preparation v1. */
+  preparation?: PlanWeekPreparationPointer;
 }
 
 export interface ScheduledPlanCandidate extends ScheduledPlanRunPayload {
@@ -86,6 +92,9 @@ export function normalizeScheduledPlanPayload(
   if (value.scheduledAt !== undefined) {
     normalized.scheduledAt = scheduledTimestamp(value.scheduledAt);
   }
+  if (value.preparation !== undefined) {
+    normalized.preparation = assertPlanWeekPreparationPointer(value.preparation);
+  }
   return normalized;
 }
 
@@ -106,6 +115,18 @@ export function assertScheduledPlanPayloadMatches(
       throw new Error(`scheduled plan payload mismatch: ${key}`);
     }
   }
+  const leftPreparation = left.preparation;
+  const rightPreparation = right.preparation;
+  if (
+    (leftPreparation === undefined) !== (rightPreparation === undefined) ||
+    (leftPreparation && rightPreparation && (
+      leftPreparation.version !== rightPreparation.version ||
+      leftPreparation.manifestKey !== rightPreparation.manifestKey ||
+      leftPreparation.manifestSha256 !== rightPreparation.manifestSha256
+    ))
+  ) {
+    throw new Error("scheduled plan payload mismatch: preparation");
+  }
   return right;
 }
 
@@ -117,6 +138,7 @@ export function scheduledPlanSeed(value: ScheduledPlanRunPayload): Record<string
     plannedTitle: plan.title,
     plannedThumbnailKey: plan.thumbnailKey,
     ...(plan.scheduledAt !== undefined ? { scheduledPublishAt: plan.scheduledAt } : {}),
+    ...(plan.preparation !== undefined ? { planWeekPreparation: plan.preparation } : {}),
   };
 }
 

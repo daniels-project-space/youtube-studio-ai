@@ -2,6 +2,7 @@ import {
   normalizeScheduledPlanPayload,
   type ScheduledPlanRunPayload,
 } from "@/lib/scheduledPlanRuntime";
+import { assertPlanWeekPreparationPointer } from "@/lib/planWeekPreparation";
 import {
   normalizePipelineInvocationSnapshot,
   type PipelineInvocationSnapshot,
@@ -58,6 +59,9 @@ export interface DurablePipelineRunForPublishResume {
   plannedTitle?: string;
   plannedThumbnailKey?: string;
   plannedPublishAt?: number;
+  plannedPreparationVersion?: string;
+  plannedPreparationManifestKey?: string;
+  plannedPreparationManifestSha256?: string;
   pipelineInvocationSnapshot?: unknown;
   pipelineInvocationSha256?: string;
   blockedPublishIntentId?: string;
@@ -241,6 +245,9 @@ export function publishPipelineResumeTriggerRequest(
     run.plannedTitle,
     run.plannedThumbnailKey,
     run.plannedPublishAt,
+    run.plannedPreparationVersion,
+    run.plannedPreparationManifestKey,
+    run.plannedPreparationManifestSha256,
   ].some((value) => value !== undefined);
   if (!hasPlanItem && hasPlanSnapshot) {
     throw new Error("failed pipeline run has a partial scheduled-plan snapshot");
@@ -254,6 +261,19 @@ export function publishPipelineResumeTriggerRequest(
         ...(run.plannedPublishAt !== undefined
           ? { scheduledAt: run.plannedPublishAt }
           : {}),
+        ...(
+          run.plannedPreparationVersion !== undefined ||
+          run.plannedPreparationManifestKey !== undefined ||
+          run.plannedPreparationManifestSha256 !== undefined
+            ? {
+                preparation: assertPlanWeekPreparationPointer({
+                  version: run.plannedPreparationVersion,
+                  manifestKey: run.plannedPreparationManifestKey,
+                  manifestSha256: run.plannedPreparationManifestSha256,
+                }),
+              }
+            : {}
+        ),
       })
     : undefined;
 

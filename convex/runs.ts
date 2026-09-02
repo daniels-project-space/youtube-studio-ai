@@ -15,6 +15,7 @@ import {
   assertScheduledPlanPayloadMatches,
   normalizeScheduledPlanPayload,
 } from "../src/lib/scheduledPlanRuntime";
+import { assertPlanWeekPreparationPointer } from "../src/lib/planWeekPreparation";
 import {
   assertChannelInceptionProbeEnvelopeStructure,
   type ChannelInceptionProbeAttemptCheckpoint,
@@ -1482,6 +1483,11 @@ export const listDueSerializedProgramEpisodeRetries = query({
           title: v.string(),
           thumbnailKey: v.string(),
           scheduledAt: v.optional(v.number()),
+          preparation: v.optional(v.object({
+            version: v.string(),
+            manifestKey: v.string(),
+            manifestSha256: v.string(),
+          })),
         }),
       ),
     }),
@@ -1528,6 +1534,7 @@ export const listDueSerializedProgramEpisodeRetries = query({
         title: string;
         thumbnailKey: string;
         scheduledAt?: number;
+        preparation?: { version: string; manifestKey: string; manifestSha256: string };
       };
     }> = [];
 
@@ -1570,6 +1577,7 @@ export const listDueSerializedProgramEpisodeRetries = query({
               title: string;
               thumbnailKey: string;
               scheduledAt?: number;
+              preparation?: { version: string; manifestKey: string; manifestSha256: string };
             }
           | undefined;
         if (run.planItemId) {
@@ -1589,6 +1597,19 @@ export const listDueSerializedProgramEpisodeRetries = query({
             title: run.plannedTitle ?? "",
             thumbnailKey: run.plannedThumbnailKey ?? "",
             ...(run.plannedPublishAt !== undefined ? { scheduledAt: run.plannedPublishAt } : {}),
+            ...(
+              run.plannedPreparationVersion !== undefined ||
+              run.plannedPreparationManifestKey !== undefined ||
+              run.plannedPreparationManifestSha256 !== undefined
+                ? {
+                    preparation: assertPlanWeekPreparationPointer({
+                      version: run.plannedPreparationVersion,
+                      manifestKey: run.plannedPreparationManifestKey,
+                      manifestSha256: run.plannedPreparationManifestSha256,
+                    }),
+                  }
+                : {}
+            ),
           });
           const itemPlan = normalizeScheduledPlanPayload({
             planItemId: String(item._id),
@@ -1596,6 +1617,19 @@ export const listDueSerializedProgramEpisodeRetries = query({
             title: item.title ?? "",
             thumbnailKey: item.thumbnailKey ?? "",
             ...(item.scheduledAt !== undefined ? { scheduledAt: item.scheduledAt } : {}),
+            ...(
+              item.preparationVersion !== undefined ||
+              item.preparationManifestKey !== undefined ||
+              item.preparationManifestSha256 !== undefined
+                ? {
+                    preparation: assertPlanWeekPreparationPointer({
+                      version: item.preparationVersion,
+                      manifestKey: item.preparationManifestKey,
+                      manifestSha256: item.preparationManifestSha256,
+                    }),
+                  }
+                : {}
+            ),
           });
           scheduledPlan = assertScheduledPlanPayloadMatches(frozenPlan, itemPlan);
         }

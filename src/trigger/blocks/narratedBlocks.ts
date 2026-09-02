@@ -596,6 +596,12 @@ export const scriptGen: Block = {
         ? syntheticScenarioWritingDirective(assertSyntheticScenarioContract(ctx.store["syntheticScenario"]))
         : undefined,
     ].filter((value): value is string => Boolean(value)).join("\n\n") || undefined;
+    const weeklyPreparation = ctx.store["planWeekPreparation"];
+    const weeklyPreparationBrief = weeklyPreparation && typeof weeklyPreparation === "object" &&
+      !Array.isArray(weeklyPreparation) &&
+      typeof (weeklyPreparation as { prompts?: { script?: unknown } }).prompts?.script === "string"
+      ? (weeklyPreparation as { prompts: { script: string } }).prompts.script
+      : undefined;
     // RENDER-GROUP REUSE: a language sibling translates the base script instead of
     // regenerating it (reuses the base's structure + research; only words change).
     const reuseScript = ctx.store["reuseScript"] as Script | undefined;
@@ -652,6 +658,7 @@ export const scriptGen: Block = {
       dataRich: ctx.params["dataRich"] as boolean | undefined,
       sourceAttributionRequired: ctx.params["sourceAttributionRequired"] === true,
       sourceGrounding,
+      weeklyPreparationBrief,
       serializedEpisodeContext: serializedEpisodeContext
         ? renderSerializedProgramEpisodeContextForPrompt(serializedEpisodeContext)
         : undefined,

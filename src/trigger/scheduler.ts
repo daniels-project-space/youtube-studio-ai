@@ -344,6 +344,7 @@ export const generationScheduler = schedules.task({
             title: admitted.title,
             thumbnailKey: admitted.thumbnailKey,
             ...(admitted.scheduledAt !== undefined ? { scheduledAt: admitted.scheduledAt } : {}),
+            ...(admitted.preparation !== undefined ? { preparation: admitted.preparation } : {}),
           }
         : undefined;
       const idempotencyKey = await idempotencyKeys.create(`generation-scheduler:${runId}`);

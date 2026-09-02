@@ -481,7 +481,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "reuseScript", "structure", "styleDNA", "scriptPlaybook", "topicBet",
       "channelName", "niche", "persona", "styleGrammar",
       // Per-channel critique grounding for the shared script critique loop.
-      "criticDoctrine", "contentLane", "dataStorySourceLedger", "casefileSourcePacket", "syntheticScenario",
+      "criticDoctrine", "contentLane", "dataStorySourceLedger", "casefileSourcePacket", "syntheticScenario", "planWeekPreparation",
       "channelProgramRoute", "serializedProgramEpisodeContext",
     ],
   }),

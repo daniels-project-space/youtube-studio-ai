@@ -913,6 +913,12 @@ export default defineSchema({
     plannedTitle: v.optional(v.string()),
     plannedThumbnailKey: v.optional(v.string()),
     plannedPublishAt: v.optional(v.number()),
+    // Pointer to a weekly preparation packet. It is copied atomically with
+    // the plan selection so a scheduled execution cannot swap to new channel
+    // inputs between the calendar claim and the immutable invocation freeze.
+    plannedPreparationVersion: v.optional(v.string()),
+    plannedPreparationManifestKey: v.optional(v.string()),
+    plannedPreparationManifestSha256: v.optional(v.string()),
     // Durable worker lifecycle. Queued work gets a short claim lease; Trigger
     // replaces it with a bounded execution lease and heartbeat. Convex cron
     // reaps expired work without depending on a paid/AI maintenance task.
@@ -1903,6 +1909,14 @@ export default defineSchema({
     generationRetryable: v.optional(v.boolean()),
     generationCostUsd: v.optional(v.number()),
     usageCheckpointKey: v.optional(v.string()),
+    // Provider-free weekly preparation packet. New batches freeze the exact
+    // editorial/configuration inputs in R2 before any later batch renderer or
+    // scheduled pipeline can consume them. Historic rows remain readable.
+    preparationState: v.optional(v.string()), // inputs_frozen
+    preparationVersion: v.optional(v.string()),
+    preparationManifestKey: v.optional(v.string()),
+    preparationManifestSha256: v.optional(v.string()),
+    preparationFrozenAt: v.optional(v.number()),
     createdAt: v.number(),
     scheduledAt: v.optional(v.number()), // pinned publish date (ms epoch)
     scheduledRunId: v.optional(v.id("runs")),

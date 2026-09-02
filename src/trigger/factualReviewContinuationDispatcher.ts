@@ -3,6 +3,7 @@ import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { factualReviewResumeSchedule } from "@/lib/factualReviewResume";
+import type { ScheduledPlanRunPayload } from "@/lib/scheduledPlanRuntime";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 
 const FACTUAL_REVIEW_CONTINUATION_LIMIT = 25;
@@ -15,13 +16,7 @@ type PendingFactualReviewResume = {
   checkpointFingerprint: string;
   approvalFingerprint: string;
   attempt: number;
-  scheduledPlan?: {
-    planItemId: string;
-    topic: string;
-    title: string;
-    thumbnailKey: string;
-    scheduledAt?: number;
-  };
+  scheduledPlan?: ScheduledPlanRunPayload;
 };
 
 const factualReviewCheckpointsApi = (api as unknown as {

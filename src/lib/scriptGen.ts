@@ -156,6 +156,8 @@ export interface ScriptRequest {
   sourceAttributionRequired?: boolean;
   /** Reviewed source/numeric-claim ledger injected by the data-story admission path. */
   sourceGrounding?: string;
+  /** Immutable provider-free weekly preparation brief, if this is a planned run. */
+  weeklyPreparationBrief?: string;
   /** Compact immutable receipt for the current serialized-program episode. */
   serializedEpisodeContext?: string;
   /** Content address for that same receipt; persisted on the resulting Script. */
@@ -377,7 +379,10 @@ function styleGuidance(req: ScriptRequest): string {
   const serializedEpisodeContext = req.serializedEpisodeContext?.trim()
     ? `\n\n${req.serializedEpisodeContext.trim()}`
     : "";
-  return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) + sourceGrounding + serializedEpisodeContext;
+  const weeklyPreparation = req.weeklyPreparationBrief?.trim()
+    ? `\n\nFROZEN WEEKLY PREPARATION (follow this episode-specific brief; do not quote it): ${req.weeklyPreparationBrief.trim()}`
+    : "";
+  return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) + sourceGrounding + serializedEpisodeContext + weeklyPreparation;
 }
 
 /**

@@ -69,7 +69,7 @@ import { renderBlockLightTask } from "@/trigger/render-block-light";
 import { planHeal } from "@/engine/healer";
 import { makeConvexSink } from "@/engine/convexSink";
 import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
-import { channelPrefix } from "@/lib/storage";
+import { channelPrefix, getObjectBytes } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { alertBudget, alertFailure } from "@/lib/telegram";
 import { evaluateBudgetAlert } from "@/lib/budgetAlert";
@@ -82,6 +82,10 @@ import {
   scheduledPlanSeed,
   type ScheduledPlanRunPayload,
 } from "@/lib/scheduledPlanRuntime";
+import {
+  assertPlanWeekPreparationManifestBinding,
+  type PlanWeekPreparationManifest,
+} from "@/lib/planWeekPreparation";
 import {
   assertFreshPipelineInvocationRouteAdmission,
   assertRunPipelineAdmission,
@@ -1153,6 +1157,7 @@ export const runPipelineTask = task({
     let observedCostTotal = Number(durableRun.costTotal ?? 0);
     let narrativeSeriesAdmission: NarrativeSeriesRunAdmission | undefined;
     let frozenModuleConfig: Record<string, Record<string, unknown>> | undefined;
+    let weeklyPreparation: PlanWeekPreparationManifest | undefined;
 
     try {
       // A selected narrative horizon is a route-owned serial planner. It must
@@ -1184,8 +1189,56 @@ export const runPipelineTask = task({
           channelId: payload.channelId as Id<"channels">,
           itemId: payload.scheduledPlan.planItemId as Id<"contentPlan">,
           runId: payload.runId as Id<"runs">,
-        });
+        }) as ScheduledPlanRunPayload & {
+          preparationScope?: {
+            batchId?: unknown;
+            itemKey?: unknown;
+            requestKey?: unknown;
+            channelSlug?: unknown;
+          };
+        };
         scheduledPlan = assertScheduledPlanPayloadMatches(payload.scheduledPlan, durablePlan);
+        if (scheduledPlan.preparation) {
+          const scope = durablePlan.preparationScope;
+          if (
+            !scope || typeof scope.batchId !== "string" || typeof scope.itemKey !== "string" ||
+            typeof scope.requestKey !== "string" || typeof scope.channelSlug !== "string"
+          ) {
+            throw new Error("scheduled plan preparation scope is missing or invalid");
+          }
+          let rawManifest: unknown;
+          try {
+            rawManifest = JSON.parse(new TextDecoder().decode(
+              await getObjectBytes(scheduledPlan.preparation.manifestKey),
+            ));
+          } catch (error) {
+            throw new Error(
+              `scheduled plan preparation manifest is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+          weeklyPreparation = assertPlanWeekPreparationManifestBinding({
+            manifest: rawManifest,
+            pointer: scheduledPlan.preparation,
+            ownerId,
+            channelId: payload.channelId,
+            batchId: scope.batchId,
+            itemId: scheduledPlan.planItemId,
+            itemKey: scope.itemKey,
+            requestKey: scope.requestKey,
+            channelSlug: scope.channelSlug,
+            topic: scheduledPlan.topic,
+            title: scheduledPlan.title,
+            thumbnailKey: scheduledPlan.thumbnailKey,
+          });
+          if (durableInvocation === undefined) {
+            entries = structuredClone(weeklyPreparation.execution.pipeline) as PipelineEntry[];
+            frozenModuleConfig = structuredClone(weeklyPreparation.execution.moduleConfig);
+          }
+          log(
+            `scheduled plan preparation verified: ${scheduledPlan.preparation.manifestSha256.slice(0, 12)} ` +
+              `(frozen ${new Date(weeklyPreparation.frozenAt).toISOString()})`,
+          );
+        }
         log(
           `scheduled plan admitted: ${scheduledPlan.planItemId} ` +
             `(${scheduledPlan.scheduledAt !== undefined ? new Date(scheduledPlan.scheduledAt).toISOString() : "cadence/unpinned"})`,
@@ -1227,6 +1280,7 @@ export const runPipelineTask = task({
         // misleading UI control rather than an execution contract.
         try {
           const configuredModuleConfig = payload.moduleConfigOverride ??
+            weeklyPreparation?.execution.moduleConfig ??
             (channel as { moduleConfig?: Record<string, Record<string, unknown>> }).moduleConfig;
           const mergedModuleConfig = mergeRuntimeModuleConfig({
             entries,
@@ -1661,6 +1715,21 @@ export const runPipelineTask = task({
             : {}),
           ...(scheduledPlan ? scheduledPlanSeed(scheduledPlan) : {}),
         };
+        if (weeklyPreparation && scheduledPlan?.preparation) {
+          // The packet wins over mutable channel identity/config. Its pointer
+          // and prompts are placed in the immutable invocation snapshot, so a
+          // retry cannot silently regenerate a week-ahead episode from newer
+          // settings.
+          seedStore = {
+            ...seedStore,
+            ...structuredClone(weeklyPreparation.execution.seedStore),
+            ...scheduledPlanSeed(scheduledPlan),
+            planWeekPreparation: {
+              ...scheduledPlan.preparation,
+              prompts: structuredClone(weeklyPreparation.prompts),
+            },
+          };
+        }
         if (payload.reuse) {
           if (payload.reuse.topic) seedStore["reuseTopic"] = payload.reuse.topic;
           if (payload.reuse.script) seedStore["reuseScript"] = payload.reuse.script;

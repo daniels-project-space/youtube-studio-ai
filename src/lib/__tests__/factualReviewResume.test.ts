@@ -22,6 +22,11 @@ const payload = {
     topic: "GDP comparison",
     title: "The numbers behind GDP",
     thumbnailKey: "owner/owner-one/thumbnail.png",
+    preparation: {
+      version: "plan-week-preparation/inputs-v1",
+      manifestKey: "owner/owner-one/channel/economics/plan-batches/batch-one/items/item-one/preparation/inputs.json",
+      manifestSha256: fp("d"),
+    },
   },
 } as const;
 
@@ -75,6 +80,17 @@ assert.throws(
   }),
   /invocation fingerprints do not match/,
   "a continuation cannot swap the frozen invocation after approval",
+);
+assert.throws(
+  () => factualReviewResumeSchedule({
+    ...payload,
+    scheduledPlan: {
+      ...payload.scheduledPlan,
+      preparation: { ...payload.scheduledPlan.preparation, manifestSha256: "not-a-hash" },
+    },
+  }),
+  /manifest digest is invalid/,
+  "a factual-review continuation cannot discard validation of the frozen weekly preparation pointer",
 );
 assert.throws(
   () => factualReviewResumeSchedule({

@@ -14,6 +14,7 @@ import {
   type FactualReviewSourceAuthority,
 } from "../src/engine/factualReviewCheckpoint";
 import { canonicalJson } from "../src/lib/canonicalJson";
+import { assertPlanWeekPreparationPointer } from "../src/lib/planWeekPreparation";
 import { assertRunExecutionWriteFence, RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
 import { sha256Hex } from "../src/lib/sha256";
 
@@ -575,7 +576,14 @@ export const listPendingResumes = query({
       checkpointFingerprint: string;
       approvalFingerprint: string;
       attempt: number;
-      scheduledPlan?: { planItemId: string; topic: string; title: string; thumbnailKey: string; scheduledAt?: number };
+      scheduledPlan?: {
+        planItemId: string;
+        topic: string;
+        title: string;
+        thumbnailKey: string;
+        scheduledAt?: number;
+        preparation?: { version: string; manifestKey: string; manifestSha256: string };
+      };
     }>;
     for (const run of runs) {
       if (run.status !== "awaiting_factual_review" || run.factualReviewState !== "approved") continue;
@@ -589,6 +597,26 @@ export const listPendingResumes = query({
       }
       const attempt = run.factualReviewResumeAttempts ?? 0;
       if (attempt >= MAX_FACTUAL_REVIEW_RESUME_ENQUEUE_ATTEMPTS) continue;
+      let preparation: { version: string; manifestKey: string; manifestSha256: string } | undefined;
+      const hasPreparation = [
+        run.plannedPreparationVersion,
+        run.plannedPreparationManifestKey,
+        run.plannedPreparationManifestSha256,
+      ].some((value) => value !== undefined);
+      if (hasPreparation) {
+        try {
+          preparation = assertPlanWeekPreparationPointer({
+            version: run.plannedPreparationVersion,
+            manifestKey: run.plannedPreparationManifestKey,
+            manifestSha256: run.plannedPreparationManifestSha256,
+          });
+        } catch {
+          // A partial or altered immutable receipt cannot be continued. Keep
+          // it observable for repair rather than issuing a run without its
+          // frozen weekly inputs.
+          continue;
+        }
+      }
       const scheduledPlan = run.planItemId && run.plannedTopic && run.plannedTitle && run.plannedThumbnailKey
         ? {
             planItemId: String(run.planItemId),
@@ -596,6 +624,7 @@ export const listPendingResumes = query({
             title: run.plannedTitle,
             thumbnailKey: run.plannedThumbnailKey,
             ...(run.plannedPublishAt === undefined ? {} : { scheduledAt: run.plannedPublishAt }),
+            ...(preparation ? { preparation } : {}),
           }
         : undefined;
       pending.push({

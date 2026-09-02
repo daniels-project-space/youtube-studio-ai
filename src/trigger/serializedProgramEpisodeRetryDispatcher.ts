@@ -5,6 +5,7 @@ import {
   serializedProgramEpisodeBusyRetrySchedule,
 } from "@/lib/serializedProgramEpisode";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import type { ScheduledPlanRunPayload } from "@/lib/scheduledPlanRuntime";
 import type { RunPipelineInput } from "./runPipeline";
 
 const SERIALIZED_PROGRAM_EPISODE_RETRY_DISPATCH_LIMIT = 50;
@@ -15,13 +16,7 @@ type DueRetryReceipt = {
   invocationSha256: string;
   retryAt: number;
   attempt: number;
-  scheduledPlan?: {
-    planItemId: string;
-    topic: string;
-    title: string;
-    thumbnailKey: string;
-    scheduledAt?: number;
-  };
+  scheduledPlan?: ScheduledPlanRunPayload;
 };
 
 /**

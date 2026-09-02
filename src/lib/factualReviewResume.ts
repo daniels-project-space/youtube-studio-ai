@@ -3,6 +3,11 @@
  * receipt. This module has no provider or Trigger dependency so its identity
  * rules are directly testable.
  */
+import {
+  normalizeScheduledPlanPayload,
+  type ScheduledPlanRunPayload,
+} from "./scheduledPlanRuntime";
+
 export const FACTUAL_REVIEW_RESUME_SCHEDULE_VERSION = "factual-review-resume-schedule/v1" as const;
 
 export interface FactualReviewResumePayload {
@@ -15,13 +20,11 @@ export interface FactualReviewResumePayload {
     readonly approvalFingerprint: string;
     readonly invocationSha256: string;
   };
-  readonly scheduledPlan?: {
-    readonly planItemId: string;
-    readonly topic: string;
-    readonly title: string;
-    readonly thumbnailKey: string;
-    readonly scheduledAt?: number;
-  };
+  /**
+   * The exact calendar admission envelope. This includes the content-addressed
+   * weekly-preparation pointer when one was present at the original claim.
+   */
+  readonly scheduledPlan?: ScheduledPlanRunPayload;
 }
 
 function required(value: unknown, label: string, max = 500): string {
@@ -64,6 +67,12 @@ export function factualReviewResumeSchedule(
   if (!Number.isSafeInteger(deliveryAttempt) || deliveryAttempt < 1 || deliveryAttempt > 100) {
     throw new Error("factual review resume delivery attempt is invalid");
   }
+  // Do this before the Trigger receipt is minted. A factual-review continuation
+  // must be just as unable to silently drop or substitute a frozen preparation
+  // packet as the original scheduled worker.
+  const scheduledPlan = input.scheduledPlan
+    ? normalizeScheduledPlanPayload(input.scheduledPlan)
+    : undefined;
   const receiptSeed = [
     FACTUAL_REVIEW_RESUME_SCHEDULE_VERSION,
     runId,
@@ -80,6 +89,9 @@ export function factualReviewResumeSchedule(
     // exact same owner-approved payload and immutable fingerprints.
     idempotencySeed:
       deliveryAttempt === 1 ? receiptSeed : `${receiptSeed}:delivery:${deliveryAttempt}`,
-    payload: input,
+    payload: {
+      ...input,
+      ...(scheduledPlan ? { scheduledPlan } : {}),
+    },
   };
 }

@@ -193,6 +193,11 @@ function serializedEpisodeRetryRunCtx(options: {
     title: string;
     thumbnailKey: string;
     scheduledAt?: number;
+    preparation?: {
+      version: "plan-week-preparation/inputs-v1";
+      manifestKey: string;
+      manifestSha256: string;
+    };
     mutateItem?: boolean;
   };
 }) {
@@ -242,6 +247,13 @@ function serializedEpisodeRetryRunCtx(options: {
           ...(options.scheduledPlan.scheduledAt !== undefined
             ? { plannedPublishAt: options.scheduledPlan.scheduledAt }
             : {}),
+          ...(options.scheduledPlan.preparation
+            ? {
+                plannedPreparationVersion: options.scheduledPlan.preparation.version,
+                plannedPreparationManifestKey: options.scheduledPlan.preparation.manifestKey,
+                plannedPreparationManifestSha256: options.scheduledPlan.preparation.manifestSha256,
+              }
+            : {}),
         }
       : {}),
   } as Record<string, unknown>;
@@ -260,6 +272,13 @@ function serializedEpisodeRetryRunCtx(options: {
         thumbnailKey: options.scheduledPlan.thumbnailKey,
         ...(options.scheduledPlan.scheduledAt !== undefined
           ? { scheduledAt: options.scheduledPlan.scheduledAt }
+          : {}),
+        ...(options.scheduledPlan.preparation
+          ? {
+              preparationVersion: options.scheduledPlan.preparation.version,
+              preparationManifestKey: options.scheduledPlan.preparation.manifestKey,
+              preparationManifestSha256: options.scheduledPlan.preparation.manifestSha256,
+            }
           : {}),
       }
     : null;
@@ -857,6 +876,11 @@ async function main() {
         title: "A sealed episode title",
         thumbnailKey: "plans/a/thumb.png",
         scheduledAt: dueNow + 86_400_000,
+        preparation: {
+          version: "plan-week-preparation/inputs-v1",
+          manifestKey: "owner/owner_a/channel/economics/plan-batches/batch_a/items/plan_a/preparation/inputs.json",
+          manifestSha256: "b".repeat(64),
+        },
       },
     });
     const dueReceipts = await invokeConvexDefinition(
@@ -871,6 +895,11 @@ async function main() {
       title: "A sealed episode title",
       thumbnailKey: "plans/a/thumb.png",
       scheduledAt: dueNow + 86_400_000,
+      preparation: {
+        version: "plan-week-preparation/inputs-v1",
+        manifestKey: "owner/owner_a/channel/economics/plan-batches/batch_a/items/plan_a/preparation/inputs.json",
+        manifestSha256: "b".repeat(64),
+      },
     });
     assert.equal(dueRetry.writes.length, 0, "outbox listing must not mutate a receipt before claimExecutionLease");
     await expectRejected(

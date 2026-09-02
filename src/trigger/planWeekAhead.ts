@@ -38,11 +38,20 @@ import {
 import {
   assertChannelProgramRouteBinding,
   assertChannelProgramRoutePipelineCompatibility,
+  channelProgramRouteRunSeed,
   type ChannelProgramRoute,
 } from "@/engine/channelProgramRoute";
 import { assertChannelShowProfilePipelineCompatibility } from "@/engine/channelShowProfile";
 import type { PipelineEntry } from "@/engine/types";
 import { thumbnailRequestHash } from "@/lib/thumbnailCheckpoint";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256BytesHex } from "@/lib/sha256";
+import {
+  PLAN_WEEK_PREPARATION_VERSION,
+  planWeekPreparationKey,
+  planWeekPreparationManifestSha256,
+  type PlanWeekPreparationManifest,
+} from "@/lib/planWeekPreparation";
 import { readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -562,6 +571,40 @@ export const planWeekAheadTask = task({
         abortTask("plan-week recovery guard: loaded batch items differ from the exact ordered recovery list");
       }
     }
+
+    // Freeze every non-secret editorial and runtime input before the first
+    // thumbnail provider claim. This keeps the weekly queue honest: it is
+    // prepared input, not a promise that a later LTX/ERNIE render already ran.
+    for (const item of batchItems) {
+      const manifest = buildPlanWeekPreparationManifest({
+        ownerId,
+        channelId: String(channelId),
+        batchId: String(batchId),
+        requestKey,
+        channel: channel as PlanWeekPreparationChannel,
+        programBrief: routeAdmission.programBrief,
+        programRoute: routeAdmission.programRoute,
+        item: {
+          _id: String(item._id),
+          itemKey: item.itemKey,
+          topic: item.topic,
+          title: item.title,
+          description: item.description,
+          sceneSeed: item.sceneSeed,
+          createdAt: item.createdAt,
+        },
+      });
+      const pointer = await persistPlanWeekPreparationManifest(manifest);
+      const recorded = await convex.mutation(api.contentPlan.recordPlanItemPreparation, {
+        ownerId,
+        channelId,
+        batchId,
+        itemId: item._id,
+        manifest,
+        ...pointer,
+      });
+      log(`inputs frozen ${recorded.reused ? "(reused) " : ""}${String(item._id).slice(-6)}`);
+    }
     const dir = join(tmpdir(), `plan_${channelId}_${batchId}`);
     mkdirSync(dir, { recursive: true });
 
@@ -866,6 +909,188 @@ function retryableFailure(error: unknown): boolean {
 
 function planThumbnailKey(ownerId: string, slug: string, itemId: string): string {
   return `${channelPrefix(ownerId, slug)}plan/${itemId}.jpg`;
+}
+
+type PlanWeekPreparationChannel = {
+  name: string;
+  slug: string;
+  budget?: number;
+  pipeline?: unknown;
+  moduleConfig?: unknown;
+  thumbnailer?: unknown;
+  scriptPlaybook?: unknown;
+  styleDNA?: unknown;
+  qaRubric?: unknown;
+  thumbnailPlaybook?: unknown;
+  family?: unknown;
+  template?: unknown;
+  contentLane?: unknown;
+  status?: unknown;
+  identity?: {
+    topicPool?: unknown;
+    styleGrammar?: unknown;
+    persona?: unknown;
+    niche?: unknown;
+    palette?: unknown;
+    creativeBrief?: unknown;
+    voiceId?: unknown;
+    bannedWords?: unknown;
+    imageKey?: unknown;
+    thumbnailIdentity?: unknown;
+    showProfile?: { selectedCapabilityKeys?: unknown };
+  };
+};
+
+function recordOrEmpty(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? structuredClone(value as Record<string, unknown>)
+    : {};
+}
+
+function buildPlanWeekPreparationManifest(args: {
+  ownerId: string;
+  channelId: string;
+  batchId: string;
+  requestKey: string;
+  channel: PlanWeekPreparationChannel;
+  programBrief: ChannelProgramBrief;
+  programRoute: ChannelProgramRoute;
+  item: {
+    _id: string;
+    itemKey?: string;
+    topic: string;
+    title?: string;
+    description?: string;
+    sceneSeed?: string;
+    createdAt: number;
+  };
+}): PlanWeekPreparationManifest {
+  const channel = args.channel;
+  const identity = channel.identity ?? {};
+  const title = args.item.title?.trim() || args.item.topic.trim();
+  const description = args.item.description?.trim() || "Editorial description unavailable";
+  const sceneSeed = args.item.sceneSeed?.trim() ||
+    `A physical cause-and-effect scene that communicates ${args.item.topic.trim()} through people, objects, and action.`;
+  const thumbnailKey = planThumbnailKey(args.ownerId, channel.slug, args.item._id);
+  const moduleConfig = recordOrEmpty(channel.moduleConfig) as Record<string, Record<string, unknown>>;
+  const channelProgramRoute = channelProgramRouteRunSeed({
+    route: args.programRoute,
+    programBrief: args.programBrief,
+  });
+  const seedStore: Record<string, unknown> = {
+    ...(channel.thumbnailer ? { thumbnailer: channel.thumbnailer } : {}),
+    topicPool: identity.topicPool ?? [],
+    styleGrammar: identity.styleGrammar ?? "",
+    channelName: channel.name,
+    palette: identity.palette ?? [],
+    persona: identity.persona ?? "",
+    niche: identity.niche ?? "",
+    ...(identity.creativeBrief ? { showBible: identity.creativeBrief } : {}),
+    ...(identity.creativeBrief && typeof identity.creativeBrief === "object" &&
+        !Array.isArray(identity.creativeBrief) &&
+        typeof (identity.creativeBrief as { criticDoctrine?: unknown }).criticDoctrine === "string"
+      ? { criticDoctrine: (identity.creativeBrief as { criticDoctrine: string }).criticDoctrine }
+      : {}),
+    ...(identity.voiceId ? { voiceId: identity.voiceId } : {}),
+    bannedWords: identity.bannedWords ?? [],
+    ...(identity.imageKey ? { channelAvatarKey: identity.imageKey } : {}),
+    ...(channel.scriptPlaybook ? { scriptPlaybook: channel.scriptPlaybook } : {}),
+    styleDNA: channel.styleDNA ?? null,
+    qualityBar: channel.qaRubric ?? null,
+    ...(channel.contentLane ? { contentLane: channel.contentLane } : {}),
+    channelSlug: channel.slug,
+    channelStatus: typeof channel.status === "string" ? channel.status : "active",
+    ...(channel.template ? { channelTemplate: channel.template } : {}),
+    channelBudget: channel.budget ?? 0,
+    ...(Object.keys(moduleConfig).length ? { channelModuleConfig: moduleConfig } : {}),
+    ...(channel.thumbnailPlaybook ? { thumbnailPlaybook: channel.thumbnailPlaybook } : {}),
+    ...(channel.family ? { family: channel.family } : {}),
+    ...(identity.thumbnailIdentity ? { thumbnailIdentity: identity.thumbnailIdentity } : {}),
+    channelProgramRoute,
+    ...(Array.isArray(identity.showProfile?.selectedCapabilityKeys)
+      ? { channelSelectedCapabilityKeys: [...identity.showProfile.selectedCapabilityKeys] }
+      : {}),
+  };
+  const audience = typeof args.programBrief.audience === "string" ? args.programBrief.audience : "the intended audience";
+  const editorialContext = [
+    `Episode title: ${title}.`,
+    `Topic: ${args.item.topic.trim()}.`,
+    `Audience: ${audience}.`,
+    `Channel route: ${args.programRoute.routeKey}.`,
+  ].join(" ");
+  return {
+    version: PLAN_WEEK_PREPARATION_VERSION,
+    ownerId: args.ownerId,
+    channelId: args.channelId,
+    batchId: args.batchId,
+    itemId: args.item._id,
+    itemKey: args.item.itemKey?.trim() || `${args.requestKey}:unknown`,
+    requestKey: args.requestKey,
+    channelSlug: channel.slug,
+    // Topic persistence and preparation are one idempotent phase. The row's
+    // creation time gives a retry-stable frozen-at value without a false claim
+    // that a later provider render happened at this time.
+    frozenAt: args.item.createdAt,
+    plan: {
+      topic: args.item.topic.trim(),
+      title,
+      description,
+      sceneSeed,
+      thumbnailKey,
+    },
+    execution: {
+      pipeline: structuredClone(Array.isArray(channel.pipeline) ? channel.pipeline : []),
+      moduleConfig,
+      seedStore,
+    },
+    prompts: {
+      script:
+        `${editorialContext} Build a specific, satisfying narration with a clear opening promise, ` +
+        `causal progression, and concrete payoff. Honor the frozen channel voice and do not add unverified claims.`,
+      narration:
+        `${editorialContext} Narration should sound native to this channel's persona and pacing. ` +
+        `Keep the spoken text useful, precise, and easy to follow aloud.`,
+      shotlist:
+        `${editorialContext} Create a shot list that visibly advances the narration; each shot must have a ` +
+        `clear subject, action, setting, and transition purpose.`,
+      visual:
+        `Primary visual seed: ${sceneSeed} Compose the episode around that readable cause-and-effect image ` +
+        `while honoring the channel's frozen visual grammar, palette, and recurring motifs.`,
+    },
+  };
+}
+
+async function persistPlanWeekPreparationManifest(manifest: PlanWeekPreparationManifest): Promise<{
+  manifestKey: string;
+  manifestSha256: string;
+}> {
+  const manifestKey = planWeekPreparationKey(manifest);
+  const body = Buffer.from(canonicalJson(manifest), "utf8");
+  const manifestSha256 = planWeekPreparationManifestSha256(manifest);
+  if (sha256BytesHex(body) !== manifestSha256) {
+    throw new Error("plan-week preparation local manifest digest mismatch");
+  }
+  try {
+    await putObject(manifestKey, body, {
+      contentType: "application/json",
+      ifNoneMatch: "*",
+      metadata: {
+        "plan-week-preparation": PLAN_WEEK_PREPARATION_VERSION,
+        sha256: manifestSha256,
+      },
+    });
+  } catch (error) {
+    // A concurrent retry may have completed the create-only write. The exact
+    // bytes below decide whether it is the same packet; no overwrite is ever
+    // allowed for a frozen item.
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    if (status !== 409 && status !== 412) throw error;
+  }
+  const persisted = await getObjectBytes(manifestKey);
+  if (sha256BytesHex(persisted) !== manifestSha256) {
+    throw new Error("plan-week preparation R2 manifest digest mismatch");
+  }
+  return { manifestKey, manifestSha256 };
 }
 
 function planTopicCheckpointKey(ownerId: string, slug: string, batchId: string, attempt: number): string {

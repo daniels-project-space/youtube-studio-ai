@@ -14,6 +14,11 @@ import {
   planWeekContractReservation,
 } from "../src/lib/planWeekContract";
 import {
+  assertPlanWeekPreparationManifestBinding,
+  assertPlanWeekPreparationPointer,
+  PLAN_WEEK_PREPARATION_VERSION,
+} from "../src/lib/planWeekPreparation";
+import {
   PLAN_WEEK_RECOVERY_GUARD_VERSION,
   assertExactFailedPlanWeekRecoveryState,
   assertExactPlanWeekRecoveryIdentity,
@@ -249,17 +254,36 @@ export const getPlanBatchRecoveryState = query({
 
 function scheduledItemPayload(item: {
   _id: unknown;
+  batchId?: unknown;
+  itemKey?: string;
   topic: string;
   title?: string;
   thumbnailKey?: string;
   scheduledAt?: number;
+  preparationState?: string;
+  preparationVersion?: string;
+  preparationManifestKey?: string;
+  preparationManifestSha256?: string;
 }): ScheduledPlanRunPayload {
+  const hasPreparation = [
+    item.preparationState,
+    item.preparationVersion,
+    item.preparationManifestKey,
+    item.preparationManifestSha256,
+  ].some((value) => value !== undefined);
   return normalizeScheduledPlanPayload({
     planItemId: String(item._id),
     topic: item.topic,
     title: item.title ?? "",
     thumbnailKey: item.thumbnailKey ?? "",
     ...(item.scheduledAt !== undefined ? { scheduledAt: item.scheduledAt } : {}),
+    ...(hasPreparation ? {
+      preparation: assertPlanWeekPreparationPointer({
+        version: item.preparationVersion,
+        manifestKey: item.preparationManifestKey,
+        manifestSha256: item.preparationManifestSha256,
+      }),
+    } : {}),
   });
 }
 
@@ -269,13 +293,28 @@ function scheduledRunPayload(run: {
   plannedTitle?: string;
   plannedThumbnailKey?: string;
   plannedPublishAt?: number;
+  plannedPreparationVersion?: string;
+  plannedPreparationManifestKey?: string;
+  plannedPreparationManifestSha256?: string;
 }): ScheduledPlanRunPayload {
+  const hasPreparation = [
+    run.plannedPreparationVersion,
+    run.plannedPreparationManifestKey,
+    run.plannedPreparationManifestSha256,
+  ].some((value) => value !== undefined);
   return normalizeScheduledPlanPayload({
     planItemId: String(run.planItemId ?? ""),
     topic: run.plannedTopic ?? "",
     title: run.plannedTitle ?? "",
     thumbnailKey: run.plannedThumbnailKey ?? "",
     ...(run.plannedPublishAt !== undefined ? { scheduledAt: run.plannedPublishAt } : {}),
+    ...(hasPreparation ? {
+      preparation: assertPlanWeekPreparationPointer({
+        version: run.plannedPreparationVersion,
+        manifestKey: run.plannedPreparationManifestKey,
+        manifestSha256: run.plannedPreparationManifestSha256,
+      }),
+    } : {}),
   });
 }
 
@@ -342,6 +381,9 @@ async function proveReadyPlanBatches(
       if (item.ownerId !== args.ownerId || item.channelId !== args.channelId ||
           item.batchId !== batch._id ||
           item.status !== "ready" || item.generationState !== "complete" ||
+          item.preparationState !== "inputs_frozen" ||
+          item.preparationVersion !== PLAN_WEEK_PREPARATION_VERSION ||
+          !item.preparationManifestKey || !item.preparationManifestSha256 || !item.preparationFrozenAt ||
           item.thumbnailKey !== expectedThumbnailKey || !checkpoint ||
           matchingReceipts.length !== 1 || !renderReceipt || !receiptVerified ||
           renderReceipt.ownerId !== args.ownerId || renderReceipt.channelId !== args.channelId ||
@@ -1233,6 +1275,90 @@ export const failPlanTopics = mutation({
   },
 });
 
+/**
+ * Records a provider-free, content-addressed weekly preparation packet after
+ * its R2 object has been written and byte-verified by the planner. This is a
+ * separate fence from thumbnail work: a paid renderer is never allowed to make
+ * a new-contract plan ready without the frozen inputs it is supposed to use.
+ */
+export const recordPlanItemPreparation = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    batchId: v.id("planBatches"),
+    itemId: v.id("contentPlan"),
+    manifest: v.any(),
+    manifestKey: v.string(),
+    manifestSha256: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requirePlannerService(ctx);
+    const [batch, item] = await Promise.all([ctx.db.get(args.batchId), ctx.db.get(args.itemId)]);
+    if (
+      !batch || !item || batch.ownerId !== args.ownerId || batch.channelId !== args.channelId ||
+      item.ownerId !== args.ownerId || item.channelId !== args.channelId || item.batchId !== args.batchId ||
+      batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION || !item.itemKey || !item.title ||
+      !item.description || !item.sceneSeed
+    ) {
+      throw new Error("plan preparation ownership/state mismatch");
+    }
+    if (item.generationProviderStartedAt !== undefined) {
+      throw new Error("plan preparation must be frozen before thumbnail provider work starts");
+    }
+    const cleanKeyPart = (value: string) => value.replace(/^\/+|\/+$/g, "");
+    const thumbnailKey = `owner/${cleanKeyPart(args.ownerId)}/channel/${cleanKeyPart(batch.channelSlug)}` +
+      `/plan/${String(item._id)}.jpg`;
+    const manifest = assertPlanWeekPreparationManifestBinding({
+      manifest: args.manifest,
+      pointer: {
+        version: PLAN_WEEK_PREPARATION_VERSION,
+        manifestKey: args.manifestKey,
+        manifestSha256: args.manifestSha256,
+      },
+      ownerId: args.ownerId,
+      channelId: String(args.channelId),
+      batchId: String(args.batchId),
+      itemId: String(args.itemId),
+      itemKey: item.itemKey,
+      requestKey: batch.requestKey,
+      channelSlug: batch.channelSlug,
+      topic: item.topic,
+      title: item.title,
+      thumbnailKey,
+    });
+    if (manifest.frozenAt > Date.now() + 60_000) {
+      throw new Error("plan preparation frozen timestamp is in the future");
+    }
+    const existing = [
+      item.preparationState,
+      item.preparationVersion,
+      item.preparationManifestKey,
+      item.preparationManifestSha256,
+      item.preparationFrozenAt,
+    ];
+    if (existing.some((value) => value !== undefined)) {
+      if (
+        item.preparationState !== "inputs_frozen" ||
+        item.preparationVersion !== PLAN_WEEK_PREPARATION_VERSION ||
+        item.preparationManifestKey !== args.manifestKey ||
+        item.preparationManifestSha256 !== args.manifestSha256 ||
+        item.preparationFrozenAt !== manifest.frozenAt
+      ) {
+        throw new Error("plan preparation replay mismatch");
+      }
+      return { state: "frozen" as const, reused: true };
+    }
+    await ctx.db.patch(args.itemId, {
+      preparationState: "inputs_frozen",
+      preparationVersion: PLAN_WEEK_PREPARATION_VERSION,
+      preparationManifestKey: args.manifestKey,
+      preparationManifestSha256: args.manifestSha256,
+      preparationFrozenAt: manifest.frozenAt,
+    });
+    return { state: "frozen" as const, reused: false };
+  },
+});
+
 export const claimPlanItem = mutation({
   args: {
     ownerId: v.string(),
@@ -1339,6 +1465,13 @@ export const markPlanItemProviderStarted = mutation({
         (batch.status === "failed" && !batch.retryable)) {
       throw new Error("plan batch is terminal before thumbnail provider start");
     }
+    if (
+      item.preparationState !== "inputs_frozen" ||
+      item.preparationVersion !== PLAN_WEEK_PREPARATION_VERSION ||
+      !item.preparationManifestKey || !item.preparationManifestSha256 || !item.preparationFrozenAt
+    ) {
+      throw new Error("plan thumbnail provider cannot start before inputs are frozen");
+    }
     if (item.generationState !== "claimed") throw new Error("plan item is not actively claimed");
     if (item.generationClaimedBy !== claimant) throw new Error("plan item claim claimant mismatch");
     const now = Date.now();
@@ -1390,6 +1523,15 @@ export const completePlanItem = mutation({
     }
     if (batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION) {
       throw new Error("plan item does not belong to the active generation contract");
+    }
+    if (
+      item.preparationState !== "inputs_frozen" ||
+      item.preparationVersion !== PLAN_WEEK_PREPARATION_VERSION ||
+      !item.preparationManifestKey ||
+      !item.preparationManifestSha256 ||
+      !item.preparationFrozenAt
+    ) {
+      throw new Error("plan item cannot be ready without a frozen weekly preparation packet");
     }
     const cleanKeyPart = (value: string) => value.replace(/^\/+|\/+$/g, "");
     const expectedThumbnailKey =
@@ -2045,6 +2187,11 @@ export const claimNextPlanRun = mutation({
       plannedTitle: payload.title,
       plannedThumbnailKey: payload.thumbnailKey,
       ...(payload.scheduledAt !== undefined ? { plannedPublishAt: payload.scheduledAt } : {}),
+      ...(payload.preparation !== undefined ? {
+        plannedPreparationVersion: payload.preparation.version,
+        plannedPreparationManifestKey: payload.preparation.manifestKey,
+        plannedPreparationManifestSha256: payload.preparation.manifestSha256,
+      } : {}),
     });
     await ctx.db.patch(item._id, {
       scheduledRunId: runId,
@@ -2167,7 +2314,23 @@ export const getClaimedPlanItemForRun = query({
     }
     const payload = scheduledItemPayload(item);
     assertScheduledPlanPayloadMatches(payload, scheduledRunPayload(run));
-    return payload;
+    if (!payload.preparation) return payload;
+    const batch = item.batchId ? await ctx.db.get(item.batchId) : null;
+    if (
+      !batch || batch.ownerId !== args.ownerId || batch.channelId !== args.channelId ||
+      !item.itemKey || item.preparationState !== "inputs_frozen"
+    ) {
+      throw new Error("scheduled plan preparation scope mismatch");
+    }
+    return {
+      ...payload,
+      preparationScope: {
+        batchId: String(batch._id),
+        itemKey: item.itemKey,
+        requestKey: batch.requestKey,
+        channelSlug: batch.channelSlug,
+      },
+    };
   },
 });
 

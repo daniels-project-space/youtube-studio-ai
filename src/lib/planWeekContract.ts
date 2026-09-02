@@ -1,7 +1,11 @@
 import { FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaProThumbnailContract";
 
 /** Fresh admissions. Provider and creative-route migrations must bump this. */
-export const PLAN_WEEK_CONTRACT_VERSION = "plan-week-v5-golden-fal-nano-banana-pro" as const;
+export const PLAN_WEEK_CONTRACT_VERSION = "plan-week-v6-frozen-inputs" as const;
+
+/** Read/recovery compatibility for batches made before frozen weekly inputs. */
+export const LEGACY_FAL_NANO_BANANA_PRO_PLAN_WEEK_CONTRACT_VERSION =
+  "plan-week-v5-golden-fal-nano-banana-pro" as const;
 
 /** Read/recovery compatibility for the former direct-Google thumbnail route. */
 export const LEGACY_GOLDEN_NANO_BANANA_PLAN_WEEK_CONTRACT_VERSION =
@@ -15,6 +19,7 @@ export const LEGACY_PLAN_WEEK_CONTRACT_VERSION = "plan-week-v3-attested-novita" 
 
 export type PlanWeekContractVersion =
   | typeof PLAN_WEEK_CONTRACT_VERSION
+  | typeof LEGACY_FAL_NANO_BANANA_PRO_PLAN_WEEK_CONTRACT_VERSION
   | typeof LEGACY_GOLDEN_NANO_BANANA_PLAN_WEEK_CONTRACT_VERSION
   | typeof LEGACY_PLAN_WEEK_CONTRACT_VERSION;
 
