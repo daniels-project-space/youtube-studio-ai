@@ -7,7 +7,10 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { synthChannelConcept } from "@/lib/conceptSynth";
-import { generateChannelArtAsset } from "@/lib/channelArt";
+import {
+  channelArtIdentityFromSource,
+  generateChannelArtAsset,
+} from "@/lib/channelArt";
 import {
   designPipeline,
   enforceLengthContract,
@@ -2931,19 +2934,14 @@ export async function executeDesignChannel(
 
   const avatarStage = channelInceptionStage(plan, "channel-inception-avatar")!;
   const bannerStage = channelInceptionStage(plan, "channel-inception-banner")!;
-  const artIdentity = {
+  const artIdentity = channelArtIdentityFromSource({
     name: positioning.name,
-    persona: positioning.identity.persona,
-    styleGrammar: positioning.identity.styleGrammar,
-    palette: positioning.identity.palette,
-    niche: positioning.identity.niche,
-    iconicMotif: positioning.creativeBrief.iconicMotif,
-    vibe: positioning.creativeBrief.vibe,
-    worldSetting: positioning.styleDNA.setting,
-    worldComposition: positioning.styleDNA.composition,
-    worldMotifs: positioning.styleDNA.motifs,
-    visualAvoid: positioning.styleDNA.visualAvoid,
-  };
+    identity: {
+      ...positioning.identity,
+      creativeBrief: positioning.creativeBrief,
+    },
+    styleDNA: positioning.styleDNA,
+  });
   const loadAvatar = async () => {
     const imageKey = asIdentity((await currentChannel(convex, channelId)).identity).imageKey;
     return imageKey ? { value: imageKey, evidence: { imageKey, protected: true } } : undefined;

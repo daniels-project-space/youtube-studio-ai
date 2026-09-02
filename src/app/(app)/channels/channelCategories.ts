@@ -52,8 +52,11 @@ export function channelCategoryFor(channel: CategoryAwareChannel): ChannelCatego
   const terms = channelTerms(channel);
   if (/\blo[- ]?fi\b|ambient|study music|sleep music|rain ambience|soundscape|music/.test(terms)) return "sound";
   if (/stoic|mindset|motivation|psychology|meditation|gratitude|wellbeing|self[- ]?help/.test(terms)) return "mindset";
-  if (/history|lore|crime|mystery|heist|comic|drawn past|inked|story/.test(terms)) return "stories";
+  // Economic language is more specific than a coincidental suffix such as
+  // "Investory". Check it before the broad narrative category and keep
+  // story itself word-bounded so new finance names cannot leak into history.
   if (/finance|invest|tax|money|compound|business|economy/.test(terms)) return "money";
+  if (/history|lore|crime|mystery|heist|comic|drawn past|inked|\bstory\b|stories/.test(terms)) return "stories";
   if (/education|learning|whiteboard|explainer|science|quiz|tutorial/.test(terms)) return "learning";
   return "other";
 }

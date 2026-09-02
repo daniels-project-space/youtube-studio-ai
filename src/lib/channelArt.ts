@@ -46,6 +46,74 @@ export interface ArtIdentity {
   visualAvoid?: string[];
 }
 
+/**
+ * The durable portions of a channel record that own visual identity.  Keep
+ * this deliberately structural: both Channel Inception and the reviewed
+ * rebrand tool read the exact same frozen data instead of maintaining
+ * channel-name maps that inevitably drift apart.
+ */
+export interface ChannelArtIdentitySource {
+  name: string;
+  identity?: {
+    persona?: unknown;
+    styleGrammar?: unknown;
+    palette?: unknown;
+    niche?: unknown;
+    creativeBrief?: {
+      iconicMotif?: unknown;
+      vibe?: unknown;
+    } | null;
+  } | null;
+  styleDNA?: {
+    setting?: unknown;
+    composition?: unknown;
+    motifs?: unknown;
+    visualAvoid?: unknown;
+  } | null;
+}
+
+function nonEmptyText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function textList(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const values = value
+    .map(nonEmptyText)
+    .filter((candidate): candidate is string => Boolean(candidate));
+  return values.length ? values : undefined;
+}
+
+/**
+ * Construct generation input directly from the immutable channel identity and
+ * its Style DNA. This is the single source of truth for newly admitted art and
+ * reviewed rebrands, so a finance channel cannot accidentally inherit a LoFi
+ * scene just because a caller forgot to wire an additional prompt field.
+ */
+export function channelArtIdentityFromSource(source: ChannelArtIdentitySource): ArtIdentity {
+  const identity = source.identity ?? {};
+  const styleDNA = source.styleDNA ?? {};
+  return {
+    name: source.name,
+    ...(nonEmptyText(identity.persona) ? { persona: nonEmptyText(identity.persona) } : {}),
+    ...(nonEmptyText(identity.styleGrammar) ? { styleGrammar: nonEmptyText(identity.styleGrammar) } : {}),
+    ...(textList(identity.palette) ? { palette: textList(identity.palette) } : {}),
+    ...(nonEmptyText(identity.niche) ? { niche: nonEmptyText(identity.niche) } : {}),
+    ...(nonEmptyText(identity.creativeBrief?.iconicMotif)
+      ? { iconicMotif: nonEmptyText(identity.creativeBrief?.iconicMotif) }
+      : {}),
+    ...(nonEmptyText(identity.creativeBrief?.vibe)
+      ? { vibe: nonEmptyText(identity.creativeBrief?.vibe) }
+      : {}),
+    ...(nonEmptyText(styleDNA.setting) ? { worldSetting: nonEmptyText(styleDNA.setting) } : {}),
+    ...(nonEmptyText(styleDNA.composition)
+      ? { worldComposition: nonEmptyText(styleDNA.composition) }
+      : {}),
+    ...(textList(styleDNA.motifs) ? { worldMotifs: textList(styleDNA.motifs) } : {}),
+    ...(textList(styleDNA.visualAvoid) ? { visualAvoid: textList(styleDNA.visualAvoid) } : {}),
+  };
+}
+
 export interface ChannelArtResult {
   imageKey: string;
   bannerKey: string;

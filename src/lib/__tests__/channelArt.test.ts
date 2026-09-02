@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import {
   avatarPrompt,
   bannerPrompt,
+  channelArtIdentityFromSource,
   generateChannelArt,
   generateChannelArtAsset,
   generateFlagBanner,
@@ -169,6 +170,33 @@ const SEASIDE_IDENTITY = {
   worldMotifs: ["turquoise ocean waves", "paper lanterns", "coastal wildflowers", "a small fluffy cat"],
   visualAvoid: ["generic headphones-at-a-desk scene", "photorealistic CGI", "harsh neon cyberpunk"],
 };
+
+function assertIdentityDerivationUsesTheChannelWorld(): void {
+  const derived = channelArtIdentityFromSource({
+    name: "Investory",
+    identity: {
+      persona: "financial history explained through patient long-term thinking",
+      styleGrammar: "sober heritage-finance editorial art",
+      palette: ["near black", "aged bronze", "parchment", "muted teal"],
+      niche: "finance",
+      creativeBrief: {
+        iconicMotif: "an antique bronze key whose teeth form a compound-growth rhythm",
+        vibe: "earned insight and durable value",
+      },
+    },
+    styleDNA: {
+      setting: "an illuminated archival market archive of ledgers, price tapes, and patient human decision-making",
+      composition: "one central institutional object with layered data-like depth, never a lifestyle desk",
+      motifs: ["engraved ledger lines", "bronze key", "long-horizon growth curve"],
+      visualAvoid: ["coffee desk", "generic trading monitors", "LoFi room", "neon cyberpunk"],
+    },
+  });
+  const prompt = bannerPrompt(derived);
+  assert.match(prompt, /archival market archive/i);
+  assert.match(prompt, /long-horizon growth curve/i);
+  assert.match(prompt, /DO NOT INTRODUCE:.*coffee desk/i);
+  assert.doesNotMatch(prompt, /coastal storybook/i);
+}
 
 function assertPromptContracts(): void {
   const avatar = avatarPrompt(IDENTITY);
@@ -441,6 +469,7 @@ async function assertDefaultProviderHasNoFallback(): Promise<void> {
 
 async function main(): Promise<void> {
   assertPromptContracts();
+  assertIdentityDerivationUsesTheChannelWorld();
   await assertApprovedIndependentOutputs();
   await assertMissingJudgeFailsBeforeSpend();
   await assertRejectedCandidateNeverReturns();
