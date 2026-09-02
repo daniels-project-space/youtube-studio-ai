@@ -7,22 +7,25 @@ import {
   generateChannelArt,
   generateChannelArtAsset,
   generateFlagBanner,
-  type ChannelArtRenderRequest,
   type ChannelArtRuntime,
 } from "@/lib/channelArt";
 import {
   NANO_BANANA_AVATAR_PROFILE,
   type NanoBananaAvatarReceipt,
 } from "@/lib/nanoBananaAvatarContract";
+import {
+  FAL_NANO_BANANA_BANNER_PROFILE,
+  type FalNanoBananaBannerReceipt,
+} from "@/lib/falNanoBananaBannerContract";
 
 type Kind = "avatar" | "banner";
 
 interface RuntimeState {
-  renders: ChannelArtRenderRequest[];
+  bannerRenders: Array<{ prompt: string; idempotencyContext: string }>;
   avatarRenders: Array<{ prompt: string; idempotencyContext: string }>;
   renderedKeys: string[];
-  downloads: Array<{ url: string; path: string }>;
   conversions: Array<{ input: string; output: string; width: number; height: number }>;
+  crops: Array<{ input: string; output: string; width: number; height: number }>;
   judgements: Array<{ kind: Kind; prompt: string; imagePaths: string[] }>;
   persisted: Map<string, { bytes: Uint8Array; contentType: string }>;
 }
@@ -38,13 +41,13 @@ function accepted(kind: Kind, score = 0.94): Record<string, unknown> {
         noText: true,
         issues: [],
       }
-    : { score, safeArea: true, noText: true, issues: [] };
+    : { score, safeArea: true, edgeToEdge: true, noText: true, issues: [] };
 }
 
 function rejected(kind: Kind, issue: string, score = 0.45): Record<string, unknown> {
   return kind === "avatar"
     ? { score, circleSafe: false, tinyLegible: false, noText: true, issues: [issue] }
-    : { score, safeArea: false, noText: true, issues: [issue] };
+    : { score, safeArea: false, edgeToEdge: true, noText: true, issues: [issue] };
 }
 
 function fakeRuntime(config: {
@@ -52,11 +55,11 @@ function fakeRuntime(config: {
   verdicts?: Partial<Record<Kind, unknown[]>>;
 } = {}): { runtime: ChannelArtRuntime; state: RuntimeState } {
   const state: RuntimeState = {
-    renders: [],
+    bannerRenders: [],
     avatarRenders: [],
     renderedKeys: [],
-    downloads: [],
     conversions: [],
+    crops: [],
     judgements: [],
     persisted: new Map(),
   };
@@ -79,6 +82,25 @@ function fakeRuntime(config: {
     responseSha256: `response-${ordinal}`,
     createdAt: ordinal,
   });
+  const bannerReceipt = (ordinal: number): FalNanoBananaBannerReceipt => ({
+    provider: FAL_NANO_BANANA_BANNER_PROFILE.provider,
+    model: FAL_NANO_BANANA_BANNER_PROFILE.model,
+    apiVersion: FAL_NANO_BANANA_BANNER_PROFILE.apiVersion,
+    providerRequestId: `fixture-banner-${ordinal}`,
+    route: FAL_NANO_BANANA_BANNER_PROFILE.route,
+    width: FAL_NANO_BANANA_BANNER_PROFILE.accountingWidth,
+    height: FAL_NANO_BANANA_BANNER_PROFILE.accountingHeight,
+    promptUtf8Bytes: 400,
+    outputCostUsd: FAL_NANO_BANANA_BANNER_PROFILE.outputImageUsd,
+    costUsd: FAL_NANO_BANANA_BANNER_PROFILE.outputImageUsd,
+    sourceContentType: "image/png",
+    providerRequestCanonicalJson: "{}",
+    providerRequestSha256: `banner-request-${ordinal}`,
+    providerResponseMetadataCanonicalJson: "{}",
+    providerResponseMetadataSha256: `banner-metadata-${ordinal}`,
+    responseSha256: `banner-response-${ordinal}`,
+    createdAt: ordinal,
+  });
   const verdicts: Record<Kind, unknown[]> = {
     avatar: [...(config.verdicts?.avatar ?? [accepted("avatar")])],
     banner: [...(config.verdicts?.banner ?? [accepted("banner")])],
@@ -86,14 +108,12 @@ function fakeRuntime(config: {
 
   const runtime: ChannelArtRuntime = {
     hasJudge: () => config.hasJudge ?? true,
-    renderImage: async (request) => {
-      state.renders.push(request);
-      const ordinal = String(state.renders.length).padStart(2, "0");
-      const key = `imagecraft/${request.prefix}/job-${ordinal}/stills/${request.id}-c01.png`;
-      state.renderedKeys.push(key);
+    renderBanner: async (request) => {
+      state.bannerRenders.push(request);
+      const ordinal = state.bannerRenders.length;
       return {
-        url: `https://signed.invalid/${request.id}/${ordinal}`,
-        key,
+        bytes: new TextEncoder().encode(`fake-banner-${ordinal}`),
+        receipt: bannerReceipt(ordinal),
       };
     },
     renderAvatar: async (request) => {
@@ -104,13 +124,13 @@ function fakeRuntime(config: {
         receipt: avatarReceipt(ordinal),
       };
     },
-    download: async (url, path) => {
-      state.downloads.push({ url, path });
-      return path;
-    },
     makeTempDir: async (prefix) => `/tmp/${prefix}`,
     toJpeg: async (input, output, width, height) => {
       state.conversions.push({ input, output, width, height });
+      return output;
+    },
+    cropCenter: async (input, output, width, height) => {
+      state.crops.push({ input, output, width, height });
       return output;
     },
     judge: async (request) => {
@@ -153,6 +173,8 @@ function assertPromptContracts(): void {
   const banner = bannerPrompt(IDENTITY);
   assert.match(banner, /1546x423 safe area/i);
   assert.match(banner, /outer edges are atmospheric extension only/i);
+  assert.match(banner, /head no higher than 35% and the base no lower than 65%/i);
+  assert.match(banner, /must fill every pixel of the canvas edge-to-edge/i);
   assert.match(banner, /absolutely no text/i);
 }
 
@@ -180,29 +202,23 @@ async function assertApprovedIndependentOutputs(): Promise<void> {
   );
 
   assert.equal(state.avatarRenders.length, 2);
-  assert.equal(state.renders.length, 1);
-  assert.deepEqual(state.renders.map((request) => request.profileId), [
-    "production",
-  ]);
-  assert.deepEqual(
-    state.renders.map((request) => request.maxCostUsd),
-    [0.35],
-    "the banner candidate must receive only its own direct-worker envelope",
-  );
+  assert.equal(state.bannerRenders.length, 1);
   assert.match(state.avatarRenders[0].idempotencyContext, /art\/avatar\/avatar-v7\/avatar-candidate-01$/);
   assert.match(state.avatarRenders[1].prompt, /subject is too small/i, "critique must guide the retry");
-  assert.match(state.renders[0].prefix, /art\/banner\/banner-v9$/);
-  assert.match(state.renders[0].negativePrompt, /important subject outside the central safe area/i);
+  assert.match(state.bannerRenders[0].idempotencyContext, /art\/banner\/banner-v9\/banner-candidate-01$/);
+  assert.match(state.bannerRenders[0].prompt, /absolutely no text/i);
 
   assert.match(result.imageKey, /art\/avatar\/avatar-v7\/approved\.jpg$/);
-  assert.match(result.bannerKey, /^imagecraft\/.*art\/banner\/banner-v9\//);
+  assert.match(result.bannerKey, /art\/banner\/banner-v9\/approved\.jpg$/);
   assert.notEqual(result.imageKey, result.bannerKey);
 
   assert(state.conversions.some(({ width, height }) => width === 1024 && height === 1024));
   assert(state.conversions.some(({ width, height }) => width === 48 && height === 48));
   assert(state.conversions.some(({ width, height }) => width === 256 && height === 256));
   assert(state.conversions.some(({ width, height }) => width === 1280 && height === 720));
-  assert(state.conversions.some(({ width, height }) => width === 773 && height === 212));
+  assert.deepEqual(state.crops.map(({ input, width, height }) => ({ input, width, height })), [
+    { input: "/tmp/channel-art-quiet-stoic-banner/banner-candidate-01-full.jpg", width: 773, height: 212 },
+  ]);
   assert.deepEqual(state.judgements.map(({ imagePaths }) => imagePaths.length), [2, 2, 2]);
 
   const persistedKeys = [...state.persisted.keys()];
@@ -234,7 +250,7 @@ async function assertMissingJudgeFailsBeforeSpend(): Promise<void> {
     }),
     /quality judge is unavailable/i,
   );
-  assert.equal(state.renders.length, 0, "missing judge must stop before a paid Imagecraft render");
+  assert.equal(state.bannerRenders.length, 0, "missing judge must stop before a paid Nano Banana render");
   assert.equal(state.avatarRenders.length, 0, "missing judge must stop before a paid Nano Banana render");
   assert.equal(state.persisted.size, 0);
 }
@@ -262,11 +278,35 @@ async function assertRejectedCandidateNeverReturns(): Promise<void> {
   );
 
   assert.equal(state.avatarRenders.length, 2);
-  assert.equal(state.renders.length, 0);
+  assert.equal(state.bannerRenders.length, 0);
   const keys = [...state.persisted.keys()];
   assert(keys.some((key) => key.endsWith("art/avatar/rejected-v2/rejection.json")));
   assert(!keys.some((key) => key.endsWith("approved.jpg")));
   assert(!keys.some((key) => key.endsWith("approval.json")));
+}
+
+async function assertLetterboxedBannerFailsClosed(): Promise<void> {
+  const { runtime, state } = fakeRuntime({
+    verdicts: {
+      // A high score is not enough. Missing the explicit full-bleed proof must
+      // reject a banner so a letterboxed provider image can never be promoted.
+      banner: [{ score: 0.99, safeArea: true, noText: true, issues: ["black matte bars"] }],
+    },
+  });
+  await assert.rejects(
+    generateChannelArt("owner-test", "letterbox-reject", IDENTITY, () => {}, {
+      runtime,
+      avatar: false,
+      banner: true,
+      maxAttempts: 1,
+      version: { banner: "letterbox-v1" },
+      existing: { imageKey: "owners/owner-test/channels/letterbox-reject/art/avatar/approved.jpg" },
+    }),
+    /banner rejected after 1 attempts/i,
+  );
+  assert.equal(state.bannerRenders.length, 1);
+  assert([...state.persisted.keys()].some((key) => key.endsWith("art/banner/letterbox-v1/rejection.json")));
+  assert(![...state.persisted.keys()].some((key) => key.endsWith("art/banner/letterbox-v1/approved.jpg")));
 }
 
 async function assertExistingAvatarsArePreserved(): Promise<void> {
@@ -284,7 +324,7 @@ async function assertExistingAvatarsArePreserved(): Promise<void> {
       { runtime, existing, preserveExisting: true },
     );
     assert.deepEqual(result, existing);
-    assert.equal(state.renders.length, 0);
+    assert.equal(state.bannerRenders.length, 0);
     assert.equal(state.avatarRenders.length, 0);
     assert.equal(state.judgements.length, 0);
   }
@@ -306,9 +346,9 @@ async function assertPerAssetPreservation(): Promise<void> {
   });
   assert.equal(result.imageKey, existingAvatar);
   assert.match(result.bannerKey, /art\/banner\/banner-refresh-v3\//);
-  assert.equal(state.renders.length, 1);
+  assert.equal(state.bannerRenders.length, 1);
   assert.equal(state.avatarRenders.length, 0);
-  assert.match(state.renders[0].id, /^banner-candidate-/);
+  assert.match(state.bannerRenders[0].idempotencyContext, /banner-candidate-01$/);
 }
 
 async function assertIndependentlyLeasedAssetGeneration(): Promise<void> {
@@ -334,7 +374,10 @@ async function assertIndependentlyLeasedAssetGeneration(): Promise<void> {
   assert.match(avatar, /art\/avatar\/avatar-stage-v1\//);
   assert.match(banner, /art\/banner\/banner-stage-v1\//);
   assert.equal(state.avatarRenders.length, 1);
-  assert.deepEqual(state.renders.map((render) => render.id.split("-candidate-")[0]), ["banner"]);
+  assert.deepEqual(
+    state.bannerRenders.map((render) => render.idempotencyContext.split("/").at(-1)?.split("-candidate-")[0]),
+    ["banner"],
+  );
 }
 
 async function assertFlagBannerUsesSameGate(): Promise<void> {
@@ -350,9 +393,9 @@ async function assertFlagBannerUsesSameGate(): Promise<void> {
     { runtime, version: { banner: "de-v1" }, maxAttempts: 1 },
   );
   assert.match(key, /art\/banner\/de-v1\//);
-  assert.equal(state.renders.length, 1);
-  assert.match(state.renders[0].prompt, /flag of Germany/i);
-  assert.match(state.renders[0].prompt, /1546x423 safe area/i);
+  assert.equal(state.bannerRenders.length, 1);
+  assert.match(state.bannerRenders[0].prompt, /flag of Germany/i);
+  assert.match(state.bannerRenders[0].prompt, /1546x423 safe area/i);
   assert(state.persisted.has(
     "owner/owner-test/channel/quiet-stoic-de/art/banner/de-v1/approval.json",
   ));
@@ -360,14 +403,12 @@ async function assertFlagBannerUsesSameGate(): Promise<void> {
 
 async function assertDefaultProviderHasNoFallback(): Promise<void> {
   const source = await readFile(new URL("../channelArt.ts", import.meta.url), "utf8");
-  assert.match(source, /renderNovitaImage/);
+  assert.match(source, /generateFalNanoBananaBannerWithReceipt/);
   assert.match(source, /generateFalNanoBananaAvatarImageWithReceipt/);
   assert.match(source, /NANO_BANANA_AVATAR_PROFILE/);
-  assert.match(source, /novitaCostEnvelope/);
+  assert.match(source, /FAL_NANO_BANANA_BANNER_PROFILE/);
   assert.match(source, /maxProviderSpendUsd/);
-  assert.match(source, /imageJobs: args\.maxAttempts/);
-  assert.doesNotMatch(source, /generateFalImage|replicate|generateFluxImage/);
-  assert.match(source, /profileId: "production"/);
+  assert.doesNotMatch(source, /renderNovitaImage|novitaCostEnvelope|generateFalImage|replicate|generateFluxImage/);
   assert.match(source, /ifNoneMatch: "\*"/);
   assert.match(source, /hasJudge: hasVisionKey/);
   assert.doesNotMatch(source, /hasJudge: hasGeminiKey/);
@@ -389,6 +430,7 @@ async function main(): Promise<void> {
   await assertApprovedIndependentOutputs();
   await assertMissingJudgeFailsBeforeSpend();
   await assertRejectedCandidateNeverReturns();
+  await assertLetterboxedBannerFailsClosed();
   await assertExistingAvatarsArePreserved();
   await assertPerAssetPreservation();
   await assertIndependentlyLeasedAssetGeneration();

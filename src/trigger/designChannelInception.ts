@@ -2949,12 +2949,6 @@ export async function executeDesignChannel(
         {
           version: { avatar: avatarStage.inputFingerprint.slice(0, 20) },
           maxProviderSpendUsd: avatarStage.maximumCostUsd,
-          providerLifecycle: {
-            ownerId,
-            channelId,
-            runId: runtime.runId,
-            blockId: "channel-inception-avatar",
-          },
         },
       );
       await mergeIdentity(convex, channelId, { imageKey });
@@ -2979,12 +2973,6 @@ export async function executeDesignChannel(
         {
           version: { banner: bannerStage.inputFingerprint.slice(0, 20) },
           maxProviderSpendUsd: bannerStage.maximumCostUsd,
-          providerLifecycle: {
-            ownerId,
-            channelId,
-            runId: runtime.runId,
-            blockId: "channel-inception-banner",
-          },
         },
       );
       await mergeIdentity(convex, channelId, { bannerKey });

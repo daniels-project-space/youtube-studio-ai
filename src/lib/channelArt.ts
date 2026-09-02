@@ -1,8 +1,8 @@
 /**
  * Production channel-art generation.
  *
- * Avatar and banner are independent, versioned jobs. Avatars use the sealed
- * Fal-hosted square Nano Banana identity route; banners use Novita Imagecraft. Every
+ * Avatar and banner are independent, versioned jobs. Both use sealed Fal-hosted
+ * Nano Banana routes with their own geometry and evidence contracts. Every
  * candidate is durable in R2 before it is judged, and there is no provider
  * fallback. Only an accepted candidate is returned.
  */
@@ -10,17 +10,15 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { produceAndCritique } from "@/engine/critiqueLoop";
-import { PRICE } from "@/engine/pricing";
 import { generateFalNanoBananaAvatarImageWithReceipt } from "@/lib/falNanoBananaAvatar";
+import { makeRunTempDir } from "@/lib/files";
+import { cropCenterImageToJpeg, imageToJpeg } from "@/lib/ffmpeg";
+import { generateFalNanoBananaBannerWithReceipt } from "@/lib/falNanoBananaBanner";
 import {
-  downloadTo,
-  DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
-  makeRunTempDir,
-} from "@/lib/files";
-import { imageToJpeg } from "@/lib/ffmpeg";
+  FAL_NANO_BANANA_BANNER_PROFILE,
+  type FalNanoBananaBannerReceipt,
+} from "@/lib/falNanoBananaBannerContract";
 import { parseJsonLoose } from "@/lib/gemini";
-import { renderNovitaImage, type NovitaRenderLifecycle } from "@/lib/novitaMedia";
-import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import {
   NANO_BANANA_AVATAR_PROFILE,
   type NanoBananaAvatarReceipt,
@@ -45,17 +43,6 @@ export interface ChannelArtResult {
   bannerKey: string;
 }
 
-export interface ChannelArtRenderRequest {
-  prefix: string;
-  id: string;
-  prompt: string;
-  negativePrompt: string;
-  profileId: "production";
-  /** Exact one-image worker ceiling; never a channel or stage aggregate. */
-  maxCostUsd: number;
-  lifecycle?: NovitaRenderLifecycle;
-}
-
 export interface ChannelAvatarRenderRequest {
   prompt: string;
   idempotencyContext: string;
@@ -63,14 +50,17 @@ export interface ChannelAvatarRenderRequest {
 
 export interface ChannelArtRuntime {
   hasJudge(): boolean;
-  renderImage(request: ChannelArtRenderRequest): Promise<{ url: string; key: string }>;
+  renderBanner(request: { prompt: string; idempotencyContext: string }): Promise<{
+    bytes: Uint8Array;
+    receipt: FalNanoBananaBannerReceipt;
+  }>;
   renderAvatar(request: ChannelAvatarRenderRequest): Promise<{
     bytes: Uint8Array;
     receipt: NanoBananaAvatarReceipt;
   }>;
-  download(url: string, path: string, options?: { timeoutMs?: number }): Promise<unknown>;
   makeTempDir(prefix: string): Promise<string>;
   toJpeg(input: string, output: string, width: number, height: number): Promise<unknown>;
+  cropCenter(input: string, output: string, width: number, height: number): Promise<unknown>;
   judge(request: { kind: ArtKind; prompt: string; imagePaths: string[] }): Promise<unknown>;
   readBytes(path: string): Promise<Uint8Array>;
   writeBytes(path: string, bytes: Uint8Array): Promise<void>;
@@ -92,14 +82,8 @@ export interface ChannelArtOptions {
   /** Stable checkpoint namespace, or independent namespaces per asset. */
   version?: string | { avatar?: string; banner?: string };
   maxAttempts?: number;
-  /**
-   * Explicit aggregate admission for one generated asset. The default Novita
-   * runtime reserves every potential critique iteration before its first
-   * image worker; a missing/undersized envelope is a zero-spend failure.
-   */
+  /** Explicit aggregate admission for one generated asset. */
   maxProviderSpendUsd?: number;
-  /** Durable owner/run/stage identity required by the direct Novita worker. */
-  providerLifecycle?: NovitaRenderLifecycle;
   /** Explicit dependency seam for deterministic tests; production omits it. */
   runtime?: ChannelArtRuntime;
 }
@@ -127,28 +111,16 @@ const SCORE_THRESHOLD: Record<ArtKind, number> = {
   banner: 0.84,
 };
 
-const NEGATIVE_PROMPT: Record<ArtKind, string> = {
-  avatar:
-    "text, words, letters, logo typography, watermark, multiple subjects, off-center subject, " +
-    "wide shot, full body, tiny face, cropped face, clutter, murky lighting, low contrast",
-  banner:
-    "text, words, letters, captions, logo typography, watermark, busy center, important subject " +
-    "outside the central safe area, clutter, low contrast, collage, split screen",
-};
-
 const DEFAULT_RUNTIME: ChannelArtRuntime = {
-  // Channel art is rendered on Novita and independently graded by the
-  // configured non-Google vision provider. Requiring a Gemini key here made a
-  // fully non-Google route impossible despite having a real grader.
+  // Channel art is rendered on Fal and independently graded by the configured
+  // non-Google vision provider. Requiring a Gemini key here made a fully
+  // non-Google route impossible despite having a real grader.
   hasJudge: hasVisionKey,
-  renderImage: async (request) => {
-    const rendered = await renderNovitaImage(request);
-    return { url: rendered.url, key: rendered.key };
-  },
+  renderBanner: generateFalNanoBananaBannerWithReceipt,
   renderAvatar: generateFalNanoBananaAvatarImageWithReceipt,
-  download: downloadTo,
   makeTempDir: makeRunTempDir,
   toJpeg: imageToJpeg,
+  cropCenter: cropCenterImageToJpeg,
   judge: async ({ prompt, imagePaths }) => {
     const raw = await visionLocal({
       prompt,
@@ -217,8 +189,14 @@ export function bannerPrompt(
     ...extra,
     "YOUTUBE SAFE AREA: keep the focal subject and every essential detail inside the centered " +
       "1546x423 safe area of a 2560x1440 canvas; outer edges are atmospheric extension only",
-    "wide 16:9 establishing composition, cinematic depth, clear focal hierarchy, high production " +
-      "value, absolutely no text, no letters, no words, no typography, no watermark",
+    "DEVICE-SAFE PLACEMENT: make the complete hero intentionally compact: fit all of it inside the " +
+      "central, horizontally wide middle strip, with the head no higher than 35% and the base no lower than " +
+      "65% of canvas height. Leave generous breathing room above the head and below the subject; do not crop " +
+      "the hero at any edge",
+    "full-frame composition: artwork must fill every pixel of the canvas edge-to-edge; " +
+      "no letterbox bars, pillarbox bars, black matte, empty framing strips, image-in-image frame, " +
+      "or border. Cinematic depth, clear focal hierarchy, high production value, absolutely no text, " +
+      "no letters, no words, no typography, no watermark",
     notes.length ? `FIX every issue from the prior attempt: ${notes.join("; ")}` : "",
   ]
     .filter(Boolean)
@@ -242,9 +220,11 @@ function judgePrompt(kind: ArtKind, id: ArtIdentity): string {
     `Judge this YouTube banner for "${id.name}". Image 1 is the full 16:9 banner; image 2 is the`,
     "centered 1546x423-equivalent safe-area crop seen across devices. Pass only when the focal",
     "subject and all essential information survive inside that crop, the composition is clean and",
-    "channel-specific, and neither image contains text, letters, watermarking, or fake typography.",
+    "channel-specific, and artwork fills the canvas edge-to-edge without letterbox/pillarbox bars, a",
+    "black matte, empty framing strips, or image-in-image framing. Neither image may contain text,",
+    "letters, watermarking, or fake typography.",
     "Return strict JSON:",
-    '{"score":0..1,"safeArea":boolean,"noText":boolean,"issues":string[]}',
+    '{"score":0..1,"safeArea":boolean,"edgeToEdge":boolean,"noText":boolean,"issues":string[]}',
   ].join(" ");
 }
 
@@ -264,7 +244,7 @@ function parseCritique(kind: ArtKind, raw: unknown): {
   const score = Math.max(0, Math.min(1, verdict.score));
   const checks = kind === "avatar"
     ? (["circleSafe", "tinyLegible", "singleMark", "noScene", "noText"] as const)
-    : (["safeArea", "noText"] as const);
+    : (["safeArea", "edgeToEdge", "noText"] as const);
   const failedChecks = checks.filter((check) => verdict[check] !== true);
   const issues = Array.isArray(verdict.issues)
     ? verdict.issues.filter((issue): issue is string => typeof issue === "string").slice(0, 6)
@@ -313,160 +293,136 @@ async function prepareCandidate(
   const full = candidate.sourcePath.replace(/\.png$/, "-full.jpg");
   const safe = candidate.sourcePath.replace(/\.png$/, "-safe-area.jpg");
   await runtime.toJpeg(candidate.sourcePath, full, 1280, 720);
-  // 1546/2560 x 423/1440, scaled onto a 1280x720 working canvas.
-  await runtime.toJpeg(candidate.sourcePath, safe, 773, 212);
+  // Crop the physical 1546/2560 x 423/1440 device-safe region from the
+  // normalized full canvas. Resizing directly to this ratio would grade a
+  // much taller central band than YouTube actually shows on every device.
+  await runtime.cropCenter(full, safe, 773, 212);
   return { ...candidate, judgedPaths: [full, safe] };
 }
 
-async function directArt(args: {
+async function directNanoBananaBanner(args: {
   ownerId: string;
   slug: string;
-  kind: ArtKind;
   identity: ArtIdentity;
   version: string;
   maxAttempts: number;
   prompt: (issues: string[]) => string;
   runtime: ChannelArtRuntime;
-  imageWorkerMaxCostUsd: number;
-  lifecycle?: NovitaRenderLifecycle;
   log: Logger;
 }): Promise<AcceptedArt> {
-  const { ownerId, slug, kind, identity, version, runtime, log } = args;
-  if (!runtime.hasJudge()) {
-    throw new Error(`channelArt: ${kind} quality judge is unavailable; refusing to generate`);
-  }
+  const { ownerId, slug, identity, version, runtime, log } = args;
+  if (!runtime.hasJudge()) throw new Error("channelArt: banner quality judge is unavailable; refusing to generate");
 
-  const prefix = channelKey(ownerId, slug, `art/${kind}/${version}`);
-  const expectedKeyPrefix = `imagecraft/${prefix.replace(/^\/+|\/+$/g, "")}/`;
-  const temp = await runtime.makeTempDir(`channel-art-${slug}-${kind}`);
-  const candidates: ArtCandidate[] = [];
+  const prefix = channelKey(ownerId, slug, `art/banner/${version}`);
+  const temp = await runtime.makeTempDir(`channel-art-${slug}-banner`);
+  const candidates: Array<ArtCandidate & { receipt: FalNanoBananaBannerReceipt }> = [];
 
-  let loop: Awaited<ReturnType<typeof produceAndCritique<ArtCandidate>>>;
+  let loop: Awaited<ReturnType<typeof produceAndCritique<ArtCandidate & {
+    receipt: FalNanoBananaBannerReceipt;
+  }>>>;
   try {
-    loop = await produceAndCritique<ArtCandidate>({
-      label: `channel-art-${kind}`,
-      threshold: SCORE_THRESHOLD[kind],
+    loop = await produceAndCritique<ArtCandidate & { receipt: FalNanoBananaBannerReceipt }>({
+      label: "channel-art-banner",
+      threshold: SCORE_THRESHOLD.banner,
       maxIters: args.maxAttempts,
       log,
       produce: async (priorIssues, attempt) => {
-        const id = `${kind}-candidate-${String(attempt).padStart(2, "0")}`;
-        const rendered = await runtime.renderImage({
-          prefix,
-          id,
+        const id = `banner-candidate-${String(attempt).padStart(2, "0")}`;
+        const generated = await runtime.renderBanner({
           prompt: args.prompt(priorIssues),
-          negativePrompt: NEGATIVE_PROMPT[kind],
-          profileId: "production",
-          maxCostUsd: args.imageWorkerMaxCostUsd,
-          lifecycle: args.lifecycle,
+          idempotencyContext: `${ownerId}/${slug}/art/banner/${version}/${id}`,
         });
-        if (!rendered.key.startsWith(expectedKeyPrefix)) {
-          throw new Error(`channelArt: ${kind} renderer escaped its versioned Imagecraft namespace`);
-        }
+        const sourceKey = `${prefix}/${id}.source`;
+        await runtime.putImmutable(sourceKey, generated.bytes, generated.receipt.sourceContentType);
+        await runtime.putImmutable(`${prefix}/${id}.receipt.json`, manifestBytes(generated.receipt), "application/json");
         const sourcePath = join(temp, `${id}.png`);
-        await runtime.download(rendered.url, sourcePath, {
-          timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
-        });
-        const candidate = await prepareCandidate(kind, {
-          key: rendered.key,
-          url: rendered.url,
-          sourcePath,
-          judgedPaths: [],
-          attempt,
-        }, runtime);
+        await runtime.writeBytes(sourcePath, generated.bytes);
+        const candidate = {
+          ...(await prepareCandidate("banner", {
+            key: sourceKey,
+            url: "",
+            sourcePath,
+            judgedPaths: [],
+            attempt,
+          }, runtime)),
+          receipt: generated.receipt,
+        };
         candidates.push(candidate);
         return candidate;
       },
-      critique: async (candidate) => parseCritique(kind, await runtime.judge({
-        kind,
-        prompt: judgePrompt(kind, identity),
+      critique: async (candidate) => parseCritique("banner", await runtime.judge({
+        kind: "banner",
+        prompt: judgePrompt("banner", identity),
         imagePaths: candidate.judgedPaths,
       })),
     });
   } catch (error) {
     if (candidates.length > 0) {
-      await runtime.putImmutable(
-        channelKey(ownerId, slug, `art/${kind}/${version}/rejection.json`),
-        manifestBytes({
-          schemaVersion: 1,
-          status: "rejected",
-          kind,
-          version,
-          error: error instanceof Error ? error.message : String(error),
-          candidates: candidates.map(({ key, attempt }) => ({ key, attempt })),
-        }),
-        "application/json",
-      );
+      await runtime.putImmutable(`${prefix}/rejection.json`, manifestBytes({
+        schemaVersion: 2,
+        status: "rejected",
+        kind: "banner",
+        contractVersion: FAL_NANO_BANANA_BANNER_PROFILE.contractVersion,
+        providerRoute: FAL_NANO_BANANA_BANNER_PROFILE.route,
+        version,
+        error: error instanceof Error ? error.message : String(error),
+        candidates: candidates.map(({ key, attempt, receipt }) => ({ key, attempt, responseSha256: receipt.responseSha256 })),
+      }), "application/json");
     }
     throw error;
   }
 
   if (!loop.accepted) {
-    await runtime.putImmutable(
-      channelKey(ownerId, slug, `art/${kind}/${version}/rejection.json`),
-      manifestBytes({
-        schemaVersion: 1,
-        status: "rejected",
-        kind,
-        version,
-        threshold: SCORE_THRESHOLD[kind],
-        candidates: candidates.map((candidate, index) => ({
-          key: candidate.key,
-          attempt: candidate.attempt,
-          critique: loop.history[index],
-        })),
-      }),
-      "application/json",
-    );
-    throw new Error(
-      `channelArt: ${kind} rejected after ${loop.iterations} attempts (best score ${loop.critique.score.toFixed(2)})`,
-    );
-  }
-
-  let selectedKey = loop.value.key;
-  if (kind === "avatar") {
-    const squarePath = loop.value.judgedPaths[0];
-    selectedKey = channelKey(ownerId, slug, `art/avatar/${version}/approved.jpg`);
-    await runtime.putImmutable(
-      selectedKey,
-      await runtime.readBytes(squarePath),
-      "image/jpeg",
-    );
-  }
-
-  await runtime.putImmutable(
-    channelKey(ownerId, slug, `art/${kind}/${version}/approval.json`),
-    manifestBytes({
-      schemaVersion: 1,
-      status: "approved",
-      kind,
+    await runtime.putImmutable(`${prefix}/rejection.json`, manifestBytes({
+      schemaVersion: 2,
+      status: "rejected",
+      kind: "banner",
+      contractVersion: FAL_NANO_BANANA_BANNER_PROFILE.contractVersion,
+      providerRoute: FAL_NANO_BANANA_BANNER_PROFILE.route,
       version,
-      threshold: SCORE_THRESHOLD[kind],
-      score: loop.critique.score,
-      attempts: loop.iterations,
-      sourceKey: loop.value.key,
-      outputKey: selectedKey,
+      threshold: SCORE_THRESHOLD.banner,
       candidates: candidates.map((candidate, index) => ({
         key: candidate.key,
         attempt: candidate.attempt,
+        responseSha256: candidate.receipt.responseSha256,
         critique: loop.history[index],
       })),
-    }),
-    "application/json",
-  );
+    }), "application/json");
+    throw new Error(`channelArt: banner rejected after ${loop.iterations} attempts (best score ${loop.critique.score.toFixed(2)})`);
+  }
 
-  log(`channelArt: ${kind} approved`, {
+  const selectedKey = `${prefix}/approved.jpg`;
+  await runtime.putImmutable(selectedKey, await runtime.readBytes(loop.value.judgedPaths[0]), "image/jpeg");
+  await runtime.putImmutable(`${prefix}/approval.json`, manifestBytes({
+    schemaVersion: 2,
+    status: "approved",
+    kind: "banner",
+    contractVersion: FAL_NANO_BANANA_BANNER_PROFILE.contractVersion,
+    providerRoute: FAL_NANO_BANANA_BANNER_PROFILE.route,
     version,
+    threshold: SCORE_THRESHOLD.banner,
+    score: loop.critique.score,
+    attempts: loop.iterations,
+    sourceKey: loop.value.key,
+    outputKey: selectedKey,
+    providerReceipt: loop.value.receipt,
+    candidates: candidates.map((candidate, index) => ({
+      key: candidate.key,
+      attempt: candidate.attempt,
+      responseSha256: candidate.receipt.responseSha256,
+      critique: loop.history[index],
+    })),
+  }), "application/json");
+
+  log("channelArt: banner approved", {
+    version,
+    providerRoute: FAL_NANO_BANANA_BANNER_PROFILE.route,
     score: loop.critique.score,
     attempts: loop.iterations,
     sourceKey: loop.value.key,
     outputKey: selectedKey,
   });
-  return {
-    key: selectedKey,
-    sourceKey: loop.value.key,
-    score: loop.critique.score,
-    attempts: loop.iterations,
-  };
+  return { key: selectedKey, sourceKey: loop.value.key, score: loop.critique.score, attempts: loop.iterations };
 }
 
 async function directNanoBananaAvatar(args: {
@@ -638,54 +594,25 @@ function validateSelection(options: ChannelArtOptions): void {
   }
 }
 
-/**
- * The default runtime owns real Novita workers. A fake/injected test runtime
- * is deliberately excluded so deterministic unit tests need not manufacture a
- * cloud lease, while every production call must carry a stage-signed envelope.
- */
-function providerAdmission(
-  args: {
-    kind: ArtKind;
-    maxAttempts: number;
-    options: ChannelArtOptions;
-    runtime: ChannelArtRuntime;
-  },
-): { imageWorkerMaxCostUsd: number; lifecycle?: NovitaRenderLifecycle } {
-  if (args.runtime !== DEFAULT_RUNTIME) {
-    return { imageWorkerMaxCostUsd: PRICE.novitaImageMaxUsd };
-  }
-  if (!args.options.providerLifecycle) {
-    throw new Error(`channelArt: ${args.kind} requires an explicit provider lifecycle before paid generation`);
-  }
-  if (args.options.maxProviderSpendUsd === undefined) {
-    throw new Error(`channelArt: ${args.kind} requires an explicit aggregate provider budget before paid generation`);
-  }
-  novitaCostEnvelope({
-    label: `channel art ${args.kind}`,
-    imageJobs: args.maxAttempts,
-    maxCostUsd: args.options.maxProviderSpendUsd,
-  });
-  return {
-    imageWorkerMaxCostUsd: PRICE.novitaImageMaxUsd,
-    lifecycle: args.options.providerLifecycle,
-  };
-}
-
-function avatarProviderAdmission(args: {
+function nanoBananaProviderAdmission(args: {
+  kind: "avatar" | "banner";
   maxAttempts: number;
   options: ChannelArtOptions;
   runtime: ChannelArtRuntime;
 }): void {
   if (args.runtime !== DEFAULT_RUNTIME) return;
   if (args.options.maxProviderSpendUsd === undefined) {
-    throw new Error("channelArt: avatar requires an explicit aggregate provider budget before paid generation");
+    throw new Error(`channelArt: ${args.kind} requires an explicit aggregate provider budget before paid generation`);
   }
+  const ceiling = args.kind === "avatar"
+    ? NANO_BANANA_AVATAR_PROFILE.admissionCeilingUsd
+    : FAL_NANO_BANANA_BANNER_PROFILE.admissionCeilingUsd;
   const required = Number((
-    args.maxAttempts * NANO_BANANA_AVATAR_PROFILE.admissionCeilingUsd
+    args.maxAttempts * ceiling
   ).toFixed(9));
   if (args.options.maxProviderSpendUsd + Number.EPSILON < required) {
     throw new Error(
-      `channelArt: avatar budget $${args.options.maxProviderSpendUsd.toFixed(3)} is below ` +
+      `channelArt: ${args.kind} budget $${args.options.maxProviderSpendUsd.toFixed(3)} is below ` +
         `the ${args.maxAttempts}-attempt Nano Banana ceiling $${required.toFixed(3)}`,
     );
   }
@@ -712,7 +639,7 @@ export async function generateChannelArtAsset(
   const version = versionFor(kind, options, runtime);
   const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
   if (kind === "avatar") {
-    avatarProviderAdmission({ maxAttempts, options, runtime });
+    nanoBananaProviderAdmission({ kind, maxAttempts, options, runtime });
     log("channelArt: generating versioned avatar through Fal Nano Banana", { version });
     return (await directNanoBananaAvatar({
       ownerId,
@@ -724,18 +651,16 @@ export async function generateChannelArtAsset(
       log,
     })).key;
   }
-  const admission = providerAdmission({ kind, maxAttempts, options, runtime });
-  log("channelArt: generating versioned banner through Novita Imagecraft", { version });
-  return (await directArt({
+  nanoBananaProviderAdmission({ kind, maxAttempts, options, runtime });
+  log("channelArt: generating versioned banner through Fal Nano Banana", { version });
+  return (await directNanoBananaBanner({
     ownerId,
     slug,
-    kind,
     identity,
     version,
     maxAttempts,
     prompt: (issues) => bannerPrompt(identity, issues),
     runtime,
-    ...admission,
     log,
   })).key;
 }
@@ -772,7 +697,7 @@ export async function generateChannelArt(
   if (generateAvatar) {
     const version = versionFor("avatar", options, runtime);
     log("channelArt: generating versioned avatar through Fal Nano Banana", { version });
-    avatarProviderAdmission({ maxAttempts, options, runtime });
+    nanoBananaProviderAdmission({ kind: "avatar", maxAttempts, options, runtime });
     imageKey = (await directNanoBananaAvatar({
       ownerId,
       slug,
@@ -786,18 +711,16 @@ export async function generateChannelArt(
 
   if (generateBanner) {
     const version = versionFor("banner", options, runtime);
-    log("channelArt: generating versioned banner through Novita Imagecraft", { version });
-    const admission = providerAdmission({ kind: "banner", maxAttempts, options, runtime });
-    bannerKey = (await directArt({
+    log("channelArt: generating versioned banner through Fal Nano Banana", { version });
+    nanoBananaProviderAdmission({ kind: "banner", maxAttempts, options, runtime });
+    bannerKey = (await directNanoBananaBanner({
       ownerId,
       slug,
-      kind: "banner",
       identity,
       version,
       maxAttempts,
       prompt: (issues) => bannerPrompt(identity, issues),
       runtime,
-      ...admission,
       log,
     })).key;
   }
@@ -815,7 +738,7 @@ export async function generateFlagBanner(
   identity: ArtIdentity,
   country: string,
   log: Logger = () => {},
-  options: Pick<ChannelArtOptions, "version" | "maxAttempts" | "runtime" | "maxProviderSpendUsd" | "providerLifecycle"> = {},
+  options: Pick<ChannelArtOptions, "version" | "maxAttempts" | "runtime" | "maxProviderSpendUsd"> = {},
 ): Promise<string> {
   const runtime = options.runtime ?? DEFAULT_RUNTIME;
   if (!runtime.hasJudge()) {
@@ -823,11 +746,10 @@ export async function generateFlagBanner(
   }
   const version = versionFor("banner", options, runtime);
   const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
-  const admission = providerAdmission({ kind: "banner", maxAttempts, options, runtime });
-  const result = await directArt({
+  nanoBananaProviderAdmission({ kind: "banner", maxAttempts, options, runtime });
+  const result = await directNanoBananaBanner({
     ownerId,
     slug,
-    kind: "banner",
     identity,
     version,
     maxAttempts,
@@ -836,7 +758,6 @@ export async function generateFlagBanner(
       "keep flag detail subtle so the centered channel motif remains dominant and safe-area legible",
     ]),
     runtime,
-    ...admission,
     log,
   });
   return result.key;

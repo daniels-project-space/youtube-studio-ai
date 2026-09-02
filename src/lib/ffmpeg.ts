@@ -1954,6 +1954,36 @@ export async function imageToJpeg(
 }
 
 /**
+ * Crop the physical centered region of an already-normalized image. Unlike
+ * imageToJpeg(), this never rescales to make a requested aspect ratio fit.
+ * Use it for device-safe-region review where changing the source geometry
+ * would silently grade the wrong pixels.
+ */
+export async function cropCenterImageToJpeg(
+  inPath: string,
+  outJpg: string,
+  width: number,
+  height: number,
+): Promise<string> {
+  if (!Number.isInteger(width) || !Number.isInteger(height) || width < 1 || height < 1) {
+    throw new FfmpegError("cropCenterImageToJpeg requires positive integer dimensions");
+  }
+  await run(FFMPEG, [
+    "-y",
+    "-i",
+    inPath,
+    "-vf",
+    `crop=${width}:${height}:(iw-${width})/2:(ih-${height})/2`,
+    "-frames:v",
+    "1",
+    "-q:v",
+    "2",
+    outJpg,
+  ]);
+  return outJpg;
+}
+
+/**
  * Concatenate per-sentence narration clips with a silence GAP between each — the
  * pauses that make TTS sound organic. Every clip but the last is end-padded with
  * `gapSec` of silence, then all are concatenated. Returns the muxed mp3.
