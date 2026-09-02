@@ -4,6 +4,7 @@ import { use, useEffect, useState, useRef, type CSSProperties, type ReactNode } 
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
+import { channelArtIdentityFromSource } from "@/lib/channelArtIdentity";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
@@ -56,6 +57,12 @@ type ChannelDoc = {
   template: string;
   budget: number;
   identity?: ChannelIdentity;
+  styleDNA?: {
+    setting?: unknown;
+    composition?: unknown;
+    motifs?: unknown;
+    visualAvoid?: unknown;
+  };
   pipeline?: { block: string; params?: unknown }[];
   moduleConfig?: Record<string, Record<string, unknown>>;
   moduleLocks?: Record<string, ChannelModuleLock>;
@@ -530,6 +537,11 @@ export default function ChannelHubPage({
           budget={channel.budget}
           slug={channel.slug}
           locked={channel.locked === true}
+          artworkIdentity={channelArtIdentityFromSource({
+            name: channel.name,
+            identity: channel.identity,
+            styleDNA: channel.styleDNA,
+          })}
         />
       )}
       {tab === "Settings" && <SettingsTab channel={channel} />}
@@ -2260,11 +2272,13 @@ function IdentityTab({
   budget,
   slug,
   locked,
+  artworkIdentity,
 }: {
   id: ChannelIdentity;
   budget: number;
   slug: string;
   locked: boolean;
+  artworkIdentity: { vibe?: string; iconicMotif?: string };
 }) {
   const bible = id.creativeBrief;
   return (
@@ -2281,8 +2295,8 @@ function IdentityTab({
         <section className={styles.identitySection}>
           <div className={styles.sectionRail}><span>Channel identity</span><i /></div>
           <div className={styles.identitySnapshot}>
-            <Field label="Vibe" value={bible.vibe} />
-            <Field label="Signature" value={bible.iconicMotif} />
+            <Field label="Vibe" value={artworkIdentity.vibe ?? bible.vibe} />
+            <Field label="Signature" value={artworkIdentity.iconicMotif ?? bible.iconicMotif} />
             {bible.activeCrew?.length > 0 && (
               <div className={styles.identityCrew}>
                 <span>Active crew</span>
