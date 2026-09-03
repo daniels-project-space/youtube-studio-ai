@@ -53,7 +53,44 @@ export interface CtrFeedbackReport {
   effects: TraitEffect[];
   /** Rules safe to promote, most confident first. Empty until conclusive. */
   suggestedRules: string[];
+  /**
+   * The advisory block for the art director, already framed as subordinate.
+   * Empty until conclusive.
+   */
+  advisory: string;
 }
+
+/**
+ * CTR evidence is a ROUGH HINT and is framed as one.
+ *
+ * The craft rules in this module encode things CTR cannot see: whether the
+ * channel still looks like itself, whether the identity contract holds, whether
+ * the subject is worth a thumbnail at all. Observed CTR, by contrast, is
+ * confounded by title, topic, publish time, subscriber mix and where the
+ * impression was served — it can tell you a pattern correlated with clicks on
+ * past videos, and nothing about whether it will on the next one.
+ *
+ * So the advisory says so explicitly, and states its own rank. A channel that
+ * chases its own CTR history converges on whatever it happened to publish
+ * before, which is the opposite of the variety the sameness gate protects.
+ */
+export const CTR_ADVISORY_PREAMBLE =
+  "OBSERVED CTR (rough signal, LOWEST priority — it ranks below the channel identity contract, " +
+  "the golden craft bar and the story-interest doctrine, all of which override it wherever they " +
+  "disagree). This is correlation from past videos on this channel, confounded by title and topic. " +
+  "Treat it as a tiebreak between two otherwise equally strong concepts, never as a reason to " +
+  "repeat a past composition or to weaken a stronger idea:";
+
+/** Traits worth testing, because each is a craft decision the module can act on. */
+export const TRACKED_THUMBNAIL_TRAITS = [
+  "layoutMode",
+  "vantage",
+  "textObject",
+  "energy",
+  "subjectClass",
+  "headlineWordCount",
+  "hasNumberCallout",
+] as const;
 
 function ctr(clicks: number, impressions: number): number {
   return impressions > 0 ? clicks / impressions : 0;
@@ -143,6 +180,7 @@ export function analyseThumbnailCtr(args: {
   const significant = effects.filter((effect) => effect.significant && effect.liftPoints > 0);
   if (!significant.length) {
     return {
+      advisory: "",
       conclusive: false,
       limitation: effects.length
         ? `${effects.length} trait(s) had enough volume to test and none cleared significance — ` +
@@ -155,15 +193,20 @@ export function analyseThumbnailCtr(args: {
     };
   }
 
+  // Cap it. Even when several traits clear significance, a long list of
+  // observed correlations would start to outweigh the craft rules simply by
+  // volume of text in the brief.
+  const promoted = significant.slice(0, 2);
+  const suggestedRules = promoted.map((effect) =>
+    `${effect.trait}="${effect.value}" measured +${effect.liftPoints} CTR points across ` +
+    `${effect.withImpressions.toLocaleString()} impressions on this channel`,
+  );
   return {
+    advisory: `${CTR_ADVISORY_PREAMBLE} ${suggestedRules.join("; ")}.`,
     conclusive: true,
     sampleSize: samples.length,
     totalImpressions,
     effects,
-    suggestedRules: significant.map((effect) =>
-      `On this channel, ${effect.trait}="${effect.value}" has measured ` +
-      `+${effect.liftPoints} CTR points across ${effect.withImpressions.toLocaleString()} impressions. ` +
-      `Correlation only — confirm against topic mix before treating it as craft law.`,
-    ),
+    suggestedRules,
   };
 }

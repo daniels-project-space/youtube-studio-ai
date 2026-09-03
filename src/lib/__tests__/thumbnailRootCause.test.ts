@@ -46,7 +46,11 @@ import {
   recordThumbnailDefect,
   type ChannelDefectLedger,
 } from "@/lib/thumbnailDefectLedger";
-import { analyseThumbnailCtr, type ThumbnailPerformanceSample } from "@/lib/thumbnailCtrFeedback";
+import {
+  analyseThumbnailCtr,
+  CTR_ADVISORY_PREAMBLE,
+  type ThumbnailPerformanceSample,
+} from "@/lib/thumbnailCtrFeedback";
 import { judgeThumbnailStoryInterest } from "@/lib/thumbnailStoryJudge";
 import {
   performanceSampleFromAnalytics,
@@ -460,8 +464,27 @@ function assertCtrFeedbackRefusesThinEvidence(): void {
   const found = analyseThumbnailCtr({ samples: real });
   assert.equal(found.conclusive, true);
   assert.ok(found.suggestedRules.length >= 1);
-  assert.match(found.suggestedRules[0] ?? "", /Correlation only/, "a promoted rule must carry its own caveat");
   assert.ok((found.effects[0]?.liftPoints ?? 0) > 0);
+
+  // CTR must stay SUBORDINATE. The craft rules encode what CTR cannot see —
+  // whether the channel still looks like itself, whether the identity contract
+  // holds, whether the subject is worth a thumbnail — while CTR is correlation
+  // confounded by title and topic. A channel that chases its own CTR history
+  // converges on whatever it published before, which is the opposite of the
+  // variety the sameness gate protects.
+  assert.match(found.advisory, /LOWEST priority/, "the advisory must state its own rank");
+  assert.match(found.advisory, /identity contract/, "it must name what overrides it");
+  assert.match(found.advisory, /tiebreak/, "it must be framed as a tiebreak, not a rule");
+  assert.match(CTR_ADVISORY_PREAMBLE, /never as a reason to repeat a past composition/);
+  assert.equal(thin.advisory, "", "an inconclusive report must emit no advisory at all");
+  assert.equal(noEffect.advisory, "");
+
+  // Capped, so a pile of observed correlations cannot outweigh the craft rules
+  // by sheer volume of text in the brief.
+  const many: ThumbnailPerformanceSample[] = [];
+  for (let i = 0; i < 10; i++) many.push({ channelName: "c", videoKey: `a${i}`, traits: { layoutMode: "split", vantage: "worm_tilt_up", energy: "bold" }, clicks: 1_200, impressions: 10_000, publishedAt: now });
+  for (let i = 0; i < 10; i++) many.push({ channelName: "c", videoKey: `b${i}`, traits: { layoutMode: "centered_hero", vantage: "eye_level", energy: "sober" }, clicks: 400, impressions: 10_000, publishedAt: now });
+  assert.ok(analyseThumbnailCtr({ samples: many }).suggestedRules.length <= 2, "the advisory must stay bounded");
 }
 
 function assertTieredRendering(): void {

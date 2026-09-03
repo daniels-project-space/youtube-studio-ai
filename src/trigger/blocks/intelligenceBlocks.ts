@@ -1627,6 +1627,51 @@ export const thumbnailGen: Block = {
       `thumbnail_gen: critique loop finished after ${attemptLoop.iterations} candidate(s) ` +
       `(${attemptLoop.accepted ? "accepted" : "best of the rejected set"})`,
     );
+    // LEARNING WRITE. Record what the grader actually rejected, once the loop
+    // has settled — not every transient candidate state. `priorIssues` only
+    // survives within this video; without this the channel re-rolls the same
+    // defect next week and the operator is the only memory in the loop.
+    //
+    // Deliberately fire-and-forget and fully swallowed: a learning write must
+    // never fail a thumbnail that has already been paid for and passed its
+    // gate. The worst case is a channel that has not learned yet.
+    try {
+      const rejectionReason = refQA?.reason?.trim();
+      if (rejectionReason && !attemptLoop.accepted) {
+        const { appendDefectObservations } = await import("@/lib/thumbnailLearningStore");
+        const written = await appendDefectObservations({
+          keyPrefix: ctx.keyPrefix,
+          channelName: thumbnailChannel.channelName ?? "channel",
+          // One video, one observation: the loop can reject the same candidate
+          // repeatedly, and doctrine counts distinct videos, not rejections.
+          observations: [{ videoKey: ctx.runId, reason: rejectionReason, at: Date.now() }],
+        });
+        ctx.log(
+          `thumbnail_gen: recorded QA rejection for channel learning ` +
+          `(${written.persisted ? `ledger now ${written.total} observation(s)` : "not persisted"})`,
+        );
+      }
+      // Phase one of the CTR loop: the craft decisions are known now, the
+      // metrics are not known for days. Recording traits keyed by run lets the
+      // scheduled analytics pass attach impressions later without having to
+      // reconstruct what the thumbnail actually did.
+      const { recordThumbnailTraits } = await import("@/lib/thumbnailLearningStore");
+      await recordThumbnailTraits({
+        keyPrefix: ctx.keyPrefix,
+        channelName: thumbnailChannel.channelName ?? "channel",
+        videoKey: ctx.runId,
+        // Only decisions already settled at this point, and only ones the
+        // module can act on later. `strategy` is deliberately excluded: it is
+        // not finalised until the gate below.
+        traits: {
+          providerRoute: FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE.route,
+          accepted: String(attemptLoop.accepted),
+          iterations: String(attemptLoop.iterations),
+        },
+      });
+    } catch (error) {
+      ctx.log(`thumbnail_gen: channel learning write skipped (${error instanceof Error ? error.message : String(error)})`);
+    }
     assertThumbnailGate(quality, refQA, `${strategy} candidate`);
     if (
       scenarioVisualTreatment &&

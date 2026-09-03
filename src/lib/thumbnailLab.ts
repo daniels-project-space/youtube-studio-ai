@@ -962,6 +962,13 @@ export async function renderCandidate(args: {
    * deterministic score, never raise it — see thumbnailStoryJudge.
    */
   useStoryJudge?: boolean;
+  /**
+   * Observed-CTR advisory for this channel, already framed as subordinate by
+   * `analyseThumbnailCtr`. Empty until a channel has real volume, and placed
+   * LAST in the brief on purpose: it is a tiebreak between equally strong
+   * concepts, never a reason to weaken one.
+   */
+  ctrAdvisory?: string;
   /** Provenance-bound rules shared by the local compositor and image provider. */
   visualTreatment?: ThumbnailVisualTreatment;
   /** Explicit production still route. There is deliberately no provider fallback. */
@@ -1059,6 +1066,9 @@ export async function renderCandidate(args: {
       (args.playbook.avoid.length
         ? `FULL PLAYBOOK AVOID LIST:\n- ${args.playbook.avoid.join("\n- ")}\n\n`
         : "\n") +
+      // Deliberately after every craft rule: it is the weakest evidence in the
+      // brief and its own preamble says so.
+      (args.ctrAdvisory ? `${args.ctrAdvisory}\n\n` : "") +
       `STEP 1 — LAYOUT: choose layoutMode ("split", "centered_hero" or "comparison") and textZone ("left"|"right"|"upperLeft"|"upperRight"|"upperCenter"). ` +
       `These are EQUAL options — pick the one this specific image is strongest in, not a default. ` +
       `split: large hero opposite the text zone, best for copy-dense hooks and asymmetric action. ` +

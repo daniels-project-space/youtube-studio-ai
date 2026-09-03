@@ -149,6 +149,65 @@ export async function upsertPerformanceSamples(args: {
 }
 
 /**
+ * Record the craft decisions a thumbnail made, before anyone knows how it did.
+ *
+ * Two-phase by necessity: the traits are known at render time and the metrics
+ * are not known for days. Writing a zero-impression placeholder now lets the
+ * scheduled analytics pass fill it in later by videoKey, and the analyser
+ * ignores zero-impression rows because they fail its minimum-volume bar.
+ */
+export async function recordThumbnailTraits(args: {
+  keyPrefix: string;
+  channelName: string;
+  videoKey: string;
+  traits: Record<string, string>;
+  publishedAt?: number;
+}): Promise<{ persisted: boolean }> {
+  const existing = await loadPerformanceSamples(args);
+  const prior = existing.find((sample) => sample.videoKey === args.videoKey);
+  const { persisted } = await upsertPerformanceSamples({
+    keyPrefix: args.keyPrefix,
+    channelName: args.channelName,
+    samples: [{
+      channelName: args.channelName,
+      videoKey: args.videoKey,
+      traits: args.traits,
+      // Preserve any metrics already pulled; never reset them to zero.
+      impressions: prior?.impressions ?? 0,
+      clicks: prior?.clicks ?? 0,
+      publishedAt: args.publishedAt ?? prior?.publishedAt ?? Date.now(),
+    }],
+  });
+  return { persisted };
+}
+
+/**
+ * Fill in metrics for a video whose traits were recorded at render time.
+ * Returns false when there is nothing to attach them to, so a caller can tell
+ * a missing join from a missing metric.
+ */
+export async function attachPerformanceMetrics(args: {
+  keyPrefix: string;
+  channelName: string;
+  videoKey: string;
+  analytics: { ctr?: number; thumbnailImpressions?: number };
+}): Promise<{ attached: boolean; reason?: string }> {
+  const existing = await loadPerformanceSamples(args);
+  const prior = existing.find((sample) => sample.videoKey === args.videoKey);
+  if (!prior) return { attached: false, reason: "no recorded traits for this video" };
+  const sample = performanceSampleFromAnalytics({
+    channelName: args.channelName,
+    videoKey: args.videoKey,
+    publishedAt: prior.publishedAt,
+    traits: prior.traits,
+    analytics: args.analytics,
+  });
+  if (!sample) return { attached: false, reason: "analytics did not include thumbnail impressions" };
+  const { persisted } = await upsertPerformanceSamples({ ...args, samples: [sample] });
+  return { attached: persisted };
+}
+
+/**
  * Convert one analytics reading into a performance sample.
  *
  * Returns null when the denominator is missing. YouTube does not always serve
