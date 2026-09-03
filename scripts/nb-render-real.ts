@@ -15,6 +15,8 @@ import { join } from "node:path";
 import type { StyleDNA } from "@/engine/creative/types";
 import { applyThumbnailChannelIdentity } from "@/lib/thumbnailChannelIdentity";
 import { buildStyleDnaPlaybook, renderCandidate } from "@/lib/thumbnailLab";
+import { fingerprintThumbnail } from "@/lib/thumbnailSameness";
+import type { ChannelDefectLedger } from "@/lib/thumbnailDefectLedger";
 
 const OUT_DIR = process.env.NB_OUT_DIR ?? "/tmp/nb-compare/out-real";
 
@@ -133,8 +135,22 @@ async function main(): Promise<void> {
     console.log(`    patterns available: ${playbook.patterns.map((p) => p.name).join(", ")}`);
     const tmp = await mkdtemp(join(tmpdir(), `nb-real-${job.id}-`));
     const outJpg = join(OUT_DIR, `${job.id}.jpg`);
+    // Simulate a channel that has repeatedly shipped an undersized hero, and a
+    // catalogue whose last thumbnail used this exact idea.
+    const defectLedger: ChannelDefectLedger = {
+      channelName: job.channelName,
+      observations: ["v-1", "v-2", "v-3"].map((videoKey, i) => ({
+        videoKey, reason: "hero is too small, too much background", at: Date.now() - (i + 1) * 86_400_000,
+      })),
+    };
+    const recentThumbnails = [
+      await fingerprintThumbnail({ heroProp: "colossal Burj Khalifa tower shot from ground level looking steeply up into hazy desert sky" }),
+    ];
     const result = await renderCandidate({
       pattern: playbook.patterns[0],
+      defectLedger,
+      recentThumbnails,
+      useStoryJudge: true,
       title: job.title,
       channelName: job.channelName,
       playbook,

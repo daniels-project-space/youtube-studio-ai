@@ -53,6 +53,13 @@ import {
 } from "@/lib/thumbnailStoryInterest";
 import { resolveThumbnailCapabilities } from "@/lib/thumbnailCapabilities";
 import { gradeThumbnailForMobile } from "@/lib/thumbnailMobileGate";
+import { judgeThumbnailStoryInterest } from "@/lib/thumbnailStoryJudge";
+import { deriveCriticDoctrine, type ChannelDefectLedger } from "@/lib/thumbnailDefectLedger";
+import {
+  fingerprintThumbnail,
+  scoreThumbnailSameness,
+  type ThumbnailFingerprint,
+} from "@/lib/thumbnailSameness";
 import { downloadTo } from "@/lib/files";
 import type { StyleDNA } from "@/engine/creative/types";
 import type { FamilyKey } from "@/engine/families";
@@ -938,6 +945,23 @@ export async function renderCandidate(args: {
   priorIssues?: readonly string[];
   /** This channel's standing critic instruction, applied to the art direction. */
   criticDoctrine?: string;
+  /**
+   * Accumulated QA rejections for this channel. Defects that recur across
+   * distinct videos are promoted into doctrine and appended to any
+   * hand-authored instruction, so the channel stops re-rolling the same
+   * mistake every week.
+   */
+  defectLedger?: ChannelDefectLedger;
+  /**
+   * Fingerprints of this channel's recent thumbnails. A recycled hero idea is
+   * corrected before an image is paid for, not after publication.
+   */
+  recentThumbnails?: readonly ThumbnailFingerprint[];
+  /**
+   * Consult a model with the same story rubric. It may only LOWER the
+   * deterministic score, never raise it — see thumbnailStoryJudge.
+   */
+  useStoryJudge?: boolean;
   /** Provenance-bound rules shared by the local compositor and image provider. */
   visualTreatment?: ThumbnailVisualTreatment;
   /** Explicit production still route. There is deliberately no provider fallback. */
@@ -967,6 +991,17 @@ export async function renderCandidate(args: {
     args.log?.(`thumbnailLab: capabilities ${capabilities.active.join(", ")} — ${capabilities.reasons.join("; ")}`);
   }
   const effectiveEnergy = capabilities.energyOverride ?? args.playbook.energy ?? "bold";
+
+  // Defects that keep recurring across DISTINCT videos become standing doctrine,
+  // appended to whatever the operator authored. Without this the channel has no
+  // memory: `priorIssues` only survives within one video.
+  const learnedDoctrine = args.defectLedger
+    ? deriveCriticDoctrine({ ledger: args.defectLedger }).doctrine
+    : "";
+  if (learnedDoctrine) {
+    args.log?.(`thumbnailLab: applying learned critic doctrine from recurring defects`);
+  }
+  const effectiveCriticDoctrine = [args.criticDoctrine, learnedDoctrine].filter(Boolean).join(" ");
 
   // STORY-INTEREST LIFT: corrections fed back into a second instantiation when
   // the first concept scores as a weak or inert subject. Text-only, so a dull
@@ -1004,8 +1039,8 @@ export async function renderCandidate(args: {
         ? `THE PREVIOUS ATTEMPT WAS REJECTED BY THE QA GRADER. Fix these specific defects — do not simply re-roll ` +
           `the same concept:\n${(args.priorIssues ?? []).slice(0, 6).map((issue) => `- ${String(issue).replace(/\s+/g, " ").trim().slice(0, 240)}`).join("\n")}\n`
         : "") +
-      (args.criticDoctrine
-        ? `CHANNEL CRITIC DOCTRINE (this channel's standing standard — honour it): ${args.criticDoctrine.replace(/\s+/g, " ").trim().slice(0, 400)}\n`
+      (effectiveCriticDoctrine
+        ? `CHANNEL CRITIC DOCTRINE (this channel's standing standard — honour it): ${effectiveCriticDoctrine.replace(/\s+/g, " ").trim().slice(0, 600)}\n`
         : "") +
       (args.visualTreatment?.artDirectionRules?.length
         ? `NON-NEGOTIABLE VISUAL TREATMENT (apply every rule; this overrides pattern inspiration and generic CTR conventions):\n- ${args.visualTreatment.artDirectionRules.join("\n- ")}\n`
@@ -1148,6 +1183,33 @@ export async function renderCandidate(args: {
     // human-agency reading meant for ordinary story channels.
     subjectClass: identityContract?.subjectClass,
   });
+  if (args.useStoryJudge) {
+    storyInterest = await judgeThumbnailStoryInterest({
+      deterministic: storyInterest,
+      title: args.title,
+      heroProp: inst.heroProp,
+      headlineWords: plannedHeadline(),
+      subjectClass: identityContract?.subjectClass,
+      log: args.log,
+    });
+  }
+  // A recycled idea is a story problem, so it rides the existing re-plan rather
+  // than adding a second loop: same correction channel, no extra image cost.
+  if (args.recentThumbnails?.length) {
+    const sameness = scoreThumbnailSameness({
+      candidate: await fingerprintThumbnail({ heroProp: inst.heroProp }),
+      recent: args.recentThumbnails,
+    });
+    if (sameness.tooSimilar) {
+      args.log?.(`thumbnailLab: ${sameness.reasons.join("; ")}`);
+      storyInterest = {
+        ...storyInterest,
+        verdict: "weak",
+        reasons: [...storyInterest.reasons, ...sameness.reasons],
+        liftPrompts: [...storyInterest.liftPrompts, ...sameness.reasons],
+      };
+    }
+  }
   if (storyInterest.verdict !== "compelling" && storyInterest.liftPrompts.length) {
     args.log?.(
       `thumbnailLab: story interest ${storyInterest.score}/100 (${storyInterest.verdict}) — ` +

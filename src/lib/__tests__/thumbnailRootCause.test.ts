@@ -40,6 +40,14 @@ import {
   THUMBNAIL_CAPABILITIES,
 } from "@/lib/thumbnailCapabilities";
 import { applyThumbnailChannelIdentity } from "@/lib/thumbnailChannelIdentity";
+import {
+  classifyThumbnailDefects,
+  deriveCriticDoctrine,
+  recordThumbnailDefect,
+  type ChannelDefectLedger,
+} from "@/lib/thumbnailDefectLedger";
+import { analyseThumbnailCtr, type ThumbnailPerformanceSample } from "@/lib/thumbnailCtrFeedback";
+import { judgeThumbnailStoryInterest } from "@/lib/thumbnailStoryJudge";
 import { gradeThumbnailForMobile, YOUTUBE_OVERLAY_ZONES } from "@/lib/thumbnailMobileGate";
 import {
   estimateTieredCostUsd,
@@ -267,6 +275,151 @@ function assertSceneTypographySplit(): void {
   assert.equal(isThumbnailBaseProvenance({
     contract: "thumbnail-base-v1", textFree: true, safeZone: "left", source: "verified-video-still",
   }, "left"), true);
+}
+
+async function assertHybridStoryJudge(): Promise<void> {
+  const concept = {
+    title: "The Secret Nobody Caught",
+    heroProp: "a generic empty office lobby with nobody in it",
+    headlineWords: ["THE SECRET", "NOBODY CAUGHT"],
+  };
+  // The lexicon is gameable by vocabulary: "SECRET", "NOBODY" and "CAUGHT" are
+  // all stake words and "nobody" also reads as human agency, so an empty lobby
+  // scores full marks. This is the blind spot the judge exists to cover, and it
+  // was reproduced against the live model, which scored the same concept 8.
+  const deterministic = scoreThumbnailStoryInterest(concept);
+  assert.equal(deterministic.score, 100, "the keyword scorer is fooled by stake vocabulary alone");
+
+  const vetoed = await judgeThumbnailStoryInterest({
+    deterministic, ...concept,
+    askJudge: async () => ({ score: 8, weakness: "an empty lobby has no stake", fix: "put a person mid-consequence in frame" }),
+  });
+  assert.equal(vetoed.score, 8, "the judge must be able to veto a vocabulary-gamed score");
+  assert.equal(vetoed.verdict, "inert");
+  assert.equal(vetoed.judgeLoweredScore, true);
+  assert.ok(vetoed.liftPrompts.some((lift) => /person mid-consequence/.test(lift)), "its fix must reach the re-plan");
+
+  // RULE 2 — veto only. An LLM asked "is this interesting?" says yes far too
+  // readily; letting it raise scores would quietly disable the gate that the
+  // regression tests are pinned to.
+  const weak = scoreThumbnailStoryInterest({
+    title: "How Vault Walls Are Built",
+    heroProp: "a thick concrete wall panel",
+    headlineWords: ["12 TONNES", "OF STEEL"],
+  });
+  const notRescued = await judgeThumbnailStoryInterest({
+    deterministic: { ...weak, verdict: "weak", score: 45 },
+    title: "How Vault Walls Are Built", heroProp: "a thick concrete wall panel", headlineWords: ["12 TONNES"],
+    askJudge: async () => ({ score: 99, weakness: "", fix: "" }),
+  });
+  assert.equal(notRescued.score, 45, "the judge must never inflate a score");
+  assert.equal(notRescued.judgeLoweredScore, false);
+
+  // RULE 1 — an inert verdict is already decided, so no call is made at all.
+  let called = false;
+  const inert = await judgeThumbnailStoryInterest({
+    deterministic: { score: 10, verdict: "inert", reasons: [], liftPrompts: ["x"] },
+    title: "t", headlineWords: [],
+    askJudge: async () => { called = true; return { score: 90 }; },
+  });
+  assert.equal(called, false, "an already-inert verdict must not spend a model call");
+  assert.equal(inert.score, 10);
+
+  // RULE 3 — a judge failure is not a rejection. Observed live: the judge does
+  // not answer every time, so this path is load-bearing, not theoretical.
+  const failed = await judgeThumbnailStoryInterest({
+    deterministic, ...concept,
+    askJudge: async () => { throw new Error("provider timeout"); },
+  });
+  assert.equal(failed.score, 100, "a provider failure must leave the deterministic verdict untouched");
+  assert.equal(failed.judgeLoweredScore, false);
+
+  // Nonsense out of range is ignored rather than trusted.
+  const nonsense = await judgeThumbnailStoryInterest({
+    deterministic, ...concept, askJudge: async () => ({ score: 5000 }),
+  });
+  assert.equal(nonsense.score, 100);
+}
+
+function assertSelfWritingDoctrine(): void {
+  const DAY = 24 * 60 * 60 * 1000;
+  const now = 1_000 * DAY;
+  let ledger: ChannelDefectLedger = { channelName: "Investory", observations: [] };
+
+  assert.deepEqual(classifyThumbnailDefects("the hero is too small and lost in the frame"), ["hero-too-small"]);
+  assert.deepEqual(classifyThumbnailDefects("nothing wrong here"), []);
+
+  // ONE bad video is not a channel pattern. The critique loop can reject the
+  // same candidate three times in a single run, and that is one bad video.
+  for (let attempt = 0; attempt < 3; attempt++) {
+    ledger = recordThumbnailDefect(ledger, { videoKey: "video-a", reason: "hero is too small", at: now - DAY });
+  }
+  assert.deepEqual(
+    deriveCriticDoctrine({ ledger, now }).rules, [],
+    "three rejections of ONE video must not become standing doctrine",
+  );
+
+  // Three DISTINCT videos is a blind spot.
+  for (const videoKey of ["video-b", "video-c"]) {
+    ledger = recordThumbnailDefect(ledger, { videoKey, reason: "subject too small, too much background", at: now - DAY });
+  }
+  const promoted = deriveCriticDoctrine({ ledger, now });
+  assert.equal(promoted.rules.length, 1);
+  assert.equal(promoted.rules[0]?.defectId, "hero-too-small");
+  assert.equal(promoted.rules[0]?.videoCount, 3);
+  assert.match(promoted.doctrine, /far larger/);
+
+  // Doctrine DECAYS. Without this the brief accumulates commandments forever
+  // and eventually crowds out the identity contract and the golden bar.
+  const stale = deriveCriticDoctrine({ ledger, now: now + 200 * DAY });
+  assert.deepEqual(stale.rules, [], "a defect that stopped recurring must stop being cited");
+
+  // The doctrine is capped, most persistent first.
+  let noisy: ChannelDefectLedger = { channelName: "Noisy", observations: [] };
+  const reasons = [
+    "hero is too small", "copy is illegible", "instruction words rendered",
+    "misspelled copy should read", "identity contract must show", "muddy blur at browse size",
+  ];
+  for (const reason of reasons) {
+    for (const videoKey of ["v1", "v2", "v3"]) {
+      noisy = recordThumbnailDefect(noisy, { videoKey, reason, at: now - DAY });
+    }
+  }
+  assert.ok(deriveCriticDoctrine({ ledger: noisy, now }).rules.length <= 4, "doctrine must stay bounded");
+}
+
+function assertCtrFeedbackRefusesThinEvidence(): void {
+  const now = Date.now();
+  const sample = (i: number, layout: string, clicks: number, impressions: number): ThumbnailPerformanceSample =>
+    ({ channelName: "Investory", videoKey: `v${i}`, traits: { layoutMode: layout }, clicks, impressions, publishedAt: now });
+
+  // The failure mode this module exists to prevent: a big-looking lift on a
+  // handful of impressions. 12% vs 4% is a huge apparent effect and complete
+  // noise at this volume.
+  const thin = analyseThumbnailCtr({
+    samples: [sample(1, "split", 6, 50), sample(2, "centered_hero", 2, 50)],
+  });
+  assert.equal(thin.conclusive, false, "a two-video sample must never conclude");
+  assert.deepEqual(thin.suggestedRules, [], "no rule may be promoted from thin evidence");
+  assert.ok(thin.limitation && thin.limitation.length > 0, "it must say WHY it refused");
+
+  // Enough volume, but the two arms genuinely perform the same.
+  const flat: ThumbnailPerformanceSample[] = [];
+  for (let i = 0; i < 10; i++) flat.push(sample(i, "split", 600, 10_000));
+  for (let i = 10; i < 20; i++) flat.push(sample(i, "centered_hero", 600, 10_000));
+  const noEffect = analyseThumbnailCtr({ samples: flat });
+  assert.equal(noEffect.conclusive, false, "identical performance must not be reported as a finding");
+  assert.match(String(noEffect.limitation), /noise|impressions/);
+
+  // A real, large, well-sampled effect IS reported — with its caveat attached.
+  const real: ThumbnailPerformanceSample[] = [];
+  for (let i = 0; i < 10; i++) real.push(sample(i, "split", 1_200, 10_000));
+  for (let i = 10; i < 20; i++) real.push(sample(i, "centered_hero", 500, 10_000));
+  const found = analyseThumbnailCtr({ samples: real });
+  assert.equal(found.conclusive, true);
+  assert.ok(found.suggestedRules.length >= 1);
+  assert.match(found.suggestedRules[0] ?? "", /Correlation only/, "a promoted rule must carry its own caveat");
+  assert.ok((found.effects[0]?.liftPoints ?? 0) > 0);
 }
 
 function assertTieredRendering(): void {
@@ -1002,6 +1155,9 @@ async function main(): Promise<void> {
     await assertMobileSquintGate();
 await assertThumbnailSameness();
 assertTieredRendering();
+await assertHybridStoryJudge();
+assertSelfWritingDoctrine();
+assertCtrFeedbackRefusesThinEvidence();
 assertCapabilityRoutingDoesNotRegressExistingChannels();
 assertBadgeIsAChannelConstant();
 assertStoryInterestIntelligence();
