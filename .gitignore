@@ -77,3 +77,8 @@ motion-graphics/*.mp3
 motion-graphics/*.log
 scripts/*.pyc
 scripts/*.bak_torch
+
+# Owner lock markers: a per-machine mirror of Convex, rebuilt by the sync timer.
+# Committing them would let a stale checkout claim something is locked when the
+# owner has already released it.
+.locks/

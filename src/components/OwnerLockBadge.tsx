@@ -1,137 +1,120 @@
 "use client";
 
 /**
- * OWNER LOCK BADGE — the lock symbol shown next to a module or a channel.
+ * OWNER LOCK BADGE — the lock shown next to a module or a channel.
  *
- * One shared store rather than a fetch per badge. The channels page renders a
- * badge for every channel, so a naive per-badge fetch would fire one request
- * per card on every render of that page.
+ * State comes from Convex, not from a file. The first version of this wrote
+ * marker files through an API route, which works locally and fails on every
+ * click in production: the studio runs on Vercel, whose filesystem is
+ * read-only. A lock the owner cannot set from the browser is not a lock.
  *
- * Locking is one click; UNLOCKING asks first. The whole point of the lock is
- * that removing it should be a deliberate act by the owner, and a bare toggle
- * next to a channel name is far too easy to hit by accident.
+ * The two kinds are enforced in different places, and this component is
+ * deliberately a thin surface over each rather than a third mechanism:
+ *
+ *   channel — convex/channels.ts lockChannel/unlockChannel, which every guarded
+ *             channel mutation already respects, with its own audit trail
+ *   module  — convex/ownerModuleLocks.ts, mirrored to the workstation where the
+ *             pre-edit guard refuses writes to the module's files
+ *
+ * Locking is one click; UNLOCKING asks first. A toggle beside a channel name is
+ * far too easy to hit by accident, and the point of a lock is that removing it
+ * is deliberate.
  */
-import { useCallback, useSyncExternalStore } from "react";
+import { useCallback, useState } from "react";
+import { useMutation, useQuery } from "convex/react";
 
-import { LOCKABLE_MODULE_IDS, channelLockId } from "@/lib/ownerLockRegistry";
+import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
+import { useOwnerId } from "@/lib/owner-context";
+import { CHANNEL_UNLOCK_CONFIRMATION } from "@/lib/channelLockContract";
+import { LOCKABLE_MODULE_IDS, lockCoverage } from "@/lib/ownerLockRegistry";
 
-interface ModuleLockDto {
-  id: string;
-  label: string;
-  locked: boolean;
-  lockedAt: string | null;
-}
-interface ChannelLockDto {
-  id: string;
-  label: string;
-  lockedAt: string;
-}
-interface LockSnapshot {
-  modules: ModuleLockDto[];
-  channelLocks: ChannelLockDto[];
-}
+type Props =
+  | { kind: "module"; moduleId: string; label?: string; size?: "sm" | "md" }
+  | { kind: "channel"; channelId: string; channelName: string; locked: boolean; size?: "sm" | "md" };
 
-let snapshot: LockSnapshot | null = null;
-let inflight: Promise<void> | null = null;
-const subscribers = new Set<() => void>();
+export function OwnerLockBadge(props: Props) {
+  const ownerId = useOwnerId();
+  const size = props.size ?? "md";
+  const [busy, setBusy] = useState(false);
 
-function notify(): void {
-  for (const fn of subscribers) fn();
-}
+  // Only the module variant needs the fleet-wide lock list. Convex dedupes
+  // identical subscriptions, so one query serves every badge on the page.
+  const moduleLocks = useQuery(
+    api.ownerModuleLocks.list,
+    props.kind === "module" ? { ownerId } : "skip",
+  );
+  const setModuleLock = useMutation(api.ownerModuleLocks.setLock);
+  const lockChannel = useMutation(api.channels.lockChannel);
+  const unlockChannel = useMutation(api.channels.unlockChannel);
 
-async function refresh(): Promise<void> {
-  const res = await fetch("/api/module-locks", { cache: "no-store" });
-  const data = await res.json() as Partial<LockSnapshot>;
-  snapshot = { modules: data.modules ?? [], channelLocks: data.channelLocks ?? [] };
-  notify();
-}
+  const locked = props.kind === "channel"
+    ? props.locked
+    : Boolean(moduleLocks?.some((row) => row.moduleKey === props.moduleId));
 
-function ensureLoaded(): void {
-  if (snapshot || inflight) return;
-  inflight = refresh()
-    .catch(() => { snapshot = { modules: [], channelLocks: [] }; notify(); })
-    .finally(() => { inflight = null; });
-}
-
-function subscribe(fn: () => void): () => void {
-  subscribers.add(fn);
-  ensureLoaded();
-  return () => { subscribers.delete(fn); };
-}
-
-const getSnapshot = () => snapshot;
-// The server renders before any lock state is known. Returning the same value
-// on both sides keeps the badge out of hydration mismatches; it fills in on
-// the client once the single shared fetch resolves.
-const getServerSnapshot = () => null;
-
-export function OwnerLockBadge(props: {
-  /** A lockable module id — the same string as the module's GOLDEN_MODULES key. */
-  moduleId?: string;
-  /** A channel name. Any channel is lockable; no registry entry is needed. */
-  channelName?: string;
-  /** Compact rendering for dense rows such as channel cards. */
-  size?: "sm" | "md";
-}) {
-  const { moduleId, channelName, size = "md" } = props;
-  const state = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot);
-
-  const id = channelName ? channelLockId(channelName) : moduleId ?? "";
-  const label = channelName ?? state?.modules.find((m) => m.id === id)?.label ?? moduleId ?? "";
-
-  const locked = channelName
-    ? Boolean(state?.channelLocks.some((lock) => lock.id === id))
-    : Boolean(state?.modules.find((m) => m.id === id)?.locked);
+  const label = props.kind === "channel" ? props.channelName : props.label ?? props.moduleId;
+  const coverage = props.kind === "module" ? lockCoverage(props.moduleId) : null;
+  const known = props.kind === "channel" || moduleLocks !== undefined;
 
   const toggle = useCallback(async () => {
     if (locked && !window.confirm(
       `Unlock “${label}”?\n\nAI workers will be able to change it again until you lock it back.`,
     )) return;
-    const body = channelName
-      ? { channelName, locked: !locked }
-      : { id: moduleId, locked: !locked };
+    setBusy(true);
     try {
-      const res = await fetch("/api/module-locks", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(body),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      await refresh();
-    } catch {
-      window.alert(`Could not ${locked ? "unlock" : "lock"} “${label}”.`);
+      if (props.kind === "channel") {
+        const channelId = props.channelId as Id<"channels">;
+        if (locked) {
+          await unlockChannel({ ownerId, channelId, confirmation: CHANNEL_UNLOCK_CONFIRMATION });
+        } else {
+          await lockChannel({ ownerId, channelId });
+        }
+      } else {
+        await setModuleLock({ ownerId, moduleKey: props.moduleId, locked: !locked });
+      }
+    } catch (error) {
+      window.alert(
+        `Could not ${locked ? "unlock" : "lock"} “${label}”.\n\n` +
+        (error instanceof Error ? error.message : String(error)),
+      );
+    } finally {
+      setBusy(false);
     }
-  }, [channelName, label, locked, moduleId]);
+  }, [label, locked, lockChannel, ownerId, props, setModuleLock, unlockChannel]);
 
-  // A module with no declared paths has nothing to protect, so offering a lock
-  // there would be decorative. Channels are always offered.
-  if (!channelName && !LOCKABLE_MODULE_IDS.has(moduleId ?? "")) return null;
+  // A module with no files resolved would be a lock the guard cannot enforce.
+  if (props.kind === "module" && !LOCKABLE_MODULE_IDS.has(props.moduleId)) return null;
 
-  const px = size === "sm" ? 6 : 8;
+  const pad = size === "sm" ? 6 : 8;
+  const title = locked
+    ? `Locked by you. No AI worker can change ${label} until you unlock it here.`
+    : coverage && !coverage.enforced
+      ? `${label} has no source files of its own yet, so locking it records your intent but blocks no edits.`
+      : `Lock ${label} so no AI worker can change it${coverage ? ` (${coverage.files} files)` : ""}.`;
+
   return (
     <button
       type="button"
       onClick={() => void toggle()}
+      disabled={busy}
       aria-pressed={locked}
       aria-label={locked ? `${label} is locked — unlock` : `Lock ${label}`}
-      title={locked
-        ? `Locked by you. No AI worker can change ${label} until you unlock it here.`
-        : `Lock ${label} so no AI worker can change it.`}
+      title={title}
       style={{
         display: "inline-flex",
         alignItems: "center",
         gap: 4,
         verticalAlign: "middle",
-        cursor: "pointer",
+        cursor: busy ? "wait" : "pointer",
         borderRadius: 999,
         border: `1px solid ${locked ? "#43c98a66" : "#ffffff1f"}`,
         background: locked ? "#43c98a1f" : "transparent",
         color: locked ? "#43c98a" : "#7d8798",
-        padding: `${px - 3}px ${px}px`,
+        padding: `${pad - 3}px ${pad}px`,
         fontSize: size === "sm" ? 11 : 12,
         fontWeight: 600,
         lineHeight: 1,
-        opacity: state ? 1 : 0.35,
+        opacity: known ? 1 : 0.35,
       }}
     >
       <span aria-hidden="true">{locked ? "🔒" : "🔓"}</span>

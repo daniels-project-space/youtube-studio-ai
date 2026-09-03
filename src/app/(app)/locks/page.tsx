@@ -1,112 +1,81 @@
 "use client";
 
 /**
- * Owner locks.
+ * Owner locks — the full list, in one place.
  *
- * Locking is deliberately a human-only surface. The enforcement is a Claude
- * Code PreToolUse hook that lives outside this repository, so a locked module
- * cannot be edited by any AI worker — and the hook also refuses edits to the
- * lock registry and to itself, so a worker cannot quietly unlock anything.
+ * The same locks appear inline on the Golden catalog and on the channels page;
+ * this is the overview that answers "what have I frozen?" without hunting.
+ *
+ * Locking is deliberately a human-only surface: `ownerModuleLocks.setLock`
+ * requires an interactive owner identity, and every automated caller
+ * authenticates as a service. Enforcement is a pre-edit hook outside this
+ * repository that also refuses edits to its own file and to the lock mirror, so
+ * a worker cannot quietly unlock anything.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useMemo } from "react";
+import { useQuery } from "convex/react";
 
-interface ModuleLock {
-  id: string;
-  label: string;
-  description: string;
-  fileCount: number;
-  locked: boolean;
-  lockedAt: string | null;
-}
+import { api } from "../../../../convex/_generated/api";
+import { useOwnerId } from "@/lib/owner-context";
+import { LOCKABLE_MODULES } from "@/lib/ownerLockRegistry";
+import { OwnerLockBadge } from "@/components/OwnerLockBadge";
 
 export default function LocksPage() {
-  const [modules, setModules] = useState<ModuleLock[]>([]);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const ownerId = useOwnerId();
+  const locks = useQuery(api.ownerModuleLocks.list, { ownerId });
+  const lockedKeys = useMemo(
+    () => new Set((locks ?? []).map((row) => row.moduleKey)),
+    [locks],
+  );
 
-  const load = useCallback(async () => {
-    try {
-      const res = await fetch("/api/module-locks", { cache: "no-store" });
-      const data = await res.json() as { modules: ModuleLock[] };
-      setModules(data.modules ?? []);
-      setError(null);
-    } catch {
-      setError("Could not load lock state.");
-    }
-  }, []);
-
-  useEffect(() => { void load(); }, [load]);
-
-  const toggle = useCallback(async (id: string, locked: boolean) => {
-    setBusy(id);
-    try {
-      const res = await fetch("/api/module-locks", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ id, locked }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      await load();
-    } catch {
-      setError(`Could not ${locked ? "lock" : "unlock"} ${id}.`);
-    } finally {
-      setBusy(null);
-    }
-  }, [load]);
+  // Locked first: the point of this page is to see what is frozen.
+  const ordered = useMemo(
+    () => [...LOCKABLE_MODULES].sort((a, b) => {
+      const byLock = Number(lockedKeys.has(b.id)) - Number(lockedKeys.has(a.id));
+      return byLock !== 0 ? byLock : a.label.localeCompare(b.label);
+    }),
+    [lockedKeys],
+  );
 
   return (
-    <main style={{ padding: 28, maxWidth: 900 }}>
+    <main style={{ padding: 28, maxWidth: 940 }}>
       <h1 style={{ fontSize: 26, marginBottom: 6 }}>Owner locks</h1>
-      <p style={{ color: "#96a2b8", marginTop: 0, lineHeight: 1.6 }}>
+      <p style={{ color: "#96a2b8", marginTop: 0, lineHeight: 1.6, maxWidth: 720 }}>
         A locked module cannot be modified by any AI worker — Claude, Codex, or anything else driving
-        the editing tools. Enforcement runs as a pre-edit hook outside this repository, and it also
-        refuses changes to the lock registry and to itself, so nothing can unlock itself. Unlocking
-        happens only here.
+        the editing tools. Everything starts unlocked. Enforcement runs as a pre-edit hook on the
+        workstation, and it also refuses changes to the lock mirror and to itself, so nothing can
+        unlock itself. A module showing <strong>0 files</strong> is a catalog contract with no source
+        of its own yet: locking it records your intent but blocks no edits.
       </p>
-      {error ? <p style={{ color: "#e2585c" }}>{error}</p> : null}
-      <div style={{ display: "grid", gap: 12, marginTop: 22 }}>
-        {modules.map((mod) => (
-          <div
-            key={mod.id}
-            style={{
-              border: `1px solid ${mod.locked ? "#43c98a66" : "#242b38"}`,
-              background: mod.locked ? "#43c98a0f" : "#141821",
-              borderRadius: 12,
-              padding: "16px 18px",
-              display: "flex",
-              alignItems: "center",
-              gap: 16,
-            }}
-          >
-            <div style={{ flex: 1 }}>
-              <div style={{ fontWeight: 600, fontSize: 15 }}>
-                {mod.locked ? "🔒 " : ""}{mod.label}
-              </div>
-              <div style={{ color: "#96a2b8", fontSize: 13, marginTop: 3 }}>{mod.description}</div>
-              <div style={{ color: "#6c7789", fontSize: 12, marginTop: 5 }}>
-                {mod.fileCount} protected file{mod.fileCount === 1 ? "" : "s"}
-                {mod.lockedAt ? ` · locked ${new Date(mod.lockedAt).toLocaleString()}` : ""}
-              </div>
-            </div>
-            <button
-              type="button"
-              disabled={busy === mod.id}
-              onClick={() => void toggle(mod.id, !mod.locked)}
+
+      <div style={{ display: "grid", gap: 10, marginTop: 22 }}>
+        {ordered.map((entity) => {
+          const locked = lockedKeys.has(entity.id);
+          return (
+            <div
+              key={entity.id}
               style={{
-                cursor: busy === mod.id ? "wait" : "pointer",
-                background: mod.locked ? "#43c98a" : "transparent",
-                color: mod.locked ? "#08120d" : "#e8edf6",
-                border: `1px solid ${mod.locked ? "#43c98a" : "#3a4354"}`,
-                borderRadius: 8,
-                padding: "9px 16px",
-                fontWeight: 600,
-                fontSize: 13,
+                border: `1px solid ${locked ? "#43c98a66" : "#242b38"}`,
+                background: locked ? "#43c98a0f" : "#141821",
+                borderRadius: 12,
+                padding: "14px 16px",
+                display: "flex",
+                alignItems: "center",
+                gap: 14,
               }}
             >
-              {busy === mod.id ? "…" : mod.locked ? "Locked" : "Lock"}
-            </button>
-          </div>
-        ))}
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontWeight: 600, fontSize: 14 }}>{entity.label}</div>
+                <div style={{ color: "#96a2b8", fontSize: 12.5, marginTop: 3 }}>{entity.description}</div>
+                <div style={{ color: entity.paths.length ? "#6c7789" : "#a1791f", fontSize: 12, marginTop: 5 }}>
+                  {entity.paths.length} protected file{entity.paths.length === 1 ? "" : "s"}
+                  {entity.paths.length === 0 ? " · no source to enforce against" : ""}
+                </div>
+              </div>
+              <OwnerLockBadge kind="module" moduleId={entity.id} label={entity.label} />
+            </div>
+          );
+        })}
       </div>
     </main>
   );

@@ -563,6 +563,26 @@ export default defineSchema({
     snapshot: v.string(),
   }).index("by_owner", ["ownerId"]),
 
+  // OWNER MODULE LOCKS: a fleet-wide "no AI worker may change this module"
+  // flag, keyed by the module's GOLDEN_MODULES key. Distinct from
+  // channelModuleLocks, which freeze one module's config for ONE channel; this
+  // freezes the module's SOURCE for everyone.
+  //
+  // It lives in Convex rather than on a disk because the studio UI runs on
+  // Vercel, whose filesystem is read-only — a lock the owner cannot set from
+  // the browser is not a lock. A syncing service mirrors the locked set onto
+  // the workstation, where the pre-edit guard reads it. Absent row = unlocked,
+  // so every module defaults to unlocked without seeding 46 rows.
+  ownerModuleLocks: defineTable({
+    ownerId: v.string(),
+    moduleKey: v.string(),
+    locked: v.boolean(),
+    lockedAt: v.number(),
+    lockedBy: v.string(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_owner_module", ["ownerId", "moduleKey"]),
+
   // MODULE FORGE: architect-authored modules as declarative specs (the TS
   // `ForgedModuleSpec` schema is the contract; the interpreter is the trust
   // boundary). status: active|disabled. Forged for one channel but reusable

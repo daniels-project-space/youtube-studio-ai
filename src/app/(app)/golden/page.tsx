@@ -554,8 +554,8 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
     <article className={styles.moduleCard} data-reference={isReference}>
       <div className={styles.moduleHead}>
         <span>{m.stage}</span>
-        {/* Lockable modules share their id with this key, so the badge needs no mapping. */}
-        <OwnerLockBadge moduleId={m.key} size="sm" />
+        {/* Every catalog module is lockable and starts unlocked; the key IS the lock id. */}
+        <OwnerLockBadge kind="module" moduleId={m.key} label={m.title} size="sm" />
         {isReference
           ? <span className={styles.moduleStatus} data-tone="reference">REFERENCE CANDIDATE</span>
           : isRegistered

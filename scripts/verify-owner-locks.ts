@@ -1,77 +1,89 @@
 /**
- * Verifies the owner-lock surface after the registry split.
+ * Verifies the owner-lock chain end to end on this workstation.
  *
- * Two claims are worth checking mechanically. First, that moving the registry
- * into a browser-safe module did not change what is protected on disk — a
- * refactor that silently emptied a marker would leave a lock that looks locked
- * in the UI and stops nothing. Second, that a channel lock actually refuses a
- * shell write naming that channel, because a channel is not a file and it would
- * be easy to ship a badge that toggles a marker no guard ever reads.
+ * The chain has three links and a break in any one is silent: Convex holds the
+ * owner's intent, the sync mirrors it to marker files, and the pre-edit guard
+ * reads those markers. A lock that looks set in the UI while the guard allows
+ * the edit is the exact failure this exists to catch.
+ *
+ * Channel locks are NOT checked here — they are enforced inside Convex by
+ * channels.lockChannel and the mutations that respect it, so they never reach
+ * this machine.
  */
 import { spawnSync } from "node:child_process";
-import { readFile } from "node:fs/promises";
-import { join } from "node:path";
 
-import { LOCK_DIR, channelLockEntity, listLocks, lockEntity, unlockEntity } from "@/lib/moduleLocks";
-import { LOCKABLE_MODULES } from "@/lib/ownerLockRegistry";
+import { LOCKABLE_MODULES, lockableModule } from "@/lib/ownerLockRegistry";
+import { listLocks, lockEntity, unlockEntity } from "@/lib/moduleLocks";
 
 const GUARD = "/root/.claude/hooks/owner-lock-guard.sh";
+const REPO = "/home/ubuntu/youtube-studio-ai";
 
 function guard(payload: unknown): number {
-  const run = spawnSync("bash", [GUARD], { input: JSON.stringify(payload), encoding: "utf8" });
-  return run.status ?? -1;
+  return spawnSync("bash", [GUARD], { input: JSON.stringify(payload), encoding: "utf8" }).status ?? -1;
 }
 
 function report(label: string, actual: unknown, expected: unknown): boolean {
   const ok = actual === expected;
-  console.log(`${ok ? "PASS" : "FAIL"}  ${label.padEnd(52)} ${String(actual)}`);
+  console.log(`${ok ? "PASS" : "FAIL"}  ${label.padEnd(54)} ${String(actual)}`);
   return ok;
 }
 
 async function main(): Promise<void> {
   let ok = true;
-  const locks = await listLocks();
-  const thumbnail = locks.find((lock) => lock.id === "thumbnail");
-  const declared = LOCKABLE_MODULES.find((entity) => entity.id === "thumbnail");
 
-  ok = report("thumbnail still locked after refactor", Boolean(thumbnail), true) && ok;
+  const withFiles = LOCKABLE_MODULES.filter((entity) => entity.paths.length > 0);
+  ok = report("every module is registered as lockable", LOCKABLE_MODULES.length > 40, true) && ok;
+  ok = report("most modules resolve to real files", withFiles.length > 40, true) && ok;
+
+  // The thumbnail module is the one with a hand-worked blast radius; if the
+  // generator ever narrows it, the lock silently stops covering its gates.
+  const thumbnail = lockableModule("thumbnail");
+  ok = report("thumbnail lock still spans its gates", (thumbnail?.paths.length ?? 0) >= 23, true) && ok;
+
+  // A module is only locked while a marker exists — never by default.
+  const marker = "editorial-evidence-packet";
+  const entity = lockableModule(marker);
+  if (!entity || entity.paths.length === 0) throw new Error(`${marker} has no files to test with`);
+  const target = `${REPO}/${entity.paths[0]}`;
+
   ok = report(
-    "marker still lists every declared path",
-    thumbnail?.paths.length,
-    declared?.paths.length,
+    "unlocked module is editable by default",
+    guard({ tool_name: "Edit", tool_input: { file_path: target } }),
+    0,
   ) && ok;
 
-  const marker = await readFile(join(LOCK_DIR, "thumbnail.lock"), "utf8");
-  ok = report(
-    "guard-readable pattern lines intact",
-    marker.split("\n").filter((line) => line.startsWith("src/lib/")).length,
-    declared?.paths.length,
-  ) && ok;
-
-  // A channel lock has to bite, or the badge is decoration.
-  const channel = channelLockEntity("Vault Breach");
-  await lockEntity({ entity: channel, lockedBy: "verification" });
+  await lockEntity({ entity, lockedBy: "verification" });
   try {
     ok = report(
-      "locked channel refuses a shell write naming it",
-      guard({ tool_name: "Bash", tool_input: { command: 'echo x > seed/vault-breach.json' } }),
+      "locked module refuses an edit",
+      guard({ tool_name: "Edit", tool_input: { file_path: target } }),
       2,
     ) && ok;
     ok = report(
-      "locked channel still allows reading it",
-      guard({ tool_name: "Bash", tool_input: { command: "grep -rn 'Vault Breach' src" } }),
-      0,
+      "locked module refuses a shell write",
+      guard({ tool_name: "Bash", tool_input: { command: `sed -i s/a/b/ ${entity.paths[0]}` } }),
+      2,
     ) && ok;
     ok = report(
-      "an unlocked channel is untouched",
-      guard({ tool_name: "Bash", tool_input: { command: "echo x > seed/some-other-channel.json" } }),
+      "locked module still allows reading",
+      guard({ tool_name: "Read", tool_input: { file_path: target } }),
       0,
     ) && ok;
   } finally {
-    await unlockEntity(channel.id);
+    await unlockEntity(entity.id);
   }
 
-  ok = report("verification channel lock removed", (await listLocks()).some((l) => l.id === channel.id), false) && ok;
+  ok = report(
+    "unlocking restores editability",
+    guard({ tool_name: "Edit", tool_input: { file_path: target } }),
+    0,
+  ) && ok;
+  ok = report(
+    "thumbnail marker survived the run",
+    (await listLocks()).some((record) => record.id === "thumbnail"),
+    true,
+  ) && ok;
+
   console.log(ok ? "\nOWNER LOCK VERIFICATION PASS" : "\nOWNER LOCK VERIFICATION FAIL");
   if (!ok) process.exit(1);
 }

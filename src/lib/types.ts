@@ -67,6 +67,10 @@ export type ChannelRow = {
   groupRole?: string;
   language?: string;
   youtubeCreated?: { ytChannelId?: string; handle?: string; url?: string; createdAt: number; status?: string };
+  /** Marked done by the owner: every guarded config/content mutation is refused. */
+  locked?: boolean;
+  lockedAt?: number;
+  lockedBy?: string;
 };
 
 /**

@@ -304,8 +304,16 @@ export default function ChannelsPage() {
                     <p>{c.identity?.niche ?? `Template ${c.template}`}</p>
                   </div>
                   {/* Sibling of the title, never inside its link: a button nested in an
-                      anchor is invalid markup and every click would navigate away. */}
-                  <OwnerLockBadge channelName={c.name} size="sm" />
+                      anchor is invalid markup and every click would navigate away.
+                      Backed by channels.lockChannel, which every guarded channel
+                      mutation already refuses to write through. */}
+                  <OwnerLockBadge
+                    kind="channel"
+                    channelId={c._id}
+                    channelName={c.name}
+                    locked={c.locked === true}
+                    size="sm"
+                  />
                   <div
                     className={`channel-live-state channel-live-state-${operatingState.tone}`}
                     aria-label={`${operatingState.label}: ${operatingState.detail}`}

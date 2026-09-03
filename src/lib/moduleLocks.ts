@@ -1,15 +1,16 @@
 /**
- * OWNER LOCKS.
+ * OWNER LOCK MARKERS — the workstation mirror the pre-edit guard reads.
  *
- * A lock marks a module or a channel as owner-controlled: no AI worker —
- * Claude, Codex, or anything else driving the editing tools — may modify it
- * until the owner unlocks it from the UI.
+ * This file no longer decides anything. Convex holds the owner's intent
+ * (`ownerModuleLocks`), because the studio UI runs on Vercel and cannot write a
+ * disk; these marker files exist only so a shell hook can answer "is this file
+ * locked?" without a network call on every tool invocation. The sync in
+ * scripts/sync-owner-locks.ts is what keeps the two in step.
  *
- * The enforcement deliberately does NOT live here. This module is the registry
- * and the state; the block happens in a Claude Code PreToolUse hook outside the
- * repository, because a guard that lives inside the thing it guards can be
- * edited by the same worker it is meant to stop. This file only decides WHAT is
- * lockable and writes the marker files the hook reads.
+ * The enforcement itself deliberately does NOT live here. The block happens in
+ * a Claude Code PreToolUse hook outside the repository, because a guard that
+ * lives inside the thing it guards can be edited by the same worker it is meant
+ * to stop.
  *
  * The marker format follows the existing `pipeline-lock-guard` convention
  * already running on this machine — one file per locked entity — and extends it
@@ -19,17 +20,11 @@
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import {
-  type LockableEntity,
-  LOCKABLE_MODULES,
-  channelLockEntity,
-  channelLockId,
-} from "./ownerLockRegistry";
+import { type LockableEntity, LOCKABLE_MODULES } from "./ownerLockRegistry";
 
 // WHAT is lockable lives in ownerLockRegistry.ts, which imports no node
-// built-ins so the browser can read the same registry the API writes from.
-// This module owns only the state on disk.
-export { LOCKABLE_MODULES, channelLockEntity, channelLockId };
+// built-ins so the browser can read the same registry the sync writes from.
+export { LOCKABLE_MODULES };
 export type { LockableEntity };
 
 export const LOCK_DIR = join(process.cwd(), ".locks");
