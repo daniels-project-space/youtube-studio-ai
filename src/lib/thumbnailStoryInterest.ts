@@ -106,12 +106,10 @@ export interface StoryInterestVerdict {
   /**
    * WHICH part of the concept is failing.
    *
-   * This exists because a verdict alone is not actionable. A Hannibal candidate
-   * scored 60 with an excellent scene — an elephant cropping into frame at the
-   * burning gates of Rome — and a headline, "AT THE GATES", that named a
-   * location rather than a consequence. The generic lift told the art director
-   * to re-plan the SUBJECT, which risks throwing away a scene that was already
-   * right, and the re-plan duly scored 60 again.
+   * This exists because a verdict alone is not actionable. A candidate can score
+   * badly with an excellent scene and a headline that names a location rather
+   * than a consequence; a generic lift then tells the art director to re-plan
+   * the SUBJECT, which risks throwing away a scene that was already right.
    *
    * Targeting the fix is the difference between a gate that reports a problem
    * and a gate that repairs one.
@@ -346,10 +344,12 @@ export function scoreThumbnailStoryInterest(args: {
  * Concrete hook constructions, offered when the HEADLINE is the weak axis.
  *
  * "Name a consequence" is a critique, not an instruction. These are the actual
- * shapes that carry a stake, drawn from what works in this repo's own approved
- * set: the golden Hannibal reference reads "ROME'S WORST NIGHTMARE" — it names
- * what the subject WAS TO SOMEONE. The rejected candidate read "AT THE GATES",
- * which names where he stood.
+ * shapes that carry a stake.
+ *
+ * Deliberately free of worked examples. An earlier version quoted an approved
+ * reference's actual headline, which meant that for that one subject the module
+ * was handed the answer and then appeared to invent it — a leak that
+ * invalidates any claim the module reasoned its way there.
  */
 /**
  * The corrective that was missing.
@@ -361,9 +361,9 @@ export function scoreThumbnailStoryInterest(args: {
  */
 export const HEADLINE_LIFT =
   "REWRITE THE HEADLINE — it currently names a place, a topic or a position rather than a stake. " +
-  "Name what the subject WAS TO SOMEONE, what it COST them, or what ALMOST happened. This channel's own " +
-  "approved reference for exactly this subject reads \"ROME'S WORST NIGHTMARE\" — it names what he was to " +
-  "Rome. A rejected candidate read \"AT THE GATES\" — it names where he stood. Write the first kind.";
+  "Name what the subject WAS TO SOMEONE, what it COST them, or what ALMOST happened. Do not restate the " +
+  "title, and do not name the location the story happens in: a place name tells the viewer where to look, " +
+  "not why to care.";
 
 export const HOOK_CONSTRUCTIONS = [
   "What the subject WAS TO SOMEONE — their worst nightmare, their last mistake, the reason they lost.",

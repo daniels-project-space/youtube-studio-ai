@@ -12,7 +12,19 @@ export const APPROVED_GOLDEN_THUMBNAIL_IDS = [
   "thumbnail-stoic-memento-image",
 ] as const;
 
+/**
+ * Distilled by studying the approved references directly, and several of these
+ * CONTRADICT what the module was previously instructing. The prompts had been
+ * asking for hard directional light, atmospheric drama and the obvious heroic
+ * moment; the references win by doing almost the opposite.
+ */
 export const GOLDEN_THUMBNAIL_CRAFT_RULES = [
+  "SET IT SOMEWHERE UNEXPECTED. The approved work does not stage the obvious moment: the Hannibal reference is not at the walls of Rome, it is an armoured elephant in an alpine blizzard. Ask what the predictable setting for this topic is, then find the moment of the same story that nobody pictures — the crossing rather than the arrival, the aftermath rather than the battle, the preparation rather than the event.",
+  "THE MOST SURPRISING ELEMENT IS THE HERO, not the most important person. In that reference the elephant's armoured head owns the frame and the commander is small on its back. The famous name is the topic; the unexpected object is the image.",
+  "NEAR-MONOCHROME FIELD PLUS ONE SATURATED ACCENT. The approved frames are close to two-tone — a whole field of snow-grey, newsprint-cream or ink-black — with a single hot colour carrying the accent and the type. That is what survives at 120px. A frame where every element competes at mid-saturation reads as mud, however rich it looks at full size.",
+  "GIVE SCALE A DEVICE, not an adjective. A column of tiny figures receding into a valley does more for scale than any amount of atmosphere, because the eye measures the hero against something countable.",
+  "PUT THE TYPE ON GENUINELY EMPTY GROUND. The reference gives its headline an entire empty half of snow. Type fighting texture is the most common way a strong scene becomes an unreadable thumbnail.",
+  "MATCH THE TYPE TO THE WORLD'S MATERIAL — weathered metal in a blizzard, torn newsprint in a scandal collage — so the lettering belongs to the same physical place as the scene.",
   "One unmistakable, story-specific hero dominates at phone size and is cropped decisively at the frame edge; a centered hero is optional only when the surrounding type and action read more strongly that way.",
   "Use only two or three meaningful visual elements with real foreground, hero, and background depth.",
   "Avoid a dead 50/50 picture-and-copy split: one hero contour or atmospheric layer should overlap the future type zone.",

@@ -69,47 +69,41 @@ async function falRender(prompt: string): Promise<Uint8Array> {
   return Buffer.from(await (await fetch(url)).arrayBuffer());
 }
 
-const JOBS = [
-  {
-    id: "hannibal",
-    channelName: "Empires At War",
-    title: "The Day Hannibal Stood At The Gates Of Rome",
-    recentHues: [222, 216, 208],
-    dna: channelDna({
-      palette: ["#0D0F14", "#C8442E"],
-      subject: "a heroic commander or war beast at the peak of a campaign moment",
-      setting: "the ancient Mediterranean world as a cinematic painted film still",
-      composition: "one dominant figure at peak action, army and landscape scale behind",
-      colorGrade: "hard directional key light, deep black shadow against bright highlight",
-      motifs: ["army column", "war standard"], avoid: ["drawn line art", "all-over haze"],
-    }),
-  },
-  {
+const JOBS = [  {
+    // "Boring and could be much more visual" — the fix is a physical, tactile
+    // mechanism the viewer can SEE taking money, not a document being held.
     id: "investory",
     channelName: "Investory",
     title: "The Pension Fee That Quietly Took A Third Of Your Retirement",
-    recentHues: [43, 41, 52],
+    recentHues: [0, 10, 350],
     dna: channelDna({
-      palette: ["#0B1220", "#D8A11A"],
-      subject: "a tactile financial artifact enacting a wealth mechanism",
-      setting: "a real domestic or institutional interior",
-      composition: "human decision at close range",
-      colorGrade: "hard window light against deep shadow",
-      motifs: ["paper", "hands"], avoid: ["floating coins", "neon charts"],
+      // DEEP GREEN world, far from both the red and the cyan.
+      palette: ["#0E2B22", "#F2C230"],
+      subject: "a physical mechanism visibly removing part of something that belongs to a person",
+      setting: "a tactile real-world object standing in for the money, being cut, siphoned or shaved",
+      composition: "extreme close crop on the mechanism doing the taking",
+      colorGrade: "deep green-black field with ONE hot yellow accent",
+      motifs: ["a slice removed", "a hand too late"],
+      avoid: ["a person holding paperwork", "floating coins", "charts", "an office desk"],
     }),
   },
   {
+    // "Horrible, boring, not understandable" — the previous frame showed bolt
+    // cutters on an anonymous cable, which reads as nothing. The subject must be
+    // the CONSEQUENCE: the thing that was supposed to be watching, blinded.
     id: "vault",
     channelName: "Vault Breach",
     title: "They Cut The Alarm Line And Nobody Noticed For 9 Hours",
-    recentHues: [197, 54, 61],
+    recentHues: [0, 10, 120],
     dna: channelDna({
-      palette: ["#0B0E12", "#4FD6C1"],
-      subject: "a security mechanism being defeated by human hands and real tools",
-      setting: "a service corridor lit only by working equipment",
-      composition: "head-on one-point perspective, mechanism dead centre",
-      colorGrade: "hard equipment light, deep black, full tonal range",
-      motifs: ["worklight", "cut cable"], avoid: ["all-over haze", "uniform mid-tone"],
+      // AMBER-SODIUM world, far from red and green.
+      palette: ["#1A1206", "#FFB020"],
+      subject: "the security system that was supposed to be watching, visibly dead",
+      setting: "the room the alarm was protecting, still and untouched, with the system dark",
+      composition: "the dead indicator or blank screen dominant, the untouched room beyond",
+      colorGrade: "near-black field with ONE sodium-amber source",
+      motifs: ["a dark status light", "an empty mount"],
+      avoid: ["anonymous cables", "generic tools in gloves", "cool cyan equipment light"],
     }),
   },
 ] as const;
