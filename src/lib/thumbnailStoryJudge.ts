@@ -95,7 +95,14 @@ export async function judgeThumbnailStoryInterest(args: {
     // the JSON contract on every attempt, which made the judge a permanent
     // no-op. The creative route is the one the art director already uses for
     // structured output successfully.
-    maxTokens: 400,
+    //
+    // 400 tokens was the second bug and the reason the judge still failed on
+    // the creative route: the same call succeeds in isolation and fails here,
+    // because this prompt prepends the whole doctrine and the model spends its
+    // budget reasoning before it emits the object. The JSON was being truncated
+    // mid-string, which surfaces as "failed the requested JSON contract" and
+    // looks like a routing problem rather than a token ceiling.
+    maxTokens: 2_000,
     tier: "pro",
     temperature: 0,
     system: judgeSystem,

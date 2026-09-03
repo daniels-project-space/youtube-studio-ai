@@ -502,7 +502,12 @@ export async function runThumbnailMobileReferenceQa(args: {
           `Beyond that exact headline, only ONE compact instance of the channel name may appear as the identity badge; ` +
           `a repeated channel name, subtitle, tagline, or supporting sentence makes textOk false.\n`
         : "\n") +
-      `(2) faceClear: any intended face is clear and undistorted (true when no face is intended).\n` +
+      `(2) faceClear: any intended face is clear and undistorted, AND every figure is anatomically sound — ` +
+      `count the limbs, hands and fingers on every person in the frame and set this FALSE if any figure has an ` +
+      `extra or missing arm, leg or hand, a hand growing from the wrong place, fused or extra fingers, or a limb ` +
+      `that does not connect to a body. A generated figure with three arms is the single most common way an ` +
+      `otherwise strong thumbnail becomes unusable, and a correct face does not make the body correct. ` +
+      `True when no person is intended.\n` +
       `(3) Rate punch, styleMatch, and storyMatch 1-10` +
       (refPaths.length ? ` against the reference set.\n` : `.\n`) +
       `(4) uiClean: no broken glyphs, watermarks, accidental UI, clipping, or unreadable clutter.\n` +

@@ -12,11 +12,12 @@
  * Every candidate renders on the SHIPPING model. Drafting is disabled, so the
  * loop judges exactly the picture a viewer would get.
  *
- * The critique here is DELIBERATELY DETERMINISTIC — the mobile squint gate, the
- * monotony guard and the copy gates, all local and free. That is not a
- * shortcut: the question being asked is whether feeding a measured contrast
- * failure back actually improves contrast, and a vision reviewer in the loop
- * would add cost and a second opinion that muddies exactly that measurement.
+ * The critique combines the deterministic gates with the REAL vision reviewer.
+ * An earlier version deliberately used deterministic gates only, to keep the
+ * contrast measurement clean. That removed the only gate that can see a figure
+ * with three arms, and duly shipped one — a defect no amount of contrast,
+ * seam or hue measurement can detect. Cheap measurements cannot replace looking
+ * at the picture; they can only tell you things looking at it would miss.
  */
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -25,7 +26,8 @@ import { join } from "node:path";
 import type { StyleDNA } from "@/engine/creative/types";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { applyThumbnailChannelIdentity } from "@/lib/thumbnailChannelIdentity";
-import { buildStyleDnaPlaybook, renderCandidate } from "@/lib/thumbnailLab";
+import { buildStyleDnaPlaybook, renderCandidate, runThumbnailMobileReferenceQa } from "@/lib/thumbnailLab";
+import { hasVisionKey } from "@/lib/vision";
 import { gradeThumbnailForMobile } from "@/lib/thumbnailMobileGate";
 import { gradeThumbnailPalette, readThumbnailPalette } from "@/lib/thumbnailPaletteGuard";
 import { detectFlatPanel } from "@/lib/thumbnailPanelDetector";
@@ -72,52 +74,67 @@ async function falRender(prompt: string): Promise<Uint8Array> {
 
 const JOBS = [
   {
-    // "Clearer text on what it references" + "more emotional".
+    id: "hannibal",
+    channelName: "Empires At War",
+    title: "The Day Hannibal Stood At The Gates Of Rome",
+    recentHues: [190, 205, 218],
+    dna: channelDna({
+      palette: ["#E9EDF2", "#B3121D"],
+      subject: "the most surprising object of the campaign, not the most famous man",
+      setting: "a bright open snowfield, daylight, the unglamorous part of the campaign",
+      composition: "the surprising object overwhelming in the frame, a countable column of tiny figures behind for scale",
+      colorGrade: "bright snow-white field, near-monochrome, ONE saturated red",
+      motifs: ["a torn red standard", "a column receding to the horizon"],
+      avoid: ["dark interiors", "night", "warm firelight", "drawn line art", "a panel beside the picture"],
+    }),
+  },
+  {
     id: "investory",
     channelName: "Investory",
     title: "The Pension Fee That Quietly Took A Third Of Your Retirement",
-    recentHues: [205, 210, 200],
+    recentHues: [190, 205, 218],
     dna: channelDna({
-      palette: ["#0E2B22", "#F2C230"],
-      subject: "an older person at the moment of realising money they earned is gone",
-      setting: "an ordinary cold home where the consequence is visible around them",
-      composition: "the face and hands carry the emotion at close range; the evidence surrounds them in the same room",
-      colorGrade: "cold green-grey domestic light with ONE warm source on the person",
-      motifs: ["unpaid bills", "a single lit lamp"],
-      avoid: ["a person holding paperwork calmly", "floating coins", "charts", "a diagram of a mechanism", "a panel beside the picture"],
+      palette: ["#123B2A", "#F2C230"],
+      subject: "one person, one clear gesture, at the moment money they earned is gone",
+      setting: "a bright ordinary kitchen in daylight",
+      composition: "ONE person with exactly two arms and two hands, both visible and doing one single action",
+      colorGrade: "bright daylight green-grey with ONE warm accent",
+      motifs: ["a single sheet of paper", "an empty purse"],
+      avoid: ["a person with hands in more than one place at once", "multiple simultaneous gestures", "dark rooms", "a panel beside the picture"],
     }),
   },
   {
-    // "Still not interesting enough" — the story is the person who should have
-    // noticed, not the tool.
+    // "Too ambiguous and complicated" — and the judge agreed: it staged the
+    // passive half and omitted the crime. Show BOTH in one simple frame.
     id: "vault",
     channelName: "Vault Breach",
-    title: "They Robbed It While The Guard Watched A Loop Of An Empty Room",
-    recentHues: [119, 130, 110],
+    title: "They Emptied The Vault While The Camera Showed An Empty Room",
+    recentHues: [190, 205, 218],
     dna: channelDna({
-      palette: ["#141821", "#FF7A1A"],
-      subject: "the person who was supposed to notice, calmly watching the wrong thing",
-      setting: "a security desk whose screens show a room that is no longer real",
-      composition: "the watcher and the screens in one frame, the truth visible to us and not to them",
-      colorGrade: "near-black room lit only by screen glow with ONE hot amber source",
-      motifs: ["a frozen timestamp", "an untouched coffee"],
-      avoid: ["anonymous cables", "tools in gloves", "an equipment box", "a panel beside the picture"],
+      palette: ["#1C1408", "#FF9E1B"],
+      subject: "the theft and the thing that failed to see it, both plainly visible in one frame",
+      setting: "the vault itself, standing wide open and stripped bare, with the camera above it",
+      composition: "the emptied vault dominant and unmistakable; the camera small and pointed at it, its light dead",
+      colorGrade: "warm sodium vault light, deep shadow, ONE amber source",
+      motifs: ["an open vault door", "a dark camera housing"],
+      avoid: ["a guard at a desk", "monitors", "cables", "anything requiring explanation", "a panel beside the picture"],
     }),
   },
   {
-    // New channel: Star Wars fan theory.
+    // "Doesn't feel interesting or epic at all" — a console close-up is not
+    // epic. Scale is the fix.
     id: "startheory",
     channelName: "Parsec Theory",
     title: "The Detail In Episode IV That Proves The Empire Knew All Along",
-    recentHues: [30, 40, 20],
+    recentHues: [190, 205, 218],
     dna: channelDna({
-      palette: ["#05070D", "#3FD2FF"],
-      subject: "one overlooked physical detail from the films, isolated and made enormous",
-      setting: "the frame of the film itself, treated as evidence rather than illustration",
-      composition: "the overlooked detail dominant and lit like the point of the whole story",
-      colorGrade: "deep space-black with ONE cold cyan source and a hard rim",
-      motifs: ["a freeze-frame marker", "scan lines"],
-      avoid: ["a collage of characters", "movie-poster montage", "a panel beside the picture", "warm firelight"],
+      palette: ["#04060C", "#59E0FF"],
+      subject: "an overwhelming imperial structure at colossal scale with one small telling detail on it",
+      setting: "deep space at a scale that dwarfs everything human",
+      composition: "the colossal structure filling the frame, a tiny ship or figure giving true scale against it",
+      colorGrade: "near-black space with ONE cold cyan source and a hard rim light",
+      motifs: ["a tiny ship for scale", "a single lit aperture"],
+      avoid: ["a control panel close-up", "a collage of characters", "a hand on a console", "a panel beside the picture"],
     }),
   },
 ] as const;
@@ -149,6 +166,7 @@ async function main(): Promise<void> {
           outJpg,
           tmpDir: tmp,
           idx: 0,
+          useStoryJudge: true,
           // THE WHOLE POINT: the previous iteration's measured failures.
           ...(priorIssues.length ? { priorIssues } : {}),
           generateDesignedThumbnail: async ({ prompt }) => falRender(prompt),
@@ -159,7 +177,7 @@ async function main(): Promise<void> {
         console.log(`      iter ${iter}: contrast ${mobile.squintContrast}`);
         return { outJpg: result.path, contrast: mobile.squintContrast };
       },
-      critique: async (value) => {
+      critique: async (value, iter) => {
         const mobile = await gradeThumbnailForMobile({ imagePath: value.outJpg });
         const palette = gradeThumbnailPalette({
           reading: await readThumbnailPalette(value.outJpg),
@@ -167,7 +185,29 @@ async function main(): Promise<void> {
         });
         const panel = await detectFlatPanel({ imagePath: value.outJpg });
         const issues = [...mobile.failures, ...palette.issues, ...panel.issues];
-        const ok = mobile.passed && !palette.monotonous && !panel.hasFlatPanel;
+        let visionOk = true;
+        if (hasVisionKey()) {
+          const tmp = await mkdtemp(join(tmpdir(), `qa-${job.id}-`));
+          const verdict = await runThumbnailMobileReferenceQa({
+            outJpg: value.outJpg,
+            tmpDir: tmp,
+            title: job.title,
+            playbook,
+            recentHues: job.recentHues,
+          }).catch(() => null);
+          if (verdict) {
+            // Anatomy and legibility live here and nowhere else.
+            // Punch 5 passed every threshold and still produced a weak frame.
+            // The deterministic gates are FLOORS — they establish that a
+            // candidate is not broken, not that it is good. The reviewer's own
+            // punch score is the only quality signal in the loop, so the loop
+            // must actually spend its remaining iterations on it.
+            visionOk = verdict.faceClear && verdict.uiClean && verdict.textOk && verdict.punch >= 7;
+            if (!visionOk) issues.push(verdict.reason || "vision reviewer rejected the candidate");
+            console.log(`      iter ${iter} vision: face=${verdict.faceClear} ui=${verdict.uiClean} text=${verdict.textOk} punch=${verdict.punch}`);
+          }
+        }
+        const ok = mobile.passed && !palette.monotonous && !panel.hasFlatPanel && visionOk;
         return { score: ok ? 1 : 0, pass: ok, issues };
       },
     });
