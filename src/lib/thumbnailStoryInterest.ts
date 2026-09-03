@@ -97,25 +97,6 @@ const PERSON_HERO = [
   "face", "portrait", "he", "she",
 ];
 
-/**
- * A title that is literally a comparison must be laid out as one.
- *
- * The comparison layout existed but was never selected: the art director is
- * free to choose layoutMode and reliably picked a single hero even for an
- * "X vs Y" title, producing one building with both words stacked in a corner —
- * which reads as a single confusing image because neither word labels anything.
- * When the title states a comparison, the layout is not a judgement call.
- */
-export function isComparisonTitle(title: string): boolean {
-  const normalized = ` ${title.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim()} `;
-  return [
-    " vs ", " versus ", " v ",
-    " before and after ", " then and now ", " then vs now ",
-    " expectation ", " promised ", " advertised ", " compared to ",
-    " what they said ", " what actually ", " reality ",
-  ].some((marker) => normalized.includes(marker));
-}
-
 export interface StoryInterestVerdict {
   score: number;
   verdict: "compelling" | "weak" | "inert";

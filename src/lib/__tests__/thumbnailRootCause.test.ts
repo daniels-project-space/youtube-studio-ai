@@ -33,6 +33,13 @@ import {
   scoreThumbnailStoryInterest,
   STORY_INTEREST_DOCTRINE,
 } from "@/lib/thumbnailStoryInterest";
+import {
+  isComparisonTitle,
+  isGraveSubject,
+  resolveThumbnailCapabilities,
+  THUMBNAIL_CAPABILITIES,
+} from "@/lib/thumbnailCapabilities";
+import { applyThumbnailChannelIdentity } from "@/lib/thumbnailChannelIdentity";
 import { planThumbnailText, type ThumbnailTextZone } from "@/lib/thumbnailLayout";
 import {
   buildThumbnailImageRequest,
@@ -247,6 +254,87 @@ function assertSceneTypographySplit(): void {
   assert.equal(isThumbnailBaseProvenance({
     contract: "thumbnail-base-v1", textFree: true, safeZone: "left", source: "verified-video-still",
   }, "left"), true);
+}
+
+function assertCapabilityRoutingDoesNotRegressExistingChannels(): void {
+  // Every capability must be able to state what it would break. A capability
+  // that cannot name its own blast radius is one nobody can review.
+  for (const capability of THUMBNAIL_CAPABILITIES) {
+    assert.ok(capability.appliesWhen.length > 20, `${capability.id} must say when it applies`);
+    assert.ok(capability.risk.length > 20, `${capability.id} must state what it damages if misrouted`);
+  }
+
+  // REGRESSION GUARD. These are the channels and titles that already produce
+  // good thumbnails. No newly added capability may fire on any of them.
+  const untouched = [
+    ["Investory", "The £40,000 Pension Mistake Nobody Warns You About"],
+    ["Investory", "The Reality Of Retiring At 55"],
+    ["Investory", "What Actually Happens To Your Pension"],
+    ["Inked Histories", "The Night Rome's Treasury Vanished"],
+    ["Gratitude Springs", "Let The Water Take The Weight"],
+    ["Vault Breach", "The Bank That Was Robbed Through Its Own Wall"],
+    ["The Getaway Files", "The Airport Switch That Fooled Everyone"],
+    ["Chalk & Compound", "How Tax Brackets Actually Work"],
+  ] as const;
+  const base = {
+    source: "style_dna_foundation" as const,
+    rules: [], avoid: [], patterns: [], refsUsed: [], distilledAt: 0, visualLanguage: {},
+  };
+  for (const [channelName, title] of untouched) {
+    const playbook = applyThumbnailChannelIdentity({ channelName, playbook: { ...base } });
+    const resolved = resolveThumbnailCapabilities({
+      title,
+      subjectClass: playbook.identityContract?.subjectClass,
+      composition: playbook.visualLanguage?.composition,
+    });
+    assert.equal(
+      resolved.forcedLayout, undefined,
+      `"${title}" must not be split into a comparison — that would destroy a single-hero story`,
+    );
+    assert.equal(
+      resolved.energyOverride, undefined,
+      `"${title}" is dramatic but not grave; overriding to sober would drain the channel's register`,
+    );
+    assert.equal(
+      resolved.defaultVantage, undefined,
+      `${channelName} did not ask for a heroic upward tilt`,
+    );
+  }
+
+  // The loose first draft of the comparison detector matched a bare "reality"
+  // and "what actually", which fired on both Investory titles above.
+  assert.equal(isComparisonTitle("The Reality Of Retiring At 55"), false);
+  assert.equal(isComparisonTitle("What Actually Happens To Your Pension"), false);
+  assert.equal(isComparisonTitle("The Render They Sold You vs What Actually Got Built"), true);
+  assert.equal(isComparisonTitle("Dubai: Expectation vs Reality"), true);
+  assert.equal(isComparisonTitle("The Same Street Before And After The Flood"), true);
+
+  // Grave detection stays tight: dramatic is not grave.
+  assert.equal(isGraveSubject("The £40,000 Pension Mistake Nobody Warns You About"), false);
+  assert.equal(isGraveSubject("The Bank That Was Robbed Through Its Own Wall"), false);
+  assert.equal(isGraveSubject("The Tower That Killed 96 Workers Before It Opened"), true);
+
+  // The channels that DID opt in must still get their capabilities.
+  const overbuilt = applyThumbnailChannelIdentity({ channelName: "Overbuilt", playbook: { ...base } });
+  const icon = resolveThumbnailCapabilities({
+    title: "Why The Burj Khalifa Is A Terrible Building",
+    subjectClass: overbuilt.identityContract?.subjectClass,
+    composition: overbuilt.visualLanguage?.composition,
+  });
+  assert.equal(icon.defaultVantage, "worm_tilt_up", "an icon channel must still get the looming vantage");
+  assert.ok(icon.active.includes("subject_class_hero"));
+
+  const sealed = applyThumbnailChannelIdentity({ channelName: "Sealed Records", playbook: { ...base } });
+  const person = resolveThumbnailCapabilities({
+    title: "The Secret Deal That Buried The Epstein Case For A Decade",
+    subjectClass: sealed.identityContract?.subjectClass,
+    composition: sealed.visualLanguage?.composition,
+  });
+  // The Gemini Developer API refuses a recognizable real likeness
+  // (finishReason=IMAGE_OTHER); fal renders the identical prompt. Re-pointing a
+  // person channel at Gemini to save a few cents would silently kill it.
+  assert.equal(person.requiredProviderRoute, "fal", "a person channel must be pinned to the provider that will render a likeness");
+  assert.ok(person.active.includes("photo_cutout_collage"), "the expose register is a photo cutout over collage, not a rendered scene");
 }
 
 function assertBadgeIsAChannelConstant(): void {
@@ -774,7 +862,8 @@ async function main(): Promise<void> {
     assertFamilyPolicy();
     assertNativeCopyOcrGate();
     assertSceneTypographySplit();
-    assertBadgeIsAChannelConstant();
+    assertCapabilityRoutingDoesNotRegressExistingChannels();
+assertBadgeIsAChannelConstant();
 assertStoryInterestIntelligence();
 assertMotifImplementations();
     assertSafePlans();

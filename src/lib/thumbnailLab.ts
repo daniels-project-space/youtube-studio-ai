@@ -48,10 +48,10 @@ import {
   OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES,
 } from "@/lib/thumbnailGoldenStandard";
 import {
-  isComparisonTitle,
   scoreThumbnailStoryInterest,
   STORY_INTEREST_DOCTRINE,
 } from "@/lib/thumbnailStoryInterest";
+import { resolveThumbnailCapabilities } from "@/lib/thumbnailCapabilities";
 import { downloadTo } from "@/lib/files";
 import type { StyleDNA } from "@/engine/creative/types";
 import type { FamilyKey } from "@/engine/families";
@@ -933,6 +933,19 @@ export async function renderCandidate(args: {
   // TWO-PASS DESIGN: the LAYOUT is decided FIRST (which zone the text owns),
   // the image is generated WITH that zone deliberately reserved as negative
   // space, then the text lands in its planned home — never fighting the image.
+  // One routing decision for this video on this channel. Every new capability
+  // is gated here rather than sprinkled through the prompt, so its blast radius
+  // is reviewable and regression-testable without generating an image.
+  const capabilities = resolveThumbnailCapabilities({
+    title: args.title,
+    subjectClass: identityContract?.subjectClass,
+    composition: args.playbook.visualLanguage?.composition,
+  });
+  if (capabilities.active.length) {
+    args.log?.(`thumbnailLab: capabilities ${capabilities.active.join(", ")} — ${capabilities.reasons.join("; ")}`);
+  }
+  const effectiveEnergy = capabilities.energyOverride ?? args.playbook.energy ?? "bold";
+
   // STORY-INTEREST LIFT: corrections fed back into a second instantiation when
   // the first concept scores as a weak or inert subject. Text-only, so a dull
   // idea is replaced before any image is paid for.
@@ -1007,7 +1020,7 @@ export async function renderCandidate(args: {
       `down it is the failure mode — the viewer cannot tell which side is which and reads it as a single confusing ` +
       `image. Each half carries its own headline word labelling it. Make the DIFFERENCE the loudest thing in the frame. Choose it whenever the topic is fundamentally two things measured ` +
       `against one another; do not force a single hero on to a comparison story just to keep the frame simple.\n` +
-      (isComparisonTitle(args.title)
+      (capabilities.forcedLayout === "comparison"
         ? `LAYOUT IS ALREADY DECIDED FOR THIS TITLE: it states a comparison, so layoutMode MUST be "comparison". ` +
           `Do not choose split or centered_hero. Name the TWO things being weighed against each other and give each ` +
           `its own half and its own headline word.\n`
@@ -1017,18 +1030,18 @@ export async function renderCandidate(args: {
       `choice for any tall structure, and the difference between a building that is merely in the frame and one that towers ` +
       `over the viewer. high_angle: looking down, making the subject exposed or precarious. close_macro: inches from the ` +
       `decisive detail, everything else falling away. eye_level: neutral, only when the subject's own scale already carries it. ` +
-      `For an icon subject, DEFAULT TO worm_tilt_up unless there is a specific reason not to.\n` +
+      `${capabilities.defaultVantage === "worm_tilt_up" ? "For THIS video the default is worm_tilt_up — choose otherwise only with a specific reason.\n" : ""}` +
       `STEP 2 — fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY — ` +
-      `never reproduce its literal scene). ENERGY TIER = "${args.playbook.energy ?? "bold"}":\n` +
-      (args.playbook.energy === "spectacle"
+      `never reproduce its literal scene). ENERGY TIER = "${effectiveEnergy}":\n` +
+      (effectiveEnergy === "spectacle"
         ? `SPECTACLE: go to the edge of absurd — IMPOSSIBLE SCALE (a tsunami of coins crashing toward a tiny figure, ` +
           `a banknote the size of a skyscraper), PHYSICS-DEFYING moments frozen mid-action, cinematic catastrophe/` +
           `triumph. The viewer's reaction must be "WHAT?!".\n`
-        : args.playbook.energy === "cozy_pop"
+        : effectiveEnergy === "cozy_pop"
           ? `COZY-POP: irresistibly charming and warm — but PUNCHY: one adorable/magical focal moment (impossibly ` +
             `cozy light, oversized moon, glowing window, a cat doing something delightful), saturated inviting ` +
             `color, storybook wonder. Catchy and clickable, never sleepy or flat.\n`
-          : args.playbook.energy === "sober"
+          : effectiveEnergy === "sober"
             ? `SOBER: documentary gravity for material that hype would cheapen — a reckoning, a disaster, a death ` +
               `toll, an investigation, a diagnosis, a loss. RESTRAINT GOVERNS THE TREATMENT, NOT THE DRAMA. The ` +
               `moment itself should still be the most charged instant in the story — a rope failing, a worker ` +
@@ -1046,7 +1059,7 @@ export async function renderCandidate(args: {
       // Saturation is an ENERGY decision, not a universal law. Forcing
       // "hyper-saturated" on to sober material is exactly what makes a serious
       // channel look like a tabloid.
-      `${args.playbook.energy === "sober"
+      `${effectiveEnergy === "sober"
         ? "True-to-life colour, real available light, restrained contrast — never pushed saturation. "
         : "Hyper-saturated, volumetric light. "}` +
       `COMPOSED FOR THE CHOSEN LAYOUT: split = subject opposite textZone with a clean darker 40% type field; centered_hero = hero centered at peak action with asymmetric supporting depth and protected type pockets around its silhouette. ` +
@@ -1150,10 +1163,11 @@ export async function renderCandidate(args: {
       );
     }
   }
+  if (!inst.vantage && capabilities.defaultVantage) inst.vantage = capabilities.defaultVantage;
   // A comparison title is not a judgement call: the model reliably ignores the
   // comparison layout and returns a single hero, which renders both headline
   // words stacked in one corner where they label nothing.
-  if (isComparisonTitle(args.title) && inst.layoutMode !== "comparison") {
+  if (capabilities.forcedLayout === "comparison" && inst.layoutMode !== "comparison") {
     args.log?.(
       `thumbnailLab: title states a comparison but the art director chose ` +
       `"${inst.layoutMode ?? "split"}" — forcing the comparison layout`,
