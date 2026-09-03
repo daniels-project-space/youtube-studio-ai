@@ -63,6 +63,7 @@ import {
 } from "@/lib/thumbnailDefaults";
 import { gradeThumbnailForMobile } from "@/lib/thumbnailMobileGate";
 import { gradeThumbnailPalette, readThumbnailPalette } from "@/lib/thumbnailPaletteGuard";
+import { detectFlatPanel } from "@/lib/thumbnailPanelDetector";
 import { judgeThumbnailStoryInterest } from "@/lib/thumbnailStoryJudge";
 import { deriveCriticDoctrine, type ChannelDefectLedger } from "@/lib/thumbnailDefectLedger";
 import {
@@ -655,6 +656,18 @@ export async function runThumbnailMobileReferenceQa(args: {
     // A measurement failure must never reject a paid candidate.
     mobileOk = true;
   }
+  // The pasted-panel check lived only in a test harness, so production never
+  // ran it. It blocks: a headline sitting on a panel butted against the picture
+  // is a template, not a thumbnail, and the loop can repair it.
+  let panelReason = "";
+  let panelOk = true;
+  try {
+    const panel = await detectFlatPanel({ imagePath: args.outJpg });
+    panelOk = !panel.hasFlatPanel;
+    if (panel.hasFlatPanel) panelReason = panel.issues.join("; ");
+  } catch {
+    panelOk = true;
+  }
   // Monotony is REPORTED, never blocking: one frame cannot be rejected for a
   // pattern that only exists across a catalogue, and the correction belongs in
   // the next concept rather than in a veto of this one.
@@ -675,11 +688,11 @@ export async function runThumbnailMobileReferenceQa(args: {
     punch: Number(verdict.punch ?? 0),
     styleMatch: Number(verdict.styleMatch ?? 0),
     storyMatch: Number(verdict.storyMatch ?? 0),
-    uiClean: verdict.uiClean === true && mobileOk,
+    uiClean: verdict.uiClean === true && mobileOk && panelOk,
     ...(requiresVisualTreatmentVerdict
       ? { visualTreatmentCompliant: verdict.visualTreatmentCompliant === true }
       : {}),
-    reason: [reason, ocrReason, mobileReason, paletteReason].filter(Boolean).join(" | "),
+    reason: [reason, ocrReason, mobileReason, panelReason, paletteReason].filter(Boolean).join(" | "),
   };
 }
 

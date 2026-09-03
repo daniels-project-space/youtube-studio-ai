@@ -48,6 +48,9 @@ import {
   type ThumbnailNanoBananaEvidence,
 } from "@/lib/thumbnailCheckpoint";
 import { FAL_NANO_BANANA_PRO_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaProThumbnailContract";
+import { loadDefectLedger, loadRecentRenders, recordRecentRender } from "@/lib/thumbnailLearningStore";
+import { fingerprintThumbnail } from "@/lib/thumbnailSameness";
+import { readThumbnailPalette } from "@/lib/thumbnailPaletteGuard";
 import {
   generateFalNanoBananaProThumbnailWithReceipt,
   hasFalNanoBananaProThumbnail,
@@ -1232,7 +1235,7 @@ export const thumbnailGen: Block = {
             verdict.styleMatch >= 7 ? "" : "preserve the attached Lo-Fi scene and the channel's read-only thumbnail style",
             verdict.storyMatch >= 7 ? "" : "make the supplied video frame remain the obvious background",
           ].map((issue) => String(issue ?? "").trim()).filter(Boolean).slice(0, 5);
-          return { score: numeric, pass: false, issues };
+          return { score: numeric, pass: false, issues, ...(verdict.textOk ? {} : { fatal: true }) };
         },
       });
       const winner = lofiLoop.value;
@@ -1322,6 +1325,46 @@ export const thumbnailGen: Block = {
       refQA: ThumbnailGateVerdict | null;
       providerEvidence?: ThumbnailNanoBananaEvidence;
     }
+
+    // LEARNING INPUTS, loaded ONCE for the whole loop so both produce() and
+    // critique() see them. These features existed and were tested, and were
+    // inert in production because nothing passed them: the channel's
+    // accumulated defect doctrine, its recent renders for the sameness guard,
+    // the recent hues for the monotony guard, and the story judge. All fail
+    // soft — an empty or unreachable store just means this channel has not
+    // learned anything yet, and a render must never fail for that.
+    const learningChannel = thumbnailChannel.channelName ?? "channel";
+    let defectLedger: Awaited<ReturnType<typeof loadDefectLedger>> | undefined;
+    let recentThumbnails: Awaited<ReturnType<typeof loadRecentRenders>> = [];
+    try {
+      [defectLedger, recentThumbnails] = await Promise.all([
+        loadDefectLedger({ keyPrefix: ctx.keyPrefix, channelName: learningChannel }),
+        loadRecentRenders({ keyPrefix: ctx.keyPrefix, channelName: learningChannel }),
+      ]);
+      if (defectLedger.observations.length || recentThumbnails.length) {
+        ctx.log(
+          `thumbnail_gen: channel memory — ${defectLedger.observations.length} past defect(s), ` +
+          `${recentThumbnails.length} recent render(s) for sameness and monotony`,
+        );
+      }
+    } catch { /* learning is an enhancement, never a render failure */ }
+
+    // Observed-CTR advisory. Empty until a channel has real volume, and framed
+    // by analyseThumbnailCtr as the lowest-priority input in the brief.
+    let ctrAdvisory = "";
+    try {
+      const { loadPerformanceSamples } = await import("@/lib/thumbnailLearningStore");
+      const { analyseThumbnailCtr } = await import("@/lib/thumbnailCtrFeedback");
+      const samples = (await loadPerformanceSamples({
+        keyPrefix: ctx.keyPrefix,
+        channelName: learningChannel,
+      })).filter((sample) => sample.impressions > 0);
+      if (samples.length) {
+        const report = analyseThumbnailCtr({ samples });
+        ctrAdvisory = report.advisory;
+        if (ctrAdvisory) ctx.log(`thumbnail_gen: applying observed-CTR advisory (${report.suggestedRules.length} finding(s))`);
+      }
+    } catch { /* advisory only */ }
 
     const attemptLoop = await produceAndCritique<ThumbnailAttempt>({
       label: "thumbnail_gen",
@@ -1427,13 +1470,17 @@ export const thumbnailGen: Block = {
             title,
             scriptHint,
             sceneSeed: thumbnailDescription,
-            channelName: thumbnailChannel.channelName ?? "channel",
+            channelName: learningChannel,
             playbook: effectivePlaybook,
             outJpg,
             tmpDir: tmp,
             idx,
             generateDesignedThumbnail,
             log: ctx.log,
+            useStoryJudge: true,
+            ...(ctrAdvisory ? { ctrAdvisory } : {}),
+            ...(defectLedger?.observations.length ? { defectLedger } : {}),
+            ...(recentThumbnails.length ? { recentThumbnails } : {}),
             ...(dnaThumb?.subject ? { sceneMandate: dnaThumb.subject } : {}),
             ...(priorIssues.length ? { priorIssues } : {}),
             ...(criticDoctrine ? { criticDoctrine } : {}),
@@ -1533,6 +1580,11 @@ export const thumbnailGen: Block = {
               playbook: effectivePlaybook,
               referenceUrls: referenceThumbs,
               brandContext: qaBrandContext,
+              // Feeds the catalogue-monotony guard, which cannot see a channel
+              // collapsing into one colour temperature from a single frame.
+              ...(recentThumbnails.length
+                ? { recentHues: recentThumbnails.map((render) => render.hue) }
+                : {}),
               expectedWords:
                 checkpoint.manifest?.version === 2 || checkpoint.manifest?.version === 3
                   ? checkpoint.manifest.providerEvidence?.version === "thumbnail-fal-nano-banana-pro-evidence/v1"
@@ -1614,10 +1666,28 @@ export const thumbnailGen: Block = {
         );
         // `pass:false` is authoritative; the score only ranks attempts so the
         // best near-miss ships if no candidate ever clears the bar.
-        return { score: 0.5 * numeric + 0.5 * booleans, pass: false, issues };
+        //
+        // But a broken headline is not a near-miss. Ranking it against the
+        // others is how a misspelled frame comes back as "best of a bad set" —
+        // observed shipping a headline reading "FÖÖLED" after the reviewer had
+        // already caught it. Marking it fatal removes it from best-of selection
+        // entirely; the loop keeps iterating and the caller is told if every
+        // attempt was unusable.
+        return {
+          score: 0.5 * numeric + 0.5 * booleans,
+          pass: false,
+          issues,
+          ...(verdict.textOk ? {} : { fatal: true }),
+        };
       },
     });
 
+    if (attemptLoop.fatal) {
+      ctx.log(
+        "thumbnail_gen: EVERY candidate carried a broken headline — the gate below owns the " +
+        "fail-closed decision rather than this frame shipping as a best-effort",
+      );
+    }
     const winner = attemptLoop.value;
     const outJpg = winner.outJpg;
     const requestHash = winner.requestHash;
@@ -1655,6 +1725,20 @@ export const thumbnailGen: Block = {
       // metrics are not known for days. Recording traits keyed by run lets the
       // scheduled analytics pass attach impressions later without having to
       // reconstruct what the thumbnail actually did.
+      // Close the loop: without this the sameness and monotony guards have
+      // nothing to compare the NEXT video against, which is why both were
+      // effectively dead in production even once they were passed in.
+      try {
+        const [fingerprint, palette] = await Promise.all([
+          fingerprintThumbnail({ imagePath: outJpg, heroProp: thumbnailDescription }),
+          readThumbnailPalette(outJpg),
+        ]);
+        await recordRecentRender({
+          keyPrefix: ctx.keyPrefix,
+          channelName: thumbnailChannel.channelName ?? "channel",
+          render: { ...fingerprint, hue: palette.hue, at: Date.now() },
+        });
+      } catch { /* history is an enhancement, never a render failure */ }
       const { recordThumbnailTraits } = await import("@/lib/thumbnailLearningStore");
       await recordThumbnailTraits({
         keyPrefix: ctx.keyPrefix,

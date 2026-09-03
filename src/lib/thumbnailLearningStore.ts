@@ -26,10 +26,12 @@ import {
 } from "@/lib/storage";
 import type { ChannelDefectLedger, DefectObservation } from "@/lib/thumbnailDefectLedger";
 import type { ThumbnailPerformanceSample } from "@/lib/thumbnailCtrFeedback";
+import type { ThumbnailFingerprint } from "@/lib/thumbnailSameness";
 
 /** Bounded so a long-running channel cannot grow an unbounded object. */
 const MAX_OBSERVATIONS = 200;
 const MAX_SAMPLES = 500;
+const MAX_FINGERPRINTS = 24;
 
 function channelSlug(channelName: string): string {
   return channelName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "channel";
@@ -41,6 +43,10 @@ export function thumbnailLedgerKey(keyPrefix: string, channelName: string): stri
 
 export function thumbnailPerformanceKey(keyPrefix: string, channelName: string): string {
   return `${keyPrefix}learning/thumbnails/${channelSlug(channelName)}/performance.json`;
+}
+
+export function thumbnailFingerprintKey(keyPrefix: string, channelName: string): string {
+  return `${keyPrefix}learning/thumbnails/${channelSlug(channelName)}/recent-renders.json`;
 }
 
 async function readJson<T>(key: string, fallback: T): Promise<T> {
@@ -146,6 +152,47 @@ export async function upsertPerformanceSamples(args: {
     .slice(-MAX_SAMPLES);
   const persisted = await writeJson(thumbnailPerformanceKey(args.keyPrefix, args.channelName), merged);
   return { persisted, total: merged.length };
+}
+
+/**
+ * What the sameness and monotony guards need to see.
+ *
+ * Both compare a candidate against the channel's RECENT history, and neither
+ * could run in production because nothing was recording that history — they
+ * worked only in a harness that passed it by hand.
+ */
+export interface RecentRender extends ThumbnailFingerprint {
+  /** Dominant hue, for the catalogue-monotony guard. */
+  hue: number;
+  at: number;
+}
+
+export async function loadRecentRenders(args: {
+  keyPrefix: string;
+  channelName: string;
+}): Promise<RecentRender[]> {
+  const stored = await readJson<RecentRender[]>(
+    thumbnailFingerprintKey(args.keyPrefix, args.channelName),
+    [],
+  );
+  if (!Array.isArray(stored)) return [];
+  return stored.filter((entry) =>
+    entry && typeof entry.phash === "string" && Array.isArray(entry.heroTokens)
+  );
+}
+
+export async function recordRecentRender(args: {
+  keyPrefix: string;
+  channelName: string;
+  render: RecentRender;
+}): Promise<{ persisted: boolean }> {
+  const existing = await loadRecentRenders(args);
+  const merged = [...existing, args.render].slice(-MAX_FINGERPRINTS);
+  const persisted = await writeJson(
+    thumbnailFingerprintKey(args.keyPrefix, args.channelName),
+    merged,
+  );
+  return { persisted };
 }
 
 /**
