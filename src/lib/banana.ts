@@ -218,6 +218,9 @@ export interface ThumbBriefArgs {
   composition?: string;
   /** Channel-constant badge signature. Resolved via `resolveBadgeTreatment`. */
   badgeTreatment?: BadgeTreatment;
+  /** Chosen layout. A comparison frame needs its copy split ACROSS the halves;
+   * every other layout lands the whole headline in one type zone. */
+  layout?: "split" | "centered_hero" | "comparison";
   /** The scene that ENACTS the topic: hero + background + story details. */
   scene: string;
   /** 1-3 headline lines; mark exactly one as the payoff (rendered 2-4x larger). */
@@ -255,6 +258,15 @@ export function buildThumbBrief(a: ThumbBriefArgs): string {
     `${collage} Scene: ${a.scene}` +
     ` Headline — render EXACTLY these words and no others: ${headline}, placed clear of all faces.` +
     ` No other word, label, annotation or description from these instructions may appear in the image.` +
+    // A comparison frame fails the moment its two words are stacked together in
+    // one corner: the copy stops labelling the halves and the viewer cannot tell
+    // which side is which. Placement is part of the layout, not decoration.
+    (a.layout === "comparison" && a.lines.length >= 2
+      ? ` COMPARISON PLACEMENT (mandatory): put ${quoted(a.lines[0].text)} entirely inside the LEFT half and` +
+        ` ${quoted(a.lines[1].text)} entirely inside the RIGHT half, each one labelling the side it sits on,` +
+        ` at matching size and weight. They must NEVER be stacked together in one corner or share a type block —` +
+        ` the whole point of the frame is that each word names the half beneath it.`
+      : "") +
     `${emphasis}${typeClause}` +
     ` CHANNEL BADGE (a fixed signature — render it identically on every video of this channel, never redesign it):` +
     ` place "${a.badge.toUpperCase()}" in the BOTTOM-RIGHT corner, always that corner and never any other, inset` +

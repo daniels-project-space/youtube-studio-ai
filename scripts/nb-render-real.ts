@@ -68,40 +68,6 @@ function channelDna(args: {
 
 const JOBS = [
   {
-    id: "overbuilt-burj",
-    channelName: "Overbuilt",
-    title: "Why The Burj Khalifa Is A Terrible Building",
-    energy: undefined,
-    dna: channelDna({
-      palette: ["#1B2733", "#E2833C"],
-      subject: "an iconic structure photographed with its unglamorous service reality",
-      setting: "a hazy desert city at working hours",
-      composition: "the structure head-on, centred and dominant, at close to full height",
-      colorGrade: "dusty daylight haze with warm concrete",
-      motifs: ["service vehicle", "haze", "construction hoarding"],
-      avoid: ["tourism postcard framing", "glossy render"],
-    }),
-  },
-  // SOBER: material that hype would cheapen. Before this tier existed the only
-  // options were spectacle, bold and cozy_pop — all loud.
-  {
-    id: "overbuilt-sober",
-    channelName: "Overbuilt",
-    title: "The Tower That Killed 96 Workers Before It Opened",
-    energy: "sober" as const,
-    dna: channelDna({
-      palette: ["#232A31", "#B9603A"],
-      subject: "an iconic structure and the human cost recorded against it",
-      setting: "a working construction city under flat overcast light",
-      composition: "the structure head-on, centred and dominant, at close to full height",
-      colorGrade: "true-to-life daylight, narrow tonal range, no pushed saturation",
-      motifs: ["site hoarding", "safety notice", "overcast sky"],
-      avoid: ["tabloid red arrows", "shock imagery", "any depiction of a victim"],
-    }),
-  },
-  // COMPARISON: a topic that is fundamentally two things measured against each
-  // other. The module previously had no layout that could express this.
-  {
     id: "overbuilt-comparison",
     channelName: "Overbuilt",
     title: "The Render They Sold You vs What Actually Got Built",
@@ -110,10 +76,10 @@ const JOBS = [
       palette: ["#1B2733", "#E2833C"],
       subject: "a promised architectural render measured against the delivered building",
       setting: "a city block in real daylight",
-      composition: "two subjects at comparable scale across a physical seam",
+      composition: "two separate photographs butted together along a hard vertical seam",
       colorGrade: "clean render gloss against dusty real daylight",
       motifs: ["hoarding board", "scaffolding", "haze"],
-      avoid: ["drawn divider bars", "infographic arrows"],
+      avoid: ["drawn divider bars", "infographic arrows", "one continuous building bisected by a line"],
     }),
   },
 ] as const;

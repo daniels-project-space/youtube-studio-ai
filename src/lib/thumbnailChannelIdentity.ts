@@ -282,8 +282,8 @@ const PROFILES: readonly IdentityProfile[] = [
   {
     names: ["overbuilt"],
     rules: [
-      "Overbuilt is structural critique and the STRUCTURE IS THE STAR: the icon owns the hero slot, centred and dominant, filling the frame at close to full height, met head-on. It is the reason the viewer clicked and must never be demoted to background haze.",
-      "Stage ONE documented operational flaw against it in the same frame - the unglamorous truth the postcard shot crops out. The flaw is supporting evidence at the base or edge of the icon, deliberately small against it; the contrast in scale IS the hook.",
+      "Overbuilt is structural critique and the STRUCTURE IS THE STAR: the icon owns the hero slot as the FOREGROUND subject — sharp, unobstructed, filling the frame at close to full height, shot from a low vantage tilted up so it looms over the viewer. Nothing may sit in front of it at comparable size. It is not merely present in the frame; it is the frame.",
+      "Stage the MOST CONSEQUENTIAL documented failure against it - what it cost people, what broke, what was promised and not delivered - never a quirky operational footnote like waste collection or lift speed, which makes the critique look petty. The evidence sits small at the base or edge of the icon; the contrast in scale IS the hook.",
       "Photograph it as a real place in real light - dust, haze, service vehicles, working infrastructure - never as a glossy render or a tourism plate. A human or vehicle may anchor scale, but only beside the icon, never in front of it.",
     ],
     avoid: [
@@ -302,7 +302,7 @@ const PROFILES: readonly IdentityProfile[] = [
       subjectClass: "icon",
       requiredSceneEvidence: [
         "The structure the video is about is the dominant hero, centred and head-on, filling most of the frame at close to full height.",
-        "One mundane, documented operational flaw is visible in the same frame, small against the icon.",
+        "The most consequential documented failure is visible in the same frame, small against the icon - a human or structural cost, not an operational curiosity.",
         "The image reads as real photographic daylight, with haze, dust or working infrastructure present.",
       ],
       prohibitedVisualPatterns: [

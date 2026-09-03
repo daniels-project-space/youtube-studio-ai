@@ -48,6 +48,7 @@ import {
   OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES,
 } from "@/lib/thumbnailGoldenStandard";
 import {
+  isComparisonTitle,
   scoreThumbnailStoryInterest,
   STORY_INTEREST_DOCTRINE,
 } from "@/lib/thumbnailStoryInterest";
@@ -944,6 +945,7 @@ export async function renderCandidate(args: {
     textPropsJson?: string;
     textZone?: string;
     layoutMode?: "split" | "centered_hero" | "comparison";
+    vantage?: "eye_level" | "worm_tilt_up" | "high_angle" | "close_macro";
   }>({
     // The native design brief needs enough room for structured scene and hook
     // planning before the JSON response closes.
@@ -998,11 +1000,24 @@ export async function renderCandidate(args: {
       `silhouette. The only thing to avoid is a flat, empty, evenly-lit title card with a small object floating ` +
       `in the middle — symmetry itself is welcome when the image is charged. ` +
       `comparison: TWO subjects held against each other in one frame — before and after, promise and reality, ` +
-      `then and now, what they said and what they did, the two things the viewer is being asked to weigh. Give each ` +
-      `side its own hero at comparable scale, divide them with a real physical seam the scene itself provides ` +
-      `(a torn edge, a wall, a mirror, a horizon, a hard shadow line) rather than a drawn divider bar, and make the ` +
-      `DIFFERENCE the loudest thing in the frame. Choose it whenever the topic is fundamentally two things measured ` +
+      `then and now, what they said and what they did, the two things the viewer is being asked to weigh. The two ` +
+      `halves must read as TWO SEPARATE PHOTOGRAPHS butted together, not as one continuous object bisected by a ` +
+      `line: give each side its own subject, its own light and its own treatment so the break is unmistakable at a ` +
+      `glance, and butt them along a hard vertical seam. One continuous building or landscape with a line drawn ` +
+      `down it is the failure mode — the viewer cannot tell which side is which and reads it as a single confusing ` +
+      `image. Each half carries its own headline word labelling it. Make the DIFFERENCE the loudest thing in the frame. Choose it whenever the topic is fundamentally two things measured ` +
       `against one another; do not force a single hero on to a comparison story just to keep the frame simple.\n` +
+      (isComparisonTitle(args.title)
+        ? `LAYOUT IS ALREADY DECIDED FOR THIS TITLE: it states a comparison, so layoutMode MUST be "comparison". ` +
+          `Do not choose split or centered_hero. Name the TWO things being weighed against each other and give each ` +
+          `its own half and its own headline word.\n`
+        : "") +
+      `STEP 1b — VANTAGE: choose the camera position, because it decides how big the subject FEELS, not just how big it is. ` +
+      `worm_tilt_up: camera at ground level tilted steeply up the subject so it looms and converges overhead — the strongest ` +
+      `choice for any tall structure, and the difference between a building that is merely in the frame and one that towers ` +
+      `over the viewer. high_angle: looking down, making the subject exposed or precarious. close_macro: inches from the ` +
+      `decisive detail, everything else falling away. eye_level: neutral, only when the subject's own scale already carries it. ` +
+      `For an icon subject, DEFAULT TO worm_tilt_up unless there is a specific reason not to.\n` +
       `STEP 2 — fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY — ` +
       `never reproduce its literal scene). ENERGY TIER = "${args.playbook.energy ?? "bold"}":\n` +
       (args.playbook.energy === "spectacle"
@@ -1014,14 +1029,17 @@ export async function renderCandidate(args: {
             `cozy light, oversized moon, glowing window, a cat doing something delightful), saturated inviting ` +
             `color, storybook wonder. Catchy and clickable, never sleepy or flat.\n`
           : args.playbook.energy === "sober"
-            ? `SOBER: restrained documentary gravity for material that hype would cheapen — a reckoning, a disaster, ` +
-              `a death toll, an investigation, a diagnosis, a loss. Arresting through RESTRAINT, not saturation: one ` +
-              `still, weighted subject; real available light with a narrow tonal range and true colour; empty space ` +
-              `used deliberately as silence around the subject; the single most consequential detail held in focus ` +
-              `while everything else falls away. Absolutely no shock-gore, no exploitation of a victim, no cheap ` +
-              `menace, no red-arrow tabloid energy. It must still stop the scroll — a quiet frame that feels ` +
-              `IMPORTANT reads as trustworthy where a loud one reads as tasteless. Never sentimental, never sleepy, ` +
-              `never a flat empty plate.\n`
+            ? `SOBER: documentary gravity for material that hype would cheapen — a reckoning, a disaster, a death ` +
+              `toll, an investigation, a diagnosis, a loss. RESTRAINT GOVERNS THE TREATMENT, NOT THE DRAMA. The ` +
+              `moment itself should still be the most charged instant in the story — a rope failing, a worker ` +
+              `swinging off the edge and grabbing for the frame, a hand slipping, a structure straining, the second ` +
+              `before or after the worst of it — staged at real human jeopardy and shot from a vantage that makes ` +
+              `the danger legible. What restraint controls is HOW it is rendered: true-to-life colour, real ` +
+              `available light, narrow tonal range, no pushed saturation, no red arrows, no lurid glow, no tabloid ` +
+              `menace. Absolutely no gore, no depiction of a body, no identifiable victim, no exploitation of a real ` +
+              `person's death — the jeopardy is in the physics and the human effort, never in the injury. A quiet ` +
+              `PALETTE with a violent MOMENT reads as journalism; a loud palette with the same moment reads as ` +
+              `tasteless. Never sentimental, never a flat empty plate, never a static postcard.\n`
             : `BOLD: grounded but dramatic — one striking focal subject at heroic scale, charged atmosphere (storm ` +
               `light, golden hour blaze, deep shadow), strong tension or payoff in the frame. Punchy, never generic.\n`) +
       `Keep ONLY the channel's palette + grade + finish from its world — the SCENE must be new each time. ` +
@@ -1065,7 +1083,7 @@ export async function renderCandidate(args: {
       `Every line must contain real English hook copy, never meta-words like "omit"/"none". ` +
       `numberCallout: use a REAL number only when it strengthens the hook, preserving every material currency sign and ` +
       `time unit (for example "$1K/MO", never bare "1000"); otherwise leave the key out. Set "position" to textZone.\n` +
-      `Return STRICT JSON {"heroProp":string,"background":string,"details":string[],"textPropsJson":string,"textZone":string,"layoutMode":"split"|"centered_hero"|"comparison"}.`,
+      `Return STRICT JSON {"heroProp":string,"background":string,"details":string[],"textPropsJson":string,"textZone":string,"layoutMode":"split"|"centered_hero"|"comparison","vantage":"eye_level"|"worm_tilt_up"|"high_angle"|"close_macro"}.`,
   });
 
   let inst = await instantiate();
@@ -1132,10 +1150,27 @@ export async function renderCandidate(args: {
       );
     }
   }
+  // A comparison title is not a judgement call: the model reliably ignores the
+  // comparison layout and returns a single hero, which renders both headline
+  // words stacked in one corner where they label nothing.
+  if (isComparisonTitle(args.title) && inst.layoutMode !== "comparison") {
+    args.log?.(
+      `thumbnailLab: title states a comparison but the art director chose ` +
+      `"${inst.layoutMode ?? "split"}" — forcing the comparison layout`,
+    );
+    inst.layoutMode = "comparison";
+  }
   // STAGED COMPOSITION: hero prop -> background -> story details, assembled
   // deterministically so generators receive named layers, not a prose blob.
   if (inst.heroProp) {
     inst.fluxPrompt =
+      `${inst.vantage === "worm_tilt_up"
+        ? "VANTAGE: camera at ground level tilted steeply up the subject so it looms and converges overhead, dominating the viewer. "
+        : inst.vantage === "high_angle"
+          ? "VANTAGE: elevated camera looking down, making the subject exposed and precarious. "
+          : inst.vantage === "close_macro"
+            ? "VANTAGE: camera inches from the decisive detail, everything else falling away. "
+            : ""}` +
       `LAYOUT MODE: ${inst.layoutMode === "centered_hero"
         ? "centered hero at peak action; reserve asymmetric clean pockets around its silhouette for native typography"
         : inst.layoutMode === "comparison"
@@ -1219,6 +1254,7 @@ export async function renderCandidate(args: {
       badge: channelName,
       // Resolved from channel constants only — never from this video — so the
       // corner mark is byte-identical across the channel's whole catalogue.
+      layout: inst.layoutMode,
       badgeTreatment: resolveBadgeTreatment({
         channelName,
         configured: vl.badgeTreatment,

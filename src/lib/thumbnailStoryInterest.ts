@@ -97,6 +97,25 @@ const PERSON_HERO = [
   "face", "portrait", "he", "she",
 ];
 
+/**
+ * A title that is literally a comparison must be laid out as one.
+ *
+ * The comparison layout existed but was never selected: the art director is
+ * free to choose layoutMode and reliably picked a single hero even for an
+ * "X vs Y" title, producing one building with both words stacked in a corner —
+ * which reads as a single confusing image because neither word labels anything.
+ * When the title states a comparison, the layout is not a judgement call.
+ */
+export function isComparisonTitle(title: string): boolean {
+  const normalized = ` ${title.toLowerCase().replace(/[^a-z0-9]+/g, " ").replace(/\s+/g, " ").trim()} `;
+  return [
+    " vs ", " versus ", " v ",
+    " before and after ", " then and now ", " then vs now ",
+    " expectation ", " promised ", " advertised ", " compared to ",
+    " what they said ", " what actually ", " reality ",
+  ].some((marker) => normalized.includes(marker));
+}
+
 export interface StoryInterestVerdict {
   score: number;
   verdict: "compelling" | "weak" | "inert";
@@ -312,6 +331,7 @@ export function scoreThumbnailStoryInterest(args: {
 export const STORY_INTEREST_DOCTRINE = [
   "STEP 0 — IS THIS STORY WORTH A THUMBNAIL? Before inventing any scene, decide what a viewer would actually care about in this video. Craft cannot rescue a boring subject.",
   "An inert material, a barrier, a tool, or a measurement is NEVER the story. Concrete, steel, walls, locks, cables and doors are obstacles in the story, not the subject of it.",
+  "PICK THE MOST CONSEQUENTIAL ANGLE, not the most quotable trivia. When a video criticises something, rank the available criticisms by what actually harms people or breaks the promise — deaths, injuries, structural failure, money lost, people displaced, a lie exposed — and stage THAT. An odd operational quirk (how the bins are emptied, where the waste goes, how slow the lifts are) is a footnote, not a thumbnail: it makes the video look small and the critic look petty. If the only angle you can find is a curiosity, you have not looked hard enough at the subject.",
   "WHO OWNS THE HERO SLOT depends on what the video is about. If it is about a famous structure, object or place, THAT icon is the draw — stage it centred and dominant, filling the frame at full height, and let any human appear only as scale or consequence beside it. If it is about a specific named person, their face is the draw and must hold the frame. Otherwise the hero is a person at the moment of consequence. Never demote the thing the viewer clicked for into the background.",
   "Prefer, in order: a human being at the moment of consequence > an irony or reversal (the thing that turned out to be the opposite of expected) > an act of audacity at scale > a tactile object that a person is visibly acting on. Never a substance on its own.",
   "If a number is used, it must measure something a person can lose, risk, escape with, or get away with — a sum, a duration, a distance, a count of people fooled. A number attached to a building material measures a barrier and communicates nothing.",
