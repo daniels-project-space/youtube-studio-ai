@@ -236,6 +236,76 @@ const PROFILES: readonly IdentityProfile[] = [
     },
   },
   {
+    names: ["sealed records"],
+    rules: [
+      "Sealed Records is documentary evidence realism: the story is told through the PAPER — court filings, redacted agreements, evidence bags, logbooks, exhibit stickers, sealed boxes — photographed like real archive material under hard institutional light.",
+      "A human presence is limited to hands, sleeves and shoulders handling the documents. The subject is the record and what it proves, never a portrait.",
+      "One document detail must be legible enough to read as authentic — a redaction bar, an exhibit number, a date stamp, a signature block — without spelling out any real name.",
+    ],
+    avoid: [
+      "any recognizable real person, face, portrait, likeness, mugshot or lookalike, and any real logo, seal, crest or letterhead",
+      "true-crime clichés: chalk outlines, crime-scene tape, blood, handcuffs, prison bars, shadowy hooded figures",
+      "any legible real name, case number, or address rendered in the artwork",
+    ],
+    visualLanguage: {
+      imageStyle: "documentary evidence photograph, hard institutional light, aged paper and manila, shallow depth, fine grain",
+      composition: "full_scene",
+      textObject: "censor_bar",
+    },
+    contract: {
+      version: "thumbnail-channel-identity/v1",
+      profile: "sealed-records-document-evidence",
+      requiredSceneEvidence: [
+        "The decisive subject is a physical document or record being handled, not a person.",
+        "Human presence is limited to hands, sleeves or shoulders; no face appears in the frame.",
+        "At least one authentic-looking archival detail is visible — a redaction bar, exhibit sticker, date stamp or sealed box.",
+      ],
+      prohibitedVisualPatterns: [
+        "Any recognizable real person, face, portrait, likeness or lookalike; any real logo, seal, crest or letterhead; any legible real name, case number or address; chalk outlines, crime-scene tape, blood, handcuffs, prison bars or hooded figures.",
+      ],
+      reviewCriteria: [
+        "No face and no identifiable real person appears anywhere in the frame.",
+        "The image reads as a photographed archival record rather than a dramatized reconstruction.",
+        "No real name, seal, or case identifier is legible in the artwork.",
+      ],
+    },
+  },
+  {
+    names: ["overbuilt"],
+    rules: [
+      "Overbuilt is structural critique: show the real structure met head-on at true scale, and make ONE documented flaw physically visible in the same frame — the thing the postcard shot never includes.",
+      "Always anchor the scale with a human or vehicle the viewer can measure the structure against; the gap between the icon and the mundane failure is the whole hook.",
+      "Photograph it as a real place in real light — dust, haze, service vehicles, working infrastructure — never as a glossy render or a tourism plate.",
+    ],
+    avoid: [
+      "glossy architectural-render or tourism-brochure treatment, golden-hour postcard framing, or drone-stock gloss",
+      "invented or exaggerated damage: collapsing towers, dramatic cracks, fire, or disaster imagery that did not happen",
+      "cartoon or infographic overlays, arrows, callout circles and diagram lines baked into the artwork",
+    ],
+    visualLanguage: {
+      imageStyle: "documentary architectural photograph, real daylight and haze, working service infrastructure, honest scale",
+      composition: "full_scene",
+      textObject: "scene_forged",
+    },
+    contract: {
+      version: "thumbnail-channel-identity/v1",
+      profile: "overbuilt-structural-critique",
+      requiredSceneEvidence: [
+        "The real structure is shown head-on at honest scale in real photographic light.",
+        "One mundane, documented operational flaw is physically visible in the same frame as the icon.",
+        "A human or vehicle anchors the scale so the viewer can measure the structure.",
+      ],
+      prohibitedVisualPatterns: [
+        "Glossy render or tourism-brochure treatment, golden-hour postcard framing, invented damage such as collapse, cracks, fire or disaster, and infographic overlays, arrows or callout lines baked into the artwork.",
+      ],
+      reviewCriteria: [
+        "The flaw shown is mundane and operational, not invented catastrophe.",
+        "Scale is legible from a human or vehicle in frame.",
+        "The candidate reads as a documentary photograph, not an architectural render.",
+      ],
+    },
+  },
+  {
     names: ["lofi", "lo-fi"],
     rules: [
       "Lo-Fi thumbnails must use the exact sampled frame from this video's finished rendered scene as their dominant artwork; only the truthful 4K quality emblem may be added in its reserved corner.",
