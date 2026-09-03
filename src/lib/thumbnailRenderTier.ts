@@ -79,19 +79,26 @@ export const THUMBNAIL_FINAL_TIER: ThumbnailTierPolicy = {
 };
 
 /**
- * A single iteration is not worth drafting: there is nothing to select between,
- * so a draft would just add a render before the same Pro render. Tiering only
- * pays once the loop can actually discard something.
+ * DRAFT TIER DISABLED BY OWNER DECISION.
+ *
+ * The economics were real — 27% over three iterations, 35% over four — and the
+ * A/B showed layout, hero, copy and badge transferring between tiers. But the
+ * same A/B also showed what did NOT transfer: torn-paper depth, type material,
+ * and a draft that rendered a legible real name the identity contract forbids.
+ * Selecting a concept on a frame that is materially different from the frame
+ * that ships means the critique loop is judging something the viewer will never
+ * see, and the saving is not worth deciding on the wrong picture.
+ *
+ * The policy is therefore a hard "always final", not a default. The tier
+ * definitions are kept because they document the measured comparison and the
+ * cost model, and because reversing this is a one-line change if the trade ever
+ * looks worth it again.
  */
-export function planThumbnailTiers(args: {
+export function planThumbnailTiers(_args: {
   maxIterations: number;
-  /** Set when the operator needs the shipping model for every candidate. */
   forceFinalOnly?: boolean;
 }): { perIteration: ThumbnailTierPolicy; finalPass: ThumbnailTierPolicy | null } {
-  if (args.forceFinalOnly || args.maxIterations <= 1) {
-    return { perIteration: THUMBNAIL_FINAL_TIER, finalPass: null };
-  }
-  return { perIteration: THUMBNAIL_DRAFT_TIER, finalPass: THUMBNAIL_FINAL_TIER };
+  return { perIteration: THUMBNAIL_FINAL_TIER, finalPass: null };
 }
 
 /** What a tiered loop costs against rendering every candidate on Pro. */

@@ -504,26 +504,18 @@ function assertTieredRendering(): void {
   assert.notEqual(THUMBNAIL_DRAFT_TIER.model, "fal-ai/nano-banana");
   assert.ok(THUMBNAIL_DRAFT_TIER.outputImageUsd < THUMBNAIL_FINAL_TIER.outputImageUsd);
 
-  // One iteration has nothing to select between, so drafting would only add a
-  // render before the same final render.
-  const single = planThumbnailTiers({ maxIterations: 1 });
-  assert.equal(single.perIteration.tier, "final");
-  assert.equal(single.finalPass, null, "a single-shot render must not pay for a draft it cannot use");
-  assert.equal(estimateTieredCostUsd({ iterations: 1 }).savedUsd, 0);
-
-  const looped = planThumbnailTiers({ maxIterations: 3 });
-  assert.equal(looped.perIteration.tier, "draft");
-  assert.equal(looped.finalPass?.tier, "final");
-
-  // An operator override must be able to force the shipping model everywhere.
-  assert.equal(planThumbnailTiers({ maxIterations: 4, forceFinalOnly: true }).finalPass, null);
-
-  // Savings are real but modest on the fal route, and must not be overstated:
-  // NB2 at $0.06 against Pro at $0.15 is roughly a third off a 4-iteration
-  // loop, not the order of magnitude implied by Gemini-direct Lite pricing.
-  const three = estimateTieredCostUsd({ iterations: 3 });
-  assert.ok(three.savedPct >= 20 && three.savedPct <= 40, `expected a modest saving, got ${three.savedPct}%`);
-  assert.ok(three.tiered < three.allFinal);
+  // DRAFT TIER IS DISABLED BY OWNER DECISION. Selecting a concept on a frame
+  // that differs materially from the frame that ships means the critique loop
+  // judges something the viewer never sees. Every plan must return the final
+  // tier for every iteration, whatever the loop length.
+  for (const maxIterations of [1, 2, 3, 8]) {
+    const plan = planThumbnailTiers({ maxIterations });
+    assert.equal(plan.perIteration.tier, "final", `${maxIterations} iterations must still render on the shipping model`);
+    assert.equal(plan.finalPass, null, "there is no separate final pass when every pass is final");
+  }
+  // And no configuration may re-enable it.
+  assert.equal(planThumbnailTiers({ maxIterations: 4, forceFinalOnly: false }).perIteration.tier, "final");
+  assert.equal(estimateTieredCostUsd({ iterations: 3 }).savedUsd, 0, "there is no saving to claim while drafting is off");
 }
 
 async function assertThumbnailSameness(): Promise<void> {
