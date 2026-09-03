@@ -30,6 +30,21 @@ export interface Critique {
   pass: boolean;
   /** Concrete, actionable issues fed back into the next produce(). */
   issues: string[];
+  /**
+   * A defect that must NEVER be returned, even as the best of a bad set.
+   *
+   * The loop previously distinguished only "accepted" from "not accepted", and
+   * on exhaustion returned the highest-scoring candidate regardless. That is
+   * right for a merely weak result — some thumbnail has to ship — and wrong for
+   * a defect that makes the output unusable. A misspelled headline was caught
+   * by the reviewer, scored well on everything else, and came back as "best".
+   *
+   * Fatal candidates are excluded from best-of selection entirely. If every
+   * candidate is fatal the loop still returns one, because the caller owns the
+   * fail-closed decision, but `accepted` is false and `fatal` is set so the
+   * caller can refuse it rather than discovering the defect in production.
+   */
+  fatal?: boolean;
 }
 
 /**
@@ -121,6 +136,8 @@ export interface LoopResult<T> {
   critique: Critique;
   iterations: number;
   accepted: boolean;
+  /** True when every candidate carried a defect that must not ship. */
+  fatal?: boolean;
   history: Critique[];
 }
 
@@ -142,8 +159,10 @@ export async function produceAndCritique<T>(
     );
   }
 
+  let lastValue: T | undefined;
   for (let iter = 1; iter <= maxIters; iter++) {
     const value = await o.produce(priorIssues, iter);
+    lastValue = value;
     const critique = await o.critique(value, iter);
     history.push(critique);
     log(
@@ -151,7 +170,14 @@ export async function produceAndCritique<T>(
       { issues: critique.issues.slice(0, 4) },
     );
 
-    if (!best || critique.score > best.critique.score) best = { value, critique };
+    // A fatal candidate is never eligible as "best": returning the highest
+    // score among unusable outputs is how a caught defect ships anyway.
+    if (!critique.fatal && (!best || critique.score > best.critique.score)) {
+      best = { value, critique };
+    }
+    if (critique.fatal) {
+      log(`${label}: iter ${iter} carries a fatal defect and cannot be returned as best`);
+    }
 
     const accepted = critique.pass && critique.score >= threshold;
     if (accepted) {
@@ -160,8 +186,22 @@ export async function produceAndCritique<T>(
     priorIssues = critique.issues;
   }
 
-  // None cleared the bar — return the best attempt; caller decides.
-  const b = best!;
+  // None cleared the bar. Prefer the best NON-FATAL attempt; if every candidate
+  // was fatal there is nothing safe to return, so the last one comes back
+  // flagged and the caller owns the fail-closed decision.
+  if (!best) {
+    const lastCritique = history[history.length - 1]!;
+    log(`${label}: exhausted ${maxIters} iters and EVERY candidate carried a fatal defect`);
+    return {
+      value: lastValue as T,
+      critique: lastCritique,
+      iterations: maxIters,
+      accepted: false,
+      fatal: true,
+      history,
+    };
+  }
+  const b = best;
   log(
     `${label}: exhausted ${maxIters} iters — returning best (score=${b.critique.score.toFixed(2)})`,
   );

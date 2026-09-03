@@ -90,6 +90,36 @@ export const FALLBACK_BACKGROUNDS = [
   "a wall of the scene's own material, textured and lit from one side",
 ] as const;
 
+/**
+ * Type motifs for a channel that never declared one.
+ *
+ * The previous fallback chain terminated at "movie_poster", whose description
+ * specifies metallic bevel — so every unregistered channel produced a metal
+ * plaque, which is exactly the convergence that was reported after the
+ * registered channels had already been diversified. Fixing the registered
+ * channels and leaving the terminal default intact fixed nothing for any
+ * channel the module had not met yet.
+ *
+ * The pool deliberately excludes the metal-leaning motifs so an unset value
+ * cannot land back on the look it converged to.
+ */
+export const FALLBACK_TEXT_OBJECTS = [
+  "torn_strip",
+  "paint_smear",
+  "censor_bar",
+  "grunge_sticker",
+  "spaced_elegant",
+  "spray_paint",
+  "stamp_ink",
+  "ransom_note",
+  "carved",
+  "scene_forged",
+] as const;
+
+export function fallbackTextObject(seed: string): typeof FALLBACK_TEXT_OBJECTS[number] {
+  return spreadDefault(seed, FALLBACK_TEXT_OBJECTS);
+}
+
 export function fallbackAccent(seed: string): string {
   return spreadDefault(seed, FALLBACK_ACCENTS);
 }

@@ -57,7 +57,9 @@ import {
   fallbackAccent,
   fallbackBackground,
   fallbackBase,
+  fallbackTextObject,
   fallbackTextZone,
+  spreadDefault,
 } from "@/lib/thumbnailDefaults";
 import { gradeThumbnailForMobile } from "@/lib/thumbnailMobileGate";
 import { gradeThumbnailPalette, readThumbnailPalette } from "@/lib/thumbnailPaletteGuard";
@@ -212,58 +214,73 @@ const FAMILY_VISUAL_LANGUAGE: Record<FamilyKey, {
   energy: NonNullable<ThumbnailPlaybook["energy"]>;
   font: NonNullable<VisualLanguage["font"]>;
   treatment: NonNullable<VisualLanguage["treatment"]>;
-  textObject: NonNullable<VisualLanguage["textObject"]>;
+  /**
+   * Family-appropriate motif OPTIONS, not one motif.
+   *
+   * This was a single value per family, and it is the true source of the metal
+   * convergence: narrated_stock is the most-used family and mapped to
+   * block_plate ("hard solid plates"), cinematic mapped to movie_poster
+   * ("metallic bevel"). Every channel built on those families therefore
+   * inherited a plate before any fallback further down could apply — which is
+   * why diversifying the registered channels AND the terminal fallback still
+   * left every new channel with a plaque.
+   *
+   * The choice is spread deterministically across the set by channel identity,
+   * so a family keeps a coherent grammar while its channels stop looking
+   * identical to each other.
+   */
+  textObjects: readonly NonNullable<VisualLanguage["textObject"]>[];
   imageStyle: string;
 }> = {
   // Quiz thumbnails live or die on a single legible question + a big "?" beat,
   // so a bold impact plate is the right grammar — the same one narrated_stock
   // uses, deliberately, rather than inventing a fifth treatment.
   quizyear: {
-    energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
+    energy: "bold", font: "impact", treatment: "plate", textObjects: ["block_plate", "censor_bar", "stamp_ink"],
     imageStyle: "bold flat graphic quiz card, high-contrast, one clear subject, no text baked in",
   },
   narrated_stock: {
-    energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
+    energy: "bold", font: "impact", treatment: "plate", textObjects: ["block_plate", "torn_strip", "stamp_ink", "scene_forged"],
     imageStyle: "premium cinematic editorial photograph with dramatic subject isolation",
   },
   cinematic: {
-    energy: "spectacle", font: "bebas", treatment: "clean", textObject: "movie_poster",
+    energy: "spectacle", font: "bebas", treatment: "clean", textObjects: ["movie_poster", "carved", "scene_forged", "spaced_elegant"],
     imageStyle: "blockbuster cinematic still with deep atmosphere and dimensional light",
   },
   music_loop: {
-    energy: "cozy_pop", font: "rounded", treatment: "neon", textObject: "neon_sign",
+    energy: "cozy_pop", font: "rounded", treatment: "neon", textObjects: ["neon_sign", "spray_paint", "grunge_sticker"],
     imageStyle: "saturated atmospheric illustration with luminous environmental storytelling",
   },
   sleep: {
-    energy: "cozy_pop", font: "serif", treatment: "clean", textObject: "spaced_elegant",
+    energy: "cozy_pop", font: "serif", treatment: "clean", textObjects: ["spaced_elegant", "paint_smear", "carved"],
     imageStyle: "ethereal cinematic nature tableau with soft luminous depth",
   },
   shorts: {
-    energy: "spectacle", font: "impact", treatment: "sticker", textObject: "grunge_sticker",
+    energy: "spectacle", font: "impact", treatment: "sticker", textObjects: ["grunge_sticker", "ransom_note", "spray_paint"],
     imageStyle: "high-energy editorial poster with sharp subject separation",
   },
   documentary_collage_short: {
-    energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
+    energy: "bold", font: "impact", treatment: "plate", textObjects: ["block_plate", "torn_strip", "stamp_ink", "scene_forged"],
     imageStyle: "premium archival evidence-board collage with one dramatic portrait-safe focal subject",
   },
   whiteboard: {
-    energy: "bold", font: "marker", treatment: "stamp", textObject: "stamp_ink",
+    energy: "bold", font: "marker", treatment: "stamp", textObjects: ["stamp_ink", "censor_bar", "torn_strip"],
     imageStyle: "hand-drawn editorial chalk illustration with tactile board grain",
   },
   comic: {
-    energy: "bold", font: "bebas", treatment: "stamp", textObject: "carved",
+    energy: "bold", font: "bebas", treatment: "stamp", textObjects: ["carved", "scene_forged", "spaced_elegant"],
     imageStyle: "cinematic inked graphic-novel panel with cross-hatched dimensional light",
   },
   loreshort: {
-    energy: "spectacle", font: "serif", treatment: "clean", textObject: "movie_poster",
+    energy: "spectacle", font: "serif", treatment: "clean", textObjects: ["movie_poster", "carved", "scene_forged", "spaced_elegant"],
     imageStyle: "epic painted concept-art tableau with chiaroscuro light and vast receding depth",
   },
   illustrated_explainer: {
-    energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
+    energy: "bold", font: "impact", treatment: "plate", textObjects: ["block_plate", "torn_strip", "stamp_ink", "scene_forged"],
     imageStyle: "original premium editorial vector scene with one causal visual idea and clean diagrammatic hierarchy",
   },
   children_learning: {
-    energy: "cozy_pop", font: "rounded", treatment: "clean", textObject: "block_plate",
+    energy: "cozy_pop", font: "rounded", treatment: "clean", textObjects: ["block_plate", "torn_strip", "stamp_ink", "scene_forged"],
     imageStyle: "original cheerful 2D learning scene with one clear safe action, stable friendly characters, and no branded properties",
   },
 };
@@ -304,7 +321,7 @@ export function buildStyleDnaPlaybook(args: {
       treatment: family.treatment,
       baseColor,
       accentColor,
-      textObject: family.textObject,
+      textObject: spreadDefault(args.channelName, family.textObjects),
       composition: "full_scene",
       imageStyle: family.imageStyle,
       badgeStyle: "pill",
@@ -1448,13 +1465,17 @@ export async function renderCandidate(args: {
       imageStyle: vl.imageStyle,
       palette: [vl.baseColor, vl.accentColor].filter((color): color is string => Boolean(color)),
       accentColor: vl.accentColor,
+      // The chain used to terminate at "movie_poster" — metallic bevel — so
+      // every channel that declared no motif produced a metal plaque. Fixing
+      // the registered channels while leaving this default in place fixed
+      // nothing for any channel the module had not met yet.
       textObject: vl.textObject
         ?? (vl.treatment === "sticker" ? "grunge_sticker"
           : vl.treatment === "stamp" ? "stamp_ink"
             : vl.treatment === "neon" ? "neon_sign"
               : vl.treatment === "plate" ? "block_plate"
                 : vl.font === "serif" ? "paint_smear"
-                  : "movie_poster"),
+                  : fallbackTextObject(channelName)),
       composition: vl.composition,
       scene: inst.fluxPrompt,
       lines: overlayLines,

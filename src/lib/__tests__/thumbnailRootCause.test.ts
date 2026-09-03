@@ -42,10 +42,13 @@ import {
 import { applyThumbnailChannelIdentity } from "@/lib/thumbnailChannelIdentity";
 import {
   FALLBACK_ACCENTS,
+  FALLBACK_TEXT_OBJECTS,
   fallbackAccent,
+  fallbackTextObject,
   fallbackTextZone,
   spreadDefault,
 } from "@/lib/thumbnailDefaults";
+import { produceAndCritique } from "@/engine/critiqueLoop";
 import {
   classifyThumbnailDefects,
   deriveCriticDoctrine,
@@ -354,6 +357,81 @@ async function assertHybridStoryJudge(): Promise<void> {
     deterministic, ...concept, askJudge: async () => ({ score: 5000 }),
   });
   assert.equal(nonsense.score, 100);
+}
+
+async function assertFatalDefectsNeverShip(): Promise<void> {
+  // The loop distinguished only accepted from not-accepted and, on exhaustion,
+  // returned the highest-scoring candidate. Right for a merely weak result —
+  // something has to ship — and wrong for a defect that makes the output
+  // unusable. A misspelled headline was caught by the reviewer, scored well on
+  // everything else, and came back as "best".
+  const seen: string[] = [];
+  const mixed = await produceAndCritique<string>({
+    label: "test", threshold: 1, maxIters: 3, channel: {},
+    produce: async (_issues, iter) => { const v = `cand${iter}`; seen.push(v); return v; },
+    critique: async (value, iter) => iter === 1
+      // Highest score of the run, but unusable.
+      ? { score: 0.9, pass: false, issues: ["misspelled headline"], fatal: true }
+      : { score: 0.4, pass: false, issues: ["weak but usable"] },
+  });
+  assert.equal(seen.length, 3, "the loop must keep trying after a fatal candidate");
+  assert.notEqual(mixed.value, "cand1", "a fatal candidate must never be returned as best, even scoring highest");
+  assert.equal(mixed.fatal, undefined, "a usable fallback exists, so the result is not fatal overall");
+
+  // When EVERY candidate is unusable the caller must be told, not handed one
+  // silently — the fail-closed decision belongs to the caller.
+  const allBad = await produceAndCritique<string>({
+    label: "test", threshold: 1, maxIters: 2, channel: {},
+    produce: async (_issues, iter) => `bad${iter}`,
+    critique: async () => ({ score: 0.9, pass: false, issues: ["misspelled"], fatal: true }),
+  });
+  assert.equal(allBad.fatal, true, "an all-fatal run must be flagged so the caller can refuse it");
+  assert.equal(allBad.accepted, false);
+
+  // Unmarked runs behave exactly as before.
+  const normal = await produceAndCritique<string>({
+    label: "test", threshold: 1, maxIters: 2, channel: {},
+    produce: async (_i, iter) => `ok${iter}`,
+    critique: async (_v, iter) => ({ score: iter === 2 ? 0.8 : 0.2, pass: false, issues: [] }),
+  });
+  assert.equal(normal.value, "ok2", "best-of selection is unchanged when nothing is fatal");
+  assert.equal(normal.fatal, undefined);
+}
+
+function assertFamilyMotifsSpread(): void {
+  // THE TRUE ROOT. Two rounds of fixes did not stop the plaques, because both
+  // were downstream. FAMILY_VISUAL_LANGUAGE assigned ONE motif per family and
+  // narrated_stock — the most-used family — mapped to block_plate, so every
+  // channel built on it inherited a plate before any channel default or
+  // terminal fallback could apply.
+  const motifs = new Set(
+    ["Blank Frames", "Crush Depth", "Proof Of Purchase", "Investory", "Empires At War", "Parsec Theory"]
+      .map((channelName) => buildStyleDnaPlaybook({ dna: DNA, family: "narrated_stock", channelName, now: 1 })
+        .visualLanguage?.textObject),
+  );
+  assert.ok(
+    motifs.size >= 3,
+    `six channels on ONE family must not share one motif, got ${motifs.size} distinct: ${[...motifs].join(", ")}`,
+  );
+  // Reproducibility still holds — a per-call choice would defeat every cache
+  // and checkpoint upstream.
+  assert.equal(
+    buildStyleDnaPlaybook({ dna: DNA, family: "narrated_stock", channelName: "Crush Depth", now: 1 }).visualLanguage?.textObject,
+    buildStyleDnaPlaybook({ dna: DNA, family: "narrated_stock", channelName: "Crush Depth", now: 9 }).visualLanguage?.textObject,
+  );
+}
+
+function assertFallbackMotifIsNotMetal(): void {
+  // The chain terminated at "movie_poster", whose description specifies
+  // metallic bevel, so every channel that declared no motif produced a metal
+  // plaque. Diversifying the REGISTERED channels fixed nothing for any channel
+  // the module had not met yet.
+  assert.ok(!FALLBACK_TEXT_OBJECTS.includes("movie_poster" as never), "the metallic default must not be in the pool");
+  assert.ok(!FALLBACK_TEXT_OBJECTS.includes("block_plate" as never), "nor the other plate motif");
+  const unregistered = ["Blank Frames", "Crush Depth", "Proof Of Purchase", "Some New Channel", "Another One"];
+  const motifs = new Set(unregistered.map((name) => fallbackTextObject(name)));
+  assert.ok(motifs.size >= 3, `unregistered channels must not share one motif, got ${motifs.size} distinct`);
+  assert.equal(fallbackTextObject("Crush Depth"), fallbackTextObject("crush depth"), "must stay deterministic");
 }
 
 function assertObjectSubjectClass(): void {
@@ -1275,6 +1353,9 @@ async function main(): Promise<void> {
 await assertThumbnailSameness();
 assertTieredRendering();
 await assertHybridStoryJudge();
+await assertFatalDefectsNeverShip();
+assertFamilyMotifsSpread();
+assertFallbackMotifIsNotMetal();
 assertObjectSubjectClass();
 assertDefaultsSpreadRatherThanCollapse();
 assertSelfWritingDoctrine();

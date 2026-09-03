@@ -173,6 +173,7 @@ async function main(): Promise<void> {
         const panel = await detectFlatPanel({ imagePath: value.outJpg });
         const issues = [...mobile.failures, ...palette.issues, ...panel.issues];
         let visionOk = true;
+        let visionTextOk: boolean | undefined;
         if (hasVisionKey()) {
           const tmp = await mkdtemp(join(tmpdir(), `qa-${job.id}-`));
           const verdict = await runThumbnailMobileReferenceQa({
@@ -189,13 +190,18 @@ async function main(): Promise<void> {
             // candidate is not broken, not that it is good. The reviewer's own
             // punch score is the only quality signal in the loop, so the loop
             // must actually spend its remaining iterations on it.
+            visionTextOk = verdict.textOk;
             visionOk = verdict.faceClear && verdict.uiClean && verdict.textOk && verdict.punch >= 7;
             if (!visionOk) issues.push(verdict.reason || "vision reviewer rejected the candidate");
             console.log(`      iter ${iter} vision: face=${verdict.faceClear} ui=${verdict.uiClean} text=${verdict.textOk} punch=${verdict.punch}`);
           }
         }
+        // A misspelled or leaked headline is not "weak" — it is unusable, and
+        // must never come back as the best of a bad set. Everything else is a
+        // quality judgement the caller may still choose to ship.
+        const copyBroken = visionTextOk === false;
         const ok = mobile.passed && !palette.monotonous && !panel.hasFlatPanel && visionOk;
-        return { score: ok ? 1 : 0, pass: ok, issues };
+        return { score: ok ? 1 : 0, pass: ok, issues, ...(copyBroken ? { fatal: true } : {}) };
       },
     });
     const first = measured[0] ?? 0;
