@@ -40,6 +40,7 @@ import {
   THUMBNAIL_CAPABILITIES,
 } from "@/lib/thumbnailCapabilities";
 import { applyThumbnailChannelIdentity } from "@/lib/thumbnailChannelIdentity";
+import { gradeThumbnailForMobile, YOUTUBE_OVERLAY_ZONES } from "@/lib/thumbnailMobileGate";
 import { planThumbnailText, type ThumbnailTextZone } from "@/lib/thumbnailLayout";
 import {
   buildThumbnailImageRequest,
@@ -254,6 +255,46 @@ function assertSceneTypographySplit(): void {
   assert.equal(isThumbnailBaseProvenance({
     contract: "thumbnail-base-v1", textFree: true, safeZone: "left", source: "verified-video-still",
   }, "left"), true);
+}
+
+async function assertMobileSquintGate(): Promise<void> {
+  // Calibration contract. The gate is only trustworthy if it passes the work
+  // this repo has already approved, so the approved golden set IS the test: a
+  // threshold that rejects a golden reference is a broken threshold, not a
+  // strict one.
+  const goldens = ["rich", "scandal", "hannibal", "samurai", "stoic_anger", "stoic_memento"];
+  for (const name of goldens) {
+    const verdict = await gradeThumbnailForMobile({
+      imagePath: join(process.cwd(), "public/golden", `${name}.jpg`),
+    });
+    assert.equal(
+      verdict.passed, true,
+      `golden reference ${name} must survive the 120px squint test (contrast ${verdict.squintContrast}): ` +
+      verdict.failures.join("; "),
+    );
+    assert.ok(verdict.squintContrast > 0, "the measurement must actually parse luma statistics");
+  }
+
+  // A flat mid-grey frame is the definition of a muddy blur at browse size.
+  const scratch = await mkdtemp(join(tmpdir(), "squint-"));
+  try {
+    const flat = join(scratch, "flat.png");
+    await solidImage(flat, 1280, 720, "#808080");
+    const verdict = await gradeThumbnailForMobile({ imagePath: flat });
+    assert.equal(verdict.passed, false, "a flat frame must fail the squint test");
+    assert.match(verdict.failures.join(" "), /muddy blur/, "the failure must say why in art-direction terms");
+  } finally {
+    await rm(scratch, { recursive: true, force: true });
+  }
+
+  // Overlay zones are reported, never used to reject — the channel badge lives
+  // bottom-right by design and every golden reference trips a naive check.
+  assert.equal(YOUTUBE_OVERLAY_ZONES.length, 2);
+  const rich = await gradeThumbnailForMobile({
+    imagePath: join(process.cwd(), "public/golden/rich.jpg"),
+  });
+  assert.ok(rich.occludedZones.length > 0, "the golden reference does have ink in the badge corner");
+  assert.equal(rich.passed, true, "…and that must not reject it");
 }
 
 function assertCapabilityRoutingDoesNotRegressExistingChannels(): void {
@@ -862,7 +903,8 @@ async function main(): Promise<void> {
     assertFamilyPolicy();
     assertNativeCopyOcrGate();
     assertSceneTypographySplit();
-    assertCapabilityRoutingDoesNotRegressExistingChannels();
+    await assertMobileSquintGate();
+assertCapabilityRoutingDoesNotRegressExistingChannels();
 assertBadgeIsAChannelConstant();
 assertStoryInterestIntelligence();
 assertMotifImplementations();

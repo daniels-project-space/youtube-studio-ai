@@ -52,6 +52,7 @@ import {
   STORY_INTEREST_DOCTRINE,
 } from "@/lib/thumbnailStoryInterest";
 import { resolveThumbnailCapabilities } from "@/lib/thumbnailCapabilities";
+import { gradeThumbnailForMobile } from "@/lib/thumbnailMobileGate";
 import { downloadTo } from "@/lib/files";
 import type { StyleDNA } from "@/engine/creative/types";
 import type { FamilyKey } from "@/engine/families";
@@ -568,17 +569,38 @@ export async function runThumbnailMobileReferenceQa(args: {
       }
     }
   }
+  // THE 120px SQUINT TEST, EXECUTED. The vision reviewer reads a full-resolution
+  // image, which is the wrong instrument for "does this survive at browse size".
+  // Measured on the pixels, calibrated so all six approved golden references
+  // pass and the weakest real candidate produced in development (a muddy Nano
+  // Banana 1 frame) fails. `uiClean` is the honest place for it: an image that
+  // is an unreadable blur at 120px is not clean at browse size.
+  let mobileReason = "";
+  let mobileOk = true;
+  try {
+    const mobile = await gradeThumbnailForMobile({ imagePath: args.outJpg });
+    mobileOk = mobile.passed;
+    if (!mobile.passed) mobileReason = mobile.failures.join("; ");
+    else if (mobile.occludedZones.length) {
+      // Advisory: the badge legitimately lives bottom-right, so this is a
+      // prompt to look rather than a defect. See thumbnailMobileGate.
+      mobileReason = `check the ${mobile.occludedZones.join(" and ")} for headline copy under YouTube's overlay`;
+    }
+  } catch {
+    // A measurement failure must never reject a paid candidate.
+    mobileOk = true;
+  }
   return {
     textOk: verdict.textOk === true && copyVerified,
     faceClear: verdict.faceClear === true,
     punch: Number(verdict.punch ?? 0),
     styleMatch: Number(verdict.styleMatch ?? 0),
     storyMatch: Number(verdict.storyMatch ?? 0),
-    uiClean: verdict.uiClean === true,
+    uiClean: verdict.uiClean === true && mobileOk,
     ...(requiresVisualTreatmentVerdict
       ? { visualTreatmentCompliant: verdict.visualTreatmentCompliant === true }
       : {}),
-    reason: [reason, ocrReason].filter(Boolean).join(" | "),
+    reason: [reason, ocrReason, mobileReason].filter(Boolean).join(" | "),
   };
 }
 
