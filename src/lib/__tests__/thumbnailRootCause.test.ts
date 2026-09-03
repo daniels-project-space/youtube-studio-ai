@@ -48,6 +48,11 @@ import {
 } from "@/lib/thumbnailDefectLedger";
 import { analyseThumbnailCtr, type ThumbnailPerformanceSample } from "@/lib/thumbnailCtrFeedback";
 import { judgeThumbnailStoryInterest } from "@/lib/thumbnailStoryJudge";
+import {
+  performanceSampleFromAnalytics,
+  thumbnailLedgerKey,
+  thumbnailPerformanceKey,
+} from "@/lib/thumbnailLearningStore";
 import { gradeThumbnailForMobile, YOUTUBE_OVERLAY_ZONES } from "@/lib/thumbnailMobileGate";
 import {
   estimateTieredCostUsd,
@@ -386,6 +391,43 @@ function assertSelfWritingDoctrine(): void {
     }
   }
   assert.ok(deriveCriticDoctrine({ ledger: noisy, now }).rules.length <= 4, "doctrine must stay bounded");
+}
+
+function assertLearningPersistence(): void {
+  // Keys are per channel and namespaced, so two channels cannot read each
+  // other's doctrine or pollute each other's evidence.
+  const a = thumbnailLedgerKey("chan/", "Investory");
+  const b = thumbnailLedgerKey("chan/", "Inked Histories");
+  assert.notEqual(a, b);
+  assert.match(a, /investory/);
+  assert.match(thumbnailPerformanceKey("chan/", "Chalk & Compound"), /chalk-compound/);
+  assert.equal(
+    thumbnailLedgerKey("chan/", "  Investory  "),
+    thumbnailLedgerKey("chan/", "investory"),
+    "channel naming drift must not silently split a channel's memory in two",
+  );
+
+  // A CTR RATE without its denominator cannot carry weight in a significance
+  // test. YouTube does not always serve thumbnail impressions, and recording a
+  // sample with a fabricated or zero denominator would corrupt every
+  // comparison the channel ever runs — so it is refused instead.
+  const base = { channelName: "Investory", videoKey: "v1", publishedAt: 1, traits: { layoutMode: "split" } };
+  assert.equal(
+    performanceSampleFromAnalytics({ ...base, analytics: { ctr: 5.2 } }),
+    null,
+    "a CTR rate with no impressions must be refused, not stored as zero",
+  );
+  assert.equal(performanceSampleFromAnalytics({ ...base, analytics: { thumbnailImpressions: 10_000 } }), null);
+  assert.equal(performanceSampleFromAnalytics({ ...base, analytics: { ctr: 5, thumbnailImpressions: 0 } }), null);
+
+  // The metric is a percentage; the analyser works in raw counts.
+  const sample = performanceSampleFromAnalytics({ ...base, analytics: { ctr: 5, thumbnailImpressions: 10_000 } });
+  assert.equal(sample?.impressions, 10_000);
+  assert.equal(sample?.clicks, 500, "5% of 10,000 impressions is 500 clicks, not 5");
+
+  // Clicks can never exceed impressions even if the provider disagrees.
+  const absurd = performanceSampleFromAnalytics({ ...base, analytics: { ctr: 250, thumbnailImpressions: 100 } });
+  assert.ok((absurd?.clicks ?? 0) <= (absurd?.impressions ?? 0));
 }
 
 function assertCtrFeedbackRefusesThinEvidence(): void {
@@ -1157,6 +1199,7 @@ await assertThumbnailSameness();
 assertTieredRendering();
 await assertHybridStoryJudge();
 assertSelfWritingDoctrine();
+assertLearningPersistence();
 assertCtrFeedbackRefusesThinEvidence();
 assertCapabilityRoutingDoesNotRegressExistingChannels();
 assertBadgeIsAChannelConstant();

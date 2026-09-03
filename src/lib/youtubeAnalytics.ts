@@ -20,6 +20,12 @@ export interface VideoAnalytics {
   avgViewDurationSec: number;
   estMinutesWatched: number;
   ctr?: number; // thumbnail impressions CTR (0..100), if the metric is available
+  /**
+   * Raw thumbnail impressions. A CTR RATE alone cannot support a significance
+   * test — 12% on 50 impressions and 12% on 50,000 are the same number and
+   * completely different evidence — so the denominator is pulled alongside it.
+   */
+  thumbnailImpressions?: number;
 }
 
 async function query(
@@ -161,16 +167,24 @@ export async function fetchVideoAnalytics(args: {
     avgViewDurationSec: get("averageViewDuration"),
     estMinutesWatched: get("estimatedMinutesWatched"),
   };
-  // Thumbnail CTR (Jan-2026 metric; not always available) — best-effort.
+  // Thumbnail CTR (Jan-2026 metric; not always available) — best-effort. Both
+  // the rate and its denominator are requested in one call so downstream
+  // analysis can weight a channel's evidence by volume instead of treating
+  // every video's percentage as equally trustworthy.
   const ctrRes = await query(accessToken, {
     startDate: args.startDate,
     endDate: args.endDate,
-    metrics: "videoThumbnailImpressionsClickRate",
+    metrics: "videoThumbnailImpressionsClickRate,videoThumbnailImpressions",
     filters: `video==${args.videoId}`,
   }, args.timeoutMs, args.beforeRequest);
   if (ctrRes) {
-    const i = ctrRes.headers.indexOf("videoThumbnailImpressionsClickRate");
-    if (i >= 0) out.ctr = Number(ctrRes.row[i]) || 0;
+    const rateIndex = ctrRes.headers.indexOf("videoThumbnailImpressionsClickRate");
+    if (rateIndex >= 0) out.ctr = Number(ctrRes.row[rateIndex]) || 0;
+    const impressionsIndex = ctrRes.headers.indexOf("videoThumbnailImpressions");
+    if (impressionsIndex >= 0) {
+      const impressions = Number(ctrRes.row[impressionsIndex]);
+      if (Number.isFinite(impressions) && impressions >= 0) out.thumbnailImpressions = impressions;
+    }
   }
   return out;
 }
