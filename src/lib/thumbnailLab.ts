@@ -54,6 +54,7 @@ import {
 } from "@/lib/thumbnailStoryInterest";
 import { resolveThumbnailCapabilities } from "@/lib/thumbnailCapabilities";
 import { gradeThumbnailForMobile } from "@/lib/thumbnailMobileGate";
+import { gradeThumbnailPalette, readThumbnailPalette } from "@/lib/thumbnailPaletteGuard";
 import { judgeThumbnailStoryInterest } from "@/lib/thumbnailStoryJudge";
 import { deriveCriticDoctrine, type ChannelDefectLedger } from "@/lib/thumbnailDefectLedger";
 import {
@@ -93,7 +94,7 @@ export const RESEARCH_PRINCIPLES = [
   "2-3 bold complementary colors; the subject 30%+ brighter or darker than the background.",
   "Faceless niches win with ONE dramatic hero object against a clean ground + a ≤4-word callout.",
   "Finance: NUMBER-FORWARD — one specific number as the credibility trigger, occupying 15-20% of the canvas, upper third, white/gold on dark (data-literate audiences click specifics, not adjectives).",
-  "Navy/charcoal base + gold/white accents = institutional authority palette for finance.",
+  "Finance authority reads through RESTRAINT and contrast rather than a specific hue: a dark institutional base with one disciplined accent taken from the channel palette. Do not assume gold.",
   "Text: bold sans-serif ONLY, 1-3 words (5 absolute max), NEVER restating the title — it adds the curiosity the title doesn't.",
   "Documentary annotation language (Vox/Johnny Harris school): muted cinematic base + ONE editorial annotation device (accent underline, circled element, arrow) in the accent color.",
   "Consistent per-channel styling lifts subscriber CTR 15-20%: lock palette + text position family; vary the hero object and the number.",
@@ -440,6 +441,12 @@ export async function runThumbnailMobileReferenceQa(args: {
   visualTreatmentCriteria?: readonly string[];
   /** Exact native copy planned before generation. OCR must find every item. */
   expectedWords?: readonly string[];
+  /**
+   * Dominant hues of this channel's recent thumbnails. Reported, never
+   * blocking: a catalogue collapsing into one colour temperature is invisible
+   * one frame at a time, and no single frame deserves rejection for it.
+   */
+  recentHues?: readonly number[];
   /** Final admission may select the stronger pinned reviewer explicitly. */
   qaTier?: VisionTier;
   log?: Logger;
@@ -585,6 +592,7 @@ export async function runThumbnailMobileReferenceQa(args: {
   // is an unreadable blur at 120px is not clean at browse size.
   let mobileReason = "";
   let mobileOk = true;
+  let paletteReason = "";
   try {
     const mobile = await gradeThumbnailForMobile({ imagePath: args.outJpg });
     mobileOk = mobile.passed;
@@ -598,6 +606,20 @@ export async function runThumbnailMobileReferenceQa(args: {
     // A measurement failure must never reject a paid candidate.
     mobileOk = true;
   }
+  // Monotony is REPORTED, never blocking: one frame cannot be rejected for a
+  // pattern that only exists across a catalogue, and the correction belongs in
+  // the next concept rather than in a veto of this one.
+  try {
+    if (args.recentHues?.length) {
+      const palette = gradeThumbnailPalette({
+        reading: await readThumbnailPalette(args.outJpg),
+        recentHues: args.recentHues,
+      });
+      if (palette.issues.length) paletteReason = palette.issues.join("; ");
+    }
+  } catch {
+    paletteReason = "";
+  }
   return {
     textOk: verdict.textOk === true && copyVerified,
     faceClear: verdict.faceClear === true,
@@ -608,7 +630,7 @@ export async function runThumbnailMobileReferenceQa(args: {
     ...(requiresVisualTreatmentVerdict
       ? { visualTreatmentCompliant: verdict.visualTreatmentCompliant === true }
       : {}),
-    reason: [reason, ocrReason, mobileReason].filter(Boolean).join(" | "),
+    reason: [reason, ocrReason, mobileReason, paletteReason].filter(Boolean).join(" | "),
   };
 }
 
@@ -1130,9 +1152,18 @@ export async function renderCandidate(args: {
               `person's death — the jeopardy is in the physics and the human effort, never in the injury. A quiet ` +
               `PALETTE with a violent MOMENT reads as journalism; a loud palette with the same moment reads as ` +
               `tasteless. Never sentimental, never a flat empty plate, never a static postcard.\n`
-            : `BOLD: grounded but dramatic — one striking focal subject at heroic scale, charged atmosphere (storm ` +
-              `light, golden hour blaze, deep shadow), strong tension or payoff in the frame. Punchy, never generic.\n`) +
+            : `BOLD: grounded but dramatic — one striking focal subject at heroic scale, charged atmosphere, strong ` +
+              `tension or payoff in the frame. Punchy, never generic. Take the light from THIS scene's own source — ` +
+              `a screen, a window, a fire, a searchlight, a sky, a wound of daylight through cloud — and let that ` +
+              `decide the colour. Do NOT default to golden-hour warmth or amber firelight; it is the laziest ` +
+              `choice and every channel that reaches for it ends up looking like every other one.\n`) +
       `Keep ONLY the channel's palette + grade + finish from its world — the SCENE must be new each time. ` +
+      `COLOUR DISCIPLINE: the dominant colour of the frame must come from the CHANNEL'S declared palette and the ` +
+      `scene's own light source, never from a default. Amber, gold and orange firelight are the house style of no ` +
+      `channel unless its palette says so. Commit to real colour — a washed-out, dust-veiled, low-saturation frame ` +
+      `reads as indecisive, not cinematic. ` +
+      `CONTRAST: the frame needs a genuinely dark value AND a genuinely bright value, and the headline must sit ` +
+      `against the darkest area available, never over mid-tone smoke or haze. ` +
       // Saturation is an ENERGY decision, not a universal law. Forcing
       // "hyper-saturated" on to sober material is exactly what makes a serious
       // channel look like a tabloid.
@@ -1151,6 +1182,11 @@ export async function renderCandidate(args: {
       `rupture, avalanche, reversal, collision, escape, exposure, or impossible reveal. Make the cause and payoff visible ` +
       `in one glance. The hero must feel dangerous, surprising, or nearly impossible, never like a polished product render. ` +
       `For money topics, dramatize the exact input-to-payoff mechanism rather than showing generic coins or charts.\n` +
+      `STEP 2a — DIVERGE BEFORE YOU COMMIT: silently invent THREE genuinely different stagings of this topic — ` +
+      `different moment in the story, different physical subject, different light source and time of day, different ` +
+      `vantage. Then discard the most predictable one, which is almost always the first that came to mind and the ` +
+      `one another channel has already made. Choose between the remaining two on which is harder to look away from, ` +
+      `not which is easier to render. Output only the winner.\n` +
       `STEP 2b - BUILD THE SCENE IN NAMED STAGES (how the top 1% compose):\n` +
       `heroProp: the ONE dominant subject - 55-75% of the frame, emotionally charged, AGGRESSIVELY cropped with edges bleeding off frame (phone-screen scale) ` +
       `(a cracked marble face glaring, a grumpy mogul portrait, a war elephant chest-on). In split mode it sits opposite textZone; in centered_hero mode it anchors the middle while the hook uses a clear outer pocket.\n` +

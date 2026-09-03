@@ -143,9 +143,9 @@ const PROFILES: readonly IdentityProfile[] = [
   {
     names: ["empires at war"],
     rules: [
-      "Empires At War is CINEMATIC HISTORICAL PAINTING, never line art: rendered like a blockbuster history film still or a museum oil painting — volumetric light, atmospheric haze, real weight and materials, painterly brush texture rather than outlines or hatching.",
+      "Empires At War is CINEMATIC HISTORICAL PAINTING, never line art: rendered like a blockbuster history film still or a museum oil painting — directional light, real weight and materials, painterly brush texture rather than outlines or hatching.",
       "One heroic subject at the peak of a campaign moment, cropped close and towering into the frame — a commander, a war beast, a siege engine, a standard going down — with an army, a city or a mountain range giving true scale behind it.",
-      "The weather is part of the drama: driving snow, dust storms, smoke, low sun through cloud. Atmosphere carries the scale that a flat illustration cannot.",
+      "Weather may carry the scale, but it must never flatten the frame: every image needs a genuinely BLACK value and a genuinely BRIGHT value, with the headline placed against the darkest area. Haze, rain, smoke and dust across the whole frame produce a mid-tone mush that dies at browse size — keep them to one depth plane and leave the hero and the type in hard light.",
     ],
     avoid: [
       "line art, ink, engraving, cross-hatching, woodcut, comic or drawn illustration of any kind — this channel is painted and cinematic, and a drawn look breaks it completely",
@@ -153,7 +153,7 @@ const PROFILES: readonly IdentityProfile[] = [
       "modern anachronism, and gore or mutilation as the subject",
     ],
     visualLanguage: {
-      imageStyle: "cinematic historical oil painting, volumetric light, atmospheric haze, painterly brushwork, blockbuster film-still weight",
+      imageStyle: "cinematic historical oil painting, hard directional key light, deep black shadow against bright highlight, painterly brushwork, blockbuster film-still weight",
       composition: "full_scene",
       textObject: "movie_poster",
     },
@@ -163,7 +163,7 @@ const PROFILES: readonly IdentityProfile[] = [
       requiredSceneEvidence: [
         "One heroic historical subject at the peak of a campaign moment, cropped close and dominating the frame.",
         "True scale is established behind the hero by an army, a city, a fleet or a landscape.",
-        "The image reads as a painted cinematic still with volumetric light and atmosphere.",
+        "The image reads as a painted cinematic still with hard directional light and a full tonal range.",
       ],
       prohibitedVisualPatterns: [
         "Line art, ink, engraving, cross-hatching, woodcut or any drawn illustration style; video-game key art; plastic 3D renders; flat vector explainer art; modern anachronism; gore as the subject.",
@@ -171,7 +171,7 @@ const PROFILES: readonly IdentityProfile[] = [
       reviewCriteria: [
         "The candidate is painted and cinematic, with no visible outlines, hatching or engraved line work anywhere.",
         "A single heroic subject dominates the frame and something behind it establishes real scale.",
-        "Atmosphere — weather, smoke, haze or volumetric light — is doing visible work in the image.",
+        "The frame contains both a genuinely dark value and a genuinely bright value; it is not uniformly mid-tone haze.",
       ],
     },
   },
