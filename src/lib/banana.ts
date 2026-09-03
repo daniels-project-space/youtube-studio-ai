@@ -23,6 +23,7 @@ import { hydrateEnv } from "@/lib/vault";
 import { PRICE } from "@/engine/pricing";
 import { recordImageUsage } from "@/lib/imageUsage";
 import { rasterImageDimensions } from "@/lib/imageDimensions";
+import { fallbackTextZone } from "@/lib/thumbnailDefaults";
 import {
   NANO_BANANA_THUMBNAIL_PROFILE,
   nanoBananaThumbnailCostUsd,
@@ -131,10 +132,10 @@ export const TEXT_OBJECT_LANGUAGE: Record<string, string> = {
   neon_sign: "as REAL glowing neon tubes mounted in the scene, casting colored light onto the hero, one tube flickering half-lit",
   spray_paint: "stencil-sprayed onto the scene surface in the accent color, paint drips running from the letterforms, overspray haze",
   stamp_ink: "as a HUGE rubber-stamp imprint slammed diagonally across the frame like a CLASSIFIED stamp, cracked dry ink, double-struck ghosting",
-  movie_poster: "as cinematic title-card lettering with metallic bevel and rim light, embedded in the scene atmosphere, blockbuster one-sheet gravity",
+  movie_poster: "as cinematic title-card lettering with strong dimensional relief and rim light, taking its surface from the world of THIS film rather than defaulting to metal, embedded in the scene atmosphere with blockbuster one-sheet gravity",
   ransom_note: "with each letter cut from a different magazine page in a different font and color, glued unevenly with visible tape and shadows",
   carved: "physically carved into the scene's dominant material (stone, wood, steel) with real chisel depth, the cuts catching the key light",
-  scene_forged: "as a PHYSICAL OBJECT STANDING IN THE SCENE that happens to carry the words - a battle standard, a hanging banner, a bronze or iron plate, a painted sign, letters cut into rock or ice - occupying 25-40% of the frame and positioned in real depth within the world, not pasted over it. It carries whatever the scene carries: snow settling on its top edge, rust and soot in its grooves, ice or blood running from it, the accent colour bleeding through its material. It is lit by the SAME key light as the hero and casts a real shadow onto what is behind it. The surface it stands against must be part of the depicted world - snow, sky, fog, water, wall, deep shadow - never a flat colour panel or gradient block laid beside the picture. Despite belonging to the scene it stays the largest, hardest-edged, highest-contrast graphic in the frame and every letter is fully legible",
+  scene_forged: "as a PHYSICAL OBJECT STANDING IN THE SCENE that happens to carry the words. CHOOSE ITS MATERIAL FROM THE SCENE OWN DOMINANT MATERIAL, and if that material is not metal then the object must NOT be metal: carve it into the rock, ice, timber or plaster already there; hang it as cloth, canvas, banner, sailcloth or hide; print it on the paper, card or ticket the story runs on; scorch, chalk, spray, tile, weld or stitch it into whatever the world is made of; let it be light itself where the scene is lit by screens or fire. A riveted metal plaque is the default every channel reaches for and it is BANNED unless this scene is genuinely a world of metal. The object occupies 25-40% of the frame in real depth, carries whatever the scene carries, is lit by the SAME key light as the hero, casts a real shadow, and stands against a real surface in this world - never a flat colour panel. Despite belonging to the scene it stays the largest, hardest-edged, highest-contrast graphic in the frame and every letter is fully legible",
 };
 
 /**
@@ -284,7 +285,8 @@ export function buildThumbSceneBrief(a: ThumbBriefArgs & { textZone?: string }):
   const collage = a.composition === "cutout_collage"
     ? " The hero is a crisp die-cut photographic cutout over a deliberate editorial collage of torn clippings, graphic shapes, paper texture, and hard cut shadows."
     : " Render one coherent, premium cinematic scene with clear depth.";
-  const zone = a.textZone ?? "left";
+  // A constant here parked every unset headline on the same side forever.
+  const zone = a.textZone ?? fallbackTextZone(a.channelName);
   return (
     `1280x720 YouTube thumbnail BASE ART for channel "${a.channelName}". ` +
     `Signature look: ${a.imageStyle ?? "premium cinematic editorial art"}. ` +

@@ -41,6 +41,12 @@ import {
 } from "@/lib/thumbnailCapabilities";
 import { applyThumbnailChannelIdentity } from "@/lib/thumbnailChannelIdentity";
 import {
+  FALLBACK_ACCENTS,
+  fallbackAccent,
+  fallbackTextZone,
+  spreadDefault,
+} from "@/lib/thumbnailDefaults";
+import {
   classifyThumbnailDefects,
   deriveCriticDoctrine,
   recordThumbnailDefect,
@@ -348,6 +354,36 @@ async function assertHybridStoryJudge(): Promise<void> {
     deterministic, ...concept, askJudge: async () => ({ score: 5000 }),
   });
   assert.equal(nonsense.score, 100);
+}
+
+function assertDefaultsSpreadRatherThanCollapse(): void {
+  // The bug class this exists for: a single constant fallback reads as a
+  // sensible safety net and silently makes every channel that omits a field
+  // identical to every other channel that omits it. The previous accent
+  // constant was #ffd400, which is why an audit of eleven renders found seven
+  // in the amber band.
+  const channels = [
+    "Investory", "Empires At War", "Vault Breach", "Parsec Theory",
+    "Gratitude Springs", "Sealed Records", "The Getaway Files", "Overbuilt",
+  ];
+  const accents = new Set(channels.map((name) => fallbackAccent(name)));
+  assert.ok(accents.size >= 4, `unset accents must spread across the wheel, got ${accents.size} distinct`);
+  assert.ok(!FALLBACK_ACCENTS.includes("#ffd400" as never), "the gold constant that caused the bias must not be the pool");
+
+  const zones = new Set(channels.map((name) => fallbackTextZone(name)));
+  assert.ok(zones.size >= 3, `unset type zones must move between channels, got ${zones.size} distinct`);
+
+  // Determinism is non-negotiable: a default that varied per call would make
+  // renders irreproducible and defeat every cache and checkpoint upstream.
+  for (const name of channels) {
+    assert.equal(fallbackAccent(name), fallbackAccent(name));
+    assert.equal(fallbackTextZone(name), fallbackTextZone(`${name}`));
+  }
+  assert.equal(fallbackAccent("Investory"), fallbackAccent("  investory  "), "identity must normalise");
+
+  // Degenerate inputs must not throw at a paid boundary.
+  assert.ok(FALLBACK_ACCENTS.includes(fallbackAccent("") as never));
+  assert.equal(spreadDefault("anything", ["only"]), "only");
 }
 
 function assertSelfWritingDoctrine(): void {
@@ -1213,6 +1249,7 @@ async function main(): Promise<void> {
 await assertThumbnailSameness();
 assertTieredRendering();
 await assertHybridStoryJudge();
+assertDefaultsSpreadRatherThanCollapse();
 assertSelfWritingDoctrine();
 assertLearningPersistence();
 assertCtrFeedbackRefusesThinEvidence();

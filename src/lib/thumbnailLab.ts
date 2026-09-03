@@ -53,6 +53,12 @@ import {
   STORY_INTEREST_DOCTRINE,
 } from "@/lib/thumbnailStoryInterest";
 import { resolveThumbnailCapabilities } from "@/lib/thumbnailCapabilities";
+import {
+  fallbackAccent,
+  fallbackBackground,
+  fallbackBase,
+  fallbackTextZone,
+} from "@/lib/thumbnailDefaults";
 import { gradeThumbnailForMobile } from "@/lib/thumbnailMobileGate";
 import { gradeThumbnailPalette, readThumbnailPalette } from "@/lib/thumbnailPaletteGuard";
 import { judgeThumbnailStoryInterest } from "@/lib/thumbnailStoryJudge";
@@ -142,10 +148,28 @@ export interface VisualLanguage {
     | "torn_strip" | "paint_smear" | "censor_bar" | "grunge_sticker" | "spaced_elegant" | "block_plate"
     | "neon_sign" | "spray_paint" | "stamp_ink" | "movie_poster" | "ransom_note" | "carved"
     | "scene_forged";
-  /** cutout_collage = hero is a die-cut PHOTO cutout over a designed collage
-   * background (the anti-AI-look device for commentary/persona channels);
-   * full_scene = one continuous rendered scene. */
-  composition?: "cutout_collage" | "full_scene";
+  /**
+   * How the picture is CONSTRUCTED, which is a different axis from layout.
+   *
+   * This had exactly two values, making it the narrowest enum in the module:
+   * every channel was either a continuous scene or a cutout collage, and the
+   * whole catalogue inherited one of two construction languages. The additions
+   * are all constructions the approved set or the wider genre already uses.
+   */
+  composition?:
+    /** Die-cut PHOTO cutout over a designed collage — the anti-AI-look device
+     * for commentary, persona and expose channels. */
+    | "cutout_collage"
+    /** One continuous rendered scene. */
+    | "full_scene"
+    /** Extreme close detail filling the frame, context implied not shown. */
+    | "macro_detail"
+    /** The subject read as a shape against a bright or empty ground. */
+    | "silhouette_field"
+    /** Looking straight down on an arrangement laid out as evidence. */
+    | "overhead_layout"
+    /** One subject repeated across the frame to make a pattern the eye counts. */
+    | "repetition_field";
   uppercase?: boolean;
   /** Historical playbook preference retained for stored-data compatibility.
    * Deployed rendering always uses the deterministic local compositor. */
@@ -260,8 +284,11 @@ export function buildStyleDnaPlaybook(args: {
   const palette = args.dna.thumbnail.palette.length
     ? args.dna.thumbnail.palette
     : args.dna.palette;
-  const baseColor = palette[0] ?? "#111827";
-  const accentColor = palette[Math.min(1, Math.max(0, palette.length - 1))] ?? "#ffd400";
+  // Spread rather than collapse: a single constant here made every channel that
+  // omitted a palette identical, and the previous accent constant was gold —
+  // the measured source of the amber bias across the catalogue.
+  const baseColor = palette[0] ?? fallbackBase(args.channelName);
+  const accentColor = palette[Math.min(1, Math.max(0, palette.length - 1))] ?? fallbackAccent(args.channelName);
   const subject = args.dna.thumbnail.subject || args.dna.recurringSubject;
   const setting = args.dna.setting;
   const shared =
@@ -849,7 +876,7 @@ export async function distillPlaybook(args: {
       `"baseColor":"#hex","accentColor":"#hex" — colors MUST come from THIS channel's palette; NEVER default to ` +
       `gold/yellow unless it is genuinely this channel's color, ` +
       `"textObject":"torn_strip"|"paint_smear"|"censor_bar"|"grunge_sticker"|"spaced_elegant"|"block_plate"|"neon_sign"|"spray_paint"|"stamp_ink"|"movie_poster"|"ransom_note"|"carved"|"scene_forged" (scene_forged = the headline takes the scene's own plane, angle, lighting and symmetry while staying the most prominent graphic; pick it for cinematic, atmospheric or photographic worlds where the type should belong to the picture rather than sit on it) (the channel SIGNATURE motif for the deterministic LOCAL typography layer; it must never appear in fluxRecipe or become a textual scene prop), "imageStyle":"<=12 words — the base-image rendering style (e.g. 'painterly anime watercolor', 'vintage ink ` +
-      `engraving', 'hyperreal cinematic 3D', 'retro screenprint poster')","badgeStyle":"center"|"pill","badgeTreatment":"outline_pill"|"solid_pill"|"stamped_block"|"engraved_plate"|"tape_label" (the channel's PERMANENT corner signature — choose it once here from this channel's material world; it is then rendered identically on every video and never redesigned per episode),"composition":"cutout_collage"|"full_scene" (cutout_collage = the hero is a clean die-cut PHOTO cutout with crisp edges pasted OVER a designed collage background of torn clippings/photos/graphic shapes - real photographic grain, magazine-composite feel; PICK THIS for commentary/persona/drama/expose channels because continuous AI scenes read fake there. full_scene = one continuous rendered scene for painterly/cinematic worlds),` +
+      `engraving', 'hyperreal cinematic 3D', 'retro screenprint poster')","badgeStyle":"center"|"pill","badgeTreatment":"outline_pill"|"solid_pill"|"stamped_block"|"engraved_plate"|"tape_label" (the channel's PERMANENT corner signature — choose it once here from this channel's material world; it is then rendered identically on every video and never redesigned per episode),"composition":"cutout_collage"|"full_scene"|"macro_detail"|"silhouette_field"|"overhead_layout"|"repetition_field" (cutout_collage = a clean die-cut PHOTO cutout with crisp edges pasted OVER a collage of torn clippings and graphic shapes, real photographic grain, magazine-composite feel - PICK THIS for commentary/persona/drama/expose channels because continuous AI scenes read fake there; full_scene = one continuous rendered scene for painterly and cinematic worlds; macro_detail = one extreme close detail filling the frame with its context implied rather than shown, for channels whose subject is evidence or craft; silhouette_field = the subject read purely as a shape against a bright or empty ground, the strongest option at browse size; overhead_layout = looking straight down on an arrangement laid out as evidence, for anything about records, contents or comparison; repetition_field = one subject repeated across the frame so the eye counts it, for scale and volume stories),` +
       `"uppercase":boolean}. THE RULE: if another channel could wear this language, it is WRONG — diverge hard.\n` +
       `1. rules: 6-8 HARD rules for this channel's thumbnails — specific (sizes, positions, counts, colors), ` +
       `derived from the evidence + principles, honoring the DNA palette.\n` +
@@ -1351,7 +1378,8 @@ export async function renderCandidate(args: {
           ? "comparison composition; two subjects at comparable scale held against each other across a physical seam the scene provides, the difference between them the loudest thing in the frame, type landing in the calmer of the two halves"
           : "split composition; hero opposite the chosen type zone"}. ` +
       `HERO PROP (dominant, 30-50% of frame, cropped close): ${inst.heroProp}. ` +
-      `BACKGROUND (separate supporting layer behind the hero - darker, simpler, depth): ${inst.background ?? "deep dark gradient"}. ` +
+      `BACKGROUND (separate supporting layer behind the hero - darker, simpler, depth): ` +
+      `${inst.background ?? fallbackBackground(`${args.channelName ?? ""}${args.title}`)}. ` +
       `STORY DETAILS (symbolic, on/around the hero): ${(inst.details ?? []).join("; ") || "none"}.`;
   }
   if (!inst.fluxPrompt || !inst.textPropsJson) throw new Error("pattern instantiation incomplete (need heroProp or fluxPrompt + textPropsJson)");
@@ -1398,7 +1426,12 @@ export async function renderCandidate(args: {
   const zones = new Set<ThumbnailTextZone>([
     "left", "right", "upperLeft", "upperRight", "center", "upperCenter",
   ]);
-  const requestedZone = String(inst.textZone ?? textProps["position"] ?? "left") as ThumbnailTextZone;
+  // "left" as a constant meant an unset headline never moved across a whole
+  // catalogue. Seeded on channel AND title so it varies between videos while
+  // staying reproducible for any one of them.
+  const requestedZone = String(
+    inst.textZone ?? textProps["position"] ?? fallbackTextZone(`${args.channelName ?? ""}${args.title}`),
+  ) as ThumbnailTextZone;
   const zone = zones.has(requestedZone) ? requestedZone : "left";
   const overlayLines = [
     ...(numberCallout ? [{ text: numberCallout, accent: true, payoff: true }] : []),

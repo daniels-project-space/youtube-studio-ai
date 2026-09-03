@@ -54,6 +54,7 @@ const PROFILES: readonly IdentityProfile[] = [
     visualLanguage: {
       imageStyle: "premium realistic financial editorial photograph, tactile real-world materials, decisive human-scale consequence, restrained navy-black and gold grade",
       composition: "full_scene",
+      textObject: "stamp_ink",
     },
     contract: {
       version: "thumbnail-channel-identity/v1",
@@ -156,7 +157,7 @@ const PROFILES: readonly IdentityProfile[] = [
     visualLanguage: {
       imageStyle: "cinematic historical oil painting, hard directional key light, deep black shadow against bright highlight, painterly brushwork, blockbuster film-still weight",
       composition: "full_scene",
-      textObject: "scene_forged",
+      textObject: "carved",
     },
     contract: {
       version: "thumbnail-channel-identity/v1",
@@ -224,7 +225,7 @@ const PROFILES: readonly IdentityProfile[] = [
     visualLanguage: {
       imageStyle: "tense photographic heist-documentary still, hard practical light, cold steel and concrete, one-point-perspective depth, fine grain",
       composition: "full_scene",
-      textObject: "scene_forged",
+      textObject: "spray_paint",
     },
     contract: {
       version: "thumbnail-channel-identity/v1",

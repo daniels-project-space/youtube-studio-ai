@@ -77,7 +77,7 @@ const JOBS = [
     id: "hannibal",
     channelName: "Empires At War",
     title: "The Day Hannibal Stood At The Gates Of Rome",
-    recentHues: [190, 205, 218],
+    recentHues: [245, 145, 115],
     dna: channelDna({
       palette: ["#E9EDF2", "#B3121D"],
       subject: "the most surprising object of the campaign, not the most famous man",
@@ -92,7 +92,7 @@ const JOBS = [
     id: "investory",
     channelName: "Investory",
     title: "The Pension Fee That Quietly Took A Third Of Your Retirement",
-    recentHues: [190, 205, 218],
+    recentHues: [245, 145, 115],
     dna: channelDna({
       palette: ["#123B2A", "#F2C230"],
       subject: "one person, one clear gesture, at the moment money they earned is gone",
@@ -109,7 +109,7 @@ const JOBS = [
     id: "vault",
     channelName: "Vault Breach",
     title: "They Emptied The Vault While The Camera Showed An Empty Room",
-    recentHues: [190, 205, 218],
+    recentHues: [245, 145, 115],
     dna: channelDna({
       palette: ["#1C1408", "#FF9E1B"],
       subject: "the theft and the thing that failed to see it, both plainly visible in one frame",
@@ -126,7 +126,7 @@ const JOBS = [
     id: "startheory",
     channelName: "Parsec Theory",
     title: "The Detail In Episode IV That Proves The Empire Knew All Along",
-    recentHues: [190, 205, 218],
+    recentHues: [245, 145, 115],
     dna: channelDna({
       palette: ["#04060C", "#59E0FF"],
       subject: "an overwhelming imperial structure at colossal scale with one small telling detail on it",
