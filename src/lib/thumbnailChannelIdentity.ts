@@ -1,4 +1,5 @@
 import type { ThumbnailPlaybook, VisualLanguage } from "@/lib/thumbnailLab";
+import type { SubjectClass } from "@/lib/thumbnailStoryInterest";
 
 /**
  * A channel identity cannot be a collection of aspirational prompt prose.
@@ -11,6 +12,13 @@ import type { ThumbnailPlaybook, VisualLanguage } from "@/lib/thumbnailLab";
 export interface ThumbnailIdentityContract {
   version: "thumbnail-channel-identity/v1";
   profile: string;
+  /**
+   * Who owns the hero slot on this channel. The story-interest gate scores a
+   * concept against this instead of assuming a human always carries the stake:
+   * an `icon` channel must lead with the structure itself, a `person` channel
+   * with the face. Omit for ordinary story channels.
+   */
+  subjectClass?: SubjectClass;
   requiredSceneEvidence: readonly string[];
   prohibitedVisualPatterns: readonly string[];
   reviewCriteria: readonly string[];
@@ -238,49 +246,50 @@ const PROFILES: readonly IdentityProfile[] = [
   {
     names: ["sealed records"],
     rules: [
-      "Sealed Records is documentary evidence realism: the story is told through the PAPER — court filings, redacted agreements, evidence bags, logbooks, exhibit stickers, sealed boxes — photographed like real archive material under hard institutional light.",
-      "A human presence is limited to hands, sleeves and shoulders handling the documents. The subject is the record and what it proves, never a portrait.",
-      "One document detail must be legible enough to read as authentic — a redaction bar, an exhibit number, a date stamp, a signature block — without spelling out any real name.",
+      "Sealed Records is tabloid-collage expose, built the way the golden scandal references are built: a die-cut PHOTO cutout of the person the video is about, crisp cut edges with a hard keyline, pasted OVER a designed collage of torn newspaper strips, court filings and evidence fragments. A continuous rendered scene reads fake in this genre.",
+      "The person is the draw. Their face is large, recognizable and holds the frame at browse size, cropped at the chest or head-and-shoulders, expression carrying the story. Documents, redactions and clippings are the collage AROUND them, never the subject.",
+      "Layer the collage from real editorial material: torn tabloid strips with short partial headline fragments, a redaction bar, an exhibit sticker, a red crash line or arrow. Aged newsprint texture, hard drop shadows, real photographic grain.",
     ],
     avoid: [
-      "any recognizable real person, face, portrait, likeness, mugshot or lookalike, and any real logo, seal, crest or letterhead",
-      "true-crime clichés: chalk outlines, crime-scene tape, blood, handcuffs, prison bars, shadowy hooded figures",
-      "any legible real name, case number, or address rendered in the artwork",
+      "a continuous AI-rendered scene, a photoreal reconstruction, or any dramatized depiction of the person DOING something - this is a portrait cutout over collage, never invented conduct",
+      "any depiction of a victim, a minor, a body, nudity, violence, or the act itself",
+      "true-crime cliches: chalk outlines, crime-scene tape, blood, handcuffs, prison bars, shadowy hooded figures",
     ],
     visualLanguage: {
-      imageStyle: "documentary evidence photograph, hard institutional light, aged paper and manila, shallow depth, fine grain",
-      composition: "full_scene",
-      textObject: "censor_bar",
+      imageStyle: "tabloid collage composite, die-cut photo cutout over torn newsprint, aged paper texture, hard shadows, real photographic grain",
+      composition: "cutout_collage",
+      textObject: "torn_strip",
     },
     contract: {
       version: "thumbnail-channel-identity/v1",
-      profile: "sealed-records-document-evidence",
+      profile: "sealed-records-tabloid-expose",
+      subjectClass: "person",
       requiredSceneEvidence: [
-        "The decisive subject is a physical document or record being handled, not a person.",
-        "Human presence is limited to hands, sleeves or shoulders; no face appears in the frame.",
-        "At least one authentic-looking archival detail is visible — a redaction bar, exhibit sticker, date stamp or sealed box.",
+        "The person the video is about is the dominant hero: a die-cut photo cutout with crisp edges, face large and holding the frame.",
+        "The background is a designed collage of torn newspaper strips, filings or evidence fragments layered behind the cutout, not a continuous rendered scene.",
+        "At least one editorial device is present - a torn headline fragment, redaction bar, exhibit sticker, or red crash line.",
       ],
       prohibitedVisualPatterns: [
-        "Any recognizable real person, face, portrait, likeness or lookalike; any real logo, seal, crest or letterhead; any legible real name, case number or address; chalk outlines, crime-scene tape, blood, handcuffs, prison bars or hooded figures.",
+        "A continuous rendered scene or photoreal reconstruction; any dramatized depiction of the person performing an action; any victim, minor, body, nudity, violence or depiction of the act; chalk outlines, crime-scene tape, blood, handcuffs, prison bars or hooded figures.",
       ],
       reviewCriteria: [
-        "No face and no identifiable real person appears anywhere in the frame.",
-        "The image reads as a photographed archival record rather than a dramatized reconstruction.",
-        "No real name, seal, or case identifier is legible in the artwork.",
+        "The hero reads as a cut-out photograph pasted over collage, with visible cut edges - not a single rendered image.",
+        "The face is large enough to be read at 120px and is the first thing the eye lands on.",
+        "No victim, minor, body, or depiction of the act appears anywhere in the frame.",
       ],
     },
   },
   {
     names: ["overbuilt"],
     rules: [
-      "Overbuilt is structural critique: show the real structure met head-on at true scale, and make ONE documented flaw physically visible in the same frame — the thing the postcard shot never includes.",
-      "Always anchor the scale with a human or vehicle the viewer can measure the structure against; the gap between the icon and the mundane failure is the whole hook.",
-      "Photograph it as a real place in real light — dust, haze, service vehicles, working infrastructure — never as a glossy render or a tourism plate.",
+      "Overbuilt is structural critique and the STRUCTURE IS THE STAR: the icon owns the hero slot, centred and dominant, filling the frame at close to full height, met head-on. It is the reason the viewer clicked and must never be demoted to background haze.",
+      "Stage ONE documented operational flaw against it in the same frame - the unglamorous truth the postcard shot crops out. The flaw is supporting evidence at the base or edge of the icon, deliberately small against it; the contrast in scale IS the hook.",
+      "Photograph it as a real place in real light - dust, haze, service vehicles, working infrastructure - never as a glossy render or a tourism plate. A human or vehicle may anchor scale, but only beside the icon, never in front of it.",
     ],
     avoid: [
+      "demoting the structure to the background behind a person, vehicle or piece of equipment - the icon must never lose the hero slot",
       "glossy architectural-render or tourism-brochure treatment, golden-hour postcard framing, or drone-stock gloss",
       "invented or exaggerated damage: collapsing towers, dramatic cracks, fire, or disaster imagery that did not happen",
-      "cartoon or infographic overlays, arrows, callout circles and diagram lines baked into the artwork",
     ],
     visualLanguage: {
       imageStyle: "documentary architectural photograph, real daylight and haze, working service infrastructure, honest scale",
@@ -290,17 +299,18 @@ const PROFILES: readonly IdentityProfile[] = [
     contract: {
       version: "thumbnail-channel-identity/v1",
       profile: "overbuilt-structural-critique",
+      subjectClass: "icon",
       requiredSceneEvidence: [
-        "The real structure is shown head-on at honest scale in real photographic light.",
-        "One mundane, documented operational flaw is physically visible in the same frame as the icon.",
-        "A human or vehicle anchors the scale so the viewer can measure the structure.",
+        "The structure the video is about is the dominant hero, centred and head-on, filling most of the frame at close to full height.",
+        "One mundane, documented operational flaw is visible in the same frame, small against the icon.",
+        "The image reads as real photographic daylight, with haze, dust or working infrastructure present.",
       ],
       prohibitedVisualPatterns: [
-        "Glossy render or tourism-brochure treatment, golden-hour postcard framing, invented damage such as collapse, cracks, fire or disaster, and infographic overlays, arrows or callout lines baked into the artwork.",
+        "The structure reduced to background behind a person, vehicle or equipment; glossy render or tourism-brochure treatment; invented damage such as collapse, cracks, fire or disaster; infographic overlays, arrows or callout lines baked into the artwork.",
       ],
       reviewCriteria: [
+        "The structure is unmistakably the largest and first-read element in the frame.",
         "The flaw shown is mundane and operational, not invented catastrophe.",
-        "Scale is legible from a human or vehicle in frame.",
         "The candidate reads as a documentary photograph, not an architectural render.",
       ],
     },

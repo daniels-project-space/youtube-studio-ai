@@ -90,7 +90,7 @@ export const RESEARCH_PRINCIPLES = [
   "Honest framing only — false-promise thumbnails decay channel-wide recommendations.",
   "THE 120px SQUINT TEST: most first views are ~120px wide on mobile — mood, subject, and text must all survive there; if it's a muddy blur, the design is wrong.",
   "SAFE ZONES: never place HEADLINE text or key story elements in the bottom-right (duration timestamp) or bottom-left (chapter markers) corners; keep critical content off extreme edges. The compact channel badge is the one deliberate exception — it is always bottom-right, sized and inset so the duration pill overlapping it costs nothing.",
-  "Max 6 words on the image, and saturate beyond real life — thumbnails compete with bright UI.",
+  "Max 6 words on the image. Saturate beyond real life so the frame competes with bright UI — EXCEPT on sober material, where true colour and restrained contrast are what make it read as trustworthy rather than tabloid.",
 ] as const;
 
 export interface VerifiedRef {
@@ -147,10 +147,17 @@ export interface ThumbnailPlaybook {
   /** Honest provenance: a reference-backed distillation or a deterministic
    * Style-DNA foundation used when reference acquisition is unavailable. */
   source?: "verified_references" | "style_dna_foundation";
-  /** Clickbait ENERGY tier (identity-chosen): spectacle = over-the-top
-   * impossible-scale drama; bold = strong grounded punch; cozy_pop = charming
-   * saturated warmth. ALL are catchy — none are sleepy. */
-  energy?: "spectacle" | "bold" | "cozy_pop";
+  /** ENERGY tier (identity-chosen): spectacle = over-the-top impossible-scale
+   * drama; bold = strong grounded punch; cozy_pop = charming saturated warmth;
+   * sober = restrained documentary gravity.
+   *
+   * The first three are all LOUD, which quietly forced every channel into hype.
+   * A disaster, a death toll, a grief or health topic, an investigation or a
+   * legal reckoning cannot be staged as "impossible scale" or "adorable" without
+   * reading as tasteless, and hype on serious material is what makes a channel
+   * look untrustworthy. `sober` is deliberately not sleepy — it is arresting
+   * through restraint rather than through saturation. */
+  energy?: "spectacle" | "bold" | "cozy_pop" | "sober";
   /** Channel-constant visual language (font/treatment/colors/image style). */
   visualLanguage?: VisualLanguage;
   /**
@@ -801,7 +808,7 @@ export async function distillPlaybook(args: {
       `sketch/whiteboard/cozy/playful identities; bebas=tall minimal premium),` +
       `"badge":"${args.channelName.toUpperCase()}"} ` +
       `— placeholders ONLY in line texts and numberCallout.\n` +
-      `Return STRICT JSON {"energy":"spectacle"|"bold"|"cozy_pop","visualLanguage":{"font","treatment","baseColor","accentColor","textObject","composition","imageStyle","badgeStyle","uppercase"},"rules":string[],"avoid":string[],"patterns":[{"name","when","fluxRecipe","textRecipeJson"}]} - energy AND visualLanguage are REQUIRED keys.`,
+      `Return STRICT JSON {"energy":"spectacle"|"bold"|"cozy_pop"|"sober" (sober = restrained documentary gravity; choose it when hype would cheapen the material — a reckoning, disaster, death toll, investigation, diagnosis or loss — and never for ordinary topics),"visualLanguage":{"font","treatment","baseColor","accentColor","textObject","composition","imageStyle","badgeStyle","uppercase"},"rules":string[],"avoid":string[],"patterns":[{"name","when","fluxRecipe","textRecipeJson"}]} - energy AND visualLanguage are REQUIRED keys.`,
   });
 
   const patterns: ThumbPattern[] = (play.patterns ?? [])
@@ -936,7 +943,7 @@ export async function renderCandidate(args: {
     fluxPrompt?: string;
     textPropsJson?: string;
     textZone?: string;
-    layoutMode?: "split" | "centered_hero";
+    layoutMode?: "split" | "centered_hero" | "comparison";
   }>({
     // The native design brief needs enough room for structured scene and hook
     // planning before the JSON response closes.
@@ -980,7 +987,7 @@ export async function renderCandidate(args: {
       (args.playbook.avoid.length
         ? `FULL PLAYBOOK AVOID LIST:\n- ${args.playbook.avoid.join("\n- ")}\n\n`
         : "\n") +
-      `STEP 1 — LAYOUT: choose layoutMode ("split" or "centered_hero") and textZone ("left"|"right"|"upperLeft"|"upperRight"|"upperCenter"). ` +
+      `STEP 1 — LAYOUT: choose layoutMode ("split", "centered_hero" or "comparison") and textZone ("left"|"right"|"upperLeft"|"upperRight"|"upperCenter"). ` +
       `These are EQUAL options — pick the one this specific image is strongest in, not a default. ` +
       `split: large hero opposite the text zone, best for copy-dense hooks and asymmetric action. ` +
       `centered_hero: the hero owns the middle and stares the viewer down — a confrontational, symmetrical, ` +
@@ -989,7 +996,13 @@ export async function renderCandidate(args: {
       `head-on moment that gains force from being met square. Build real depth and tension around it (converging ` +
       `lines, foreground occlusion, atmosphere) and land the type in the clean pockets above or beside the ` +
       `silhouette. The only thing to avoid is a flat, empty, evenly-lit title card with a small object floating ` +
-      `in the middle — symmetry itself is welcome when the image is charged.\n` +
+      `in the middle — symmetry itself is welcome when the image is charged. ` +
+      `comparison: TWO subjects held against each other in one frame — before and after, promise and reality, ` +
+      `then and now, what they said and what they did, the two things the viewer is being asked to weigh. Give each ` +
+      `side its own hero at comparable scale, divide them with a real physical seam the scene itself provides ` +
+      `(a torn edge, a wall, a mirror, a horizon, a hard shadow line) rather than a drawn divider bar, and make the ` +
+      `DIFFERENCE the loudest thing in the frame. Choose it whenever the topic is fundamentally two things measured ` +
+      `against one another; do not force a single hero on to a comparison story just to keep the frame simple.\n` +
       `STEP 2 — fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY — ` +
       `never reproduce its literal scene). ENERGY TIER = "${args.playbook.energy ?? "bold"}":\n` +
       (args.playbook.energy === "spectacle"
@@ -1000,10 +1013,25 @@ export async function renderCandidate(args: {
           ? `COZY-POP: irresistibly charming and warm — but PUNCHY: one adorable/magical focal moment (impossibly ` +
             `cozy light, oversized moon, glowing window, a cat doing something delightful), saturated inviting ` +
             `color, storybook wonder. Catchy and clickable, never sleepy or flat.\n`
-          : `BOLD: grounded but dramatic — one striking focal subject at heroic scale, charged atmosphere (storm ` +
-            `light, golden hour blaze, deep shadow), strong tension or payoff in the frame. Punchy, never generic.\n`) +
+          : args.playbook.energy === "sober"
+            ? `SOBER: restrained documentary gravity for material that hype would cheapen — a reckoning, a disaster, ` +
+              `a death toll, an investigation, a diagnosis, a loss. Arresting through RESTRAINT, not saturation: one ` +
+              `still, weighted subject; real available light with a narrow tonal range and true colour; empty space ` +
+              `used deliberately as silence around the subject; the single most consequential detail held in focus ` +
+              `while everything else falls away. Absolutely no shock-gore, no exploitation of a victim, no cheap ` +
+              `menace, no red-arrow tabloid energy. It must still stop the scroll — a quiet frame that feels ` +
+              `IMPORTANT reads as trustworthy where a loud one reads as tasteless. Never sentimental, never sleepy, ` +
+              `never a flat empty plate.\n`
+            : `BOLD: grounded but dramatic — one striking focal subject at heroic scale, charged atmosphere (storm ` +
+              `light, golden hour blaze, deep shadow), strong tension or payoff in the frame. Punchy, never generic.\n`) +
       `Keep ONLY the channel's palette + grade + finish from its world — the SCENE must be new each time. ` +
-      `Hyper-saturated, volumetric light. COMPOSED FOR THE CHOSEN LAYOUT: split = subject opposite textZone with a clean darker 40% type field; centered_hero = hero centered at peak action with asymmetric supporting depth and protected type pockets around its silhouette. ` +
+      // Saturation is an ENERGY decision, not a universal law. Forcing
+      // "hyper-saturated" on to sober material is exactly what makes a serious
+      // channel look like a tabloid.
+      `${args.playbook.energy === "sober"
+        ? "True-to-life colour, real available light, restrained contrast — never pushed saturation. "
+        : "Hyper-saturated, volumetric light. "}` +
+      `COMPOSED FOR THE CHOSEN LAYOUT: split = subject opposite textZone with a clean darker 40% type field; centered_hero = hero centered at peak action with asymmetric supporting depth and protected type pockets around its silhouette. ` +
       `The final native design may contain ONLY the exact planned headline and compact channel badge—no other ` +
       `words, letters, numbers, equations, financial symbols, signs, labels, documents with writing, or logos.\n` +
       `NARRATIVE COHERENCE (hard requirement): the scene must LITERALLY ENACT the topic so a viewer instantly ` +
@@ -1037,7 +1065,7 @@ export async function renderCandidate(args: {
       `Every line must contain real English hook copy, never meta-words like "omit"/"none". ` +
       `numberCallout: use a REAL number only when it strengthens the hook, preserving every material currency sign and ` +
       `time unit (for example "$1K/MO", never bare "1000"); otherwise leave the key out. Set "position" to textZone.\n` +
-      `Return STRICT JSON {"heroProp":string,"background":string,"details":string[],"textPropsJson":string,"textZone":string,"layoutMode":"split"|"centered_hero"}.`,
+      `Return STRICT JSON {"heroProp":string,"background":string,"details":string[],"textPropsJson":string,"textZone":string,"layoutMode":"split"|"centered_hero"|"comparison"}.`,
   });
 
   let inst = await instantiate();
@@ -1062,6 +1090,10 @@ export async function renderCandidate(args: {
     heroProp: inst.heroProp,
     headlineWords: plannedHeadline(),
     sceneSeed: args.sceneSeed,
+    // Declared by the channel: an icon channel must lead with the structure and
+    // a person channel with the face, so the gate must not score either on the
+    // human-agency reading meant for ordinary story channels.
+    subjectClass: identityContract?.subjectClass,
   });
   if (storyInterest.verdict !== "compelling" && storyInterest.liftPrompts.length) {
     args.log?.(
@@ -1086,6 +1118,7 @@ export async function renderCandidate(args: {
         }
       })(),
       sceneSeed: args.sceneSeed,
+      subjectClass: identityContract?.subjectClass,
     });
     // Only keep the replacement if it is actually a better subject — a retry
     // that scores worse must not overwrite a merely-weak original.
@@ -1103,7 +1136,11 @@ export async function renderCandidate(args: {
   // deterministically so generators receive named layers, not a prose blob.
   if (inst.heroProp) {
     inst.fluxPrompt =
-      `LAYOUT MODE: ${inst.layoutMode === "centered_hero" ? "centered hero at peak action; reserve asymmetric clean pockets around its silhouette for native typography" : "split composition; hero opposite the chosen type zone"}. ` +
+      `LAYOUT MODE: ${inst.layoutMode === "centered_hero"
+        ? "centered hero at peak action; reserve asymmetric clean pockets around its silhouette for native typography"
+        : inst.layoutMode === "comparison"
+          ? "comparison composition; two subjects at comparable scale held against each other across a physical seam the scene provides, the difference between them the loudest thing in the frame, type landing in the calmer of the two halves"
+          : "split composition; hero opposite the chosen type zone"}. ` +
       `HERO PROP (dominant, 30-50% of frame, cropped close): ${inst.heroProp}. ` +
       `BACKGROUND (separate supporting layer behind the hero - darker, simpler, depth): ${inst.background ?? "deep dark gradient"}. ` +
       `STORY DETAILS (symbolic, on/around the hero): ${(inst.details ?? []).join("; ") || "none"}.`;

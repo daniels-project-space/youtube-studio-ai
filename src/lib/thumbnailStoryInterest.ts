@@ -59,6 +59,44 @@ const REVERSAL_WORDS = [
   "gave back", "still there", "never was", "switch", "swap", "decoy", "twist",
 ];
 
+/**
+ * What the video is actually ABOUT, which decides who owns the hero slot.
+ *
+ * The first version of this gate had a single universal rule — a human being
+ * carries the stake — and it was wrong for a whole class of video. Asked for
+ * "Why The Burj Khalifa Is A Terrible Building" it scored the tower-only
+ * concept as inert for having no human in the hero, re-planned, and produced a
+ * sanitation worker in the foreground with the show-stopper reduced to haze in
+ * the background. For an icon subject the icon IS the draw; a human belongs in
+ * the frame as scale or consequence, never in the hero slot instead of it.
+ *
+ * - `icon`   the video is about a specific famous structure, object or place
+ * - `person` the video is about a specific named person; their face is the draw
+ * - `event`  a story, process or case; human agency carries the stake (default)
+ */
+export type SubjectClass = "icon" | "person" | "event";
+
+/** Structures and landmarks that can legitimately own the hero slot. */
+const ICON_SUBJECTS = [
+  "tower", "skyscraper", "building", "spire", "bridge", "dam", "stadium",
+  "cathedral", "monument", "statue", "pyramid", "temple", "palace", "castle",
+  "ship", "liner", "aircraft", "jet", "rocket", "station", "terminal",
+  "skyline", "structure", "facade", "megastructure",
+];
+
+/** Words that place a subject in the dominant hero slot rather than the set. */
+const DOMINANCE_MARKERS = [
+  "fills", "filling", "dominates", "dominating", "towers", "towering",
+  "centred", "centered", "centre", "center", "head", "full", "entire",
+  "vertical", "colossal", "immense", "looming", "looms", "soaring", "spanning",
+];
+
+/** A person occupying the hero slot. */
+const PERSON_HERO = [
+  "man", "woman", "worker", "guard", "driver", "figure", "person",
+  "face", "portrait", "he", "she",
+];
+
 export interface StoryInterestVerdict {
   score: number;
   verdict: "compelling" | "weak" | "inert";
@@ -88,14 +126,112 @@ export function scoreThumbnailStoryInterest(args: {
   heroProp?: string;
   headlineWords: readonly string[];
   sceneSeed?: string;
+  /** Declared by the channel identity. Defaults to the human-agency reading. */
+  subjectClass?: SubjectClass;
 }): StoryInterestVerdict {
   const headline = tokens(args.headlineWords.join(" "));
   const hero = tokens(args.heroProp ?? "");
   const scene = tokens(`${args.sceneSeed ?? ""} ${args.heroProp ?? ""} ${args.title}`);
+  const subjectClass = args.subjectClass ?? "event";
 
   const reasons: string[] = [];
   const liftPrompts: string[] = [];
   let score = 50;
+
+  // ICON AND PERSON SUBJECTS: the draw is the subject itself. Scoring these on
+  // human agency demotes the very thing the viewer clicked for.
+  if (subjectClass === "icon") {
+    const heroIsIcon = hasAny(hero, ICON_SUBJECTS);
+    const heroIsDominant = hasAny(hero, DOMINANCE_MARKERS);
+    const personTookTheSlot = hasAny(hero, PERSON_HERO) && !heroIsIcon;
+    if (heroIsIcon) {
+      score += 20;
+      reasons.push("the icon itself owns the hero slot");
+    } else {
+      score -= 30;
+      reasons.push("the icon this video is about is not the hero");
+      liftPrompts.push(
+        "The subject of this video is the icon itself. Put it in the hero slot, centred and dominant, filling most " +
+        "of the frame at full height. A person may appear for scale or consequence, but never in place of it.",
+      );
+    }
+    if (heroIsDominant) {
+      score += 10;
+      reasons.push("the icon is staged at dominant scale");
+    } else if (heroIsIcon) {
+      liftPrompts.push("Stage the icon at genuinely dominant scale — filling the frame head-on, not sitting in the background.");
+    }
+    if (personTookTheSlot) {
+      score -= 20;
+      reasons.push("a supporting human has displaced the icon from the hero slot");
+    }
+    if (hasAny(headline, STAKE_WORDS)) {
+      score += 15;
+      reasons.push("the headline names a consequence, reversal or jeopardy");
+    } else {
+      score -= 10;
+      reasons.push("the headline names no consequence — it describes rather than threatens");
+    }
+    if (hasAny(scene, AUDACITY_WORDS)) {
+      score += 10;
+      reasons.push("the concept carries an audacity or scale marker");
+    }
+    if (hasAny(scene, REVERSAL_WORDS)) {
+      score += 15;
+      reasons.push("the concept contains an irony or reversal");
+    } else {
+      liftPrompts.push(
+        "Find the contradiction: the gap between what the icon is famous for and the unglamorous truth. Stage THAT " +
+        "against the icon itself.",
+      );
+    }
+    score = Math.max(0, Math.min(100, score));
+    return {
+      score,
+      verdict: score >= 65 ? "compelling" : score >= 40 ? "weak" : "inert",
+      reasons,
+      liftPrompts,
+    };
+  }
+
+  if (subjectClass === "person") {
+    const heroIsPerson = hasAny(hero, PERSON_HERO) || hasAny(hero, HUMAN_AGENCY);
+    if (heroIsPerson) {
+      score += 25;
+      reasons.push("the person this video is about owns the hero slot");
+    } else {
+      score -= 30;
+      reasons.push("the person this video is about is not the hero — the draw is missing");
+      liftPrompts.push(
+        "This video is about a specific person. Their face is the draw and must be the hero: large, recognizable, " +
+        "and holding the frame. Documents, locations and objects are supporting evidence around them, never the subject.",
+      );
+    }
+    if (hasAny(hero, ["face", "eyes", "portrait", "expression", "stare", "mugshot"])) {
+      score += 15;
+      reasons.push("the face is explicitly staged, not merely implied");
+    } else if (heroIsPerson) {
+      liftPrompts.push("Bring the face itself forward — expression and eye line are what the viewer reads first at 120px.");
+    }
+    if (hasAny(headline, STAKE_WORDS)) {
+      score += 15;
+      reasons.push("the headline names a consequence, reversal or jeopardy");
+    } else {
+      score -= 10;
+      reasons.push("the headline names no consequence — it describes rather than threatens");
+    }
+    if (hasAny(scene, REVERSAL_WORDS)) {
+      score += 15;
+      reasons.push("the concept contains an irony or reversal");
+    }
+    score = Math.max(0, Math.min(100, score));
+    return {
+      score,
+      verdict: score >= 65 ? "compelling" : score >= 40 ? "weak" : "inert",
+      reasons,
+      liftPrompts,
+    };
+  }
 
   const heroHasHuman = hasAny(hero, HUMAN_AGENCY);
   const heroIsInert = hasAny(hero, INERT_SUBJECTS);
@@ -175,7 +311,8 @@ export function scoreThumbnailStoryInterest(args: {
  */
 export const STORY_INTEREST_DOCTRINE = [
   "STEP 0 — IS THIS STORY WORTH A THUMBNAIL? Before inventing any scene, decide what a viewer would actually care about in this video. Craft cannot rescue a boring subject.",
-  "An inert material, a barrier, a tool, or a measurement is NEVER the story. Concrete, steel, walls, locks, cables and doors are obstacles in the story, not the subject of it. The subject is the person, the stake, and the consequence.",
+  "An inert material, a barrier, a tool, or a measurement is NEVER the story. Concrete, steel, walls, locks, cables and doors are obstacles in the story, not the subject of it.",
+  "WHO OWNS THE HERO SLOT depends on what the video is about. If it is about a famous structure, object or place, THAT icon is the draw — stage it centred and dominant, filling the frame at full height, and let any human appear only as scale or consequence beside it. If it is about a specific named person, their face is the draw and must hold the frame. Otherwise the hero is a person at the moment of consequence. Never demote the thing the viewer clicked for into the background.",
   "Prefer, in order: a human being at the moment of consequence > an irony or reversal (the thing that turned out to be the opposite of expected) > an act of audacity at scale > a tactile object that a person is visibly acting on. Never a substance on its own.",
   "If a number is used, it must measure something a person can lose, risk, escape with, or get away with — a sum, a duration, a distance, a count of people fooled. A number attached to a building material measures a barrier and communicates nothing.",
   "Test: state the concept aloud in one sentence. If it describes a procedure ('drilling through a wall') rather than a stake ('they rented the shop next door for six months to reach it'), the concept is not finished.",
