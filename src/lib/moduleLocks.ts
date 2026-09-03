@@ -19,78 +19,20 @@
 import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
+import {
+  type LockableEntity,
+  LOCKABLE_MODULES,
+  channelLockEntity,
+  channelLockId,
+} from "./ownerLockRegistry";
+
+// WHAT is lockable lives in ownerLockRegistry.ts, which imports no node
+// built-ins so the browser can read the same registry the API writes from.
+// This module owns only the state on disk.
+export { LOCKABLE_MODULES, channelLockEntity, channelLockId };
+export type { LockableEntity };
+
 export const LOCK_DIR = join(process.cwd(), ".locks");
-
-export interface LockableEntity {
-  id: string;
-  label: string;
-  kind: "module" | "channel";
-  description: string;
-  /** Absolute-from-repo-root path patterns this lock protects. */
-  paths: readonly string[];
-}
-
-/**
- * Modules that can be locked.
- *
- * A module is a coherent unit of behaviour, not a single file: locking the
- * thumbnail module has to cover every file that can change how a thumbnail is
- * produced, or the lock is theatre — a worker forbidden from editing the
- * renderer would simply edit the gate that admits its output.
- */
-export const LOCKABLE_MODULES: readonly LockableEntity[] = [
-  {
-    id: "thumbnail",
-    label: "Thumbnail module",
-    kind: "module",
-    description:
-      "Art direction, story-interest gating, capability routing, the quality gates and the learning loops.",
-    paths: [
-      "src/lib/thumbnailLab.ts",
-      "src/lib/banana.ts",
-      "src/lib/thumbnailStoryInterest.ts",
-      "src/lib/thumbnailStoryJudge.ts",
-      "src/lib/thumbnailCapabilities.ts",
-      "src/lib/thumbnailChannelIdentity.ts",
-      "src/lib/thumbnailGoldenStandard.ts",
-      "src/lib/thumbnailMobileGate.ts",
-      "src/lib/thumbnailPaletteGuard.ts",
-      "src/lib/thumbnailPanelDetector.ts",
-      "src/lib/thumbnailSameness.ts",
-      "src/lib/thumbnailDefectLedger.ts",
-      "src/lib/thumbnailCtrFeedback.ts",
-      "src/lib/thumbnailLearningStore.ts",
-      "src/lib/thumbnailDefaults.ts",
-      "src/lib/thumbnailRenderTier.ts",
-      "src/lib/thumbnailOcr.ts",
-      "src/lib/thumbnailRenderer.ts",
-      "src/lib/thumbnailLayout.ts",
-      "src/lib/thumbnailSafeZone.ts",
-      "src/lib/falNanoBananaProThumbnail.ts",
-      "src/lib/falNanoBananaProThumbnailContract.ts",
-      "src/lib/nanoBananaThumbnailContract.ts",
-    ],
-  },
-  {
-    id: "publishing",
-    label: "Publishing + YouTube",
-    kind: "module",
-    description: "Upload, scheduling, thumbnail replacement and anything that reaches the live channel.",
-    paths: [
-      "src/lib/youtube.ts",
-      "src/lib/youtubeThumbnailReplacement.ts",
-      "src/lib/youtubeThumbnailReplacementRuntime.ts",
-      "src/lib/youtubeAnalytics.ts",
-    ],
-  },
-  {
-    id: "vault",
-    label: "Credentials + vault",
-    kind: "module",
-    description: "Secret hydration and provider credential handling.",
-    paths: ["src/lib/vault.ts", "src/lib/storage.ts"],
-  },
-];
 
 export interface LockRecord {
   id: string;
@@ -105,17 +47,6 @@ function markerPath(id: string): string {
   // Never let an id escape the lock directory.
   const safe = id.replace(/[^a-zA-Z0-9._-]/g, "-");
   return join(LOCK_DIR, `${safe}.lock`);
-}
-
-/** Channels are lockable by name; their marker protects no file paths. */
-export function channelLockEntity(channelName: string): LockableEntity {
-  return {
-    id: `channel-${channelName.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-")}`,
-    label: channelName,
-    kind: "channel",
-    description: "Channel identity, playbook and settings.",
-    paths: [],
-  };
 }
 
 export async function listLocks(): Promise<LockRecord[]> {

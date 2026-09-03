@@ -1,3 +1,4 @@
+import { OwnerLockBadge } from "@/components/OwnerLockBadge";
 import { GOLDEN_MODULES, type GoldenModule } from "@/engine/golden";
 import {
   catalogExecutionAvailability,
@@ -553,6 +554,8 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
     <article className={styles.moduleCard} data-reference={isReference}>
       <div className={styles.moduleHead}>
         <span>{m.stage}</span>
+        {/* Lockable modules share their id with this key, so the badge needs no mapping. */}
+        <OwnerLockBadge moduleId={m.key} size="sm" />
         {isReference
           ? <span className={styles.moduleStatus} data-tone="reference">REFERENCE CANDIDATE</span>
           : isRegistered

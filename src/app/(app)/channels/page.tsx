@@ -12,6 +12,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
 import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
 import { IconChannels } from "@/components/icons";
+import { OwnerLockBadge } from "@/components/OwnerLockBadge";
 import { ChannelFolderWorkspace } from "@/components/ChannelFolderWorkspace";
 import { useOperationsAccess } from "@/components/OperationsAccess";
 import { fmtUsd } from "@/lib/format";
@@ -302,6 +303,9 @@ export default function ChannelsPage() {
                     </Link>
                     <p>{c.identity?.niche ?? `Template ${c.template}`}</p>
                   </div>
+                  {/* Sibling of the title, never inside its link: a button nested in an
+                      anchor is invalid markup and every click would navigate away. */}
+                  <OwnerLockBadge channelName={c.name} size="sm" />
                   <div
                     className={`channel-live-state channel-live-state-${operatingState.tone}`}
                     aria-label={`${operatingState.label}: ${operatingState.detail}`}
