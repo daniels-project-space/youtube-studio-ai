@@ -41,6 +41,18 @@ import {
 } from "@/lib/thumbnailCapabilities";
 import { applyThumbnailChannelIdentity } from "@/lib/thumbnailChannelIdentity";
 import { gradeThumbnailForMobile, YOUTUBE_OVERLAY_ZONES } from "@/lib/thumbnailMobileGate";
+import {
+  estimateTieredCostUsd,
+  planThumbnailTiers,
+  THUMBNAIL_DRAFT_TIER,
+  THUMBNAIL_FINAL_TIER,
+} from "@/lib/thumbnailRenderTier";
+import {
+  fingerprintThumbnail,
+  hammingDistance,
+  heroOverlap,
+  scoreThumbnailSameness,
+} from "@/lib/thumbnailSameness";
 import { planThumbnailText, type ThumbnailTextZone } from "@/lib/thumbnailLayout";
 import {
   buildThumbnailImageRequest,
@@ -255,6 +267,90 @@ function assertSceneTypographySplit(): void {
   assert.equal(isThumbnailBaseProvenance({
     contract: "thumbnail-base-v1", textFree: true, safeZone: "left", source: "verified-video-still",
   }, "left"), true);
+}
+
+function assertTieredRendering(): void {
+  // A draft is selected for its CONCEPT. Holding it to the shipping model's
+  // typography would reject good ideas for artefacts that never reach
+  // production — verified by rendering one identical prompt on both tiers: the
+  // layout, hero, copy and badge transferred exactly, while paper depth and
+  // type material did not, and the draft additionally rendered incidental
+  // collage text that the identity contract forbids.
+  assert.equal(THUMBNAIL_DRAFT_TIER.enforceCopyFidelity, false);
+  assert.equal(THUMBNAIL_FINAL_TIER.enforceCopyFidelity, true, "the frame that ships gets the full gate");
+  assert.equal(THUMBNAIL_DRAFT_TIER.enforceMobileGate, true, "browse-size legibility is a concept property and does transfer");
+
+  // Nano Banana 1 was measured dropping mandated headline words and staging
+  // heroes far too small; drafting on it would send the loop chasing defects
+  // that never reach production.
+  assert.notEqual(THUMBNAIL_DRAFT_TIER.model, "fal-ai/nano-banana");
+  assert.ok(THUMBNAIL_DRAFT_TIER.outputImageUsd < THUMBNAIL_FINAL_TIER.outputImageUsd);
+
+  // One iteration has nothing to select between, so drafting would only add a
+  // render before the same final render.
+  const single = planThumbnailTiers({ maxIterations: 1 });
+  assert.equal(single.perIteration.tier, "final");
+  assert.equal(single.finalPass, null, "a single-shot render must not pay for a draft it cannot use");
+  assert.equal(estimateTieredCostUsd({ iterations: 1 }).savedUsd, 0);
+
+  const looped = planThumbnailTiers({ maxIterations: 3 });
+  assert.equal(looped.perIteration.tier, "draft");
+  assert.equal(looped.finalPass?.tier, "final");
+
+  // An operator override must be able to force the shipping model everywhere.
+  assert.equal(planThumbnailTiers({ maxIterations: 4, forceFinalOnly: true }).finalPass, null);
+
+  // Savings are real but modest on the fal route, and must not be overstated:
+  // NB2 at $0.06 against Pro at $0.15 is roughly a third off a 4-iteration
+  // loop, not the order of magnitude implied by Gemini-direct Lite pricing.
+  const three = estimateTieredCostUsd({ iterations: 3 });
+  assert.ok(three.savedPct >= 20 && three.savedPct <= 40, `expected a modest saving, got ${three.savedPct}%`);
+  assert.ok(three.tiered < three.allFinal);
+}
+
+async function assertThumbnailSameness(): Promise<void> {
+  const golden = (name: string) => join(process.cwd(), "public/golden", `${name}.jpg`);
+
+  // A file against itself is the one unambiguous duplicate.
+  const rich = await fingerprintThumbnail({ imagePath: golden("rich"), heroProp: "a billionaire portrait cutout over torn newsprint" });
+  assert.equal(hammingDistance(rich.phash, rich.phash), 0);
+  assert.equal(rich.phash.length, 16, "the hash must be a full 64-bit value");
+
+  // Genuinely different approved thumbnails must be far apart, or the whole
+  // instrument is useless.
+  const hannibal = await fingerprintThumbnail({ imagePath: golden("hannibal"), heroProp: "a war elephant advancing through alpine snow" });
+  assert.ok(
+    hammingDistance(rich.phash, hannibal.phash) > 12,
+    "two unrelated approved thumbnails must not read as duplicates",
+  );
+
+  // Hero vocabulary is the PRIMARY signal, because the perceptual bands
+  // overlap: a re-rendered identical scene measured 26 while different videos
+  // on one channel measured 28.
+  assert.equal(heroOverlap(["tower", "crane", "haze"], ["tower", "crane", "haze"]), 1);
+  assert.equal(heroOverlap(["tower", "crane"], ["briefcase", "lounge"]), 0);
+
+  const repeat = scoreThumbnailSameness({
+    candidate: { phash: rich.phash, heroTokens: ["woman", "floating", "water", "ripples"] },
+    recent: [{ phash: hannibal.phash, heroTokens: ["woman", "floating", "water", "ripples"] }],
+  });
+  assert.equal(repeat.tooSimilar, true, "a recycled hero idea must be caught even when the render looks different");
+  assert.ok(repeat.reasons.join(" ").includes("repeats a recent idea"));
+
+  // Channel consistency must NOT be punished: same palette and type family,
+  // genuinely different subject.
+  const consistent = scoreThumbnailSameness({
+    candidate: { phash: rich.phash, heroTokens: ["tower", "crane", "haze"] },
+    recent: [{ phash: hannibal.phash, heroTokens: ["briefcase", "lounge", "swap"] }],
+  });
+  assert.equal(consistent.tooSimilar, false, "a channel is supposed to look like itself");
+
+  // No history is never a duplicate.
+  assert.equal(
+    scoreThumbnailSameness({ candidate: rich, recent: [] }).tooSimilar,
+    false,
+    "the first thumbnail on a channel cannot repeat anything",
+  );
 }
 
 async function assertMobileSquintGate(): Promise<void> {
@@ -904,6 +1000,8 @@ async function main(): Promise<void> {
     assertNativeCopyOcrGate();
     assertSceneTypographySplit();
     await assertMobileSquintGate();
+await assertThumbnailSameness();
+assertTieredRendering();
 assertCapabilityRoutingDoesNotRegressExistingChannels();
 assertBadgeIsAChannelConstant();
 assertStoryInterestIntelligence();
