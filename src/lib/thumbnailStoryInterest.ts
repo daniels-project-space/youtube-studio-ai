@@ -103,10 +103,36 @@ export interface StoryInterestVerdict {
   reasons: string[];
   /** Concrete art-direction corrections that would raise the score. */
   liftPrompts: string[];
+  /**
+   * WHICH part of the concept is failing.
+   *
+   * This exists because a verdict alone is not actionable. A Hannibal candidate
+   * scored 60 with an excellent scene — an elephant cropping into frame at the
+   * burning gates of Rome — and a headline, "AT THE GATES", that named a
+   * location rather than a consequence. The generic lift told the art director
+   * to re-plan the SUBJECT, which risks throwing away a scene that was already
+   * right, and the re-plan duly scored 60 again.
+   *
+   * Targeting the fix is the difference between a gate that reports a problem
+   * and a gate that repairs one.
+   */
+  weakestAxis: "hero" | "headline" | "both" | "none";
 }
 
 function tokens(value: string): string[] {
   return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").split(" ").filter(Boolean);
+}
+
+/**
+ * Which axis to repair. A concept can have an excellent scene and a headline
+ * that names nothing, and re-planning the whole subject in that case discards
+ * work that was already right.
+ */
+function axisFor(heroWeak: boolean, headlineWeak: boolean): StoryInterestVerdict["weakestAxis"] {
+  if (heroWeak && headlineWeak) return "both";
+  if (heroWeak) return "hero";
+  if (headlineWeak) return "headline";
+  return "none";
 }
 
 function hasAny(list: readonly string[], words: readonly string[]): boolean {
@@ -171,6 +197,7 @@ export function scoreThumbnailStoryInterest(args: {
     } else {
       score -= 10;
       reasons.push("the headline names no consequence — it describes rather than threatens");
+      liftPrompts.push(HEADLINE_LIFT);
     }
     if (hasAny(scene, AUDACITY_WORDS)) {
       score += 10;
@@ -191,6 +218,7 @@ export function scoreThumbnailStoryInterest(args: {
       verdict: score >= 65 ? "compelling" : score >= 40 ? "weak" : "inert",
       reasons,
       liftPrompts,
+      weakestAxis: axisFor(!heroIsIcon || personTookTheSlot, !hasAny(headline, STAKE_WORDS)),
     };
   }
 
@@ -219,6 +247,7 @@ export function scoreThumbnailStoryInterest(args: {
     } else {
       score -= 10;
       reasons.push("the headline names no consequence — it describes rather than threatens");
+      liftPrompts.push(HEADLINE_LIFT);
     }
     if (hasAny(scene, REVERSAL_WORDS)) {
       score += 15;
@@ -230,6 +259,7 @@ export function scoreThumbnailStoryInterest(args: {
       verdict: score >= 65 ? "compelling" : score >= 40 ? "weak" : "inert",
       reasons,
       liftPrompts,
+      weakestAxis: axisFor(!heroIsPerson, !hasAny(headline, STAKE_WORDS)),
     };
   }
 
@@ -268,6 +298,7 @@ export function scoreThumbnailStoryInterest(args: {
   } else {
     score -= 10;
     reasons.push("the headline names no consequence — it describes rather than threatens");
+    liftPrompts.push(HEADLINE_LIFT);
   }
 
   // The signature failure: a quantity attached to an inert noun. "18 INCHES OF
@@ -302,8 +333,46 @@ export function scoreThumbnailStoryInterest(args: {
 
   score = Math.max(0, Math.min(100, score));
   const verdict = score >= 65 ? "compelling" : score >= 40 ? "weak" : "inert";
-  return { score, verdict, reasons, liftPrompts };
+  return {
+    score,
+    verdict,
+    reasons,
+    liftPrompts,
+    weakestAxis: axisFor(!heroHasHuman || (heroIsInert && !heroHasHuman), !headlineHasStake),
+  };
 }
+
+/**
+ * Concrete hook constructions, offered when the HEADLINE is the weak axis.
+ *
+ * "Name a consequence" is a critique, not an instruction. These are the actual
+ * shapes that carry a stake, drawn from what works in this repo's own approved
+ * set: the golden Hannibal reference reads "ROME'S WORST NIGHTMARE" — it names
+ * what the subject WAS TO SOMEONE. The rejected candidate read "AT THE GATES",
+ * which names where he stood.
+ */
+/**
+ * The corrective that was missing.
+ *
+ * Every scoring path reported "the headline names no consequence" and then
+ * pushed no lift for it, so the art director was told a headline was wrong and
+ * never told what to do about it — it re-planned three times and produced the
+ * same location hook each time. Diagnosing without prescribing is not a gate.
+ */
+export const HEADLINE_LIFT =
+  "REWRITE THE HEADLINE — it currently names a place, a topic or a position rather than a stake. " +
+  "Name what the subject WAS TO SOMEONE, what it COST them, or what ALMOST happened. This channel's own " +
+  "approved reference for exactly this subject reads \"ROME'S WORST NIGHTMARE\" — it names what he was to " +
+  "Rome. A rejected candidate read \"AT THE GATES\" — it names where he stood. Write the first kind.";
+
+export const HOOK_CONSTRUCTIONS = [
+  "What the subject WAS TO SOMEONE — their worst nightmare, their last mistake, the reason they lost.",
+  "What it COST — a number attached to something a person can lose: lives, years, a fortune, a city.",
+  "The REVERSAL — the thing that turned out the opposite of expected, or the victory that changed nothing.",
+  "What ALMOST happened — the outcome that was one decision away, and did not come.",
+  "Who was BLAMED, betrayed, warned, or ignored — and what happened to them.",
+  "The thing NOBODY saw, said, or survived.",
+] as const;
 
 /**
  * Standing doctrine for the art director. This runs BEFORE layout and scene

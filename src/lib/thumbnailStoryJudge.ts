@@ -139,5 +139,9 @@ export async function judgeThumbnailStoryInterest(args: {
     deterministicScore: args.deterministic.score,
     judgeScore,
     judgeLoweredScore: true,
+    // The judge critiques the concept as a whole and cannot attribute the
+    // weakness to one axis, so the deterministic diagnosis is preserved rather
+    // than overwritten with a guess.
+    weakestAxis: args.deterministic.weakestAxis,
   };
 }

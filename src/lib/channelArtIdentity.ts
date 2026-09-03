@@ -72,6 +72,32 @@ function nameBoundArtWorld(identity: ArtIdentity): Partial<ArtIdentity> {
       visualAvoid: ["rainy neon bedroom", "generic headphones-at-a-desk scene", "city-only window view", "photorealistic CGI"],
     };
   }
+  if (/\b(drift|drifting)\b/u.test(name)) {
+    return {
+      persona: "a quiet, non-identifiable study figure inside a slow-moving sky observatory",
+      styleGrammar: "hand-painted atmospheric animation, soft paper texture, luminous cloud depth, calm cinematic daylight",
+      palette: ["#10263f", "#466e93", "#a6d6dd", "#efd2a1", "#f8f3e8"],
+      iconicMotif: "an open field notebook whose loose page becomes a small paper glider above an ocean of clouds",
+      vibe: "weightless concentration, quiet momentum, and room to think",
+      worldSetting: "a hand-painted high-altitude study observatory drifting through a vast morning cloudscape, with no coastline or enclosed bedroom",
+      worldComposition: "one compact study figure and a paper glider in the center safe area; layered clouds, distant sun, and open sky fill the wide banner",
+      worldMotifs: ["paper glider", "field notebook", "sunlit cloud layers", "quiet brass observatory rail", "slow-moving curtains"],
+      visualAvoid: ["rainy neon bedroom", "generic headphones-at-a-desk scene", "seaside window", "generic city skyline", "photorealistic CGI"],
+    };
+  }
+  if (/\b(neon|rainy|rain)\b/u.test(name) && /\b(lofi|lo-fi|music)\b/u.test(name)) {
+    return {
+      persona: "a quiet, non-identifiable late-night listener in a rain-washed city refuge",
+      styleGrammar: "rich hand-painted nocturne, restrained neon reflections, tactile ink and watercolor, cinematic rain light",
+      palette: ["#070d1f", "#1a3d66", "#4c81b7", "#cc5d88", "#f0c98f"],
+      iconicMotif: "a single glowing cassette player reflected in a rain-slicked window overlooking a softened night city",
+      vibe: "late-night warmth, softened rain, and a private pulse of focus",
+      worldSetting: "a hand-painted rain-lit listening room above a living night city, with unmistakable wet glass, reflected signs, and a distant transit glow",
+      worldComposition: "one small cassette-player focal point inside the safe area; window reflections and blurred city color form the outer banner",
+      worldMotifs: ["rain-slicked window", "glowing cassette player", "soft transit light", "reflected signage", "ink-blue rain"],
+      visualAvoid: ["seaside window", "generic headphones-at-a-desk scene", "daytime coffee desk", "photorealistic CGI"],
+    };
+  }
   if (/\binvestory\b/u.test(name)) {
     return {
       persona: "a patient financial historian tracing durable capital through time",

@@ -233,6 +233,22 @@ function assertNameBoundWorldsRepairStaleImportedIdentity(): void {
   assert.match(investory, /bronze key/i);
   assert.match(investory, /DO NOT INTRODUCE:.*coffee desk/i);
   assert.doesNotMatch(investory, /lifestyle desk photography/i);
+
+  const drift = bannerPrompt(channelArtIdentityFromSource({
+    name: "Drift & Study",
+    identity: {
+      persona: "a rainy bedroom listener", styleGrammar: "generic cozy LoFi desk", niche: "Lo-Fi Music",
+      creativeBrief: { iconicMotif: "headphones beside a coffee cup", vibe: "quiet focus" },
+    },
+    styleDNA: {
+      setting: "a rainy neon bedroom", composition: "headphones at a desk", motifs: ["coffee cup"],
+      visualAvoid: [],
+    },
+  }));
+  assert.match(drift, /high-altitude study observatory/i);
+  assert.match(drift, /paper glider/i);
+  assert.match(drift, /DO NOT INTRODUCE:.*rainy neon bedroom/i);
+  assert.doesNotMatch(drift, /generic cozy LoFi desk/i);
 }
 
 function assertPromptContracts(): void {

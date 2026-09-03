@@ -327,7 +327,7 @@ async function assertHybridStoryJudge(): Promise<void> {
   // RULE 1 — an inert verdict is already decided, so no call is made at all.
   let called = false;
   const inert = await judgeThumbnailStoryInterest({
-    deterministic: { score: 10, verdict: "inert", reasons: [], liftPrompts: ["x"] },
+    deterministic: { score: 10, verdict: "inert", reasons: [], liftPrompts: ["x"], weakestAxis: "both" },
     title: "t", headlineWords: [],
     askJudge: async () => { called = true; return { score: 90 }; },
   });

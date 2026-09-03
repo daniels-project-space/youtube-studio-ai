@@ -48,6 +48,7 @@ import {
   OWNER_SELECTED_THUMBNAIL_PREFERENCE_RULES,
 } from "@/lib/thumbnailGoldenStandard";
 import {
+  HOOK_CONSTRUCTIONS,
   scoreThumbnailStoryInterest,
   STORY_INTEREST_DOCTRINE,
 } from "@/lib/thumbnailStoryInterest";
@@ -1014,6 +1015,7 @@ export async function renderCandidate(args: {
   // the first concept scores as a weak or inert subject. Text-only, so a dull
   // idea is replaced before any image is paid for.
   let storyLift: readonly string[] = [];
+  let storyLiftAxis: "hero" | "headline" | "both" | "none" = "both";
   const instantiate = async () => claudeJson<{
     heroProp?: string;
     background?: string;
@@ -1036,8 +1038,16 @@ export async function renderCandidate(args: {
       // cannot rescue a subject nobody cares about.
       `${STORY_INTEREST_DOCTRINE.join("\n")}\n` +
       (storyLift.length
-        ? `THE PREVIOUS CONCEPT WAS REJECTED AS A WEAK SUBJECT, not a weak execution. The craft was fine; the story ` +
-          `was not worth telling. Choose a genuinely more interesting subject for this same video:\n` +
+        ? `${storyLiftAxis === "headline"
+            ? `THE SCENE IS GOOD — DO NOT CHANGE IT. Keep the same heroProp, background and details exactly as ` +
+              `planned. ONLY the headline is failing: it describes rather than threatens. Rewrite JUST the copy ` +
+              `using one of these constructions, and pick the one this story actually supports:\n` +
+              `${HOOK_CONSTRUCTIONS.map((hook) => `- ${hook}`).join("\n")}\n`
+            : storyLiftAxis === "hero"
+              ? `THE HOOK IS GOOD — KEEP THE COPY. Only the SCENE is failing: it does not stage anything worth ` +
+                `looking at. Re-plan heroProp, background and details around the same hook.\n`
+              : `THE PREVIOUS CONCEPT WAS REJECTED AS A WEAK SUBJECT, not a weak execution. Choose a genuinely ` +
+                `more interesting subject for this same video.\n`}` +
           `${storyLift.map((lift) => `- ${lift}`).join("\n")}\n`
         : "") +
       // Regenerate feedback comes FIRST so it cannot be buried under the
@@ -1220,12 +1230,24 @@ export async function renderCandidate(args: {
       };
     }
   }
-  if (storyInterest.verdict !== "compelling" && storyInterest.liftPrompts.length) {
+  // ACT on a low score rather than merely reporting one. The first version
+  // bought exactly one re-plan and kept the original whenever the retry failed
+  // to beat it, which meant a weak concept simply shipped weak — observed on a
+  // Hannibal candidate that scored 60, re-planned to 60, and shipped at 60.
+  //
+  // Two changes make it actionable. The lift is TARGETED at the failing axis,
+  // so a good scene with a weak hook gets its copy rewritten instead of its
+  // subject discarded. And it tries more than once, keeping the best attempt
+  // seen rather than only accepting a strict improvement on the first.
+  const MAX_STORY_REPLANS = 3;
+  for (let attempt = 0; attempt < MAX_STORY_REPLANS; attempt++) {
+    if (storyInterest.verdict === "compelling" || !storyInterest.liftPrompts.length) break;
     args.log?.(
-      `thumbnailLab: story interest ${storyInterest.score}/100 (${storyInterest.verdict}) — ` +
-      `${storyInterest.reasons.join("; ")}; re-planning the subject before paying for an image`,
+      `thumbnailLab: story interest ${storyInterest.score}/100 (${storyInterest.verdict}, weakest: ` +
+      `${storyInterest.weakestAxis}) — ${storyInterest.reasons.join("; ")}; re-planning attempt ${attempt + 1}`,
     );
     storyLift = storyInterest.liftPrompts;
+    storyLiftAxis = storyInterest.weakestAxis;
     const lifted = await instantiate();
     const liftedScore = scoreThumbnailStoryInterest({
       title: args.title,
@@ -1245,19 +1267,22 @@ export async function renderCandidate(args: {
       sceneSeed: args.sceneSeed,
       subjectClass: identityContract?.subjectClass,
     });
-    // Only keep the replacement if it is actually a better subject — a retry
-    // that scores worse must not overwrite a merely-weak original.
     if (liftedScore.score > storyInterest.score) {
       inst = lifted;
       storyInterest = liftedScore;
       args.log?.(`thumbnailLab: story interest lifted to ${liftedScore.score}/100 (${liftedScore.verdict})`);
     } else {
       args.log?.(
-        `thumbnailLab: story re-plan scored ${liftedScore.score}/100, no better than ${storyInterest.score} — keeping the original concept`,
+        `thumbnailLab: re-plan ${attempt + 1} scored ${liftedScore.score}/100, keeping ${storyInterest.score}`,
       );
     }
   }
-  if (!inst.vantage && capabilities.defaultVantage) inst.vantage = capabilities.defaultVantage;
+  if (storyInterest.verdict !== "compelling") {
+    args.log?.(
+      `thumbnailLab: shipping a ${storyInterest.verdict} concept at ${storyInterest.score}/100 after ` +
+      `${MAX_STORY_REPLANS} re-plans — the hook could not be strengthened automatically`,
+    );
+  }
   // A comparison title is not a judgement call: the model reliably ignores the
   // comparison layout and returns a single hero, which renders both headline
   // words stacked in one corner where they label nothing.
