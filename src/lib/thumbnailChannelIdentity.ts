@@ -145,6 +145,7 @@ const PROFILES: readonly IdentityProfile[] = [
     rules: [
       "Empires At War is CINEMATIC HISTORICAL PAINTING, never line art: rendered like a blockbuster history film still or a museum oil painting — directional light, real weight and materials, painterly brush texture rather than outlines or hatching.",
       "One heroic subject at the peak of a campaign moment, cropped close and towering into the frame — a commander, a war beast, a siege engine, a standard going down — with an army, a city or a mountain range giving true scale behind it.",
+      "The headline belongs to the same world as the scene and is lit by the same light. " +
       "Weather may carry the scale, but it must never flatten the frame: every image needs a genuinely BLACK value and a genuinely BRIGHT value, with the headline placed against the darkest area. Haze, rain, smoke and dust across the whole frame produce a mid-tone mush that dies at browse size — keep them to one depth plane and leave the hero and the type in hard light.",
     ],
     avoid: [
@@ -155,7 +156,7 @@ const PROFILES: readonly IdentityProfile[] = [
     visualLanguage: {
       imageStyle: "cinematic historical oil painting, hard directional key light, deep black shadow against bright highlight, painterly brushwork, blockbuster film-still weight",
       composition: "full_scene",
-      textObject: "movie_poster",
+      textObject: "scene_forged",
     },
     contract: {
       version: "thumbnail-channel-identity/v1",

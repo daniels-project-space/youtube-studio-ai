@@ -28,10 +28,11 @@ import { applyThumbnailChannelIdentity } from "@/lib/thumbnailChannelIdentity";
 import { buildStyleDnaPlaybook, renderCandidate } from "@/lib/thumbnailLab";
 import { gradeThumbnailForMobile } from "@/lib/thumbnailMobileGate";
 import { gradeThumbnailPalette, readThumbnailPalette } from "@/lib/thumbnailPaletteGuard";
+import { detectFlatPanel } from "@/lib/thumbnailPanelDetector";
 import { THUMBNAIL_FINAL_TIER } from "@/lib/thumbnailRenderTier";
 
 const OUT = process.env.NB_OUT_DIR ?? "/tmp/nb-compare/out-loop";
-const MAX_ITERS = 2;
+const MAX_ITERS = 3;
 
 function channelDna(a: {
   palette: string[]; subject: string; setting: string; composition: string;
@@ -69,41 +70,54 @@ async function falRender(prompt: string): Promise<Uint8Array> {
   return Buffer.from(await (await fetch(url)).arrayBuffer());
 }
 
-const JOBS = [  {
-    // "Boring and could be much more visual" — the fix is a physical, tactile
-    // mechanism the viewer can SEE taking money, not a document being held.
+const JOBS = [
+  {
+    // "Clearer text on what it references" + "more emotional".
     id: "investory",
     channelName: "Investory",
     title: "The Pension Fee That Quietly Took A Third Of Your Retirement",
-    recentHues: [0, 10, 350],
+    recentHues: [205, 210, 200],
     dna: channelDna({
-      // DEEP GREEN world, far from both the red and the cyan.
       palette: ["#0E2B22", "#F2C230"],
-      subject: "a physical mechanism visibly removing part of something that belongs to a person",
-      setting: "a tactile real-world object standing in for the money, being cut, siphoned or shaved",
-      composition: "extreme close crop on the mechanism doing the taking",
-      colorGrade: "deep green-black field with ONE hot yellow accent",
-      motifs: ["a slice removed", "a hand too late"],
-      avoid: ["a person holding paperwork", "floating coins", "charts", "an office desk"],
+      subject: "an older person at the moment of realising money they earned is gone",
+      setting: "an ordinary cold home where the consequence is visible around them",
+      composition: "the face and hands carry the emotion at close range; the evidence surrounds them in the same room",
+      colorGrade: "cold green-grey domestic light with ONE warm source on the person",
+      motifs: ["unpaid bills", "a single lit lamp"],
+      avoid: ["a person holding paperwork calmly", "floating coins", "charts", "a diagram of a mechanism", "a panel beside the picture"],
     }),
   },
   {
-    // "Horrible, boring, not understandable" — the previous frame showed bolt
-    // cutters on an anonymous cable, which reads as nothing. The subject must be
-    // the CONSEQUENCE: the thing that was supposed to be watching, blinded.
+    // "Still not interesting enough" — the story is the person who should have
+    // noticed, not the tool.
     id: "vault",
     channelName: "Vault Breach",
-    title: "They Cut The Alarm Line And Nobody Noticed For 9 Hours",
-    recentHues: [0, 10, 120],
+    title: "They Robbed It While The Guard Watched A Loop Of An Empty Room",
+    recentHues: [119, 130, 110],
     dna: channelDna({
-      // AMBER-SODIUM world, far from red and green.
-      palette: ["#1A1206", "#FFB020"],
-      subject: "the security system that was supposed to be watching, visibly dead",
-      setting: "the room the alarm was protecting, still and untouched, with the system dark",
-      composition: "the dead indicator or blank screen dominant, the untouched room beyond",
-      colorGrade: "near-black field with ONE sodium-amber source",
-      motifs: ["a dark status light", "an empty mount"],
-      avoid: ["anonymous cables", "generic tools in gloves", "cool cyan equipment light"],
+      palette: ["#141821", "#FF7A1A"],
+      subject: "the person who was supposed to notice, calmly watching the wrong thing",
+      setting: "a security desk whose screens show a room that is no longer real",
+      composition: "the watcher and the screens in one frame, the truth visible to us and not to them",
+      colorGrade: "near-black room lit only by screen glow with ONE hot amber source",
+      motifs: ["a frozen timestamp", "an untouched coffee"],
+      avoid: ["anonymous cables", "tools in gloves", "an equipment box", "a panel beside the picture"],
+    }),
+  },
+  {
+    // New channel: Star Wars fan theory.
+    id: "startheory",
+    channelName: "Parsec Theory",
+    title: "The Detail In Episode IV That Proves The Empire Knew All Along",
+    recentHues: [30, 40, 20],
+    dna: channelDna({
+      palette: ["#05070D", "#3FD2FF"],
+      subject: "one overlooked physical detail from the films, isolated and made enormous",
+      setting: "the frame of the film itself, treated as evidence rather than illustration",
+      composition: "the overlooked detail dominant and lit like the point of the whole story",
+      colorGrade: "deep space-black with ONE cold cyan source and a hard rim",
+      motifs: ["a freeze-frame marker", "scan lines"],
+      avoid: ["a collage of characters", "movie-poster montage", "a panel beside the picture", "warm firelight"],
     }),
   },
 ] as const;
@@ -151,12 +165,10 @@ async function main(): Promise<void> {
           reading: await readThumbnailPalette(value.outJpg),
           recentHues: job.recentHues,
         });
-        const issues = [...mobile.failures, ...palette.issues];
-        return {
-          score: mobile.passed && !palette.monotonous ? 1 : 0,
-          pass: mobile.passed && !palette.monotonous,
-          issues,
-        };
+        const panel = await detectFlatPanel({ imagePath: value.outJpg });
+        const issues = [...mobile.failures, ...palette.issues, ...panel.issues];
+        const ok = mobile.passed && !palette.monotonous && !panel.hasFlatPanel;
+        return { score: ok ? 1 : 0, pass: ok, issues };
       },
     });
     const first = measured[0] ?? 0;
