@@ -356,6 +356,32 @@ async function assertHybridStoryJudge(): Promise<void> {
   assert.equal(nonsense.score, 100);
 }
 
+function assertObjectSubjectClass(): void {
+  // Found by running three brand-new channels through the module unaided. An
+  // art-theft channel, a deep-sea engineering channel and a consumer-goods
+  // channel all thrashed, scoring 0 and 15 for "no human presence or agency in
+  // the hero" — when an empty picture frame, a hull bolt and a crisp packet are
+  // precisely what those videos are about. Same failure the `icon` class was
+  // created to fix, in a class nobody had named.
+  const failingBolt = "a single hull bolt blowing out of a steel seam as water floods through the gap";
+  const asEvent = scoreThumbnailStoryInterest({ title: "t", heroProp: failingBolt, headlineWords: ["ONE BOLT", "FAILED"] });
+  const asObject = scoreThumbnailStoryInterest({ title: "t", heroProp: failingBolt, headlineWords: ["ONE BOLT", "FAILED"], subjectClass: "object" });
+  assert.equal(asEvent.verdict, "inert", "the event reading penalises an object subject for being an object");
+  assert.ok(asObject.score > asEvent.score + 30, `the object reading must not punish the subject for existing (${asEvent.score} -> ${asObject.score})`);
+
+  // But it must not become a free pass: an object nobody is doing anything to
+  // is a product shot, and a product shot is still not a thumbnail.
+  const inertShelf = scoreThumbnailStoryInterest({
+    title: "t", heroProp: "a crisp packet on a supermarket shelf", headlineWords: ["THE BAG"], subjectClass: "object",
+  });
+  assert.equal(inertShelf.verdict, "inert", "an unhandled object must still fail");
+  assert.ok(
+    inertShelf.liftPrompts.some((lift) => /Put hands on it/.test(lift)),
+    "and it must say what to do about it",
+  );
+  assert.equal(inertShelf.weakestAxis, "both");
+}
+
 function assertDefaultsSpreadRatherThanCollapse(): void {
   // The bug class this exists for: a single constant fallback reads as a
   // sensible safety net and silently makes every channel that omits a field
@@ -1249,6 +1275,7 @@ async function main(): Promise<void> {
 await assertThumbnailSameness();
 assertTieredRendering();
 await assertHybridStoryJudge();
+assertObjectSubjectClass();
 assertDefaultsSpreadRatherThanCollapse();
 assertSelfWritingDoctrine();
 assertLearningPersistence();

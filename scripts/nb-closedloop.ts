@@ -74,67 +74,54 @@ async function falRender(prompt: string): Promise<Uint8Array> {
 
 const JOBS = [
   {
-    id: "hannibal",
-    channelName: "Empires At War",
-    title: "The Day Hannibal Stood At The Gates Of Rome",
-    recentHues: [245, 145, 115],
+    // HEIST — a new one. Art theft, nothing to do with vaults or getaway cars.
+    id: "blankframes",
+    channelName: "Blank Frames",
+    title: "The Painting That Hung Upside Down For Eleven Years Before Anyone Checked",
+    recentHues: [],
     dna: channelDna({
-      palette: ["#E9EDF2", "#B3121D"],
-      subject: "the most surprising object of the campaign, not the most famous man",
-      setting: "a bright open snowfield, daylight, the unglamorous part of the campaign",
-      composition: "the surprising object overwhelming in the frame, a countable column of tiny figures behind for scale",
-      colorGrade: "bright snow-white field, near-monochrome, ONE saturated red",
-      motifs: ["a torn red standard", "a column receding to the horizon"],
-      avoid: ["dark interiors", "night", "warm firelight", "drawn line art", "a panel beside the picture"],
+      palette: ["#171A21", "#C4452F"],
+      subject: "the absence left behind in a gallery after something is taken",
+      setting: "museum and gallery interiors after hours",
+      composition: "the empty place where the work should be, at human scale",
+      colorGrade: "cold gallery light, deep parquet shadow",
+      motifs: ["an empty hanging wire", "a numbered wall label", "a velvet rope"],
+      avoid: ["masked burglars", "laser grids", "money", "getaway cars"],
     }),
   },
   {
-    id: "investory",
-    channelName: "Investory",
-    title: "The Pension Fee That Quietly Took A Third Of Your Retirement",
-    recentHues: [245, 145, 115],
+    // NEW — deep-sea engineering failure. No palette accent supplied on
+    // purpose: the accent must fall through to the spread default, which is
+    // the fix that replaced the hard-coded gold.
+    id: "crushdepth",
+    channelName: "Crush Depth",
+    title: "The Submersible That Imploded Because Of One Bolt",
+    recentHues: [],
     dna: channelDna({
-      palette: ["#123B2A", "#F2C230"],
-      subject: "one person, one clear gesture, at the moment money they earned is gone",
-      setting: "a bright ordinary kitchen in daylight",
-      composition: "ONE person with exactly two arms and two hands, both visible and doing one single action",
-      colorGrade: "bright daylight green-grey with ONE warm accent",
-      motifs: ["a single sheet of paper", "an empty purse"],
-      avoid: ["a person with hands in more than one place at once", "multiple simultaneous gestures", "dark rooms", "a panel beside the picture"],
+      palette: ["#04141C"],
+      subject: "a machine built to survive pressure, and the one part that did not",
+      setting: "deep water and the surface vessels that work above it",
+      composition: "the machine at true scale against water that has no bottom",
+      colorGrade: "black water pierced by artificial light",
+      motifs: ["a single work light in dark water", "a hull seam", "a tether"],
+      avoid: ["sea monsters", "shipwreck cliché", "sunlit tropical water"],
     }),
   },
   {
-    // "Too ambiguous and complicated" — and the judge agreed: it staged the
-    // passive half and omitted the crime. Show BOTH in one simple frame.
-    id: "vault",
-    channelName: "Vault Breach",
-    title: "They Emptied The Vault While The Camera Showed An Empty Room",
-    recentHues: [245, 145, 115],
+    // NEW — consumer/supply-chain expose. Deliberately mundane and brightly
+    // lit, the opposite visual world to the other two.
+    id: "proofofpurchase",
+    channelName: "Proof Of Purchase",
+    title: "Why The Big Bag Of Crisps Has Been Getting Lighter Every Year",
+    recentHues: [],
     dna: channelDna({
-      palette: ["#1C1408", "#FF9E1B"],
-      subject: "the theft and the thing that failed to see it, both plainly visible in one frame",
-      setting: "the vault itself, standing wide open and stripped bare, with the camera above it",
-      composition: "the emptied vault dominant and unmistakable; the camera small and pointed at it, its light dead",
-      colorGrade: "warm sodium vault light, deep shadow, ONE amber source",
-      motifs: ["an open vault door", "a dark camera housing"],
-      avoid: ["a guard at a desk", "monitors", "cables", "anything requiring explanation", "a panel beside the picture"],
-    }),
-  },
-  {
-    // "Doesn't feel interesting or epic at all" — a console close-up is not
-    // epic. Scale is the fix.
-    id: "startheory",
-    channelName: "Parsec Theory",
-    title: "The Detail In Episode IV That Proves The Empire Knew All Along",
-    recentHues: [245, 145, 115],
-    dna: channelDna({
-      palette: ["#04060C", "#59E0FF"],
-      subject: "an overwhelming imperial structure at colossal scale with one small telling detail on it",
-      setting: "deep space at a scale that dwarfs everything human",
-      composition: "the colossal structure filling the frame, a tiny ship or figure giving true scale against it",
-      colorGrade: "near-black space with ONE cold cyan source and a hard rim light",
-      motifs: ["a tiny ship for scale", "a single lit aperture"],
-      avoid: ["a control panel close-up", "a collage of characters", "a hand on a console", "a panel beside the picture"],
+      palette: ["#F4F1EA", "#2E7D5B"],
+      subject: "an everyday product handled as physical evidence",
+      setting: "supermarket aisles and kitchen counters under flat retail light",
+      composition: "the ordinary object made forensic at close range",
+      colorGrade: "bright flat fluorescent retail light, honest colour",
+      motifs: ["a shelf edge label", "a set of kitchen scales", "packaging"],
+      avoid: ["dark dramatic lighting", "conspiracy imagery", "stock businesspeople"],
     }),
   },
 ] as const;

@@ -72,9 +72,21 @@ const REVERSAL_WORDS = [
  *
  * - `icon`   the video is about a specific famous structure, object or place
  * - `person` the video is about a specific named person; their face is the draw
+ * - `object` the video is about an ORDINARY object treated as evidence — a
+ *            product, a component, a document, a machine part. Nobody is
+ *            famous and nothing is monumental; the thing itself is the story.
  * - `event`  a story, process or case; human agency carries the stake (default)
+ *
+ * `object` was added after three new channels — an art-theft channel, a
+ * deep-sea engineering channel and a consumer-goods channel — were run through
+ * the module unaided. All three thrashed: the gate scored them 0 and 15 out of
+ * 100 with "no human presence or agency in the hero", because an empty picture
+ * frame, a hull bolt and a crisp packet are exactly what those videos are
+ * about. They burned re-plans fighting a rule written for story channels. It is
+ * the same failure the `icon` class was created to fix, reappearing for a class
+ * nobody had named yet.
  */
-export type SubjectClass = "icon" | "person" | "event";
+export type SubjectClass = "icon" | "person" | "object" | "event";
 
 /** Structures and landmarks that can legitimately own the hero slot. */
 const ICON_SUBJECTS = [
@@ -217,6 +229,55 @@ export function scoreThumbnailStoryInterest(args: {
       reasons,
       liftPrompts,
       weakestAxis: axisFor(!heroIsIcon || personTookTheSlot, !hasAny(headline, STAKE_WORDS)),
+    };
+  }
+
+  if (subjectClass === "object") {
+    // The object IS the subject, so its presence is not a deficiency. What
+    // matters is whether it is treated as EVIDENCE — held, measured, opened,
+    // cut, compared — rather than merely photographed.
+    const handled = hasAny(hero, [
+      "hand", "hands", "gloved", "held", "holding", "measuring", "cutting",
+      "opening", "weighing", "comparing", "tearing", "lifting", "pointing",
+    ]);
+    const forensic = hasAny(hero, [
+      "close", "macro", "detail", "scale", "caliper", "ruler", "label",
+      "seam", "crack", "wear", "stamp", "serial", "evidence",
+    ]);
+    if (handled) {
+      score += 20;
+      reasons.push("the object is being handled as evidence rather than merely photographed");
+    } else {
+      score -= 15;
+      reasons.push("the object sits in the frame without anyone doing anything to it");
+      liftPrompts.push(
+        "Put hands on it. An object photographed is a product shot; an object being measured, opened, cut, " +
+        "weighed or compared is evidence, and evidence is what the viewer clicked for.",
+      );
+    }
+    if (forensic) {
+      score += 10;
+      reasons.push("the object is staged forensically, close enough to read");
+    }
+    if (hasAny(headline, STAKE_WORDS)) {
+      score += 15;
+      reasons.push("the headline names a consequence, reversal or jeopardy");
+    } else {
+      score -= 10;
+      reasons.push("the headline names no consequence — it describes rather than threatens");
+      liftPrompts.push(HEADLINE_LIFT);
+    }
+    if (hasAny(scene, REVERSAL_WORDS)) {
+      score += 15;
+      reasons.push("the concept contains an irony or reversal");
+    }
+    score = Math.max(0, Math.min(100, score));
+    return {
+      score,
+      verdict: score >= 65 ? "compelling" : score >= 40 ? "weak" : "inert",
+      reasons,
+      liftPrompts,
+      weakestAxis: axisFor(!handled, !hasAny(headline, STAKE_WORDS)),
     };
   }
 
