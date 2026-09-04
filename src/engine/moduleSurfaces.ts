@@ -257,7 +257,8 @@ const VISUAL_MATTER_MODULE: ModuleCard = {
   customization: {
     capabilities: [
       "topic-specific mood direction",
-      "character and setting continuity sheets",
+      "three-view character turnarounds for cross-shot consistency",
+      "setting continuity sheets",
       "per-shot storyboard and visual QA locks",
       "typed provider-free visual handoff",
     ],
@@ -303,8 +304,47 @@ const SCENARIO_DISCLOSURE_GATE_MODULE: ModuleCard = {
 };
 
 /** Core pipeline surfaces — registered into MODULE_REGISTRY. */
+/**
+ * The title/metadata module had NO surface at all, which is not a cosmetic gap:
+ * validateModuleConfigMap skips unregistered blocks, so any per-channel title
+ * configuration was silently dropped on write. The clickbait dial in particular
+ * was unreachable from onboarding even though the engine reads it — a
+ * capability nobody could switch on.
+ */
+const METADATA_MODULE: ModuleCard = {
+  key: "metadata",
+  title: "Title, description + tags",
+  stage: "package",
+  does: "Writes the title, description and tags from live search evidence and the real competitor feed, then gates the winner against a click-through judge.",
+  customization: {
+    capabilities: [
+      "seven framed title candidates judged against the live feed",
+      "per-channel clickbait intensity",
+      "runner-up retained for a click-through swap",
+    ],
+    knobs: [
+      // 0-3 rather than a boolean. It was a binary tied to one voice archetype,
+      // so ten of eleven archetypes shared identical, maximally restrained
+      // rules — the same single-constant collapse that made every thumbnail
+      // amber. Omitting it falls back to the channel voice's own default, which
+      // is why there is no neutral "off" value here.
+      {
+        id: "clickbaitLevel", type: "number", range: [0, 3], default: 1,
+        describes: "how hard titles may pull: 0 understated, 1 confident, 2 urgent, 3 maximum",
+        servesStyles: ["hype", "commentary", "documentary", "meditation"],
+      },
+    ],
+    presets: {
+      documentary: { clickbaitLevel: 1 },
+      meditation: { clickbaitLevel: 0 },
+      commentary: { clickbaitLevel: 3 },
+    },
+  },
+};
+
 export const CORE_MODULE_SURFACES: ModuleCard[] = [
   TOPIC_MODULE,
+  METADATA_MODULE,
   SCRIPT_MODULE,
   NARRATION_MODULE,
   FOOTAGE_MODULE,

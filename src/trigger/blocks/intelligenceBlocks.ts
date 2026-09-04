@@ -495,9 +495,14 @@ export const metadataOptimized: Block = {
         // precedence. Entering the pool keeps an owner-approved title that is
         // genuinely the strongest, and drops one that is not.
         warmStartTitle: plannedTitle || undefined,
-        clickbaitLevel: typeof ctx.store["clickbaitLevel"] === "number"
-          ? (ctx.store["clickbaitLevel"] as number)
-          : undefined,
+        // Per-pipeline knob first, then the channel's frozen identity, then the
+        // voice archetype's own default inside metacraft. Without the params
+        // read the module surface would render a dial that changes nothing.
+        clickbaitLevel: typeof ctx.params["clickbaitLevel"] === "number"
+          ? (ctx.params["clickbaitLevel"] as number)
+          : typeof ctx.store["clickbaitLevel"] === "number"
+            ? (ctx.store["clickbaitLevel"] as number)
+            : undefined,
         log: ctx.log,
       });
       let { title, description, tags } = m;

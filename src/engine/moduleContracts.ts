@@ -1169,7 +1169,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   whiteboard_scribe: contract(
     ["script.generated", "script.qa_passed", "narration.timed", "visuals.generated", "visuals.story_aligned", "master.assembled"],
     {
-      optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "voiceId", "ttsProvider", "palette", "musicKey", "musicUrl", "selfContainedStoryReceipt", "channelProgramRoute"],
+      // channelName seeds the creative defaults for a channel that declared no
+      // art style; without it every undeclared drawn channel renders in one
+      // identical hand.
+      optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "voiceId", "ttsProvider", "palette", "musicKey", "musicUrl", "selfContainedStoryReceipt", "channelProgramRoute", "channelName"],
       providerProfiles: [managed, local],
       // 16 panels × five sealed one-worker image envelopes, plus
       // the full premium TTS ceiling. Upstream music is charged by its own
