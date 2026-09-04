@@ -361,16 +361,27 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
   ].filter(Boolean).join(". ") || `A deliberate cinematic world for ${topic}`);
 
   const maxCharacters = boundedInteger(input.maxCharacters, 3, 0, 6);
+  // Wardrobe and props belong to the EPISODE, not to any one person: the ledger
+  // holds one list for the whole story. Stamping them onto every character's
+  // identity lock told the renderer that a cartographer and a quartermaster
+  // wear the same coat and carry the same instruments, which is the same
+  // collapse as every channel sharing one accent colour. They are now stated
+  // once, at scene level, where they are true.
+  const sharedWardrobe = ledger.wardrobe.length ? `Wardrobe in play: ${ledger.wardrobe.join(", ")}.` : "";
+  const sharedProps = ledger.props.length ? `Recurring props: ${ledger.props.join(", ")}.` : "";
   const characters = ledger.entities.slice(0, maxCharacters).map((entity) => {
-    const wardrobe = ledger.wardrobe.length ? `Wardrobe: ${ledger.wardrobe.join(", ")}.` : "";
-    const props = ledger.props.length ? `Recurring props: ${ledger.props.join(", ")}.` : "";
-    const identityLock = clipped(`${entity.look}. ${wardrobe} ${props}`);
+    // NAME-ATTRIBUTED. Two characters in one shot previously produced an
+    // unattributed run of descriptions joined by a space, so nothing tied a
+    // face to its wardrobe and the renderer was free to blend them. The name
+    // leads every lock so multi-character shots stay separable.
+    const identityLock = clipped(`${entity.name}: ${entity.look}`);
     return {
       id: entity.id,
       name: entity.name,
       identityLock,
       stylePrompt: clipped(
-        `Create a consistent cinematic character reference for ${entity.name}. ${identityLock} ` +
+        `Create a consistent cinematic character reference for ${entity.name}. ${identityLock}. ` +
+        `${sharedWardrobe} ${sharedProps} ` +
         `${channelWorld}. ${treatment ? `Treatment storyboard rule: ${treatmentStoryboard}. ` : ""}` +
         `Full figure, front/three-quarter/profile turnaround, neutral readable pose, ` +
         `no typography, labels, captions, logos, or watermarks.`,
@@ -421,15 +432,18 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
     const beat = beatById.get(shot.beatId);
     const characterIds = shot.entities.filter((id) => characterById.has(id));
     const settingId = shot.locationId && settingById.has(shot.locationId) ? shot.locationId : undefined;
+    // Separated, not run together: a space between two identity locks reads as
+    // one description of one person.
     const characterLock = characterIds.length
-      ? characterIds.map((id) => characterById.get(id)!.identityLock).join(" ")
+      ? characterIds.map((id) => characterById.get(id)!.identityLock).join(" | ")
       : "No named character is required; retain the world and subject continuity.";
     const settingLock = settingId
       ? settingById.get(settingId)!.continuityLock
       : setting ?? "Use the established cinematic world without an arbitrary location change.";
     const promptAddendum = clipped(
       `Visual Matter lock for ${shot.id}: ${shot.literalContent}. ` +
-      `Story purpose: ${beat?.purpose ?? shot.coveragePurpose}. Character lock: ${characterLock} ` +
+      `Story purpose: ${beat?.purpose ?? shot.coveragePurpose}. Character lock: ${characterLock}. ` +
+      `${sharedWardrobe} ${sharedProps} ` +
       `Setting lock: ${settingLock} Mood: ${moodBoard.mood}. ` +
       `${treatment ? `Treatment composition: ${treatmentComposition}. Storyboard rule: ${treatmentStoryboard}. ` : ""}` +
       `${cameraRecipe ? `Approved camera grammar: ${cameraRecipe}. ` : ""}` +

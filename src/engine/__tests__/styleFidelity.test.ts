@@ -205,6 +205,66 @@ function main(): void {
     );
   }
 
+  /* ---------------- multi-character attribution ---------------- */
+  //
+  // Invisible with one character, damaging with two. Identity locks were joined
+  // by a space and carried no name, so a shot with a cartographer and a
+  // quartermaster produced one unattributed run of description — nothing tied a
+  // face to its wardrobe and the renderer was free to blend them. Wardrobe and
+  // props made it worse: they live on the EPISODE ledger, and stamping that one
+  // list onto every character asserted that everyone dresses identically.
+  {
+    const twoHanded = {
+      ...story,
+      continuityLedger: {
+        ...story.continuityLedger,
+        entities: [
+          { id: "entity-mara", name: "Mara", look: "a ship's cartographer with a salt-bleached coat" },
+          { id: "entity-royce", name: "Royce", look: "a scarred quartermaster in a tarred jacket" },
+        ],
+      },
+      shotList: [{ ...story.shotList[0], entities: ["entity-mara", "entity-royce"] }],
+    };
+    const manifest = planVisualMatter({
+      topic: "The cartographer who found her own chart was wrong",
+      channelName: "Lorecraft",
+      styleDNA: { setting: "hand-painted watercolour seascape" },
+      visualBrief: { mood: "cold doubt at sea" },
+      ...twoHanded,
+    } as Parameters<typeof planVisualMatter>[0]);
+
+    const addendum = manifest.storyboard[0]!.promptAddendum;
+
+    // Both people NAMED, or nothing ties a description to a figure.
+    assert.match(addendum, /Mara/, `first character unnamed: ${addendum}`);
+    assert.match(addendum, /Royce/, `second character unnamed: ${addendum}`);
+
+    // And SEPARATED. A space between two locks reads as one person.
+    assert.match(
+      addendum,
+      /Mara[^|]*\|[^|]*Royce/,
+      `two characters must be separated, not run together: ${addendum}`,
+    );
+
+    // Neither may lose their own distinguishing description.
+    assert.ok(addendum.includes("cartographer"), "Mara lost her description");
+    assert.ok(addendum.includes("quartermaster"), "Royce lost his description");
+
+    // Episode wardrobe stated ONCE at scene level, never per character.
+    const mentions = addendum.split("Wardrobe in play").length - 1;
+    assert.equal(mentions, 1, `episode wardrobe must appear once, found ${mentions}: ${addendum}`);
+    for (const character of manifest.characters) {
+      assert.ok(
+        !character.identityLock.includes("Wardrobe"),
+        `${character.name}'s lock claims the episode wardrobe as personal: ${character.identityLock}`,
+      );
+      assert.ok(
+        character.identityLock.startsWith(character.name),
+        `identity lock must lead with the name it describes: ${character.identityLock}`,
+      );
+    }
+  }
+
   console.log(
     `STYLE FIDELITY PASS — opposite identities share ${(divergent * 100).toFixed(0)}% of their style clause, ` +
     `same identity ${(control * 100).toFixed(0)}%`,
