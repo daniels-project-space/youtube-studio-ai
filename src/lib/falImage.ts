@@ -234,7 +234,6 @@ async function foldReferencesToSheet(
   const { join } = await import("node:path");
   const { execFile } = await import("node:child_process");
   const { promisify } = await import("node:util");
-  const { buildCharacterSheet } = await import("@/lib/characterSheet");
   const exec = promisify(execFile);
 
   const dir = await mkdtemp(join(tmpdir(), "falrefs-"));
@@ -246,9 +245,17 @@ async function foldReferencesToSheet(
       await writeFile(path, Buffer.from(ref.data, "base64"));
       views.push({ id: `ref_${index}`, path });
     }
-    const { path } = await buildCharacterSheet({
+    // Up to four views lay out as a turnaround; beyond that a 3x3 contact
+    // sheet holds them all. Without this the character-sheet plan caps at four
+    // and any further reference is silently dropped — the same loss this
+    // folding exists to prevent, just at a higher count.
+    const { buildCharacterSheet: build, planCharacterSheet, planContactSheet } =
+      await import("@/lib/characterSheet");
+    const plan = views.length > 4 ? planContactSheet(views) : planCharacterSheet(views);
+    const { path } = await build({
       views,
       outDir: dir,
+      plan,
       run: async (bin, argv, timeoutMs) => { await exec(bin, argv, { timeout: timeoutMs }); },
     });
     return { data: (await readFile(path)).toString("base64"), mimeType: "image/png" };
