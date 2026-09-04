@@ -1635,6 +1635,85 @@ export const setModuleConfig = mutation({
 });
 
 /**
+ * Apply SEVERAL module configurations in one atomic mutation.
+ *
+ * Channel inception previously looped over setModuleConfig, one call per
+ * module. That is a dozen or more round trips per channel created, and — more
+ * importantly — it is not atomic. The loop threw on the first locked module, so
+ * a channel whose seventh module was locked kept the six writes that had
+ * already landed and lost the rest: a half-configured channel with no record of
+ * which half.
+ *
+ * A Convex mutation is atomic, so validating every block BEFORE writing any of
+ * them turns that into an all-or-nothing operation. A refusal now names the
+ * locked module and changes nothing at all.
+ *
+ * Deliberately NOT applied to the claim/complete mutations elsewhere: those are
+ * per-item leases protecting at-most-once paid work, where the sequencing is
+ * the feature rather than the cost.
+ */
+export const setModuleConfigs = mutation({
+  args: {
+    channelId: v.id("channels"),
+    configs: v.record(v.string(), v.record(v.string(), v.any())),
+  },
+  returns: v.union(
+    v.object({ applied: v.number() }),
+    v.object({ state: v.literal("module_locked"), blockId: v.string() }),
+    v.object({ state: v.literal("channel_locked") }),
+  ),
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.channelId);
+    if (!existing) throw new Error(`channel not found: ${args.channelId}`);
+
+    const blockIds = Object.keys(args.configs);
+    const selected = new Set((existing.pipeline ?? []).map((entry) => entry.block));
+
+    // Validate EVERYTHING first. A single pass that writes as it goes is what
+    // made the old loop leave partial state behind.
+    for (const blockId of blockIds) {
+      if (!selected.has(blockId)) {
+        throw new Error(`setModuleConfigs: '${blockId}' is not selected in this channel pipeline`);
+      }
+      if (isChannelModuleLocked(existing.moduleLocks, blockId)) {
+        const rejected = await rejectLockedModuleMutation(
+          ctx, existing, blockId, "channels.setModuleConfigs",
+        );
+        return { state: rejected.state, blockId };
+      }
+    }
+
+    const next: Record<string, unknown> = { ...(existing.moduleConfig ?? {}) };
+    for (const blockId of blockIds) {
+      const cleaned = validateModuleConfig(blockId, args.configs[blockId]!); // throws on illegal
+      if (Object.keys(cleaned).length === 0) delete next[blockId];
+      else next[blockId] = cleaned;
+    }
+
+    const patch: Record<string, unknown> = {
+      moduleConfig: Object.keys(next).length ? next : undefined,
+    };
+    if (JSON.stringify(existing.moduleConfig ?? {}) !== JSON.stringify(next)) {
+      const invalidated = invalidatePersistedInceptionProofs(
+        existing.inception,
+        channelInceptionInvalidationRoots(existing, { ...existing, ...patch }),
+        await channelMutationRole(ctx),
+      );
+      if (invalidated) {
+        patch.inception = invalidated;
+        patch.status = "draft";
+      }
+    }
+    const outcome = await patchChannelRespectingLock(
+      ctx, args.channelId, patch, "channels.setModuleConfigs",
+    );
+    return outcome.state === "channel_locked"
+      ? { state: "channel_locked" as const }
+      : { applied: blockIds.length };
+  },
+});
+
+/**
  * Freeze one selected module. This is an interactive-owner operation only;
  * workers, schedulers, APIs, and agents authenticate as service identities and
  * cannot create a lock that would change the channel's future behavior.

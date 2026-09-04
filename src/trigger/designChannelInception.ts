@@ -2337,15 +2337,22 @@ export async function executeDesignChannel(
     >[0]["persisted"],
   });
   await initializeChannelInceptionLedger({ convex, channelId, plan, admission });
-  for (const [blockId, config] of Object.entries(requestedModuleConfig)) {
-    const moduleConfigWrite = await convex.mutation(api.channels.setModuleConfig, {
+  // ONE atomic write for every module, not one call per module.
+  //
+  // The loop this replaces made a dozen-plus round trips per channel created,
+  // and threw on the first locked module — leaving the writes that had already
+  // landed in place and the rest missing, so a refusal produced a
+  // half-configured channel. A Convex mutation is atomic, so validating every
+  // block before writing any makes a refusal change nothing at all.
+  if (Object.keys(requestedModuleConfig).length > 0) {
+    const moduleConfigWrite = await convex.mutation(api.channels.setModuleConfigs, {
       channelId,
-      blockId,
-      config,
+      configs: requestedModuleConfig as Record<string, Record<string, unknown>>,
     });
-    if ((moduleConfigWrite as { state?: string; blockId?: string }).state === "module_locked") {
+    const refusal = moduleConfigWrite as { state?: string; blockId?: string };
+    if (refusal.state === "module_locked") {
       throw new Error(
-        `channel inception module configuration refused: module '${(moduleConfigWrite as { blockId?: string }).blockId ?? blockId}' is locked`,
+        `channel inception module configuration refused: module '${refusal.blockId ?? "unknown"}' is locked`,
       );
     }
   }
