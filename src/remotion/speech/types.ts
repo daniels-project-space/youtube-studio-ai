@@ -147,3 +147,21 @@ export function resolveTheme(theme?: Partial<SpeechTheme>): SpeechTheme {
 /** ms → frame helpers (single source of truth for caption/cue timing). */
 export const msToFrame = (ms: number, fps: number) => (ms / 1000) * fps;
 export const frameToMs = (frame: number, fps: number) => (frame / fps) * 1000;
+
+/**
+ * Cue visibility and progress — the module's timing contract, in one place.
+ *
+ * Extracted from MotionCueLayer so a test can exercise the SAME rule the
+ * renderer uses. A test that re-implements this logic verifies its own copy and
+ * would keep passing while the component drifted, which is the failure mode
+ * that makes an oracle worthless.
+ *
+ * The window is half-open on purpose: a cue is visible ON its start and gone ON
+ * its end, so adjacent cues never both render on the same frame.
+ */
+export const cueVisibleAt = (cue: { start: number; end: number }, tMs: number): boolean =>
+  !(tMs < cue.start || tMs >= cue.end);
+
+/** Local progress 0 -> 1 across the window, clamped, and safe at zero length. */
+export const cueProgressAt = (cue: { start: number; end: number }, tMs: number): number =>
+  Math.max(0, Math.min(1, (tMs - cue.start) / Math.max(1, cue.end - cue.start)));

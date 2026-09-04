@@ -5,7 +5,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { frameToMs } from "./types";
+import { cueProgressAt, cueVisibleAt, frameToMs } from "./types";
 import type { IconId, MotionCue, SpeechTheme } from "./types";
 
 /**
@@ -426,8 +426,8 @@ export const MotionCueLayer: React.FC<{
   return (
     <>
       {cues.map((cue, i) => {
-        if (t < cue.start || t >= cue.end) return null;
-        const p = Math.max(0, Math.min(1, (t - cue.start) / Math.max(1, cue.end - cue.start)));
+        if (!cueVisibleAt(cue, t)) return null;
+        const p = cueProgressAt(cue, t);
         const Comp = CUE_COMPONENTS[cue.type];
         if (!Comp) return null;
         return <Comp key={i} cue={cue} p={p} theme={theme} />;
