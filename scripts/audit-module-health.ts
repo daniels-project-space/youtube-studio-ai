@@ -77,8 +77,17 @@ function main(): void {
       }
     }
 
-    // A module stem imported from a file that is not one of its own.
-    const stems = module.paths.map((p) => p.replace(/^src\//, "@/").replace(/\.tsx?$/, ""));
+    // A module file referenced from a file that is not one of its own.
+    //
+    // Both the alias form and the bare module name are matched. Tests import
+    // siblings relatively — `../editorialEvidencePacketBlocks` — so matching
+    // only the "@/..." alias reported thoroughly tested blocks as having no
+    // oracle, which is exactly the kind of false alarm that sends the next hour
+    // to a module that was already covered.
+    const stems = module.paths.flatMap((p) => [
+      p.replace(/^src\//, "@/").replace(/\.tsx?$/, ""),
+      (p.split("/").pop() ?? "").replace(/\.tsx?$/, ""),
+    ]).filter((stem) => stem.length > 3);
     const importers = new Set<string>();
     const testers = new Set<string>();
     for (const [file, text] of contents) {
