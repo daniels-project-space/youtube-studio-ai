@@ -84,6 +84,63 @@ export const FALLBACK_ACCENT_COLOURS = [
   "#E03131", "#F08C00", "#2F9E44", "#1098AD", "#3B5BDB", "#AE3EC9", "#E8590C", "#F1F3F5",
 ] as const;
 
+/**
+ * Show-bible fallbacks, used when generation fails and a channel would
+ * otherwise be created with no identity at all.
+ *
+ * The single previous pair — "calm, consistent, on-brand" and "a single bold,
+ * recurring central subject" — meant every channel that hit the failure path
+ * received the same creative doctrine. The show bible drives crew, register and
+ * look, so that is the most consequential place in the system for a shared
+ * default, not the least.
+ */
+export const FALLBACK_CHANNEL_VIBES = [
+  "calm, consistent, on-brand",
+  "unhurried and exact, never raising its voice to be believed",
+  "warm and plainspoken, explaining as if to one attentive person",
+  "dry and observant, finding the absurd without mocking anyone",
+  "grave and deliberate, treating the subject as it deserves",
+] as const;
+
+/**
+ * Motifs, kept deliberately abstract. A concrete motif — a lantern, a ledger —
+ * would be wrong for most channels; these describe a COMPOSITIONAL habit that
+ * any subject can satisfy.
+ */
+export const FALLBACK_CHANNEL_MOTIFS = [
+  "a single bold, recurring central subject",
+  "one object held in frame while its context shifts around it",
+  "a repeated wide-to-close move that ends on a detail",
+  "a recurring hard division of the frame into before and after",
+  "a subject seen against a much larger space that dwarfs it",
+] as const;
+
+/**
+ * Comic-illustration looks for a channel that never declared one.
+ *
+ * Same collapse as the drawn-channel line art: one hard-coded phrase made every
+ * undeclared comic channel draw in an identical hand. Every option is still
+ * comic illustration, so the range widens inside the format rather than
+ * escaping it.
+ */
+export const FALLBACK_COMIC_STYLES = [
+  "clean controlled comic illustration",
+  "inked comic illustration with heavy spot blacks and confident contour lines",
+  "flat-colour comic illustration with limited palette and crisp panel edges",
+  "painterly comic illustration with soft edges and visible brush texture",
+  "high-contrast noir comic illustration built from shadow shapes",
+] as const;
+
+export function fallbackChannelVibe(seed: string): string {
+  return spreadDefault(seed, FALLBACK_CHANNEL_VIBES);
+}
+export function fallbackChannelMotif(seed: string): string {
+  return spreadDefault(seed, FALLBACK_CHANNEL_MOTIFS);
+}
+export function fallbackComicStyle(seed: string): string {
+  return spreadDefault(seed, FALLBACK_COMIC_STYLES);
+}
+
 export function fallbackLineArtStyle(seed: string): string {
   return spreadDefault(seed, FALLBACK_LINE_ART_STYLES);
 }

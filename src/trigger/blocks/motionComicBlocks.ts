@@ -61,6 +61,7 @@ import { PRICE } from "@/engine/pricing";
 import { preflightNarrationPerformance } from "@/lib/narrationPerformance";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
+import { fallbackComicStyle } from "@/lib/identitySpread";
 
 /**
  * Checks the complete primary + bounded-recovery art envelope before the
@@ -190,7 +191,11 @@ function motionComicAtlasIdentity(
     {
       role: "line_language",
       instruction:
-        `Every frame uses one identical channel drawing language: ${resolvedStyle?.trim() || String(ctx.store["styleGrammar"] ?? ctx.store["visualStyle"] ?? "clean controlled comic illustration")}.`,
+        `Every frame uses one identical channel drawing language: ${resolvedStyle?.trim() || String(ctx.store["styleGrammar"] ?? ctx.store["visualStyle"] ??
+      // Spread by channel: one hard-coded phrase made every undeclared comic
+      // channel draw in an identical hand. Every option is still comic
+      // illustration, so the range widens inside the format.
+      fallbackComicStyle(String(ctx.store["channelName"] ?? "")))}.`,
     },
     ...(dna?.palette?.length ? [{
       role: "palette" as const,

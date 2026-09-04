@@ -13,6 +13,7 @@ import {
   type ChannelProgramBrief,
 } from "@/engine/channelProgramBrief";
 import { VIDEO_CREW_ROLES, type ShowBible, type VideoCrewRole } from "./types";
+import { fallbackChannelMotif, fallbackChannelVibe } from "@/lib/identitySpread";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
@@ -58,8 +59,12 @@ function fallbackBible(input: ShowBibleInput): ShowBible {
     positioning: programBriefText
       ? `${input.name} — ${programBriefText}`
       : `${input.name} — a ${input.niche ?? "focused"} channel in the ${input.family} format.`,
-    vibe: input.persona ?? "calm, consistent, on-brand",
-    iconicMotif: input.motifHint ?? input.styleGrammar ?? "a single bold, recurring central subject",
+    // Spread by channel name. A single fallback pair meant every channel that
+    // hit this path received identical creative doctrine — and the show bible
+    // drives crew, register and look, so it is the worst place in the system
+    // for a shared default.
+    vibe: input.persona ?? fallbackChannelVibe(input.name),
+    iconicMotif: input.motifHint ?? input.styleGrammar ?? fallbackChannelMotif(input.name),
     worksInSpace: [],
     avoidInSpace: [],
     activeCrew: crew,

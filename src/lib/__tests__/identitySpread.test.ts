@@ -7,7 +7,13 @@ import assert from "node:assert/strict";
 import {
   FALLBACK_ACCENT_COLOURS,
   FALLBACK_LINE_ART_STYLES,
+  FALLBACK_CHANNEL_MOTIFS,
+  FALLBACK_CHANNEL_VIBES,
+  FALLBACK_COMIC_STYLES,
   FALLBACK_NARRATOR_PERSONAS,
+  fallbackChannelMotif,
+  fallbackChannelVibe,
+  fallbackComicStyle,
   fallbackLineArtStyle,
   fallbackNarratorPersona,
   spreadDefault,
@@ -65,6 +71,27 @@ function main(): void {
   // put seven of eleven audited thumbnails in the same amber band.
   assert.ok(FALLBACK_ACCENT_COLOURS.length >= 6);
   assert.equal(new Set(FALLBACK_ACCENT_COLOURS).size, FALLBACK_ACCENT_COLOURS.length, "no duplicate accents");
+
+  // Show-bible and comic fallbacks obey the same two rules as the rest: they
+  // spread across channels, and every option stays inside its own format.
+  {
+    const vibes = new Set(CHANNELS.map(fallbackChannelVibe));
+    const motifs = new Set(CHANNELS.map(fallbackChannelMotif));
+    const comics = new Set(CHANNELS.map(fallbackComicStyle));
+    assert.ok(vibes.size >= 3, `show-bible vibes collapsed to ${vibes.size}`);
+    assert.ok(motifs.size >= 3, `show-bible motifs collapsed to ${motifs.size}`);
+    assert.ok(comics.size >= 3, `comic styles collapsed to ${comics.size}`);
+
+    // A comic channel must not become a painted or photoreal one.
+    for (const style of FALLBACK_COMIC_STYLES) {
+      assert.match(style, /comic illustration/, `not recognisably comic: ${style}`);
+    }
+    // The historical defaults stay first, so a channel resolving to them is
+    // unchanged by this widening.
+    assert.equal(FALLBACK_COMIC_STYLES[0], "clean controlled comic illustration");
+    assert.equal(FALLBACK_CHANNEL_VIBES[0], "calm, consistent, on-brand");
+    assert.equal(FALLBACK_CHANNEL_MOTIFS[0], "a single bold, recurring central subject");
+  }
 
   console.log("IDENTITY SPREAD PASS");
 }
