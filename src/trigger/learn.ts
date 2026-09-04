@@ -286,7 +286,9 @@ type LearningAnalyticsItem = {
   engagedViews?: number;
   avgViewPct?: number;
   ctr?: number;
+  thumbnailImpressions?: number;
   title?: string;
+  titleAlternate?: string;
   topic?: string;
   thumbnailStrategy?: string;
 };
@@ -308,13 +310,17 @@ type LearningAnalyticsBatch = {
 async function runAttributes(
   convex: ConvexHttpClient,
   runId: Id<"runs">,
-): Promise<{ title: string; topic: string; thumbnailStrategy?: string }> {
+): Promise<{ title: string; topic: string; thumbnailStrategy?: string; titleAlternate?: string }> {
   try {
     const stages = (await convex.query(api.runStages.listRunStages, {
       runId,
     })) as Array<{ block: string; outputs?: Record<string, unknown> }>;
     return {
       title: (stages.find((stage) => stage.block === "metadata")?.outputs?.title as string) ?? "",
+      // Metacraft's judged runner-up. Carried into the ledger so the CTR swap
+      // has something to swap TO; without it the alternate is generated on
+      // every video and then thrown away, which is what used to happen.
+      titleAlternate: (stages.find((stage) => stage.block === "metadata")?.outputs?.titleAlternate as string) || undefined,
       topic: (stages.find((stage) => stage.block === "topic_select")?.outputs?.topic as string) ?? "",
       thumbnailStrategy: (stages.find((stage) => stage.block === "thumbnail_gen")?.outputs as { strategy?: string })?.strategy,
     };
@@ -639,7 +645,11 @@ async function processLearningBatch(args: {
         ...(analytics.engagedViews === undefined ? {} : { engagedViews: analytics.engagedViews }),
         avgViewPct: analytics.avgViewPct,
         ...(analytics.ctr === undefined ? {} : { ctr: analytics.ctr }),
+        ...(analytics.thumbnailImpressions === undefined
+          ? {}
+          : { thumbnailImpressions: analytics.thumbnailImpressions }),
         title: attributes.title,
+        ...(attributes.titleAlternate ? { titleAlternate: attributes.titleAlternate } : {}),
         topic: attributes.topic,
         ...(attributes.thumbnailStrategy ? { thumbnailStrategy: attributes.thumbnailStrategy } : {}),
         now: Date.now(),
@@ -758,7 +768,13 @@ async function processLearningBatch(args: {
     const ledger = await loadLedger(prefix);
     const byId = new Map<string, PerfEntry>(ledger.map((entry) => [entry.videoId, entry]));
     for (const item of preparation.items ?? []) {
+      // MERGE, never replace. A fresh object here silently dropped every field
+      // written by another task on the same entry — `reoptimizedAt`, and now
+      // the title-swap record — so a cooldown that exists to prevent repeated
+      // rewrites was erased by the next analytics run.
+      const prior = byId.get(item.youtubeVideoId);
       byId.set(item.youtubeVideoId, {
+        ...prior,
         videoId: item.youtubeVideoId,
         topic: item.topic,
         title: item.title,
@@ -768,6 +784,10 @@ async function processLearningBatch(args: {
         ...(item.engagedViews === undefined ? {} : { engagedViews: item.engagedViews }),
         avgViewPct: item.avgViewPct,
         ...(item.ctr === undefined ? {} : { ctr: item.ctr }),
+        ...(item.thumbnailImpressions === undefined
+          ? {}
+          : { thumbnailImpressions: item.thumbnailImpressions }),
+        ...(item.titleAlternate ? { titleAlternate: item.titleAlternate } : {}),
         updatedAt: Date.now(),
         connectorId: String(active.connectorId),
         connectorVersion: active.connectorVersion,

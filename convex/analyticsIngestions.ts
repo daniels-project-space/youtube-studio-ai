@@ -56,7 +56,9 @@ type LearningItem = {
   engagedViews?: number;
   avgViewPct?: number;
   ctr?: number;
+  thumbnailImpressions?: number;
   title?: string;
+  titleAlternate?: string;
   topic?: string;
   thumbnailStrategy?: string;
 };
@@ -921,7 +923,9 @@ export const recordLearningItemFetched = mutation({
     engagedViews: v.optional(v.number()),
     avgViewPct: v.number(),
     ctr: v.optional(v.number()),
+    thumbnailImpressions: v.optional(v.number()),
     title: v.string(),
+    titleAlternate: v.optional(v.string()),
     topic: v.string(),
     thumbnailStrategy: v.optional(v.string()),
     now: v.number(),
@@ -937,6 +941,9 @@ export const recordLearningItemFetched = mutation({
       assertFiniteNonNegative(args.engagedViews, "engaged views");
     }
     if (args.ctr !== undefined) assertFiniteNonNegative(args.ctr, "ctr");
+    if (args.thumbnailImpressions !== undefined) {
+      assertFiniteNonNegative(args.thumbnailImpressions, "thumbnail impressions");
+    }
     const progress = await exactLearningProgress(ctx, args.ownerId, args.channelId);
     const batch = progress?.activeBatch as LearningBatch | undefined;
     if (!progress || !batch || batch.batchKey !== args.batchKey) {
@@ -993,7 +1000,9 @@ export const recordLearningItemFetched = mutation({
       ...(args.engagedViews === undefined ? {} : { engagedViews: args.engagedViews }),
       avgViewPct: args.avgViewPct,
       ...(args.ctr === undefined ? {} : { ctr: args.ctr }),
+      ...(args.thumbnailImpressions === undefined ? {} : { thumbnailImpressions: args.thumbnailImpressions }),
       title: args.title.slice(0, 1_000),
+      ...(args.titleAlternate ? { titleAlternate: args.titleAlternate.slice(0, 1_000) } : {}),
       topic: args.topic.slice(0, 1_000),
       ...(args.thumbnailStrategy ? { thumbnailStrategy: args.thumbnailStrategy.slice(0, 1_000) } : {}),
     };
@@ -1203,7 +1212,9 @@ export const prepareLearningLedgerWrite = mutation({
       engagedViews: item.engagedViews,
       avgViewPct: item.avgViewPct,
       ctr: item.ctr,
+      thumbnailImpressions: item.thumbnailImpressions,
       title: item.title,
+      titleAlternate: item.titleAlternate,
       topic: item.topic,
       thumbnailStrategy: item.thumbnailStrategy,
       metricDefinitionVersion,

@@ -2531,7 +2531,12 @@ export default defineSchema({
         engagedViews: v.optional(v.number()),
         avgViewPct: v.optional(v.number()),
         ctr: v.optional(v.number()),
+        // Raw denominator. A CTR rate alone cannot support a decision: 2% on 40
+        // impressions and 2% on 40,000 are the same number and only one of them
+        // is evidence.
+        thumbnailImpressions: v.optional(v.number()),
         title: v.optional(v.string()),
+        titleAlternate: v.optional(v.string()),
         topic: v.optional(v.string()),
         thumbnailStrategy: v.optional(v.string()),
       })),

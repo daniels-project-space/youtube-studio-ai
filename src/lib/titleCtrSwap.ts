@@ -29,14 +29,73 @@
  * the loop would keep replacing titles without ever learning which won.
  */
 
+/**
+ * ATTRIBUTION ADMISSION.
+ *
+ * seoReoptimize — the other task that writes titles to YouTube — is hard-blocked
+ * by `unavailablePackageAttributionAdmission()`, which refuses to act because
+ * the performance ledger has "no immutable package version, raw impressions,
+ * freshness boundary, or fully post-package observation". That containment is
+ * correct and this must not route around it.
+ *
+ * A title swap can satisfy it where a general rewrite could not, because the
+ * swap knows exactly which title was live and from when:
+ *
+ *   raw impressions          now carried on the ledger entry
+ *   freshness boundary       titleSetAt — when the current title went live
+ *   post-package observation the measurement window must start after that
+ *   package version          the title string itself, recorded on both sides
+ *
+ * If any of those is missing the answer is "not admitted", never a substituted
+ * proxy. Views are not impressions and a run-stage title is not a published one.
+ */
+export interface AttributionAdmission {
+  admitted: boolean;
+  reason: string;
+}
+
+export function admitTitleObservation(
+  video: TitleCandidateStats,
+  now: number,
+  policy: SwapPolicy = DEFAULT_SWAP_POLICY,
+): AttributionAdmission {
+  if (typeof video.thumbnailImpressions !== "number") {
+    return { admitted: false, reason: "no raw impressions on this entry — a CTR rate alone cannot support a decision" };
+  }
+  if (typeof video.ctr !== "number" || video.ctr <= 0) {
+    return { admitted: false, reason: "no measured click-through yet" };
+  }
+  const titleSetAt = video.titleSetAt ?? video.publishedAt;
+  if (!titleSetAt) {
+    return { admitted: false, reason: "no freshness boundary — unknown when the current title went live" };
+  }
+  const hoursLive = (now - titleSetAt) / 3_600_000;
+  if (hoursLive < policy.settleHours) {
+    return {
+      admitted: false,
+      reason: `the current title has only been live ${hoursLive.toFixed(0)}h; the observation is not yet fully post-package`,
+    };
+  }
+  if (video.thumbnailImpressions < policy.minImpressions) {
+    return {
+      admitted: false,
+      reason: `${video.thumbnailImpressions} impressions below the ${policy.minImpressions} noise floor`,
+    };
+  }
+  return { admitted: true, reason: `${video.thumbnailImpressions} impressions accrued wholly under the current title` };
+}
+
 export interface TitleCandidateStats {
   videoId: string;
   title: string;
   /** The runner-up metacraft already produced. No alternate, no test. */
   titleAlternate?: string | null;
-  impressions?: number | null;
+  /** Raw denominator behind `ctr`. Absent means the decision cannot be made. */
+  thumbnailImpressions?: number | null;
   ctr?: number | null;
   publishedAt: number;
+  /** When the CURRENT title went live; defaults to publish time. */
+  titleSetAt?: number | null;
   /** Set once a swap has been applied, so a video is never swapped twice. */
   swappedAt?: number | null;
 }
@@ -64,6 +123,7 @@ export interface SwapDecision {
   to?: string;
   /** The number the alternate has to beat for the swap to have been worth it. */
   baselineCtr?: number;
+  baselineImpressions?: number;
   channelMedianCtr?: number;
 }
 
@@ -101,33 +161,31 @@ export function planTitleSwaps(
     if (video.titleAlternate.trim() === video.title.trim()) {
       return { ...base, action: "hold", reason: "alternate is identical to the live title" };
     }
-    const ageHours = (now - video.publishedAt) / 3_600_000;
-    if (ageHours < policy.settleHours) {
-      return { ...base, action: "hold", reason: `only ${ageHours.toFixed(0)}h old; the subscriber surge has not settled` };
-    }
-    if ((video.impressions ?? 0) < policy.minImpressions) {
-      return { ...base, action: "hold", reason: `${video.impressions ?? 0} impressions below the ${policy.minImpressions} noise floor` };
-    }
-    if (typeof video.ctr !== "number" || video.ctr <= 0) {
-      return { ...base, action: "hold", reason: "no measured click-through yet" };
+    // Everything about impressions, freshness and post-package observation is
+    // decided in one place, so this rule and the containment seoReoptimize
+    // enforces cannot drift apart.
+    const admission = admitTitleObservation(video, now, policy);
+    if (!admission.admitted) {
+      return { ...base, action: "hold", reason: admission.reason };
     }
     if (median === null) {
       return { ...base, action: "hold", reason: "fewer than 4 measured videos; no channel median to judge against" };
     }
-    if (video.ctr >= median * policy.medianRatio) {
+    if (video.ctr! >= median * policy.medianRatio) {
       return {
         ...base,
         action: "hold",
-        reason: `CTR ${video.ctr.toFixed(1)}% is within ${Math.round((1 - policy.medianRatio) * 100)}% of the channel median ${median.toFixed(1)}%`,
+        reason: `CTR ${video.ctr!.toFixed(1)}% is within ${Math.round((1 - policy.medianRatio) * 100)}% of the channel median ${median.toFixed(1)}%`,
       };
     }
     return {
       ...base,
       action: "swap",
-      reason: `CTR ${video.ctr.toFixed(1)}% is below ${(median * policy.medianRatio).toFixed(1)}% (median ${median.toFixed(1)}%) over ${video.impressions} impressions`,
+      reason: `CTR ${video.ctr!.toFixed(1)}% is below ${(median * policy.medianRatio).toFixed(1)}% (median ${median.toFixed(1)}%) over ${video.thumbnailImpressions} impressions`,
       from: video.title,
       to: video.titleAlternate.trim(),
-      baselineCtr: video.ctr,
+      baselineCtr: video.ctr!,
+      baselineImpressions: video.thumbnailImpressions!,
     };
   });
 }

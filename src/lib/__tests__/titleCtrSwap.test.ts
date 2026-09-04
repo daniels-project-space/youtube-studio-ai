@@ -23,7 +23,7 @@ function video(over: Partial<TitleCandidateStats> = {}): TitleCandidateStats {
     videoId: over.videoId ?? "v1",
     title: "The Original Title That Went Out",
     titleAlternate: "The Runner Up Nobody Ever Used",
-    impressions: 10_000,
+    thumbnailImpressions: 10_000,
     ctr: 2.0,
     publishedAt: NOW - 30 * 24 * HOUR,
     ...over,
@@ -57,7 +57,7 @@ function main(): void {
 
   // Noise floor: the same weak CTR on a handful of impressions is not evidence.
   assert.equal(
-    decision([...healthyChannel(), video({ videoId: "slow", ctr: 2.0, impressions: 300 })], "slow").action,
+    decision([...healthyChannel(), video({ videoId: "slow", ctr: 2.0, thumbnailImpressions: 300 })], "slow").action,
     "hold",
   );
 

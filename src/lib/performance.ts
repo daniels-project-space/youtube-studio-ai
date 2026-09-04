@@ -17,6 +17,32 @@ export interface PerfEntry {
   engagedViews?: number;
   avgViewPct: number; // audience retention 0..100
   ctr?: number; // thumbnail CTR 0..100 (if available)
+  /**
+   * Raw thumbnail impressions — the denominator behind `ctr`.
+   *
+   * Without it a rate cannot support a decision, which is precisely why
+   * seoReoptimize's attribution admission refuses to act on this ledger.
+   */
+  thumbnailImpressions?: number;
+  /** Metacraft's runner-up, kept so a swap has something to swap TO. */
+  titleAlternate?: string;
+  /**
+   * When the CURRENT title went live. Publish time is the default; a rewrite
+   * moves it. Observations before this point describe a different title and
+   * must not be attributed to the one now showing.
+   */
+  titleSetAt?: number;
+  /** The live A/B this video is in, if any. */
+  titleSwap?: {
+    from: string;
+    to: string;
+    baselineCtr: number;
+    baselineImpressions: number;
+    swappedAt: number;
+    outcome?: "alternate_won" | "original_won" | "inconclusive";
+    outcomeDetail?: string;
+    outcomeAt?: number;
+  };
   updatedAt: number;
   /** Exact OAuth/data-ingestion provenance for this outcome. */
   connectorId?: string;
