@@ -146,9 +146,12 @@ function collectExports(files: string[]): { fns: ExportedFn[]; names: Map<string
         for (const decl of node.declarationList.declarations) {
           if (ts.isIdentifier(decl.name)) names.set(decl.name.text, rel);
         }
-      } else if ((ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) || ts.isClassDeclaration(node)) && node.name) {
-        names.set(node.name.text, rel);
       }
+      // Types and interfaces are deliberately NOT tracked. An exported type
+      // that nothing imports is part of a module's public surface and costs
+      // nothing; including them produced 2539 "dead" symbols, which is a report
+      // nobody acts on. Only values — functions and constants — can be dead
+      // code in the sense worth deleting.
     });
   }
   return { fns, names };
@@ -157,6 +160,8 @@ function collectExports(files: string[]): { fns: ExportedFn[]; names: Map<string
 /** Every identifier referenced anywhere, and the property keys of every object literal. */
 function collectUsage(files: string[]) {
   const referenced = new Map<string, Set<string>>();
+  /** Total identifier occurrences across the whole tree, declaration included. */
+  const occurrences = new Map<string, number>();
   const propertyKeysNear = new Map<string, Set<string>>();
   const maxArity = new Map<string, number>();
   /** A spread or a variable argument could supply anything; never claim "dead". */
@@ -168,6 +173,7 @@ function collectUsage(files: string[]) {
       if (ts.isIdentifier(node)) {
         if (!referenced.has(node.text)) referenced.set(node.text, new Set());
         referenced.get(node.text)!.add(rel);
+        occurrences.set(node.text, (occurrences.get(node.text) ?? 0) + 1);
       }
       // Record which property names are passed at each call, so an optional
       // parameter can be checked against what callers actually supply.
@@ -198,28 +204,44 @@ function collectUsage(files: string[]) {
     };
     visit(sf);
   }
-  return { referenced, propertyKeysNear, maxArity, opaqueCall };
+  return { referenced, propertyKeysNear, maxArity, opaqueCall, occurrences };
 }
 
 function main(): void {
-  const files = walk(join(ROOT, "src")).concat(walk(join(ROOT, "convex")));
+  // scripts/ is part of the tree, not scaffolding. Omitting it reported
+  // judgeTournament, auditionBank, recruitVoice and profileVoiceBank as dead
+  // when three operator scripts call them — deleting on that advice would have
+  // broken working tooling.
+  const files = [
+    ...walk(join(ROOT, "src")),
+    ...walk(join(ROOT, "convex")),
+    ...walk(join(ROOT, "scripts")),
+  ];
   const { fns, names } = collectExports(files);
-  const { referenced, propertyKeysNear, maxArity, opaqueCall } = collectUsage(files);
+  const { referenced, propertyKeysNear, maxArity, opaqueCall, occurrences } = collectUsage(files);
 
   const onlyProd = (set: Set<string> | undefined, self: string) =>
     [...(set ?? [])].filter((f) => f !== self && !TEST_FILE.test(f));
 
-  console.log("=== EXPORTS WITH NO PRODUCTION CALLER ===");
+  // DEAD means genuinely unreferenced — not "unreferenced by production".
+  //
+  // Three different things were being conflated, and only one is worth
+  // deleting. A symbol used solely inside its own file is alive (its export may
+  // be unnecessary, which is a style point, not dead code). A symbol used
+  // solely by a test is usually a contract constant deliberately exported to be
+  // pinned. Counting either as dead produced 1303 findings, and a cleanup list
+  // that size is one nobody runs. Only a symbol whose name appears exactly once
+  // in the entire tree — its own declaration — is actually unused.
+  console.log("=== UNREFERENCED EXPORTS (safe-to-delete candidates) ===");
   let deadCount = 0;
   for (const [name, file] of names) {
     if (ENTRY_POINT.test(file)) continue;
-    const users = onlyProd(referenced.get(name), file);
-    if (users.length === 0) {
-      deadCount += 1;
-      console.log(`  ${file.padEnd(52)} ${name}`);
-    }
+    if ((occurrences.get(name) ?? 0) > 1) continue;
+    deadCount += 1;
+    console.log(`  ${file.padEnd(52)} ${name}`);
   }
   console.log(`  (${deadCount} symbols)\n`);
+  void onlyProd;
 
   console.log("=== OPTIONAL PARAMETERS NO CALLER EVER PASSES ===");
   console.log("  a feature that cannot be switched on is not a feature\n");

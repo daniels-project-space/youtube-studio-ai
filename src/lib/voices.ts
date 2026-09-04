@@ -19,14 +19,4 @@ export const VOICES: VoiceOption[] = [
   { id: "voice_es_locutor", label: "Voz de locutor K", lang: "es", note: "Spanish — deep authoritative" },
 ];
 
-/** Default narration voice per language (used by language siblings). */
-export const VOICE_BY_LANG: Record<string, string> = {
-  en: "sleepless_historian",
-  de: "voice_de_stoic",
-  es: "voice_es_locutor",
-};
 
-export function voiceLabel(id?: string): string {
-  if (!id) return "—";
-  return VOICES.find((v) => v.id === id)?.label ?? id;
-}

@@ -50,9 +50,6 @@ export { stripAudioTags } from "@/lib/tts";
 
 const ELEVEN = "https://api.elevenlabs.io/v1";
 
-export function hasVoicecraft(): boolean {
-  return Boolean(process.env.ELEVENLABS_API_KEY);
-}
 
 function elevenKey(): string {
   const k = process.env.ELEVENLABS_API_KEY;
@@ -244,69 +241,8 @@ export async function auditionBank(o: {
 
 /* ----------------------------- voice library ---------------------------- */
 
-export interface LibraryVoice {
-  publicOwnerId: string;
-  voiceId: string;
-  name: string;
-  gender?: string;
-  age?: string;
-  accent?: string;
-  useCase?: string;
-  previewUrl?: string;
-  /** "professional" = ElevenLabs-reviewed Professional Voice Clone. */
-  category?: string;
-  /** How many accounts saved this voice — the library's strongest quality proxy. */
-  clonedByCount?: number;
-  /** Characters rendered with it in the last year. */
-  usage1y?: number;
-}
 
-/** Search the ElevenLabs community voice library (bank expansion source). */
-export async function searchVoiceLibrary(o: {
-  gender?: string;
-  age?: string;
-  accent?: string;
-  useCase?: string;
-  search?: string;
-  pageSize?: number;
-}): Promise<LibraryVoice[]> {
-  const q = new URLSearchParams();
-  if (o.gender && o.gender !== "any") q.set("gender", o.gender);
-  if (o.age && o.age !== "any") q.set("age", o.age);
-  if (o.accent) q.set("accent", o.accent);
-  if (o.useCase) q.set("use_cases", o.useCase);
-  if (o.search) q.set("search", o.search);
-  q.set("page_size", String(o.pageSize ?? 8));
-  q.set("language", "en");
-  const res = await fetch(`${ELEVEN}/shared-voices?${q}`, { headers: { "xi-api-key": elevenKey() } });
-  if (!res.ok) return [];
-  const j = (await res.json()) as { voices?: { public_owner_id: string; voice_id: string; name: string; gender?: string; age?: string; accent?: string; use_case?: string; preview_url?: string; category?: string; cloned_by_count?: number; usage_character_count_1y?: number }[] };
-  return (j.voices ?? []).map((v) => ({
-    publicOwnerId: v.public_owner_id,
-    voiceId: v.voice_id,
-    name: v.name,
-    gender: v.gender,
-    age: v.age,
-    accent: v.accent,
-    useCase: v.use_case,
-    previewUrl: v.preview_url,
-    category: v.category,
-    clonedByCount: v.cloned_by_count ?? 0,
-    usage1y: v.usage_character_count_1y ?? 0,
-  }));
-}
 
-/** Add a library voice to the operator's bank; returns its NEW account voice id. */
-export async function addLibraryVoice(v: LibraryVoice, newName?: string): Promise<string> {
-  const res = await fetch(`${ELEVEN}/voices/add/${v.publicOwnerId}/${v.voiceId}`, {
-    method: "POST",
-    headers: { "xi-api-key": elevenKey(), "content-type": "application/json" },
-    body: JSON.stringify({ new_name: newName ?? v.name }),
-  });
-  if (!res.ok) throw new Error(`voicecraft: add library voice HTTP ${res.status}: ${(await res.text()).slice(0, 160)}`);
-  const j = (await res.json()) as { voice_id?: string };
-  return j.voice_id ?? v.voiceId;
-}
 
 /** Remove a voice from the operator's account (failed validation / eviction). */
 export async function removeAccountVoice(voiceId: string): Promise<void> {
