@@ -241,6 +241,11 @@ export default defineSchema({
       thumbnailTemplate: v.string(),
       topicPool: v.array(v.string()),
       cadence: v.string(),
+      // How hard this channel's titles are allowed to pull, 0-3. Optional: an
+      // absent dial falls back to the voice archetype's own default rather than
+      // to one global constant, so a channel that never sets it still gets a
+      // level matched to its register instead of the most restrained setting.
+      clickbaitLevel: v.optional(v.number()),
       // Stable catalog key for data lookups; `niche` below stays presentation-only.
       nicheKey: v.optional(v.string()),
       // The niche this channel competes in (drives competitor research).

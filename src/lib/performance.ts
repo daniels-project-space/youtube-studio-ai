@@ -52,8 +52,20 @@ export async function saveLedger(keyPrefix: string, entries: PerfEntry[]): Promi
 const score = (e: PerfEntry) => e.avgViewPct * 0.7 + (e.ctr ?? 0) * 0.3;
 
 /**
- * Compact winners/losers prompt for the Director. Returns "" until there's
- * enough signal (≥4 measured videos) so we never bias on noise.
+ * Which job the caller is being judged on.
+ *
+ * "blended" weights retention at 0.7 and CTR at 0.3 — reasonable for the
+ * Director, who is responsible for the whole video. It is the wrong lens for a
+ * TITLE. A title's only job is earning the click; retention is the script's.
+ * Under the blended score a strong title on a weak video was listed as a WEAK
+ * performer, teaching the title generator to avoid a title that worked, while a
+ * flat title on a gripping video was held up as the model.
+ */
+export type PerformanceLens = "blended" | "ctr";
+
+/**
+ * Compact winners/losers prompt. Returns "" until there's enough signal
+ * (≥4 measured videos) so we never bias on noise.
  */
 export async function loadPerformanceContext(
   keyPrefix: string,
@@ -61,8 +73,10 @@ export async function loadPerformanceContext(
     minViews?: number;
     connectorId?: string;
     connectorVersion?: number;
+    lens?: PerformanceLens;
   } = {},
 ): Promise<string> {
+  const lens = opts.lens ?? "blended";
   const ledger = (await loadLedger(keyPrefix)).filter(
     (e) =>
       e.views >= (opts.minViews ?? 50) &&
@@ -71,6 +85,22 @@ export async function loadPerformanceContext(
       (opts.connectorVersion === undefined ||
         e.connectorVersion === opts.connectorVersion),
   );
+
+  if (lens === "ctr") {
+    // A missing CTR is unknown, not zero. `ctr ?? 0` ranked unmeasured videos
+    // as the worst on the channel, so absent data was taught as failure.
+    const measured = ledger.filter((e) => typeof e.ctr === "number" && e.ctr > 0);
+    if (measured.length < 4) return "";
+    const sorted = [...measured].sort((a, b) => (b.ctr ?? 0) - (a.ctr ?? 0));
+    const fmt = (e: PerfEntry) => `"${e.title}" (CTR ${(e.ctr ?? 0).toFixed(1)}%)`;
+    return (
+      `TITLE PERFORMANCE on this channel — CLICK-THROUGH ONLY, because that is what a title controls. ` +
+      `Retention is deliberately excluded: it measures the script, not the title.\n` +
+      `HIGHEST click-through:\n${sorted.slice(0, 3).map(fmt).join("\n")}\n` +
+      `LOWEST click-through:\n${sorted.slice(-3).reverse().map(fmt).join("\n")}`
+    );
+  }
+
   if (ledger.length < 4) return "";
   const sorted = [...ledger].sort((a, b) => score(b) - score(a));
   const top = sorted.slice(0, 3);

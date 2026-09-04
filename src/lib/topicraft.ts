@@ -47,7 +47,7 @@
 import type { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
 import { claudeJson, claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
-import { youtubeSuggest, lintTitle } from "@/lib/metacraft";
+import { youtubeSuggest, lintTitle, resolveClickbaitLevel } from "@/lib/metacraft";
 import { fetchNicheOutliers, type OutlierVideo } from "@/lib/outliers";
 import { fetchRedditTrends, type TrendSignal } from "@/lib/trends";
 import { embedText, cosine } from "@/lib/embeddings";
@@ -108,6 +108,8 @@ export interface CraftTopicsArgs {
   outliers?: OutlierVideo[];
   /** High-CTR niche power words (databank) — flavor for provisional titles. */
   powerWords?: string[];
+  /** Clickbait dial 0-3; omitted falls back to the channel voice's own default. */
+  clickbaitLevel?: number;
   /** Disable paid embedding fan-out when the caller supplies its own deterministic near-duplicate gate. */
   providerSemanticDedupe?: boolean;
   /** Durable fence invoked once, immediately before Topicraft enters a paid provider. */
@@ -368,7 +370,12 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
   const count = Math.max(1, a.count);
   const want = count + 4;
   const doctrine = resolveVoiceDoctrine(a.niche);
-  const allowHype = doctrine?.voice === "chaos-commentator";
+  // The provisional title is linted with the same rules the metadata engine
+  // uses, so it has to read the same clickbait dial. Leaving this as the old
+  // one-archetype binary would let topicraft reject the very framing metacraft
+  // is now allowed to write, and the bet would die before the title ever
+  // reached the judge.
+  const allowHype = resolveClickbaitLevel(a.clickbaitLevel, doctrine?.voice) >= 3;
   // Music/ambient channels legitimately title with "lofi/chill/study" — the
   // LOFI_LEAK anti-drift lint is for NON-music channels only (same detection
   // regex the metadata block uses).

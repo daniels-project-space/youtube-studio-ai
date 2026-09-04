@@ -39,6 +39,55 @@ export function hasMetacraft(): boolean {
   return hasAnthropicKey();
 }
 
+/**
+ * CLICKBAIT INTENSITY — a per-channel dial, not a single archetype's privilege.
+ *
+ * `allowHype` used to be `voice === "chaos-commentator"`: one of eleven voice
+ * archetypes could use urgency, and the other ten were held to identical,
+ * maximally restrained rules. That is the same single-constant convergence that
+ * made every thumbnail amber — a default that collapses a range onto one point.
+ *
+ * The dial does NOT license dishonesty. Every level still passes the grounding
+ * lint, so numbers and names must exist in the fact-checked script. What rises
+ * with the level is the permitted URGENCY of framing: how directly the title is
+ * allowed to name stakes and consequence.
+ */
+export type ClickbaitLevel = 0 | 1 | 2 | 3;
+
+const VOICE_CLICKBAIT: Record<string, ClickbaitLevel> = {
+  "gentle-guide": 0,
+  "quiet-mentor": 0,
+  "calm-analyst": 1,
+  "narrator-teacher": 1,
+  "trusted-explainer": 1,
+  "teacher-advisor": 1,
+  "investigator": 2,
+  "insider-explainer": 2,
+  "operator-mentor": 2,
+  "enthusiast-critic": 3,
+  "chaos-commentator": 3,
+};
+
+export const CLICKBAIT_DIRECTION: Record<ClickbaitLevel, string> = {
+  0: "Understated. State the finding plainly; no urgency language, no second-person stakes.",
+  1: "Confident. A clear claim with its consequence attached. No superlatives.",
+  2: "Urgent. Name the stake directly and address the viewer; a superlative is allowed when the " +
+     "script supports it. Curiosity gaps must still be closed by the video.",
+  3: "Maximum pull. Lead with the most consequential, most surprising true thing in the script and " +
+     "say it as bluntly as it deserves. Never promise anything the video does not deliver.",
+};
+
+/** The level for a channel: explicit dial first, else the voice's own default. */
+export function resolveClickbaitLevel(
+  explicit: number | undefined,
+  voice: string | undefined,
+): ClickbaitLevel {
+  if (typeof explicit === "number" && explicit >= 0 && explicit <= 3) {
+    return Math.round(explicit) as ClickbaitLevel;
+  }
+  return VOICE_CLICKBAIT[voice ?? ""] ?? 1;
+}
+
 const LOFI_LEAK = /\b(lo-?fi|study (beats|music)|beats to (relax|study)|chillhop)\b/i;
 const FILLER_START = /^(the (story|history|tale) of|what happened (to|when)|a (look|deep dive) (at|into)|let's talk about|everything you need to know)/i;
 const HYPE = /\b(you won'?t believe|gone wrong|shocking truth|insane|jaw[- ]?dropping|mind[- ]?blowing)\b/i;
@@ -159,7 +208,12 @@ export function lintTitle(
   const issues: string[] = [];
   const t = title.trim();
   if (!t) return { pass: false, issues: ["empty title"] };
-  if (t.length > 85) issues.push(`${t.length} chars > 85 — shorter and more to the point (aim 40-70)`);
+  // 85 was far outside the module's own 40-70 doctrine, so the target was
+  // advice and only the extreme was a gate. Measured across the real content
+  // plan that produced a median of 73 characters with 70% past the point browse
+  // truncates. 76 keeps slack for a genuinely long proper noun while ending the
+  // drift; the generator is still asked for 40-70.
+  if (t.length > 76) issues.push(`${t.length} chars > 76 — shorter and more to the point (aim 40-70)`);
   if (t.length < 25) issues.push(`${t.length} chars — too short (aim 40-70)`);
   if (FILLER_START.test(t)) issues.push("filler start — front-load the payoff, not throat-clearing");
   if (SETUP_COLON.test(t)) issues.push("scene-setting setup before a colon — state the point directly");
@@ -168,10 +222,36 @@ export function lintTitle(
   if (o.channelName && o.channelName !== "this channel" && t.toLowerCase().includes(o.channelName.toLowerCase()))
     issues.push("contains the channel name");
 
-  // Mobile truncation: browse shows ~50 chars — a payoff number buried past
-  // that is a payoff the scroller never sees.
-  const firstDigit = t.search(/\d/);
-  if (firstDigit > 50) issues.push(`payoff number starts at char ${firstDigit} (must land inside the first ~50)`);
+  // Mobile truncation: browse shows ~50 characters.
+  //
+  // Two distinct failures, so two rules. A number pushed past the fold is a
+  // truncated payoff even when the opening words are vivid; a title whose every
+  // specific detail sits past the fold opens with nothing but setup. Folding
+  // them into one check silently retired the first.
+  const digit = t.search(/\d/);
+  if (digit > 50) issues.push(`payoff number starts at char ${digit} (must land inside the first ~50)`);
+
+  const words = t.split(/\s+/).map((w) => w.replace(/[^A-Za-z'-]/g, ""));
+  const significant = words.slice(1).filter((w) => w.length >= 4);
+  const isTitleCase = significant.length >= 3 && significant.filter((w) => /^[A-Z]/.test(w)).length / significant.length > 0.6;
+
+  // "Specific" cannot mean "a longish word": Really, Happened and Turns would
+  // all qualify and the gate would never fire. It means a number or a proper
+  // noun — and a proper noun is only detectable when the casing carries
+  // information. A Title-Cased title capitalises everything, so this check
+  // stands down there rather than pretending to a precision it does not have.
+  if (!isTitleCase) {
+    const specifics: number[] = [];
+    if (digit >= 0) specifics.push(digit);
+    for (const match of t.matchAll(/\b[A-Z][A-Za-z'-]{2,}/g)) {
+      if ((match.index ?? 0) === 0) continue; // the first word is capitalised regardless
+      if (TITLE_STOPWORDS.has(match[0].toLowerCase())) continue;
+      specifics.push(match.index ?? 0);
+    }
+    if (specifics.length && Math.min(...specifics) > 50) {
+      issues.push(`every specific detail starts past char ${Math.min(...specifics)} — the first ~50 chars are all setup`);
+    }
+  }
 
   if (o.grounding) {
     const hay = o.grounding.toLowerCase();
@@ -184,9 +264,6 @@ export function lintTitle(
     // EVERY word, so there the check narrows to capitalized runs of ≥2 words —
     // and a run passes when ANY of its non-stopword words exists (only fully-
     // alien runs are hallucinated names).
-    const words = t.split(/\s+/).map((w) => w.replace(/[^A-Za-z'-]/g, ""));
-    const significant = words.slice(1).filter((w) => w.length >= 4);
-    const isTitleCase = significant.length >= 3 && significant.filter((w) => /^[A-Z]/.test(w)).length / significant.length > 0.6;
     if (isTitleCase) {
       for (const run of t.match(/\b[A-Z][a-z'-]{3,}(?:\s+[A-Z][a-z'-]{2,})+\b/g) ?? []) {
         const ws = run.split(/\s+/).filter((w) => !TITLE_STOPWORDS.has(w.toLowerCase()));
@@ -223,6 +300,18 @@ export interface MetaCraftArgs {
   descriptionStructure?: string;
   perfContext?: string;
   isMusicNiche?: boolean;
+  /**
+   * The plan's provisional title, if this video was scheduled.
+   *
+   * It ENTERS THE POOL rather than replacing the result. The packaging step
+   * used to ship `plannedTitle || craftedTitle`, so on the scheduled path a
+   * title written before the script existed — and never judged against the feed
+   * — beat one that was. Competing keeps an owner-approved title that is
+   * genuinely good while no longer letting a weaker one win by precedence.
+   */
+  warmStartTitle?: string;
+  /** 0-3; omitted falls back to the channel voice's own default. */
+  clickbaitLevel?: number;
   log?: (m: string) => void;
 }
 
@@ -235,7 +324,16 @@ export interface CraftedMetadata {
   /** Comment-seeding question for the upload block to pin. */
   pinnedComment: string;
   frame: string;
-  clickScore: number;
+  /**
+   * The judge's score — or null when the judge never ran.
+   *
+   * This used to default to 8 and stay 8 if the judge threw, so an ungraded
+   * title was persisted as a graded one. Any learning loop reading that column
+   * would have been training on an invented number.
+   */
+  clickScore: number | null;
+  /** False when the title passed lint but was never judged against the feed. */
+  judged: boolean;
   /** The real autocomplete queries used as evidence. */
   suggests: string[];
   /** The real competitor titles judged against. */
@@ -251,7 +349,10 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
   if (!hasAnthropicKey()) throw new Error("metacraft: OPENROUTER_API_KEY missing — cannot craft real metadata");
   const t0 = Date.now();
   const doctrine = resolveVoiceDoctrine(a.niche);
-  const allowHype = doctrine?.voice === "chaos-commentator";
+  const clickbait = resolveClickbaitLevel(a.clickbaitLevel, doctrine?.voice);
+  // Level 3 is the only setting that may reach for the hype register; the lint
+  // still refuses anything the script cannot support at every level.
+  const allowHype = clickbait >= 3;
   const seed = a.topic.split(/[—:-]/)[0].trim().split(/\s+/).slice(0, 5).join(" ").toLowerCase();
 
   // EVIDENCE — concurrently: real queries + real competitors.
@@ -308,6 +409,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           a.titleFormula ? `CHANNEL TITLE FORMULA (Style DNA — obey its shape): ${a.titleFormula}` : "",
           a.powerWords?.length ? `POWER WORDS: ${a.powerWords.slice(0, 12).join(", ")}` : "",
           a.perfContext ?? "",
+          `CLICKBAIT LEVEL ${clickbait}/3 — ${CLICKBAIT_DIRECTION[clickbait]}`,
           `TITLE RULES — SHORT and DIRECT: 40-70 characters. The title is the POINT ITSELF, never a setup for ` +
             `the point — no scene-setting fragments, no atmospheric prefixes, no two-part colon constructions ` +
             `(a short established format prefix like "Mission log:" is fine). Front-load the primary keyword and ` +
@@ -327,8 +429,13 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       continue;
     }
 
-    const candidates = (gen.candidates ?? [])
-      .map((c) => ({ frame: String(c.frame ?? "unknown"), title: String(c.title ?? "").trim() }))
+    const candidates = [
+      // The scheduled plan's title competes on the same terms as the rest. If
+      // it is the strongest option it still wins; it simply no longer wins by
+      // being written first.
+      ...(a.warmStartTitle?.trim() ? [{ frame: "planned", title: a.warmStartTitle.trim() }] : []),
+      ...(gen.candidates ?? []).map((c) => ({ frame: String(c.frame ?? "unknown"), title: String(c.title ?? "").trim() })),
+    ]
       .filter((c) => c.title)
       .map((c) => ({ ...c, lint: lintTitle(c.title, { grounding, channelName: a.channelName, isMusicNiche: a.isMusicNiche, allowHype }) }));
     const survivors = candidates.filter((c) => c.lint.pass);
@@ -338,7 +445,8 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
     if (survivors.length >= 1) {
       let best = 0;
       let runner = -1;
-      let score = 8;
+      let score: number | null = null;
+      let judged = false;
       try {
         const j = await claudeJson<{ rankings?: { idx?: number; clickScore?: number; direct?: number }[]; winner?: number; runnerUp?: number }>({
           prompt: [
@@ -361,7 +469,8 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         if (ranked.length) {
           best = ranked[0].idx!;
           runner = ranked[1]?.idx ?? -1;
-          score = ranked[0].clickScore ?? 8;
+          score = ranked[0].clickScore ?? null;
+          judged = true;
         } else {
           lastIssues.push("no candidate gated clickScore+direct ≥7");
           fixNote = `THE PREVIOUS ATTEMPT WAS REJECTED. Fix every one of these: ${[...new Set(lastIssues)].slice(0, 6).join("; ")}.`;
@@ -397,7 +506,10 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       const tags = String(pkg.tagsCsv ?? "").split(",").map((t) => t.trim()).filter(Boolean);
       if (!description || tags.length < 5) throw new Error("metacraft: winner package came back empty");
       const pinnedComment = await pinnedPromise;
-      a.log?.(`metacraft: [${w.frame}] wins (click ${score}/10) in ${((Date.now() - t0) / 1000).toFixed(1)}s — "${w.title}"`);
+      a.log?.(
+        `metacraft: [${w.frame}] wins (${judged ? `click ${score}/10` : "UNJUDGED — lint only"}) ` +
+        `in ${((Date.now() - t0) / 1000).toFixed(1)}s — "${w.title}"`,
+      );
       return {
         title: w.title,
         description,
@@ -406,6 +518,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         pinnedComment,
         frame: w.frame,
         clickScore: score,
+        judged,
         suggests,
         feed,
       };

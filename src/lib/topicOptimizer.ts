@@ -29,6 +29,8 @@ export interface OptimizeTopicsOpts {
     topicPool?: string[];
     bannedWords?: string[];
     requiredCallbacks?: string[];
+    /** Per-channel clickbait dial 0-3; absent falls back to the voice default. */
+    clickbaitLevel?: number;
   };
   channelName?: string;
   /** Extra topics to treat as already-taken (e.g. the current content plan). */
@@ -103,6 +105,7 @@ export async function optimizeTopics(opts: OptimizeTopicsOpts): Promise<Optimize
     competitorTitles,
     outliers,
     powerWords,
+    clickbaitLevel: opts.identity.clickbaitLevel,
     providerSemanticDedupe: opts.providerSemanticDedupe,
     programDirective: opts.programDirective,
     beforeProviderSpend: opts.beforeProviderSpend,

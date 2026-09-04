@@ -141,12 +141,58 @@ import { lintTitle } from "@/lib/metacraft";
 
 /* ---------------------------- other lint gates ---------------------------- */
 
-// Length bounds (25-85 chars).
+// Length bounds (25-76 chars).
+//
+// The ceiling was 85 while the doctrine, the prompt and this module's own docs
+// all said 40-70 — so the target was advice and only the extreme was a gate.
+// Measured across the real content plan that produced a median of 73 characters
+// with 70% of titles running past the point a mobile browse row truncates.
 {
   const short = lintTitle("Too Short");
   assert.ok(short.issues.some((i) => i.includes("too short")), "under-25-char title must fail length gate");
   const long = lintTitle("x".repeat(90));
-  assert.ok(long.issues.some((i) => i.includes("> 85")), "over-85-char title must fail length gate");
+  assert.ok(long.issues.some((i) => i.includes("> 76")), "over-76-char title must fail length gate");
+
+  // The band the old ceiling waved through. This is the tightening itself, so
+  // it is pinned: an 80-character title used to be perfectly acceptable.
+  const eighty = lintTitle("Why The Roman Empire Collapsed Faster Than Anyone Alive At The Time Expected It");
+  assert.equal(eighty.pass, false, "an 80-char title must no longer pass");
+  assert.ok(eighty.issues.some((i) => i.includes("> 76")), `expected a length issue; got ${JSON.stringify(eighty.issues)}`);
+}
+
+// Mobile truncation, generalised beyond digits: a title whose every specific
+// detail sits past the fold shows the scroller nothing but setup. The digit
+// rule stays alongside it — a number pushed past the fold is a truncated payoff
+// even when the opening words are vivid, and folding the two together silently
+// retired the original gate.
+{
+  // Sentence case, so capitalisation still carries information about which word
+  // is a name. The only proper noun sits at char 54 — past the fold.
+  const allSetup = lintTitle("It turns out that what really happened here was about Chernobyl", {
+    grounding: "it turns out that what really happened here was about chernobyl",
+  });
+  assert.ok(
+    allSetup.issues.some((i) => i.includes("all setup")),
+    `a title whose only specific detail sits past char 50 must be flagged; got ${JSON.stringify(allSetup.issues)}`,
+  );
+
+  const specificEarly = lintTitle("Chernobyl melted down because of one ignored safety test", {
+    grounding: "chernobyl melted down because of one ignored safety test",
+  });
+  assert.ok(
+    !specificEarly.issues.some((i) => i.includes("all setup")),
+    `a title that front-loads its subject must pass; got ${JSON.stringify(specificEarly.issues)}`,
+  );
+
+  // Title Case hides which words are names, so the rule stands down rather than
+  // guessing. Claiming a verdict it cannot support would be worse than silence.
+  const titleCased = lintTitle("It Turns Out That What Really Happened Here Was About Chernobyl", {
+    grounding: "it turns out that what really happened here was about chernobyl",
+  });
+  assert.ok(
+    !titleCased.issues.some((i) => i.includes("all setup")),
+    `Title Case must not be judged by this rule; got ${JSON.stringify(titleCased.issues)}`,
+  );
 }
 
 // Filler-start ban.
