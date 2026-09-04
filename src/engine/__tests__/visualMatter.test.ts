@@ -312,4 +312,43 @@ assert.equal(
   "disabling Studio reuse must retain a typed zero-cost post-production resolver rather than breaking the sealed route",
 );
 
+
+/* -------------------- character sheets are TURNAROUNDS -------------------- */
+//
+// A character sheet exists so later shots cannot invent a different person. A
+// single portrait cannot do that: it shows one angle and leaves the rest to the
+// renderer, which is why the same character drifted between shots. The fix
+// costs nothing — one image either way — except the model now draws the SAME
+// person three times in one frame instead of three independent generations
+// agreeing by luck.
+//
+// Asserted as a contract, not as wording: pinning the exact sentence would fail
+// on every harmless edit and teach the next person to delete the test.
+{
+  const sheets = visualMatterAssetRequests(manifest, 8).filter((r) => r.kind === "character_sheet");
+  assert.ok(sheets.length >= 1, "a story with a recurring person must plan a character sheet");
+  for (const sheet of sheets) {
+    const prompt = sheet.prompt.toLowerCase();
+    // Three NAMED views. "Multiple angles" is satisfied by two near-identical
+    // three-quarters, which is not a turnaround.
+    for (const view of ["front", "three-quarter", "profile"]) {
+      assert.ok(prompt.includes(view), `character sheet must name the ${view} view: ${sheet.prompt}`);
+    }
+    // One frame: three separate images are three independent guesses, and they
+    // cannot pass through a single-image conditioning route either.
+    assert.match(prompt, /one frame|single frame/, "the views must share one frame");
+    assert.match(prompt, /identical scale|same scale/, "views must be at identical scale");
+    assert.match(prompt, /identical across|one person seen from three angles/,
+      "the sheet must state the three views are one person");
+    assert.match(prompt, /neutral background/, "scenery would teach the renderer the background, not the character");
+    // STYLE LEADS. The channel's own visual language must survive in front of
+    // the layout instruction, or a watercolour channel gets a generic model
+    // sheet — the drift the golden reference exists to prevent.
+    assert.ok(
+      sheet.prompt.indexOf("Lay this out") > 0,
+      "layout must be an addendum to the channel style prompt, never replace it",
+    );
+  }
+}
+
 console.log("VISUAL MATTER TESTS PASS");

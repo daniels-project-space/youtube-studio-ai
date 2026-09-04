@@ -534,11 +534,30 @@ export function visualMatterAssetRequests(
       label: "Mood board",
       prompt: manifest.moodBoard.visualPrompt,
     },
+    // A character sheet is a TURNAROUND, not a portrait.
+    //
+    // This asked for a single view, which is what a portrait is: it shows the
+    // renderer one angle of a face and leaves every other angle to invention,
+    // so the same character drifts between shots. Real character sheets exist
+    // precisely to solve that, and the fix costs nothing — one image either
+    // way, except that the model now draws the SAME person three times inside
+    // one frame instead of three independent generations agreeing by luck.
+    //
+    // The style prompt still leads, so a watercolour channel gets a watercolour
+    // turnaround. This adds layout, never look.
     ...manifest.characters.map((character) => ({
       id: character.id,
       kind: "character_sheet" as const,
       label: `Character sheet · ${character.name}`,
-      prompt: character.stylePrompt,
+      prompt: [
+        character.stylePrompt,
+        "Lay this out as a model-sheet TURNAROUND: the same character drawn three times " +
+        "side by side in one frame — front view, three-quarter view, and profile — at " +
+        "identical scale and height, evenly spaced, all facing the same lighting.",
+        "Plain neutral background, full figure in every view, no props or scenery.",
+        "Keep face, hair, build, wardrobe and every distinctive marking identical across " +
+        "all three views; they are one person seen from three angles, not three people.",
+      ].join(" "),
     })),
     ...manifest.settings.map((setting) => ({
       id: setting.id,
