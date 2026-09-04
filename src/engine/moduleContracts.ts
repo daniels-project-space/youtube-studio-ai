@@ -434,6 +434,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "bannedWords", "chaptersText", "videoDurationSec", "attributions", "channelName", "niche", "persona",
       "nicheIntel", "seoDatabank", "competitors", "narrationText", "script", "styleDNA", "topicBet", "plannedTitle",
       "serializedProgramEpisodeContext",
+      // The channel's title register, frozen into the seed store at run start.
+      "clickbaitLevel",
     ],
   }),
   package_to_opening_plan: contract(["package.opening_bound"], {

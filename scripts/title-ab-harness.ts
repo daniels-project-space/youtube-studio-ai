@@ -75,8 +75,9 @@ async function main(): Promise<void> {
     // scene seed are genuinely all the grounding that exists at this point.
     const grounding = [plan.topic, plan.description, plan.sceneSeed].filter(Boolean).join("\n");
     process.stdout.write(`\n=== ${name} · ${niche}\n    topic: ${plan.topic}\n`);
+    const isMusicNiche = /lo-?fi|music|ambien|beats/i.test(`${niche} ${channel.identity?.persona ?? ""}`);
     const shipped = plan.title!.trim();
-    const shippedLint = lintTitle(shipped, { grounding, channelName: name });
+    const shippedLint = lintTitle(shipped, { grounding, channelName: name, isMusicNiche });
     console.log(`    SHIPPED TODAY (${shipped.length}) ${shipped}`);
     console.log(`      lint: ${shippedLint.pass ? "pass" : shippedLint.issues.join("; ")}`);
 
@@ -92,10 +93,14 @@ async function main(): Promise<void> {
         // The pipeline passes this; without it the lofi lint rejects the only
         // on-brand framing a music channel has, which would make the harness
         // report a module failure that production never sees.
-        isMusicNiche: /lo-?fi|music|ambien|beats/i.test(`${niche} ${channel.identity?.persona ?? ""}`),
+        isMusicNiche,
+        // Mirrors packaging: the planned title enters the pool and either wins
+        // on merit or loses. Omitting it here would measure a pipeline nobody
+        // runs, since every scheduled video carries one.
+        warmStartTitle: shipped,
         log: () => {},
       });
-      const lint = lintTitle(m.title, { grounding, channelName: name });
+      const lint = lintTitle(m.title, { grounding, channelName: name, isMusicNiche });
       console.log(`    METACRAFT     (${m.title.length}) ${m.title}`);
       console.log(`      frame=${m.frame} click=${m.clickScore}/10 alt="${m.titleAlternate}"`);
       console.log(`      lint: ${lint.pass ? "pass" : lint.issues.join("; ")}`);

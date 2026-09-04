@@ -452,8 +452,11 @@ export const metadataOptimized: Block = {
       };
     }
 
-    // Phase 7: bias titles toward past high-CTR/retention winners ("" until data).
-    const perfCtx = await loadPerformanceContext(ctx.keyPrefix);
+    // Past performance, read through the CTR lens. The blended default weights
+    // retention at 0.7 — but retention measures the script, and a title only
+    // controls the click, so under the blend a strong title on a weak video was
+    // handed to the generator as a WEAK performer to avoid.
+    const perfCtx = await loadPerformanceContext(ctx.keyPrefix, { lens: "ctr" });
 
     // Style-DNA SEO spec — the channel's own research-distilled title formula /
     // description structure (previously generated at inception and never read).
@@ -486,17 +489,34 @@ export const metadataOptimized: Block = {
         descriptionStructure: dnaSeo?.descriptionStructure,
         perfContext: perfCtx || undefined,
         isMusicNiche,
+        // The scheduled plan's title now COMPETES instead of overriding. It is
+        // written before the script exists and never faces the feed judge, yet
+        // the packaging line below used to let it beat a judged winner purely by
+        // precedence. Entering the pool keeps an owner-approved title that is
+        // genuinely the strongest, and drops one that is not.
+        warmStartTitle: plannedTitle || undefined,
+        clickbaitLevel: typeof ctx.store["clickbaitLevel"] === "number"
+          ? (ctx.store["clickbaitLevel"] as number)
+          : undefined,
         log: ctx.log,
       });
       let { title, description, tags } = m;
       ({ title, description, tags } = finishMetadata(ctx, { title, description, tags, channelName, nicheIntel }));
       const ve = await viewEstimate(tags);
-      ctx.log(`metadata: METACRAFT [${m.frame}] click ${m.clickScore}/10 — "${title.slice(0, 60)}" est=${ve.estimatedViews} (${ve.estimatedViewsSource})`);
+      ctx.log(
+        `metadata: METACRAFT [${m.frame}] ${m.judged ? `click ${m.clickScore}/10` : "UNJUDGED"} — ` +
+        `"${title.slice(0, 60)}" est=${ve.estimatedViews} (${ve.estimatedViewsSource})` +
+        (plannedTitle && title !== plannedTitle ? ` (beat the planned title "${plannedTitle.slice(0, 40)}")` : ""),
+      );
+      // The planned title is no longer applied here. It was passed into
+      // metacraft as a candidate above, so if it is the strongest option it is
+      // already `title`; if it is not, it lost on merit rather than being
+      // reinstated after the judging it never took part in.
       return {
-        title: plannedTitle || title,
+        title,
         description,
         thumbnailDescription: buildThumbnailDescription({
-          title: plannedTitle || title,
+          title,
           topic,
           scriptExcerpt,
           ...(serializedEpisodePrompt ? { serializedEpisodeContext: serializedEpisodePrompt } : {}),

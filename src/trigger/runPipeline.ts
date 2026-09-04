@@ -1651,6 +1651,13 @@ export const runPipelineTask = task({
           palette: channel.identity?.palette ?? [],
           persona: channel.identity?.persona ?? "",
           niche: channel.identity?.niche ?? "",
+          // Frozen with the rest of the identity so a channel's title register
+          // cannot drift mid-run. Omitted when unset rather than defaulted, so
+          // the engine falls back to the voice archetype's own level instead of
+          // one global constant.
+          ...(typeof channel.identity?.clickbaitLevel === "number"
+            ? { clickbaitLevel: channel.identity.clickbaitLevel }
+            : {}),
           // The Showrunner-authored stance for THIS channel's critic. Frozen
           // into the seed store alongside the rest of the identity so every
           // model-graded gate (script, thumbnail, narration, visual review)
