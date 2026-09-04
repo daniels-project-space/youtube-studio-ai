@@ -201,14 +201,64 @@ async function downloadPaidFalImage(receipt: FalPaidImageReceipt): Promise<Buffe
  * Generate one still on fal and return the image BYTES (banana contract).
  * Same arg shape as generateBananaImage so banana.ts can delegate 1:1:
  *   - no reference images → FLUX1.1 [pro] text→image
- *   - reference images    → FLUX Kontext img2img. LIMITATION: Kontext takes ONE
- *     image_url, so only the FIRST reference is used — multi-ref conditioning
- *     (e.g. a 3-view character sheet) degrades to single-ref on the fal route.
- *     References arrive as base64 and are passed as data: URIs (fal accepts them).
+ *   - reference images    → FLUX Kontext img2img. Kontext takes ONE image_url,
+ *     so several references are COMPOSITED onto a single character sheet first
+ *     (see foldReferencesToSheet) instead of dropping all but the first, which
+ *     is what this route used to do. References arrive as base64 and are passed
+ *     as data: URIs (fal accepts them).
  *   - allowText false/undefined → banana's NO_TEXT_CLAUSE is appended, so the
  *     picture-only guard is identical across providers.
  * Retries 429/5xx twice (the groqVision backoff pattern); throws loud otherwise.
  */
+
+/**
+ * Fold multiple references into ONE conditioning image.
+ *
+ * Kontext accepts a single `image_url`, so a three-view character reference
+ * previously became whichever view happened to be first and the rest were
+ * silently dropped — the character the model saw was a fraction of the
+ * character the studio had prepared. Rather than accept that, the views are
+ * composited onto one sheet, exactly as an animation department would: still
+ * one image_url, but the model now sees the whole character.
+ *
+ * Falls back to the first reference if compositing fails for any reason. A
+ * degraded reference is worth far more than a failed render, and this is a
+ * quality improvement rather than a correctness requirement.
+ */
+async function foldReferencesToSheet(
+  refs: { data: string; mimeType: string }[],
+): Promise<{ data: string; mimeType: string }> {
+  if (refs.length <= 1) return refs[0];
+  const { mkdtemp, writeFile, readFile, rm } = await import("node:fs/promises");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  const { execFile } = await import("node:child_process");
+  const { promisify } = await import("node:util");
+  const { buildCharacterSheet } = await import("@/lib/characterSheet");
+  const exec = promisify(execFile);
+
+  const dir = await mkdtemp(join(tmpdir(), "falrefs-"));
+  try {
+    const views = [];
+    for (const [index, ref] of refs.entries()) {
+      const ext = ref.mimeType.includes("png") ? "png" : "jpg";
+      const path = join(dir, `ref_${index}.${ext}`);
+      await writeFile(path, Buffer.from(ref.data, "base64"));
+      views.push({ id: `ref_${index}`, path });
+    }
+    const { path } = await buildCharacterSheet({
+      views,
+      outDir: dir,
+      run: async (bin, argv, timeoutMs) => { await exec(bin, argv, { timeout: timeoutMs }); },
+    });
+    return { data: (await readFile(path)).toString("base64"), mimeType: "image/png" };
+  } catch {
+    return refs[0];
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
 export async function generateFalImage(req: {
   prompt: string;
   aspectRatio?: string;
@@ -250,10 +300,12 @@ export async function generateFalImage(req: {
   const endpoint = `https://fal.run/${model}`;
   let body: Record<string, unknown>;
   if (refs.length > 0) {
+    // Multiple references are folded onto one character sheet rather than
+    // discarding all but the first; see foldReferencesToSheet.
+    const conditioning = await foldReferencesToSheet(refs);
     body = {
       prompt,
-      // Kontext takes exactly one reference (see LIMITATION above).
-      image_url: `data:${refs[0].mimeType};base64,${refs[0].data}`,
+      image_url: `data:${conditioning.mimeType};base64,${conditioning.data}`,
       aspect_ratio: aspect,
       seed,
       num_images: 1,
