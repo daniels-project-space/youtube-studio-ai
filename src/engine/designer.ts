@@ -76,6 +76,8 @@ import {
   assertMinimumVideoFoundationForAutomaticFamily,
   pipelineSupportsNarrationAlignedShorts,
 } from "./minimumVideoFoundation";
+import { routeNarrationProvider } from "@/lib/narrationProviderRouting";
+import { resolveVoiceDoctrine as voiceDoctrine } from "@/engine/golden";
 import {
   compilePipeline,
   completePipelineForPolicy,
@@ -840,7 +842,8 @@ export function designPipeline(opts: DesignOptions): DesignResult {
 
   // Mirror the narration pacing into script_gen so the word budget accounts for
   // the real inter-sentence pauses AND voice speed (length math in scriptGen).
-  const narrParams = pipeline.find((e) => e.block === "narration_tts")?.params;
+  const narrEntry = pipeline.find((e) => e.block === "narration_tts");
+  const narrParams = narrEntry?.params;
   const sgEntry = pipeline.find((e) => e.block === "script_gen");
   if (sgEntry && narrParams) {
     if (typeof narrParams["sentenceGapSec"] === "number") {
@@ -852,6 +855,30 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     // ElevenLabs v3 voice → the writer places performable [audio tags].
     if (narrParams["ttsProvider"] === "elevenlabs") {
       sgEntry.params = { ...(sgEntry.params ?? {}), voiceTags: true };
+    }
+  }
+
+  // NARRATION PROVIDER for a channel that has not chosen one.
+  //
+  // Measured rather than preferred: self-hosted Qwen matches or beats the paid
+  // provider on intelligibility, casting accuracy and timbre consistency, and
+  // is about half as prosodically varied — F0 spread 13.5 against 24-55. That
+  // gap is architectural, so it is routed around rather than tuned away: even
+  // registers take the free provider, dynamic ones do not.
+  //
+  // Only ever applied at DESIGN time, and only when nothing has been chosen. A
+  // channel already publishing in one voice must not acquire another because a
+  // router changed its mind; that is the same drift the golden reference
+  // prevents visually, and a new narrator is more jarring than a new palette.
+  if (narrEntry && !narrEntry.params?.["ttsProvider"]) {
+    const advice = routeNarrationProvider({
+      voice: voiceDoctrine(opts.nicheKey ?? "")?.voice,
+      narrationSeconds: typeof narrEntry.params?.["targetSeconds"] === "number"
+        ? (narrEntry.params["targetSeconds"] as number)
+        : undefined,
+    });
+    if (advice.binding) {
+      narrEntry.params = { ...(narrEntry.params ?? {}), ttsProvider: advice.provider };
     }
   }
 

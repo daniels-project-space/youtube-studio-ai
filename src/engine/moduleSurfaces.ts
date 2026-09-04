@@ -47,6 +47,12 @@ const NARRATION_MODULE: ModuleCard = {
     knobs: [
       { id: "sentenceGapSec", type: "number", range: [0, 3], default: 0.35, describes: "base silence between sentences (jittered)", servesStyles: ["meditation", "documentary"] },
       { id: "ttsSpeed", type: "number", range: [0.85, 1.15], default: 1.0, describes: "voice speed multiplier", servesStyles: ["meditation", "hype"] },
+      // The block has always read ctx.params["ttsProvider"], but no knob
+      // exposed it, so the narration engine could not be chosen when a channel
+      // was built — including the self-hosted qwen3 route. "fish" stays the
+      // default because changing it would re-voice every channel that never
+      // set one, which a listener notices faster than any visual change.
+      { id: "ttsProvider", type: "enum", values: ["fish", "elevenlabs", "qwen3"], default: "fish", describes: "narration engine; qwen3 is the self-hosted worker and refuses until it is qualified", servesStyles: ["documentary", "meditation", "commentary"] },
       { id: "voiceFx", type: "enum", values: ["none", "radio"], default: "none", describes: "stylized filter on the finished narration", servesStyles: ["vintage", "crime"] },
       { id: "chapterCards", type: "boolean", default: false, describes: "read each section heading on a fading card", servesStyles: ["documentary", "essay"] },
     ],
