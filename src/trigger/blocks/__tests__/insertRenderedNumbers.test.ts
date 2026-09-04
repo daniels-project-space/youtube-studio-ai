@@ -30,10 +30,13 @@ const item = (over: Partial<InsertPlanItem>): InsertPlanItem =>
   ({ kind: "big_stat", sentenceIdx: 0, ...over }) as InsertPlanItem;
 
 /** Reads better at the call site than comparing against null. */
-const clean = (i: Partial<InsertPlanItem>, sentence: string): boolean =>
-  unspokenRenderedField(item(i), sentence) === null;
-const offender = (i: Partial<InsertPlanItem>, sentence: string): string | null =>
-  unspokenRenderedField(item(i), sentence);
+const clean = (i: Partial<InsertPlanItem>, sentence: string, narration?: string): boolean =>
+  unspokenRenderedField(item(i), sentence, narration) === null;
+const offender = (i: Partial<InsertPlanItem>, sentence: string, narration?: string): string | null =>
+  unspokenRenderedField(item(i), sentence, narration)?.field ?? null;
+/** The text the gate objected to — what makes a drop diagnosable. */
+const rejected = (i: Partial<InsertPlanItem>, sentence: string): string | undefined =>
+  unspokenRenderedField(item(i), sentence)?.rendered;
 
 /**
  * Brace depth of an index relative to the start of the plan loop.
@@ -120,6 +123,14 @@ function main(): void {
     "an invented figure in the label must be caught",
   );
 
+  // The drop must carry the offending TEXT, not just the field name. Without it
+  // an over-strict gate and a lying director produce identical log lines.
+  assert.equal(
+    rejected({ value: "$1.2 million", anchorValues: ["534000"] }, "The programme added 534,000 jobs last year."),
+    "$1.2 million",
+    "the gate must report what it rejected, not merely where",
+  );
+
   // ---- what must still get through ---------------------------------------
   // Narration says "534 thousand"; rendering the full figure is formatting.
   assert.ok(
@@ -172,15 +183,93 @@ function main(): void {
     "interpolated series points must not be judged as spoken numerals",
   );
 
+  // ---- spoken as WORDS, because narration is read aloud -------------------
+  // Measured against the real director on the only channel using this block, a
+  // digits-only reading rejected six of eleven planned inserts and every
+  // rejection was wrong. These are those exact cases.
+  assert.ok(
+    clean(
+      { value: "10.2%" },
+      "According to S and P Dow Jones Indices historical data from 1926 through 2023, the broad " +
+        "S and P 500 index generated an average annual compound return of ten point two percent.",
+    ),
+    "a spoken decimal said in words must not read as an invented figure",
+  );
+  assert.ok(
+    clean(
+      { value: "11.9%" },
+      "The FTSE Nareit All Equity REITs index delivered an average annual return of eleven point nine percent.",
+    ),
+    "spelled decimals must be recognised wherever they occur",
+  );
+  assert.ok(
+    clean(
+      { title: "Dividend Aristocrats 20-Year Return" },
+      "Over the twenty-year period from 2003 through 2023, the index achieved ten point five percent.",
+    ),
+    "a hyphenated spelled number must be recognised",
+  );
+  assert.ok(clean({ value: "25" }, "Some twenty five percent of them agreed."), "compound tens must parse");
+  assert.ok(clean({ value: "300000" }, "It grows into three hundred thousand dollars."), "hundreds and magnitudes must compose");
+  // An axis that starts at zero asserts nothing.
+  assert.ok(
+    clean({ kind: "line_chart", xLabels: ["Year 0", "Year 36"] }, "It would take approximately 36 years."),
+    "a zero baseline is scaffolding, not a claim",
+  );
+  // But spelling is not a licence: a figure nobody said in any form still fails.
+  assert.equal(
+    offender({ value: "12.7%" }, "The index returned ten point two percent last year."),
+    "value",
+    "recognising number words must not admit numbers that were never said",
+  );
+
+  // ---- quantity is pinned to its sentence; frame may cite the script -------
+  const script =
+    "Your initial 10,000 dollars is the starting point. " +
+    "By year 40, the compounding curve tilts vertically, pushing your balance past 452,000 dollars.";
+  const sentence = "By year 40, the compounding curve tilts vertically, pushing your balance past 452,000 dollars.";
+  assert.ok(
+    clean({ value: "452,000", label: "Total Balance from Initial $10,000 Investment" }, sentence, script),
+    "a caption may name a figure the script established earlier",
+  );
+  // The hole this gate closes stays closed: the hero number is still pinned to
+  // the sentence it is spoken in, no matter what the rest of the script says.
+  assert.equal(
+    offender({ value: "$10,000" }, sentence, script),
+    "value",
+    "a quantity must be spoken in ITS OWN sentence — earlier context does not license it",
+  );
+  assert.equal(
+    offender(
+      { kind: "bar_compare", bars: [{ label: "Start", value: 10000, display: "$10,000" }] },
+      sentence,
+      script,
+    ),
+    "bars[0].value",
+    "bar heights are quantities and stay sentence-scoped",
+  );
+  // A frame citing a figure that appears nowhere is still refused.
+  assert.equal(
+    offender({ title: "The $75,000 Threshold" }, sentence, script),
+    "title",
+    "a frame naming a figure absent from the whole script must still be caught",
+  );
+  // Omitting the narration must not silently loosen the check.
+  assert.equal(
+    offender({ label: "Initial $10,000 Investment" }, sentence),
+    "label",
+    "with no narration supplied the frame scope must fall back to the sentence",
+  );
+
   // ---- wiring -------------------------------------------------------------
   // A gate that is defined but not called is the failure mode this module
   // already had once.
   assert.match(
     SOURCE,
-    /const unspoken = unspokenRenderedField\(it, t\.text\);/,
+    /const unspoken = unspokenRenderedField\(it, t\.text, narrationText\);/,
     "the gate must be applied to each planned insert",
   );
-  const gateAt = SOURCE.indexOf("const unspoken = unspokenRenderedField(it, t.text);");
+  const gateAt = SOURCE.indexOf("const unspoken = unspokenRenderedField(it, t.text, narrationText);");
   const anchorsAt = SOURCE.indexOf("if (!anchorsSpoken(it, t.text))");
   assert.ok(gateAt > 0 && anchorsAt > 0, "both gates must be present in the plan loop");
   assert.equal(
@@ -194,7 +283,7 @@ function main(): void {
   // no way to tell an over-tight gate from a lying director.
   assert.match(
     SOURCE,
-    /\$\{unspoken\} renders a number not spoken in the sentence/,
+    /\$\{unspoken\.field\}="\$\{unspoken\.rendered\}" renders a number not spoken/,
     "the drop must log which field carried the unspoken number",
   );
 

@@ -28,13 +28,32 @@ export class OpenRouterGenerationOutcomeUnknownError extends Error {
   readonly code = "openrouter_generation_outcome_unknown";
   readonly retryable = false;
   readonly status?: number;
+  /**
+   * Whether provider work is KNOWN to have been consumed, or merely might have
+   * been. The distinction matters to a caller deciding whether to call again.
+   *
+   * "unknown"           transport died, the body was unreadable, an HTTP error
+   *                     arrived after dispatch, or a 2xx carried no text. It is
+   *                     genuinely unclear what the provider did, so replaying
+   *                     could silently buy the same generation twice.
+   * "consumed_unusable" a complete response arrived and its text was not valid
+   *                     JSON. There is no ambiguity here: the generation ran, it
+   *                     was billed, and the output cannot be used. Calling again
+   *                     is a second deliberate purchase, not a blind replay —
+   *                     which is a cost decision only the caller can make.
+   *
+   * `retryable` stays false for both: it governs AUTOMATIC replay inside this
+   * client, which neither case permits.
+   */
+  readonly outcome: "unknown" | "consumed_unusable";
 
-  constructor(detail: string, options?: { status?: number; cause?: unknown }) {
+  constructor(detail: string, options?: { status?: number; cause?: unknown; outcome?: "unknown" | "consumed_unusable" }) {
     super(
       `openRouter: generation may already have consumed provider work; refusing automatic replay: ${detail}`,
       options?.cause === undefined ? undefined : { cause: options.cause },
     );
     this.name = "OpenRouterGenerationOutcomeUnknownError";
+    this.outcome = options?.outcome ?? "unknown";
     if (options?.status !== undefined) this.status = options.status;
   }
 }
@@ -237,7 +256,7 @@ export async function openRouterChat(args: {
     } catch (error) {
       throw new OpenRouterGenerationOutcomeUnknownError(
         "successful response text failed the requested JSON contract",
-        { status: response.status, cause: error },
+        { status: response.status, cause: error, outcome: "consumed_unusable" },
       );
     }
   }

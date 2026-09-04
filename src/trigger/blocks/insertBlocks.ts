@@ -28,7 +28,7 @@ import {
   type EvidenceVisualManifest,
 } from "@/engine/evidenceVisualManifest";
 import { join } from "node:path";
-import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { ClaudeGenerationOutcomeUnknownError, claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { makeRunTempDir, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { renderDataInsert } from "@/lib/remotionRender";
@@ -156,6 +156,74 @@ function magnitudeOf(word: string | undefined): number | undefined {
 }
 
 /**
+ * Number WORDS, because narration is written to be read aloud.
+ *
+ * Measured against the real Insert Director on the one channel that uses this
+ * block, a digits-only reading of "spoken" rejected six of eleven planned
+ * inserts and every single rejection was wrong: "an annual return of ten point
+ * two percent" rendered as "10.2%", "over the twenty-year period" titled
+ * "20-Year Return". The figures were spoken; they were spelled.
+ */
+const NUMBER_WORDS: Record<string, number> = {
+  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
+  ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
+  seventeen: 17, eighteen: 18, nineteen: 19,
+};
+const TENS_WORDS: Record<string, number> = {
+  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
+};
+
+/** Every number spelled out in a text, e.g. "ten point two" -> 10.2. */
+function spelledNumbers(text: string): number[] {
+  const tokens = text.toLowerCase().split(/[^a-z]+/).filter(Boolean);
+  const found: number[] = [];
+  for (let i = 0; i < tokens.length; ) {
+    let value: number | undefined;
+    if (TENS_WORDS[tokens[i]] !== undefined) {
+      value = TENS_WORDS[tokens[i]];
+      i++;
+      // "twenty five" and "twenty-five" tokenize identically.
+      if (NUMBER_WORDS[tokens[i]] !== undefined && NUMBER_WORDS[tokens[i]] < 10) {
+        value += NUMBER_WORDS[tokens[i]];
+        i++;
+      }
+    } else if (NUMBER_WORDS[tokens[i]] !== undefined) {
+      value = NUMBER_WORDS[tokens[i]];
+      i++;
+    } else {
+      i++;
+      continue;
+    }
+    if (tokens[i] === "hundred") {
+      value *= 100;
+      i++;
+      if (TENS_WORDS[tokens[i]] !== undefined) { value += TENS_WORDS[tokens[i]]; i++; }
+      if (NUMBER_WORDS[tokens[i]] !== undefined && NUMBER_WORDS[tokens[i]] < 10) { value += NUMBER_WORDS[tokens[i]]; i++; }
+    }
+    // "ten point two" — spoken decimals.
+    if (tokens[i] === "point") {
+      let decimals = "";
+      let j = i + 1;
+      while (NUMBER_WORDS[tokens[j]] !== undefined && NUMBER_WORDS[tokens[j]] < 10) {
+        decimals += String(NUMBER_WORDS[tokens[j]]);
+        j++;
+      }
+      if (decimals) {
+        value = Number(`${value}.${decimals}`);
+        i = j;
+      }
+    }
+    found.push(value);
+    const scale = magnitudeOf(tokens[i]);
+    if (scale !== undefined) {
+      found.push(value * scale);
+      i++;
+    }
+  }
+  return found;
+}
+
+/**
  * The numbers a sentence speaks, including magnitude-WORD expansions: narration
  * says "534 thousand" far more often than "534,000", and a chart that renders
  * the full figure for it is formatting, not invention.
@@ -171,6 +239,10 @@ function spokenNumberSet(sentence: string): Set<string> {
       spoken.add(String(Math.round(scaled)));
     }
   }
+  for (const value of spelledNumbers(sentence)) {
+    spoken.add(String(value));
+    spoken.add(String(Math.round(value)));
+  }
   return spoken;
 }
 
@@ -178,6 +250,10 @@ function spokenNumberSet(sentence: string): Set<string> {
 function numbersSpokenIn(text: string, spoken: Set<string>): boolean {
   for (const m of text.replace(/[,\s](?=\d)/g, "").matchAll(/(\d+(?:\.\d+)?)\s*([a-zA-Z]*)/g)) {
     const raw = m[1];
+    // A zero baseline is scaffolding, not a claim: an axis beginning at
+    // "Year 0" asserts nothing, and demanding the script say "zero" out loud
+    // rejects the most ordinary axis there is.
+    if (Number(raw) === 0) continue;
     if (spoken.has(raw) || spoken.has(raw.split(".")[0])) continue;
     const scale = magnitudeOf(m[2]);
     if (scale !== undefined) {
@@ -189,31 +265,80 @@ function numbersSpokenIn(text: string, spoken: Set<string>): boolean {
   return true;
 }
 
-/** Returns the first field carrying an unspoken numeral, or null when clean. */
-export function unspokenRenderedField(item: InsertPlanItem, sentence: string): string | null {
-  const spoken = spokenNumberSet(sentence);
-  const fields: [string, unknown][] = [
-    ["title", item.title],
+/**
+ * The first field carrying an unspoken numeral, or null when clean.
+ *
+ * Returns the offending TEXT as well as the field name. "value renders a number
+ * not spoken" cannot be acted on: it reads the same whether the director
+ * invented a figure or the gate is too strict about formatting. With the text in
+ * hand the drop is diagnosable from the run log alone.
+ */
+export interface UnspokenRender { field: string; rendered: string }
+
+/**
+ * QUANTITY vs FRAME — the two kinds of field answer to different scopes.
+ *
+ * A quantity is the claim itself: the hero number, a bar's caption, a bar's
+ * height. It must be spoken in the very sentence the insert is pinned to,
+ * because the insert appears WHILE that sentence is read and the viewer takes
+ * the two together.
+ *
+ * A frame only says what the quantity is OF: the title, the label, the axis
+ * ends, an event marker. Measured against the real director, sentence-scoping
+ * the frame rejected captions like "Total Balance from Initial $10,000
+ * Investment" on a video whose whole premise is ten thousand dollars, and
+ * "Years to Reach $300,000 Goal" one sentence after the script said "300
+ * thousand dollars". That is the script's own established context, not
+ * invention, so a frame is checked against the whole narration.
+ *
+ * The hole this gate exists to close stays closed either way: `value` and the
+ * bars remain pinned to their sentence, and a frame citing a figure that
+ * appears NOWHERE in the script is still refused.
+ */
+export function unspokenRenderedField(
+  item: InsertPlanItem,
+  sentence: string,
+  narration?: string,
+): UnspokenRender | null {
+  const inSentence = spokenNumberSet(sentence);
+  // Without a narration the sentence is all the context there is, which keeps
+  // the two scopes identical rather than silently lenient.
+  const inNarration = narration ? spokenNumberSet(narration) : inSentence;
+  const quantities: [string, unknown][] = [
     ["value", item.value],
-    ["label", item.label],
-    ...(item.xLabels ?? []).map((x, i) => [`xLabels[${i}]`, x] as [string, unknown]),
     ...(item.bars ?? []).flatMap((b, i) => [
       [`bars[${i}].label`, b.label],
       [`bars[${i}].value`, b.value],
       [`bars[${i}].display`, b.display],
     ] as [string, unknown][]),
+  ];
+  const frames: [string, unknown][] = [
+    ["title", item.title],
+    ["label", item.label],
+    ...(item.xLabels ?? []).map((x, i) => [`xLabels[${i}]`, x] as [string, unknown]),
     ...(item.events ?? []).map((e, i) => [`events[${i}].label`, e.label] as [string, unknown]),
   ];
-  for (const [name, value] of fields) {
-    if (value === undefined || value === null) continue;
-    if (!numbersSpokenIn(String(value), spoken)) return name;
+  for (const [scope, fields] of [[inSentence, quantities], [inNarration, frames]] as const) {
+    for (const [name, value] of fields) {
+      if (value === undefined || value === null) continue;
+      const rendered = String(value);
+      if (!numbersSpokenIn(rendered, scope)) return { field: name, rendered };
+    }
   }
   return null;
 }
 
-/** Every anchor's digits must appear verbatim in the sentence. */
+/**
+ * Every anchor must appear in the sentence — as digits OR as words.
+ *
+ * This read digitGroups alone, which meant a script that spelled its figures
+ * out lost every insert on that sentence. Measured on the real channel, four of
+ * seven planned inserts died here on sentences like "an average annual compound
+ * return of ten point two percent" — a correct figure, correctly attributed,
+ * silently refused because narration is written to be read aloud.
+ */
 function anchorsSpoken(item: InsertPlanItem, sentence: string): boolean {
-  const spoken = digitGroups(sentence);
+  const spoken = spokenNumberSet(sentence);
   if (spoken.size === 0) return false;
   const anchors = (item.anchorValues ?? [])
     .map((a) => String(a).replace(/[,\s]/g, ""))
@@ -247,6 +372,38 @@ function numericPlanValues(item: InsertPlanItem): number[] {
   }
   for (const event of item.events ?? []) collect(event.label);
   return values;
+}
+
+/**
+ * One deliberate re-plan when the director's text came back unusable.
+ *
+ * Measured on the real channel, the planner returned non-JSON on three of five
+ * topics. The block caught that, logged one line and returned zero inserts, so
+ * a video shipped with no data layer at all and nothing downstream could tell
+ * an empty plan apart from a failed one. For a channel whose identity IS the
+ * data layer, a transient formatting hiccup was silently deleting the feature.
+ *
+ * The client refuses to replay these itself, and is right to: a replay might
+ * buy the same generation twice. But "outcome: consumed_unusable" is the one
+ * case with no ambiguity — a complete response arrived and its text was not
+ * JSON. Calling again is a second, known purchase of a sub-cent planning call,
+ * weighed against losing every insert in the video. Only that case retries;
+ * a genuinely unknown outcome still propagates untouched.
+ */
+export async function planWithRetryOnUnusableOutput<T>(
+  call: () => Promise<T>,
+  log: (message: string) => void,
+): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (
+      !(error instanceof ClaudeGenerationOutcomeUnknownError)
+      || error.outcome !== "consumed_unusable"
+    ) throw error;
+    log("visual_inserts: director returned unusable text — re-planning once (a second billed planning call, against losing the video's data layer)");
+    return call();
+  }
 }
 
 export const visualInserts: Block = {
@@ -354,7 +511,7 @@ export const visualInserts: Block = {
 
     let plan: InsertPlanItem[] = [];
     try {
-      const raw = await claudeJson<{ inserts?: InsertPlanItem[] }>({
+      const raw = await planWithRetryOnUnusableOutput(() => claudeJson<{ inserts?: InsertPlanItem[] }>({
         prompt:
           `You are the channel's MOTION-GRAPHICS DIRECTOR for a ${niche || "YouTube"} video: "${topic}".\n` +
           `These narration sentences speak numbers (sentenceIdx: text):\n` +
@@ -380,14 +537,21 @@ export const visualInserts: Block = {
         maxTokens: 1800,
         temperature: 0.4,
         log: ctx.log,
-      });
+      }), ctx.log);
       plan = Array.isArray(raw.inserts) ? raw.inserts : [];
+      ctx.log(`visual_inserts: director planned ${plan.length} insert(s) across ${candidates.length} numeric sentence(s)`);
     } catch (e) {
-      ctx.log(`visual_inserts: director failed (skipping inserts): ${e instanceof Error ? e.message : e}`);
+      // Loud, and named as a failure: this is the module's core output not
+      // happening, not a channel that warranted no inserts.
+      ctx.log(`visual_inserts: FAILED — director produced no usable plan, video will have NO data layer: ${e instanceof Error ? e.message : e}`);
       return { insertOverlays: [] };
     }
 
     // ---- Deterministic integrity + shape validation ----
+    // Frame fields (titles, labels, axis ends) may cite context the script
+    // established in an earlier sentence; quantities may not. See
+    // unspokenRenderedField.
+    const narrationText = timings.map((timing) => timing.text).join(" ");
     const valid: InsertPlanItem[] = [];
     for (const it of plan) {
       const t = timings[it.sentenceIdx];
@@ -426,18 +590,29 @@ export const visualInserts: Block = {
         ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — plotted curve leaves the range of its spoken anchors`);
         continue;
       }
-      const unspoken = unspokenRenderedField(it, t.text);
+      const unspoken = unspokenRenderedField(it, t.text, narrationText);
       if (unspoken !== null) {
-        ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — ${unspoken} renders a number not spoken in the sentence ("${t.text.slice(0, 60)}…")`);
+        ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — ${unspoken.field}="${unspoken.rendered}" renders a number not spoken in the sentence ("${t.text.slice(0, 60)}…")`);
         continue;
       }
       if (!anchorsSpoken(it, t.text)) {
         ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — anchor numbers not spoken verbatim ("${t.text.slice(0, 60)}…")`);
         continue;
       }
-      if (it.kind === "big_stat" && !(it.value && /\d/.test(it.value))) continue;
-      if ((it.kind === "line_chart" || it.kind === "annotated_line") && !(Array.isArray(it.series) && it.series.length >= 2)) continue;
-      if (it.kind === "bar_compare" && !(Array.isArray(it.bars) && it.bars.length >= 2)) continue;
+      // Shape checks used to `continue` in silence, which is how a module
+      // reports "the director planned nothing" when it in fact rejected work.
+      if (it.kind === "big_stat" && !(it.value && /\d/.test(it.value))) {
+        ctx.log(`visual_inserts: DROPPED big_stat@${it.sentenceIdx} — no numeric value to count up`);
+        continue;
+      }
+      if ((it.kind === "line_chart" || it.kind === "annotated_line") && !(Array.isArray(it.series) && it.series.length >= 2)) {
+        ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — fewer than 2 series points to draw`);
+        continue;
+      }
+      if (it.kind === "bar_compare" && !(Array.isArray(it.bars) && it.bars.length >= 2)) {
+        ctx.log(`visual_inserts: DROPPED bar_compare@${it.sentenceIdx} — fewer than 2 bars to compare`);
+        continue;
+      }
       valid.push(it);
     }
 
@@ -494,7 +669,10 @@ export const visualInserts: Block = {
         ctx.log(`visual_inserts: ${it.kind}@${startSec.toFixed(0)}s would spill into the tail — skipped`);
         continue;
       }
-      if (startSec < lastEnd + minGapSec) continue;
+      if (startSec < lastEnd + minGapSec) {
+        ctx.log(`visual_inserts: ${it.kind}@${startSec.toFixed(0)}s is inside the ${minGapSec}s gap after the previous insert — skipped`);
+        continue;
+      }
       if (quoteWindows.some(([a, b]) => startSec < b && startSec + durSec > a)) {
         ctx.log(`visual_inserts: ${it.kind}@${startSec.toFixed(0)}s clashes with a quote card — skipped`);
         continue;
