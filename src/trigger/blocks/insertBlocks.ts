@@ -37,7 +37,7 @@ import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studio
 const KINDS = ["big_stat", "line_chart", "bar_compare", "annotated_line", "lower_third"] as const;
 type InsertKind = (typeof KINDS)[number];
 
-interface InsertPlanItem {
+export interface InsertPlanItem {
   sentenceIdx: number;
   /** Last sentence STILL discussing this data — the insert holds until then. */
   endSentenceIdx?: number;
@@ -82,6 +82,41 @@ function digitGroups(text: string): Set<string> {
     out.add(m[0].split(".")[0]);
   }
   return out;
+}
+
+/**
+ * A plotted curve may not leave the range of the numbers actually spoken.
+ *
+ * anchorsSpoken proves the ANCHORS were said out loud, and the evidence-manifest
+ * path checks every rendered numeral — but that path only runs when a reviewed
+ * manifest exists. On the ordinary route nothing looked at `series` at all, so a
+ * curve interpolated between two spoken anchors could peak anywhere: anchors of
+ * 100 and 200 with a series topping 900 passed the gate and put a number on
+ * screen that no one said, implying a magnitude the narration never claimed.
+ *
+ * Interpolation between anchors is legitimate — the shape of a decade of growth
+ * is not itself a claim. Leaving the anchors' range is, because the highest
+ * point of a chart reads as a figure. A small tolerance is allowed for a smooth
+ * curve's overshoot at the endpoints; anything beyond that is invention.
+ */
+const SERIES_OVERSHOOT_TOLERANCE = 0.02;
+
+export function seriesWithinSpokenRange(item: InsertPlanItem): boolean {
+  const series = item.series ?? [];
+  if (!series.length) return true;
+  const anchors = (item.anchorValues ?? [])
+    .flatMap((a) => Array.from(String(a).replace(/[,\s]/g, "").matchAll(/\d+(?:\.\d+)?/g)))
+    .map((m) => Number(m[0]))
+    .filter((n) => Number.isFinite(n));
+  // With fewer than two anchors there is no range to stay inside; anchorsSpoken
+  // already refuses an insert with no spoken anchor at all.
+  if (anchors.length < 2) return true;
+  const low = Math.min(...anchors);
+  const high = Math.max(...anchors);
+  const span = Math.max(Math.abs(high), 1) * SERIES_OVERSHOOT_TOLERANCE;
+  return series.every((value) =>
+    Number.isFinite(value) && value >= low - span && value <= high + span,
+  );
 }
 
 /** Every anchor's digits must appear verbatim in the sentence. */
@@ -294,6 +329,10 @@ export const visualInserts: Block = {
           ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — rendered numbers are not all present in the reviewed manifest`);
           continue;
         }
+      }
+      if (!seriesWithinSpokenRange(it)) {
+        ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — plotted curve leaves the range of its spoken anchors`);
+        continue;
       }
       if (!anchorsSpoken(it, t.text)) {
         ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — anchor numbers not spoken verbatim ("${t.text.slice(0, 60)}…")`);
