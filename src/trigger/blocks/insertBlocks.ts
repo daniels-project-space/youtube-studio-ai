@@ -119,6 +119,98 @@ export function seriesWithinSpokenRange(item: InsertPlanItem): boolean {
   );
 }
 
+/**
+ * Every numeral that will be DRAWN must have been spoken.
+ *
+ * anchorsSpoken checks `anchorValues` — the numbers the director declares the
+ * insert is built on. But anchorValues is not what reaches the screen. The
+ * Remotion component draws `title`, `value`, `label`, the first and last
+ * `xLabels`, each bar's `label` and `display`, and each event's `label`. Only
+ * the evidence-manifest path ever looked at those, via numericPlanValues, and
+ * that path runs solely when a reviewed manifest exists.
+ *
+ * So on the ordinary route a director could declare truthful anchors and still
+ * render a different figure: anchors ["534000"] with value "$1.2 million" put a
+ * hero number on screen that nobody said, past a gate that reported success.
+ * That is the module's central promise — "the model styles the data; it never
+ * invents it" — failing silently on its main path.
+ *
+ * Bars are checked on `value` as well as `display`, because value drives bar
+ * HEIGHT. Two bars displaying 100 and 200 but valued 100 and 900 read as a
+ * ninefold gap; the geometry is a claim even when the captions are honest.
+ *
+ * `series` is deliberately excluded — its points are interpolated between the
+ * anchors by design, and seriesWithinSpokenRange bounds them instead.
+ */
+const MAGNITUDES: [RegExp, number][] = [
+  [/^(k|thousand)$/, 1e3],
+  [/^(m|mm|mn|million)$/, 1e6],
+  [/^(b|bn|billion)$/, 1e9],
+  [/^(t|tn|trillion)$/, 1e12],
+];
+
+function magnitudeOf(word: string | undefined): number | undefined {
+  if (!word) return undefined;
+  const lower = word.toLowerCase();
+  return MAGNITUDES.find(([re]) => re.test(lower))?.[1];
+}
+
+/**
+ * The numbers a sentence speaks, including magnitude-WORD expansions: narration
+ * says "534 thousand" far more often than "534,000", and a chart that renders
+ * the full figure for it is formatting, not invention.
+ */
+function spokenNumberSet(sentence: string): Set<string> {
+  const spoken = digitGroups(sentence);
+  for (const m of sentence.replace(/[,\s](?=\d)/g, "").matchAll(/(\d+(?:\.\d+)?)\s*([a-zA-Z]+)/g)) {
+    const scale = magnitudeOf(m[2]);
+    if (scale === undefined) continue;
+    const scaled = Number(m[1]) * scale;
+    if (Number.isFinite(scaled)) {
+      spoken.add(String(scaled));
+      spoken.add(String(Math.round(scaled)));
+    }
+  }
+  return spoken;
+}
+
+/** True when every digit-group in a to-be-rendered string was spoken. */
+function numbersSpokenIn(text: string, spoken: Set<string>): boolean {
+  for (const m of text.replace(/[,\s](?=\d)/g, "").matchAll(/(\d+(?:\.\d+)?)\s*([a-zA-Z]*)/g)) {
+    const raw = m[1];
+    if (spoken.has(raw) || spoken.has(raw.split(".")[0])) continue;
+    const scale = magnitudeOf(m[2]);
+    if (scale !== undefined) {
+      const scaled = Number(raw) * scale;
+      if (spoken.has(String(scaled)) || spoken.has(String(Math.round(scaled)))) continue;
+    }
+    return false;
+  }
+  return true;
+}
+
+/** Returns the first field carrying an unspoken numeral, or null when clean. */
+export function unspokenRenderedField(item: InsertPlanItem, sentence: string): string | null {
+  const spoken = spokenNumberSet(sentence);
+  const fields: [string, unknown][] = [
+    ["title", item.title],
+    ["value", item.value],
+    ["label", item.label],
+    ...(item.xLabels ?? []).map((x, i) => [`xLabels[${i}]`, x] as [string, unknown]),
+    ...(item.bars ?? []).flatMap((b, i) => [
+      [`bars[${i}].label`, b.label],
+      [`bars[${i}].value`, b.value],
+      [`bars[${i}].display`, b.display],
+    ] as [string, unknown][]),
+    ...(item.events ?? []).map((e, i) => [`events[${i}].label`, e.label] as [string, unknown]),
+  ];
+  for (const [name, value] of fields) {
+    if (value === undefined || value === null) continue;
+    if (!numbersSpokenIn(String(value), spoken)) return name;
+  }
+  return null;
+}
+
 /** Every anchor's digits must appear verbatim in the sentence. */
 function anchorsSpoken(item: InsertPlanItem, sentence: string): boolean {
   const spoken = digitGroups(sentence);
@@ -332,6 +424,11 @@ export const visualInserts: Block = {
       }
       if (!seriesWithinSpokenRange(it)) {
         ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — plotted curve leaves the range of its spoken anchors`);
+        continue;
+      }
+      const unspoken = unspokenRenderedField(it, t.text);
+      if (unspoken !== null) {
+        ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — ${unspoken} renders a number not spoken in the sentence ("${t.text.slice(0, 60)}…")`);
         continue;
       }
       if (!anchorsSpoken(it, t.text)) {
