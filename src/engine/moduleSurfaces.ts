@@ -348,9 +348,62 @@ const METADATA_MODULE: ModuleCard = {
   },
 };
 
+/**
+ * Three surfaces that did not exist, so eight parameters the onboarding UI
+ * offered were validated against nothing and silently dropped on write —
+ * exactly the failure this file was created to fix, still live for the blocks
+ * it never reached.
+ *
+ * lore_short and quiz_year had NO surface at all. The header note said
+ * free-text knobs were blocked on the Knob type gaining a "text" variant; that
+ * variant exists and customization.ts has validated it for some time, so the
+ * note was stale and the narrator field stayed unconfigurable for no reason.
+ */
+const LORE_SHORT_MODULE: ModuleCard = {
+  key: "lore_short",
+  title: "Lore micro-doc",
+  stage: "visual",
+  does: "Writes the beat sheet, paints each beat and animates a depth-camera move over it, cutting to the narration.",
+  customization: {
+    capabilities: ["art look per channel", "first-person narrator identity"],
+    knobs: [
+      { id: "subStyle", type: "enum", values: ["cinematic", "watercolor_pencil"], default: "cinematic", describes: "art look for every painted beat", servesStyles: ["lore", "history", "myth"] },
+      // Free text because a narrator is a character, not a menu choice. Bounded
+      // so a pasted essay cannot become the prompt.
+      { id: "narrator", type: "text", maxLength: 400, default: "", describes: "who speaks, in first person — identity plus tone; empty falls back to the channel persona", servesStyles: ["lore", "history", "myth"] },
+    ],
+    presets: {
+      lore: { subStyle: "cinematic" },
+      folk: { subStyle: "watercolor_pencil" },
+    },
+  },
+};
+
+const QUIZ_YEAR_MODULE: ModuleCard = {
+  key: "quiz_year",
+  title: "Certified QuizYear",
+  stage: "visual",
+  does: "Builds a multiple-choice quiz from verified CC0 facts, with a depleting timer and a locked reveal.",
+  customization: {
+    capabilities: ["pace of guess and reveal", "how widely known the subjects are"],
+    knobs: [
+      { id: "countdownSeconds", type: "number", range: [3, 15], default: 7, describes: "seconds the viewer gets before the answer locks", servesStyles: ["quiz", "shorts"] },
+      { id: "revealSeconds", type: "number", range: [2, 10], default: 4, describes: "seconds the answer is held on screen", servesStyles: ["quiz", "shorts"] },
+      { id: "minNotability", type: "number", range: [0, 200], default: 40, describes: "Wikipedia language editions a subject must appear in; higher is better known but fewer facts qualify", servesStyles: ["quiz"] },
+    ],
+    presets: {
+      fast: { countdownSeconds: 4, revealSeconds: 2 },
+      relaxed: { countdownSeconds: 12, revealSeconds: 6 },
+      obscure: { minNotability: 5 },
+    },
+  },
+};
+
 export const CORE_MODULE_SURFACES: ModuleCard[] = [
   TOPIC_MODULE,
   METADATA_MODULE,
+  LORE_SHORT_MODULE,
+  QUIZ_YEAR_MODULE,
   SCRIPT_MODULE,
   NARRATION_MODULE,
   FOOTAGE_MODULE,

@@ -32,6 +32,13 @@ export const ASSEMBLY_SURFACE: CustomizationSurface = {
     { id: "transitions", type: "enum", values: ["hardcut", "crossfade", "dip_to_black"], default: "crossfade", describes: "between-shot transition", servesStyles: ["documentary", "hype"] },
     { id: "reframe", type: "enum", values: ["none", "center", "subject_track"], default: "none", describes: "repurpose horizontal → vertical", servesStyles: ["shorts", "social"] },
     { id: "tailSec", type: "number", range: [0, 8], default: 3, describes: "silent fade-out tail", servesStyles: ["shorts", "ambient"] },
+    // These three are read by the assemble block and were offered by the
+    // onboarding catalog, but had no knob here — so setting them validated
+    // against nothing and was dropped on write. Ranges mirror the catalog
+    // exactly, so the UI can never send a value this surface rejects.
+    { id: "fadeOutSec", type: "number", range: [0, 6], default: 0, describes: "video fade to black at the end, in seconds", servesStyles: ["documentary", "ambient"] },
+    { id: "audioFadeOutSec", type: "number", range: [0, 30], default: 0, describes: "music fade-out length, in seconds", servesStyles: ["ambient", "meditation"] },
+    { id: "burnCaptions", type: "boolean", default: false, describes: "burn captions into the picture rather than shipping them as a track", servesStyles: ["shorts", "social"] },
     { id: "captions", type: "boolean", default: true, describes: "burn word-level captions over the video (toggle off to ship caption-free)", servesStyles: ["accessibility", "shorts", "social"] },
     // ────────────────────────────────────────────────────────────────────────
     // OPERATOR-ONLY CUTOVER SWITCH — NOT a creative knob. DEFAULT false.

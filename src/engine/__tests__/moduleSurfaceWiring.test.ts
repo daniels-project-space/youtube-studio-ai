@@ -24,6 +24,8 @@ import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 import { CORE_MODULE_SURFACES } from "@/engine/moduleSurfaces";
+import { MODULE_REGISTRY } from "@/engine/moduleRegistry";
+import { NEW_CHANNEL_MODULE_CATALOG } from "@/engine/moduleCatalog";
 
 const ROOT = process.cwd();
 
@@ -72,6 +74,33 @@ function main(): void {
   const keys = new Set(CORE_MODULE_SURFACES.map((card) => card.key));
   for (const required of ["metadata", "script_gen", "narration_tts", "visual_matter"]) {
     assert.ok(keys.has(required), `${required} must expose a surface or its channel config is dropped on write`);
+  }
+
+  // ONBOARDING AND VALIDATION MUST AGREE.
+  //
+  // Two registries describe the same modules: NEW_CHANNEL_MODULE_CATALOG is
+  // what the channel-creation UI renders, and MODULE_REGISTRY is what
+  // channels.setModuleConfig validates against. A parameter present in the
+  // first and absent from the second renders as a working control, accepts a
+  // value, and is DROPPED on write — validateModuleConfigMap skips what it does
+  // not recognise. Nothing connected the two, and eight parameters across three
+  // blocks were being discarded that way: lore_short's art look and narrator,
+  // quiz_year's three pacing controls, and the assemble block's fades and
+  // caption burn-in.
+  {
+    const orphaned: string[] = [];
+    for (const entry of NEW_CHANNEL_MODULE_CATALOG as { block: string; params?: { key: string }[] }[]) {
+      const knobs = new Set((MODULE_REGISTRY[entry.block]?.customization?.knobs ?? []).map((knob) => knob.id));
+      for (const param of entry.params ?? []) {
+        if (!knobs.has(param.key)) orphaned.push(`${entry.block}.${param.key}`);
+      }
+    }
+    assert.deepEqual(
+      orphaned,
+      [],
+      "onboarding offers these parameters but nothing validates them, so setting them is discarded on write:\n  " +
+        orphaned.join("\n  "),
+    );
   }
 
   // Presets may only reference knobs the same card declares. A preset naming a
