@@ -164,6 +164,7 @@ import { narrationPhysics } from "@/lib/voicecraft";
 import {
   assertNarrationPerformanceEvidence,
   assertNarrationTimingMeasurementIntegrity,
+  evaluateNarrationRate,
   planNarrationCadence,
   preflightNarrationPerformance,
   reconcileNarrationCadenceAfterDurationMeasurement,
@@ -1378,6 +1379,22 @@ export const narrationTts: Block = {
       ctx.log(
         `narration_tts: local final evidence PASSED (${narrationPerformanceEvidence.durationSec.toFixed(1)}s | ${narrationPerformanceEvidence.wordsPerSec.toFixed(2)} words/s | ${narrationPerformanceEvidence.integratedLufs.toFixed(1)} LUFS)`,
       );
+      // DELIVERY RATE against the channel's own intended pace. Inter-sentence
+      // pauses are already held to 0.08s, but the rate of speech inside them
+      // had only a 0.3x-2.5x sanity band — which passed the same pipeline
+      // delivering 98 and 158 wpm on scripts whose reference takes ran 125-136.
+      // Reported rather than fatal: nothing has measured production rates yet,
+      // so failing renders on first deploy would break channels currently
+      // sitting at the edge. Promoting this to a throw is one line once the
+      // logs show where real episodes actually land.
+      {
+        const rate = evaluateNarrationRate({
+          wordCount: narrationPerformanceEvidence.wordCount,
+          durationSec: narrationPerformanceEvidence.durationSec,
+          speed,
+        });
+        ctx.log(`narration_tts: delivery rate ${rate.ok ? "OK" : "OFF-PACE"} — ${rate.detail}`);
+      }
       const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
       await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
       await recordAsset(ctx, "narration", narrationKey, { durationSec, chapters: chap, mode: "chapter" });
@@ -1495,6 +1512,16 @@ export const narrationTts: Block = {
     ctx.log(
       `narration_tts: local final evidence PASSED (${narrationPerformanceEvidence.durationSec.toFixed(1)}s | ${narrationPerformanceEvidence.wordsPerSec.toFixed(2)} words/s | ${narrationPerformanceEvidence.integratedLufs.toFixed(1)} LUFS)`,
     );
+    // Same delivery-rate report as the other narration path; both routes reach
+    // production, so checking only one would leave half the episodes unmeasured.
+    {
+      const rate = evaluateNarrationRate({
+        wordCount: narrationPerformanceEvidence.wordCount,
+        durationSec: narrationPerformanceEvidence.durationSec,
+        speed,
+      });
+      ctx.log(`narration_tts: delivery rate ${rate.ok ? "OK" : "OFF-PACE"} — ${rate.detail}`);
+    }
 
     const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
     await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });

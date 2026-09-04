@@ -85,6 +85,79 @@ export const NARRATION_CADENCE_EVIDENCE_VERSION = "narration-cadence-evidence/v1
 
 export type NarrationPausePurpose = "turn" | "reveal" | "question" | "release" | "continuation";
 
+/**
+ * DELIVERY RATE — the pacing axis nothing was checking.
+ *
+ * Inter-sentence pauses are already enforced to within 0.08s by
+ * evaluateNarrationCadence, which is tight. The rate of speech INSIDE those
+ * sentences had only the sanity band in preflightNarrationPerformance, which
+ * accepts anything between 0.3x and 2.5x of expected. That catches silence and
+ * truncation and nothing else: a read 27% too fast passes comfortably.
+ *
+ * It is not hypothetical. Grading the studio's own narration corpus with
+ * scripts/narration-oracle.py found the same pipeline delivering 98, 140 and
+ * 158 words per minute on three scripts, against an ElevenLabs reference of
+ * 125, 128 and 136. A 60% spread in delivery rate is a different video at each
+ * end, and nothing in the pipeline noticed.
+ *
+ * CALIBRATION. The band has to pass work that was already approved, or it is
+ * broken rather than strict — the rule the thumbnail gates were rebuilt on.
+ * Centred on the channel's intended rate with a 15% tolerance, all three
+ * reference takes pass and both outliers fail, which is the discrimination the
+ * gate exists to provide.
+ */
+export const NARRATION_BASE_WORDS_PER_SEC = 2.15;
+export const NARRATION_RATE_TOLERANCE = 0.15;
+
+export interface NarrationRateVerdict {
+  ok: boolean;
+  wordsPerSec: number;
+  intendedWordsPerSec: number;
+  lowerBound: number;
+  upperBound: number;
+  ratio: number;
+  detail: string;
+}
+
+/**
+ * Judge delivered speech rate against the channel's own intended pace.
+ *
+ * `speed` comes from the channel's narration physics, where a quiet mentor runs
+ * 0.95 and a chaos commentator 1.15. Judging every channel against one absolute
+ * rate would mark a deliberately unhurried read as broken — the same mistake as
+ * scoring every channel's CTR against one absolute threshold.
+ */
+export function evaluateNarrationRate(args: {
+  wordCount: number;
+  durationSec: number;
+  /** Narration physics speed multiplier; 1 when the channel declares none. */
+  speed?: number;
+  tolerance?: number;
+}): NarrationRateVerdict {
+  const tolerance = args.tolerance ?? NARRATION_RATE_TOLERANCE;
+  const speed = Number.isFinite(args.speed) && (args.speed ?? 0) > 0 ? args.speed! : 1;
+  const intended = NARRATION_BASE_WORDS_PER_SEC * speed;
+  const lowerBound = intended * (1 - tolerance);
+  const upperBound = intended * (1 + tolerance);
+  if (!Number.isFinite(args.durationSec) || args.durationSec <= 0 || args.wordCount <= 0) {
+    return {
+      ok: false, wordsPerSec: 0, intendedWordsPerSec: intended, lowerBound, upperBound, ratio: 0,
+      detail: "no measurable narration to rate",
+    };
+  }
+  const wordsPerSec = args.wordCount / args.durationSec;
+  const ratio = wordsPerSec / intended;
+  const ok = wordsPerSec >= lowerBound && wordsPerSec <= upperBound;
+  const wpm = (value: number) => Math.round(value * 60);
+  return {
+    ok, wordsPerSec, intendedWordsPerSec: intended, lowerBound, upperBound, ratio,
+    detail: ok
+      ? `${wpm(wordsPerSec)} wpm is within ${Math.round(tolerance * 100)}% of the channel's intended ${wpm(intended)} wpm`
+      : `${wpm(wordsPerSec)} wpm is ${wordsPerSec < lowerBound ? "slower" : "faster"} than the channel's intended ` +
+        `${wpm(intended)} wpm by more than ${Math.round(tolerance * 100)}% (accepts ${wpm(lowerBound)}-${wpm(upperBound)} wpm)`,
+  };
+}
+
 export interface NarrationCadencePlan {
   version: typeof NARRATION_CADENCE_EVIDENCE_VERSION;
   gapsSec: number[];
