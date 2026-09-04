@@ -82,3 +82,6 @@ scripts/*.bak_torch
 # Committing them would let a stale checkout claim something is locked when the
 # owner has already released it.
 .locks/
+
+# Claude Code worktrees are local scratch checkouts, never repo content
+.claude/worktrees/
