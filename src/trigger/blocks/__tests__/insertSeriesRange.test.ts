@@ -29,6 +29,27 @@ const chart = (over: Partial<InsertPlanItem>): InsertPlanItem => ({
   kind: "line_chart", sentenceIdx: 0, ...over,
 } as InsertPlanItem);
 
+/**
+ * Brace depth of an index relative to the start of the plan loop.
+ *
+ * The first version of this check asserted the two gates sat within N
+ * characters of each other, as a proxy for "on the unconditional path". That
+ * proxy broke the moment a legitimate gate was added between them — a test
+ * failing for a reason it does not name is worse than no test. Depth answers
+ * the actual question: a gate inside `if (strictDataStory) {` is one level
+ * deeper than the loop body, and that is the placement bug being guarded.
+ */
+function depthAt(source: string, index: number): number {
+  const from = source.indexOf("for (const it of plan) {");
+  assert.ok(from > 0 && index > from, "index must fall inside the plan loop");
+  let depth = 0;
+  for (let i = from + "for (const it of plan) {".length; i < index; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}") depth--;
+  }
+  return depth;
+}
+
 function main(): void {
   // ---- behaviour ---------------------------------------------------------
   // A curve that stays between its spoken anchors is presentation, not a claim.
@@ -100,11 +121,13 @@ function main(): void {
   const gateAt = SOURCE.indexOf("if (!seriesWithinSpokenRange(it))");
   const anchorsAt = SOURCE.indexOf("if (!anchorsSpoken(it, t.text))");
   assert.ok(gateAt > 0 && anchorsAt > 0, "both gates must be present in the plan loop");
-  assert.ok(
-    Math.abs(gateAt - anchorsAt) < 400,
-    "the series gate must sit alongside anchorsSpoken on the unconditional path, " +
-    "not inside the evidence-manifest branch that most inserts skip",
+  assert.equal(
+    depthAt(SOURCE, gateAt),
+    depthAt(SOURCE, anchorsAt),
+    "the series gate must sit at the same nesting as anchorsSpoken — on the " +
+    "unconditional path, not inside the evidence-manifest branch most inserts skip",
   );
+  assert.equal(depthAt(SOURCE, gateAt), 0, "the gate must run for every planned insert");
 
   // A dropped insert must say why. A silent skip is indistinguishable from a
   // planner that produced nothing, which is how a gate stops being noticed.

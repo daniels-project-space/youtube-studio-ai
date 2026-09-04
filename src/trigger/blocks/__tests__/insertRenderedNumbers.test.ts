@@ -35,6 +35,27 @@ const clean = (i: Partial<InsertPlanItem>, sentence: string): boolean =>
 const offender = (i: Partial<InsertPlanItem>, sentence: string): string | null =>
   unspokenRenderedField(item(i), sentence);
 
+/**
+ * Brace depth of an index relative to the start of the plan loop.
+ *
+ * The first version of this check asserted the two gates sat within N
+ * characters of each other, as a proxy for "on the unconditional path". That
+ * proxy broke the moment a legitimate gate was added between them — a test
+ * failing for a reason it does not name is worse than no test. Depth answers
+ * the actual question: a gate inside `if (strictDataStory) {` is one level
+ * deeper than the loop body, and that is the placement bug being guarded.
+ */
+function depthAt(source: string, index: number): number {
+  const from = source.indexOf("for (const it of plan) {");
+  assert.ok(from > 0 && index > from, "index must fall inside the plan loop");
+  let depth = 0;
+  for (let i = from + "for (const it of plan) {".length; i < index; i++) {
+    if (source[i] === "{") depth++;
+    else if (source[i] === "}") depth--;
+  }
+  return depth;
+}
+
 function main(): void {
   // ---- the hole this closes -----------------------------------------------
   // Truthful anchors, invented hero number. This is the exact shape that used
@@ -162,11 +183,13 @@ function main(): void {
   const gateAt = SOURCE.indexOf("const unspoken = unspokenRenderedField(it, t.text);");
   const anchorsAt = SOURCE.indexOf("if (!anchorsSpoken(it, t.text))");
   assert.ok(gateAt > 0 && anchorsAt > 0, "both gates must be present in the plan loop");
-  assert.ok(
-    Math.abs(gateAt - anchorsAt) < 500,
-    "the gate must sit on the unconditional path beside anchorsSpoken, not inside " +
-      "the evidence-manifest branch that most inserts skip",
+  assert.equal(
+    depthAt(SOURCE, gateAt),
+    depthAt(SOURCE, anchorsAt),
+    "the gate must sit at the same nesting as anchorsSpoken — on the unconditional " +
+      "path, not inside the evidence-manifest branch that most inserts skip",
   );
+  assert.equal(depthAt(SOURCE, gateAt), 0, "the gate must run for every planned insert");
   // The drop must name the offending field. "DROPPED big_stat@4" alone leaves
   // no way to tell an over-tight gate from a lying director.
   assert.match(
