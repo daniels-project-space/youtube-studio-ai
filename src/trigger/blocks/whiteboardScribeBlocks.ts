@@ -569,6 +569,11 @@ export const whiteboardScribe: Block = {
     };
     const brief: WhiteboardSyncBrief = {
       topic, facts, styleId, artStyle: visualBrief?.promptStyle,
+      // Seeds creative defaults; without it an undeclared art style has no
+      // channel identity to resolve against and every channel looks the same.
+      ...(typeof ctx.store["channelName"] === "string" && ctx.store["channelName"].trim()
+        ? { channelName: (ctx.store["channelName"] as string).trim() }
+        : {}),
       header: visualBrief?.header, voiceId, width, height,
       ...(usesElevenLabsVoice ? { ttsProvider: "elevenlabs" as const, elevenVoiceId } : {}),
       ...(boardMode ? { boardMode } : {}),

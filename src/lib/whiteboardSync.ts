@@ -40,6 +40,7 @@
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { fallbackLineArtStyle } from "@/lib/identitySpread";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
@@ -75,6 +76,15 @@ export interface WhiteboardSyncBrief {
   header?: string;
   /** Whiteboard style-lock ref id (src/assets/whiteboard/<id>_ref.png). Default "history". */
   styleId?: string;
+  /**
+   * Channel name, used ONLY as the stable seed for creative defaults.
+   *
+   * Without it an undeclared art style has nothing channel-specific to resolve
+   * against, and every channel that never set one renders in the same hand.
+   * Topic would be the wrong seed: it changes per video, so a channel's look
+   * would shift between episodes.
+   */
+  channelName?: string;
   /** Channel Style-DNA rendering language, used as a text-native style lock. */
   artStyle?: string;
   /** Fish voice id (default "sleepless_historian") — used when provider is Fish. */
@@ -1041,9 +1051,14 @@ export async function castWhiteboardSync(args: {
   // this is cheaper and more deterministic than re-uploading a generated image
   // as a paid input on every panel.
   const styleId = brief.styleId?.trim() || "history";
+  // A declared Style-DNA always wins. Only the UNDECLARED case is spread: the
+  // single hard-coded fallback made every channel without an art style render
+  // in one identical hand, which is the same convergence that put most of the
+  // thumbnail catalogue in one colour band. Every option is still line art, so
+  // widening the range cannot turn a scribe channel into a painted one.
   const styleLock = brief.artStyle?.trim()
     ? `CHANNEL STYLE-DNA (${styleId}): ${brief.artStyle.trim()}`
-    : `CHANNEL STYLE (${styleId}): clean editorial black-marker line art, bold simple silhouettes, uniform stroke weight, sparse red accents`;
+    : `CHANNEL STYLE (${styleId}): ${fallbackLineArtStyle(brief.channelName?.trim() || styleId)}`;
   const artJobs: { p: NPanel; l: NLayer }[] = [];
   for (const p of panels) for (const l of p.layers) if (l.kind === "art") artJobs.push({ p, l });
   const isSceneJob = (j: { l: NLayer }) => Number(j.l.box?.[2] ?? 0) >= 0.32;

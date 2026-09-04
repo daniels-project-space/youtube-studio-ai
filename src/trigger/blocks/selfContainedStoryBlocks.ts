@@ -35,6 +35,7 @@ import {
 } from "@/lib/serializedProgramEpisodeContext";
 import { serializedProgramEpisodeIdentity } from "@/lib/serializedProgramEpisode";
 import { type WhiteboardSyncBrief } from "@/lib/whiteboardSync";
+import { fallbackNarratorPersona } from "@/lib/identitySpread";
 
 /** Two bounded plan attempts plus two bounded critic passes. */
 export const SELF_CONTAINED_STORY_PLAN_MAX_TEXT_COST_USD = 4 * PRICE.boundedTextPassUsd;
@@ -115,10 +116,11 @@ function motionComicBrief(ctx: StageContext): MotionComicBrief {
 function loreBrief(ctx: StageContext): { topic: string; narrator: string; nScenes: number } {
   const topic = requiredTopic(ctx);
   const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
+  // See loreShortBlocks: the same hard-coded persona lived in both files.
   const narrator =
     (typeof ctx.params["narrator"] === "string" ? ctx.params["narrator"].trim() : "") ||
     (typeof ctx.store["persona"] === "string" ? ctx.store["persona"].trim() : "") ||
-    "a weathered chronicler who witnessed these events first-hand and speaks of them plainly, without boast";
+    fallbackNarratorPersona(String(ctx.store["channelName"] ?? ""));
   return { topic, narrator, nScenes: loreBeatCount(targetSeconds) };
 }
 

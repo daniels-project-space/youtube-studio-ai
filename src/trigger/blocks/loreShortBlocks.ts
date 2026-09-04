@@ -63,6 +63,7 @@ import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { generateI2V } from "@/lib/i2v";
 import { PRICE } from "@/engine/pricing";
 import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
+import { fallbackNarratorPersona } from "@/lib/identitySpread";
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -405,10 +406,14 @@ export const loreShort: Block = {
     }
     // WHO narrates, first person. The channel's persona is the honest source;
     // a generic fallback keeps the block runnable on a bare pipeline.
+    // A declared persona always wins. The fallback is spread by channel
+    // because this exact 100-character string was hard-coded in two blocks, so
+    // every channel without a persona shared one narrator character — voice is
+    // identity as much as palette is.
     const narrator =
       (ctx.params["narrator"] as string | undefined)?.trim() ||
       (ctx.store["persona"] as string | undefined)?.trim() ||
-      "a weathered chronicler who witnessed these events first-hand and speaks of them plainly, without boast";
+      fallbackNarratorPersona(String(ctx.store["channelName"] ?? ""));
 
     const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
     const nScenes = loreBeatCount(targetSeconds);
