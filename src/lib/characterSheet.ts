@@ -34,6 +34,16 @@ import { join } from "node:path";
  * model reads them as one character rather than as different subjects. */
 export const CHARACTER_SHEET_PANEL = 512;
 export const CHARACTER_SHEET_MAX_VIEWS = 4;
+/**
+ * A scene contact sheet: nine beats of one scene in a single 3x3 image.
+ *
+ * Nine separately rendered stills cost nine renders and agree only by luck. Nine
+ * panels drawn in one pass cost one render and are internally consistent by
+ * construction, which is the same reasoning that made the character sheet a
+ * turnaround rather than three portraits.
+ */
+export const CONTACT_SHEET_COLUMNS = 3;
+export const CONTACT_SHEET_MAX_PANELS = 9;
 
 export interface CharacterView {
   /** Stable id of the source reference asset. */
@@ -68,6 +78,28 @@ const ANGLE_ORDER = ["front", "three_quarter", "profile", "back"];
 function angleRank(angle: string | undefined): number {
   const index = ANGLE_ORDER.indexOf((angle ?? "").toLowerCase());
   return index < 0 ? ANGLE_ORDER.length : index;
+}
+
+export function planContactSheet(
+  views: readonly CharacterView[],
+  columns = CONTACT_SHEET_COLUMNS,
+  maxPanels = CONTACT_SHEET_MAX_PANELS,
+): CharacterSheetPlan {
+  const ordered = views.slice(0, maxPanels);
+  const digest = createHash("sha256")
+    .update(ordered.map((v) => `${v.id}\0${v.angle ?? ""}`).join("\n"))
+    .digest("hex")
+    .slice(0, 32);
+  const rows = Math.max(1, Math.ceil(ordered.length / columns));
+  return {
+    views: [...ordered],
+    columns,
+    width: Math.min(columns, ordered.length || 1) * CHARACTER_SHEET_PANEL,
+    height: rows * CHARACTER_SHEET_PANEL,
+    digest,
+    // A single panel is not a contact sheet; hand back the image itself.
+    passthrough: ordered.length <= 1,
+  };
 }
 
 export function planCharacterSheet(views: readonly CharacterView[]): CharacterSheetPlan {
@@ -142,8 +174,10 @@ export async function buildCharacterSheet(args: {
   run: (bin: string, argv: string[], timeoutMs: number) => Promise<unknown>;
   ffmpegBin?: string;
   timeoutMs?: number;
+  /** Supply a plan to use a different layout, e.g. a 3x3 scene contact sheet. */
+  plan?: CharacterSheetPlan;
 }): Promise<{ path: string; plan: CharacterSheetPlan }> {
-  const plan = planCharacterSheet(args.views);
+  const plan = args.plan ?? planCharacterSheet(args.views);
   if (!plan.views.length) throw new Error("character sheet requires at least one reference view");
   if (plan.passthrough) return { path: plan.views[0].path, plan };
 

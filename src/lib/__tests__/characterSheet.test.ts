@@ -20,6 +20,7 @@ import {
   CHARACTER_SHEET_PANEL,
   buildCharacterSheet,
   planCharacterSheet,
+  planContactSheet,
   xstackLayout,
 } from "@/lib/characterSheet";
 
@@ -116,6 +117,42 @@ async function main(): Promise<void> {
     assert.equal(again.path, path, "the same character must rebuild to the same sheet");
   } finally {
     await rm(dir, { recursive: true, force: true });
+  }
+
+  // ---- 3x3 scene contact sheet ------------------------------------------
+  // Nine beats of one scene in one image. The layout maths differs from the
+  // 2x2 case (three columns, three rows) and a wrong offset still produces a
+  // correctly sized PNG, so the corners are read back individually.
+  const nine = await mkdtemp(join(tmpdir(), "contact-"));
+  try {
+    const colours = ["red", "green", "blue", "yellow", "cyan", "magenta", "white", "gray", "black"];
+    const views = [] as { id: string; path: string }[];
+    for (const [i, colour] of colours.entries()) {
+      views.push({ id: `beat${i}`, path: await solid(nine, `beat${i}`, colour) });
+    }
+    const plan = planContactSheet(views);
+    assert.equal(plan.views.length, 9, "a scene contact sheet holds nine beats");
+    assert.equal(plan.columns, 3);
+    assert.equal(plan.width, 3 * CHARACTER_SHEET_PANEL);
+    assert.equal(plan.height, 3 * CHARACTER_SHEET_PANEL);
+
+    const { path } = await buildCharacterSheet({ views, outDir: nine, run, plan });
+    const p = CHARACTER_SHEET_PANEL;
+    const dominant = (rgb: [number, number, number]) => ["r", "g", "b"][rgb.indexOf(Math.max(...rgb))];
+    // First panel of each row, so a row-offset error cannot hide.
+    assert.equal(dominant(await pixelRgb(path, 100, 100)), "r", "beat 1 (red) belongs top-left");
+    assert.equal(dominant(await pixelRgb(path, 100, p + 100)), "r", "beat 4 (yellow) belongs row 2");
+    const bottomLeft = await pixelRgb(path, 100, 2 * p + 100);
+    assert.ok(bottomLeft.every((c) => c > 200), `beat 7 (white) belongs row 3, got ${bottomLeft}`);
+    // Bottom-right must be the ninth panel (black), which also proves the sheet
+    // is not silently truncated to fewer panels.
+    const bottomRight = await pixelRgb(path, 2 * p + 100, 2 * p + 100);
+    assert.ok(bottomRight.every((c) => c < 60), `beat 9 (black) belongs bottom-right, got ${bottomRight}`);
+
+    // Over-supply must clamp rather than overflow the grid.
+    assert.equal(planContactSheet([...views, ...views]).views.length, 9);
+  } finally {
+    await rm(nine, { recursive: true, force: true });
   }
 
   console.log("CHARACTER SHEET PASS");
