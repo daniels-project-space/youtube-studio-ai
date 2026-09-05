@@ -134,3 +134,47 @@ write is a claim about my own imagination.**
     on the unconditional path". Adding a second legitimate gate between them
     broke it, reporting a placement bug that did not exist. Assert the actual
     property — here, brace depth relative to the loop body.
+
+## What the reasoning-starvation sweep added (2026-09-05)
+
+One mechanism accounted for four separately-discovered dead features, across
+four modules that had nothing else in common. It is worth its own rules.
+
+12. **On a reasoning route, `maxTokens` is a budget for THINKING PLUS ANSWERING,
+    and the failure correlates with difficulty.** Measured directly on the
+    shipped advertiser-safety call at its ceiling of 200: `completion_tokens=196`
+    of which `reasoning_tokens=189`. Seven tokens for the JSON, sixteen
+    unparseable characters back. The consequence is not random — a clean verdict
+    is cheap to emit, a flagged one has to name a policy and justify itself, so
+    **the scan passed benign narration 2/2 and threw on violating narration 2/2.**
+    A gate on this route is cheapest exactly when it should fire. Size every
+    ceiling against the hardest output it must produce, never the typical one.
+
+13. **Check that a "control" is wired to the provider you are actually on.**
+    `vision.ts` carried a rigorous A/B and a `reasoningEffort` option defaulting
+    to "none". Both were inert: the only code reading the option was a Groq
+    provider that the dispatch loop could no longer select, and a live caller was
+    setting it on the final-master review believing it bought a constrained,
+    reasoning-free pass. Before trusting a knob, find the line that sends it to
+    the API.
+
+14. **Preserve the measurement when you delete the mechanism.** That A/B — 130
+    calls, 13 real gate cases — showed gate judgement is strictly better without
+    reasoning (90.0% vs 81.7% accuracy, 382ms vs 3032ms, ~$0.44 vs ~$2.59 per
+    1000 gates). The code that acted on it was unreachable and had to go; the
+    finding is still true and still governs what to do if the route ever changes.
+    Delete the lever, keep the evidence.
+
+15. **Prefer a warning on the slope to a post-mortem at the cliff.** These
+    failures are binary: a call site works until its prompt gets slightly harder,
+    then fails its contract outright. `openRouterChat` now reports when reasoning
+    consumes more than 60% of a ceiling, WHILE the call still succeeds. All four
+    dead features sat at ~95% and would have been visible long before they broke.
+
+16. **An audit is wrong until it survives its own output.** The two audits added
+    this pass each took three corrections. The fail-open audit first reported 160
+    of 895 catches (mostly correct code), then missed a fix because its log
+    capture was too short, then flagged a catch because the COMMENT explaining
+    the fix contained the old wording. The ceiling audit guessed "list-shaped"
+    from nearby words and called `{"closing_line":string}` a list. Read an
+    audit's findings before acting on them, and fix the audit first.
