@@ -46,7 +46,7 @@
  */
 import type { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
-import { claudeJson, claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
+import { claudeJson, claudeJsonPro, hasAnthropicKey, retryOnUnusableOutput } from "@/lib/anthropic";
 import { youtubeSuggest, lintTitle, resolveClickbaitLevel } from "@/lib/metacraft";
 import { fetchNicheOutliers, type OutlierVideo } from "@/lib/outliers";
 import { fetchRedditTrends, type TrendSignal } from "@/lib/trends";
@@ -122,6 +122,14 @@ export interface CraftedTopics {
   /** Lint+judge survivors beyond `count` — a warm start for the next plan. */
   bench: TopicBet[];
   evidence: TopicEvidence;
+  /**
+   * True when the judge could not be reached and bets were admitted on the
+   * deterministic lint alone — NOT scored on demand/freshness/fit/
+   * packageability. A caller must be able to tell an unjudged slate from a
+   * judged one; the per-bet `scores` field is optional, so its absence was
+   * indistinguishable from a bet that simply was not ranked.
+   */
+  ungated?: boolean;
 }
 
 /* ------------------------------ helpers -------------------------------- */
@@ -423,6 +431,13 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
   // (thin evidence days) triggers a second slate for the remainder instead of
   // shipping a shortfall.
   const won: TopicBet[] = [];
+  /**
+   * True when any attempt admitted bets without the judge having scored them.
+   * Surfaced on the result because `scores` is per-bet and optional, so a caller
+   * inspecting a slate could not otherwise tell "the judge scored this and it
+   * passed" from "the judge never ran".
+   */
+  let ungatedByJudgeFailure = false;
   let fixNote = "";
   let lastIssues: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
@@ -517,7 +532,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
     if (survivors.length > 0) {
       let gated: TopicBet[] = [];
       try {
-        const j = await claudeJson<{ rankings?: { idx?: number; demand?: number; freshness?: number; fit?: number; packageability?: number }[] }>({
+        const j = await retryOnUnusableOutput(() => claudeJson<{ rankings?: { idx?: number; demand?: number; freshness?: number; fit?: number; packageability?: number }[] }>({
           prompt: [
             `You are a YouTube growth strategist auditing topic BETS for "${a.channelName ?? "this channel"}" (${a.niche ?? "general"}).`,
             a.programDirective
@@ -532,9 +547,13 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
               `Be harsh — 7 means genuinely strong.`,
             `Return STRICT JSON {"rankings":[{"idx":n,"demand":n,"freshness":n,"fit":n,"packageability":n}]}.`,
           ].filter(Boolean).join("\n\n"),
-          maxTokens: 1500,
+          // Measured on a realistic 8-bet slate: 1500 failed the JSON contract
+          // 2 of 3 attempts, 2500 and 4000 passed 3 of 3. The route is a
+          // reasoning model, so the ceiling has to cover the reasoning AND the
+          // rankings, and a slate grows with `count`.
+          maxTokens: 3000,
           temperature: 0.2,
-        });
+        }), () => log("topicraft: judge returned unusable text — re-judging once (a second billed call, against admitting an ungated slate)"));
         const ranked = (j.rankings ?? [])
           .filter((r): r is Required<typeof r> =>
             typeof r.idx === "number" && r.idx >= 0 && r.idx < survivors.length &&
@@ -546,7 +565,25 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
           scores: { demand: r.demand, freshness: r.freshness, fit: r.fit, packageability: r.packageability },
         }));
       } catch (e) {
-        log(`topicraft: judge unreachable (${e instanceof Error ? e.message : e}) — lint-only pass`);
+        // FAIL-OPEN, DELIBERATELY AND LOUDLY.
+        //
+        // This used to read "lint-only pass", which undersold it: when the
+        // judge is unreachable every lint-passing bet is admitted exactly as if
+        // it had scored >=7 on demand, freshness, fit and packageability. At the
+        // old 1500-token ceiling that happened on roughly two slates in three,
+        // and `scores` is read nowhere downstream, so an ungated slate was
+        // indistinguishable from a judged one everywhere it mattered.
+        //
+        // It still fails open rather than closed: the bets have cleared a real
+        // deterministic lint (cited evidence fuzzy-verified against the actual
+        // signals, banned words, stale years, dedupe, title lint), and a hard
+        // failure here means a channel plans no videos at all. But it must be
+        // impossible to mistake for a judged slate.
+        ungatedByJudgeFailure = true;
+        log(
+          `topicraft: JUDGE FAILED (${e instanceof Error ? e.message : e}) — admitting ${survivors.length} ` +
+          `LINT-ONLY bet(s) with NO demand/freshness/fit/packageability score. This slate is not quality-gated.`,
+        );
         gated = survivors;
       }
 
@@ -561,7 +598,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
           `topicraft: ${bets.length} bets + ${bench.length} bench in ${((Date.now() - t0) / 1000).toFixed(1)}s — ` +
             bets.map((b) => `[${b.betType}${b.scores ? ` ${b.scores.demand}/${b.scores.fit}` : ""}] "${b.topic.slice(0, 50)}"`).join(" · "),
         );
-        return { bets, bench, evidence };
+        return { bets, bench, evidence, ...(ungatedByJudgeFailure ? { ungated: true } : {}) };
       }
       if (gated.length === 0) lastIssues.push("no bet gated demand/freshness/fit/packageability ≥7");
       fixNote =
@@ -575,7 +612,12 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
   }
   if (won.length > 0) {
     log(`topicraft: SHORTFALL — ${won.length}/${count} bets gated after two slates (shipping what passed)`);
-    return { bets: won.slice(0, count), bench: won.slice(count), evidence };
+    return {
+      bets: won.slice(0, count),
+      bench: won.slice(count),
+      evidence,
+      ...(ungatedByJudgeFailure ? { ungated: true } : {}),
+    };
   }
   throw new Error(`topicraft: both attempts failed the gate (${[...new Set(lastIssues)].slice(0, 4).join("; ")})`);
 }

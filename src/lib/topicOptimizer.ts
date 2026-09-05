@@ -89,7 +89,7 @@ export async function optimizeTopics(opts: OptimizeTopicsOpts): Promise<Optimize
       })
     : [];
 
-  const { bets } = await craftTopics({
+  const { bets, ungated } = await craftTopics({
     channelName: opts.channelName,
     niche,
     persona: opts.identity.persona,
@@ -111,6 +111,16 @@ export async function optimizeTopics(opts: OptimizeTopicsOpts): Promise<Optimize
     beforeProviderSpend: opts.beforeProviderSpend,
     log,
   });
+
+  // An unjudged slate must not travel silently. This is the topic layer that
+  // every later module builds on, so a caller reading only `bets` would have no
+  // way to know the quality gate never ran.
+  if (ungated) {
+    log(
+      `optimizeTopics: this slate was NOT quality-gated — topicraft's judge was unreachable and ` +
+      `${bets.length} bet(s) were admitted on the deterministic lint alone`,
+    );
+  }
 
   return bets.map((b) => ({
     topic: b.topic,

@@ -74,6 +74,41 @@ export async function claudeJson<T = unknown>(args: {
   }, { memoize: args.memoize });
 }
 
+/**
+ * One deliberate re-call when the provider returned text that was not usable.
+ *
+ * The client refuses to replay these itself, and is right to: a replay of an
+ * AMBIGUOUS outcome can buy the same generation twice. But
+ * `outcome: "consumed_unusable"` has no ambiguity — a complete response
+ * arrived and its text was not JSON. The generation ran, it was billed, and the
+ * output cannot be used. Calling again is a second known purchase, and whether
+ * that is worth it is a decision only the caller can make.
+ *
+ * Two callers now need exactly this, both for the same reason: the pinned route
+ * is a reasoning model that intermittently spends its budget before emitting
+ * JSON, and both of their failure paths silently deleted a feature — the insert
+ * director returned zero inserts, the topicraft judge admitted every bet
+ * ungated.
+ *
+ * `onRetry` rather than a message template so each caller keeps its own words;
+ * a shared string here would flatten two very different events into one.
+ */
+export async function retryOnUnusableOutput<T>(
+  call: () => Promise<T>,
+  onRetry: () => void,
+): Promise<T> {
+  try {
+    return await call();
+  } catch (error) {
+    if (
+      !(error instanceof OpenRouterGenerationOutcomeUnknownError)
+      || error.outcome !== "consumed_unusable"
+    ) throw error;
+    onRetry();
+    return call();
+  }
+}
+
 export async function claudeJsonPro<T = unknown>(args: Omit<Parameters<typeof claudeJson<T>>[0], "tier">): Promise<T> {
   return claudeJson<T>({ ...args, tier: "pro" });
 }

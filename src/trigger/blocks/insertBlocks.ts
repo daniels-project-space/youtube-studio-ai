@@ -28,7 +28,7 @@ import {
   type EvidenceVisualManifest,
 } from "@/engine/evidenceVisualManifest";
 import { join } from "node:path";
-import { ClaudeGenerationOutcomeUnknownError, claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { claudeJson, hasAnthropicKey, retryOnUnusableOutput } from "@/lib/anthropic";
 import { makeRunTempDir, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { renderDataInsert } from "@/lib/remotionRender";
@@ -394,16 +394,9 @@ export async function planWithRetryOnUnusableOutput<T>(
   call: () => Promise<T>,
   log: (message: string) => void,
 ): Promise<T> {
-  try {
-    return await call();
-  } catch (error) {
-    if (
-      !(error instanceof ClaudeGenerationOutcomeUnknownError)
-      || error.outcome !== "consumed_unusable"
-    ) throw error;
+  return retryOnUnusableOutput(call, () => {
     log("visual_inserts: director returned unusable text — re-planning once (a second billed planning call, against losing the video's data layer)");
-    return call();
-  }
+  });
 }
 
 export const visualInserts: Block = {
