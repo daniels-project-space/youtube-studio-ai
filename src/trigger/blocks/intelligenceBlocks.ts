@@ -31,6 +31,7 @@ import {
   createThumbnailCurrentCandidateEvidence,
 } from "@/lib/thumbnailRefreshInventory";
 import { getObjectBytes, putObject } from "@/lib/storage";
+import { clampTags } from "@/lib/youtube";
 import {
   LOFI_RENDER_THUMBNAIL_CONTRACT,
   lofiNanoBananaEditPrompt,
@@ -245,7 +246,7 @@ interface CompetitorRow {
  * name from the title, merge/screen tags against identity.bannedWords, append
  * chapters + CC attributions to the description.
  */
-function finishMetadata(
+export function finishMetadata(
   ctx: StageContext,
   o: { title: string; description: string; tags: string[]; channelName: string; nicheIntel: NicheIntel | null },
 ): { title: string; description: string; tags: string[] } {
@@ -269,7 +270,26 @@ function finishMetadata(
   const nicheTags = (o.nicheIntel?.topTags ?? []).map((t) => t.tag);
   const dropped = [...baseTags, ...nicheTags].filter((t) => !notBanned(t));
   if (dropped.length) ctx.log(`metadata: dropped banned-word tags: ${dropped.join(", ")}`);
-  tags = Array.from(new Set([...baseTags, ...tags, ...nicheTags].filter(notBanned))).slice(0, 30);
+  // COUNT was never the binding constraint. YouTube budgets tags by total
+  // CHARACTER length (~500, space-containing tags counted as quoted), and the
+  // uploader has always clamped to that — silently, by dropping the tail.
+  // Measured across four real channels, the module emitted 594-797 effective
+  // characters and 6-13 tags per video never reached YouTube at all.
+  //
+  // Clamping HERE, at the module boundary, is what makes the number honest:
+  // `tags` is persisted and read back by the learning loops, so a 30-tag record
+  // for a video that shipped 17 trains them on tags that were never live.
+  // Order is preserved deliberately — channel identity, then this video's own
+  // terms, then researched niche reach — so the tail that gets cut is the
+  // broadest, least specific material rather than the video's own.
+  const requested = Array.from(new Set([...baseTags, ...tags, ...nicheTags].filter(notBanned))).slice(0, 30);
+  tags = clampTags(requested);
+  if (tags.length < requested.length) {
+    ctx.log(
+      `metadata: ${requested.length - tags.length} tag(s) exceeded YouTube's character budget and were cut ` +
+      `here rather than silently at upload: ${requested.slice(tags.length).join(", ")}`,
+    );
+  }
   if (tags.length === 0) tags = [title.toLowerCase()];
 
   // ElevenLabs v3 [audio tags] are PERFORMED, never displayed — they leaked
