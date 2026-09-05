@@ -1,5 +1,6 @@
 /** Shared managed/open narration seam. Every provider returns MP3 bytes and
  * must preserve at-most-once paid submission semantics. */
+import { spreadDefault } from "@/lib/identitySpread";
 import {
   synthQwenNarration,
   type QwenTtsReceipt,
@@ -37,10 +38,29 @@ export function hasFishKey(): boolean {
  * Resolve a Fish Audio reference_id from a channel voice key, a niche, or a raw
  * 32-hex reference id (passed through). Defaults to sleepless_historian.
  */
+/**
+ * English voices an unmapped niche may be spread across.
+ *
+ * VOICE_MAP also holds a German and a Spanish reference, and spreading an
+ * English channel onto either would be far worse than converging — a wrong
+ * language is not a stylistic difference. So the pool is only the voices that
+ * can narrate English.
+ */
+const ENGLISH_FALLBACK_VOICE_KEYS = ["sleepless_historian", "psychological", "voice_dl"] as const;
+
 export function resolveVoiceId(voiceId?: string, niche?: string): string {
   if (voiceId && VOICE_MAP[voiceId]) return VOICE_MAP[voiceId];
   if (voiceId && /^[0-9a-f]{32}$/i.test(voiceId)) return voiceId; // raw ref id
-  const key = (niche && NICHE_VOICES[niche.toLowerCase()]) || "sleepless_historian";
+  // A deliberate niche mapping always wins — those are chosen, not inferred.
+  const mapped = niche ? NICHE_VOICES[niche.toLowerCase()] : undefined;
+  if (mapped) return VOICE_MAP[mapped] ?? VOICE_MAP["sleepless_historian"];
+  // Otherwise spread across a RANGE by stable identity rather than collapsing
+  // onto one point. NICHE_VOICES covers four niches and maps all four to the
+  // same voice, so before this every unmapped channel — which is most of them —
+  // received the identical narrator. Seeded on the niche so a channel's voice
+  // is stable across runs, and so two channels in the same niche still share a
+  // register, which is intended; two channels in DIFFERENT niches no longer do.
+  const key = spreadDefault(String(niche ?? "").toLowerCase(), ENGLISH_FALLBACK_VOICE_KEYS);
   return VOICE_MAP[key] ?? VOICE_MAP["sleepless_historian"];
 }
 
@@ -120,8 +140,29 @@ async function synthElevenLabs(args: {
 }): Promise<Uint8Array> {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) throw new TtsError("ELEVENLABS_API_KEY is not configured");
-  // Default: George — warm, documentary-grade narrator.
-  const voice = args.elevenVoiceId || "JBFqnCBsd6RMkjVDRZzb";
+  // A NARRATOR IS AN IDENTITY DECISION, SO IT MUST BE DECLARED.
+  //
+  // This defaulted to one hard-coded voice ("George"), which meant any channel
+  // that selected ElevenLabs without naming a voice silently adopted the same
+  // narrator as every other channel that did the same. That is the convergence
+  // failure applied to the single most identity-defining attribute a channel
+  // has — and it is silent, because a video narrated in the wrong voice renders
+  // and uploads perfectly.
+  //
+  // The qwen3 branch of this very dispatch already refuses an unnamed speaker.
+  // Two providers reached through one function should not disagree about
+  // whether a missing voice is an error.
+  //
+  // Safe to enforce: of the six live narrated channels, exactly one uses
+  // ElevenLabs and it names its voice; the other five run Fish with an explicit
+  // identity.voiceId. Nothing in production relies on the default.
+  const voice = args.elevenVoiceId?.trim();
+  if (!voice) {
+    throw new TtsError(
+      "ElevenLabs narration requires an explicit elevenVoiceId — refusing to substitute a default " +
+      "narrator, because every channel that omitted it would receive the same voice",
+    );
+  }
   const speed = Math.max(0.7, Math.min(1.2, args.speed ?? 1));
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   for (let attempt = 0; attempt < 3; attempt++) {
