@@ -244,7 +244,14 @@ export async function adviseFormatSelection(args: AdviseFormatSelectionArgs): Pr
         '{"family":"...","confidence":0.0,"reasoning":"..."}. ' +
         "confidence is a finite 0..1 number reflecting your overall confidence in this specific pick over the " +
         "others. reasoning is one or two sentences citing the concept and/or performance context.",
-      maxTokens: 700,
+      // Measured, not guessed: this route is a reasoning model, so the ceiling
+      // has to cover the reasoning AND the JSON. On an advisor-shaped prompt
+      // (candidate list + performance context + strict-JSON instruction), 500
+      // failed the contract 2 of 2 attempts and 700 failed 1 of 2; 1200 and
+      // 2000 both passed 2 of 2. Under the old ceiling this advisor did not
+      // degrade loudly — it returned its reasoned fallback, so a channel got a
+      // default pick that read exactly like an advised one.
+      maxTokens: 2000,
       temperature: 0,
       log: args.log,
     });

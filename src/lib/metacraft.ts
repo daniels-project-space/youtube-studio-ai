@@ -377,15 +377,33 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
 
   // Pinned comment doesn't depend on the winning title — craft it in parallel
   // with the judging pass (it seeds discussion about the episode's tension).
+  //
+  // maxTokens was 300, and that produced an EMPTY pinned comment on every video
+  // ever made. The route is a reasoning model: the ceiling has to cover the
+  // reasoning AND the answer, and at 300 the budget was gone before any JSON
+  // was emitted, so the call failed its contract 100% of the time. Measured on
+  // this exact prompt: 300 and 600 fail every attempt, 1200 and 2000 succeed.
+  //
+  // There is no safe universal floor to hoist this to — how much the model
+  // reasons depends on the prompt, and simpler prompts clear 700 comfortably.
+  // What makes the class survivable is the logging below, not the number.
   const pinnedPromise = claudeJson<{ comment?: string }>({
     prompt:
       `Write ONE pinned comment (≤200 chars) for a video about "${a.topic}"${a.niche ? ` (${a.niche})` : ""}: a ` +
       `SPECIFIC, genuinely curious question that seeds discussion about the video's core tension — never generic ` +
       `("what do you think?"), never engagement-bait. ${a.hookLoop ? `The video's promise: "${a.hookLoop}". ` : ""}` +
       `Return STRICT JSON {"comment":string}.`,
-    maxTokens: 300,
+    maxTokens: 1200,
     temperature: 0.8,
-  }).then((p) => (p.comment ?? "").trim()).catch(() => "");
+  })
+    .then((p) => (p.comment ?? "").trim())
+    // A pinned comment is genuinely optional, so failing soft is right — but
+    // `.catch(() => "")` said nothing, which is how a feature stayed dead in
+    // production indefinitely. Degrade quietly in behaviour, never in the log.
+    .catch((error: unknown) => {
+      a.log?.(`metacraft: pinned comment failed, shipping without one: ${error instanceof Error ? error.message : String(error)}`);
+      return "";
+    });
 
   let fixNote = "";
   let lastIssues: string[] = [];
