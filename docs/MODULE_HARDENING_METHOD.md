@@ -90,3 +90,47 @@ Two of the six rules do not need a human:
 - `scripts/audit-inertness.ts` — capabilities with no caller (rule 5)
 
 Run both before touching any module, and again before calling it done.
+
+## What the inserts pass added (2026-09-05)
+
+The thumbnail rules held up. Five more came out of `visual_inserts`, all of them
+about the same blind spot: **a gate is a claim about the world, and a test I
+write is a claim about my own imagination.**
+
+7. **Calibrate a gate in BOTH directions, on real module output.** A new gate
+   passed thirteen of my own cases and then rejected six of eleven inserts the
+   real director planned — and every one of those six rejections was wrong.
+   Narration is written to be read aloud, so figures arrive spelled: "an average
+   annual compound return of ten point two percent" is a spoken number, and a
+   digits-only reading of "spoken" silently deletes the feature it protects.
+   Over-tightening is not the safe direction to err in; it is the same defect as
+   leaving the gate open, and it is harder to notice because nothing looks
+   broken. Run the shipping module over real inputs and read every rejection
+   before shipping the gate.
+
+8. **Zero rejections is an ambiguous result.** A clean calibration run reads
+   exactly the same whether the inputs were honest or the gate is dead. Pair it
+   with an adversarial sweep that corrupts the SAME real inputs and requires
+   every corruption to be caught. On this module: 19/19 legitimate inserts
+   survive and 181/181 injected violations are refused. Disabling one gate turns
+   that into 141 misses — which is the only reason the first number means
+   anything.
+
+9. **A silent `continue` is a defect, not a style.** Shape checks and the
+   spacing rule dropped inserts without logging, so "the director planned
+   nothing" and "the module rejected everything" produced identical output. That
+   is how a module's primary output came to fail on three of five real topics
+   without anyone noticing.
+
+10. **Read the error taxonomy before adding a retry.** This codebase
+    deliberately refuses to replay a provider error that may already have been
+    billed, and that convention is correct. But it conflated "we don't know what
+    the provider did" with "a complete response arrived and it wasn't JSON" —
+    the second has no ambiguity at all. The fix was to distinguish the two, not
+    to override the convention or accept the loss.
+
+11. **A proxy assertion eventually fires for the wrong reason.** "These two
+    gates sit within 400 characters of each other" stood in for "this gate runs
+    on the unconditional path". Adding a second legitimate gate between them
+    broke it, reporting a placement bug that did not exist. Assert the actual
+    property — here, brace depth relative to the loop body.

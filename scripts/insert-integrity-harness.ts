@@ -30,7 +30,12 @@ import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
 import { claudeJson } from "@/lib/anthropic";
 import { dataDiscipline } from "@/lib/scriptGen";
-import { visualInserts } from "@/trigger/blocks/insertBlocks";
+import {
+  seriesWithinSpokenRange,
+  unspokenRenderedField,
+  visualInserts,
+  type InsertPlanItem,
+} from "@/trigger/blocks/insertBlocks";
 import type { StageContext } from "@/engine/types";
 
 const NARRATION_CACHE = "/tmp/insert-harness-narration.json";
@@ -158,6 +163,49 @@ async function main(): Promise<void> {
       console.log(`    LOG   ${l.replace("visual_inserts: ", "").slice(0, 200)}`);
     }
   }
+
+  // ---- adversarial sweep --------------------------------------------------
+  // Zero drops above is ambiguous on its own: it reads the same whether the
+  // director behaved or the gates have quietly gone permissive. So the same
+  // REAL sentences are replayed with deliberately corrupted plans, and every
+  // one must be caught. This is the harness checking itself.
+  let caught = 0;
+  let missed = 0;
+  for (const n of narrations) {
+    const narration = n.sentences.join(" ");
+    for (const sentence of n.sentences.filter((x) => /\d/.test(x))) {
+      const digits = Array.from(sentence.matchAll(/\d+(?:\.\d+)?/g)).map((m) => Number(m[0]));
+      // A figure that appears nowhere in the entire script.
+      const invented = String(Math.max(...digits, 1) * 7919 + 13);
+      const attacks: [string, () => boolean][] = [
+        ["hero number nobody said", () =>
+          unspokenRenderedField({ kind: "big_stat", sentenceIdx: 0, value: `$${invented}` } as InsertPlanItem, sentence, narration) !== null],
+        ["bar height contradicting its caption", () =>
+          unspokenRenderedField({
+            kind: "bar_compare", sentenceIdx: 0,
+            bars: [{ label: "A", value: Number(invented), display: String(digits[0] ?? 1) }],
+          } as InsertPlanItem, sentence, narration) !== null],
+        ["frame citing a figure absent from the script", () =>
+          unspokenRenderedField({ kind: "line_chart", sentenceIdx: 0, title: `The ${invented} Threshold` } as InsertPlanItem, sentence, narration) !== null],
+      ];
+      if (digits.length >= 2) {
+        const low = Math.min(...digits);
+        const high = Math.max(...digits);
+        attacks.push(["curve peaking outside its spoken anchors", () =>
+          !seriesWithinSpokenRange({
+            kind: "line_chart", sentenceIdx: 0,
+            anchorValues: [String(low), String(high)],
+            series: [low, high * 9 + 1000, high],
+          } as InsertPlanItem)]);
+      }
+      for (const [name, holds] of attacks) {
+        if (holds()) caught++;
+        else { missed++; console.log(`    MISSED  ${name} — on "${sentence.slice(0, 70)}…"`); }
+      }
+    }
+  }
+  console.log(`\nadversarial sweep over the same real sentences: ${caught} caught, ${missed} missed`);
+  if (missed > 0) console.log("  A MISS means a gate has gone permissive — the clean run above proves nothing.");
 
   console.log(`\n\n===== GATE SUMMARY =====`);
   console.log(`planned by the director: ${planned}`);
