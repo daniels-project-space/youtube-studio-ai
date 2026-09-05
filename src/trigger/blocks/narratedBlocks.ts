@@ -2200,7 +2200,15 @@ export const entityImagery: Block = {
             .filter((e): e is string => typeof e === "string" && e.trim().length > 0)
             .slice(0, 4);
         } catch (e) {
-          ctx.log(`entity_imagery: extraction failed (${e instanceof Error ? e.message : e})`);
+          // Not a per-item skip like the Wikimedia lookups below — if extraction
+          // fails there are no entities to look up at all, so the video ships
+          // with NO entity imagery. Degrading is right (a missing portrait must
+          // not fail a render), but a run that produced none has to be
+          // distinguishable from a script that named nobody.
+          ctx.log(
+            `entity_imagery: EXTRACTION FAILED — this video gets no entity imagery at all, ` +
+            `not because the script names no one: ${e instanceof Error ? e.message : e}`,
+          );
         }
 
         const resolved: ResolvedEntity[] = [];
