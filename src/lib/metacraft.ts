@@ -486,7 +486,20 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         ranked.sort((x, y) => (y.clickScore ?? 0) + (y.direct ?? 0) - ((x.clickScore ?? 0) + (x.direct ?? 0)));
         if (ranked.length) {
           best = ranked[0].idx!;
+          // The runner-up is the CTR swap's only experiment. It is deliberately
+          // drawn from the SAME >=7 gate as the winner — swapping in a title the
+          // judge rejected would trade a measured problem for an unmeasured one.
+          // But when only one candidate clears, there is no alternate at all and
+          // the swap loop simply cannot run for that video. Measured across four
+          // real channels that was 2 of 4, so say it rather than leaving the
+          // downstream loop looking broken.
           runner = ranked[1]?.idx ?? -1;
+          if (runner < 0) {
+            a.log?.(
+              `metacraft: only ${ranked.length} candidate cleared the judge's bar — no alternate title, ` +
+              `so the CTR swap has nothing to test for this video`,
+            );
+          }
           score = ranked[0].clickScore ?? null;
           judged = true;
         } else {

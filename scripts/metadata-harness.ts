@@ -97,8 +97,13 @@ async function main(): Promise<void> {
       continue;
     }
 
+    // Measure the layer that SHIPS. craftMetadata returns the raw generated
+    // tags; the block then runs finishMetadata, which clamps to YouTube's
+    // character budget. Reporting the raw list would flag an already-fixed
+    // overflow as still broken.
+    const shipped = clampTags(m.tags);
     const tagCost = effectiveTagCost(m.tags);
-    const kept = clampTags(m.tags);
+    const kept = shipped;
     console.log(`\n=== ${label}`);
     console.log(`    topic:  ${topic.slice(0, 90)}`);
     console.log(`    TITLE:  "${m.title}"  (${m.title.length} chars, frame=${m.frame}, ` +
@@ -125,7 +130,13 @@ async function main(): Promise<void> {
     if (!/#\w/.test(m.description)) note("description has no hashtags");
 
     if (!m.tags.length) note("no tags");
-    if (kept.length < m.tags.length) note(`${m.tags.length - kept.length} tags silently dropped at upload (${tagCost} effective chars)`);
+    if (kept.length < m.tags.length) {
+      note(
+        `craftMetadata generated ${m.tags.length} tags costing ${tagCost} effective chars; ` +
+        `${m.tags.length - kept.length} exceed the budget and are cut by finishMetadata before upload ` +
+        `(not silently lost, but generator effort spent on tags that can never ship)`,
+      );
+    }
     if (!m.pinnedComment.trim()) note("no pinned comment — the comment-seeding surface is empty");
 
     if (!MUSIC_NICHE.test(niche) && LOFI_LEAK.test(`${m.title} ${m.description}`)) {
