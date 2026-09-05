@@ -203,13 +203,41 @@ export const competitorResearch: Block = {
     );
     // Load cached intelligence into the store for downstream blocks.
     const c = convex();
+    // These three reads were each `.catch(() => null)` with no log, so a Convex
+    // outage produced an empty result indistinguishable from a niche that has
+    // genuinely never been researched. That matters downstream: topicraft
+    // fuzzy-verifies every bet's cited evidence against these signals and
+    // metacraft judges titles against this competitor feed, so both quietly
+    // lose their evidence base rather than failing.
     const [nicheIntel, databank, competitors] = await Promise.all([
-      c.query(api.seo.getNiche, { ownerId: ctx.ownerId, niche }).catch(() => null),
-      c.query(api.seo.getDatabank, { ownerId: ctx.ownerId, niche }).catch(() => null),
+      c.query(api.seo.getNiche, { ownerId: ctx.ownerId, niche }).catch((e) => {
+        ctx.log(`competitor_research: niche intelligence read FAILED: ${e instanceof Error ? e.message : e}`);
+        return null;
+      }),
+      c.query(api.seo.getDatabank, { ownerId: ctx.ownerId, niche }).catch((e) => {
+        ctx.log(`competitor_research: SEO databank read FAILED: ${e instanceof Error ? e.message : e}`);
+        return null;
+      }),
       c
         .query(api.competitors.listCompetitors, { ownerId: ctx.ownerId, niche })
-        .catch(() => []),
+        .catch((e) => {
+          ctx.log(`competitor_research: competitor list read FAILED: ${e instanceof Error ? e.message : e}`);
+          return [];
+        }),
     ]);
+
+    const competitorCount = Array.isArray(competitors) ? competitors.length : 0;
+    if (!nicheIntel && !databank && competitorCount === 0) {
+      ctx.log(
+        `competitor_research: NO INTELLIGENCE for "${niche}" — no niche profile, no SEO databank and ` +
+        `no competitors. Topic bets and titles downstream will be judged against an empty feed.`,
+      );
+    } else {
+      ctx.log(
+        `competitor_research: nicheIntel=${nicheIntel ? "yes" : "no"} databank=${databank ? "yes" : "no"} ` +
+        `competitors=${competitorCount}`,
+      );
+    }
 
     return {
       nicheReady: true,
