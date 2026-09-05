@@ -454,10 +454,13 @@ export async function defaultCinematicFinalMasterQaReviewer(
     imagePaths: input.frames.map((frame) => frame.localPath),
     json: true,
     maxTokens: VISION_GATE_MAX_TOKENS,
-    reasoningEffort: "none",
     noCache: true,
+    // reasoningEffort:"none" and maxAttemptsPerProvider:1 used to be set here.
+    // Both were inert: the only code that read them was the retired Groq and fal
+    // vision routes, and vision has run exclusively through OpenRouter for some
+    // time — where reasoning cannot be disabled at all. They are removed rather
+    // than left implying a control this call does not have.
     providers: ["openrouter"], tier: "final",
-    maxAttemptsPerProvider: 1,
   });
 }
 
