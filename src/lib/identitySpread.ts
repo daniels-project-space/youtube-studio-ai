@@ -123,6 +123,34 @@ export const FALLBACK_CHANNEL_MOTIFS = [
  * comic illustration, so the range widens inside the format rather than
  * escaping it.
  */
+/**
+ * Instrumental beds for a narrated channel that has declared no sound of its own.
+ *
+ * The music block's last-resort prompt was a single LOFI HIP-HOP brief — Rhodes
+ * piano, boom-bap drums, vinyl crackle — left over from when the block served
+ * only the lofi family. It now serves twelve channels, most of which are not
+ * lofi, so a finance or philosophy channel with no styleDNA audio and no
+ * composer brief would have been scored as lofi.
+ *
+ * These are written to be usable under narration: no percussion that competes
+ * with speech, no build-ups, low dynamics. They differ in register rather than
+ * in quality, so which one a channel receives changes its character without
+ * making any channel worse. The lofi family keeps its own brief and never draws
+ * from this list.
+ */
+export const FALLBACK_UNDERSCORE_BRIEFS = [
+  "sparse solo piano underscore, wide spacing between phrases, soft felt hammers, warm room tone, " +
+  "contemplative and unhurried, very low dynamics, no percussion, no build-ups, purely instrumental",
+  "sustained string underscore, slow bowed swells, gentle cello underneath, warm and reflective, " +
+  "minimal movement, no percussion, no drums, no build-ups, purely instrumental",
+  "soft ambient underscore, layered analogue pads and faint tape hiss, slow harmonic drift, " +
+  "calm and spacious, no rhythm section, no build-ups, purely instrumental",
+  "quiet acoustic guitar underscore, fingerpicked and close-mic'd, occasional low sustained note, " +
+  "warm and grounded, unobtrusive, no percussion, no build-ups, purely instrumental",
+  "muted brass and low woodwind underscore, long held notes, distant and documentary, " +
+  "restrained and serious, no percussion, no build-ups, purely instrumental",
+] as const;
+
 export const FALLBACK_COMIC_STYLES = [
   "clean controlled comic illustration",
   "inked comic illustration with heavy spot blacks and confident contour lines",

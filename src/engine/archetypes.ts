@@ -76,12 +76,13 @@ const NARRATED: PipelineEntry[] = [
   { block: "entity_imagery" },
   {
     block: "music",
-    params: {
-      provider: "mureka",
-      prompt:
-        "very calm, gentle ambient underscore — soft sustained strings and sparse, slow piano, warm and " +
-        "contemplative, minimal and unobtrusive, low dynamics, no percussion, no drums, no build-ups, no vocals",
-    },
+    // No `prompt` here on purpose. A literal in the archetype is copied verbatim
+    // onto every channel built from it, and six live channels — two finance and
+    // four philosophy — ended up with byte-identical musical briefs because of
+    // this one. The block resolves styleDNA audio, then the composer's per-video
+    // arc, then a per-channel brief drawn from a range; all three differentiate,
+    // and this line overrode all of them.
+    params: { provider: "mureka" },
   },
   { block: "intro_card", params: { introSec: 5 } },
   { block: "quote_overlays", params: { maxQuotes: 3, minQuoteWords: 6 } },

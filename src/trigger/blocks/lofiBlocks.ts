@@ -30,6 +30,7 @@
  * production video is the channel pipeline's `assemble.params.durationSec`
  * (and `music.params.durationSec`) — set them to 7200 for a 2h render.
  */
+import { FALLBACK_UNDERSCORE_BRIEFS, spreadDefault } from "@/lib/identitySpread";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { familyDurationContract, familyTimeScalingContract } from "@/engine/families";
 import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
@@ -1768,13 +1769,31 @@ export const music: Block = {
     const arcNote = composerPrompt?.trim()
       ? ` This video's emotional direction: ${composerPrompt.trim().slice(0, 220)}`
       : "";
+    // LAST RESORT, AND IT USED TO BE ONE GENRE.
+    //
+    // This chain ended in a lofi hip-hop brief — Rhodes piano, boom-bap drums,
+    // vinyl crackle — from when this block served only the lofi family. It now
+    // serves twelve channels, most of them not lofi, so a finance or philosophy
+    // channel with no styleDNA audio and no composer brief was one missing
+    // param away from being scored as lofi. Nothing caught it because a wrong
+    // score renders and uploads perfectly.
+    //
+    // The lofi family still gets its own brief; everything else draws from a
+    // range by stable channel identity, so two narrated channels that both
+    // declare nothing no longer sound identical.
+    const musicRoute = routeSeedForTopicSelection(ctx);
+    const isLoopFamily = musicRoute?.family === "music_loop";
+    const seed = String(ctx.store["channelName"] ?? ctx.channelId ?? "");
+    const lastResort = isLoopFamily
+      ? `warm cozy lofi hip-hop instrumental to study/relax to, evoking "${topic}". ` +
+        `mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle, tape warmth, ` +
+        `calm and nostalgic, ~72 bpm, purely instrumental, no vocals, no lyrics, loop-friendly`
+      : `${spreadDefault(seed, FALLBACK_UNDERSCORE_BRIEFS)}, evoking "${topic}", no vocals, no lyrics`;
     const basePrompt =
       (dnaPrompt && dnaPrompt.trim() ? `${dnaPrompt.trim()}${arcNote}` : "") ||
       (composerPrompt && composerPrompt.trim()) ||
       (ctx.params.prompt as string) ||
-      `warm cozy lofi hip-hop instrumental to study/relax to, evoking "${topic}". ` +
-      `mellow Rhodes piano, soft boom-bap drums, gentle bass, vinyl crackle, tape warmth, ` +
-      `calm and nostalgic, ~72 bpm, purely instrumental, no vocals, no lyrics, loop-friendly`;
+      lastResort;
     const prompt = [
       musicProgram?.audio.direction,
       basePrompt,
