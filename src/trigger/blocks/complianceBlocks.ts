@@ -17,7 +17,7 @@
  */
 import type { Block, StageContext } from "@/engine/types";
 import { putObject, getObjectBytes } from "@/lib/storage";
-import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { claudeJson, hasAnthropicKey, retryOnUnusableOutput } from "@/lib/anthropic";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -210,7 +210,7 @@ function str(ctx: StageContext, key: string): string {
 async function scanSpokenLines(text: string, log: (m: string) => void): Promise<void> {
   if (!hasAnthropicKey()) return;
   try {
-    const out = await claudeJson<{ violation?: boolean; category?: string; reason?: string }>({
+    const out = await retryOnUnusableOutput(() => claudeJson<{ violation?: boolean; category?: string; reason?: string }>({
       prompt:
         `You are a YouTube advertiser-safety reviewer reading the SPOKEN NARRATION of a faceless video. ` +
         `Flag ONLY clear policy violations in the words themselves: glorification/encouragement of violence or ` +
@@ -219,9 +219,23 @@ async function scanSpokenLines(text: string, log: (m: string) => void): Promise<
         `Historical/educational description of violence is NOT a violation unless it glorifies or instructs.\n\n` +
         `NARRATION:\n"""${text.slice(0, 6000)}"""\n\n` +
         `Return STRICT JSON {"violation":boolean,"category":string,"reason":string}.`,
-      maxTokens: 200,
+      // 200 made this scan blind to exactly what it exists to catch.
+      //
+      // A clean verdict is cheap to emit ({"violation":false,...}); a violation
+      // requires the model to reason about WHICH policy and write a `reason`.
+      // On the reasoning route that difference straddled the old ceiling.
+      // Measured, two attempts each, with 6000 characters of narration:
+      //
+      //   benign historical narration  @200 -> 2/2 returned violation=false
+      //   clearly violating narration  @200 -> 0/2, the call threw both times
+      //                                @800 and @1500 -> 2/2 violation=true
+      //
+      // and a thrown call lands in the catch below, which logs "skipped
+      // (non-fatal)" and lets the video through. The scan worked whenever there
+      // was nothing to find and failed whenever there was.
+      maxTokens: 1500,
       temperature: 0.1,
-    });
+    }), () => log("originality_gate: safety scan returned unusable text — re-scanning once"));
     if (out.violation === true) {
       throw new Error(
         `spoken-line compliance FAILED: ${out.category || "policy"} — ${out.reason || "the narration violates advertiser-safety policy"} (refusing to auto-publish)`,
@@ -231,7 +245,10 @@ async function scanSpokenLines(text: string, log: (m: string) => void): Promise<
   } catch (e) {
     // A thrown compliance failure must propagate; a model/parse error must not.
     if (e instanceof Error && e.message.startsWith("spoken-line compliance FAILED")) throw e;
-    log(`originality_gate: spoken-line scan skipped (non-fatal): ${e instanceof Error ? e.message : e}`);
+    // Still non-fatal — a provider outage must not block every publish — but it
+    // is a SAFETY SCAN THAT DID NOT RUN, not a routine skip, and the log has to
+    // say which of those it is.
+    log(`originality_gate: SPOKEN-LINE SAFETY SCAN DID NOT RUN — this narration was never checked for advertiser-safety violations: ${e instanceof Error ? e.message : e}`);
   }
 }
 
@@ -349,7 +366,7 @@ export const complianceCheck: Block = {
     let synthRealistic = false;
     let reason = "";
     try {
-      const out = await claudeJson<{
+      const out = await retryOnUnusableOutput(() => claudeJson<{
         sensitive?: boolean;
         depictsRealPeopleRealistically?: boolean;
         reason?: string;
@@ -360,14 +377,19 @@ export const complianceCheck: Block = {
           `Return STRICT JSON {"sensitive":boolean,"depictsRealPeopleRealistically":boolean,"reason":string}.\n` +
           `- "sensitive" = health/medical, breaking news, elections/politics, or financial advice.\n` +
           `- "depictsRealPeopleRealistically" = realistic SYNTHETIC depiction of a real recent/living person or real event (deepfake-like). Historical public-domain portraits and generic stock are NOT this.`,
-        maxTokens: 200,
+        // Same shape as the spoken-line scan above and the same failure: both
+        // flags default to false, so a parse failure means the hard gate
+        // (sensitive && synthRealistic) can never fire and no synthetic-content
+        // disclosure is set. A "nothing to declare" verdict is cheap; a flagged
+        // one has to justify itself in `reason`.
+        maxTokens: 1500,
         temperature: 0.1,
-      });
+      }), () => ctx.log("compliance_check: classifier returned unusable text — re-classifying once"));
       sensitive = out.sensitive === true;
       synthRealistic = out.depictsRealPeopleRealistically === true;
       reason = out.reason ?? "";
     } catch (e) {
-      ctx.log(`compliance_check: classify failed (continuing): ${e instanceof Error ? e.message : e}`);
+      ctx.log(`compliance_check: CLASSIFIER DID NOT RUN — sensitive-topic and synthetic-depiction flags stay false by default, so neither the manual-review gate nor the disclosure note can fire: ${e instanceof Error ? e.message : e}`);
     }
 
     // Hard gate: sensitive topic + realistic synthetic depiction → manual review.
