@@ -85,8 +85,20 @@ function declaredShape(callText: string, fileText: string): { shape: Shape; deta
     if (fields >= 2) return { shape: "multi_field", detail: `zod, ${fields} fields${ref ? ` (via ${ref[1]})` : ""}` };
     if (fields === 1) return { shape: "single_field", detail: `zod, 1 field${ref ? ` (via ${ref[1]})` : ""}` };
   }
-  // Everything else states the contract literally in the prompt.
-  const literal = /STRICT JSON\s*(\{[\s\S]{0,400}?\})\s*[.`"]/.exec(callText);
+  // Everything else states the contract literally in the prompt — but the prompt
+  // is often built by concatenating string literals, which splits the contract
+  // across quotes and `+`. casefileCaseResearcher writes
+  //   '{"pass":true,...,' + '"findings":[{...}]}. '
+  // and the first version of this regex, matching inside ONE literal, saw only
+  // the opening fragment and never the array. Joining the literals first is the
+  // difference between seeing the contract and seeing a piece of it.
+  const joined = callText.replace(/["'`]\s*\+\s*\n?\s*["'`]/g, "");
+  // Words are allowed between the phrase and the brace: several prompts write
+  // "Return STRICT JSON of the exact shape {...}", and requiring the brace to
+  // follow immediately missed every one of them — including a findings-list
+  // contract running at 1600 tokens.
+  const contract = /STRICT JSON[^{]{0,60}?(\{[\s\S]{0,400}?\})\s*[.`"]/;
+  const literal = contract.exec(joined) ?? contract.exec(callText);
   if (literal) {
     const body = literal[1];
     if (/\[/.test(body)) return { shape: "list", detail: body.replace(/\s+/g, " ").slice(0, 70) };

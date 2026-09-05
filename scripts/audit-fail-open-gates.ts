@@ -122,9 +122,24 @@ function main(): void {
           // fallback" and only passes when no hard flag is set; that is good
           // design, and an audit that calls it a defect trains people to ignore
           // the audit.
-          const namedInLog = logs.some((l) => /DID NOT RUN|FAILED|NOT quality-gated|never|errored/i.test(l));
+          // Vocabulary kept in step with audit-silent-degradation.ts. It drifted
+          // once already: after crew/critic was changed to log "BRIEF
+          // UNAVAILABLE — this video gets no review spec", this audit flagged it
+          // as routine, because ROUTINE matched the lowercase word "unavailable"
+          // while the loud list did not know the uppercase marker. An audit that
+          // reports the fix it asked for is an audit that gets muted.
+          const namedInLog = logs.some((l) =>
+            /DID NOT RUN|FAILED|NOT quality-gated|never|errored|UNAVAILABLE|gets no |gets none/.test(l),
+          );
           const markedInValue = /(judged:\s*false|ungated|unmeasured|not_measured|heuristic fallback|"fallback"|reasonCode)/i.test(body);
-          const loud = namedInLog || markedInValue;
+          // Returning a NON-EMPTY problem report is failing CLOSED, not open.
+          // casefileCaseResearcher returns `["semantic verification failed: ..."]`
+          // into an issues list, so a provider error becomes a verification
+          // issue rather than a pass — the opposite of the defect this looks
+          // for, and it was flagged because the audit could only see that a
+          // value was returned, not what the value MEANT.
+          const returnsProblemReport = /return\s*\[\s*[`"']?[^\]]*\b(failed|error|unsupported|invalid|missing)\b/i.test(body);
+          const loud = namedInLog || markedInValue || returnsProblemReport;
           const routine = logs.some((l) => ROUTINE.test(l));
           const verdict: Finding["verdict"] = loud ? "NAMED" : "SILENT";
           if (verdict === "SILENT") {

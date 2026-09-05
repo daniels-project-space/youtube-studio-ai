@@ -236,7 +236,13 @@ export async function autoVerifyCasefileSourcePacket(
         "pass must be false if any single finding is implausible, if your confidence is not high, or if " +
         "you are unsure about any pair. issues lists any set-level concerns (e.g. a systematic " +
         "placeholder pattern); use [] only when you have none.",
-      maxTokens: 1_800,
+      // Reasoning route: the ceiling covers the thinking AND the findings list,
+      // one entry per claim/shot pair. Measured — a 5-item list failed at 500 and
+      // passed at 1000; an 8-item ranking failed at 1500 and passed at 2500. This
+      // verifier fails CLOSED, so too low a ceiling blocks legitimate work rather
+      // than admitting bad work — still worth fixing, and cheaper than the retries
+      // it was causing.
+      maxTokens: 2_500,
       temperature: 0,
       log: options.log,
     });
