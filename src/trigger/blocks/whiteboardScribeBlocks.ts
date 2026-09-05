@@ -17,6 +17,7 @@
  * additionalFiles (trigger.config.ts) and the pip deps install lazily —
  * castWhiteboardSync preflights ALL of it at $0 spend (src/lib/pydeps.ts).
  */
+import { fallbackVoiceKey } from "@/lib/tts";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { readFile, writeFile } from "node:fs/promises";
@@ -495,7 +496,14 @@ export const whiteboardScribe: Block = {
     const visualBrief = getVisualBrief(ctx.store);
 
     const styleId = String(ctx.params["styleId"] ?? "history");
-    const voiceId = String(ctx.params["voiceId"] ?? ctx.store["voiceId"] ?? "sleepless_historian");
+    // Seeded on the channel rather than hard-coded: the literal that used to sit
+    // here gave every whiteboard channel with no declared voice the same
+    // narrator, which is the one attribute a viewer recognises a channel by.
+    const voiceId = String(
+      ctx.params["voiceId"]
+      ?? ctx.store["voiceId"]
+      ?? fallbackVoiceKey(String(ctx.store["channelName"] ?? ctx.channelId ?? "")),
+    );
     // IDENTITY WIRING: the designer threads the channel's cast ElevenLabs voice
     // + dark/chalk board mode + palette into these params (they used to be unset
     // → every scribe rendered the light "history" marker style in a Fish default

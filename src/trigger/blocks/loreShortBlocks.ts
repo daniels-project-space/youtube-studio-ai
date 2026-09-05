@@ -25,6 +25,7 @@
  *    frozen into a content-addressed R2 checkpoint, so a rejected draft never
  *    costs a paid render and a replay never re-buys one.
  */
+import { fallbackVoiceKey } from "@/lib/tts";
 import { createHash } from "node:crypto";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
@@ -434,10 +435,18 @@ export const loreShort: Block = {
     // instead of the engine's hardcoded ElevenLabs id.
     const ttsProvider = String(ctx.params["ttsProvider"] ?? ctx.store["ttsProvider"] ?? "fish");
     const elevenVoiceId = ctx.params["elevenVoiceId"] as string | undefined;
+    // A hard-coded literal here gave every lore-short channel that never
+    // declared a voice the same narrator. Seeded on the channel so the choice is
+    // stable per channel and different between channels; the topic would be the
+    // wrong seed because it changes every episode. `niche` is deliberately not
+    // in the chain: it is not a declared consume of this module, and channelName
+    // is already the per-channel seed this codebase uses for creative defaults.
     const castVoiceId =
       (ctx.store["voiceId"] as string | undefined) ??
       (ctx.params["voiceId"] as string | undefined) ??
-      "sleepless_historian";
+      fallbackVoiceKey(
+        String(ctx.store["channelName"] ?? ctx.channelId ?? ""),
+      );
     const selectedVoiceId = ttsProvider === "elevenlabs" ? (elevenVoiceId ?? castVoiceId) : castVoiceId;
 
     // DETERMINISTIC dir (scoped): the engine caches EVERY stage by path, so a

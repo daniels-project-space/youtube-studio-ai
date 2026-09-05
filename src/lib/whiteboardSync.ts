@@ -37,6 +37,7 @@
  *     runDir, log,
  *   });
  */
+import { fallbackVoiceKey } from "@/lib/tts";
 import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -1178,7 +1179,10 @@ export async function castWhiteboardSync(args: {
           }
         : {
             text: fullText,
-            voiceId: brief.voiceId ?? "sleepless_historian",
+            // Seeded on channelName, exactly as this module already seeds its art
+            // style — a hard-coded literal here gave every whiteboard channel
+            // that never declared a voice the same narrator.
+            voiceId: brief.voiceId ?? fallbackVoiceKey(brief.channelName ?? brief.topic),
             speed: 0.95,
             onBillableCharacters: (characters: number) => { ttsCharactersGenerated += characters; },
           },

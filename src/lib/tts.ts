@@ -48,6 +48,21 @@ export function hasFishKey(): boolean {
  */
 const ENGLISH_FALLBACK_VOICE_KEYS = ["sleepless_historian", "psychological", "voice_dl"] as const;
 
+/**
+ * The voice an undeclared channel should get, spread across a range by a stable
+ * seed rather than collapsed onto one point.
+ *
+ * Exported because two other modules were each hard-coding the same literal
+ * ("sleepless_historian") as their own fallback, which meant the policy lived in
+ * three places and only one of them was a range. A caller with no niche can seed
+ * on its channel name instead — the same seed whiteboardSync already uses for
+ * its art style, for the same reason: topic changes per video, so a channel's
+ * voice would shift between episodes.
+ */
+export function fallbackVoiceKey(seed: string): (typeof ENGLISH_FALLBACK_VOICE_KEYS)[number] {
+  return spreadDefault(seed.trim().toLowerCase(), ENGLISH_FALLBACK_VOICE_KEYS);
+}
+
 export function resolveVoiceId(voiceId?: string, niche?: string): string {
   if (voiceId && VOICE_MAP[voiceId]) return VOICE_MAP[voiceId];
   if (voiceId && /^[0-9a-f]{32}$/i.test(voiceId)) return voiceId; // raw ref id
@@ -60,7 +75,7 @@ export function resolveVoiceId(voiceId?: string, niche?: string): string {
   // received the identical narrator. Seeded on the niche so a channel's voice
   // is stable across runs, and so two channels in the same niche still share a
   // register, which is intended; two channels in DIFFERENT niches no longer do.
-  const key = spreadDefault(String(niche ?? "").toLowerCase(), ENGLISH_FALLBACK_VOICE_KEYS);
+  const key = fallbackVoiceKey(String(niche ?? ""));
   return VOICE_MAP[key] ?? VOICE_MAP["sleepless_historian"];
 }
 

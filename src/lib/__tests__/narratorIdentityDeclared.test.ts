@@ -108,6 +108,22 @@ function main(): void {
   const raw = "0123456789abcdef0123456789abcdef";
   assert.equal(resolveVoiceId(raw), raw, "a raw reference id must pass through");
 
+  // ---- the editor must not WRITE the convergence it used to display -------
+  // The form defaulted to a real voice and its dirty-check compared against the
+  // same literal, so opening a channel and saving anything at all persisted that
+  // narrator. The collapse happened at data entry, before any engine ran.
+  const editor = readFileSync(join(process.cwd(), "src/app/(app)/channels/[slug]/page.tsx"), "utf8");
+  assert.ok(
+    !/useState\(id\.voiceId \?\? "sleepless_historian"\)/.test(editor),
+    "the voice field must not default to a real narrator",
+  );
+  assert.match(editor, /useState\(id\.voiceId \?\? AUTO_VOICE_ID\)/, "it must default to the explicit auto option");
+  assert.match(
+    editor,
+    /if \(voice\) nextId\.voiceId = voice;/,
+    "auto must persist as ABSENT — an empty voiceId is a declared value that resolves to nothing",
+  );
+
   console.log("NARRATOR IDENTITY PASS — a narrator is declared, not defaulted");
 }
 

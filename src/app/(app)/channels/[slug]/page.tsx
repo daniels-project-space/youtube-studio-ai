@@ -37,7 +37,7 @@ import {
   LIVE_PIPELINE_PHASE_LABEL,
   livePipelinePhaseForBlock,
 } from "@/lib/livePipelinePresentation";
-import { VOICES } from "@/lib/voices";
+import { AUTO_VOICE_ID, VOICES } from "@/lib/voices";
 import { useAssetUrl, useAssetUrlState } from "@/lib/asset-url";
 import { assessYouTubeSetup } from "@/lib/youtubeSetupStatus";
 import { NICHE_CATALOG_EVIDENCE, NICHES, subcategoryTags } from "@/lib/nicheCatalog";
@@ -1609,7 +1609,7 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
   const cid = channel._id as Id<"channels">;
   const id = channel.identity ?? ({} as ChannelIdentity);
 
-  const [voice, setVoice] = useState(id.voiceId ?? "sleepless_historian");
+  const [voice, setVoice] = useState(id.voiceId ?? AUTO_VOICE_ID);
   const [cadence, setCadence] = useState(channel.schedule?.frequency ?? id.cadence ?? "weekly");
   const [days, setDays] = useState<number[]>(channel.schedule?.days?.length ? channel.schedule.days : [1]);
   const [niche, setNiche] = useState(id.niche ?? "");
@@ -1620,7 +1620,7 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
   const [research, setResearch] = useState<string | null>(null);
 
   const dirty =
-    voice !== (id.voiceId ?? "sleepless_historian") ||
+    voice !== (id.voiceId ?? AUTO_VOICE_ID) ||
     cadence !== (channel.schedule?.frequency ?? id.cadence ?? "weekly") ||
     JSON.stringify(days) !== JSON.stringify(channel.schedule?.days?.length ? channel.schedule.days : [1]) ||
     niche.trim() !== (id.niche ?? "") ||
@@ -1637,7 +1637,11 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
     setBusy(true);
     setMsg(null);
     try {
-      const nextId = { ...id, voiceId: voice, cadence, niche: niche.trim() };
+      // "Auto" must persist as ABSENT, never as an empty string — an empty
+      // voiceId would be a declared value that resolves to nothing.
+      const nextId = { ...id, cadence, niche: niche.trim() };
+      if (voice) nextId.voiceId = voice;
+      else delete (nextId as { voiceId?: string }).voiceId;
       // If a catalog subcategory was picked, seed its SEO tags into the metadata
       // block so the pipeline automates from them (v1 catalog defaults).
       const seed = nicheKey && subcat ? subcategoryTags(nicheKey, subcat) : [];
