@@ -379,7 +379,12 @@ export async function updateVideoMetadata(args: {
   const snippet = {
     ...sn,
     ...(args.title ? { title: args.title.slice(0, 100) } : {}),
-    ...(args.tags ? { tags: args.tags.slice(0, 30) } : {}),
+    // clampTags, not slice(0, 30): YouTube rejects on the TOTAL character
+    // length of the tag list, not its count, and it also refuses "<" and ">".
+    // The upload path has always clamped; this one only capped the count, so a
+    // verbose tag list returned "invalidTags" and threw — taking the TITLE
+    // rewrite down with it, since both travel in the same snippet PUT.
+    ...(args.tags ? { tags: clampTags(args.tags) } : {}),
     ...(args.description != null ? { description: args.description.slice(0, 4900) } : {}),
   };
   const res = await fetch("https://www.googleapis.com/youtube/v3/videos?part=snippet", {
@@ -470,7 +475,7 @@ export interface YouTubeUploadCheckpoint {
  * with spaces are counted with surrounding quotes, +2 each). Strip invalid
  * characters and greedily keep tags until the effective total hits a safe cap.
  */
-function clampTags(tags: string[], maxTotal = 460): string[] {
+export function clampTags(tags: string[], maxTotal = 460): string[] {
   const out: string[] = [];
   let total = 0;
   for (const raw of tags) {
