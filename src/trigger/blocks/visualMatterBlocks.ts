@@ -13,6 +13,27 @@ function boundedInteger(value: unknown, fallback: number, min: number, max: numb
  * Builds a reusable, provider-free Visual Matter package for a cinematic story.
  * The typed lock is consumed downstream; rendering non-thumbnail reference
  * pixels remains deliberately unavailable until an approved adapter exists.
+ *
+ * WHY THIS BLOCK IS IN NO CHANNEL PIPELINE (checked 2026-09-05, 0 of 15 live
+ * channels) — it is staged, not missing. Adding it would be a mistake today:
+ *
+ *   Its output is a set of per-shot CHARACTER and SETTING identity locks. Those
+ *   only mean something to a renderer that GENERATES the character pixels, and
+ *   no live lane does. The narrated channels cut stock footage; scene_compiler
+ *   is a zero-provider deterministic renderer (externalProviderCalls: 0) that
+ *   draws scene grammar, not people; lofi is two looping stills. None of them
+ *   consume visualMatterManifest, and none could act on it if they did.
+ *
+ *   The one lane that would — the direct-Novita cinematic render farm — lists
+ *   visualMatterManifest in requiredConsumes and is gated behind an approved
+ *   runtime adapter (see VISUAL_MATTER_REFERENCE_ADAPTER_REQUIRED below).
+ *
+ *   qa_visual DOES read the manifest, as an optional consume, and turns it into
+ *   review criteria. That is the trap: inserting visual_matter into a live
+ *   pipeline would start judging finished videos against character locks that
+ *   nothing was ever rendered from, failing reviews for a consistency the
+ *   pipeline never attempted. Wire the generative renderer FIRST; the pipeline
+ *   entry is the last step, not the first.
  */
 export const VISUAL_MATTER_REFERENCE_ADAPTER_REQUIRED =
   "visual_matter cannot render non-thumbnail reference assets: FAL/Nano Banana is thumbnail-only. " +
