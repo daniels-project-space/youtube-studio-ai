@@ -31,7 +31,25 @@ const ROOT = process.cwd();
 const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "dist", "build", ".locks", "remotion"]);
 
 /** Invoked by a framework, not by our code. Absence of callers proves nothing. */
-const ENTRY_POINT = /(^|\/)(page|layout|route|middleware|instrumentation)\.tsx?$|^src\/trigger\/|^convex\//;
+const ENTRY_POINT =
+  /(^|\/)(page|layout|route|middleware|instrumentation|error|not-found|loading|global-error|template|default)\.tsx?$|^src\/trigger\/|^convex\//;
+
+/**
+ * Dead BY DECISION, not by accident.
+ *
+ * A module can be unreferenced because someone retired it deliberately and kept
+ * it for a documented reason. src/lib/cinecraft.ts is the case that forced this:
+ * a 480-line cinematic engine whose entry gate returns a literal `false`,
+ * retained — as engine/golden.ts records at length — until its subject/Soul
+ * tools have a full replacement, with an explicit warning never to reopen the
+ * retired paid renderer.
+ *
+ * Reporting that beside a genuinely forgotten export is how an audit gets
+ * ignored. A file states its own status with an `@retired` tag in its header
+ * doc, and this reports those separately instead of pretending they are a
+ * cleanup opportunity.
+ */
+const RETIRED_TAG = /@retired\b/;
 const TEST_FILE = /\.test\.tsx?$|__tests__/;
 
 interface GatingParam {
@@ -232,15 +250,37 @@ function main(): void {
   // pinned. Counting either as dead produced 1303 findings, and a cleanup list
   // that size is one nobody runs. Only a symbol whose name appears exactly once
   // in the entire tree — its own declaration — is actually unused.
-  console.log("=== UNREFERENCED EXPORTS (safe-to-delete candidates) ===");
-  let deadCount = 0;
+  const dead: { name: string; file: string }[] = [];
   for (const [name, file] of names) {
     if (ENTRY_POINT.test(file)) continue;
     if ((occurrences.get(name) ?? 0) > 1) continue;
-    deadCount += 1;
-    console.log(`  ${file.padEnd(52)} ${name}`);
+    dead.push({ name, file });
   }
-  console.log(`  (${deadCount} symbols)\n`);
+
+  // Split dead-by-decision from dead-by-accident before printing either.
+  const retiredCache = new Map<string, boolean>();
+  const isRetired = (file: string): boolean => {
+    const cached = retiredCache.get(file);
+    if (cached !== undefined) return cached;
+    let value = false;
+    try { value = RETIRED_TAG.test(readFileSync(join(ROOT, file), "utf8").slice(0, 4_000)); } catch { value = false; }
+    retiredCache.set(file, value);
+    return value;
+  };
+  const retired = dead.filter((d) => isRetired(d.file));
+  const accidental = dead.filter((d) => !isRetired(d.file));
+
+  if (retired.length) {
+    console.log("=== RETIRED BY DECISION (declared @retired — not a cleanup opportunity) ===");
+    for (const file of [...new Set(retired.map((r) => r.file))]) {
+      console.log(`  ${file.padEnd(52)} ${retired.filter((r) => r.file === file).length} unreferenced export(s)`);
+    }
+    console.log(`  (${retired.length} symbols)\n`);
+  }
+
+  console.log("=== UNREFERENCED EXPORTS (safe-to-delete candidates) ===");
+  for (const d of accidental) console.log(`  ${d.file.padEnd(52)} ${d.name}`);
+  console.log(`  (${accidental.length} symbols)\n`);
   void onlyProd;
 
   console.log("=== OPTIONAL PARAMETERS NO CALLER EVER PASSES ===");

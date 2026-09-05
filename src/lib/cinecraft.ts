@@ -34,6 +34,18 @@
  *
  *   import { extractSubjects, designSubject, buildShotScript, renderShot,
  *            craftCinematicShots, hasCinecraft } from "@/lib/cinecraft";
+ *
+ * @retired hasCinecraft() returns a literal false and every entry point above
+ * throws. The render path drove the retired PAID Higgsfield CLI and must never
+ * be reopened. The file is kept as a type/catalog surface (ShotSpec, used by
+ * src/lib/crew/cinematographer.ts) and as the reference for what a full Novita
+ * replacement has to reproduce — engine/golden.ts records that decision in
+ * full. The hero-anchor consistency LAW it describes IS enforced in production,
+ * by src/engine/visualMatter.ts, not by this file.
+ *
+ * The measurement embedded above is the reason it is kept rather than deleted:
+ * anchoring every keyframe on the subject's hero IMAGE scored 9/10 against 2-6
+ * for a Soul ID. Whatever replaces this must not relearn that.
  */
 import { join } from "node:path";
 import { runCli, HiggsfieldError } from "@/lib/higgsfield";

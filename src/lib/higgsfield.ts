@@ -20,6 +20,14 @@
  * Live gate: real spawn only runs when HIGGSFIELD_LIVE=1 (set after a verified
  * `higgsfield auth login`); otherwise we throw rather than silently fake media.
  */
+
+/**
+ * @retired Imported by exactly one file, src/lib/cinecraft.ts, which is itself
+ * retired with a hard-disabled entry gate — so nothing in the pipeline can
+ * reach this client. Kept alongside cinecraft as the contract a replacement
+ * would have to satisfy; deleting one without the other would leave a dangling
+ * reference. The paid Higgsfield renderer must not be reopened.
+ */
 export class HiggsfieldSessionExpiredError extends Error {
   constructor(
     message = "Higgsfield session expired — run `higgsfield auth login`",
