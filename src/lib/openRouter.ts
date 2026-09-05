@@ -156,6 +156,15 @@ function responseText(value: unknown): string {
     .trim();
 }
 
+/**
+ * Fraction of the ceiling that reasoning may consume before a call site is
+ * warned. Chosen from the measured failures: the compliance call died at 94%
+ * (189/200) and the advisors at similar shares, while healthy calls in this
+ * codebase sit far below. 0.6 leaves real headroom for the answer and still
+ * fires well before the contract breaks.
+ */
+const REASONING_STARVATION_RATIO = 0.6;
+
 export async function openRouterChat(args: {
   model: string;
   messages: OpenRouterMessage[];
@@ -243,6 +252,35 @@ export async function openRouterChat(args: {
     totalTokens: typeof usage?.total_tokens === "number" ? usage.total_tokens : undefined,
     ...(!usage ? { unpricedReason: "OpenRouter response omitted usage" } : {}),
   });
+  // STARVATION WARNING.
+  //
+  // Reasoning on this route is MANDATORY and is billed as completion tokens, so
+  // it is spent out of max_tokens before a single character of the answer is
+  // produced. Measured directly against the shipped advertiser-safety call at
+  // its old ceiling of 200: completion_tokens=196, of which reasoning_tokens=189
+  // — seven tokens left for the JSON, and 16 unparseable characters came back.
+  //
+  // It cannot be turned off. The API rejects reasoning:{enabled:false},
+  // reasoning:{effort:"none"}, reasoning:{max_tokens:0} and reasoning_effort
+  // with "Reasoning is mandatory for this endpoint and cannot be disabled", and
+  // reasoning:{exclude:true} only hides it from the response while still burning
+  // 193 of 200. (vision.ts CAN set reasoning_effort:"none" because that path
+  // goes to Groq, a different provider.) So every ceiling here has to be sized
+  // as reasoning + answer, and this warning is how a call site says it is close
+  // to the edge BEFORE it starts failing.
+  //
+  // Four features had already died this way silently — an empty pinned comment
+  // on every video, an advisor that never advised, a topic gate skipped on two
+  // slates in three, and a safety scan that failed precisely when it had
+  // something to report.
+  const reasoningTokens = typeof usage?.reasoning_tokens === "number" ? usage.reasoning_tokens : 0;
+  if (reasoningTokens > 0 && reasoningTokens > args.maxTokens * REASONING_STARVATION_RATIO) {
+    (args.log ?? (() => {}))(
+      `openRouter: STARVATION RISK — reasoning used ${reasoningTokens} of the ${args.maxTokens}-token ceiling ` +
+      `(${Math.round((reasoningTokens / args.maxTokens) * 100)}%) on ${returnedModel}. The answer has to fit in ` +
+      `what is left; raise maxTokens at this call site before it starts failing its contract.`,
+    );
+  }
   const text = responseText(payload);
   if (!text) {
     throw new OpenRouterGenerationOutcomeUnknownError(
