@@ -513,7 +513,12 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           continue;
         }
       } catch (e) {
-        a.log?.(`metacraft: judge unreachable (${e instanceof Error ? e.message : e}) — lint-only pass`);
+        // The result already carries `judged: false` and `clickScore: null`, and
+        // the metadata block prints UNJUDGED from them — so this one was never
+        // invisible. The wording is aligned with hookcraft and topicraft anyway:
+        // "lint-only pass" describes a downgrade, and what happened is that the
+        // title was never scored against the feed at all.
+        a.log?.(`metacraft: JUDGE FAILED (${e instanceof Error ? e.message : e}) — this title was NOT scored against the feed; shipping on lint alone`);
       }
 
       const w = survivors[best];

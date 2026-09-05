@@ -116,7 +116,15 @@ function main(): void {
           // at all" — the audit flagged code it had itself just been fixed to
           // approve of. Capture the whole literal and judge on its text.
           const logs = Array.from(body.matchAll(/["'`]([^"'`]{8,600})["'`]/g)).map((m) => m[1]);
-          const loud = logs.some((l) => /DID NOT RUN|FAILED|NOT quality-gated|never/i.test(l));
+          // A fail-open is fine when the fallback IDENTIFIES ITSELF — either the
+          // log names what did not run, or the returned value carries a marker a
+          // consumer can branch on. geoCinema returns verdict: "heuristic
+          // fallback" and only passes when no hard flag is set; that is good
+          // design, and an audit that calls it a defect trains people to ignore
+          // the audit.
+          const namedInLog = logs.some((l) => /DID NOT RUN|FAILED|NOT quality-gated|never|errored/i.test(l));
+          const markedInValue = /(judged:\s*false|ungated|unmeasured|not_measured|heuristic fallback|"fallback"|reasonCode)/i.test(body);
+          const loud = namedInLog || markedInValue;
           const routine = logs.some((l) => ROUTINE.test(l));
           const verdict: Finding["verdict"] = loud ? "NAMED" : "SILENT";
           if (verdict === "SILENT") {
