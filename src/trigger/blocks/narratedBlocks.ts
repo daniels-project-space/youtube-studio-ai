@@ -185,6 +185,7 @@ import {
 import {
   assertPackageToOpeningPlanBinding,
   createPackageToOpeningOmission,
+  packageToOpeningOmissionReasonFor,
   createPackageToOpeningReceipt,
   packageToOpeningOpeningCriterion,
   type PackageToOpeningOmission,
@@ -6184,13 +6185,12 @@ export const qaVisual: Block = {
         });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const reasonCode = packageToOpeningOmissionReasonFor(message);
         packageToOpeningOmission = createPackageToOpeningOmission({
-          reasonCode: /opening window|opening frame/i.test(message)
-            ? "opening_review_frame_unavailable"
-            : "package_binding_unavailable",
+          reasonCode,
           ...(planFingerprint ? { planFingerprint } : {}),
         });
-        ctx.log(`qa_visual: package-to-opening omitted (${message})`);
+        ctx.log(`qa_visual: package-to-opening omitted [${reasonCode}] (${message})`);
       }
     }
     // Bind an actual Studio-library selection for the direct open-weight LTX 2.5

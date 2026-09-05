@@ -113,6 +113,18 @@ export const PackageToOpeningOmissionReasonCodeSchema = z.enum([
   "legacy_package_plan_missing",
   "opening_review_frame_unavailable",
   "package_binding_unavailable",
+  /**
+   * The plan was present and well-formed, but the current title, thumbnail
+   * brief, topic, route or opening anchor no longer matches what was sealed
+   * before the paid thumbnail boundary.
+   *
+   * This used to be recorded as `package_binding_unavailable`, which reads as
+   * an infrastructure problem. It is the opposite: the binding worked exactly
+   * as intended and caught the package changing after the promise was sold. On
+   * a supervised lane a human reads this code and decides what to do, so the
+   * two cases must not share one label.
+   */
+  "package_binding_drifted",
 ]);
 
 export type PackageToOpeningOmissionReasonCode = z.infer<
@@ -184,9 +196,21 @@ function anchorValuesFor(context: AnchorContext): {
   const hookLoop = text(script?.["hookLoop"]);
   const quizTopic = text(quizPlan?.["topic"]);
   if (hook || hookLoop) {
+    // `source` is a provenance claim inside a hash-sealed evidence record, so
+    // it has to name where the text ACTUALLY came from. The previous form
+    // hard-coded the labels and fell back on the value only: a script with a
+    // cold open but no loop sealed a declaredPromise labelled "script_hook_loop"
+    // holding the cold open, and a script with only a loop produced a criterion
+    // telling the reviewer the text came "from script_cold_open" when it did
+    // not. Both anchors then carried the same fingerprint under two different
+    // stated origins.
     return {
-      declaredPromise: { source: "script_hook_loop", value: hookLoop ?? hook! },
-      plannedOpening: { source: "script_cold_open", value: hook ?? hookLoop! },
+      declaredPromise: hookLoop
+        ? { source: "script_hook_loop", value: hookLoop }
+        : { source: "script_cold_open", value: hook! },
+      plannedOpening: hook
+        ? { source: "script_cold_open", value: hook }
+        : { source: "script_hook_loop", value: hookLoop! },
     };
   }
   if (quizTopic) {
@@ -448,6 +472,26 @@ export function requireAutomaticPackageToOpeningReceipt(args: {
     );
   }
   return receipt;
+}
+
+/**
+ * Classify why package-to-opening evidence could not be produced.
+ *
+ * Three distinguishable situations were collapsing into two labels, and the
+ * important one was hidden: "plan no longer matches the current package" is not
+ * an unavailable binding, it is the binding WORKING and catching the title or
+ * thumbnail brief changing after the promise was sealed. Automatic families
+ * refuse any omission, so release safety never depended on this — but a human
+ * reviewing a supervised lane reads the code to decide what to do, and
+ * "unavailable" points them at infrastructure instead of at the drift.
+ *
+ * Lives here rather than inline at the call site so it can be tested against
+ * the exact messages the binding functions above actually throw.
+ */
+export function packageToOpeningOmissionReasonFor(message: string): PackageToOpeningOmissionReasonCode {
+  if (/opening window|opening frame/i.test(message)) return "opening_review_frame_unavailable";
+  if (/no longer matches/i.test(message)) return "package_binding_drifted";
+  return "package_binding_unavailable";
 }
 
 export function createPackageToOpeningOmission(input: {
