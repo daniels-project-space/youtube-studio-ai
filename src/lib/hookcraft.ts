@@ -269,7 +269,17 @@ export interface CraftedHook {
   device: string;
   /** The exact promise/open loop this cold open creates — the script MUST pay it off. */
   loop: string;
-  verdict: HookVerdict & { lint: HookLint; factCheck: "verified" | "skipped" | "unchecked" };
+  verdict: HookVerdict & {
+    lint: HookLint;
+    factCheck: "verified" | "skipped" | "unchecked";
+    /**
+     * False when this cold open was admitted without the judge scoring it —
+     * either the judge call failed, or it returned no verdict for this
+     * candidate. passes() reads every missing axis as 10, so an unjudged hook
+     * is otherwise indistinguishable from one that scored full marks.
+     */
+    judged: boolean;
+  };
 }
 
 export interface HookCraftArgs {
@@ -325,6 +335,29 @@ async function factCheckColdOpen(
   // bind its hook to an admitted source packet before publication; absent that
   // artifact this creative-only module marks the claim status honestly.
   return { ok: true, problems: [], status: "unchecked" };
+}
+
+/**
+ * `?? 10` treats a MISSING axis as a perfect one.
+ *
+ * That is right for a judge that returned a verdict and simply omitted an axis
+ * — the other scores still carry the decision. It is wrong for a verdict that
+ * does not exist at all: when the judge is unreachable, `verdicts` is empty,
+ * every candidate is judged as `{}`, and every single axis defaults to 10. The
+ * gate then passes everything while reading exactly like a candidate that
+ * scored 10 on punch, specificity, curiosity, voiceMatch and promise and was
+ * found honest — on the first 15 seconds of the video, which is the highest-
+ * leverage retention surface there is.
+ *
+ * So an EMPTY verdict is separated from a partial one. Nothing is scored
+ * differently; what changes is that "the judge never ran" can no longer wear
+ * the same face as "the judge gave it full marks".
+ */
+export function isEmptyVerdict(v: HookVerdict): boolean {
+  return (
+    v.punch === undefined && v.specificity === undefined && v.curiosity === undefined &&
+    v.voiceMatch === undefined && v.promise === undefined && v.honest === undefined
+  );
 }
 
 function passes(v: HookVerdict): boolean {
@@ -455,6 +488,8 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
     if (survivors.length) {
       // Judge the lint survivors (cheap fast model; judge down = lint-only pass).
       let verdicts: HookVerdict[] = [];
+      /** False once the judge has failed — carried onto the chosen hook. */
+      let judgeRan = true;
       let best = 0;
       try {
         const j = await claudeJson<{ verdicts?: HookVerdict[]; best?: number }>({
@@ -482,7 +517,19 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         verdicts = j.verdicts ?? [];
         best = typeof j.best === "number" && j.best >= 0 && j.best < survivors.length ? j.best : 0;
       } catch (e) {
-        a.log?.(`hookcraft: judge unreachable (${e instanceof Error ? e.message : e}) — lint-only pass`);
+        // FAIL-OPEN, DELIBERATELY AND LOUDLY — see isEmptyVerdict above.
+        //
+        // "lint-only pass" undersold this badly. With no verdicts every
+        // candidate is scored as `{}`, and passes() reads each missing axis as
+        // 10, so the cold-open gate admits everything as if the judge had given
+        // it full marks. The candidates HAVE cleared a real deterministic lint,
+        // and refusing to produce a cold open at all would fail the whole
+        // video, so it still fails open — but not quietly.
+        judgeRan = false;
+        a.log?.(
+          `hookcraft: JUDGE FAILED (${e instanceof Error ? e.message : e}) — the cold open was NOT scored ` +
+          `on punch/specificity/curiosity/voiceMatch/promise; every candidate now passes the gate on lint alone`,
+        );
       }
 
       // Prefer the judge's pick if it gates; else any gating candidate. The
@@ -519,7 +566,11 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           coldOpen: `${c.hook}\n\n${c.opening}`,
           device: c.device,
           loop: c.loop || `pay off the promise of: ${c.hook}`,
-          verdict: { ...v, lint: c.lint, factCheck },
+          // `judged` travels with the verdict so a consumer can tell a hook the
+          // judge gave full marks from one the judge never saw. Without it the
+          // two are byte-identical: both arrive as an empty verdict that
+          // passes() reads as a perfect score.
+          verdict: { ...v, lint: c.lint, factCheck, judged: judgeRan && !isEmptyVerdict(v) },
         };
       }
       lastIssues = [...factProblems, ...verdicts.map((v) => v.note ?? "").filter(Boolean)];
