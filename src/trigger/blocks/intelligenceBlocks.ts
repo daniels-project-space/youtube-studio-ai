@@ -664,7 +664,12 @@ export const metadataOptimized: Block = {
           role: "producer",
           schema: seoSchema,
           log: ctx.log,
-          maxTokens: 900,
+          // Reasoning route: the ceiling covers the thinking AND the list. Measured —
+          // an agentJson list failed at 500 and passed at 1000; an 8-item ranking
+          // failed at 1500 and passed at 2500. See scripts/audit-json-contract-ceilings.ts,
+          // which could not see this call at all until it learned to resolve a schema
+          // passed by reference.
+          maxTokens: 2500,
           temperature: 0.8,
           prompt:
             `Write YouTube SEO metadata for a video about "${topic}" on the channel "${channelName}".\n` +
@@ -738,7 +743,12 @@ export const metadataOptimized: Block = {
               role: "director",
               schema: seoDirectorSchema,
               log: ctx.log,
-              maxTokens: 500,
+              // Reasoning route: the ceiling covers the thinking AND the list. Measured —
+              // an agentJson list failed at 500 and passed at 1000; an 8-item ranking
+              // failed at 1500 and passed at 2500. See scripts/audit-json-contract-ceilings.ts,
+              // which could not see this call at all until it learned to resolve a schema
+              // passed by reference.
+              maxTokens: 2500,
               temperature: 0.3,
               system: "You are the DIRECTOR: a YouTube SEO + CTR strategist. Return ONLY JSON.",
               prompt:

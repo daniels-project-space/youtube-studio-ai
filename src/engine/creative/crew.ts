@@ -68,7 +68,12 @@ export async function briefDirector(bible: ShowBible, ctx: CrewContext): Promise
       role: "crew_director",
       schema: structureSchema,
       log: (m) => log(m),
-      maxTokens: 1200,
+      // Reasoning route: the ceiling covers the thinking AND the list. Measured —
+      // an agentJson list failed at 500 and passed at 1000; an 8-item ranking
+      // failed at 1500 and passed at 2500. See scripts/audit-json-contract-ceilings.ts,
+      // which could not see this call at all until it learned to resolve a schema
+      // passed by reference.
+      maxTokens: 2500,
       temperature: 0.8,
       prompt:
         `${header(bible, ctx)}\n\n` +
@@ -84,7 +89,11 @@ export async function briefDirector(bible: ShowBible, ctx: CrewContext): Promise
     if (!raw.hook && beats.length === 0) return undefined;
     return { hook: (raw.hook ?? "").trim(), beats };
   } catch (e) {
-    log(`crew/director: ${e instanceof Error ? e.message : e}`);
+    // Returning undefined is the right degradation — a video without a director
+    // brief still renders. But the log has to say the brief is GONE, not just
+    // echo a provider error, or a run that shipped with no structure/beats reads
+    // exactly like a run that had them.
+    log(`crew/director: BRIEF UNAVAILABLE — this video gets no structure/beats from the director: ${e instanceof Error ? e.message : e}`);
     return undefined;
   }
 }
@@ -106,7 +115,12 @@ export async function briefCinematographer(bible: ShowBible, ctx: CrewContext): 
       role: "cinematographer",
       schema: visualSchema,
       log: (m) => log(m),
-      maxTokens: 1000,
+      // Reasoning route: the ceiling covers the thinking AND the list. Measured —
+      // an agentJson list failed at 500 and passed at 1000; an 8-item ranking
+      // failed at 1500 and passed at 2500. See scripts/audit-json-contract-ceilings.ts,
+      // which could not see this call at all until it learned to resolve a schema
+      // passed by reference.
+      maxTokens: 2500,
       temperature: 0.8,
       prompt:
         `${header(bible, ctx)}\n\n` +
@@ -143,7 +157,11 @@ export async function briefCinematographer(bible: ShowBible, ctx: CrewContext): 
       avoid: (raw.avoid ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 8),
     };
   } catch (e) {
-    log(`crew/dp: ${e instanceof Error ? e.message : e}`);
+    // Returning undefined is the right degradation — a video without a dp
+    // brief still renders. But the log has to say the brief is GONE, not just
+    // echo a provider error, or a run that shipped with no visual specs reads
+    // exactly like a run that had them.
+    log(`crew/dp: BRIEF UNAVAILABLE — this video gets no visual specs from the dp: ${e instanceof Error ? e.message : e}`);
     return undefined;
   }
 }
@@ -164,7 +182,12 @@ export async function briefEditor(bible: ShowBible, ctx: CrewContext): Promise<C
       role: "editor",
       schema: cutSchema,
       log: (m) => log(m),
-      maxTokens: 900,
+      // Reasoning route: the ceiling covers the thinking AND the list. Measured —
+      // an agentJson list failed at 500 and passed at 1000; an 8-item ranking
+      // failed at 1500 and passed at 2500. See scripts/audit-json-contract-ceilings.ts,
+      // which could not see this call at all until it learned to resolve a schema
+      // passed by reference.
+      maxTokens: 2500,
       temperature: 0.7,
       prompt:
         `${header(bible, ctx)}\n\n` +
@@ -186,7 +209,11 @@ export async function briefEditor(bible: ShowBible, ctx: CrewContext): Promise<C
       overlayRule: (raw.overlayRule ?? "").trim(),
     };
   } catch (e) {
-    log(`crew/editor: ${e instanceof Error ? e.message : e}`);
+    // Returning undefined is the right degradation — a video without a editor
+    // brief still renders. But the log has to say the brief is GONE, not just
+    // echo a provider error, or a run that shipped with no cut plan reads
+    // exactly like a run that had them.
+    log(`crew/editor: BRIEF UNAVAILABLE — this video gets no cut plan from the editor: ${e instanceof Error ? e.message : e}`);
     return undefined;
   }
 }
@@ -210,7 +237,12 @@ export async function briefComposer(
       role: "composer",
       schema: composerSchema,
       log: (m) => log(m),
-      maxTokens: 700,
+      // Reasoning route: the ceiling covers the thinking AND the list. Measured —
+      // an agentJson list failed at 500 and passed at 1000; an 8-item ranking
+      // failed at 1500 and passed at 2500. See scripts/audit-json-contract-ceilings.ts,
+      // which could not see this call at all until it learned to resolve a schema
+      // passed by reference.
+      maxTokens: 2500,
       temperature: 0.8,
       prompt:
         `${header(bible, ctx)}\n\n` +
@@ -234,7 +266,11 @@ export async function briefComposer(
       },
     };
   } catch (e) {
-    log(`crew/composer: ${e instanceof Error ? e.message : e}`);
+    // Returning undefined is the right degradation — a video without a composer
+    // brief still renders. But the log has to say the brief is GONE, not just
+    // echo a provider error, or a run that shipped with no music arc reads
+    // exactly like a run that had them.
+    log(`crew/composer: BRIEF UNAVAILABLE — this video gets no music arc from the composer: ${e instanceof Error ? e.message : e}`);
     return undefined;
   }
 }
@@ -326,7 +362,12 @@ export async function briefCritic(bible: ShowBible, ctx: CrewContext): Promise<V
       role: "critic",
       schema: specSchema,
       log: (m) => log(m),
-      maxTokens: 1200,
+      // Reasoning route: the ceiling covers the thinking AND the list. Measured —
+      // an agentJson list failed at 500 and passed at 1000; an 8-item ranking
+      // failed at 1500 and passed at 2500. See scripts/audit-json-contract-ceilings.ts,
+      // which could not see this call at all until it learned to resolve a schema
+      // passed by reference.
+      maxTokens: 2500,
       temperature: 0.5,
       prompt:
         `${header(bible, ctx)}\nFormat: ${ctx.family}.\n\n` +
@@ -358,7 +399,11 @@ export async function briefCritic(bible: ShowBible, ctx: CrewContext): Promise<V
     if (assertions.length === 0) return undefined;
     return { assertions };
   } catch (e) {
-    log(`crew/critic: ${e instanceof Error ? e.message : e}`);
+    // Returning undefined is the right degradation — a video without a critic
+    // brief still renders. But the log has to say the brief is GONE, not just
+    // echo a provider error, or a run that shipped with no review spec reads
+    // exactly like a run that had them.
+    log(`crew/critic: BRIEF UNAVAILABLE — this video gets no review spec from the critic: ${e instanceof Error ? e.message : e}`);
     return undefined;
   }
 }

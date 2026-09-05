@@ -61,14 +61,29 @@ type Shape = "single_field" | "multi_field" | "list" | "unknown";
  * The shape a call asks for, read from its own declared contract rather than
  * inferred from nearby words.
  */
-function declaredShape(callText: string): { shape: Shape; detail: string } {
+function declaredShape(callText: string, fileText: string): { shape: Shape; detail: string } {
   // agentJson declares a zod schema; an array anywhere in it means a list.
   const schema = /schema:\s*([\s\S]{0,400}?)(?:,\n\s*(?:prompt|log|role|system|maxTokens|temperature):)/.exec(callText);
   if (schema) {
-    if (/z\.array\(/.test(schema[1])) return { shape: "list", detail: "zod array" };
-    const fields = (schema[1].match(/\w+:\s*z\./g) ?? []).length;
-    if (fields >= 2) return { shape: "multi_field", detail: `zod, ${fields} fields` };
-    if (fields === 1) return { shape: "single_field", detail: "zod, 1 field" };
+    let body = schema[1];
+    // A schema passed BY REFERENCE — `schema: cutSchema` — was invisible to the
+    // first version of this audit: it inspected the two captured words, found no
+    // z.array, fell through to the literal-JSON check, found none, and reported
+    // the call as "unknown" shape, which is never flagged. Every call in
+    // engine/creative/crew.ts is written that way, so five agentJson calls on
+    // modules serving 8-13 channels were silently exempt and the audit claimed
+    // zero findings. Resolve the identifier to its declaration first.
+    const ref = /^\s*([A-Za-z_$][\w$]*)\s*$/.exec(body);
+    if (ref) {
+      const decl = new RegExp(`const ${ref[1]}\\s*=\\s*([\\s\\S]{0,1200}?)\\n\\n`).exec(fileText)
+        ?? new RegExp(`const ${ref[1]}\\s*=\\s*([\\s\\S]{0,1200}?)\\n(?=const |function |export )`).exec(fileText);
+      if (decl) body = decl[1];
+      else return { shape: "unknown", detail: `schema ${ref[1]} not resolvable in this file` };
+    }
+    if (/z\.array\(/.test(body)) return { shape: "list", detail: `zod array${ref ? ` (via ${ref[1]})` : ""}` };
+    const fields = (body.match(/\w+:\s*z\./g) ?? []).length;
+    if (fields >= 2) return { shape: "multi_field", detail: `zod, ${fields} fields${ref ? ` (via ${ref[1]})` : ""}` };
+    if (fields === 1) return { shape: "single_field", detail: `zod, 1 field${ref ? ` (via ${ref[1]})` : ""}` };
   }
   // Everything else states the contract literally in the prompt.
   const literal = /STRICT JSON\s*(\{[\s\S]{0,400}?\})\s*[.`"]/.exec(callText);
@@ -110,7 +125,7 @@ function main(): void {
       const ceiling = Number(m[1].replace(/_/g, ""));
       // The contract can sit either side of maxTokens inside the same call.
       const callText = lines.slice(start, Math.min(lines.length, i + 25)).join("\n");
-      const { shape, detail } = declaredShape(callText);
+      const { shape, detail } = declaredShape(callText, text);
       const floor = floorFor(shape);
       if (ceiling >= floor) continue;
       findings.push({ file: relative(ROOT, file), line: i + 1, helper, ceiling, shape, detail, floor });
