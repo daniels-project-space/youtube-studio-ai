@@ -53,7 +53,7 @@ Configuration alone is insufficient. Production requires all four values in the 
 3. `QWEN3_TTS_QUALITY_QUALIFIED=1`
 4. `QWEN3_TTS_QUALITY_RECEIPT_SHA256=<64 lowercase hex>`
 
-The quality receipt must come from a reviewed benchmark of the exact worker/model revision. At minimum, retain:
+The quality receipt must come from a reviewed benchmark of the exact worker/model revision. That benchmark is `scripts/qwen-tts-qualify.ts`: it runs the matrix below against a live worker, measures every take with `scripts/qwen_take_measure.py` (ASR word-error rate, integrated loudness, true peak, duration and pace), refuses to emit a receipt if any axis fails or is UNMEASURED, refuses again until a human verdict has been recorded per take, and hashes the measurements together with those verdicts so neither can be edited afterwards. Instruction following is judged as the pace separation between a calm and an energetic take, which one take cannot fake. At minimum, retain:
 
 - one English documentary passage for Aiden and Ryan;
 - one calm/slow passage and one energetic passage to verify instruction following;
