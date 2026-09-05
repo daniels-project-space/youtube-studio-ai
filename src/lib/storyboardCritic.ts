@@ -76,7 +76,11 @@ export async function critiqueStoryboardText(args: {
         "Return STRICT JSON {\"score\":0.0,\"pass\":true,\"issues\":[\"...\"]}. " +
         "Score is a finite 0..1 number. Each issue must name the panel or beat and give one concrete repair instruction. " +
         "Use [] only when the candidate passes every stated criterion.",
-      maxTokens: 1_200,
+      // Reasoning route: the ceiling must cover the thinking AND the list.
+      // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
+      // ranking failed at 1500 and passed at 2500. See
+      // scripts/audit-json-contract-ceilings.ts.
+      maxTokens: 2_500,
       temperature: 0.2,
       log: args.log,
     });

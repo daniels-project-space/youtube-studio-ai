@@ -857,7 +857,11 @@ export const topicSelect: Block = {
               `a one-line PLOT BEAT capturing what this specific episode adds, the UPDATED list of unresolved narrative threads ` +
               `(open questions/promises still to pay off), and any newly introduced entities (name + one-line ROLE only — never wardrobe or appearance). ` +
               `Return STRICT JSON {"candidates":[{"topic":string,"angle":string,"arcSummary":string,"newPlotBeat":string,"unresolvedThreads":string[],"entities":[{"name":string,"role":string}]}]}.`,
-            maxTokens: 600,
+            // Reasoning route: the ceiling must cover the thinking AND the list.
+            // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
+            // ranking failed at 1500 and passed at 2500. See
+            // scripts/audit-json-contract-ceilings.ts.
+            maxTokens: 2500,
             temperature: 0.8,
           });
           const candidate = out.candidates?.[0];
@@ -980,7 +984,11 @@ export const topicSelect: Block = {
                 `a one-line PLOT BEAT capturing what this specific episode adds, the UPDATED list of unresolved narrative threads ` +
                 `(open questions/promises still to pay off), and any newly introduced entities (name + one-line ROLE only — never wardrobe or appearance). ` +
                 `Return STRICT JSON {"candidates":[{"topic":string,"angle":string,"arcSummary":string,"newPlotBeat":string,"unresolvedThreads":string[],"entities":[{"name":string,"role":string}]}]}.`,
-              maxTokens: 600,
+              // Reasoning route: the ceiling must cover the thinking AND the list.
+              // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
+              // ranking failed at 1500 and passed at 2500. See
+              // scripts/audit-json-contract-ceilings.ts.
+              maxTokens: 2500,
               temperature: 0.8,
             });
             const cand = out.candidates?.[0];

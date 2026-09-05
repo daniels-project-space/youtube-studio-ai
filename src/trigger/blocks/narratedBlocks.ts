@@ -2188,7 +2188,11 @@ export const entityImagery: Block = {
               channelCritiqueBrief(entityChannel) +
               "Return STRICT JSON {\"entities\":string[]}.\n\n" +
               narration.slice(0, 3000),
-            maxTokens: 250,
+            // Reasoning route: the ceiling must cover the thinking AND the list.
+            // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
+            // ranking failed at 1500 and passed at 2500. See
+            // scripts/audit-json-contract-ceilings.ts.
+            maxTokens: 2500,
             temperature: 0.3,
           });
           iterationCostUsd += PRICE.boundedTextPassUsd;
@@ -2501,7 +2505,11 @@ export const quoteOverlaysBlock: Block = {
           studioPresentationDirection +
           `\n` +
           indexed,
-        maxTokens: 500,
+        // Reasoning route: the ceiling must cover the thinking AND the list.
+        // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
+        // ranking failed at 1500 and passed at 2500. See
+        // scripts/audit-json-contract-ceilings.ts.
+        maxTokens: 2500,
         temperature: 0.4,
       });
       picks = (res.quotes ?? [])

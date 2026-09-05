@@ -477,7 +477,11 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
               `atmosphere; penalize two-part constructions and anything a scroller must decode)? ` +
               `Return STRICT JSON {"rankings":[{"idx":n,"clickScore":n,"direct":n}],"winner":n,"runnerUp":n}.`,
           ].filter(Boolean).join("\n\n"),
-          maxTokens: 1200,
+          // Reasoning route: the ceiling must cover the thinking AND the list.
+          // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
+          // ranking failed at 1500 and passed at 2500. See
+          // scripts/audit-json-contract-ceilings.ts.
+          maxTokens: 2500,
           temperature: 0.2,
         });
         const ranked = (j.rankings ?? []).filter(

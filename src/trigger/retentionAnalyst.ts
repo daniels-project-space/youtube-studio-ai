@@ -178,7 +178,11 @@ export const retentionAnalystTask = task({
       learnings?: { rule: string; evidence: string; confidence: "high" | "medium" | "low" }[];
     }>({
       tier: "pro",
-      maxTokens: 1600,
+      // Reasoning route: the ceiling must cover the thinking AND the list.
+      // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
+      // ranking failed at 1500 and passed at 2500. See
+      // scripts/audit-json-contract-ceilings.ts.
+      maxTokens: 2500,
       temperature: 0.3,
       system: "You are a YouTube retention engineer turning REAL audience data into writing rules. Return ONLY JSON.",
       prompt:

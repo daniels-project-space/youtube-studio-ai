@@ -721,7 +721,11 @@ export async function acquireReferences(args: {
   const log = args.log ?? (() => {});
   if (!hasAnthropicKey()) throw new Error("thumbnailLab: OPENROUTER_API_KEY required");
   const q = await claudeJson<{ queries?: string[] }>({
-    maxTokens: 400,
+    // Reasoning route: the ceiling must cover the thinking AND the list.
+    // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
+    // ranking failed at 1500 and passed at 2500. See
+    // scripts/audit-json-contract-ceilings.ts.
+    maxTokens: 2500,
     temperature: 0.4,
     system: "You are a YouTube competitive-research strategist. Return ONLY JSON.",
     prompt:

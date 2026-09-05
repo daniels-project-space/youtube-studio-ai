@@ -527,7 +527,11 @@ export const visualInserts: Block = {
           `Return STRICT JSON {"inserts":[{"sentenceIdx":number,"endSentenceIdx":number,"kind":string,"title":string,"value"?:string,` +
           `"label"?:string,"series"?:number[],"xLabels"?:string[],"bars"?:[{"label":string,"value":number,"display"?:string}],` +
           `"anchorValues":number[]|string[],"evidenceVisualId"?:string}]}.`,
-        maxTokens: 1800,
+        // Reasoning route: the ceiling must cover the thinking AND the list.
+        // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
+        // ranking failed at 1500 and passed at 2500. See
+        // scripts/audit-json-contract-ceilings.ts.
+        maxTokens: 2500,
         temperature: 0.4,
         log: ctx.log,
       }), ctx.log);
