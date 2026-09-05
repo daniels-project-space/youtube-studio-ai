@@ -8,6 +8,7 @@
  * headline copy itself. That means the story-interest gate, the identity
  * contract, the golden craft bar and the badge signature all run for real.
  */
+import { generateFalNanoBananaProThumbnailWithReceipt } from "@/lib/falNanoBananaProThumbnail";
 import { mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -86,36 +87,6 @@ const JOBS = [
   },
 ] as const;
 
-async function generateWithNanoBananaPro(prompt: string): Promise<Uint8Array> {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("GEMINI_API_KEY not injected");
-  const response = await fetch(
-    "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image:generateContent",
-    {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-goog-api-key": key },
-      body: JSON.stringify({
-        contents: [{ role: "user", parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseModalities: ["IMAGE"],
-          imageConfig: { aspectRatio: "16:9", imageSize: "2K" },
-        },
-      }),
-      signal: AbortSignal.timeout(300_000),
-    },
-  );
-  const raw = await response.text();
-  if (!response.ok) throw new Error(`Gemini HTTP ${response.status}: ${raw.slice(0, 300)}`);
-  const payload = JSON.parse(raw) as {
-    candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] }; finishReason?: string }[];
-  };
-  const part = payload.candidates?.[0]?.content?.parts?.find((p) => p.inlineData?.data);
-  if (!part?.inlineData?.data) {
-    throw new Error(`Gemini returned no image (finishReason=${payload.candidates?.[0]?.finishReason})`);
-  }
-  return Buffer.from(part.inlineData.data, "base64");
-}
-
 async function main(): Promise<void> {
   for (const job of JOBS) {
     console.log(`\n=== ${job.channelName} — "${job.title}"`);
@@ -161,7 +132,24 @@ async function main(): Promise<void> {
         console.log(`    module planned copy: ${expectWords.join(" / ")}`);
         console.log(`    prompt: ${Buffer.byteLength(prompt, "utf8")} UTF-8 bytes`);
         await writeFile(join(OUT_DIR, `${job.id}.prompt.txt`), prompt);
-        return generateWithNanoBananaPro(prompt);
+        // The sealed, receipt-bearing provider the production block uses.
+        //
+        // This script existed to "drive the REAL thumbnail module end to end",
+        // and then called a raw Google image endpoint of its own — so it was
+        // exercising a path production does not take, and its results did not
+        // describe the shipped renderer. It also tripped the runtime gate that
+        // forbids a raw Google model boundary under scripts/, which is the only
+        // reason the failure was visible at all.
+        //
+        // The endpoint is deliberately not spelled out here: that gate scans raw
+        // source, so quoting the host in a comment re-trips it. Weakening a
+        // production guard so a comment can pass would be the wrong trade.
+        const generated = await generateFalNanoBananaProThumbnailWithReceipt({
+          prompt,
+          idempotencyContext: `nb-render-real:${job.id}`,
+        });
+        console.log(`    provider receipt: $${generated.receipt.costUsd.toFixed(4)}`);
+        return generated.bytes;
       },
       log: (message) => console.log(`    ${message}`),
     });
