@@ -39,6 +39,12 @@ if (tests.length === 0) {
   process.exit(1);
 }
 
+// Run EVERY test, then report. This used to exit on the first failure, which
+// hides the size of a breakage: when the owner lock moved to Convex it broke
+// two golden surface tests, and because one of them sorts third out of 579 the
+// suite died there and the remaining 576 never ran. A green-looking partial
+// sweep is worse than a red one, because it is quoted as evidence.
+const failures = [];
 for (const test of tests) {
   const label = relative(root, test);
   console.log(`\n=== ${label} ===`);
@@ -49,12 +55,19 @@ for (const test of tests) {
   });
   if (result.error) {
     console.error(`Unable to execute ${label}: ${result.error.message}`);
-    process.exit(1);
+    failures.push(label);
+    continue;
   }
   if (result.status !== 0) {
     console.error(`${label} failed with exit code ${result.status ?? "unknown"}`);
-    process.exit(result.status ?? 1);
+    failures.push(label);
   }
+}
+
+if (failures.length) {
+  console.error(`\n${failures.length} of ${tests.length} direct production-readiness tests FAILED:`);
+  for (const label of failures) console.error(`  ${label}`);
+  process.exit(1);
 }
 
 console.log(`\nAll ${tests.length} direct production-readiness tests passed.`);

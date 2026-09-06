@@ -204,6 +204,19 @@ export interface PlanStorySpineInput {
     beats?: Array<{
       name?: string;
       note?: string;
+      /**
+       * The Director's pacing intent for this beat, in on-screen seconds.
+       *
+       * This is what decides WHERE each beat's purpose lands on the narration
+       * clock (see assignStructureBeats). Until it was wired, structure beats
+       * were mapped onto sentences by COUNT — every beat got the same share of
+       * sentences however long the Director asked it to run — and
+       * scripts/story-spine-pacing-harness.ts measured the result on real
+       * briefDirector output: a mean 30.6% of the timeline carried the wrong
+       * beat purpose, worst case 46.2%. The error was largest exactly where the
+       * Director had the strongest opinion (a 15s hook next to a 65s body),
+       * which is the opposite of what a pacing input should do.
+       */
       intentSec?: number;
       mood?: string;
       /** See NarrativeRoleSchema; unrecognized values are dropped, not thrown. */
@@ -369,6 +382,75 @@ export function storySpineVisualReviewLocks(input: {
   }));
 }
 
+/**
+ * Which structure beat owns each narrated sentence.
+ *
+ * The Director declares `intentSec` per beat — how long that beat should be on
+ * screen. Honouring it means placing beat boundaries on the narration CLOCK,
+ * not at evenly-spaced sentence counts, because sentences are not uniform and
+ * because a Director who wants a 15-second hook in front of a 65-second body is
+ * expressing exactly the thing a count-split destroys.
+ *
+ * Three properties this must keep, in order of importance:
+ *
+ *   monotonic   the returned index never decreases, so beat purposes cannot
+ *               interleave and every narrative beat stays contiguous.
+ *   surjective  when there are at least as many sentences as beats, every
+ *               declared beat receives at least one — otherwise a beat carrying
+ *               narrativeRole "introduction" and its nameCardText could be
+ *               skipped entirely and the character introduction would silently
+ *               vanish from the render.
+ *   compatible  with no usable intentSec (all zero, absent, or non-finite) this
+ *               returns the historical count-proportional mapping unchanged, so
+ *               a Director that omits pacing is no worse off than before.
+ */
+function assignStructureBeats(
+  intervals: ReadonlyArray<{ t0: number; t1: number }>,
+  beats: ReadonlyArray<{ intentSec?: number }>,
+  durationSec: number,
+): number[] {
+  const n = intervals.length;
+  const m = beats.length;
+  if (!m || !n) return new Array(n).fill(0);
+
+  const usable = (value: unknown): number =>
+    typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+  const declared = beats.reduce((total, beat) => total + usable(beat.intentSec), 0);
+  if (declared <= 0) {
+    return intervals.map((_, index) => Math.min(m - 1, Math.floor((index * m) / n)));
+  }
+
+  // Cumulative intended end of each beat, scaled onto the real narration clock.
+  // Scaling matters: a Director's seconds sum to roughly, not exactly, the
+  // delivered narration length, and the spine must tile the real duration.
+  const intendedEnd: number[] = [];
+  let accumulated = 0;
+  for (const beat of beats) {
+    accumulated += usable(beat.intentSec);
+    intendedEnd.push((accumulated / declared) * durationSec);
+  }
+
+  const assignment: number[] = [];
+  let cursor = 0;
+  for (let index = 0; index < n; index++) {
+    // Advance past every beat this sentence already starts after, but never so
+    // far that the sentences still to come cannot cover the beats still to
+    // come — that guard is what makes the mapping surjective.
+    while (
+      cursor < m - 1 &&
+      intervals[index]!.t0 >= intendedEnd[cursor]! - EPSILON &&
+      n - index > m - 1 - cursor
+    ) {
+      cursor++;
+    }
+    // The mirror of that guard: once only as many sentences remain as beats,
+    // each remaining sentence must take the next beat or the tail goes unused.
+    cursor = Math.min(m - 1, Math.max(cursor, m - n + index));
+    assignment.push(cursor);
+  }
+  return assignment;
+}
+
 export function planStorySpine(input: PlanStorySpineInput): StorySpine {
   const duration = input.narrationDurationSec;
   if (!Number.isFinite(duration) || duration <= 0 || duration > 36000) {
@@ -402,12 +484,11 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
     t1: index === sentences.length - 1 ? duration : sentence.t1,
   }));
   const structureBeats = input.structure?.beats ?? [];
+  const structureBeatIndexBySentence = assignStructureBeats(intervals, structureBeats, duration);
   // Factored out of the duplicated modulo-index expression below so the new
   // mood lookup does not triple it a third time.
   const structureBeatForIndex = (index: number) =>
-    structureBeats.length
-      ? structureBeats[Math.min(structureBeats.length - 1, Math.floor((index * structureBeats.length) / intervals.length))]
-      : undefined;
+    structureBeats.length ? structureBeats[structureBeatIndexBySentence[index]!] : undefined;
   // Beat id -> reviewed name-card text, populated below alongside
   // narrativeBeats. Kept OUT of NarrativeBeatSchema (name-card text is a
   // shot-level concept, applied to only the beat's first cut shot below) but

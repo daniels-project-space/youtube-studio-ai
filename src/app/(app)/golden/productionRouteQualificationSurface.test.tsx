@@ -1,17 +1,19 @@
+/**
+ * Static-render contract for the route-qualification surface.
+ *
+ * Rendered through renderAppPage for the same reason as its sibling: without
+ * the layout's Convex client, OwnerLockBadge's useQuery throws and none of the
+ * assertions below run.
+ */
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderAppPage, stubCssImports } from "@/lib/testSupport/renderAppPage";
 
 async function main(): Promise<void> {
-  const require = createRequire(import.meta.url);
-  require.extensions[".css"] = (module) => {
-    const classes = new Proxy({}, { get: (_target, key) => String(key) });
-    module.exports = { __esModule: true, default: classes };
-  };
+  stubCssImports(createRequire(import.meta.url));
   const { default: GoldenPipelinePage } = await import("./page");
-  const html = renderToStaticMarkup(createElement(GoldenPipelinePage));
+  const html = await renderAppPage(GoldenPipelinePage);
 
   assert.match(html, /Route qualification/);
   assert.match(html, /NO RECEIPT CONNECTED/);
