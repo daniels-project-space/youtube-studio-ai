@@ -1,33 +1,33 @@
 ﻿/**
- * THE GOLDEN PIPELINE â€” the single tuning surface for what EVERY channel inherits.
+ * THE GOLDEN PIPELINE — the single tuning surface for what EVERY channel inherits.
  *
  * The block engine (designer.ts + families.ts) still builds each channel's concrete
- * pipeline, but the *intent* â€” the canonical stage order, the spoken-craft rules,
- * and per-niche defaults â€” lives here so refining the "golden base" is a one-file
+ * pipeline, but the *intent* — the canonical stage order, the spoken-craft rules,
+ * and per-niche defaults — lives here so refining the "golden base" is a one-file
  * edit that lifts every channel at once. Per-channel customization then layers on
- * top via: family delta (visual engine) â†’ param overrides â†’ Show Bible crew brief
- * â†’ analytics learning loop.
+ * top via: family delta (visual engine) → param overrides → Show Bible crew brief
+ * → analytics learning loop.
  */
 
 import { CHANNEL_INCEPTION_CATALOG_MODULES } from "./channelInceptionContracts";
 
 /**
- * CRAFT_RULES â€” research-backed retention craft injected into every script prompt
+ * CRAFT_RULES — research-backed retention craft injected into every script prompt
  * (short, long, per-section, hook). Channel-agnostic; the Show Bible adds the
  * channel-specific doctrine on top. Sources: faceless-retention studies 2026
  * (hook<7s, <15-word sentences, one idea/60-90s, mid-video pattern break).
  */
 export const CRAFT_RULES = [
   "RETENTION CRAFT (apply throughout, this is non-negotiable):",
-  "- HOOK: the first 1-2 spoken lines must hook within ~7 seconds â€” a curiosity gap, a bold/contrarian claim, a pattern interrupt, or direct second-person address (\"you\"). No slow throat-clearing or \"in this video\" intros.",
-  "- SENTENCES: short and spoken â€” average UNDER 15 words. Vary rhythm. No run-ons.",
+  "- HOOK: the first 1-2 spoken lines must hook within ~7 seconds — a curiosity gap, a bold/contrarian claim, a pattern interrupt, or direct second-person address (\"you\"). No slow throat-clearing or \"in this video\" intros.",
+  "- SENTENCES: short and spoken — average UNDER 15 words. Vary rhythm. No run-ons.",
   "- ONE IDEA AT A TIME: deliver one clear, complete idea roughly every 60-90 seconds; always move forward, never stall or pad.",
-  "- MIDPOINT RE-HOOK: around the middle, insert a deliberate pattern break â€” a pointed question to the viewer, a vivid concrete example, or a tonal shift â€” to recover the attention dip where audiences usually drop.",
+  "- MIDPOINT RE-HOOK: around the middle, insert a deliberate pattern break — a pointed question to the viewer, a vivid concrete example, or a tonal shift — to recover the attention dip where audiences usually drop.",
   "- DIRECT ADDRESS: speak to \"you\" where natural; make abstract ideas concrete and felt before explaining them.",
 ].join("\n");
 
 /**
- * GOLDEN_SPINE â€” the catalog of executable stages available to a channel.
+ * GOLDEN_SPINE — the catalog of executable stages available to a channel.
  * A channel does not inherit every block in this list: the production compiler
  * maps only its selected executable entries to their editorial catalog owners.
  * This is the all-family overview used by the UI; `compileCatalogExecutionFlow`
@@ -1516,7 +1516,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
 ];
 
 /**
- * Per-niche defaults â€” the smart starting point each niche gets before per-channel
+ * Per-niche defaults — the smart starting point each niche gets before per-channel
  * overrides. Keep light; the designer + concept synth fill the rest.
  */
 export interface NichePreset {
@@ -1527,8 +1527,8 @@ export interface NichePreset {
   /**
    * Optional per-niche crew roster (overrides the family default FAMILY_CREW).
    * Role keys: director | cinematographer | editor | composer | critic.
-   * Omit â†’ use the family's default crew. (family itself stays catalog-driven via
-   * nicheCatalog.defaultFamily â€” not duplicated here.)
+   * Omit → use the family's default crew. (family itself stays catalog-driven via
+   * nicheCatalog.defaultFamily — not duplicated here.)
    */
   crew?: string[];
   /**
@@ -1541,7 +1541,7 @@ export interface NichePreset {
   footageTheme?: string;
   /**
    * Script-synced motion-graphics inserts this niche benefits from
-   * (visual_inserts block): big_stat | line_chart | bar_compare. Omit â†’ none.
+   * (visual_inserts block): big_stat | line_chart | bar_compare. Omit → none.
    * The Insert Director still only visualizes numbers the narration speaks.
    */
   insertTypes?: ("big_stat" | "line_chart" | "bar_compare" | "annotated_line" | "lower_third")[];
@@ -1565,7 +1565,7 @@ export const NICHE_PRESETS: Record<string, NichePreset> = {
   // Stoicism previously had a voice mapping but no preset at all. The serene-
   // nature footage lock lives HERE now (per-niche), not on the narrated archetype.
   stoicism: { targetSeconds: 900, scriptStyle: "generic", footageTheme: "nature" },
-  // 2026 breakout niches â€” drama leans on the crime style's tension/withhold-reveal.
+  // 2026 breakout niches — drama leans on the crime style's tension/withhold-reveal.
   // Crew tailored per niche: drama wants narrative+visuals+pacing (no music director);
   // explainers run a lean director+editor+critic crew (cheaper, focused).
   stories: { targetSeconds: 720, scriptStyle: "crime", crew: ["director", "cinematographer", "editor", "critic"], insertTypes: ["big_stat"] },

@@ -1,10 +1,10 @@
 ﻿/**
- * MODULE FORGE â€” runtime. Turns a validated ForgedModuleSpec into a real
+ * MODULE FORGE — runtime. Turns a validated ForgedModuleSpec into a real
  * engine Block. The interpreter is the trust boundary: specs can only invoke
  * the whitelisted primitives, read their declared store keys, spend up to
  * their cost ceiling, and produce overlay specs (appended to extraOverlays).
  * Failures are LOUD (the run fails honestly; the healer/architect can drop
- * the module next run) â€” never a silent skip.
+ * the module next run) — never a silent skip.
  */
 import { join } from "node:path";
 import type { Block, StageContext } from "@/engine/types";
@@ -129,7 +129,7 @@ async function runStep(
 ): Promise<unknown> {
   const guardCost = (add: number) => {
     if (state.cost + add > state.maxCost) {
-      throw new Error(`forged module exceeded its cost ceiling ($${state.maxCost}) â€” step skipped the budget gate`);
+      throw new Error(`forged module exceeded its cost ceiling ($${state.maxCost}) — step skipped the budget gate`);
     }
     state.cost += add;
   };
@@ -234,7 +234,7 @@ async function runStep(
   // foreach
   const arrRaw = resolveRef(step.overFrom, scope);
   const arr = Array.isArray(arrRaw) ? arrRaw.slice(0, step.max) : [];
-  if (!arr.length) throw new Error(`forged foreach: "${step.overFrom}" resolved to an empty/non-array â€” failing loudly`);
+  if (!arr.length) throw new Error(`forged foreach: "${step.overFrom}" resolved to an empty/non-array — failing loudly`);
   const results: unknown[] = [];
   for (const item of arr) {
     const inner: Scope = { ...scope, item, steps: [] };
@@ -296,7 +296,7 @@ export function makeForgedBlock(spec: ForgedModuleSpec): Block {
       // APPEND to extraOverlays (forged modules compose; they never clobber).
       const prior = (ctx.store["extraOverlays"] as unknown[] | undefined) ?? [];
       const exactCost = Math.max(0, state.cost);
-      ctx.log(`${spec.id}: done â€” ${keyed.length} overlay(s), $${exactCost.toFixed(2)}`);
+      ctx.log(`${spec.id}: done — ${keyed.length} overlay(s), $${exactCost.toFixed(2)}`);
       return { extraOverlays: [...prior, ...keyed], [COST_PATCH_KEY]: exactCost };
     },
   };

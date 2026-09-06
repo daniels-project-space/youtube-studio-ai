@@ -1,5 +1,5 @@
 // PROOF RUN: distill fresh visual-language playbooks for 4 vastly different
-// channels and render one thumbnail each â€” no two may wear the same look.
+// channels and render one thumbnail each — no two may wear the same look.
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../convex/_generated/api.js";
 import { acquireReferences, verifyReferences, distillPlaybook, renderCandidate } from "../src/lib/thumbnailLab.ts";
@@ -16,7 +16,7 @@ const log = (m) => console.log(`  ${m}`);
 const DRAWN_DNA = {
   recurringSubject: "A single ink-stained hand sketching crosshatched historical figures and scenes onto a whiteboard, drawings alive stroke by stroke",
   setting: "bright whiteboard canvas, warm paper-cream tones, sepia ink linework, burnt-orange accent used sparingly",
-  colorGrade: "warm paper-white, sepia/charcoal ink, burnt-orange accent â€” hand-drawn editorial illustration, never photoreal",
+  colorGrade: "warm paper-white, sepia/charcoal ink, burnt-orange accent — hand-drawn editorial illustration, never photoreal",
   palette: ["#f5efe0", "#2b2620", "#c45a1d", "#6b5d4a"],
   thumbnail: { subject: "dramatic hand-drawn crosshatch illustration of the episode's moment, artist's hand visible mid-sketch", palette: ["#f5efe0", "#2b2620", "#c45a1d"] },
   visualAvoid: ["photorealism", "stock photography", "modern objects", "neon"],
@@ -26,7 +26,7 @@ const JOBS = [
   { key: "invest", find: "Investory", niche: "Finance", title: "The $50 Trillion Wealth Transfer Has Already Started" },
   { key: "seaside", find: "Seaside", niche: "Lofi", title: "Warm Nights by the Sea ~ sleepy waves, a girl and her cat" },
   { key: "neon", find: "Rainy Neon", niche: "Lofi", title: "Tokyo Rain at 2AM // neon beats to drift away" },
-  { key: "drawn", inline: { name: "The Drawn Past", dna: DRAWN_DNA, positioning: "calm curious educator who sketches history into life â€” hand-drawn whiteboard explainers" }, niche: "History", title: "The Map That Redrew Europe Overnight" },
+  { key: "drawn", inline: { name: "The Drawn Past", dna: DRAWN_DNA, positioning: "calm curious educator who sketches history into life — hand-drawn whiteboard explainers" }, niche: "History", title: "The Map That Redrew Europe Overnight" },
 ];
 
 const only = process.env.ONLY; for (const job of JOBS.filter((j) => !only || j.key === only)) {

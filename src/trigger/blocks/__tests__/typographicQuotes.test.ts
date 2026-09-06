@@ -27,7 +27,7 @@
  * pass while the file itself stayed broken.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const SOURCE = join(process.cwd(), "src/trigger/blocks/narratedBlocks.ts");
@@ -35,18 +35,57 @@ const text = readFileSync(SOURCE, "utf8");
 
 /* --------------------- no double-encoding may return --------------------- */
 
-// The exact byte signature of a Latin-1 round trip: `â` (c3 a2) followed by a
-// continuation. One is enough to have broken a character class before.
-const bytes = readFileSync(SOURCE);
-const mojibake: number[] = [];
-for (let i = 0; i < bytes.length - 1; i++) {
-  if (bytes[i] === 0xc3 && bytes[i + 1] === 0xa2) mojibake.push(i);
+// Repo-wide, not just this one file. The damage was found in narratedBlocks.ts
+// but the same Latin-1 round trip had also hit engine/golden.ts (inside a MODEL
+// PROMPT), engine/forge/runtime.ts, genFootageBlocks.ts and
+// scripts/four-channels.mjs (inside an image STYLE PROMPT) — mojibake in an
+// instruction is noise the model reads, not a cosmetic blemish.
+//
+// The signature is `\u00e2` (c3 a2), which is what U+2014/U+201C/U+2026 and
+// friends all become. It is vanishingly rare in legitimate source here; this
+// file's own doc comment above is the one deliberate exception, and it is
+// excluded by name rather than by weakening the check.
+const SELF = "src/trigger/blocks/__tests__/typographicQuotes.test.ts";
+const ROOTS = ["src", "convex", "scripts", "docs"];
+const SKIP = new Set(["node_modules", ".next", ".git", "dist", "build", ".locks"]);
+
+function walk(dir: string, out: string[] = []): string[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return out;
+  }
+  for (const entry of entries) {
+    if (SKIP.has(entry)) continue;
+    const full = join(dir, entry);
+    try {
+      if (statSync(full).isDirectory()) walk(full, out);
+      else if (/\.(tsx?|mjs|json|md|py)$/.test(entry)) out.push(full);
+    } catch { /* unreadable entry */ }
+  }
+  return out;
 }
-assert.equal(
-  mojibake.length,
-  0,
-  `narratedBlocks.ts contains ${mojibake.length} double-encoded sequence(s) at byte offset(s) ` +
-    `${mojibake.slice(0, 5).join(", ")}. Re-save the file as UTF-8 without a Latin-1 round trip.`,
+
+const damaged: string[] = [];
+for (const root of ROOTS) {
+  for (const file of walk(join(process.cwd(), root))) {
+    const relative = file.slice(process.cwd().length + 1);
+    if (relative === SELF) continue;
+    const buffer = readFileSync(file);
+    let count = 0;
+    for (let i = 0; i < buffer.length - 1; i++) {
+      if (buffer[i] === 0xc3 && buffer[i + 1] === 0xa2) count++;
+    }
+    if (count) damaged.push(`${relative} (${count})`);
+  }
+}
+assert.deepEqual(
+  damaged,
+  [],
+  `double-encoded UTF-8 found. In a comment it is cosmetic; in a regex character ` +
+    `class it deletes the character the class matches, and in a prompt the model ` +
+    `reads the noise. Re-save as UTF-8 without a Latin-1 round trip:\n  ${damaged.join("\n  ")}`,
 );
 
 /* ------------- the shipping regexes, extracted from the source ------------ */

@@ -1,11 +1,11 @@
 ﻿/**
- * gen_footage â€” GENERATED b-roll: the visual engine for channels whose world
+ * gen_footage — GENERATED b-roll: the visual engine for channels whose world
  * CANNOT come from a stock library (whiteboard draw-ons, painted worlds,
  * signature scenes). Drop-in producer-compatible with stock_footage (same
- * `footageClips` contract â†’ timeline_assemble just works), so the designer/
+ * `footageClips` contract → timeline_assemble just works), so the designer/
  * architect can SWAP stock for generation per channel identity.
  *
- * Per scene: a validated shared story plan â†’ the centrally attested Novita
+ * Per scene: a validated shared story plan → the centrally attested Novita
  * image-to-video profile. This legacy adapter never chooses or advertises a
  * concrete video model: central runtime admission owns that decision.
  */
@@ -71,7 +71,7 @@ function stableVisualAttemptToken(value: string): string {
   return token;
 }
 
-/** Ordered pool (same as narratedBlocks.mapPool â€” local copy, no cross-import). */
+/** Ordered pool (same as narratedBlocks.mapPool — local copy, no cross-import). */
 async function pool<T, R>(items: T[], limit: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
