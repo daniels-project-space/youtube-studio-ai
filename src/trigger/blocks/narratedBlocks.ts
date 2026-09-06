@@ -641,7 +641,7 @@ export const scriptGen: Block = {
       topic,
       channelName: opt(ctx, "channelName"),
       persona: opt(ctx, "persona"),
-      styleGrammar: opt(ctx, "styleGrammar"),
+      // styleGrammar deliberately not passed — see ScriptRequest in scriptGen.ts.
       niche: opt(ctx, "niche"),
       style: ctx.params["style"] as string | undefined,
       language: ctx.params["language"] as string | undefined,

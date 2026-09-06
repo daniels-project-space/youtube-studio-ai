@@ -285,6 +285,21 @@ function boundedDoctrine(channel?: HealChannelContext): string | undefined {
 }
 
 /**
+ * The channel's VISUAL grammar, bounded the same way the doctrine is.
+ *
+ * runPipeline passes styleGrammar into every planHeal call and this file read
+ * it nowhere, so a repair regenerated toward the channel's critic doctrine and
+ * content lane with no description of how the channel is supposed to LOOK. That
+ * matters most in exactly the case a heal exists for: when a visual block
+ * re-runs, dropping the visual grammar is how a watercolour channel comes back
+ * hyperreal. Shorter than the doctrine because it is a descriptor, not prose.
+ */
+function boundedStyleGrammar(channel?: HealChannelContext): string | undefined {
+  const grammar = channel?.styleGrammar?.replace(/\s+/g, " ").trim().slice(0, 200);
+  return grammar || undefined;
+}
+
+/**
  * Diagnose a failed run and plan the surgical re-run. Returns null when the
  * failure isn't in the catalog (or is explicitly unhealable) — the caller
  * must then fail the run honestly.
@@ -367,16 +382,28 @@ export function planHeal(
   // regenerate. This changes WHAT the repair aims at, never WHICH blocks run —
   // the rerun set above is already fixed by this point.
   const doctrine = boundedDoctrine(channel);
+  const styleGrammar = boundedStyleGrammar(channel);
   const laneKey = channel?.contentLaneKey?.trim();
-  if (doctrine || laneKey) {
+  if (doctrine || laneKey || styleGrammar) {
     const grounding = [
       laneKey ? `content lane: ${laneKey}` : "",
       doctrine ? `channel critic doctrine: ${doctrine}` : "",
+      styleGrammar ? `channel visual grammar: ${styleGrammar}` : "",
     ].filter(Boolean).join(" | ");
     for (const owner of owners) {
-      (hints[owner] ??= []).push(`[channel-grounding] ${grounding}`.slice(0, 300));
+      // 600, not 300: lane + a 240-char doctrine + a 200-char grammar already
+      // exceeds 300, and a cap that silently truncates the grounding is the
+      // same failure as not passing it.
+      (hints[owner] ??= []).push(`[channel-grounding] ${grounding}`.slice(0, 600));
     }
-    log(`healer: heal hints grounded in ${doctrine ? "the channel's critic doctrine" : "the channel's content lane"}${laneKey ? ` (${laneKey})` : ""}`);
+    // Name what actually grounded the hints. Saying "critic doctrine" while
+    // also sending the visual grammar makes the log a worse record than none.
+    const sources = [
+      laneKey ? "content lane" : "",
+      doctrine ? "critic doctrine" : "",
+      styleGrammar ? "visual grammar" : "",
+    ].filter(Boolean).join(" + ");
+    log(`healer: heal hints grounded in the channel's ${sources}${laneKey ? ` (${laneKey})` : ""}`);
   }
 
   return {

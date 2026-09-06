@@ -111,7 +111,14 @@ export interface ScriptRequest {
   topic: string;
   channelName?: string;
   persona?: string;
-  styleGrammar?: string;
+  // NO styleGrammar. It was declared here and passed by script_gen, and read at
+  // zero sites while persona, niche, channelName, style and language beside it
+  // are each read at four or more — the asymmetry that made it look like an
+  // oversight. It is not: styleGrammar is a VISUAL descriptor. showBible.ts and
+  // styleDNA.ts both label it "Visual style seed", constitution.ts blends it
+  // into image prompts, and channelArt.ts draws with it. Steering spoken prose
+  // with a description of how the channel LOOKS is noise, so the field is gone
+  // rather than wired up. Visual QA still receives it, which is where it belongs.
   niche?: string;
   /** Archetype tone: essay | crime | shorts | meditation | generic. */
   style?: string;
