@@ -73,6 +73,8 @@ interface Finding {
   typeName: string;
   field: string;
   usedBy: string;
+  /** Other files that read this leaf name — the reader's discriminator. */
+  elsewhere: string[];
 }
 
 /**
@@ -175,6 +177,13 @@ function parameterTypes(sf: ts.SourceFile): Map<string, { fn: string; spread: bo
 function recordTypeNames(files: readonly string[]): Set<string> {
   const names = new Set<string>();
   const patterns = [
+    // Imported by another file. A purpose-built input type lives with its one
+    // consumer; a type other modules import is shared, and its fields may be
+    // read by any of them. PersistedChannelVoiceCast — a persisted document
+    // shape whose only data use is a `satisfies` in a test file this audit
+    // skips — leaked seven findings until this pattern existed.
+    /\bimport\s+(?:type\s+)?\{[^}]*?\b([A-Z]\w+)\b[^}]*?\}\s+from/g,
+    /\btype\s+([A-Z]\w+)\s+as\s+\w+/g,
     /\b([A-Z]\w+)\[\]/g,
     /\b(?:Array|ReadonlyArray|Promise|Set|Map|Record)<[^>]*?\b([A-Z]\w+)\b/g,
     /\bas\s+([A-Z]\w+)\b/g,
@@ -188,6 +197,28 @@ function recordTypeNames(files: readonly string[]): Set<string> {
     }
   }
   return names;
+}
+
+/**
+ * Other files that read `.leaf`.
+ *
+ * This audit is deliberately file-scoped — a repo-wide rule would have missed
+ * intentSec, which IS read elsewhere (crew/director.ts) and was still inert
+ * where it mattered. But file scope alone cannot tell PlanStorySpineInput
+ * apart from FormatPreflight.fallbackFamily, whose doc says "never silently
+ * selected" because an API route produces it and the channel-creation UI
+ * displays it. So report the finding either way, and hand the reader the fact
+ * that decides it.
+ */
+function readersOf(leaf: string, files: readonly string[], self: string): string[] {
+  const pattern = new RegExp(`\\.${leaf}\\b`);
+  const out: string[] = [];
+  for (const file of files) {
+    if (file === self) continue;
+    if (pattern.test(strip(readFileSync(file, "utf8")))) out.push(relative(ROOT, file));
+    if (out.length >= 4) break;
+  }
+  return out;
 }
 
 function main(): void {
@@ -223,7 +254,7 @@ function main(): void {
             skippedRecord++;
           } else {
             typesInspected++;
-            const inert: Array<{ field: string; line: number }> = [];
+            const inert: Array<{ field: string; leaf: string; line: number }> = [];
             let total = 0;
             // Exclude the declaration itself so a field is never "used" by
             // being declared, nested ones included.
@@ -240,13 +271,16 @@ function main(): void {
               const read = new RegExp(
                 `(\\.${member.leaf}\\b|\\b${member.leaf}\\s*[,}:]|["'\`]${member.leaf}["'\`])`,
               ).test(body);
-              if (!read) inert.push({ field: member.path, line: member.line });
+              if (!read) inert.push({ field: member.path, leaf: member.leaf, line: member.line });
             }
             // A type where NOTHING is read is an unused type, not an inert
             // field — a different finding, and the inertness audit's job.
             if (inert.length && inert.length < total) {
               for (const item of inert) {
-                findings.push({ file: rel, line: item.line, typeName, field: item.field, usedBy: use.fn });
+                findings.push({
+                  file: rel, line: item.line, typeName, field: item.field, usedBy: use.fn,
+                  elsewhere: readersOf(item.leaf, files, file),
+                });
               }
             }
           }
@@ -266,7 +300,10 @@ function main(): void {
   console.log(`fields inspected: ${fieldsInspected}`);
   console.log(`declared but never read: ${findings.length}\n`);
   for (const f of findings) {
-    console.log(`  ${f.file}:${f.line}\n        ${f.typeName}.${f.field}  — taken by ${f.usedBy}(), read nowhere in the file`);
+    console.log(
+      `  ${f.file}:${f.line}\n        ${f.typeName}.${f.field}  — taken by ${f.usedBy}(), read nowhere in the file\n` +
+        `        ${f.elsewhere.length ? `read elsewhere: ${f.elsewhere.join(", ")}` : "read NOWHERE in src/ — fully inert"}`,
+    );
   }
   if (!findings.length) console.log("  none");
   console.log(

@@ -14,7 +14,6 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { synthShowBible } from "@/engine/creative/showBible";
 import { assertPersistedProgramBriefIdentity } from "@/engine/channelProgramBrief";
-import type { ChannelArtOptions } from "@/lib/channelArt";
 import { FAMILY_CREW, CREW_ROLE_BLOCK, type FamilyKey } from "@/engine/families";
 import type { PipelineEntry } from "@/engine/types";
 
@@ -40,11 +39,16 @@ export interface RefreshShowBibleArgs {
    * channel identity is not replaced merely because its Show Bible was refreshed.
    * Passing `avatar: true` explicitly opts into a new judged avatar.
    */
+  /**
+   * Only the two REFUSAL switches. This task throws on any request to generate
+   * art (see run()), so `preserveExisting` and `version` were options that could
+   * never take effect — and `preserveExisting` in particular reads like a
+   * safeguard, which is the worst kind of dead option to leave lying about.
+   * Art belongs to the admitted channel-inception stages.
+   */
   art?: {
     avatar?: boolean;
     banner?: boolean;
-    preserveExisting?: ChannelArtOptions["preserveExisting"];
-    version?: ChannelArtOptions["version"];
   };
 }
 

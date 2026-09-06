@@ -197,6 +197,13 @@ export type StorySpine = z.infer<typeof StorySpineSchema>;
 export type ShotPlan = z.infer<typeof ShotPlanSchema>;
 
 export interface PlanStorySpineInput {
+  /**
+   * Carried for provenance, deliberately NOT planned from. Every shot's content
+   * comes from the narrated sentence it covers, so steering the plan by the
+   * topic as well would let a shot depict the video's subject instead of the
+   * line being spoken at that second. Flagged by
+   * scripts/audit-inert-inputs.ts and kept on purpose.
+   */
   topic: string;
   narrationDurationSec: number;
   sentenceTimings: Array<{ text: string; start: number; end: number }>;

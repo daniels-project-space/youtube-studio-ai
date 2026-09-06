@@ -16,7 +16,10 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import type { PipelineEntry } from "@/engine/types";
 
 export interface MakeMultilingualArgs {
-  ownerId?: string;
+  // No ownerId. Every sibling inherits the BASE channel's owner, which this
+  // task resolves from channelId. An optional ownerId here was declared and
+  // never read, which is worse than absent: it reads like a way to place the
+  // siblings under a different owner, and silently was not one.
   channelId: string;
   /** Target language codes for the siblings (base stays as-is). */
   languages: string[];
