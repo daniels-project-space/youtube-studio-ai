@@ -448,9 +448,27 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   thumbnail_gen: contract(["package.thumbnail"], {
     requiredConsumes: ["title", "thumbnailDescription", "topic", "packageToOpeningPlan"],
     optionalConsumes: [
-      "channelName", "topic", "f1Url", "f1Key", "f1ThumbnailBaseProvenance", "loopUnitKey", "loopUnitResolution",
-      "videoKey", "videoLocalPath", "videoDurationSec", "styleGrammar", "styleDNA", "family", "persona",
-      "thumbnailIdentity", "nicheIntel", "niche", "seoDatabank", "competitors", "healHints", "plannedThumbnailKey",
+      // Ten declarations were removed here, each verified unread by deleting it
+      // and re-running this file's own undeclared-read check (which DOES fail on
+      // a live key — confirmed with a control). thumbnail_gen has no
+      // constant-keyed store reads, so the static check is exhaustive for it.
+      //
+      // The notable one is thumbnailIdentity — {colorPalette, visualStyle,
+      // textPosition, avoid}, generated at Channel Inception, persisted on the
+      // channel, threaded through runPipeline's seed store, re-emitted by
+      // competitor_research, and read by NOTHING. It is superseded, not
+      // forgotten: thumbnailIdentity shipped 2026-06-01 and thumbnailPlaybook
+      // ten days later, and the playbook "owns its references, palette and
+      // composition" (thumbnailChannelIdentity.ts) with identityContract as the
+      // additive channel-truth guard. Wiring it up would be re-introducing the
+      // older of two mechanisms for the same job.
+      //
+      // Also gone: f1Url/f1Key/f1ThumbnailBaseProvenance, loopUnitResolution,
+      // videoDurationSec, styleGrammar, nicheIntel, healHints,
+      // plannedThumbnailKey.
+      "channelName", "topic", "loopUnitKey",
+      "videoKey", "videoLocalPath", "styleDNA", "family", "persona",
+      "niche", "seoDatabank", "competitors",
       "narrationText", "thumbnailPlaybook", "script", "quizPlan",
       "serializedProgramEpisodeContext",
       // A route-bearing fictional scenario must bind package art before a
