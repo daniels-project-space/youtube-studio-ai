@@ -41,7 +41,29 @@ const SKIP = new Set(["node_modules", ".next", ".git", "dist", "build", ".locks"
 const REASONING_HELPERS = /(claudeJsonPro|claudeJson|agentJson)\s*[<(]/;
 
 /** Measured requirements by declared output shape. */
-const FLOOR_SINGLE_FIELD = 0;      // 100 sufficed for a one-number answer
+/**
+ * 700, not 0.
+ *
+ * The old floor of 0 came from one measurement — agentJson answered "2+2" inside
+ * 100 tokens — and that is a measurement about the ANSWER. Reasoning is mandatory
+ * on this route, billed as completion tokens, and spent BEFORE any answer exists,
+ * so the ceiling has to cover the thinking the TASK provokes, not the bytes the
+ * schema declares. "2+2" provokes almost none.
+ *
+ * Two creative single-field calls were measured on their own real prompts:
+ *
+ *   hook_craft {"hook":string}          0/3 at 200, 0/3 at 400, 3/3 at 700
+ *   scriptGen  {"closing_line":string}  0/3 at 300, 0/3 at 500, 2/3 at 700, 3/3 at 1200
+ *
+ * Both had been running below their floor and had NEVER once returned a value.
+ * The floor is the worse of the two, because a floor set by the easier prompt
+ * would have passed the harder one straight through.
+ *
+ * One call is genuinely trivial and says so at the site: verifyMastra's "2+2"
+ * reachability probe, tagged @trivial-contract. That is the call this floor was
+ * originally, wrongly, generalised from.
+ */
+const FLOOR_SINGLE_FIELD = 1200;
 const FLOOR_MULTI_FIELD = 1200;    // measured on the advisor prompts
 const FLOOR_LIST = 2000;           // 5-item list needed 1000; an 8-item ranking needed 2500
 
@@ -97,7 +119,12 @@ function declaredShape(callText: string, fileText: string): { shape: Shape; deta
   // "Return STRICT JSON of the exact shape {...}", and requiring the brace to
   // follow immediately missed every one of them — including a findings-list
   // contract running at 1600 tokens.
-  const contract = /STRICT JSON[^{]{0,60}?(\{[\s\S]{0,400}?\})\s*[.`"]/;
+  // No trailing-delimiter requirement. Insisting the closing brace be followed
+  // by `.`, a backtick or a quote missed hook_craft's critique contract —
+  // `{"pass":boolean,"score":number,"issues":string[]} — at most 4 issues` —
+  // because an em dash follows it. That call was running a findings list at 700.
+  // The brace itself is the terminator; anything after it is prose.
+  const contract = /STRICT JSON[^{]{0,60}?(\{[\s\S]{0,400}?\})/;
   const literal = contract.exec(joined) ?? contract.exec(callText);
   if (literal) {
     const body = literal[1];
@@ -109,14 +136,25 @@ function declaredShape(callText: string, fileText: string): { shape: Shape; deta
   return { shape: "unknown", detail: "no declared contract found" };
 }
 
-const floorFor = (shape: Shape): number =>
-  shape === "list" ? FLOOR_LIST : shape === "multi_field" ? FLOOR_MULTI_FIELD : FLOOR_SINGLE_FIELD;
+const floorFor = (shape: Shape): number => {
+  switch (shape) {
+    case "list": return FLOOR_LIST;
+    case "multi_field": return FLOOR_MULTI_FIELD;
+    case "single_field": return FLOOR_SINGLE_FIELD;
+    // Never reported, as the header promises. This used to fall through to the
+    // single-field floor, which was harmless only while that floor was 0 —
+    // raising it to 1200 immediately made the audit contradict its own rule and
+    // report an unknown shape.
+    case "unknown": return 0;
+  }
+};
 
 interface Finding { file: string; line: number; helper: string; ceiling: number; shape: Shape; detail: string; floor: number }
 
 function main(): void {
   const findings: Finding[] = [];
   let inspected = 0;
+  let trivial = 0;
 
   for (const file of walk(join(ROOT, "src"))) {
     const text = readFileSync(file, "utf8");
@@ -134,6 +172,12 @@ function main(): void {
       }
       if (!/^(claudeJsonPro|claudeJson|agentJson)$/.test(helper)) continue;
       inspected++;
+      // An explicit, sited exemption for a call whose TASK provokes no
+      // reasoning. It must be claimed at the call, not inferred here.
+      if (/@trivial-contract/.test(lines.slice(start, Math.min(lines.length, i + 4)).join("\n"))) {
+        trivial++;
+        continue;
+      }
       const ceiling = Number(m[1].replace(/_/g, ""));
       // The contract can sit either side of maxTokens inside the same call.
       const callText = lines.slice(start, Math.min(lines.length, i + 25)).join("\n");
@@ -145,7 +189,7 @@ function main(): void {
   }
 
   findings.sort((a, b) => a.ceiling - b.ceiling);
-  console.log(`reasoning-route JSON calls inspected: ${inspected}`);
+  console.log(`reasoning-route JSON calls inspected: ${inspected} (${trivial} tagged @trivial-contract)`);
   console.log(`below the floor their declared shape needs: ${findings.length}\n`);
   for (const f of findings) {
     console.log(

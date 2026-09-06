@@ -44,6 +44,10 @@ export const verifyMastraTask = task({
         role: "producer",
         schema: z.object({ answer: z.number() }),
         prompt: "What is 2+2? Return JSON {\"answer\": number}.",
+        // @trivial-contract — deliberately low, and the ONE call for which that
+        // is right. This is the reachability probe the single-field floor was
+        // originally (mis)generalised from: the task provokes no reasoning, so
+        // 100 is plenty. Every other single-field call is a real judgement.
         maxTokens: 100,
         log: (m: string) => probeLogs.push(m),
       });

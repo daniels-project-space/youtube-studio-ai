@@ -46,6 +46,21 @@ const FALLIBLE = /(claudeJsonPro|claudeJson|agentJson|geminiJsonPro|geminiJson|o
 const YIELDS_EMPTY = /return\s+(undefined|null|""|''|``|\[\]|\{\})\s*;|=>\s*(undefined|null|""|''|``|\[\])\s*[,)]|=\s*(\[\]|null|undefined|"")\s*;/;
 
 /**
+ * An EMPTY catch — `catch { }` or `catch (e) { /* fallback below *\/ }`.
+ *
+ * This is the purest form of the shape this audit exists to find, and it was
+ * invisible: the regex above looks for a catch that RETURNS an empty value, and
+ * an empty catch returns nothing at all because the variable it was going to
+ * fill was already initialised empty above the try.
+ *
+ * Found by hand in scriptGen, where `catch { /* fallback below *\/ }` swallowed
+ * every failure of THE QUOTE of the episode. That call was also running below
+ * its measured token floor, so it failed every single time, and the only trace
+ * was a closing line that silently never existed.
+ */
+const isEmptyCatch = (body: string): boolean => /^\s*\{\s*\}\s*$/.test(body);
+
+/**
  * Accessors whose null return IS their contract.
  *
  * fetchRemoteImage, searchWikimediaImage, getVideoPrivacy and friends are
@@ -106,13 +121,16 @@ function main(): void {
             .replace(/\/\*[\s\S]*?\*\//g, "")
             .replace(/(^|[^:])\/\/.*$/gm, "$1");
           const rethrows = /\bthrow\b/.test(body);
-          if (!rethrows && !ACCESSOR.test(name) && YIELDS_EMPTY.test(body) && !NAMES_THE_LOSS.test(body)) {
+          const swallows = YIELDS_EMPTY.test(body) || isEmptyCatch(body);
+          if (!rethrows && !ACCESSOR.test(name) && swallows && !NAMES_THE_LOSS.test(body)) {
             const logs = Array.from(body.matchAll(/["'`]([^"'`]{6,200})["'`]/g)).map((m) => m[1]);
             findings.push({
               file: rel,
               line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
               context: name || "?",
-              detail: logs.length ? `log: "${logs[0].slice(0, 80)}"` : "NO LOG AT ALL",
+              detail: logs.length
+                ? `log: "${logs[0].slice(0, 80)}"`
+                : isEmptyCatch(body) ? "EMPTY CATCH — swallows the failure entirely" : "NO LOG AT ALL",
             });
           }
         }

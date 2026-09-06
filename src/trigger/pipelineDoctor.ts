@@ -394,7 +394,10 @@ async function sweep(ownerId: string, log: (m: string) => void) {
         if ((await getVideoPrivacy(pc.videoId, refreshToken)) !== "public") continue;
         if (await hasChannelComment(pc.videoId, myId, refreshToken)) continue;
           const q = await claudeJson<{ comment?: string }>({
-            maxTokens: 200,
+            // Writing an engaging comment is a creative single-field call, and
+            // the floor for those is measured at 1200 — not the ~100 a trivial
+            // one needs. See scripts/measure-single-field-ceiling.ts.
+            maxTokens: 2500,
             temperature: 0.8,
             system: "You write ONE engaging creator comment. Return ONLY JSON.",
             prompt:

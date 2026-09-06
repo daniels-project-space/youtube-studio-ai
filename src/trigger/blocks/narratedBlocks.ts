@@ -730,7 +730,14 @@ export const scriptGen: Block = {
               (draft.narrationText.length <= 9000
                 ? draft.narrationText
                 : draft.narrationText.slice(0, 4000) + `\n\n[... OMITTED ...]\n\n` + draft.narrationText.slice(-3500)),
-            maxTokens: 1200,
+            // Reasoning route: the ceiling covers the THINKING and the answer, and a
+            // findings list is the expensive verdict — a clean pass is cheap to emit,
+            // a rejection must enumerate why. At the old ceiling this gate was
+            // starved precisely when it had something to say. Measured floor for a
+            // list contract is 2000; see scripts/audit-json-contract-ceilings.ts,
+            // which could not see these four at all until it stopped requiring a
+            // trailing delimiter after the JSON block.
+            maxTokens: 2500,
             temperature: 0.3,
           });
           const issues = (Array.isArray(crit.issues) ? crit.issues : []).filter(Boolean).slice(0, 6);
@@ -856,7 +863,22 @@ export const hookCraft: Block = {
               channelCritiqueBrief(hookChannel) +
               'Return STRICT JSON {"hook": string}. No markdown.\n\n' +
               narration.slice(0, 2000),
-            maxTokens: 200,
+            // MEASURED, not chosen: scripts/measure-single-field-ceiling.ts runs
+            // this exact prompt at a ladder of ceilings. At 200 and 400 it threw
+            // on every trial; at 700 it succeeded on every trial. So at the old
+            // 200 this call NEVER returned a hook — it threw, was caught, and
+            // fell back to firstLine(), which this block's own deterministic
+            // critique then rejects as "just the narration's opening line echoed
+            // back". Two produce/critique iterations were spent to ship a hook
+            // the block itself considers invalid.
+            //
+            // The ceiling audit exempted it because the contract is a SINGLE
+            // FIELD, and its single-field floor came from measuring "2+2".
+            // Reasoning is mandatory on this route and is billed out of
+            // max_tokens before any answer exists, so what the ceiling must
+            // cover is the thinking the TASK provokes, not the size of the value
+            // it returns.
+            maxTokens: 2500,
             temperature: 0.9,
           });
           observedCostUsd += PRICE.boundedTextPassUsd;
@@ -900,7 +922,14 @@ export const hookCraft: Block = {
               ` Return STRICT JSON {"pass": boolean, "score": number 0..1, "issues": string[]} — at most ` +
               `4 issues, each under 140 characters.\n\nHOOK: ${trimmed}\n\nNARRATION (excerpt):\n` +
               narration.slice(0, 2500),
-            maxTokens: 700,
+            // Reasoning route: the ceiling covers the THINKING and the answer, and a
+            // findings list is the expensive verdict — a clean pass is cheap to emit,
+            // a rejection must enumerate why. At the old ceiling this gate was
+            // starved precisely when it had something to say. Measured floor for a
+            // list contract is 2000; see scripts/audit-json-contract-ceilings.ts,
+            // which could not see these four at all until it stopped requiring a
+            // trailing delimiter after the JSON block.
+            maxTokens: 2500,
             temperature: 0.3,
           });
           observedCostUsd += PRICE.boundedTextPassUsd;
@@ -1035,7 +1064,14 @@ export const qaScript: Block = {
               narration.slice(Math.floor(narration.length / 2) - 1500, Math.floor(narration.length / 2) + 1500) +
               `\n\n[... OMITTED ...]\n\n` +
               narration.slice(-2500)),
-        maxTokens: 1200,
+        // Reasoning route: the ceiling covers the THINKING and the answer, and a
+        // findings list is the expensive verdict — a clean pass is cheap to emit,
+        // a rejection must enumerate why. At the old ceiling this gate was
+        // starved precisely when it had something to say. Measured floor for a
+        // list contract is 2000; see scripts/audit-json-contract-ceilings.ts,
+        // which could not see these four at all until it stopped requiring a
+        // trailing delimiter after the JSON block.
+        maxTokens: 2500,
         temperature: 0.3,
       });
       const issues = Array.isArray(res.issues) ? res.issues : [];
@@ -2294,7 +2330,14 @@ export const entityImagery: Block = {
               `most 4 issues, each under 140 characters.\n\nENTITIES: ` +
               candidate.resolved.map((r) => r.entity).join(", ") +
               `\n\nNARRATION (excerpt):\n` + narration.slice(0, 3000),
-            maxTokens: 700,
+            // Reasoning route: the ceiling covers the THINKING and the answer, and a
+            // findings list is the expensive verdict — a clean pass is cheap to emit,
+            // a rejection must enumerate why. At the old ceiling this gate was
+            // starved precisely when it had something to say. Measured floor for a
+            // list contract is 2000; see scripts/audit-json-contract-ceilings.ts,
+            // which could not see these four at all until it stopped requiring a
+            // trailing delimiter after the JSON block.
+            maxTokens: 2500,
             temperature: 0.3,
           });
           observedCostUsd += PRICE.boundedTextPassUsd;

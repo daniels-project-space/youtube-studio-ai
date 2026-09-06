@@ -610,11 +610,24 @@ async function synthLongScript(
         `THE QUOTE of the episode: one resonant, quotable line (<=12 words) that distills its lesson, shown ` +
         `on the outro card as the takeaway. ${programRouteClause(req)}\n${styleGuidance(req)}\n` +
         `Return STRICT JSON {"closing_line":string}.`,
-      maxTokens: 300,
+      // MEASURED: this exact prompt returns nothing at 300 or 500 (0/3 each),
+      // 2/3 at 700, 3/3 at 1200. Reasoning is mandatory on this route and is
+      // billed out of max_tokens before any answer exists, so at the old 300
+      // THE QUOTE was never once produced. Its floor is HIGHER than the hook's,
+      // which is why the audit now uses the worse of the two measurements.
+      maxTokens: 2500,
       temperature: 0.85,
     });
     closingRaw = typeof head.closing_line === "string" ? head.closing_line : "";
-  } catch { /* fallback below */ }
+  } catch (e) {
+    // An empty catch is the purest silent degradation: the episode simply loses
+    // its distilled quote, and the ending is written without it, and the run
+    // reads exactly like one that had it.
+    log(
+      `scriptGen: NO CLOSING QUOTE — the ending will be written without one ` +
+        `(${e instanceof Error ? e.message : e})`,
+    );
+  }
 
   const targetWords = Math.round(wordBudget * 0.95);
   const beats = req.structure?.beats?.filter((b) => b.name?.trim()) ?? [];
