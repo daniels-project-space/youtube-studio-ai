@@ -3424,11 +3424,29 @@ export const notify: Block = {
   run: async (ctx) => {
     const watchUrl = str(ctx, "watchUrl");
     const title = str(ctx, "title");
-    await notifyDraftReady(title, watchUrl, {
-      chatId: process.env.TELEGRAM_CHAT_ID ?? process.env.TELEGRAM_ADMIN_CHAT_ID,
-    });
-    ctx.log(`notify: telegram draft-ready sent for ${watchUrl}`);
-    return { notified: true };
+    // The video is ALREADY PUBLISHED by the time this runs, and `notified` is
+    // read by nothing. sendMessage throws loudly on a missing token, a missing
+    // chat id, or an API error — correct for the sender, wrong as a run-ending
+    // failure here: it turned a successful publish into a failed run AND
+    // stopped `cleanup`, which runs immediately after, from ever sealing its
+    // retention schedule. An advisory Telegram message was holding every
+    // intermediate artifact in R2 indefinitely.
+    //
+    // So degrade, and name the loss. This must never be silent: nobody watching
+    // the chat would otherwise learn that the notification stopped arriving.
+    try {
+      await notifyDraftReady(title, watchUrl, {
+        chatId: process.env.TELEGRAM_CHAT_ID ?? process.env.TELEGRAM_ADMIN_CHAT_ID,
+      });
+      ctx.log(`notify: telegram draft-ready sent for ${watchUrl}`);
+      return { notified: true };
+    } catch (e) {
+      ctx.log(
+        `notify: TELEGRAM NOTIFICATION DID NOT GO OUT for ${watchUrl} — the video is ` +
+          `published and the run continues, but nobody was told: ${e instanceof Error ? e.message : e}`,
+      );
+      return { notified: false };
+    }
   },
 };
 
