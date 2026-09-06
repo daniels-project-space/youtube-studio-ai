@@ -1798,7 +1798,7 @@ export const stockFootage: Block = {
     const dpQueries = ((getVisualBrief(ctx.store)?.footageQueries) ?? [])
       .map(compressQuery).filter(Boolean);
     const extras = [topic, ...((script?.sections ?? []).map((sec) => sec.heading ?? "").filter(Boolean)), opt(ctx, "niche") ?? "cinematic background"];
-    const built = await buildFootageQueries(brief, nQueries, extras);
+    const built = await buildFootageQueries(brief, nQueries, extras, (m) => ctx.log(m));
     const queries = [...dpQueries, ...built].filter((q, i, a) => q && a.indexOf(q) === i).slice(0, nQueries);
     if (dpQueries.length) ctx.log(`stock_footage: led with ${dpQueries.length} DP brief queries`);
     ctx.log(

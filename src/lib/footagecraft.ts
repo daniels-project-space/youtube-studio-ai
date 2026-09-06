@@ -206,7 +206,12 @@ export function shuffle<T>(a: T[]): T[] {
  * have no literal stock — Gemini turns them into concrete, filmable terms that
  * live inside the channel's locked visual world and never touch its avoid-list.
  */
-export async function buildFootageQueries(brief: FootageBrief, count: number, extra: string[] = []): Promise<string[]> {
+export async function buildFootageQueries(
+  brief: FootageBrief,
+  count: number,
+  extra: string[] = [],
+  log: (message: string) => void = () => {},
+): Promise<string[]> {
   let queries: string[] = [];
   if (hasGeminiKey()) {
     const nicheBit = brief.niche ? ` (${brief.niche})` : "";
@@ -257,8 +262,17 @@ export async function buildFootageQueries(brief: FootageBrief, count: number, ex
         temperature: 0.7,
       });
       queries = (out.queries ?? []).filter((q): q is string => typeof q === "string" && q.trim().length > 0);
-    } catch {
-      /* fall through to the deterministic extras below */
+    } catch (e) {
+      // The whole point of this call is queries whose MOOD, SUBJECT and MOVEMENT
+      // match THIS narration. Falling through to the deterministic extras is the
+      // right degradation — a footage-query failure must not fail a render — but
+      // the result is generic b-roll for this video, and that has to be visible.
+      // It was an empty catch: the run read exactly like one that got bespoke
+      // queries.
+      log(
+        `footagecraft: NO NARRATION-MATCHED QUERIES — falling back to deterministic ` +
+          `generic queries for this video (${e instanceof Error ? e.message : e})`,
+      );
     }
   }
   if (brief.natureMode) queries = [...queries, ...shuffle(NATURE_POOL)];

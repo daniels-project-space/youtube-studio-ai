@@ -146,13 +146,25 @@ function main(): void {
   for (const f of findings) console.log(`  ${f.file}:${f.line}  [${f.context}]\n        ${f.detail}`);
   if (!findings.length) console.log("  none");
   console.log(
-    `\nTwo remaining findings were investigated and are correct, recorded here so the\n` +
-    `next reader does not repeat it:\n` +
+    `\nAll five remaining findings were investigated and are correct, recorded here so\n` +
+    `the next reader does not repeat it:\n` +
     `  metacraft youtubeSuggest   an accessor in all but name — its caller logs the query\n` +
     `                             count, so an empty autocomplete IS visible one level up.\n` +
     `  storyboardCritic           returns null, and loreShortBlocks then rejects the whole\n` +
     `                             outcome (critique.accepted !== true), so it FAILS CLOSED\n` +
-    `                             rather than accepting an uncritiqued storyboard.`,
+    `                             rather than accepting an uncritiqued storyboard.\n` +
+    `  learn adaptShowBible       the swallowed write is a FOLLOW-UP marker; the\n` +
+    `                             provider_started fence already prevents replay, so the\n` +
+    `                             safety does not depend on this catch succeeding.\n` +
+    `  planWeekAhead              same shape: the exact spend is persisted below regardless,\n` +
+    `                             and Trigger makes one recovery-only attempt.\n` +
+    `  pipelineDoctor sweep       advisory trend mining. It cannot affect a verdict, only\n` +
+    `                             the defect-trend counters an operator reads.\n` +
+    `\nThree others found by this audit's empty-catch rule WERE real and are fixed:\n` +
+    `footagecraft (generic b-roll instead of narration-matched queries), architect\n` +
+    `(designing on 0 competitors, indistinguishable from a niche that has none), and\n` +
+    `geminiVision — which skipped every unreachable image and would have asked the\n` +
+    `model to judge none, and which was removed outright as a zero-caller leftover.`,
   );
   console.log(
     `\nDegrading is usually right — a missing portrait must not fail a render. What must\n` +

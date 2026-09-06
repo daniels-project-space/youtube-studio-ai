@@ -59,7 +59,15 @@ export const architectPipelineTask = task({
         });
         competitorCount = (comps as unknown[]).length;
       }
-    } catch { /* evidence stays 0 — the architect will order repair */ }
+    } catch (e) {
+      // The architect DOES order repair on zero evidence, so degrading is right.
+      // But "the query failed" and "this niche genuinely has no tracked
+      // competitors" produce the same 0 and used to read identically.
+      log(
+        `competitor evidence UNAVAILABLE — designing on 0 competitors, which will ` +
+          `order repair (${e instanceof Error ? e.message : e})`,
+      );
+    }
 
     const arch = await architectPipeline({
       // Persisted family is the source of truth; template letter is the

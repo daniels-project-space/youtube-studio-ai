@@ -3,7 +3,6 @@
  *
  * Two uses for the competitor-intelligence engine:
  *   - geminiJson    — structured JSON generation (SEO databank, title optimise)
- *   - geminiVision  — multimodal image analysis (thumbnail style guide / QA)
  *
  * Key: GEMINI_API_KEY. Gemini is not a general runtime provider: the only
  * admitted production uses are sealed Nano Banana image-asset routes.
@@ -681,85 +680,25 @@ export async function geminiJsonPro<T = unknown>(args: {
 }
 
 /**
- * Analyse one or more images (by URL) with a text prompt. Downloads each image,
- * inlines it as base64, and returns the model's text answer. Used for the
- * thumbnail style guide and the thumbnail QA gate.
- */
-export async function geminiVision(args: {
-  prompt: string;
-  imageUrls: string[];
-  model?: string;
-  json?: boolean;
-  maxTokens?: number;
-}): Promise<string> {
-  const parts: GeminiPart[] = [{ text: args.prompt }];
-  for (const url of args.imageUrls.slice(0, 12)) {
-    try {
-      const r = await fetch(url);
-      if (!r.ok) continue;
-      const buf = Buffer.from(await r.arrayBuffer());
-      const mime = r.headers.get("content-type") ?? "image/jpeg";
-      parts.push({
-        inlineData: { mimeType: mime, data: buf.toString("base64") },
-      });
-    } catch {
-      /* skip unreachable images */
-    }
-  }
-  return generate(args.model ?? "gemini-2.5-flash", parts, {
-    json: args.json,
-    maxTokens: args.maxTokens ?? 1024,
-  });
-}
-
-/**
  * Like {@link geminiVision} but inlines LOCAL image files (e.g. ffmpeg-grabbed
  * frames) instead of fetching URLs. Used by the qa_visual gate.
  */
 /**
- * Native AUDIO judging — Gemini hears the clips (base64 mp3) and returns a
- * structured verdict. Used by voice casting (auditions vs the DNA register).
+ * Inline LOCAL image files (e.g. ffmpeg-grabbed frames) for a Gemini read.
+ *
+ * DEV AND ANALYSIS ONLY — used by scripts/footage-ab.ts, scripts/test_motion.mjs
+ * and scripts/anchor-invest-refs.mjs. It is deliberately NOT part of the vision
+ * review route: src/lib/__tests__/visionProviderScope.test.ts asserts vision.ts
+ * never references it, because "a Gemini-only chain is not valid evidence for a
+ * certified independent review".
+ *
+ * Its URL-fetching sibling geminiVision and the audio judge geminiAudioJudge
+ * were REMOVED rather than kept: both had zero callers, both had doc comments
+ * still claiming they served the thumbnail QA gate and voice casting, and both
+ * are forbidden in those roles by tests (visionProviderScope, voicecraftNoGemini).
+ * geminiVision also silently skipped every unreachable image and would have
+ * asked the model to judge zero of them.
  */
-export async function geminiAudioJudge(args: {
-  audios: string[]; // base64 mp3
-  prompt: string;
-  model?: string;
-  maxTokens?: number;
-}): Promise<{ takes?: { idx?: number; score?: number; note?: string }[]; winner?: number; why?: string }> {
-  const parts: GeminiPart[] = [{ text: args.prompt }];
-  for (const b64 of args.audios.slice(0, 6)) {
-    parts.push({ inlineData: { mimeType: "audio/mpeg", data: b64 } });
-  }
-  const raw = await generate(args.model ?? "gemini-2.5-flash", parts, {
-    json: true,
-    maxTokens: args.maxTokens ?? 800,
-    temperature: 0.2,
-  });
-  return parseJsonLoose(raw);
-}
-
-/**
- * Generic audio-grounded JSON: Gemini LISTENS to the supplied mp3s and
- * returns the prompt's JSON contract (voicecraft profiling/casting/gating).
- */
-export async function geminiAudioJson<T = unknown>(args: {
-  audios: string[]; // base64 mp3
-  prompt: string;
-  model?: string;
-  maxTokens?: number;
-}): Promise<T> {
-  const parts: GeminiPart[] = [{ text: args.prompt }];
-  for (const b64 of args.audios.slice(0, 6)) {
-    parts.push({ inlineData: { mimeType: "audio/mpeg", data: b64 } });
-  }
-  const raw = await generate(args.model ?? "gemini-2.5-flash", parts, {
-    json: true,
-    maxTokens: args.maxTokens ?? 1000,
-    temperature: 0.2,
-  });
-  return parseJsonLoose<T>(raw);
-}
-
 export async function geminiVisionLocal(args: {
   prompt: string;
   imagePaths: string[];
