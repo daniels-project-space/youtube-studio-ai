@@ -64,8 +64,25 @@ export async function reoptimize(
   await bootstrapSecrets((m) => log(m));
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL not configured");
+  // UNREACHABLE, and deliberately so — do not "fix" this by porting the rewrite
+  // to another provider.
+  //
+  // unavailablePackageAttributionAdmission() above returns admitted:false
+  // unconditionally ("Deliberately fail closed"), so this line is never reached.
+  // hasGeminiKey() is separately hard-wired to false by policy, which made the
+  // old message ("no Gemini key — skip") read like a missing configuration and
+  // an invitation to swap in claudeJson. It is not: the containment is the
+  // attribution requirement, not the provider, and src/lib/titleCtrSwap.ts says
+  // of it "that containment is correct and this must not route around it".
+  //
+  // The sanctioned path is the TITLE SWAP, which can satisfy the attribution
+  // record a general rewrite cannot, because it knows exactly which title was
+  // live and from when.
   if (!hasGeminiKey()) {
-    log("seo-reopt: no Gemini key — skip");
+    log(
+      "seo-reopt: the general rewrite has no permitted provider AND is behind the " +
+        "package-attribution containment — use the title swap (lib/titleCtrSwap.ts) instead",
+    );
     return { ok: true, skipped: "no_llm", updated: 0 };
   }
   const convex = new ConvexHttpClient(url);
