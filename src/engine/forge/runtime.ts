@@ -17,7 +17,8 @@ import {
   readBytes,
 } from "@/lib/files";
 import { putObject } from "@/lib/storage";
-import { geminiJson, parseJsonLoose } from "@/lib/gemini";
+import { parseJsonLoose } from "@/lib/gemini";
+import { claudeJson } from "@/lib/anthropic";
 import { PRICE } from "@/engine/pricing";
 import { assertPipelineVideoRuntimeReady } from "@/engine/runtimeCapability";
 import { generateI2V } from "@/lib/i2v";
@@ -145,9 +146,19 @@ async function runStep(
   };
 
   if (step.op === "llm_json") {
-    const raw = await geminiJson<Record<string, unknown>>({
+    // On the permitted route. This ran on geminiJson, and every Gemini call in
+    // the repo throws GeminiRuntimeDisabledError — the runtime is off by policy,
+    // and no key re-enables it. Since the forge is reachable from runPipeline
+    // and designChannelInception, that meant EVERY architect-authored module
+    // with an llm_json step failed at execution, unguarded.
+    //
+    // The default ceiling is 2500 rather than 1500: a forged step declares its
+    // own JSON contract, reasoning on this route is billed out of max_tokens
+    // before any answer exists, and the measured floor for a list contract is
+    // 2000. A step may still raise it explicitly.
+    const raw = await claudeJson<Record<string, unknown>>({
       prompt: interp(step.prompt, scope),
-      maxTokens: step.maxTokens ?? 1500,
+      maxTokens: step.maxTokens ?? 2500,
       temperature: 0.4,
     });
     return typeof raw === "string" ? parseJsonLoose(raw) : raw;

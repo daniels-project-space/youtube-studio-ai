@@ -36,7 +36,7 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { geminiJson, geminiJsonPro, parseJsonLoose } from "@/lib/gemini";
+import { geminiJson, geminiJsonPro, isGeminiRuntimeEnabled, parseJsonLoose } from "@/lib/gemini";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
 import { searchWikimediaImageUrl } from "@/lib/wikimedia";
@@ -87,7 +87,16 @@ export function hasDocumotion(options: { requiresPlanning?: boolean } = {}): boo
   // Production documentary Shorts supply a locked strategy plan. The legacy
   // optional planner still needs its own text-model credential, but generated
   // pixels are always caller-injected and never inferred from FAL/Gemini keys.
-  return options.requiresPlanning === false || Boolean(process.env.GEMINI_API_KEY);
+  //
+  // The planning answer was `Boolean(process.env.GEMINI_API_KEY)`, and that key
+  // IS set in this environment — so this returned TRUE for a capability the
+  // runtime refuses: planDocu runs on geminiJsonPro, and every Gemini call
+  // throws GeminiRuntimeDisabledError by policy. A capability check that says
+  // yes and then throws is worse than one that says no, because the caller has
+  // already committed by the time it finds out.
+  //
+  // The production block asks with requiresPlanning:false and is unaffected.
+  return options.requiresPlanning === false || isGeminiRuntimeEnabled();
 }
 
 /* --------------------------------------------------------------- helpers -- */
