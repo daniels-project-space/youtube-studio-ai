@@ -590,7 +590,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   length_check: contract(["master.length_passed"], { qualityRequired: true }),
   captions: contract(["master.captions_packaged"], {
-    optionalConsumes: ["script", "sentenceTimings", "introSec", "chapterPlan"],
+    // No chapterPlan. It is read by assembly, inserts and the retention
+    // analyst; captions builds its chapter list from the script's own sections
+    // and never touched it. Found by scripts/audit-inert-consumes.ts.
+    optionalConsumes: ["script", "sentenceTimings", "introSec"],
   }),
   qa_visual: contract(["master.quality_passed"], {
     optionalConsumes: [

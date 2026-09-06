@@ -225,6 +225,7 @@ import {
   burnCaptions,
   writeCaptionsAss,
   captionCuesFromTimings,
+  type CaptionCue,
   type QuoteOverlaySpec,
 } from "@/lib/ffmpeg";
 import { renderTitleCard, renderQuoteOverlay } from "@/lib/remotionRender";
@@ -3684,6 +3685,51 @@ export const lengthCheck: Block = {
   },
 };
 
+/**
+ * Fit caption cues to the finished MASTER, not to the narration.
+ *
+ * `videoDurationSec` was declared in the captions block's `consumes` and read
+ * nowhere — found by scripts/audit-inert-consumes.ts — so it bought an ordering
+ * constraint and did no work. It has a real job. Cue times come from the
+ * narration clock shifted by introSec, while the master is assembled
+ * separately, so nothing guaranteed the last cue ended before the picture did,
+ * and a subtitle that outlives the video is a visible defect.
+ *
+ * Clamping, not refusing: a caption tail must never fail a finished render. A
+ * cue starting after the end is dropped outright, since a zero-length cue is
+ * not a subtitle. When the master duration is unknown or nonsensical the cues
+ * pass through untouched — guessing a duration would be worse than not
+ * checking.
+ *
+ * Pure and exported so the behaviour is testable without R2 or a StageContext.
+ */
+export function captionCuesWithinMaster(
+  cues: readonly CaptionCue[],
+  masterSec: number,
+): { cues: CaptionCue[]; dropped: number; clamped: number; overrunSec: number; masterSec: number } {
+  const usable = Number.isFinite(masterSec) && masterSec > 0;
+  if (!usable) return { cues: [...cues], dropped: 0, clamped: 0, overrunSec: 0, masterSec };
+  const kept: CaptionCue[] = [];
+  let clamped = 0;
+  for (const cue of cues) {
+    if (cue.startSec >= masterSec) continue;
+    if (cue.endSec > masterSec) {
+      kept.push({ ...cue, endSec: masterSec });
+      clamped++;
+    } else {
+      kept.push(cue);
+    }
+  }
+  const last = cues.reduce((max, cue) => Math.max(max, cue.endSec), 0);
+  return {
+    cues: kept,
+    dropped: cues.length - kept.length,
+    clamped,
+    overrunSec: Math.max(0, last - masterSec),
+    masterSec,
+  };
+}
+
 export const captions: Block = {
   id: "captions",
   consumes: ["narrationDurationSec", "videoDurationSec"],
@@ -3697,23 +3743,33 @@ export const captions: Block = {
     const sections = script?.sections ?? [];
 
     // Chapters: derived from script sections + narration timing + intro offset.
-    // No external dependency â€” works today (lands in the video description).
+    // No external dependency — works today (lands in the video description).
     const chaptersText = buildChapters(sections, narrationSec, introSec);
     if (chaptersText) ctx.log(`captions: ${chaptersText.split("\n").length} chapters`);
 
-    // Captions (SRT) â€” built DETERMINISTICALLY from the ground-truth sentenceTimings
+    // Captions (SRT) — built DETERMINISTICALLY from the ground-truth sentenceTimings
     // we already produced in narration_tts (chunked to short cues, shifted by the
     // intro offset). No more re-transcribing our OWN TTS audio via AssemblyAI (an
-    // external poll-until-done service that could time out) â€” we already know the
+    // external poll-until-done service that could time out) — we already know the
     // exact words and their timing. No external dependency, instant, never flaky.
     let captionsKey = "";
     const capTimings = ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
     if (!capTimings?.length) {
-      ctx.log("captions: no sentenceTimings â€” chapters only");
+      ctx.log("captions: no sentenceTimings — chapters only");
       return { captionsKey, chaptersText };
     }
     try {
-      const cues = captionCuesFromTimings(capTimings, introSec);
+      const fitted = captionCuesWithinMaster(
+        captionCuesFromTimings(capTimings, introSec),
+        Number(ctx.store["videoDurationSec"] ?? 0),
+      );
+      const cues = fitted.cues;
+      if (fitted.overrunSec > 0) {
+        ctx.log(
+          `captions: cues ran ${fitted.overrunSec.toFixed(2)}s past the master — ` +
+            `${fitted.dropped} dropped, ${fitted.clamped} clamped to the ${fitted.masterSec.toFixed(2)}s end`,
+        );
+      }
       const toTs = (s: number) => {
         const ms = Math.max(0, Math.round(s * 1000));
         const p = (n: number, w = 2) => String(n).padStart(w, "0");
