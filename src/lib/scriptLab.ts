@@ -89,6 +89,13 @@ export async function distillScriptPlaybook(args: {
   // designChannelInception calls this unconditionally for them. That is TEN of
   // the eleven families — everything except music_loop — which is why the
   // message states the condition rather than a list that would go stale.
+  //
+  // And it fails DEEP. The call sits inside the "channel-inception-seo" stage,
+  // and voice casting, the avatar, the banner, the thumbnails and the pipeline
+  // compilation are all stages AFTER it. So the channel row is created and then
+  // abandoned: a shell with no cast voice, no artwork, no thumbnails and no
+  // compiled pipeline. The wizard reaches this too — /api/build-channel
+  // triggers "design-channel", which delegates straight here.
   // src/lib/__tests__/scriptLabCapabilityGap.test.ts prints the live set.
   // Reviving this needs a non-video route to the same playbook, not a key.
   if (!hasGeminiKey()) {
