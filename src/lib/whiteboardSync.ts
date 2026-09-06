@@ -567,8 +567,31 @@ export function hasWhiteboardSync(options: {
 
 /* ------------------------------ helpers -------------------------------- */
 
+/**
+ * Bound a layer box to the board.
+ *
+ * This did not clamp anything — it mapped the array to Number and returned it,
+ * so a box of [1.5, 0.2, 0.8, 0.6] drew entirely off-frame and the layer
+ * silently vanished from a panel that had already been paid for. The name said
+ * clamp; the body did not.
+ *
+ * whiteboardStoryboardDefects now rejects an out-of-board box in the text-only
+ * planning loop, which is where it should be fixed. This is the second line:
+ * whatever reaches the renderer is made drawable rather than dropped.
+ */
 function clampBox(b: unknown): number[] {
-  return Array.isArray(b) && b.length === 4 ? b.map(Number) : [0.1, 0.18, 0.8, 0.66];
+  const DEFAULT = [0.1, 0.18, 0.8, 0.66];
+  if (!Array.isArray(b) || b.length !== 4) return DEFAULT;
+  const [x, y, w, h] = b.map(Number);
+  if (![x, y, w, h].every((value) => Number.isFinite(value)) || w <= 0 || h <= 0) return DEFAULT;
+  const width = Math.min(Math.max(w, 0.01), 1);
+  const height = Math.min(Math.max(h, 0.01), 1);
+  return [
+    Math.min(Math.max(x, 0), 1 - width),
+    Math.min(Math.max(y, 0), 1 - height),
+    width,
+    height,
+  ];
 }
 
 function whiteboardSeed(styleId: string, artifactId: string): number {

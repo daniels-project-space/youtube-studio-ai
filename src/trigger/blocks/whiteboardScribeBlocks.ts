@@ -239,11 +239,41 @@ export function whiteboardStoryboardDefects(
       issues.push(`panel ${index + 1} only kept ${panel.layers.length} layer(s) — every "cue" must be an EXACT substring of that panel's narration`);
     }
   });
-  for (let i = 1; i < plan.panels.length; i++) {
-    if (plan.panels[i].narration.trim() === plan.panels[i - 1].narration.trim()) {
-      issues.push(`panels ${i} and ${i + 1} repeat the same narration — each panel must advance the explanation`);
+  // OFF-CANVAS. The layer schema validates that a box is four finite numbers and
+  // stops there — nothing bounds it to the board. A box of [1.5, 0.2, 0.8, 0.6]
+  // passes every existing check and draws entirely outside the frame, so the
+  // panel silently loses that layer after it has been paid for. Caught here, in
+  // the text-only loop, where the fix costs a rewrite instead of a render.
+  plan.panels.forEach((panel, index) => {
+    for (const layer of panel.layers) {
+      const box = layer.box;
+      if (!Array.isArray(box) || box.length !== 4) continue;
+      const [x, y, w, h] = box.map(Number);
+      if (![x, y, w, h].every((value) => Number.isFinite(value))) continue;
+      // A hair over the edge is a rounding artefact, not a mistake.
+      const EPS = 0.02;
+      if (w <= 0 || h <= 0) {
+        issues.push(`panel ${index + 1} has a layer with a zero or negative size (w=${w}, h=${h}) — it would draw nothing`);
+      } else if (x < -EPS || y < -EPS || x + w > 1 + EPS || y + h > 1 + EPS) {
+        issues.push(
+          `panel ${index + 1} places a layer outside the board (x=${x.toFixed(2)} y=${y.toFixed(2)} ` +
+            `w=${w.toFixed(2)} h=${h.toFixed(2)}) — every box must fit inside 0..1 on both axes`,
+        );
+      }
     }
-  }
+  });
+  // Repeated narration ANYWHERE, not just next door. The adjacent-only check
+  // let panels 1 and 5 ship the same spoken line.
+  const seenNarration = new Map<string, number>();
+  plan.panels.forEach((panel, index) => {
+    const key = panel.narration.trim().toLowerCase();
+    if (!key) return;
+    const first = seenNarration.get(key);
+    if (first === undefined) seenNarration.set(key, index);
+    else {
+      issues.push(`panels ${first + 1} and ${index + 1} repeat the same narration — each panel must advance the explanation`);
+    }
+  });
   if (targetWords > 0) {
     const got = storyboardWords(plan);
     if (got < targetWords * 0.65) {
