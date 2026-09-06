@@ -37,8 +37,9 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { downloadTo } from "@/lib/files";
 import { grabFrame } from "@/lib/ffmpeg";
-import { geminiJson, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
-import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
+import { parseJsonLoose } from "@/lib/gemini";
+import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { footageDoctrineFor, type FootageDoctrine } from "@/engine/golden";
 import {
   searchFootage,
@@ -53,8 +54,14 @@ import { type ThirdPartyStockSource } from "@/lib/thirdPartyStockEvidence";
 export { searchFootage, is4k, scoreClip, activeProviders, hasAnyFootageProvider, type FootageClip } from "@/lib/footage";
 export { footageDoctrineFor, FOOTAGE_DOCTRINE, type FootageDoctrine } from "@/engine/golden";
 
+/**
+ * Zero callers today. Kept, corrected rather than deleted, because it is the
+ * honest capability answer for this module and the WRONG answer is what it used
+ * to give: `hasGeminiKey() && ...` is unconditionally false, so anything that
+ * had gated on it would have silently disabled stock footage entirely.
+ */
 export function hasFootagecraft(): boolean {
-  return hasGeminiKey() && hasAnyFootageProvider();
+  return hasAnthropicKey() && hasAnyFootageProvider();
 }
 
 /** Strict relevance floor (clearly on-theme, not loosely related). */
@@ -203,8 +210,21 @@ export function shuffle<T>(a: T[]): T[] {
 
 /**
  * Channel + topic aware b-roll queries: abstract topics (philosophy, finance)
- * have no literal stock — Gemini turns them into concrete, filmable terms that
- * live inside the channel's locked visual world and never touch its avoid-list.
+ * have no literal stock, so a model turns them into concrete, filmable terms
+ * that live inside the channel's locked visual world and never touch its
+ * avoid-list.
+ *
+ * This ran on Gemini and stopped running at all. hasGeminiKey() is hard-wired
+ * to false ("Generic Gemini is intentionally unavailable"), so the whole branch
+ * was dead and this returned only `extra` — which the stock_footage caller fills
+ * with the topic, the niche, and the script's SECTION HEADINGS. A heading is
+ * prose, not a 2-4 word filmable search term, so the queries degraded to
+ * something stock search handles badly, while this comment still said Gemini was
+ * turning them into concrete terms.
+ *
+ * Now on claudeJson, the same OpenRouter route every other text call in the
+ * repo uses. The DP brief's own queries still LEAD at the call site; this fills
+ * the rest.
  */
 export async function buildFootageQueries(
   brief: FootageBrief,
@@ -213,7 +233,7 @@ export async function buildFootageQueries(
   log: (message: string) => void = () => {},
 ): Promise<string[]> {
   let queries: string[] = [];
-  if (hasGeminiKey()) {
+  if (hasAnthropicKey()) {
     const nicheBit = brief.niche ? ` (${brief.niche})` : "";
     const narr = brief.narrationExcerpt ? `\n\nNarration excerpt:\n"${brief.narrationExcerpt.slice(0, 900)}"\n\n` : " ";
     const repairClause = footageRepairDirective(brief, "query");
@@ -256,9 +276,12 @@ export async function buildFootageQueries(
       `visual world AND its movement above. Vary scenes so no two look alike. Avoid abstract words and filler. ` +
       `Return STRICT JSON {"queries":string[]}.`;
     try {
-      const out = await geminiJson<{ queries?: string[] }>({
+      const out = await claudeJson<{ queries?: string[] }>({
         prompt: brief.natureMode ? naturePrompt : defaultPrompt,
-        maxTokens: 500,
+        // A LIST contract on the reasoning route: the ceiling covers the
+        // thinking AND the list, and the measured list floor is 2000. The old
+        // 500 was sized for the answer alone.
+        maxTokens: 2500,
         temperature: 0.7,
       });
       queries = (out.queries ?? []).filter((q): q is string => typeof q === "string" && q.trim().length > 0);
@@ -340,7 +363,21 @@ export async function gateClip(
   log: (m: string) => void = () => {},
   singleFrame = false,
 ): Promise<{ relevant: boolean; score: number }> {
-  if (!hasGeminiKey()) return { relevant: true, score: 8 };
+  // The capability this gate ACTUALLY needs. It judges frames through
+  // visionLocal on the OpenRouter route (see below) and has not touched Gemini
+  // in a long time — but the guard was never updated, and hasGeminiKey() is
+  // hard-wired to false ("Generic Gemini is intentionally unavailable"). So a
+  // complete, working relevance gate returned `relevant: true, score: 8` for
+  // EVERY clip, on every run, without judging one of them.
+  //
+  // Enabling it is safe by construction: a rejected clip is not dropped, it goes
+  // to the ranked `spares` pool that castFootage drains whenever coverage would
+  // starve, after the evergreen fallback and the dedup relaxation. The pipeline
+  // was always built to expect rejections; it just never saw any.
+  if (!hasVisionKey()) {
+    log("footagecraft: RELEVANCE GATE DID NOT RUN — no vision provider; accepting this clip unjudged");
+    return { relevant: true, score: 8 };
+  }
   const dur = durationSec || 8;
   const frames: string[] = [];
   // Legacy (old pipeline) judged ONE frame at ~1s; the new gate samples three.
