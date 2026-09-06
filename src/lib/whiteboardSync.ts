@@ -651,7 +651,11 @@ const whiteboardStoryboardResponseSchema: z.ZodType<RawPlan> = z.object({
       text: z.string().optional(),
       color: z.enum(["black", "red"]).optional(),
       cue: z.string().optional(),
-      box: z.array(z.number().finite()).min(4).max(4).optional(),
+      // Bounded to the BOARD, not merely to four finite numbers. The old
+      // .min(4).max(4) bounds the array LENGTH; the values inside were free, so
+      // [1.5, 0.2, 0.8, 0.6] validated and drew off-frame. Same shape as
+      // selfContainedStoryReceipt's box, which had it right.
+      box: z.array(z.number().finite().min(0).max(1)).length(4).optional(),
     })).optional(),
   })).optional(),
 });
