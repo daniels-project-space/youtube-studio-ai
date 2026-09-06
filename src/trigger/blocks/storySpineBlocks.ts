@@ -12,6 +12,11 @@ export const storySpine: Block = {
   id: "story_spine",
   consumes: [
     "topic",
+    // `script` and `narrationText` are ORDERING only: the spine is planned
+    // entirely from sentenceTimings and the narration duration, and reads
+    // neither. They keep this block behind BOTH script_gen and narration_tts,
+    // which sentenceTimings alone would also do — kept as an explicit
+    // statement of the dependency rather than an implied one.
     "script",
     "narrationText",
     "sentenceTimings",

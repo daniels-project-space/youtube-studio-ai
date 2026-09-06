@@ -438,6 +438,9 @@ const quizTopicSafety: Block = {
 /** Deterministic SEO package grounded in the selected, source-backed topic. */
 const quizMetadata: Block = {
   id: "quiz_metadata",
+  // `topic` is ORDERING only — the metadata is written from quizPlan, which
+  // already carries the subject. Declaring it keeps this block behind
+  // topic_select rather than behind quizPlan alone.
   consumes: ["topic", "quizPlan"],
   produces: [
     "title",

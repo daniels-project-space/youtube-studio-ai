@@ -576,7 +576,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "entityClips", "introCardPath", "introApplied", "introCardKey", "introSec", "healHints", "healClasses", "sentenceTimings", "cutSheet",
       "chapterPlan", "channelAvatarKey", "script", "channelName", "quoteOverlays", "insertOverlays",
       "cinematicGeneratedScenePlan", "cinematicEditDecisionList", "generatedFootageSceneManifest",
-      "extraOverlays", "musicKey", "styleDNA", "shotRenderManifest", "shotQaReport", "visualCoverage", "studioOverlayRecipeProjection", "studioTransitionRecipeProjection", "channelModuleConfig",
+      "extraOverlays", "musicKey",
+      // No styleDNA: colorGrade/palette are consumed at GENERATION time
+      // (novita_render, gen_footage, lofi keyframes) and baked into the prompts.
+      // Applying the grade again at assembly would double it.
+      "shotRenderManifest", "shotQaReport", "visualCoverage", "studioOverlayRecipeProjection", "studioTransitionRecipeProjection", "channelModuleConfig",
       "topic", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment",
       // Rights provenance is optional for historical runs, but when present
       // assembly verifies the selected staged input set before encoding.
@@ -600,14 +604,19 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "narrationDurationSec", "narrationPerformanceEvidence", "script", "sentenceTimings", "styleDNA", "showBible", "introApplied", "healHints", "palette",
       "tags", "strategy", "thumbnailer", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec", "loopSeamDiff",
-      "overlaysDropped", "qualityBar", "description", "musicKey", "channelName", "niche", "persona", "styleGrammar", "topic", "family",
+      // No overlaysDropped: qa_visual never reads it. The counter is surfaced in
+      // timeline_assemble's own log and mined as a trend by pipelineDoctor; QA
+      // judges the frames, not the drop count.
+      "qualityBar", "description", "musicKey", "channelName", "niche", "persona", "styleGrammar", "topic", "family",
       // Grounds the mandatory holistic visual gate in this channel's doctrine.
       "criticDoctrine", "contentLane",
       // Optional plan-only inputs for the non-gating Viewer Promise Progression
       // observation. Final QA consumes these only after its normal review;
       // no route needs to produce all of them.
       "timedScript", "narrativeBeats", "continuityLedger", "shotList", "dpVisualSpecs", "editorEdl", "storyCoverage", "storySpineFingerprint", "episodeGraph",
-      "assetQaReport", "shotQaReport", "healAttempt",
+      "assetQaReport", "shotQaReport",
+      // No healAttempt: declared and never read here (healHints is what the
+      // re-running block actually receives).
       // Durable provenance from story_spine / short_strategy is reused when it
       // matches the active lane; final QA must declare that cross-block input.
       "episodeSpec",

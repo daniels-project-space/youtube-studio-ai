@@ -58,8 +58,56 @@ function blockFiles(dir: string, out: string[] = []): string[] {
  * that node's text — rather than the file's — is what makes a per-block answer
  * possible in a file that holds thirty of them.
  */
-function blockScopes(): Map<string, { file: string; line: number; text: string }> {
-  const scopes = new Map<string, { file: string; line: number; text: string }>();
+/**
+ * Every store key a node actually READS, by AST rather than by regex.
+ *
+ * `ctx.store["k"]`, a bare `store["k"]` (helpers take the store directly), and
+ * the `opt(ctx, "k")` / `str(ctx, "k")` accessors. Unlike the analyzer in
+ * moduleContracts.test.ts this does NOT stop at nested functions: a read inside
+ * a `.map()` or a local closure is still a read, and stopping there would
+ * invent findings.
+ */
+function storeReads(
+  node: ts.Node,
+  sf: ts.SourceFile,
+  into = new Set<string>(),
+  constants: ReadonlyMap<string, string> = new Map(),
+): Set<string> {
+  const keyOf = (expression: ts.Expression): string | null => {
+    if (ts.isStringLiteral(expression)) return expression.text;
+    // A key held in a constant is still a literal read. shorts_spinoff reads
+    // ctx.store[NARRATIVE_SERIES_RUN_SELECTOR_SEED_KEY], and treating that as
+    // "not a read" would have had this audit recommend deleting a declaration
+    // the runtime Proxy enforces — an undeclared read THROWS in production.
+    if (ts.isIdentifier(expression)) return constants.get(expression.text) ?? null;
+    return null;
+  };
+  const visit = (current: ts.Node): void => {
+    if (ts.isElementAccessExpression(current) && current.argumentExpression) {
+      const target = current.expression;
+      const isStore =
+        (ts.isPropertyAccessExpression(target) && target.name.text === "store") ||
+        (ts.isIdentifier(target) && /^(store|s)$/.test(target.text));
+      const key = isStore ? keyOf(current.argumentExpression) : null;
+      if (key) into.add(key);
+    }
+    if (
+      ts.isCallExpression(current) && ts.isIdentifier(current.expression) &&
+      ["str", "opt", "num", "bool"].includes(current.expression.text) &&
+      current.arguments.length >= 2
+    ) {
+      const key = keyOf(current.arguments[1]!);
+      if (key) into.add(key);
+    }
+    current.forEachChild(visit);
+  };
+  visit(node);
+  return into;
+}
+
+function blockScopes(): Map<string, { file: string; line: number; text: string; reads: Set<string> }> {
+  const scopes = new Map<string, { file: string; line: number; text: string; reads: Set<string> }>();
+  const constants = stringConstants();
   for (const file of blockFiles(BLOCK_DIR)) {
     const text = readFileSync(file, "utf8");
     const sf = ts.createSourceFile(file, text, ts.ScriptTarget.Latest, true);
@@ -87,10 +135,20 @@ function blockScopes(): Map<string, { file: string; line: number; text: string }
             ) continue;
             text += `\n${property.getText(sf)}`;
           }
+          const helpers = helperBodies(text, file, sf);
+          const reads = storeReads(node, sf, new Set<string>(), constants);
+          // Helper bodies are text by the time they come back, so re-parse them
+          // once to collect their reads too. storySpineFromStore(store) is the
+          // shape that makes this necessary.
+          if (helpers.trim()) {
+            const helperSf = ts.createSourceFile("helpers.ts", helpers, ts.ScriptTarget.Latest, true);
+            storeReads(helperSf, helperSf, reads, constants);
+          }
           scopes.set(id, {
             file: relative(ROOT, file),
             line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
-            text: text + helperBodies(text, file, sf),
+            text: text + helpers,
+            reads,
           });
         }
       }
@@ -201,6 +259,28 @@ function helperBodies(scopeText: string, file: string, sf: ts.SourceFile, depth 
   return out;
 }
 
+/**
+ * `const NAME = "literal"` across the repo, so a store key held in a constant
+ * resolves to the key it actually is.
+ */
+function stringConstants(): Map<string, string> {
+  const out = new Map<string, string>();
+  const scan = (dir: string): void => {
+    for (const entry of readdirSync(dir)) {
+      if (["node_modules", ".next", ".git", "__tests__"].includes(entry)) continue;
+      const full = join(dir, entry);
+      if (statSync(full).isDirectory()) { scan(full); continue; }
+      if (!/\.tsx?$/.test(entry)) continue;
+      const text = readFileSync(full, "utf8");
+      for (const match of text.matchAll(/\bconst\s+([A-Z][A-Z0-9_]{2,})\s*(?::[^=]+)?=\s*["'`]([^"'`\n]{1,80})["'`]/g)) {
+        out.set(match[1]!, match[2]!);
+      }
+    }
+  };
+  scan(join(ROOT, "src"));
+  return out;
+}
+
 interface Finding { block: string; file: string; line: number; key: string; kind: "consumes" | "optionalConsumes" }
 
 function main(): void {
@@ -210,6 +290,7 @@ function main(): void {
   let blocksChecked = 0;
   let keysChecked = 0;
   const noScope: string[] = [];
+  let mentionedOnly = 0;
 
   for (const manifest of allManifests()) {
     const scope = scopes.get(manifest.id);
@@ -224,9 +305,12 @@ function main(): void {
     ];
     for (const [key, kind] of declared) {
       keysChecked++;
-      // Any string literal bearing the name counts. See the header: generous on
-      // purpose, so a finding is worth reading.
-      if (new RegExp(`["'\`]${key}["'\`]`).test(scope.text)) continue;
+      if (scope.reads.has(key)) continue;
+      // A key can also be named in a string the block passes onward (a log, a
+      // receipt field). That is not a READ, but it is enough ambiguity that
+      // reporting it would waste the reader's time, so it is still excused —
+      // just recorded separately so the two are not confused.
+      if (new RegExp(`["'\`]${key}["'\`]`).test(scope.text)) { mentionedOnly++; continue; }
       findings.push({ block: manifest.id, file: scope.file, line: scope.line, key, kind });
     }
   }
@@ -234,6 +318,7 @@ function main(): void {
   findings.sort((a, b) => a.block.localeCompare(b.block) || a.key.localeCompare(b.key));
   console.log(`blocks with a locatable definition: ${blocksChecked}${noScope.length ? ` (${noScope.length} not found: ${noScope.slice(0, 6).join(", ")}${noScope.length > 6 ? " …" : ""})` : ""}`);
   console.log(`declared store keys checked: ${keysChecked}`);
+  console.log(`named in a string but never read (excused): ${mentionedOnly}`);
   console.log(`declared but never read in the block: ${findings.length}\n`);
   let current = "";
   for (const f of findings) {

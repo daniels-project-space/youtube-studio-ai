@@ -254,6 +254,9 @@ const studioPostproductionAssetResolve: Block = {
  */
 const studioLtxAdapterResolve: Block = {
   id: "studio_ltx_adapter_resolve",
+  // ORDERING, not an input: the report is never read here. Declaring it is what
+  // forces adapter resolution to happen AFTER the keyframes have passed asset
+  // QA, so a rejected still can never have a video adapter selected for it.
   consumes: ["assetQaReport"],
   produces: [
     "studioLtxAdapterResolution",

@@ -3430,6 +3430,7 @@ export const notify: Block = {
 export const cleanup: Block = {
   id: "cleanup",
   consumes: [
+    // ORDERING, not an input: never read in the body. It is the gate below.
     "watchUrl",
     "finalMasterReleaseCertificateKey",
     "artifactRetentionRelease",
@@ -3527,6 +3528,10 @@ export const shortsSpinoff: Block = {
     "videoLocalPath",
     "sentenceTimings",
     "title",
+    // ORDERING, not an input: never read here. Requiring the upload's watchUrl
+    // is what stops a short being cut from a video that was never published.
+    // scripts/audit-inert-consumes.ts reports it as unread, correctly — this
+    // note is the answer.
     "watchUrl",
     "qaPassed",
     "qualityEvidence",
