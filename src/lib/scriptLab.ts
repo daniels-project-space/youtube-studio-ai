@@ -75,8 +75,33 @@ export async function distillScriptPlaybook(args: {
   log?: Logger;
 }): Promise<ScriptPlaybook> {
   const log = args.log ?? (() => {});
-  if (!hasGeminiKey() || !hasAnthropicKey()) {
-    throw new Error("scriptLab: GEMINI_API_KEY + OPENROUTER_API_KEY required");
+  // This is BLOCKED, not misconfigured, and the old message sent readers hunting
+  // for a key that cannot fix it.
+  //
+  // deconstructOpening watches the first 75 seconds of each reference video via
+  // geminiAnalyzeYouTube, which takes a YouTube URL directly. No other provider
+  // wired here can ingest video, so this is a genuinely Gemini-only capability —
+  // and hasGeminiKey() returns false unconditionally by policy ("Generic Gemini
+  // is intentionally unavailable"). Supplying a GEMINI_API_KEY changes nothing.
+  //
+  // What that blocks, exactly: every family whose policy sets
+  // requiresNarrativePlaybook cannot complete Channel Inception, because
+  // designChannelInception calls this unconditionally for them. That is TEN of
+  // the eleven families — everything except music_loop — which is why the
+  // message states the condition rather than a list that would go stale.
+  // src/lib/__tests__/scriptLabCapabilityGap.test.ts prints the live set.
+  // Reviving this needs a non-video route to the same playbook, not a key.
+  if (!hasGeminiKey()) {
+    throw new Error(
+      "scriptLab: the narrative playbook needs to WATCH reference videos " +
+        "(geminiAnalyzeYouTube), and generic Gemini is intentionally disabled. This is a " +
+        "capability gap, not a missing key — no GEMINI_API_KEY will enable it. It blocks " +
+        "Channel Inception for every family whose policy sets requiresNarrativePlaybook " +
+        "(see engine/channelInceptionContracts.ts — currently all but music_loop).",
+    );
+  }
+  if (!hasAnthropicKey()) {
+    throw new Error("scriptLab: OPENROUTER_API_KEY required to distil the studied openings");
   }
   const targets = args.refs.slice(0, 3);
   if (targets.length === 0) throw new Error("scriptLab: no reference videos to study");
