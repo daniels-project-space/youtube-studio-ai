@@ -3067,6 +3067,16 @@ export const timelineAssemble: Block = {
     // reject. TOL absorbs caption/overlay rounding so it never trips a video
     // that would have passed (passing ⇒ actual≈videoSec ∈ [min,max]).
     {
+      // A malformed bound used to make BOTH tests below false (NaN > 0 is
+      // false), so the precheck silently skipped. That was harmless while
+      // length_check silently passed on the same input; now that the gate
+      // fails closed, skipping here means paying for a full render and THEN
+      // refusing it. Surface the configuration error before the spend, which
+      // is exactly what this block exists to do.
+      const configured = resolveLengthBounds(0, ctx.params["minSeconds"], ctx.params["maxSeconds"]);
+      if (!configured.ok) {
+        throw new Error(`length_precheck CANNOT RUN: ${configured.reason} — aborting before render`);
+      }
       const lcMin = Number(ctx.params["minSeconds"] ?? 0);
       const lcMax = Number(ctx.params["maxSeconds"] ?? 0);
       const TOL = 30;
@@ -3084,8 +3094,8 @@ export const timelineAssemble: Block = {
 
     const tmp = await makeRunTempDir(ctx.runId);
 
-    // SURGICAL HEAL â€” when the self-healer re-runs this block for an
-    // overlay/caption-class defect (cards, captions, inserts â€” anything the
+    // SURGICAL HEAL — when the self-healer re-runs this block for an
+    // overlay/caption-class defect (cards, captions, inserts — anything the
     // finishing pass owns), re-finish from the persisted PRE-OVERLAY video
     // instead of rebuilding the whole body: a ~40-min full re-compose becomes a
     // single ~4-min finishing encode. Footage/black/dead-air defects still get
@@ -3668,19 +3678,74 @@ async function finishFromComposed(
   };
 }
 
+/**
+ * Every input to the length gate, or a refusal naming the one that is unusable.
+ *
+ * `Number(x)` returning NaN silently DISABLED this gate, three independent
+ * ways, because NaN loses every comparison it takes part in:
+ *
+ *   NaN <  min   is false     an unparseable videoDurationSec passed
+ *   dur <  NaN   is false     a malformed minSeconds removed the floor
+ *   dur >  NaN   is false     a malformed maxSeconds removed the ceiling
+ *
+ * So a stored duration of `{}` or `"unknown"`, or a `maxSeconds: "900s"` typed
+ * into a channel's params, turned a hard Stage-4 gate into a no-op that logged
+ * "ok" — the exact shape of failure a gate exists to prevent, and one that
+ * leaves no trace, because passing is what it looks like.
+ *
+ * Params are `Record<string, unknown>`, so this is reachable from ordinary
+ * configuration and not only from a bug. Pure and exported so the refusals are
+ * testable without a StageContext.
+ */
+export function resolveLengthBounds(
+  videoDurationSec: unknown,
+  minSeconds: unknown,
+  maxSeconds: unknown,
+): { ok: true; dur: number; min: number; max: number } | { ok: false; reason: string } {
+  const finite = (value: unknown, fallback: number): number | null => {
+    const resolved = value ?? fallback;
+    const parsed = typeof resolved === "number" ? resolved : Number(resolved);
+    return Number.isFinite(parsed) ? parsed : null;
+  };
+  const dur = finite(videoDurationSec, 0);
+  if (dur === null) {
+    return { ok: false, reason: `videoDurationSec is not a finite number (got ${JSON.stringify(videoDurationSec)})` };
+  }
+  const min = finite(minSeconds, 10);
+  if (min === null) {
+    return { ok: false, reason: `minSeconds param is not a finite number (got ${JSON.stringify(minSeconds)})` };
+  }
+  const max = finite(maxSeconds, 36000);
+  if (max === null) {
+    return { ok: false, reason: `maxSeconds param is not a finite number (got ${JSON.stringify(maxSeconds)})` };
+  }
+  // An inverted window can never admit anything, so it is a configuration
+  // error rather than a rejected video, and saying which one it is matters.
+  if (min > max) return { ok: false, reason: `bounds are inverted: minSeconds ${min} exceeds maxSeconds ${max}` };
+  return { ok: true, dur, min, max };
+}
+
 export const lengthCheck: Block = {
   id: "length_check",
   consumes: ["videoDurationSec"],
   produces: ["lengthOk"],
   run: async (ctx) => {
-    const dur = Number(ctx.store["videoDurationSec"] ?? 0);
-    const min = Number(ctx.params["minSeconds"] ?? 10);
-    const max = Number(ctx.params["maxSeconds"] ?? 36000);
+    const bounds = resolveLengthBounds(
+      ctx.store["videoDurationSec"],
+      ctx.params["minSeconds"],
+      ctx.params["maxSeconds"],
+    );
+    if (!bounds.ok) {
+      // Fail CLOSED on an unusable input. A gate that cannot evaluate its own
+      // condition has not passed; it has not run.
+      throw new Error(`length_check CANNOT RUN: ${bounds.reason}`);
+    }
+    const { dur, min, max } = bounds;
     if (dur < min || dur > max) {
       // Hard gate (Stage 4): don't ship an off-spec runtime.
       throw new Error(`length_check FAILED: ${dur}s outside [${min}, ${max}]`);
     }
-    ctx.log(`length_check ok: ${dur}s (bounds ${min}â€“${max})`);
+    ctx.log(`length_check ok: ${dur}s (bounds ${min}–${max})`);
     return { lengthOk: true };
   },
 };
