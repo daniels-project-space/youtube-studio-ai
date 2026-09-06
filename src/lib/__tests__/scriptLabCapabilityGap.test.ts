@@ -26,7 +26,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { distillScriptPlaybook } from "@/lib/scriptLab";
+import { distillScriptPlaybook, narrativePlaybookCapability } from "@/lib/scriptLab";
 import { CHANNEL_INCEPTION_FAMILY_POLICIES } from "@/engine/channelInceptionContracts";
 
 async function main(): Promise<void> {
@@ -85,9 +85,44 @@ async function main(): Promise<void> {
   "inception must still call the playbook unconditionally for those families",
   );
 
+  /* ------------- the refusal happens BEFORE any stage runs ---------------- */
+
+  // This is the part that stops a half-built channel being left behind. The
+  // playbook call lives in the "channel-inception-seo" stage, and voice casting,
+  // the avatar, the banner, the thumbnails and the pipeline compilation are all
+  // stages AFTER it — so a throw there created the channel row and abandoned it.
+  // designChannelInception now ASKS the capability up front and returns the same
+  // clean plan-only draft it already produces when execution is not admitted.
+  const capability = narrativePlaybookCapability();
+  assert.equal(capability.available, false, "the playbook is unavailable — if it is not, delete this test");
+  assert.match(capability.reason, /capability gap, not a missing key/, "the reason must not read as misconfiguration");
+
+  const askAt = inception.indexOf("narrativePlaybookCapability(");
+  const firstStageAt = inception.indexOf("await runStage(");
+  const playbookAt = inception.indexOf("distillScriptPlaybook(");
+  assert.ok(askAt > 0, "inception must ask whether the playbook is available");
+  assert.ok(
+    askAt < firstStageAt,
+    "the capability must be checked BEFORE the first inception stage, or a channel is still abandoned mid-build",
+  );
+  assert.ok(askAt < playbookAt, "and before the call that would throw");
+  // Computing the capability first is not enough — it has to DECIDE the refusal.
+  // Without this, deleting `|| !playbookCapability.available` from the condition
+  // left every assertion above still passing.
+  assert.match(
+    inception,
+    /if \(!admission\.executionAuthorized \|\| !playbookCapability\.available\)/,
+    "the missing capability must itself trigger the plan-only refusal, not merely be computed",
+  );
+  assert.match(
+    inception,
+    /requires a narrative playbook: \$\{playbookCapability\.reason\}/,
+    "the blocker must carry the capability's own reason rather than restating it",
+  );
+
   console.log(
-    `SCRIPTLAB CAPABILITY GAP PASS — Channel Inception blocked for ${blocked.length} families: ` +
-      `${blocked.join(", ")}`,
+    `SCRIPTLAB CAPABILITY GAP PASS — refused up front, not mid-build; ` +
+      `${blocked.length} families: ${blocked.join(", ")}`,
   );
 }
 

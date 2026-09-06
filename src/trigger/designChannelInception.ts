@@ -79,6 +79,7 @@ import {
   type PlanWeekProviderRenderReceipt,
 } from "@/lib/planWeekRenderReceipt";
 import { synthShowBible } from "@/engine/creative/showBible";
+import { narrativePlaybookCapability } from "@/lib/scriptLab";
 import {
   synthStyleDNA,
   buildQualityBar,
@@ -2365,13 +2366,27 @@ export async function executeDesignChannel(
   ) {
     throw new Error("persisted module configuration does not match the admitted request");
   }
-  if (!admission.executionAuthorized) {
-    const blockers = ["provider execution requires a fresh authenticated inception approval"];
+  // The narrative playbook is a hard prerequisite for ten of the eleven families
+  // and it is currently unavailable (see lib/scriptLab.ts). Asking here turns
+  // what was a throw inside the SEO stage — five stages before voice casting,
+  // artwork, thumbnails and pipeline compilation, leaving an abandoned shell —
+  // into the same clean, reported plan-only draft this file already produces
+  // when execution is not admitted. It does NOT decide whether the playbook
+  // should degrade; it only stops a half-built channel being left behind.
+  const playbookCapability = plan.familyPolicy.requiresNarrativePlaybook
+    ? narrativePlaybookCapability()
+    : { available: true, reason: "" };
+  if (!admission.executionAuthorized || !playbookCapability.available) {
+    const blockers = admission.executionAuthorized
+      ? [`${payload.family} requires a narrative playbook: ${playbookCapability.reason}`]
+      : ["provider execution requires a fresh authenticated inception approval"];
     await convex.mutation(api.channels.updateChannel, {
       channelId,
       status: "draft",
       architectReport: {
-        summary: "plan-only draft: provider execution not admitted",
+        summary: admission.executionAuthorized
+          ? "plan-only draft: the narrative playbook this family requires is unavailable"
+          : "plan-only draft: provider execution not admitted",
         applied: [],
         rejected: [],
         missingCapabilities: [],

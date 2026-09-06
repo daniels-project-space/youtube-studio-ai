@@ -66,6 +66,28 @@ async function deconstructOpening(
   }
 }
 
+/**
+ * Can the narrative playbook be produced at all?
+ *
+ * Separated from distillScriptPlaybook so Channel Inception can ASK before it
+ * starts, instead of discovering the answer five stages in. The throw inside
+ * distillScriptPlaybook remains, for any caller that does not ask.
+ */
+export function narrativePlaybookCapability(): { available: boolean; reason: string } {
+  if (!hasGeminiKey()) {
+    return {
+      available: false,
+      reason:
+        "the narrative playbook must WATCH reference videos (geminiAnalyzeYouTube) and generic " +
+        "Gemini is intentionally disabled — a capability gap, not a missing key",
+    };
+  }
+  if (!hasAnthropicKey()) {
+    return { available: false, reason: "OPENROUTER_API_KEY is required to distil the studied openings" };
+  }
+  return { available: true, reason: "" };
+}
+
 export async function distillScriptPlaybook(args: {
   /** Verified top competitor videos (highest views first). */
   refs: { videoId: string; title: string; views: number }[];
