@@ -1109,8 +1109,23 @@ export const topicSelect: Block = {
       `topic_select: "${topic}" [${bet.betType}] title="${bet.provisionalTitle}" ` +
         `evidence=${bet.evidence.slice(0, 90)}`,
     );
-    // The full bet rides the store: provisionalTitle/thumbnailMoment/hookPromise
-    // are judged warm starts for metacraft, banana and hookcraft downstream.
+    // The full bet rides the store. This comment used to claim
+    // provisionalTitle/thumbnailMoment/hookPromise were "judged warm starts for
+    // metacraft, banana and hookcraft downstream", and none of the three read
+    // them — the bet was written, judge-linted, logged and discarded. What is
+    // actually true today:
+    //
+    //   provisionalTitle  WIRED. metadata passes it to craftMetadata as
+    //                     `betTitle`, where it competes in the title pool under
+    //                     its own frame and wins only on lint + the CTR judge.
+    //                     Measured: won outright 1 of 7 on real bets.
+    //   thumbnailMoment   NOT wired to thumbnail_gen. Read only by planWeekAhead
+    //                     (the scheduled path) and topicOptimizer.
+    //   hookPromise       NOT wired to hook_craft. Read only by
+    //                     narrativeSeriesIntelligence and topicOptimizer.
+    //
+    // The two unwired ones are a real gap, not a decision — left explicit here
+    // rather than restated as a claim that is not true yet.
     return { topic, topicBet: bet };
   },
 };

@@ -403,6 +403,10 @@ export const metadataOptimized: Block = {
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
     const persona = (ctx.store["persona"] as string | undefined) ?? "";
 
+    const topicBet = ctx.store["topicBet"] as { provisionalTitle?: unknown } | null | undefined;
+    const topicBetProvisionalTitle =
+      typeof topicBet?.provisionalTitle === "string" ? topicBet.provisionalTitle.trim() : "";
+
     const nicheIntel = (ctx.store["nicheIntel"] as NicheIntel | null) ?? null;
     const databank = (ctx.store["seoDatabank"] as SeoDatabank | null) ?? null;
     const competitors = (ctx.store["competitors"] as CompetitorRow[] | null) ?? [];
@@ -543,6 +547,9 @@ export const metadataOptimized: Block = {
         // precedence. Entering the pool keeps an owner-approved title that is
         // genuinely the strongest, and drops one that is not.
         warmStartTitle: plannedTitle || undefined,
+        // topic_select produced this with the topic evidence in hand and had it
+        // judge-linted; it competes here rather than being discarded.
+        betTitle: topicBetProvisionalTitle || undefined,
         // Per-pipeline knob first, then the channel's frozen identity, then the
         // voice archetype's own default inside metacraft. Without the params
         // read the module surface would render a dial that changes nothing.

@@ -310,6 +310,22 @@ export interface MetaCraftArgs {
    * genuinely good while no longer letting a weaker one win by precedence.
    */
   warmStartTitle?: string;
+  /**
+   * The topic bet's provisional title — a judge-linted 40-70 char title written
+   * by topic_select with the full topic evidence in hand.
+   *
+   * topic_select's own comment says provisionalTitle/thumbnailMoment/hookPromise
+   * "are judged warm starts for metacraft, banana and hookcraft downstream", and
+   * none of the three read them: metadata passed only the SCHEDULED plan's
+   * title, so on the unscheduled path this one was written, judged, logged and
+   * thrown away.
+   *
+   * Same rule as warmStartTitle, for the same reason: it ENTERS THE POOL under
+   * its own frame and wins only if the lint and the CTR judge prefer it. A warm
+   * start that overrides is how a title written before the script existed beats
+   * one written after it.
+   */
+  betTitle?: string;
   /** 0-3; omitted falls back to the channel voice's own default. */
   clickbaitLevel?: number;
   log?: (m: string) => void;
@@ -344,6 +360,31 @@ const FRAMES =
   "(1) specific_number, (2) curiosity_gap, (3) contrarian, (4) mechanism (how/why it actually works), " +
   "(5) stakes_warning, (6) search_intent — MUST contain one of the real search queries below VERBATIM, " +
   "(7) direct_verdict — the episode's conclusion stated flat as the title";
+
+/**
+ * Titles written before this step that must COMPETE in the pool, never override it.
+ *
+ * Two sources, and they are labelled apart on purpose: the judge is shown
+ * `[frame] title` with every candidate, so calling a topic bet "planned" feeds
+ * it a false premise about where the title came from. Identical strings are
+ * deduped — the same title competing twice only crowds the pool.
+ *
+ * Measured with scripts/metacraft-bet-title-value.ts on the real bettor, real
+ * metacraft and real judge: the bet title won outright 1 of 7. The "winner
+ * changed" count is NOT evidence — two identical control runs disagreed 7 of 7,
+ * because generation runs at temperature 0.8.
+ */
+export function warmStartCandidates(
+  warmStartTitle?: string,
+  betTitle?: string,
+): Array<{ frame: string; title: string }> {
+  const planned = warmStartTitle?.trim() ?? "";
+  const bet = betTitle?.trim() ?? "";
+  const out: Array<{ frame: string; title: string }> = [];
+  if (planned) out.push({ frame: "planned", title: planned });
+  if (bet && bet !== planned) out.push({ frame: "topic-bet", title: bet });
+  return out;
+}
 
 export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> {
   if (!hasAnthropicKey()) throw new Error("metacraft: OPENROUTER_API_KEY missing — cannot craft real metadata");
@@ -451,7 +492,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       // The scheduled plan's title competes on the same terms as the rest. If
       // it is the strongest option it still wins; it simply no longer wins by
       // being written first.
-      ...(a.warmStartTitle?.trim() ? [{ frame: "planned", title: a.warmStartTitle.trim() }] : []),
+      ...warmStartCandidates(a.warmStartTitle, a.betTitle),
       ...(gen.candidates ?? []).map((c) => ({ frame: String(c.frame ?? "unknown"), title: String(c.title ?? "").trim() })),
     ]
       .filter((c) => c.title)
