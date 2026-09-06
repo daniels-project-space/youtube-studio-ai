@@ -127,7 +127,24 @@ export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> 
       role: "showrunner",
       schema: bibleSchema,
       log: (m) => log(m),
-      maxTokens: 2000,
+      // MEASURED, not chosen: scripts/measure-showbible-ceiling.ts runs the real
+      // synth over four channel identities. At 2000, 2 of 8 attempts fell back;
+      // at 4000, 0 of 8. Small sample, but the direction matches every other
+      // ceiling measured this session, and the cost of headroom is nothing — a
+      // ceiling is only billed for tokens actually used.
+      //
+      // This contract is much heavier than the list floor was measured on: TWO
+      // arrays of 5-8 specific items, an activeCrew array, three prose fields and
+      // up to five doctrine strings — about 12 list items in practice, plus eight
+      // prose fields, on a route where reasoning is billed from the same budget.
+      //
+      // Falling back here is not a bad video, it is a bad CHANNEL. fallbackBible
+      // returns worksInSpace: [] and avoidInSpace: [] with no doctrines, crew.ts's
+      // header() then omits both clauses entirely, and the bible is persisted at
+      // inception — so every crew brief for that channel, for its whole life, is
+      // written without the proven patterns and the anti-patterns the prompt
+      // itself calls critical.
+      maxTokens: 4000,
       temperature: 0.8,
       prompt,
     });
