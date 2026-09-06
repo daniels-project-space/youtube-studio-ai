@@ -144,6 +144,8 @@ function main(): void {
       `whiteboard layer box proved the cost: four finite numbers, no bound, a layer\n` +
       `drawn off-frame and lost after it had already been paid for.`,
   );
+  // Machine-readable, so scripts/run-audits.mjs never parses prose.
+  console.log(`AUDIT_FINDINGS ${findings.length}`);
 }
 
 main();

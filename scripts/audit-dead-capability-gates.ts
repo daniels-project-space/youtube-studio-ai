@@ -193,6 +193,8 @@ function main(): void {
       `A finding is a question: given this capability is off for good, is the branch\n` +
       `that always runs the one you would have chosen?`,
   );
+  // Machine-readable, so scripts/run-audits.mjs never parses prose.
+  console.log(`AUDIT_FINDINGS ${findings.length}`);
 }
 
 main();

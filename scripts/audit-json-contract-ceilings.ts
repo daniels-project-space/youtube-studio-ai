@@ -204,6 +204,8 @@ function main(): void {
     `failed at 500 and passed at 1000, an 8-item ranking failed at 1500 and passed at 2500.\n` +
     `"unknown" shapes are never reported — guessing is what made the first version wrong.`,
   );
+  // Machine-readable, so scripts/run-audits.mjs never parses prose.
+  console.log(`AUDIT_FINDINGS ${findings.length}`);
 }
 
 main();

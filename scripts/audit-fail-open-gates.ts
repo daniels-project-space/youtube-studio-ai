@@ -171,6 +171,8 @@ function main(): void {
     `be true is that a consumer can tell the check did not run. Read the catch and\n` +
     `decide; the three already fixed all looked exactly like these.`,
   );
+  // Machine-readable, so scripts/run-audits.mjs never parses prose.
+  console.log(`AUDIT_FINDINGS ${findings.length}`);
 }
 
 main();

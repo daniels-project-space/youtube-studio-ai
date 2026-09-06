@@ -30,7 +30,8 @@
     "review:image-benchmark": "tsx scripts/review-image-provider-benchmark.mts",
     "audit:ui": "node scripts/ui-fifth-pass-audit.mjs",
     "trigger:dev": "npx --yes trigger.dev@4.5.9 dev",
-    "trigger:deploy": "npx --yes trigger.dev@4.5.9 deploy --native-build-server"
+    "trigger:deploy": "npx --yes trigger.dev@4.5.9 deploy --native-build-server",
+    "audit": "node scripts/run-audits.mjs"
   },
   "dependencies": {
     "@ai-sdk/google": "^3.0.80",

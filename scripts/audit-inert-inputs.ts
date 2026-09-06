@@ -312,6 +312,8 @@ function main(): void {
       `these, type-checked cleanly, passed every gate, and cost a mean 30.6% of\n` +
       `the timeline carrying the wrong beat purpose.`,
   );
+  // Machine-readable, so scripts/run-audits.mjs never parses prose.
+  console.log(`AUDIT_FINDINGS ${findings.length}`);
 }
 
 main();

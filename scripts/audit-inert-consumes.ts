@@ -367,6 +367,8 @@ function main(): void {
       `a real constraint for nothing and hides the block's true dependencies. Where a\n` +
       `key is declared to force ordering for a side effect, say so at the declaration.`,
   );
+  // Machine-readable, so scripts/run-audits.mjs never parses prose.
+  console.log(`AUDIT_FINDINGS ${findings.length}`);
 }
 
 main();

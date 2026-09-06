@@ -66,6 +66,14 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 python -m unittest -v infra/novita/test_worker.py infra/novita/test_a2vid_worker.py
       - name: Production-readiness tests
         run: ${{ steps.pm.outputs.pm }} run test:production-readiness
+      # Structural audits, checked against a committed baseline rather than
+      # zero: every remaining finding has been investigated and is correct as it
+      # stands, so demanding zero would force the gate to be silenced. Counts
+      # may fall freely; any rise fails. Eleven of these scripts existed and
+      # nothing ran them, which is the same "built it, never wired it up" defect
+      # they keep finding in the pipeline.
+      - name: Structural audit regression check
+        run: ${{ steps.pm.outputs.pm }} run audit
 
   cloud-runtime-preflight:
     name: Cloud runtime deployment preflight

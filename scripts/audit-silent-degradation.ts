@@ -171,6 +171,8 @@ function main(): void {
     `never happen is that the degraded run reads exactly like a healthy one. Each line is\n` +
     `a question: is this feature's absence visible to whoever reads the run log?`,
   );
+  // Machine-readable, so scripts/run-audits.mjs never parses prose.
+  console.log(`AUDIT_FINDINGS ${findings.length}`);
 }
 
 main();
