@@ -314,7 +314,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // Historical/manual music-loop designs can still compile for migration,
     // but the runtime block itself refuses to mint a plan without these two
     // route-owned seeds.  The automatic route requires both blocks.
-    optionalConsumes: ["channelProgramRoute", "contentLane", "styleDNA", "visualBrief", "musicBrief", "niche"],
+    optionalConsumes: ["channelProgramRoute", "styleDNA", "visualBrief", "musicBrief", "niche"],
     providerProfiles: [local],
     qualityRequired: true,
   }),
@@ -349,7 +349,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     maxCostUsdFor: () => PRICE.topazUpscaleUsd,
   }),
   music: contract(["audio.music_generated"], {
-    optionalConsumes: ["reuseMusicKey", "musicBrief", "styleDNA", "channelName", "sceneMusicPrompt", "studioAudioRecipeProjection", "musicProgramPlan"],
+    optionalConsumes: ["reuseMusicKey", "musicBrief", "styleDNA", "channelName", "studioAudioRecipeProjection", "musicProgramPlan"],
     providerProfiles: [managed, minimaxMusic3],
     maxCostUsd: 10,
     // Reserve both the requested generation count and one alternate-provider
@@ -498,7 +498,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   script_gen: contract(["script.generated"], {
     optionalConsumes: [
-      "reuseScript", "structure", "styleDNA", "scriptPlaybook", "topicBet",
+      "reuseScript", "structure", "styleDNA", "scriptPlaybook",
       "channelName", "niche", "persona", "styleGrammar",
       // Per-channel critique grounding for the shared script critique loop.
       "criticDoctrine", "contentLane", "dataStorySourceLedger", "casefileSourcePacket", "syntheticScenario", "planWeekPreparation",
@@ -507,21 +507,19 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   hook_craft: contract(["script.hook_refined"], {
     optionalConsumes: [
-      "script",
-      // Per-channel grounding for the hook produce→critique loop (P1-4).
+            // Per-channel grounding for the hook produce→critique loop (P1-4).
       "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane",
     ],
   }),
   qa_script: contract(["script.qa_passed"], {
-    optionalConsumes: ["script", "styleDNA", "persona", "dataStorySourceLedger", "channelProgramRoute", "serializedProgramEpisodeContext"],
+    optionalConsumes: ["script", "persona", "dataStorySourceLedger", "channelProgramRoute", "serializedProgramEpisodeContext"],
     qualityRequired: true,
   }),
   narration_tts: contract(["narration.timed"], {
     optionalConsumes: [
-      "styleDNA", "musicBrief", "script", "voiceId", "reuseLanguage", "niche",
+      "styleDNA", "musicBrief", "script", "voiceId", "niche",
       // Grounds the cold-open take judge in this channel's own voice standard.
-      "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane",
-    ],
+          ],
     providerProfiles: [managed],
     maxCostUsd: 10,
     maxCostUsdFor: (params, context) => {
@@ -578,12 +576,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   entity_imagery: contract(["visuals.entities"], {
     optionalConsumes: [
-      "styleDNA", "visualBrief",
       // Per-channel grounding for the entity-selection produce→critique loop (P1-4).
       "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane", "topic", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment",
     ],
   }),
-  intro_card: contract(["graphics.intro"], { optionalConsumes: ["palette", "channelAvatarKey", "channelName"] }),
+  intro_card: contract(["graphics.intro"], { optionalConsumes: ["palette", "channelAvatarKey"] }),
   quote_overlays: contract(["graphics.quotes"], { optionalConsumes: ["introSec", "chapterPlan", "studioOverlayRecipeProjection"] }),
   visual_inserts: contract(["graphics.data"], {
     optionalConsumes: ["topic", "niche", "styleDNA", "palette", "introSec", "quoteOverlays", "chapterPlan", "dataStorySourceLedger", "evidenceVisualManifests", "studioMotionGraphicsRecipeProjection"],
@@ -619,8 +616,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   qa_visual: contract(["master.quality_passed"], {
     optionalConsumes: [
-      "narrationDurationSec", "narrationPerformanceEvidence", "script", "sentenceTimings", "styleDNA", "showBible", "introApplied", "healHints", "palette",
-      "tags", "strategy", "thumbnailer", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
+      "narrationDurationSec", "narrationPerformanceEvidence", "script", "sentenceTimings", "styleDNA", "showBible", "introApplied", "palette",
+      "tags", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec", "loopSeamDiff",
       // No overlaysDropped: qa_visual never reads it. The counter is surfaced in
       // timeline_assemble's own log and mined as a trend by pipelineDoctor; QA
@@ -656,8 +653,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "studioAssetRecipeProjection", "studioAudioRecipeProjection",
       "studioOverlayRecipeProjection", "studioMotionGraphicsRecipeProjection",
       "studioTransitionRecipeProjection", "studioPostproductionDecision",
-      "shortStrategyBrief", "beatManifest", "shortRetentionManifest", "shortSceneQa", "documotionVerdict", "documotionRender",
-      // Final QA conditionally rehydrates narration, validates admitted
+            // Final QA conditionally rehydrates narration, validates admitted
       // Casefile provenance, and now verifies renderer-declared readable text.
       // These remain optional because each is specific to a different lane.
       "narrationKey", "narrationLocalPath", "narrationTranscriptText", "narrationStartSec", "onScreenTextCues", "quizShortOpeningHook",
@@ -928,7 +924,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
 
   scene_compiler: contract(["visuals.scene_compiled", "master.assembled"], {
     requiredConsumes: ["sceneManifest", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
-    optionalConsumes: ["musicKey", "episodeGraph", "contentLane", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment"],
+    optionalConsumes: ["musicKey", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment"],
     providerProfiles: [local],
     maxCostUsd: 0,
     qualityRequired: true,
@@ -1014,16 +1010,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "cinematicCreativeLocks",
       "cinematicEditDecisionList",
       "cinematicFinalMasterQaAdmission",
-      "channelName",
-      "persona",
-      "styleGrammar",
-      "criticDoctrine",
-      // Present only on a route-owned serialized program. The planner verifies
+                              // Present only on a route-owned serialized program. The planner verifies
       // its route/run/topic binding before it can influence a native comic
       // storyboard; ordinary self-contained stories remain independent.
-      "serializedProgramEpisodeContext",
-      "contentLane",
-    ],
+                ],
     providerProfiles: [{ id: "novita-zimage-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
     // A cinematic sequence can deliberately contain up to 240 short,
     // source-bound coverage shots. It must name maxCinematicClips explicitly
@@ -1058,12 +1048,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "editorEdl",
       "storyCoverage",
       "sceneManifest",
-      "channelName",
-      "persona",
-      "styleGrammar",
-      "criticDoctrine",
-      "contentLane",
-    ],
+                                  ],
     providerProfiles: [{ id: "novita-zimage-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 33,
     maxCostUsdFor: (params) => {
@@ -1075,7 +1060,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   novita_render_images: contract(["visuals.keyframes_generated", "render.profile_pinned", "render.spot_only"], {
     requiredConsumes: ["shotList", "dpVisualSpecs", "visualMatterManifest"],
-    optionalConsumes: ["visualBrief", "studioLtxCreativeAdapterSelection"],
+    optionalConsumes: ["visualBrief"],
     providerProfiles: [{ id: "novita-zimage-production", provider: "novita", quality: "production", allowFallback: false }],
     // 50 hero shots × two candidates × the single-4090 two-hour hard bound.
     // This is a reservation ceiling, not an instruction to spend it; runtime
@@ -1273,7 +1258,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   motion_comic: contract(
     ["script.generated", "script.qa_passed", "narration.timed", "visuals.generated", "visuals.story_aligned", "master.assembled"],
     {
-      optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "visualRepair", "healHints", "healAttempt", "selfContainedStoryReceipt", "channelProgramRoute", "styleDNA", "styleGrammar", "visualStyle"],
+      optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "visualRepair", "selfContainedStoryReceipt", "channelProgramRoute", "styleDNA", "styleGrammar", "visualStyle"],
       providerProfiles: [managed, local],
       maxCostUsd: 40,
       // Cold-run bound includes the live direct-Novita primary/recovery panel

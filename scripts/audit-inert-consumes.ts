@@ -37,6 +37,24 @@ import ts from "typescript";
 
 import { registerAllBlocks } from "@/engine/blocks";
 import { allManifests } from "@/engine/registry";
+import { CREW_ARTIFACT_BINDINGS } from "@/engine/pipelineCompiler";
+
+/**
+ * A crew artifact must be DECLARED by every listed consumer whether or not the
+ * body reads it: pipelineCompiler refuses a pipeline where a consumer of a crew
+ * artifact has not declared it ("uses crew artifact X without declaring it").
+ *
+ * Learned by removing four of them in a batch and watching the module-contract
+ * test reject the whole design — which is the third distinct legitimate reason
+ * for an unread declaration, after ordering constraints and superseded fields.
+ */
+const CREW_REQUIRED = new Map<string, Set<string>>();
+for (const binding of CREW_ARTIFACT_BINDINGS) {
+  for (const consumer of binding.consumerIds) {
+    if (!CREW_REQUIRED.has(consumer)) CREW_REQUIRED.set(consumer, new Set());
+    CREW_REQUIRED.get(consumer)!.add(binding.artifact);
+  }
+}
 
 const ROOT = process.cwd();
 const BLOCK_DIR = join(ROOT, "src/trigger/blocks");
@@ -291,6 +309,7 @@ function main(): void {
   let keysChecked = 0;
   const noScope: string[] = [];
   let mentionedOnly = 0;
+  let crewRequired = 0;
 
   for (const manifest of allManifests()) {
     const scope = scopes.get(manifest.id);
@@ -306,6 +325,7 @@ function main(): void {
     for (const [key, kind] of declared) {
       keysChecked++;
       if (scope.reads.has(key)) continue;
+      if (CREW_REQUIRED.get(manifest.id)?.has(key)) { crewRequired++; continue; }
       // A key can also be named in a string the block passes onward (a log, a
       // receipt field). That is not a READ, but it is enough ambiguity that
       // reporting it would waste the reader's time, so it is still excused —
@@ -319,6 +339,7 @@ function main(): void {
   console.log(`blocks with a locatable definition: ${blocksChecked}${noScope.length ? ` (${noScope.length} not found: ${noScope.slice(0, 6).join(", ")}${noScope.length > 6 ? " …" : ""})` : ""}`);
   console.log(`declared store keys checked: ${keysChecked}`);
   console.log(`named in a string but never read (excused): ${mentionedOnly}`);
+  console.log(`required by a crew-artifact binding, read or not: ${crewRequired}`);
   console.log(`declared but never read in the block: ${findings.length}\n`);
   let current = "";
   for (const f of findings) {
@@ -330,7 +351,19 @@ function main(): void {
   }
   if (!findings.length) console.log("  none");
   console.log(
-    `\n"consumes" is what the compiler orders the pipeline by, so a dead entry buys\n` +
+    `\nEvery remaining finding is a REQUIRED consume kept deliberately to sequence the\n` +
+      `pipeline, and each says so where it is declared: cleanup and shorts_spinoff wait\n` +
+      `on the upload's watchUrl, studio_ltx_adapter_resolve waits on asset QA,\n` +
+      `quiz_metadata on topic_select, story_spine on both script_gen and narration_tts.\n` +
+      `There are no unexplained inert declarations left.\n` +
+      `\nThree distinct reasons a declaration can be unread, all learned the hard way:\n` +
+      `  ordering        the key sequences the pipeline; the body never touches it\n` +
+      `  crew binding    pipelineCompiler REFUSES a pipeline whose crew-artifact consumer\n` +
+      `                  has not declared it, read or not — found by batch-removing four\n` +
+      `                  and watching the module-contract test reject the design\n` +
+      `  superseded      a newer mechanism owns the job (thumbnail_gen's thumbnailIdentity,\n` +
+      `                  replaced by thumbnailPlaybook ten days after it shipped)\n` +
+      `\n"consumes" is what the compiler orders the pipeline by, so a dead entry buys\n` +
       `a real constraint for nothing and hides the block's true dependencies. Where a\n` +
       `key is declared to force ordering for a side effect, say so at the declaration.`,
   );
