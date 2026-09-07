@@ -7,5 +7,6 @@
   "audit-dead-capability-gates": 14,
   "audit-unbounded-normalized": 2,
   "audit-inert-produces": 67,
-  "audit-unchecked-number-clamps": 3
+  "audit-unchecked-number-clamps": 3,
+  "audit-contract-consumes-drift": 0
 }
