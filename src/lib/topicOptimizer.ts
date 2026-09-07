@@ -73,15 +73,40 @@ export async function optimizeTopics(opts: OptimizeTopicsOpts): Promise<Optimize
   const channelId = opts.channelId as Id<"channels">;
 
   // Convex-side context (best-effort reads; topicraft itself gates loudly).
+  // Each of these five was a bare .catch with no log, so an outage looked exactly
+  // like an empty result. The first is the one that matters: `done` is the
+  // ALREADY-USED topic list, and losing it silently produces a week of bets the
+  // channel has already published. topic_select re-checks at run time against a
+  // read that has no catch at all — it fails closed — so nothing ships twice;
+  // what a silent loss here buys is a plan full of topics that will be refused
+  // later, with no clue why.
+  //
+  // Degrading is still right: a topic slate must not fail because a niche read
+  // was slow. It just has to be visible. Same fix competitor_research already
+  // had for the same shape.
+  const lost: string[] = [];
+  const noteLoss = <T,>(what: string, fallback: T) => (error: unknown): T => {
+    lost.push(`${what} (${error instanceof Error ? error.message : error})`);
+    return fallback;
+  };
   const [done, plan, competitors, nicheIntel, perfCtx] = await Promise.all([
-    opts.convex.query(api.topicMemory.listForChannel, { channelId }).catch(() => [] as { key: string }[]),
-    opts.convex.query(api.contentPlan.listPlan, { ownerId: opts.ownerId, channelId }).catch(() => [] as { topic: string }[]),
+    opts.convex.query(api.topicMemory.listForChannel, { channelId })
+      .catch(noteLoss("already-used topics — this slate may repeat published work", [] as { key: string }[])),
+    opts.convex.query(api.contentPlan.listPlan, { ownerId: opts.ownerId, channelId })
+      .catch(noteLoss("the current plan — this slate may duplicate scheduled topics", [] as { topic: string }[])),
     niche
-      ? opts.convex.query(api.competitors.listCompetitors, { ownerId: opts.ownerId, niche }).catch(() => [])
+      ? opts.convex.query(api.competitors.listCompetitors, { ownerId: opts.ownerId, niche })
+          .catch(noteLoss("competitor evidence", [] as unknown[]))
       : Promise.resolve([] as unknown[]),
-    niche ? opts.convex.query(api.seo.getNiche, { ownerId: opts.ownerId, niche }).catch(() => null) : Promise.resolve(null),
-    loadPerformanceContext(opts.keyPrefix).catch(() => ""),
+    niche
+      ? opts.convex.query(api.seo.getNiche, { ownerId: opts.ownerId, niche })
+          .catch(noteLoss("niche intel and power words", null))
+      : Promise.resolve(null),
+    loadPerformanceContext(opts.keyPrefix).catch(noteLoss("performance context", "")),
   ]);
+  if (lost.length) {
+    log(`optimizeTopics: BET EVIDENCE LOST — ${lost.join("; ")}`);
+  }
 
   const competitorTitles = (competitors as { topVideos?: { title: string; views: number }[] }[])
     .flatMap((c) => c.topVideos ?? [])

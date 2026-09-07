@@ -90,6 +90,23 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
+/** The nearest named function or variable enclosing a node, for the report. */
+function enclosingName(node: ts.Node, sf: ts.SourceFile): string {
+  let current: ts.Node | undefined = node;
+  while (current) {
+    if ((ts.isFunctionDeclaration(current) || ts.isMethodDeclaration(current)) && current.name) {
+      return current.name.getText(sf);
+    }
+    if (ts.isVariableDeclaration(current) && ts.isIdentifier(current.name)) return current.name.getText(sf);
+    if (
+      ts.isPropertyAssignment(current) && current.name.getText(sf) === "id" &&
+      ts.isStringLiteral(current.initializer)
+    ) return current.initializer.text;
+    current = current.parent;
+  }
+  return "";
+}
+
 interface Finding { file: string; line: number; context: string; detail: string }
 
 function main(): void {
@@ -110,6 +127,62 @@ function main(): void {
         name = node.initializer.text;
       }
 
+      // A PROMISE .catch(handler) is the same shape as a catch clause and this
+      // audit could not see one: it matched ts.isCatchClause only, so 105
+      // `.catch(() => null)` / `.catch(() => [])` chains were never inspected.
+      // competitor_research's three bare Convex reads were exactly this, and
+      // they had to be found by hand — the comment recording that fix sits at
+      // intelligenceBlocks.ts and the audit still could not have found it.
+      if (
+        ts.isCallExpression(node) &&
+        ts.isPropertyAccessExpression(node.expression) &&
+        node.expression.name.text === "catch" &&
+        node.arguments.length === 1
+      ) {
+        const handler = node.arguments[0]!;
+        const receiver = node.expression.expression.getText(sf);
+        if (
+          (ts.isArrowFunction(handler) || ts.isFunctionExpression(handler)) &&
+          FALLIBLE.test(receiver)
+        ) {
+          considered++;
+          const body = handler.getText(sf)
+            .replace(/\/\*[\s\S]*?\*\//g, "")
+            .replace(/(^|[^:])\/\/.*$/gm, "$1");
+          // `() => null` has no `return`, so YIELDS_EMPTY's return-shaped
+          // patterns miss it. A concise arrow body IS the returned value.
+          const concise = /=>\s*(null|undefined|\[\]|\{\}|""|''|``|0|false)\s*$/.test(body.trim());
+          const rethrows = /\bthrow\b/.test(body);
+          const enclosing = enclosingName(node, sf) || name;
+          // The handler is not the whole story. documotion's asset gate does
+          //   const raw = await visionLocal({...}).catch(() => "");
+          //   if (!raw) return rejectedAssetGate("asset gate unavailable; ...");
+          // which fails CLOSED and names the loss on the very next line. Judging
+          // the handler in isolation called that a silent degradation — a false
+          // positive, and a few of those are all it takes for an audit to be
+          // ignored. Look at the statement's immediate aftermath too.
+          const fullText = sf.getFullText();
+          const after = fullText.slice(node.getEnd(), node.getEnd() + 400)
+            .replace(/\/\*[\s\S]*?\*\//g, "")
+            .replace(/(^|[^:])\/\/.*$/gm, "$1");
+          const handledAfter = NAMES_THE_LOSS.test(after) || /\breject|\bthrow\b/.test(after);
+          if (
+            !rethrows && !ACCESSOR.test(enclosing) &&
+            (concise || YIELDS_EMPTY.test(body)) &&
+            !NAMES_THE_LOSS.test(body) && !handledAfter
+          ) {
+            const logs = Array.from(body.matchAll(/["'`]([^"'`]{6,200})["'`]/g)).map((m) => m[1]);
+            findings.push({
+              file: rel,
+              line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+              context: `${enclosing || "?"} (promise .catch)`,
+              detail: logs.length
+                ? `log: "${logs[0].slice(0, 80)}"`
+                : `SWALLOWED: ${receiver.replace(/\s+/g, " ").slice(0, 70)}`,
+            });
+          }
+        }
+      }
       if (ts.isCatchClause(node) && ts.isTryStatement(node.parent)) {
         const tried = node.parent.tryBlock.getText(sf);
         if (FALLIBLE.test(tried)) {

@@ -513,7 +513,16 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
         `"secondary" = smaller real motion (cloth, hair, robes, banners, flames, ripples, breathing); if none, "none"; ` +
         `"intensity" = how much TOTAL motion HONESTLY suits this moment: "gentle" for calm, quiet, still, contemplative or portrait scenes (MOST lore scenes), "moderate" for normal activity, "strong" ONLY for genuine action/chaos/battle/cataclysm. Default to gentle or moderate; reserve strong. ` +
         `Be concrete and specific to THIS picture. Output ONLY the JSON object.`,
-    }).catch(() => "");
+    }).catch((e) => {
+      // Losing this leaves the scene with NO camera move, no subject action and
+      // no particles — it animates on defaults while the run reads like one that
+      // was directed. Degrading is right; silence is not.
+      deps.log?.(
+        `loreshort: NO MOTION DIRECTION for scene ${i} — it will animate on defaults ` +
+          `(${e instanceof Error ? e.message : e})`,
+      );
+      return "";
+    });
     let analysis: MotionAnalysis = {};
     try { analysis = parseMotionAnalysis(raw); } catch { analysis = {}; }
     motion[i] = analysis;

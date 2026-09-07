@@ -1,7 +1,7 @@
 {
   "audit-json-contract-ceilings": 0,
   "audit-fail-open-gates": 2,
-  "audit-silent-degradation": 5,
+  "audit-silent-degradation": 16,
   "audit-inert-inputs": 3,
   "audit-inert-consumes": 6,
   "audit-dead-capability-gates": 14,
