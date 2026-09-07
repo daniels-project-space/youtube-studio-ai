@@ -178,3 +178,70 @@ four modules that had nothing else in common. It is worth its own rules.
     the fix contained the old wording. The ceiling audit guessed "list-shaped"
     from nearby words and called `{"closing_line":string}` a list. Read an
     audit's findings before acting on them, and fix the audit first.
+
+## What the fleet-wide module pass added (2026-09-06/07)
+
+17. **Test the detector against a case you already know, before believing a clean
+    run.** Six blind spots were found in this repo's own audits this pass, and
+    every one surfaced by asking "would this have caught the thing I found by
+    hand?" — never by reading the audit's output. The ceiling audit could not see
+    a schema passed by reference, a contract split across concatenated literals,
+    a contract followed by an em dash, or a nested field. The inert-input audit
+    excluded its own target because `[...input.sentenceTimings]` matched a spread
+    guard. The silent-degradation audit had never looked at a promise `.catch`,
+    which is 105 call sites here and the exact shape of the defect it was written
+    for. A zero from an unfalsified detector is not evidence of anything.
+
+18. **When an audit reads the source that declares the thing it audits, remove
+    the declaration from what it scans.** Twice: `consumes: ["k"]` made every
+    consumed key look read, and `produces: ["k"]` made every produced key look
+    consumed. The second reported 0 of 286 and the zero meant nothing.
+
+19. **A convention that is correct and a convention that is merely unexamined
+    look identical.** Five crew ceilings were raised to 2500 by convention and
+    measured afterwards: all five fine. synthShowBible's 2000 was set the same
+    way and fell back on 2 of 8 attempts, permanently genericising a channel,
+    because its contract is far heavier than the floor was measured on. Measure
+    the ones whose failure is expensive; the cost of headroom is nothing.
+
+20. **Size a ceiling by the reasoning the TASK provokes, not the shape of the
+    answer.** The single-field floor was 0, justified by agentJson answering
+    "2+2" in 100 tokens. hook_craft's `{"hook":string}` is also a single field,
+    and is a creative judgement over 2000 characters of narration: 0/3 usable at
+    200, 3/3 at 700. It had never once returned a hook.
+
+21. **A capability check must not outrun the capability.** `hasGeminiKey()`
+    honestly returns false; `hasDocumotion()` answered
+    `Boolean(process.env.GEMINI_API_KEY)` for a runtime disabled by policy, so it
+    said yes and then threw. A check that says yes and throws is worse than one
+    that says no, because the caller has already committed.
+
+22. **Follow the guard to the call.** `hasGeminiKey()` being false was the
+    visible half. The other half was that `generate()` asserts a runtime gate, so
+    EVERY Gemini call throws — which meant the forge's `llm_json` step, having no
+    guard at all, failed for every architect-authored module. Auditing guards
+    would never have found it.
+
+23. **Ask what the failure costs where it happens.** `notify` throws on a
+    Telegram error, which is right for the sender and wrong after a successful
+    upload: it marked a published run failed and stopped `cleanup` from sealing
+    its retention schedule. Severity belongs at the call site.
+
+24. **A mutation that survives is usually the test's fault.** Four times this
+    pass. The rounding tolerance was never exercised because the "hair over the
+    edge" case summed to 0.995; a capability check was computed before the
+    stages but not actually gating the refusal; a fixture used comfortable short
+    strings so a truncating cap never truncated. Each survival exposed a test
+    that would have passed through the regression it existed to catch.
+
+25. **Wire the audits, or they become the thing they find.** Eleven audit scripts
+    existed and nothing ran them. They now run in CI against a committed
+    baseline — not zero, because every remaining finding is investigated and
+    correct, and a gate that must be silenced on day one is worse than no gate.
+    Counts may fall freely; any rise fails.
+
+26. **"Few throws in a block" usually means "delegates to an assertion".** Three
+    scans in this pass read as alarming and were scoping artifacts:
+    child_content_safety delegates to a 13-throw assertion, casefile_source_packet
+    to a 25-issue evaluator, and originality_gate's assertion sits in a helper
+    defined ABOVE the block. Follow the delegation before reporting a gap.
