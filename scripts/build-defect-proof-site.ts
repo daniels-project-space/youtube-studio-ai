@@ -18,7 +18,7 @@
  * cannot drift from the repository's own history.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { boundedInteger, boundedNumber } from "@/engine/boundedNumber";
@@ -34,6 +34,18 @@ function git(...args: string[]): string {
 }
 
 const HEAD = git("rev-parse", "HEAD");
+
+/** Resolve an anchor string to its 1-based line, or fail the build. */
+function anchorLine(file: string, anchor: string): number {
+  const lines = readFileSync(join(ROOT, file), "utf8").split("\n");
+  const hits = lines.flatMap((text, i) => (text.includes(anchor) ? [i + 1] : []));
+  if (hits.length !== 1) {
+    throw new Error(
+      `${file}: anchor ${JSON.stringify(anchor)} matched ${hits.length} lines — a deep link must be unambiguous`,
+    );
+  }
+  return hits[0]!;
+}
 
 /** Render any value the way a reader needs to see it — NaN must look like NaN. */
 function show(value: unknown): string {
@@ -75,7 +87,16 @@ interface Defect {
   impact: string;
   commit: string;
   file?: string;
-  line?: number;
+  /**
+   * A literal string to LOCATE the line, instead of a hand-typed number.
+   *
+   * Three of the first links pointed at the wrong line within an hour of being
+   * written, because every edit above them shifted the file. A number is a
+   * transcription, and this page exists to avoid transcriptions: the anchor is
+   * resolved against the file at build time and a missing one FAILS the build,
+   * so a link cannot quietly rot into pointing at unrelated code.
+   */
+  anchor?: string;
   evidence: Executed | Measured | Inspected;
 }
 
@@ -91,7 +112,7 @@ const DEFECTS: Defect[] = [
       "Promise.all([]) resolves instantly, so nothing threw and nothing logged.",
     commit: "5053bf0",
     file: "src/trigger/blocks/narratedBlocks.ts",
-    line: 391,
+    anchor: "A POOL WITH NO WORKERS IS NOT A POOL",
     evidence: {
       kind: "executed",
       beforeSrc: `Array.from({ length: Math.min(NaN, Math.max(1, 12)) }).length`,
@@ -114,7 +135,7 @@ const DEFECTS: Defect[] = [
     impact: "The source of the NaN above: TTS_CONCURRENCY=auto silently disabled narration.",
     commit: "5053bf0",
     file: "src/trigger/blocks/narratedBlocks.ts",
-    line: 378,
+    anchor: "export function ttsConcurrency",
     evidence: {
       kind: "executed",
       beforeSrc: `Math.max(1, Number("auto"))`,
@@ -133,7 +154,7 @@ const DEFECTS: Defect[] = [
       "synthesis proceeded with no budget test at all.",
     commit: "5053bf0",
     file: "src/trigger/blocks/narratedBlocks.ts",
-    line: 1216,
+    anchor: "Qwen3 stage budget is not a number",
     evidence: {
       kind: "executed",
       beforeSrc: `Math.max(0, Number("$5") - 0) < 0.02   // does the gate fire?`,
@@ -153,7 +174,7 @@ const DEFECTS: Defect[] = [
       "this; the readers were hardened and the writer was not.",
     commit: "5053bf0",
     file: "src/lib/music.ts",
-    line: 83,
+    anchor: "const observed = (error as",
     evidence: {
       kind: "executed",
       // Run against the REAL function, not a re-typed imitation of it: a
@@ -184,7 +205,7 @@ const DEFECTS: Defect[] = [
       "and composited, uncapped — and the planner was literally asked to 'Plan AT MOST NaN'.",
     commit: "5053bf0",
     file: "src/trigger/blocks/insertBlocks.ts",
-    line: 463,
+    anchor: "const maxInserts = boundedInteger",
     evidence: {
       kind: "executed",
       beforeSrc: `500 >= Math.max(1, Math.min(8, Number("three")))   // cap trips?`,
@@ -201,7 +222,7 @@ const DEFECTS: Defect[] = [
     impact: "The motion-graphics director was given 'NaN' as its budget for on-screen inserts.",
     commit: "5053bf0",
     file: "src/trigger/blocks/insertBlocks.ts",
-    line: 518,
+    anchor: "Plan AT MOST ${maxInserts}",
     evidence: {
       kind: "executed",
       beforeSrc: "`Plan AT MOST ${Math.max(1, Math.min(8, Number(\"three\")))} inserts`",
@@ -220,7 +241,7 @@ const DEFECTS: Defect[] = [
       "undefined, and reading .end off it a TypeError.",
     commit: "5053bf0",
     file: "src/trigger/blocks/insertBlocks.ts",
-    line: 660,
+    anchor: "endSentenceIdx` comes from MODEL JSON",
     evidence: {
       kind: "executed",
       beforeSrc: `timings[Math.min(3, Math.max(1, Math.min(Number("seven"), 5)))].end`,
@@ -248,7 +269,7 @@ const DEFECTS: Defect[] = [
       "block's own comment records fixing ('the wizard's lengthMinutes never reached this engine').",
     commit: "5053bf0",
     file: "src/trigger/blocks/whiteboardScribeBlocks.ts",
-    line: 556,
+    anchor: "const targetSeconds = boundedNumber",
     evidence: {
       kind: "executed",
       beforeSrc: `Math.max(0, Number("10 minutes")) > 0   // is the length honoured?`,
@@ -265,7 +286,7 @@ const DEFECTS: Defect[] = [
     impact: "maxClips becomes maxScenes, and slice(0, NaN) is [] — a paid render stage with no scenes.",
     commit: "5053bf0",
     file: "src/trigger/blocks/genFootageBlocks.ts",
-    line: 683,
+    anchor: "const genericMaxClips = boundedInteger",
     evidence: {
       kind: "executed",
       beforeSrc: `[sceneA, sceneB, sceneC].slice(0, Math.max(6, Math.min(24, Number("lots"))))`,
@@ -284,7 +305,7 @@ const DEFECTS: Defect[] = [
       "through — to plan zero scenes after paying to get there. The find that started the sweep.",
     commit: "f3d6d56",
     file: "src/engine/boundedNumber.ts",
-    line: 38,
+    anchor: "export function boundedNumber",
     evidence: {
       kind: "executed",
       beforeSrc: `Math.max(0, Math.min(6, Number("abc"))) <= 0   // guard fires?`,
@@ -500,8 +521,9 @@ function evidenceBadge(kind: string): string {
 
 function renderDefect(r: Rendered, index: number): string {
   const d = r.defect;
+  const line = d.file && d.anchor ? anchorLine(d.file, d.anchor) : undefined;
   const link = d.file
-    ? `${REPO}/blob/${HEAD}/${d.file}${d.line ? `#L${d.line}` : ""}`
+    ? `${REPO}/blob/${HEAD}/${d.file}${line ? `#L${line}` : ""}`
     : `${REPO}/commit/${d.commit}`;
   const body = git("log", "-1", "--pretty=format:%b", d.commit).split("\n").slice(0, 6).join("\n");
 
@@ -542,7 +564,7 @@ function renderDefect(r: Rendered, index: number): string {
       <pre>${esc(body)}</pre>
     </details>
     <p class="links">
-      <a href="${link}">${d.file ? `${esc(d.file)}${d.line ? `:${d.line}` : ""}` : "view commit"}</a>
+      <a href="${link}">${d.file ? `${esc(d.file)}${line ? `:${line}` : ""}` : "view commit"}</a>
       <a href="${REPO}/commit/${d.commit}">full diff</a>
     </p>
   </article>`;

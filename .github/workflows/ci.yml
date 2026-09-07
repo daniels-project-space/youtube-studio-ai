@@ -74,6 +74,13 @@ jobs:
       # they keep finding in the pipeline.
       - name: Structural audit regression check
         run: ${{ steps.pm.outputs.pm }} run audit
+      # The proof page runs each fixed defect's ORIGINAL expression beside its
+      # replacement and refuses to build if a "before" no longer demonstrates
+      # its defect, or if a deep-link anchor has gone missing. That makes it a
+      # regression test as well as a page: if someone reintroduces one of these
+      # shapes, or moves the code out from under a link, this step fails.
+      - name: Defect proof page still proves what it claims
+        run: ${{ steps.pm.outputs.pm }} run proof
 
   cloud-runtime-preflight:
     name: Cloud runtime deployment preflight
