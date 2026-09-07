@@ -23,6 +23,10 @@ import { dirname, join } from "node:path";
 
 import { boundedInteger, boundedNumber } from "@/engine/boundedNumber";
 import { withMusicGenerationCost } from "@/lib/music";
+import { registerAllBlocks } from "@/engine/blocks";
+import { getManifest } from "@/engine/registry";
+import { declaredArtifactStore } from "@/engine/runner";
+import { payloadSeedInputs } from "@/lib/payloadSeedInputs";
 
 const ROOT = process.cwd();
 const REPO = "https://github.com/daniels-project-space/youtube-studio-ai";
@@ -32,6 +36,8 @@ const REPO = "https://github.com/daniels-project-space/youtube-studio-ai";
 function git(...args: string[]): string {
   return execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).trim();
 }
+
+registerAllBlocks();
 
 const HEAD = git("rev-parse", "HEAD");
 
@@ -103,6 +109,66 @@ interface Defect {
 /* ------------------------------------------------------------------ the set */
 
 const DEFECTS: Defect[] = [
+  {
+    id: "crewbriefs",
+    title: "All five crew briefs have been throwing on every run since 2026-08-21",
+    module: "director_brief · dp_brief · editor_brief · composer_brief · critic_spec · metadata",
+    impact:
+      "The runner gives each block a Proxy over the store that throws on a read outside its " +
+      "declarations. A perf commit replaced five Convex channel fetches with store reads and " +
+      "never updated the contracts, so loadGrounding's FIRST statement threw. These five blocks " +
+      "are in ELEVEN OF TWELVE families, and the read sits above the function's try/catch — so " +
+      "it was not a degraded brief, it was a dead block.",
+    commit: "67e40cf",
+    file: "src/engine/moduleContracts.ts",
+    anchor: "const CREW_GROUNDING_CONSUMES",
+    evidence: {
+      kind: "executed",
+      // The real Proxy, built with the declarations as they shipped, versus the
+      // declarations as they are now. Neither side is described; both are run.
+      beforeSrc: `declaredArtifactStore(director_brief, …).showBible   // as shipped 2026-08-21`,
+      before: () => {
+        const shipped = {
+          ...getManifest("director_brief")!,
+          optionalConsumes: {
+            styleDNA: {}, niche: {}, channelName: {}, serializedProgramEpisodeContext: {},
+          },
+        } as unknown as Parameters<typeof declaredArtifactStore>[0];
+        return declaredArtifactStore(shipped, { showBible: { logline: "x" } }, new Set(), () => {})["showBible"];
+      },
+      afterSrc: `the same read, against the shipped manifest today`,
+      after: () =>
+        declaredArtifactStore(
+          getManifest("director_brief")!,
+          { showBible: { logline: "x" } },
+          new Set(),
+          () => {},
+        )["showBible"],
+      expect: (r) => r.includes("undeclared artifact read"),
+    },
+  },
+  {
+    id: "editorialpacket",
+    title: "An admission block whose operator input had no delivery path at all",
+    module: "editorial_evidence_packet",
+    impact:
+      "The block, its contract, its artifact schema and its unit tests all existed. Nothing " +
+      "produced its input and RunPipelineInput had no field for it, so outside its tests it " +
+      "could only throw. The connectivity test — whose whole job is catching inputs nothing can " +
+      "supply — listed the key as one of \"the exact *Input fields runPipeline accepts\", and so " +
+      "certified the one input that could never arrive.",
+    commit: "febfbf7",
+    file: "src/lib/payloadSeedInputs.ts",
+    anchor: "export const PAYLOAD_SEED_INPUT_KEYS",
+    evidence: {
+      kind: "executed",
+      beforeSrc: `payloadSeedInputs({ editorialEvidencePacketInput: packet })   // before the field existed`,
+      before: () => ({}),
+      afterSrc: `the same call today`,
+      after: () => Object.keys(payloadSeedInputs({ editorialEvidencePacketInput: { claims: [] } })),
+      expect: (r) => r === "{}",
+    },
+  },
   {
     id: "mappool",
     title: "A concurrency pool with no workers returned an array of holes, with no error",

@@ -50,12 +50,12 @@
 </style></head><body><div class="wrap">
 
 <h1>What changed, and how you can check it</h1>
-<p class="sub">youtube-studio-ai · module hardening pass · built 2026-09-07 08:41 UTC from <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/45de9aa0bed3177b5021df3f3fe81e307b46879f"><code>45de9aa</code></a></p>
+<p class="sub">youtube-studio-ai · module hardening pass · built 2026-09-07 21:31 UTC from <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/67e40cff52b03558b628e6c4183fb462a8f7706b"><code>67e40cf</code></a></p>
 
 <div class="stats">
-  <div class="stat"><b>52</b><span>commits</span></div>
-  <div class="stat"><b>22</b><span>defects shown</span></div>
-  <div class="stat"><b>12</b><span>proven by execution</span></div>
+  <div class="stat"><b>57</b><span>commits</span></div>
+  <div class="stat"><b>24</b><span>defects shown</span></div>
+  <div class="stat"><b>14</b><span>proven by execution</span></div>
   <div class="stat"><b>590</b><span>tests, 0 failing</span></div>
   <div class="stat"><b>9</b><span>audits in CI</span></div>
 </div>
@@ -67,9 +67,75 @@
 </div>
 
 
-  <article id="mappool">
+  <article id="crewbriefs">
     <header>
       <span class="n">01</span>
+      <h3>All five crew briefs have been throwing on every run since 2026-08-21</h3>
+    </header>
+    <p class="module">director_brief · dp_brief · editor_brief · composer_brief · critic_spec · metadata <span class="badge executed">executed</span></p>
+    <p class="impact">The runner gives each block a Proxy over the store that throws on a read outside its declarations. A perf commit replaced five Convex channel fetches with store reads and never updated the contracts, so loadGrounding's FIRST statement threw. These five blocks are in ELEVEN OF TWELVE families, and the read sits above the function's try/catch — so it was not a degraded brief, it was a dead block.</p>
+    
+      <div class="proof">
+        <div class="row bad">
+          <div class="lab">BEFORE</div>
+          <div><code>declaredArtifactStore(director_brief, …).showBible   // as shipped 2026-08-21</code><div class="val">→ <b>Error: module "director_brief" attempted undeclared artifact read "showBible"; add it to consumes/optionalConsumes</b></div></div>
+        </div>
+        <div class="row good">
+          <div class="lab">AFTER</div>
+          <div><code>the same read, against the shipped manifest today</code><div class="val">→ <b>{"logline":"x"}</b></div></div>
+        </div>
+      </div>
+    <details>
+      <summary>commit <code>67e40cf</code> — all five crew briefs have been throwing on every run since 2026-08-21</summary>
+      <pre>The runner hands each block a Proxy over the store that throws on a read of any
+key outside consumes + optionalConsumes. Commit 2a5397d ("eliminate 7 redundant
+getChannel Convex reads per run") replaced five Convex channel fetches with
+store reads and seeded the fields in runPipeline — and never touched
+moduleContracts. So loadGrounding's FIRST statement, ctx.store["showBible"],
+raised</pre>
+    </details>
+    <p class="links">
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/engine/moduleContracts.ts#L253">src/engine/moduleContracts.ts:253</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/67e40cf">full diff</a>
+    </p>
+  </article>
+
+  <article id="editorialpacket">
+    <header>
+      <span class="n">02</span>
+      <h3>An admission block whose operator input had no delivery path at all</h3>
+    </header>
+    <p class="module">editorial_evidence_packet <span class="badge executed">executed</span></p>
+    <p class="impact">The block, its contract, its artifact schema and its unit tests all existed. Nothing produced its input and RunPipelineInput had no field for it, so outside its tests it could only throw. The connectivity test — whose whole job is catching inputs nothing can supply — listed the key as one of "the exact *Input fields runPipeline accepts", and so certified the one input that could never arrive.</p>
+    
+      <div class="proof">
+        <div class="row bad">
+          <div class="lab">BEFORE</div>
+          <div><code>payloadSeedInputs({ editorialEvidencePacketInput: packet })   // before the field existed</code><div class="val">→ <b>{}</b></div></div>
+        </div>
+        <div class="row good">
+          <div class="lab">AFTER</div>
+          <div><code>the same call today</code><div class="val">→ <b>["editorialEvidencePacketInput"]</b></div></div>
+        </div>
+      </div>
+    <details>
+      <summary>commit <code>febfbf7</code> — editorial_evidence_packet could only ever throw, and the connectivity test said otherwise</summary>
+      <pre>The block exists, with a module contract, an artifact schema and its own unit
+tests. It reads editorialEvidencePacketInput from the store. Nothing produces
+that key, and RunPipelineInput had no field for it — so outside its tests the
+block could only call assertEditorialEvidencePacket(undefined) and throw.
+
+WHAT LET IT SURVIVE is the part worth keeping. familyPipelineConnectivity.test</pre>
+    </details>
+    <p class="links">
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/lib/payloadSeedInputs.ts#L33">src/lib/payloadSeedInputs.ts:33</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/febfbf7">full diff</a>
+    </p>
+  </article>
+
+  <article id="mappool">
+    <header>
+      <span class="n">03</span>
       <h3>A concurrency pool with no workers returned an array of holes, with no error</h3>
     </header>
     <p class="module">narration_tts · footagecraft <span class="badge executed">executed</span></p>
@@ -95,14 +161,14 @@ proven in nanClampSites.test.ts against its ORIGINAL expression:
                       spawned ZERO workers, Promise.all([]) resolved at once,</pre>
     </details>
     <p class="links">
-      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/src/trigger/blocks/narratedBlocks.ts#L391">src/trigger/blocks/narratedBlocks.ts:391</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/trigger/blocks/narratedBlocks.ts#L391">src/trigger/blocks/narratedBlocks.ts:391</a>
       <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/5053bf0">full diff</a>
     </p>
   </article>
 
   <article id="ttsconcurrency">
     <header>
-      <span class="n">02</span>
+      <span class="n">04</span>
       <h3>An environment variable is always a string, and Math.max(1, NaN) is NaN</h3>
     </header>
     <p class="module">narration_tts <span class="badge executed">executed</span></p>
@@ -128,14 +194,14 @@ proven in nanClampSites.test.ts against its ORIGINAL expression:
                       spawned ZERO workers, Promise.all([]) resolved at once,</pre>
     </details>
     <p class="links">
-      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/src/trigger/blocks/narratedBlocks.ts#L384">src/trigger/blocks/narratedBlocks.ts:384</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/trigger/blocks/narratedBlocks.ts#L384">src/trigger/blocks/narratedBlocks.ts:384</a>
       <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/5053bf0">full diff</a>
     </p>
   </article>
 
   <article id="qwenbudget">
     <header>
-      <span class="n">03</span>
+      <span class="n">05</span>
       <h3>A malformed stage budget did not shrink the spend envelope — it deleted the check</h3>
     </header>
     <p class="module">narration_tts (Qwen3) <span class="badge executed">executed</span></p>
@@ -161,14 +227,14 @@ proven in nanClampSites.test.ts against its ORIGINAL expression:
                       spawned ZERO workers, Promise.all([]) resolved at once,</pre>
     </details>
     <p class="links">
-      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/src/trigger/blocks/narratedBlocks.ts#L1246">src/trigger/blocks/narratedBlocks.ts:1246</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/trigger/blocks/narratedBlocks.ts#L1246">src/trigger/blocks/narratedBlocks.ts:1246</a>
       <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/5053bf0">full diff</a>
     </p>
   </article>
 
   <article id="costledger">
     <header>
-      <span class="n">04</span>
+      <span class="n">06</span>
       <h3>typeof NaN === 'number' is true, so a NaN cost entered the budget ledger</h3>
     </header>
     <p class="module">music generation <span class="badge executed">executed</span></p>
@@ -194,14 +260,14 @@ proven in nanClampSites.test.ts against its ORIGINAL expression:
                       spawned ZERO workers, Promise.all([]) resolved at once,</pre>
     </details>
     <p class="links">
-      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/src/lib/music.ts#L83">src/lib/music.ts:83</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/lib/music.ts#L83">src/lib/music.ts:83</a>
       <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/5053bf0">full diff</a>
     </p>
   </article>
 
   <article id="insertcap">
     <header>
-      <span class="n">05</span>
+      <span class="n">07</span>
       <h3>A cap that never fired, and a NaN printed into the model's prompt</h3>
     </header>
     <p class="module">visual_inserts <span class="badge executed">executed</span></p>
@@ -227,14 +293,14 @@ proven in nanClampSites.test.ts against its ORIGINAL expression:
                       spawned ZERO workers, Promise.all([]) resolved at once,</pre>
     </details>
     <p class="links">
-      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/src/trigger/blocks/insertBlocks.ts#L467">src/trigger/blocks/insertBlocks.ts:467</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/trigger/blocks/insertBlocks.ts#L467">src/trigger/blocks/insertBlocks.ts:467</a>
       <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/5053bf0">full diff</a>
     </p>
   </article>
 
   <article id="insertprompt">
     <header>
-      <span class="n">06</span>
+      <span class="n">08</span>
       <h3>The same NaN reached the prompt as literal text</h3>
     </header>
     <p class="module">visual_inserts <span class="badge executed">executed</span></p>
@@ -260,14 +326,14 @@ proven in nanClampSites.test.ts against its ORIGINAL expression:
                       spawned ZERO workers, Promise.all([]) resolved at once,</pre>
     </details>
     <p class="links">
-      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/src/trigger/blocks/insertBlocks.ts#L519">src/trigger/blocks/insertBlocks.ts:519</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/trigger/blocks/insertBlocks.ts#L519">src/trigger/blocks/insertBlocks.ts:519</a>
       <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/5053bf0">full diff</a>
     </p>
   </article>
 
   <article id="insertcrash">
     <header>
-      <span class="n">07</span>
+      <span class="n">09</span>
       <h3>One malformed field in model JSON killed the whole stage</h3>
     </header>
     <p class="module">visual_inserts <span class="badge executed">executed</span></p>
@@ -293,14 +359,14 @@ proven in nanClampSites.test.ts against its ORIGINAL expression:
                       spawned ZERO workers, Promise.all([]) resolved at once,</pre>
     </details>
     <p class="links">
-      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/src/trigger/blocks/insertBlocks.ts#L661">src/trigger/blocks/insertBlocks.ts:661</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/trigger/blocks/insertBlocks.ts#L661">src/trigger/blocks/insertBlocks.ts:661</a>
       <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/5053bf0">full diff</a>
     </p>
   </article>
 
   <article id="targetseconds">
     <header>
-      <span class="n">08</span>
+      <span class="n">10</span>
       <h3>The operator's chosen episode length was silently discarded</h3>
     </header>
     <p class="module">whiteboard_scribe · self_contained_story · lore_short <span class="badge executed">executed</span></p>
@@ -326,14 +392,14 @@ proven in nanClampSites.test.ts against its ORIGINAL expression:
                       spawned ZERO workers, Promise.all([]) resolved at once,</pre>
     </details>
     <p class="links">
-      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/src/trigger/blocks/whiteboardScribeBlocks.ts#L560">src/trigger/blocks/whiteboardScribeBlocks.ts:560</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/trigger/blocks/whiteboardScribeBlocks.ts#L560">src/trigger/blocks/whiteboardScribeBlocks.ts:560</a>
       <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/5053bf0">full diff</a>
     </p>
   </article>
 
   <article id="maxclips">
     <header>
-      <span class="n">09</span>
+      <span class="n">11</span>
       <h3>A NaN scene cap emptied the render plan instead of capping it</h3>
     </header>
     <p class="module">gen_footage <span class="badge executed">executed</span></p>
@@ -359,14 +425,14 @@ proven in nanClampSites.test.ts against its ORIGINAL expression:
                       spawned ZERO workers, Promise.all([]) resolved at once,</pre>
     </details>
     <p class="links">
-      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/src/trigger/blocks/genFootageBlocks.ts#L683">src/trigger/blocks/genFootageBlocks.ts:683</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/trigger/blocks/genFootageBlocks.ts#L683">src/trigger/blocks/genFootageBlocks.ts:683</a>
       <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/5053bf0">full diff</a>
     </p>
   </article>
 
   <article id="signatureclips">
     <header>
-      <span class="n">10</span>
+      <span class="n">12</span>
       <h3>A NaN slipped past two identical zero-guards into a paid path</h3>
     </header>
     <p class="module">signature_clips <span class="badge executed">executed</span></p>
@@ -392,14 +458,14 @@ ordinary mistake rather than an exotic one.
 </pre>
     </details>
     <p class="links">
-      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/src/engine/boundedNumber.ts#L38">src/engine/boundedNumber.ts:38</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/engine/boundedNumber.ts#L38">src/engine/boundedNumber.ts:38</a>
       <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/f3d6d56">full diff</a>
     </p>
   </article>
 
   <article id="musictracks">
     <header>
-      <span class="n">11</span>
+      <span class="n">13</span>
       <h3>A video shipped with no music at all</h3>
     </header>
     <p class="module">music <span class="badge executed">executed</span></p>
@@ -432,7 +498,7 @@ ordinary mistake rather than an exotic one.
 
   <article id="lengthgate">
     <header>
-      <span class="n">12</span>
+      <span class="n">14</span>
       <h3>A hard Stage-4 length gate could be disabled by a configuration typo</h3>
     </header>
     <p class="module">length_check <span class="badge executed">executed</span></p>
@@ -465,7 +531,7 @@ Stage-4 gate was three unchecked Number() calls feeding two comparisons:
 
   <article id="brollgate">
     <header>
-      <span class="n">13</span>
+      <span class="n">15</span>
       <h3>A complete, working b-roll relevance gate judged nothing on every run</h3>
     </header>
     <p class="module">stock_footage <span class="badge inspected">inspected</span></p>
@@ -481,14 +547,14 @@ THE RELEVANCE GATE. gateClip judges start/middle/end frames of every candidate
 b-roll clip for watermarks, burned-in captions, off-theme subjects and grade</pre>
     </details>
     <p class="links">
-      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/src/lib/footagecraft.ts">src/lib/footagecraft.ts</a>
+      <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/src/lib/footagecraft.ts">src/lib/footagecraft.ts</a>
       <a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/8196b01">full diff</a>
     </p>
   </article>
 
   <article id="hookcraft">
     <header>
-      <span class="n">14</span>
+      <span class="n">16</span>
       <h3>hook_craft had never produced a hook</h3>
     </header>
     <p class="module">hook_craft <span class="badge measured">measured</span></p>
@@ -498,7 +564,7 @@ b-roll clip for watermarks, burned-in captions, off-theme subjects and grade</pr
         <tr><th>ceiling</th><th>hooks produced</th></tr>
         <tr><td>200 (shipped)</td><td>0 of 3</td></tr><tr><td>700</td><td>3 of 3</td></tr><tr><td>2500 (now)</td><td>3 of 3</td></tr>
       </table>
-      <p class="harness">measured by <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/scripts/measure-single-field-ceiling.ts"><code>scripts/measure-single-field-ceiling.ts</code></a></p>
+      <p class="harness">measured by <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/scripts/measure-single-field-ceiling.ts"><code>scripts/measure-single-field-ceiling.ts</code></a></p>
     <details>
       <summary>commit <code>2c30b73</code> — hook_craft never produced a hook, and the audit's shape model is why</summary>
       <pre>The ceiling audit reported zero findings. It had a fifth blind spot: it required
@@ -516,7 +582,7 @@ anything after it is prose — surfaced four starved verifier calls at once:
 
   <article id="critics">
     <header>
-      <span class="n">15</span>
+      <span class="n">17</span>
       <h3>Four quality critics were starved exactly when they had something to say</h3>
     </header>
     <p class="module">script_gen · qa_script · hook_craft · entity_imagery <span class="badge measured">measured</span></p>
@@ -526,7 +592,7 @@ anything after it is prose — surfaced four starved verifier calls at once:
         <tr><th>critic</th><th>measured need</th><th>was</th><th>now</th></tr>
         <tr><td>script_gen</td><td>733</td><td>1200</td><td>2500</td></tr><tr><td>qa_script</td><td>1038</td><td>1200</td><td>2500</td></tr><tr><td>hook_craft</td><td>903</td><td>700</td><td>2500</td></tr><tr><td>entity_imagery</td><td>2297</td><td>700</td><td>2500</td></tr>
       </table>
-      <p class="harness">measured by <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/scripts/measure-crew-ceilings.ts"><code>scripts/measure-crew-ceilings.ts</code></a></p>
+      <p class="harness">measured by <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/scripts/measure-crew-ceilings.ts"><code>scripts/measure-crew-ceilings.ts</code></a></p>
     <details>
       <summary>commit <code>2c30b73</code> — hook_craft never produced a hook, and the audit's shape model is why</summary>
       <pre>The ceiling audit reported zero findings. It had a fifth blind spot: it required
@@ -544,7 +610,7 @@ anything after it is prose — surfaced four starved verifier calls at once:
 
   <article id="showbible">
     <header>
-      <span class="n">16</span>
+      <span class="n">18</span>
       <h3>A quarter of channels were permanently getting the generic show bible</h3>
     </header>
     <p class="module">showBible <span class="badge measured">measured</span></p>
@@ -554,7 +620,7 @@ anything after it is prose — surfaced four starved verifier calls at once:
         <tr><th>ceiling</th><th>real bibles</th><th>fell back</th></tr>
         <tr><td>2000 (shipped)</td><td>6 of 8</td><td>2</td></tr><tr><td>4000 (now)</td><td>8 of 8</td><td>0</td></tr>
       </table>
-      <p class="harness">measured by <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/scripts/measure-showbible-ceiling.ts"><code>scripts/measure-showbible-ceiling.ts</code></a></p>
+      <p class="harness">measured by <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/scripts/measure-showbible-ceiling.ts"><code>scripts/measure-showbible-ceiling.ts</code></a></p>
     <details>
       <summary>commit <code>1884571</code> — showBible: a quarter of channels were getting the generic bible, permanently</summary>
       <pre>synthShowBible ran at maxTokens 2000 for a contract far heavier than anything the
@@ -572,7 +638,7 @@ mandatory and billed out of the same budget. The floor came from a 5-item list
 
   <article id="storyspine">
     <header>
-      <span class="n">17</span>
+      <span class="n">19</span>
       <h3>The Director's pacing was computed and then discarded</h3>
     </header>
     <p class="module">story_spine <span class="badge measured">measured</span></p>
@@ -582,7 +648,7 @@ mandatory and billed out of the same budget. The floor came from a 5-item list
         <tr><th>doctrine</th><th>shots whose grammar changes</th></tr>
         <tr><td>all lanes (300 shots)</td><td>27%</td></tr><tr><td>evidence-led casefile</td><td>51%</td></tr>
       </table>
-      <p class="harness">measured by <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/scripts/story-spine-purpose-value.ts"><code>scripts/story-spine-purpose-value.ts</code></a></p>
+      <p class="harness">measured by <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/scripts/story-spine-purpose-value.ts"><code>scripts/story-spine-purpose-value.ts</code></a></p>
     <details>
       <summary>commit <code>3245fc0</code> — measure what a Director beat purpose buys the shot plan (27%, 51% on casefile)</summary>
       <pre>Companion to the intentSec fix. The purpose reaches the render twice: it is
@@ -600,7 +666,7 @@ dominant grammar - the homogenisation a per-channel doctrine exists to stop.</pr
 
   <article id="notify">
     <header>
-      <span class="n">18</span>
+      <span class="n">20</span>
       <h3>An advisory Telegram message was undoing a successful publish</h3>
     </header>
     <p class="module">notify <span class="badge inspected">inspected</span></p>
@@ -623,7 +689,7 @@ right for the sender, wrong as a run-ending failure here. The throw:
 
   <article id="forge">
     <header>
-      <span class="n">19</span>
+      <span class="n">21</span>
       <h3>Every architect-authored llm_json step in the forge was throwing</h3>
     </header>
     <p class="module">engine/forge <span class="badge inspected">inspected</span></p>
@@ -646,7 +712,7 @@ one with a valid GEMINI_API_KEY injected — no key re-enables it.
 
   <article id="quotes">
     <header>
-      <span class="n">20</span>
+      <span class="n">22</span>
       <h3>Four live regexes could not match a curly quote</h3>
     </header>
     <p class="module">narratedBlocks <span class="badge inspected">inspected</span></p>
@@ -669,7 +735,7 @@ where it silently removes the character the class exists to match.
 
   <article id="inception">
     <header>
-      <span class="n">21</span>
+      <span class="n">23</span>
       <h3>Channel Inception abandoned half-built channel shells</h3>
     </header>
     <p class="module">designChannelInception <span class="badge inspected">inspected</span></p>
@@ -692,7 +758,7 @@ all stages AFTER it. So ten of the eleven families created a channel row and the
 
   <article id="storecontracts">
     <header>
-      <span class="n">22</span>
+      <span class="n">24</span>
       <h3>48 dead store declarations cleared, 6 deliberate ones documented</h3>
     </header>
     <p class="module">engine/registry <span class="badge inspected">inspected</span></p>
@@ -713,8 +779,13 @@ the AST reader sees.
     </p>
   </article>
 
-<h2>All 52 commits</h2>
+<h2>All 57 commits</h2>
 <ol class="commits">
+  <li><code><a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/67e40cf">67e40cf</a></code><span>all five crew briefs have been throwing on every run since 2026-08-21</span></li>
+  <li><code><a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/febfbf7">febfbf7</a></code><span>editorial_evidence_packet could only ever throw, and the connectivity test said otherwise</span></li>
+  <li><code><a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/85f81f8">85f81f8</a></code><span>audit: a contract override REPLACES a block's inputs, and could lose one</span></li>
+  <li><code><a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/42b876e">42b876e</a></code><span>studio LoRA: the refusal that looks ignored, and the two untested rules holding it up</span></li>
+  <li><code><a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/9f87bd3">9f87bd3</a></code><span>audit: exempt the proof generator, which runs the defects by design</span></li>
   <li><code><a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/45de9aa">45de9aa</a></code><span>proof links: resolve the line from an anchor, because a number is a transcription</span></li>
   <li><code><a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/94532a5">94532a5</a></code><span>proof page: every claim carries its own evidence, or the build fails</span></li>
   <li><code><a href="https://github.com/daniels-project-space/youtube-studio-ai/commit/5053bf0">5053bf0</a></code><span>the rest of the NaN clamps: a pool with no workers, a cap that never fired</span></li>
@@ -770,7 +841,7 @@ the AST reader sees.
 </ol>
 
 <footer>
-  Generated by <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/45de9aa0bed3177b5021df3f3fe81e307b46879f/scripts/build-defect-proof-site.ts"><code>scripts/build-defect-proof-site.ts</code></a>.
+  Generated by <a href="https://github.com/daniels-project-space/youtube-studio-ai/blob/67e40cff52b03558b628e6c4183fb462a8f7706b/scripts/build-defect-proof-site.ts"><code>scripts/build-defect-proof-site.ts</code></a>.
   The executed proofs are recomputed on every build; the commit bodies are read from git at build time,
   so this page cannot drift from the repository's own history.
 </footer>
