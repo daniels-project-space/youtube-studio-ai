@@ -79,7 +79,30 @@ async function resolveDirectLtxSelection(
   };
 }
 
-function exactCharacterRegistryIdentitiesForShot(input: {
+/**
+ * The registry identities to bind to one shot, or `null` to refuse.
+ *
+ * THREE RETURN CASES, AND THE DIFFERENCE BETWEEN TWO OF THEM IS LOAD-BEARING:
+ *
+ *   []      the shot has no continuity characters — a portable style selection
+ *           is appropriate
+ *   null    the shot HAS characters but at least one is unregistered — refuse,
+ *           because binding the registered actor's LoRA to a mixed shot claims
+ *           a continuity guarantee that does not hold
+ *   [ids]   the complete cast resolves — bind exactly this set
+ *
+ * At the call site both `[]` and `null` fall through to the global selection,
+ * which reads like the refusal is being ignored. It is not, and the reason is
+ * three files away: an entry may not be portable AND character-bound
+ * (studioAssetLibrary asserts this when the entry is created), and a resolve
+ * request with no target characters cannot match a character adapter or stack
+ * (the entry filter rejects both), so the global selection is ALWAYS portable.
+ * A refused shot therefore gets a style LoRA and never a character one.
+ *
+ * Exported for the test that pins that chain, because a change in any of those
+ * three places would silently turn this into a false continuity guarantee.
+ */
+export function exactCharacterRegistryIdentitiesForShot(input: {
   readonly continuityCharacterIds: readonly string[];
   readonly registryIdentityByCharacterId: ReadonlyMap<string, string>;
 }): readonly string[] | null {
@@ -312,7 +335,13 @@ const studioLtxAdapterResolve: Block = {
           registryIdentityByCharacterId,
         });
         if (!exactCharacters?.length) continue;
-        const key = exactCharacters.join("\\u0000");
+        // A real NUL, as everywhere else in the repo — including two lines up in
+        // narrativeSeriesLoraScopeForStudio. These two sites were the only
+        // "\\u0000" (a backslash and five characters) in the codebase. Harmless
+        // as it stood, since both the write and the read used the same literal
+        // and registry identities are sha256 hex, but a cache key built to one
+        // convention and read under another is a silent miss waiting to happen.
+        const key = exactCharacters.join("\u0000");
         if (!exactSelections.has(key)) {
           const exact = await resolveDirectLtxSelection(baseRequest, exactCharacters);
           exactSelections.set(key, exact.selection);
@@ -326,7 +355,7 @@ const studioLtxAdapterResolve: Block = {
             registryIdentityByCharacterId,
           });
           const exact = exactCharacters?.length
-            ? exactSelections.get(exactCharacters.join("\\u0000")) ?? null
+            ? exactSelections.get(exactCharacters.join("\u0000")) ?? null
             : null;
           // A portable selection is allowed when there is no exact character
           // recipe, but a partial character set never is.
