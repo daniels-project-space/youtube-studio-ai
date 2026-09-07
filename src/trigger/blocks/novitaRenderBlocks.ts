@@ -93,6 +93,11 @@ import { sha256ShotAnalysisSource } from "@/lib/shotAnalysis";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 import { getObjectBytes } from "@/lib/storage";
+import {
+  createStoryboardAtlasRenderPlan,
+  materializeStoryboardAtlasCrops,
+  requestedQualifiedStoryboardAtlasGrid,
+} from "@/lib/storyboardAtlasRuntime";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
 const EPSILON = 0.02;
@@ -1155,10 +1160,23 @@ export const novitaRenderImages: Block = {
         negative: spec.negativePrompt,
       };
     });
-    const envelope = cinematicProviderEnvelope(ctx, "novita_render_images", profile, renderShots);
+    const atlasGrid = requestedQualifiedStoryboardAtlasGrid({
+      value: ctx.params["storyboardAtlasGrid"],
+      profile,
+    });
+    const atlasPlan = atlasGrid === undefined
+      ? undefined
+      : createStoryboardAtlasRenderPlan({
+          shots: renderShots,
+          gridSize: atlasGrid,
+          canvasWidth: profile.image.width,
+          canvasHeight: profile.image.height,
+        });
+    const providerShots = atlasPlan ? atlasPlan.jobs.map((job) => job.shot) : renderShots;
+    const envelope = cinematicProviderEnvelope(ctx, "novita_render_images", profile, providerShots);
     const cfg: NovitaRenderCfg = {
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/novita`,
-      shots: renderShots,
+      shots: providerShots,
       profile: toNovitaPhaseProfile(profile, "image"),
       style: ctx.params["style"] as string | undefined,
       negative: ctx.params["negative"] as string | undefined,
@@ -1183,18 +1201,30 @@ export const novitaRenderImages: Block = {
     };
     const result = await renderImages(cfg);
     if (!result.candidates?.length) throw new Error("novita_render_images returned no exact candidate mapping");
+    const items = atlasPlan
+      ? await materializeStoryboardAtlasCrops({
+          plan: atlasPlan,
+          result,
+          keyPrefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/novita`,
+        })
+      : result.candidates.map((candidate) => ({
+          shotId: candidate.shotId,
+          candidateIndex: candidate.candidateIndex,
+          outputId: candidate.outputId,
+          stillKey: candidate.key,
+        }));
     const stillRenderManifest = StillRenderManifestSchema.parse({
       version: "1.0.0",
       generation: generationIdentity(profile, "image"),
-      items: result.candidates.map((candidate) => ({
-        shotId: candidate.shotId,
-        candidateIndex: candidate.candidateIndex,
-        outputId: candidate.outputId,
-        stillKey: candidate.key,
-      })),
+      items,
     });
     assertExactStillCandidates(shots, stillRenderManifest);
-    ctx.log(`novita_render_images: ${result.outputs} pinned still candidate(s) in ${result.durationSec}s`);
+    ctx.log(
+      atlasPlan
+        ? `novita_render_images: ${stillRenderManifest.items.length} provenance-bound still crop(s) from ` +
+          `${result.outputs} qualified ${atlasPlan.gridSize}x${atlasPlan.gridSize} atlas sheet(s) in ${result.durationSec}s`
+        : `novita_render_images: ${result.outputs} pinned still candidate(s) in ${result.durationSec}s`,
+    );
     return {
       stillKeys: stillRenderManifest.items.map((item) => item.stillKey),
       stillRenderManifest,

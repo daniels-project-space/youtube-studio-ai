@@ -1984,6 +1984,36 @@ export async function cropCenterImageToJpeg(
 }
 
 /**
+ * Extract one exact pixel region from a storyboard/contact sheet without
+ * rescaling it. Atlas derivatives condition downstream I2V, so silently
+ * stretching a cell would invalidate both its geometry and provenance.
+ */
+export async function cropImageRegionToPng(
+  inPath: string,
+  outPng: string,
+  region: { x: number; y: number; width: number; height: number },
+): Promise<string> {
+  const { x, y, width, height } = region;
+  if (
+    ![x, y, width, height].every(Number.isInteger) ||
+    x < 0 || y < 0 || width < 1 || height < 1
+  ) {
+    throw new FfmpegError("cropImageRegionToPng requires a positive integer region");
+  }
+  await run(FFMPEG, [
+    "-y",
+    "-i",
+    inPath,
+    "-vf",
+    `crop=${width}:${height}:${x}:${y}`,
+    "-frames:v",
+    "1",
+    outPng,
+  ]);
+  return outPng;
+}
+
+/**
  * Concatenate per-sentence narration clips with a silence GAP between each — the
  * pauses that make TTS sound organic. Every clip but the last is end-padded with
  * `gapSec` of silence, then all are concatenated. Returns the muxed mp3.

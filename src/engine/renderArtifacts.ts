@@ -23,6 +23,25 @@ export const StillRenderManifestSchema = z.object({
     candidateIndex: z.number().int().nonnegative(),
     outputId: z.string().min(1),
     stillKey: z.string().min(1),
+    derivation: z.object({
+      version: z.literal("storyboard-atlas-crop/v1"),
+      planFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      planKey: z.string().min(1),
+      sourceOutputId: z.string().min(1),
+      sourceStillKey: z.string().min(1),
+      sourceRequestSha256: z.string().regex(/^[a-f0-9]{64}$/),
+      sourceBillingReceiptId: z.string().min(1),
+      sourceContentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+      contentSha256: z.string().regex(/^[a-f0-9]{64}$/),
+      gridSize: z.union([z.literal(2), z.literal(4), z.literal(8), z.literal(16)]),
+      coordinate: z.string().regex(/^[A-P](?:[1-9]|1[0-6])$/),
+      crop: z.object({
+        x: z.number().int().nonnegative(),
+        y: z.number().int().nonnegative(),
+        width: z.number().int().positive(),
+        height: z.number().int().positive(),
+      }).strict(),
+    }).strict().optional(),
   })).min(1),
 });
 
