@@ -72,8 +72,16 @@ const SKIP = new Set(["node_modules", ".next", ".git", "dist", "build", ".locks"
  * its own `consumes` array, inert-produces on its own `produces` array). The
  * exemption is named file by file rather than "skip tests", because a test can
  * hold a real one.
+ *
+ * build-defect-proof-site.ts is here for the same reason and was caught the same
+ * way: it RUNS each original broken expression to prove the defect, so adding it
+ * pushed this audit from 3 to 13 and failed the gate. Four times now an audit in
+ * this repo has flagged the artifact that documents what it audits — which is
+ * the argument for the gate, not against it. It found a real new occurrence of
+ * the shape it hunts; it simply could not know why that occurrence was there.
  */
-const EXEMPT = /boundedNumber\.(ts|test\.ts)$|audit-unchecked-number-clamps\.ts$|nanClampSites\.test\.ts$/;
+const EXEMPT =
+  /boundedNumber\.(ts|test\.ts)$|audit-unchecked-number-clamps\.ts$|nanClampSites\.test\.ts$|build-defect-proof-site\.ts$/;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const entry of readdirSync(dir)) {
