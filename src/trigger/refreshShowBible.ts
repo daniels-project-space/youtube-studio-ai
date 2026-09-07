@@ -123,8 +123,16 @@ export const refreshShowBibleTask = task({
     const researchNiche = programBrief?.nicheKey ?? identity.nicheKey ?? identity.niche;
     if (researchNiche) {
       const [nicheIntel, competitors] = await Promise.all([
-        convex.query(api.seo.getNiche, { ownerId, niche: researchNiche }).catch(() => null),
-        convex.query(api.competitors.listCompetitors, { ownerId, niche: researchNiche }).catch(() => []),
+        // Named, not silent: a Bible rewritten without competitor signals reads
+        // exactly like one written for a niche that genuinely has none.
+        convex.query(api.seo.getNiche, { ownerId, niche: researchNiche }).catch((e) => {
+          log(`refresh: NICHE INTEL LOST — the Bible is rewritten without power words (${e instanceof Error ? e.message : e})`);
+          return null;
+        }),
+        convex.query(api.competitors.listCompetitors, { ownerId, niche: researchNiche }).catch((e) => {
+          log(`refresh: COMPETITOR SIGNALS LOST — the Bible is rewritten without them (${e instanceof Error ? e.message : e})`);
+          return [];
+        }),
       ]);
       const titles = (competitors as { topVideos?: { title: string; views: number }[] }[])
         .flatMap((c) => c.topVideos ?? []).sort((a, b) => b.views - a.views).slice(0, 15).map((v) => v.title);

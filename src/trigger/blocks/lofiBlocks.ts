@@ -1050,7 +1050,18 @@ export const topicSelect: Block = {
       throw new Error("topic_select: OPENROUTER_API_KEY missing — refusing silent pool fallback");
     }
     const competitorRows = niche
-      ? await c.query(api.competitors.listCompetitors, { ownerId: ctx.ownerId, niche }).catch(() => [])
+      ? await c.query(api.competitors.listCompetitors, { ownerId: ctx.ownerId, niche })
+          .catch((e) => {
+            // Same shape optimizeTopics has one layer up, and named for the same
+            // reason: an outage and a niche with no tracked competitors produce
+            // the same empty array, and this bet is written without the evidence
+            // either way.
+            ctx.log(
+              `topic_select: COMPETITOR EVIDENCE LOST — this bet is written without competitor ` +
+                `titles (${e instanceof Error ? e.message : e})`,
+            );
+            return [];
+          })
       : [];
     const competitorTitles = (competitorRows as { topVideos?: { title: string; views: number }[] }[])
       .flatMap((r) => r.topVideos ?? [])

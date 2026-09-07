@@ -973,10 +973,24 @@ async function readyPlanRows(
   return snapshot.rows;
 }
 
+/**
+ * Research signals for a new channel's identity.
+ *
+ * These three reads feed synthStyleDNA and the Show Bible's competitorContext,
+ * and Channel Inception happens ONCE and is persisted — so a silent loss here
+ * founds a channel with no competitors, no power words and no databank, forever,
+ * and the run reads exactly like a niche that genuinely has none. That is the
+ * second independent route to a generic channel identity; the first was the
+ * Show Bible's own token ceiling.
+ *
+ * Degrading is still right — a channel must not fail to exist because a niche
+ * read was slow — so the fallbacks are unchanged and only the silence is fixed.
+ */
 async function groundingSignals(
   convex: ConvexHttpClient,
   ownerId: string,
   niche: string | undefined,
+  log: (message: string) => void = () => {},
 ) {
   if (!niche) {
     return {
@@ -989,11 +1003,22 @@ async function groundingSignals(
       competitorContext: "",
     };
   }
+  const lost: string[] = [];
+  const noteLoss = <T,>(what: string, fallback: T) => (error: unknown): T => {
+    lost.push(`${what} (${error instanceof Error ? error.message : error})`);
+    return fallback;
+  };
   const [nicheIntel, competitors, databank] = await Promise.all([
-    convex.query(api.seo.getNiche, { ownerId, niche }).catch(() => null),
-    convex.query(api.competitors.listCompetitors, { ownerId, niche }).catch(() => []),
-    convex.query(api.seo.getDatabank, { ownerId, niche }).catch(() => null),
+    convex.query(api.seo.getNiche, { ownerId, niche }).catch(noteLoss("niche intel and power words", null)),
+    convex.query(api.competitors.listCompetitors, { ownerId, niche }).catch(noteLoss("competitors and their top videos", [])),
+    convex.query(api.seo.getDatabank, { ownerId, niche }).catch(noteLoss("the SEO databank", null)),
   ]);
+  if (lost.length) {
+    log(
+      `channel research: GROUNDING LOST — ${lost.join("; ")}. This channel's Style DNA and ` +
+        `Show Bible will be written without it, and inception is persisted.`,
+    );
+  }
   const topVideos = (competitors as {
     topVideos?: { videoId?: string; title: string; views: number }[];
   }[])
@@ -2505,7 +2530,7 @@ export async function executeDesignChannel(
     if (!styleDNA || styleDNA.confidence < ESTABLISHED_CONFIDENCE || styleDNA.groundingGaps.length) return undefined;
     if (!qualityBar || !identity.creativeBrief) return undefined;
     if (!sameChannelProgramBrief(identity.programBrief, positioningProgramBrief)) return undefined;
-    const signals = await groundingSignals(convex, ownerId, identityResearchNiche(identity));
+    const signals = await groundingSignals(convex, ownerId, identityResearchNiche(identity), log);
     const value: PositioningState = {
       name: channel.name,
       identity,
@@ -2566,7 +2591,7 @@ export async function executeDesignChannel(
         voiceId: concept.voiceId,
         thumbnailTemplate: FAMILIES[positioningStage.params.family].defaultThumbnailStyle,
       };
-      const signals = await groundingSignals(convex, ownerId, identityResearchNiche(identity));
+      const signals = await groundingSignals(convex, ownerId, identityResearchNiche(identity), log);
       const now = Date.now();
       const styleDNA = await synthStyleDNA({
         family: positioningStage.params.family,
@@ -2704,7 +2729,7 @@ export async function executeDesignChannel(
       ]));
       let scriptPlaybook = channel.scriptPlaybook;
       if (plan.familyPolicy.requiresNarrativePlaybook) {
-        const signals = await groundingSignals(convex, ownerId, identityResearchNiche(identity));
+        const signals = await groundingSignals(convex, ownerId, identityResearchNiche(identity), log);
         const { distillScriptPlaybook } = await import("@/lib/scriptLab");
         scriptPlaybook = await distillScriptPlaybook({
           refs: signals.topVideos,

@@ -219,7 +219,18 @@ function main(): void {
   for (const f of findings) console.log(`  ${f.file}:${f.line}  [${f.context}]\n        ${f.detail}`);
   if (!findings.length) console.log("  none");
   console.log(
-    `\nAll five remaining findings were investigated and are correct, recorded here so\n` +
+    `\nEVERY remaining finding has been investigated. Recorded so the next reader does\n` +
+    `not repeat it:\n` +
+    `  voicecraft listProfiles    an empty profile list makes the todo set the whole account, so\n` +
+    `                             it RE-PROFILES rather than skipping — wasteful, not a\n` +
+    `                             quality loss, and self-correcting.\n` +
+    `  bundleBlocks / lofi        getChannel is a FALLBACK behind the store seeds that\n` +
+    `  getChannel                 runPipeline already writes; losing it costs nothing when\n` +
+    `                             the seeds are present, which is the normal path.\n` +
+    `  documotion vision retry    the .catch feeds a two-attempt retry that re-prompts for\n` +
+    `                             valid JSON; the empty string is the retry signal.\n` +
+    `  ConvexClientProvider       an unauthenticated read in the UI, logged as such.\n` +
+    `\nAnd the older four:\n` +
     `the next reader does not repeat it:\n` +
     `  metacraft youtubeSuggest   an accessor in all but name — its caller logs the query\n` +
     `                             count, so an empty autocomplete IS visible one level up.\n` +
