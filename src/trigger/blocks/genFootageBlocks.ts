@@ -10,6 +10,7 @@
  * concrete video model: central runtime admission owns that decision.
  */
 import type { Block } from "@/engine/types";
+import { boundedInteger } from "@/engine/boundedNumber";
 import { join } from "node:path";
 import {
   DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
@@ -1281,7 +1282,11 @@ export const signatureClipsBlock: Block = {
   produces: ["signatureClips", "signatureKeys"],
   paid: true,
   run: async (ctx) => {
-    const k = Math.max(0, Math.min(6, Number(ctx.params["count"] ?? ctx.params["signatureGenClips"] ?? 0)));
+    // boundedInteger, not a raw clamp: Math.max(0, Math.min(6, NaN)) is NaN, and
+    // NaN <= 0 is false, so a malformed count slipped past this block's guard AND
+    // the generator's into a PAID path. A bad param now resolves to the
+    // documented default of 0, which returns early as intended.
+    const k = boundedInteger(ctx.params["count"] ?? ctx.params["signatureGenClips"], 0, 0, 6);
     if (k <= 0) return { signatureClips: [], signatureKeys: [], [COST_PATCH_KEY]: 0 };
     const sig = await generateSignatureClips(ctx, k);
     // R2-back for resume: without keys, any retry/heal re-SPENT the generation.

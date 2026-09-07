@@ -45,6 +45,7 @@
  * QUESTION WORDING only and can never touch an answer.
  */
 import { join } from "node:path";
+import { boundedNumber } from "@/engine/boundedNumber";
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -966,7 +967,9 @@ export const quizYear: Block = {
       ctx.params["categories"] ?? ctx.store["quizCategories"],
     );
     const allowSensitiveTopics = false;
-    const minNotability = Math.max(0, Number(ctx.params["minNotability"] ?? 40));
+    // A NaN threshold makes `>= minNotability` false for every candidate, which
+    // is a silent rejection of the entire pool rather than a filter.
+    const minNotability = boundedNumber(ctx.params["minNotability"], 40, 0, 100);
     const musicKey = String(ctx.store["musicKey"] ?? "").trim();
     if (noGemini && !musicKey) {
       throw new Error("quiz: certified no-Gemini mode requires an upstream original musicKey");

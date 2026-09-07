@@ -31,6 +31,7 @@
  * (and `music.params.durationSec`) — set them to 7200 for a 2h render.
  */
 import { FALLBACK_UNDERSCORE_BRIEFS, spreadDefault } from "@/lib/identitySpread";
+import { boundedInteger } from "@/engine/boundedNumber";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { familyDurationContract, familyTimeScalingContract } from "@/engine/families";
 import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
@@ -1886,7 +1887,9 @@ export const music: Block = {
     // into one continuous mix before looping. A Suno generation returns TWO
     // clips for one credit, so cost = ceil(N/2) generations. Default 2 = double
     // the unique audio at the old single-track price.
-    const trackCount = Math.max(1, Math.min(8, Number(ctx.params.trackCount ?? 2)));
+    // NaN here produced NaN, so the track loop ran zero times and the video
+    // shipped with no music at all — the quietest possible failure.
+    const trackCount = boundedInteger(ctx.params.trackCount, 2, 1, 8);
     const sunoModel = (ctx.params.model as string | undefined) ?? "V5";
     const mixTitle = (String(ctx.store["channelName"] ?? "") || topic).slice(0, 60);
     const tmp = await makeRunTempDir(ctx.runId);
