@@ -8,5 +8,6 @@
   "audit-unbounded-normalized": 2,
   "audit-inert-produces": 67,
   "audit-unchecked-number-clamps": 3,
-  "audit-contract-consumes-drift": 0
+  "audit-contract-consumes-drift": 0,
+  "audit-unproducible-consumes": 3
 }

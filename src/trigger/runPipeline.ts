@@ -182,6 +182,7 @@ import {
 } from "@/lib/narrativeSeriesStateRuntime";
 import { resolveOwnerReviewedLtxRuntime } from "@/lib/reviewedLtxRuntimeStateRuntime";
 import type { ThirdPartyStockEvidenceReference } from "@/lib/thirdPartyStockEvidence";
+import { payloadSeedInputs } from "@/lib/payloadSeedInputs";
 
 const MAX_SELF_HEALS = 2;
 const FACTUAL_REVIEW_FROZEN_BLOCK_IDS = new Set([
@@ -338,6 +339,18 @@ export interface RunPipelineInput {
    * Same freeze-before-provider-work contract as `childrenShowBibleInput`.
    */
   casefileSourcePacketInput?: unknown;
+  /**
+   * Reviewed claim/source packet for the supervised factual-explainer lane's
+   * `editorial_evidence_packet` admission block.
+   *
+   * This field did not exist while the block, its contract, its artifact schema
+   * and its tests all did — and familyPipelineConnectivity.test listed it among
+   * "the exact `*Input` fields runPipeline accepts", so the connectivity check
+   * certified a delivery path that was never built. Same freeze-before-provider
+   * -work contract as the three above; assertEditorialEvidencePacket remains
+   * the trust boundary.
+   */
+  editorialEvidencePacketInput?: unknown;
   /**
    * Render-group reuse: when a language sibling is fanned out by the base run's
    * emit_bundle, the base assets are passed here and seeded into the store so the
@@ -1712,15 +1725,11 @@ export const runPipelineTask = task({
           ...(showProfile
             ? { channelSelectedCapabilityKeys: [...showProfile.selectedCapabilityKeys] }
             : {}),
-          ...(payload.childrenShowBibleInput !== undefined
-            ? { childrenShowBibleInput: structuredClone(payload.childrenShowBibleInput) }
-            : {}),
-          ...(payload.curriculumEpisodeSeedInput !== undefined
-            ? { curriculumEpisodeSeedInput: structuredClone(payload.curriculumEpisodeSeedInput) }
-            : {}),
-          ...(payload.casefileSourcePacketInput !== undefined
-            ? { casefileSourcePacketInput: structuredClone(payload.casefileSourcePacketInput) }
-            : {}),
+          // One list, in src/lib/payloadSeedInputs.ts, rather than a spread per
+          // key. Written out by hand these had already drifted from the
+          // connectivity test's copy, which claimed a fourth field this seeding
+          // did not accept.
+          ...payloadSeedInputs(payload),
           ...(scheduledPlan ? scheduledPlanSeed(scheduledPlan) : {}),
         };
         if (weeklyPreparation && scheduledPlan?.preparation) {

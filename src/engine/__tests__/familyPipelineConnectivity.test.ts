@@ -35,6 +35,7 @@ import { registerAllBlocks } from "@/engine/blocks";
 import { childrenShowBibleSeedKeys } from "@/engine/childrenShowBible";
 import { inferContentLane } from "@/engine/contentLane";
 import type { PipelineEntry } from "@/engine/types";
+import { PAYLOAD_SEED_INPUT_KEYS } from "@/lib/payloadSeedInputs";
 
 /** Channel identity, frozen into the store at run start (runPipeline seedStore). */
 const IDENTITY_SEEDS = [
@@ -45,11 +46,14 @@ const IDENTITY_SEEDS = [
 /**
  * Operator-authored packets that arrive on the run payload rather than from an
  * upstream block — the exact `*Input` fields runPipeline accepts.
+ *
+ * IMPORTED, not re-typed. This list used to be written here by hand and had
+ * drifted from the seeding in runPipeline: it named editorialEvidencePacketInput
+ * among the fields "runPipeline accepts" when no such field existed, so this
+ * check certified a delivery path that was never built — the exact failure it
+ * exists to catch. Both now read the one list.
  */
-const PAYLOAD_SEEDS = [
-  "casefileSourcePacketInput", "childrenShowBibleInput", "curriculumEpisodeSeedInput",
-  "editorialEvidencePacketInput",
-];
+const PAYLOAD_SEEDS: readonly string[] = PAYLOAD_SEED_INPUT_KEYS;
 
 function seedsFor(entries: readonly PipelineEntry[]): string[] {
   const lane = inferContentLane(entries);

@@ -47,6 +47,7 @@ const AUDITS = [
   "audit-inert-produces",
   "audit-unchecked-number-clamps",
   "audit-contract-consumes-drift",
+  "audit-unproducible-consumes",
 ];
 
 const save = process.argv.includes("--save");
