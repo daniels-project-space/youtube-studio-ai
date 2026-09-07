@@ -360,6 +360,16 @@ export const complianceCheck: Block = {
     const topic = str(ctx, "topic");
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
     if (!hasAnthropicKey()) {
+      // The SAME failure as the catch below — the classifier did not run — and it
+      // was silent here while that one is loud. Both flags default to false, so
+      // the hard gate (sensitive && synthRealistic) cannot fire and no synthetic
+      // -content disclosure is noted; a reader of the run log has to be able to
+      // tell that from a genuine "nothing to declare".
+      ctx.log(
+        "compliance_check: CLASSIFIER DID NOT RUN — no model credential; sensitive-topic and " +
+          "synthetic-depiction flags stay false by default, so neither the manual-review gate " +
+          "nor the disclosure note can fire",
+      );
       return { disclosureRequired: false, sensitiveTopic: false, complianceNote: "" };
     }
     let sensitive = false;

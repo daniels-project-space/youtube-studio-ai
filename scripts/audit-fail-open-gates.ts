@@ -12,6 +12,14 @@
  *   spoken-line safety     a thrown scan logged "skipped (non-fatal)" and the
  *                          narration shipped unchecked — and the throw
  *                          correlated with there being a violation to find.
+ *   compliance capability  the SAME check, twenty lines up: an
+ *                          `if (!hasAnthropicKey()) return { sensitiveTopic:
+ *                          false, ... }` guard returned the benign verdict in
+ *                          silence, while the catch below it announced the
+ *                          identical failure in full. This audit could not see
+ *                          it, because it only inspected CATCH clauses — an
+ *                          early-return capability guard is the same defect
+ *                          wearing different syntax, and it now looks for both.
  *   sensitive classifier   both flags default false, so a failed call means the
  *                          manual-review gate cannot fire.
  *
@@ -51,6 +59,9 @@ const GATE_WORDS = /(gate|guard|check|scan|judge|verify|verif|validate|assert|co
 const MODEL_CALL = /(claudeJsonPro|claudeJson|agentJson|geminiJsonPro|geminiJson|openRouterJson|openRouterChat|generateImage|visionJson)\s*[<(]/;
 
 /** Log text that makes a missing check read as routine. */
+/** A guard on whether a capability is available at all. */
+const CAPABILITY_GUARD = /^!?\s*has[A-Z]\w*\s*\(|^!\s*\w*[Kk]ey\b|Enabled\s*\(\)/;
+
 const ROUTINE = /(skipp?ed|continuing|non-?fatal|ignored|best-?effort|soft|fallback|unavailable|lint-only)/i;
 
 function walk(dir: string, out: string[] = []): string[] {
@@ -92,6 +103,36 @@ function main(): void {
         ts.isPropertyAssignment(node) && node.name.getText(sf) === "id" && ts.isStringLiteral(node.initializer)
       ) name = node.initializer.text;
 
+      // AN EARLY-RETURN GUARD is the same defect as a permissive catch, and this
+      // audit could not see one. compliance_check opened with
+      //   if (!hasAnthropicKey()) return { sensitiveTopic: false, ... };
+      // — the identical failure the catch twenty lines below it announces in
+      // full, silently. Same shape: the check cannot run, a benign verdict is
+      // returned, nothing says so.
+      if (
+        ts.isIfStatement(node) &&
+        node.thenStatement &&
+        !node.elseStatement &&
+        CAPABILITY_GUARD.test(node.expression.getText(sf))
+      ) {
+        const guardBody = node.thenStatement.getText(sf)
+          .replace(/\/\*[\s\S]*?\*\//g, "")
+          .replace(/(^|[^:])\/\/.*$/gm, "$1");
+        const returnsBenign = /return\s*\{[^}]*\b(false|""|\[\])/.test(guardBody);
+        const guardLogs = Array.from(guardBody.matchAll(/["'`]([^"'`]{8,600})["'`]/g)).map((m) => m[1]);
+        const guardNamed = guardLogs.some((l) =>
+          /DID NOT RUN|FAILED|NOT quality-gated|never|errored|UNAVAILABLE|gets no |gets none/.test(l),
+        );
+        if (returnsBenign && !guardNamed && (GATE_WORDS.test(name) || GATE_WORDS.test(guardBody))) {
+          findings.push({
+            file: rel,
+            line: sf.getLineAndCharacterOfPosition(node.getStart(sf)).line + 1,
+            context: name,
+            verdict: "SILENT",
+            detail: `capability guard returns a benign verdict without naming it: ${node.expression.getText(sf).slice(0, 60)}`,
+          });
+        }
+      }
       if (ts.isCatchClause(node)) {
         catches++;
         // Comments stripped first. Scanning raw text made the audit match its
