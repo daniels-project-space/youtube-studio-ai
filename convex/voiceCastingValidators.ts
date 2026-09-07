@@ -7,7 +7,7 @@ export const voiceCastingProviderValidator = v.union(
 
 /** Durable attestation emitted by the pinned private Qwen3-TTS worker. */
 export const qwenTtsReceiptValidator = v.object({
-  schema: v.literal("qwen3-tts-worker/v1"),
+  schema: v.literal("qwen3-tts-worker/v2"),
   requestKey: v.string(),
   model: v.literal("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice"),
   revision: v.literal("0c0e3051f131929182e2c023b9537f8b1c68adfe"),
@@ -49,9 +49,11 @@ export const qwenTtsReceiptValidator = v.object({
   runtime: v.object({
     provider: v.literal("novita"),
     gpu: v.literal("RTX 4090"),
-    capacityMode: v.literal("spot"),
+    capacityMode: v.literal("serverless-scale-to-zero"),
     persistentCache: v.literal(true),
     idleShutdownSeconds: v.number(),
+    accounting: v.literal("conservative-upper-bound"),
+    requestGpuSeconds: v.number(),
     gpuSeconds: v.number(),
     gpuRateUsdPerSecond: v.number(),
     startupUsd: v.number(),

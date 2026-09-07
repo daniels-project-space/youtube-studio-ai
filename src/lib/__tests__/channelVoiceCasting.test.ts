@@ -58,7 +58,7 @@ assert.throws(
 
 const audioSha256 = "b".repeat(64);
 const providerRenderReceipt = {
-  schema: "qwen3-tts-worker/v1",
+  schema: "qwen3-tts-worker/v2",
   requestKey: "a".repeat(64),
   model: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
   revision: "0c0e3051f131929182e2c023b9537f8b1c68adfe",
@@ -78,14 +78,16 @@ const providerRenderReceipt = {
   runtime: {
     provider: "novita",
     gpu: "RTX 4090",
-    capacityMode: "spot",
+    capacityMode: "serverless-scale-to-zero",
     persistentCache: true,
-    idleShutdownSeconds: 120,
-    gpuSeconds: 10,
+    idleShutdownSeconds: 300,
+    accounting: "conservative-upper-bound",
+    requestGpuSeconds: 10,
+    gpuSeconds: 310,
     gpuRateUsdPerSecond: 0.00005,
     startupUsd: 0,
     storageUsd: 0,
-    costUsd: 0.0005,
+    costUsd: 0.0155,
   },
 } satisfies QwenTtsReceipt;
 const qwenCast = {

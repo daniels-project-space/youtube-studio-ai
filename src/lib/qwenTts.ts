@@ -1,13 +1,14 @@
 import { createHash } from "node:crypto";
 import { canonicalJson } from "@/lib/canonicalJson";
 
-export const QWEN3_TTS_WORKER_CONTRACT = "qwen3-tts-worker/v1" as const;
+export const QWEN3_TTS_WORKER_CONTRACT = "qwen3-tts-worker/v2" as const;
 export const QWEN3_TTS_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice" as const;
 /** Exact Hugging Face revision qualified from the official Qwen repository. */
 export const QWEN3_TTS_MODEL_REVISION = "0c0e3051f131929182e2c023b9537f8b1c68adfe" as const;
 export const QWEN3_TTS_PACKAGE_VERSION = "0.1.1" as const;
 export const QWEN3_TTS_TRANSFORMERS_VERSION = "4.57.3" as const;
 export const QWEN3_TTS_SAMPLE_RATE_HZ = 24_000 as const;
+export const QWEN3_TTS_IDLE_SHUTDOWN_SECONDS = 300 as const;
 
 export const QWEN3_TTS_SPEAKERS = [
   "Vivian",
@@ -60,9 +61,11 @@ export type QwenTtsLanguage = (typeof QWEN3_TTS_LANGUAGES)[number];
 export interface QwenTtsRuntimeReceipt {
   provider: "novita";
   gpu: "RTX 4090";
-  capacityMode: "spot";
+  capacityMode: "serverless-scale-to-zero";
   persistentCache: true;
   idleShutdownSeconds: number;
+  accounting: "conservative-upper-bound";
+  requestGpuSeconds: number;
   gpuSeconds: number;
   gpuRateUsdPerSecond: number;
   startupUsd: number;
@@ -124,14 +127,17 @@ export function isPinnedQwenTtsReceipt(value: unknown): value is QwenTtsReceipt 
     typeof receipt.durationSec !== "number" || !Number.isFinite(receipt.durationSec) ||
     receipt.durationSec < 0.25 || receipt.durationSec > 3_600 ||
     !runtime || runtime.provider !== "novita" || runtime.gpu !== "RTX 4090" ||
-    runtime.capacityMode !== "spot" || runtime.persistentCache !== true ||
-    typeof runtime.idleShutdownSeconds !== "number" || runtime.idleShutdownSeconds < 30 || runtime.idleShutdownSeconds > 900 ||
+    runtime.capacityMode !== "serverless-scale-to-zero" || runtime.persistentCache !== true ||
+    runtime.idleShutdownSeconds !== QWEN3_TTS_IDLE_SHUTDOWN_SECONDS ||
+    runtime.accounting !== "conservative-upper-bound" ||
+    typeof runtime.requestGpuSeconds !== "number" || runtime.requestGpuSeconds <= 0 || runtime.requestGpuSeconds > 3_600 ||
     typeof runtime.gpuSeconds !== "number" || runtime.gpuSeconds <= 0 || runtime.gpuSeconds > 3_600 ||
     typeof runtime.gpuRateUsdPerSecond !== "number" || runtime.gpuRateUsdPerSecond <= 0 || runtime.gpuRateUsdPerSecond > 1 ||
     typeof runtime.startupUsd !== "number" || runtime.startupUsd < 0 || runtime.startupUsd > 5 ||
     typeof runtime.storageUsd !== "number" || runtime.storageUsd < 0 || runtime.storageUsd > 5 ||
     typeof runtime.costUsd !== "number" || runtime.costUsd <= 0 || runtime.costUsd > 1
   ) return false;
+  if (runtime.gpuSeconds + 0.000001 < runtime.requestGpuSeconds + runtime.idleShutdownSeconds) return false;
   const expectedCost = runtime.gpuSeconds * runtime.gpuRateUsdPerSecond + runtime.startupUsd + runtime.storageUsd;
   return Math.abs(runtime.costUsd - expectedCost) <= 0.000001;
 }
@@ -297,6 +303,7 @@ function validateReceipt(args: {
   seed: number;
   audio: Uint8Array;
   maxCostUsd: number;
+  idleShutdownSeconds: number;
 }): QwenTtsReceipt {
   if (!args.value || typeof args.value !== "object" || Array.isArray(args.value)) {
     throw new Error("Qwen3 TTS worker receipt is missing");
@@ -328,10 +335,18 @@ function validateReceipt(args: {
   const runtime = value.runtime as Record<string, unknown>;
   exactString(runtime.provider, "novita", "runtime provider");
   exactString(runtime.gpu, "RTX 4090", "GPU");
-  exactString(runtime.capacityMode, "spot", "capacity mode");
+  exactString(runtime.capacityMode, "serverless-scale-to-zero", "capacity mode");
   if (runtime.persistentCache !== true) throw new Error("Qwen3 TTS worker did not attest persistent model caching");
-  finiteNumber(runtime.idleShutdownSeconds, "idle shutdown", 30, 900);
+  if (runtime.idleShutdownSeconds !== args.idleShutdownSeconds) {
+    throw new Error("Qwen3 TTS receipt idle shutdown does not match the request");
+  }
+  const idleShutdownSeconds = args.idleShutdownSeconds;
+  exactString(runtime.accounting, "conservative-upper-bound", "accounting basis");
+  const requestGpuSeconds = finiteNumber(runtime.requestGpuSeconds, "request GPU seconds", 0.001, 3_600);
   const gpuSeconds = finiteNumber(runtime.gpuSeconds, "GPU seconds", 0.001, 3_600);
+  if (gpuSeconds + 0.000001 < requestGpuSeconds + idleShutdownSeconds) {
+    throw new Error("Qwen3 TTS lifecycle upper bound omits request or idle GPU time");
+  }
   const gpuRate = finiteNumber(runtime.gpuRateUsdPerSecond, "GPU rate", 0.000001, 1);
   const startupUsd = finiteNumber(runtime.startupUsd, "startup cost", 0, 5);
   const storageUsd = finiteNumber(runtime.storageUsd, "storage cost", 0, 5);
@@ -368,7 +383,10 @@ export async function synthQwenNarration(args: {
     ? Number(args.seed)
     : 4_242;
   const instruction = qwenTtsInstruction(args.instruction, args.speed);
-  const requestedMaxCostUsd = args.maxCostUsd ?? Math.max(0.02, text.length / 1_000);
+  // Serverless bills the worker during its configured idle tail. The default
+  // is therefore a conservative lifecycle envelope, not fictional character
+  // pricing. A tighter stage budget still takes precedence and fails closed.
+  const requestedMaxCostUsd = args.maxCostUsd ?? Math.max(0.10, text.length / 1_000);
   if (!Number.isFinite(requestedMaxCostUsd) || requestedMaxCostUsd <= 0) {
     throw new QwenTtsError("Qwen3 TTS requires a positive per-request cost ceiling");
   }
@@ -394,9 +412,10 @@ export async function synthQwenNarration(args: {
     runtime: {
       provider: "novita",
       gpu: "RTX 4090",
-      capacityMode: "spot",
+      capacityMode: "serverless-scale-to-zero",
       persistentCache: true,
-      idleShutdownMaxSeconds: 900,
+      idleShutdownMaxSeconds: QWEN3_TTS_IDLE_SHUTDOWN_SECONDS,
+      accounting: "conservative-upper-bound",
     },
   } as const;
   const requestKey = sha256(canonicalJson(payload));
@@ -450,6 +469,7 @@ export async function synthQwenNarration(args: {
       seed,
       audio,
       maxCostUsd,
+      idleShutdownSeconds: payload.runtime.idleShutdownMaxSeconds,
     });
     args.onReceipt?.(receipt);
     return audio;

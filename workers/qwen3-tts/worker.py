@@ -1,47 +1,14 @@
 #!/usr/bin/env python3
-"""
-qwen3-tts-worker/v1 — the engine behind the studio's `qwen3` narration provider.
+"""Pinned Qwen3-TTS CustomVoice inference worker for YouTube Studio AI.
 
-The provider, its receipts, cost accounting, Convex validators and production
-gates all shipped some time ago; what never existed was anything to serve them,
-so `QWEN3_TTS_WORKER_URL` was unset and the whole path was inert. This is that
-service.
-
-WHY A GPU BOX AND NOT THE STUDIO VPS. Local CPU synthesis was benchmarked
-rather than assumed: 10.7-11.8x slower than realtime on this 4-core avx2 host,
-about two hours of compute per ten minutes of narration, and int8 quantisation
-runs out of memory during conversion. Fine for a cold open, hopeless for a
-catalogue. A 4090 with the weights already on an attached volume removes both
-the throughput problem and the cold-start download.
-
-WHY DESIGN-THEN-CLONE AND NOT CustomVoice PRESETS. The pinned model exposes nine
-preset speakers, of which exactly two are English and both are male — a studio
-casting twelve channels of different character across two voices is the same
-convergence defect as every channel sharing one accent colour. VoiceDesign
-builds a voice from a text brief instead, and measured on the same script it
-lands the casting (F0 84.9-88.4 Hz against a 90.4 Hz reference) that presets
-structurally cannot reach.
-
-But VoiceDesign draws a NEW voice on every call — the model card warns the same
-description "may produce slightly different voices each time" — so calling it
-per sentence changes speaker mid-paragraph. Measured timbre drift: 0.0175
-per-sentence versus 0.0040 for design-once-then-clone. So a voice is designed
-ONCE per channel, cached on the volume by a hash of its brief, and every
-sentence thereafter is cloned against that one reference. The cache is what
-makes a channel's narrator stable across videos and months, not merely within
-one render.
-
-FAIL CLOSED. The studio refuses a receipt whose digests do not match what it
-asked for, so this never substitutes a different voice, model or revision when
-something is missing — it returns an error and lets the caller decide.
+The separately deployable TypeScript caller and Python service share their
+boundary through contract.py. Production remains fail-closed until the exact
+container has passed the measured and human-reviewed qualification matrix.
 """
 from __future__ import annotations
 
-import base64
 import gc
-import hashlib
-import io
-import json
+import importlib.metadata
 import os
 import subprocess
 import tempfile
@@ -56,190 +23,169 @@ import numpy as np
 import soundfile as sf
 import torch
 from fastapi import FastAPI, Header, HTTPException
-from pydantic import BaseModel, Field
 
-CONTRACT = "qwen3-tts-worker/v1"
-DESIGN_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign"
-BASE_MODEL = "Qwen/Qwen3-TTS-12Hz-1.7B-Base"
-SAMPLE_RATE = 24_000
+from contract import (
+    CONTRACT,
+    MODEL,
+    QWEN_TTS_VERSION,
+    REVISION,
+    SAMPLE_RATE,
+    TRANSFORMERS_VERSION,
+    ContractError,
+    make_response,
+    parse_request,
+)
 
-# The attached volume. Weights and designed voice references both live here so
-# an instance that starts, works and shuts down pays no download cost and — more
-# importantly — returns the SAME voice it returned last week.
 VOLUME = Path(os.environ.get("QWEN3_TTS_VOLUME", "/workspace/qwen3-tts"))
-VOICE_CACHE = VOLUME / "voices"
-VOICE_CACHE.mkdir(parents=True, exist_ok=True)
+VOLUME.mkdir(parents=True, exist_ok=True)
 os.environ.setdefault("HF_HOME", str(VOLUME / "hf"))
 
 app = FastAPI()
 _lock = threading.Lock()
-_models: dict[str, Any] = {}
-_last_used = time.time()
+_model: Any | None = None
+_last_used = time.monotonic()
 
 
-def _sha256(data: bytes) -> str:
-    return hashlib.sha256(data).hexdigest()
+def _exact_runtime_version(distribution: str, expected: str) -> None:
+    try:
+        actual = importlib.metadata.version(distribution)
+    except importlib.metadata.PackageNotFoundError as error:
+        raise RuntimeError(f"required package {distribution} is missing") from error
+    if actual != expected:
+        raise RuntimeError(f"{distribution} {actual} is not pinned {expected}")
 
 
-def _load(model_id: str):
-    """One model resident at a time.
+def _runtime_attestation() -> None:
+    _exact_runtime_version("qwen-tts", QWEN_TTS_VERSION)
+    _exact_runtime_version("transformers", TRANSFORMERS_VERSION)
+    if not torch.cuda.is_available():
+        raise RuntimeError("Qwen3 TTS requires CUDA; CPU may not attest the RTX 4090 route")
+    gpu_name = torch.cuda.get_device_name(0)
+    if "4090" not in gpu_name:
+        raise RuntimeError(f"worker GPU is {gpu_name!r}, not the pinned RTX 4090")
+    try:
+        _exact_runtime_version("flash-attn", os.environ.get("QWEN3_TTS_FLASH_ATTN_VERSION", "2.8.3"))
+    except RuntimeError as error:
+        raise RuntimeError("FlashAttention 2 is missing or unpinned") from error
 
-    Two 1.7B models in fp32 are ~6.8 GB each. On a 24 GB card both fit, but the
-    designed-voice reference is produced once and then never again for that
-    channel, so keeping VoiceDesign resident wastes memory that batching the
-    clone path can use.
-    """
+
+def _load_model():
+    global _model
+    if _model is not None:
+        return _model
+    _runtime_attestation()
     from qwen_tts import Qwen3TTSModel
 
-    if model_id in _models:
-        return _models[model_id]
-    for other in list(_models):
-        if other != model_id:
-            del _models[other]
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
-    cuda = torch.cuda.is_available()
-    _models[model_id] = Qwen3TTSModel.from_pretrained(
-        model_id,
-        device_map="cuda" if cuda else "cpu",
-        # bf16 only where the hardware implements it. On an avx2-only CPU it is
-        # emulated and runs ~30x SLOWER than fp32, which is the opposite of the
-        # advice on the model card.
-        dtype=torch.bfloat16 if cuda else torch.float32,
-        attn_implementation="flash_attention_2" if cuda else "eager",
+    _model = Qwen3TTSModel.from_pretrained(
+        MODEL,
+        revision=REVISION,
+        device_map="cuda",
+        dtype=torch.bfloat16,
+        attn_implementation="flash_attention_2",
     )
-    return _models[model_id]
+    return _model
 
 
-class SynthRequest(BaseModel):
-    schema_: str = Field(alias="schema")
-    text: str
-    language: str = "English"
-    instruction: str | None = None
-    # Exactly one casting route must be supplied.
-    speaker: str | None = None
-    voice_design: str | None = None
-    voice_key: str | None = None
-    seed: int | None = None
-    request_key: str
-
-
-def _designed_voice(design: str, voice_key: str, seed: int | None):
-    """Return (reference audio, reference text) for a channel's designed voice.
-
-    Cached on the volume by a digest of the brief, so the same brief always
-    yields the same speaker. Regenerating it per render would give every video
-    a slightly different narrator, which is the drift this design exists to
-    avoid.
-    """
-    digest = _sha256(f"{voice_key}\0{design}\0{seed or 0}".encode())[:32]
-    ref_wav = VOICE_CACHE / f"{digest}.wav"
-    ref_txt = VOICE_CACHE / f"{digest}.txt"
-    if ref_wav.exists() and ref_txt.exists():
-        audio, sr = sf.read(str(ref_wav))
-        return (audio, sr), ref_txt.read_text(), digest, True
-
-    # A reference line chosen to exercise range: a statement, a question, a
-    # contrast and a falling close. The clone inherits the reference's delivery,
-    # so a monotone reference yields monotone narration.
-    reference_text = (
-        "This is where the record begins, and where most accounts quietly stop. "
-        "So what actually happened next? Not what was reported — what happened. "
-        "The answer is smaller than the legend, and far harder to forget."
-    )
-    model = _load(DESIGN_MODEL)
-    if seed is not None:
-        torch.manual_seed(seed)
-    wavs, sr = model.generate_voice_design(
-        text=[reference_text], instruct=[design], language=["English"],
-    )
-    sf.write(str(ref_wav), wavs[0], sr)
-    ref_txt.write_text(reference_text)
-    return (wavs[0], sr), reference_text, digest, False
-
-
-def _to_mp3(audio: np.ndarray, sr: int) -> bytes:
-    """MP3 at the contract's sample rate. The studio measures the returned bytes
-    with ffmpeg and binds their digest to the receipt, so the encode must happen
-    here rather than being reported second-hand."""
+def _to_mp3(audio: np.ndarray, source_rate: int) -> bytes:
     with tempfile.TemporaryDirectory() as tmp:
         wav = Path(tmp) / "out.wav"
         mp3 = Path(tmp) / "out.mp3"
-        sf.write(str(wav), audio, sr)
+        sf.write(str(wav), audio, source_rate)
         subprocess.run(
-            ["ffmpeg", "-y", "-loglevel", "error", "-i", str(wav),
-             "-ar", str(SAMPLE_RATE), "-b:a", "192k", str(mp3)],
+            [
+                "ffmpeg", "-y", "-loglevel", "error", "-i", str(wav),
+                "-ar", str(SAMPLE_RATE), "-b:a", "192k", str(mp3),
+            ],
             check=True,
         )
         return mp3.read_bytes()
 
 
+def _runtime_number(name: str, minimum: float, maximum: float) -> float:
+    raw = os.environ.get(name, "").strip()
+    try:
+        value = float(raw)
+    except ValueError as error:
+        raise RuntimeError(f"{name} is missing or invalid") from error
+    if not minimum <= value <= maximum:
+        raise RuntimeError(f"{name} is outside {minimum}..{maximum}")
+    return value
+
+
 @app.get("/health")
 def health() -> dict[str, Any]:
+    try:
+        _runtime_attestation()
+    except RuntimeError as error:
+        raise HTTPException(status_code=503, detail=str(error)) from error
     return {
         "schema": CONTRACT,
-        "cuda": torch.cuda.is_available(),
-        "loaded": list(_models),
-        "cached_voices": len(list(VOICE_CACHE.glob("*.wav"))),
-        "idle_seconds": round(time.time() - _last_used, 1),
+        "runtimeReady": True,
+        "modelLoaded": _model is not None,
+        "idleSeconds": round(time.monotonic() - _last_used, 1),
     }
 
 
 @app.post("/synthesize")
-def synthesize(req: SynthRequest, authorization: str = Header(default="")) -> dict[str, Any]:
+def synthesize(
+    payload: dict[str, Any],
+    authorization: str = Header(default=""),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key"),
+) -> dict[str, Any]:
     global _last_used
     expected = os.environ.get("QWEN3_TTS_WORKER_TOKEN", "")
     if not expected or authorization != f"Bearer {expected}":
         raise HTTPException(status_code=401, detail="unauthorized")
-    if req.schema_ != CONTRACT:
-        raise HTTPException(status_code=400, detail=f"unsupported schema {req.schema_}")
-    if bool(req.speaker) == bool(req.voice_design):
-        raise HTTPException(status_code=400, detail="supply exactly one of speaker or voice_design")
-
-    started = time.time()
-    with _lock:
-        _last_used = started
-        if req.seed is not None:
-            torch.manual_seed(req.seed)
-
-        if req.voice_design:
-            (ref_audio, ref_sr), ref_text, voice_digest, cached = _designed_voice(
-                req.voice_design, req.voice_key or "", req.seed,
+    try:
+        request = parse_request(payload, idempotency_key)
+        gpu_rate = _runtime_number("QWEN3_TTS_GPU_RATE_USD_PER_SECOND", 0.000001, 1)
+        storage_upper = _runtime_number("QWEN3_TTS_STORAGE_USD_PER_REQUEST_UPPER_BOUND", 0, 5)
+        configured_idle = int(_runtime_number("QWEN3_TTS_IDLE_SHUTDOWN_SECONDS", 30, 900))
+        if request.idle_shutdown_seconds != configured_idle:
+            raise ContractError(
+                f"request idle ceiling {request.idle_shutdown_seconds}s does not match "
+                f"the endpoint configuration {configured_idle}s"
             )
-            base = _load(BASE_MODEL)
-            prompt = base.create_voice_clone_prompt(
-                ref_audio=(ref_audio, ref_sr), ref_text=ref_text,
+        # Reject an impossible cost ceiling before model inference. The actual
+        # receipt uses measured request time plus this same platform idle tail.
+        minimum_lifecycle_cost = request.idle_shutdown_seconds * gpu_rate + storage_upper
+        if minimum_lifecycle_cost > request.max_cost_usd:
+            raise ContractError(
+                f"request ceiling ${request.max_cost_usd:.6f} cannot cover the configured "
+                f"scale-down tail (${minimum_lifecycle_cost:.6f})"
             )
-            wavs, sr = base.generate_voice_clone(
-                text=[req.text], language=[req.language], voice_clone_prompt=prompt,
-            )
-            route = "voice_design_clone"
-            model_id = BASE_MODEL
-        else:
-            model = _load("Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice")
-            wavs, sr = model.generate_custom_voice(
-                text=[req.text], speaker=[req.speaker], language=[req.language],
-                instruct=[req.instruction] if req.instruction else None,
-            )
-            route, model_id, voice_digest, cached = "custom_voice", \
-                "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", "", False
+    except (ContractError, RuntimeError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
-        audio = wavs[0]
-        mp3 = _to_mp3(audio, sr)
-
-    return {
-        "schema": CONTRACT,
-        "route": route,
-        "model": model_id,
-        "audio_base64": base64.b64encode(mp3).decode(),
-        "audio_sha256": _sha256(mp3),
-        "text_sha256": _sha256(req.text.encode()),
-        "request_key": req.request_key,
-        "voice_digest": voice_digest,
-        "voice_was_cached": cached,
-        "sample_rate": SAMPLE_RATE,
-        "audio_seconds": round(len(audio) / sr, 3),
-        "generate_seconds": round(time.time() - started, 2),
-        "device": "cuda" if torch.cuda.is_available() else "cpu",
-    }
+    started = time.monotonic()
+    try:
+        with _lock:
+            _last_used = started
+            torch.manual_seed(request.seed)
+            model = _load_model()
+            wavs, source_rate = model.generate_custom_voice(
+                text=[request.text],
+                speaker=[request.speaker],
+                language=[request.language],
+                instruct=[request.instruction] if request.instruction else None,
+            )
+            audio = wavs[0]
+            mp3 = _to_mp3(audio, source_rate)
+            request_seconds = time.monotonic() - started
+            _last_used = time.monotonic()
+        return make_response(
+            request,
+            mp3,
+            duration_sec=len(audio) / source_rate,
+            request_gpu_seconds=request_seconds,
+            gpu_rate_usd_per_second=gpu_rate,
+            storage_usd=storage_upper,
+        )
+    except ContractError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    except Exception as error:
+        # Release recoverable allocator state without silently changing model,
+        # precision, attention, or device.
+        gc.collect()
+        torch.cuda.empty_cache()
+        raise HTTPException(status_code=500, detail=f"pinned synthesis failed: {type(error).__name__}") from error

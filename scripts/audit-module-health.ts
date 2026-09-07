@@ -62,12 +62,12 @@ function main(): void {
   }
   const rows: Row[] = [];
 
-  for (const module of GENERATED_LOCKABLE_MODULES) {
-    if (!module.paths.length) continue;
-    const own = new Set(module.paths);
+  for (const moduleEntry of GENERATED_LOCKABLE_MODULES) {
+    if (!moduleEntry.paths.length) continue;
+    const own = new Set(moduleEntry.paths);
     let loc = 0;
     let drift = 0;
-    for (const path of module.paths) {
+    for (const path of moduleEntry.paths) {
       const text = contents.get(path);
       if (!text) continue;
       loc += text.split("\n").length;
@@ -84,7 +84,7 @@ function main(): void {
     // only the "@/..." alias reported thoroughly tested blocks as having no
     // oracle, which is exactly the kind of false alarm that sends the next hour
     // to a module that was already covered.
-    const stems = module.paths.flatMap((p) => [
+    const stems = moduleEntry.paths.flatMap((p) => [
       p.replace(/^src\//, "@/").replace(/\.tsx?$/, ""),
       (p.split("/").pop() ?? "").replace(/\.tsx?$/, ""),
     ]).filter((stem) => stem.length > 3);
@@ -95,9 +95,9 @@ function main(): void {
       if (!stems.some((stem) => text.includes(stem))) continue;
       (TEST.test(file) ? testers : importers).add(file);
     }
-    const frameworkInvoked = module.paths.some((path) => FRAMEWORK_ENTRY.test(path));
+    const frameworkInvoked = moduleEntry.paths.some((path) => FRAMEWORK_ENTRY.test(path));
     rows.push({
-      id: module.id, label: module.label, files: module.paths.length, loc,
+      id: moduleEntry.id, label: moduleEntry.label, files: moduleEntry.paths.length, loc,
       importers: importers.size, tests: testers.size, drift, frameworkInvoked,
     });
   }

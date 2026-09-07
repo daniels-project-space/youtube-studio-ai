@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
+import { join } from "node:path";
 import {
   hasQualifiedQwenTts,
   isPinnedQwenTtsReceipt,
@@ -7,9 +8,6 @@ import {
   qwenTtsInstruction,
   QWEN3_TTS_MODEL,
   QWEN3_TTS_MODEL_REVISION,
-  QWEN3_TTS_PACKAGE_VERSION,
-  QWEN3_TTS_SAMPLE_RATE_HZ,
-  QWEN3_TTS_TRANSFORMERS_VERSION,
   QWEN3_TTS_WORKER_CONTRACT,
   QwenTtsError,
   synthQwenNarration,
@@ -21,8 +19,23 @@ import { normalizeTtsProvider } from "@/lib/tts";
 const savedFetch = globalThis.fetch;
 const savedEnv = { ...process.env };
 
-function sha256(value: string | Uint8Array): string {
-  return createHash("sha256").update(value).digest("hex");
+function actualPythonWorkerResponse(request: Record<string, unknown>, audio: Uint8Array): unknown {
+  const output = execFileSync(
+    "python3",
+    [join(process.cwd(), "workers/qwen3-tts/contract.py"), "--fixture"],
+    {
+      input: JSON.stringify({
+        payload: request,
+        idempotencyKey: request.requestKey,
+        audioBase64: Buffer.from(audio).toString("base64"),
+        durationSec: 2.4,
+        requestGpuSeconds: 10,
+        gpuRateUsdPerSecond: 0.00005,
+      }),
+      encoding: "utf8",
+    },
+  );
+  return JSON.parse(output) as unknown;
 }
 
 async function main(): Promise<void> {
@@ -53,43 +66,12 @@ async function main(): Promise<void> {
     const request = JSON.parse(String(init?.body)) as Record<string, unknown>;
     assert.equal(request.model, QWEN3_TTS_MODEL);
     assert.equal(request.revision, QWEN3_TTS_MODEL_REVISION);
+    assert.equal(request.schema, QWEN3_TTS_WORKER_CONTRACT);
     assert.equal(request.speaker, "Aiden");
     assert.equal(request.language, "English");
     assert.match(String(request.instruction), /measured/);
     assert.equal(new Headers(init?.headers).get("Idempotency-Key"), request.requestKey);
-    const runtime = {
-      provider: "novita",
-      gpu: "RTX 4090",
-      capacityMode: "spot",
-      persistentCache: true,
-      idleShutdownSeconds: 120,
-      gpuSeconds: 10,
-      gpuRateUsdPerSecond: 0.00005,
-      startupUsd: 0,
-      storageUsd: 0,
-      costUsd: 0.0005,
-    } as const;
-    const receipt = {
-      schema: QWEN3_TTS_WORKER_CONTRACT,
-      requestKey: request.requestKey,
-      model: QWEN3_TTS_MODEL,
-      revision: QWEN3_TTS_MODEL_REVISION,
-      qwenTtsPackageVersion: QWEN3_TTS_PACKAGE_VERSION,
-      transformersVersion: QWEN3_TTS_TRANSFORMERS_VERSION,
-      dtype: "bfloat16",
-      attention: "flash_attention_2",
-      textSha256: request.textSha256,
-      instructionSha256: request.instructionSha256,
-      speaker: "Aiden",
-      language: "English",
-      seed: request.seed,
-      audioSha256: sha256(audio),
-      audioFormat: "mp3",
-      sampleRateHz: QWEN3_TTS_SAMPLE_RATE_HZ,
-      durationSec: 2.4,
-      runtime,
-    };
-    return Response.json({ receipt, audioBase64: Buffer.from(audio).toString("base64") });
+    return Response.json(actualPythonWorkerResponse(request, audio));
   };
   const bytes = await synthQwenNarration({
     text: "A measured open narration qualification line.",
@@ -100,7 +82,10 @@ async function main(): Promise<void> {
   });
   assert.deepEqual(bytes, audio);
   assert.equal(requests, 1);
-  assert.equal(acceptedReceipt?.runtime.costUsd, 0.0005);
+  assert.equal(acceptedReceipt?.runtime.accounting, "conservative-upper-bound");
+  assert.equal(acceptedReceipt?.runtime.requestGpuSeconds, 10);
+  assert.equal(acceptedReceipt?.runtime.gpuSeconds, 310);
+  assert.equal(acceptedReceipt?.runtime.costUsd, 0.0155);
   assert.equal(isPinnedQwenTtsReceipt(acceptedReceipt), true);
 
   globalThis.fetch = async (_input, init) => {

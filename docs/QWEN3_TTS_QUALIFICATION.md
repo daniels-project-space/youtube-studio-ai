@@ -9,7 +9,7 @@ The Studio supports an explicit `qwen3` narration provider without allowing it t
 - Hugging Face revision: `0c0e3051f131929182e2c023b9537f8b1c68adfe`.
 - Runtime package: `qwen-tts==0.1.1` with its declared `transformers==4.57.3` dependency.
 - Inference: BF16, FlashAttention 2, 24 kHz decoded audio, MP3 delivery.
-- Infrastructure: one provider-attested Novita RTX 4090 spot worker, persistent model cache, and automatic idle shutdown.
+- Infrastructure target: one Novita RTX 4090 serverless worker, persistent model cache, zero minimum workers, and a 300-second platform idle timeout.
 
 The official implementation exposes `generate_custom_voice(text, language, speaker, instruct)` and nine fixed speakers. The Studio passes only those enumerated speakers and the ten documented languages. Speaking-rate intent is translated into the model's supported natural-language instruction rather than inventing an unsupported numeric API field.
 
@@ -24,13 +24,18 @@ Official references:
 
 ## Worker contract
 
-`src/lib/qwenTts.ts` posts an idempotency-keyed `qwen3-tts-worker/v1` request to `QWEN3_TTS_WORKER_URL`. A response is accepted only when it returns:
+`src/lib/qwenTts.ts` posts an idempotency-keyed `qwen3-tts-worker/v2` request to `QWEN3_TTS_WORKER_URL`. A response is accepted only when it returns:
 
 - the exact model, revision, package versions, BF16 precision, and FlashAttention 2 implementation;
 - matching text, instruction, speaker, language, seed, request, and audio SHA-256 digests;
 - 24 kHz MP3 bytes inside a bounded response;
-- a Novita RTX 4090 spot/persistent-cache/idle-shutdown runtime attestation;
-- internally consistent GPU seconds, rate, startup, storage, and total cost.
+- a Novita RTX 4090 serverless/persistent-cache/scale-to-zero runtime attestation;
+- internally consistent request time and conservative lifecycle upper-bound cost. The upper bound deliberately charges the complete configured idle tail to each request; it may over-reserve when a warm worker handles another request, but it cannot omit that billable tail.
+
+The Python boundary implementation is `workers/qwen3-tts/contract.py`. The
+TypeScript test sends the real client payload through that Python code and then
+validates its response in the TypeScript client. This is the compatibility gate
+that the former same-language mock did not provide.
 
 A transport failure after POST is an unknown paid outcome. The client emits the deterministic request key for reconciliation and never resubmits. An unrecognized provider name also fails before spend instead of falling through to Fish.
 
@@ -53,7 +58,7 @@ Configuration alone is insufficient. Production requires all four values in the 
 3. `QWEN3_TTS_QUALITY_QUALIFIED=1`
 4. `QWEN3_TTS_QUALITY_RECEIPT_SHA256=<64 lowercase hex>`
 
-The quality receipt must come from a reviewed benchmark of the exact worker/model revision. That benchmark is `scripts/qwen-tts-qualify.ts`: it runs the matrix below against a live worker, measures every take with `scripts/qwen_take_measure.py` (ASR word-error rate, integrated loudness, true peak, duration and pace), refuses to emit a receipt if any axis fails or is UNMEASURED, refuses again until a human verdict has been recorded per take, and hashes the measurements together with those verdicts so neither can be edited afterwards. Instruction following is judged as the pace separation between a calm and an energetic take, which one take cannot fake. At minimum, retain:
+The quality receipt must come from a reviewed benchmark of the exact immutable container/model revision. The deployment helper refuses mutable image tags and configures `minNum=0`, `maxNum=1`, `freeTimeout=300`, and `maxConcurrent=1`; verify those values in the returned Novita endpoint before qualification. That benchmark is `scripts/qwen-tts-qualify.ts`: it runs the matrix below against a live worker, measures every take with `scripts/qwen_take_measure.py` (ASR word-error rate, integrated loudness, true peak, duration and pace), refuses to emit a receipt if any axis fails or is UNMEASURED, refuses again until a human verdict has been recorded per take, and hashes the measurements together with those verdicts so neither can be edited afterwards. Instruction following is judged as the pace separation between a calm and an energetic take, which one take cannot fake. At minimum, retain:
 
 - one English documentary passage for Aiden and Ryan;
 - one calm/slow passage and one energetic passage to verify instruction following;
@@ -65,4 +70,14 @@ Every production channel still needs voice evidence bound to its exact Qwen spea
 
 ## Cost authority
 
-Planning reserves a conservative `$1 / 1,000 characters` ceiling until real worker benchmarking supports a tighter operator override via `PRICE_TTS_QWEN_MAX_PER_KCHAR_USD`. Actual run spend ignores character pricing and uses only the worker's verified GPU lifecycle receipts. This protects admission without pretending the self-hosted worker has a managed per-character invoice.
+Planning reserves a conservative `$1 / 1,000 characters` ceiling until real worker benchmarking supports a tighter operator override via `PRICE_TTS_QWEN_MAX_PER_KCHAR_USD`. Runtime admission uses the worker's conservative request lifecycle upper bound, based on the operator-confirmed serverless GPU rate plus the complete idle tail and a storage allowance. This protects admission without pretending that a response-time estimate is a settled Novita invoice.
+
+## Serverless deployment
+
+Build `workers/qwen3-tts/Dockerfile`, push it to a registry, and resolve the
+result to an immutable `@sha256:` image reference. Then inject the endpoint
+product, cluster, dedicated network-volume ID, image digest, worker token, and
+the exact hourly rate shown by Novita into `workers/qwen3-tts/deploy-novita.py`.
+Run `plan` first; `create` is the only billable verb. The helper never embeds the
+Novita account key in the worker container, and `/health` returns 503 unless the
+pinned package versions, FlashAttention 2, CUDA, and RTX 4090 are all present.
