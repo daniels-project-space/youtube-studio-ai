@@ -226,6 +226,41 @@ const contract = (
 });
 
 /**
+ * Everything crewBlocks' `loadGrounding` reads from the store.
+ *
+ * ALL FIVE CREW BRIEFS WERE THROWING ON EVERY RUN. Commit 2a5397d ("eliminate 7
+ * redundant getChannel Convex reads per run", 2026-08-21) replaced five Convex
+ * channel fetches with store reads and seeded the fields in runPipeline — and
+ * did not touch this file. The runner denies every store read outside a block's
+ * declarations, so `loadGrounding`'s FIRST statement,
+ * `ctx.store["showBible"]`, raised
+ *
+ *     module "director_brief" attempted undeclared artifact read "showBible"
+ *
+ * on director_brief, dp_brief, editor_brief, composer_brief and critic_spec —
+ * which are in eleven of the twelve families. The read sits above that
+ * function's try/catch, so it was not degraded, it was fatal.
+ *
+ * That commit's own verification note lists tsc, eslint and ten tests. None of
+ * them builds a proxied store, which is why a change that could not work passed
+ * review: the optimisation was correct about the data and silent about the
+ * contract that governs reaching it.
+ *
+ * One list for all five, so the next field added to grounding is added once.
+ * `mem:` see src/engine/__tests__/declaredStoreReads.test.ts, which executes
+ * every block against the real Proxy so this cannot recur.
+ */
+const CREW_GROUNDING_CONSUMES = [
+  // Already declared before the regression.
+  "styleDNA", "niche", "channelName", "serializedProgramEpisodeContext",
+  // Read by loadGrounding since 2a5397d and never declared.
+  "showBible", "channelSlug", "persona", "styleGrammar",
+  "channelStatus", "channelTemplate", "channelBudget", "channelModuleConfig",
+  // Read when resolving the channel's crew and role profiles.
+  "channelProgramRoute",
+] as const;
+
+/**
  * Explicit migration contracts for every currently registered production
  * block. Optional reads are declarations, not a global allow-list: the runner
  * denies every store read outside `consumes` + this exact list.
@@ -233,6 +268,9 @@ const contract = (
 export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> = {
   topic_select: contract(["topic.selected"], {
     optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "narrativeSeriesRunSelector",
       "plannedTopic", "reuseTopic", "channelName", "persona", "niche", "styleGrammar", "topicPool",
       // A sealed program route constrains every selection path, including
       // planned and render-group-reused topics.
@@ -314,15 +352,24 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // Historical/manual music-loop designs can still compile for migration,
     // but the runtime block itself refuses to mint a plan without these two
     // route-owned seeds.  The automatic route requires both blocks.
-    optionalConsumes: ["channelProgramRoute", "styleDNA", "visualBrief", "musicBrief", "niche"],
+    optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "visualStyle","channelProgramRoute", "styleDNA", "visualBrief", "musicBrief", "niche"],
     providerProfiles: [local],
     qualityRequired: true,
   }),
   scene_planner: contract(["visuals.planned"], {
-    optionalConsumes: ["styleGrammar", "visualStyle", "visualBrief", "niche", "styleDNA", "sceneLibrary", "musicProgramPlan"],
+    optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "channelProgramRoute","styleGrammar", "visualStyle", "visualBrief", "niche", "styleDNA", "sceneLibrary", "musicProgramPlan"],
   }),
   keyframes: contract(["visuals.keyframe_generated", "render.profile_pinned", "render.spot_only"], {
-    optionalConsumes: ["styleGrammar", "visualStyle", "styleDNA"],
+    optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "visualBrief","styleGrammar", "visualStyle", "styleDNA"],
     providerProfiles: [{ id: "novita-zimage-local-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 1,
     // The art-director loop performs at most two still generations.
@@ -335,7 +382,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // Kept optional in the generic contract so historical/manual designs can
     // still be inspected or migrated. The registered music-loop route makes
     // it mandatory through its sealed order and the runtime re-check below.
-    optionalConsumes: ["topic", "musicKey", "scenes", "motionPrompt", "musicProgramMotionIntent", "styleGrammar", "visualStyle"],
+    optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "channelProgramRoute", "musicProgramPlan", "visualBrief","topic", "musicKey", "scenes", "motionPrompt", "musicProgramMotionIntent", "styleGrammar", "visualStyle"],
     providerProfiles: [{ id: "novita-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 5,
     // The sealed 30-second source unit is two independently attested 15-second
@@ -349,7 +399,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     maxCostUsdFor: () => PRICE.topazUpscaleUsd,
   }),
   music: contract(["audio.music_generated"], {
-    optionalConsumes: ["reuseMusicKey", "musicBrief", "styleDNA", "channelName", "studioAudioRecipeProjection", "musicProgramPlan"],
+    optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "channelProgramRoute","reuseMusicKey", "musicBrief", "styleDNA", "channelName", "studioAudioRecipeProjection", "musicProgramPlan"],
     providerProfiles: [managed, minimaxMusic3],
     maxCostUsd: 10,
     // Reserve both the requested generation count and one alternate-provider
@@ -375,6 +428,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     ["publish.connector_bound", "publish.resumable", "publish.synthetic_disclosed", "publish.private_first"],
     {
       optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "channelMusicProgramKey", "finalMasterReleaseCertificate", "musicProvider", "musicRuntimeReceiptKey",
         "chapterPlan", "scheduledPublishAt", "contentLane", "childContentSafety", "sceneCompilerReceipt", "quizShortRelease",
         // Last-hop package-art verification for a current fictional scenario.
         "topic", "channelProgramRoute", "syntheticScenario", "syntheticScenarioDisclosure",
@@ -388,7 +444,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   cleanup: contract(["storage.scoped_cleanup"], {
     // Shorts are optional, but a successfully uploaded derivative carries a
     // separate release certificate that cleanup must retain with its proof.
-    optionalConsumes: ["shortKey", "shortReleaseCertificateKey"],
+    optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "finalMasterReleaseCertificate","shortKey", "shortReleaseCertificateKey"],
     sideEffects: ["delete_scoped_artifacts"],
   }),
   shorts_spinoff: contract([
@@ -403,6 +462,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // transform. These contextual inputs make the post-transform reviewer
     // channel-aware without treating them as an inherited pass.
     optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "channelMusicProgramKey", "finalMasterReleaseCertificate", "musicProvider", "musicRuntimeReceiptKey",
       "description", "tags", "qualityBar", "contentLane", "channelName", "persona",
       "styleGrammar", "styleDNA", "showBible", "criticDoctrine", "topic", "niche",
       // Present only for sealed serialized narrative routes. A derivative
@@ -436,6 +498,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "serializedProgramEpisodeContext",
       // The channel's title register, frozen into the seed store at run start.
       "clickbaitLevel",
+      // Read by intelligenceBlocks' loadChannel since 2a5397d and never
+      // declared, so `metadata` failed with an undeclared-read error on every
+      // run exactly as the five crew briefs did. See CREW_GROUNDING_CONSUMES.
+      "channelProgramRoute",
     ],
   }),
   package_to_opening_plan: contract(["package.opening_bound"], {
@@ -512,7 +578,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     ],
   }),
   qa_script: contract(["script.qa_passed"], {
-    optionalConsumes: ["script", "persona", "dataStorySourceLedger", "channelProgramRoute", "serializedProgramEpisodeContext"],
+    optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "topic","script", "persona", "dataStorySourceLedger", "channelProgramRoute", "serializedProgramEpisodeContext"],
     qualityRequired: true,
   }),
   narration_tts: contract(["narration.timed"], {
@@ -588,6 +657,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   timeline_assemble: contract(["master.assembled"], {
     requiredConsumes: ["footageClips", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
     optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "ltxStyleId",
       "entityClips", "introCardPath", "introApplied", "introCardKey", "introSec", "healHints", "healClasses", "sentenceTimings", "cutSheet",
       "chapterPlan", "channelAvatarKey", "script", "channelName", "quoteOverlays", "insertOverlays",
       "cinematicGeneratedScenePlan", "cinematicEditDecisionList", "generatedFootageSceneManifest",
@@ -711,14 +783,17 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   originality_gate: contract(["final.lexical_script_self_dedup_passed"], { optionalConsumes: ["topic"], qualityRequired: true }),
   compliance_check: contract(["final.compliance_passed"], { optionalConsumes: ["niche"], qualityRequired: true }),
 
-  director_brief: contract(["crew.director_treatment"], { optionalConsumes: ["styleDNA", "niche", "channelName", "serializedProgramEpisodeContext"] }),
-  dp_brief: contract(["crew.dp_visual_spec"], { optionalConsumes: ["styleDNA", "niche", "channelName", "serializedProgramEpisodeContext"] }),
-  editor_brief: contract(["crew.editor_edl"], { optionalConsumes: ["styleDNA", "niche", "channelName", "serializedProgramEpisodeContext"] }),
-  composer_brief: contract(["crew.composer_cue_sheet"], { optionalConsumes: ["styleDNA", "niche", "channelName", "serializedProgramEpisodeContext"] }),
-  critic_spec: contract(["crew.critic_validation_spec"], { optionalConsumes: ["styleDNA", "niche", "channelName", "serializedProgramEpisodeContext"] }),
+  director_brief: contract(["crew.director_treatment"], { optionalConsumes: [...CREW_GROUNDING_CONSUMES] }),
+  dp_brief: contract(["crew.dp_visual_spec"], { optionalConsumes: [...CREW_GROUNDING_CONSUMES] }),
+  editor_brief: contract(["crew.editor_edl"], { optionalConsumes: [...CREW_GROUNDING_CONSUMES] }),
+  composer_brief: contract(["crew.composer_cue_sheet"], { optionalConsumes: [...CREW_GROUNDING_CONSUMES] }),
+  critic_spec: contract(["crew.critic_validation_spec"], { optionalConsumes: [...CREW_GROUNDING_CONSUMES] }),
 
   story_spine: contract(["story.timed", "visuals.story_planned"], {
     optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "channelProgramRoute",
       "structure", "visualBrief", "cutSheet", "styleDNA", "contentLane",
       "curriculumEpisodeSeed", "curriculumEpisodeSeedApproval",
       "editorialEvidencePacket",
@@ -969,7 +1044,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // Present only on sealed serialized narrative routes. When it is present,
     // the resolver uses its episode-local accepted-character subset to keep a
     // persistent character LoRA out of episodes where that character is absent.
-    optionalConsumes: ["narrativeAcceptedCharacterAdapters", "narrativeShotControl"],
+    optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "narrativeSeriesRunSelector","narrativeAcceptedCharacterAdapters", "narrativeShotControl"],
     providerProfiles: [local],
     maxCostUsd: 0,
   }),
@@ -1038,6 +1116,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // See gen_footage: signature rendering consumes the same durable plan
     // rather than asking a second model to invent a disconnected scene list.
     optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "cinematicGeneratedScenePlan",
       "styleDNA",
       "visualBrief",
       "timedScript",
@@ -1160,6 +1241,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   self_contained_story_plan: contract(["story.self_contained_plan_critic_approved"], {
     requiredConsumes: ["topic", "channelProgramRoute", "contentLane"],
     optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "serializedProgramEpisodeContext",
       "researchNotes",
       "factSheet",
       "visualBrief",
@@ -1187,7 +1271,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // channelName seeds the creative defaults for a channel that declared no
       // art style; without it every undeclared drawn channel renders in one
       // identical hand.
-      optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "voiceId", "ttsProvider", "palette", "musicKey", "musicUrl", "selfContainedStoryReceipt", "channelProgramRoute", "channelName"],
+      optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "contentLane","researchNotes", "factSheet", "visualBrief", "voiceId", "ttsProvider", "palette", "musicKey", "musicUrl", "selfContainedStoryReceipt", "channelProgramRoute", "channelName"],
       providerProfiles: [managed, local],
       // 16 panels × five sealed one-worker image envelopes, plus
       // the full premium TTS ceiling. Upstream music is charged by its own
@@ -1258,7 +1345,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   motion_comic: contract(
     ["script.generated", "script.qa_passed", "narration.timed", "visuals.generated", "visuals.story_aligned", "master.assembled"],
     {
-      optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "visualRepair", "selfContainedStoryReceipt", "channelProgramRoute", "styleDNA", "styleGrammar", "visualStyle"],
+      optionalConsumes: [
+      // Read at run time and never declared: the runner's Proxy refuses an
+      // undeclared read, so this threw the moment its branch ran.
+      "channelName", "contentLane","researchNotes", "factSheet", "visualBrief", "visualRepair", "selfContainedStoryReceipt", "channelProgramRoute", "styleDNA", "styleGrammar", "visualStyle"],
       providerProfiles: [managed, local],
       maxCostUsd: 40,
       // Cold-run bound includes the live direct-Novita primary/recovery panel

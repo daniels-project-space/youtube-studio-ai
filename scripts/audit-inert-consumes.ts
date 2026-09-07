@@ -123,7 +123,16 @@ function storeReads(
   return into;
 }
 
-function blockScopes(): Map<string, { file: string; line: number; text: string; reads: Set<string> }> {
+/**
+ * EXPORTED so audit-undeclared-store-reads can ask the same question in reverse.
+ *
+ * This scoping is the expensive part of both audits and it took several
+ * corrections to get right — dropping the block's own declaration arrays before
+ * scanning, following same-file helpers four levels deep, resolving keys given
+ * as string constants. Re-deriving it in a second file would mean re-earning
+ * every one of those corrections, and the two answers would drift.
+ */
+export function blockScopes(): Map<string, { file: string; line: number; text: string; reads: Set<string> }> {
   const scopes = new Map<string, { file: string; line: number; text: string; reads: Set<string> }>();
   const constants = stringConstants();
   for (const file of blockFiles(BLOCK_DIR)) {
@@ -136,7 +145,18 @@ function blockScopes(): Map<string, { file: string; line: number; text: string; 
         for (const property of node.properties) {
           if (!ts.isPropertyAssignment(property) || !property.name) continue;
           const name = property.name.getText(sf);
-          if (name === "id" && ts.isStringLiteral(property.initializer)) id = property.initializer.text;
+          // `id: "foo"` OR `id: SOME_CONSTANT`. narrative_series_visual_controls
+          // declares its id through NARRATIVE_SERIES_VISUAL_CONTROL_BLOCK, so a
+          // string-literal-only match skipped it entirely — and a block nobody
+          // scans is precisely where an undeclared read survives. Both audits
+          // that share this scoping reported it as "no scope found" rather than
+          // as checked, which is the only reason it was visible at all.
+          if (name === "id") {
+            if (ts.isStringLiteral(property.initializer)) id = property.initializer.text;
+            else if (ts.isIdentifier(property.initializer)) {
+              id = constants.get(property.initializer.text) ?? null;
+            }
+          }
           if (name === "run") hasRun = true;
         }
         if (id && hasRun && !scopes.has(id)) {
@@ -371,4 +391,6 @@ function main(): void {
   console.log(`AUDIT_FINDINGS ${findings.length}`);
 }
 
-main();
+// Only when run directly. The scoping above is imported by
+// audit-undeclared-store-reads, and importing an audit must not run it.
+if (require.main === module) main();
