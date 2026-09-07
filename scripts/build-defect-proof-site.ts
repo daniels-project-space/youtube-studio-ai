@@ -579,7 +579,12 @@ const commits = git("log", "--pretty=format:%h%s%ad", "--date=short", "--since
   .filter(Boolean)
   .map((line) => { const [sha, subject, date] = line.split(""); return { sha, subject, date }; });
 
-const testCount = 590;
+// Keep this number coupled to the exact discovery rule in
+// run-production-readiness-tests.mjs instead of publishing a stale hand-typed
+// total. The runner adds the same two explicitly allowlisted script tests.
+const testCount = git("ls-files", "src")
+  .split("\n")
+  .filter((file) => /\.test\.(?:ts|tsx|mts|mjs)$/.test(file)).length + 2;
 
 function evidenceBadge(kind: string): string {
   return `<span class="badge ${kind}">${kind}</span>`;
@@ -694,7 +699,7 @@ const html = `<!doctype html>
   <div class="stat"><b>${commits.length}</b><span>commits</span></div>
   <div class="stat"><b>${DEFECTS.length}</b><span>defects shown</span></div>
   <div class="stat"><b>${rendered.filter((r) => r.defect.evidence.kind === "executed").length}</b><span>proven by execution</span></div>
-  <div class="stat"><b>${testCount}</b><span>tests, 0 failing</span></div>
+  <div class="stat"><b>${testCount}</b><span>direct readiness tests</span></div>
   <div class="stat"><b>9</b><span>audits in CI</span></div>
 </div>
 

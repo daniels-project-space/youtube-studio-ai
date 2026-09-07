@@ -22,7 +22,13 @@ jobs:
     # valid release before the cloud-runtime deployment can run.
     timeout-minutes: 25
     steps:
+      # The defect-proof gate resolves and quotes the exact historical commits
+      # that establish each inspected defect. A shallow checkout makes those
+      # receipts disappear and turns the proof build into a machine-dependent
+      # pass/fail, so CI must retain the repository history it is validating.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Detect package manager
         id: pm
         run: |
