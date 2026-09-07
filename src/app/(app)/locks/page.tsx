@@ -42,9 +42,9 @@ export default function LocksPage() {
       <h1 style={{ fontSize: 26, marginBottom: 6 }}>Owner locks</h1>
       <p style={{ color: "#96a2b8", marginTop: 0, lineHeight: 1.6, maxWidth: 720 }}>
         A locked module cannot be modified by any AI worker — Claude, Codex, or anything else driving
-        the editing tools. Everything starts unlocked. Enforcement runs as a pre-edit hook on the
-        workstation, and it also refuses changes to the lock mirror and to itself, so nothing can
-        unlock itself. A module showing <strong>0 files</strong> is a catalog contract with no source
+        the editing tools. Everything starts unlocked. The workstation mirror applies read-only kernel
+        protection in every linked worktree, with a Claude pre-edit guard as an additional early warning.
+        Only an owner unlock here causes the mirror service to release those files. A module showing <strong>0 files</strong> is a catalog contract with no source
         of its own yet: locking it records your intent but blocks no edits.
       </p>
 

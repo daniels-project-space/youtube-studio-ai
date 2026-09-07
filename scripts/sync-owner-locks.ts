@@ -20,6 +20,7 @@ import { execFileSync } from "node:child_process";
 import { OWNER_ID } from "@/lib/config";
 import { LOCKABLE_MODULES, lockableModule } from "@/lib/ownerLockRegistry";
 import { lockEntity, listLocks, unlockEntity } from "@/lib/moduleLocks";
+import { reconcileWorkstationModuleFiles } from "@/lib/workstationModuleLock";
 
 interface RemoteLock { moduleKey: string; lockedAt: number; lockedBy: string }
 
@@ -47,7 +48,7 @@ async function main(): Promise<void> {
   const remote = readRemoteLocks();
 
   const wanted = new Map(remote.map((row) => [row.moduleKey, row]));
-  const present = new Set((await listLocks()).map((record) => record.id));
+  const presentRecords = new Map((await listLocks()).map((record) => [record.id, record]));
 
   let added = 0;
   let removed = 0;
@@ -60,21 +61,36 @@ async function main(): Promise<void> {
       console.warn(`[owner-locks] locked module not in this checkout: ${moduleKey}`);
       continue;
     }
-    if (present.has(moduleKey)) continue;
-    await lockEntity({ entity, lockedBy: `${row.lockedBy} (via studio UI)` });
-    added += 1;
-    console.log(`[owner-locks] locked ${moduleKey} (${entity.paths.length} files)`);
+    const present = presentRecords.get(moduleKey);
+    if (!present) {
+      await lockEntity({ entity, lockedBy: `${row.lockedBy} (via studio UI)` });
+      added += 1;
+    }
+    const paths = [...new Set([...(present?.paths ?? []), ...entity.paths])];
+    const applied = reconcileWorkstationModuleFiles({ paths, locked: true });
+    console.log(
+      `[owner-locks] locked ${moduleKey} · ${applied.protectedFiles} inode(s) across ` +
+      `${applied.roots} worktree(s) · changed ${applied.changedFiles} · absent ${applied.absentFiles}`,
+    );
   }
 
   const lockableIds = new Set(LOCKABLE_MODULES.map((entity) => entity.id));
-  for (const id of present) {
+  for (const [id, record] of presentRecords) {
     if (wanted.has(id)) continue;
     // Only ever retire a marker this sync is responsible for. An unrelated
     // marker written by another tool is left alone.
     if (!lockableIds.has(id)) continue;
+    const entity = lockableModule(id);
+    const paths = [...new Set([...record.paths, ...(entity?.paths ?? [])])];
+    // Kernel protection comes off before the marker. If this fails, the marker
+    // remains and every tool still sees the module as locked.
+    const released = reconcileWorkstationModuleFiles({ paths, locked: false });
     await unlockEntity(id);
     removed += 1;
-    console.log(`[owner-locks] unlocked ${id}`);
+    console.log(
+      `[owner-locks] unlocked ${id} · ${released.protectedFiles} inode(s) across ` +
+      `${released.roots} worktree(s) · changed ${released.changedFiles}`,
+    );
   }
 
   console.log(`[owner-locks] in sync · ${wanted.size} locked · +${added} -${removed}`);

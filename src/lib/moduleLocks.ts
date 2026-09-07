@@ -7,10 +7,9 @@
  * locked?" without a network call on every tool invocation. The sync in
  * scripts/sync-owner-locks.ts is what keeps the two in step.
  *
- * The enforcement itself deliberately does NOT live here. The block happens in
- * a Claude Code PreToolUse hook outside the repository, because a guard that
- * lives inside the thing it guards can be edited by the same worker it is meant
- * to stop.
+ * The enforcement itself deliberately does NOT live here. The sync applies an
+ * immutable inode flag in every linked worktree, while a Claude Code PreToolUse
+ * hook outside the repository provides an earlier human-readable refusal.
  *
  * The marker format follows the existing `pipeline-lock-guard` convention
  * already running on this machine — one file per locked entity — and extends it

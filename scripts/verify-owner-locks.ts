@@ -11,9 +11,13 @@
  * this machine.
  */
 import { spawnSync } from "node:child_process";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 import { LOCKABLE_MODULES, lockableModule } from "@/lib/ownerLockRegistry";
 import { listLocks, lockEntity, unlockEntity } from "@/lib/moduleLocks";
+import { reconcileImmutableModuleFiles } from "@/lib/workstationModuleLock";
 
 const GUARD = "/root/.claude/hooks/owner-lock-guard.sh";
 const REPO = "/home/ubuntu/youtube-studio-ai";
@@ -30,6 +34,8 @@ function report(label: string, actual: unknown, expected: unknown): boolean {
 
 async function main(): Promise<void> {
   let ok = true;
+  const initialLocks = await listLocks();
+  const initialIds = new Set(initialLocks.map((record) => record.id));
 
   const withFiles = LOCKABLE_MODULES.filter((entity) => entity.paths.length > 0);
   ok = report("every module is registered as lockable", LOCKABLE_MODULES.length > 40, true) && ok;
@@ -41,9 +47,12 @@ async function main(): Promise<void> {
   ok = report("thumbnail lock still spans its gates", (thumbnail?.paths.length ?? 0) >= 23, true) && ok;
 
   // A module is only locked while a marker exists — never by default.
-  const marker = "editorial-evidence-packet";
-  const entity = lockableModule(marker);
-  if (!entity || entity.paths.length === 0) throw new Error(`${marker} has no files to test with`);
+  const baseEntity = lockableModule("editorial-evidence-packet");
+  if (!baseEntity || baseEntity.paths.length === 0) throw new Error("guard probe module has no files");
+  // A synthetic id is deliberately outside LOCKABLE_MODULES, so the minute
+  // sync cannot mistake this short-lived local proof for a stale UI marker and
+  // remove it halfway through the assertions.
+  const entity = { ...baseEntity, id: `verification-${process.pid}` };
   const target = `${REPO}/${entity.paths[0]}`;
 
   ok = report(
@@ -79,10 +88,45 @@ async function main(): Promise<void> {
     0,
   ) && ok;
   ok = report(
-    "thumbnail marker survived the run",
-    (await listLocks()).some((record) => record.id === "thumbnail"),
+    "pre-existing owner locks survived the run",
+    initialIds.size === 0 || (await listLocks()).filter((record) => initialIds.has(record.id)).length === initialIds.size,
     true,
   ) && ok;
+
+  // Kernel-level proof for tools without a pre-edit hook (including Codex).
+  const probeRoot = await mkdtemp(join(tmpdir(), "ysa-owner-lock-proof-"));
+  const probePath = join(probeRoot, "probe.txt");
+  await writeFile(probePath, "unchanged\n");
+  try {
+    const applied = reconcileImmutableModuleFiles({
+      roots: [probeRoot],
+      paths: ["probe.txt"],
+      locked: true,
+    });
+    ok = report("kernel immutable flag was applied", applied.changedFiles, 1) && ok;
+    ok = report(
+      "ordinary shell write is refused by the kernel",
+      spawnSync("bash", ["-c", ': >> "$1"', "_", probePath]).status === 0,
+      false,
+    ) && ok;
+    const released = reconcileImmutableModuleFiles({
+      roots: [probeRoot],
+      paths: ["probe.txt"],
+      locked: false,
+    });
+    ok = report("UI-mirror unlock releases the inode", released.changedFiles, 1) && ok;
+    ok = report(
+      "ordinary shell write works after unlock",
+      spawnSync("bash", ["-c", ': >> "$1"', "_", probePath]).status,
+      0,
+    ) && ok;
+  } finally {
+    // If an assertion above throws, release before cleaning the private probe.
+    try {
+      reconcileImmutableModuleFiles({ roots: [probeRoot], paths: ["probe.txt"], locked: false });
+    } catch { /* the main report will already fail */ }
+    await rm(probeRoot, { recursive: true, force: true });
+  }
 
   console.log(ok ? "\nOWNER LOCK VERIFICATION PASS" : "\nOWNER LOCK VERIFICATION FAIL");
   if (!ok) process.exit(1);
