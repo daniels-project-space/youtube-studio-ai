@@ -19,6 +19,7 @@ import {
   type ThumbnailPlaybook,
 } from "@/lib/thumbnailLab";
 import type { ThumbnailTextZone } from "@/lib/thumbnailLayout";
+import { boundedInteger } from "@/engine/boundedNumber";
 
 const MODEL = "fal-ai/nano-banana-pro";
 const ROUTE = `https://fal.run/${MODEL}`;
@@ -26,11 +27,14 @@ const OUTPUT_COST_USD = 0.15;
 const OUT_DIR = process.env.THUMBNAIL_PROOF_DIR?.trim()
   || "/tmp/ysa-fal-nano-banana-pro-thumbnail-examples";
 const REQUESTED_PROOF_KEY = process.env.THUMBNAIL_PROOF_KEY?.trim();
-const MAX_ATTEMPTS = Math.max(1, Math.min(2, Number(process.env.THUMBNAIL_PROOF_MAX_ATTEMPTS ?? "2")));
+// Env vars are strings: THUMBNAIL_PROOF_MAX_ATTEMPTS=all made this NaN, and a
+// NaN attempt budget in a script that SPENDS $0.15 per output is not a setting
+// anyone can reason about from the log.
+const MAX_ATTEMPTS = boundedInteger(process.env.THUMBNAIL_PROOF_MAX_ATTEMPTS, 2, 1, 2);
 const QA_EXISTING = process.env.THUMBNAIL_PROOF_QA_EXISTING === "1";
 const PROMPT_ONLY = process.env.THUMBNAIL_PROOF_PROMPT_ONLY === "1";
 const REQUESTED_ATTEMPT = process.env.THUMBNAIL_PROOF_ATTEMPT
-  ? Math.max(1, Math.min(2, Number(process.env.THUMBNAIL_PROOF_ATTEMPT)))
+  ? boundedInteger(process.env.THUMBNAIL_PROOF_ATTEMPT, 1, 1, 2)
   : null;
 
 type ChannelRow = {

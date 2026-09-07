@@ -32,6 +32,7 @@ import { claudeJson, hasAnthropicKey, retryOnUnusableOutput } from "@/lib/anthro
 import { makeRunTempDir, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { renderDataInsert } from "@/lib/remotionRender";
+import { boundedInteger } from "@/engine/boundedNumber";
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 
 const KINDS = ["big_stat", "line_chart", "bar_compare", "annotated_line", "lower_third"] as const;
@@ -459,9 +460,15 @@ export const visualInserts: Block = {
     }
 
     const narrationSec = timings[timings.length - 1]?.end ?? 0;
-    const maxInserts = Math.max(
+    // NaN did two things here, both silent. It reached the PROMPT as literal
+    // text ("Plan AT MOST NaN on-screen data inserts"), and it deleted the cap
+    // below, because `out.length >= NaN` is false for every length — so every
+    // insert the planner returned was rendered and composited, uncapped.
+    const maxInserts = boundedInteger(
+      ctx.params["maxInserts"],
+      Math.ceil(narrationSec / 180),
       1,
-      Math.min(8, Number(ctx.params["maxInserts"] ?? Math.ceil(narrationSec / 180))),
+      8,
     );
     const minGapSec = Number(ctx.params["minGapSec"] ?? 20);
     const topic = (ctx.store["topic"] as string | undefined) ?? "";
@@ -651,9 +658,14 @@ export const visualInserts: Block = {
       // NARRATED-RELEVANCY DURATION: hold while the script is still talking
       // about this data (+1s to land), with per-kind read-time floors —
       // a chart that flashes for 5s was never actually read.
+      // `endSentenceIdx` comes from MODEL JSON, so it can be "seven" as easily
+      // as 7. That made every clamp below NaN, `timings[NaN]` undefined, and
+      // `timings[endIdx].end` a TypeError that killed the block — a malformed
+      // field in one planned insert took down the whole visual_inserts stage.
+      // An unusable span means "this insert covers its own sentence".
       const endIdx = Math.min(
         timings.length - 1,
-        Math.max(it.sentenceIdx, Math.min(Number(it.endSentenceIdx ?? it.sentenceIdx), it.sentenceIdx + 4)),
+        Math.max(it.sentenceIdx, boundedInteger(it.endSentenceIdx, it.sentenceIdx, it.sentenceIdx, it.sentenceIdx + 4)),
       );
       const spanSec = Math.max(0, timings[endIdx].end - t.start) + 1.0;
       const floors = { lower_third: 4.5, big_stat: 6, line_chart: 8, annotated_line: 9, bar_compare: 8 } as const;

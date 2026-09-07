@@ -1,5 +1,6 @@
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
+import { boundedNumber } from "@/engine/boundedNumber";
 
 export const ERNIE_THUMBNAIL_REFRESH_BATCH_OWNER_ID = "owner_daniel" as const;
 export const ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_KEY =
@@ -175,6 +176,11 @@ export function ernieThumbnailBatchApplyApprovalSubject(args: {
 
 /** A proportional Novita spot estimate is retained for each imported candidate. */
 export function ernieThumbnailRefreshCandidateCost(candidate: ErnieThumbnailRefreshBatchCandidate): number {
+  // A candidate with no source reviews divides by zero. 0/0 is NaN, and
+  // `Math.min(0.4, Math.max(0, NaN))` is NaN — a NaN COST, which is the one
+  // value a budget cannot compare against: every later `spent > limit` test
+  // involving it is false, so the limit stops limiting. (n/0 for n > 0 gives
+  // Infinity, which clamps to 0.4 and is merely wrong, not corrosive.)
   const estimate = (candidate.elapsedSeconds / 3_600 * 0.335) / candidate.sourceReviewCount;
-  return Math.min(0.4, Math.max(0, Number(estimate.toFixed(6))));
+  return boundedNumber(Number(estimate.toFixed(6)), 0, 0, 0.4);
 }

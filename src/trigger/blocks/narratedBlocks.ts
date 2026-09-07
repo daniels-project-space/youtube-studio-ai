@@ -91,6 +91,7 @@ import {
   assertScriptCritiqueAccepted,
 } from "@/engine/scriptQualityGate";
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
+import { boundedInteger, isUsableNumber } from "@/engine/boundedNumber";
 import { qaVisualReviewFrameLimits } from "@/engine/visualReviewBudget";
 import { visualMatterFromUnknown, visualMatterReviewLocks } from "@/engine/visualMatter";
 import { visualTreatmentReferenceCriteria } from "@/engine/visualTreatmentCatalog";
@@ -373,14 +374,43 @@ function bodySegSeconds(
   return narrationSec > 600 ? 25 : 10;
 }
 
-/** Ordered concurrency pool — results in input order, `limit` in flight. */
+/**
+ * How many TTS takes to synthesize at once.
+ *
+ * An environment variable is always a STRING, so `Number(process.env.X ?? 2)`
+ * turns any non-numeric setting into NaN, and `Math.max(1, NaN)` is NaN — which
+ * mapPool then read as zero workers. Exported for the test that pins it.
+ */
+export function ttsConcurrency(): number {
+  return boundedInteger(process.env.TTS_CONCURRENCY, 2, 1, 16);
+}
+
+/**
+ * Ordered concurrency pool — results in input order, `limit` in flight.
+ *
+ * A POOL WITH NO WORKERS IS NOT A POOL. `Array.from({ length: NaN })` is `[]`,
+ * so a non-finite limit spawned zero workers, `Promise.all([])` resolved at
+ * once, `failed` stayed false, and this returned `new Array(items.length)` — the
+ * right LENGTH, filled with holes, with no error. The caller then read `.buf`
+ * off `undefined` far downstream, or concatenated nothing.
+ *
+ * `limit` is `Math.max(1, Number(process.env.TTS_CONCURRENCY ?? 2))` at both
+ * call sites, and `Math.max(1, NaN)` is NaN — so `TTS_CONCURRENCY=auto` in the
+ * environment silently produced a narration of no sentences. The call sites now
+ * resolve the env var properly, and the invariant is enforced HERE too, because
+ * "at least one worker" is true of every pool regardless of who is calling.
+ */
 async function mapPool<T, R>(items: T[], limit: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
   let failed = false;
   let firstError: unknown;
+  const workers = Math.min(
+    Number.isFinite(limit) ? Math.max(1, Math.floor(limit)) : 1,
+    Math.max(1, items.length),
+  );
   await Promise.all(
-    Array.from({ length: Math.min(limit, Math.max(1, items.length)) }, async () => {
+    Array.from({ length: workers }, async () => {
       for (;;) {
         // Stop admitting new paid work after the first failure, but wait for
         // already in-flight workers to settle so their billable callbacks are
@@ -1205,6 +1235,18 @@ export const narrationTts: Block = {
       value: string,
       stitch?: Parameters<typeof synthNarration>[0]["stitch"],
     ) => {
+      // A BUDGET GATE MUST FAIL CLOSED. `Math.max(0, NaN - spent)` is NaN and
+      // `NaN < 0.02` is false, so a malformed stageBudgetUsd did not shrink the
+      // envelope — it DELETED the check, and Qwen synthesis proceeded with no
+      // remaining-budget test at all. Substituting a default here would be just
+      // as wrong: a gate that quietly invents the threshold it was configured
+      // with hides the misconfiguration behind a plausible result.
+      if (ttsProvider === "qwen3" && ctx.stageBudgetUsd !== undefined && !isUsableNumber(ctx.stageBudgetUsd)) {
+        throw new Error(
+          `narration_tts: Qwen3 stage budget is not a number (${JSON.stringify(ctx.stageBudgetUsd)}) — ` +
+          `refusing to synthesize without a checkable provider envelope`,
+        );
+      }
       const qwenRemainingCostUsd = Math.max(0, Number(ctx.stageBudgetUsd ?? 0) - qwenObservedCostUsd);
       if (ttsProvider === "qwen3" && qwenRemainingCostUsd < 0.02) {
         throw new Error("narration_tts: Qwen3 stage budget has no remaining provider envelope");
@@ -1340,7 +1382,7 @@ export const narrationTts: Block = {
         baseGapSec: baseGap,
         jitterSec: jitter,
       });
-      const chPool = Math.max(1, Number(process.env.TTS_CONCURRENCY ?? 2));
+      const chPool = ttsConcurrency();
       // Probe-fallback counter: an ESTIMATED duration shifts every later
       // sentenceTiming (captions/quotes/inserts) by the estimation error —
       // one flaky probe is tolerable, several means the whole sync is fiction.
@@ -1470,7 +1512,7 @@ export const narrationTts: Block = {
     // made TTS the slowest non-encode stage (~140 calls Ã— ~5s). Pool kept SMALL:
     // Fish Audio enforces a plan-level CONCURRENCY limit (pool of 6 → instant
     // 429 "exceeded your current concurrency limit" → failed render).
-    const ttsPool = Math.max(1, Number(process.env.TTS_CONCURRENCY ?? 2));
+    const ttsPool = ttsConcurrency();
     let probeFailures = 0;
     const parts = await mapPool(sentences, ttsPool, async (s, i) => {
       // v3 continuity: neighbor conditioning kills the per-sentence "new take"

@@ -65,6 +65,7 @@ import { generateI2V } from "@/lib/i2v";
 import { PRICE } from "@/engine/pricing";
 import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 import { fallbackNarratorPersona } from "@/lib/identitySpread";
+import { boundedNumber } from "@/engine/boundedNumber";
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -416,7 +417,11 @@ export const loreShort: Block = {
       (ctx.store["persona"] as string | undefined)?.trim() ||
       fallbackNarratorPersona(String(ctx.store["channelName"] ?? ""));
 
-    const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
+    // loreBeatCount already refuses a non-finite value, so NaN here was ABSORBED
+    // into the 9-beat default rather than corrupting the render — but it also
+    // skipped the `targetSeconds > 0` log below, so the one signal that the
+    // operator's length had been dropped went missing too.
+    const targetSeconds = boundedNumber(ctx.params["targetSeconds"], 0, 0, 7_200);
     const nScenes = loreBeatCount(targetSeconds);
     const stageBudgetUsd = requireNovitaStageBudget(ctx.stageBudgetUsd, "lore_short");
     if (targetSeconds > 0) ctx.log(`lore_short: sized to ~${targetSeconds}s → ${nScenes} beats`);

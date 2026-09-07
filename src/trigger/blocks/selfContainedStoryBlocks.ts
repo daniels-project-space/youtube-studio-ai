@@ -36,6 +36,7 @@ import {
 import { serializedProgramEpisodeIdentity } from "@/lib/serializedProgramEpisode";
 import { type WhiteboardSyncBrief } from "@/lib/whiteboardSync";
 import { fallbackNarratorPersona } from "@/lib/identitySpread";
+import { boundedNumber } from "@/engine/boundedNumber";
 
 /** Two bounded plan attempts plus two bounded critic passes. */
 export const SELF_CONTAINED_STORY_PLAN_MAX_TEXT_COST_USD = 4 * PRICE.boundedTextPassUsd;
@@ -57,7 +58,7 @@ function sourceFacts(ctx: StageContext): string | undefined {
 function whiteboardBrief(ctx: StageContext): WhiteboardSyncBrief {
   const topic = requiredTopic(ctx);
   const visual = getVisualBrief(ctx.store);
-  const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
+  const targetSeconds = boundedNumber(ctx.params["targetSeconds"], 0, 0, 7_200);
   const panels = targetSeconds > 0 ? Math.max(4, Math.min(16, Math.round(targetSeconds / 22))) : undefined;
   return {
     topic,
@@ -74,7 +75,7 @@ function motionComicBrief(ctx: StageContext): MotionComicBrief {
   const visual = getVisualBrief(ctx.store);
   const explicitStyle = typeof ctx.params["style"] === "string" ? ctx.params["style"].trim() : "";
   const style = (explicitStyle || visual?.promptStyle || "").replace(/[.\s]+$/, "");
-  const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
+  const targetSeconds = boundedNumber(ctx.params["targetSeconds"], 0, 0, 7_200);
   const route = parseChannelProgramRouteRunSeed(ctx.store["channelProgramRoute"]);
   const serialIdentity = serializedProgramEpisodeIdentity(route);
   const seriesContinuity = !route.serializedProgram
@@ -115,7 +116,7 @@ function motionComicBrief(ctx: StageContext): MotionComicBrief {
 
 function loreBrief(ctx: StageContext): { topic: string; narrator: string; nScenes: number } {
   const topic = requiredTopic(ctx);
-  const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
+  const targetSeconds = boundedNumber(ctx.params["targetSeconds"], 0, 0, 7_200);
   // See loreShortBlocks: the same hard-coded persona lived in both files.
   const narrator =
     (typeof ctx.params["narrator"] === "string" ? ctx.params["narrator"].trim() : "") ||

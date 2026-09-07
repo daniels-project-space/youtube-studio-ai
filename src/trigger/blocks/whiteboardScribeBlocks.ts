@@ -65,6 +65,7 @@ import { attestedWhiteboardArtReceiptFromNovita } from "@/lib/attestedWhiteboard
 import { PRICE } from "@/engine/pricing";
 import { buildWhiteboardOnScreenTextCues } from "@/lib/whiteboardOnScreenTextCues";
 import { preflightNarrationPerformance } from "@/lib/narrationPerformance";
+import { boundedInteger, boundedNumber } from "@/engine/boundedNumber";
 
 /**
  * Prove the complete bounded art sequence fits the signed compiler stage
@@ -545,14 +546,18 @@ export const whiteboardScribe: Block = {
       (ctx.params["palette"] as string[] | undefined) ??
       (ctx.store["palette"] as string[] | undefined) ??
       undefined;
-    const width = Math.max(1280, Math.min(2560, Number(ctx.params["width"] ?? 1920)));
+    const width = boundedInteger(ctx.params["width"], 1920, 1280, 2560);
     const height = Math.round((width * 9) / 16);
     // LENGTH: the wizard's lengthMinutes never reached this engine — it sized
     // itself from its own defaults (6 panels / 150 words ≈ one minute) no
     // matter what the operator chose. targetSeconds chooses fewer, fuller
     // boards: the visible hand is part of the product, so a dense board may
     // never be compressed into the old 22-second sparse-panel cadence.
-    const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
+    // A malformed targetSeconds silently REINSTATED the bug the comment above
+    // describes fixing: NaN fails `targetSeconds > 0`, so panels and targetWords
+    // both went undefined and the engine sized itself from its own defaults
+    // again, exactly as if the operator's length had never arrived.
+    const targetSeconds = boundedNumber(ctx.params["targetSeconds"], 0, 0, 7_200);
     const panels = targetSeconds > 0 ? whiteboardPanelsForTargetSeconds(targetSeconds) : undefined;
     // Calibrated on TWO live renders: Fish speaks the scribe scripts at
     // ~3.7-3.9 w/s (468 words -> ~120s narration). 3.1 w/s budgets words so

@@ -62,6 +62,7 @@ import { preflightNarrationPerformance } from "@/lib/narrationPerformance";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 import { fallbackComicStyle } from "@/lib/identitySpread";
+import { boundedInteger } from "@/engine/boundedNumber";
 
 /**
  * Checks the complete primary + bounded-recovery art envelope before the
@@ -546,7 +547,7 @@ export const motionComicBlock: Block = {
     const styleParam = typeof ctx.params["style"] === "string" ? (ctx.params["style"] as string).trim() : "";
     const styleBase = (styleParam || visualBrief?.promptStyle || "").replace(/[.\s]+$/, "");
     const style = styleBase ? `${styleBase}. ${NO_TEXT_GUARD}` : undefined;
-    const width = Math.max(1280, Math.min(2560, Number(ctx.params["width"] ?? 1920)));
+    const width = boundedInteger(ctx.params["width"], 1920, 1280, 2560);
     const layoutRepair = Array.isArray(ctx.store["visualRepair"])
       ? ctx.store["visualRepair"].flatMap((signal) => {
           if (!signal || typeof signal !== "object") return [];

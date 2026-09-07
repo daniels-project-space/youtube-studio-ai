@@ -174,7 +174,14 @@ async function mapPool<T, R>(items: T[], concurrency: number, fn: (item: T, i: n
       out[i] = await fn(items[i], i);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(concurrency, items.length) }, worker));
+  // A pool with no workers is not a pool: Array.from({ length: NaN }) is [], so a
+  // non-finite concurrency returned an array of the right LENGTH full of holes,
+  // with no error. Same defect as the narratedBlocks copy of this helper.
+  const workers = Math.min(
+    Number.isFinite(concurrency) ? Math.max(1, Math.floor(concurrency)) : 1,
+    Math.max(1, items.length),
+  );
+  await Promise.all(Array.from({ length: workers }, worker));
   return out;
 }
 

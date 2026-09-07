@@ -71,13 +71,26 @@ export function withMusicGenerationCost(
 ): Error {
   const failure = error instanceof Error ? error : new Error(String(error));
   const acceptedOnFailure = error instanceof MusicError ? error.acceptedUnits : 0;
-  const attestedObservedCost = typeof (error as { observedCostUsd?: unknown } | null)?.observedCostUsd === "number"
-    ? Math.max(0, Number((error as { observedCostUsd: number }).observedCostUsd))
-    : 0;
-  const totalUnits = Math.max(0, Math.floor(completedUnits)) + acceptedOnFailure;
+  // `typeof NaN === "number"` is TRUE, so this type check admitted NaN, and
+  // `Math.max(0, NaN)` is NaN — which then became the failure's whole
+  // additionalObservedCostUsd. A NaN in the cost ledger is worse than a wrong
+  // number: every later `spent > budget` comparison against it is false, so the
+  // budget stops enforcing anything.
+  //
+  // Every CONSUMER of this field already defends against exactly this —
+  // novitaRenderBlocks' nonnegativeCost(), lofiBlocks' `Number.isFinite(prior)
+  // && prior > 0 ? prior : 0`. The readers were hardened and the writer was not.
+  const observed = (error as { observedCostUsd?: unknown } | null)?.observedCostUsd;
+  const attestedObservedCost =
+    typeof observed === "number" && Number.isFinite(observed) ? Math.max(0, observed) : 0;
+  // `completedUnits` and `unitCostUsd` are declared `number`, which does not
+  // exclude NaN, and both reach the same total. One NaN anywhere in this sum
+  // poisons the whole ledger entry, so every term is settled before it is used.
+  const finite = (value: number): number => (Number.isFinite(value) ? Math.max(0, value) : 0);
+  const totalUnits = Math.floor(finite(completedUnits)) + finite(acceptedOnFailure);
   Object.assign(failure, {
     retryable: false,
-    additionalObservedCostUsd: totalUnits * Math.max(0, unitCostUsd) + attestedObservedCost,
+    additionalObservedCostUsd: totalUnits * finite(unitCostUsd) + attestedObservedCost,
   });
   return failure;
 }

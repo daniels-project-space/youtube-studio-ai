@@ -45,6 +45,7 @@ const AUDITS = [
   "audit-dead-capability-gates",
   "audit-unbounded-normalized",
   "audit-inert-produces",
+  "audit-unchecked-number-clamps",
 ];
 
 const save = process.argv.includes("--save");

@@ -10,7 +10,7 @@
  * concrete video model: central runtime admission owns that decision.
  */
 import type { Block } from "@/engine/types";
-import { boundedInteger } from "@/engine/boundedNumber";
+import { boundedInteger, boundedNumber } from "@/engine/boundedNumber";
 import { join } from "node:path";
 import {
   DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
@@ -675,10 +675,16 @@ export const genFootage: Block = {
         : ""),
     );
     const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 300;
-    const clipSec = Math.min(10, Math.max(5, Number(ctx.params["clipSec"] ?? 5)));
-    const genericMaxClips = Math.max(
+    // Both of these size PAID Novita renders. `clipSec` is also the fallback
+    // passed to boundedSceneDuration, and a fallback that is itself NaN cannot
+    // do the one job a fallback has; `maxClips` becomes maxScenes, where NaN
+    // means `slice(0, NaN)` — an empty plan rather than a capped one.
+    const clipSec = boundedNumber(ctx.params["clipSec"], 5, 5, 10);
+    const genericMaxClips = boundedInteger(
+      ctx.params["maxClips"],
+      Math.ceil(narrationSec / 22),
       6,
-      Math.min(24, Number(ctx.params["maxClips"] ?? Math.ceil(narrationSec / 22))),
+      24,
     );
     const hasCinematicSequence = ctx.store["cinematicGeneratedScenePlan"] !== undefined;
     // Cinematic keyframe, take, and cut gates are independent visual evidence,

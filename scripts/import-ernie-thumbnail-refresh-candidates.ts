@@ -22,6 +22,7 @@ import {
 } from "@/lib/studioActionApproval";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { getObjectBytes, putObject } from "@/lib/storage";
+import { boundedNumber } from "@/engine/boundedNumber";
 
 config({ path: process.env.ERNIE_THUMBNAIL_STUDIO_ENV_FILE?.trim() || ".env.local" });
 
@@ -165,8 +166,11 @@ function estimatedPerCandidateCost(candidate: ReviewedCandidate): number {
   // Novita exposes the exact elapsed worker lifetime but no per-output invoice.
   // Store the reproducible proportional spot estimate rather than fabricate a
   // provider charge. The import mutation independently caps it at $0.40.
+  // A zero sourceReviewCount makes this 0/0 = NaN, and a NaN cost is the one
+  // value a budget cannot compare against. Same fix as the library twin in
+  // src/lib/ernieThumbnailRefreshBatch.ts.
   const estimate = (candidate.controller.elapsedSeconds / 3_600 * ERNIE_SPOT_HOURLY_USD) / candidate.sourceReviewCount;
-  return Math.min(0.4, Math.max(0, Number(estimate.toFixed(6))));
+  return boundedNumber(Number(estimate.toFixed(6)), 0, 0, 0.4);
 }
 
 function reviewFiles(): string[] {
