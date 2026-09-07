@@ -13,16 +13,31 @@
  *
  *   QUOTED         false on a curly-quoted line with no "said/wrote" trigger —
  *                  the line was not recognised as a quotation at all
- *   quote extract  null on curly quotes, correct on straight ones — so a
- *                  narration written with typographic quotes produced NO quote
- *                  overlay, silently
+ *   quote extract  fell through to its `return s.trim()` fallback on curly
+ *                  quotes, so the card carried the WHOLE SENTENCE instead of the
+ *                  quoted span. Measured on a real line: 17 words / 95 chars
+ *                  instead of 9 / 51, and a sync index of 0 instead of 18 — so
+ *                  the card was either dropped by the 140-char / word-count gate
+ *                  or shown with the attribution wrapper ("As Seneca wrote, ...")
+ *                  and timed to the sentence start rather than to when the quote
+ *                  is actually spoken.
+ *
+ *                  An earlier version of this comment said typographic quotes
+ *                  produced NO overlay at all. That was wrong and is corrected
+ *                  here: extractQuote has a whole-sentence fallback, and
+ *                  quote_overlays has a FLOOR GUARANTEE that backfills picks, so
+ *                  cards still appeared — with the wrong text and the wrong
+ *                  timing, which is a subtler defect than absence, not a smaller
+ *                  one.
  *   single-quote   null on curly single quotes
  *   sentence split did not split before a curly opening quote, merging two
  *                  sentences into one — and that splitter feeds sentence
  *                  timings, which feed captions and the whole Story Spine
  *
  * A model writing polished prose emits typographic quotes by default, so this
- * was the common case failing, not the edge case. This test reads the regexes
+ * was the common case failing, not the edge case. The QUOTED and sentence-split
+ * failures below are unqualified — those genuinely returned false and did not
+ * split. This test reads the regexes
  * out of the shipping source rather than restating them, because a copy would
  * pass while the file itself stayed broken.
  */
@@ -125,6 +140,26 @@ assert.equal(
   straight.match(EXTRACT)?.[1],
   "The obstacle is the way",
   "a quote in straight double quotes must still be extractable",
+);
+
+// The consequence, not just the match: a failed extraction falls back to the
+// whole sentence, which is what made the defect subtle. 17 words vs 9, and a
+// sync offset of 0 vs 18 — the card showed the attribution wrapper and appeared
+// when the sentence started rather than when the quote is spoken.
+const attributed = "As Seneca wrote, “We suffer more often in imagination than in reality” and he meant it plainly.";
+const extracted = attributed.match(EXTRACT)?.[1]?.trim() ?? attributed.trim();
+assert.equal(
+  extracted,
+  "We suffer more often in imagination than in reality",
+  "extraction must return the QUOTE, not fall back to the whole sentence",
+);
+assert.ok(
+  extracted.split(/\s+/).length <= 24 && extracted.length <= 140,
+  "the extracted quote must fit the card's word and character gates; the whole sentence does not",
+);
+assert.ok(
+  attributed.indexOf(extracted) > 0,
+  "the card is synced by indexOf(display), so a whole-sentence fallback times it to 0 instead of the quote",
 );
 
 const curlySingle = "‘Waste no more time arguing’ was his whole point.";
