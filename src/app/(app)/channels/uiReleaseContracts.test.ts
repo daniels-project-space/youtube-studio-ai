@@ -218,6 +218,25 @@ assert.match(channels, /link\.status === "active"/);
 assert.match(channels, /link\.scopeHealth === "healthy"/);
 assert.match(channels, /OAuth scopes unverified/);
 assert.match(channels, /\?tab=seo/);
+// Fleet management is one focused dialog, not an independently expanding
+// settings console inside every narrow card. It must preserve the real room,
+// OAuth, autopilot, profile-art, and destructive controls with focus return.
+assert.doesNotMatch(channels, /<details className="channel-card-details"/);
+assert.match(channels, /const \[managedChannelId, setManagedChannelId\] = useState<string \| null>\(null\)/);
+assert.match(channels, /<ChannelFleetInspector/);
+assert.match(channels, /const returnFocus = returnFocusRef\.current/);
+assert.match(channels, /returnFocus\?\.focus\(\)/);
+assert.match(channels, /createPortal\(/);
+assert.match(channels, /role="dialog"/);
+assert.match(channels, /aria-modal="true"/);
+assert.match(channels, /<ChannelRoomSelect/);
+assert.match(channels, /<LinkYouTubeButton/);
+assert.match(channels, /<ChannelToggle/);
+assert.match(channels, /<SetAvatarButton/);
+assert.match(channels, /<DeleteChannelX/);
+assert.match(globalCss, /\.channel-fleet-inspector-backdrop\s*\{[\s\S]*?position: fixed/);
+assert.match(globalCss, /\.channel-fleet-inspector\s*\{[\s\S]*?height: 100dvh/);
+assert.match(globalCss, /prefers-reduced-motion[\s\S]*?\.channel-fleet-inspector \{ animation: none !important; \}/);
 assert.match(detail, /Refresh intelligence/);
 assert.match(detail, /className="channel-check-control"[\s\S]*Made for kids/);
 assert.match(detail, /className="channel-check-control"[\s\S]*Scheduler enabled/);
@@ -271,9 +290,9 @@ assert.match(settings, /\/api\/youtube-revoke/);
 // High-frequency navigation and channel-management actions must remain usable
 // touch targets on both desktop and the mobile bottom-navigation layout.
 assert.match(globalCss, /\.channel-card-title > a\s*\{[\s\S]*?min-height: 36px/);
-assert.match(globalCss, /\.channel-card-secondary-actions a\s*\{[\s\S]*?min-height: 38px/);
+assert.match(globalCss, /\.channel-fleet-inspector-nav a\s*\{[\s\S]*?min-height: 40px/);
 assert.match(globalCss, /\.channel-account-action\s*\{[\s\S]*?min-height: 38px/);
-assert.match(globalCss, /\.channel-card-actions a\s*\{[\s\S]*?min-height: 40px/);
+assert.match(globalCss, /\.channel-card-actions a,\s*\n\.channel-card-manage\s*\{[\s\S]*?min-height: 40px/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*?\.channel-card-banner \{ aspect-ratio: 16 \/ 6 !important/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*?\.channel-card-actions \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
 assert.match(scheduleCss, /\.itemLinks a\s*\{[\s\S]*?min-height: 36px/);

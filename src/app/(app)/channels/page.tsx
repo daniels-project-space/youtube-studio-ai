@@ -1,7 +1,8 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -112,7 +113,10 @@ export default function ChannelsPage() {
     | undefined;
   const [openFolder, setOpenFolder] = useState<string | null>(null);
   const [visibleLimit, setVisibleLimit] = useState(CHANNEL_PAGE_SIZE);
+  const [managedChannelId, setManagedChannelId] = useState<string | null>(null);
+  const inspectorTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [viewStartedAt] = useState(() => Date.now());
+  const closeInspector = useCallback(() => setManagedChannelId(null), []);
   const loading =
     channels === undefined ||
     folders === undefined ||
@@ -144,6 +148,17 @@ export default function ChannelsPage() {
     items.push(item);
     readyPlanBySlug.set(item.channelSlug, items);
   }
+  const managedChannel = (channels ?? []).find((channel) => channel._id === managedChannelId);
+  const managedArtwork = managedChannel
+    ? channelArtwork?.find(
+        (art) => art.channelId === managedChannel._id || art.channelSlug === managedChannel.slug,
+      )
+    : undefined;
+  const managedConnector = managedChannel ? linkByChannel.get(managedChannel._id) : undefined;
+  const managedLinked = managedChannel ? linkedIds.has(managedChannel._id) : false;
+  const managedYtId = managedChannel
+    ? ytIdByChannel.get(managedChannel._id) || managedChannel.youtubeCreated?.ytChannelId || null
+    : null;
 
   return (
     <>
@@ -172,6 +187,7 @@ export default function ChannelsPage() {
           onSelect={(folder) => {
             setOpenFolder(folder);
             setVisibleLimit(CHANNEL_PAGE_SIZE);
+            setManagedChannelId(null);
           }}
         />
       ) : null}
@@ -211,14 +227,11 @@ export default function ChannelsPage() {
             const cardData = channelArtwork.find(
               (art) => art.channelId === c._id || art.channelSlug === c.slug,
             );
-            const count = cardData?.recentRunCount ?? 0;
             const videos = cardData?.recentPublishedCount ?? 0;
-            const cost = cardData?.recentSpend ?? 0;
             const connector = linkByChannel.get(c._id);
             const linked = linkedIds.has(c._id);
             const creating = c.youtubeCreated?.status === "creating";
             const needsLink = !linked && !creating;
-            const ytId = ytIdByChannel.get(c._id) || c.youtubeCreated?.ytChannelId || null;
             const readyPlan = readyPlanBySlug.get(c.slug) ?? [];
             const next = nextProjectedPlanItem({
               items: readyPlan,
@@ -258,7 +271,6 @@ export default function ChannelsPage() {
             ];
             const setupDone = setupChecks.filter(Boolean).length;
             const cadence = c.schedule?.frequency || c.identity?.cadence || "Not set";
-            const modulePath = (c.pipeline ?? []).map((entry) => blockLabel(entry.block));
             const autopilotEnabled = c.status === "active" && c.schedule?.enabled !== false;
             const inactive = !autopilotEnabled || !linked;
             const operatingState = inactive
@@ -338,58 +350,33 @@ export default function ChannelsPage() {
                   </div>
                 </div>
 
-                <details className="channel-card-details">
-                  <summary>
-                    <span>Manage channel</span>
-                    <span className="channel-card-readiness">
-                      <progress
-                        aria-label={`${c.name} setup readiness`}
-                        max={setupChecks.length}
-                        value={setupDone}
-                      />
-                      <small>{setupDone}/{setupChecks.length} ready</small>
-                    </span>
-                  </summary>
-                    <div className="channel-card-details-body">
-                    <ChannelRoomSelect channelId={c._id} currentFolder={c.folder} folders={folders} />
-                    <div className="channel-module-path" title={modulePath.join(" → ")}>
-                      <small>Module path</small>
-                      <span>
-                        {modulePath.length
-                          ? `${modulePath.slice(0, 3).join(" → ")}${modulePath.length > 3 ? ` → +${modulePath.length - 3}` : ""}`
-                          : "No pipeline configured"}
-                      </span>
-                    </div>
-
-                    <div className="channel-card-stats" title="Latest 20 runs for this channel">
-                      <CardStat label="Recent runs" value={String(count)} />
-                      <CardStat label="Published" value={String(videos)} />
-                      <CardStat label="Recent spend" value={fmtUsd(cost)} />
-                    </div>
-                    <nav className="channel-card-secondary-actions" aria-label={`${c.name} setup actions`}>
-                      <Link href={`/channels/${c.slug}?tab=week-ahead`}>Schedule</Link>
-                      <Link href={`/channels/${c.slug}?tab=seo`}>SEO</Link>
-                      <Link href={`/channels/${c.slug}?tab=settings`}>Settings</Link>
-                    </nav>
-                    <div className="channel-card-account-actions">
-                      <ChannelToggle id={c._id} active={autopilotEnabled} schedule={c.schedule} />
-                      {linked && c.identity?.imageKey && ytId && (
-                        <SetAvatarButton imageKey={c.identity.imageKey} ytChannelId={ytId} slug={c.slug} />
-                      )}
-                      <DeleteChannelX id={c._id} name={c.name} />
-                    </div>
-                  </div>
-                </details>
-
                 {creating && (
                   <div className="channel-card-notice channel-card-notice-warning">
                     <span className="studio-pulse">●</span> Setting up YouTube channel…
                   </div>
                 )}
                 <nav className="channel-card-actions" aria-label={`${c.name} actions`}>
-                  {needsLink && !creating ? (
-                    <LinkYouTubeButton channelId={c._id} created={Boolean(c.youtubeCreated?.ytChannelId)} />
-                  ) : null}
+                  <button
+                    type="button"
+                    className="channel-card-manage"
+                    aria-haspopup="dialog"
+                    aria-expanded={managedChannelId === c._id}
+                    aria-controls="channel-fleet-inspector"
+                    onClick={(event) => {
+                      inspectorTriggerRef.current = event.currentTarget;
+                      setManagedChannelId(c._id);
+                    }}
+                  >
+                    <span>Manage</span>
+                    <span className="channel-card-readiness">
+                      <progress
+                        aria-label={`${c.name} setup readiness`}
+                        max={setupChecks.length}
+                        value={setupDone}
+                      />
+                      <small>{setupDone}/{setupChecks.length}</small>
+                    </span>
+                  </button>
                   <Link href={`/channels/${c.slug}`} className="channel-card-open">Open channel</Link>
                 </nav>
               </article>
@@ -431,7 +418,221 @@ export default function ChannelsPage() {
           ) : null}
         </>
       )}
+
+      {managedChannel && folders ? (
+        <ChannelFleetInspector
+          channel={managedChannel}
+          artwork={managedArtwork}
+          connector={managedConnector}
+          folders={folders}
+          linked={managedLinked}
+          ytChannelId={managedYtId}
+          readyPlan={readyPlanBySlug.get(managedChannel.slug) ?? []}
+          returnFocusRef={inspectorTriggerRef}
+          viewStartedAt={viewStartedAt}
+          onClose={closeInspector}
+        />
+      ) : null}
     </>
+  );
+}
+
+function ChannelFleetInspector({
+  channel,
+  artwork,
+  connector,
+  folders,
+  linked,
+  ytChannelId,
+  readyPlan,
+  returnFocusRef,
+  viewStartedAt,
+  onClose,
+}: {
+  channel: ChannelCardRow;
+  artwork?: ChannelCardArtwork;
+  connector?: YoutubeLinkStatus;
+  folders: { _id: string; name: string }[];
+  linked: boolean;
+  ytChannelId: string | null;
+  readyPlan: PlanCardRow[];
+  returnFocusRef: { current: HTMLButtonElement | null };
+  viewStartedAt: number;
+  onClose: () => void;
+}) {
+  const closeRef = useRef<HTMLButtonElement | null>(null);
+  const creating = channel.youtubeCreated?.status === "creating";
+  const needsLink = !linked && !creating;
+  const autopilotEnabled = channel.status === "active" && channel.schedule?.enabled !== false;
+  const next = nextProjectedPlanItem({
+    items: readyPlan,
+    schedule: channel.schedule,
+    cadence: channel.identity?.cadence,
+    fromTimestamp: viewStartedAt,
+  });
+  const latestArtwork = artwork?.latestThumbnailKey;
+  const planArtwork = (next?.item.thumbnailSource !== "rendered_video_frame"
+    ? next?.item.thumbnailKey
+    : undefined) ?? readyPlan.find(
+    (item) => item.thumbnailKey && item.thumbnailSource !== "rendered_video_frame",
+  )?.thumbnailKey;
+  const setupChecks = [
+    { label: "YouTube", ready: linked },
+    { label: "Identity", ready: Boolean(channel.identity?.imageKey && channel.identity?.niche) },
+    { label: "Voice", ready: Boolean(channel.identity?.voiceId) },
+    { label: "Thumbnail", ready: Boolean(channel.identity?.thumbnailTemplate) },
+    { label: "Pipeline", ready: Boolean(channel.pipeline?.length) },
+  ];
+  const setupDone = setupChecks.filter((check) => check.ready).length;
+  const modulePath = (channel.pipeline ?? []).map((entry) => blockLabel(entry.block));
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const returnFocus = returnFocusRef.current;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", closeOnEscape);
+    closeRef.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", closeOnEscape);
+      returnFocus?.focus();
+    };
+  }, [onClose, returnFocusRef]);
+
+  const containFocus = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Tab") return;
+    const controls = Array.from(
+      event.currentTarget.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])',
+      ),
+    );
+    if (!controls.length) return;
+    const first = controls[0];
+    const last = controls[controls.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  };
+
+  return createPortal(
+    <div
+      className="channel-fleet-inspector-backdrop"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <aside
+        id="channel-fleet-inspector"
+        className="channel-fleet-inspector glass"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="channel-fleet-inspector-title"
+        onKeyDown={containFocus}
+      >
+        <header className="channel-fleet-inspector-head">
+          <div>
+            <small>Fleet control</small>
+            <h2 id="channel-fleet-inspector-title">{channel.name}</h2>
+          </div>
+          <button ref={closeRef} type="button" onClick={onClose} aria-label="Close channel controls">×</button>
+        </header>
+
+        <ChannelBanner
+          bannerKey={channel.identity?.bannerKey}
+          fallbackKeys={[latestArtwork, planArtwork]}
+          name={channel.name}
+          palette={channel.identity?.palette}
+          aspectRatio="16 / 5"
+          className="channel-fleet-inspector-banner"
+        />
+
+        <div className="channel-fleet-inspector-identity">
+          <ChannelAvatar
+            imageKey={channel.identity?.imageKey}
+            name={channel.name}
+            palette={channel.identity?.palette}
+            size={54}
+            radius={13}
+          />
+          <div>
+            <strong>{channel.identity?.niche ?? `Template ${channel.template}`}</strong>
+            <span>{creating ? "YouTube setup running" : linked ? "YouTube destination ready" : youtubeConnectionIssue(connector, false)}</span>
+          </div>
+          <OwnerLockBadge
+            kind="channel"
+            channelId={channel._id}
+            channelName={channel.name}
+            locked={channel.locked === true}
+            size="sm"
+          />
+        </div>
+
+        <section className="channel-fleet-inspector-readiness" aria-labelledby="channel-fleet-readiness-title">
+          <div className="channel-fleet-inspector-section-head">
+            <div>
+              <small id="channel-fleet-readiness-title">Readiness</small>
+              <strong>{setupDone}/{setupChecks.length} ready</strong>
+            </div>
+            <progress aria-label={`${channel.name} setup readiness`} max={setupChecks.length} value={setupDone} />
+          </div>
+          <ul>
+            {setupChecks.map((check) => (
+              <li key={check.label} data-ready={check.ready ? "true" : "false"}>
+                <span aria-hidden="true">{check.ready ? "✓" : "·"}</span>{check.label}
+              </li>
+            ))}
+          </ul>
+        </section>
+
+        <div className="channel-fleet-inspector-metrics">
+          <CardStat
+            label="Next publish"
+            value={next?.timestamp ? formatZonedScheduleTimestamp(next.timestamp, next.timeZone) : "No ready item"}
+          />
+          <CardStat label="Recent runs" value={String(artwork?.recentRunCount ?? 0)} />
+          <CardStat label="Published" value={String(artwork?.recentPublishedCount ?? 0)} />
+          <CardStat label="Recent spend" value={fmtUsd(artwork?.recentSpend ?? 0)} />
+        </div>
+
+        <ChannelRoomSelect channelId={channel._id} currentFolder={channel.folder} folders={folders} />
+
+        <section className="channel-fleet-inspector-pipeline" aria-labelledby="channel-fleet-pipeline-title">
+          <small id="channel-fleet-pipeline-title">Module path</small>
+          <div>
+            {modulePath.length
+              ? modulePath.map((module, index) => <span key={`${index}-${module}`}>{module}</span>)
+              : <span>No pipeline configured</span>}
+          </div>
+        </section>
+
+        <nav className="channel-fleet-inspector-nav" aria-label={`${channel.name} workspaces`}>
+          <Link href={`/channels/${channel.slug}`}>Overview</Link>
+          <Link href={`/channels/${channel.slug}?tab=week-ahead`}>Schedule</Link>
+          <Link href={`/channels/${channel.slug}?tab=seo`}>Packaging</Link>
+          <Link href={`/channels/${channel.slug}?tab=settings`}>Settings</Link>
+        </nav>
+
+        <div className="channel-fleet-inspector-actions">
+          {needsLink ? (
+            <LinkYouTubeButton channelId={channel._id} created={Boolean(channel.youtubeCreated?.ytChannelId)} />
+          ) : null}
+          <ChannelToggle id={channel._id} active={autopilotEnabled} schedule={channel.schedule} />
+          {linked && channel.identity?.imageKey && ytChannelId ? (
+            <SetAvatarButton imageKey={channel.identity.imageKey} ytChannelId={ytChannelId} slug={channel.slug} />
+          ) : null}
+          <DeleteChannelX id={channel._id} name={channel.name} />
+        </div>
+      </aside>
+    </div>,
+    document.body,
   );
 }
 
