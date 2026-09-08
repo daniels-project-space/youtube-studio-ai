@@ -26,8 +26,14 @@ import {
   hasDocumotion,
   type DocuImageRequest,
 } from "@/lib/documotion";
+import {
+  docuLabelReviewRecordFingerprint,
+  type DocuLabelReviewCheckpoint,
+  type DocuLabelReviewClaim,
+  type DocuLabelReviewReceipt,
+} from "@/lib/documotionLabelReview";
 import { makeRunTempDir } from "@/lib/files";
-import { putObject, putObjectFromFile } from "@/lib/storage";
+import { getObjectBytes, headObjectMetadata, putObject, putObjectFromFile } from "@/lib/storage";
 import { safeFrameForDocuLayout } from "@/remotion/docuLayout";
 import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
@@ -38,6 +44,51 @@ function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   return new ConvexHttpClient(url);
+}
+
+function durableDocuLabelReviewCheckpoint(keyPrefix: string): {
+  receiptKey: string;
+  checkpoint: DocuLabelReviewCheckpoint;
+} {
+  const prefix = keyPrefix.replace(/\/$/, "");
+  const claimKey = `${prefix}/documotion-label-review.claim.json`;
+  const receiptKey = `${prefix}/documotion-label-review.receipt.json`;
+  const readJson = async (key: string): Promise<unknown | null> => {
+    if (!await headObjectMetadata(key)) return null;
+    return JSON.parse(Buffer.from(await getObjectBytes(key)).toString("utf8")) as unknown;
+  };
+  const putCreateOnly = async (key: string, value: DocuLabelReviewClaim | DocuLabelReviewReceipt): Promise<boolean> => {
+    try {
+      await putObject(key, Buffer.from(JSON.stringify(value)), {
+        contentType: "application/json",
+        ifNoneMatch: "*",
+      });
+      return true;
+    } catch (error) {
+      // A lost successful PUT response is reconciled by content, while an R2
+      // outage (no readable object) remains a failure before any new spend.
+      const existing = await readJson(key).catch(() => null);
+      if (existing && docuLabelReviewRecordFingerprint(existing) === docuLabelReviewRecordFingerprint(value)) {
+        return true;
+      }
+      if (existing) return false;
+      throw error;
+    }
+  };
+  return {
+    receiptKey,
+    checkpoint: {
+      loadReceipt: () => readJson(receiptKey),
+      async claim(value) {
+        return await putCreateOnly(claimKey, value) ? "acquired" : "pending";
+      },
+      async saveReceipt(value) {
+        if (!await putCreateOnly(receiptKey, value)) {
+          throw new Error("documotion label-review receipt conflicts with the immutable run checkpoint");
+        }
+      },
+    },
+  };
 }
 
 async function recordAsset(
@@ -293,6 +344,9 @@ export const documotionShort: Block = {
         blockId: "documotion_short",
       },
     });
+    const labelReview = durableDocuLabelReviewCheckpoint(
+      `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}`,
+    );
     const result = await craftDocuMotion({
       topic,
       style: styleId,
@@ -304,6 +358,7 @@ export const documotionShort: Block = {
       lockShotDurations: true,
       maxRefineRounds,
       generateImage,
+      labelReviewCheckpoint: labelReview.checkpoint,
       log: (message) => ctx.log(`documotion_short: ${message}`),
     });
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
@@ -349,6 +404,10 @@ export const documotionShort: Block = {
       captionSafeFrame,
       assetReceiptKey,
       assetReceipts,
+      labelReview: {
+        ...result.labelReview,
+        receiptKey: labelReview.receiptKey,
+      },
     };
     await recordAsset(ctx, "video", videoKey, {
       engine: "documotion_short",

@@ -31,10 +31,10 @@
  *   import { craftDocuMotion } from "@/lib/documotion";
  *   const { outPath, verdict } = await craftDocuMotion({ topic, style: "detective_board", runDir, log });
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { claudeJson, claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
 import { parseJsonLoose } from "@/lib/gemini";
@@ -45,6 +45,17 @@ import { synthNarration } from "@/lib/tts";
 import { generateMusic } from "@/lib/music";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
+import {
+  DOCUMOTION_LABEL_REVIEW_CLAIM_VERSION,
+  DOCUMOTION_LABEL_REVIEW_RECONCILIATION_MARKER,
+  buildDocuLabelReviewReceipt,
+  docuLabelReviewPlanFingerprint,
+  mergeModelUsageSummaries,
+  reusableDocuLabelReviewReceipt,
+  subtractModelUsageSummary,
+  type DocuLabelReviewCheckpoint,
+  type DocuLabelReviewOutcome,
+} from "@/lib/documotionLabelReview";
 import { narrationTtsCost, PRICE } from "@/engine/pricing";
 import { CINEMATOGRAPHER_DOCTRINE } from "@/lib/visualDirection";
 import { renderDocuMotion, renderDocuStills } from "@/lib/remotionRender";
@@ -799,7 +810,7 @@ export async function planDocu(args: {
  * in place; never throws. The deterministic text contract and final visual
  * verifier remain authoritative if this optional semantic pass is unavailable.
  */
-async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Promise<void> {
+async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Promise<DocuLabelReviewOutcome> {
   const items = plan.shots.map((s, i) => ({
     i,
     kind: s.kind,
@@ -810,7 +821,7 @@ async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Pr
     labels: (s.labels ?? []).map((l) => l.text),
   }));
   const hasText = items.some((it) => it.title || it.kicker || it.circleLabel || it.labels.length);
-  if (!hasText) return;
+  if (!hasText) return "not_needed";
   try {
     const res = await claudeJson<{ fixes?: { i: number; title?: string; kicker?: string; circleLabel?: string; labels?: string[] }[] }>({
       prompt:
@@ -840,11 +851,13 @@ async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Pr
       if (f.labels !== undefined && s.labels) { s.labels = f.labels.map((t, k) => ({ ...s.labels![k], text: t })).filter((l) => l.text); n++; }
     }
     if (n) log?.(`documotion label lint: rewrote ${n} on-screen text item(s)`);
+    return "reviewed";
   } catch (e) {
     log?.(
       `documotion label QUALITY REVIEW UNAVAILABLE (${e instanceof Error ? e.message : e}) — ` +
       "deterministic text bounds remain enforced and the final visual verifier must still pass",
     );
+    return "unavailable";
   }
 }
 
@@ -1534,6 +1547,35 @@ async function renderVerifySet(args: {
 
 /* ------------------------------------------------------------ orchestrate -- */
 
+function localDocuLabelReviewCheckpoint(runDir: string): DocuLabelReviewCheckpoint {
+  const claimPath = join(runDir, "label-review.claim.json");
+  const receiptPath = join(runDir, "label-review.receipt.json");
+  return {
+    async loadReceipt() {
+      if (!existsSync(receiptPath)) return null;
+      return JSON.parse(await readFile(receiptPath, "utf8")) as unknown;
+    },
+    async claim(value) {
+      try {
+        await writeFile(claimPath, JSON.stringify(value, null, 2), { encoding: "utf8", flag: "wx" });
+        return "acquired";
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === "EEXIST") return "pending";
+        throw error;
+      }
+    },
+    async saveReceipt(value) {
+      const temporaryPath = `${receiptPath}.${process.pid}.${randomUUID()}.tmp`;
+      try {
+        await writeFile(temporaryPath, JSON.stringify(value, null, 2), "utf8");
+        await rename(temporaryPath, receiptPath);
+      } finally {
+        await rm(temporaryPath, { force: true }).catch(() => {});
+      }
+    },
+  };
+}
+
 export interface CraftDocuArgs {
   topic: string;
   /** Channel world id (src/remotion/docuStyles.ts). Default archival_collage. */
@@ -1557,6 +1599,8 @@ export interface CraftDocuArgs {
   lockShotDurations?: boolean;
   /** The only permitted generated-pixel dependency for this renderer. */
   generateImage?: DocuImageGenerator;
+  /** Durable at-most-once checkpoint for visual direction plus semantic label review. */
+  labelReviewCheckpoint?: DocuLabelReviewCheckpoint;
   log?: Logger;
 }
 
@@ -1570,6 +1614,12 @@ export interface CraftDocuResult {
   shotDurationsSec: number[];
   /** Content hashes for every approved renderer asset used in the final plan. */
   assetReceipts: DocuAssetReceipt[];
+  labelReview: {
+    outcome: DocuLabelReviewOutcome;
+    inputPlanFingerprint: string;
+    outputPlanFingerprint: string;
+    reused: boolean;
+  };
   /** Exact provider usage observed inside the isolated DocuMotion worker. */
   usage: DocuMotionUsage;
 }
@@ -1604,6 +1654,8 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   // with the patch and the parent can enforce the frozen run budget.
   const imageUsageScope = createImageUsageScope();
   const narrationUsage: DocuNarrationUsage = { provider: "fish", billableCharacters: 0 };
+  let retainedLabelReviewUsage: ModelUsageSummary | null = null;
+  let labelReviewEvidence: CraftDocuResult["labelReview"];
   await mkdir(runDir, { recursive: true });
 
   // 1. PLAN (cached) — then the CINEMATOGRAPHER pass realises each line into a
@@ -1629,14 +1681,65 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   } else {
     plan = await planDocu({ topic: args.topic, style, referenceNotes: args.referenceNotes, durationSec, log });
   }
-  if (plan.shots.some((s) => !s.visualCues)) {
-    await directDocuVisuals(plan, style, args.topic, log);
+  // Every entry route receives visual direction plus label review exactly once
+  // per run and exact base plan. The claim is durable before either provider
+  // boundary; a missing receipt after a prior claim is reconciliation work,
+  // never permission to re-buy either text-model pass.
+  const labelReviewCheckpoint = args.labelReviewCheckpoint ?? localDocuLabelReviewCheckpoint(runDir);
+  const retainedReview = await labelReviewCheckpoint.loadReceipt();
+  if (retainedReview) {
+    const receipt = reusableDocuLabelReviewReceipt({
+      value: retainedReview,
+      styleId: style.id,
+      currentPlan: plan,
+    });
+    plan = normalizeDocuPlan(receipt.outputPlan);
+    retainedLabelReviewUsage = receipt.modelUsage;
+    labelReviewEvidence = {
+      outcome: receipt.outcome,
+      inputPlanFingerprint: receipt.inputPlanFingerprint,
+      outputPlanFingerprint: receipt.outputPlanFingerprint,
+      reused: true,
+    };
+    log(`documotion directed-plan review: reused durable ${receipt.outcome} receipt (${receipt.outputPlanFingerprint.slice(0, 12)})`);
+  } else {
+    const inputPlanFingerprint = docuLabelReviewPlanFingerprint(plan);
+    const claim = {
+      version: DOCUMOTION_LABEL_REVIEW_CLAIM_VERSION,
+      styleId: style.id,
+      inputPlanFingerprint,
+      attemptId: randomUUID(),
+      claimedAt: Date.now(),
+    } as const;
+    if (await labelReviewCheckpoint.claim(claim) !== "acquired") {
+      throw new Error(
+        `${DOCUMOTION_LABEL_REVIEW_RECONCILIATION_MARKER}: a prior directed-plan review claim has no completed receipt`,
+      );
+    }
+    const usageBefore = modelUsageScope.snapshot();
+    if (plan.shots.some((s) => !s.visualCues)) {
+      await directDocuVisuals(plan, style, args.topic, log);
+    }
+    const outcome = await lintLabels(plan, style, log);
+    const usageAfter = modelUsageScope.snapshot();
+    const receipt = buildDocuLabelReviewReceipt({
+      styleId: style.id,
+      inputPlanFingerprint,
+      outputPlan: plan,
+      outcome,
+      modelUsage: subtractModelUsageSummary(usageAfter, usageBefore),
+      completedAt: Date.now(),
+    });
+    await labelReviewCheckpoint.saveReceipt(receipt);
+    labelReviewEvidence = {
+      outcome: receipt.outcome,
+      inputPlanFingerprint: receipt.inputPlanFingerprint,
+      outputPlanFingerprint: receipt.outputPlanFingerprint,
+      reused: false,
+    };
   }
-  // Every entry route (fresh, supplied, and cached) receives the same text
-  // review. This used to run only inside the optional planner, so production's
-  // locked Short plan bypassed it completely. Normalize the untrusted response,
-  // re-validate the exact render ABI, then persist only the reviewed safe plan.
-  await lintLabels(plan, style, log);
+  // Normalize the retained/provider output, re-validate the exact render ABI,
+  // then persist only the reviewed safe plan.
   plan = normalizeDocuPlan(plan);
   const directedProblems = validatePlan(plan, durationSec, style);
   if (directedProblems.length) {
@@ -1758,7 +1861,10 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     }
   }
   const imageUsage = imageUsageScope.snapshot();
-  const modelUsage = modelUsageScope.snapshot();
+  const modelUsage = mergeModelUsageSummaries([
+    modelUsageScope.snapshot(),
+    ...(retainedLabelReviewUsage ? [retainedLabelReviewUsage] : []),
+  ]);
   const narrationCostUsd = narrationTtsCost(
     narrationUsage.provider,
     narrationUsage.billableCharacters,
@@ -1778,6 +1884,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
       role: asset.role,
       approvalSha256: asset.approvalSha256,
     })),
+    labelReview: labelReviewEvidence,
     usage: {
       model: modelUsage,
       image: imageUsage,

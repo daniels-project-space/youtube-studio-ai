@@ -46,6 +46,28 @@ assert.match(runPipelineSource, /provider cost is UNKNOWN and automatic replay\/
 assert.match(runPipelineSource, /let childDispatchStarted = false/);
 assert.match(runPipelineSource, /childDispatchStarted = true/);
 assert.match(runPipelineSource, /result\.error\?\.includes\(PAID_STAGE_RECONCILIATION_MARKER\)/);
+assert.match(documotionSource, /DOCUMOTION_LABEL_REVIEW_RECONCILIATION_MARKER/);
+assert.match(documotionSource, /labelReviewCheckpoint\.claim\(claim\)/);
+assert.match(documotionSource, /labelReviewCheckpoint\.saveReceipt\(receipt\)/);
+assert.match(documotionSource, /directed-plan review: reused durable \$\{receipt\.outcome\} receipt/);
+assert.ok(
+  documotionSource.indexOf("labelReviewCheckpoint.claim(claim)") < documotionSource.indexOf("await directDocuVisuals(plan"),
+  "the immutable claim must precede optional visual-direction provider work",
+);
+assert.ok(
+  documotionSource.indexOf("labelReviewCheckpoint.claim(claim)") < documotionSource.indexOf("await lintLabels(plan"),
+  "the immutable claim must precede semantic label-review provider work",
+);
+const documentaryBlockSource = readFileSync(
+  new URL("../../trigger/blocks/documentaryCollageShortBlocks.ts", import.meta.url),
+  "utf8",
+);
+assert.match(documentaryBlockSource, /documotion-label-review\.claim\.json/);
+assert.match(documentaryBlockSource, /documotion-label-review\.receipt\.json/);
+assert.match(documentaryBlockSource, /ifNoneMatch:\s*"\*"/,
+  "the durable label-review claim and receipt must be immutable create-only writes");
+assert.match(documentaryBlockSource, /labelReviewCheckpoint:\s*labelReview\.checkpoint/,
+  "the production remote child must inject its R2 checkpoint into DocuMotion");
 
 // The renderer must own no secret paid image sub-routes. Its only generated
 // pixels arrive through the injected attested generator; cutout and camera
