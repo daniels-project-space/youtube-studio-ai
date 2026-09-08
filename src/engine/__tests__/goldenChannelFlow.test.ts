@@ -9,6 +9,7 @@ import {
   NOVITA_GPU_VIDEO_RENDER_BINDING,
   assertNovitaVideoRenderBinding,
   assessNovitaVideoRenderBinding,
+  catalogExecutionAvailability,
   catalogExecutionBinding,
   compileCatalogExecutionFlow,
   compileGoldenExecutionFlow,
@@ -140,10 +141,13 @@ function dormantQuizShortReleaseIsNotAnActiveCreatorRoute(): void {
     "ordinary QuizYear must not inherit the dormant portrait release block",
   );
   const releaseBinding = catalogExecutionBinding("quiz-short-private-release");
+  const releaseAvailability = catalogExecutionAvailability(releaseBinding);
   assert.equal(quizShortRelease.status, "registered");
   assert.equal(releaseBinding.kind, "registered-private-release");
   assert.deepEqual(releaseBinding.executableIds, ["quiz_short_release"]);
   assert.match(releaseBinding.note ?? "", /no owner-facing intake/i);
+  assert.equal(releaseAvailability.state, "private-review-only");
+  assert.match(releaseAvailability.detail, /no owner-facing intake/i);
   assert(
     CERTIFIED_CHANNEL_PROGRAM_ROUTE_DEFINITIONS.every(
       (definition) => !definition.requiredBlocks.includes("quiz_short_release"),
@@ -162,11 +166,10 @@ function dormantQuizShortReleaseIsNotAnActiveCreatorRoute(): void {
     "the dormant block must not become a Golden executable through registry presence alone",
   );
   const goldenPage = readFileSync(join(process.cwd(), "src/app/(app)/golden/page.tsx"), "utf8");
-  assert.match(
-    goldenPage,
-    /REGISTERED PRIVATE-RELEASE BLOCK[\s\S]*?NO OWNER INTAKE[\s\S]*?NOT ROUTE-EXECUTABLE/,
-    "the Golden card must not describe the dormant block as an executable route",
-  );
+  assert.match(goldenPage, /Private-release block ·/);
+  assert.match(goldenPage, /executionIsWarning \? "Not route-executable"/);
+  assert.match(goldenPage, /availability\.label/);
+  assert.match(goldenPage, /availability\.detail/);
 }
 
 function packageOpeningProofIsAVisibleSeparateModule(): void {
