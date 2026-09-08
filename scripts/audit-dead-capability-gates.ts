@@ -13,7 +13,8 @@
  *   buildFootageQueries lost its whole generation branch, so the script's SECTION
  *                      HEADINGS went to stock search as queries.
  *   distillScriptPlaybook threw on every call, blocking Channel Inception for ten
- *                      of the eleven families.
+ *                      of the eleven families. FIXED: bounded YouTube storyboard
+ *                      + caption evidence now routes through OpenRouter vision.
  *   hasFootagecraft    returned false always, so anything gating on it would have
  *                      silently disabled stock footage entirely.
  *
@@ -172,15 +173,14 @@ function main(): void {
   }
   if (!findings.length) console.log("  none");
   console.log(
-    `\nTRIAGE of the current 13, so the next reader starts from here:\n` +
+    `\nTRIAGE of the current 12, so the next reader starts from here:\n` +
       `  FIXED     gateClip (returned relevant:true score:8 for every clip ever cast; its\n` +
       `            body already ran on the sanctioned vision route, only the guard was stale),\n` +
       `            buildFootageQueries (section headings were going to stock search as\n` +
       `            queries), hasFootagecraft (always false; anything gating on it would have\n` +
-      `            silently disabled stock footage).\n` +
-      `  BLOCKED   scriptLab.distillScriptPlaybook — a real capability gap, not a missing\n` +
-      `            key: it must WATCH reference video. Blocks Channel Inception for ten of\n` +
-      `            eleven families. Documented at the site; needs a product decision.\n` +
+      `            silently disabled stock footage), scriptLab.distillScriptPlaybook\n` +
+      `            (now watches bounded YouTube storyboards + captions through OpenRouter,\n` +
+      `            unblocking the ten narrative-playbook families when keyed).\n` +
       `  CORRECT   seoReoptimize sits behind an unconditional attribution containment and is\n` +
       `            unreachable ON PURPOSE — titleCtrSwap.ts says "this must not route around\n` +
       `            it". The right action there was to document, not to port.\n` +

@@ -2446,13 +2446,11 @@ export async function executeDesignChannel(
   ) {
     throw new Error("persisted module configuration does not match the admitted request");
   }
-  // The narrative playbook is a hard prerequisite for ten of the eleven families
-  // and it is currently unavailable (see lib/scriptLab.ts). Asking here turns
-  // what was a throw inside the SEO stage — five stages before voice casting,
-  // artwork, thumbnails and pipeline compilation, leaving an abandoned shell —
-  // into the same clean, reported plan-only draft this file already produces
-  // when execution is not admitted. It does NOT decide whether the playbook
-  // should degrade; it only stops a half-built channel being left behind.
+  // The narrative playbook is a hard prerequisite for ten of the eleven
+  // families. Ask before the first stage so a missing OpenRouter key or pinned
+  // storyboard/caption capture binary becomes a clean plan-only draft, never a
+  // half-built channel abandoned after research spend. When both are present,
+  // the same check admits the real bounded evidence route in lib/scriptLab.ts.
   const playbookCapability = plan.familyPolicy.requiresNarrativePlaybook
     ? narrativePlaybookCapability()
     : { available: true, reason: "" };

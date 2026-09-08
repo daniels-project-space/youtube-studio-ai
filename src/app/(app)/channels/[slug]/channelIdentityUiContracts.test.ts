@@ -6,7 +6,10 @@ async function main(): Promise<void> {
   const styles = await readFile(new URL("./channelHub.module.css", import.meta.url), "utf8");
 
   assert.match(page, /<div className=\{styles\.identitySnapshot\}>/);
-  assert.match(page, /artworkIdentity=\{channelArtIdentityFromSource\(/);
+  assert.match(page, /const artworkIdentity = channelArtIdentityFromSource\(\{/);
+  assert.match(page, /<IdentityTab[\s\S]{0,400}?artworkIdentity=\{artworkIdentity\}/);
+  assert.match(page, /const avatarArtFreshness = assessChannelArtFreshness\(\{/);
+  assert.match(page, /const bannerArtFreshness = assessChannelArtFreshness\(\{/);
   assert.match(page, /<Field label="Vibe" value=\{artworkIdentity\.vibe \?\? bible\.vibe\}/);
   assert.match(page, /<Field label="Signature" value=\{artworkIdentity\.iconicMotif \?\? bible\.iconicMotif\}/);
   assert.match(page, /<details className=\{styles\.identityDetails\}>/);

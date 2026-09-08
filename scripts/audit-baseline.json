@@ -4,7 +4,7 @@
   "audit-silent-degradation": 13,
   "audit-inert-inputs": 3,
   "audit-inert-consumes": 6,
-  "audit-dead-capability-gates": 14,
+  "audit-dead-capability-gates": 12,
   "audit-unbounded-normalized": 2,
   "audit-inert-produces": 67,
   "audit-unchecked-number-clamps": 3,
