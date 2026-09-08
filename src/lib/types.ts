@@ -5,6 +5,7 @@
  */
 import type { ReleaseEvidenceStatus } from "@/lib/releaseEvidenceStatus";
 import type { ChannelArtProvenance } from "@/lib/channelArtIdentity";
+import type { RunStageProgressSummary } from "@/lib/runStageProgress";
 
 export type RunRow = {
   _id: string;
@@ -20,6 +21,7 @@ export type RunRow = {
   releaseEvidenceUpdatedAt?: number;
   channelName: string;
   channelSlug: string;
+  stageProgress?: RunStageProgressSummary;
 };
 
 export type ChannelIdentity = {

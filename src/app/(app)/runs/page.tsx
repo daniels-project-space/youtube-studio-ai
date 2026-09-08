@@ -13,6 +13,7 @@ import { StageBadge } from "@/components/StageBadge";
 import { ReleaseEvidenceBadge } from "@/components/ReleaseEvidenceBadge";
 import { Elapsed } from "@/components/Elapsed";
 import { fmtDateTime, fmtUsd } from "@/lib/format";
+import { blockLabel } from "@/lib/blocks";
 import styles from "./runs.module.css";
 import {
   INITIAL_VISIBLE_RUNS,
@@ -37,8 +38,6 @@ export default function RunsPage() {
     ? projectRunHistory(runs, selectedSlug, filter, visibleLimit)
     : undefined;
   const scopedRuns = runs?.filter((run) => selectedSlug ? run.channelSlug === selectedSlug : true) ?? [];
-  const completedCount = scopedRuns.filter((run) => run.status === "ok").length;
-  const failedCount = scopedRuns.filter((run) => run.status === "failed").length;
   const outputCount = scopedRuns.filter((run) => run.youtubeVideoId).length;
   const totalCost = scopedRuns.reduce((sum, run) => sum + (run.costTotal ?? 0), 0);
   const chooseFilter = (next: RunFilter) => {
@@ -54,15 +53,11 @@ export default function RunsPage() {
           <h1>Runs</h1>
           <p>Watch progress, inspect failures, and open saved output.</p>
         </div>
-        <div className={styles.heroMark} aria-hidden="true"><i /><span>RUN</span><i /></div>
+        <dl className={styles.heroFacts} aria-label="Production totals">
+          <div><dt>On YouTube</dt><dd>{runs === undefined ? "—" : outputCount}</dd></div>
+          <div><dt>Spend</dt><dd>{runs === undefined ? "—" : fmtUsd(totalCost)}</dd></div>
+        </dl>
       </header>
-
-      <section className={styles.operatingSignals} aria-label="Production operating signals">
-        <div data-tone={failedCount ? "attention" : "quiet"}><small>Failed</small><strong>{failedCount}</strong><span>Needs review</span></div>
-        <div data-tone="ready"><small>Completed</small><strong>{completedCount}</strong><span>Successful</span></div>
-        <div><small>On YouTube</small><strong>{outputCount}</strong><span>Linked videos</span></div>
-        <div><small>Spend</small><strong>{fmtUsd(totalCost)}</strong><span>Last 200 runs</span></div>
-      </section>
 
       <section
         className={styles.summary}
@@ -91,14 +86,8 @@ export default function RunsPage() {
       ) : projection && projection.visible.length > 0 ? (
         <>
           <div className={styles.listHeader}>
-            <div>
-              <span>Runs</span>
-              <h2>{RUN_FILTER_LABEL[filter]}</h2>
-              <p aria-live="polite">
-                {projection.visible.length} of {projection.matching.length}
-              </p>
-            </div>
-            <span>Select a run for details</span>
+            <h2>{RUN_FILTER_LABEL[filter]}</h2>
+            <p aria-live="polite">{projection.visible.length} of {projection.matching.length}</p>
           </div>
           <div className={styles.list}>
             {projection.visible.map((run, index) => (
@@ -143,6 +132,22 @@ function ProductionRunRow({ run, index }: { run: RunRow; index: number }) {
     : run.youtubeVideoId
       ? "Output + record"
       : "Open record";
+  const progress = live ? run.stageProgress : undefined;
+  const progressRatio = progress?.totalKnown && progress.total > 0
+    ? Math.min(1, progress.completed / progress.total)
+    : null;
+  const progressText = progress
+    ? progress.totalKnown
+      ? `${progress.completed}/${progress.total}`
+      : `${progress.completed} done · total unknown`
+    : null;
+  const progressStage = progress?.currentBlock
+    ? blockLabel(progress.currentBlock)
+    : progress?.totalKnown && progress.total > 0 && progress.completed === progress.total
+      ? "Finalizing"
+      : run.status === "queued"
+        ? "Waiting for runner"
+        : "Starting pipeline";
   return (
     <Link href={`/runs/${run._id}`} className={styles.runRow} data-status={run.status}>
       <span className={styles.runIndex}>{String(index + 1).padStart(2, "0")}</span>
@@ -150,6 +155,16 @@ function ProductionRunRow({ run, index }: { run: RunRow; index: number }) {
       <span className={styles.runIdentity}>
         <strong>{run.channelName}</strong>
         <small>{fmtDateTime(run.startedAt)} · {run._id.slice(0, 8)}</small>
+        {progress ? (
+          <span
+            className={styles.runProgress}
+            data-known={progress.totalKnown ? "true" : "false"}
+            aria-label={`${progressStage}, ${progressText}`}
+          >
+            <span aria-hidden="true"><i style={progressRatio === null ? undefined : { transform: `scaleX(${progressRatio})` }} /></span>
+            <small>{progressStage} · {progressText}</small>
+          </span>
+        ) : null}
         {failure && (
           <span
             className={styles.runDiagnosis}

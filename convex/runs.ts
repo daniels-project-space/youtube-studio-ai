@@ -11,6 +11,7 @@ import {
 } from "../src/lib/pipelineInvocationSnapshot";
 import { pipelineInvocationSha256 } from "../src/lib/pipelineInvocationHash";
 import { frozenRunPipelinePresentation } from "../src/lib/runPipelinePresentation";
+import { summarizeRunStageProgress } from "../src/lib/runStageProgress";
 import {
   assertScheduledPlanPayloadMatches,
   normalizeScheduledPlanPayload,
@@ -3090,6 +3091,19 @@ export const listRecent = query({
     return await Promise.all(
       limited.map(async (run) => {
         const channel = await ctx.db.get(run.channelId);
+        const live = run.status === "queued" || run.status === "running";
+        const pipeline = live
+          ? frozenRunPipelinePresentation({
+              snapshot: run.pipelineInvocationSnapshot,
+              sha256: run.pipelineInvocationSha256,
+            })
+          : undefined;
+        const stages = live
+          ? await ctx.db
+              .query("runStages")
+              .withIndex("by_run", (q) => q.eq("runId", run._id))
+              .collect()
+          : [];
         return {
           _id: run._id,
           status: run.status,
@@ -3104,6 +3118,14 @@ export const listRecent = query({
           releaseEvidenceUpdatedAt: run.releaseEvidenceUpdatedAt,
           channelName: channel?.name ?? "(unknown)",
           channelSlug: channel?.slug ?? "",
+          ...(live
+            ? {
+                stageProgress: summarizeRunStageProgress({
+                  pipeline: pipeline?.entries,
+                  stages,
+                }),
+              }
+            : {}),
         };
       }),
     );

@@ -10,6 +10,10 @@ const eslintConfig = defineConfig([
     // Default ignores of eslint-config-next:
     ".next/**",
     ".trigger/**",
+    // Local agent worktrees are independent checkouts with their own generated
+    // and vendored files. Linting them from this checkout duplicates the tree
+    // and can fail this revision because of unrelated worktree state.
+    ".claude/**",
     "graphify-out/**",
     "motion-graphics/out/**",
     "motion-graphics/public/**",

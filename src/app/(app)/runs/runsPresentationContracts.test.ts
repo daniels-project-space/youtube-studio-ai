@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 const root = resolve(import.meta.dirname, "../../../..");
 const page = readFileSync(resolve(root, "src/app/(app)/runs/page.tsx"), "utf8");
 const styles = readFileSync(resolve(root, "src/app/(app)/runs/runs.module.css"), "utf8");
+const runsQuery = readFileSync(resolve(root, "convex/runs.ts"), "utf8");
 
 assert.match(page, /const destination = failure[\s\S]*?\? "Inspect"/);
 assert.match(page, /className=\{styles\.runDiagnosis\}/);
@@ -13,3 +14,11 @@ assert.match(page, /ReleaseEvidenceBadge status=\{run\.releaseEvidenceStatus\} c
 assert.doesNotMatch(page, /className=\{styles\.runFailure\}/);
 assert.match(styles, /\.runDiagnosis \{/);
 assert.doesNotMatch(styles, /\.runFailure \{/);
+assert.doesNotMatch(page, /operatingSignals/);
+assert.doesNotMatch(styles, /\.operatingSignals/);
+assert.doesNotMatch(styles, /repeat\(6,minmax\(104px,1fr\)\)/);
+assert.match(page, /run\.stageProgress/);
+assert.match(page, /blockLabel\(progress\.currentBlock\)/);
+assert.match(styles, /\.runProgress \{/);
+assert.match(runsQuery, /summarizeRunStageProgress/);
+assert.match(runsQuery, /\.query\("runStages"\)/);
