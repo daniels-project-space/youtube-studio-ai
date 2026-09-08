@@ -21,6 +21,12 @@ const archiveMutation = videos.match(/export const setLibraryState = mutation\(\
 assert.doesNotMatch(archiveMutation, /db\.delete|deleteObject|youtube/i, "archiving must never delete stored or external media");
 
 assert.match(library, /includeArchived: true/);
+assert.match(library, /api\.videos\.librarySummary/,
+  "collection badges must use the exact lightweight aggregate, not the bounded card payload");
+assert.doesNotMatch(library, /libraryVideos\?\.filter\(\(video\).*libraryState/,
+  "collection badges must not silently stop at the 500-card presentation window");
+assert.match(videos, /export const librarySummary = query/);
+assert.match(videos, /withIndex\("by_owner_kind"/);
 assert.match(library, /type CollectionMode = "active" \| "archived"/);
 assert.match(library, /Moved to archive/);
 assert.match(library, />\s*Undo\s*</);

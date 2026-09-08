@@ -29,6 +29,7 @@ import styles from "./library.module.css";
 /** Open lightbox = the index within the current filtered master collection. */
 type LightboxTarget = { index: number };
 type CollectionMode = "active" | "archived";
+type LibrarySummary = { activeCount: number; archivedCount: number; totalCount: number };
 export default function LibraryPage() {
   const ownerId = useOwnerId();
   const { selectedSlug } = useSelectedChannel();
@@ -37,6 +38,7 @@ export default function LibraryPage() {
   const videos = useQuery(api.videos.listVideos, { ownerId, limit: 500, includeArchived: true }) as
     | VideoRow[]
     | undefined;
+  const summary = useQuery(api.videos.librarySummary, { ownerId }) as LibrarySummary | undefined;
   const channels = useQuery(api.channels.listChannels, { ownerId }) as
     | ChannelRow[]
     | undefined;
@@ -111,9 +113,9 @@ export default function LibraryPage() {
     setLightbox({ index: Math.max(0, index) });
   };
 
-  const loading = libraryVideos === undefined || channels === undefined;
-  const activeCount = libraryVideos?.filter((video) => (video.libraryState ?? "active") === "active").length ?? 0;
-  const archivedCount = libraryVideos?.filter((video) => video.libraryState === "archived").length ?? 0;
+  const loading = libraryVideos === undefined || channels === undefined || summary === undefined;
+  const activeCount = summary?.activeCount ?? 0;
+  const archivedCount = summary?.archivedCount ?? 0;
 
   const changeLibraryState = async (video: VideoRow, state: CollectionMode) => {
     if (busyIds.has(video._id)) return;
