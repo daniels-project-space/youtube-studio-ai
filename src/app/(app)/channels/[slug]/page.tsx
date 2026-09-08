@@ -161,10 +161,10 @@ type Tab =
   | "Identity"
   | "Settings";
 const TAB_GROUPS = [
-  { label: "Overview", detail: "Now", icon: IconOverview, tabs: ["Overview"] },
-  { label: "Content", detail: "Queue + masters", icon: IconChannels, tabs: ["Week ahead", "Library"] },
-  { label: "Performance", detail: "Audience + search", icon: IconAnalytics, tabs: ["Analytics", "SEO"] },
-  { label: "Setup", detail: "Identity + automation", icon: IconSettings, tabs: ["Identity", "Pipeline", "Settings"] },
+  { label: "Overview", icon: IconOverview, tabs: ["Overview"] },
+  { label: "Content", icon: IconChannels, tabs: ["Week ahead", "Library"] },
+  { label: "Performance", icon: IconAnalytics, tabs: ["Analytics", "SEO"] },
+  { label: "Setup", icon: IconSettings, tabs: ["Identity", "Pipeline", "Settings"] },
 ] as const;
 
 const TAB_BY_QUERY: Record<string, Tab> = {
@@ -196,13 +196,11 @@ type WorkspaceSignal = {
 function WorkspaceIntro({
   eyebrow,
   title,
-  description,
   signals,
   action,
 }: {
   eyebrow: string;
   title: string;
-  description: string;
   signals: WorkspaceSignal[];
   action?: ReactNode;
 }) {
@@ -211,7 +209,6 @@ function WorkspaceIntro({
       <div className={styles.workspaceIntroCopy}>
         <span>{eyebrow}</span>
         <h2>{title}</h2>
-        <p>{description}</p>
       </div>
       {action && <div className={styles.workspaceIntroAction}>{action}</div>}
       <div className={styles.workspaceSignals} aria-label={`${title} operating signals`}>
@@ -386,7 +383,7 @@ export default function ChannelHubPage({
         fallbackKeys={[latestArtwork, plannedArtwork]}
         name={channel.name}
         palette={id.palette}
-        height={226}
+        height={192}
       >
         <div className={styles.heroContent}>
           <div className={styles.heroIdentity}>
@@ -505,7 +502,6 @@ export default function ChannelHubPage({
             <group.icon width={17} height={17} aria-hidden="true" />
             <span>
               <strong>{group.label}</strong>
-              <small>{group.detail}</small>
             </span>
           </button>
         ))}
@@ -588,50 +584,56 @@ function ChannelInceptionProgress({
   const progress = stages.length ? Math.round((complete / stages.length) * 100) : 0;
 
   return (
-    <section
+    <details
       className={styles.inception}
       aria-label="Channel setup progress"
       data-state={inception.status}
       style={{ "--inception-progress": `${progress}%` } as CSSProperties}
+      {...(inception.status === "running" || inception.status === "blocked" ? { open: true } : {})}
     >
-      <div className={styles.inceptionHeading}>
-        <div>
-          <small>Inception / live build</small>
-          <strong>
-            {inception.status === "complete"
-              ? "Ready"
-              : inception.status === "blocked"
-                ? "Needs attention"
-                : inception.status === "planned"
-                  ? "Plan ready — approval required"
-                : "Building the channel"}
-          </strong>
-        </div>
-        <span>{progress}%</span>
-      </div>
-      <div className={styles.inceptionProgress} aria-hidden="true"><i /></div>
-      <div className={styles.inceptionStages}>
-        {stages.map((stage, index) => (
-          <div
-            className={styles.inceptionStage}
-            data-status={stage.status}
-            key={stage.key}
-            title={stage.error ?? `${stage.label}: ${stage.status}`}
-          >
-            <i aria-hidden="true">{String(index + 1).padStart(2, "0")}</i>
-            <span>
-              <strong>{stage.label}</strong>
-              <small>{stage.status.replaceAll("_", " ")}</small>
-            </span>
-            {stage.error && (
-              <small className={styles.inceptionStageError} role="alert">
-                {stage.error}
-              </small>
-            )}
+      <summary className={styles.inceptionSummary}>
+        <div className={styles.inceptionHeading}>
+          <div>
+            <small>Channel build</small>
+            <strong>
+              {inception.status === "complete"
+                ? "Ready"
+                : inception.status === "blocked"
+                  ? "Needs attention"
+                  : inception.status === "planned"
+                    ? "Plan ready"
+                    : "Building"}
+            </strong>
           </div>
-        ))}
+        </div>
+        <div className={styles.inceptionProgress} aria-hidden="true"><i /></div>
+        <span className={styles.inceptionPercent}>{progress}%</span>
+        <i className={styles.inceptionToggle} aria-hidden="true">+</i>
+      </summary>
+      <div className={styles.inceptionBody}>
+        <div className={styles.inceptionStages}>
+          {stages.map((stage, index) => (
+            <div
+              className={styles.inceptionStage}
+              data-status={stage.status}
+              key={stage.key}
+              title={stage.error ?? `${stage.label}: ${stage.status}`}
+            >
+              <i aria-hidden="true">{String(index + 1).padStart(2, "0")}</i>
+              <span>
+                <strong>{stage.label}</strong>
+                <small>{stage.status.replaceAll("_", " ")}</small>
+              </span>
+              {stage.error && (
+                <small className={styles.inceptionStageError} role="alert">
+                  {stage.error}
+                </small>
+              )}
+            </div>
+          ))}
+        </div>
       </div>
-    </section>
+    </details>
   );
 }
 
@@ -1051,7 +1053,6 @@ function SettingsTab({ channel }: { channel: ChannelDoc }) {
       <WorkspaceIntro
         eyebrow="Settings"
         title="Channel controls"
-        description="Publishing, budget, schedule, and YouTube."
         signals={[
           { label: "Channel", value: channel.status === "active" ? "Enabled" : "Paused", detail: "Eligibility for scheduled + manual runs", tone: channel.status === "active" ? "ready" : "attention" },
           { label: "Release", value: publishMode === "draft" ? "Private drafts" : publishMode, detail: "Main-video publishing authority", tone: publishMode === "draft" ? "ready" : "attention" },
@@ -1086,7 +1087,7 @@ function SettingsTab({ channel }: { channel: ChannelDoc }) {
         onToggle={(event) => setAdvancedOpen(event.currentTarget.open)}
       >
         <summary>
-          <span><strong>04 / Channel system</strong><small>Pipeline modules, voice, niche, and separately admitted language variants</small></span>
+          <span><strong>04 / Channel system</strong></span>
           <span aria-hidden="true">+</span>
         </summary>
         {advancedOpen && (
@@ -1267,11 +1268,6 @@ function PipelineModulesCard({ channel }: { channel: ChannelDoc }) {
   return (
     <section style={{ marginBottom: "1.6rem" }}>
       <SectionTitle>Pipeline modules</SectionTitle>
-      <p style={{ margin: "-0.4rem 0 0.85rem", fontSize: "0.78rem", color: "var(--color-muted)" }}>
-        {channel.locked
-          ? "Channel frozen — unlock it here before changing any module."
-          : "Tune each module&apos;s style — changes save instantly and shape every future render."}
-      </p>
       <ModuleConfigSection
         channelId={cid}
         moduleConfig={channel.moduleConfig as ModuleConfigMap | undefined}
@@ -1894,7 +1890,6 @@ function AnalyticsTab({
       <WorkspaceIntro
         eyebrow="Analytics"
         title="Audience &amp; cost"
-        description="YouTube performance and production spend."
         signals={[
           { label: "Audience window", value: audienceSamples ? `${audienceSamples} snapshots` : "Awaiting sync", detail: "Rolling 90 days", tone: audienceSamples ? "ready" : "attention" },
           { label: "Recent spend", value: fmtUsd(totalCost), detail: "Latest 500 runs maximum" },
@@ -1967,7 +1962,6 @@ function LibraryTab({
       <WorkspaceIntro
         eyebrow="Library"
         title="Videos"
-        description="Open active videos or restore archived ones."
         signals={[
           { label: "Active masters", value: String(active.length), detail: "Visible on this channel shelf", tone: active.length ? "ready" : "quiet" },
           { label: "Published", value: String(published), detail: "YouTube-linked outputs" },
@@ -2717,7 +2711,6 @@ function WeekAheadTab({
       <WorkspaceIntro
         eyebrow="Plan"
         title="Next videos"
-        description="Reorder topics or create five more."
         signals={[
           { label: "Planned", value: plan === undefined ? "Loading" : String(plan.length), detail: "Upcoming editorial slots" },
           { label: "Ready", value: String(readyCount), detail: "Topic + cover complete", tone: readyCount ? "ready" : "quiet" },

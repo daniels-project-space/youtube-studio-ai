@@ -137,9 +137,7 @@ export function ChannelFolderWorkspace({
     <section className={styles.workspace} aria-labelledby="channel-folders-title">
       <header className={styles.header}>
         <div>
-          <span>Fleet organization</span>
-          <h2 id="channel-folders-title">Channel rooms</h2>
-          <p>Group related shows without changing their pipeline, schedule, or YouTube destination.</p>
+          <h2 id="channel-folders-title">Rooms</h2>
         </div>
         <button
           type="button"
@@ -226,7 +224,6 @@ export function ChannelFolderWorkspace({
           );
         })}
       </div>
-      <p className={styles.hint}>Drag a card into a room, or use its Manage panel on touch and keyboard devices.</p>
       {message ? <p className={styles.message} role="status">{message}</p> : null}
     </section>
   );

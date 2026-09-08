@@ -10,7 +10,7 @@
 
 .channelLock {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: 36px minmax(0, 1fr) auto;
   gap: 0.75rem;
   align-items: center;
   padding: 0.85rem 1rem;
@@ -24,9 +24,15 @@
     linear-gradient(110deg, color-mix(in srgb, var(--color-amber) 12%, transparent), transparent 62%);
 }
 
-.channelLock > div:first-child { display: grid; gap: 0.18rem; min-width: 0; }
-.channelLock strong { color: var(--color-fg); font-size: 0.78rem; }
-.channelLock span { color: var(--color-muted); font-family: var(--font-mono); font-size: 0.57rem; letter-spacing: 0.05em; }
+.lockGlyph { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid var(--color-border-strong); border-radius: 9px; color: var(--color-accent); background: color-mix(in srgb,var(--color-accent) 8%,transparent); }
+.lockGlyph svg,
+.lockState svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-linecap: round; stroke-linejoin: round; stroke-width: 1.35; }
+.lockGlyph circle,
+.lockState circle { fill: currentColor; stroke: none; }
+.channelLock[data-locked="true"] .lockGlyph { border-color: color-mix(in srgb,var(--color-ok) 42%,var(--color-border)); color: var(--color-ok); background: color-mix(in srgb,var(--color-ok) 8%,transparent); }
+.lockCopy { display: grid; gap: 0.18rem; min-width: 0; }
+.lockCopy strong { color: var(--color-fg); font-size: 0.82rem; }
+.lockCopy span { color: var(--color-muted); font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.035em; }
 .channelLock .error { grid-column: 1 / -1; margin-top: 0; }
 
 .module {
@@ -181,6 +187,9 @@
   letter-spacing: 0.045em;
 }
 
+.lockState { display: inline-flex; min-width: 0; align-items: center; gap: .42rem; }
+.lockState svg { flex: 0 0 auto; color: var(--color-accent); }
+
 .lockButton {
   min-height: 34px;
   border: 1px solid var(--color-border-strong);
@@ -275,7 +284,8 @@
 }
 
 @media (max-width: 760px) {
-  .channelLock { grid-template-columns: minmax(0, 1fr) auto; padding: 0.75rem; }
+  .channelLock { grid-template-columns: 34px minmax(0, 1fr); padding: 0.75rem; }
+  .channelLock > .lockButton { grid-column: 1 / -1; width: 100%; }
 
   .summary {
     grid-template-columns: 52px minmax(0, 1fr) auto;

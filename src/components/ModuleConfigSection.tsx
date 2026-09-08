@@ -160,12 +160,13 @@ function ModuleCard({
         <div className={styles.controls}>
           {channelId && ownerId && (
             <div className={styles.lockRow}>
-              <span>
+              <span className={styles.lockState}>
+                <ProtectionGlyph locked={channelLocked || moduleLocked} />
                 {channelLocked
-                  ? "Channel frozen"
+                  ? "Protected by channel lock"
                   : moduleLocked
-                  ? `Locked · ${new Date(lock!.lockedAt).toLocaleDateString()}`
-                  : "Editable module"}
+                  ? `Protected · ${new Date(lock!.lockedAt).toLocaleDateString()}`
+                  : "AI edits allowed"}
               </span>
               {!channelLocked && <button
                 type="button"
@@ -177,7 +178,7 @@ function ModuleCard({
                   ? `Type '${channelModuleUnlockConfirmation(blockId)}' to unlock`
                   : "Freeze this module's saved controls and pipeline entry"}
               >
-                {lockBusy ? "Working…" : moduleLocked ? "Unlock module" : "Lock module"}
+                {lockBusy ? "Working…" : moduleLocked ? "Unlock module" : "Protect module"}
               </button>
               }
             </div>
@@ -234,9 +235,10 @@ function ChannelLockControl({
 
   return (
     <div className={styles.channelLock} data-locked={locked || undefined}>
-      <div>
-        <strong>{locked ? "Channel frozen" : "Channel editable"}</strong>
-        <span>{locked && lockedAt ? `Since ${new Date(lockedAt).toLocaleDateString()}` : "Owner control"}</span>
+      <span className={styles.lockGlyph} aria-hidden="true"><ProtectionGlyph locked={locked} /></span>
+      <div className={styles.lockCopy}>
+        <strong>{locked ? "Channel protected" : "Channel protection"}</strong>
+        <span>{locked && lockedAt ? `Locked ${new Date(lockedAt).toLocaleDateString()} · all AI edits blocked` : "Protect config, schedule, pipeline and creative settings"}</span>
       </div>
       <button
         type="button"
@@ -246,10 +248,20 @@ function ChannelLockControl({
         onClick={changeLock}
         title={locked ? `Type '${CHANNEL_UNLOCK_CONFIRMATION}' to unlock` : "Freeze all future channel changes"}
       >
-        {busy ? "Working…" : locked ? "Unlock channel" : "Lock channel"}
+        {busy ? "Working…" : locked ? "Unlock channel" : "Protect channel"}
       </button>
       {error && <div className={styles.error} role="alert">{error}</div>}
     </div>
+  );
+}
+
+function ProtectionGlyph({ locked }: { locked: boolean }) {
+  return (
+    <svg viewBox="0 0 18 18" focusable="false" aria-hidden="true">
+      <rect x="4.25" y="8" width="9.5" height="7" rx="2" />
+      <path d={locked ? "M6.25 8V6.15a2.75 2.75 0 0 1 5.5 0V8" : "M6.25 8V6.15a2.75 2.75 0 0 1 5.3-1"} />
+      <circle cx="9" cy="11.3" r=".8" />
+    </svg>
   );
 }
 

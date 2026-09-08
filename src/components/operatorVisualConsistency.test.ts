@@ -68,10 +68,11 @@ for (const id of ["library-search", "library-channel", "library-status", "librar
 assert.match(globalCss, /--color-failed: #fb7185/);
 assert.doesNotMatch(globalCss, /\.channel-live-state-inactive\s*\{\s*opacity:/);
 assert.match(globalCss, /\.channel-live-state small[\s\S]*display: none/);
-assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-live-state small \{ display: block/);
 assert.match(globalCss, /\.channel-card-grid[\s\S]*min\(100%, 195px\)/);
 assert.match(globalCss, /\.channel-card-readiness progress/);
-assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-live-state[\s\S]*grid-column: 1 \/ -1/);
+assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-card-grid \{[\s\S]*grid-auto-flow: column/);
+assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-card-grid \{[\s\S]*scroll-snap-type: x proximity/);
+assert.doesNotMatch(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-live-state small \{ display: block/);
 
 // Visual review always uses a persisted R2 thumbnail first. The shared media
 // boundary holds a stable space while R2 resolves and only falls back to a

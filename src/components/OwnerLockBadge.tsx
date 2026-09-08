@@ -95,7 +95,6 @@ export function OwnerLockBadge(props: Props) {
   // A module with no files resolved would be a lock the guard cannot enforce.
   if (props.kind === "module" && !LOCKABLE_MODULE_IDS.has(props.moduleId)) return null;
 
-  const pad = size === "sm" ? 6 : 8;
   const title = operationsAccess !== "owner"
     ? `Verify the owner channel before changing the ${label} lock.`
     : locked
@@ -114,25 +113,31 @@ export function OwnerLockBadge(props: Props) {
         ? locked ? `${label} is locked — unlock` : `Lock ${label}`
         : `${label} lock status — verify owner to change`}
       title={title}
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: 4,
-        verticalAlign: "middle",
-        cursor: busy ? "wait" : operationsAccess === "checking" ? "default" : "pointer",
-        borderRadius: 999,
-        border: `1px solid ${locked ? "#43c98a66" : "#ffffff1f"}`,
-        background: locked ? "#43c98a1f" : "transparent",
-        color: locked ? "#43c98a" : "#7d8798",
-        padding: `${pad - 3}px ${pad}px`,
-        fontSize: size === "sm" ? 11 : 12,
-        fontWeight: 600,
-        lineHeight: 1,
-        opacity: known ? 1 : 0.35,
-      }}
+      className="owner-lock-control"
+      data-state={locked ? "locked" : operationsAccess === "owner" ? "open" : "restricted"}
+      data-size={size}
+      data-busy={busy ? "true" : undefined}
+      style={{ opacity: known ? 1 : 0.35 }}
     >
-      <span aria-hidden="true">{locked ? "🔒" : "🔓"}</span>
-      {locked ? <span>LOCKED</span> : null}
+      <span className="owner-lock-control-icon" aria-hidden="true">
+        <svg viewBox="0 0 18 18" focusable="false">
+          <rect x="4.25" y="8" width="9.5" height="7" rx="2" />
+          <path d={locked ? "M6.25 8V6.15a2.75 2.75 0 0 1 5.5 0V8" : "M6.25 8V6.15a2.75 2.75 0 0 1 5.3-1"} />
+          <circle cx="9" cy="11.3" r=".8" />
+        </svg>
+      </span>
+      <span>
+        {busy
+          ? "Updating"
+          : operationsAccess === "checking"
+            ? "Checking"
+            : operationsAccess !== "owner"
+              ? "Owner lock"
+              : locked
+                ? "Protected"
+                : "Protect"}
+      </span>
+      {size === "md" && coverage?.enforced ? <small>{coverage.files} files</small> : null}
     </button>
   );
 }

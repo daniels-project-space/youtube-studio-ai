@@ -182,13 +182,6 @@ const CATEGORY: Record<string, string> = {
   layer: "Post-production", assemble: "Post-production", metadata: "Post-production", verify: "Post-production", "final-master-story-coverage": "Post-production", ship: "Post-production", "quiz-short-private-release": "Post-production",
 };
 const CATEGORY_ORDER = ["Pre-production", "Video Engines", "Visual", "Audio", "Post-production"];
-const CATEGORY_BLURB: Record<string, string> = {
-  "Pre-production": "Plan the channel, pick the topic, write and clear the script.",
-  "Video Engines": "The standalone formats — each one a complete kind of video.",
-  Visual: "The visual layers laid into every video.",
-  Audio: "The narrated voice.",
-  "Post-production": "Assemble, caption, label, QA, and ship.",
-};
 
 /** Short "what it does" line — first sentence of the honest `how`. */
 function blurb(how: string): string {
@@ -203,6 +196,21 @@ function compactHow(how: string): string {
   const sentences = withoutAuditNotes.split(/(?<=\.)\s+/).filter(Boolean).slice(0, 2).join(" ");
   if (sentences.length <= 360) return sentences;
   return `${sentences.slice(0, 356).trimEnd()}…`;
+}
+
+function compactPoint(value: string, max = 94): string {
+  const clean = value.replace(/^[\s•→↳-]+/, "").replace(/\s+/g, " ").trim();
+  return clean.length <= max ? clean : `${clean.slice(0, max - 1).trimEnd()}…`;
+}
+
+function modulePowerPoints(module: GoldenModule): string[] {
+  const lead = blurb(module.how)
+    .split(/:\s|\s—\s|;\s|,\s(?=where|then|before|while)/i)[0]
+    .replace(/\.$/, "");
+  return [...new Set([
+    compactPoint(lead, 76),
+    ...module.gates.slice(0, 1).map((gate) => compactPoint(gate, 76)),
+  ])].slice(0, 2);
 }
 function take2<T>(xs: readonly T[]): T[] { return xs.slice(0, 2); }
 
@@ -328,52 +336,16 @@ export default function GoldenPipelinePage() {
   const notPresentableMedia = media.historical + media.quarantined + media.duplicate;
   return (
     <main className={styles.page}>
-      <header className={styles.hero}>
-        <div className={styles.heroCopy}>
-          <p className={styles.eyebrow}>Quality standards</p>
+      <header className={styles.catalogHeader}>
+        <div className={styles.catalogTitle}>
+          <p className={styles.eyebrow}>Production standards</p>
           <h1>Golden modules</h1>
-          <div className={styles.heroRule}>
-            <span aria-hidden="true">G</span>
-            <div>
-              <small>Rule</small>
-              <strong>Only tested routes can be promoted.</strong>
-            </div>
-          </div>
         </div>
-        <div className={styles.assay} aria-label="Golden module admission assay">
-          <div className={styles.assayHeader}>
-            <span>Live registry assay</span>
-            <small>{GOLDEN_MODULES.length} catalog records</small>
-          </div>
-          <div className={styles.assayField}>
-            <div className={`${styles.assayNode} ${styles.nodeCatalog}`}>
-              <span>01</span><div><small>Catalog</small><strong>{GOLDEN_MODULES.length} modules</strong></div>
-            </div>
-            <div className={`${styles.assayNode} ${styles.nodeExecution}`}>
-              <span>02</span><div><small>Runnable binding</small><strong>{executableCount} connected</strong></div>
-            </div>
-            <div className={`${styles.assayNode} ${styles.nodeProof}`} data-empty={receiptCount === 0}>
-              <span>03</span><div><small>Promotion receipt</small><strong>{receiptCount} recorded</strong></div>
-            </div>
-            <div className={`${styles.assayNode} ${styles.nodeAdmission}`}>
-              <span>04</span><div><small>Family admission</small><strong>{automaticAdmissions.length} automatic</strong></div>
-            </div>
-            <div className={styles.assayCore} data-empty={receiptCount === 0}>
-              <span>GOLDEN</span>
-              <strong>{receiptCount}</strong>
-              <small>promoted</small>
-            </div>
-            <i className={styles.assayTrackA} aria-hidden="true" />
-            <i className={styles.assayTrackB} aria-hidden="true" />
-            <i className={styles.assayTrackC} aria-hidden="true" />
-          </div>
-        </div>
-        <div className={styles.metricRail}>
-          <HeroMetric label="Catalog" value={GOLDEN_MODULES.length} note="registered standards" />
-          <HeroMetric label="Reference" value={referenceCount} note="candidate modules" />
-          <HeroMetric label="Executable" value={executableCount} note="pipeline bindings" />
-          <HeroMetric label="Proof media" value={media.reference} note="inspectable artifacts" />
-          <HeroMetric label="Promoted" value={receiptCount} note="immutable receipts" />
+        <div className={styles.catalogStats} aria-label="Golden catalog summary">
+          <HeroMetric label="Catalog" value={GOLDEN_MODULES.length} note="modules" />
+          <HeroMetric label="Runnable" value={executableCount} note="bound" />
+          <HeroMetric label="Reference" value={referenceCount} note="candidates" />
+          <HeroMetric label="Promoted" value={receiptCount} note="proofs" />
         </div>
       </header>
       <GoldenTruthOverview
@@ -387,13 +359,6 @@ export default function GoldenPipelinePage() {
         mediaSuccessorQueue={mediaSuccessorQueue}
       />
       <MinimumVideoFoundationOverview />
-      <section className={styles.catalogIntro}>
-        <div>
-          <span>Standards library</span>
-          <h2>Five production disciplines</h2>
-        </div>
-        <p>Open a module to inspect its tests and examples.</p>
-      </section>
       <div className={styles.chapters}>
       {CATEGORY_ORDER.map((cat, categoryIndex) => {
         const mods = GOLDEN_MODULES
@@ -412,7 +377,6 @@ export default function GoldenPipelinePage() {
               <span className={styles.chapterIndex}>{String(categoryIndex + 1).padStart(2, "0")}</span>
               <span className={styles.chapterCopy}>
                 <span role="heading" aria-level={2}>{cat}</span>
-                <small>{CATEGORY_BLURB[cat]}</small>
               </span>
               <span className={styles.chapterMeter} aria-hidden="true">
                 <i style={{ width: `${Math.max(8, Math.round((references / mods.length) * 100))}%` }} />
@@ -465,28 +429,37 @@ function GoldenTruthOverview({
   mediaSuccessorQueue: readonly GoldenProofMediaSuccessorRequirement[];
 }) {
   return (
-    <section aria-label="Golden evidence and channel admission truth" className={styles.truthDesk}>
-      <div className={styles.truthHeader}>
+    <details aria-label="Golden evidence and channel admission truth" className={styles.truthDesk}>
+      <summary className={styles.truthSummary}>
+        <span className={styles.truthMark} aria-hidden="true">✓</span>
         <div>
-          <span className={styles.label}>Truth layer · evidence ≠ execution ≠ channel admission</span>
-          <h2>What can be seen, what can run, and what a creator can actually start.</h2>
-          <p>
-            Media below is manifest-bound reference or context material. A module earns Golden status only from a separate immutable promotion proof; a registered executable then still needs an admitted channel route.
-          </p>
+          <small>Catalog truth</small>
+          <strong>Evidence & admission</strong>
         </div>
-        <span className={styles.promotionState} data-empty={promotionProofCount === 0}>{promotionProofCount === 0 ? "NO GOLDEN PROMOTIONS RECORDED" : `${promotionProofCount} PROMOTION PROOF${promotionProofCount === 1 ? "" : "S"} RECORDED`}</span>
-      </div>
+        <span className={styles.truthPills}>
+          <b>{automatic.length} automatic</b>
+          <b>{supervised.length} supervised</b>
+          <b>{blocked.length} blocked</b>
+        </span>
+        <i aria-hidden="true">+</i>
+      </summary>
 
-      <div className={styles.truthMetrics}>
-        <TruthMetric label="Promotion proof records" value={promotionProofCount} note="Required before a module may be called Golden" tone="warning" />
-        <TruthMetric label="Manifest reference media" value={referenceMediaCount} note="Inspectable samples, never a promotion receipt" tone="gold" />
-        <TruthMetric label="Context-only media" value={contextMediaCount} note="Visible with an explicit use limitation" tone="neutral" />
-        <TruthMetric label="Not presentable" value={excludedMediaCount} note="Historical, quarantined, or duplicate bytes stay out of proof views" tone="neutral" />
-      </div>
+      <div className={styles.truthBody}>
+        <div className={styles.truthLead}>
+          <strong>{promotionProofCount === 0 ? "No Golden promotions recorded" : `${promotionProofCount} promotion proof${promotionProofCount === 1 ? "" : "s"} recorded`}</strong>
+          <span>Reference media, executable bindings, and creator admission stay separate.</span>
+        </div>
 
-      <GoldenMediaSuccessorQueue items={mediaSuccessorQueue} />
+        <div className={styles.truthMetrics}>
+          <TruthMetric label="Promotion proofs" value={promotionProofCount} note="Required for Golden status" tone="warning" />
+          <TruthMetric label="Reference media" value={referenceMediaCount} note="Inspectable candidates" tone="gold" />
+          <TruthMetric label="Context only" value={contextMediaCount} note="Limited-use references" tone="neutral" />
+          <TruthMetric label="Excluded" value={excludedMediaCount} note="Quarantined or duplicate" tone="neutral" />
+        </div>
 
-      <div className={styles.admissionDesk}>
+        <GoldenMediaSuccessorQueue items={mediaSuccessorQueue} />
+
+        <div className={styles.admissionDesk}>
         <div className={styles.sectionHeading}>
           <div>
             <span className={styles.label}>Live catalog evaluation</span>
@@ -504,8 +477,9 @@ function GoldenTruthOverview({
             unavailableMessage="No persisted per-channel qualification receipt is connected to the Golden catalog. The family-admission groups above are live catalog policy, not a live route qualification."
           />
         </div>
+        </div>
       </div>
-    </section>
+    </details>
   );
 }
 
@@ -558,7 +532,7 @@ function MinimumVideoFoundationOverview() {
         <span className={styles.foundationMark} aria-hidden="true">08</span>
         <span className={styles.foundationCopy}>
           <small>Universal video foundation · engine-enforced</small>
-          <strong>The baseline every automatic channel must keep</strong>
+          <strong>Universal video foundation</strong>
         </span>
         <b>{MINIMUM_VIDEO_FOUNDATION_TEMPLATE.length} NON-NEGOTIABLE STAGES</b>
         <span className={styles.foundationToggle} aria-hidden="true">+</span>
@@ -688,7 +662,9 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
         <span className={styles.moduleSummaryCopy}>
           <small>{m.stage}</small>
           <span role="heading" aria-level={3}>{m.title}</span>
-          <span>{blurb(m.how)}</span>
+          <ul className={styles.modulePowerPoints}>
+            {modulePowerPoints(m).map((point) => <li key={point}>{point}</li>)}
+          </ul>
         </span>
         <span className={styles.moduleSummaryMeta}>
           {isReference
@@ -704,7 +680,7 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
       <div className={styles.moduleBody}>
         <div className={styles.moduleToolbar}>
           <span className={styles.moduleProtection}>
-            <small>Module protection</small>
+            <small>AI edit protection</small>
             {/* Every catalog module is lockable and starts unlocked; the key IS the lock id. */}
             <OwnerLockBadge kind="module" moduleId={m.key} label={m.title} size="sm" />
           </span>
@@ -728,9 +704,12 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
           </div>
         </div>
         <div className={styles.moduleDoctrine}>
-          <p>{compactHow(m.how)}</p>
+          <div>
+            <small>What it controls</small>
+            <strong>{compactHow(m.how)}</strong>
+          </div>
           <ul className={styles.gates}>
-            {m.gates.slice(0, 3).map((gate) => (
+            {m.gates.slice(0, 4).map((gate) => (
               <li key={gate}>
                 <span aria-hidden="true">↳</span>
                 <span>{gate}</span>

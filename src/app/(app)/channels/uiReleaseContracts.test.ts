@@ -253,6 +253,11 @@ assert.match(channels, /Verify owner to edit/,
   "a viewer receives one actionable elevation control instead of mutations that can only fail");
 assert.match(ownerLockBadge, /operationsAccess !== "owner"/,
   "channel and module lock controls must request owner elevation before invoking a mutation");
+assert.match(ownerLockBadge, /className="owner-lock-control"/,
+  "locks must use the shared professional control rather than ad-hoc badges");
+assert.match(ownerLockBadge, /<svg viewBox="0 0 18 18"/,
+  "lock state must use a scalable custom symbol rather than an emoji");
+assert.doesNotMatch(ownerLockBadge, /🔒|🔓/);
 assert.match(globalCss, /\.channel-fleet-inspector-backdrop\s*\{[\s\S]*?position: fixed/);
 assert.match(globalCss, /\.channel-fleet-inspector\s*\{[\s\S]*?height: 100dvh/);
 assert.match(globalCss, /prefers-reduced-motion[\s\S]*?\.channel-fleet-inspector \{ animation: none !important; \}/);
@@ -294,9 +299,10 @@ assert.match(detail, /\{advancedOpen && \(/);
 // active masters; archived work remains recoverable from the full Library.
 assert.match(detail, /includeArchived: true/);
 assert.match(detail, /video\.libraryState !== "archived"/);
-assert.match(detail, /Open active videos or restore archived ones/);
-assert.match(detail, /YouTube performance and production spend/);
-assert.match(detail, /Reorder topics or create five more/);
+assert.match(detail, /title="Videos"/);
+assert.match(detail, /title="Audience &amp; cost"/);
+assert.match(detail, /title="Next videos"/);
+assert.doesNotMatch(detail, /description="Publishing, budget, schedule, and YouTube\.|description="YouTube performance and production spend\.|description="Open active videos or restore archived ones\.|description="Reorder topics or create five more\./);
 assert.match(detail, /selectedPlanId=\{selectedPlanId\}/,
   "channel plan links must carry an exact selected item into the week-ahead workspace");
 assert.match(detail, /Open script, visuals, narration and master/,
@@ -320,7 +326,7 @@ assert.match(globalCss, /\.channel-card-title > a\s*\{[\s\S]*?min-height: 36px/)
 assert.match(globalCss, /\.channel-fleet-inspector-nav a\s*\{[\s\S]*?min-height: 40px/);
 assert.match(globalCss, /\.channel-account-action\s*\{[\s\S]*?min-height: 38px/);
 assert.match(globalCss, /\.channel-card-actions a,\s*\n\.channel-card-manage\s*\{[\s\S]*?min-height: 40px/);
-assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*?\.channel-card-banner \{ aspect-ratio: 16 \/ 6 !important/);
+assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*?\.channel-card-banner \{ aspect-ratio: 16 \/ 5 !important/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*?\.channel-card-actions \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
 assert.match(scheduleCss, /\.itemLinks a\s*\{[\s\S]*?min-height: 36px/);
 assert.match(overviewCss, /\.sectionHeading > a,[\s\S]*?min-height: 36px/);

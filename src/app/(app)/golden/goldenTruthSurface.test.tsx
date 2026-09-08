@@ -17,7 +17,7 @@ async function main(): Promise<void> {
   const html = await renderAppPage(GoldenPipelinePage);
 
   assert.match(html, /Golden evidence and channel admission truth/);
-  assert.match(html, /NO GOLDEN PROMOTIONS RECORDED/);
+  assert.match(html, /No Golden promotions recorded/);
   assert.match(html, /Creator channel admission/);
   assert.match(html, /Universal video foundation/);
   assert.match(html, /8 NON-NEGOTIABLE STAGES/);
@@ -35,7 +35,7 @@ async function main(): Promise<void> {
   assert.match(html, /SHA-256/);
   assert.equal(
     html.match(/<details/g)?.length,
-    GOLDEN_MODULES.length + 10,
+    GOLDEN_MODULES.length + 11,
     "every module and admission group is a native disclosure inside the catalog",
   );
   assert.equal(

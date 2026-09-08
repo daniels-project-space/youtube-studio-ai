@@ -168,7 +168,6 @@ export default function ChannelsPage() {
       <PageHeader
         eyebrow="Workspace"
         title="Channels"
-        subtitle="Create, group, and connect channels."
         actions={
           <div className="channel-page-actions">
             <Link
@@ -273,7 +272,6 @@ export default function ChannelsPage() {
               Boolean(c.pipeline?.length),
             ];
             const setupDone = setupChecks.filter(Boolean).length;
-            const cadence = c.schedule?.frequency || c.identity?.cadence || "Not set";
             const autopilotEnabled = c.status === "active" && c.schedule?.enabled !== false;
             const inactive = !autopilotEnabled || !linked;
             const operatingState = inactive
@@ -299,10 +297,19 @@ export default function ChannelsPage() {
                   fallbackKeys={[latestArtwork, planArtwork]}
                   name={c.name}
                   palette={c.identity?.palette}
-                  aspectRatio="16 / 6"
+                  aspectRatio="16 / 5"
                   className="channel-card-banner"
                 >
-                  {previewLabel ? <span className="channel-card-preview-label">{previewLabel}</span> : null}
+                  <div className="channel-card-banner-tools">
+                    {previewLabel ? <span className="channel-card-preview-label">{previewLabel}</span> : <span />}
+                    <OwnerLockBadge
+                      kind="channel"
+                      channelId={c._id}
+                      channelName={c.name}
+                      locked={c.locked === true}
+                      size="sm"
+                    />
+                  </div>
                 </ChannelBanner>
                 <div className="channel-card-identity">
                   <ChannelAvatar
@@ -318,17 +325,6 @@ export default function ChannelsPage() {
                     </Link>
                     <p>{c.identity?.niche ?? channelCategoryLabelFor(c)}</p>
                   </div>
-                  {/* Sibling of the title, never inside its link: a button nested in an
-                      anchor is invalid markup and every click would navigate away.
-                      Backed by channels.lockChannel, which every guarded channel
-                      mutation already refuses to write through. */}
-                  <OwnerLockBadge
-                    kind="channel"
-                    channelId={c._id}
-                    channelName={c.name}
-                    locked={c.locked === true}
-                    size="sm"
-                  />
                   <div
                     className={`channel-live-state channel-live-state-${operatingState.tone}`}
                     aria-label={`${operatingState.label}: ${operatingState.detail}`}
@@ -344,12 +340,10 @@ export default function ChannelsPage() {
                   <div>
                     <small>Next publish</small>
                     <strong>{next?.timestamp ? formatZonedScheduleTimestamp(next.timestamp, next.timeZone) : next ? "Time unavailable" : "No ready item"}</strong>
-                    <span>{next ? next.item.title || next.item.topic : cadence}</span>
                   </div>
                   <div>
                     <small>Output</small>
                     <strong>{videos} published</strong>
-                    <span>{cardData?.lastRunStatus ? `Last run · ${cardData.lastRunStatus}` : "No run history"}</span>
                   </div>
                 </div>
 

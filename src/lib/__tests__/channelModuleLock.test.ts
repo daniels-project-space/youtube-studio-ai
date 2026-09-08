@@ -316,8 +316,9 @@ assert.match(source("convex/channels.ts"), /export const listModuleLockAudits = 
 assert.match(source("convex/channels.ts"), /firstLockedModulePipelineChange/);
 assert.match(source("convex/channelLock.ts"), /state: "channel_locked"/);
 assert.doesNotMatch(source("convex/channelLock.ts"), /insertChannelFork/);
-assert.match(source("src/components/ModuleConfigSection.tsx"), /Lock module/);
-assert.match(source("src/components/ModuleConfigSection.tsx"), /Lock channel/);
+assert.match(source("src/components/ModuleConfigSection.tsx"), /Protect module/);
+assert.match(source("src/components/ModuleConfigSection.tsx"), /Protect channel/);
+assert.match(source("src/components/ModuleConfigSection.tsx"), /Channel protection/);
 assert.match(source("src/components/ModuleConfigSection.tsx"), /channelModuleUnlockConfirmation/);
 assert.match(source("src/components/ModuleConfigSection.tsx"), /Recent lock activity/);
 assert.match(source("src/trigger/designChannelInception.ts"), /channel inception module configuration refused/);
