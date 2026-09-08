@@ -1018,6 +1018,7 @@ export default defineSchema({
     leaseRecoveryPending: v.optional(v.boolean()),
   })
     .index("by_owner", ["ownerId"])
+    .index("by_owner_status", ["ownerId", "status"])
     .index("by_channel", ["channelId"])
     // Packaging-only thumbnail candidates share the durable run/stage lease
     // infrastructure, but are not ordinary video runs. These indexes let
@@ -2185,9 +2186,10 @@ export default defineSchema({
     .index("by_owner_status", ["ownerId", "status"])
     .index("by_run", ["runId"]),
 
-  // Explicit owner acceptance ledger for applying a QA-passed private
-  // thumbnail candidate to one exact YouTube video. Candidate bytes, connector
-  // version, account identity, and source run are frozen before dispatch.
+  // Durable acceptance ledger for applying a QA-passed thumbnail candidate to
+  // one exact YouTube video. A narrow owner policy can issue this approval
+  // automatically; candidate bytes, connector version, account identity, and
+  // source run are still frozen and revalidated before dispatch.
   youtubeThumbnailReplacements: defineTable({
     ownerId: v.string(),
     channelId: v.id("channels"),

@@ -10,6 +10,7 @@ import type {
   StudioAction,
   StudioActionApprovalReceipt,
 } from "@/lib/studioActionApprovalContract";
+import { studioActionActorIsAllowed } from "@/lib/studioActionApprovalContract";
 import {
   STUDIO_ACTION_APPROVAL_MAX_CLOCK_SKEW_MS,
   STUDIO_ACTION_APPROVAL_MAX_TTL_MS,
@@ -78,7 +79,8 @@ function receiptShapeIsValid(
     receipt.action === expected.action &&
     receipt.ownerId === expected.ownerId &&
     receipt.subject === expected.subject &&
-    receipt.actor?.startsWith("authenticated-operator:") === true &&
+    typeof receipt.actor === "string" &&
+    studioActionActorIsAllowed(expected.action, receipt.actor) &&
     Boolean(receipt.evidence?.trim()) &&
     typeof receipt.issuedAt === "number" &&
     Number.isFinite(receipt.issuedAt) &&

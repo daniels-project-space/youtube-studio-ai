@@ -228,11 +228,10 @@ function validErnieThumbnailQa(value: unknown): value is ThumbnailGateVerdict {
 /**
  * Read-only inventory for the first, safe stage of a legacy thumbnail refresh.
  *
- * It neither creates a candidate nor records an owner acceptance. The only
- * decision it makes is whether the persisted thumbnail has an exact, run-bound
- * current-Golden provenance marker. Release-evidence status is returned as
- * adjacent context only; a final-master certificate never upgrades thumbnail
- * provenance.
+ * It never creates a candidate or changes external media. It reports whether
+ * the source or its newest completed sibling has an exact, run-bound
+ * current-Golden provenance marker. Release-evidence status is adjacent
+ * context only; a final-master certificate never upgrades thumbnail proof.
  */
 export const listInventory = query({
   args: {
@@ -285,9 +284,9 @@ export const listInventory = query({
         (Boolean(videoAsset) && run.status !== "failed");
       if (!isFinished) continue;
 
-      // Keep selection aligned with the Studio's existing video query. This
-      // inventory reports provenance for the thumbnail users currently see;
-      // it does not choose a newer asset or silently replace anything.
+      // Source proof remains available for comparison. A completed sibling is
+      // assessed below and becomes the presented proof only when its own
+      // owner/channel/run/key marker is exact.
       const thumbnail = assets.find((asset) => asset.kind === "thumbnail");
       const assessment = assessThumbnailRefreshEvidence(
         thumbnail
@@ -334,6 +333,19 @@ export const listInventory = query({
             .collect()
         : [];
       const candidateThumbnail = candidateAssets.find((asset) => asset.kind === "thumbnail");
+      const candidateAssessment = candidate?.status === "ok" && candidateThumbnail
+        ? assessThumbnailRefreshEvidence({
+            ownerId: candidateThumbnail.ownerId,
+            channelId: String(candidateThumbnail.channelId),
+            runId: candidateThumbnail.runId ? String(candidateThumbnail.runId) : undefined,
+            kind: candidateThumbnail.kind,
+            r2Key: candidateThumbnail.r2Key,
+            meta: candidateThumbnail.meta,
+          } satisfies ThumbnailRefreshAsset)
+        : null;
+      const presentedAssessment = candidateAssessment?.status === "current_golden_candidate"
+        ? candidateAssessment
+        : assessment;
       const replacement = candidate
         ? await ctx.db
             .query("youtubeThumbnailReplacements")
@@ -353,9 +365,9 @@ export const listInventory = query({
         status: run.status,
         youtubeVideoId: run.youtubeVideoId,
         thumbnailKey: thumbnail?.r2Key ?? null,
-        thumbnailEvidenceStatus: assessment.status,
-        refreshAction: assessment.action,
-        evidenceReason: assessment.reason,
+        thumbnailEvidenceStatus: presentedAssessment.status,
+        refreshAction: presentedAssessment.action,
+        evidenceReason: presentedAssessment.reason,
         // Deliberately adjacent rather than part of `assessment`: release
         // proof is evidence for the video master, never a thumbnail upgrade.
         releaseEvidenceStatus: normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus),
@@ -899,5 +911,83 @@ export const getCandidateExecution = query({
     }
     assertThumbnailRefreshKeepSource(source, channel, refreshMaterial.title);
     return { candidate, source, channelSlug: channel.slug, material: refreshMaterial.material };
+  },
+});
+
+/**
+ * Bounded recovery inventory for the automatic post-QA YouTube handoff.
+ *
+ * Only completed sibling candidates whose source still has an active connector
+ * are returned. The replacement mutation revalidates the artifact evidence,
+ * exact source/video/channel binding and connector version again before it
+ * creates any durable plan, so this query is discovery rather than authority.
+ */
+export const listAutomaticReplacementCandidates = query({
+  args: { ownerId: v.string(), limit: v.optional(v.number()) },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "automatic thumbnail replacement inventory");
+    const limit = Math.max(1, Math.min(25, Math.floor(args.limit ?? 10)));
+    const completed = await ctx.db
+      .query("runs")
+      .withIndex("by_owner_status", (q) => q
+        .eq("ownerId", args.ownerId)
+        .eq("status", "ok"))
+      .order("desc")
+      .take(300);
+    const latestBySource = new Map<string, (typeof completed)[number]>();
+    for (const candidate of completed) {
+      if (!candidate.thumbnailRefreshSourceRunId) continue;
+      const sourceKey = String(candidate.thumbnailRefreshSourceRunId);
+      const prior = latestBySource.get(sourceKey);
+      const candidateTime = candidate.finishedAt ?? candidate.startedAt ?? candidate._creationTime;
+      const priorTime = prior
+        ? prior.finishedAt ?? prior.startedAt ?? prior._creationTime
+        : -1;
+      if (!prior || candidateTime > priorTime) latestBySource.set(sourceKey, candidate);
+    }
+    const latestCandidates = [...latestBySource.values()].sort((left, right) =>
+      (right.finishedAt ?? right.startedAt ?? right._creationTime) -
+      (left.finishedAt ?? left.startedAt ?? left._creationTime),
+    );
+    const due: Array<{
+      sourceRunId: Id<"runs">;
+      candidateRunId: Id<"runs">;
+      youtubeVideoId: string;
+    }> = [];
+    for (const candidate of latestCandidates) {
+      if (due.length >= limit || !candidate.thumbnailRefreshSourceRunId) continue;
+      const source = await ctx.db.get(candidate.thumbnailRefreshSourceRunId);
+      if (
+        !source ||
+        source.ownerId !== args.ownerId ||
+        source.channelId !== candidate.channelId ||
+        !source.youtubeVideoId
+      ) continue;
+      const connector = (await ctx.db
+        .query("youtubeAuth")
+        .withIndex("by_channel", (q) => q.eq("channelId", source.channelId))
+        .collect())
+        .filter((row) =>
+          row.ownerId === args.ownerId &&
+          (row.status ?? "active") === "active" &&
+          Boolean(row.ytChannelId),
+        )
+        .sort((left, right) => right._creationTime - left._creationTime)[0];
+      if (!connector?.ytChannelId) continue;
+      const replacement = await ctx.db
+        .query("youtubeThumbnailReplacements")
+        .withIndex("by_owner_candidate", (q) => q
+          .eq("ownerId", args.ownerId)
+          .eq("candidateRunId", candidate._id))
+        .unique();
+      if (replacement && !["awaiting_approval", "pending"].includes(replacement.status)) continue;
+      due.push({
+        sourceRunId: source._id,
+        candidateRunId: candidate._id,
+        youtubeVideoId: source.youtubeVideoId,
+      });
+    }
+    return due;
   },
 });

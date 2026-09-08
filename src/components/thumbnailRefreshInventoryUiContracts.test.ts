@@ -15,7 +15,8 @@ const library = read("src/app/(app)/library/page.tsx");
 // Legacy review can now request one bounded, separate candidate. Stored media
 // remains server-resolved from opaque run ids, and neither the browser nor the
 // candidate endpoint receives authority to overwrite the source/YouTube image.
-// Applying a finished candidate is a separate, exact-video confirmation route.
+// Completed QA candidates enter the existing identity-bound replacement worker
+// through a narrow automatic policy, without another browser confirmation.
 assert.match(panel, /fetch\("\/api\/thumbnail-refresh"/);
 assert.match(panel, /row\.legacyCleanupAction !== "retire"/);
 assert.match(panel, /Current Golden Nano Banana Pro module snapshotted/);
@@ -32,10 +33,11 @@ assert.match(panel, /confirmCandidateSpend:\s*true/);
 assert.match(panel, /Render Nano candidate/);
 assert.match(panel, /Resume candidate delivery/);
 assert.match(panel, /Candidate authorization interrupted/);
-assert.match(panel, /The current thumbnail is unchanged/);
-assert.match(panel, /Use on YouTube/);
-assert.match(panel, /confirmYoutubeVideoId/);
-assert.match(panel, /Private Nano Banana Pro candidates only/);
+assert.match(panel, /become the Library image after production QA/);
+assert.doesNotMatch(panel, /Use on YouTube/);
+assert.doesNotMatch(panel, /confirmYoutubeVideoId/);
+assert.match(panel, /sync to their exact connected YouTube video automatically/);
+assert.match(panel, /canManage/);
 assert.match(panel, /Current Golden Nano Banana Pro module snapshotted/);
 assert.match(panel, /Render Nano candidate/);
 assert.doesNotMatch(panel, /ernieBatch=reviewed/);
@@ -45,7 +47,8 @@ assert.match(panel, /Render exact video frame/);
 assert.match(panel, /no generated scene/);
 assert.match(panel, /retained finished videos/);
 assert.match(panel, /queueLofiFrameCandidates/);
-assert.match(route, /requireStudioActor/);
+assert.match(route, /getStudioActor/);
+assert.match(route, /actor\?\.ownerId \?\? process\.env\.STUDIO_OWNER_ID/);
 assert.match(route, /thumbnailPresent: Boolean\(item\.thumbnailKey\)/);
 assert.match(route, /presignDownload\(key/);
 assert.match(route, /reviewedErnieBatchPreview/);
@@ -67,7 +70,8 @@ assert.match(ernieBatchTask, /assertPinnedErnieThumbnailRefreshBatch/);
 assert.match(ernieBatchTask, /assertNativePng/);
 assert.match(ernieBatchTask, /youtubeThumbnailReplacementTriggerRequest/);
 assert.match(ernieBatchTask, /candidateArtifactSha256 !== item\.artifactSha256/);
-assert.match(library, /ThumbnailRefreshInventoryPanel selectedChannelSlug=\{selectedSlug\}/);
+assert.match(library, /ThumbnailRefreshInventoryPanel[\s\S]*selectedChannelSlug=\{selectedSlug\}[\s\S]*canManage=\{operationsAccess === "owner"\}/);
+assert.doesNotMatch(library, /<OwnerOnlyNotice/);
 assert.match(library, /id="thumbnail-refresh"[\s\S]*open/);
 assert.doesNotMatch(library, /ernieBatch=reviewed/);
 assert.doesNotMatch(library, /reviewedThumbnailUrl/);

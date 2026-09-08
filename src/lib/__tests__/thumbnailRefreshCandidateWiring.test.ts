@@ -8,6 +8,8 @@ const schema = read("convex/schema.ts");
 const convex = read("convex/thumbnailRefresh.ts");
 const route = read("src/app/api/thumbnail-refresh/route.ts");
 const task = read("src/trigger/thumbnailRefreshCandidate.ts");
+const automaticTask = read("src/trigger/automaticThumbnailReplacement.ts");
+const automaticCore = read("src/trigger/automaticThumbnailReplacementCore.ts");
 const replay = read("src/lib/thumbnailRefreshReplay.ts");
 const successor = read("src/lib/thumbnailRefreshSuccessor.ts");
 const moduleContracts = read("src/engine/moduleContracts.ts");
@@ -31,6 +33,8 @@ assert.match(convex, /thumbnail-ernie-batch-import/);
 assert.match(convex, /providerRoute !== "ernie-image-novita-4090"/);
 assert.match(convex, /thumbnailRefreshDispatchState: "consumed"/);
 assert.match(convex, /pipelineInvocationSha256: run\.pipelineInvocationSha256/);
+assert.match(convex, /latestBySource/,
+  "automatic recovery must never queue an older candidate after a newer candidate for the same video");
 assert.match(convex, /export const consumeCandidateDispatch = mutation/);
 assert.doesNotMatch(
   convex.match(/export const createCandidateShell = mutation\(\{([\s\S]*?)\n\}\);/)?.[1] ?? "",
@@ -67,7 +71,14 @@ assert.match(task, /runPipeline as runEngine/);
 assert.match(task, /makeConvexSink\(convex, payload\.ownerId, executionLease\)/);
 assert.match(task, /id: "thumbnail-refresh-dispatcher"/);
 assert.match(task, /scope: "global"/);
-assert.doesNotMatch(task, /youtube|upload_draft/i);
+assert.match(task, /queueAutomaticThumbnailReplacement/);
+assert.doesNotMatch(task, /upload_draft/i);
+assert.match(automaticTask, /id: "automatic-thumbnail-replacement-dispatcher"/);
+assert.match(automaticTask, /cron: "\* \* \* \* \*"/);
+assert.match(automaticCore, /createPlanShell/);
+assert.match(automaticCore, /AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX/);
+assert.match(automaticCore, /youtubeThumbnailReplacementTriggerRequest/);
+assert.match(automaticCore, /scope: "global"/);
 
 for (const key of [
   "styleDNA",

@@ -13,7 +13,6 @@ import { SkeletonList } from "@/components/Skeleton";
 import { VideoGrid } from "@/components/VideoGrid";
 import { Lightbox } from "@/components/Lightbox";
 import { ThumbnailRefreshInventoryPanel } from "@/components/ThumbnailRefreshInventoryPanel";
-import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
 import { useOperationsAccess } from "@/components/OperationsAccess";
 import {
   LibraryFilters,
@@ -202,11 +201,10 @@ export default function LibraryPage() {
             <i aria-hidden="true" />
           </summary>
           <div className={styles.workshopBody}>
-            {operationsAccess === "owner" ? (
-              <ThumbnailRefreshInventoryPanel selectedChannelSlug={selectedSlug} />
-            ) : (
-              <OwnerOnlyNotice access={operationsAccess} desk="the thumbnail refresh inventory" />
-            )}
+            <ThumbnailRefreshInventoryPanel
+              selectedChannelSlug={selectedSlug}
+              canManage={operationsAccess === "owner"}
+            />
           </div>
         </details>
       ) : null}

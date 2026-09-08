@@ -4,12 +4,12 @@ import { FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE } from "@/lib/falNanoBananaLofiT
 /**
  * A compact, durable provenance marker for a thumbnail produced by the
  * current Golden thumbnail module. It deliberately says nothing about visual
- * quality, CTR, owner approval, or an external YouTube replacement.
+ * quality, CTR, or an external YouTube replacement.
  *
  * The owner/run/key binding prevents a marker copied from one run being used
- * to make a different thumbnail look current. A later refresh proposal must
- * still be created and explicitly accepted by its owner before it can touch a
- * YouTube thumbnail.
+ * to make a different thumbnail look current. The automatic replacement
+ * policy may act on this proof, but the YouTube worker must still independently
+ * verify the exact artifact, connector, channel and video bindings.
  */
 export const THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION =
   "thumbnail-current-candidate-evidence/v1" as const;
@@ -111,6 +111,13 @@ export type ThumbnailRefreshAsset = {
   r2Key: string;
   meta?: unknown;
 };
+
+export type ThumbnailRefreshPresentationCandidate = Readonly<{
+  status: string;
+  finishedAt?: number;
+  startedAt?: number;
+  thumbnail?: ThumbnailRefreshAsset | null;
+}>;
 
 const SHA256 = /^[a-f0-9]{64}$/;
 
@@ -364,9 +371,32 @@ export function assessThumbnailRefreshEvidence(
     status: "current_golden_candidate",
     action: "no_refresh_action",
     reason: evidence.version === LOFI_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION
-      ? "Current Lo-Fi 15-second-frame Nano Banana provenance is recorded. This is still not an owner acceptance or an external thumbnail replacement."
+      ? "Current Lo-Fi 15-second-frame Nano Banana provenance is recorded and eligible for automatic presentation and bound YouTube sync."
       : evidence.version === ERNIE_NOVITA_THUMBNAIL_CURRENT_CANDIDATE_EVIDENCE_VERSION
-        ? "Current ERNIE-Novita native-image and native-typography provenance is recorded. This is still not an owner acceptance or an external thumbnail replacement."
-        : "Current Golden generator provenance is recorded. This is still not an owner acceptance or an external thumbnail replacement.",
+        ? "Current ERNIE-Novita native-image and native-typography provenance is recorded and eligible for automatic presentation and bound YouTube sync."
+        : "Current Golden generator provenance is recorded and eligible for automatic presentation and bound YouTube sync.",
   };
+}
+
+/**
+ * Pick the newest completed sibling candidate that carries valid, exact
+ * current-Golden evidence. This is the Library projection rule only: the
+ * YouTube worker separately revalidates the same bytes and identity bindings.
+ */
+export function selectLatestCurrentGoldenThumbnail(input: {
+  ownerId: string;
+  channelId: string;
+  candidates?: readonly ThumbnailRefreshPresentationCandidate[];
+}): ThumbnailRefreshAsset | null {
+  return (input.candidates ?? [])
+    .filter((candidate) => candidate.status === "ok" && Boolean(candidate.thumbnail))
+    .sort((left, right) =>
+      (right.finishedAt ?? right.startedAt ?? 0) - (left.finishedAt ?? left.startedAt ?? 0),
+    )
+    .map((candidate) => candidate.thumbnail!)
+    .find((thumbnail) =>
+      thumbnail.ownerId === input.ownerId &&
+      thumbnail.channelId === input.channelId &&
+      assessThumbnailRefreshEvidence(thumbnail).status === "current_golden_candidate",
+    ) ?? null;
 }

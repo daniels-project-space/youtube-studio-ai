@@ -75,8 +75,9 @@ export function isVerifiedLofiRenderedFrameThumbnail(input: {
 
 /**
  * A completed source-frame refresh is newer presentation material than the
- * source run's own thumbnail, but it stays a private Library preview until a
- * separate owner-confirmed YouTube replacement is applied.
+ * source run's own thumbnail. Once its bound evidence passes, it is the
+ * Library image and the automatic policy can hand it to the separately
+ * identity-verified YouTube replacement worker.
  */
 export function selectLofiLibraryThumbnail(input: {
   ownerId: string;

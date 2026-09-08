@@ -56,6 +56,7 @@ const thumbnailRefreshApi = (api as unknown as {
     readonly importErnieBatchCandidate: never;
     readonly claimCandidateApproval: never;
     readonly getCandidateDispatch: never;
+    readonly listAutomaticReplacementCandidates: never;
     readonly markCandidateDispatchQueued: never;
     readonly recordCandidateDispatchFailure: never;
   };
@@ -65,8 +66,9 @@ export const thumbnailRefreshRuntimeApi = thumbnailRefreshApi;
 
 /**
  * Server-only owner inventory for evaluating older thumbnails. It is neither a
- * candidate generator nor an update command: callers still need a separately
- * reviewed candidate and explicit owner acceptance before an external change.
+ * candidate generator nor an update command. Completed production-QA
+ * candidates are presented by the Library and handed to the bound YouTube
+ * replacement policy without a second browser confirmation.
  */
 export async function listThumbnailRefreshInventory(input: {
   readonly client: QueryClient;

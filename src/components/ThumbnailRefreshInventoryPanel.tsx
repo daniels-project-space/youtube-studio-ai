@@ -138,7 +138,7 @@ function ThumbnailRefreshPreview({
   const fallback = !candidate && row.youtubeVideoId ? youtubeThumbnailUrl(row.youtubeVideoId) : null;
   const src = storedUrl && !storedPreviewFailed ? storedUrl : fallback;
   const source = storedUrl && !storedPreviewFailed
-      ? candidate ? "new candidate" : "retained candidate"
+      ? candidate ? "new Library thumbnail" : "previous thumbnail"
     : fallback
       ? "current YouTube image"
       : "no image retained";
@@ -146,7 +146,7 @@ function ThumbnailRefreshPreview({
   return (
     <div
       className={styles.preview}
-      data-preview-source={source === "new candidate" ? "candidate" : source === "retained candidate" ? "retained" : fallback ? "youtube" : "unavailable"}
+      data-preview-source={source === "new Library thumbnail" ? "candidate" : source === "previous thumbnail" ? "retained" : fallback ? "youtube" : "unavailable"}
     >
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -166,14 +166,16 @@ function ThumbnailRefreshPreview({
 }
 
 /**
- * Owner-authenticated packaging evidence queue. This view does not pretend a
- * legacy row is ready: it proves whether an exact thumbnail-only replay is
- * possible before a separate, bounded candidate action can spend.
+ * Public packaging evidence queue. Read-only status and previews do not need
+ * an owner session; paid generation and destructive retirement controls still
+ * require the owner capability passed by the Library page.
  */
 export function ThumbnailRefreshInventoryPanel({
   selectedChannelSlug,
+  canManage = false,
 }: {
   selectedChannelSlug?: string | null;
+  canManage?: boolean;
 }) {
   const [inventory, setInventory] = useState<readonly ThumbnailInventoryRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -182,8 +184,6 @@ export function ThumbnailRefreshInventoryPanel({
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [retirementRunId, setRetirementRunId] = useState<string | null>(null);
   const [retirementConfirmation, setRetirementConfirmation] = useState("");
-  const [replacementRunId, setReplacementRunId] = useState<string | null>(null);
-  const [replacementConfirmation, setReplacementConfirmation] = useState("");
   const [lofiFrameBatchBusy, setLofiFrameBatchBusy] = useState(false);
 
   const loadInventory = useCallback(async (signal?: AbortSignal) => {
@@ -223,7 +223,8 @@ export function ThumbnailRefreshInventoryPanel({
     row.retirement && ["pending", "queued"].includes(row.retirement.status ?? ""),
   ) ?? false;
   const hasActiveReplacement = inventory?.some((row) =>
-    row.replacement && ["pending", "queued"].includes(row.replacement.status ?? ""),
+    (row.replacement && ["awaiting_approval", "pending", "queued"].includes(row.replacement.status ?? "")) ||
+    (row.candidate?.status === "ok" && Boolean(row.youtubeVideoId) && !row.replacement),
   ) ?? false;
 
   useEffect(() => {
@@ -252,7 +253,7 @@ export function ThumbnailRefreshInventoryPanel({
       }
       setActionMessage(
         `${row.candidate ? "Candidate delivery resumed" : "Candidate queued"} for “${row.title}”. ` +
-        "The current thumbnail is unchanged.",
+        "It will become the Library image after production QA and sync to its bound YouTube video automatically.",
       );
       await loadInventory();
     } catch (candidateError) {
@@ -298,48 +299,6 @@ export function ThumbnailRefreshInventoryPanel({
       setActionMessage(retirementError instanceof Error
         ? retirementError.message
         : "Could not queue permanent removal");
-    } finally {
-      setBusyRunIds((current) => {
-        const next = new Set(current);
-        next.delete(row.runId);
-        return next;
-      });
-    }
-  };
-
-  const applyCandidate = async (row: ThumbnailInventoryRow) => {
-    if (
-      !row.youtubeVideoId ||
-      !row.candidate ||
-      row.candidate.status !== "ok" ||
-      replacementConfirmation !== row.youtubeVideoId ||
-      busyRunIds.has(row.runId)
-    ) return;
-    setBusyRunIds((current) => new Set(current).add(row.runId));
-    setActionMessage(null);
-    try {
-      const response = await fetch("/api/thumbnail-refresh/accept", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          sourceRunId: row.runId,
-          candidateRunId: row.candidate.runId,
-          youtubeVideoId: row.youtubeVideoId,
-          confirmYoutubeVideoId: replacementConfirmation,
-        }),
-      });
-      const payload = await response.json() as { ok?: boolean; error?: string };
-      if (!response.ok || !payload.ok) {
-        throw new Error(payload.error || "Could not apply the thumbnail");
-      }
-      setActionMessage(`YouTube update queued for “${row.title}”. The exact account and candidate will be rechecked.`);
-      setReplacementRunId(null);
-      setReplacementConfirmation("");
-      await loadInventory();
-    } catch (replacementError) {
-      setActionMessage(replacementError instanceof Error
-        ? replacementError.message
-        : "Could not apply the thumbnail");
     } finally {
       setBusyRunIds((current) => {
         const next = new Set(current);
@@ -416,7 +375,7 @@ export function ThumbnailRefreshInventoryPanel({
         <div>
           <p className={styles.eyebrow}>Saved uploads</p>
           <h2 id="thumbnail-review-title">Packaging queue</h2>
-          <p>Private Nano Banana Pro candidates only. Originals stay untouched until you confirm an exact YouTube update.</p>
+          <p>Production-QA candidates appear here immediately and sync to their exact connected YouTube video automatically.</p>
         </div>
         <div className={styles.counts} aria-label="Thumbnail evidence totals">
           <span data-tone="review"><small>Needs review</small><strong>{inventory === null ? "—" : reviewCount}</strong></span>
@@ -425,7 +384,7 @@ export function ThumbnailRefreshInventoryPanel({
         </div>
       </header>
 
-      {lofiFrameCandidates.length ? (
+      {canManage && lofiFrameCandidates.length ? (
         <div className={styles.lofiFrameBatch}>
           <div>
             <span className={styles.lofiFrameMark} aria-hidden="true">4K</span>
@@ -504,7 +463,7 @@ export function ThumbnailRefreshInventoryPanel({
                   </div>
                 </div>
                 <div className={styles.actions}>
-                  {row.legacyCleanupAction !== "retire" && row.refreshAction === "owner_review_required" && row.thumbnailReplayStatus !== "private_successor_unavailable" && !row.candidate ? (
+                  {canManage && row.legacyCleanupAction !== "retire" && row.refreshAction === "owner_review_required" && row.thumbnailReplayStatus !== "private_successor_unavailable" && !row.candidate ? (
                     <button
                       type="button"
                       className={styles.generateAction}
@@ -520,7 +479,7 @@ export function ThumbnailRefreshInventoryPanel({
                             : "Render Nano candidate"} · ≤$${THUMBNAIL_REFRESH_MAXIMUM_COST_USD.toFixed(2)}`}
                     </button>
                   ) : null}
-                  {dispatchCanResume ? (
+                  {canManage && dispatchCanResume ? (
                     <button
                       type="button"
                       className={styles.generateAction}
@@ -538,51 +497,26 @@ export function ThumbnailRefreshInventoryPanel({
                     </span>
                   ) : null}
                   {row.candidate?.status === "ok" ? (
-                    <span className={styles.candidateReady}>Candidate ready for comparison</span>
+                    <span className={styles.candidateReady}>New Library thumbnail active</span>
                   ) : null}
                   {row.replacement?.status === "applied" && row.replacement.verified ? (
                     <span className={styles.replacementDone}>Live on YouTube · receipt verified</span>
                   ) : null}
-                  {row.replacement && ["pending", "queued"].includes(row.replacement.status ?? "") ? (
+                  {row.replacement && ["awaiting_approval", "pending", "queued"].includes(row.replacement.status ?? "") ? (
                     <span className={styles.candidateProgress} role="status">
-                      <i aria-hidden="true" />Account check + YouTube update
+                      <i aria-hidden="true" />Applying to the bound YouTube video
                     </span>
+                  ) : null}
+                  {row.candidate?.status === "ok" && row.youtubeVideoId && !row.replacement ? (
+                    <span className={styles.candidateProgress} role="status">
+                      <i aria-hidden="true" />Automatic YouTube sync queued
+                    </span>
+                  ) : null}
+                  {row.candidate?.status === "ok" && !row.youtubeVideoId ? (
+                    <span className={styles.replacementDone}>Active in Library</span>
                   ) : null}
                   {row.replacement?.status === "blocked" ? (
                     <span className={styles.candidateFailed}>{row.replacement.error ?? "YouTube update blocked"}</span>
-                  ) : null}
-                  {row.candidate?.status === "ok" && row.youtubeVideoId && !row.replacement && replacementRunId !== row.runId ? (
-                    <button
-                      type="button"
-                      className={styles.acceptAction}
-                      onClick={() => {
-                        setReplacementRunId(row.runId);
-                        setReplacementConfirmation("");
-                      }}
-                    >Use on YouTube</button>
-                  ) : null}
-                  {row.candidate?.status === "ok" && row.youtubeVideoId && !row.replacement && replacementRunId === row.runId ? (
-                    <div className={styles.acceptConfirm}>
-                      <label htmlFor={`accept-${row.runId}`}>Confirm video <code>{row.youtubeVideoId}</code></label>
-                      <input
-                        id={`accept-${row.runId}`}
-                        value={replacementConfirmation}
-                        onChange={(event) => setReplacementConfirmation(event.target.value.trim())}
-                        autoComplete="off"
-                      />
-                      <button
-                        type="button"
-                        disabled={replacementConfirmation !== row.youtubeVideoId || busyRunIds.has(row.runId)}
-                        onClick={() => void applyCandidate(row)}
-                      >Apply thumbnail</button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setReplacementRunId(null);
-                          setReplacementConfirmation("");
-                        }}
-                      >Cancel</button>
-                    </div>
                   ) : null}
                   {row.candidate?.status === "failed" ? (
                     <span className={styles.candidateFailed}>Candidate stopped — inspect evidence</span>
@@ -601,7 +535,7 @@ export function ThumbnailRefreshInventoryPanel({
                   {row.legacyCleanupAction === "retire" && row.retirement?.status === "blocked" ? (
                     <span className={styles.candidateFailed}>{row.retirement.error ?? "Removal blocked"}</span>
                   ) : null}
-                  {row.legacyCleanupAction === "retire" && !row.retirement && retirementRunId !== row.runId ? (
+                  {canManage && row.legacyCleanupAction === "retire" && !row.retirement && retirementRunId !== row.runId ? (
                     <button
                       type="button"
                       className={styles.retireAction}
@@ -611,7 +545,7 @@ export function ThumbnailRefreshInventoryPanel({
                       }}
                     >Review permanent removal</button>
                   ) : null}
-                  {row.legacyCleanupAction === "retire" && !row.retirement && retirementRunId === row.runId && row.youtubeVideoId ? (
+                  {canManage && row.legacyCleanupAction === "retire" && !row.retirement && retirementRunId === row.runId && row.youtubeVideoId ? (
                     <div className={styles.retireConfirm}>
                       <label htmlFor={`retire-${row.runId}`}>Type <code>{row.youtubeVideoId}</code></label>
                       <input

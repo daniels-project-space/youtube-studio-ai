@@ -5,6 +5,7 @@ import {
   createErnieNovitaThumbnailCurrentCandidateEvidence,
   createLofiThumbnailCurrentCandidateEvidence,
   createThumbnailCurrentCandidateEvidence,
+  selectLatestCurrentGoldenThumbnail,
 } from "@/lib/thumbnailRefreshInventory";
 
 const ownerId = "owner-alice";
@@ -34,7 +35,7 @@ assert.deepEqual(
   {
     status: "current_golden_candidate",
     action: "no_refresh_action",
-    reason: "Current Golden generator provenance is recorded. This is still not an owner acceptance or an external thumbnail replacement.",
+    reason: "Current Golden generator provenance is recorded and eligible for automatic presentation and bound YouTube sync.",
   },
   "only an exact owner/run/key-bound current marker is recognised as a current candidate",
 );
@@ -98,6 +99,71 @@ assert.throws(
   }),
   /SHA-256 receipts/,
   "current provenance cannot be minted without byte and provider receipts",
+);
+
+const olderKey = r2Key.replace("thumbnail.jpg", "older-thumbnail.jpg");
+const olderEvidence = createThumbnailCurrentCandidateEvidence({
+  ownerId,
+  channelId,
+  runId: "candidate-older",
+  r2Key: olderKey,
+  artifactSha256: "6".repeat(64),
+  providerRequestSha256: "7".repeat(64),
+  providerResponseSha256: "8".repeat(64),
+});
+assert.equal(
+  selectLatestCurrentGoldenThumbnail({
+    ownerId,
+    channelId,
+    candidates: [
+      {
+        status: "ok",
+        finishedAt: 100,
+        thumbnail: {
+          ownerId,
+          channelId,
+          runId: "candidate-older",
+          kind: "thumbnail",
+          r2Key: olderKey,
+          meta: { thumbnailCurrentCandidateEvidence: olderEvidence },
+        },
+      },
+      {
+        status: "ok",
+        finishedAt: 200,
+        thumbnail: {
+          ownerId,
+          channelId,
+          runId,
+          kind: "thumbnail",
+          r2Key,
+          meta: { thumbnailCurrentCandidateEvidence: evidence },
+        },
+      },
+    ],
+  })?.r2Key,
+  r2Key,
+  "the newest completed exact-evidence candidate becomes the Library presentation",
+);
+assert.equal(
+  selectLatestCurrentGoldenThumbnail({
+    ownerId,
+    channelId,
+    candidates: [{
+      status: "ok",
+      finishedAt: 300,
+      thumbnail: {
+        ownerId,
+        channelId,
+        runId: "wrong-run",
+        kind: "thumbnail",
+        r2Key,
+        meta: { thumbnailCurrentCandidateEvidence: evidence },
+      },
+    }],
+  }),
+  null,
+  "a newer candidate with copied or mismatched evidence never replaces the Library image",
 );
 
 const lofiEvidence = createLofiThumbnailCurrentCandidateEvidence({

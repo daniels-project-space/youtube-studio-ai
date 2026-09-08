@@ -10,8 +10,10 @@ const rail = read("src/components/ArtifactWorkRail.tsx");
 const preview = read("src/components/MediaPreview.tsx");
 
 assert.match(videos, /selectLofiLibraryThumbnail/, "Library rows select a verified Lo-Fi rendered-frame thumbnail");
-assert.match(videos, /thumbnailPresentation = exactFrame \? "lofi_rendered_frame" : "lofi_frame_pending"/,
+assert.match(videos, /exactFrame[\s\S]*presentation: "lofi_rendered_frame"[\s\S]*presentation: "lofi_frame_pending"/,
   "a generic legacy thumbnail is never passed through as a valid Lo-Fi frame");
+assert.match(videos, /selectLatestCurrentGoldenThumbnail/,
+  "non-Lo-Fi cards also project the newest completed evidence-bound candidate");
 for (const source of [card, rail]) {
   assert.match(source, /videoStillKey=\{video\.thumbnailPresentation === "lofi_frame_pending" \? video\.videoKey : undefined\}/,
     "pending Lo-Fi rows use their retained master as the visual fallback");

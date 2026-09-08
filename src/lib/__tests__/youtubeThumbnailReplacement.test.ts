@@ -13,6 +13,7 @@ import {
   studioActionApprovalFingerprint,
   verifyStudioActionApproval,
 } from "@/lib/studioActionApproval";
+import { AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX } from "@/lib/studioActionApprovalContract";
 
 process.env.STUDIO_CONVEX_JWT_PRIVATE_KEY = "thumbnail-replacement-test-key";
 
@@ -63,6 +64,32 @@ assert.equal(verifyStudioActionApproval(approval, {
   subject,
   now: 1_100,
 }), true);
+const automaticApproval = issueStudioActionApproval({
+  action: "youtube-thumbnail-replacement",
+  ownerId: identity.ownerId,
+  subject,
+  actor: `${AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX}${identity.ownerId}`,
+  evidence: "production-QA candidate admitted by automatic thumbnail policy",
+  now: 1_000,
+});
+assert.equal(verifyStudioActionApproval(automaticApproval, {
+  action: "youtube-thumbnail-replacement",
+  ownerId: identity.ownerId,
+  subject,
+  now: 1_100,
+}), true, "the narrow automatic policy can authorize only a bound thumbnail replacement");
+assert.throws(
+  () => issueStudioActionApproval({
+    action: "youtube-video-retire",
+    ownerId: identity.ownerId,
+    subject: "retire:forbidden",
+    actor: `${AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX}${identity.ownerId}`,
+    evidence: "must never widen into deletion",
+    now: 1_000,
+  }),
+  /actor is not allowed/,
+  "the automatic thumbnail actor must never authorize a destructive or unrelated action",
+);
 assert.throws(
   () => assertYoutubeThumbnailReplacementDispatch({
     ...dispatch,

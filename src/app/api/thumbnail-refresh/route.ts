@@ -5,7 +5,7 @@ import {
   ERNIE_THUMBNAIL_REFRESH_BATCH_OWNER_ID,
   assertPinnedErnieThumbnailRefreshBatch,
 } from "@/lib/ernieThumbnailRefreshBatch";
-import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
+import { getStudioActor, requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { getObjectBytes, presignDownload } from "@/lib/storage";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { listThumbnailRefreshInventory } from "@/lib/thumbnailRefreshRuntime";
@@ -64,18 +64,19 @@ async function reviewedErnieBatchPreview(input: {
  */
 export async function GET(request: Request) {
   try {
-    const actor = await requireStudioActor(request);
+    const actor = await getStudioActor(request);
+    const ownerId = actor?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel";
     const inventory = await listThumbnailRefreshInventory({
       client: convexClient(),
-      ownerId: actor.ownerId,
+      ownerId,
     });
     const searchParams = new URL(request.url).searchParams;
     const previewRunId = searchParams.get("previewRunId");
     const candidatePreviewRunId = searchParams.get("candidatePreviewRunId");
     if (previewRunId !== null || candidatePreviewRunId !== null) {
-      // The browser may ask only for the opaque run identity it already owns.
-      // Resolve the R2 key server-side from the owner-scoped inventory; never
-      // let a client supply or receive a storage locator.
+      // The browser may ask only for an opaque run identity present in this
+      // owner-scoped inventory. Resolve the R2 key server-side; never let a
+      // client supply or receive a storage locator.
       const requestedRunId = previewRunId ?? candidatePreviewRunId!;
       if (!/^[A-Za-z0-9_-]{8,256}$/.test(requestedRunId)) {
         return NextResponse.json({ ok: false, error: "invalid thumbnail preview request" }, { status: 400 });
@@ -97,8 +98,11 @@ export async function GET(request: Request) {
         { headers: { "Cache-Control": "private, no-store" } },
       );
     }
+    if (searchParams.get("ernieBatch") === "reviewed" && !actor) {
+      throw new StudioAuthError("authentication required");
+    }
     const ernieBatch = searchParams.get("ernieBatch") === "reviewed"
-      ? await reviewedErnieBatchPreview({ ownerId: actor.ownerId, inventory })
+      ? await reviewedErnieBatchPreview({ ownerId, inventory })
       : null;
     return NextResponse.json(
       {
@@ -184,8 +188,9 @@ function candidateRequestBody(value: unknown): { sourceRunId: string; confirmed:
 
 /**
  * Create one separate, production-QA thumbnail candidate. The source run and
- * current YouTube image are never changed here; external replacement remains
- * a later explicit acceptance action.
+ * current YouTube image are never changed here. A successful production-QA
+ * candidate becomes the Library presentation and enters the server-side,
+ * identity-bound YouTube replacement policy automatically.
  */
 export async function POST(request: Request) {
   try {

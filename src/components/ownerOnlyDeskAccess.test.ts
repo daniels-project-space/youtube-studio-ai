@@ -29,8 +29,10 @@ assert.match(
 const library = read("../app/(app)/library/page.tsx");
 assert.match(
   library,
-  /operationsAccess === "owner"[\s\S]*<ThumbnailRefreshInventoryPanel/,
+  /<ThumbnailRefreshInventoryPanel[\s\S]*canManage=\{operationsAccess === "owner"\}/,
 );
+assert.doesNotMatch(library, /<OwnerOnlyNotice/,
+  "thumbnail evidence and automatic sync status stay visible without an owner-login wall");
 
 const novitaDesk = read("../app/(app)/novita-render/page.tsx");
 assert.match(novitaDesk, /const operationsAccess = useOperationsAccess\(\)/);

@@ -3,6 +3,7 @@ import type {
   StudioAction,
   StudioActionApprovalReceipt,
 } from "@/lib/studioActionApprovalContract";
+import { studioActionActorIsAllowed } from "@/lib/studioActionApprovalContract";
 import {
   STUDIO_ACTION_APPROVAL_MAX_CLOCK_SKEW_MS,
   STUDIO_ACTION_APPROVAL_MAX_TTL_MS,
@@ -50,8 +51,8 @@ export function issueStudioActionApproval(args: {
   const now = args.now ?? Date.now();
   const ttlMs = args.ttlMs ?? DEFAULT_RECEIPT_TTL_MS;
   if (!args.ownerId.trim() || !args.subject.trim()) throw new Error("approval owner and subject are required");
-  if (!args.actor.startsWith("authenticated-operator:")) {
-    throw new Error("action approval requires an authenticated operator actor");
+  if (!studioActionActorIsAllowed(args.action, args.actor)) {
+    throw new Error("action approval actor is not allowed for this action");
   }
   if (!args.evidence.trim()) throw new Error("action approval evidence is required");
   if (!Number.isFinite(ttlMs) || ttlMs < 1_000 || ttlMs > STUDIO_ACTION_APPROVAL_MAX_TTL_MS) {
@@ -100,7 +101,8 @@ export function verifyStudioActionApproval(
       receipt.action !== expected.action ||
       receipt.ownerId !== expected.ownerId ||
       receipt.subject !== expected.subject ||
-      !receipt.actor?.startsWith("authenticated-operator:") ||
+      typeof receipt.actor !== "string" ||
+      !studioActionActorIsAllowed(expected.action, receipt.actor) ||
       !receipt.evidence?.trim() ||
       typeof receipt.issuedAt !== "number" ||
       typeof receipt.expiresAt !== "number" ||

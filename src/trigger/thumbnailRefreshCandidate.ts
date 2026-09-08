@@ -22,6 +22,7 @@ import {
   type StudioActionApprovalReceipt,
 } from "@/lib/studioActionApproval";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
+import { queueAutomaticThumbnailReplacement } from "./automaticThumbnailReplacementCore";
 
 const DISPATCH_LIMIT = 10;
 const thumbnailRefreshApi = (api as unknown as {
@@ -54,7 +55,7 @@ type CandidateExecution = Readonly<{
     thumbnailRefreshSourceRunId?: Id<"runs">;
     thumbnailRefreshReplayFingerprint?: string;
   };
-  source: { _id: Id<"runs"> };
+  source: { _id: Id<"runs">; youtubeVideoId?: string };
   channelSlug: string;
   material: ThumbnailRefreshReplayMaterial;
 }>;
@@ -201,6 +202,27 @@ export async function executeThumbnailRefreshCandidate(
       costTotal: observedCost,
       ...executionLease,
     });
+    if (execution.source.youtubeVideoId) {
+      try {
+        await queueAutomaticThumbnailReplacement({
+          ownerId: payload.ownerId,
+          convex,
+          candidate: {
+            sourceRunId: execution.source._id,
+            candidateRunId: execution.candidate._id,
+            youtubeVideoId: execution.source.youtubeVideoId,
+          },
+        });
+      } catch (error) {
+        // Candidate completion is durable and immediately visible in the
+        // Library. The minute recovery dispatcher resumes the same exact
+        // replacement identity if the downstream handoff is unavailable.
+        console.error("[thumbnail-refresh-candidate] automatic YouTube handoff deferred", {
+          candidateRunId: payload.candidateRunId,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
     return { ok: true, candidateRunId: payload.candidateRunId, costTotal: observedCost };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);

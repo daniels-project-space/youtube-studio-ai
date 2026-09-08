@@ -9,6 +9,7 @@ import {
   studioActionApprovalFingerprintForConvex,
   verifyStudioActionApprovalForConvex,
 } from "../studioActionApprovalConvex";
+import { AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX } from "../studioActionApprovalContract";
 
 async function main(): Promise<void> {
   const priorSecret = process.env.STUDIO_CONVEX_JWT_PRIVATE_KEY;
@@ -45,6 +46,27 @@ async function main(): Promise<void> {
     now: now + 61_000,
     persistedReceiptFingerprint: studioActionApprovalFingerprint(receipt),
   }), true, "only the exact previously frozen receipt may resume after expiry");
+  const automaticReceipt = issueStudioActionApproval({
+    action: "youtube-thumbnail-replacement",
+    ownerId: "owner_daniel",
+    subject: "youtube-thumbnail-replacement:test",
+    actor: `${AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX}owner_daniel`,
+    evidence: "production-QA candidate admitted automatically",
+    now,
+    ttlMs: 60_000,
+  });
+  assert.equal(await verifyStudioActionApprovalForConvex(automaticReceipt, {
+    action: "youtube-thumbnail-replacement",
+    ownerId: "owner_daniel",
+    subject: "youtube-thumbnail-replacement:test",
+    now: now + 30_000,
+  }), true, "Convex accepts the narrow automatic thumbnail policy receipt");
+  assert.equal(await verifyStudioActionApprovalForConvex(automaticReceipt, {
+    action: "youtube-video-retire",
+    ownerId: "owner_daniel",
+    subject: "youtube-thumbnail-replacement:test",
+    now: now + 30_000,
+  }), false, "the automatic thumbnail policy cannot widen into deletion");
   } finally {
     if (priorSecret === undefined) delete process.env.STUDIO_CONVEX_JWT_PRIVATE_KEY;
     else process.env.STUDIO_CONVEX_JWT_PRIVATE_KEY = priorSecret;
