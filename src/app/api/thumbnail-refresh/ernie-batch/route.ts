@@ -48,7 +48,7 @@ export async function POST(request: Request) {
     });
     const approvalFingerprint = studioActionApprovalFingerprint(approval);
     const idempotencyKey = await idempotencyKeys.create(
-      `ernie-thumbnail-batch-apply:${ownerId}:${batchFingerprint}`,
+      `ernie-thumbnail-batch-apply:${ownerId}:${batchFingerprint}:automatic-policy-v2`,
       { scope: "global" },
     );
     const handle = await tasks.trigger("ernie-thumbnail-batch-apply", {

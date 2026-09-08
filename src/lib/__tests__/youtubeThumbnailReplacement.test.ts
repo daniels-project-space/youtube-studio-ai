@@ -13,7 +13,10 @@ import {
   studioActionApprovalFingerprint,
   verifyStudioActionApproval,
 } from "@/lib/studioActionApproval";
-import { AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX } from "@/lib/studioActionApprovalContract";
+import {
+  AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX,
+  automaticThumbnailPolicyClaimIsValid,
+} from "@/lib/studioActionApprovalContract";
 
 process.env.STUDIO_CONVEX_JWT_PRIVATE_KEY = "thumbnail-replacement-test-key";
 
@@ -90,14 +93,32 @@ assert.throws(
   /actor is not allowed/,
   "the automatic thumbnail actor must never authorize a destructive or unrelated action",
 );
-assert.doesNotThrow(() => issueStudioActionApproval({
+const automaticImportApproval = issueStudioActionApproval({
   action: "thumbnail-ernie-batch-import",
   ownerId: identity.ownerId,
   subject: "thumbnail-ernie-batch-import:pinned",
   actor: `${AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX}${identity.ownerId}`,
   evidence: "immutable reviewed batch candidate",
   now: 1_000,
-}), "the same narrow policy may admit a pinned reviewed thumbnail artifact");
+  maxCostUsd: 0.4,
+});
+assert.equal(automaticThumbnailPolicyClaimIsValid(automaticImportApproval, {
+  action: "thumbnail-ernie-batch-import",
+  ownerId: identity.ownerId,
+  subject: "thumbnail-ernie-batch-import:pinned",
+  now: 1_100,
+  maximumCostUsd: 0.4,
+}), true, "a service-only boundary may admit the exact automatic thumbnail policy claim");
+assert.equal(automaticThumbnailPolicyClaimIsValid({
+  ...automaticImportApproval,
+  subject: "thumbnail-ernie-batch-import:other",
+}, {
+  action: "thumbnail-ernie-batch-import",
+  ownerId: identity.ownerId,
+  subject: "thumbnail-ernie-batch-import:pinned",
+  now: 1_100,
+  maximumCostUsd: 0.4,
+}), false, "an automatic policy claim cannot be moved to another artifact subject");
 assert.throws(
   () => assertYoutubeThumbnailReplacementDispatch({
     ...dispatch,

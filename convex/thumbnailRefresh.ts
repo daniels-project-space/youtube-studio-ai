@@ -18,6 +18,7 @@ import {
   thumbnailRefreshDispatchKey,
 } from "../src/lib/thumbnailRefreshCandidate";
 import type { StudioActionApprovalReceipt } from "../src/lib/studioActionApprovalContract";
+import { automaticThumbnailPolicyClaimIsValid } from "../src/lib/studioActionApprovalContract";
 import {
   studioActionApprovalFingerprintForConvex,
   verifyStudioActionApprovalForConvex,
@@ -596,12 +597,21 @@ export const importErnieBatchCandidate = mutation({
     });
     if (
       await studioActionApprovalFingerprintForConvex(approval) !== args.approvalFingerprint ||
-      !(await verifyStudioActionApprovalForConvex(approval, {
-        action: "thumbnail-ernie-batch-import",
-        ownerId: args.ownerId,
-        subject,
-        persistedReceiptFingerprint: args.approvalFingerprint,
-      }))
+      !(
+        await verifyStudioActionApprovalForConvex(approval, {
+          action: "thumbnail-ernie-batch-import",
+          ownerId: args.ownerId,
+          subject,
+          persistedReceiptFingerprint: args.approvalFingerprint,
+        }) ||
+        automaticThumbnailPolicyClaimIsValid(approval, {
+          action: "thumbnail-ernie-batch-import",
+          ownerId: args.ownerId,
+          subject,
+          now: args.now,
+          maximumCostUsd: THUMBNAIL_REFRESH_MAXIMUM_COST_USD,
+        })
+      )
     ) throw new Error("ERNIE thumbnail batch import owner approval is invalid or changed");
     const existing = (await ctx.db
       .query("assets")

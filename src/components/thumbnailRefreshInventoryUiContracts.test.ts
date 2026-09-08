@@ -71,6 +71,7 @@ assert.match(ernieBatchTask, /assertPinnedErnieThumbnailRefreshBatch/);
 assert.match(ernieBatchTask, /assertNativePng/);
 assert.match(ernieBatchTask, /youtubeThumbnailReplacementTriggerRequest/);
 assert.match(ernieBatchTask, /candidateArtifactSha256 !== item\.artifactSha256/);
+assert.match(read("convex/thumbnailRefresh.ts"), /automaticThumbnailPolicyClaimIsValid[\s\S]*maximumCostUsd: THUMBNAIL_REFRESH_MAXIMUM_COST_USD/);
 assert.match(library, /ThumbnailRefreshInventoryPanel[\s\S]*selectedChannelSlug=\{selectedSlug\}[\s\S]*canManage=\{operationsAccess === "owner"\}/);
 assert.doesNotMatch(library, /<OwnerOnlyNotice/);
 assert.match(library, /id="thumbnail-refresh"[\s\S]*open/);
