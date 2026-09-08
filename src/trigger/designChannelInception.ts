@@ -158,6 +158,11 @@ import {
   type ChannelProgramBrief,
 } from "@/engine/channelProgramBrief";
 import {
+  assertChannelPipelinePreviewSnapshot,
+  channelPipelinePreviewFromCompiledDesign,
+  type ChannelPipelinePreviewSnapshot,
+} from "@/engine/channelPipelinePreview.server";
+import {
   assertChannelProgramRouteBinding,
   channelProgramRouteFingerprint,
   channelProgramRouteRunSeed,
@@ -249,6 +254,8 @@ export interface DesignChannelArgs extends Omit<DesignOptions, "family" | "progr
   youtubeCreationApproval?: StudioActionApprovalReceipt;
   exampleClipUrl?: string;
   moduleConfig?: Record<string, Record<string, unknown>>;
+  /** Operator-reviewed compiler snapshot; recompiled before any new channel write. */
+  pipelinePreviewSnapshot?: ChannelPipelinePreviewSnapshot;
   /**
    * A narrowly-scoped, zero-spend shell for the reviewed Data Story desk.
    * It is never an automatic channel-creation or publication authority.
@@ -1774,6 +1781,13 @@ export async function executeDesignChannel(
     ? asIdentity(existingAtStart.identity)
     : undefined;
   const isRouteLessLegacyRetry = isRouteLessLegacyChannelIdentity(existingIdentityAtStart);
+  if (
+    !reviewedDataStoryIntake &&
+    !isRouteLessLegacyRetry &&
+    payload.pipelinePreviewSnapshot === undefined
+  ) {
+    throw new Error("channel pipeline preview snapshot is required before automatic channel inception");
+  }
   const programRouteForCompile = isRouteLessLegacyRetry ? undefined : resolvedProgramRoute;
   const payloadSuppliesSeries = payload.seriesTitle !== undefined || payload.seriesCount !== undefined;
   if (payloadSuppliesSeries && !isRouteLessLegacyRetry) {
@@ -1847,6 +1861,16 @@ export async function executeDesignChannel(
     throw new Error("new channel admission did not seal its resolved program route into the show profile");
   }
   const designPipelineFingerprint = channelInceptionContentSha256(design.pipeline);
+  if (!reviewedDataStoryIntake && !isRouteLessLegacyRetry) {
+    assertChannelPipelinePreviewSnapshot(
+      payload.pipelinePreviewSnapshot,
+      channelPipelinePreviewFromCompiledDesign({
+        programBrief,
+        programRoute: programRouteForCompile!,
+        design,
+      }),
+    );
+  }
   // Preserve the exact design resolution: an omitted operator duration may
   // intentionally use a valid niche preset rather than the generic family default.
   const lengthSeconds = design.episodeLengthSeconds;

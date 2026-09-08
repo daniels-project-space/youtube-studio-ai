@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import { createChannelProgramBrief, type ChannelProgramBrief } from "@/engine/channelProgramBrief";
+import { compileChannelPipelinePreview } from "@/engine/channelPipelinePreview.server";
 import { channelBuildIntentFingerprint } from "@/lib/channelBuildRequestKey";
 import { POST } from "./route";
 
@@ -171,6 +172,60 @@ async function main() {
     }));
     assert.equal(stale.status, 400);
     assert.match((await stale.json() as { error: string }).error, /noncanonical|catalogFingerprint/);
+
+    const automaticBrief = createChannelProgramBrief({
+      family: "quizyear",
+      nicheKey: "educational",
+      locale: "en",
+      concept: "A deterministic adult geography quiz with sourced facts and a timed reveal.",
+      programIntent: { kind: "certified_quiz", profile: "world_geography" },
+    });
+    const automaticDesign = designFor(automaticBrief);
+    const missingPreview = await POST(request({
+      requestKey: requestKey(automaticDesign),
+      design: automaticDesign,
+    }));
+    assert.equal(missingPreview.status, 409);
+    assert.match(
+      (await missingPreview.json() as { error: string }).error,
+      /preview snapshot is missing or invalid/,
+      "an automatic build cannot dispatch without the exact route the operator reviewed",
+    );
+
+    const currentPreview = compileChannelPipelinePreview({ programBrief: automaticBrief });
+    const stalePreviewDesign = {
+      ...automaticDesign,
+      pipelinePreviewSnapshot: {
+        ...currentPreview,
+        pipelineFingerprint: "0".repeat(64),
+      },
+    };
+    const stalePreview = await POST(request({
+      requestKey: requestKey(stalePreviewDesign),
+      design: stalePreviewDesign,
+    }));
+    assert.equal(stalePreview.status, 409);
+    assert.match(
+      (await stalePreview.json() as { error: string }).error,
+      /preview is stale/,
+      "a catalog or compiler change must force a fresh visible review before dispatch",
+    );
+
+    const exactPreviewDesign = {
+      ...automaticDesign,
+      pipelinePreviewSnapshot: currentPreview,
+      budget: 0,
+    };
+    const exactPreview = await POST(request({
+      requestKey: requestKey(exactPreviewDesign),
+      design: exactPreviewDesign,
+    }));
+    assert.equal(exactPreview.status, 400);
+    assert.match(
+      (await exactPreview.json() as { error: string }).error,
+      /per-video budget must be at least/,
+      "an exact preview must clear the binding gate and continue to the next independent validation",
+    );
   } finally {
     restoreEnv("STUDIO_INTERNAL_API_TOKEN", originalToken);
     restoreEnv("TRIGGER_SECRET_KEY", originalTriggerKey);

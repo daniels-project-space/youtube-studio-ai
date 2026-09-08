@@ -79,12 +79,22 @@ assert.match(
 const legacyIdentityLookup = coordinator.indexOf("const existingAtStart = await convex.query(api.channels.getChannelBySlug");
 const serializedSeriesGate = coordinator.indexOf("const payloadSuppliesSeries");
 const baselineCompile = coordinator.indexOf("const design = designPipeline(");
+const previewSnapshotGate = coordinator.lastIndexOf("assertChannelPipelinePreviewSnapshot(");
+const firstChannelWrite = coordinator.indexOf("api.channels.createChannel");
 assert(
   legacyIdentityLookup >= 0 &&
     serializedSeriesGate > legacyIdentityLookup &&
-    baselineCompile > serializedSeriesGate,
-  "the executor must inspect a durable identity before deciding whether legacy series fields may reach compilation",
+    baselineCompile > serializedSeriesGate &&
+    previewSnapshotGate > baselineCompile &&
+    firstChannelWrite > previewSnapshotGate,
+  "the executor must inspect durable legacy identity, compile the exact route, and bind the reviewed preview before the first channel write",
 );
+assert.match(newChannelUi, /pipelinePreviewSnapshot:\s*\{/,
+  "the wizard must submit the exact compiler snapshot it displayed");
+assert.match(route, /assertChannelPipelinePreviewSnapshot\(/,
+  "the authenticated build route must reject a stale preview before Trigger dispatch");
+assert.match(coordinator, /channel pipeline preview snapshot is required before automatic channel inception/,
+  "a direct Trigger call must not bypass the operator-reviewed compiler snapshot");
 assert.match(
   coordinator,
   /const programRouteForCompile = isRouteLessLegacyRetry \? undefined : resolvedProgramRoute/,

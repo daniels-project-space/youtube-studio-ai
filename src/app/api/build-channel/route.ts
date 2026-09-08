@@ -51,6 +51,11 @@ import {
 } from "@/engine/creative/creativeCapabilityCatalog";
 import { resolveCertifiedQuizProfile } from "@/engine/certifiedQuizProfile";
 import {
+  assertChannelPipelinePreviewSnapshot,
+  channelPipelinePreviewInputFromDesign,
+  compileChannelPipelinePreview,
+} from "@/engine/channelPipelinePreview.server";
+import {
   assertReviewedDataStoryChannelIntake,
   isReviewedDataStoryChannelIntakeMode,
   REVIEWED_DATA_STORY_CHANNEL_INTAKE_MODE,
@@ -520,6 +525,26 @@ export async function POST(request: Request) {
         programRoute,
       });
       design = { ...design, programRoute, creatorIntentDiagnosis };
+      if (!reviewedDataStoryIntake) {
+        try {
+          const currentPipelinePreview = compileChannelPipelinePreview(
+            channelPipelinePreviewInputFromDesign(design),
+          );
+          assertChannelPipelinePreviewSnapshot(
+            design.pipelinePreviewSnapshot,
+            currentPipelinePreview,
+          );
+          // Dispatch only the server-recompiled snapshot. The browser copy is
+          // an operator acknowledgment, not execution authority.
+          design = { ...design, pipelinePreviewSnapshot: currentPipelinePreview };
+        } catch (error) {
+          return NextResponse.json({
+            error: error instanceof Error
+              ? error.message
+              : "channel pipeline preview could not be bound to this build",
+          }, { status: 409 });
+        }
+      }
       // This authenticated route is the only place the wizard's explicit
       // confirmations become their separate external-action authorities.
       const approvedForSetupSpend = design.approveSetupSpend === true;

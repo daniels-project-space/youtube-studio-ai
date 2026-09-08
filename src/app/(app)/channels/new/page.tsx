@@ -139,8 +139,12 @@ interface PipelinePreviewState {
   status: "idle" | "loading" | "ready" | "error";
   blocks: string[];
   requestJson?: string;
+  family?: string;
   routeKey?: string;
+  routeFingerprint?: string;
   pipelineFingerprint?: string;
+  episodeLengthSeconds?: number;
+  contentLane?: string;
   error?: string;
 }
 
@@ -534,6 +538,17 @@ export default function NewChannelWizard() {
   const programBrief = programBriefResolution.brief;
   const pipelinePreviewRequestJson = useMemo(() => {
     if (!programBrief || !fam || supervisedAdmission) return null;
+    let documentaryEvidence: { sourceReferences: unknown; claimEvidence: unknown } | undefined;
+    if (family === "documentary_collage_short") {
+      try {
+        documentaryEvidence = {
+          sourceReferences: JSON.parse(sourceReferencesJson),
+          claimEvidence: JSON.parse(claimEvidenceJson),
+        };
+      } catch {
+        return null;
+      }
+    }
     return JSON.stringify({
       programBrief,
       ...(duration?.inputUnit !== "fixed" ? { lengthMinutes } : {}),
@@ -543,10 +558,12 @@ export default function NewChannelWizard() {
       approvedForPublish,
       toggles,
       ...(Object.keys(paramOverrides).length ? { paramOverrides } : {}),
+      ...documentaryEvidence,
       ...(selectedCapabilitySelections.length ? { capabilitySelections: selectedCapabilitySelections } : {}),
     });
   }, [
     approvedForPublish,
+    claimEvidenceJson,
     duration?.inputUnit,
     fam,
     family,
@@ -556,6 +573,7 @@ export default function NewChannelWizard() {
     programBrief,
     publishMode,
     selectedCapabilitySelections,
+    sourceReferencesJson,
     supervisedAdmission,
     toggles,
     voiceFx,
@@ -654,9 +672,13 @@ export default function NewChannelWizard() {
       }).then(async (response) => {
         const payload = await response.json().catch(() => ({})) as {
           version?: unknown;
+          family?: unknown;
           blocks?: unknown;
           routeKey?: unknown;
+          routeFingerprint?: unknown;
           pipelineFingerprint?: unknown;
+          episodeLengthSeconds?: unknown;
+          contentLane?: unknown;
           error?: unknown;
         };
         if (!current) return;
@@ -666,8 +688,12 @@ export default function NewChannelWizard() {
           || !Array.isArray(payload.blocks)
           || payload.blocks.length === 0
           || !payload.blocks.every((block) => typeof block === "string")
+          || typeof payload.family !== "string"
           || typeof payload.routeKey !== "string"
+          || typeof payload.routeFingerprint !== "string"
           || typeof payload.pipelineFingerprint !== "string"
+          || typeof payload.episodeLengthSeconds !== "number"
+          || typeof payload.contentLane !== "string"
         ) {
           setPipelinePreview({
             status: "error",
@@ -683,8 +709,12 @@ export default function NewChannelWizard() {
           status: "ready",
           blocks: payload.blocks,
           requestJson: pipelinePreviewRequestJson,
+          family: payload.family,
           routeKey: payload.routeKey,
+          routeFingerprint: payload.routeFingerprint,
           pipelineFingerprint: payload.pipelineFingerprint,
+          episodeLengthSeconds: payload.episodeLengthSeconds,
+          contentLane: payload.contentLane,
         });
       }).catch(() => {
         if (current && !abort.signal.aborted) {
@@ -946,6 +976,16 @@ export default function NewChannelWizard() {
         concept: programBrief.concept,
         locale: programBrief.locale,
         programBrief,
+        pipelinePreviewSnapshot: {
+          version: "channel-pipeline-preview/v1",
+          family: pipelinePreview.family,
+          routeKey: pipelinePreview.routeKey,
+          routeFingerprint: pipelinePreview.routeFingerprint,
+          pipelineFingerprint: pipelinePreview.pipelineFingerprint,
+          blocks: pipelinePreview.blocks,
+          episodeLengthSeconds: pipelinePreview.episodeLengthSeconds,
+          contentLane: pipelinePreview.contentLane,
+        },
         name: requestedYoutubeName || undefined,
         // Every variable-duration family receives its own authored unit. Fixed
         // engines own their timing and never receive a misleading generic value.
