@@ -1279,6 +1279,7 @@ export default defineSchema({
     meta: v.optional(v.any()),
   })
     .index("by_owner", ["ownerId"])
+    .index("by_owner_kind", ["ownerId", "kind"])
     .index("by_channel", ["channelId"])
     .index("by_channel_kind", ["channelId", "kind"])
     .index("by_run", ["runId"]),

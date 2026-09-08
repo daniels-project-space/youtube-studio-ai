@@ -10,6 +10,7 @@ import {
   isLofiChannel,
   selectLofiLibraryThumbnail,
 } from "../src/lib/lofiLibraryThumbnail";
+import { summarizeLibraryStates } from "../src/lib/librarySummary";
 
 /**
  * Finished-videos library (Tranche 4).
@@ -314,6 +315,40 @@ export const listVideos = query({
     // Newest first (startedAt can drift a hair from _creationTime).
     rows.sort((a, b) => (b.createdAt as number) - (a.createdAt as number));
     return rows;
+  },
+});
+
+/**
+ * Exact collection badges for the Library. This intentionally avoids the
+ * enriched card projection above: counts avoid per-run metadata, certificate,
+ * thumbnail and Lo-Fi candidate joins and return only three numbers, while
+ * listVideos remains bounded for browser payloads.
+ */
+export const librarySummary = query({
+  args: { ownerId: v.string() },
+  handler: async (ctx, args) => {
+    const [runs, videoAssets] = await Promise.all([
+      ctx.db
+        .query("runs")
+        .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+        .collect(),
+      ctx.db
+        .query("assets")
+        .withIndex("by_owner_kind", (q) => q.eq("ownerId", args.ownerId).eq("kind", "video"))
+        .collect(),
+    ]);
+    const videoRunIds = new Set(
+      videoAssets.flatMap((asset) => asset.runId ? [String(asset.runId)] : []),
+    );
+    return summarizeLibraryStates(
+      runs.map((run) => ({
+        id: String(run._id),
+        status: run.status,
+        youtubeVideoId: run.youtubeVideoId,
+        libraryState: run.libraryState,
+      })),
+      videoRunIds,
+    );
   },
 });
 
