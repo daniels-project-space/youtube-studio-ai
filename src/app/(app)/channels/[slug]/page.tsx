@@ -321,6 +321,23 @@ export default function ChannelHubPage({
   }
 
   const id = channel.identity ?? {};
+  const artworkIdentity = channelArtIdentityFromSource({
+    name: channel.name,
+    identity: channel.identity,
+    styleDNA: channel.styleDNA,
+  });
+  const avatarArtFreshness = assessChannelArtFreshness({
+    kind: "avatar",
+    identity: artworkIdentity,
+    assetKey: id.imageKey,
+    provenance: id.artProvenance,
+  });
+  const bannerArtFreshness = assessChannelArtFreshness({
+    kind: "banner",
+    identity: artworkIdentity,
+    assetKey: id.bannerKey,
+    provenance: id.artProvenance,
+  });
   const allRuns = runs ?? [];
   const videoRuns = allRuns.filter((r) => r.youtubeVideoId);
   const okRuns = allRuns.filter((r) => r.status === "ok");
@@ -335,7 +352,7 @@ export default function ChannelHubPage({
     fromTimestamp: viewStartedAt,
   });
   const readinessChecks = [
-    Boolean(id.imageKey && id.niche),
+    Boolean(id.niche && avatarArtFreshness.current && bannerArtFreshness.current),
     Boolean(id.voiceId),
     Boolean(id.thumbnailTemplate),
     Boolean(channel.pipeline?.length),
@@ -406,6 +423,11 @@ export default function ChannelHubPage({
           </div>
           <div className={styles.heroStatus}>
             <StageBadge status={channel.status === "active" ? "ok" : channel.status} />
+            {!bannerArtFreshness.current && (
+              <Link className={styles.artFreshnessLink} href="?tab=identity">
+                Art needs refresh
+              </Link>
+            )}
           </div>
         </div>
       </ChannelBanner>
@@ -545,11 +567,7 @@ export default function ChannelHubPage({
           budget={channel.budget}
           slug={channel.slug}
           locked={channel.locked === true}
-          artworkIdentity={channelArtIdentityFromSource({
-            name: channel.name,
-            identity: channel.identity,
-            styleDNA: channel.styleDNA,
-          })}
+          artworkIdentity={artworkIdentity}
         />
       )}
       {tab === "Settings" && <SettingsTab channel={channel} />}

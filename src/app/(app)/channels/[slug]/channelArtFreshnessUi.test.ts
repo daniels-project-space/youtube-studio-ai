@@ -11,6 +11,10 @@ assert.match(page, /Owner verification is required because this spends money and
 assert.match(page, /requestOwnerAccess\(\)/,
   "the banner action must open owner verification directly instead of dead-ending");
 assert.match(page, /Replace stale banner/);
+assert.match(page, /Art needs refresh/,
+  "a stale banner must be discoverable from the channel header, not only inside Identity");
+assert.match(page, /avatarArtFreshness\.current && bannerArtFreshness\.current/,
+  "config readiness must not call identity complete while either art proof is stale");
 assert.match(page, /Rendering \+ reviewing…/,
   "the progress label must describe both paid generation and the visual gate");
 

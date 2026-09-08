@@ -127,7 +127,9 @@
 
 .heroDecision strong { color: #fff; font-size: 0.72rem; font-weight: 620; }
 .heroDecision span { color: rgba(255,255,255,0.56); font-size: 0.58rem; }
-.heroStatus { align-self: start; }
+.heroStatus { display: grid; align-self: start; justify-items: end; gap: 0.35rem; }
+.artFreshnessLink { padding: 0.28rem 0.48rem; border: 1px solid color-mix(in srgb,var(--color-amber) 46%,transparent); border-radius: 999px; color: var(--color-amber); background: rgba(7,10,18,0.72); font: 700 0.52rem/1 var(--font-mono); letter-spacing: 0.04em; text-decoration: none; text-transform: uppercase; backdrop-filter: blur(12px); }
+.artFreshnessLink:hover { border-color: var(--color-amber); color: var(--color-fg); }
 
 .operatingProfile {
   position: relative;
