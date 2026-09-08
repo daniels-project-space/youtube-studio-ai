@@ -68,7 +68,10 @@ for (const id of ["library-search", "library-channel", "library-status", "librar
 assert.match(globalCss, /--color-failed: #fb7185/);
 assert.doesNotMatch(globalCss, /\.channel-live-state-inactive\s*\{\s*opacity:/);
 assert.match(globalCss, /\.channel-live-state small[\s\S]*display: none/);
-assert.match(globalCss, /\.channel-card-grid[\s\S]*min\(100%, 195px\)/);
+// The compact fleet card keeps its deliberate 218px operating width. This is
+// still materially smaller than the old card treatment while leaving room for
+// the two-column queue/published strip and 44px action targets.
+assert.match(globalCss, /\.channel-card-grid[\s\S]*min\(100%, 218px\)/);
 assert.match(globalCss, /\.channel-card-readiness progress/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-card-grid \{[\s\S]*grid-auto-flow: column/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-card-grid \{[\s\S]*scroll-snap-type: x proximity/);

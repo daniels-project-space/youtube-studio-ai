@@ -167,9 +167,10 @@ function dormantQuizShortReleaseIsNotAnActiveCreatorRoute(): void {
   );
   const goldenPage = readFileSync(join(process.cwd(), "src/app/(app)/golden/page.tsx"), "utf8");
   assert.match(goldenPage, /Private-release block ·/);
-  assert.match(goldenPage, /executionIsWarning \? "Not route-executable"/);
+  assert.match(goldenPage, /const availability = catalogExecutionAvailability\(execution\)/);
+  assert.match(goldenPage, /data-state=\{availability\.state\}/);
   assert.match(goldenPage, /availability\.label/);
-  assert.match(goldenPage, /availability\.detail/);
+  assert.match(goldenPage, /title=\{availability\.detail\}/);
 }
 
 function packageOpeningProofIsAVisibleSeparateModule(): void {

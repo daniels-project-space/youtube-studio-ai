@@ -709,7 +709,7 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
             <small>Runtime binding</small>
             <strong>{binding}</strong>
           </div>
-          <div data-state={availability.state}>
+          <div data-state={availability.state} title={availability.detail}>
             <small>Availability</small>
             <strong>{availability.label}</strong>
           </div>
