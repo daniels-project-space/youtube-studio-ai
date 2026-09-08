@@ -64,8 +64,6 @@
 .libraryMetrics [data-tone="attention"] dd { color: var(--color-failed); }
 .libraryMetrics [data-tone="ready"] dd { color: var(--color-ok); }
 
-.latestRail { min-width: 0; }
-
 .packagingWorkshop { overflow: hidden; }
 .packagingWorkshop > summary { min-height: 58px; display: grid; grid-template-columns: auto minmax(150px, auto) minmax(180px, 1fr) auto; align-items: center; gap: .65rem; padding: .6rem .72rem; cursor: pointer; list-style: none; }
 .packagingWorkshop > summary::-webkit-details-marker { display: none; }
@@ -99,6 +97,8 @@
 .changeToast small { overflow: hidden; color: var(--color-faint); font-size: .7rem; text-overflow: ellipsis; white-space: nowrap; }
 .changeToast button { min-height: 30px; padding: .35rem .52rem; border: 1px solid var(--color-border); border-radius: 7px; color: var(--color-muted); background: transparent; cursor: pointer; }
 .changeToast button:hover { color: var(--color-fg); border-color: var(--color-border-strong); }
+.changeToast[data-tone="error"] { border-color: color-mix(in srgb, var(--color-failed) 55%, var(--color-border)); }
+.changeToast[data-tone="error"] strong { color: var(--color-failed); }
 
 @media (max-width: 900px) {
   .libraryDashboard { grid-template-columns: 1fr; }

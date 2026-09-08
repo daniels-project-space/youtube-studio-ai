@@ -12,7 +12,6 @@ import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
 import { VideoGrid } from "@/components/VideoGrid";
 import { Lightbox } from "@/components/Lightbox";
-import { ArtifactWorkRail } from "@/components/ArtifactWorkRail";
 import { ThumbnailRefreshInventoryPanel } from "@/components/ThumbnailRefreshInventoryPanel";
 import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
 import { useOperationsAccess } from "@/components/OperationsAccess";
@@ -56,6 +55,7 @@ export default function LibraryPage() {
   const [collection, setCollection] = useState<CollectionMode>("active");
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
   const [recentChange, setRecentChange] = useState<{ video: VideoRow; state: CollectionMode } | null>(null);
+  const [changeError, setChangeError] = useState<string | null>(null);
   // ERNIE was kept only as sealed comparison evidence. The Library always
   // projects the retained source or a run-bound current candidate; it must
   // never promote a frozen experimental batch as the visible replacement.
@@ -117,6 +117,7 @@ export default function LibraryPage() {
 
   const changeLibraryState = async (video: VideoRow, state: CollectionMode) => {
     if (busyIds.has(video._id)) return;
+    setChangeError(null);
     setBusyIds((current) => new Set(current).add(video._id));
     try {
       await setLibraryState({
@@ -126,6 +127,8 @@ export default function LibraryPage() {
       });
       setRecentChange({ video, state });
       if (lightbox && filtered[lightbox.index]?._id === video._id) setLightbox(null);
+    } catch (error) {
+      setChangeError(error instanceof Error ? error.message : "The Library could not save that change.");
     } finally {
       setBusyIds((current) => {
         const next = new Set(current);
@@ -146,21 +149,29 @@ export default function LibraryPage() {
     setRecentChange(null);
   };
 
+  const selectCollection = (next: CollectionMode) => {
+    setCollection(next);
+    setVisibleLimit(LIBRARY_PAGE_SIZE);
+    setLightbox(null);
+    setRecentChange(null);
+    setChangeError(null);
+  };
+
   return (
     <div className={styles.library}>
       <PageHeader
         eyebrow="Video library"
         title="Library"
-        subtitle="Open, repackage, or archive saved videos."
+        subtitle="Review, archive, and restore saved masters."
       />
 
       <div className={styles.libraryDashboard}>
         <section className={styles.collectionBar} aria-label="Library collections">
           <div className={styles.collectionTabs} role="tablist" aria-label="Video collection">
-            <button type="button" role="tab" aria-selected={collection === "active"} onClick={() => setCollection("active")}>
+            <button type="button" role="tab" aria-selected={collection === "active"} onClick={() => selectCollection("active")}>
               <span>Active masters</span><strong>{loading ? "—" : activeCount}</strong>
             </button>
-            <button type="button" role="tab" aria-selected={collection === "archived"} onClick={() => setCollection("archived")}>
+            <button type="button" role="tab" aria-selected={collection === "archived"} onClick={() => selectCollection("archived")}>
               <span>Archive</span><strong>{loading ? "—" : archivedCount}</strong>
             </button>
           </div>
@@ -176,20 +187,9 @@ export default function LibraryPage() {
         <dl className={styles.libraryMetrics} aria-label="Current library summary">
           <LibraryMetric label="Visible" value={loading ? "—" : String(filtered.length)} />
           <LibraryMetric label="Channels" value={loading ? "—" : String(matchingChannelCount)} />
-          <LibraryMetric label="Review" value={loading ? "—" : String(reviewCount)} tone={reviewCount ? "attention" : "ready"} />
+          <LibraryMetric label="Unverified" value={loading ? "—" : String(reviewCount)} tone={reviewCount ? "attention" : "ready"} />
         </dl>
       </div>
-
-      {collection === "active" ? <div className={styles.latestRail}>
-        <ArtifactWorkRail
-          videos={libraryVideos === undefined ? undefined : filtered}
-          onOpen={openLightbox}
-          title="Recent masters"
-          description="Open saved output."
-          emptyMessage="No saved videos match these filters."
-          maxItems={5}
-        />
-      </div> : null}
 
       {collection === "active" ? (
         <details id="thumbnail-refresh" className={`${styles.packagingWorkshop} glass`}>
@@ -283,6 +283,12 @@ export default function LibraryPage() {
             Undo
           </button>
           <button type="button" aria-label="Dismiss" onClick={() => setRecentChange(null)}>×</button>
+        </aside>
+      ) : null}
+      {changeError ? (
+        <aside className={styles.changeToast} data-tone="error" role="alert">
+          <span><strong>Library change failed</strong><small>{changeError}</small></span>
+          <button type="button" onClick={() => setChangeError(null)}>Dismiss</button>
         </aside>
       ) : null}
     </div>
