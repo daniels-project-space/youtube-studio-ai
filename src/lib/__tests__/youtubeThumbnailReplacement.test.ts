@@ -90,6 +90,14 @@ assert.throws(
   /actor is not allowed/,
   "the automatic thumbnail actor must never authorize a destructive or unrelated action",
 );
+assert.doesNotThrow(() => issueStudioActionApproval({
+  action: "thumbnail-ernie-batch-import",
+  ownerId: identity.ownerId,
+  subject: "thumbnail-ernie-batch-import:pinned",
+  actor: `${AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX}${identity.ownerId}`,
+  evidence: "immutable reviewed batch candidate",
+  now: 1_000,
+}), "the same narrow policy may admit a pinned reviewed thumbnail artifact");
 assert.throws(
   () => assertYoutubeThumbnailReplacementDispatch({
     ...dispatch,

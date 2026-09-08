@@ -23,6 +23,7 @@ import {
   verifyStudioActionApproval,
   type StudioActionApprovalReceipt,
 } from "@/lib/studioActionApproval";
+import { AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX } from "@/lib/studioActionApprovalContract";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { getObjectBytes, putObject } from "@/lib/storage";
 import {
@@ -174,8 +175,8 @@ async function importCandidate(args: {
       providerRequestSha256: item.providerRequestSha256,
       providerResponseSha256: item.providerResponseSha256,
     }),
-    actor: `authenticated-operator:${ownerId}`,
-    evidence: `Owner-confirmed reviewed ERNIE batch ${ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_SHA256}: source ${item.sourceRunId}, native PNG SHA-256 ${item.artifactSha256}.`,
+    actor: `${AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX}${ownerId}`,
+    evidence: `Standing thumbnail policy admitted reviewed ERNIE batch ${ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_SHA256}: source ${item.sourceRunId}, native PNG SHA-256 ${item.artifactSha256}.`,
     maxCostUsd: 0.4,
   });
   await convex.mutation(thumbnailRefreshRuntimeApi.importErnieBatchCandidate, {
@@ -226,8 +227,8 @@ async function queueReplacement(args: {
         planFingerprint: shell.planFingerprint,
         dispatchKey: shell.dispatchKey,
       }),
-      actor: `authenticated-operator:${ownerId}`,
-      evidence: `Owner-confirmed reviewed ERNIE batch ${ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_SHA256}: exact YouTube video ${item.youtubeVideoId}.`,
+      actor: `${AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX}${ownerId}`,
+      evidence: `Standing thumbnail policy admitted reviewed ERNIE batch ${ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_SHA256}: exact YouTube video ${item.youtubeVideoId}.`,
     });
     await convex.mutation(youtubeThumbnailReplacementRuntimeApi.claimApproval, {
       ownerId,
