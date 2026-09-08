@@ -287,14 +287,18 @@ function moduleEvidenceLabel(moduleKey: string): string {
 }
 
 function moduleGlyph(moduleKey: string): string {
-  if (moduleKey.includes("thumbnail") || moduleKey === "visuals") return "◇";
-  if (moduleKey.includes("voice") || moduleKey === "narration") return "∿";
-  if (moduleKey.includes("script") || moduleKey.includes("story")) return "¶";
-  if (moduleKey.includes("music") || moduleKey === "lofi") return "♫";
-  if (moduleKey.includes("render") || moduleKey.includes("video")) return "▶";
-  if (moduleKey.includes("evidence") || moduleKey.includes("verify") || moduleKey.includes("guard")) return "✓";
-  if (moduleKey.includes("asset") || moduleKey.includes("layer")) return "▦";
-  if (moduleKey.includes("plan") || moduleKey.includes("topic")) return "◎";
+  if (/research|evidence|source/.test(moduleKey)) return "⌕";
+  if (/positioning|bible|context/.test(moduleKey)) return "◫";
+  if (/seo|metadata|topic/.test(moduleKey)) return "◎";
+  if (/voice|narration|speech|music|lofi/.test(moduleKey)) return "∿";
+  if (/avatar|banner|thumbnail|image|visual/.test(moduleKey)) return "◇";
+  if (/pipeline|graph|sequence|assemble/.test(moduleKey)) return "⌁";
+  if (/probe|readiness|safety|guard|verify|proof|release/.test(moduleKey)) return "✓";
+  if (/script|story|documentary/.test(moduleKey)) return "¶";
+  if (/planner|plan/.test(moduleKey)) return "▦";
+  if (/render|video|scene|motion|comic|whiteboard|short/.test(moduleKey)) return "▶";
+  if (/asset|layer|insert|caption|overlay/.test(moduleKey)) return "▧";
+  if (/ship|upload/.test(moduleKey)) return "↑";
   return "G";
 }
 
