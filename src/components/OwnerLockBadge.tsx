@@ -28,6 +28,9 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
 import { CHANNEL_UNLOCK_CONFIRMATION } from "@/lib/channelLockContract";
 import { LOCKABLE_MODULE_IDS, lockCoverage } from "@/lib/ownerLockRegistry";
+import {
+  useOptionalOperationsAccess,
+} from "@/components/OperationsAccess";
 
 type Props =
   | { kind: "module"; moduleId: string; label?: string; size?: "sm" | "md" }
@@ -35,6 +38,9 @@ type Props =
 
 export function OwnerLockBadge(props: Props) {
   const ownerId = useOwnerId();
+  const optionalAccess = useOptionalOperationsAccess();
+  const operationsAccess = optionalAccess.state;
+  const requestOperationsAccess = optionalAccess.request;
   const size = props.size ?? "md";
   const [busy, setBusy] = useState(false);
 
@@ -57,6 +63,10 @@ export function OwnerLockBadge(props: Props) {
   const known = props.kind === "channel" || moduleLocks !== undefined;
 
   const toggle = useCallback(async () => {
+    if (operationsAccess !== "owner") {
+      requestOperationsAccess();
+      return;
+    }
     if (locked && !window.confirm(
       `Unlock “${label}”?\n\nAI workers will be able to change it again until you lock it back.`,
     )) return;
@@ -80,13 +90,15 @@ export function OwnerLockBadge(props: Props) {
     } finally {
       setBusy(false);
     }
-  }, [label, locked, lockChannel, ownerId, props, setModuleLock, unlockChannel]);
+  }, [label, locked, lockChannel, operationsAccess, ownerId, props, requestOperationsAccess, setModuleLock, unlockChannel]);
 
   // A module with no files resolved would be a lock the guard cannot enforce.
   if (props.kind === "module" && !LOCKABLE_MODULE_IDS.has(props.moduleId)) return null;
 
   const pad = size === "sm" ? 6 : 8;
-  const title = locked
+  const title = operationsAccess !== "owner"
+    ? `Verify the owner channel before changing the ${label} lock.`
+    : locked
     ? `Locked by you. No AI worker can change ${label} until you unlock it here.`
     : coverage && !coverage.enforced
       ? `${label} has no source files of its own yet, so locking it records your intent but blocks no edits.`
@@ -96,16 +108,18 @@ export function OwnerLockBadge(props: Props) {
     <button
       type="button"
       onClick={() => void toggle()}
-      disabled={busy}
+      disabled={busy || operationsAccess === "checking"}
       aria-pressed={locked}
-      aria-label={locked ? `${label} is locked — unlock` : `Lock ${label}`}
+      aria-label={operationsAccess === "owner"
+        ? locked ? `${label} is locked — unlock` : `Lock ${label}`
+        : `${label} lock status — verify owner to change`}
       title={title}
       style={{
         display: "inline-flex",
         alignItems: "center",
         gap: 4,
         verticalAlign: "middle",
-        cursor: busy ? "wait" : "pointer",
+        cursor: busy ? "wait" : operationsAccess === "checking" ? "default" : "pointer",
         borderRadius: 999,
         border: `1px solid ${locked ? "#43c98a66" : "#ffffff1f"}`,
         background: locked ? "#43c98a1f" : "transparent",

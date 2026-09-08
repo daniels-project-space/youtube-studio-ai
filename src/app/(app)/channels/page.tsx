@@ -15,7 +15,10 @@ import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
 import { IconChannels } from "@/components/icons";
 import { OwnerLockBadge } from "@/components/OwnerLockBadge";
 import { ChannelFolderWorkspace } from "@/components/ChannelFolderWorkspace";
-import { useOperationsAccess } from "@/components/OperationsAccess";
+import {
+  useOperationsAccess,
+  useRequestOperationsAccess,
+} from "@/components/OperationsAccess";
 import { fmtUsd } from "@/lib/format";
 import {
   formatZonedScheduleTimestamp,
@@ -461,6 +464,8 @@ function ChannelFleetInspector({
   onClose: () => void;
 }) {
   const closeRef = useRef<HTMLButtonElement | null>(null);
+  const operationsAccess = useOperationsAccess();
+  const requestOperationsAccess = useRequestOperationsAccess();
   const creating = channel.youtubeCreated?.status === "creating";
   const needsLink = !linked && !creating;
   const autopilotEnabled = channel.status === "active" && channel.schedule?.enabled !== false;
@@ -621,14 +626,27 @@ function ChannelFleetInspector({
         </nav>
 
         <div className="channel-fleet-inspector-actions">
-          {needsLink ? (
-            <LinkYouTubeButton channelId={channel._id} created={Boolean(channel.youtubeCreated?.ytChannelId)} />
-          ) : null}
-          <ChannelToggle id={channel._id} active={autopilotEnabled} schedule={channel.schedule} />
-          {linked && channel.identity?.imageKey && ytChannelId ? (
-            <SetAvatarButton imageKey={channel.identity.imageKey} ytChannelId={ytChannelId} slug={channel.slug} />
-          ) : null}
-          <DeleteChannelX id={channel._id} name={channel.name} />
+          {operationsAccess === "owner" ? (
+            <>
+              {needsLink ? (
+                <LinkYouTubeButton channelId={channel._id} created={Boolean(channel.youtubeCreated?.ytChannelId)} />
+              ) : null}
+              <ChannelToggle id={channel._id} active={autopilotEnabled} schedule={channel.schedule} />
+              {linked && channel.identity?.imageKey && ytChannelId ? (
+                <SetAvatarButton imageKey={channel.identity.imageKey} ytChannelId={ytChannelId} slug={channel.slug} />
+              ) : null}
+              <DeleteChannelX id={channel._id} name={channel.name} />
+            </>
+          ) : (
+            <button
+              type="button"
+              className="channel-account-action channel-account-action-attention"
+              disabled={operationsAccess === "checking"}
+              onClick={requestOperationsAccess}
+            >
+              {operationsAccess === "checking" ? "Checking owner access…" : "Verify owner to edit"}
+            </button>
+          )}
         </div>
       </aside>
     </div>,

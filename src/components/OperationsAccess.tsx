@@ -86,6 +86,22 @@ export function useOperationsAccess(): OperationsAccessState {
   return useOperationsAccessContext().state;
 }
 
+/**
+ * Reusable controls can also be rendered in isolated proof/test surfaces that
+ * intentionally omit the application shell. In that case they must stay
+ * read-only, never throw during render and never acquire mutation authority.
+ */
+export function useOptionalOperationsAccess(): {
+  state: OperationsAccessState;
+  request: () => void;
+} {
+  const context = useContext(OperationsAccessContext);
+  return {
+    state: context?.state ?? "viewer",
+    request: () => context?.setDialogOpen(true),
+  };
+}
+
 /** Opens the single owner-verification dialog from any actionable control. */
 export function useRequestOperationsAccess(): () => void {
   const { setDialogOpen } = useOperationsAccessContext();

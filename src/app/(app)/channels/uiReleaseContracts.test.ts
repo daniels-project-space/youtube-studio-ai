@@ -21,6 +21,7 @@ const sidebar = readFileSync(join(root, "src/components/Sidebar.tsx"), "utf8");
 const scheduleCss = readFileSync(join(root, "src/app/(app)/schedule/schedule.module.css"), "utf8");
 const designer = readFileSync(join(root, "src/engine/designer.ts"), "utf8");
 const auditScript = readFileSync(join(root, "scripts/ui-fifth-pass-audit.mjs"), "utf8");
+const ownerLockBadge = readFileSync(join(root, "src/components/OwnerLockBadge.tsx"), "utf8");
 
 const terminalError = wizard.match(/const terminalError = \(message: string\) => \{([\s\S]*?)\n    \};/)?.[1];
 assert.ok(terminalError, "terminal build recovery handler must exist");
@@ -235,6 +236,12 @@ assert.match(channels, /<LinkYouTubeButton/);
 assert.match(channels, /<ChannelToggle/);
 assert.match(channels, /<SetAvatarButton/);
 assert.match(channels, /<DeleteChannelX/);
+assert.match(channels, /operationsAccess === "owner"/,
+  "the fleet inspector must not expose write controls to a public viewer");
+assert.match(channels, /Verify owner to edit/,
+  "a viewer receives one actionable elevation control instead of mutations that can only fail");
+assert.match(ownerLockBadge, /operationsAccess !== "owner"/,
+  "channel and module lock controls must request owner elevation before invoking a mutation");
 assert.match(globalCss, /\.channel-fleet-inspector-backdrop\s*\{[\s\S]*?position: fixed/);
 assert.match(globalCss, /\.channel-fleet-inspector\s*\{[\s\S]*?height: 100dvh/);
 assert.match(globalCss, /prefers-reduced-motion[\s\S]*?\.channel-fleet-inspector \{ animation: none !important; \}/);
