@@ -262,16 +262,16 @@
 .moduleCard:hover .moduleVisual > span { color: #ffe09a; transform: scale(1.08); }
 .moduleVisual small { position: absolute; right: 4px; bottom: 4px; padding: 3px 4px; border-radius: 4px; color: #f0b38f; background: rgba(16,8,5,.88); font: 700 0.42rem/1 var(--font-mono,ui-monospace,monospace); letter-spacing: .05em; text-transform: uppercase; }
 .moduleSummaryCopy { display: grid; grid-column: 2; grid-row: 1; min-width: 0; gap: 5px; align-self: center; }
-.moduleSummaryCopy > small { color: #827563; font: 0.57rem/1 var(--font-mono,ui-monospace,monospace); letter-spacing: .08em; text-transform: uppercase; }
+.moduleSummaryCopy > small { color: #827563; font: 0.62rem/1 var(--font-mono,ui-monospace,monospace); letter-spacing: .08em; text-transform: uppercase; }
 .moduleSummaryCopy > [role="heading"] { display: -webkit-box; overflow: hidden; color: var(--gold-ink); font-family: var(--font-display,Georgia,serif); font-size: 1.12rem; font-weight: 570; letter-spacing: -.025em; line-height: 1.15; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .modulePowerPoints { display: grid; gap: 3px; margin: 1px 0 0; padding: 0; list-style: none; }
-.modulePowerPoints li { position: relative; display: -webkit-box; overflow: hidden; padding-left: 11px; color: #b4a895; font-size: .74rem; line-height: 1.34; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
+.modulePowerPoints li { position: relative; display: -webkit-box; overflow: hidden; padding-left: 11px; color: #b4a895; font-size: .78rem; line-height: 1.34; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
 .modulePowerPoints li::before { position: absolute; top: .43em; left: 0; width: 4px; height: 4px; border-radius: 50%; background: var(--gold-warm); content: ""; }
 .moduleSummaryMeta { display: flex; grid-column: 2; grid-row: 2; min-width: 0; align-items: center; justify-content: space-between; gap: 7px; align-self: start; }
 .moduleSummaryMeta > small { overflow: hidden; color: #706656; font: .5rem/1.2 var(--font-mono,ui-monospace,monospace); text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
 .moduleToggle { grid-column: 3; grid-row: 1 / 3; color: var(--gold-warm); font: 600 1rem/1 var(--font-mono,ui-monospace,monospace); transition: transform 160ms ease; }
 .moduleCard[open] .moduleToggle { transform: rotate(45deg); }
-.moduleStatus { flex: 0 0 auto; padding: 4px 7px; border: 1px solid #4a4033; border-radius: 999px; color: #928673; font: 0.5rem/1 var(--font-mono, ui-monospace, monospace); letter-spacing: 0.05em; }
+.moduleStatus { flex: 0 0 auto; padding: 4px 7px; border: 1px solid #4a4033; border-radius: 999px; color: #928673; font: 0.56rem/1 var(--font-mono, ui-monospace, monospace); letter-spacing: 0.05em; }
 .moduleStatus[data-tone="reference"] { border-color: #6c5629; color: var(--gold-bright); }
 .moduleStatus[data-tone="active"] { border-color: #315741; color: var(--gold-green); }
 .moduleStatus[data-tone="registered"] { border-color: #634a31; color: #d3a575; }
@@ -378,7 +378,8 @@
   .moduleSummary { grid-template-columns: 54px minmax(0,1fr) 18px; min-height: 110px; gap: 5px 10px; padding: 10px; }
   .moduleVisual { width: 54px; height: 82px; }
   .moduleSummaryCopy > [role="heading"] { font-size: 1.03rem; }
-  .modulePowerPoints li { font-size: .72rem; }
+  .modulePowerPoints li { font-size: .76rem; line-height: 1.38; -webkit-line-clamp: 2; }
+  .modulePowerPoints li:nth-child(n + 2) { display: none; }
   .moduleSummaryMeta > small { display: none; }
   .moduleStatus { max-width: 86px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .moduleToolbar { align-items: stretch; flex-direction: column; }

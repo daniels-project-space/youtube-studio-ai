@@ -8,7 +8,7 @@ const styles = readFileSync(`${here}/golden.module.css`, "utf8");
 const images = readFileSync(`${here}/GoldenImages.tsx`, "utf8");
 const imageStyles = readFileSync(`${here}/GoldenImages.module.css`, "utf8");
 
-assert.match(page, /Production standards/i);
+assert.doesNotMatch(page, /Production standards/i, "the Golden catalog header must not carry redundant eyebrow copy");
 assert.match(page, /aria-label="Golden catalog summary"/);
 assert.match(page, /Catalog truth/);
 assert.match(page, /className=\{styles\.modulePowerPoints\}/);

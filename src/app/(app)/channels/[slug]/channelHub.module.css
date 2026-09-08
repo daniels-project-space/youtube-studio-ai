@@ -628,14 +628,17 @@
 .pipelineBands { display: grid; gap: 0.62rem; margin: 0; padding: 0; list-style: none; }
 .pipelineBand { --pipeline-band-color: var(--color-blueprint); display: grid; grid-template-columns: minmax(126px,0.22fr) minmax(0,1fr); gap: 0.62rem; padding: 0.62rem; border: 1px solid var(--color-border); border-radius: 12px; background: linear-gradient(135deg,color-mix(in srgb,var(--pipeline-band-color) 4%,transparent),rgba(243,240,232,0.018)); box-shadow: inset 0 1px rgba(255,255,255,0.025); }
 .pipelineBand[data-phase="foundation"] { --pipeline-band-color: var(--color-secondary); }
+.pipelineBand[data-phase="direction"] { --pipeline-band-color: var(--color-accent); }
 .pipelineBand[data-phase="narrative"] { --pipeline-band-color: var(--color-accent); }
+.pipelineBand[data-phase="audio"] { --pipeline-band-color: var(--color-amber); }
+.pipelineBand[data-phase="metadata"] { --pipeline-band-color: var(--color-secondary); }
 .pipelineBand[data-phase="assembly"] { --pipeline-band-color: var(--color-amber); }
 .pipelineBand[data-phase="release"] { --pipeline-band-color: var(--color-ok); }
 .pipelineBandHeader { display: grid; grid-template-columns: 1.25rem minmax(0,1fr); align-content: start; gap: 0.32rem 0.5rem; min-width: 0; padding: 0.42rem 0.48rem; border-right: 1px solid var(--color-border); }
-.pipelineBandHeader > span { color: var(--pipeline-band-color); font: 700 0.52rem/1 var(--font-mono); }
+.pipelineBandHeader > span { color: var(--pipeline-band-color); font: 700 0.6rem/1 var(--font-mono); }
 .pipelineBandHeader > div { display: grid; min-width: 0; gap: 0.22rem; }
-.pipelineBandHeader strong { color: var(--color-fg); font-size: 0.74rem; font-weight: 660; }
-.pipelineBandHeader small { color: var(--color-faint); font: 0.53rem/1.4 var(--font-mono); }
+.pipelineBandHeader strong { color: var(--color-fg); font-size: 0.84rem; font-weight: 660; }
+.pipelineBandHeader small { color: var(--color-faint); font: 0.6rem/1.4 var(--font-mono); }
 .pipelineBandHeader i { grid-column: 1 / -1; width: 32px; height: 1px; margin-top: 0.3rem; background: linear-gradient(90deg,var(--pipeline-band-color),transparent); }
 
 .pipelineModuleGrid { display: grid; grid-template-columns: repeat(auto-fit,minmax(190px,1fr)); gap: 0.36rem; min-width: 0; }
@@ -645,13 +648,13 @@
 .pipelineModule > summary { cursor: pointer; list-style: none; }
 .pipelineModule > summary::-webkit-details-marker { display: none; }
 .pipelineModuleSummary { display: grid; grid-template-columns: 1.45rem 0.72rem minmax(0,1fr) auto; min-height: 48px; align-items: center; gap: 0.42rem; padding: 0.4rem 0.48rem; }
-.pipelineIndex { color: var(--color-faint); font: 700 0.54rem/1 var(--font-mono); }
+.pipelineIndex { color: var(--color-faint); font: 700 0.6rem/1 var(--font-mono); }
 .pipelineNode { display: grid; width: 12px; height: 12px; place-items: center; border: 1px solid var(--color-border-strong); border-radius: 50%; }
 .pipelineNode i { width: 4px; height: 4px; border-radius: 50%; background: var(--color-blueprint); box-shadow: 0 0 8px color-mix(in srgb,var(--color-blueprint) 55%,transparent); }
 .pipelineIdentity { display: grid; min-width: 0; gap: 0.12rem; }
-.pipelineIdentity strong { overflow: hidden; font-size: 0.73rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.pipelineIdentity small { overflow: hidden; color: var(--color-faint); font: 0.54rem/1 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
-.pipelineControlCount { color: var(--color-faint); font: 650 0.49rem/1 var(--font-mono); white-space: nowrap; }
+.pipelineIdentity strong { overflow: hidden; font-size: 0.8rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.pipelineIdentity small { overflow: hidden; color: var(--color-faint); font: 0.6rem/1 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.pipelineControlCount { color: var(--color-faint); font: 650 0.56rem/1 var(--font-mono); white-space: nowrap; }
 .pipelineModule[data-tuned="true"] .pipelineControlCount { color: var(--color-blueprint); }
 .pipelineParams { display: grid; grid-template-columns: repeat(auto-fit,minmax(150px,1fr)); gap: 0; margin: 0; padding: 0 0.48rem 0.48rem 2.95rem; }
 .pipelineParams > div { min-width: 0; padding: 0.38rem 0.46rem; border-top: 1px solid var(--color-border); }

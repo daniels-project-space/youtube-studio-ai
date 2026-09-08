@@ -166,7 +166,6 @@ export default function ChannelsPage() {
   return (
     <>
       <PageHeader
-        eyebrow="Workspace"
         title="Channels"
         actions={
           <div className="channel-page-actions">

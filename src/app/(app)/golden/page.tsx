@@ -338,7 +338,6 @@ export default function GoldenPipelinePage() {
     <main className={styles.page}>
       <header className={styles.catalogHeader}>
         <div className={styles.catalogTitle}>
-          <p className={styles.eyebrow}>Production standards</p>
           <h1>Golden modules</h1>
         </div>
         <div className={styles.catalogStats} aria-label="Golden catalog summary">

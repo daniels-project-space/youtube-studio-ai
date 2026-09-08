@@ -5,8 +5,11 @@
  */
 export type LivePipelinePhase =
   | "foundation"
+  | "direction"
   | "narrative"
   | "visual"
+  | "audio"
+  | "metadata"
   | "assembly"
   | "release";
 
@@ -35,10 +38,13 @@ export type LivePipelinePhaseSummary = {
 
 export const LIVE_PIPELINE_PHASE_LABEL: Record<LivePipelinePhase, string> = {
   foundation: "Foundation",
+  direction: "Direction",
   narrative: "Story",
   visual: "Visual production",
+  audio: "Audio",
+  metadata: "Metadata",
   assembly: "Assembly",
-  release: "Audience & release",
+  release: "Release",
 };
 
 const VISUAL_BLOCKS = new Set([
@@ -80,8 +86,6 @@ const ASSEMBLY_BLOCKS = new Set([
 
 const RELEASE_BLOCKS = new Set([
   "package_to_opening_plan",
-  "metadata",
-  "quiz_metadata",
   "thumbnail_gen",
   "qa_assets",
   "qa_shots",
@@ -96,18 +100,31 @@ const RELEASE_BLOCKS = new Set([
   "cleanup",
 ]);
 
-const NARRATIVE_BLOCKS = new Set([
+const DIRECTION_BLOCKS = new Set([
   "director_brief",
   "dp_brief",
   "editor_brief",
   "composer_brief",
   "critic_spec",
+  "originality_gate",
+  "compliance_check",
+]);
+
+const AUDIO_BLOCKS = new Set([
+  "music_program_plan",
+  "music",
+]);
+
+const METADATA_BLOCKS = new Set([
+  "metadata",
+  "quiz_metadata",
+]);
+
+const NARRATIVE_BLOCKS = new Set([
   "curriculum_episode_seed",
   "script_gen",
   "hook_craft",
   "qa_script",
-  "originality_gate",
-  "compliance_check",
   "narration_tts",
   "story_spine",
   "episode_graph",
@@ -115,9 +132,6 @@ const NARRATIVE_BLOCKS = new Set([
   "narrative_series_visual_controls",
   "self_contained_story_plan",
   "self_contained_story",
-  "music_program_plan",
-  "music",
-  "composer_brief",
   "editorial_evidence_packet",
   "casefile_source_packet",
   "casefile_evidence_shot_map",
@@ -131,8 +145,11 @@ const NARRATIVE_BLOCKS = new Set([
 export function livePipelinePhaseForBlock(block: string): LivePipelinePhase {
   if (RELEASE_BLOCKS.has(block)) return "release";
   if (ASSEMBLY_BLOCKS.has(block)) return "assembly";
+  if (METADATA_BLOCKS.has(block)) return "metadata";
+  if (AUDIO_BLOCKS.has(block)) return "audio";
   if (VISUAL_BLOCKS.has(block)) return "visual";
   if (NARRATIVE_BLOCKS.has(block)) return "narrative";
+  if (DIRECTION_BLOCKS.has(block)) return "direction";
   return "foundation";
 }
 
