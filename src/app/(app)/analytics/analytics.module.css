@@ -148,8 +148,13 @@
 .fieldEmpty { fill: var(--color-faint); font: 8px var(--font-mono); letter-spacing: 0.08em; }
 .fieldNodeLabel { fill: var(--color-muted); letter-spacing: 0; }
 .fieldEmpty { font-size: 11px; }
+.fieldNodeLink { cursor: pointer; outline: none; }
 .fieldNode { transition: filter 180ms ease, opacity 180ms ease; }
-.fieldNode:hover { filter: brightness(1.4); }
+.fieldNodeLink:hover .fieldNode,
+.fieldNodeLink:focus .fieldNode { filter: brightness(1.4); }
+.fieldNodeLink:focus .fieldNodeHalo { stroke: var(--color-accent); stroke-width: 2.5; }
+.fieldTruthLine { stroke: rgba(243, 240, 232, 0.2); stroke-width: 1; stroke-dasharray: 2 3; }
+.fieldLeader { stroke: rgba(243, 240, 232, 0.18); stroke-width: 0.8; }
 .fieldNodeHalo { fill: rgba(125, 211, 192, 0.035); stroke: rgba(125, 211, 192, 0.2); stroke-width: 1; }
 .fieldNode[data-selected="true"] .fieldNodeHalo { fill: rgba(255, 94, 42, 0.08); stroke: var(--color-accent); stroke-width: 2; }
 .fieldNode[data-selected="true"] .fieldNodeLabel { fill: var(--color-accent); }

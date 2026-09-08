@@ -26,6 +26,7 @@ import {
   ANALYTICS_FLEET_PAGE_SIZE,
   nextAnalyticsFleetLimit,
 } from "@/lib/analyticsFleetPresentation";
+import { layoutAnalyticsEfficiencyField } from "@/lib/analyticsEfficiencyField";
 import styles from "./analytics.module.css";
 
 /** Per-channel summary row shape returned by analytics.channelSummary. */
@@ -324,15 +325,7 @@ function FleetEfficiencyField({
   rows: SummaryRow[];
   selectedChannelId: string | null;
 }) {
-  const maxCost = Math.max(1, ...rows.map((row) => row.costTotal));
-  const maxViews = Math.max(1, ...rows.map((row) => row.totalViews));
-  const maxVideos = Math.max(1, ...rows.map((row) => row.videoCount));
-  const labelled = new Set(
-    [...rows]
-      .sort((left, right) => right.totalViews - left.totalViews)
-      .slice(0, 5)
-      .map((row) => row.channelId),
-  );
+  const nodes = layoutAnalyticsEfficiencyField(rows, selectedChannelId);
 
   return (
     <figure className={styles.efficiencyField}>
@@ -356,30 +349,39 @@ function FleetEfficiencyField({
         <text x="43" y="232" className={styles.fieldLabel}>LOWER SPEND</text>
         <text x="694" y="232" textAnchor="end" className={styles.fieldLabel}>HIGHER SPEND</text>
         <text x="28" y="110" textAnchor="middle" transform="rotate(-90 28 110)" className={styles.fieldLabel}>MORE OBSERVED REACH</text>
-        {rows.map((row) => {
-          const x = 58 + (row.costTotal / maxCost) * 614;
-          const y = 194 - (row.totalViews / maxViews) * 156;
-          const radius = 5 + Math.sqrt(row.videoCount / maxVideos) * 10;
-          const selected = row.channelId === selectedChannelId;
+        {nodes.map((node) => {
           return (
-            <g key={row.channelId} data-selected={selected || undefined} className={styles.fieldNode}>
-              <circle cx={x} cy={y} r={radius + (selected ? 5 : 2)} className={styles.fieldNodeHalo} />
-              <circle cx={x} cy={y} r={radius} fill="url(#analytics-node)">
-                <title>{`${row.name}: ${compact(row.totalViews)} views · ${fmtUsd(row.costTotal)} spend · ${row.videoCount} videos`}</title>
-              </circle>
-              {(labelled.has(row.channelId) || selected) && (
-                <text x={x} y={y - radius - 7} textAnchor="middle" className={styles.fieldNodeLabel}>
-                  {row.name.length > 18 ? `${row.name.slice(0, 17)}…` : row.name}
-                </text>
-              )}
-            </g>
+            <a
+              key={node.channelId}
+              href={`/channels/${node.slug}?tab=analytics`}
+              className={styles.fieldNodeLink}
+              aria-label={`Open ${node.name} analytics`}
+            >
+              <g data-selected={node.selected || undefined} className={styles.fieldNode}>
+                {node.displaced ? (
+                  <line x1={node.rawX} y1={node.rawY} x2={node.x} y2={node.y} className={styles.fieldTruthLine} />
+                ) : null}
+                {node.label ? (
+                  <line x1={node.x} y1={node.y} x2={node.label.x} y2={node.label.y - 3} className={styles.fieldLeader} />
+                ) : null}
+                <circle cx={node.x} cy={node.y} r={node.radius + (node.selected ? 5 : 2)} className={styles.fieldNodeHalo} />
+                <circle cx={node.x} cy={node.y} r={node.radius} fill="url(#analytics-node)">
+                  <title>{`${node.name}: ${compact(node.totalViews)} views · ${fmtUsd(node.costTotal)} spend · ${node.videoCount} videos. Open channel analytics.`}</title>
+                </circle>
+                {node.label ? (
+                  <text x={node.label.x} y={node.label.y} textAnchor={node.label.anchor} className={styles.fieldNodeLabel}>
+                    {node.name.length > 18 ? `${node.name.slice(0, 17)}…` : node.name}
+                  </text>
+                ) : null}
+              </g>
+            </a>
           );
         })}
         {!rows.length && <text x="368" y="122" textAnchor="middle" className={styles.fieldEmpty}>No observed channel snapshots yet</text>}
       </svg>
       <div className={styles.fieldLegend}>
         <span><i /> Observed channel</span>
-        <span>Axes use persisted totals; neither axis estimates revenue.</span>
+        <span>Open a node for channel analytics. Tied values fan out from their exact anchor.</span>
       </div>
     </figure>
   );

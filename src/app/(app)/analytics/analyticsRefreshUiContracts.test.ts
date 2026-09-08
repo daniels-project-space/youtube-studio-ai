@@ -25,6 +25,11 @@ assert.match(page, /className=\{styles\.rankingBar\}/);
 assert.doesNotMatch(page, /function GlobalCharts/);
 assert.doesNotMatch(page, /Subscribers by channel/);
 assert.match(page, /Reach \/ spend field/);
+assert.match(page, /layoutAnalyticsEfficiencyField/);
+assert.match(page, /href=\{`\/channels\/\$\{node\.slug\}\?tab=analytics`\}/,
+  "each reach/spend node must open the channel analytics workspace");
+assert.match(page, /fieldTruthLine/,
+  "fanned collision targets must retain a visible connector to their exact persisted coordinate");
 assert.match(page, /Cumulative views/);
 assert.match(page, /Published inventory/);
 assert.doesNotMatch(page, /<PageHeader/);
