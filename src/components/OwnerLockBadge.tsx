@@ -114,6 +114,7 @@ export function OwnerLockBadge(props: Props) {
         : `${label} lock status — verify owner to change`}
       title={title}
       className="owner-lock-control"
+      data-kind={props.kind}
       data-state={locked ? "locked" : operationsAccess === "owner" ? "open" : "restricted"}
       data-size={size}
       data-busy={busy ? "true" : undefined}
@@ -134,8 +135,8 @@ export function OwnerLockBadge(props: Props) {
             : operationsAccess !== "owner"
               ? "Owner lock"
               : locked
-                ? "Protected"
-                : "Protect"}
+                ? "Sealed"
+                : "Seal"}
       </span>
       {size === "md" && coverage?.enforced ? <small>{coverage.files} files</small> : null}
     </button>

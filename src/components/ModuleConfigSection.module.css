@@ -13,10 +13,10 @@
   grid-template-columns: 36px minmax(0, 1fr) auto;
   gap: 0.75rem;
   align-items: center;
-  padding: 0.85rem 1rem;
+  padding: 0.72rem 0.82rem;
   border-bottom: 1px solid var(--color-border);
   background:
-    linear-gradient(110deg, color-mix(in srgb, var(--color-accent) 8%, transparent), transparent 62%);
+    linear-gradient(110deg, color-mix(in srgb, var(--color-blueprint) 10%, transparent), transparent 62%);
 }
 
 .channelLock[data-locked="true"] {
@@ -31,8 +31,8 @@
 .lockState circle { fill: currentColor; stroke: none; }
 .channelLock[data-locked="true"] .lockGlyph { border-color: color-mix(in srgb,var(--color-ok) 42%,var(--color-border)); color: var(--color-ok); background: color-mix(in srgb,var(--color-ok) 8%,transparent); }
 .lockCopy { display: grid; gap: 0.18rem; min-width: 0; }
-.lockCopy strong { color: var(--color-fg); font-size: 0.82rem; }
-.lockCopy span { color: var(--color-muted); font-family: var(--font-mono); font-size: 0.6rem; letter-spacing: 0.035em; }
+.lockCopy strong { color: var(--color-fg); font-size: 0.86rem; }
+.lockCopy span { color: var(--color-muted); font-family: var(--font-mono); font-size: 0.62rem; letter-spacing: 0.025em; }
 .channelLock .error { grid-column: 1 / -1; margin-top: 0; }
 
 .module {
@@ -47,8 +47,8 @@
   grid-template-columns: 76px minmax(0, 1fr) auto;
   gap: 1rem;
   align-items: center;
-  min-height: 78px;
-  padding: 0.8rem 1rem;
+  min-height: 68px;
+  padding: 0.68rem 0.82rem;
   cursor: pointer;
   list-style: none;
   transition: background 160ms ease;
@@ -90,7 +90,7 @@
 .title {
   overflow: hidden;
   color: var(--color-fg);
-  font-size: 0.94rem;
+  font-size: 0.98rem;
   font-weight: 650;
   letter-spacing: -0.015em;
   text-overflow: ellipsis;
@@ -177,11 +177,11 @@
   justify-content: space-between;
   gap: 0.7rem;
   margin-bottom: 0.85rem;
-  padding: 0.55rem 0.65rem;
-  border: 1px solid var(--color-border);
-  border-radius: 10px;
+  padding: 0.5rem 0.58rem;
+  border: 1px solid color-mix(in srgb,var(--color-blueprint) 22%,var(--color-border));
+  border-radius: 9px;
   color: var(--color-muted);
-  background: color-mix(in srgb, var(--color-surface) 74%, transparent);
+  background: linear-gradient(120deg,color-mix(in srgb,var(--color-blueprint) 7%,transparent),color-mix(in srgb, var(--color-surface) 74%, transparent));
   font-family: var(--font-mono);
   font-size: 0.58rem;
   letter-spacing: 0.045em;
@@ -192,11 +192,11 @@
 
 .lockButton {
   min-height: 34px;
-  border: 1px solid var(--color-border-strong);
+  border: 1px solid color-mix(in srgb,var(--color-blueprint) 42%,var(--color-border));
   border-radius: 8px;
   padding: 0.35rem 0.58rem;
   color: var(--color-fg);
-  background: transparent;
+  background: color-mix(in srgb,var(--color-blueprint) 8%,transparent);
   cursor: pointer;
   font: 600 0.62rem var(--font-mono);
   letter-spacing: 0.035em;

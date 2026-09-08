@@ -654,6 +654,7 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
       className={styles.moduleCard}
       data-reference={isReference}
       data-module-key={m.key}
+      data-category={CATEGORY[m.key] ?? "Post-production"}
     >
       <summary className={styles.moduleSummary}>
         <span className={styles.moduleVisual} data-has-cover={cover ? "true" : "false"}>
@@ -686,9 +687,18 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
       <div className={styles.moduleBody}>
         <div className={styles.moduleToolbar}>
           <span className={styles.moduleProtection}>
-            <small>AI edit protection</small>
+            <span className={styles.moduleProtectionMark} aria-hidden="true">
+              <svg viewBox="0 0 24 24" focusable="false">
+                <path d="M12 2.8 19 5.6v5.7c0 4.4-2.7 7.9-7 9.9-4.3-2-7-5.5-7-9.9V5.6L12 2.8Z" />
+                <path d="m9.1 11.8 2 2 4-4.2" />
+              </svg>
+            </span>
+            <span className={styles.moduleProtectionCopy}>
+              <strong>Owner protection</strong>
+              <small>Seal this module against AI edits</small>
+            </span>
             {/* Every catalog module is lockable and starts unlocked; the key IS the lock id. */}
-            <OwnerLockBadge kind="module" moduleId={m.key} label={m.title} size="sm" />
+            <OwnerLockBadge kind="module" moduleId={m.key} label={m.title} size="md" />
           </span>
           {destination ? <Link href={destination.href}>{destination.label}<span aria-hidden="true">↗</span></Link> : null}
         </div>

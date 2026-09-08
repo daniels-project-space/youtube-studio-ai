@@ -315,8 +315,8 @@ export default function ChannelsPage() {
                     imageKey={c.identity?.imageKey}
                     name={c.name}
                     palette={c.identity?.palette}
-                    size={44}
-                    radius={11}
+                    size={48}
+                    radius={12}
                   />
                   <div className="channel-card-title">
                     <Link href={`/channels/${c.slug}`}>
@@ -337,12 +337,12 @@ export default function ChannelsPage() {
 
                 <div className="channel-card-operating-row">
                   <div>
-                    <small>Next publish</small>
-                    <strong>{next?.timestamp ? formatZonedScheduleTimestamp(next.timestamp, next.timeZone) : next ? "Time unavailable" : "No ready item"}</strong>
+                    <small>Next</small>
+                    <strong>{next?.timestamp ? formatZonedScheduleTimestamp(next.timestamp, next.timeZone) : next ? "Time unavailable" : "Queue empty"}</strong>
                   </div>
                   <div>
-                    <small>Output</small>
-                    <strong>{videos} published</strong>
+                    <small>Published</small>
+                    <strong>{videos} video{videos === 1 ? "" : "s"}</strong>
                   </div>
                 </div>
 
@@ -363,7 +363,7 @@ export default function ChannelsPage() {
                       setManagedChannelId(c._id);
                     }}
                   >
-                    <span>Manage</span>
+                    <span>Controls</span>
                     <span className="channel-card-readiness">
                       <progress
                         aria-label={`${c.name} setup readiness`}
@@ -373,7 +373,7 @@ export default function ChannelsPage() {
                       <small>{setupDone}/{setupChecks.length}</small>
                     </span>
                   </button>
-                  <Link href={`/channels/${c.slug}`} className="channel-card-open">Open channel</Link>
+                  <Link href={`/channels/${c.slug}`} className="channel-card-open">Open</Link>
                 </nav>
               </article>
             );

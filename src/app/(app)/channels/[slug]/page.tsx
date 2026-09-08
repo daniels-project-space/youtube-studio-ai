@@ -2249,7 +2249,6 @@ function PipelineTab({
         <div>
           <span>Frozen channel route</span>
           <h2>{pipeline.length}-module production route</h2>
-          <p>Numbered in exact execution order. Open a tuned module to inspect its saved controls.</p>
         </div>
         <dl className={styles.pipelineStats}>
           <div><dt>Groups</dt><dd>{bands.length}</dd></div>

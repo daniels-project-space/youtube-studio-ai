@@ -163,9 +163,9 @@ function ModuleCard({
               <span className={styles.lockState}>
                 <ProtectionGlyph locked={channelLocked || moduleLocked} />
                 {channelLocked
-                  ? "Protected by channel lock"
+                  ? "Channel lock active"
                   : moduleLocked
-                  ? `Protected · ${new Date(lock!.lockedAt).toLocaleDateString()}`
+                  ? `Module locked · ${new Date(lock!.lockedAt).toLocaleDateString()}`
                   : "AI edits allowed"}
               </span>
               {!channelLocked && <button
@@ -178,7 +178,7 @@ function ModuleCard({
                   ? `Type '${channelModuleUnlockConfirmation(blockId)}' to unlock`
                   : "Freeze this module's saved controls and pipeline entry"}
               >
-                {lockBusy ? "Working…" : moduleLocked ? "Unlock module" : "Protect module"}
+                {lockBusy ? "Working…" : moduleLocked ? "Unlock module" : "Lock module"}
               </button>
               }
             </div>
@@ -237,8 +237,8 @@ function ChannelLockControl({
     <div className={styles.channelLock} data-locked={locked || undefined}>
       <span className={styles.lockGlyph} aria-hidden="true"><ProtectionGlyph locked={locked} /></span>
       <div className={styles.lockCopy}>
-        <strong>{locked ? "Channel protected" : "Channel protection"}</strong>
-        <span>{locked && lockedAt ? `Locked ${new Date(lockedAt).toLocaleDateString()} · all AI edits blocked` : "Protect config, schedule, pipeline and creative settings"}</span>
+        <strong>{locked ? "Channel locked" : "Channel lock"}</strong>
+        <span>{locked && lockedAt ? `Sealed ${new Date(lockedAt).toLocaleDateString()} · all AI edits blocked` : "Locks config, schedule, pipeline and creative settings"}</span>
       </div>
       <button
         type="button"
@@ -248,7 +248,7 @@ function ChannelLockControl({
         onClick={changeLock}
         title={locked ? `Type '${CHANNEL_UNLOCK_CONFIRMATION}' to unlock` : "Freeze all future channel changes"}
       >
-        {busy ? "Working…" : locked ? "Unlock channel" : "Protect channel"}
+        {busy ? "Working…" : locked ? "Unlock channel" : "Lock channel"}
       </button>
       {error && <div className={styles.error} role="alert">{error}</div>}
     </div>
