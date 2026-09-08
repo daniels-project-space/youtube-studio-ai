@@ -1,6 +1,7 @@
 /** Script Lab must use bounded real video evidence without direct Google. */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { CHANNEL_INCEPTION_FAMILY_POLICIES } from "@/engine/channelInceptionContracts";
@@ -24,6 +25,11 @@ assert.match(capture, /"--write-auto-subs"/);
 assert.match(capture, /await rm\(dir, \{ recursive: true, force: true \}\)/);
 
 const previousKey = process.env.OPENROUTER_API_KEY;
+const previousYtDlpBin = process.env.YT_DLP_BIN;
+const probeDir = mkdtempSync(join(tmpdir(), "studio-yt-dlp-probe-"));
+const probeBin = join(probeDir, "yt-dlp");
+writeFileSync(probeBin, "#!/bin/sh\nprintf '2026.6.9\\n'\n", "utf8");
+chmodSync(probeBin, 0o755);
 try {
   delete process.env.OPENROUTER_API_KEY;
   const unavailable = narrativePlaybookCapability();
@@ -31,12 +37,16 @@ try {
   assert.match(unavailable.reason, /OPENROUTER_API_KEY/);
 
   process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+  process.env.YT_DLP_BIN = probeBin;
   const available = narrativePlaybookCapability();
   assert.equal(available.available, true, available.reason);
   assert.match(referenceOpeningCapability().version ?? "", /^\d{4}\.\d{1,2}\.\d{1,2}$/);
 } finally {
   if (previousKey === undefined) delete process.env.OPENROUTER_API_KEY;
   else process.env.OPENROUTER_API_KEY = previousKey;
+  if (previousYtDlpBin === undefined) delete process.env.YT_DLP_BIN;
+  else process.env.YT_DLP_BIN = previousYtDlpBin;
+  rmSync(probeDir, { recursive: true, force: true });
 }
 
 const required = Object.entries(CHANNEL_INCEPTION_FAMILY_POLICIES)
