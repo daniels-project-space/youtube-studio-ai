@@ -13,7 +13,7 @@
  *     the caller's attested dependency or "archival" (a real Wikimedia
  *     photograph of a named entity). Every generated still passes a vision
  *     gate before it enters the film.
- *   • HOW TO ASSEMBLE — a Gemini-Pro plan with a cinematography doctrine
+ *   • HOW TO ASSEMBLE — an OpenRouter Gemini 3.7 Flash plan with a cinematography doctrine
  *     (motivated camera move + varied pacing per shot), rendered by the
  *     DocuMotion Remotion composition (eased camera + 2.5D parallax, stroked
  *     type on scrims, red-string evidence boards, torn mattes, film grade).
@@ -36,7 +36,8 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
-import { geminiJson, geminiJsonPro, isGeminiRuntimeEnabled, parseJsonLoose } from "@/lib/gemini";
+import { claudeJson, claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
+import { parseJsonLoose } from "@/lib/gemini";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
 import { searchWikimediaImageUrl } from "@/lib/wikimedia";
@@ -85,18 +86,10 @@ const ASSET_CONCURRENCY = Number(process.env.DOCU_ASSET_CONCURRENCY ?? 4);
 
 export function hasDocumotion(options: { requiresPlanning?: boolean } = {}): boolean {
   // Production documentary Shorts supply a locked strategy plan. The legacy
-  // optional planner still needs its own text-model credential, but generated
-  // pixels are always caller-injected and never inferred from FAL/Gemini keys.
-  //
-  // The planning answer was `Boolean(process.env.GEMINI_API_KEY)`, and that key
-  // IS set in this environment — so this returned TRUE for a capability the
-  // runtime refuses: planDocu runs on geminiJsonPro, and every Gemini call
-  // throws GeminiRuntimeDisabledError by policy. A capability check that says
-  // yes and then throws is worse than one that says no, because the caller has
-  // already committed by the time it finds out.
-  //
-  // The production block asks with requiresPlanning:false and is unaffected.
-  return options.requiresPlanning === false || isGeminiRuntimeEnabled();
+  // optional planner needs the pinned OpenRouter text route, while generated
+  // pixels are always caller-injected. The production block asks with
+  // requiresPlanning:false because it already carries a locked strategy plan.
+  return options.requiresPlanning === false || hasAnthropicKey();
 }
 
 /* --------------------------------------------------------------- helpers -- */
@@ -425,6 +418,39 @@ export interface DocuPlan {
 const QUOTE_CARD_MAX_WORDS = 14;
 const QUOTE_CARD_MAX_CHARACTERS = 120;
 const QUOTE_ATTRIBUTION_MAX_CHARACTERS = 48;
+const TITLE_MAX_WORDS = 3;
+const TITLE_MAX_CHARACTERS = 36;
+const KICKER_MAX_WORDS = 6;
+const KICKER_MAX_CHARACTERS = 56;
+const LABEL_MAX_WORDS = 3;
+const LABEL_MAX_CHARACTERS = 36;
+const LABEL_SUB_MAX_WORDS = 6;
+const LABEL_SUB_MAX_CHARACTERS = 64;
+const ANNOTATION_MAX_WORDS = 6;
+const ANNOTATION_MAX_CHARACTERS = 72;
+const CIRCLE_LABEL_MAX_CHARACTERS = 24;
+const MAX_LABELS_PER_SHOT = 4;
+const MAX_ANNOTATIONS_PER_SHOT = 3;
+
+function wordCount(value: string): number {
+  return value.split(/\s+/).filter(Boolean).length;
+}
+
+function validateOverlayText(
+  problems: string[],
+  shotIndex: number,
+  field: string,
+  value: string | undefined,
+  maxWords: number,
+  maxCharacters: number,
+): void {
+  if (!value) return;
+  if (wordCount(value) > maxWords || Array.from(value).length > maxCharacters) {
+    problems.push(
+      `shot ${shotIndex}: ${field} must be <=${maxWords} words and <=${maxCharacters} characters`,
+    );
+  }
+}
 
 function optionalText(value: unknown): string | undefined {
   if (typeof value !== "string") return undefined;
@@ -492,10 +518,25 @@ export function normalizeDocuPlan(value: unknown): DocuPlan {
         ];
       }
     }
+    const labels = (Array.isArray(shot.labels) ? shot.labels : [])
+      .filter((label): label is Record<string, unknown> => Boolean(label) && typeof label === "object" && !Array.isArray(label))
+      .flatMap((label) => {
+        const text = optionalText(label.text);
+        const sub = optionalText(label.sub);
+        return text ? [{ text, ...(sub ? { sub } : {}) }] : [];
+      });
+    const annotations = (Array.isArray(shot.annotations) ? shot.annotations : [])
+      .map(optionalText)
+      .filter((annotation): annotation is string => Boolean(annotation));
     return {
       ...shot,
       narration: optionalText(shot.narration) ?? "",
       beat: optionalText(shot.beat) ?? "",
+      title: optionalText(shot.title),
+      kicker: optionalText(shot.kicker),
+      labels: labels.length ? labels : undefined,
+      annotations: annotations.length ? annotations : undefined,
+      circleLabel: optionalText(shot.circleLabel),
       quote: optionalText(shot.quote),
       quoteEmphasis: normalizeQuoteEmphasis(shot.quoteEmphasis),
       attribution: optionalText(shot.attribution),
@@ -580,6 +621,29 @@ export function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuSt
     if (!(s.durationSec >= 3 && s.durationSec <= 10)) problems.push(`shot ${i}: durationSec must be 3-10`);
     if (!s.camera || !CAMERA_MOVES.includes(s.camera.move) || !CAMERA_INTENSITIES.includes(s.camera.intensity))
       problems.push(`shot ${i}: camera must be {move,intensity}`);
+    validateOverlayText(problems, i, "title", s.title, TITLE_MAX_WORDS, TITLE_MAX_CHARACTERS);
+    validateOverlayText(problems, i, "kicker", s.kicker, KICKER_MAX_WORDS, KICKER_MAX_CHARACTERS);
+    validateOverlayText(problems, i, "circleLabel", s.circleLabel, 1, CIRCLE_LABEL_MAX_CHARACTERS);
+    if ((s.labels?.length ?? 0) > MAX_LABELS_PER_SHOT) {
+      problems.push(`shot ${i}: labels must contain <=${MAX_LABELS_PER_SHOT} items`);
+    }
+    for (const [labelIndex, label] of (s.labels ?? []).entries()) {
+      validateOverlayText(problems, i, `label ${labelIndex}`, label.text, LABEL_MAX_WORDS, LABEL_MAX_CHARACTERS);
+      validateOverlayText(problems, i, `label ${labelIndex} sub`, label.sub, LABEL_SUB_MAX_WORDS, LABEL_SUB_MAX_CHARACTERS);
+    }
+    if ((s.annotations?.length ?? 0) > MAX_ANNOTATIONS_PER_SHOT) {
+      problems.push(`shot ${i}: annotations must contain <=${MAX_ANNOTATIONS_PER_SHOT} items`);
+    }
+    for (const [annotationIndex, annotation] of (s.annotations ?? []).entries()) {
+      validateOverlayText(
+        problems,
+        i,
+        `annotation ${annotationIndex}`,
+        annotation,
+        ANNOTATION_MAX_WORDS,
+        ANNOTATION_MAX_CHARACTERS,
+      );
+    }
     const byRole: Record<string, number> = {};
     for (const a of s.assets ?? []) byRole[a.role] = (byRole[a.role] ?? 0) + 1;
     for (const [role, [min, max]] of Object.entries(KIND_ASSETS[s.kind]) as [DocuAssetRole, [number, number]][]) {
@@ -657,7 +721,7 @@ CUE-DRIVEN ASSETS: every asset brief must depict EXACTLY what its shot's narrati
 ON-SCREEN TEXT TONE: titles/kickers/labels/circleLabels must be SHORT, dramatic and tonally on-point for a premium documentary — evocative, never awkward, literal, redundant or accidentally COMICAL. (Bad: an evidence shot titled "THE TRASH". Good: "THE SLIP", "ONE MISTAKE", "THE INSIDER".) When unsure, omit the title and let the imagery speak.`;
 }
 
-/** Gemini Pro plans the shot list for the chosen style. One retry, then loud. */
+/** Pinned OpenRouter creative route plans the shot list. One retry, then loud. */
 export async function planDocu(args: {
   topic: string;
   style: DocuStyleDef;
@@ -706,7 +770,7 @@ export async function planDocu(args: {
   let feedback = "";
   let lastProblems: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
-    const rawPlan = await geminiJsonPro<unknown>({ prompt: base + feedback, maxTokens: 9000, temperature: 0.6, log });
+    const rawPlan = await claudeJsonPro<unknown>({ prompt: base + feedback, maxTokens: 9000, temperature: 0.6, log });
     let plan: DocuPlan;
     try {
       plan = normalizeDocuPlan(rawPlan);
@@ -719,7 +783,6 @@ export async function planDocu(args: {
     plan.styleId = style.id;
     lastProblems = validatePlan(plan, durationSec, style);
     if (!lastProblems.length) {
-      await lintLabels(plan, style, log);
       log?.(`documotion plan [${style.id}]: "${plan.title}" — ${plan.shots.length} shots, narration-driven`);
       return plan;
     }
@@ -733,7 +796,8 @@ export async function planDocu(args: {
  * On-screen TEXT tonal lint — review every title/kicker/label/circleLabel in
  * the context of its shot's narration and rewrite anything awkward, literal,
  * redundant or accidentally comical (the "THE TRASH" problem). Mutates the plan
- * in place; never throws (the plan is already valid).
+ * in place; never throws. The deterministic text contract and final visual
+ * verifier remain authoritative if this optional semantic pass is unavailable.
  */
 async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Promise<void> {
   const items = plan.shots.map((s, i) => ({
@@ -748,7 +812,7 @@ async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Pr
   const hasText = items.some((it) => it.title || it.kicker || it.circleLabel || it.labels.length);
   if (!hasText) return;
   try {
-    const res = await geminiJson<{ fixes?: { i: number; title?: string; kicker?: string; circleLabel?: string; labels?: string[] }[] }>({
+    const res = await claudeJson<{ fixes?: { i: number; title?: string; kicker?: string; circleLabel?: string; labels?: string[] }[] }>({
       prompt:
         `You are the typography editor of a premium ${style.label} documentary. Below is the on-screen TEXT for each ` +
         `shot with its voiceover. A title/label is a DRAMATIC card — it must name the SIGNIFICANCE or stakes, never a ` +
@@ -774,7 +838,10 @@ async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Pr
     }
     if (n) log?.(`documotion label lint: rewrote ${n} on-screen text item(s)`);
   } catch (e) {
-    log?.(`documotion label lint skipped (${e instanceof Error ? e.message : e})`);
+    log?.(
+      `documotion label QUALITY REVIEW UNAVAILABLE (${e instanceof Error ? e.message : e}) — ` +
+      "deterministic text bounds remain enforced and the final visual verifier must still pass",
+    );
   }
 }
 
@@ -785,7 +852,7 @@ async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Pr
  * + period-accurate + composed, and rewrites the on-screen text to carry real
  * INFORMATION (a name / date / place / number) instead of a generic chapter
  * label. It also records the per-shot visualCues the verifier checks. One
- * Gemini-Pro call; mutates the plan. Best-effort — on failure the planner's
+ * OpenRouter creative call; mutates the plan. Best-effort — on failure the planner's
  * briefs stand. (Doctrine in src/lib/visualDirection.ts is reusable by other
  * narrated engines.)
  */
@@ -799,7 +866,7 @@ export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, top
     .join("\n");
   try {
     const geoShots = plan.shots.map((s, i) => ({ s, i })).filter((x) => x.s.kind === "geo_map");
-    const res = await geminiJsonPro<{
+    const res = await claudeJsonPro<{
       shots?: { i: number; assets?: { id: string; brief?: string; source?: "generate" | "archival"; query?: string }[]; title?: string; kicker?: string; circleLabel?: string; labels?: { text: string; sub?: string }[]; annotations?: string[]; cues?: string[]; geoContext?: { label: string; side: "top" | "bottom" | "left" | "right" }[] }[];
     }>({
       prompt:
@@ -812,7 +879,7 @@ export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, top
           ? `GEO ORIENTATION — for the geo_map shot(s) [${geoShots.map((x) => x.i).join(", ")}], also give "geoContext": 2-4 orienting labels that place the feature so the viewer sees WHERE it is and what it connects, in relation to the line. Use REAL surrounding geography with the correct side: e.g. a N–S canal → {"label":"MEDITERRANEAN SEA","side":"top"},{"label":"RED SEA","side":"bottom"},{"label":"EGYPT","side":"left"},{"label":"SINAI","side":"right"}.\n\n`
           : "") +
         `${shotReqs}\n\n` +
-        `Return STRICT JSON {"shots":[{"i":n,"assets":[{"id":"bg","brief":"rich, specific, composed PICTURE-ONLY brief — name the real subject, show the action + key objects, set framing/lighting/era","source":"generate|archival","query":"<only if archival: a precise unambiguous subject>"}],"title":"SPECIFIC headline — a name / number / place, not an abstraction (<=4 words)","kicker":"informative qualifier <=6 words","circleLabel":"ring/geo word if any","labels":[{"text":"specific callout <=4 words","sub":"opt note"}],"annotations":["opt margin note"],"cues":["concrete thing the frame MUST show","2-4 of these"],"geoContext":[{"label":"MEDITERRANEAN SEA","side":"top"}]}]}.`,
+        `Return STRICT JSON {"shots":[{"i":n,"assets":[{"id":"bg","brief":"rich, specific, composed PICTURE-ONLY brief — name the real subject, show the action + key objects, set framing/lighting/era","source":"generate|archival","query":"<only if archival: a precise unambiguous subject>"}],"title":"SPECIFIC headline — a name / number / place, not an abstraction (<=3 words)","kicker":"informative qualifier <=6 words","circleLabel":"ring/geo word if any","labels":[{"text":"specific callout <=3 words","sub":"opt note <=6 words"}],"annotations":["opt margin note <=6 words"],"cues":["concrete thing the frame MUST show","2-4 of these"],"geoContext":[{"label":"MEDITERRANEAN SEA","side":"top"}]}]}.`,
       maxTokens: 4000,
       temperature: 0.5,
     });
@@ -1304,7 +1371,10 @@ const VERIFIER_DOCTRINE =
 const VERIFIER_CHECKLIST =
   `THE CRAFT CHECKLIST:\n` +
   `1. TYPE: engine headlines HUGE (>=12% of frame height), readable at a glance, never lost in a busy plate; a ` +
-  `headline's first characters may tuck behind a foreground cutout (the style) but stay recognisable. 2. CUTOUTS: ` +
+  `headline's first characters may tuck behind a foreground cutout (the style) but stay recognisable. Typography ` +
+  `must also read like premium editorial copy: awkward raw sentence fragments, duplicated labels, internal pipeline ` +
+  `jargon, or a mundane object treated as a dramatic hero (for example “THE TRASH”) force typeCraft <=4. ` +
+  `2. CUTOUTS: ` +
   `hero/object cutouts read as INTENTIONAL die-cut pieces — clean edges, no half-dissolved subjects, clear ` +
   `separation from the plate. 3. COMPOSITION: one clear focal point, breathing room, nothing important buried, ` +
   `labels not colliding with faces/titles. 4. STYLE: cohesive world — same palette/grade/grain across shots. ` +
@@ -1543,7 +1613,6 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     if (suppliedProblems.length) {
       throw new Error(`documotion: supplied plan failed validation (${suppliedProblems.join("; ")})`);
     }
-    await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
     log(`documotion: using supplied locked plan (${plan.shots.length} shots, style ${plan.styleId})`);
   } else if (existsSync(planPath)) {
     plan = normalizeDocuPlan(JSON.parse(await readFile(planPath, "utf8")));
@@ -1553,18 +1622,26 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
         `documotion: cached plan failed validation before provider work (${cachedProblems.join("; ")})`,
       );
     }
-    // Persist the normalized form once, so future resumes inherit the stable
-    // runtime schema instead of repeatedly handling old provider quirks.
-    await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
     log(`documotion: plan loaded from cache (${plan.shots.length} shots, style ${plan.styleId})`);
   } else {
     plan = await planDocu({ topic: args.topic, style, referenceNotes: args.referenceNotes, durationSec, log });
-    await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
   }
   if (plan.shots.some((s) => !s.visualCues)) {
     await directDocuVisuals(plan, style, args.topic, log);
-    await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8"); // persist so re-runs skip it
   }
+  // Every entry route (fresh, supplied, and cached) receives the same text
+  // review. This used to run only inside the optional planner, so production's
+  // locked Short plan bypassed it completely. Normalize the untrusted response,
+  // re-validate the exact render ABI, then persist only the reviewed safe plan.
+  await lintLabels(plan, style, log);
+  plan = normalizeDocuPlan(plan);
+  const directedProblems = validatePlan(plan, durationSec, style);
+  if (directedProblems.length) {
+    throw new Error(
+      `documotion: directed plan failed final validation before image or TTS spend (${directedProblems.join("; ")})`,
+    );
+  }
+  await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
 
   // 2. ASSETS (gated, pooled, cached) + GEO geometry for any geo_map shots
   let assets = await imageUsageScope.run(() =>

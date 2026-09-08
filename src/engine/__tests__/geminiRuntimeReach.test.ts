@@ -15,9 +15,8 @@
  *              runPipeline and designChannelInception — so every
  *              architect-authored module with an llm_json step failed at
  *              execution. Now on claudeJson.
- *   CAUGHT     it degrades. documotion's label lint and cinematographer pass are
- *              both caught and both name the loss, and the policy message
- *              reaches the log, so a reader can tell.
+ * DocuMotion's former direct-Gemini planning/enrichment calls now use the same
+ * pinned OpenRouter route as the rest of the creative-text system.
  *
  * This pins the boundary rather than the individual sites: the two entry points
  * that reach the forge must not regain a Gemini dependency, and a capability
@@ -28,7 +27,6 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { hasDocumotion } from "@/lib/documotion";
-import { isGeminiRuntimeEnabled } from "@/lib/gemini";
 
 const read = (path: string) =>
   readFileSync(join(process.cwd(), path), "utf8")
@@ -42,13 +40,17 @@ const read = (path: string) =>
 // says yes and then throws is worse than one that says no: the caller has
 // already committed by the time it finds out.
 const saved = process.env.GEMINI_API_KEY;
+const savedOpenRouter = process.env.OPENROUTER_API_KEY;
 process.env.GEMINI_API_KEY = "a-real-looking-key";
 try {
+  delete process.env.OPENROUTER_API_KEY;
   assert.equal(
     hasDocumotion({ requiresPlanning: true }),
-    isGeminiRuntimeEnabled(),
-    "documotion planning is available exactly when the Gemini RUNTIME is, never merely when a key is present",
+    false,
+    "a direct Gemini key must never advertise DocuMotion planning",
   );
+  process.env.OPENROUTER_API_KEY = "test-openrouter-key";
+  assert.equal(hasDocumotion({ requiresPlanning: true }), true, "the pinned OpenRouter route enables planning");
   assert.equal(
     hasDocumotion({ requiresPlanning: false }),
     true,
@@ -57,6 +59,8 @@ try {
 } finally {
   if (saved === undefined) delete process.env.GEMINI_API_KEY;
   else process.env.GEMINI_API_KEY = saved;
+  if (savedOpenRouter === undefined) delete process.env.OPENROUTER_API_KEY;
+  else process.env.OPENROUTER_API_KEY = savedOpenRouter;
 }
 
 /* ------------------- the forge runs on the permitted route ---------------- */
@@ -84,12 +88,15 @@ for (const path of ["src/trigger/runPipeline.ts", "src/trigger/designChannelInce
   );
 }
 
-/* ----------------------- degrading sites still say so --------------------- */
+/* ---------------- DocuMotion text work uses the permitted route ----------- */
 
-// documotion's two optional passes are allowed to fail — they are enrichment —
-// but a reader of the run log has to be able to tell that they did.
 const documotion = read("src/lib/documotion.ts");
-for (const marker of ["label lint skipped", "cinematographer pass skipped"]) {
+assert.ok(
+  !/\bgeminiJson\s*[<(]/.test(documotion) && !/\bgeminiJsonPro\s*[<(]/.test(documotion),
+  "DocuMotion planning and text enrichment must not call the disabled direct Gemini runtime",
+);
+assert.match(documotion, /claudeJsonPro</, "DocuMotion planning must use the pinned OpenRouter creative route");
+for (const marker of ["label QUALITY REVIEW UNAVAILABLE", "cinematographer pass skipped"]) {
   assert.ok(
     documotion.includes(marker),
     `documotion's optional pass must name its loss ("${marker}") rather than failing silently`,

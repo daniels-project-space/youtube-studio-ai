@@ -39,6 +39,21 @@ const DOCUMENTARY_SHORT_ROLES = [
   "cta",
 ] as const;
 
+const DOCUMENTARY_SHORT_HEADLINES: Record<typeof DOCUMENTARY_SHORT_ROLES[number], string> = {
+  hook: "THE HIDDEN CLUE",
+  context: "BEHIND THE STORY",
+  conflict: "THE STORY BREAKS",
+  escalation: "THE PAPER TRAIL",
+  reversal: "THE RECORD FLIPS",
+  payoff: "WHAT IT CHANGED",
+  cta: "LOOK AGAIN",
+};
+
+const DOCUMENTARY_EVIDENCE_LABELS: Partial<Record<typeof DOCUMENTARY_SHORT_ROLES[number], string>> = {
+  conflict: "CONFLICTING ACCOUNTS",
+  reversal: "THE TURNING POINT",
+};
+
 const DOCUMENTARY_SHORT_KINDS: readonly DocuShotKind[] = [
   "parallax_portrait",
   "evidence_board",
@@ -605,7 +620,7 @@ export function evaluateDocumentaryShortSceneQa(input: DocumentaryShortSceneQaIn
 
 function docuShotForBeat(beat: ShortBeat, index: number): DocuShotPlan {
   const kind = DOCUMENTARY_SHORT_KINDS[index] ?? "photo_slide";
-  const caption = overlayText(beat.scene.caption.text);
+  const supportingCopy = shortPhrase(beat.scene.caption.text, 6, 56);
   const camera = cameraForMotion(beat.scene.motion.primary.family, beat.scene.motion.primary.intensity, index);
   const visualCues = [beat.scene.primaryVisualEvent, ...beat.scene.layers.flatMap((layer) => layer.content ? [layer.content] : [])]
     .map((cue) => briefText(cue, 220));
@@ -618,13 +633,15 @@ function docuShotForBeat(beat: ShortBeat, index: number): DocuShotPlan {
     beat: beat.scene.primaryVisualEvent,
     durationSec: beat.scene.durationSec,
     camera,
-    title: caption,
-    kicker: beat.role,
-    labels: kind === "evidence_board" ? [
-      { text: caption },
-      { text: beat.role.toUpperCase() },
-      { text: "SOURCE-TRACEABLE" },
-    ] : [{ text: beat.role.toUpperCase(), sub: caption }],
+    // These are safe editorial fallbacks, not raw narration fragments or
+    // internal pipeline jargon. The OpenRouter text editor may make them more
+    // story-specific before render, while a provider outage still leaves
+    // concise, tonally credible copy inside the strict typography bounds.
+    title: DOCUMENTARY_SHORT_HEADLINES[beat.role],
+    kicker: supportingCopy,
+    labels: kind === "evidence_board"
+      ? [{ text: DOCUMENTARY_EVIDENCE_LABELS[beat.role] ?? "THE EVIDENCE" }]
+      : undefined,
     // Reuse the manifest asset id for the primary generated plate. The render
     // receipt can therefore prove this exact planned asset—not merely some
     // image generated in the same beat—passed the approval gate.
@@ -632,7 +649,7 @@ function docuShotForBeat(beat: ShortBeat, index: number): DocuShotPlan {
     visualCues,
   };
   if (kind === "quote_card") {
-    shot.quote = shortPhrase(beat.audio.narration.text, 16);
+    shot.quote = shortPhrase(beat.audio.narration.text, 14, 120);
     delete shot.title;
     delete shot.labels;
   }
@@ -854,8 +871,9 @@ function overlayText(value: string): string {
   return shortPhrase(value, 10).toUpperCase();
 }
 
-function shortPhrase(value: string, maxWords: number): string {
+function shortPhrase(value: string, maxWords: number, maxCharacters = Number.POSITIVE_INFINITY): string {
   const words = value.replace(/\s+/g, " ").trim().split(" ").filter(Boolean).slice(0, maxWords);
+  while (words.length > 0 && Array.from(words.join(" ")).length > maxCharacters) words.pop();
   return words.join(" ").replace(/[,:;]+$/g, "") || "DOCUMENTARY BEAT";
 }
 

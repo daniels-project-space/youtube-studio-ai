@@ -6,6 +6,8 @@ import {
   mineDocumentarySpinoffCandidates,
   shortRetentionManifestForStrategy,
 } from "../documentaryCollageShort";
+import { validatePlan } from "@/lib/documotion";
+import { DOCU_STYLES } from "@/remotion/docuStyles";
 
 const narration = [
   "In 1911 a single decision set an entire city on a path nobody expected, and the first clue was hiding in plain sight.",
@@ -57,6 +59,23 @@ function run(): void {
   assert.ok(
     plan.shots.every((shot, index) => shot.assets?.some((asset) => asset.id === manifest.assets[index]?.id)),
     "each beat must carry its exact manifest asset id into the renderer plan",
+  );
+  assert.deepEqual(
+    validatePlan(plan, 52, DOCU_STYLES.archival_collage),
+    [],
+    "the exact deterministic production plan must satisfy DocuMotion before any paid image or TTS work",
+  );
+  assert.ok(
+    plan.shots.every((shot) => !shot.title || shot.title.split(/\s+/).length <= 3),
+    "production headlines must honor the three-word renderer contract",
+  );
+  assert.ok(
+    plan.shots.every((shot) => !shot.quote || shot.quote.split(/\s+/).length <= 14),
+    "production quote cards must honor the fourteen-word renderer contract",
+  );
+  assert.ok(
+    plan.shots.every((shot) => !(shot.labels ?? []).some((label) => /SOURCE-TRACEABLE|HOOK|CTA/.test(label.text))),
+    "viewer-facing copy must not expose internal pipeline roles or provenance jargon",
   );
 
   const retention = shortRetentionManifestForStrategy(manifest);
