@@ -9,6 +9,7 @@ import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 
 import { renderAppPage, stubCssImports } from "@/lib/testSupport/renderAppPage";
+import { GOLDEN_MODULES } from "@/engine/golden";
 
 async function main(): Promise<void> {
   stubCssImports(createRequire(import.meta.url));
@@ -24,7 +25,7 @@ async function main(): Promise<void> {
   assert.match(html, /Final-master review/);
   assert.match(html, /Automatic/);
   assert.match(html, /Supervised \/ private/);
-  assert.match(html, /CATALOG ONLY/);
+  assert.match(html, /Catalog only · no compiler binding/);
   assert.match(html, /Studio Asset Library/);
   assert.match(html, /IC controls remain unavailable until exact workflow/);
   assert.match(html, /MANIFEST REFERENCE/);
@@ -34,10 +35,15 @@ async function main(): Promise<void> {
   assert.match(html, /SHA-256/);
   assert.equal(
     html.match(/<details/g)?.length,
-    7,
-    "five catalog disciplines plus foundation and audit evidence stay collapsed by default",
+    GOLDEN_MODULES.length + 7,
+    "every module is a native disclosure inside the five catalog disciplines",
   );
-  assert.doesNotMatch(html, /<details[^>]*\sopen(?:=|\s|>)/);
+  assert.equal(
+    html.match(/<details[^>]*\sopen(?:=|\s|>)/g)?.length,
+    1,
+    "the first discipline is discoverable while modules and secondary truth sections remain compact",
+  );
+  assert.equal(html.match(/data-module-key=/g)?.length, GOLDEN_MODULES.length);
   assert.equal(
     html.match(/role="heading" aria-level="2"/g)?.length,
     5,

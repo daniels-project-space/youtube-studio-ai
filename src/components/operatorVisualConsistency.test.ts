@@ -27,6 +27,7 @@ const runDetailCss = read("src/app/(app)/runs/[runId]/runDetail.module.css");
 const logConsole = read("src/components/LogConsole.tsx");
 const logConsoleCss = read("src/components/LogConsole.module.css");
 const releaseEvidenceBadge = read("src/components/ReleaseEvidenceBadge.tsx");
+const golden = read("src/app/(app)/golden/page.tsx");
 
 // A shared header is the visual anchor for the main operator pages. Its action
 // state must be structural, not a page-specific style hack.
@@ -88,10 +89,15 @@ assert.match(runCard, /data-release-evidence=\{run\.releaseEvidenceStatus\}/);
 assert.match(globalCss, /\.run-card\[data-status="running"\]/);
 assert.match(globalCss, /\.video-card-media::after/);
 
-// Everyday work stays in one six-item rail. Specialist destinations remain
-// reachable behind one native disclosure, while four actions form the dock.
-for (const route of ["/runs", "/schedule", "/library", "/analytics", "/seo", "/editorial-evidence", "/casefile", "/studio-assets", "/golden", "/novita-render"]) {
+// Everyday work stays in the primary rail. The global toolbox exposes only
+// cross-channel insight surfaces; specialist desks live inside the relevant
+// expandable Golden module instead of competing with daily navigation.
+for (const route of ["/runs", "/schedule", "/library", "/analytics", "/golden"]) {
   assert.match(sidebar, new RegExp(`href: \\"${route.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}\\"`));
+}
+for (const route of ["/seo", "/editorial-evidence", "/casefile", "/studio-assets", "/novita-render", "/lofi", "/loreshort"]) {
+  assert.doesNotMatch(sidebar, new RegExp(`href: \\"${route.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}\\"`));
+  assert.match(golden, new RegExp(`href: \\"${route.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}\\"`));
 }
 assert.match(sidebar, /const PRIMARY_NAV_ITEMS = \[[\s\S]*href: "\/runs"[\s\S]*href: "\/schedule"[\s\S]*href: "\/analytics"/);
 assert.match(sidebar, /const TOOLBOX_NAV_GROUPS = \[/);

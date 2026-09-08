@@ -1,4 +1,5 @@
 import { OwnerLockBadge } from "@/components/OwnerLockBadge";
+import Link from "next/link";
 import { GOLDEN_MODULES, type GoldenModule } from "@/engine/golden";
 import {
   catalogExecutionAvailability,
@@ -196,6 +197,98 @@ function blurb(how: string): string {
 }
 function take2<T>(xs: readonly T[]): T[] { return xs.slice(0, 2); }
 
+type ModuleDestination = { href: string; label: string };
+type ModuleCover = { src: string; alt: string; status: "reference" | "context" };
+
+const MODULE_DESTINATIONS: Readonly<Record<string, ModuleDestination>> = {
+  "novita-render-farm": { href: "/novita-render", label: "Open render fleet" },
+  "imagecraft-novita": { href: "/novita-render", label: "Open render fleet" },
+  "videocraft-novita": { href: "/novita-render", label: "Open render fleet" },
+  lofi: { href: "/lofi", label: "Open music references" },
+  loreshort: { href: "/loreshort", label: "Open lore references" },
+  "studio-assets": { href: "/studio-assets", label: "Open Studio assets" },
+  cinematic: { href: "/casefile", label: "Open Casefile desk" },
+  "casefile-documentary": { href: "/casefile", label: "Open Casefile desk" },
+  "casefile-evidence-shot-map": { href: "/casefile", label: "Open Casefile desk" },
+  "editorial-evidence-packet": { href: "/editorial-evidence", label: "Open evidence desk" },
+  "source-bound-story-spine": { href: "/editorial-evidence", label: "Open evidence desk" },
+  "topic-intel": { href: "/seo", label: "Open packaging research" },
+  metadata: { href: "/seo", label: "Open packaging research" },
+};
+
+const MODULES_WITH_PROOF = new Set([
+  "channel-planner",
+  "topic-intel",
+  "show-bible",
+  "script",
+  "loreshort",
+  "novita-render-farm",
+  "quiz",
+  "cinematic",
+  "documotion",
+  "speech-tv",
+  "shorts",
+  "lofi",
+  "whiteboard",
+  "comic",
+  "thumbnail",
+  "studio-assets",
+  "package-opening-proof",
+  "motioncraft",
+  "narration",
+  "assemble",
+  "metadata",
+  "final-master-story-coverage",
+]);
+
+function moduleCover(moduleKey: string): ModuleCover | undefined {
+  const cover = (() => {
+    if (moduleKey === "thumbnail") return PROOFS[0];
+    if (moduleKey === "cinematic") return CINEMATIC_PROOFS[0];
+    if (moduleKey === "loreshort") return LORESHORT_PROOFS[0]?.poster;
+    if (moduleKey === "quiz") return QUIZ_PROOFS[0]?.poster;
+    if (moduleKey === "motioncraft") return MOTION_PROOFS[0]?.poster;
+    if (["novita-render-farm", "imagecraft-novita", "videocraft-novita"].includes(moduleKey)) {
+      return NOVITA_PROOFS[0]?.poster;
+    }
+    if (moduleKey === "lofi") return LOFI_PROOFS[0]?.media;
+    if (moduleKey === "whiteboard") return contextMedia("whiteboard-chiquita-image", "image");
+    if (moduleKey === "comic") return contextMedia("comic-comic3d-image", "image");
+    return undefined;
+  })();
+  if (!cover) return undefined;
+  if ("src" in cover) {
+    return { src: cover.src, alt: cover.alt, status: cover.status };
+  }
+  if (cover.kind === "video" || cover.kind === "audio") return undefined;
+  return {
+    src: cover.url,
+    alt: cover.id,
+    status: cover.status,
+  };
+}
+
+function moduleEvidenceLabel(moduleKey: string): string {
+  if (["loreshort", "quiz", "motioncraft", "novita-render-farm", "documotion", "whiteboard", "comic"].includes(moduleKey)) return "Video evidence";
+  if (["thumbnail", "lofi", "cinematic"].includes(moduleKey)) return "Visual references";
+  if (moduleKey === "narration") return "Voice references";
+  if (["package-opening-proof", "final-master-story-coverage"].includes(moduleKey)) return "Evidence flow";
+  if (["channel-planner", "topic-intel", "show-bible", "script", "shorts", "studio-assets", "assemble", "metadata"].includes(moduleKey)) return "Working specimens";
+  return "Contract & gates";
+}
+
+function moduleGlyph(moduleKey: string): string {
+  if (moduleKey.includes("thumbnail") || moduleKey === "visuals") return "◇";
+  if (moduleKey.includes("voice") || moduleKey === "narration") return "∿";
+  if (moduleKey.includes("script") || moduleKey.includes("story")) return "¶";
+  if (moduleKey.includes("music") || moduleKey === "lofi") return "♫";
+  if (moduleKey.includes("render") || moduleKey.includes("video")) return "▶";
+  if (moduleKey.includes("evidence") || moduleKey.includes("verify") || moduleKey.includes("guard")) return "✓";
+  if (moduleKey.includes("asset") || moduleKey.includes("layer")) return "▦";
+  if (moduleKey.includes("plan") || moduleKey.includes("topic")) return "◎";
+  return "G";
+}
+
 function catalogStatusRank(status: GoldenModule["status"]): number {
   if (status === "reference") return 0;
   if (status === "registered") return 1;
@@ -300,6 +393,7 @@ export default function GoldenPipelinePage() {
             key={cat}
             className={styles.chapter}
             aria-label={`${cat} Golden modules`}
+            open={categoryIndex === 0}
           >
             <summary className={styles.chapterSummary}>
               <span className={styles.chapterIndex}>{String(categoryIndex + 1).padStart(2, "0")}</span>
@@ -550,49 +644,89 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
   const availability = catalogExecutionAvailability(execution);
   const promotionProof = GOLDEN_PROMOTION_PROOFS[m.key];
   const executionIsWarning = execution.kind === "catalog-only" || execution.kind === "registered-private-release";
+  const destination = MODULE_DESTINATIONS[m.key];
+  const cover = moduleCover(m.key);
+  const binding = execution.kind === "pipeline-module"
+    ? `Executable · ${execution.executableIds.join(" · ")}`
+    : execution.kind === "registered-private-release"
+      ? `Private-release block · ${execution.executableIds.join(" · ")}`
+      : execution.kind === "external-task"
+        ? `External task · ${execution.executableIds.join(" · ")}`
+        : "Catalog only · no compiler binding";
   return (
-    <article className={styles.moduleCard} data-reference={isReference}>
-      <div className={styles.moduleHead}>
-        <span>{m.stage}</span>
-        {/* Every catalog module is lockable and starts unlocked; the key IS the lock id. */}
-        <OwnerLockBadge kind="module" moduleId={m.key} label={m.title} size="sm" />
-        {isReference
-          ? <span className={styles.moduleStatus} data-tone="reference">REFERENCE CANDIDATE</span>
-          : isRegistered
-            ? <span className={styles.moduleStatus} data-tone="registered">REGISTERED · NO INTAKE</span>
-            : <span className={styles.moduleStatus} data-tone="active">ACTIVE</span>}
-      </div>
+    <details
+      className={styles.moduleCard}
+      data-reference={isReference}
+      data-module-key={m.key}
+    >
+      <summary className={styles.moduleSummary}>
+        <span className={styles.moduleVisual} data-has-cover={cover ? "true" : "false"}>
+          {cover ? (
+            // eslint-disable-next-line @next/next/no-img-element -- manifest-resolved card cover
+            <img src={cover.src} alt="" loading="lazy" />
+          ) : (
+            <span aria-hidden="true">{moduleGlyph(m.key)}</span>
+          )}
+          {cover?.status === "context" ? <small>Context</small> : null}
+        </span>
+        <span className={styles.moduleSummaryCopy}>
+          <small>{m.stage}</small>
+          <span role="heading" aria-level={3}>{m.title}</span>
+          <span>{blurb(m.how)}</span>
+        </span>
+        <span className={styles.moduleSummaryMeta}>
+          {isReference
+            ? <span className={styles.moduleStatus} data-tone="reference">REFERENCE</span>
+            : isRegistered
+              ? <span className={styles.moduleStatus} data-tone="registered">REGISTERED</span>
+              : <span className={styles.moduleStatus} data-tone="active">ACTIVE</span>}
+          <small>{moduleEvidenceLabel(m.key)}</small>
+        </span>
+        <span className={styles.moduleToggle} aria-hidden="true">+</span>
+      </summary>
 
-      <h3>{m.title}</h3>
-      <div className={styles.executionBinding} data-warning={executionIsWarning}>
-        {execution.kind === "pipeline-module"
-          ? `EXECUTABLE BINDING · ${execution.executableIds.join(" · ")} · NOT PROMOTED`
-          : execution.kind === "registered-private-release"
-            ? `REGISTERED PRIVATE-RELEASE BLOCK · ${execution.executableIds.join(" · ")} · NO OWNER INTAKE · NOT ROUTE-EXECUTABLE`
-            : execution.kind === "external-task"
-              ? `EXTERNAL TASK · ${execution.executableIds.join(" · ")} · NOT PROMOTED`
-            : "CATALOG ONLY · NOT COMPILER-EXECUTABLE · NOT PROMOTED"}
+      <div className={styles.moduleBody}>
+        <div className={styles.moduleToolbar}>
+          {/* Every catalog module is lockable and starts unlocked; the key IS the lock id. */}
+          <OwnerLockBadge kind="module" moduleId={m.key} label={m.title} size="sm" />
+          {destination ? <Link href={destination.href}>{destination.label}<span aria-hidden="true">↗</span></Link> : null}
+        </div>
+        <div className={styles.moduleFacts}>
+          <div data-warning={executionIsWarning}>
+            <small>Runtime binding</small>
+            <strong>{binding}</strong>
+            <span>{executionIsWarning ? "Not route-executable" : "Connected to the production compiler"}</span>
+          </div>
+          <div data-state={availability.state}>
+            <small>Availability</small>
+            <strong>{availability.label}</strong>
+            <span>{availability.detail}</span>
+          </div>
+          <div data-proof={promotionProof ? "true" : "false"}>
+            <small>Promotion</small>
+            <strong>{promotionProof ? `Recorded ${promotionProof.verifiedAt}` : "Not promoted"}</strong>
+            <span>{promotionProof ? "Immutable production proof is registered" : "No production-promotion receipt recorded"}</span>
+          </div>
+        </div>
+        <div className={styles.moduleDoctrine}>
+          <p>{m.how}</p>
+          <ul className={styles.gates}>
+            {m.gates.slice(0, 3).map((gate) => (
+              <li key={gate}>
+                <span aria-hidden="true">↳</span>
+                <span>{gate}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        {MODULES_WITH_PROOF.has(m.key) ? (
+          <section className={styles.moduleEvidence} aria-label={`${m.title} evidence`}>
+            <header><span>Evidence</span><small>{moduleEvidenceLabel(m.key)}</small></header>
+            <ProofStrip moduleKey={m.key} />
+          </section>
+        ) : null}
       </div>
-      <div className={styles.availability} data-state={availability.state}>
-        <span>{availability.label}</span>
-        <p>{availability.detail}</p>
-        <small>
-          PROMOTION EVIDENCE · {promotionProof ? `RECORD ${promotionProof.verifiedAt}` : "NO PRODUCTION-PROMOTION RECEIPT RECORDED"}
-        </small>
-      </div>
-      <p className={styles.moduleBlurb}>{blurb(m.how)}</p>
-
-      <ul className={styles.gates}>
-        {m.gates.slice(0, 3).map((g) => (
-          <li key={g}>
-            <span aria-hidden="true">↳</span>
-            <span>{g}</span>
-          </li>
-        ))}
-      </ul>
-
-      <ProofStrip moduleKey={m.key} />
-    </article>
+    </details>
   );
 }
 

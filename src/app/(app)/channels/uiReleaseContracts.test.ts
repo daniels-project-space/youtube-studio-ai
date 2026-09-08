@@ -18,6 +18,7 @@ const recentVideos = readFileSync(join(root, "src/components/RecentVideos.tsx"),
 const statusBanner = readFileSync(join(root, "src/components/StatusBanner.tsx"), "utf8");
 const settings = readFileSync(join(root, "src/app/(app)/settings/page.tsx"), "utf8");
 const sidebar = readFileSync(join(root, "src/components/Sidebar.tsx"), "utf8");
+const golden = readFileSync(join(root, "src/app/(app)/golden/page.tsx"), "utf8");
 const scheduleCss = readFileSync(join(root, "src/app/(app)/schedule/schedule.module.css"), "utf8");
 const designer = readFileSync(join(root, "src/engine/designer.ts"), "utf8");
 const auditScript = readFileSync(join(root, "scripts/ui-fifth-pass-audit.mjs"), "utf8");
@@ -199,12 +200,16 @@ assert.doesNotMatch(sidebar, /Specialist tools, tucked away/);
 assert.match(sidebar, />Workspace<\/span>/);
 assert.match(sidebar, /<strong>Tools<\/strong>/);
 assert.match(sidebar, /<strong>Draft mode<\/strong>/);
-// The rail keeps production primary and preserves packaging research in the
-// disclosed specialist toolbox. Channel cards still own their guarded actions.
+// The rail keeps production primary and reduces Tools to cross-channel insight
+// surfaces. Specialist desks remain reachable from their relevant Golden card.
 assert.match(sidebar, /href:\s*["']\/runs["']/);
-assert.match(sidebar, /href:\s*["']\/seo["']/);
+assert.match(sidebar, /href:\s*["']\/golden["']/);
 assert.match(sidebar, /const PRIMARY_NAV_ITEMS[\s\S]*href:\s*["']\/runs["']/);
-assert.match(sidebar, /const TOOLBOX_NAV_GROUPS[\s\S]*href:\s*["']\/seo["']/);
+assert.match(sidebar, /const TOOLBOX_NAV_GROUPS[\s\S]*href:\s*["']\/golden["']/);
+for (const route of ["seo", "editorial-evidence", "casefile", "studio-assets", "novita-render", "lofi", "loreshort"]) {
+  assert.doesNotMatch(sidebar, new RegExp(`href:\\s*[\"']/${route}[\"']`));
+  assert.match(golden, new RegExp(`href: \\"/${route}\\"`));
+}
 assert.doesNotMatch(sidebar, /Novita Render/);
 assert.match(sidebar, /MOBILE_PRIMARY_COUNT/);
 assert.match(channels, /channel-live-state/);

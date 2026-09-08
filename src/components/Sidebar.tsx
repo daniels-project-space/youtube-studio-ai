@@ -9,16 +9,10 @@ import {
   IconRuns,
   IconLibrary,
   IconAnalytics,
-  IconSeo,
   IconSettings,
   IconSpark,
   IconCalendar,
   IconGolden,
-  IconTerminal,
-  IconLofi,
-  IconLore,
-  IconAssets,
-  IconEvidence,
   IconToolbox,
 } from "./icons";
 import { StudioMark } from "./StudioMark";
@@ -33,27 +27,10 @@ const PRIMARY_NAV_ITEMS = [
 
 const TOOLBOX_NAV_GROUPS = [
   {
-    label: "Intelligence",
+    label: "Insights",
     items: [
       { href: "/analytics", label: "Analytics", icon: <IconAnalytics /> },
-      { href: "/seo", label: "Packaging research", icon: <IconSeo /> },
-      { href: "/editorial-evidence", label: "Editorial evidence", icon: <IconEvidence /> },
-    ],
-  },
-  {
-    label: "Library systems",
-    items: [
-      { href: "/studio-assets", label: "Studio assets", icon: <IconAssets /> },
       { href: "/golden", label: "Golden modules", icon: <IconGolden /> },
-      { href: "/casefile", label: "Casefile", icon: <IconEvidence /> },
-    ],
-  },
-  {
-    label: "Infrastructure",
-    items: [
-      { href: "/novita-render", label: "Render fleet", icon: <IconTerminal /> },
-      { href: "/lofi", label: "Music references", icon: <IconLofi /> },
-      { href: "/loreshort", label: "Lore references", icon: <IconLore /> },
     ],
   },
 ];

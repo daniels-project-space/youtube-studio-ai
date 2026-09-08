@@ -15,7 +15,12 @@ assert.match(page, /Five production disciplines/);
 assert.match(page, /Open a module to inspect its tests and examples\./);
 assert.match(page, /data-empty=\{receiptCount === 0\}/);
 assert.match(page, /data-warning=\{executionIsWarning\}/);
-assert.match(page, /CATALOG ONLY · NOT COMPILER-EXECUTABLE · NOT PROMOTED/);
+assert.match(page, /Catalog only · no compiler binding/);
+assert.match(page, /data-module-key=\{m\.key\}/);
+assert.match(page, /className=\{styles\.moduleSummary\}/);
+assert.match(page, /const MODULE_DESTINATIONS/);
+assert.match(page, /href=\{destination\.href\}/);
+assert.match(page, /MODULES_WITH_PROOF\.has\(m\.key\)/);
 assert.doesNotMatch(page, /<PageHeader/);
 assert.doesNotMatch(page, /className="glass/);
 assert.doesNotMatch(page, /style=\{\{(?! width:)/,
@@ -26,6 +31,9 @@ assert.match(styles, /\.admissionGrid/);
 assert.match(styles, /\.foundationBody ol/);
 assert.match(styles, /\.chapterSummary/);
 assert.match(styles, /\.moduleCard/);
+assert.match(styles, /\.moduleCard\[open\]/);
+assert.match(styles, /\.moduleSummary:focus-visible/);
+assert.match(styles, /\.moduleFacts/);
 assert.match(styles, /@keyframes assayTurn/);
 assert.match(styles, /prefers-reduced-motion: reduce/);
 
