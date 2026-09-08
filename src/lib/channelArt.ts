@@ -23,10 +23,24 @@ import {
   NANO_BANANA_AVATAR_PROFILE,
   type NanoBananaAvatarReceipt,
 } from "@/lib/nanoBananaAvatarContract";
-import { channelKey, putObject } from "@/lib/storage";
+import {
+  channelKey,
+  getObjectBytes,
+  headObjectMetadata,
+  putObject,
+} from "@/lib/storage";
+import { sha256BytesHex } from "@/lib/sha256";
 import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
-import { channelArtIdentityFromSource } from "@/lib/channelArtIdentity";
-import type { ArtIdentity } from "@/lib/channelArtIdentity";
+import {
+  CHANNEL_ART_PROMPT_VERSION,
+  CHANNEL_ART_PROVENANCE_VERSION,
+  channelArtApprovalKey,
+  channelArtDirectionFingerprint,
+} from "@/lib/channelArtIdentity";
+import type {
+  ArtIdentity,
+  ChannelArtAssetProvenance,
+} from "@/lib/channelArtIdentity";
 
 export { channelArtIdentityFromSource } from "@/lib/channelArtIdentity";
 export type { ArtIdentity, ChannelArtIdentitySource } from "@/lib/channelArtIdentity";
@@ -58,6 +72,7 @@ export interface ChannelArtRuntime {
   readBytes(path: string): Promise<Uint8Array>;
   writeBytes(path: string, bytes: Uint8Array): Promise<void>;
   putImmutable(key: string, bytes: Uint8Array, contentType: string): Promise<string>;
+  getImmutable(key: string): Promise<{ bytes: Uint8Array; contentType?: string } | null>;
   createVersion(kind: ArtKind): string;
 }
 
@@ -97,6 +112,7 @@ interface AcceptedArt {
   sourceKey: string;
   score: number;
   attempts: number;
+  provenance: ChannelArtAssetProvenance;
 }
 
 const SCORE_THRESHOLD: Record<ArtKind, number> = {
@@ -131,8 +147,32 @@ const DEFAULT_RUNTIME: ChannelArtRuntime = {
     const { writeFile } = await import("node:fs/promises");
     await writeFile(path, bytes);
   },
-  putImmutable: (key, bytes, contentType) =>
-    putObject(key, bytes, { contentType, ifNoneMatch: "*" }),
+  putImmutable: async (key, bytes, contentType) => {
+    try {
+      return await putObject(key, bytes, { contentType, ifNoneMatch: "*" });
+    } catch (error) {
+      // A worker retry may reach a deterministic key written immediately
+      // before a crash. Reuse it only when both media type and exact bytes are
+      // identical; a different payload at the same key remains a hard error.
+      const existing = await headObjectMetadata(key);
+      if (!existing) throw error;
+      const stored = await getObjectBytes(key);
+      if (
+        existing.contentType !== contentType ||
+        sha256BytesHex(stored) !== sha256BytesHex(bytes)
+      ) {
+        throw new Error(`channelArt: immutable key collision with different content: ${key}`, {
+          cause: error,
+        });
+      }
+      return key;
+    }
+  },
+  getImmutable: async (key) => {
+    const metadata = await headObjectMetadata(key);
+    if (!metadata) return null;
+    return { bytes: await getObjectBytes(key), contentType: metadata.contentType };
+  },
   createVersion: (kind) => {
     const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
     return `${timestamp}-${kind}-${randomUUID().slice(0, 12)}`;
@@ -282,6 +322,110 @@ function manifestBytes(value: unknown): Uint8Array {
   return new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
 }
 
+function acceptedProvenance(args: {
+  kind: ArtKind;
+  identity: ArtIdentity;
+  outputKey: string;
+  outputSha256: string;
+  providerRoute: string;
+  acceptedAt: number;
+}): ChannelArtAssetProvenance {
+  return {
+    version: CHANNEL_ART_PROVENANCE_VERSION,
+    promptVersion: CHANNEL_ART_PROMPT_VERSION,
+    directionFingerprint: channelArtDirectionFingerprint(args.kind, args.identity),
+    outputKey: args.outputKey,
+    outputSha256: args.outputSha256,
+    approvalKey: channelArtApprovalKey(args.outputKey),
+    providerRoute: args.providerRoute,
+    acceptedAt: args.acceptedAt,
+  };
+}
+
+async function recoverApprovedArt(args: {
+  ownerId: string;
+  slug: string;
+  kind: ArtKind;
+  identity: ArtIdentity;
+  version: string;
+  maxAttempts: number;
+  runtime: ChannelArtRuntime;
+}): Promise<AcceptedArt | null> {
+  const prefix = channelKey(args.ownerId, args.slug, `art/${args.kind}/${args.version}`);
+  const outputKey = `${prefix}/approved.jpg`;
+  const approvalKey = channelArtApprovalKey(outputKey);
+  const storedApproval = await args.runtime.getImmutable(approvalKey);
+  if (!storedApproval) {
+    const rejection = await args.runtime.getImmutable(`${prefix}/rejection.json`);
+    if (rejection) {
+      throw new Error(
+        `channelArt: ${args.kind} version ${args.version} has a sealed rejection; change the identity direction before retrying`,
+      );
+    }
+    return null;
+  }
+  if (storedApproval.contentType !== "application/json") {
+    throw new Error(`channelArt: ${args.kind} approval has the wrong media type`);
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    const value = JSON.parse(new TextDecoder().decode(storedApproval.bytes)) as unknown;
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not an object");
+    parsed = value as Record<string, unknown>;
+  } catch (error) {
+    throw new Error(`channelArt: ${args.kind} approval receipt is invalid JSON`, { cause: error });
+  }
+  const providerRoute = args.kind === "avatar"
+    ? NANO_BANANA_AVATAR_PROFILE.route
+    : FAL_NANO_BANANA_BANNER_PROFILE.route;
+  const directionFingerprint = channelArtDirectionFingerprint(args.kind, args.identity);
+  const score = typeof parsed.score === "number" ? parsed.score : Number.NaN;
+  const attempts = typeof parsed.attempts === "number" ? parsed.attempts : Number.NaN;
+  const acceptedAt = typeof parsed.acceptedAt === "number" ? parsed.acceptedAt : Number.NaN;
+  const contractVersion = args.kind === "avatar"
+    ? NANO_BANANA_AVATAR_PROFILE.contractVersion
+    : FAL_NANO_BANANA_BANNER_PROFILE.contractVersion;
+  if (
+    parsed.schemaVersion !== 3 ||
+    parsed.status !== "approved" ||
+    parsed.kind !== args.kind ||
+    parsed.outputKey !== outputKey ||
+    parsed.contractVersion !== contractVersion ||
+    parsed.providerRoute !== providerRoute ||
+    parsed.promptVersion !== CHANNEL_ART_PROMPT_VERSION ||
+    parsed.directionFingerprint !== directionFingerprint ||
+    !Number.isFinite(acceptedAt) || acceptedAt <= 0 ||
+    !Number.isFinite(score) || score < SCORE_THRESHOLD[args.kind] || score > 1 ||
+    !Number.isInteger(attempts) || attempts < 1 || attempts > args.maxAttempts ||
+    typeof parsed.sourceKey !== "string" || !parsed.sourceKey
+  ) {
+    throw new Error(`channelArt: ${args.kind} approval receipt does not match the current render contract`);
+  }
+  const storedOutput = await args.runtime.getImmutable(outputKey);
+  if (!storedOutput || storedOutput.contentType !== "image/jpeg" || storedOutput.bytes.length === 0) {
+    throw new Error(`channelArt: ${args.kind} approval points to a missing or invalid image`);
+  }
+  const outputSha256 = sha256BytesHex(storedOutput.bytes);
+  if (parsed.outputSha256 !== outputSha256) {
+    throw new Error(`channelArt: ${args.kind} approved image bytes do not match its receipt`);
+  }
+  const provenance = acceptedProvenance({
+    kind: args.kind,
+    identity: args.identity,
+    outputKey,
+    outputSha256,
+    providerRoute,
+    acceptedAt,
+  });
+  return {
+    key: outputKey,
+    sourceKey: parsed.sourceKey,
+    score,
+    attempts,
+    provenance,
+  };
+}
+
 async function prepareCandidate(
   kind: ArtKind,
   candidate: ArtCandidate,
@@ -399,9 +543,18 @@ async function directNanoBananaBanner(args: {
   }
 
   const selectedKey = `${prefix}/approved.jpg`;
-  await runtime.putImmutable(selectedKey, await runtime.readBytes(loop.value.judgedPaths[0]), "image/jpeg");
-  await runtime.putImmutable(`${prefix}/approval.json`, manifestBytes({
-    schemaVersion: 2,
+  const approvedBytes = await runtime.readBytes(loop.value.judgedPaths[0]);
+  const provenance = acceptedProvenance({
+    kind: "banner",
+    identity,
+    outputKey: selectedKey,
+    outputSha256: sha256BytesHex(approvedBytes),
+    providerRoute: FAL_NANO_BANANA_BANNER_PROFILE.route,
+    acceptedAt: Date.now(),
+  });
+  await runtime.putImmutable(selectedKey, approvedBytes, "image/jpeg");
+  await runtime.putImmutable(provenance.approvalKey, manifestBytes({
+    schemaVersion: 3,
     status: "approved",
     kind: "banner",
     contractVersion: FAL_NANO_BANANA_BANNER_PROFILE.contractVersion,
@@ -412,6 +565,10 @@ async function directNanoBananaBanner(args: {
     attempts: loop.iterations,
     sourceKey: loop.value.key,
     outputKey: selectedKey,
+    outputSha256: provenance.outputSha256,
+    promptVersion: provenance.promptVersion,
+    directionFingerprint: provenance.directionFingerprint,
+    acceptedAt: provenance.acceptedAt,
     providerReceipt: loop.value.receipt,
     candidates: candidates.map((candidate, index) => ({
       key: candidate.key,
@@ -429,7 +586,13 @@ async function directNanoBananaBanner(args: {
     sourceKey: loop.value.key,
     outputKey: selectedKey,
   });
-  return { key: selectedKey, sourceKey: loop.value.key, score: loop.critique.score, attempts: loop.iterations };
+  return {
+    key: selectedKey,
+    sourceKey: loop.value.key,
+    score: loop.critique.score,
+    attempts: loop.iterations,
+    provenance,
+  };
 }
 
 async function directNanoBananaAvatar(args: {
@@ -546,15 +709,24 @@ async function directNanoBananaAvatar(args: {
   }
 
   const selectedKey = `${prefix}/approved.jpg`;
+  const approvedBytes = await runtime.readBytes(loop.value.judgedPaths[0]);
+  const provenance = acceptedProvenance({
+    kind: "avatar",
+    identity,
+    outputKey: selectedKey,
+    outputSha256: sha256BytesHex(approvedBytes),
+    providerRoute: NANO_BANANA_AVATAR_PROFILE.route,
+    acceptedAt: Date.now(),
+  });
   await runtime.putImmutable(
     selectedKey,
-    await runtime.readBytes(loop.value.judgedPaths[0]),
+    approvedBytes,
     "image/jpeg",
   );
   await runtime.putImmutable(
-    `${prefix}/approval.json`,
+    provenance.approvalKey,
     manifestBytes({
-      schemaVersion: 2,
+      schemaVersion: 3,
       status: "approved",
       kind: "avatar",
       contractVersion: NANO_BANANA_AVATAR_PROFILE.contractVersion,
@@ -565,6 +737,10 @@ async function directNanoBananaAvatar(args: {
       attempts: loop.iterations,
       sourceKey: loop.value.key,
       outputKey: selectedKey,
+      outputSha256: provenance.outputSha256,
+      promptVersion: provenance.promptVersion,
+      directionFingerprint: provenance.directionFingerprint,
+      acceptedAt: provenance.acceptedAt,
       providerReceipt: loop.value.receipt,
       candidates: candidates.map((candidate, index) => ({
         key: candidate.key,
@@ -589,6 +765,7 @@ async function directNanoBananaAvatar(args: {
     sourceKey: loop.value.key,
     score: loop.critique.score,
     attempts: loop.iterations,
+    provenance,
   };
 }
 
@@ -639,16 +816,56 @@ export async function generateChannelArtAsset(
 ): Promise<string> {
   const existingKey = kind === "avatar" ? options.existing?.imageKey : options.existing?.bannerKey;
   if (preserves(kind, options.preserveExisting) && existingKey) return existingKey;
+  return (await generateChannelArtAssetWithProvenance(
+    ownerId,
+    slug,
+    kind,
+    identity,
+    log,
+    options,
+  )).key;
+}
+
+/**
+ * Generate a fresh reviewed asset and return the exact proof that may be
+ * persisted beside the channel key. This function never blesses an existing
+ * key: provenance is minted only after the immutable approval receipt exists.
+ */
+export async function generateChannelArtAssetWithProvenance(
+  ownerId: string,
+  slug: string,
+  kind: ArtKind,
+  identity: ArtIdentity,
+  log: Logger = () => {},
+  options: Omit<ChannelArtOptions, "avatar" | "banner" | "existing" | "preserveExisting"> = {},
+): Promise<{ key: string; provenance: ChannelArtAssetProvenance }> {
   const runtime = options.runtime ?? DEFAULT_RUNTIME;
+  const version = versionFor(kind, options, runtime);
+  const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
+  const recovered = await recoverApprovedArt({
+    ownerId,
+    slug,
+    kind,
+    identity,
+    version,
+    maxAttempts,
+    runtime,
+  });
+  if (recovered) {
+    log(`channelArt: recovered approved ${kind} without provider spend`, {
+      version,
+      outputKey: recovered.key,
+      approvalKey: recovered.provenance.approvalKey,
+    });
+    return { key: recovered.key, provenance: recovered.provenance };
+  }
   if (!runtime.hasJudge()) {
     throw new Error("channelArt: quality judge is unavailable; refusing paid generation");
   }
-  const version = versionFor(kind, options, runtime);
-  const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
   if (kind === "avatar") {
     nanoBananaProviderAdmission({ kind, maxAttempts, options, runtime });
     log("channelArt: generating versioned avatar through Fal Nano Banana", { version });
-    return (await directNanoBananaAvatar({
+    const accepted = await directNanoBananaAvatar({
       ownerId,
       slug,
       identity,
@@ -656,11 +873,12 @@ export async function generateChannelArtAsset(
       maxAttempts,
       runtime,
       log,
-    })).key;
+    });
+    return { key: accepted.key, provenance: accepted.provenance };
   }
   nanoBananaProviderAdmission({ kind, maxAttempts, options, runtime });
   log("channelArt: generating versioned banner through Fal Nano Banana", { version });
-  return (await directNanoBananaBanner({
+  const accepted = await directNanoBananaBanner({
     ownerId,
     slug,
     identity,
@@ -669,7 +887,8 @@ export async function generateChannelArtAsset(
     prompt: (issues) => bannerPrompt(identity, issues),
     runtime,
     log,
-  })).key;
+  });
+  return { key: accepted.key, provenance: accepted.provenance };
 }
 
 export async function generateChannelArt(
@@ -680,8 +899,6 @@ export async function generateChannelArt(
   options: ChannelArtOptions = {},
 ): Promise<ChannelArtResult> {
   validateSelection(options);
-  const runtime = options.runtime ?? DEFAULT_RUNTIME;
-  const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
   const existing = options.existing ?? {};
 
   const generateAvatar = options.avatar !== false && !(
@@ -691,45 +908,30 @@ export async function generateChannelArt(
     preserves("banner", options.preserveExisting) && existing.bannerKey
   );
 
-  // Validate the judge before making either paid request. Preserved-only calls do
-  // not need a judge and are safe even during provider outages.
-  if ((generateAvatar || generateBanner) && !runtime.hasJudge()) {
-    throw new Error("channelArt: quality judge is unavailable; refusing paid generation");
-  }
-
   let imageKey = existing.imageKey;
   let bannerKey = existing.bannerKey;
 
   // Sequential by design: if the avatar fails closed, do not spend on a banner.
   if (generateAvatar) {
-    const version = versionFor("avatar", options, runtime);
-    log("channelArt: generating versioned avatar through Fal Nano Banana", { version });
-    nanoBananaProviderAdmission({ kind: "avatar", maxAttempts, options, runtime });
-    imageKey = (await directNanoBananaAvatar({
+    imageKey = (await generateChannelArtAssetWithProvenance(
       ownerId,
       slug,
+      "avatar",
       identity,
-      version,
-      maxAttempts,
-      runtime,
       log,
-    })).key;
+      options,
+    )).key;
   }
 
   if (generateBanner) {
-    const version = versionFor("banner", options, runtime);
-    log("channelArt: generating versioned banner through Fal Nano Banana", { version });
-    nanoBananaProviderAdmission({ kind: "banner", maxAttempts, options, runtime });
-    bannerKey = (await directNanoBananaBanner({
+    bannerKey = (await generateChannelArtAssetWithProvenance(
       ownerId,
       slug,
+      "banner",
       identity,
-      version,
-      maxAttempts,
-      prompt: (issues) => bannerPrompt(identity, issues),
-      runtime,
       log,
-    })).key;
+      options,
+    )).key;
   }
 
   if (!imageKey || !bannerKey) {
@@ -748,19 +950,36 @@ export async function generateFlagBanner(
   options: Pick<ChannelArtOptions, "version" | "maxAttempts" | "runtime" | "maxProviderSpendUsd"> = {},
 ): Promise<string> {
   const runtime = options.runtime ?? DEFAULT_RUNTIME;
+  const version = versionFor("banner", options, runtime);
+  const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
+  const localizedIdentity: ArtIdentity = {
+    ...identity,
+    worldMotifs: [
+      ...(identity.worldMotifs ?? []),
+      `localized flag of ${country}`,
+    ],
+  };
+  const recovered = await recoverApprovedArt({
+    ownerId,
+    slug,
+    kind: "banner",
+    identity: localizedIdentity,
+    version,
+    maxAttempts,
+    runtime,
+  });
+  if (recovered) return recovered.key;
   if (!runtime.hasJudge()) {
     throw new Error("channelArt: banner quality judge is unavailable; refusing paid generation");
   }
-  const version = versionFor("banner", options, runtime);
-  const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
   nanoBananaProviderAdmission({ kind: "banner", maxAttempts, options, runtime });
   const result = await directNanoBananaBanner({
     ownerId,
     slug,
-    identity,
+    identity: localizedIdentity,
     version,
     maxAttempts,
-    prompt: (issues) => bannerPrompt(identity, issues, [
+    prompt: (issues) => bannerPrompt(localizedIdentity, issues, [
       `a softly defocused waving flag of ${country} extending through the atmospheric background`,
       "keep flag detail subtle so the centered channel motif remains dominant and safe-area legible",
     ]),

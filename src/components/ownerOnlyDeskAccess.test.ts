@@ -16,6 +16,8 @@ assert.equal(
   "the shared provider performs one session probe",
 );
 assert.match(access, /export function useOperationsAccess/);
+assert.match(access, /export function useRequestOperationsAccess/,
+  "paid controls outside the top bar must open the one shared verification dialog");
 
 const shell = read("./AppShell.tsx");
 assert.match(

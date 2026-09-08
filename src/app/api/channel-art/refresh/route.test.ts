@@ -7,11 +7,15 @@ async function main(): Promise<void> {
     "paid artwork refresh must require the existing owner session");
   assert.match(source, /channelArtIdentityFromSource/,
     "refreshes must derive their world from the channel's frozen identity and Style DNA");
-  assert.match(source, /generateChannelArtAsset/,
+  assert.match(source, /generateChannelArtAssetWithProvenance/,
     "refreshes must use the receipt-bound Fal Nano Banana and visual-judge route");
+  assert.match(source, /provenance: generated\.provenance/,
+    "the accepted key and its identity-bound approval pointer must be saved together");
   assert.match(source, /maxProviderSpendUsd: MAX_PROVIDER_SPEND_USD/,
     "the UI action must expose a bounded provider envelope");
-  assert.match(source, /expectedBannerKey: requested\.expectedBannerKey/,
+  assert.match(source, /api\.channels\.applyChannelArtAsset/,
+    "the accepted art must merge into the latest channel row instead of replaying a pre-render identity snapshot");
+  assert.match(source, /expectedAssetKey: requested\.expectedBannerKey/,
     "the final banner write must compare-and-swap the artwork revision");
   assert.match(source, /channel\.locked/,
     "locked channels must not spend on a banner refresh");

@@ -307,6 +307,34 @@ export default defineSchema({
       // Generated channel art (R2 keys): square avatar + 16:9 banner.
       imageKey: v.optional(v.string()),
       bannerKey: v.optional(v.string()),
+      // Immutable approval pointers bind each saved image to the exact derived
+      // identity/prompt contract that passed visual QA. Historical rows omit
+      // this and are surfaced as legacy-unverified rather than silently trusted.
+      artProvenance: v.optional(
+        v.object({
+          version: v.literal("channel-art-provenance/v1"),
+          avatar: v.optional(v.object({
+            version: v.literal("channel-art-provenance/v1"),
+            promptVersion: v.literal("channel-art-prompt/v1"),
+            directionFingerprint: v.string(),
+            outputKey: v.string(),
+            outputSha256: v.string(),
+            approvalKey: v.string(),
+            providerRoute: v.string(),
+            acceptedAt: v.number(),
+          })),
+          banner: v.optional(v.object({
+            version: v.literal("channel-art-provenance/v1"),
+            promptVersion: v.literal("channel-art-prompt/v1"),
+            directionFingerprint: v.string(),
+            outputKey: v.string(),
+            outputSha256: v.string(),
+            approvalKey: v.string(),
+            providerRoute: v.string(),
+            acceptedAt: v.number(),
+          })),
+        }),
+      ),
       // Thumbnail identity for the claude_flux thumbnailer (all optional).
       thumbnailIdentity: v.optional(
         v.object({

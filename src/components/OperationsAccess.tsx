@@ -21,6 +21,8 @@ export type OperationsAccessState =
 type OperationsAccessContextValue = {
   state: OperationsAccessState;
   setState: (value: SetStateAction<OperationsAccessState>) => void;
+  dialogOpen: boolean;
+  setDialogOpen: (value: SetStateAction<boolean>) => void;
 };
 
 const OperationsAccessContext =
@@ -40,6 +42,7 @@ async function readResponse(response: Response): Promise<ElevationResponse> {
 /** One session probe serves the header and every owner-only desk. */
 export function OperationsAccessProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<OperationsAccessState>("checking");
+  const [dialogOpen, setDialogOpen] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -63,7 +66,7 @@ export function OperationsAccessProvider({ children }: { children: ReactNode }) 
   }, []);
 
   return (
-    <OperationsAccessContext.Provider value={{ state, setState }}>
+    <OperationsAccessContext.Provider value={{ state, setState, dialogOpen, setDialogOpen }}>
       {children}
     </OperationsAccessContext.Provider>
   );
@@ -83,13 +86,23 @@ export function useOperationsAccess(): OperationsAccessState {
   return useOperationsAccessContext().state;
 }
 
+/** Opens the single owner-verification dialog from any actionable control. */
+export function useRequestOperationsAccess(): () => void {
+  const { setDialogOpen } = useOperationsAccessContext();
+  return () => setDialogOpen(true);
+}
+
 /** Optional operations elevation; the surrounding viewer shell always remains mounted. */
 export function OperationsAccess() {
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const requestAbortRef = useRef<AbortController | null>(null);
-  const { state: access, setState: setAccess } = useOperationsAccessContext();
-  const [open, setOpen] = useState(false);
+  const {
+    state: access,
+    setState: setAccess,
+    dialogOpen: open,
+    setDialogOpen: setOpen,
+  } = useOperationsAccessContext();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -122,7 +135,7 @@ export function OperationsAccess() {
     return () => {
       if (frame !== undefined) window.cancelAnimationFrame(frame);
     };
-  }, []);
+  }, [setOpen]);
 
   useEffect(() => {
     if (!open) return;

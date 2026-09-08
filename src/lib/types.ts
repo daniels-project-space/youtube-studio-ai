@@ -4,6 +4,7 @@
  * components can be strongly typed without importing server internals.
  */
 import type { ReleaseEvidenceStatus } from "@/lib/releaseEvidenceStatus";
+import type { ChannelArtProvenance } from "@/lib/channelArtIdentity";
 
 export type RunRow = {
   _id: string;
@@ -35,6 +36,8 @@ export type ChannelIdentity = {
   /** Generated channel art (R2 keys) — presign via /api/asset-url. */
   imageKey?: string;
   bannerKey?: string;
+  /** Approval evidence binding each image to its exact derived channel world. */
+  artProvenance?: ChannelArtProvenance;
   /** Show Bible — the film-crew creative brief written by the Showrunner. */
   creativeBrief?: {
     positioning: string;

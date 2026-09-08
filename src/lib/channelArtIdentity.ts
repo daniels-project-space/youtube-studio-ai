@@ -4,6 +4,39 @@
  * means what the operator sees is exactly the identity sent to the renderer.
  */
 
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
+
+export const CHANNEL_ART_PROMPT_VERSION = "channel-art-prompt/v1" as const;
+export const CHANNEL_ART_PROVENANCE_VERSION = "channel-art-provenance/v1" as const;
+
+export type ChannelArtKind = "avatar" | "banner";
+
+export interface ChannelArtAssetProvenance {
+  version: typeof CHANNEL_ART_PROVENANCE_VERSION;
+  promptVersion: typeof CHANNEL_ART_PROMPT_VERSION;
+  directionFingerprint: string;
+  outputKey: string;
+  outputSha256: string;
+  approvalKey: string;
+  providerRoute: string;
+  acceptedAt: number;
+}
+
+export interface ChannelArtProvenance {
+  version: typeof CHANNEL_ART_PROVENANCE_VERSION;
+  avatar?: ChannelArtAssetProvenance;
+  banner?: ChannelArtAssetProvenance;
+}
+
+export type ChannelArtFreshness =
+  | { current: true; reason: "current"; directionFingerprint: string }
+  | {
+      current: false;
+      reason: "missing-asset" | "legacy-unverified" | "asset-mismatch" | "proof-invalid" | "direction-changed";
+      directionFingerprint: string;
+    };
+
 export interface ArtIdentity {
   name: string;
   persona?: string;
@@ -149,4 +182,82 @@ export function channelArtIdentityFromSource(source: ChannelArtIdentitySource): 
   // merging would leave contradictory cues such as "rainy bedroom" beside a
   // required seaside world in the same provider prompt.
   return { ...derived, ...nameBoundArtWorld(derived) };
+}
+
+/**
+ * Binds an accepted image to the exact derived identity and prompt contract
+ * that produced it. Including the prompt version lets a deliberate contract
+ * upgrade mark old art stale without guessing from filenames or timestamps.
+ */
+export function channelArtDirectionFingerprint(
+  kind: ChannelArtKind,
+  identity: ArtIdentity,
+): string {
+  return sha256Hex(canonicalJson({
+    kind,
+    promptVersion: CHANNEL_ART_PROMPT_VERSION,
+    identity,
+  }));
+}
+
+export function channelArtApprovalKey(outputKey: string): string {
+  if (!outputKey.endsWith("/approved.jpg")) {
+    throw new Error(`channel art output is not an approved asset key: ${outputKey}`);
+  }
+  return `${outputKey.slice(0, -"approved.jpg".length)}approval.json`;
+}
+
+export function assessChannelArtFreshness(args: {
+  kind: ChannelArtKind;
+  identity: ArtIdentity;
+  assetKey?: string | null;
+  provenance?: ChannelArtProvenance | null;
+}): ChannelArtFreshness {
+  const directionFingerprint = channelArtDirectionFingerprint(args.kind, args.identity);
+  if (!args.assetKey) return { current: false, reason: "missing-asset", directionFingerprint };
+  const proof = args.provenance?.[args.kind];
+  if (
+    args.provenance?.version !== CHANNEL_ART_PROVENANCE_VERSION ||
+    !proof ||
+    proof.version !== CHANNEL_ART_PROVENANCE_VERSION ||
+    proof.promptVersion !== CHANNEL_ART_PROMPT_VERSION
+  ) {
+    return { current: false, reason: "legacy-unverified", directionFingerprint };
+  }
+  if (proof.outputKey !== args.assetKey) {
+    return { current: false, reason: "asset-mismatch", directionFingerprint };
+  }
+  let expectedApprovalKey: string;
+  try {
+    expectedApprovalKey = channelArtApprovalKey(args.assetKey);
+  } catch {
+    return { current: false, reason: "proof-invalid", directionFingerprint };
+  }
+  if (
+    proof.approvalKey !== expectedApprovalKey ||
+    !/^[a-f0-9]{64}$/u.test(proof.outputSha256) ||
+    !proof.providerRoute.trim() ||
+    !Number.isFinite(proof.acceptedAt) ||
+    proof.acceptedAt <= 0 ||
+    !/^[a-f0-9]{64}$/u.test(proof.directionFingerprint)
+  ) {
+    return { current: false, reason: "proof-invalid", directionFingerprint };
+  }
+  if (proof.directionFingerprint !== directionFingerprint) {
+    return { current: false, reason: "direction-changed", directionFingerprint };
+  }
+  return { current: true, reason: "current", directionFingerprint };
+}
+
+export function mergeChannelArtProvenance(
+  current: ChannelArtProvenance | null | undefined,
+  kind: ChannelArtKind,
+  proof: ChannelArtAssetProvenance,
+): ChannelArtProvenance {
+  return {
+    version: CHANNEL_ART_PROVENANCE_VERSION,
+    ...(current?.avatar ? { avatar: current.avatar } : {}),
+    ...(current?.banner ? { banner: current.banner } : {}),
+    [kind]: proof,
+  };
 }

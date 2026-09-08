@@ -77,6 +77,11 @@ import {
 } from "@/engine/contentLane";
 import { assertMinimumVideoFoundationForAutomaticFamily } from "@/engine/minimumVideoFoundation";
 import { assertStyleDNAAdmissionSafety } from "@/engine/creative/styleDNAAdmission";
+import {
+  assessChannelArtFreshness,
+  channelArtIdentityFromSource,
+  mergeChannelArtProvenance,
+} from "@/lib/channelArtIdentity";
 
 const MAX_INCEPTION_OUTPUT_CHARS = 16_000;
 const MAX_INCEPTION_STAGES = 10;
@@ -446,6 +451,23 @@ async function projectChannelCard(ctx: QueryCtx, channel: Doc<"channels">) {
   };
 }
 
+const channelArtAssetProvenanceValidator = v.object({
+  version: v.literal("channel-art-provenance/v1"),
+  promptVersion: v.literal("channel-art-prompt/v1"),
+  directionFingerprint: v.string(),
+  outputKey: v.string(),
+  outputSha256: v.string(),
+  approvalKey: v.string(),
+  providerRoute: v.string(),
+  acceptedAt: v.number(),
+});
+
+const channelArtProvenanceValidator = v.object({
+  version: v.literal("channel-art-provenance/v1"),
+  avatar: v.optional(channelArtAssetProvenanceValidator),
+  banner: v.optional(channelArtAssetProvenanceValidator),
+});
+
 const identityValidator = v.object({
   persona: v.string(),
   // Voicecraft audition winner — persisted at inception (was silently rejected
@@ -529,6 +551,7 @@ const identityValidator = v.object({
   niche: v.optional(v.string()),
   imageKey: v.optional(v.string()),
   bannerKey: v.optional(v.string()),
+  artProvenance: v.optional(channelArtProvenanceValidator),
   thumbnailIdentity: v.optional(
     v.object({
       colorPalette: v.array(v.string()),
@@ -1035,6 +1058,95 @@ export const deleteChannel = mutation({
 
     await ctx.db.delete(args.channelId);
     return null;
+  },
+});
+
+/**
+ * Installs one reviewed channel-art asset without replaying a stale identity
+ * snapshot captured before the provider render. The service caller supplies
+ * only the exact asset/proof pair; this transaction merges it into the latest
+ * channel identity after CAS, lock, route, and current-direction checks.
+ */
+export const applyChannelArtAsset = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    kind: v.union(v.literal("avatar"), v.literal("banner")),
+    expectedAssetKey: v.union(v.string(), v.null()),
+    assetKey: v.string(),
+    provenance: channelArtAssetProvenanceValidator,
+  },
+  returns: v.union(
+    v.object({ applied: v.literal(true) }),
+    v.object({ applied: v.literal(false), state: v.literal("channel_locked") }),
+  ),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "channel art apply");
+    const existing = await ctx.db.get(args.channelId);
+    if (!existing || existing.ownerId !== args.ownerId) {
+      throw new Error("channel not found for channel art apply");
+    }
+    if (!existing.identity) throw new Error("channel identity is missing");
+    const currentKey = args.kind === "avatar"
+      ? existing.identity.imageKey ?? null
+      : existing.identity.bannerKey ?? null;
+    if (currentKey !== args.expectedAssetKey) {
+      throw new Error(
+        `channel ${args.kind} changed while its reviewed replacement was rendering; inspect the current artwork and try again`,
+      );
+    }
+    const expectedRoute = args.kind === "avatar"
+      ? "fal-nano-banana-avatar"
+      : "fal-nano-banana-channel-banner-edit";
+    if (args.provenance.providerRoute !== expectedRoute) {
+      throw new Error(`channel ${args.kind} approval used an unrecognized provider route`);
+    }
+    const artProvenance = mergeChannelArtProvenance(
+      existing.identity.artProvenance,
+      args.kind,
+      args.provenance,
+    );
+    const nextIdentity = {
+      ...existing.identity,
+      ...(args.kind === "avatar" ? { imageKey: args.assetKey } : { bannerKey: args.assetKey }),
+      artProvenance,
+    };
+    const freshness = assessChannelArtFreshness({
+      kind: args.kind,
+      identity: channelArtIdentityFromSource({
+        name: existing.name,
+        identity: existing.identity,
+        styleDNA: existing.styleDNA,
+      }),
+      assetKey: args.assetKey,
+      provenance: artProvenance,
+    });
+    if (!freshness.current) {
+      throw new Error(`channel ${args.kind} approval is not current: ${freshness.reason}`);
+    }
+    assertProgramBriefIdentityMutation({
+      existingIdentity: existing.identity,
+      nextIdentity,
+      effectiveFamily: existing.family ?? channelContentLane(existing).family,
+      nextPipeline: existing.pipeline,
+      allowFirstShowProfile: false,
+    });
+    const patch: Record<string, unknown> = { identity: nextIdentity };
+    const roots = channelInceptionInvalidationRoots(existing, { ...existing, identity: nextIdentity });
+    const invalidated = invalidatePersistedInceptionProofs(existing.inception, roots, "service");
+    if (invalidated) {
+      patch.inception = invalidated;
+      patch.status = "draft";
+    }
+    const outcome = await patchChannelRespectingLock(
+      ctx,
+      args.channelId,
+      patch,
+      "channels.applyChannelArtAsset",
+    );
+    return outcome.state === "channel_locked"
+      ? { applied: false as const, state: "channel_locked" as const }
+      : { applied: true as const };
   },
 });
 

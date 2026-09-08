@@ -9,8 +9,12 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import { synthChannelConcept } from "@/lib/conceptSynth";
 import {
   channelArtIdentityFromSource,
-  generateChannelArtAsset,
+  generateChannelArtAssetWithProvenance,
 } from "@/lib/channelArt";
+import {
+  assessChannelArtFreshness,
+  type ChannelArtProvenance,
+} from "@/lib/channelArtIdentity";
 import {
   designPipeline,
   enforceLengthContract,
@@ -325,6 +329,7 @@ interface ChannelIdentityState {
   niche?: string;
   imageKey?: string;
   bannerKey?: string;
+  artProvenance?: ChannelArtProvenance;
   thumbnailIdentity?: {
     colorPalette: string[];
     visualStyle: string;
@@ -520,6 +525,12 @@ export interface ChannelInceptionSnapshotResumeInput {
   creatorIntentDiagnosis?: CreatorIntentDiagnosis;
   showProfile: ChannelShowProfile;
   currentPreviewFingerprintSet: ReadonlySet<string>;
+  /** Current proof state is only needed to reject snapshots that protected an
+   * asset which no longer matches the channel-art direction. */
+  currentArt?: {
+    avatar: { assetKey?: string; current: boolean };
+    banner: { assetKey?: string; current: boolean };
+  };
 }
 
 function isRouteLessLegacyChannelIdentity(identity: unknown): boolean {
@@ -544,6 +555,16 @@ export function channelInceptionSnapshotCanResume(input: ChannelInceptionSnapsho
         (fingerprint): fingerprint is string => typeof fingerprint === "string",
       )
     : [];
+  const previousBrand = previous.brand;
+  const protectedArtStillCurrent = input.currentArt === undefined || ([
+    [previousBrand?.avatar, input.currentArt.avatar],
+    [previousBrand?.banner, input.currentArt.banner],
+  ] as const).every(([intent, current]) => (
+    !intent?.existing || (
+      current.current &&
+      current.assetKey === intent.existing.assetKey
+    )
+  ));
   return (
     previous.ownerId === input.ownerId &&
     previous.channelRef === input.channelRef &&
@@ -556,6 +577,7 @@ export function channelInceptionSnapshotCanResume(input: ChannelInceptionSnapsho
     sameChannelProgramRoute(previous.programRoute, input.programRoute) &&
     sameCreatorIntentDiagnosis(previous.creatorIntentDiagnosis, input.creatorIntentDiagnosis) &&
     sameChannelShowProfile(previous.showProfile, input.showProfile) &&
+    protectedArtStillCurrent &&
     previousPreviewFingerprints.every((fingerprint) => input.currentPreviewFingerprintSet.has(fingerprint))
   );
 }
@@ -2172,6 +2194,23 @@ export async function executeDesignChannel(
 
   const existingChannel = await currentChannel(convex, channelId);
   const existingIdentity = asIdentity(existingChannel.identity);
+  const existingArtIdentity = channelArtIdentityFromSource({
+    name: existingChannel.name,
+    identity: existingIdentity,
+    styleDNA: existingChannel.styleDNA as StyleDNA | undefined,
+  });
+  const existingAvatarFreshness = assessChannelArtFreshness({
+    kind: "avatar",
+    identity: existingArtIdentity,
+    assetKey: existingIdentity.imageKey,
+    provenance: existingIdentity.artProvenance,
+  });
+  const existingBannerFreshness = assessChannelArtFreshness({
+    kind: "banner",
+    identity: existingArtIdentity,
+    assetKey: existingIdentity.bannerKey,
+    provenance: existingIdentity.artProvenance,
+  });
   const acceptedRows = await readyPlanRows(convex, ownerId, channelId);
   const acceptedTopicFingerprints = acceptedRows.map((row) =>
     channelInceptionContentSha256(row.topic));
@@ -2207,6 +2246,16 @@ export async function executeDesignChannel(
     creatorIntentDiagnosis: requestCreatorIntentDiagnosis,
     showProfile: requestShowProfile,
     currentPreviewFingerprintSet,
+    currentArt: {
+      avatar: {
+        ...(existingIdentity.imageKey ? { assetKey: existingIdentity.imageKey } : {}),
+        current: existingAvatarFreshness.current,
+      },
+      banner: {
+        ...(existingIdentity.bannerKey ? { assetKey: existingIdentity.bannerKey } : {}),
+        current: existingBannerFreshness.current,
+      },
+    },
   });
   const currentRequest: ChannelInceptionRequest = {
     ownerId,
@@ -2226,20 +2275,26 @@ export async function executeDesignChannel(
       : {}),
     showProfile: requestShowProfile,
     brand: {
-      ...(existingIdentity.imageKey ? {
+      ...(existingIdentity.imageKey && existingAvatarFreshness.current ? {
         avatar: {
           existing: {
             assetKey: existingIdentity.imageKey,
-            contentFingerprint: channelInceptionContentSha256(existingIdentity.imageKey),
+            contentFingerprint: channelInceptionContentSha256({
+              assetKey: existingIdentity.imageKey,
+              proof: existingIdentity.artProvenance?.avatar,
+            }),
           },
           protectExisting: true,
         },
       } : {}),
-      ...(existingIdentity.bannerKey ? {
+      ...(existingIdentity.bannerKey && existingBannerFreshness.current ? {
         banner: {
           existing: {
             assetKey: existingIdentity.bannerKey,
-            contentFingerprint: channelInceptionContentSha256(existingIdentity.bannerKey),
+            contentFingerprint: channelInceptionContentSha256({
+              assetKey: existingIdentity.bannerKey,
+              proof: existingIdentity.artProvenance?.banner,
+            }),
           },
           protectExisting: true,
         },
@@ -2990,15 +3045,33 @@ export async function executeDesignChannel(
     styleDNA: positioning.styleDNA,
   });
   const loadAvatar = async () => {
-    const imageKey = asIdentity((await currentChannel(convex, channelId)).identity).imageKey;
-    return imageKey ? { value: imageKey, evidence: { imageKey, protected: true } } : undefined;
+    const identity = asIdentity((await currentChannel(convex, channelId)).identity);
+    const freshness = assessChannelArtFreshness({
+      kind: "avatar",
+      identity: artIdentity,
+      assetKey: identity.imageKey,
+      provenance: identity.artProvenance,
+    });
+    return freshness.current && identity.imageKey
+      ? {
+          value: identity.imageKey,
+          evidence: {
+            imageKey: identity.imageKey,
+            protected: true,
+            directionFingerprint: freshness.directionFingerprint,
+          },
+        }
+      : undefined;
   };
   await runStage("channel-inception-avatar", {
     maximumAttempts: 3,
     loadCompleted: loadAvatar,
     adoptExisting: loadAvatar,
     execute: async () => {
-      const imageKey = await generateChannelArtAsset(
+      const expectedImageKey = asIdentity(
+        (await currentChannel(convex, channelId)).identity,
+      ).imageKey ?? null;
+      const generated = await generateChannelArtAssetWithProvenance(
         ownerId,
         slug,
         "avatar",
@@ -3009,20 +3082,53 @@ export async function executeDesignChannel(
           maxProviderSpendUsd: avatarStage.maximumCostUsd,
         },
       );
-      await mergeIdentity(convex, channelId, { imageKey });
-      return { value: imageKey, evidence: { imageKey } };
+      const applied = await convex.mutation(api.channels.applyChannelArtAsset, {
+        ownerId,
+        channelId,
+        kind: "avatar",
+        expectedAssetKey: expectedImageKey,
+        assetKey: generated.key,
+        provenance: generated.provenance,
+      });
+      if (!applied.applied) throw new Error("channel was locked while the reviewed avatar was rendering");
+      return {
+        value: generated.key,
+        evidence: {
+          imageKey: generated.key,
+          directionFingerprint: generated.provenance.directionFingerprint,
+          approvalKey: generated.provenance.approvalKey,
+        },
+      };
     },
   });
   const loadBanner = async () => {
-    const bannerKey = asIdentity((await currentChannel(convex, channelId)).identity).bannerKey;
-    return bannerKey ? { value: bannerKey, evidence: { bannerKey, protected: true } } : undefined;
+    const identity = asIdentity((await currentChannel(convex, channelId)).identity);
+    const freshness = assessChannelArtFreshness({
+      kind: "banner",
+      identity: artIdentity,
+      assetKey: identity.bannerKey,
+      provenance: identity.artProvenance,
+    });
+    return freshness.current && identity.bannerKey
+      ? {
+          value: identity.bannerKey,
+          evidence: {
+            bannerKey: identity.bannerKey,
+            protected: true,
+            directionFingerprint: freshness.directionFingerprint,
+          },
+        }
+      : undefined;
   };
   await runStage("channel-inception-banner", {
     maximumAttempts: 3,
     loadCompleted: loadBanner,
     adoptExisting: loadBanner,
     execute: async () => {
-      const bannerKey = await generateChannelArtAsset(
+      const expectedBannerKey = asIdentity(
+        (await currentChannel(convex, channelId)).identity,
+      ).bannerKey ?? null;
+      const generated = await generateChannelArtAssetWithProvenance(
         ownerId,
         slug,
         "banner",
@@ -3033,8 +3139,23 @@ export async function executeDesignChannel(
           maxProviderSpendUsd: bannerStage.maximumCostUsd,
         },
       );
-      await mergeIdentity(convex, channelId, { bannerKey });
-      return { value: bannerKey, evidence: { bannerKey } };
+      const applied = await convex.mutation(api.channels.applyChannelArtAsset, {
+        ownerId,
+        channelId,
+        kind: "banner",
+        expectedAssetKey: expectedBannerKey,
+        assetKey: generated.key,
+        provenance: generated.provenance,
+      });
+      if (!applied.applied) throw new Error("channel was locked while the reviewed banner was rendering");
+      return {
+        value: generated.key,
+        evidence: {
+          bannerKey: generated.key,
+          directionFingerprint: generated.provenance.directionFingerprint,
+          approvalKey: generated.provenance.approvalKey,
+        },
+      };
     },
   });
 
@@ -3804,8 +3925,25 @@ export async function executeDesignChannel(
         blockers.push("Style DNA is not established");
       }
       if (!identity.creativeBrief) blockers.push("Show Bible is missing");
-      if (!identity.imageKey) blockers.push("accepted avatar is missing");
-      if (!identity.bannerKey) blockers.push("accepted banner is missing");
+      const readinessArtIdentity = channelArtIdentityFromSource({
+        name: channel.name,
+        identity,
+        styleDNA: dna,
+      });
+      const avatarFreshness = assessChannelArtFreshness({
+        kind: "avatar",
+        identity: readinessArtIdentity,
+        assetKey: identity.imageKey,
+        provenance: identity.artProvenance,
+      });
+      const bannerFreshness = assessChannelArtFreshness({
+        kind: "banner",
+        identity: readinessArtIdentity,
+        assetKey: identity.bannerKey,
+        provenance: identity.artProvenance,
+      });
+      if (!avatarFreshness.current) blockers.push("current identity-bound avatar approval is missing");
+      if (!bannerFreshness.current) blockers.push("current identity-bound banner approval is missing");
       if (!channel.thumbnailPlaybook) blockers.push("thumbnail playbook is missing");
       if (acceptedThumbnailCount < thumbnailStage.params.previews.targetCount) {
         blockers.push(`starter thumbnails incomplete (${acceptedThumbnailCount}/${thumbnailStage.params.previews.targetCount})`);

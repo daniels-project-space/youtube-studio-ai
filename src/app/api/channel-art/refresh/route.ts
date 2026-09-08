@@ -4,7 +4,7 @@ import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import {
   channelArtIdentityFromSource,
-  generateChannelArtAsset,
+  generateChannelArtAssetWithProvenance,
 } from "@/lib/channelArt";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -61,15 +61,16 @@ export async function POST(request: Request) {
       }, { status: 409 });
     }
 
-    const bannerKey = await generateChannelArtAsset(
+    const artIdentity = channelArtIdentityFromSource({
+      name: channel.name,
+      identity: channel.identity,
+      styleDNA: channel.styleDNA,
+    });
+    const generated = await generateChannelArtAssetWithProvenance(
       actor.ownerId,
       channel.slug,
       "banner",
-      channelArtIdentityFromSource({
-        name: channel.name,
-        identity: channel.identity,
-        styleDNA: channel.styleDNA,
-      }),
+      artIdentity,
       () => {},
       {
         version: { banner: `operator-refresh-${Date.now()}-v1` },
@@ -78,17 +79,22 @@ export async function POST(request: Request) {
       },
     );
 
-    const result = await convex.mutation(api.channels.updateChannel, {
+    const result = await convex.mutation(api.channels.applyChannelArtAsset, {
+      ownerId: actor.ownerId,
       channelId: channel._id as Id<"channels">,
-      expectedBannerKey: requested.expectedBannerKey,
-      identity: { ...channel.identity, bannerKey },
+      kind: "banner",
+      expectedAssetKey: requested.expectedBannerKey,
+      assetKey: generated.key,
+      provenance: generated.provenance,
     });
-    if (result.state === "channel_locked") {
+    if (!result.applied) {
       return NextResponse.json({ ok: false, error: "The channel was locked while the candidate was rendering" }, { status: 409 });
     }
     return NextResponse.json({
       ok: true,
-      bannerKey,
+      bannerKey: generated.key,
+      directionFingerprint: generated.provenance.directionFingerprint,
+      approvalKey: generated.provenance.approvalKey,
       maximumAttempts: MAX_ATTEMPTS,
       maximumSpendUsd: MAX_PROVIDER_SPEND_USD,
     }, { headers: { "Cache-Control": "private, no-store" } });

@@ -123,6 +123,42 @@ assert.equal(
   false,
   "substituting the current v3 receipt reproduces the historical retry invalidation bug",
 );
+
+const protectedBannerSnapshot = {
+  ...priorSnapshot,
+  brand: {
+    banner: {
+      existing: { assetKey: "channel/banner/legacy.jpg", contentFingerprint: "legacy-proof" },
+      protectExisting: true,
+    },
+  },
+};
+assert.equal(
+  channelInceptionSnapshotCanResume({
+    ...retryGuardInput,
+    previousSnapshot: protectedBannerSnapshot,
+    showProfile: retryProfile,
+    currentArt: {
+      avatar: { current: false },
+      banner: { assetKey: "channel/banner/legacy.jpg", current: false },
+    },
+  }),
+  false,
+  "a retry snapshot must not keep protecting a legacy key with no current identity-bound approval",
+);
+assert.equal(
+  channelInceptionSnapshotCanResume({
+    ...retryGuardInput,
+    previousSnapshot: protectedBannerSnapshot,
+    showProfile: retryProfile,
+    currentArt: {
+      avatar: { current: false },
+      banner: { assetKey: "channel/banner/legacy.jpg", current: true },
+    },
+  }),
+  true,
+  "an exact still-current protected banner remains resumable and is never regenerated",
+);
 assert.throws(
   () => existingChannelInceptionRetryShowProfile({
     profile: legacyV1Profile,

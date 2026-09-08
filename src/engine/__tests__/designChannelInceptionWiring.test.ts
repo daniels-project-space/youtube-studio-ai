@@ -261,9 +261,16 @@ assert(
 );
 assert.match(coordinator, /providerStart:\s*"explicit"[\s\S]*recover:\s*async/);
 assert.equal(
-  [...coordinator.matchAll(/await generateChannelArtAsset\(/g)].length,
+  [...coordinator.matchAll(/await generateChannelArtAssetWithProvenance\(/g)].length,
   2,
   "avatar and banner must execute under independent durable stage leases",
+);
+assert.match(coordinator, /assessChannelArtFreshness\(/,
+  "an existing image key must not bypass current identity-bound approval checks");
+assert.equal(
+  [...coordinator.matchAll(/api\.channels\.applyChannelArtAsset/g)].length,
+  2,
+  "each accepted art stage must atomically persist its exact approval pointer beside the key",
 );
 assert(!coordinator.includes("sharedArt"), "one art stage must never hide another stage's spend");
 assert.match(coordinator, /maxProviderSpendUsd:\s*avatarStage\.maximumCostUsd/);
@@ -288,6 +295,8 @@ assert.match(
 );
 assert.match(coordinator, /review = reviewProbeArtifacts/);
 assert.match(coordinator, /missing explicit accepted golden QA evidence/);
+assert.match(coordinator, /current identity-bound avatar approval is missing/);
+assert.match(coordinator, /current identity-bound banner approval is missing/);
 assert(!coordinator.includes("nativeWatchRender"), "probe review must stay within admitted child QA spend");
 assert.match(coordinator, /dialInAttempted = true/);
 assert.match(coordinator, /"upload_draft"/);

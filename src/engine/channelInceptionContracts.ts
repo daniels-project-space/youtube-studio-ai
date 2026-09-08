@@ -257,7 +257,7 @@ export const CHANNEL_INCEPTION_MODULE_CONTRACTS: readonly ChannelInceptionModule
   },
   {
     key: "channel-inception-positioning",
-    version: "1.1.0",
+    version: "1.2.0",
     certification: "contract",
     catalogStatus: "reference",
     stage: "inception/identity",
@@ -278,7 +278,7 @@ export const CHANNEL_INCEPTION_MODULE_CONTRACTS: readonly ChannelInceptionModule
   },
   {
     key: "channel-inception-seo",
-    version: "1.0.0",
+    version: "1.1.0",
     certification: "contract",
     catalogStatus: "reference",
     stage: "inception/editorial",

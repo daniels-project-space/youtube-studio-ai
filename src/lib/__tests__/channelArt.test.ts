@@ -7,6 +7,7 @@ import {
   channelArtIdentityFromSource,
   generateChannelArt,
   generateChannelArtAsset,
+  generateChannelArtAssetWithProvenance,
   generateFlagBanner,
   type ChannelArtRuntime,
 } from "@/lib/channelArt";
@@ -147,6 +148,7 @@ function fakeRuntime(config: {
       state.persisted.set(key, { bytes, contentType });
       return key;
     },
+    getImmutable: async (key) => state.persisted.get(key) ?? null,
     createVersion: (kind) => `generated-${kind}-version`,
   };
   return { runtime, state };
@@ -458,7 +460,7 @@ async function assertIndependentlyLeasedAssetGeneration(): Promise<void> {
     () => {},
     { runtime, version: { avatar: "avatar-stage-v1" } },
   );
-  const banner = await generateChannelArtAsset(
+  const banner = await generateChannelArtAssetWithProvenance(
     "owner-test",
     "quiet-stoic",
     "banner",
@@ -467,12 +469,50 @@ async function assertIndependentlyLeasedAssetGeneration(): Promise<void> {
     { runtime, version: { banner: "banner-stage-v1" } },
   );
   assert.match(avatar, /art\/avatar\/avatar-stage-v1\//);
-  assert.match(banner, /art\/banner\/banner-stage-v1\//);
+  assert.match(banner.key, /art\/banner\/banner-stage-v1\//);
+  assert.equal(banner.provenance.outputKey, banner.key);
+  assert.match(banner.provenance.approvalKey, /art\/banner\/banner-stage-v1\/approval\.json$/);
+  assert.match(banner.provenance.directionFingerprint, /^[a-f0-9]{64}$/);
   assert.equal(state.avatarRenders.length, 1);
   assert.deepEqual(
     state.bannerRenders.map((render) => render.idempotencyContext.split("/").at(-1)?.split("-candidate-")[0]),
     ["banner"],
   );
+
+  const approval = state.persisted.get(banner.provenance.approvalKey);
+  assert(approval);
+  const receipt = JSON.parse(new TextDecoder().decode(approval.bytes)) as Record<string, unknown>;
+  assert.equal(receipt.directionFingerprint, banner.provenance.directionFingerprint);
+  assert.equal(receipt.promptVersion, banner.provenance.promptVersion);
+  assert.equal(receipt.acceptedAt, banner.provenance.acceptedAt);
+}
+
+async function assertApprovedRetryRecoversWithoutSpend(): Promise<void> {
+  const { runtime, state } = fakeRuntime({
+    verdicts: { banner: [accepted("banner")] },
+  });
+  const options = { runtime, version: { banner: "recover-banner-v1" }, maxAttempts: 3 };
+  const first = await generateChannelArtAssetWithProvenance(
+    "owner-test",
+    "quiet-stoic",
+    "banner",
+    IDENTITY,
+    () => {},
+    options,
+  );
+  const second = await generateChannelArtAssetWithProvenance(
+    "owner-test",
+    "quiet-stoic",
+    "banner",
+    IDENTITY,
+    () => {},
+    options,
+  );
+  assert.deepEqual(second, first);
+  assert.equal(state.bannerRenders.length, 1,
+    "a retry after the immutable approval was written must not call the paid provider again");
+  assert.equal(state.judgements.length, 1,
+    "a recovered approval must not rerun the vision judge");
 }
 
 async function assertFlagBannerUsesSameGate(): Promise<void> {
@@ -531,6 +571,7 @@ async function main(): Promise<void> {
   await assertExistingAvatarsArePreserved();
   await assertPerAssetPreservation();
   await assertIndependentlyLeasedAssetGeneration();
+  await assertApprovedRetryRecoversWithoutSpend();
   await assertFlagBannerUsesSameGate();
   await assertDefaultProviderHasNoFallback();
   console.log("CHANNEL ART ROOT-CAUSE PASS");

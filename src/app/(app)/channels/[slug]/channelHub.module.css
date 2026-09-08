@@ -658,8 +658,11 @@
 .identitySection { display: grid; gap: 0; }
 .bannerRefresh { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.78rem 0.82rem; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .bannerRefresh > div { display: grid; min-width: 0; gap: 0.22rem; }
-.bannerRefresh strong { color: var(--color-fg); font-size: 0.76rem; font-weight: 630; }
+.bannerRefresh strong { display: flex; align-items: center; gap: 0.48rem; color: var(--color-fg); font-size: 0.76rem; font-weight: 630; }
+.bannerRefresh strong i { padding: 0.14rem 0.36rem; border: 1px solid color-mix(in srgb, var(--color-ok) 45%, var(--color-border)); border-radius: 999px; color: var(--color-ok); font: 650 0.52rem/1 var(--font-mono); font-style: normal; letter-spacing: 0.04em; text-transform: uppercase; }
+.bannerRefresh[data-fresh="false"] strong i { border-color: color-mix(in srgb, var(--color-amber) 48%, var(--color-border)); color: var(--color-amber); }
 .bannerRefresh span { color: var(--color-faint); font: 0.56rem/1.35 var(--font-mono); letter-spacing: 0.02em; }
+.bannerRefresh small { max-width: 34rem; color: var(--color-muted); font-size: 0.62rem; line-height: 1.4; }
 .bannerRefresh > div:last-child { justify-items: end; }
 .bannerRefreshButton { min-height: 34px; padding: 0.42rem 0.68rem; border: 1px solid color-mix(in srgb, var(--color-accent) 55%, var(--color-border)); border-radius: 8px; background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface)); color: var(--color-accent); font-size: 0.65rem; font-weight: 700; cursor: pointer; }
 .bannerRefreshButton:hover:not(:disabled) { background: color-mix(in srgb, var(--color-accent) 20%, var(--color-surface)); }

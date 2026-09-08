@@ -25,8 +25,9 @@ import type { Doc, Id } from "../convex/_generated/dataModel";
 import {
   bannerPrompt,
   channelArtIdentityFromSource,
-  generateChannelArtAsset,
+  generateChannelArtAssetWithProvenance,
 } from "@/lib/channelArt";
+import type { ChannelArtAssetProvenance } from "@/lib/channelArtIdentity";
 import { FAL_NANO_BANANA_BANNER_PROFILE } from "@/lib/falNanoBananaBannerContract";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { getObjectBytes, headObjectMetadata } from "@/lib/storage";
@@ -35,7 +36,7 @@ import { hydrateEnv } from "@/lib/vault";
 const OWNER_ID = "owner_daniel";
 const CONVEX_URL = process.env.NEXT_PUBLIC_CONVEX_URL ?? "https://astute-camel-689.convex.cloud";
 const VERSION = process.argv.find((arg) => arg.startsWith("--version="))
-  ?.slice("--version=".length) ?? "channel-world-refresh-20260902-v1";
+  ?.slice("--version=".length) ?? "channel-world-refresh-20260907-provenance-v1";
 const MAX_ATTEMPTS = 3;
 const MAX_PER_CHANNEL_USD = Number((
   MAX_ATTEMPTS * FAL_NANO_BANANA_BANNER_PROFILE.admissionCeilingUsd
@@ -46,12 +47,17 @@ const MANIFEST_PATH = join(OUTPUT_DIR, "manifest.json");
 type Channel = Doc<"channels">;
 
 interface ApprovalReceipt {
+  schemaVersion: 3;
   status: "approved";
   kind: "banner";
   outputKey: string;
+  outputSha256: string;
   providerRoute: string;
   score: number;
   attempts: number;
+  promptVersion: "channel-art-prompt/v1";
+  directionFingerprint: string;
+  acceptedAt: number;
 }
 
 interface GeneratedRow {
@@ -65,11 +71,12 @@ interface GeneratedRow {
   outputSha256?: string;
   prompt: string;
   approval?: ApprovalReceipt;
+  provenance?: ChannelArtAssetProvenance;
   error?: string;
 }
 
 interface RefreshManifest {
-  contractVersion: "channel-banner-refresh/v1";
+  contractVersion: "channel-banner-refresh/v2";
   ownerId: typeof OWNER_ID;
   version: string;
   generatedAt: string;
@@ -104,7 +111,11 @@ function approvalKeyFor(bannerKey: string): string {
   return `${bannerKey.slice(0, -"approved.jpg".length)}approval.json`;
 }
 
-function parseApproval(value: unknown, expectedKey: string): ApprovalReceipt {
+function parseApproval(
+  value: unknown,
+  expectedKey: string,
+  expectedProvenance: ChannelArtAssetProvenance,
+): ApprovalReceipt {
   if (!value || typeof value !== "object") throw new Error("banner approval receipt is not an object");
   const approval = value as Record<string, unknown>;
   if (approval.status !== "approved" || approval.kind !== "banner") {
@@ -122,20 +133,40 @@ function parseApproval(value: unknown, expectedKey: string): ApprovalReceipt {
   if (!Number.isInteger(attempts) || attempts < 1 || attempts > MAX_ATTEMPTS) {
     throw new Error("banner approval attempts are outside the reviewed refresh limit");
   }
+  if (
+    approval.schemaVersion !== 3 ||
+    approval.promptVersion !== expectedProvenance.promptVersion ||
+    approval.directionFingerprint !== expectedProvenance.directionFingerprint ||
+    approval.acceptedAt !== expectedProvenance.acceptedAt ||
+    approval.outputSha256 !== expectedProvenance.outputSha256 ||
+    expectedProvenance.outputKey !== expectedKey ||
+    expectedProvenance.approvalKey !== approvalKeyFor(expectedKey) ||
+    expectedProvenance.providerRoute !== approval.providerRoute
+  ) {
+    throw new Error("banner approval provenance does not match the staged identity contract");
+  }
   return {
+    schemaVersion: 3,
     status: "approved",
     kind: "banner",
     outputKey: approval.outputKey,
+    outputSha256: approval.outputSha256 as string,
     providerRoute: approval.providerRoute,
     score,
     attempts,
+    promptVersion: approval.promptVersion as "channel-art-prompt/v1",
+    directionFingerprint: approval.directionFingerprint as string,
+    acceptedAt: approval.acceptedAt as number,
   };
 }
 
-async function readApproval(bannerKey: string): Promise<ApprovalReceipt> {
+async function readApproval(
+  bannerKey: string,
+  provenance: ChannelArtAssetProvenance,
+): Promise<ApprovalReceipt> {
   const key = approvalKeyFor(bannerKey);
   const bytes = await getObjectBytes(key);
-  return parseApproval(JSON.parse(Buffer.from(bytes).toString("utf8")), bannerKey);
+  return parseApproval(JSON.parse(Buffer.from(bytes).toString("utf8")), bannerKey, provenance);
 }
 
 function selectTargets(rows: Channel[], slugs: readonly string[]): Channel[] {
@@ -161,7 +192,7 @@ async function generate(): Promise<void> {
   await mkdir(OUTPUT_DIR, { recursive: true });
   const selected = selectTargets(await channels(studioClient()), slugs);
   const manifest: RefreshManifest = {
-    contractVersion: "channel-banner-refresh/v1",
+    contractVersion: "channel-banner-refresh/v2",
     ownerId: OWNER_ID,
     version: VERSION,
     generatedAt: new Date().toISOString(),
@@ -185,7 +216,7 @@ async function generate(): Promise<void> {
     };
     try {
       console.log(`\n[banner] ${channel.name}`);
-      const newBannerKey = await generateChannelArtAsset(
+      const generated = await generateChannelArtAssetWithProvenance(
         OWNER_ID,
         channel.slug,
         "banner",
@@ -197,7 +228,8 @@ async function generate(): Promise<void> {
           maxProviderSpendUsd: MAX_PER_CHANNEL_USD,
         },
       );
-      const approval = await readApproval(newBannerKey);
+      const newBannerKey = generated.key;
+      const approval = await readApproval(newBannerKey, generated.provenance);
       const previewBytes = await getObjectBytes(newBannerKey);
       const localPath = join(OUTPUT_DIR, `${channel.slug}.jpg`);
       await writeFile(localPath, previewBytes);
@@ -206,6 +238,7 @@ async function generate(): Promise<void> {
       row.localPath = localPath;
       row.outputSha256 = sha256(previewBytes);
       row.approval = approval;
+      row.provenance = generated.provenance;
       console.log(`  staged ${newBannerKey} (judge ${approval.score.toFixed(2)}, ${approval.attempts} attempt(s))`);
     } catch (error) {
       row.error = error instanceof Error ? error.message : String(error);
@@ -234,14 +267,15 @@ async function apply(): Promise<void> {
   }
   const manifest = JSON.parse(bytes.toString("utf8")) as RefreshManifest;
   if (
-    manifest.contractVersion !== "channel-banner-refresh/v1" ||
+    manifest.contractVersion !== "channel-banner-refresh/v2" ||
     manifest.ownerId !== OWNER_ID ||
     manifest.version !== VERSION ||
     manifest.maxAttemptsPerChannel !== MAX_ATTEMPTS ||
     manifest.rows.length === 0 ||
     manifest.rows.some((row) =>
-      row.error || !row.newBannerKey || !row.oldBannerKey || !row.outputSha256 || !row.approval ||
-      row.approval.outputKey !== row.newBannerKey,
+      row.error || !row.newBannerKey || !row.oldBannerKey || !row.outputSha256 || !row.approval || !row.provenance ||
+      row.approval.outputKey !== row.newBannerKey ||
+      row.outputSha256 !== row.provenance.outputSha256,
     )
   ) {
     throw new Error("manifest is incomplete or does not match the sealed refresh contract");
@@ -257,7 +291,7 @@ async function apply(): Promise<void> {
     if (!await headObjectMetadata(row.newBannerKey!)) {
       throw new Error(`approved banner disappeared before apply: ${row.name}`);
     }
-    await readApproval(row.newBannerKey!);
+    await readApproval(row.newBannerKey!, row.provenance!);
   }
 
   const writer = studioClient();
@@ -274,11 +308,15 @@ async function apply(): Promise<void> {
     if (channel.identity?.bannerKey !== row.oldBannerKey) {
       throw new Error(`banner compare-and-swap failed for ${row.name}`);
     }
-    const result = await writer.mutation(api.channels.updateChannel, {
+    const result = await writer.mutation(api.channels.applyChannelArtAsset, {
+      ownerId: OWNER_ID,
       channelId: channel._id,
-      identity: { ...channel.identity, bannerKey: row.newBannerKey },
+      kind: "banner",
+      expectedAssetKey: row.oldBannerKey ?? null,
+      assetKey: row.newBannerKey!,
+      provenance: row.provenance!,
     });
-    if (result.forked || result.state === "channel_locked") {
+    if (!result.applied) {
       throw new Error(`banner apply was rejected for ${row.name}`);
     }
     console.log(`APPLIED ${row.name}: ${row.oldBannerKey} -> ${row.newBannerKey}`);

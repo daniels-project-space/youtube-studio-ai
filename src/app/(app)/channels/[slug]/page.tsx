@@ -4,7 +4,11 @@ import { use, useEffect, useState, useRef, type CSSProperties, type ReactNode } 
 import Link from "next/link";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
-import { channelArtIdentityFromSource } from "@/lib/channelArtIdentity";
+import {
+  assessChannelArtFreshness,
+  channelArtIdentityFromSource,
+  type ArtIdentity,
+} from "@/lib/channelArtIdentity";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
@@ -21,6 +25,10 @@ import { Chart, compact, type ChartSeries } from "@/components/Chart";
 import { VideoGrid } from "@/components/VideoGrid";
 import { Lightbox } from "@/components/Lightbox";
 import { EmptyState } from "@/components/EmptyState";
+import {
+  useOperationsAccess,
+  useRequestOperationsAccess,
+} from "@/components/OperationsAccess";
 import { SkeletonList } from "@/components/Skeleton";
 import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
 import { LatestVideoWidget } from "@/components/LatestVideoWidget";
@@ -2282,7 +2290,7 @@ function IdentityTab({
   budget: number;
   slug: string;
   locked: boolean;
-  artworkIdentity: { vibe?: string; iconicMotif?: string };
+  artworkIdentity: ArtIdentity;
 }) {
   const bible = id.creativeBrief;
   return (
@@ -2292,6 +2300,8 @@ function IdentityTab({
         <BannerRefreshControl
           slug={slug}
           bannerKey={id.bannerKey ?? null}
+          provenance={id.artProvenance}
+          artworkIdentity={artworkIdentity}
           locked={locked}
         />
       </section>
@@ -2384,14 +2394,27 @@ function IdentityTab({
 function BannerRefreshControl({
   slug,
   bannerKey,
+  provenance,
+  artworkIdentity,
   locked,
 }: {
   slug: string;
   bannerKey: string | null;
+  provenance: ChannelIdentity["artProvenance"];
+  artworkIdentity: ArtIdentity;
   locked: boolean;
 }) {
+  const router = useRouter();
+  const access = useOperationsAccess();
+  const requestOwnerAccess = useRequestOperationsAccess();
   const [state, setState] = useState<"idle" | "running" | "done" | "error">("idle");
   const [message, setMessage] = useState<string | null>(null);
+  const freshness = assessChannelArtFreshness({
+    kind: "banner",
+    identity: artworkIdentity,
+    assetKey: bannerKey,
+    provenance,
+  });
 
   const refresh = async () => {
     if (state === "running" || locked) return;
@@ -2406,7 +2429,8 @@ function BannerRefreshControl({
       const payload = await response.json() as { ok?: boolean; error?: string };
       if (!response.ok || !payload.ok) throw new Error(payload.error ?? "Could not refresh the banner");
       setState("done");
-      setMessage("Banner refreshed from this channel’s visual world.");
+      setMessage("Reviewed banner accepted. Updating this channel now.");
+      router.refresh();
     } catch (error) {
       setState("error");
       setMessage(error instanceof Error ? error.message : "Could not refresh the banner");
@@ -2414,19 +2438,43 @@ function BannerRefreshControl({
   };
 
   return (
-    <div className={styles.bannerRefresh}>
+    <div className={styles.bannerRefresh} data-fresh={freshness.current ? "true" : "false"}>
       <div>
-        <strong>Channel world artwork</strong>
-        <span>Fal Nano Banana · visual QA · ≤$0.12</span>
+        <strong>
+          Channel world artwork
+          <i>{freshness.current ? "Current" : bannerKey ? "Needs refresh" : "Missing"}</i>
+        </strong>
+        <span>
+          {freshness.current
+            ? "Identity-matched · reviewed · receipt saved"
+            : "Saved art does not prove the current channel identity · ≤$0.12"}
+        </span>
+        {access !== "owner" && (
+          <small>Owner verification is required because this spends money and replaces saved art.</small>
+        )}
       </div>
       <div>
         <button
           type="button"
           className={styles.bannerRefreshButton}
-          onClick={() => void refresh()}
-          disabled={locked || state === "running"}
+          onClick={() => {
+            if (access !== "owner") {
+              requestOwnerAccess();
+              return;
+            }
+            void refresh();
+          }}
+          disabled={locked || state === "running" || access === "checking"}
         >
-          {locked ? "Channel locked" : state === "running" ? "Refreshing…" : "Refresh banner"}
+          {locked
+            ? "Channel locked"
+            : state === "running"
+              ? "Rendering + reviewing…"
+              : access !== "owner"
+                ? "Verify owner"
+                : freshness.current
+                  ? "Render replacement"
+                  : "Replace stale banner"}
         </button>
         {message && (
           <p role={state === "error" ? "alert" : "status"} data-tone={state}>
