@@ -10,6 +10,7 @@ import { referenceOpeningCapability } from "@/lib/referenceOpening";
 
 const source = readFileSync(join(process.cwd(), "src/lib/scriptLab.ts"), "utf8");
 const capture = readFileSync(join(process.cwd(), "src/lib/referenceOpening.ts"), "utf8");
+const triggerConfig = readFileSync(join(process.cwd(), "trigger.config.ts"), "utf8");
 const inception = readFileSync(join(process.cwd(), "src/trigger/designChannelInception.ts"), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
@@ -23,12 +24,16 @@ assert.match(capture, /youtube:player_client=web_safari/);
 assert.match(capture, /"-f",\s*"sb0"/);
 assert.match(capture, /"--write-auto-subs"/);
 assert.match(capture, /await rm\(dir, \{ recursive: true, force: true \}\)/);
+assert.match(triggerConfig, /const YT_DLP_PACKAGE_VERSION = "2026\.6\.9"/);
+assert.match(triggerConfig, /const YT_DLP_CLI_VERSION = "2026\.06\.09"/);
+assert.match(triggerConfig, /yt-dlp==\$\{YT_DLP_PACKAGE_VERSION\}/);
+assert.match(triggerConfig, /yt-dlp --version\)" = "\$\{YT_DLP_CLI_VERSION\}"/);
 
 const previousKey = process.env.OPENROUTER_API_KEY;
 const previousYtDlpBin = process.env.YT_DLP_BIN;
 const probeDir = mkdtempSync(join(tmpdir(), "studio-yt-dlp-probe-"));
 const probeBin = join(probeDir, "yt-dlp");
-writeFileSync(probeBin, "#!/bin/sh\nprintf '2026.6.9\\n'\n", "utf8");
+writeFileSync(probeBin, "#!/bin/sh\nprintf '2026.06.09\\n'\n", "utf8");
 chmodSync(probeBin, 0o755);
 try {
   delete process.env.OPENROUTER_API_KEY;

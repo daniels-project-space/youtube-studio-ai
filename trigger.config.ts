@@ -31,7 +31,8 @@ const FASTER_WHISPER_VERSION = "1.2.1";
 const FASTER_WHISPER_SMALL_EN_REPOSITORY = "Systran/faster-whisper-small.en";
 const FASTER_WHISPER_SMALL_EN_REVISION = "d1d751a5f8271d482d14ca55d9e2deeebbae577f";
 const REFERENCE_OPENING_CAPTURE_VENV = "/opt/youtube-studio-reference-opening";
-const YT_DLP_VERSION = "2026.6.9";
+const YT_DLP_PACKAGE_VERSION = "2026.6.9";
+const YT_DLP_CLI_VERSION = "2026.06.09";
 const YT_DLP_WHEEL_SHA256 = "442ba4c75724b9496144c8434b617962ee08d0ee7c26ec663848fe9b78d5a3e4";
 
 function pinnedQaSceneAnalysis(): BuildExtension {
@@ -127,7 +128,7 @@ function pinnedReferenceOpeningCapture(): BuildExtension {
     name: "pinned-reference-opening-capture",
     onBuildComplete(context) {
       if (context.target === "dev") return;
-      const requirement = `yt-dlp==${YT_DLP_VERSION} --hash=sha256:${YT_DLP_WHEEL_SHA256}\n`;
+      const requirement = `yt-dlp==${YT_DLP_PACKAGE_VERSION} --hash=sha256:${YT_DLP_WHEEL_SHA256}\n`;
       const writeRequirement = [
         'const fs = require("node:fs");',
         `fs.writeFileSync("/tmp/reference-opening-capture.txt", Buffer.from(${JSON.stringify(requirement)}, "utf8"));`,
@@ -140,7 +141,7 @@ function pinnedReferenceOpeningCapture(): BuildExtension {
             `RUN node -e ${JSON.stringify(writeRequirement)}`,
             `RUN python3 -m venv ${REFERENCE_OPENING_CAPTURE_VENV}`,
             `RUN ${REFERENCE_OPENING_CAPTURE_VENV}/bin/python -m pip install --no-cache-dir --disable-pip-version-check --require-hashes --only-binary=:all: --no-deps -r /tmp/reference-opening-capture.txt`,
-            `RUN test "$(${REFERENCE_OPENING_CAPTURE_VENV}/bin/yt-dlp --version)" = "${YT_DLP_VERSION}"`,
+            `RUN test "$(${REFERENCE_OPENING_CAPTURE_VENV}/bin/yt-dlp --version)" = "${YT_DLP_CLI_VERSION}"`,
             `ENV PATH=${REFERENCE_OPENING_CAPTURE_VENV}/bin:$PATH`,
           ],
         },
