@@ -3,7 +3,8 @@
 import { useMemo } from "react";
 import { Chart } from "./Chart";
 import { SectionTitle } from "./PageHeader";
-import { dailyBuckets, outcomeTally, runsByChannel, type StatRun } from "@/lib/runStats";
+import { dailyBuckets, hasBucketActivity, outcomeTally, runsByChannel, type StatRun } from "@/lib/runStats";
+import styles from "./StatsCharts.module.css";
 
 /**
  * Dashboard analytics panel built from real run data (no extra round-trips):
@@ -20,16 +21,23 @@ export function StatsCharts({ runs, showByChannel = false }: { runs: StatRun[]; 
 
   const renders = [{ name: "Renders", color: "var(--color-accent)", points: buckets.map((b) => ({ label: b.label, value: b.count })) }];
   const spend = [{ name: "Spend", color: "var(--color-secondary)", points: buckets.map((b) => ({ label: b.label, value: Number(b.cost.toFixed(2)) })) }];
+  const hasRecentActivity = hasBucketActivity(buckets);
+
+  if (runs.length === 0) return null;
 
   return (
-    <section style={{ marginBottom: "1.6rem" }}>
-      <SectionTitle>Activity (last {days} days)</SectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: "0.9rem" }}>
-        <Chart title="Renders / day" series={renders} formatValue={(n) => String(Math.round(n))} />
-        <Chart title="Spend / day (USD)" series={spend} formatValue={(n) => `$${n.toFixed(2)}`} />
-      </div>
+    <section className={styles.section} data-recent-activity={hasRecentActivity}>
+      {hasRecentActivity ? (
+        <>
+          <SectionTitle>{days}-day activity</SectionTitle>
+          <div className={styles.charts}>
+            <Chart title="Renders / day" series={renders} formatValue={(n) => String(Math.round(n))} />
+            <Chart title="Spend / day (USD)" series={spend} formatValue={(n) => `$${n.toFixed(2)}`} />
+          </div>
+        </>
+      ) : null}
 
-      <div style={{ display: "grid", gridTemplateColumns: showByChannel ? "1fr 1fr" : "1fr", gap: "0.9rem", marginTop: "0.9rem" }}>
+      <div className={styles.outcomes} data-by-channel={showByChannel} data-after-charts={hasRecentActivity}>
         <OutcomeCard ok={tally.ok} failed={tally.failed} other={tally.other} total={tally.total} />
         {showByChannel && byChannel.length > 0 && <ByChannelCard rows={byChannel} />}
       </div>
@@ -40,14 +48,14 @@ export function StatsCharts({ runs, showByChannel = false }: { runs: StatRun[]; 
 function OutcomeCard({ ok, failed, other, total }: { ok: number; failed: number; other: number; total: number }) {
   const pct = (n: number) => (total ? (n / total) * 100 : 0);
   return (
-    <div className="glass" style={{ padding: "1.1rem 1.2rem" }}>
-      <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.8rem" }}>Outcomes ({total} runs)</div>
-      <div style={{ display: "flex", height: 14, borderRadius: 7, overflow: "hidden", background: "var(--color-surface)" }}>
-        {ok > 0 && <div style={{ width: `${pct(ok)}%`, background: "var(--color-ok)" }} />}
-        {failed > 0 && <div style={{ width: `${pct(failed)}%`, background: "var(--color-failed)" }} />}
-        {other > 0 && <div style={{ width: `${pct(other)}%`, background: "var(--color-queued, #888)" }} />}
+    <div className={`glass ${styles.card}`}>
+      <div className={styles.cardTitle}>Outcomes <span>{total} runs</span></div>
+      <div className={styles.outcomeBar}>
+        {ok > 0 && <div style={{ width: `${pct(ok)}%`, background: "var(--color-ok)" }} aria-label={`${ok} completed`} />}
+        {failed > 0 && <div style={{ width: `${pct(failed)}%`, background: "var(--color-failed)" }} aria-label={`${failed} failed`} />}
+        {other > 0 && <div style={{ width: `${pct(other)}%`, background: "var(--color-queued, #888)" }} aria-label={`${other} other`} />}
       </div>
-      <div style={{ display: "flex", gap: "1.2rem", marginTop: "0.8rem", fontSize: "0.8rem", color: "var(--color-muted)" }}>
+      <div className={styles.legendRow}>
         <Legend color="var(--color-ok)" label="Completed" n={ok} />
         <Legend color="var(--color-failed)" label="Failed" n={failed} />
         {other > 0 && <Legend color="var(--color-queued, #888)" label="Other" n={other} />}
@@ -59,14 +67,14 @@ function OutcomeCard({ ok, failed, other, total }: { ok: number; failed: number;
 function ByChannelCard({ rows }: { rows: { name: string; count: number }[] }) {
   const max = Math.max(...rows.map((r) => r.count), 1);
   return (
-    <div className="glass" style={{ padding: "1.1rem 1.2rem" }}>
-      <div style={{ fontSize: "0.85rem", fontWeight: 600, marginBottom: "0.8rem" }}>Runs by channel</div>
-      <div style={{ display: "grid", gap: "0.55rem" }}>
+    <div className={`glass ${styles.card}`}>
+      <div className={styles.cardTitle}>Runs by channel</div>
+      <div className={styles.channelRows}>
         {rows.slice(0, 6).map((r) => (
-          <div key={r.name} style={{ display: "grid", gridTemplateColumns: "120px 1fr 28px", alignItems: "center", gap: "0.6rem", fontSize: "0.8rem" }}>
-            <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "var(--color-muted)" }}>{r.name}</span>
-            <span style={{ height: 8, borderRadius: 4, background: "var(--color-accent)", width: `${(r.count / max) * 100}%`, minWidth: 4 }} />
-            <span style={{ textAlign: "right", color: "var(--color-fg)" }}>{r.count}</span>
+          <div key={r.name} className={styles.channelRow}>
+            <span>{r.name}</span>
+            <span className={styles.channelBar} style={{ width: `${(r.count / max) * 100}%` }} />
+            <strong>{r.count}</strong>
           </div>
         ))}
       </div>
@@ -76,9 +84,9 @@ function ByChannelCard({ rows }: { rows: { name: string; count: number }[] }) {
 
 function Legend({ color, label, n }: { color: string; label: string; n: number }) {
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: "0.4rem" }}>
-      <span style={{ width: 9, height: 9, borderRadius: 2, background: color }} />
-      {label} <strong style={{ color: "var(--color-fg)" }}>{n}</strong>
+    <span className={styles.legend}>
+      <span style={{ background: color }} />
+      {label} <strong>{n}</strong>
     </span>
   );
 }

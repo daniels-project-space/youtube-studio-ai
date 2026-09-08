@@ -44,6 +44,11 @@ export function dailyBuckets(runs: StatRun[], days = 14, now = Date.now()): DayB
   return buckets;
 }
 
+/** True only when the selected period contains a run or recorded spend. */
+export function hasBucketActivity(buckets: readonly DayBucket[]): boolean {
+  return buckets.some((bucket) => bucket.count > 0 || bucket.cost > 0);
+}
+
 /** Outcome tally across the supplied runs. */
 export function outcomeTally(runs: StatRun[]): { ok: number; failed: number; other: number; total: number } {
   const ok = runs.filter((r) => r.status === "ok").length;

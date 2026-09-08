@@ -1,0 +1,123 @@
+.section {
+  margin-bottom: 1.35rem;
+}
+
+.charts {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+  gap: 0.9rem;
+}
+
+.outcomes {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 0.9rem;
+}
+
+.outcomes[data-by-channel="true"] {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.outcomes[data-after-charts="true"] {
+  margin-top: 0.9rem;
+}
+
+.card {
+  padding: 0.9rem 1.05rem;
+}
+
+.cardTitle {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.65rem;
+  color: var(--color-fg);
+  font-size: 0.9rem;
+  font-weight: 700;
+}
+
+.cardTitle span {
+  color: var(--color-faint);
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.outcomeBar {
+  display: flex;
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-surface);
+}
+
+.legendRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.7rem 1.2rem;
+  margin-top: 0.7rem;
+  color: var(--color-muted);
+  font-size: 0.8rem;
+}
+
+.legend {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.legend > span {
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+
+.legend strong,
+.channelRow strong {
+  color: var(--color-fg);
+}
+
+.channelRows {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.channelRow {
+  display: grid;
+  grid-template-columns: 120px minmax(40px, 1fr) 28px;
+  align-items: center;
+  gap: 0.6rem;
+  color: var(--color-muted);
+  font-size: 0.8rem;
+}
+
+.channelRow > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.channelBar {
+  min-width: 4px;
+  height: 7px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, var(--color-accent), var(--color-secondary));
+}
+
+.channelRow strong {
+  text-align: right;
+}
+
+@media (max-width: 720px) {
+  .charts,
+  .outcomes[data-by-channel="true"] {
+    grid-template-columns: 1fr;
+  }
+
+  .card {
+    padding: 0.85rem 0.9rem;
+  }
+}
