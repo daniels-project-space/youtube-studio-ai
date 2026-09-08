@@ -74,6 +74,71 @@ export const set = mutation({
 });
 
 /**
+ * Move one unchanged legacy refresh token into its encrypted envelope.
+ *
+ * This is a compare-and-swap storage migration, not a connector rotation: the
+ * logical credential and tokenVersion remain unchanged, so frozen upload and
+ * thumbnail plans stay valid. The worker round-trips the envelope with the
+ * channel-bound AAD before this mutation atomically removes the plaintext.
+ */
+export const migrateLegacyTokenStorage = mutation({
+  args: {
+    secret: v.string(),
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    connectorId: v.id("youtubeAuth"),
+    expectedTokenVersion: v.number(),
+    expectedUpdatedAt: v.number(),
+    refreshTokenCiphertext: v.string(),
+    migratedAt: v.number(),
+  },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const expected = process.env.INTERNAL_QUERY_SECRET;
+    if (!expected || args.secret !== expected) {
+      throw new Error("youtubeAuth.migrateLegacyTokenStorage: invalid internal secret");
+    }
+    if (
+      !Number.isSafeInteger(args.expectedTokenVersion) ||
+      args.expectedTokenVersion < 1 ||
+      !Number.isSafeInteger(args.expectedUpdatedAt) ||
+      !Number.isSafeInteger(args.migratedAt) ||
+      args.migratedAt < args.expectedUpdatedAt ||
+      args.refreshTokenCiphertext.length < 40 ||
+      args.refreshTokenCiphertext.length > 10_000 ||
+      !/^enc:v1:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+:[A-Za-z0-9_-]+$/.test(
+        args.refreshTokenCiphertext,
+      )
+    ) {
+      throw new Error("youtubeAuth.migrateLegacyTokenStorage: invalid migration claim");
+    }
+    const row = await ctx.db.get(args.connectorId);
+    if (!row || row.ownerId !== args.ownerId || row.channelId !== args.channelId) {
+      throw new Error("youtubeAuth.migrateLegacyTokenStorage: connector binding changed");
+    }
+    if (row.refreshTokenCiphertext && !row.refreshToken) {
+      return { state: "already_encrypted", connectorId: row._id, tokenVersion: row.tokenVersion ?? 1 };
+    }
+    if (
+      (row.status ?? "active") !== "active" ||
+      !row.refreshToken ||
+      row.refreshTokenCiphertext ||
+      (row.tokenVersion ?? 1) !== args.expectedTokenVersion ||
+      row.updatedAt !== args.expectedUpdatedAt
+    ) {
+      throw new Error("youtubeAuth.migrateLegacyTokenStorage: legacy credential changed");
+    }
+    await ctx.db.patch(row._id, {
+      refreshTokenCiphertext: args.refreshTokenCiphertext,
+      refreshToken: undefined,
+      dataRetentionPolicy: "retain_aggregates_delete_credentials_v1",
+      updatedAt: args.migratedAt,
+    });
+    return { state: "migrated", connectorId: row._id, tokenVersion: row.tokenVersion ?? 1 };
+  },
+});
+
+/**
  * The token row for a channel (or null). Server-only consumers.
  *
  * SECURITY: this returns a refreshToken, and Convex queries are publicly

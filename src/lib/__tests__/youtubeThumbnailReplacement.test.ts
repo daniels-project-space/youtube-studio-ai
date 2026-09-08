@@ -59,8 +59,15 @@ const dispatch = assertYoutubeThumbnailReplacementDispatch({
   dispatchAttempt: 0,
 });
 
-assert.equal(youtubeThumbnailReplacementTriggerRequest(dispatch).taskId, "youtube-thumbnail-replacement");
-assert.equal("youtubeVideoId" in youtubeThumbnailReplacementTriggerRequest(dispatch).payload, false);
+const firstRequest = youtubeThumbnailReplacementTriggerRequest(dispatch);
+assert.equal(firstRequest.taskId, "youtube-thumbnail-replacement");
+assert.equal("youtubeVideoId" in firstRequest.payload, false);
+assert.equal(firstRequest.idempotencySeed, `${dispatchKey}:attempt:1`);
+assert.equal(
+  youtubeThumbnailReplacementTriggerRequest({ ...dispatch, dispatchAttempt: 1 }).idempotencySeed,
+  `${dispatchKey}:attempt:2`,
+  "a bounded retry must create a new Trigger execution instead of resolving to the failed attempt",
+);
 assert.equal(verifyStudioActionApproval(approval, {
   action: "youtube-thumbnail-replacement",
   ownerId: identity.ownerId,

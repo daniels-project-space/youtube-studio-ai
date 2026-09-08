@@ -10,6 +10,8 @@ const task = read("src/trigger/youtubeThumbnailReplacement.ts");
 const panel = read("src/components/ThumbnailRefreshInventoryPanel.tsx");
 const automaticCore = read("src/trigger/automaticThumbnailReplacementCore.ts");
 const candidateTask = read("src/trigger/thumbnailRefreshCandidate.ts");
+const migrationTask = read("src/trigger/migrateYoutubeConnectorStorage.ts");
+const youtubeAuth = read("convex/youtubeAuth.ts");
 
 assert.match(schema, /youtubeThumbnailReplacements: defineTable/);
 assert.match(schema, /candidateArtifactSha256: v\.string\(\)/);
@@ -33,5 +35,16 @@ assert.match(panel, /New Library thumbnail active/);
 assert.match(automaticCore, /AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX/);
 assert.match(automaticCore, /youtubeThumbnailReplacementTriggerRequest/);
 assert.match(candidateTask, /queueAutomaticThumbnailReplacement/);
+assert.match(youtubeAuth, /export const migrateLegacyTokenStorage = mutation/);
+assert.match(youtubeAuth, /refreshToken: undefined/);
+assert.match(youtubeAuth, /row\.updatedAt !== args\.expectedUpdatedAt/);
+const migrationSection = youtubeAuth.slice(youtubeAuth.indexOf("export const migrateLegacyTokenStorage"));
+const migrationPatch = migrationSection.match(/await ctx\.db\.patch\(row\._id, \{([\s\S]*?)\n    \}\);/)?.[1] ?? "";
+assert.ok(migrationPatch, "the storage migration must atomically patch the connector");
+assert.doesNotMatch(migrationPatch, /tokenVersion:/, "storage migration must preserve the logical connector version");
+assert.match(migrationTask, /decryptSecret\(refreshTokenCiphertext/);
+assert.match(migrationTask, /migrateLegacyTokenStorage/);
+assert.doesNotMatch(migrationTask, /console\.(?:log|error)/);
+assert.match(convex, /resumed_after_storage_migration/);
 
 console.log("YouTube thumbnail replacement wiring: PASS");

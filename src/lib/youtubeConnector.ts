@@ -3,6 +3,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { hasAnyScope } from "@/lib/publishingPolicy";
 import { decryptSecret } from "@/lib/secretEnvelope";
+import { LEGACY_YOUTUBE_CONNECTOR_STORAGE_ERROR } from "@/lib/youtubeConnectorStorage";
 
 const TOKEN_KEY_ENV = "YOUTUBE_TOKEN_ENCRYPTION_KEY";
 
@@ -145,7 +146,5 @@ export async function requireYouTubeConnector(
     };
   }
 
-  throw new Error(
-    "YouTube connector uses legacy plaintext storage; reconnect or run the encrypted-token migration",
-  );
+  throw new Error(LEGACY_YOUTUBE_CONNECTOR_STORAGE_ERROR);
 }

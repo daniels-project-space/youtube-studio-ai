@@ -143,6 +143,9 @@ export function youtubeThumbnailReplacementTriggerRequest(
       planFingerprint: dispatch.planFingerprint,
     },
     concurrencyKey: dispatch.channelId,
-    idempotencySeed: dispatch.dispatchKey,
+    // A recovered durable receipt needs a fresh bounded Trigger execution.
+    // Using only the plan key caused every retry to resolve to the first failed
+    // task forever instead of starting its next recorded attempt.
+    idempotencySeed: `${dispatch.dispatchKey}:attempt:${dispatch.dispatchAttempt + 1}`,
   };
 }

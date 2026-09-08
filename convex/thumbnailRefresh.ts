@@ -7,6 +7,7 @@ import {
   assessThumbnailRefreshEvidence,
   type ThumbnailRefreshAsset,
 } from "../src/lib/thumbnailRefreshInventory";
+import { isLegacyYoutubeConnectorStorageError } from "../src/lib/youtubeConnectorStorage";
 import { thumbnailGatePassed, type ThumbnailGateVerdict } from "../src/engine/qualityPolicy";
 import { assessThumbnailRefreshReplay } from "../src/lib/thumbnailRefreshReplay";
 import { normalizeReleaseEvidenceStatus } from "../src/lib/releaseEvidenceStatus";
@@ -991,7 +992,17 @@ export const listAutomaticReplacementCandidates = query({
           .eq("ownerId", args.ownerId)
           .eq("candidateRunId", candidate._id))
         .unique();
-      if (replacement && !["awaiting_approval", "pending"].includes(replacement.status)) continue;
+      const recoverableStorageMigration = Boolean(
+        replacement?.status === "blocked" &&
+        isLegacyYoutubeConnectorStorageError(replacement.lastError) &&
+        connector.refreshTokenCiphertext &&
+        !connector.refreshToken,
+      );
+      if (
+        replacement &&
+        !["awaiting_approval", "pending"].includes(replacement.status) &&
+        !recoverableStorageMigration
+      ) continue;
       due.push({
         sourceRunId: source._id,
         candidateRunId: candidate._id,

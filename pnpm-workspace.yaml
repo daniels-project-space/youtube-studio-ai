@@ -12,6 +12,7 @@ allowBuilds:
 overrides:
   engine.io: 6.6.9
   fast-uri: 3.1.7
+  "gray-matter>js-yaml": 3.15.2
   nanoid: 3.3.18
   qs: 6.16.0
   ws: 8.21.2

@@ -15,6 +15,7 @@ import {
   youtubeThumbnailReplacementPlanFingerprint,
 } from "../src/lib/youtubeThumbnailReplacement";
 import { assessLegacyVideoCleanup } from "../src/lib/legacyVideoCleanup";
+import { isLegacyYoutubeConnectorStorageError } from "../src/lib/youtubeConnectorStorage";
 
 const MAX_ATTEMPTS = 3;
 type DbCtx = Pick<QueryCtx | MutationCtx, "db">;
@@ -163,6 +164,31 @@ export const createPlanShell = mutation({
     if (existing) {
       if (existing.planFingerprint !== planFingerprint) {
         throw new Error("YouTube thumbnail replacement identity conflict");
+      }
+      // The at-rest migration preserves connector identity, logical token and
+      // version. Release only this exact deterministic storage failure; every
+      // candidate/video/channel/artifact binding above was revalidated first.
+      if (
+        existing.status === "blocked" &&
+        isLegacyYoutubeConnectorStorageError(existing.lastError) &&
+        Boolean(connector.refreshTokenCiphertext) &&
+        !connector.refreshToken
+      ) {
+        await ctx.db.patch(existing._id, {
+          status: "pending",
+          dispatchAttempts: 0,
+          dispatchTriggerRunId: undefined,
+          lastError: undefined,
+          updatedAt: args.now,
+        });
+        return {
+          state: "resumed_after_storage_migration",
+          replacementId: existing._id,
+          ...existing,
+          status: "pending",
+          dispatchAttempts: 0,
+          lastError: undefined,
+        };
       }
       return { state: "reused", replacementId: existing._id, ...existing };
     }
