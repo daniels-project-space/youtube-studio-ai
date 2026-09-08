@@ -25,7 +25,8 @@ async function main(): Promise<void> {
   assert.match(html, /Final-master review/);
   assert.match(html, /Automatic/);
   assert.match(html, /Supervised \/ private/);
-  assert.match(html, /Catalog only · no compiler binding/);
+  assert.match(html, /Reference card only/);
+  assert.match(html, /title="No compiler binding"/);
   assert.match(html, /Studio Asset Library/);
   assert.match(html, /IC controls remain unavailable until exact workflow/);
   assert.match(html, /MANIFEST REFERENCE/);

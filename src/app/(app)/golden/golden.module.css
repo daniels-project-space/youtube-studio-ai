@@ -259,7 +259,7 @@
 .moduleCard[open] { grid-column: 1 / -1; border-color: #67512a; background: #100d09; }
 .moduleCard[open]:hover { transform: none; }
 .moduleCard[data-reference="true"] { border-color: #58451f; box-shadow: inset 0 2px rgba(227, 168, 54, 0.24); }
-.moduleSummary { display: grid; grid-template-columns: 82px minmax(0,1fr) 20px; grid-template-rows: minmax(0,1fr) auto; min-height: 136px; align-items: center; gap: 7px 13px; padding: 12px 13px; cursor: pointer; list-style: none; }
+.moduleSummary { display: grid; grid-template-columns: 82px minmax(0,1fr) 20px; grid-template-rows: minmax(0,1fr) auto; min-height: 140px; align-items: center; gap: 7px 13px; padding: 11px 13px; cursor: pointer; list-style: none; }
 .moduleSummary::-webkit-details-marker { display: none; }
 .moduleSummary:focus-visible { outline: 2px solid var(--gold-bright); outline-offset: -3px; }
 .moduleSummary:hover { background: rgba(227,168,54,0.028); }
@@ -268,11 +268,12 @@
 .moduleVisual > span { transition: color 180ms ease, transform 180ms ease; }
 .moduleCard:hover .moduleVisual > span { color: #fff1c4; transform: scale(1.08); }
 .moduleVisual small { position: absolute; right: 4px; bottom: 4px; padding: 3px 4px; border-radius: 4px; color: #f0b38f; background: rgba(16,8,5,.88); font: 700 0.42rem/1 var(--font-mono,ui-monospace,monospace); letter-spacing: .05em; text-transform: uppercase; }
-.moduleSummaryCopy { display: grid; grid-column: 2; grid-row: 1; min-width: 0; gap: 5px; align-self: center; }
+.moduleSummaryCopy { display: grid; grid-column: 2; grid-row: 1; min-width: 0; gap: 4px; align-self: center; }
 .moduleSummaryCopy > small { color: color-mix(in srgb,var(--module-accent) 72%,#918474); font: 0.64rem/1 var(--font-mono,ui-monospace,monospace); letter-spacing: .08em; text-transform: uppercase; }
-.moduleSummaryCopy > [role="heading"] { display: -webkit-box; overflow: hidden; color: var(--gold-ink); font-family: var(--font-display,Georgia,serif); font-size: 1.18rem; font-weight: 580; letter-spacing: -.025em; line-height: 1.12; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.modulePowerPoints { display: grid; gap: 3px; margin: 1px 0 0; padding: 0; list-style: none; }
-.modulePowerPoints li { position: relative; display: -webkit-box; overflow: hidden; padding-left: 12px; color: #c2b8aa; font-size: .82rem; line-height: 1.34; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.moduleSummaryCopy > [role="heading"] { display: -webkit-box; overflow: hidden; color: var(--gold-ink); font-family: var(--font-display,Georgia,serif); font-size: 1.24rem; font-weight: 610; letter-spacing: -.025em; line-height: 1.1; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.modulePromise { display: -webkit-box; overflow: hidden; color: #f0dfbf; font-size: .88rem; font-weight: 610; line-height: 1.25; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
+.modulePowerPoints { display: grid; gap: 2px; margin: 1px 0 0; padding: 0; list-style: none; }
+.modulePowerPoints li { position: relative; display: block; overflow: hidden; padding-left: 12px; color: #aaa092; font-size: .76rem; line-height: 1.28; text-overflow: ellipsis; white-space: nowrap; }
 .modulePowerPoints li::before { position: absolute; top: .43em; left: 0; width: 5px; height: 5px; border-radius: 50%; background: var(--module-accent); box-shadow: 0 0 0 3px color-mix(in srgb,var(--module-accent) 9%,transparent); content: ""; }
 .moduleSummaryMeta { display: flex; grid-column: 2; grid-row: 2; min-width: 0; align-items: center; justify-content: space-between; gap: 7px; align-self: start; }
 .moduleSummaryMeta > small { overflow: hidden; color: #706656; font: .5rem/1.2 var(--font-mono,ui-monospace,monospace); text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
@@ -303,13 +304,6 @@
 .moduleFacts [data-state="blocked"] strong { color: var(--gold-red); }
 .moduleFacts [data-state="private-review-only"] strong,
 .moduleFacts [data-proof="true"] strong { color: var(--gold-bright); }
-.moduleDoctrine { display: grid; grid-template-columns: minmax(0,.82fr) minmax(0,1.18fr); gap: 20px; padding: 3px 2px 0; }
-.moduleDoctrine > div { display: grid; align-content: start; gap: 7px; }
-.moduleDoctrine > div small { color: var(--gold-warm); font: 700 .54rem/1 var(--font-mono,ui-monospace,monospace); letter-spacing: .09em; text-transform: uppercase; }
-.moduleDoctrine > div strong { color: #b9ad9b; font-size: .76rem; font-weight: 520; line-height: 1.55; }
-.gates { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.gates li { display: grid; grid-template-columns: 17px minmax(0, 1fr); gap: 5px; color: #968b7b; font-size: 0.7rem; line-height: 1.45; }
-.gates li > span:first-child { color: var(--gold-warm); font-family: var(--font-mono, ui-monospace, monospace); }
 .moduleEvidence { display: grid; gap: 9px; padding-top: 12px; border-top: 1px solid #342c22; }
 .moduleEvidence > header { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .moduleEvidence > header span { color: var(--gold-warm); font: 700 .54rem/1 var(--font-mono,ui-monospace,monospace); letter-spacing: .1em; text-transform: uppercase; }
@@ -366,7 +360,6 @@
   .chapterBody { padding: 10px; }
   .moduleFacts { grid-template-columns: 1fr; }
   .moduleFacts > div + div { border-top: 1px solid #3a3127; border-left: 0; }
-  .moduleDoctrine { grid-template-columns: 1fr; gap: 12px; }
 }
 
 @media (max-width: 540px) {
@@ -389,8 +382,9 @@
   .moduleGrid { grid-template-columns: 1fr; }
   .moduleSummary { grid-template-columns: 54px minmax(0,1fr) 18px; min-height: 110px; gap: 5px 10px; padding: 10px; }
   .moduleVisual { width: 54px; height: 82px; }
-  .moduleSummaryCopy > [role="heading"] { font-size: 1.03rem; }
-  .modulePowerPoints li { font-size: .76rem; line-height: 1.38; -webkit-line-clamp: 2; }
+  .moduleSummaryCopy > [role="heading"] { font-size: 1.08rem; }
+  .modulePromise { font-size: .84rem; -webkit-line-clamp: 2; }
+  .modulePowerPoints li { font-size: .76rem; line-height: 1.32; }
   .moduleSummaryMeta > small { display: none; }
   .moduleStatus { max-width: 86px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .moduleToolbar { align-items: stretch; flex-direction: column; }

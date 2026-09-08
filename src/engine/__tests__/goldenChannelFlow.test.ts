@@ -166,7 +166,7 @@ function dormantQuizShortReleaseIsNotAnActiveCreatorRoute(): void {
     "the dormant block must not become a Golden executable through registry presence alone",
   );
   const goldenPage = readFileSync(join(process.cwd(), "src/app/(app)/golden/page.tsx"), "utf8");
-  assert.match(goldenPage, /Private-release block ·/);
+  assert.match(goldenPage, /Private-release control/);
   assert.match(goldenPage, /const availability = catalogExecutionAvailability\(execution\)/);
   assert.match(goldenPage, /data-state=\{availability\.state\}/);
   assert.match(goldenPage, /availability\.label/);

@@ -20,6 +20,7 @@ import {
 } from "@/engine/goldenProofMedia";
 import { ProductionRouteQualificationCard } from "@/components/ProductionRouteQualificationCard";
 import { GoldenImages } from "./GoldenImages";
+import { moduleSalesPitch } from "./moduleSalesPitches";
 import styles from "./golden.module.css";
 
 /* ============================ proof data ============================== *
@@ -183,42 +184,6 @@ const CATEGORY: Record<string, string> = {
 };
 const CATEGORY_ORDER = ["Pre-production", "Video Engines", "Visual", "Audio", "Post-production"];
 
-/** Short "what it does" line — first sentence of the honest `how`. */
-function blurb(how: string): string {
-  const first = how.split(/\.\s/)[0].trim();
-  return first.endsWith(".") ? first : first + ".";
-}
-
-/** Keep implementation audit notes available in source, not in the operator's visual scan. */
-function compactHow(how: string): string {
-  const clean = how.replace(/\s+/g, " ").trim();
-  const withoutAuditNotes = clean.split(/\s(?:P\d+-\d+|NOTE \()/)[0].trim();
-  const sentences = withoutAuditNotes.split(/(?<=\.)\s+/).filter(Boolean).slice(0, 2).join(" ");
-  if (sentences.length <= 180) return sentences;
-  return `${sentences.slice(0, 176).trimEnd()}…`;
-}
-
-function compactPoint(value: string, max = 94): string {
-  const clean = value.replace(/^[\s•→↳-]+/, "").replace(/\s+/g, " ").trim();
-  return clean.length <= max ? clean : `${clean.slice(0, max - 1).trimEnd()}…`;
-}
-
-function modulePowerPoints(module: GoldenModule): string[] {
-  const lead = blurb(module.how)
-    .split(/:\s|\s—\s|;\s|,\s(?=where|then|before|while)/i)[0]
-    .replace(/\.$/, "");
-  const compactGates = module.gates
-    .slice(0, 3)
-    .map((gate) => gate.trim())
-    .filter((gate) => gate.length > 0 && gate.length <= 20);
-  const gatePoint = compactGates.length > 1
-    ? `Checks ${compactGates.join(" · ")}`
-    : module.gates[0];
-  return [...new Set([
-    compactPoint(lead, 76),
-    ...(gatePoint ? [compactPoint(gatePoint, 76)] : []),
-  ])].slice(0, 2);
-}
 function take2<T>(xs: readonly T[]): T[] { return xs.slice(0, 2); }
 
 type ModuleDestination = { href: string; label: string };
@@ -636,6 +601,7 @@ function AdmissionGroup({
 /* ----------------------------- module card ----------------------------- */
 
 function ModuleCard({ module: m }: { module: GoldenModule }) {
+  const pitch = moduleSalesPitch(m);
   const isReference = m.status === "reference";
   const isRegistered = m.status === "registered";
   const execution = catalogExecutionBinding(m.key);
@@ -645,12 +611,15 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
   const destination = MODULE_DESTINATIONS[m.key];
   const cover = moduleCover(m.key);
   const binding = execution.kind === "pipeline-module"
-    ? `Executable · ${execution.executableIds.join(" · ")}`
+    ? `${execution.executableIds.length} production step${execution.executableIds.length === 1 ? "" : "s"}`
     : execution.kind === "registered-private-release"
-      ? `Private-release block · ${execution.executableIds.join(" · ")}`
+      ? "Private-release control"
       : execution.kind === "external-task"
-        ? `External task · ${execution.executableIds.join(" · ")}`
-        : "Catalog only · no compiler binding";
+        ? "Connected production task"
+        : "Reference card only";
+  const bindingDetail = execution.kind === "catalog-only"
+    ? "No compiler binding"
+    : execution.executableIds.join(" · ");
   return (
     <details
       className={styles.moduleCard}
@@ -670,9 +639,10 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
         </span>
         <span className={styles.moduleSummaryCopy}>
           <small>{m.stage}</small>
-          <span role="heading" aria-level={3}>{m.title}</span>
+          <span role="heading" aria-level={3}>{pitch.title}</span>
+          <strong className={styles.modulePromise}>{pitch.promise}</strong>
           <ul className={styles.modulePowerPoints}>
-            {modulePowerPoints(m).map((point) => <li key={point}>{point}</li>)}
+            {pitch.bullets.map((point) => <li key={point}>{point}</li>)}
           </ul>
         </span>
         <span className={styles.moduleSummaryMeta}>
@@ -707,7 +677,7 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
         <div className={styles.moduleFacts}>
           <div data-warning={executionIsWarning}>
             <small>Runtime binding</small>
-            <strong>{binding}</strong>
+            <strong title={bindingDetail}>{binding}</strong>
           </div>
           <div data-state={availability.state} title={availability.detail}>
             <small>Availability</small>
@@ -717,20 +687,6 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
             <small>Promotion</small>
             <strong>{promotionProof ? `Recorded ${promotionProof.verifiedAt}` : "Not promoted"}</strong>
           </div>
-        </div>
-        <div className={styles.moduleDoctrine}>
-          <div>
-            <small>What it controls</small>
-            <strong>{compactHow(m.how)}</strong>
-          </div>
-          <ul className={styles.gates}>
-            {m.gates.slice(0, 4).map((gate) => (
-              <li key={gate}>
-                <span aria-hidden="true">↳</span>
-                <span>{gate}</span>
-              </li>
-            ))}
-          </ul>
         </div>
         {MODULES_WITH_PROOF.has(m.key) ? (
           <section className={styles.moduleEvidence} aria-label={`${m.title} evidence`}>
