@@ -60,8 +60,13 @@ assert.throws(
 );
 
 const creatorSource = readFileSync(join(process.cwd(), "src/app/(app)/channels/new/page.tsx"), "utf8");
-assert.match(creatorSource, /previewBlocks\(family, toggles, nicheKey, dataStory, syntheticScenarioProfile/);
-assert.match(creatorSource, /const needsDataInserts = \(dataStory && supportsDataStoryFamily\(familyKey\)\)/);
+const previewSource = readFileSync(join(process.cwd(), "src/engine/channelPipelinePreview.server.ts"), "utf8");
+assert.doesNotMatch(creatorSource, /function previewBlocks/);
+assert.match(creatorSource, /fetch\("\/api\/channel-pipeline-preview"/);
+assert.match(previewSource, /validateCreativeCapabilitySelections\(\{/);
+assert.match(previewSource, /capabilitySelections,/);
+assert.match(previewSource, /designPipelineCore\(\{/);
+assert.match(previewSource, /validateRuntimeRegistry: false/);
 assert.match(creatorSource, /creativeCapabilityOffers/);
 assert.match(creatorSource, /capabilitySelections/);
 assert.match(creatorSource, /capabilityCatalogFingerprint/);

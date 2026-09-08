@@ -9,19 +9,14 @@ import { nichePreset } from "@/engine/golden";
 import {
   FAMILIES,
   FAMILY_KEYS,
-  FAMILY_CREW,
-  CREW_ROLE_BLOCK,
   clampFamilyEpisodeLengthMinutes,
   familyDurationContract,
+  familyAutonomousPlanningCapability,
   formatFamilyDurationContract,
   getFamily,
   type FamilyKey,
 } from "@/engine/families";
 import { automaticFamilyCreatorReadiness } from "@/engine/automaticFamilyCreatorReadiness";
-import { ARCHETYPES } from "@/engine/archetypes";
-import {
-  supportsDataStoryFamily,
-} from "@/engine/dataStory";
 import { type SyntheticScenarioProfile } from "@/engine/syntheticScenario";
 import {
   CERTIFIED_QUIZ_PROFILE_OPTIONS,
@@ -138,6 +133,15 @@ interface AutomaticFamilyRuntimeStatus {
   ready: boolean;
   scope: "creator_contract";
   blockers: readonly string[];
+}
+
+interface PipelinePreviewState {
+  status: "idle" | "loading" | "ready" | "error";
+  blocks: string[];
+  requestJson?: string;
+  routeKey?: string;
+  pipelineFingerprint?: string;
+  error?: string;
 }
 
 function qualityCalibrationForCreator(family: FamilyKey) {
@@ -287,79 +291,6 @@ function channelSampleTopics(value: string): string[] {
     .filter(Boolean);
 }
 
-// Client preview of the designed block list (mirrors src/engine/designer filter).
-function previewBlocks(
-  familyKey: FamilyKey,
-  t: Toggles,
-  nicheKey?: string,
-  dataStory = false,
-  syntheticScenarioProfile?: SyntheticScenarioProfile,
-): string[] {
-  const fam = FAMILIES[familyKey];
-  const base = ARCHETYPES[fam.archetypeKey]?.pipeline ?? [];
-  let blocks = base
-    .filter((e) => {
-      if (e.block === "quote_overlays" && !t.quotes) return false;
-      if (e.block === "captions" && !t.captions) return false;
-      if (e.block === "notify" && !t.notify) return false;
-      return true;
-    })
-    .map((e) => e.block);
-  // Film crew (default on) — mirror the designer: niche preset roster wins, else family.
-  const crew = (nichePreset(nicheKey)?.crew ?? FAMILY_CREW[familyKey] ?? []).map((r) => CREW_ROLE_BLOCK[r]).filter(Boolean);
-  if (crew.length) {
-    const at = blocks.indexOf("topic_select");
-    const i = at >= 0 ? at + 1 : 0;
-    blocks = [...blocks.slice(0, i), ...crew, ...blocks.slice(i)];
-  }
-  if (syntheticScenarioProfile) {
-    const script = blocks.indexOf("script_gen");
-    if (script >= 0) {
-      blocks = [...blocks.slice(0, script), "synthetic_scenario", ...blocks.slice(script)];
-      const resolvedScript = blocks.indexOf("script_gen");
-      blocks = [...blocks.slice(0, resolvedScript + 1), "scenario_disclosure_gate", ...blocks.slice(resolvedScript + 1)];
-    }
-  }
-  // The designer inserts a durable story spine for externally narrated lanes.
-  // Cinematic then inserts Visual Matter immediately after it; mirror that in
-  // the review preview so the optional creative module is never invisible.
-  if (fam.narrated && !blocks.includes("story_spine")) {
-    const narration = blocks.indexOf("narration_tts");
-    if (narration >= 0) blocks = [...blocks.slice(0, narration + 1), "story_spine", ...blocks.slice(narration + 1)];
-  }
-  if (familyKey === "cinematic" && !blocks.includes("visual_matter")) {
-    const story = blocks.indexOf("story_spine");
-    if (story >= 0) blocks = [...blocks.slice(0, story + 1), "visual_matter", ...blocks.slice(story + 1)];
-  }
-  // Mirror the design pipeline's existing niche inserts plus the explicit
-  // source-attributed data-story contract. The contract is only supported by
-  // the narrated-stock timeline, so the preview never promises a no-op module
-  // for a self-contained or scene-compiler renderer.
-  const needsDataInserts = (dataStory && supportsDataStoryFamily(familyKey))
-    || Boolean(nichePreset(nicheKey)?.insertTypes?.length);
-  if (needsDataInserts && blocks.includes("timeline_assemble") && !blocks.includes("visual_inserts")) {
-    const anchors = ["quote_overlays", "intro_card", "narration_tts"];
-    const anchor = anchors.map((block) => blocks.indexOf(block)).find((index) => index >= 0) ?? -1;
-    if (anchor >= 0) blocks = [...blocks.slice(0, anchor + 1), "visual_inserts", ...blocks.slice(anchor + 1)];
-  }
-  if (t.crosspost) {
-    const i = blocks.findIndex((b) => b === "notify" || b === "cleanup");
-    blocks = i >= 0 ? [...blocks.slice(0, i), "crosspost", ...blocks.slice(i)] : [...blocks, "crosspost"];
-  }
-  // Shorts spinoff — only for narrated families with an upload step (mirrors designer).
-  if (t.shorts && familyKey !== "music_loop" && blocks.includes("upload_draft") && blocks.includes("narration_tts")) {
-    const i = blocks.findIndex((b) => b === "notify" || b === "cleanup");
-    blocks = i >= 0 ? [...blocks.slice(0, i), "shorts_spinoff", ...blocks.slice(i)] : [...blocks, "shorts_spinoff"];
-  }
-  if (t.documentaryCandidates && blocks.includes("upload_draft") && blocks.includes("narration_tts") && blocks.includes("metadata")) {
-    const i = blocks.findIndex((b) => b === "notify" || b === "cleanup");
-    blocks = i >= 0
-      ? [...blocks.slice(0, i), "documentary_short_candidates", ...blocks.slice(i)]
-      : [...blocks, "documentary_short_candidates"];
-  }
-  return blocks;
-}
-
 export default function NewChannelWizard() {
   const router = useRouter();
   const operationsAccess = useOperationsAccess();
@@ -429,6 +360,15 @@ export default function NewChannelWizard() {
     [automaticCapabilitySelections],
   );
   const dataStory = Boolean(capabilitySelections.source_attributed_data_story);
+  const selectedCapabilitySelections = useMemo(
+    () => [
+      ...automaticCapabilitySelections,
+      ...(dataStory
+        ? [["source_attributed_data_story", capabilitySelections.source_attributed_data_story] as const]
+        : []),
+    ].map(([capability, catalogFingerprint]) => ({ capability, catalogFingerprint })),
+    [automaticCapabilitySelections, capabilitySelections.source_attributed_data_story, dataStory],
+  );
   const dataStorySuggested = creativeCapabilityOffers.some(
     (capability) => capability.capability === "source_attributed_data_story",
   );
@@ -453,6 +393,10 @@ export default function NewChannelWizard() {
   const sampleTopics = useMemo(() => channelSampleTopics(sampleTopicsText), [sampleTopicsText]);
   const [suggesting, setSuggesting] = useState(false);
   const [supervisedAdmission, setSupervisedAdmission] = useState<SupervisedCreatorSelection | null>(null);
+  const [resolvedPipelinePreview, setPipelinePreview] = useState<PipelinePreviewState>({
+    status: "idle",
+    blocks: [],
+  });
 
   useEffect(() => {
     const abort = new AbortController();
@@ -523,6 +467,99 @@ export default function NewChannelWizard() {
     return receipt ? { receipt, definition: certifiedChannelCompositionDefinition(receipt) } : null;
   }, [family, automaticCapabilityKeys]);
   const duration = family ? familyDurationContract(family) : undefined;
+  const requiredPlannerBlocks = useMemo(() => {
+    if (!family) return new Set<string>();
+    const capability = familyAutonomousPlanningCapability(family);
+    return capability.mode === "registered_non_gemini"
+      ? new Set(capability.requiredEntries.map((entry) => entry.block))
+      : new Set<string>();
+  }, [family]);
+  // This exact canonical object is shared by the preview and the eventual
+  // recoverable build request. A partial/free-form browser approximation can
+  // therefore never show a route that the submitted brief would not compile.
+  const programBriefResolution = useMemo(() => {
+    if (!family || !nicheKey) return { brief: null, error: "Choose a territory and production route." };
+    if (concept.trim().length < 12) {
+      return { brief: null, error: "Enter a channel idea of at least 12 characters." };
+    }
+    try {
+      const normalizedAudience = audience.trim();
+      const programIntent = family === "quizyear"
+        ? quizProfile === "sports_championship_timeline"
+          ? { kind: "sports_championship_timeline" as const }
+          : { kind: "certified_quiz" as const, profile: quizProfile }
+        : family === "illustrated_explainer" && syntheticScenarioProfile
+          ? { kind: "fictional_scenario" as const, profile: syntheticScenarioProfile }
+          : undefined;
+      const serializedProgram = seriesTitle.trim()
+        ? {
+          version: SERIALIZED_PROGRAM_VERSION,
+          seriesTitle: seriesTitle.trim(),
+          ...(seriesCount > 0 ? { seriesCount } : {}),
+        }
+        : undefined;
+      return {
+        brief: createChannelProgramBrief({
+          family,
+          nicheKey,
+          ...(subcategory.trim() ? { subcategory } : {}),
+          locale,
+          concept,
+          ...(normalizedAudience ? { audience: normalizedAudience } : {}),
+          ...(sampleTopics.length ? { sampleTopics } : {}),
+          ...(programIntent ? { programIntent } : {}),
+          ...(serializedProgram ? { serializedProgram } : {}),
+        }),
+        error: null,
+      };
+    } catch (error) {
+      return {
+        brief: null,
+        error: error instanceof Error ? error.message : "The channel brief is invalid.",
+      };
+    }
+  }, [
+    audience,
+    concept,
+    family,
+    locale,
+    nicheKey,
+    quizProfile,
+    sampleTopics,
+    seriesCount,
+    seriesTitle,
+    subcategory,
+    syntheticScenarioProfile,
+  ]);
+  const programBrief = programBriefResolution.brief;
+  const pipelinePreviewRequestJson = useMemo(() => {
+    if (!programBrief || !fam || supervisedAdmission) return null;
+    return JSON.stringify({
+      programBrief,
+      ...(duration?.inputUnit !== "fixed" ? { lengthMinutes } : {}),
+      ...(family === "narrated_stock" && footageTheme ? { footageTheme } : {}),
+      ...(fam.narrated && voiceFx !== "none" ? { voiceFx } : {}),
+      publishMode,
+      approvedForPublish,
+      toggles,
+      ...(Object.keys(paramOverrides).length ? { paramOverrides } : {}),
+      ...(selectedCapabilitySelections.length ? { capabilitySelections: selectedCapabilitySelections } : {}),
+    });
+  }, [
+    approvedForPublish,
+    duration?.inputUnit,
+    fam,
+    family,
+    footageTheme,
+    lengthMinutes,
+    paramOverrides,
+    programBrief,
+    publishMode,
+    selectedCapabilitySelections,
+    supervisedAdmission,
+    toggles,
+    voiceFx,
+  ]);
   const costAuthority = channelBuildCostAuthority({
     approveSetupSpend,
     runProbe,
@@ -552,6 +589,16 @@ export default function NewChannelWizard() {
     setCreativeCapabilityOffers([]);
     setCapabilitySelections({});
     setCapabilityCatalogFingerprint("");
+    const planning = familyAutonomousPlanningCapability(next);
+    if (planning.mode === "registered_non_gemini") {
+      const required = new Set(planning.requiredEntries.map((entry) => entry.block));
+      setToggles((current) => ({
+        ...current,
+        ...(required.has("quote_overlays") ? { quotes: true } : {}),
+        ...(required.has("captions") ? { captions: true } : {}),
+        ...(required.has("notify") ? { notify: true } : {}),
+      }));
+    }
     // A supervised family intake is deliberately not a channel-build
     // authorization. Clear any authority retained from an earlier autonomous
     // selection before the UI can show the review-only package.
@@ -592,10 +639,79 @@ export default function NewChannelWizard() {
     }
   };
 
-  const preview = useMemo(
-    () => (family ? previewBlocks(family, toggles, nicheKey, dataStory, syntheticScenarioProfile || undefined) : []),
-    [family, toggles, nicheKey, dataStory, syntheticScenarioProfile],
-  );
+  useEffect(() => {
+    if (!pipelinePreviewRequestJson) return;
+
+    const abort = new AbortController();
+    let current = true;
+    const timer = window.setTimeout(() => {
+      void fetch("/api/channel-pipeline-preview", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: pipelinePreviewRequestJson,
+        cache: "no-store",
+        signal: abort.signal,
+      }).then(async (response) => {
+        const payload = await response.json().catch(() => ({})) as {
+          version?: unknown;
+          blocks?: unknown;
+          routeKey?: unknown;
+          pipelineFingerprint?: unknown;
+          error?: unknown;
+        };
+        if (!current) return;
+        if (
+          !response.ok
+          || payload.version !== "channel-pipeline-preview/v1"
+          || !Array.isArray(payload.blocks)
+          || payload.blocks.length === 0
+          || !payload.blocks.every((block) => typeof block === "string")
+          || typeof payload.routeKey !== "string"
+          || typeof payload.pipelineFingerprint !== "string"
+        ) {
+          setPipelinePreview({
+            status: "error",
+            blocks: [],
+            requestJson: pipelinePreviewRequestJson,
+            error: typeof payload.error === "string"
+              ? payload.error
+              : "The exact route could not be compiled.",
+          });
+          return;
+        }
+        setPipelinePreview({
+          status: "ready",
+          blocks: payload.blocks,
+          requestJson: pipelinePreviewRequestJson,
+          routeKey: payload.routeKey,
+          pipelineFingerprint: payload.pipelineFingerprint,
+        });
+      }).catch(() => {
+        if (current && !abort.signal.aborted) {
+          setPipelinePreview({
+            status: "error",
+            blocks: [],
+            requestJson: pipelinePreviewRequestJson,
+            error: "The exact route could not be reached. Retry before continuing.",
+          });
+        }
+      });
+    }, 220);
+
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+      abort.abort();
+    };
+  }, [pipelinePreviewRequestJson]);
+
+  const pipelinePreview: PipelinePreviewState = !pipelinePreviewRequestJson
+    ? { status: "idle", blocks: [] }
+    : resolvedPipelinePreview.requestJson === pipelinePreviewRequestJson
+      ? resolvedPipelinePreview
+      : { status: "loading", blocks: [] };
+
+  const preview = pipelinePreview.blocks;
   // A supervised intake has no active family production pipeline. Keep its
   // registered review stages separate from `preview`, which exists solely for
   // executable automatic family designs.
@@ -778,35 +894,11 @@ export default function NewChannelWizard() {
   async function create(startedAt: number) {
     setPhase("building"); setError(null); setBuildProgress(null); setReviewHrefs([]);
     try {
-      // Bind the creator-visible format promise before the recoverable intent
-      // is fingerprinted. Execution choices stay on `design`; this immutable
-      // brief is the sole source of its family/niche/concept/audience identity.
-      const normalizedAudience = audience.trim();
-      const programIntent = family === "quizyear"
-        ? quizProfile === "sports_championship_timeline"
-          ? { kind: "sports_championship_timeline" as const }
-          : { kind: "certified_quiz" as const, profile: quizProfile }
-        : family === "illustrated_explainer" && syntheticScenarioProfile
-          ? { kind: "fictional_scenario" as const, profile: syntheticScenarioProfile }
-          : undefined;
-      const serializedProgram = seriesTitle.trim()
-        ? {
-          version: SERIALIZED_PROGRAM_VERSION,
-          seriesTitle: seriesTitle.trim(),
-          ...(seriesCount > 0 ? { seriesCount } : {}),
-        }
-        : undefined;
-      const programBrief = createChannelProgramBrief({
-        family,
-        nicheKey,
-        ...(subcategory.trim() ? { subcategory } : {}),
-        locale,
-        concept,
-        ...(normalizedAudience ? { audience: normalizedAudience } : {}),
-        ...(sampleTopics.length ? { sampleTopics } : {}),
-        ...(programIntent ? { programIntent } : {}),
-        ...(serializedProgram ? { serializedProgram } : {}),
-      });
+      if (!programBrief || pipelinePreview.status !== "ready") {
+        setError("Resolve the exact channel route before saving this plan.");
+        setPhase("error");
+        return;
+      }
       const requestedYoutubeName = normalizeYoutubeChannelName(name);
       if (autoYoutube && !requestedYoutubeName) {
         setError("Enter the exact channel name before authorizing real YouTube creation.");
@@ -847,12 +939,6 @@ export default function NewChannelWizard() {
         setPhase("error");
         return;
       }
-      const selectedCapabilitySelections = [
-        ...automaticCapabilitySelections,
-        ...(reviewedDataStoryIntake
-          ? [["source_attributed_data_story", capabilitySelections.source_attributed_data_story] as const]
-          : []),
-      ].map(([capability, catalogFingerprint]) => ({ capability, catalogFingerprint }));
       const design: Record<string, unknown> = {
         nicheKey: programBrief.nicheKey,
         subcategory: programBrief.subcategory,
@@ -1231,18 +1317,28 @@ export default function NewChannelWizard() {
       && visibleAutomaticFamilyRuntimeCheck === "ready"
       && automaticFamilyRuntime[family]?.ready === true,
   );
+  const exactAutomaticPreviewReady = pipelinePreview.status === "ready";
   const canNext = step === 0
     ? !!nicheKey
     : step === 1
       ? Boolean(
         family
           && fam?.available
+          && programBrief
           && (supervisedAdmission || (
             automaticFamilyCreatorReadiness(family).ready
             && selectedAutomaticRuntimeReady
+            && exactAutomaticPreviewReady
           )),
       )
-      : true;
+      : step === 2
+        ? Boolean(programBrief && (supervisedAdmission || exactAutomaticPreviewReady))
+        : true;
+  const automaticCreateDisabled = !supervisedAdmission && (
+    !programBrief
+    || !exactAutomaticPreviewReady
+    || ((publishMode !== "draft" || toggles.crosspost) && !approvedForPublish)
+  );
   const selectedNicheOutsideFeatured = Boolean(nicheKey && !FEATURED_NICHE_KEYS.has(nicheKey));
   const visibleNiches = showAllNiches || selectedNicheOutsideFeatured
     ? NICHES
@@ -1368,9 +1464,24 @@ export default function NewChannelWizard() {
               <span><small>Visual engine</small><strong>{fam.visualEngine}</strong></span>
               <span><small>Episode unit</small><strong>{formatFamilyDurationContract(fam.key)}</strong></span>
               <span><small>Route state</small><strong>{supervisedAdmission ? "Private review" : "Automatic"}</strong></span>
-              <span><small>Pipeline</small><strong>{preview.length} modules</strong></span>
+              <span title={pipelinePreview.routeKey}><small>Pipeline</small><strong>{supervisedAdmission
+                ? `${activeReviewOnlyStages.length} review stages`
+                : pipelinePreview.status === "ready"
+                  ? `${preview.length} exact modules`
+                  : pipelinePreview.status === "loading"
+                    ? "Resolving exact route…"
+                    : pipelinePreview.status === "error"
+                      ? "Route needs attention"
+                      : "Complete the brief"}</strong></span>
             </div>
           </section> : <div className={styles.noRoute}><strong>Choose an admitted route</strong><span>The territory’s default format is currently held. Open the catalog and make an explicit compatible choice.</span></div>}
+
+          {fam && !supervisedAdmission && pipelinePreview.status !== "ready" && (
+            <div className={styles.pipelineStatus} data-state={pipelinePreview.status} role={pipelinePreview.status === "error" ? "alert" : "status"}>
+              <span>{pipelinePreview.status === "loading" ? "Compiling the exact route" : pipelinePreview.error ?? programBriefResolution.error}</span>
+              {pipelinePreview.status === "loading" && <i aria-hidden="true" />}
+            </div>
+          )}
 
           <details className={styles.routeCatalog} open={!fam}>
             <summary><span><strong>{fam ? "Change route" : "Browse routes"}</strong><small>Ready, review-only, and held formats.</small></span><b>{FAMILY_KEYS.length} +</b></summary>
@@ -1806,11 +1917,12 @@ export default function NewChannelWizard() {
             <div className={styles.room}>
               <header className={styles.roomHeader}><div><small>03B / tools</small><strong>Optional modules</strong></div><span>Editable later</span></header>
               <div className={styles.moduleToggleGrid}>
-              {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Companion Short when eligible (9:16, private)"], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)"]] as [keyof Toggles, string][]).map(([k, lbl]) => (
-                <label key={k} className={styles.moduleToggle}>
-                  <input type="checkbox" checked={toggles[k]} onChange={(e) => setToggles((p) => ({ ...p, [k]: e.target.checked }))} /> {lbl}
-                </label>
-              ))}
+              {([["quotes", "Quote cards", "quote_overlays"], ["captions", "Burned captions", "captions"], ["chapters", "Chapter cards", ""], ["notify", "Telegram notify", "notify"], ["crosspost", "Cross-post (TikTok/Reels)", ""], ["shorts", "Companion Short when eligible (9:16, private)", ""], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)", ""]] as [keyof Toggles, string, string][]).map(([k, lbl, block]) => {
+                const required = Boolean(block && requiredPlannerBlocks.has(block));
+                return <label key={k} className={styles.moduleToggle} data-required={required ? "true" : undefined} title={required ? "Required by this route's certified planner" : undefined}>
+                  <input type="checkbox" checked={toggles[k]} disabled={required} onChange={(e) => setToggles((p) => ({ ...p, [k]: e.target.checked }))} /> {lbl}{required ? " · required" : ""}
+                </label>;
+              })}
               {family === "cinematic" && (
                 <label className={styles.moduleToggle}>
                   <input
@@ -1894,8 +2006,12 @@ export default function NewChannelWizard() {
           )}
           <div className={styles.room}>
             <header className={styles.roomHeader}><div><small>04A / route manifest</small><strong>
-              {supervisedAdmission ? `Registered private-review stages (${activeReviewOnlyStages.length})` : `Designed pipeline (${preview.length} modules)`}
-            </strong></div><span>Execution order retained</span></header>
+              {supervisedAdmission
+                ? `Registered private-review stages (${activeReviewOnlyStages.length})`
+                : pipelinePreview.status === "ready"
+                  ? `Exact compiled pipeline (${preview.length} modules)`
+                  : "Resolving exact pipeline"}
+            </strong></div><span>{pipelinePreview.routeKey ?? "Server-authoritative order"}</span></header>
             {supervisedAdmission && (
               <div style={{ fontSize: "0.72rem", color: "var(--color-muted)", marginBottom: "0.6rem" }}>
                 Only these private-review stages are active. The family production pipeline is not enabled for this intake.
@@ -1906,6 +2022,12 @@ export default function NewChannelWizard() {
                 <span key={b + i}>{String(i + 1).padStart(2, "0")} · {b}</span>
               ))}
             </div>
+            {!supervisedAdmission && pipelinePreview.status !== "ready" && (
+              <div className={styles.pipelineStatus} data-state={pipelinePreview.status} role={pipelinePreview.status === "error" ? "alert" : "status"}>
+                <span>{pipelinePreview.error ?? "Compiling the sealed route and production module order."}</span>
+                {pipelinePreview.status === "loading" && <i aria-hidden="true" />}
+              </div>
+            )}
             {supervisedAdmission && activeReviewOnlyStages.length === 0 && (
               <div style={{ fontSize: "0.72rem", color: "var(--color-muted)", marginTop: "0.6rem" }}>No private-review stages are registered for this selection yet; no production pipeline is available.</div>
             )}
@@ -1973,7 +2095,7 @@ export default function NewChannelWizard() {
             ? supervisedAdmission.reviewHref
               ? <Link href={supervisedAdmission.reviewHref} style={btnPrimary}>Open private review desk</Link>
               : <button disabled style={{ ...btnPrimary, opacity: 0.5 }}>Private review package required</button>
-            : <button onClick={() => void create(Date.now())} disabled={(publishMode !== "draft" || toggles.crosspost) && !approvedForPublish} style={{ ...btnPrimary, opacity: (publishMode !== "draft" || toggles.crosspost) && !approvedForPublish ? 0.5 : 1 }}>{approveSetupSpend ? "Build channel" : "Save channel plan"}</button>}
+            : <button onClick={() => void create(Date.now())} disabled={automaticCreateDisabled} style={{ ...btnPrimary, opacity: automaticCreateDisabled ? 0.5 : 1 }}>{pipelinePreview.status === "loading" ? "Resolving route…" : approveSetupSpend ? "Build channel" : "Save channel plan"}</button>}
       </div>
     </main>
   );

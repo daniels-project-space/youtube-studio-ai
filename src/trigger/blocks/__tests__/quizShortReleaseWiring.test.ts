@@ -29,7 +29,10 @@ assert.equal(artifactContract("quizShortRelease").opaque, false);
 const narrated = readFileSync(join(process.cwd(), "src/trigger/blocks/narratedBlocks.ts"), "utf8");
 const lofi = readFileSync(join(process.cwd(), "src/trigger/blocks/lofiBlocks.ts"), "utf8");
 const quizShortRelease = readFileSync(join(process.cwd(), "src/trigger/blocks/quizShortReleaseBlocks.ts"), "utf8");
-const designer = readFileSync(join(process.cwd(), "src/engine/designer.ts"), "utf8");
+const designer = [
+  readFileSync(join(process.cwd(), "src/engine/designer.ts"), "utf8"),
+  readFileSync(join(process.cwd(), "src/engine/designerCore.ts"), "utf8"),
+].join("\n");
 const executionCatalog = readFileSync(join(process.cwd(), "src/engine/goldenExecution.ts"), "utf8");
 
 const routeGate = narrated.indexOf("const isSupervisedQuizShort");

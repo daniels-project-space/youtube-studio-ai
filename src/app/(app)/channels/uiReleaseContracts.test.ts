@@ -20,7 +20,10 @@ const settings = readFileSync(join(root, "src/app/(app)/settings/page.tsx"), "ut
 const sidebar = readFileSync(join(root, "src/components/Sidebar.tsx"), "utf8");
 const golden = readFileSync(join(root, "src/app/(app)/golden/page.tsx"), "utf8");
 const scheduleCss = readFileSync(join(root, "src/app/(app)/schedule/schedule.module.css"), "utf8");
-const designer = readFileSync(join(root, "src/engine/designer.ts"), "utf8");
+const designer = [
+  readFileSync(join(root, "src/engine/designer.ts"), "utf8"),
+  readFileSync(join(root, "src/engine/designerCore.ts"), "utf8"),
+].join("\n");
 const auditScript = readFileSync(join(root, "scripts/ui-fifth-pass-audit.mjs"), "utf8");
 const ownerLockBadge = readFileSync(join(root, "src/components/OwnerLockBadge.tsx"), "utf8");
 
@@ -52,12 +55,15 @@ assert.match(wizard, /const \[audience, setAudience\] = useState\(""\)/);
 assert.match(wizard, /const \[sampleTopicsText, setSampleTopicsText\] = useState\(""\)/);
 assert.match(wizard, /\{ audience: audienceText \}/);
 assert.match(wizard, /\{ sampleTopics \}/);
-const programBriefArgs = wizard.match(/const programBrief = createChannelProgramBrief\(\{([\s\S]*?)\n      \}\);/)?.[1];
-assert.ok(programBriefArgs, "the creator must construct a canonical ProgramBrief before request-key binding");
+const programBriefArgs = wizard.match(/brief: createChannelProgramBrief\(\{([\s\S]*?)\n        \}\),/)?.[1];
+assert.ok(programBriefArgs, "the creator must construct one canonical ProgramBrief shared by preview and request-key binding");
 assert.match(programBriefArgs, /\{ audience: normalizedAudience \}/);
 assert.match(programBriefArgs, /\{ sampleTopics \}/);
 assert.match(programBriefArgs, /\{ programIntent \}/);
 assert.match(programBriefArgs, /\{ serializedProgram \}/);
+assert.match(wizard, /fetch\("\/api\/channel-pipeline-preview"/);
+assert.doesNotMatch(wizard, /function previewBlocks/);
+assert.match(wizard, /pipelinePreview\.status !== "ready"/);
 assert.match(wizard, /const serializedProgram = seriesTitle\.trim\(\)/);
 assert.match(wizard, /version: SERIALIZED_PROGRAM_VERSION/);
 assert.doesNotMatch(

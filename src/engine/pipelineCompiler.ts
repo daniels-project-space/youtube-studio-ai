@@ -125,6 +125,126 @@ export const PRIVATE_PROBE_CONTRACT_POLICY: PipelinePolicy = {
 
 const certificationRank = { revoked: -1, legacy: 0, contract: 1, golden: 2 } as const;
 
+type PolicyManifestSource = "runtime" | "structural";
+
+interface PolicyManifestProjection {
+  readonly id: string;
+  readonly certification: keyof typeof certificationRank;
+  readonly capabilities: readonly string[];
+  readonly consumes: readonly string[];
+  readonly produces: readonly string[];
+}
+
+const policyProjection = (
+  id: string,
+  capabilities: readonly string[] = [],
+  consumes: readonly string[] = [],
+  produces: readonly string[] = [],
+): PolicyManifestProjection => ({
+  id,
+  certification: "contract",
+  capabilities,
+  consumes,
+  produces,
+});
+
+/**
+ * Browser-safe structural slice of the executable manifest catalog.
+ *
+ * Policy completion only needs capability providers and the small set of
+ * artifacts used to place them. Keeping that declaration here makes policy
+ * order deterministic without importing Trigger block implementations (and
+ * their renderer binaries) into read-only web routes. The executable path
+ * still resolves and validates every full manifest after registration; parity
+ * tests compile every supported family through both sources.
+ */
+const STRUCTURAL_POLICY_MANIFESTS: readonly PolicyManifestProjection[] = [
+  policyProjection("topic_select", ["topic.selected"], [], ["topic"]),
+  policyProjection("competitor_research", ["topic.researched"], [], [
+    "nicheReady", "niche", "nicheIntel", "seoDatabank", "competitors",
+    "thumbnailIdentity", "persona", "thumbnailer",
+  ]),
+  policyProjection("script_gen", ["script.generated"], ["topic"], ["script", "narrationText"]),
+  policyProjection("qa_script", ["script.qa_passed"], ["narrationText"], ["scriptApproved"]),
+  policyProjection("compliance_check", ["final.compliance_passed"], ["topic"], [
+    "disclosureRequired", "sensitiveTopic", "complianceNote",
+  ]),
+  policyProjection("director_brief", ["crew.director_treatment"], ["topic"], ["structure"]),
+  policyProjection("dp_brief", ["crew.dp_visual_spec"], ["topic"], ["visualBrief"]),
+  policyProjection("editor_brief", ["crew.editor_edl"], ["topic"], ["cutSheet"]),
+  policyProjection("composer_brief", ["crew.composer_cue_sheet"], ["topic"], ["musicBrief"]),
+  policyProjection("critic_spec", ["crew.critic_validation_spec"], ["topic"], ["validationSpec"]),
+  policyProjection("thumbnail_gen", ["package.thumbnail"], [
+    "title", "thumbnailDescription", "topic", "packageToOpeningPlan",
+  ], ["thumbnailKey"]),
+  policyProjection("assemble", ["master.assembled"], ["loopUnitKey", "musicUrl"], ["videoLocalPath"]),
+  policyProjection("timeline_assemble", ["master.assembled"], [
+    "footageClips", "narrationLocalPath", "narrationDurationSec", "musicUrl",
+  ], ["videoLocalPath"]),
+  policyProjection("scene_compiler", ["visuals.scene_compiled", "master.assembled"], [
+    "sceneManifest", "narrationLocalPath", "narrationDurationSec", "musicUrl",
+  ], ["videoLocalPath"]),
+  policyProjection("whiteboard_scribe", [
+    "script.generated", "script.qa_passed", "narration.timed", "visuals.generated",
+    "visuals.story_aligned", "master.assembled",
+  ], ["topic"], ["videoLocalPath", "narrationText"]),
+  policyProjection("motion_comic", [
+    "script.generated", "script.qa_passed", "narration.timed", "visuals.generated",
+    "visuals.story_aligned", "master.assembled",
+  ], ["topic"], ["videoLocalPath", "narrationText"]),
+  policyProjection("lore_short", [
+    "script.generated", "script.qa_passed", "narration.timed", "visuals.generated",
+    "visuals.story_aligned", "master.assembled",
+  ], ["topic"], ["videoLocalPath", "narrationText"]),
+  policyProjection("quiz_topic_plan", [
+    "topic.researched", "topic.selected", "quiz.plan_provenanced", "crew.composer_cue_sheet",
+  ], [], ["topic", "quizPlan", "musicBrief"]),
+  policyProjection("quiz_topic_safety", ["final.compliance_passed"], ["topic", "quizPlan"], [
+    "disclosureRequired", "sensitiveTopic", "complianceNote", "quizSafety",
+  ]),
+  policyProjection("quiz_critic_spec", ["crew.critic_validation_spec"], ["quizPlan"], ["validationSpec"]),
+  policyProjection("quiz_year", ["visuals.generated", "visuals.story_aligned", "master.assembled"], [
+    "quizPlan", "quizSafety",
+  ], ["videoLocalPath"]),
+  policyProjection("documotion_short", [
+    "narration.timed", "visuals.documentary_collage", "master.native_vertical", "master.assembled",
+  ], ["topic", "beatManifest"], ["videoLocalPath"]),
+];
+
+const structuralPolicyManifestById = new Map(
+  STRUCTURAL_POLICY_MANIFESTS.map((manifest) => [manifest.id, manifest]),
+);
+
+function projectRuntimeManifest(id: string): PolicyManifestProjection | undefined {
+  const manifest = getManifest(id);
+  if (!manifest) return undefined;
+  return {
+    id: manifest.id,
+    certification: manifest.certification.status,
+    capabilities: manifest.capabilities,
+    consumes: Object.keys(manifest.consumes),
+    produces: [...Object.keys(manifest.produces), ...Object.keys(manifest.optionalProduces)],
+  };
+}
+
+function getPolicyManifest(
+  id: string,
+  source: PolicyManifestSource,
+): PolicyManifestProjection | undefined {
+  return source === "runtime" ? projectRuntimeManifest(id) : structuralPolicyManifestById.get(id);
+}
+
+function allPolicyManifests(source: PolicyManifestSource): readonly PolicyManifestProjection[] {
+  if (source === "structural") return STRUCTURAL_POLICY_MANIFESTS;
+  return allManifests().map((manifest) => ({
+    id: manifest.id,
+    certification: manifest.certification.status,
+    capabilities: manifest.capabilities,
+    consumes: Object.keys(manifest.consumes),
+    produces: [...Object.keys(manifest.produces), ...Object.keys(manifest.optionalProduces)],
+  }));
+}
+
 export const CREW_ARTIFACT_BINDINGS: ReadonlyArray<{
   consumerIds: readonly string[];
   artifact: string;
@@ -157,52 +277,55 @@ export const CREW_ARTIFACT_BINDINGS: ReadonlyArray<{
   { consumerIds: ["qa_visual"], artifact: "validationSpec", capability: "crew.critic_validation_spec" },
 ];
 
-function pipelineCapabilities(entries: readonly PipelineEntry[]): Set<string> {
+function pipelineCapabilities(
+  entries: readonly PipelineEntry[],
+  source: PolicyManifestSource,
+): Set<string> {
   return new Set(
-    entries.flatMap((entry) => getManifest(entry.block)?.capabilities ?? []),
+    entries.flatMap((entry) => getPolicyManifest(entry.block, source)?.capabilities ?? []),
   );
 }
 
-function findArtifactProducerIndex(entries: readonly PipelineEntry[], artifact: string): number {
+function findArtifactProducerIndex(
+  entries: readonly PipelineEntry[],
+  artifact: string,
+  source: PolicyManifestSource,
+): number {
   return entries.findIndex((entry) => {
-    const manifest = getManifest(entry.block);
-    return Boolean(manifest && (artifact in manifest.produces || artifact in manifest.optionalProduces));
+    const manifest = getPolicyManifest(entry.block, source);
+    return Boolean(manifest?.produces.includes(artifact));
   });
 }
 
 function insertCapabilityProvider(
   entries: PipelineEntry[],
   capability: string,
+  source: PolicyManifestSource,
   beforeIndex?: number,
 ): string | null {
-  if (pipelineCapabilities(entries).has(capability)) return null;
-  const candidates = allManifests()
+  if (pipelineCapabilities(entries, source).has(capability)) return null;
+  const candidates = allPolicyManifests(source)
     .filter(
       (manifest) =>
         manifest.capabilities.includes(capability) &&
-        certificationRank[manifest.certification.status] >= certificationRank.contract &&
+        certificationRank[manifest.certification] >= certificationRank.contract &&
         !entries.some((entry) => entry.block === manifest.id),
     )
     .sort(
       (a, b) =>
         a.capabilities.length - b.capabilities.length ||
-        Object.keys(a.produces).length + Object.keys(a.optionalProduces).length -
-          (Object.keys(b.produces).length + Object.keys(b.optionalProduces).length) ||
+        a.produces.length - b.produces.length ||
         a.id.localeCompare(b.id),
     );
   for (const candidate of candidates) {
     const existingProduced = new Set(
       entries.flatMap((entry) => {
-        const manifest = getManifest(entry.block);
-        return manifest ? [...Object.keys(manifest.produces), ...Object.keys(manifest.optionalProduces)] : [];
+        return getPolicyManifest(entry.block, source)?.produces ?? [];
       }),
     );
-    if (
-      [...Object.keys(candidate.produces), ...Object.keys(candidate.optionalProduces)]
-        .some((artifact) => existingProduced.has(artifact))
-    ) continue;
-    const required = Object.keys(candidate.consumes);
-    const producerIndexes = required.map((artifact) => findArtifactProducerIndex(entries, artifact));
+    if (candidate.produces.some((artifact) => existingProduced.has(artifact))) continue;
+    const producerIndexes = candidate.consumes.map((artifact) =>
+      findArtifactProducerIndex(entries, artifact, source));
     if (producerIndexes.some((index) => index < 0)) continue;
     const insertAt = producerIndexes.length ? Math.max(...producerIndexes) + 1 : 0;
     if (beforeIndex !== undefined && insertAt > beforeIndex) continue;
@@ -214,12 +337,12 @@ function insertCapabilityProvider(
   return null;
 }
 
-function producesArtifact(entry: PipelineEntry, artifact: string): boolean {
-  const manifest = getManifest(entry.block);
-  return Boolean(
-    manifest &&
-      (artifact in manifest.produces || artifact in manifest.optionalProduces),
-  );
+function producesArtifact(
+  entry: PipelineEntry,
+  artifact: string,
+  source: PolicyManifestSource,
+): boolean {
+  return Boolean(getPolicyManifest(entry.block, source)?.produces.includes(artifact));
 }
 
 /**
@@ -228,7 +351,10 @@ function producesArtifact(entry: PipelineEntry, artifact: string): boolean {
  * insert the shared evidence-backed gate at the one safe point instead of
  * trusting every caller to remember it.
  */
-function ensureReleaseVisualReview(entries: PipelineEntry[]): boolean {
+function ensureReleaseVisualReview(
+  entries: PipelineEntry[],
+  source: PolicyManifestSource,
+): boolean {
   const uploadIndex = entries.findIndex((entry) => entry.block === "upload_draft");
   if (uploadIndex < 0) return false;
 
@@ -261,10 +387,10 @@ function ensureReleaseVisualReview(entries: PipelineEntry[]): boolean {
   }
 
   const upstream = entries.slice(0, uploadIndex);
-  if (!upstream.some((entry) => producesArtifact(entry, "videoLocalPath"))) {
+  if (!upstream.some((entry) => producesArtifact(entry, "videoLocalPath", source))) {
     throw new PipelinePolicyError("cannot add qa_visual: upload_draft has no rendered video upstream");
   }
-  if (!upstream.some((entry) => producesArtifact(entry, "thumbnailKey"))) {
+  if (!upstream.some((entry) => producesArtifact(entry, "thumbnailKey", source))) {
     throw new PipelinePolicyError("cannot add qa_visual: upload_draft has no thumbnail upstream");
   }
   entries.splice(uploadIndex, 0, {
@@ -327,9 +453,12 @@ export function completePipelineForPolicy(
      * freshly designed pipeline stays internally consistent.
      */
     readonly generationProfile?: GenerationProfileId;
+    /** Runtime manifests for execution; browser-safe structural catalog for read-only previews. */
+    readonly manifestSource?: PolicyManifestSource;
   },
 ): { entries: PipelineEntry[]; inserted: string[]; retired: string[] } {
   const generationProfileId = options?.generationProfile ?? DEFAULT_GENERATION_PROFILE;
+  const manifestSource = options?.manifestSource ?? "runtime";
   const entries = source.map((entry) => ({
     block: entry.block,
     ...(entry.params ? { params: { ...entry.params } } : {}),
@@ -386,11 +515,11 @@ export function completePipelineForPolicy(
   }
 
   for (const capability of ["topic.researched", "final.compliance_passed"]) {
-    const moduleId = insertCapabilityProvider(entries, capability);
+    const moduleId = insertCapabilityProvider(entries, capability, manifestSource);
     if (moduleId) inserted.push(moduleId);
   }
-  if (pipelineCapabilities(entries).has("script.generated")) {
-    const moduleId = insertCapabilityProvider(entries, "script.qa_passed");
+  if (pipelineCapabilities(entries, manifestSource).has("script.generated")) {
+    const moduleId = insertCapabilityProvider(entries, "script.qa_passed", manifestSource);
     if (moduleId) inserted.push(moduleId);
   }
 
@@ -398,14 +527,22 @@ export function completePipelineForPolicy(
     inserted.push("package_to_opening_plan");
   }
 
-  if (ensureReleaseVisualReview(entries)) {
+  if (ensureReleaseVisualReview(entries, manifestSource)) {
     inserted.push("qa_visual");
   }
 
   for (const binding of CREW_ARTIFACT_BINDINGS) {
     const consumerIndex = entries.findIndex((entry) => binding.consumerIds.includes(entry.block));
-    if (consumerIndex < 0 || findArtifactProducerIndex(entries, binding.artifact) >= 0) continue;
-    const moduleId = insertCapabilityProvider(entries, binding.capability, consumerIndex);
+    if (
+      consumerIndex < 0 ||
+      findArtifactProducerIndex(entries, binding.artifact, manifestSource) >= 0
+    ) continue;
+    const moduleId = insertCapabilityProvider(
+      entries,
+      binding.capability,
+      manifestSource,
+      consumerIndex,
+    );
     if (!moduleId) {
       throw new PipelinePolicyError(
         `no certified provider can produce crew artifact "${binding.artifact}" before ${entries[consumerIndex].block}`,

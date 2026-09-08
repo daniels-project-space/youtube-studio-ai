@@ -7,8 +7,9 @@ async function source(relative: string): Promise<string> {
 }
 
 async function main(): Promise<void> {
-  const [designer, blocks, quotes, inserts, music, renderer, quoteOverlay, dataInsert] = await Promise.all([
+  const [designerBoundary, designerCore, blocks, quotes, inserts, music, renderer, quoteOverlay, dataInsert] = await Promise.all([
     source("src/engine/designer.ts"),
+    source("src/engine/designerCore.ts"),
     source("src/trigger/blocks/studioAssetLibraryBlocks.ts"),
     source("src/trigger/blocks/narratedBlocks.ts"),
     source("src/trigger/blocks/insertBlocks.ts"),
@@ -18,6 +19,7 @@ async function main(): Promise<void> {
     source("src/remotion/DataInsert.tsx"),
   ]);
 
+  const designer = `${designerBoundary}\n${designerCore}`;
   assert.match(designer, /studio_postproduction_asset_resolve/);
   assert.match(blocks, /moduleId: "music"/);
   assert.match(blocks, /moduleId: "quote_overlays"/);

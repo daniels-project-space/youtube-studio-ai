@@ -329,8 +329,10 @@ assert.match(
 );
 assert.match(route, /requires a supervised episode admission before automatic channel creation/,
   "future child-show readiness cannot bypass a required private child-editor admission");
-assert.match(newChannelUi, /const programBrief = createChannelProgramBrief\(\{[\s\S]*?concept,[\s\S]*?\}\);/,
-  "the recoverable build request must bind the exact creator concept into its canonical program brief");
+assert.match(newChannelUi, /brief: createChannelProgramBrief\(\{[\s\S]*?concept,[\s\S]*?\}\),/,
+  "the preview and recoverable build request must share the exact canonical creator concept");
+assert.match(newChannelUi, /programBrief,[\s\S]*?fetch\("\/api\/channel-pipeline-preview"/,
+  "the canonical creator brief must reach the server-owned preview compiler");
 
 for (const operation of ["claim", "complete", "checkpoint", "heartbeat", "fail"] as const) {
   assert(adapter.includes(`${operation}: async`), `Convex ledger adapter must implement ${operation}`);

@@ -122,6 +122,12 @@
 .routeFacts span { display: grid; gap: .2rem; padding: .62rem; border-right: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .routeFacts small { color: var(--color-faint); font: 700 .47rem/1 var(--font-mono); letter-spacing: .07em; text-transform: uppercase; }
 .routeFacts strong { overflow: hidden; color: var(--color-muted); font-size: .63rem; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
+.pipelineStatus { display: flex; align-items: center; justify-content: space-between; gap: .7rem; min-height: 34px; margin-top: -.45rem; padding: .45rem .65rem; border: 1px solid var(--color-border); border-radius: 10px; color: var(--color-muted); background: rgba(10,14,24,.66); font-size: .7rem; }
+.pipelineStatus[data-state="error"] { border-color: color-mix(in srgb,var(--color-failed) 40%,var(--color-border)); color: var(--color-failed); }
+.pipelineStatus i { position: relative; width: 58px; height: 2px; flex: 0 0 auto; overflow: hidden; border-radius: 999px; background: color-mix(in srgb,var(--creator-tone) 18%,transparent); }
+.pipelineStatus i::after { position: absolute; inset: 0; width: 44%; border-radius: inherit; background: var(--creator-tone); animation: routeResolve 1.15s ease-in-out infinite; content: ""; }
+@keyframes routeResolve { from { transform: translateX(-120%); } to { transform: translateX(330%); } }
+@media (prefers-reduced-motion: reduce) { .pipelineStatus i::after { animation: none; transform: none; } }
 .noRoute { display: grid; min-height: 140px; place-content: center; justify-items: center; gap: .28rem; padding: 1rem; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); text-align: center; }
 .noRoute strong { font-family: var(--font-display); font-size: 1.15rem; font-weight: 560; }
 .noRoute span { max-width: 35rem; color: var(--color-faint); font-size: .7rem; }
