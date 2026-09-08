@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 const root = process.cwd();
 const page = readFileSync(join(root, "src/app/(app)/analytics/page.tsx"), "utf8");
+const css = readFileSync(join(root, "src/app/(app)/analytics/analytics.module.css"), "utf8");
 const query = readFileSync(join(root, "convex/analytics.ts"), "utf8");
 
 // Analytics health must be driven by the owner-scoped connector/cursor
@@ -30,8 +31,12 @@ assert.match(page, /href=\{`\/channels\/\$\{node\.slug\}\?tab=analytics`\}/,
   "each reach/spend node must open the channel analytics workspace");
 assert.match(page, /fieldTruthLine/,
   "fanned collision targets must retain a visible connector to their exact persisted coordinate");
-assert.match(page, /r="22" className=\{styles\.fieldHitTarget\}/,
-  "every SVG node must expose a 44px touch target regardless of its data radius");
+assert.match(page, /className=\{styles\.fieldNodeAction\}/,
+  "desktop graph nodes must expose screen-space links independent of SVG scaling");
+assert.match(page, /className=\{styles\.fieldMobileDirectory\}/,
+  "mobile must replace scaled SVG hitboxes with a compact channel directory");
+assert.match(css, /\.fieldNodeAction\s*\{[\s\S]*?width:\s*44px;[\s\S]*?height:\s*44px;/,
+  "desktop graph links must retain a 44px CSS-pixel target");
 assert.match(page, /Cumulative views/);
 assert.match(page, /Published inventory/);
 assert.doesNotMatch(page, /<PageHeader/);

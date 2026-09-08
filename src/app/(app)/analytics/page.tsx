@@ -333,53 +333,68 @@ function FleetEfficiencyField({
         <span>Reach / spend field</span>
         <small>Node size = published inventory</small>
       </figcaption>
-      <svg viewBox="0 0 720 255" role="img" aria-label="Channel reach compared with production spend">
-        <defs>
-          <pattern id="analytics-field-grid" width="48" height="42" patternUnits="userSpaceOnUse">
-            <path d="M 48 0 L 0 0 0 42" fill="none" stroke="currentColor" strokeWidth="1" opacity=".08" />
-          </pattern>
-          <radialGradient id="analytics-node" cx="35%" cy="30%">
-            <stop offset="0" stopColor="var(--color-secondary)" />
-            <stop offset="1" stopColor="rgba(125, 211, 192, .2)" />
-          </radialGradient>
-        </defs>
-        <rect x="42" y="18" width="652" height="190" rx="8" fill="url(#analytics-field-grid)" />
-        <line x1="42" y1="208" x2="694" y2="208" className={styles.fieldAxis} />
-        <line x1="42" y1="18" x2="42" y2="208" className={styles.fieldAxis} />
-        <text x="43" y="232" className={styles.fieldLabel}>LOWER SPEND</text>
-        <text x="694" y="232" textAnchor="end" className={styles.fieldLabel}>HIGHER SPEND</text>
-        <text x="28" y="110" textAnchor="middle" transform="rotate(-90 28 110)" className={styles.fieldLabel}>MORE OBSERVED REACH</text>
-        {nodes.map((node) => {
-          return (
-            <a
+      <div className={styles.fieldPlot}>
+        <svg viewBox="0 0 720 255" role="img" aria-label="Channel reach compared with production spend">
+          <defs>
+            <pattern id="analytics-field-grid" width="48" height="42" patternUnits="userSpaceOnUse">
+              <path d="M 48 0 L 0 0 0 42" fill="none" stroke="currentColor" strokeWidth="1" opacity=".08" />
+            </pattern>
+            <radialGradient id="analytics-node" cx="35%" cy="30%">
+              <stop offset="0" stopColor="var(--color-secondary)" />
+              <stop offset="1" stopColor="rgba(125, 211, 192, .2)" />
+            </radialGradient>
+          </defs>
+          <rect x="42" y="18" width="652" height="190" rx="8" fill="url(#analytics-field-grid)" />
+          <line x1="42" y1="208" x2="694" y2="208" className={styles.fieldAxis} />
+          <line x1="42" y1="18" x2="42" y2="208" className={styles.fieldAxis} />
+          <text x="43" y="232" className={styles.fieldLabel}>LOWER SPEND</text>
+          <text x="694" y="232" textAnchor="end" className={styles.fieldLabel}>HIGHER SPEND</text>
+          <text x="28" y="110" textAnchor="middle" transform="rotate(-90 28 110)" className={styles.fieldLabel}>MORE OBSERVED REACH</text>
+          {nodes.map((node) => (
+            <g key={node.channelId} data-selected={node.selected || undefined} className={styles.fieldNode}>
+              {node.displaced ? (
+                <line x1={node.rawX} y1={node.rawY} x2={node.x} y2={node.y} className={styles.fieldTruthLine} />
+              ) : null}
+              {node.label ? (
+                <line x1={node.x} y1={node.y} x2={node.label.x} y2={node.label.y - 3} className={styles.fieldLeader} />
+              ) : null}
+              <circle cx={node.x} cy={node.y} r={node.radius + (node.selected ? 5 : 2)} className={styles.fieldNodeHalo} />
+              <circle cx={node.x} cy={node.y} r={node.radius} fill="url(#analytics-node)">
+                <title>{`${node.name}: ${compact(node.totalViews)} views · ${fmtUsd(node.costTotal)} spend · ${node.videoCount} videos.`}</title>
+              </circle>
+              {node.label ? (
+                <text x={node.label.x} y={node.label.y} textAnchor={node.label.anchor} className={styles.fieldNodeLabel}>
+                  {node.name.length > 18 ? `${node.name.slice(0, 17)}…` : node.name}
+                </text>
+              ) : null}
+            </g>
+          ))}
+          {!rows.length && <text x="368" y="122" textAnchor="middle" className={styles.fieldEmpty}>No observed channel snapshots yet</text>}
+        </svg>
+        <div className={styles.fieldNodeActions} aria-label="Open channel analytics from the reach and spend field">
+          {nodes.map((node) => (
+            <Link
               key={node.channelId}
               href={`/channels/${node.slug}?tab=analytics`}
-              className={styles.fieldNodeLink}
+              className={styles.fieldNodeAction}
+              style={{ left: `${(node.x / 720) * 100}%`, top: `${(node.y / 255) * 100}%` }}
               aria-label={`Open ${node.name} analytics`}
-            >
-              <g data-selected={node.selected || undefined} className={styles.fieldNode}>
-                {node.displaced ? (
-                  <line x1={node.rawX} y1={node.rawY} x2={node.x} y2={node.y} className={styles.fieldTruthLine} />
-                ) : null}
-                {node.label ? (
-                  <line x1={node.x} y1={node.y} x2={node.label.x} y2={node.label.y - 3} className={styles.fieldLeader} />
-                ) : null}
-                <circle cx={node.x} cy={node.y} r="22" className={styles.fieldHitTarget} />
-                <circle cx={node.x} cy={node.y} r={node.radius + (node.selected ? 5 : 2)} className={styles.fieldNodeHalo} />
-                <circle cx={node.x} cy={node.y} r={node.radius} fill="url(#analytics-node)">
-                  <title>{`${node.name}: ${compact(node.totalViews)} views · ${fmtUsd(node.costTotal)} spend · ${node.videoCount} videos. Open channel analytics.`}</title>
-                </circle>
-                {node.label ? (
-                  <text x={node.label.x} y={node.label.y} textAnchor={node.label.anchor} className={styles.fieldNodeLabel}>
-                    {node.name.length > 18 ? `${node.name.slice(0, 17)}…` : node.name}
-                  </text>
-                ) : null}
-              </g>
-            </a>
-          );
-        })}
-        {!rows.length && <text x="368" y="122" textAnchor="middle" className={styles.fieldEmpty}>No observed channel snapshots yet</text>}
-      </svg>
+              title={`Open ${node.name} analytics`}
+            />
+          ))}
+        </div>
+      </div>
+      <details className={styles.fieldMobileDirectory}>
+        <summary>Open a channel from this graph <span>{nodes.length}</span></summary>
+        <div>
+          {nodes.map((node) => (
+            <Link key={node.channelId} href={`/channels/${node.slug}?tab=analytics`}>
+              <span>{node.name}</span>
+              <small>{compact(node.totalViews)} views · {fmtUsd(node.costTotal)}</small>
+            </Link>
+          ))}
+        </div>
+      </details>
       <div className={styles.fieldLegend}>
         <span><i /> Observed channel</span>
         <span>Open a node for channel analytics. Tied values fan out from their exact anchor.</span>
