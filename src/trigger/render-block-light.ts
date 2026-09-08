@@ -38,6 +38,9 @@ export const renderBlockLightTask = task({
     maxTimeoutInMs: 30000,
     factor: 2,
   },
-  run: async (payload: RenderBlockInput) =>
-    executeRenderBlock(payload, { taskLabel: "render-block-light", machineClass: "offloaded" }),
+  run: async (payload: RenderBlockInput, { ctx }) =>
+    executeRenderBlock(payload, {
+      taskLabel: "render-block-light", machineClass: "offloaded",
+      taskRunId: ctx.run.id, attemptNumber: ctx.attempt.number,
+    }),
 });

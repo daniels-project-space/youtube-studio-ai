@@ -59,7 +59,7 @@ assert.throws(
     blockId: entryA.block,
     store: {},
     budgetUsd: 10,
-    completedStages: [],
+    stages: [],
   }),
   /no finite absolute cost envelope/,
   "a remote paid child refuses a missing per-stage envelope instead of falling back to the aggregate budget",
@@ -74,7 +74,7 @@ assert.throws(
     blockId: entryA.block,
     store: {},
     budgetUsd: 6,
-    completedStages: [],
+    stages: [],
   }),
   /budget reservation rejected before paid block/,
   "a child reserves its exact stage plus all still-pending frozen paid envelopes before block work",
@@ -102,13 +102,42 @@ const rehydratedAdmission = admitFrozenRemoteChildStage({
   blockId: "remote-paid-rehydrated",
   store: { frozenRenderPlan: "two-workers" },
   budgetUsd: 2,
-  completedStages: [],
+  stages: [],
 });
 assert.equal(
   rehydratedAdmission.stageBudgetUsd,
   2,
   "the remote child derives its exact stage envelope from rehydrated frozen inputs",
 );
+
+assert.throws(
+  () => admitFrozenRemoteChildStage({
+    resolved: resolved([entryA], [paidManifest(entryA.block, 2)]),
+    blockId: entryA.block,
+    store: {},
+    budgetUsd: 5,
+    stages: [
+      { block: "finished-narration", status: "ok", cost: 1 },
+      { block: entryA.block, status: "superseded", cost: 2 },
+      { block: "failed-paid-review", status: "failed", cost: 1 },
+    ],
+  }),
+  /\$4.00 spent \+ \$2.00 remaining reserved/,
+  "remote child refuses repair spend that only appears affordable when failed and superseded costs are omitted",
+);
+const repairedAdmission = admitFrozenRemoteChildStage({
+  resolved: resolved([entryA, entryB], [paidManifest(entryA.block, 2), paidManifest(entryB.block, 1)]),
+  blockId: entryA.block,
+  store: {},
+  budgetUsd: 5,
+  stages: [
+    { block: entryA.block, status: "running", cost: 2 },
+    { block: entryB.block, status: "ok", cost: 1 },
+  ],
+});
+assert.equal(repairedAdmission.knownSpentUsd, 3, "running repaired stages retain the prior generation's cost");
+assert.deepEqual(repairedAdmission.initialReservation.blockIds, [entryA.block], "completed siblings restore without another reservation");
+assert.equal(repairedAdmission.initialReservation.reservedMaxCostUsd, 2);
 
 const snapshot = {
   version: 1,
@@ -173,7 +202,7 @@ const childRunner = readFileSync(
 const invocationGate = childRunner.indexOf("assertRenderBlockInvocation({");
 const frozenRouteGate = childRunner.indexOf("reconstructFrozenRemoteChildPipeline(frozenInvocation)");
 const envelopeGate = childRunner.indexOf("admitFrozenRemoteChildStage({");
-const providerBlockWork = childRunner.indexOf("await block.run(ctx)");
+const providerBlockWork = childRunner.indexOf("await executeRemoteCostTrackedBlock({");
 assert.ok(
   invocationGate >= 0 && frozenRouteGate > invocationGate && envelopeGate > frozenRouteGate && providerBlockWork > envelopeGate,
   "forged/drifted snapshots and missing/insufficient envelopes fail before the remote block can start provider work",

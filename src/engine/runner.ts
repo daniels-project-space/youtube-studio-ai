@@ -34,6 +34,7 @@ import { configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
 import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
+import { createCheckpointCostScope, incrementalObservedFailureCostUsd, type CheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
 
 export interface RunPipelineOptions {
   ownerId: string;
@@ -134,6 +135,26 @@ function takeCost(patch: Record<string, unknown>): number {
   const raw = patch[COST_PATCH_KEY];
   delete patch[COST_PATCH_KEY];
   return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+interface PriorStageCost {
+  status: string;
+  cost?: number;
+  costBeforeExecution?: number;
+}
+
+/**
+ * A remote retry rejoins the same durable child until a healer supersedes its
+ * stage. Its returned cost therefore includes any spend already observed for
+ * that child. Local execution and a new heal add to all earlier executions.
+ */
+function executionCostBaseline(prior: PriorStageCost | undefined, remote: boolean) {
+  const priorCost = prior?.cost ?? 0;
+  const reattaching = remote && (prior?.status === "running" || prior?.status === "failed");
+  // Legacy remote rows recorded only their latest child's cost, so their
+  // pre-child baseline is zero. New rows persist the baseline before dispatch.
+  const carriedCost = reattaching ? (prior?.costBeforeExecution ?? 0) : priorCost;
+  return { priorCost, carriedCost, creditedCost: priorCost - carriedCost };
 }
 
 /** Spend a provider adapter observed before throwing (for failed paid calls). */
@@ -460,14 +481,14 @@ export async function runPipeline(
   }
 
   // Resume: load already-completed blocks' persisted outputs (skip + restore).
-  // Their recorded COSTS seed spentUsd so (a) the budget ceiling covers the
+  // Every stage's recorded COST seeds spentUsd so (a) the budget ceiling covers the
   // WHOLE run, not just this invocation (heal cycles previously reset it and
   // could silently blow the channel budget), and (b) runs.costTotal reports
   // the cumulative truth.
   const completedMap: Record<string, Record<string, unknown>> = {};
   const priorStageMap = new Map<
     string,
-    { status: string; cost?: number; startedAt?: number; error?: string }
+    { status: string; cost?: number; costBeforeExecution?: number; checkpointCostReceipts?: CheckpointCostReceipt[]; startedAt?: number; error?: string }
   >();
   if (
     opts.resume !== false &&
@@ -482,6 +503,8 @@ export async function runPipeline(
         status: string;
         outputs?: unknown;
         cost?: number;
+        costBeforeExecution?: number;
+        checkpointCostReceipts?: CheckpointCostReceipt[];
         startedAt?: number;
         error?: string;
       }> = opts.sink.getResumeState
@@ -491,18 +514,28 @@ export async function runPipeline(
             status: "ok",
           }));
       for (const row of rows) {
+        for (const amount of [row.cost, row.costBeforeExecution]) {
+          if (amount !== undefined && (!Number.isFinite(amount) || amount < 0)) {
+            throw new Error(`resume: invalid persisted cost for block "${row.block}"`);
+          }
+        }
+        if ((row.costBeforeExecution ?? 0) > (row.cost ?? 0)) {
+          throw new Error(`resume: cost baseline exceeds recorded spend for block "${row.block}"`);
+        }
         priorStageMap.set(row.block, {
           status: row.status,
           cost: row.cost,
+          costBeforeExecution: row.costBeforeExecution,
+          checkpointCostReceipts: row.checkpointCostReceipts,
           startedAt: row.startedAt,
           error: row.error,
         });
+        // Paid responses can precede a failure, and a repair supersedes the
+        // artifact without refunding its provider. Both costs remain spent.
+        spentUsd += row.cost ?? 0;
         if (row.status !== "ok") continue;
         if (row.outputs && typeof row.outputs === "object") {
           completedMap[row.block] = row.outputs as Record<string, unknown>;
-          if (typeof row.cost === "number" && Number.isFinite(row.cost) && row.cost > 0) {
-            spentUsd += row.cost;
-          }
         }
       }
       const n = Object.keys(completedMap).length;
@@ -714,6 +747,12 @@ export async function runPipeline(
     }
     const params = opts.paramsByBlock?.[block.id] ?? resolved.entries[blockIndex]?.params ?? {};
     const priorStage = priorStageMap.get(block.id);
+    const isRemoteExecution = opts.remoteBlocks?.has(block.id) === true && Boolean(opts.runRemoteBlock);
+    const costBaseline = executionCostBaseline(
+      priorStage,
+      isRemoteExecution,
+    );
+    const checkpointCostScope = createCheckpointCostScope(priorStage?.checkpointCostReceipts ?? [], costBaseline.priorCost);
     // Remote child work is normally keyed by Trigger's durable idempotency key;
     // a parent retry can reattach to that child instead of deadlocking itself.
     // A remote child marked as requiring reconciliation is different: it may
@@ -852,13 +891,14 @@ export async function runPipeline(
         index: blockIndex,
         store,
       });
+      const additionalReservation = Math.max(0, configuredEnvelope - costBaseline.creditedCost);
       if (
         opts.budgetUsd > 0 &&
-        spentUsd + configuredEnvelope > opts.budgetUsd + Number.EPSILON
+        spentUsd + additionalReservation > opts.budgetUsd + Number.EPSILON
       ) {
         const message =
           `budget reservation rejected before paid block "${block.id}": ` +
-          `$${spentUsd.toFixed(2)} spent + $${configuredEnvelope.toFixed(2)} reserved > ` +
+          `$${spentUsd.toFixed(2)} spent + $${additionalReservation.toFixed(2)} reserved > ` +
           `$${opts.budgetUsd.toFixed(2)} budget`;
         await opts.sink.upsert({
           ownerId: opts.ownerId,
@@ -866,6 +906,7 @@ export async function runPipeline(
           block: block.id,
           status: "failed",
           finishedAt: Date.now(),
+          costBeforeExecution: costBaseline.carriedCost,
           error: message,
         });
         stages.push({ block: block.id, status: "failed" });
@@ -903,7 +944,11 @@ export async function runPipeline(
                 index: candidateIndex,
                 store,
               });
-        reservedMaxCostUsd += candidateEnvelope;
+        const candidateCostBaseline = executionCostBaseline(
+          priorStageMap.get(candidate.id),
+          opts.remoteBlocks?.has(candidate.id) === true && Boolean(opts.runRemoteBlock),
+        );
+        reservedMaxCostUsd += Math.max(0, candidateEnvelope - candidateCostBaseline.creditedCost);
         blockIds.push(candidate.id);
       }
       const required = args.requiredFuturePaidBlockIds ?? [];
@@ -933,6 +978,7 @@ export async function runPipeline(
       block: block.id,
       status: "running",
       startedAt: Date.now(),
+      costBeforeExecution: costBaseline.carriedCost,
       inputs,
     });
 
@@ -1048,6 +1094,7 @@ export async function runPipeline(
     };
 
     let observedCost = 0;
+    let checkpointAdjustedCost = 0;
     let costAccounted = false;
     let usageReported = false;
     let imageUsageReported = false;
@@ -1103,8 +1150,8 @@ export async function runPipeline(
         // Keep one scope across the block's bounded retry loop. Provider
         // wrappers can then reuse a valid response if a later operation fails,
         // while every actual successful provider response is charged once.
-        patch = await usageScope.run(() =>
-          imageUsageScope.run(() => runBlockWithRetry(block, ctx, retries, log)),
+        patch = await checkpointCostScope.run(() =>
+          usageScope.run(() => imageUsageScope.run(() => runBlockWithRetry(block, ctx, retries, log))),
         );
       }
       const hasExplicitCost = Object.prototype.hasOwnProperty.call(patch, COST_PATCH_KEY);
@@ -1115,11 +1162,18 @@ export async function runPipeline(
       // allowance in __costUsd. Treat that patch as authoritative to prevent
       // double counting; text-only blocks without a patch receive exact
       // provider-token cost from this scope.
-      const cost = hasExplicitCost
+      const reportedCost = hasExplicitCost
         ? explicitCost
         : explicitCost + modelUsage.costUsd + imageUsage.costUsd;
+      const checkpointCosts = checkpointCostScope.snapshot();
+      const cost = Math.max(reportedCost, checkpointCosts.reportedReceiptCostUsd);
       observedCost = cost;
-      spentUsd += cost;
+      checkpointAdjustedCost = Math.max(
+        0,
+        cost - checkpointCosts.alreadyAccountedCostUsd,
+        modelUsage.costUsd + imageUsage.costUsd,
+      );
+      spentUsd += Math.max(0, costBaseline.carriedCost + checkpointAdjustedCost - costBaseline.priorCost);
       costAccounted = true;
       if (
         configuredEnvelope !== undefined &&
@@ -1146,7 +1200,8 @@ export async function runPipeline(
         block: block.id,
         status: "ok",
         finishedAt: Date.now(),
-        cost,
+        cost: Math.max(costBaseline.priorCost, costBaseline.carriedCost + checkpointAdjustedCost),
+        ...(!isRemoteExecution && checkpointCosts.receipts.length ? { checkpointCostReceipts: checkpointCosts.receipts } : {}),
         outputs: persistedStageOutputs,
       });
       stages.push({ block: block.id, status: "ok" });
@@ -1159,15 +1214,25 @@ export async function runPipeline(
         const imageUsage = reportImageUsage();
         const reportedFailureCost = observedCostFromError(err);
         const additionalFailureCost = additionalObservedCostFromError(err) ?? 0;
+        const checkpointCosts = checkpointCostScope.snapshot();
         // observedCostUsd is an adapter's authoritative whole-attempt spend
         // (for example TTS plus its audio judge). Otherwise preserve the exact
         // known token cost of provider responses received before the failure.
-        observedCost =
-          Math.max(
-            reportedFailureCost ?? 0,
-            modelUsage.costUsd + imageUsage.costUsd,
-          ) + additionalFailureCost;
-        spentUsd += observedCost;
+        observedCost = Math.max(
+          reportedFailureCost ?? 0,
+          modelUsage.costUsd + imageUsage.costUsd,
+          checkpointCosts.reportedReceiptCostUsd,
+        ) + additionalFailureCost;
+        // Only a cumulative receipt total can contain historical cost. Fresh
+        // model/image usage and explicitly supplemental external spend remain
+        // incremental even when an older checkpoint was restored first.
+        checkpointAdjustedCost = Math.max(
+          0,
+          incrementalObservedFailureCostUsd(err, checkpointCosts.alreadyAccountedCostUsd),
+          modelUsage.costUsd + imageUsage.costUsd,
+          checkpointCosts.reportedReceiptCostUsd - checkpointCosts.alreadyAccountedCostUsd,
+        ) + additionalFailureCost;
+        spentUsd += Math.max(0, costBaseline.carriedCost + checkpointAdjustedCost - costBaseline.priorCost);
         costAccounted = true;
       }
       await opts.sink.upsert({
@@ -1176,7 +1241,8 @@ export async function runPipeline(
         block: block.id,
         status: "failed",
         finishedAt: Date.now(),
-        ...(observedCost > 0 ? { cost: observedCost } : {}),
+        ...(observedCost > 0 ? { cost: Math.max(costBaseline.priorCost, costBaseline.carriedCost + checkpointAdjustedCost) } : {}),
+        ...(!isRemoteExecution && checkpointCostScope.snapshot().receipts.length ? { checkpointCostReceipts: checkpointCostScope.snapshot().receipts } : {}),
         error: message,
       });
       stages.push({ block: block.id, status: "failed" });

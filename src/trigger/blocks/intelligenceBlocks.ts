@@ -40,6 +40,8 @@ import {
   prepareLofiThumbnailReference,
 } from "@/lib/lofiThumbnail";
 import {
+  thumbnailGenerationCheckpointCost,
+  thumbnailQaCheckpointCost,
   beginThumbnailPaidWork,
   openThumbnailCheckpoint,
   saveThumbnailGenerationCheckpoint,
@@ -1151,7 +1153,7 @@ export const thumbnailGen: Block = {
             ) {
               throw new Error("thumbnail_gen: Lo-Fi checkpoint lacks its exact Nano Banana reference evidence");
             }
-            checkpointGenerationCostUsd += checkpoint.manifest.generationCostUsd;
+            checkpointGenerationCostUsd += thumbnailGenerationCheckpointCost(checkpoint);
           } else {
             checkpoint = await beginThumbnailPaidWork(checkpoint);
             const spentBefore = observedImageCost();
@@ -1245,7 +1247,7 @@ export const thumbnailGen: Block = {
           const cachedQa = checkpoint.manifest?.qa;
           if (cachedQa?.completed && cachedQa.requestHash === qaRequestHash) {
             const verdict = cachedQa.verdict as Partial<ThumbnailGateVerdict> | null;
-            checkpointQaCostUsd += cachedQa.costUsd;
+            checkpointQaCostUsd += thumbnailQaCheckpointCost(checkpoint, qaRequestHash);
             if (
               verdict &&
               typeof verdict.textOk === "boolean" &&
@@ -1530,7 +1532,7 @@ export const thumbnailGen: Block = {
           } else if (checkpoint.manifest.scenarioVisualTreatment !== undefined) {
             throw new Error("thumbnail_gen: non-fictional thumbnail checkpoint carries a scenario visual treatment binding");
           }
-          checkpointGenerationCostUsd += checkpoint.manifest.generationCostUsd;
+          checkpointGenerationCostUsd += thumbnailGenerationCheckpointCost(checkpoint);
           ctx.log(
             `thumbnail_gen: reused ${checkpoint.source} paid candidate checkpoint ${requestHash.slice(0, 12)}`,
           );
@@ -1621,7 +1623,7 @@ export const thumbnailGen: Block = {
         let refQA: ThumbnailGateVerdict | null;
         const cachedQa = checkpoint.manifest?.qa;
         if (cachedQa?.completed && cachedQa.requestHash === qaRequestHash) {
-          checkpointQaCostUsd += cachedQa.costUsd;
+          checkpointQaCostUsd += thumbnailQaCheckpointCost(checkpoint, qaRequestHash);
           if (thumbnailScenarioVisualTreatmentBinding) {
             assertScenarioVisualTreatmentThumbnailBinding({
               binding: cachedQa.scenarioVisualTreatment?.binding,
@@ -1938,7 +1940,7 @@ export const thumbnailGen: Block = {
     };
     } catch (error) {
       const failure = error instanceof Error ? error : new Error(String(error));
-      Object.assign(failure, { observedCostUsd: thumbnailCost() });
+      Object.assign(failure, { observedCostUsd: thumbnailCost(), observedCostIncludesCheckpointReceipts: true });
       throw failure;
     }
   },

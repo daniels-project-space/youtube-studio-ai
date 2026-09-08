@@ -44,6 +44,9 @@ export const renderBlockTask = task({
     maxTimeoutInMs: 30000,
     factor: 2,
   },
-  run: async (payload: RenderBlockInput) =>
-    executeRenderBlock(payload, { taskLabel: "render-block", machineClass: "heavy" }),
+  run: async (payload: RenderBlockInput, { ctx }) =>
+    executeRenderBlock(payload, {
+      taskLabel: "render-block", machineClass: "heavy",
+      taskRunId: ctx.run.id, attemptNumber: ctx.attempt.number,
+    }),
 });

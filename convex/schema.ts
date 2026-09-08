@@ -1223,6 +1223,13 @@ export default defineSchema({
     startedAt: v.optional(v.number()),
     finishedAt: v.optional(v.number()),
     cost: v.number(),
+    costBeforeExecution: v.optional(v.number()),
+    checkpointCostReceipts: v.optional(v.array(v.object({ id: v.string(), costUsd: v.number() }))),
+    remoteChildCostAttempts: v.optional(v.array(v.object({
+      dispatchKey: v.string(), taskRunId: v.string(), attemptNumber: v.number(),
+      status: v.union(v.literal("started"), v.literal("succeeded"), v.literal("failed")),
+      costUsd: v.number(), complete: v.boolean(),
+    }))),
     inputs: v.optional(v.any()),
     outputs: v.optional(v.any()),
     error: v.optional(v.string()),
@@ -1306,6 +1313,13 @@ export default defineSchema({
     ),
     releaseAt: v.optional(v.number()),
     retainUntil: v.optional(v.number()),
+    // Requested schedule is separate from observed public-release evidence.
+    scheduledPublishAt: v.optional(v.number()),
+    nextReleaseCheckAt: v.optional(v.number()),
+    releaseConfirmedAt: v.optional(v.number()),
+    releaseObservationAt: v.optional(v.number()),
+    releaseVideoId: v.optional(v.string()),
+    releaseYouTubeChannelId: v.optional(v.string()),
     status: v.union(
       v.literal("awaiting_release"),
       v.literal("pending"),
@@ -1325,7 +1339,8 @@ export default defineSchema({
     lastError: v.optional(v.string()),
   })
     .index("by_run", ["runId"])
-    .index("by_owner_status_retain_until", ["ownerId", "status", "retainUntil"]),
+    .index("by_owner_status_retain_until", ["ownerId", "status", "retainUntil"])
+    .index("by_owner_release_check", ["ownerId", "status", "nextReleaseCheckAt"]),
 
   // Immutable, owner-operated reusable recipe/adapter catalog. Media bytes
   // remain in R2; a Studio entry carries only a content-addressed resource

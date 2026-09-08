@@ -3469,10 +3469,10 @@ export const notify: Block = {
 /**
  * Release-aware storage lifecycle — runs LAST after a successful upload but
  * never destroys media in the pipeline worker. It seals an immutable cleanup
- * schedule instead: private drafts wait for a real release, scheduled uploads
- * retain through publish time + 14 days, and public uploads retain for 14 days.
- * A separate leased sweeper re-reads every release certificate and retained
- * evidence object immediately before it removes intermediates.
+ * schedule instead. Every upload waits for YouTube to confirm that its exact
+ * video is public and processed; intermediates remain until that actual public
+ * release + 14 days. The leased sweeper checks publication again and re-reads
+ * release evidence immediately before it removes intermediates.
  */
 export const cleanup: Block = {
   id: "cleanup",
@@ -3530,7 +3530,7 @@ export const cleanup: Block = {
     if (!durable) throw new Error("cleanup: artifact retention schedule was not persisted");
     ctx.log(
       retention.status === "awaiting_release"
-        ? "cleanup: retained all run artifacts until this private draft has a real release time"
+        ? "cleanup: retaining all run artifacts until YouTube confirms the actual public release"
         : `cleanup: retained all run artifacts until ${new Date(retention.retainUntil as number).toISOString()} (release + 14 days)`,
     );
     return {

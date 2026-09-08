@@ -20,8 +20,9 @@ import {
   type PipelineInvocationSnapshot,
 } from "@/lib/pipelineInvocationSnapshot";
 
-export interface RemoteChildCompletedStage {
+export interface RemoteChildStage {
   readonly block: string;
+  readonly status: string;
   readonly cost?: number;
 }
 
@@ -37,7 +38,7 @@ export interface FrozenRemoteChildStageAdmission {
   readonly manifest: ModuleManifest;
   /** Present exactly for paid stages; never substituted from the run budget. */
   readonly stageBudgetUsd?: number;
-  /** Recorded completed-stage spend carried into the child reservation. */
+  /** Every stage's known spend, including failed and superseded executions. */
   readonly knownSpentUsd: number;
   /** The reservation checked immediately before the child receives its context. */
   readonly initialReservation: { reservedMaxCostUsd: number; blockIds: readonly string[] };
@@ -83,11 +84,11 @@ function exactFrozenStage(
   return { blockIndex, entry, manifest };
 }
 
-function knownCompletedSpend(rows: readonly RemoteChildCompletedStage[]): number {
+function knownStageSpend(rows: readonly RemoteChildStage[]): number {
   return rows.reduce((total, row) => {
     if (row.cost === undefined) return total;
     if (!Number.isFinite(row.cost) || row.cost < 0) {
-      throw new Error(`remote child completed stage "${row.block}" has an invalid recorded cost`);
+      throw new Error(`remote child stage "${row.block}" has an invalid recorded cost`);
     }
     return total + row.cost;
   }, 0);
@@ -104,17 +105,17 @@ export function admitFrozenRemoteChildStage(args: {
   readonly blockId: string;
   readonly store: Readonly<Record<string, unknown>>;
   readonly budgetUsd: number;
-  readonly completedStages: readonly RemoteChildCompletedStage[];
+  readonly stages: readonly RemoteChildStage[];
 }): FrozenRemoteChildStageAdmission {
   if (!Number.isFinite(args.budgetUsd) || args.budgetUsd < 0) {
     throw new Error("remote child frozen budget is invalid");
   }
   const { blockIndex, entry, manifest } = exactFrozenStage(args.resolved, args.blockId);
-  const completedBlockIds = new Set(args.completedStages.map((row) => row.block));
+  const completedBlockIds = new Set(args.stages.filter((row) => row.status === "ok").map((row) => row.block));
   if (completedBlockIds.has(args.blockId)) {
     throw new Error(`remote child paid stage "${args.blockId}" is already completed; refusing replay`);
   }
-  const knownSpentUsd = knownCompletedSpend(args.completedStages);
+  const knownSpentUsd = knownStageSpend(args.stages);
   const stageBudgetUsd = manifest.costAndLatency.paid
     ? configuredMaxCostUsd(manifest, entry.params ?? {}, {
         entries: args.resolved.entries,

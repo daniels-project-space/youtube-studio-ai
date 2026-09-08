@@ -46,6 +46,7 @@ import {
 import { resolveOwnerReviewedLtxRuntime } from "@/lib/reviewedLtxRuntimeStateRuntime";
 import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
 import { RENDER_CHILD_HEARTBEAT_RENEW_INTERVAL_MS } from "@/lib/renderChildLease";
+import { executeRemoteCostTrackedBlock } from "@/trigger/remoteChildCostTransport";
 
 export interface RenderBlockInput {
   runId: string;
@@ -66,6 +67,8 @@ export interface RenderBlockRunnerOptions {
   taskLabel: string;
   /** The block class this task's machine tier is provisioned for. */
   machineClass: RenderBlockMachineClass;
+  taskRunId: string;
+  attemptNumber: number;
 }
 
 function stableJson(value: unknown): string {
@@ -276,8 +279,11 @@ export async function executeRenderBlock(
     executionLeaseToken: payload.executionLeaseToken,
   };
   const sink = makeConvexSink(convex, payload.ownerId, executionLease);
-  if (!sink.getCompleted) throw new Error(`${taskLabel}: sink lacks getCompleted (cannot rebuild store)`);
-  const completed = await sink.getCompleted(payload.runId);
+  if (!sink.getResumeState) throw new Error(`${taskLabel}: sink lacks getResumeState (cannot account for previous work)`);
+  // One stage read supplies both reusable outputs and cumulative cost. A heal
+  // supersedes an output, but the original provider charge remains spent.
+  const persistedStages = await sink.getResumeState(payload.runId);
+  const completed = persistedStages.filter((row) => row.status === "ok" && row.outputs != null);
   const completedByBlock = new Map(completed.map((row) => [row.block, row]));
   const loadInputArtifactRefs = async (): Promise<Readonly<Record<string, ArtifactRef>>> => {
     const artifactRows = await convex.query(api.runArtifacts.listForRun, {
@@ -366,7 +372,7 @@ export async function executeRenderBlock(
     blockId: frozenEntry.block,
     store,
     budgetUsd: frozenInvocation.budgetUsd,
-    completedStages: completed,
+    stages: persistedStages,
   });
 
   // The parent wait receipt is a short liveness lease, not a multi-hour blind
@@ -443,7 +449,26 @@ export async function executeRenderBlock(
   };
 
   try {
-    const patch = await block.run(ctx);
+    const costIdentity = {
+      ownerId: payload.ownerId,
+      channelId: payload.channelId as Id<"channels">,
+      runId: payload.runId as Id<"runs">,
+      ...executionLease,
+      blockId: payload.blockId,
+      dispatchKey: payload.dispatchKey,
+      taskRunId: options.taskRunId,
+      attemptNumber: options.attemptNumber,
+    };
+    const patch = await executeRemoteCostTrackedBlock({
+      paid: manifest.costAndLatency.paid,
+      priorCostUsd: persistedStages.find((row) => row.block === payload.blockId)?.cost ?? 0,
+      checkpointCostReceipts: persistedStages.find((row) => row.block === payload.blockId)?.checkpointCostReceipts ?? [],
+      execute: () => block.run(ctx),
+      transport: {
+        begin: () => convex.mutation(api.remoteChildCosts.begin, costIdentity),
+        finish: (result) => convex.mutation(api.remoteChildCosts.finish, { ...costIdentity, ...result }),
+      },
+    });
     return { patch };
   } catch (error) {
     const taskError = taskErrorForRetryPolicy(error);

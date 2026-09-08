@@ -30,6 +30,8 @@ export function makeConvexSink(
         startedAt: args.startedAt,
         finishedAt: args.finishedAt,
         cost: args.cost,
+        costBeforeExecution: args.costBeforeExecution,
+        checkpointCostReceipts: args.checkpointCostReceipts,
         inputs: args.inputs,
         outputs: args.outputs,
         error: args.error,
@@ -51,6 +53,8 @@ export function makeConvexSink(
         status: string;
         outputs?: unknown;
         cost?: number;
+        costBeforeExecution?: number;
+        checkpointCostReceipts?: Array<{ id: string; costUsd: number }>;
         startedAt?: number;
         error?: string;
       }>;

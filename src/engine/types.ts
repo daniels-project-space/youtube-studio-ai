@@ -167,7 +167,11 @@ export interface RunStageSink {
     status: StageStatus;
     startedAt?: number;
     finishedAt?: number;
+    /** Cumulative known spend, including failed and superseded executions. */
     cost?: number;
+    /** Spend preceding the current execution; remote reattachment reuses it. */
+    costBeforeExecution?: number;
+    checkpointCostReceipts?: Array<{ id: string; costUsd: number }>;
     inputs?: unknown;
     outputs?: unknown;
     error?: string;
@@ -190,6 +194,8 @@ export interface RunStageSink {
       status: string;
       outputs?: unknown;
       cost?: number;
+      costBeforeExecution?: number;
+      checkpointCostReceipts?: Array<{ id: string; costUsd: number }>;
       startedAt?: number;
       error?: string;
     }>

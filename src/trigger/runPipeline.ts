@@ -104,6 +104,7 @@ import {
   renderChildWaitLeaseMs,
   renderChildWorkDeadlineMs,
 } from "@/lib/renderChildLease";
+import { remoteChildFailureWithEvidence } from "@/lib/remoteChildCostEvidence";
 import {
   serializedProgramEpisodeBusyRetryAt,
   serializedProgramEpisodeBusyRetryReceipt,
@@ -2116,28 +2117,26 @@ export const runPipelineTask = task({
             waitUntil: remoteChildWaitStartedAt + renderChildWaitLeaseMs(machineClass),
             deadline: remoteChildWaitStartedAt + renderChildWorkDeadlineMs(machineClass),
           });
-          const requireDocuMotionReconciliation = (childFailure: string): ExecutionError =>
-            new ExecutionError(
-              `${PAID_STAGE_RECONCILIATION_MARKER}: remote documotion_short child failed after dispatch; ` +
-                `provider cost is UNKNOWN and automatic replay/heal is forbidden. ${childFailure}`,
-              {
-                code: "DOCUMOTION_REMOTE_COST_RECONCILIATION_REQUIRED",
-                retryable: false,
-              },
-            );
+          const failureWithRecordedCost = async (message: string): Promise<Error> => {
+            try {
+              const summary = await convex.query(api.remoteChildCosts.getForDispatch, {
+                ownerId, channelId: payload.channelId as Id<"channels">,
+                runId: payload.runId as Id<"runs">, blockId, dispatchKey: idemKey,
+              });
+              return remoteChildFailureWithEvidence(message, summary);
+            } catch {
+              return remoteChildFailureWithEvidence(message);
+            }
+          };
           let res:
             | { ok: true; output: { patch: Record<string, unknown> } }
             | { ok: false; error: unknown }
             | undefined;
           let postDispatchFailure: unknown;
           let hasPostDispatchFailure = false;
-          let childDispatchStarted = false;
           try {
-            // Once this call has been initiated, an ambiguous throw can mean
-            // Trigger accepted the child even if the parent never receives a
-            // terminal result. Treat DocuMotion as potentially paid from that
-            // point forward rather than attempting another generation.
-            childDispatchStarted = true;
+            // The child persists exact attempt costs independently of Trigger's
+            // serialized result, including failures after provider acceptance.
             res = await child.triggerAndWait(
               {
                 runId: payload.runId,
@@ -2181,28 +2180,15 @@ export const runPipelineTask = task({
                 ? postDispatchFailure.message.slice(0, 300)
                 : JSON.stringify(postDispatchFailure)?.slice(0, 300)
             }`;
-            if (blockId === "documotion_short" && childDispatchStarted) {
-              throw requireDocuMotionReconciliation(childFailure);
-            }
-            throw postDispatchFailure;
+            throw await failureWithRecordedCost(childFailure);
           }
           if (!res) {
             const childFailure = `${child.id} child wait ended without a terminal result`;
-            if (blockId === "documotion_short" && childDispatchStarted) {
-              throw requireDocuMotionReconciliation(childFailure);
-            }
-            throw new Error(childFailure);
+            throw await failureWithRecordedCost(childFailure);
           }
           if (!res.ok) {
             const childFailure = `${child.id} child failed: ${JSON.stringify(res.error)?.slice(0, 300)}`;
-            if (blockId === "documotion_short") {
-              // The heavy child may have accepted FAL/TTS/music work before a
-              // later render/download/validation failure. Until its durable
-              // per-operation receipt layer lands, the amount is explicitly
-              // UNKNOWN — do not pretend it was $0 or start h+1 automatically.
-              throw requireDocuMotionReconciliation(childFailure);
-            }
-            throw new Error(childFailure);
+            throw await failureWithRecordedCost(childFailure);
           }
           return (res.output as { patch: Record<string, unknown> }).patch;
         },

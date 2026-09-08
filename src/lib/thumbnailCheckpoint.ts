@@ -24,12 +24,14 @@ import {
   type NanoBananaImageReceipt,
 } from "@/lib/nanoBananaThumbnailContract";
 import { getObjectBytes, putObject } from "@/lib/storage";
+import { checkpointCostReceiptId, observeCheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
 
 interface ThumbnailQaCheckpoint {
   completed: true;
   requestHash: string;
   verdict: unknown;
   costUsd: number;
+  costReceiptId?: string;
   /** Present only for a current fictional-scenario package-art review. */
   scenarioVisualTreatment?: {
     binding: ScenarioVisualTreatmentThumbnailBinding;
@@ -41,6 +43,7 @@ interface LegacyThumbnailCheckpointManifest {
   version: 1;
   requestHash: string;
   generationCostUsd: number;
+  generationCostReceiptId?: string;
   qa?: ThumbnailQaCheckpoint;
 }
 
@@ -79,6 +82,7 @@ interface CurrentThumbnailCheckpointManifest {
   version: 2 | 3;
   requestHash: string;
   generationCostUsd: number;
+  generationCostReceiptId?: string;
   artifactSha256: string;
   providerEvidence?: ThumbnailNanoBananaEvidence;
   /** v3 carries this witness whenever the request is treatment-bound. */
@@ -89,6 +93,32 @@ interface CurrentThumbnailCheckpointManifest {
 export type ThumbnailCheckpointManifest =
   | LegacyThumbnailCheckpointManifest
   | CurrentThumbnailCheckpointManifest;
+
+/** Match the existing paid checkpoint, without inferring identity from price. */
+export function thumbnailGenerationCheckpointCost(session: ThumbnailCheckpointSession): number {
+  const manifest = session.manifest;
+  if (!manifest) throw new Error("thumbnail generation cost requires its checkpoint");
+  const identity = manifest.generationCostReceiptId ?? canonicalJson({
+    legacyRequest: manifest.requestHash,
+    ...(manifest.version !== 1 ? { artifactSha256: manifest.artifactSha256, providerEvidence: manifest.providerEvidence } : {}),
+  });
+  observeCheckpointCostReceipt({
+    id: checkpointCostReceiptId(session.manifestKey, `generation:${identity}`),
+    costUsd: manifest.generationCostUsd,
+  }, true);
+  return manifest.generationCostUsd;
+}
+
+/** Only a QA receipt matching the caller's exact request contributes cost. */
+export function thumbnailQaCheckpointCost(session: ThumbnailCheckpointSession, requestHash: string): number {
+  const qa = session.manifest?.qa;
+  if (!qa?.completed || qa.requestHash !== requestHash) throw new Error("thumbnail QA cost requires the matching checkpoint");
+  observeCheckpointCostReceipt({
+    id: checkpointCostReceiptId(session.manifestKey, `qa:${qa.costReceiptId ?? canonicalJson({ requestHash, verdict: qa.verdict })}`),
+    costUsd: qa.costUsd,
+  }, true);
+  return qa.costUsd;
+}
 
 interface CheckpointPutOptions {
   contentType?: string;
@@ -895,12 +925,17 @@ export async function saveThumbnailGenerationCheckpoint(
     version: effectiveScenarioVisualTreatment ? 3 : 2,
     requestHash: session.requestHash,
     generationCostUsd: cost,
+    generationCostReceiptId: randomUUID(),
     artifactSha256: createHash("sha256").update(imageBytes).digest("hex"),
     ...(providerEvidence ? { providerEvidence } : {}),
     ...(effectiveScenarioVisualTreatment
       ? { scenarioVisualTreatment: effectiveScenarioVisualTreatment }
       : {}),
   };
+  observeCheckpointCostReceipt({
+    id: checkpointCostReceiptId(session.manifestKey, `generation:${manifest.generationCostReceiptId}`),
+    costUsd: cost,
+  }, false);
   await writeFile(session.localManifestPath, JSON.stringify(manifest));
   await io.putObject(session.imageKey, imageBytes, {
     contentType: "image/jpeg",
@@ -958,9 +993,14 @@ export async function saveThumbnailQaCheckpoint(
       requestHash: qa.requestHash,
       verdict: qa.verdict,
       costUsd: cost,
+      costReceiptId: randomUUID(),
       ...(qa.scenarioVisualTreatment ? { scenarioVisualTreatment: qa.scenarioVisualTreatment } : {}),
     },
   };
+  observeCheckpointCostReceipt({
+    id: checkpointCostReceiptId(session.manifestKey, `qa:${manifest.qa!.costReceiptId}`),
+    costUsd: cost,
+  }, false);
   await writeFile(session.localManifestPath, JSON.stringify(manifest));
   await io.putObject(session.manifestKey, JSON.stringify(manifest), {
     contentType: "application/json",

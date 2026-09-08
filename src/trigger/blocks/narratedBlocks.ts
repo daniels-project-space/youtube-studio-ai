@@ -9,7 +9,8 @@
  * work. Quality cannot quietly degrade into a polished-looking release.
  */
 import { join } from "node:path";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
+import { checkpointCostReceiptId, observeCheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
@@ -551,18 +552,35 @@ function iterationRequestHash(payload: unknown): string {
 }
 
 async function readIterationCheckpoint<T>(key: string, log: (msg: string) => void): Promise<T | null> {
+  let parsed: T;
   try {
-    return JSON.parse(new TextDecoder().decode(await getObjectBytes(key))) as T;
+    parsed = JSON.parse(new TextDecoder().decode(await getObjectBytes(key))) as T;
   } catch {
     // Absent (the normal first-run case) or unreadable — either way, produce it.
     log(`checkpoint miss: ${key.split("/").pop() ?? key}`);
     return null;
   }
+  const paid = parsed as { costUsd?: unknown; costReceiptId?: unknown } | null;
+  if (paid && typeof paid.costUsd === "number" && Number.isFinite(paid.costUsd) && paid.costUsd >= 0) {
+    observeCheckpointCostReceipt({
+      id: checkpointCostReceiptId(key, typeof paid.costReceiptId === "string" ? paid.costReceiptId : `legacy:${canonicalJson(parsed)}`),
+      costUsd: paid.costUsd,
+    }, true);
+  }
+  return parsed;
 }
 
 async function writeIterationCheckpoint(key: string, value: unknown, log: (msg: string) => void): Promise<void> {
+  const paid = value as { costUsd?: unknown } | null;
+  const costReceiptId = randomUUID();
+  const persisted = paid && typeof paid.costUsd === "number" && Number.isFinite(paid.costUsd) && paid.costUsd >= 0
+    ? { ...paid, costReceiptId }
+    : value;
+  if (persisted !== value) {
+    observeCheckpointCostReceipt({ id: checkpointCostReceiptId(key, costReceiptId), costUsd: paid!.costUsd as number }, false);
+  }
   try {
-    await putObject(key, Buffer.from(JSON.stringify(value)), { contentType: "application/json" });
+    await putObject(key, Buffer.from(JSON.stringify(persisted)), { contentType: "application/json" });
   } catch (e) {
     // A checkpoint is an optimisation, never a correctness requirement: losing
     // the write costs a future replay money, but failing the run costs more.

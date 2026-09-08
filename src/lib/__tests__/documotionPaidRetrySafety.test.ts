@@ -41,10 +41,10 @@ function run(command: string, args: string[]): Promise<Buffer> {
 // Trigger must not replay the whole child automatically.
 assert.match(renderBlockSource, /retry:\s*\{\s*maxAttempts:\s*1,/);
 assert.match(renderBlockSource, /must reconcile rather than make\s*\n\s*\/\/ Trigger replay the entire child attempt/i);
-assert.match(runPipelineSource, /blockId === "documotion_short"/);
-assert.match(runPipelineSource, /provider cost is UNKNOWN and automatic replay\/heal is forbidden/);
-assert.match(runPipelineSource, /let childDispatchStarted = false/);
-assert.match(runPipelineSource, /childDispatchStarted = true/);
+// All remote children now retain attempt costs; the handler/transport tests in
+// remoteChildCostTransport.test.ts exercise unknown-cost holds, crash fencing,
+// lost responses, and parent reconciliation instead of matching one block's
+// old special-case branch.
 assert.match(runPipelineSource, /result\.error\?\.includes\(PAID_STAGE_RECONCILIATION_MARKER\)/);
 assert.match(documotionSource, /DOCUMOTION_LABEL_REVIEW_RECONCILIATION_MARKER/);
 assert.match(documotionSource, /labelReviewCheckpoint\.claim\(claim\)/);

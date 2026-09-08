@@ -19,6 +19,8 @@ export const upsertRunStage = mutation({
     startedAt: v.optional(v.number()),
     finishedAt: v.optional(v.number()),
     cost: v.optional(v.number()),
+    costBeforeExecution: v.optional(v.number()),
+    checkpointCostReceipts: v.optional(v.array(v.object({ id: v.string(), costUsd: v.number() }))),
     inputs: v.optional(v.any()),
     outputs: v.optional(v.any()),
     error: v.optional(v.string()),
@@ -29,6 +31,19 @@ export const upsertRunStage = mutation({
     const run = await ctx.db.get(args.runId);
     if (!run || run.ownerId !== args.ownerId) {
       throw new Error("run stage ownership mismatch");
+    }
+    for (const value of [args.cost, args.costBeforeExecution]) {
+      if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+        throw new Error("run stage cost must be a finite non-negative amount");
+      }
+    }
+    if (args.checkpointCostReceipts !== undefined) {
+      if (args.checkpointCostReceipts.length > 256 ||
+          new Set(args.checkpointCostReceipts.map((receipt) => receipt.id)).size !== args.checkpointCostReceipts.length ||
+          args.checkpointCostReceipts.some((receipt) => !/^[a-f0-9]{64}$/.test(receipt.id) ||
+            !Number.isFinite(receipt.costUsd) || receipt.costUsd < 0)) {
+        throw new Error("run stage checkpoint cost receipts are invalid");
+      }
     }
     if ((args.leaseOwner === undefined) !== (args.executionLeaseToken === undefined)) {
       throw new Error("run stage write must provide both execution lease fence fields or neither");
@@ -47,6 +62,26 @@ export const upsertRunStage = mutation({
         q.eq("runId", args.runId).eq("block", args.block),
       )
       .unique();
+    // A late parent summary can be older than a child's fenced cost receipt.
+    // Ordinary progress writes cannot refund accepted work.
+    const effectiveCost = Math.max(args.cost ?? 0, existing?.cost ?? 0);
+    if (
+      (args.costBeforeExecution ?? existing?.costBeforeExecution ?? 0) >
+      effectiveCost
+    ) {
+      throw new Error("run stage cost baseline exceeds recorded spend");
+    }
+    let checkpointCostReceipts = args.checkpointCostReceipts;
+    if (checkpointCostReceipts !== undefined) {
+      const receipts = new Map((existing?.checkpointCostReceipts ?? []).map((receipt) => [receipt.id, receipt]));
+      for (const receipt of checkpointCostReceipts) {
+        const prior = receipts.get(receipt.id);
+        if (prior && prior.costUsd !== receipt.costUsd) throw new Error("run stage checkpoint receipt amount changed");
+        receipts.set(receipt.id, receipt);
+      }
+      if (receipts.size > 256) throw new Error("run stage checkpoint cost receipt limit exceeded");
+      checkpointCostReceipts = [...receipts.values()];
+    }
 
     let stageId: Id<"runStages">;
     let stageOutputs: unknown = args.outputs;
@@ -54,7 +89,9 @@ export const upsertRunStage = mutation({
       const patch: Record<string, unknown> = { status: args.status };
       if (args.startedAt !== undefined) patch.startedAt = args.startedAt;
       if (args.finishedAt !== undefined) patch.finishedAt = args.finishedAt;
-      if (args.cost !== undefined) patch.cost = args.cost;
+      if (args.cost !== undefined) patch.cost = effectiveCost;
+      if (args.costBeforeExecution !== undefined) patch.costBeforeExecution = args.costBeforeExecution;
+      if (checkpointCostReceipts !== undefined) patch.checkpointCostReceipts = checkpointCostReceipts;
       if (args.inputs !== undefined) patch.inputs = args.inputs;
       if (args.outputs !== undefined) patch.outputs = args.outputs;
       if (args.error !== undefined) patch.error = args.error;
@@ -73,6 +110,8 @@ export const upsertRunStage = mutation({
         startedAt: args.startedAt,
         finishedAt: args.finishedAt,
         cost: args.cost ?? 0,
+        costBeforeExecution: args.costBeforeExecution,
+        checkpointCostReceipts,
         inputs: args.inputs,
         outputs: args.outputs,
         error: args.error,
