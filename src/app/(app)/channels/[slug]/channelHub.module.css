@@ -450,10 +450,8 @@
 .libraryEmpty p { max-width: 42rem; margin: 0; color: var(--color-faint); font-size: 0.72rem; line-height: 1.55; }
 .libraryEmpty a { color: var(--color-blueprint); font-size: 0.68rem; font-weight: 650; text-decoration: none; white-space: nowrap; }
 
-.weekEmpty { display: grid; grid-template-columns: minmax(0,1.25fr) minmax(0,1.2fr) auto; align-items: center; gap: 1.3rem; min-height: 150px; padding: 1.1rem; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
-.weekEmptySlots { display: grid; grid-template-columns: repeat(5,minmax(36px,1fr)); gap: 0.35rem; }
-.weekEmptySlots span { display: grid; aspect-ratio: 16/10; place-items: center; border: 1px dashed var(--color-border-strong); color: var(--color-faint); font: 0.55rem/1 var(--font-mono); }
-.weekEmpty > div:nth-child(2) { display: grid; gap: 0.3rem; }
+.weekEmpty { display: grid; align-items: center; min-height: 78px; padding: 0.85rem 0; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
+.weekEmpty > div { display: grid; gap: 0.3rem; }
 .weekEmpty strong { font-family: var(--font-display); font-size: 1rem; font-weight: 560; }
 .weekEmpty p { margin: 0; color: var(--color-faint); font-size: 0.71rem; line-height: 1.52; }
 .weekQueue { display: grid; }

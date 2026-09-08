@@ -2727,16 +2727,10 @@ function WeekAheadTab({
         <SkeletonList rows={3} />
       ) : plan.length === 0 ? (
         <section className={styles.weekEmpty}>
-          <div className={styles.weekEmptySlots} aria-hidden="true">
-            {[1, 2, 3, 4, 5].map((slot) => <span key={slot}>{String(slot).padStart(2, "0")}</span>)}
-          </div>
           <div>
-            <strong>The editorial runway is open</strong>
-            <p>Create five channel-specific video plans.</p>
+            <strong>No videos planned</strong>
+            <p>Use Plan 5 more to build the next channel-specific batch.</p>
           </div>
-          <button type="button" onClick={generate} disabled={busy} className={styles.workspaceActionButton}>
-            {busy ? "Starting planner…" : "Build the first five"}
-          </button>
         </section>
       ) : (
         <section className={styles.weekQueue} aria-label="Upcoming editorial queue">

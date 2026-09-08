@@ -194,8 +194,8 @@ function compactHow(how: string): string {
   const clean = how.replace(/\s+/g, " ").trim();
   const withoutAuditNotes = clean.split(/\s(?:P\d+-\d+|NOTE \()/)[0].trim();
   const sentences = withoutAuditNotes.split(/(?<=\.)\s+/).filter(Boolean).slice(0, 2).join(" ");
-  if (sentences.length <= 360) return sentences;
-  return `${sentences.slice(0, 356).trimEnd()}…`;
+  if (sentences.length <= 180) return sentences;
+  return `${sentences.slice(0, 176).trimEnd()}…`;
 }
 
 function compactPoint(value: string, max = 94): string {
@@ -354,17 +354,6 @@ export default function GoldenPipelinePage() {
           <HeroMetric label="Promoted" value={receiptCount} note="proofs" />
         </div>
       </header>
-      <GoldenTruthOverview
-        automatic={automaticAdmissions}
-        supervised={supervisedAdmissions}
-        blocked={blockedAdmissions}
-        promotionProofCount={receiptCount}
-        referenceMediaCount={media.reference}
-        contextMediaCount={media.context}
-        excludedMediaCount={notPresentableMedia}
-        mediaSuccessorQueue={mediaSuccessorQueue}
-      />
-      <MinimumVideoFoundationOverview />
       <div className={styles.chapters}>
       {CATEGORY_ORDER.map((cat, categoryIndex) => {
         const mods = GOLDEN_MODULES
@@ -398,6 +387,19 @@ export default function GoldenPipelinePage() {
           </details>
         );
       })}
+      </div>
+      <div className={styles.assuranceFooter}>
+        <GoldenTruthOverview
+          automatic={automaticAdmissions}
+          supervised={supervisedAdmissions}
+          blocked={blockedAdmissions}
+          promotionProofCount={receiptCount}
+          referenceMediaCount={media.reference}
+          contextMediaCount={media.context}
+          excludedMediaCount={notPresentableMedia}
+          mediaSuccessorQueue={mediaSuccessorQueue}
+        />
+        <MinimumVideoFoundationOverview />
       </div>
     </main>
   );
@@ -706,17 +708,14 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
           <div data-warning={executionIsWarning}>
             <small>Runtime binding</small>
             <strong>{binding}</strong>
-            <span>{executionIsWarning ? "Not route-executable" : "Connected to the production compiler"}</span>
           </div>
           <div data-state={availability.state}>
             <small>Availability</small>
             <strong>{availability.label}</strong>
-            <span>{availability.detail}</span>
           </div>
           <div data-proof={promotionProof ? "true" : "false"}>
             <small>Promotion</small>
             <strong>{promotionProof ? `Recorded ${promotionProof.verifiedAt}` : "Not promoted"}</strong>
-            <span>{promotionProof ? "Immutable production proof is registered" : "No production-promotion receipt recorded"}</span>
           </div>
         </div>
         <div className={styles.moduleDoctrine}>
