@@ -22,6 +22,10 @@ import {
   analyticsRefreshHealth,
   type AnalyticsRefreshHealthInput,
 } from "@/lib/analyticsRefreshPresentation";
+import {
+  ANALYTICS_FLEET_PAGE_SIZE,
+  nextAnalyticsFleetLimit,
+} from "@/lib/analyticsFleetPresentation";
 import styles from "./analytics.module.css";
 
 /** Per-channel summary row shape returned by analytics.channelSummary. */
@@ -537,7 +541,10 @@ const FLEET_METRICS: readonly { key: FleetMetric; label: string }[] = [
  * suggests the channels form a time sequence. */
 function FleetComparison({ rows }: { rows: SummaryRow[] }) {
   const [metric, setMetric] = useState<FleetMetric>("totalViews");
+  const [visibleLimit, setVisibleLimit] = useState(ANALYTICS_FLEET_PAGE_SIZE);
   const ranked = [...rows].sort((left, right) => right[metric] - left[metric]);
+  const visible = ranked.slice(0, visibleLimit);
+  const remaining = Math.max(0, ranked.length - visible.length);
   const peak = Math.max(1, ...ranked.map((row) => row[metric]));
   const formatMetric = (value: number) => metric === "costTotal" ? fmtUsd(value) : compact(value);
 
@@ -556,14 +563,17 @@ function FleetComparison({ rows }: { rows: SummaryRow[] }) {
             aria-selected={metric === item.key}
             data-active={metric === item.key || undefined}
             key={item.key}
-            onClick={() => setMetric(item.key)}
+            onClick={() => {
+              setMetric(item.key);
+              setVisibleLimit(ANALYTICS_FLEET_PAGE_SIZE);
+            }}
           >
             {item.label}
           </button>
         ))}
       </div>
       <div className={styles.rankingGrid}>
-        {ranked.map((row, index) => (
+        {visible.map((row, index) => (
           <Link className={styles.rankingRow} href={`/channels/${row.slug}?tab=analytics`} key={row.channelId}>
             <span className={styles.rankingIndex}>{String(index + 1).padStart(2, "0")}</span>
             <span className={styles.rankingIdentity}>
@@ -578,6 +588,14 @@ function FleetComparison({ rows }: { rows: SummaryRow[] }) {
           </Link>
         ))}
       </div>
+      {remaining > 0 ? (
+        <div className={styles.comparisonPaging}>
+          <span>Showing {visible.length} of {ranked.length}</span>
+          <button type="button" onClick={() => setVisibleLimit((current) => nextAnalyticsFleetLimit(current, ranked.length))}>
+            Show next {Math.min(ANALYTICS_FLEET_PAGE_SIZE, remaining)}
+          </button>
+        </div>
+      ) : null}
     </section>
   );
 }
@@ -632,11 +650,7 @@ function CompetitorsSection({
           title="Competitor signals"
           detail="Select a channel to compare its niche."
         />
-        <EmptyState
-          title="Select a channel"
-          description="Choose a channel above."
-          icon={<IconExternal width={24} height={24} />}
-        />
+        <CompetitorPrompt title="Choose a channel" detail="Use the fleet selector above to load its niche comparison." />
       </section>
     );
   }
@@ -649,10 +663,10 @@ function CompetitorsSection({
           title="Competitor signals"
           detail="Add a niche to compare channels."
         />
-        <EmptyState
+        <CompetitorPrompt
           title="No niche set"
-          description={`Set a niche for "${selected.name}" (in its identity) to unlock competitor intelligence.`}
-          icon={<IconExternal width={24} height={24} />}
+          detail={`Add a niche to ${selected.name} before comparing its market.`}
+          action={<Link href={`/channels/${selected.slug}?tab=identity`}>Open identity ↗</Link>}
         />
       </section>
     );
@@ -681,10 +695,10 @@ function CompetitorsSection({
       {loading ? (
         <SkeletonList rows={3} />
       ) : topVideos.length === 0 ? (
-        <EmptyState
+        <CompetitorPrompt
           title="No competitor data yet"
-          description="Run SEO research to collect competitor videos."
-          icon={<IconExternal width={24} height={24} />}
+          detail="Run packaging research to collect comparable videos."
+          action={<Link href="/seo">Open research ↗</Link>}
         />
       ) : (
         <>
@@ -726,5 +740,23 @@ function CompetitorsSection({
         </>
       )}
     </section>
+  );
+}
+
+function CompetitorPrompt({
+  title,
+  detail,
+  action,
+}: {
+  title: string;
+  detail: string;
+  action?: ReactNode;
+}) {
+  return (
+    <div className={styles.competitorPrompt}>
+      <span aria-hidden="true"><IconExternal width={15} height={15} /></span>
+      <div><strong>{title}</strong><small>{detail}</small></div>
+      {action}
+    </div>
   );
 }

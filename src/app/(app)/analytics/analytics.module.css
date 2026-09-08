@@ -315,6 +315,10 @@
 .rankingBar i { display: block; width: 100%; height: 100%; border-radius: inherit; background: linear-gradient(90deg, rgba(125, 211, 192, 0.18), var(--color-secondary)); transform-origin: left; transition: transform 320ms cubic-bezier(0.2, 0.75, 0.2, 1); }
 .rankingValue { min-width: 54px; color: var(--color-secondary); font: 0.68rem var(--font-mono); text-align: right; }
 .rankingArrow { color: var(--color-faint); font-size: 0.62rem; }
+.comparisonPaging { display: flex; min-height: 43px; align-items: center; justify-content: space-between; gap: 0.75rem; margin-top: 0.55rem; border-top: 1px solid var(--color-border); padding-top: 0.55rem; }
+.comparisonPaging span { color: var(--color-faint); font: 0.57rem var(--font-mono); text-transform: uppercase; }
+.comparisonPaging button { min-height: 32px; padding: 0.35rem 0.62rem; border: 1px solid var(--color-border); border-radius: 7px; color: var(--color-muted); background: rgba(243,240,232,.025); cursor: pointer; font-size: .62rem; font-weight: 650; }
+.comparisonPaging button:hover { color: var(--color-fg); border-color: var(--color-border-strong); }
 
 .trendSummary {
   display: grid;
@@ -333,6 +337,12 @@
 .chartGrid :global(.studio-chart) { border-radius: 13px; background: rgba(255, 255, 255, 0.018); }
 
 .competitorBenchmarks { display: flex; gap: 1.2rem; margin-bottom: 0.65rem; color: var(--color-muted); font-size: 0.67rem; }
+.competitorPrompt { display: grid; grid-template-columns: 32px minmax(0,1fr) auto; gap: .7rem; align-items: center; min-height: 58px; border: 1px solid var(--color-border); border-radius: 11px; background: linear-gradient(110deg,rgba(255,94,42,.045),rgba(255,255,255,.018)); padding: .62rem .72rem; }
+.competitorPrompt > span { display: grid; width: 32px; height: 32px; place-items: center; border: 1px solid color-mix(in srgb,var(--color-accent) 35%,var(--color-border)); border-radius: 8px; color: var(--color-accent); background: color-mix(in srgb,var(--color-accent) 7%,transparent); }
+.competitorPrompt > div { display: grid; min-width: 0; gap: .12rem; }
+.competitorPrompt strong { font-size: .73rem; }
+.competitorPrompt small { color: var(--color-faint); font-size: .61rem; line-height: 1.4; }
+.competitorPrompt > a { min-height: 32px; align-content: center; color: var(--color-accent); font-size: .62rem; font-weight: 650; white-space: nowrap; }
 .competitorBenchmarks strong { color: var(--color-fg); }
 .competitorLedger { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0.4rem; }
 .competitorRow {
@@ -410,6 +420,8 @@
   .competitorRow { grid-template-columns: 22px minmax(0, 1fr) 14px; }
   .competitorRow em { grid-column: 2; font-size: 0.56rem; }
   .competitorRow > i { grid-column: 3; grid-row: 1; }
+  .competitorPrompt { grid-template-columns: 30px minmax(0,1fr); }
+  .competitorPrompt > a { grid-column: 2; }
 }
 
 @media (prefers-reduced-motion: reduce) {

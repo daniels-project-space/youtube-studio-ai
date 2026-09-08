@@ -11,5 +11,11 @@ assert.match(page, /api\.analytics\.refreshStatus/);
 assert.match(page, /api\.analytics\.channelTrend/);
 assert.match(page, /<QualityLearningPanel/);
 assert.match(page, /<CompetitorsSection ownerId=\{ownerId\} selected=\{selected\}/);
+assert.match(page, /ANALYTICS_FLEET_PAGE_SIZE/);
+assert.match(page, /ranked\.slice\(0, visibleLimit\)/);
+assert.match(page, /setVisibleLimit\(ANALYTICS_FLEET_PAGE_SIZE\)/);
+assert.match(page, /nextAnalyticsFleetLimit\(current, ranked\.length\)/);
+assert.match(page, /function CompetitorPrompt/);
+assert.doesNotMatch(page, /title="Select a channel"[\s\S]{0,200}<EmptyState/);
 
 console.log("Analytics information ownership contracts passed");
