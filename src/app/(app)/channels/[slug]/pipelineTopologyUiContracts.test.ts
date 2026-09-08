@@ -22,7 +22,9 @@ async function main(): Promise<void> {
   assert.match(styles, /\.pipelineModuleGrid \{[^}]*repeat\(auto-fit,minmax\(190px,1fr\)\)/);
   assert.match(styles, /\.pipelineModuleSummary \{[^}]*min-height: 48px/,
     "interactive module summaries retain a usable pointer target");
-  assert.match(styles, /@media \(max-width: 440px\)[\s\S]*\.pipelineModuleGrid \{ grid-template-columns: 1fr; \}/);
+  assert.match(styles, /@media \(max-width: 440px\)[\s\S]*\.pipelineModuleGrid \{ grid-template-columns: repeat\(2,minmax\(0,1fr\)\); \}/);
+  assert.match(styles, /@media \(max-width: 440px\)[\s\S]*\.pipelineModule\[open\] \{ grid-column: 1 \/ -1; \}/,
+    "expanded controls use the full phone width while default modules remain compact");
 
   console.log("Channel pipeline compact topology UI contracts passed");
 }
