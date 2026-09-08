@@ -1,5 +1,9 @@
 # Thumbnail rendering contract
 
+> **Superseded historical contract — 2026-09-08.** The two-stage text-free-art plus local FFmpeg typography below is obsolete and must not be restored. The owner chose native image-provider typography for non-Lo-Fi thumbnails. Lo-Fi uses the exact video still, no headline, and a bottom-right 4K symbol; it must not receive a generic replacement scene or local text treatment. Current sealed runtime/configuration and owner locks govern implementation. See the [active goal ledger, items 136–139](GOAL_MODULE_AND_UI_HARDENING_BACKLOG_2026-09.md#h-earlier-owner-requirements-that-remain-active). The historical accounting discussion below is retained for audit context, not permission to reinstate its renderer.
+
+## Historical implementation (not current instructions)
+
 Every production thumbnail uses the same two-stage renderer:
 
 1. A configured image provider generates text-free 16:9 scene art at the

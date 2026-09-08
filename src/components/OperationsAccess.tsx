@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import { createPortal } from "react-dom";
+import { usePathname } from "next/navigation";
 
 export type OperationsAccessState =
   | "checking"
@@ -110,6 +111,7 @@ export function useRequestOperationsAccess(): () => void {
 
 /** Optional operations elevation; the surrounding viewer shell always remains mounted. */
 export function OperationsAccess() {
+  const pathname = usePathname();
   const triggerRef = useRef<HTMLButtonElement>(null);
   const dialogRef = useRef<HTMLElement>(null);
   const requestAbortRef = useRef<AbortController | null>(null);
@@ -121,6 +123,7 @@ export function OperationsAccess() {
   } = useOperationsAccessContext();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const isLibraryRoute = pathname === "/library" || pathname.startsWith("/library/");
 
   useEffect(() => () => {
     requestAbortRef.current?.abort();
@@ -250,7 +253,9 @@ export function OperationsAccess() {
 
   return (
     <>
-      <button
+      {/* Library thumbnails apply automatically. Keep session capabilities and
+          explicitly requested dialogs available without a global login prompt. */}
+      {!isLibraryRoute ? <button
         ref={triggerRef}
         type="button"
         className={`operations-access-trigger${unlocked ? " is-unlocked" : ""}`}
@@ -266,7 +271,7 @@ export function OperationsAccess() {
         <span className="operations-access-label">
           {unlocked ? "Owner verified" : access === "checking" ? "Checking access" : "Verify owner"}
         </span>
-      </button>
+      </button> : null}
 
       {open ? createPortal((
         <div

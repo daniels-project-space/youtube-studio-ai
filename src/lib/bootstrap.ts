@@ -33,9 +33,29 @@ const SERVICES = [
   "langfuse", // LANGFUSE_PUBLIC_KEY/SECRET_KEY (Mastra agent tracing; optional)
   "assemblyai", // ASSEMBLYAI_API_KEY (captions SRT; optional — chapters work without)
   "ayrshare", // AYRSHARE_API_KEY (Phase 8 cross-post; optional)
-];
+] as const;
 
-let done = false;
+// Provider-specific workers can request only their own vault service. Salad is
+// opt-in here so unrelated jobs never acquire its infrastructure credential.
+type BootstrapService = (typeof SERVICES)[number] | "salad";
+const hydratedServices = new Set<BootstrapService>();
+const pendingServices = new Map<BootstrapService, Promise<string[]>>();
+
+async function hydrateService(service: BootstrapService): Promise<string[]> {
+  if (hydratedServices.has(service)) return [];
+  const pending = pendingServices.get(service);
+  if (pending) return pending;
+  const request = hydrateEnv(service).then((keys) => {
+    hydratedServices.add(service);
+    return keys;
+  });
+  pendingServices.set(service, request);
+  try {
+    return await request;
+  } finally {
+    pendingServices.delete(service);
+  }
+}
 
 /** Throw when quality-critical keys are absent after hydration. */
 function requireKeys(keys: string[]): void {
@@ -50,25 +70,32 @@ function requireKeys(keys: string[]): void {
 }
 
 /**
- * Hydrate vault secrets once per process. Returns loaded key names.
+ * Hydrate each successful vault service once per process. Concurrent calls
+ * share in-flight reads; failed reads are retried on the next invocation.
+ * Returns loaded key names. Default order preserves existing alias precedence.
  * `opts.required` — env keys that MUST be present afterwards; missing → throw
  * (the alternative is a full run of silent generic fallbacks).
+ * `opts.services` — opt into a narrow service set instead of the general worker
+ * bootstrap. Gemini remains excluded; its sealed adapter is the only entry.
  */
 export async function bootstrapSecrets(
   log: (msg: string, extra?: Record<string, unknown>) => void = () => {},
-  opts?: { required?: string[] },
+  opts?: { required?: string[]; services?: BootstrapService[] },
 ): Promise<string[]> {
-  if (done) {
-    if (opts?.required) requireKeys(opts.required);
-    return [];
-  }
   const loaded: string[] = [];
-  for (const svc of SERVICES) {
+  const services = opts?.services ?? SERVICES;
+  // Runtime callers must not bypass the sealed Gemini boundary by casting
+  // arbitrary strings into the type-level allowlist. Validate before any read.
+  if (services.some((svc) => svc !== "salad" && !(SERVICES as readonly string[]).includes(svc))) {
+    throw new Error("bootstrap: unsupported vault service");
+  }
+  for (const svc of new Set(services)) {
     try {
-      const keys = await hydrateEnv(svc);
+      const keys = await hydrateService(svc);
       loaded.push(...keys);
-    } catch (e) {
-      log(`bootstrap: vault hydrate ${svc} failed (continuing): ${e instanceof Error ? e.message : e}`);
+    } catch {
+      // Provider error bodies may contain credential values; never echo them.
+      log(`bootstrap: vault hydrate ${svc} failed (continuing; retryable)`);
     }
   }
   // Default telegram chat to the admin chat id if not explicitly set.
@@ -79,8 +106,7 @@ export async function bootstrapSecrets(
   // variables. Non-thumbnail model routes must declare and use their own
   // provider credentials; otherwise a future SDK import could silently bypass
   // the sealed-thumbnail admission boundary.
-  done = true;
-  log(`bootstrap: hydrated ${loaded.length} keys`, { keys: loaded });
+  if (loaded.length) log(`bootstrap: hydrated ${loaded.length} keys`, { keys: loaded });
   if (opts?.required) requireKeys(opts.required);
   return loaded;
 }

@@ -9,7 +9,8 @@ keyboard path, and captured visual result have all been reviewed.
 ## Product-wide rules
 
 - Keep the always-visible navigation to the five daily desks. Specialist desks
-  belong in the collapsed Utility deck.
+  are reached from the relevant Golden module cards, not separate sidebar links
+  or a collapsed Utility link deck (superseded by the owner's later request).
 - Use channel artwork and channel-specific color only where identity matters;
   keep operational state colors consistent across the fleet.
 - Animation must communicate real state, chronology, or spatial relationship.

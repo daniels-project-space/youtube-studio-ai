@@ -1,0 +1,227 @@
+# Goal phase — module intelligence, efficiency, integration, and Studio refinement
+
+**Added:** 2026-09-08  
+**Scope:** every production module except the thumbnail module, plus every Studio page and subpanel  
+**Rule:** this is a measured hardening program, not a prompt-polish sweep. No item is complete without a current baseline, an independent oracle that is proven to reject a bad case, real-output evidence, wiring evidence, and isolated plus integrated tests.
+
+## Relationship to the ongoing goal
+
+This is an additive goal ledger, not a replacement plan. Earlier unfinished work remains active, including the [page/subpanel overhaul matrix](STUDIO_UI_OVERHAUL_2026-08.md), [fifth-pass findings](UI_FIFTH_PASS_AUDIT_2026-09.md), and [module hardening method](MODULE_HARDENING_METHOD.md). Section H explicitly preserves decisions that a generic module/UI checklist could otherwise lose. The thumbnail module is excluded from the new module-rewrite sweep, **not** from finishing already-requested thumbnail application, consistency, source fidelity, and quality validation. Historical roadmaps do not override later owner decisions or current locked contracts.
+
+## Current assessment
+
+- The live execution core is real and well tested, but the catalog, module contracts, and production callers are not yet uniformly the same system. The August audit found working, unwired, and catalog-only modules mixed together.
+- `metacraft` is already substantially better than the legacy metadata path: seven distinct title frames, live YouTube suggestions and competitor titles, factual lint, a feed judge, one repair attempt, and a retained runner-up. It is not finished.
+- The title path still has a contradictory legacy fallback that asks for 60–90 characters, repeats unsupported CTR folklore, and can silently provide a lower-quality package after the stricter path fails. That destroys consistency exactly when the primary route is under stress.
+- Title quality is judged mostly inside the same model family that generated it. Deterministic truth/shape checks exist, but the click-quality oracle still needs calibration against owner choices and real post-package watch-time observations.
+- A single 25–76 character lint band is too blunt for every format. Search-led explainers, terse motivational titles, serialized lore, children’s learning, Lo-Fi, and Shorts need different tested bounds without allowing each channel to invent arbitrary rules.
+- The system records alternates and has a title-swap path, but experiments are not yet a first-class title/thumbnail package with a statistically useful outcome ledger on every eligible channel.
+- Existing fleet audits already catch inert inputs, single-constant convergence, silent degradation, and reasoning-token starvation. They are a strong base, but each remaining module still needs a domain oracle and real before/after corpus.
+- Trigger and Convex usage has several proven efficiencies already (request memoization, immutable receipts, bounded retries), but no complete per-module call/cost/latency ledger yet proves which steps can be eliminated or consolidated.
+- The UI has had multiple large visual passes, but hierarchy is still inconsistent: some pages expose global owner controls unrelated to the page, some panels repeat evidence prose, and some progress views spend too much area on decoration instead of state and next action.
+
+## Research-derived operating principles
+
+- YouTube’s own guidance says titles should be accurate, succinct, and front-load the important words; searchable and intriguing titles are both valid depending on audience and discovery surface. It recommends evaluating Home/Suggested and Subscription-feed CTR in the first 24 hours on videos with above-average impressions.
+- YouTube’s current native experiment chooses among up to three title/thumbnail combinations by **watch-time share**, not CTR alone. Our oracle therefore must reward a click that the opening actually fulfills, not maximum clickbait in isolation.
+- YouTube permits 100 characters, but that is a storage ceiling, not a quality target. The module must learn tested format-specific working ranges and mobile-front-load scores.
+- YouTube Data API reads should request only required `part` and `fields`, reuse ETags where helpful, and avoid redundant search calls because every request consumes quota.
+- Trigger child work should use explicit queues, attempt-scoped idempotency when a retry genuinely needs a new child run, and batch waits rather than parallel `triggerAndWait` calls.
+- Convex queries should be deterministic and cacheable, large reads should use selective indexes or pagination, and related database work in actions should be consolidated instead of paying for sequential `runQuery`/`runMutation` calls.
+- Apple’s current design guidance emphasizes hierarchy, consistency, adaptive layout, progressive disclosure, legible type, and strong text/background contrast. “Apple-like” here means those operating qualities—not decorative imitation.
+
+Primary sources:
+
+- https://support.google.com/youtube/answer/12340300
+- https://support.google.com/youtube/answer/16391400
+- https://support.google.com/youtube/answer/57404
+- https://developers.google.com/youtube/v3/getting-started
+- https://trigger.dev/docs/triggering
+- https://trigger.dev/docs/queue-concurrency
+- https://trigger.dev/docs/idempotency
+- https://docs.convex.dev/understanding/best-practices
+- https://docs.convex.dev/functions/actions
+- https://docs.convex.dev/database/reading-data/indexes/
+- https://developer.apple.com/design/human-interface-guidelines
+- https://developer.apple.com/design/human-interface-guidelines/layout
+- https://developer.apple.com/design/human-interface-guidelines/typography
+
+## Individually tracked work items
+
+### A. Measurement harness and invariants
+
+- [ ] **01 — Freeze the comparison corpus.** Select real retained inputs from every active format plus deliberately unfamiliar niches; hash inputs and expected channel identity so later passes cannot cherry-pick fixtures.
+- [ ] **02 — Establish a module scorecard schema.** Record output validity, oracle score, false-pass/false-reject counts, wall time, provider calls, input/output tokens, Trigger runs/waits, Convex calls/rows read/written, and estimated cost.
+- [ ] **03 — Capture the current baseline.** Run every non-thumbnail module on the frozen corpus before changing it and retain raw outputs, logs, receipts, and exact code/model/config identities.
+- [ ] **04 — Prove every oracle can fail.** Inject at least one realistic corruption per promised capability and require the responsible module gate to reject it with a useful root-cause code.
+- [ ] **05 — Calibrate false rejection.** Run owner-approved/golden outputs through each oracle and fix the oracle before changing production when known-good work is rejected.
+- [ ] **06 — Add isolated module runners.** Each module must execute from only its declared inputs with provider calls stubbed or live according to the test tier; undeclared store reads fail the test.
+- [ ] **07 — Add pairwise contract tests.** Test every producer→consumer artifact boundary and prove that reorder/removal produces a compile-time or fail-closed runtime error rather than generic degradation.
+- [ ] **08 — Add whole-pipeline mutation tests.** Remove, duplicate, reorder, and corrupt modules in representative pipelines and require the compiler/runner to diagnose the exact broken contract.
+- [ ] **09 — Add a no-overwrite ledger.** Record artifact ownership and reject a module that silently replaces another module’s output without an explicit revision contract.
+- [ ] **10 — Make the scorecard a CI artifact.** Store baseline/current deltas and fail only on calibrated regressions, never on invented absolute vanity scores.
+
+### B. Title and metadata module — first major implementation pass
+
+- [ ] **11 — Separate title quality from metadata packaging.** Give title generation, title judging, descriptions/tags, and pinned comments separate typed contracts so a description failure cannot downgrade a winning title.
+- [ ] **12 — Replace one universal length band with tested format profiles.** Define bounded profiles for searchable long-form, browse-led long-form, serialized/lore, motivational speech, children/quiz, music/Lo-Fi, and Shorts; keep YouTube’s 100-character hard ceiling everywhere.
+- [ ] **13 — Score front-loaded information.** Measure whether the person/entity, tension, consequence, or search phrase survives the first mobile-visible segment instead of treating character count as a proxy.
+- [ ] **14 — Generate meaningfully different hypotheses.** Require candidate semantic-distance across search intent, direct verdict, contradiction, stakes, transformation, specificity, and curiosity—reject paraphrase-only tournaments.
+- [ ] **15 — Make frame selection channel-aware without hard-coding niches.** Match frames to audience intent, discovery surface, tone, video format, and script evidence through typed capabilities.
+- [ ] **16 — Add a title novelty detector.** Reject fleet-wide syntactic repetition, recurring filler, and channel-to-channel phrase leakage while permitting a channel’s proven signature format.
+- [ ] **17 — Strengthen factual grounding.** Validate names, quantities, causal claims, quotations, superlatives, and implied outcomes against the fact-checked script/evidence packet, including spelled numbers and aliases.
+- [ ] **18 — Add promise-to-opening entailment.** Independently score whether the first 15–30 seconds actually begin fulfilling the title; a high-click title that breaks this contract cannot win.
+- [ ] **19 — Build a calibrated pairwise ranker.** Compare candidates head-to-head against the real feed and owner selections, then measure agreement, tie rate, positional bias, and stability over repeated runs.
+- [ ] **20 — Preserve searchable and intriguing routes.** Never force every channel into curiosity-gap clickbait; choose the route using intended discovery surface and audience evidence.
+- [ ] **21 — Remove contradictory legacy doctrine.** Delete unsupported “long titles lift CTR” folklore, 60–90-character drift, automatic caps/niche suffixes, and any fallback rule that conflicts with the primary module.
+- [ ] **22 — Make fallback quality-equivalent.** A provider fallback must use the same candidates, deterministic lint, promise contract, and calibrated judge—or fail loudly and preserve the last valid title.
+- [ ] **23 — Keep planned titles as candidates only.** Re-verify every scheduled and topic-bet path so no pre-script title regains precedence after judging.
+- [ ] **24 — Produce up to three experiment-ready packages.** Keep truly diverse, independently passing title/thumbnail pairings with immutable package IDs rather than a winner plus an unlabeled spare string.
+- [ ] **25 — Measure by watch-time share.** Integrate eligible YouTube title/thumbnail experiments or an equivalent confidence-qualified observation ledger; use CTR diagnostically but select learning outcomes by fulfilled watch time.
+- [ ] **26 — Guard experiment eligibility.** Respect YouTube advanced-feature, content, privacy, and format restrictions and never treat ineligible videos as failed tests.
+- [ ] **27 — Use audience evidence economically.** Cache normalized suggestions/competitor evidence by query+locale+freshness window and reuse it across title, topic, SEO, and thumbnail-promise planning.
+- [ ] **28 — Reduce title-path model calls.** Baseline the current generator, judge, package, and comment calls; consolidate only prompts that share fate/context, parallelize independent work, and require equal-or-better corpus scores before accepting savings.
+- [ ] **29 — Calibrate temperature and token ceilings.** Measure title diversity, judge stability, JSON validity, latency, and cost for each route; remove headroom or reasoning only where real hard cases still pass.
+- [ ] **30 — Add title-specific adversarial tests.** Include sensational-but-false, correct-but-boring, vague, overloaded, repetitive, truncated, mismatched-tone, spoiler-heavy, and policy-risky candidates.
+- [ ] **31 — Validate multilingual titles.** Test length, casing, word segmentation, entity grounding, and front-loading in every supported language instead of applying English regexes blindly.
+- [ ] **32 — Publish a before/after title report.** Show corpus outputs, owner-choice agreement, promise-match, diversity, length/front-load distribution, calls, cost, and latency with the exact revision and model route.
+
+### C. Every remaining module, inspected and improved separately
+
+- [ ] **33 — Topic Intel / Topicraft.** Measure novelty, demand evidence, saturation, channel fit, provenance, and title leakage; eliminate duplicate YouTube research already gathered elsewhere.
+- [ ] **34 — Episode Graph.** Test causal order, retention beats, duration feasibility, and scene coverage across documentary, essay, story, quiz, music, and short formats.
+- [ ] **35 — Self-Contained Story.** Prove the handoff includes every fact, identity rule, and render requirement needed downstream without hidden store reads.
+- [ ] **36 — Casefile Documentary.** Validate source-to-claim traceability, uncertainty language, chronology, and no unsupported dramatization on real and adversarial cases.
+- [ ] **37 — Evidence Shot Map.** Require every visualized claim to map to admissible evidence and detect decorative or contradictory shots.
+- [ ] **38 — Source-Bound Story Spine.** Measure factual coverage, pacing, and timed handoff completeness; consolidate duplicate source parsing with the evidence packet.
+- [ ] **39 — Editorial Evidence Packet.** Deduplicate network/database retrieval, normalize citations once, and make every consuming module read the same immutable factual core.
+- [ ] **40 — Cinematic Case Sequence.** Validate shot continuity, geographic/period accuracy, evidence density, visual variety, and achievable render instructions.
+- [ ] **41 — Learning Contract.** Test objective alignment, retrieval practice, difficulty progression, age/language fit, and measurable learning outcomes.
+- [ ] **42 — Children’s Show Bible.** Validate curriculum, character continuity, participation cadence, safeguarding, developmental fit, and non-generic identity.
+- [ ] **43 — Show Bible + Crew.** Wire every director/cinematographer/editor/composer/critic output through declared contracts and remove inert doctrine/knobs.
+- [ ] **44 — Script + Hook.** Measure spoken naturalness, opening retention promise, narrative momentum, factual coverage, repetition, duration accuracy, and channel voice across formats.
+- [ ] **45 — Guard Gates.** Calibrate advertiser safety, factual safety, child safety, originality, and policy classifiers in both directions; remove duplicate scans that inspect the same artifact with no incremental signal.
+- [ ] **46 — Narration / Voicecraft.** Test cast fit, intelligibility, pronunciation, pacing, silence, loudness, language, retry boundaries, and reusable audio caching without replacing required human audition evidence.
+- [ ] **47 — Music / Scorecraft.** Test brief fit, licensing provenance, loudness, loopability, duration strategy, voice masking, originality, and reuse policy; avoid generating music before timing is stable.
+- [ ] **48 — Scene Compiler.** Validate deterministic layout, identity preservation, text safety, aspect adaptation, and render parity across unfamiliar art directions.
+- [ ] **49 — Novita Render Farm.** Measure queue wait, GPU utilization, warm reuse, checkpoint recovery, spot interruption, idle shutdown, artifact integrity, and cost per accepted second.
+- [ ] **50 — Imagecraft Novita.** Either wire the catalog entry into a real executable capability with independent QA or mark/remove it; never leave a parallel dead engine.
+- [ ] **51 — Videocraft Novita.** Prove LTX input/output contracts, motion quality, first/last-frame continuity, retries, checkpointing, and exact provider/cost receipts.
+- [ ] **52 — Lo-Fi Loop.** Test exact source-frame identity, seamless loop metrics, 1–8-hour scaling, audio/video drift, 4K delivery, and the rule that the visual scene is not generically regenerated.
+- [ ] **53 — Lore Short.** Test canon/evidence grounding, watercolor/illustration identity, vertical composition, narrative completeness, and short-duration pacing.
+- [ ] **54 — Quiz / Quiz Year / Quiz Short.** Resolve buildability/licensing truth, validate answers and distractors, difficulty, pacing, accessibility, deterministic metadata, and private-release boundaries.
+- [ ] **55 — General Visuals.** Make channel identity, story coverage, shot variety, entity continuity, and source/reuse policy typed requirements instead of prompt suggestions.
+- [ ] **56 — Studio Asset Library.** Enforce channel-scoped access, provenance, retention, originality cadence, reuse ceilings, and cost savings with no cross-channel identity leakage.
+- [ ] **57 — Cinecraft.** Validate shot language, realism, continuity, performance, editability, and useful narrative coverage rather than isolated pretty frames.
+- [ ] **58 — Documotion.** Test evidence-first motion, maps/documents/timelines, legibility, restrained effects, and period/location correctness.
+- [ ] **59 — Motioncraft.** Wire or remove the current catalog-only path; test that motion graphics clarify information, fit the cut, and do not overwrite captions or identity.
+- [ ] **60 — Speechcraft.** Validate speaker likeness policy, speech-to-visual synchronization, motivational pacing, quotation provenance, and non-generic speaker/channel presentation.
+- [ ] **61 — Data-Viz Inserts.** Preserve the existing 19/19 legitimate and 181/181 adversarial calibration, then add visual legibility, unit accuracy, narration timing, and design-system fit.
+- [ ] **62 — Captions + Presentation.** Test word timing, safe areas, reading speed, hierarchy, collisions, languages, Shorts/16:9 variants, and restraint; remove redundant render passes.
+- [ ] **63 — Assembly / EDL.** Replace the documented-but-orphaned contract with the executed renderer contract; prove idempotency, checkpoint recovery, LUFS, A/V sync, transitions, no dead air, and render parity.
+- [ ] **64 — SEO Metadata beyond titles.** Measure descriptions, chapters, tags, pinned comments, policy compliance, language, duplication, and actual search value; stop producing fields whose measured value is negligible.
+- [ ] **65 — Artifact + Shot Gates.** Consolidate overlapping image/video judges, route defects to the responsible module, and prove final acceptance cannot pass with missing scenes or stale artifacts.
+- [ ] **66 — Final Master Story Coverage.** Watch the complete output, score every narrated claim/beat against on-screen coverage, and require re-review after any repaired artifact changes.
+- [ ] **67 — Whiteboard / Drawn Cinema.** Test that the full story is drawn, not only early panels; enforce stroke/build continuity, hand timing, identity, legibility, and no unexplained static gaps.
+- [ ] **68 — Motion Comic.** Test page/panel continuity, character identity, speech/narration alignment, composition, motion restraint, and complete story coverage.
+- [ ] **69 — Ship.** Validate exact channel identity, private-first policy, metadata/media checksums, resumable upload, provider verification, idempotency, and no duplicate publish or notification-induced false failure.
+- [ ] **70 — Channel Planner.** Test schedule feasibility, format-specific duration/workload, diversity, dependencies, batch preparation, cost caps, and no invented analytics.
+- [ ] **71 — Shorts.** Validate vertical-safe storytelling, ≤format duration, hook speed, subtitle density, source originality, metadata rules, and no long-form assumptions.
+
+### D. Cost, latency, Trigger, Convex, and connector consolidation
+
+- [ ] **72 — Build a provider-call graph.** Attribute every external call to module, artifact, cache key, attempt, and accepted/rejected output; unknown cost is a failing measurement.
+- [ ] **73 — Eliminate duplicate research calls.** Share immutable, freshness-bound YouTube/audience/evidence packets between topic, title, SEO, script, and packaging consumers.
+- [ ] **74 — Audit YouTube quota shape.** Minimize `part` and `fields`, batch video IDs, cache stable responses/ETags, and measure quota units per completed video before and after.
+- [ ] **75 — Audit Trigger task granularity.** Merge tasks only when they share retry/failure fate; preserve separate tasks where checkpointing, queueing, cost attribution, or independent retries matter.
+- [ ] **76 — Audit Trigger waiting/concurrency.** Replace accidental active polling and unsafe parallel waits with checkpoints, batch waits, explicit resource queues, and bounded backoff.
+- [ ] **77 — Audit idempotency scopes.** Use run/global/attempt keys intentionally and prove retries neither reuse a permanently failed child nor double-spend successful work.
+- [ ] **78 — Audit Convex round trips.** Count `runQuery`/`runMutation`/`runAction` per pipeline stage; combine consistent related reads/writes and call plain helpers inside the same runtime.
+- [ ] **79 — Audit Convex query bounds.** Replace broad collects/filters with selective indexes, `take`, or pagination; measure rows/bytes read and index-maintenance trade-offs.
+- [ ] **80 — Audit reactive UI queries.** Remove duplicate subscriptions and frequently changing arguments that defeat cache reuse; keep one source of truth per visible datum.
+- [ ] **81 — Audit model response reuse.** Verify cache keys include model, prompt, schema, version, and relevant channel identity while excluding incidental run IDs that prevent safe reuse.
+- [ ] **82 — Add spend-before-value gates.** Resolve deterministic requirements, existing artifacts, locks, and eligibility before paid model/render calls; prove gates do not suppress valid work.
+- [ ] **83 — Publish an efficiency delta report.** For every accepted consolidation, report provider calls, Trigger runs/wait time, Convex calls/rows, latency, cost, cache hit rate, and quality delta.
+
+### E. Novel-channel proof without manual substitution
+
+- [ ] **84 — Define a genuinely unfamiliar channel brief.** Select a niche, visual grammar, duration pattern, audience, and format not represented in the frozen corpus; do not hand-author its pipeline.
+- [ ] **85 — Run automated channel creation unchanged.** Capture the architect’s research, module selection, configuration, art, connector checks, and bounded test-render decision without helping it choose.
+- [ ] **86 — Tail the entire test render.** Observe real Trigger/Convex/provider state and receipts; intervene only to repair a discovered root defect or unblock a truly unavailable external service.
+- [ ] **87 — Preserve the failed attempt.** Keep exact artifacts/logs/costs from every failure before fixing code so the rerun is an honest before/after, not a rewritten history.
+- [ ] **88 — Rerun from the proper boundary.** Resume/checkpoint when the contract permits; restart only when the repaired upstream artifact invalidates downstream work.
+- [ ] **89 — Validate each module alone after repair.** Reproduce the failure in its isolated runner and add a falsifiable regression before rerunning the integrated channel.
+- [ ] **90 — Validate the complete new channel visually and functionally.** Inspect avatar, banner, tile, channel theme, title, script, all visuals, narration, edit, captions, metadata, progress UI, final master, and private-release evidence.
+- [ ] **91 — Produce the final novel-channel scorecard.** Compare against baseline and target on quality, consistency, calls, cost, speed, recovery, and truthful UI state.
+
+### F. Whole-Studio modern minimal design pass
+
+- [ ] **92 — Inventory every route and subpanel.** Record purpose, primary action, required evidence, current density, duplicate prose, dead controls, and mobile behavior before restyling.
+- [ ] **93 — Establish one restrained visual system.** Define modern type scale, spacing grid, radii, border/material layers, contrast, semantic color, gradients, icon rules, motion tokens, and reduced-motion behavior.
+- [ ] **94 — Increase useful text legibility.** Raise undersized body/metadata text, shorten copy, reduce headline theater, and preserve hierarchy at narrow and large-text sizes.
+- [ ] **95 — Remove unrelated global controls.** Do not show owner, render, publish, or channel actions on pages where they do not apply; surface permissions only at the consequential action.
+- [ ] **96 — Redesign Studio overview.** Use real expandable widgets for issues, runs, channels, schedule, analytics, spend, and master controls; no fake metrics or overlay prose.
+- [ ] **97 — Redesign Channels and categories.** Keep tiles compact, category-aware, identity-rich, and free of multi-channel duplicates; give each channel a distinct art system derived from its name and format.
+- [ ] **98 — Redesign every channel detail tab.** Make current plan, assets, modules, history, YouTube connection, schedule, scripts, visuals, SEO, narration, retention, and locks directly understandable and actionable.
+- [ ] **99 — Redesign New Channel.** Compress copy, make decisions visual and sequential, show real staged progress and QC, and keep automated creation truthful about external waits/failures.
+- [ ] **100 — Redesign Production and run detail.** Use a compact stage rail, live artifact previews, elapsed/cost/error state, responsible-module routing, and expandable evidence instead of tall decorative progress panels.
+- [ ] **101 — Redesign Schedule.** Make every video clickable into its exact channel/run details and distinguish planned, prepared, rendering, QC, ready, scheduled, published, and blocked at a glance.
+- [ ] **102 — Redesign Library.** Keep the dense master grid, clear current-thumbnail provenance, compact filters, useful archive controls, and progressive disclosure; never let refresh evidence dominate the collection.
+- [ ] **103 — Redesign Tools and Golden modules.** Present modules as concise capability cards with real media, bullet outcomes, proof, cost/speed, compatibility, and professional locks; hide implementation prose until expanded.
+- [ ] **104 — Redesign Settings, analytics, assets, evidence, and render consoles.** Give each a task-specific layout instead of reusing generic giant cards and empty hero regions.
+- [ ] **105 — Replace generic symbols.** Create scalable channel/module-specific icons whose restrained motion communicates function; maintain keyboard, contrast, reduced-motion, and small-size clarity.
+- [ ] **106 — Validate three visual passes per screen.** Pass 1 hierarchy/density, pass 2 interaction/responsiveness/accessibility, pass 3 polish/identity/motion; capture desktop and mobile screenshots each pass.
+- [ ] **107 — Run an actionable-control audit.** Every visible button/link must work against real data, expose disabled reasons, and reach the expected destination or mutation; remove controls with no real caller.
+- [ ] **108 — Run visual regression and performance gates.** Compare screenshots, layout overflow, keyboard focus, reduced motion, console/network errors, Core Web Vitals, and bundle impact before production release.
+
+### G. Weekly Salad fleet and cost-aware recovery
+
+Added from the owner's follow-up on 2026-09-08. These items extend all earlier work; they do not replace title, module, UI, or novel-channel validation. Existing R2 worker bundles and model artifacts are the starting point, and credentials must come from the shared vault.
+
+- [ ] **109 — Inventory existing R2 runtimes.** Locate the ERNIE, Qwen TTS, MiniMax music, and H3 bundles, model manifests, workflows, pinned container images, and prior output receipts; verify identity and digests before reuse.
+- [ ] **110 — Resolve the H3 runtime from evidence.** Bind the requested H3 video workload to its exact retained model/workflow; an unrelated video model cannot stand in for it.
+- [ ] **111 — Connect Salad through the vault.** Verify the current API key, organization, project, registry credentials, and app-scoped runtime access without exposing credentials in manifests, logs, or browser data.
+- [ ] **112 — Aggregate the week's media work across channels.** Freeze approved scripts, narration inputs, shot lists, image references, video prompts, and music briefs into one owner/week order with exact channel/episode/module destinations.
+- [ ] **113 — Schedule by real dependencies.** Allow independent narration/music/image work concurrently, release video work only when its input images exist and pass checks, and unblock assembly only when required assets are complete.
+- [ ] **114 — Group work by worker image and model.** Reuse one pinned deployment image per tool across replicas and process multiple eligible episodes while that model is warm.
+- [ ] **115 — Select exact RTX 3090 and desktop RTX 5090 classes.** Use live Salad class IDs/prices: 3090 for ERNIE/TTS/music, 5090 for H3; validate memory/runtime requirements without silently changing GPU quality or model.
+- [ ] **116 — Enforce medium priority.** Persist medium priority in each immutable provider request and reject runtime/config drift.
+- [ ] **117 — Enforce three GPUs fleet-wide.** Share the three-node limit across all active model groups and concurrent weekly orders; do not accidentally allocate three per tool.
+- [ ] **118 — Scale to useful remaining work.** Allocate one to three replicas according to ready jobs, deadlines, warm-up cost, throughput, and budget; measure whether extra replicas actually shorten completion.
+- [ ] **119 — Add durable per-job claims.** Use expiring claims with fenced completion so worker interruption or queue redelivery cannot cause two accepted outputs or duplicate paid work.
+- [ ] **120 — Restore completed work before retry.** Verify R2 checksums and immutable receipts, reuse accepted assets, and retry only missing or recoverably failed jobs.
+- [ ] **121 — Route results directly into channel/episode R2 paths.** Validate output namespace, content type, size, input/config hashes, and job identity before making the asset available to assembly.
+- [ ] **122 — Integrate prepared assets with the existing runner.** Prove scheduled episodes consume their prepared script/TTS/images/video/music and do not regenerate or overwrite those assets.
+- [ ] **123 — Drain and stop GPUs as soon as useful work ends.** Stop idle groups immediately after durable results are secured; confirm stopped state, and recover teardown after process failure.
+- [ ] **124 — Keep Novita as a bounded fallback.** Use it only for a verified Salad capacity/runtime failure, with the same input/quality contract and a reconciled prior attempt; never launch both against an uncertain result.
+- [ ] **125 — Retain pending and scheduled work in R2.** Preparation, scripts, media, and intermediate results have no expiration before the actual episode release.
+- [ ] **126 — Start cleanup from confirmed release.** Reconcile YouTube publication, keep work through release plus fourteen days, and extend the hold if release is delayed or reverted to private.
+- [ ] **127 — Keep the final video after cleanup.** Delete only the exact released episode's eligible intermediates; protect other episodes, shared model/worker bundles, reusable library assets, and required compact audit records.
+- [ ] **128 — Improve healer preflight.** Detect missing credentials, incompatible GPU memory, missing models, broken dependencies, insufficient budget, stale locks, and invalid prompts before dispatching paid work.
+- [ ] **129 — Preserve cumulative cost through healing.** Failed and superseded work still counts toward the episode/order budget; rerendering cannot erase previous spend from the budget calculation.
+- [ ] **130 — Make healer decisions explainable.** Record root cause, saved artifacts, remaining work, expected incremental cost, chosen retry boundary, and next action without filling the UI with logs.
+- [ ] **131 — Test interruption and recovery end to end.** Exercise worker loss, duplicate delivery, expired URLs, R2 outages, missing results, rejected QA, shutdown failure, and provider ambiguity; verify correct routing and bounded spend.
+- [ ] **132 — Retire replaced routes after parity proof.** Remove obsolete active dispatch paths and unused wrappers only after real Salad/Novita comparison and consumer tests demonstrate the replacement; retain immutable historical evidence.
+
+### H. Earlier owner requirements that remain active
+
+- [ ] **133 — Preserve owner-only channel and module locks separately.** Only the owner's deliberate unlock in the UI can release a lock. AI, background healers, migrations, retries, and deployment work cannot alter protected code/config through alternate paths. Test both lock scopes and cross-worktree mirrors.
+- [ ] **134 — Enforce the exact reusable-asset policy.** Eligible videos may reuse at most 40% of source assets; every third video must use entirely original sourcing. History, crime, heist, and lore story assets are not reusable. Check both planner allocation and actual assembled footage, not just metadata.
+- [ ] **135 — Build useful isolated Toolkit containers.** Automatically retain good eligible Stoic/meditation/B-roll assets with identity, rights, quality, source, and usage records. Prove channel isolation, retrieval, effects compatibility, and protection from episode cleanup; reusable assets never excuse unrelated imagery.
+- [ ] **136 — Preserve the Lo-Fi thumbnail exception.** Use the video's exact frame at 15 seconds, preserve its scene/daylight/artwork, no headline, and only a 4K symbol in the bottom-right. No generic substitute image, local text overlay, or silent thumbnail-module configuration rewrite. Validate current backfill and future videos.
+- [ ] **137 — Preserve native non-Lo-Fi thumbnail typography.** Use the admitted native image-generation pipeline with its current pinned quality contract; do not restore FFmpeg/Satori text compositing, downgraded tiers, or reference-image injection against the owner's decision. Centered subjects remain optional with surrounding composition designed for them.
+- [ ] **138 — Preserve the owner's Golden comparison corpus.** Record approved and rejected examples separately: accepted Rome/Inquisition, evil Bill Gates, approved paparazzi, selected ZERO WEAPONS, DEADLY DANCE, and PEACE AWAITS; rejected Empire, Rings of Power, Steve Jobs, Vault, and earlier generic comic/whiteboard examples are not Goldens. Keep later approved revisions distinct from earlier rejected ones. Prove judges select the owner-preferred comparisons without training on their answer labels.
+- [ ] **139 — Finish thumbnail backfill and projection consistency.** Library, run details, channel pages, and scheduled cards must show the same accepted current asset with cache invalidation. Local application must not require owner login; external YouTube updates still must satisfy Google's actual channel/feature authorization. Inspect production images, not only database URLs.
+- [ ] **140 — Backfill channel-specific identity artwork.** Seaside Ghibli must depict a seaside in the requested illustrated style; Drift & Study remains visibly distinct; Investory must look realistic and finance-specific. Gratitude Springs needs a broad serenity palette, Chalk & Compound must visibly use chalk/tax identity, and Inked Histories must avoid video-game aesthetics. Test both existing channels and automatic future generation.
+- [ ] **141 — Preserve purposeful custom-symbol examples.** History uses an opening/closing book and Drawn Past a drawing pen, with equivalent topic-specific symbols elsewhere. Small-size clarity, restrained motion, and reduced-motion variants are acceptance checks; generic rotating ornaments are not a substitute.
+- [ ] **142 — Remove specialist navigation clutter completely.** Render fleet, music/lore references, and similar specialist pages are reached through relevant Golden capability cards, not separate sidebar entries or an expanded Tools link dump. Retain useful deep links inside the appropriate module presentation.
+- [ ] **143 — Require a creation proof for every new channel.** Each ordinary automated channel creation includes one bounded real test render, channel-identity QA over the whole output, and root-cause repair where needed. Show actual staged creation/render progress. The novel-channel benchmark alone does not satisfy this recurring contract.
+- [ ] **144 — Test the real YouTube connection lifecycle.** Cover connect, denied consent, callback, wrong channel, expired access, refresh, reconnect, and upload/scheduled-release handoff. Read-only fixture/screenshot tests are explicitly insufficient evidence for a successful OAuth lifecycle. Remove unnecessary app-level gating without pretending Google permissions can be bypassed.
+- [ ] **145 — Make schedule drill-down complete.** Clicking an event reaches its exact channel/episode plan and available script, shot list, image/video renders, SEO, subtitles, narration, and export. The view gains artifacts as they arrive and exposes actual retention state.
+- [ ] **146 — Preserve variable-duration formats.** Prove 30-second Shorts, demanding narrated long-form, and 1–8-hour Lo-Fi episodes all use the same declared framework without forcing identical generation costs. Lo-Fi uses the specified two 15-second seamless segments and extended looping with real audio/continuity checks.
+- [ ] **147 — Keep the original five review dimensions.** For each page/subpanel separately assess function, hierarchy/layout, visual identity, interaction/motion, and clarity/minimalism; combine these with the three visual passes in item 106. Small typography, useless prose, oversized offline screens, decorative animations, and empty widget areas must not return.
+- [ ] **148 — Release accepted stages regularly.** Commit the scoped verified work, push production, verify actual Convex/Trigger deployments and the exact Vercel alias revision, then inspect the affected live UI/API. A successful push or local test is not a production receipt. Keep incomplete or unqualified paid routes disabled until proven.
+
+## Completion gate for this phase
+
+This phase is complete only when all 148 items are either passed with linked evidence or explicitly rejected with a documented reason; every non-thumbnail production module has a current scorecard; the unfamiliar channel succeeds without manual creative substitution; weekly Salad rendering and recovery are proven on real artifacts; full tests and real render validation pass; the exact Convex, Trigger, and Vercel production revisions are verified; and screenshots prove the final UI rather than merely proving it builds.

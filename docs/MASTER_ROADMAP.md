@@ -1,5 +1,7 @@
 # YouTube Studio AI — Master Roadmap (v2)
 
+> **Historical roadmap, not current provider authority.** Later owner decisions and the [active goal ledger](GOAL_MODULE_AND_UI_HARDENING_BACKLOG_2026-09.md) supersede this document's Claude/Gemini model choices, thumbnail compositor, cost estimates, and older media routes. In particular, do not restore Claude or local Satori/FFmpeg thumbnail text from this plan. Read current pinned runtime/configuration and owner locks before changing any module. Unfinished product requirements remain relevant; obsolete implementation prescriptions do not.
+
 The phased plan to turn the current pipeline into a **great, automatic, reliable**
 autonomous YouTube engine. Companion to `PIPELINE_V2_PLAN.md` (audit, gap map,
 tool research). This doc is the build sequence.
