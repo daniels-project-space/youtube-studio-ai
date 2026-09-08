@@ -12,8 +12,6 @@ import { SkeletonList } from "@/components/Skeleton";
 import { Chart, compact, type ChartSeries } from "@/components/Chart";
 import { IconAnalytics, IconExternal } from "@/components/icons";
 import { fmtUsd } from "@/lib/format";
-import type { VideoRow } from "@/lib/types";
-import { ArtifactWorkRail } from "@/components/ArtifactWorkRail";
 import { QualityLearningPanel } from "@/components/QualityLearningPanel";
 import {
   qualityLearningInsightsFromUnknown,
@@ -86,17 +84,6 @@ export default function AnalyticsPage() {
     () => summary?.find((s) => s.slug === selectedSlug) ?? null,
     [summary, selectedSlug],
   );
-  const recentWork = useQuery(
-    api.videos.listVideos,
-    selected
-      ? {
-          ownerId,
-          channelId: selected.channelId as Id<"channels">,
-          limit: 12,
-        }
-      : { ownerId, limit: 12 },
-  ) as VideoRow[] | undefined;
-
   const trend = useQuery(
     api.analytics.channelTrend,
     selected
@@ -195,16 +182,6 @@ export default function AnalyticsPage() {
             insights={qualityLearning.insights}
             channelNames={new Map((summary ?? []).map((row) => [row.channelId, row.name]))}
             {...(selected ? { selectedChannelId: selected.channelId } : {})}
-          />
-
-          <ArtifactWorkRail
-            videos={recentWork}
-            title={selected ? `${selected.name} — visible work` : "Visible work behind the numbers"}
-            description={selected
-              ? "Persisted thumbnails and release provenance for the current channel—separate from forecasts and rollup metrics."
-              : "The latest persisted video artifacts across your channels, so the analytics rollup stays connected to the work viewers actually see."}
-            action={<Link href="/library">Open Library ↗</Link>}
-            emptyMessage="No rendered or uploaded video artifacts match this analytics scope yet."
           />
 
           {/* Competitors for the selected channel's niche. */}

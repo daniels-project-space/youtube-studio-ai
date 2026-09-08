@@ -141,11 +141,15 @@ assert.match(runDetailCss, /@media \(max-width: 540px\)/);
 // The terminal is a reviewable persisted record, not a decorative code box:
 // operators can pause tail-following, jump back to the newest receipt, and
 // distinguish a live run from a completed ledger without losing line counts.
-assert.match(logConsole, /runStatus === "running" \|\| runStatus === "queued"/);
-assert.match(logConsole, /Review paused/);
+assert.match(logConsole, /isLiveRunStatus\(runStatus\)/);
+assert.match(logConsole, /runConsoleStartsOpen\(runStatus\)/);
+assert.match(logConsole, /completedLogSummary/);
+assert.match(logConsole, /Review log/);
+assert.match(logConsole, /aria-controls="run-console-body"/);
 assert.match(logConsole, /Jump to latest/);
 assert.match(logConsole, /scrollHeight - el\.scrollTop - el\.clientHeight < 40/);
 assert.match(logConsoleCss, /\.line\s*\{/);
+assert.match(logConsoleCss, /\.root:not\(\[data-open="true"\]\)/);
 assert.match(logConsoleCss, /@media \(max-width: 680px\)/);
 assert.match(releaseEvidenceBadge, /compact\?: boolean/);
 assert.match(releaseEvidenceBadge, /Legacy unverified/);

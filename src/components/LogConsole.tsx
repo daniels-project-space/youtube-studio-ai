@@ -5,6 +5,11 @@ import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { IconChevron, IconTerminal } from "./icons";
+import {
+  completedLogSummary,
+  isLiveRunStatus,
+  runConsoleStartsOpen,
+} from "@/lib/logConsolePresentation";
 import styles from "./LogConsole.module.css";
 
 /** Max lines kept in the DOM (the query is already capped server-side). */
@@ -27,7 +32,7 @@ function fmtClock(ts: number): string {
 
 /** Reactive persisted log tail with an explicit follow/pause control. */
 export function LogConsole({ runId, runStatus }: { runId: string; runStatus?: string }) {
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(() => runConsoleStartsOpen(runStatus));
   const [following, setFollowing] = useState(true);
   const logs = useQuery(api.runLogs.listRunLogs, {
     runId: runId as Id<"runs">,
@@ -35,7 +40,7 @@ export function LogConsole({ runId, runStatus }: { runId: string; runStatus?: st
   }) as LogLine[] | undefined;
   const scrollRef = useRef<HTMLDivElement>(null);
   const stickRef = useRef(true);
-  const live = runStatus === "running" || runStatus === "queued";
+  const live = isLiveRunStatus(runStatus);
 
   function onScroll() {
     const el = scrollRef.current;
@@ -77,9 +82,22 @@ export function LogConsole({ runId, runStatus }: { runId: string; runStatus?: st
     },
     { info: 0, warn: 0, error: 0 },
   );
+  const feedLabel = live
+    ? (following ? "Following tail" : "Review paused")
+    : completedLogSummary({
+        loading: logs === undefined,
+        lines: count,
+        warnings: counts.warn,
+        errors: counts.error,
+      });
 
   return (
-    <section className={styles.root} data-live={live ? "true" : undefined} aria-labelledby="run-console-title">
+    <section
+      className={styles.root}
+      data-live={live ? "true" : undefined}
+      data-open={open ? "true" : undefined}
+      aria-labelledby="run-console-title"
+    >
       <header className={styles.header}>
         <div className={styles.identity}>
           <span className={styles.icon}><IconTerminal width={16} height={16} /></span>
@@ -90,15 +108,15 @@ export function LogConsole({ runId, runStatus }: { runId: string; runStatus?: st
           </span>
         </div>
         <div className={styles.headerActions}>
-          <span className={styles.feedState} data-following={following ? "true" : undefined}><i />{following ? "Following tail" : "Review paused"}</span>
-          <button type="button" className={styles.collapse} onClick={toggleOpen} aria-expanded={open}>
-            {open ? "Collapse" : "Open console"}<IconChevron width={14} height={14} data-open={open ? "true" : undefined} />
+          <span className={styles.feedState} data-following={live && following ? "true" : undefined} aria-live={live ? "polite" : undefined}><i />{feedLabel}</span>
+          <button type="button" className={styles.collapse} onClick={toggleOpen} aria-expanded={open} aria-controls="run-console-body">
+            {open ? "Collapse" : "Review log"}<IconChevron width={14} height={14} data-open={open ? "true" : undefined} />
           </button>
         </div>
       </header>
 
       {open && (
-        <div className={styles.body}>
+        <div id="run-console-body" className={styles.body}>
           <div className={styles.toolbar} aria-label="Log line summary">
             <span><small>Lines</small><strong>{count}{count >= TAIL_LIMIT ? "+" : ""}</strong></span>
             <span data-level="info"><small>Info</small><strong>{counts.info}</strong></span>
