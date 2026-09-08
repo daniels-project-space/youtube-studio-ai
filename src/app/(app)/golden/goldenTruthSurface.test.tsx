@@ -35,8 +35,8 @@ async function main(): Promise<void> {
   assert.match(html, /SHA-256/);
   assert.equal(
     html.match(/<details/g)?.length,
-    GOLDEN_MODULES.length + 7,
-    "every module is a native disclosure inside the five catalog disciplines",
+    GOLDEN_MODULES.length + 10,
+    "every module and admission group is a native disclosure inside the catalog",
   );
   assert.equal(
     html.match(/<details[^>]*\sopen(?:=|\s|>)/g)?.length,

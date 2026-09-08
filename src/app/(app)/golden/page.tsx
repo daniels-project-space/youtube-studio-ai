@@ -195,6 +195,15 @@ function blurb(how: string): string {
   const first = how.split(/\.\s/)[0].trim();
   return first.endsWith(".") ? first : first + ".";
 }
+
+/** Keep implementation audit notes available in source, not in the operator's visual scan. */
+function compactHow(how: string): string {
+  const clean = how.replace(/\s+/g, " ").trim();
+  const withoutAuditNotes = clean.split(/\s(?:P\d+-\d+|NOTE \()/)[0].trim();
+  const sentences = withoutAuditNotes.split(/(?<=\.)\s+/).filter(Boolean).slice(0, 2).join(" ");
+  if (sentences.length <= 360) return sentences;
+  return `${sentences.slice(0, 356).trimEnd()}…`;
+}
 function take2<T>(xs: readonly T[]): T[] { return xs.slice(0, 2); }
 
 type ModuleDestination = { href: string; label: string };
@@ -604,34 +613,37 @@ function AdmissionGroup({
 }) {
   const emptyMessage = mode === "supervised" ? "No private-review family is registered." : mode === "blocked" ? "No families are blocked." : "No automatic family is admitted.";
   return (
-    <div className={styles.admissionGroup} data-mode={mode}>
-      <div className={styles.admissionHead}>
+    <details className={styles.admissionGroup} data-mode={mode}>
+      <summary className={styles.admissionHead}>
         <span>{title}</span>
         <strong>{admissions.length}</strong>
+        <i aria-hidden="true">+</i>
+      </summary>
+      <div className={styles.admissionBody}>
+        {admissions.length === 0 ? (
+          <span className={styles.emptyAdmission}>{emptyMessage}</span>
+        ) : (
+          <div className={styles.admissionList}>
+            {admissions.map((admission) => {
+              const family = FAMILIES[admission.family];
+              const detail = mode === "automatic"
+                ? `${admission.routeKeys.length} certified route${admission.routeKeys.length === 1 ? "" : "s"}`
+                : mode === "supervised"
+                  ? admission.reviewScope === "private_human_child_editor_review_only"
+                    ? "Private child-editor review only"
+                    : "Private human review only"
+                  : admission.blockers[0] ?? "Automatic admission is not registered.";
+              return (
+                <div key={admission.family} title={detail}>
+                  <span>{family.label}</span>
+                  <small>{detail}</small>
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
-      {admissions.length === 0 ? (
-        <span className={styles.emptyAdmission}>{emptyMessage}</span>
-      ) : (
-        <div className={styles.admissionList}>
-          {admissions.map((admission) => {
-            const family = FAMILIES[admission.family];
-            const detail = mode === "automatic"
-              ? `${admission.routeKeys.length} certified route${admission.routeKeys.length === 1 ? "" : "s"}`
-              : mode === "supervised"
-                ? admission.reviewScope === "private_human_child_editor_review_only"
-                  ? "Private child-editor review only"
-                  : "Private human review only"
-                : admission.blockers[0] ?? "Automatic admission is not registered.";
-            return (
-              <div key={admission.family} title={detail}>
-                <span>{family.label}</span>
-                <small>{detail}</small>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
+    </details>
   );
 }
 
@@ -687,8 +699,11 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
 
       <div className={styles.moduleBody}>
         <div className={styles.moduleToolbar}>
-          {/* Every catalog module is lockable and starts unlocked; the key IS the lock id. */}
-          <OwnerLockBadge kind="module" moduleId={m.key} label={m.title} size="sm" />
+          <span className={styles.moduleProtection}>
+            <small>Module protection</small>
+            {/* Every catalog module is lockable and starts unlocked; the key IS the lock id. */}
+            <OwnerLockBadge kind="module" moduleId={m.key} label={m.title} size="sm" />
+          </span>
           {destination ? <Link href={destination.href}>{destination.label}<span aria-hidden="true">↗</span></Link> : null}
         </div>
         <div className={styles.moduleFacts}>
@@ -709,7 +724,7 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
           </div>
         </div>
         <div className={styles.moduleDoctrine}>
-          <p>{m.how}</p>
+          <p>{compactHow(m.how)}</p>
           <ul className={styles.gates}>
             {m.gates.slice(0, 3).map((gate) => (
               <li key={gate}>
