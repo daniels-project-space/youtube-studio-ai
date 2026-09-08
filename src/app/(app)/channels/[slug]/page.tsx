@@ -41,10 +41,7 @@ import {
 } from "@/components/icons";
 import { fmtUsd } from "@/lib/format";
 import { blockLabel } from "@/lib/blocks";
-import {
-  LIVE_PIPELINE_PHASE_LABEL,
-  livePipelinePhaseForBlock,
-} from "@/lib/livePipelinePresentation";
+import { buildPipelineTopology } from "@/lib/pipelineTopology";
 import { AUTO_VOICE_ID, VOICES } from "@/lib/voices";
 import { useAssetUrl, useAssetUrlState } from "@/lib/asset-url";
 import { assessYouTubeSetup } from "@/lib/youtubeSetupStatus";
@@ -2247,50 +2244,84 @@ function PipelineTab({
 }) {
   if (pipeline.length === 0)
     return <EmptyState title="No pipeline configured" />;
+  const bands = buildPipelineTopology(pipeline);
+  const tunedModules = bands.reduce(
+    (total, band) => total + band.modules.filter((module) => module.controlCount > 0).length,
+    0,
+  );
   return (
-    <section className={styles.pipelineMap} aria-label="Channel production pipeline">
+    <section className={styles.pipelineTopology} aria-label="Channel production pipeline">
       <header className={styles.pipelineHeader}>
         <div>
           <span>Frozen channel route</span>
-          <h2>{pipeline.length} working modules</h2>
-          <p>The configured production route.</p>
+          <h2>{pipeline.length}-module production route</h2>
+          <p>Numbered in exact execution order. Open a tuned module to inspect its saved controls.</p>
         </div>
-        <strong>{String(pipeline.length).padStart(2, "0")}</strong>
+        <dl className={styles.pipelineStats}>
+          <div><dt>Groups</dt><dd>{bands.length}</dd></div>
+          <div><dt>Tuned</dt><dd>{tunedModules}</dd></div>
+        </dl>
       </header>
-      {pipeline.map((p, i) => {
-        const params = p.params as Record<string, unknown> | undefined;
-        const hasParams = params && Object.keys(params).length > 0;
-        const phase = livePipelinePhaseForBlock(p.block);
-        const previousPhase = i > 0 ? livePipelinePhaseForBlock(pipeline[i - 1]!.block) : null;
-        return (
-          <div className={styles.pipelineGroup} key={`${p.block}-${i}`}>
-            {phase !== previousPhase && (
-              <div className={styles.pipelinePhase}>
-                <span>{LIVE_PIPELINE_PHASE_LABEL[phase]}</span><i />
+      <ol className={styles.pipelineBands}>
+        {bands.map((band, bandIndex) => (
+          <li className={styles.pipelineBand} data-phase={band.phase} key={`${band.phase}-${band.startIndex}`}>
+            <header className={styles.pipelineBandHeader}>
+              <span>{String(bandIndex + 1).padStart(2, "0")}</span>
+              <div>
+                <strong>{band.label}</strong>
+                <small>
+                  {band.modules.length} module{band.modules.length === 1 ? "" : "s"} · steps {String(band.startIndex).padStart(2, "0")}
+                  {band.endIndex === band.startIndex ? "" : `–${String(band.endIndex).padStart(2, "0")}`}
+                </small>
               </div>
-            )}
-            <article className={styles.pipelineModule} data-phase={phase}>
-              <span className={styles.pipelineIndex}>{String(i + 1).padStart(2, "0")}</span>
-              <span className={styles.pipelineNode} aria-hidden="true"><i /></span>
-              <span className={styles.pipelineIdentity}>
-                <strong>{blockLabel(p.block)}</strong>
-                <small>{p.block}</small>
-              </span>
-              <span className={styles.pipelineCapability}>{LIVE_PIPELINE_PHASE_LABEL[phase]}</span>
-              {hasParams ? (
-                <details className={styles.pipelineParams}>
-                  <summary>{Object.keys(params!).length} controls</summary>
-                  <dl>
-                    {Object.entries(params!).map(([key, value]) => (
-                      <div key={key}><dt>{key}</dt><dd>{JSON.stringify(value)}</dd></div>
-                    ))}
-                  </dl>
-                </details>
-              ) : <span className={styles.pipelineDefault}>module defaults</span>}
-            </article>
-          </div>
-        );
-      })}
+              <i aria-hidden="true" />
+            </header>
+            <div className={styles.pipelineModuleGrid}>
+              {band.modules.map((module) => {
+                const params = module.params as Record<string, unknown> | undefined;
+                const summary = (
+                  <span className={styles.pipelineModuleSummary}>
+                    <span className={styles.pipelineIndex}>{String(module.index).padStart(2, "0")}</span>
+                    <span className={styles.pipelineNode} aria-hidden="true"><i /></span>
+                    <span className={styles.pipelineIdentity}>
+                      <strong>{blockLabel(module.block)}</strong>
+                      <small>{module.block}</small>
+                    </span>
+                    <span className={styles.pipelineControlCount}>
+                      {module.controlCount > 0 ? `${module.controlCount} ctrl` : "default"}
+                    </span>
+                  </span>
+                );
+                if (module.controlCount === 0 || !params) {
+                  return (
+                    <article
+                      className={styles.pipelineModule}
+                      data-tuned="false"
+                      key={`${module.block}-${module.index}`}
+                    >
+                      {summary}
+                    </article>
+                  );
+                }
+                return (
+                  <details
+                    className={styles.pipelineModule}
+                    data-tuned="true"
+                    key={`${module.block}-${module.index}`}
+                  >
+                    <summary aria-label={`Inspect ${blockLabel(module.block)} controls`}>{summary}</summary>
+                    <dl className={styles.pipelineParams}>
+                      {Object.entries(params).map(([key, value]) => (
+                        <div key={key}><dt>{key}</dt><dd>{JSON.stringify(value)}</dd></div>
+                      ))}
+                    </dl>
+                  </details>
+                );
+              })}
+            </div>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 }
