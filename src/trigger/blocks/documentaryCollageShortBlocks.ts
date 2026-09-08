@@ -20,6 +20,11 @@ import {
   mineDocumentarySpinoffCandidates,
   shortRetentionManifestForStrategy,
 } from "@/engine/documentaryCollageShort";
+import {
+  assertDocumentarySourceEpisodePlan,
+  buildDocumentarySourceEpisodePlan,
+} from "@/engine/documentarySourceEpisodePlan";
+import { parseChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
 import { parseShortStrategyManifest, shortRenderDurationSec } from "@/engine/shortStrategyManifest";
 import {
   craftDocuMotion,
@@ -122,6 +127,58 @@ function targetSeconds(ctx: StageContext): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
 }
 
+/**
+ * Selects one reviewed source-season episode and binds it to this run's frozen
+ * Program Route before the generic topic/script seams execute. A scheduled
+ * plan may name an episode, but cannot supply or alter its narration/evidence.
+ */
+export const documentarySourcePlan: Block = {
+  id: "documentary_source_plan",
+  consumes: [],
+  produces: [
+    "plannedTopic",
+    "documentaryEpisodePlan",
+    "sourceReferences",
+    "claimEvidence",
+  ],
+  run: async (ctx) => {
+    const route = parseChannelProgramRouteRunSeed(ctx.store["channelProgramRoute"]);
+    const frozen = ctx.store["documentaryEpisodePlan"];
+    const plannedTopic = typeof ctx.store["plannedTopic"] === "string"
+      ? ctx.store["plannedTopic"].trim()
+      : undefined;
+    const plan = frozen === undefined
+      ? buildDocumentarySourceEpisodePlan({
+          topic: plannedTopic,
+          entropy: `${ctx.channelId}:${ctx.runId}`,
+          targetDurationSec: targetSeconds(ctx),
+          usedMemoryKeys: (await convex().query(api.topicMemory.listForChannel, {
+            channelId: ctx.channelId as Id<"channels">,
+          }) as Array<{ key: string }>).map((row) => row.key),
+          route,
+        })
+      : assertDocumentarySourceEpisodePlan(frozen, route);
+    if (plannedTopic && plan.topic !== plannedTopic) {
+      throw new Error("documentary_source_plan: scheduled topic differs from its frozen source episode");
+    }
+    await convex().mutation(api.topicMemory.recordTopic, {
+      ownerId: ctx.ownerId,
+      channelId: ctx.channelId as Id<"channels">,
+      key: plan.memoryKey,
+    });
+    ctx.log(
+      `documentary_source_plan: sealed ${plan.episodeKey} with ${plan.claimEvidence.length} ` +
+      `claim links (${plan.fingerprint.slice(0, 12)})`,
+    );
+    return {
+      plannedTopic: plan.topic,
+      documentaryEpisodePlan: plan,
+      sourceReferences: plan.sourceReferences,
+      claimEvidence: plan.claimEvidence,
+    };
+  },
+};
+
 function documotionRenderReceipt(value: unknown): {
   width: number;
   height: number;
@@ -208,6 +265,8 @@ export const shortStrategy: Block = {
   run: async (ctx) => {
     const topic = textFromStore(ctx, "topic");
     const narrationText = textFromStore(ctx, "narrationText");
+    const sourceReferences = ctx.store["sourceReferences"] ?? ctx.params["sourceReferences"];
+    const claimEvidence = ctx.store["claimEvidence"] ?? ctx.params["claimEvidence"];
     const manifest = buildDocumentaryCollageShortStrategy({
       runId: ctx.runId,
       channelId: ctx.channelId,
@@ -215,10 +274,11 @@ export const shortStrategy: Block = {
       narrationText,
       targetDurationSec: targetSeconds(ctx),
       treatmentPreset: typeof ctx.params["treatmentPreset"] === "string" ? ctx.params["treatmentPreset"] : undefined,
-      // Structured source references are an explicit pipeline parameter so a
-      // channel can pass auditable research without ambient store reads.
-      sources: ctx.params["sourceReferences"],
-      claimEvidence: ctx.params["claimEvidence"],
+      // The route-owned source planner supplies the reviewed evidence. Legacy
+      // frozen runs may still replay their snapshotted parameters, but a new
+      // channel cannot inject mutable evidence through the designer.
+      sources: sourceReferences,
+      claimEvidence,
     });
     const retention = shortRetentionManifestForStrategy(manifest);
     const episodeSpec = buildEpisodeSpec({
@@ -463,6 +523,7 @@ export const shortSceneQa: Block = {
 };
 
 export const documentaryCollageShortBlocks: Block[] = [
+  documentarySourcePlan,
   shortStrategy,
   documentaryShortCandidates,
   documotionShort,

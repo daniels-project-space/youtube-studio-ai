@@ -8,6 +8,10 @@ import {
   resolveChannelProgramRoute,
 } from "@/engine/channelProgramRoute";
 import { syntheticScenarioContract } from "@/engine/syntheticScenario";
+import {
+  buildDocumentarySourceEpisodePlan,
+  documentarySourceSeasonCandidates,
+} from "@/engine/documentarySourceEpisodePlan";
 import { classifyExecutionError, ExecutionError } from "@/engine/executionErrors";
 import type { Block, StageContext } from "@/engine/types";
 import { freezeChannelInceptionProbeContext } from "@/lib/channelInceptionProbe";
@@ -378,6 +382,60 @@ async function reusedScriptsRetainTheirRouteBinding(): Promise<void> {
   );
 }
 
+async function documentaryScriptsUseOnlyTheReviewedEpisodePlan(): Promise<void> {
+  const documentaryBrief = brief({
+    family: "documentary_collage_short",
+    nicheKey: "history",
+    concept: "Official-source archival history Shorts with a complete narrative payoff.",
+  });
+  const documentaryRoute = resolveChannelProgramRoute(documentaryBrief);
+  const documentarySeed = channelProgramRouteRunSeed({
+    route: documentaryRoute,
+    programBrief: documentaryBrief,
+  });
+  const [candidate] = documentarySourceSeasonCandidates({ count: 1 });
+  const episodePlan = buildDocumentarySourceEpisodePlan({
+    topic: candidate.topic,
+    route: documentarySeed,
+  });
+  const generated = await scriptGen(stageContext({
+    store: {
+      channelProgramRoute: documentarySeed,
+      topic: episodePlan.topic,
+      documentaryEpisodePlan: episodePlan,
+    },
+  }));
+  assert.equal(generated.narrationText, episodePlan.narrationText);
+  assert.equal(
+    (generated.script as { programRouteFingerprint?: string }).programRouteFingerprint,
+    documentarySeed.routeFingerprint,
+    "the no-provider script branch must retain the exact frozen documentary route",
+  );
+  await assert.rejects(
+    qaScript(stageContext({
+      store: {
+        channelProgramRoute: documentarySeed,
+        topic: episodePlan.topic,
+        documentaryEpisodePlan: episodePlan,
+        narrationText: `${episodePlan.narrationText} Unreviewed addition.`,
+        script: generated.script,
+      },
+    })),
+    /narration differs from its reviewed documentary source plan/,
+    "script QA must reject altered narration before an external critic can approve it",
+  );
+  await assert.rejects(
+    scriptGen(stageContext({
+      store: {
+        channelProgramRoute: documentarySeed,
+        topic: "A different unsupported topic",
+        documentaryEpisodePlan: episodePlan,
+      },
+    })),
+    /documentary topic differs from its reviewed source episode plan/,
+  );
+}
+
 async function serializedReuseRequiresTheExactEpisodeReceipt(): Promise<void> {
   const reuseScript = {
     hook: "The first answer is not the first question.",
@@ -626,6 +684,7 @@ async function main(): Promise<void> {
   await topicFastPathsStayInsideTheSealedRoute();
   serializedBusyIsRetryableWithoutProviderFallback();
   await reusedScriptsRetainTheirRouteBinding();
+  await documentaryScriptsUseOnlyTheReviewedEpisodePlan();
   await serializedReuseRequiresTheExactEpisodeReceipt();
   await quizBlocksUseTheRouteOwnedProfile();
   await syntheticBlocksUseTheRouteOwnedContract();

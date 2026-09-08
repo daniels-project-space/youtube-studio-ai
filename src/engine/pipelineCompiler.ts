@@ -159,6 +159,9 @@ const policyProjection = (
  * tests compile every supported family through both sources.
  */
 const STRUCTURAL_POLICY_MANIFESTS: readonly PolicyManifestProjection[] = [
+  policyProjection("documentary_source_plan", [
+    "topic.researched", "documentary.source_plan_sealed",
+  ], [], ["plannedTopic", "documentaryEpisodePlan", "sourceReferences", "claimEvidence"]),
   policyProjection("topic_select", ["topic.selected"], [], ["topic"]),
   policyProjection("competitor_research", ["topic.researched"], [], [
     "nicheReady", "niche", "nicheIntel", "seoDatabank", "competitors",

@@ -330,8 +330,6 @@ export default function NewChannelWizard() {
   const [cadence, setCadence] = useState("weekly");
   const [days, setDays] = useState<number[]>([1]);
   const [budget, setBudget] = useState(5);
-  const [sourceReferencesJson, setSourceReferencesJson] = useState("");
-  const [claimEvidenceJson, setClaimEvidenceJson] = useState("");
   const [publishMode, setPublishMode] = useState("draft");
   const [approvedForPublish, setApprovedForPublish] = useState(false);
   const [approveSetupSpend, setApproveSetupSpend] = useState(false);
@@ -538,17 +536,6 @@ export default function NewChannelWizard() {
   const programBrief = programBriefResolution.brief;
   const pipelinePreviewRequestJson = useMemo(() => {
     if (!programBrief || !fam || supervisedAdmission) return null;
-    let documentaryEvidence: { sourceReferences: unknown; claimEvidence: unknown } | undefined;
-    if (family === "documentary_collage_short") {
-      try {
-        documentaryEvidence = {
-          sourceReferences: JSON.parse(sourceReferencesJson),
-          claimEvidence: JSON.parse(claimEvidenceJson),
-        };
-      } catch {
-        return null;
-      }
-    }
     return JSON.stringify({
       programBrief,
       ...(duration?.inputUnit !== "fixed" ? { lengthMinutes } : {}),
@@ -558,12 +545,10 @@ export default function NewChannelWizard() {
       approvedForPublish,
       toggles,
       ...(Object.keys(paramOverrides).length ? { paramOverrides } : {}),
-      ...documentaryEvidence,
       ...(selectedCapabilitySelections.length ? { capabilitySelections: selectedCapabilitySelections } : {}),
     });
   }, [
     approvedForPublish,
-    claimEvidenceJson,
     duration?.inputUnit,
     fam,
     family,
@@ -573,7 +558,6 @@ export default function NewChannelWizard() {
     programBrief,
     publishMode,
     selectedCapabilitySelections,
-    sourceReferencesJson,
     supervisedAdmission,
     toggles,
     voiceFx,
@@ -938,28 +922,6 @@ export default function NewChannelWizard() {
       const requestedYoutubeHandle = autoYoutube
         ? suggestYoutubeHandle(requestedYoutubeName)
         : undefined;
-      let sourceReferences: unknown;
-      let claimEvidence: unknown;
-      if (family === "documentary_collage_short") {
-        try {
-          sourceReferences = JSON.parse(sourceReferencesJson);
-          claimEvidence = JSON.parse(claimEvidenceJson);
-        } catch {
-          setError("Documentary collage Shorts need valid JSON source references and claim evidence.");
-          setPhase("error");
-          return;
-        }
-        if (!Array.isArray(sourceReferences) || sourceReferences.length === 0) {
-          setError("Documentary collage Shorts need at least one external source reference.");
-          setPhase("error");
-          return;
-        }
-        if (!Array.isArray(claimEvidence) || claimEvidence.length === 0) {
-          setError("Documentary collage Shorts need claim evidence for every locked beat.");
-          setPhase("error");
-          return;
-        }
-      }
       const reviewedDataStoryIntake = family === "narrated_stock" && dataStory;
       if (
         reviewedDataStoryIntake &&
@@ -993,7 +955,6 @@ export default function NewChannelWizard() {
         footageTheme: family === "narrated_stock" ? footageTheme : undefined,
         voiceFx: fam?.narrated && voiceFx !== "none" ? voiceFx : undefined,
         cadence, days, budget, publishMode, approvedForPublish, toggles, autoYoutube, runProbe,
-        ...(family === "documentary_collage_short" ? { sourceReferences, claimEvidence } : {}),
         ...(selectedCapabilitySelections.length ? { capabilitySelections: selectedCapabilitySelections } : {}),
         ...(reviewedDataStoryIntake
           ? { supervisedDataStoryIntake: "reviewed_data_story_intake/v1" }
@@ -1857,32 +1818,6 @@ export default function NewChannelWizard() {
                   </div>
                 )}
               </Row>
-            )}
-            {family === "documentary_collage_short" && (
-              <>
-                <label style={lblStyle}>
-                  <span style={capStyle}>External source references (required JSON)</span>
-                  <textarea
-                    value={sourceReferencesJson}
-                    onChange={(e) => setSourceReferencesJson(e.target.value)}
-                    rows={5}
-                    placeholder={'[{"id":"source:archive","type":"archive","title":"Archive title","citation":"Publisher, date","url":"https://example.org/record"}]'}
-                    style={{ ...inpStyle, resize: "vertical", fontFamily: "monospace" }}
-                  />
-                  <span style={muted}>Every source must be externally reachable with a stable URL.</span>
-                </label>
-                <label style={lblStyle}>
-                  <span style={capStyle}>Claim evidence (required JSON)</span>
-                  <textarea
-                    value={claimEvidenceJson}
-                    onChange={(e) => setClaimEvidenceJson(e.target.value)}
-                    rows={6}
-                    placeholder={'[{"claimId":"claim:1","sourceId":"source:archive","excerpt":"Exact supporting passage or finding.","locator":"p. 14"}]'}
-                    style={{ ...inpStyle, resize: "vertical", fontFamily: "monospace" }}
-                  />
-                  <span style={muted}>Provide at least one cited excerpt for each of the seven locked narrative beats.</span>
-                </label>
-              </>
             )}
             <Row label="Series (optional)">
               <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap", justifyContent: "flex-end" }}>

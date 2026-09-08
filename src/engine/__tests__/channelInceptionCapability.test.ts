@@ -86,12 +86,19 @@ if (cinematic.mode === "registered_non_gemini") {
   assert.match(cinematic.provenance, /runtime remains independently benchmark-gated/);
 }
 
-const unregisteredFutureFamily = familyChannelInceptionCapability("documentary_collage_short");
-assert.equal(
-  unregisteredFutureFamily.mode,
-  "unregistered",
-  "future non-Gemini episode planners must opt into creator capability independently",
-);
+const documentary = familyChannelInceptionCapability("documentary_collage_short");
+assert.equal(documentary.mode, "registered_non_gemini");
+if (documentary.mode === "registered_non_gemini") {
+  assert.deepEqual(documentary.coveredStages, [
+    "official-source-positioning",
+    "receipt-bound-avatar-and-banner",
+    "source-first-starter-season",
+    "immutable-artifact-persistence",
+    "draft-only-test-render",
+  ]);
+  assert.match(documentary.provenance, /seven-episode starter season/);
+  assert.match(documentary.provenance, /draft-only DocuMotion test render/);
+}
 
 const children = familySupervisedChannelInceptionCapability("children_learning");
 assert.equal(children?.mode, "registered_supervised_non_gemini");

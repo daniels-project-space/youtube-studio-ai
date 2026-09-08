@@ -434,10 +434,11 @@ export function designPipelineCore(
     ?? opts.paramOverrides?.["short_strategy"]?.["claimEvidence"];
   if (
     opts.family === "documentary_collage_short" &&
-    (documentaryShortSources === undefined || documentaryShortClaimEvidence === undefined)
+    (documentaryShortSources !== undefined || documentaryShortClaimEvidence !== undefined)
   ) {
-    warnings.push(
-      "Documentary collage Shorts require structured external sourceReferences and per-claim claimEvidence before a draft can render.",
+    throw new Error(
+      "Documentary collage Short source inputs are route-owned by documentary_source_plan; " +
+      "direct sourceReferences/claimEvidence overrides are not admitted.",
     );
   }
 
@@ -469,7 +470,12 @@ export function designPipelineCore(
         params.maxSeconds = QUIZ_SHORT_PORTRAIT_LENGTH_ENVELOPE.maxSeconds;
       }
       if (documentaryShortTargetSec !== undefined) {
-        if (e.block === "topic_select" || e.block === "short_strategy" || e.block === "documotion_short") {
+        if (
+          e.block === "documentary_source_plan" ||
+          e.block === "topic_select" ||
+          e.block === "short_strategy" ||
+          e.block === "documotion_short"
+        ) {
           params.targetSeconds = documentaryShortTargetSec;
         }
         if (e.block === "script_gen") params.maxSeconds = documentaryShortTargetSec;
@@ -477,12 +483,6 @@ export function designPipelineCore(
           params.minSeconds = 20;
           params.maxSeconds = 60;
         }
-      }
-      if (e.block === "short_strategy" && documentaryShortSources !== undefined) {
-        params.sourceReferences = documentaryShortSources;
-      }
-      if (e.block === "short_strategy" && documentaryShortClaimEvidence !== undefined) {
-        params.claimEvidence = documentaryShortClaimEvidence;
       }
       if (e.block === "stock_footage") {
         if (opts.footageTheme) params.footageTheme = opts.footageTheme;
@@ -1469,7 +1469,11 @@ export function enforceLengthContract(
     }
     if (e.block === "quiz_year") pin("targetSeconds", lenSec);
     if (family === "documentary_collage_short") {
-      if (e.block === "short_strategy" || e.block === "documotion_short") {
+      if (
+        e.block === "documentary_source_plan" ||
+        e.block === "short_strategy" ||
+        e.block === "documotion_short"
+      ) {
         pin("targetSeconds", lenSec);
       }
     }

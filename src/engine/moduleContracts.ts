@@ -278,6 +278,15 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     ],
     optionalProduces: ["topicBet"],
   }),
+  documentary_source_plan: contract([
+    "topic.researched",
+    "documentary.source_plan_sealed",
+  ], {
+    optionalConsumes: ["plannedTopic", "documentaryEpisodePlan", "channelProgramRoute"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
+    qualityRequired: true,
+  }),
   // Route-owned read of the row atomically completed by Topic Select. It is
   // local/DB-only and cannot select a route or call a model/provider itself.
   serialized_program_episode_context: contract(["series.episode_context"], {
@@ -568,7 +577,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "channelName", "niche", "persona", "styleGrammar",
       // Per-channel critique grounding for the shared script critique loop.
       "criticDoctrine", "contentLane", "dataStorySourceLedger", "casefileSourcePacket", "syntheticScenario", "planWeekPreparation",
-      "channelProgramRoute", "serializedProgramEpisodeContext",
+      "channelProgramRoute", "serializedProgramEpisodeContext", "documentaryEpisodePlan",
     ],
   }),
   hook_craft: contract(["script.hook_refined"], {
@@ -581,7 +590,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: [
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
-      "topic","script", "persona", "dataStorySourceLedger", "channelProgramRoute", "serializedProgramEpisodeContext"],
+      "topic","script", "persona", "dataStorySourceLedger", "channelProgramRoute", "serializedProgramEpisodeContext",
+      "documentaryEpisodePlan"],
     qualityRequired: true,
   }),
   narration_tts: contract(["narration.timed"], {
@@ -617,6 +627,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   short_strategy: contract(["shorts.strategy_locked", "shorts.source_traceable", "shorts.retention_mapped"], {
     requiredConsumes: ["topic", "narrationText"],
+    optionalConsumes: ["sourceReferences", "claimEvidence"],
     qualityRequired: true,
   }),
   documentary_short_candidates: contract(["shorts.candidates_mined", "shorts.source_windowed"], {

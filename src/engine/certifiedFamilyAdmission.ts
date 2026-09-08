@@ -77,6 +77,12 @@ export const CERTIFIED_AUTOMATIC_FAMILY_ADMISSION_DEFINITIONS = [
     composition: { key: "vertical_micro_explainer", definitionVersion: "v1" },
   },
   {
+    family: "documentary_collage_short",
+    contentLane: "documentary_collage_short",
+    routeKeys: ["documentary-collage-short/source-season/v1"],
+    composition: { key: "source_bound_documentary_collage_short", definitionVersion: "v1" },
+  },
+  {
     family: "cinematic",
     contentLane: "cinematic_ai",
     routeKeys: ["cinematic/foundation/v1"],

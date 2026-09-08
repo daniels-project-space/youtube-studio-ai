@@ -381,50 +381,28 @@ const documentaryShortAtMaximum = designPipeline({
   family: "documentary_collage_short",
   lengthMinutes: 1,
 });
-for (const block of ["topic_select", "script_gen", "short_strategy", "documotion_short"]) {
+for (const block of ["documentary_source_plan", "topic_select", "script_gen", "short_strategy", "documotion_short"]) {
   const entry = documentaryShortAtMaximum.pipeline.find((candidate) => candidate.block === block);
   assert(entry, `documentary Short pipeline must contain ${block}`);
   const seconds = Number(entry.params?.[block === "script_gen" ? "maxSeconds" : "targetSeconds"]);
   assert.equal(seconds, 60, `${block} must preserve the selected native-Short duration`);
 }
 
-const documentarySources = [
-  {
-    id: "source:archive",
-    type: "archive",
-    title: "Primary archive record",
-    citation: "Primary archive record, 1911.",
-    url: "https://example.com/archive-record",
-  },
-];
-const documentaryClaimEvidence = Array.from({ length: 7 }, (_, index) => ({
-  claimId: `claim:${index + 1}`,
-  sourceId: "source:archive",
-  excerpt: `Archive excerpt for locked documentary beat ${index + 1}.`,
-  locator: `folio ${index + 1}`,
-}));
-const documentaryShortWithSources = designPipeline({
-  family: "documentary_collage_short",
-  sourceReferences: documentarySources,
-  claimEvidence: documentaryClaimEvidence,
-});
-const documentaryStrategy = documentaryShortWithSources.pipeline.find(
+const documentaryStrategy = documentaryShortAtMaximum.pipeline.find(
   (entry) => entry.block === "short_strategy",
 );
-assert.deepEqual(
-  documentaryStrategy?.params?.sourceReferences,
-  documentarySources,
-  "documentary source references must persist into the executable short_strategy entry",
-);
-assert.deepEqual(
-  documentaryStrategy?.params?.claimEvidence,
-  documentaryClaimEvidence,
-  "documentary claim evidence must persist into the executable short_strategy entry",
-);
 assert.equal(
-  documentaryShortWithSources.warnings.some((warning) => /sourceReferences|claimEvidence/.test(warning)),
-  false,
-  "an explicit structured source bundle clears the documentary Short source warning",
+  documentaryStrategy?.params?.sourceReferences,
+  undefined,
+  "the route-owned source episode must be produced at run time rather than embedded as mutable designer params",
+);
+assert.throws(
+  () => designPipeline({
+    family: "documentary_collage_short",
+    sourceReferences: [{ id: "source:archive" }],
+  }),
+  /route-owned.*sourceReferences\/claimEvidence overrides are not admitted/,
+  "direct source overrides must not bypass the reviewed source season",
 );
 
 const longFormDocumentaryCandidates = designPipeline({

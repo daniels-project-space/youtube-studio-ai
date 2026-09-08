@@ -8,7 +8,7 @@ import { designPipeline } from "@/engine/designer";
 import { assertPlanWeekChannelRouteAdmission } from "@/trigger/planWeekAhead";
 
 function admittedChannel(input: {
-  family: "narrated_stock" | "quizyear";
+  family: "narrated_stock" | "quizyear" | "documentary_collage_short";
   programIntent?: { kind: "certified_quiz"; profile: "world_geography" };
   serializedProgram?: {
     version: "serialized_program/v1";
@@ -18,7 +18,11 @@ function admittedChannel(input: {
 }) {
   const programBrief = createChannelProgramBrief({
     family: input.family,
-    nicheKey: input.family === "quizyear" ? "educational" : "psychology",
+    nicheKey: input.family === "quizyear"
+      ? "educational"
+      : input.family === "documentary_collage_short"
+        ? "history"
+        : "psychology",
     locale: "en",
     concept: "A clear, recurring channel program with a bounded viewer promise.",
     ...(input.programIntent ? { programIntent: input.programIntent } : {}),
@@ -56,6 +60,14 @@ assert.match(
   /FROZEN CHANNEL PROGRAM ROUTE: narrated-stock\/foundation\/v1/,
   "Topicraft must receive a directive derived from the admitted route, never a raw selector",
 );
+
+const documentary = admittedChannel({ family: "documentary_collage_short" });
+const documentaryAdmission = assertPlanWeekChannelRouteAdmission(documentary);
+assert.equal(
+  documentaryAdmission.programRoute.routeKey,
+  "documentary-collage-short/source-season/v1",
+);
+assert.match(documentaryAdmission.programDirective, /source_bound_documentary/);
 
 assert.throws(
   () => assertPlanWeekChannelRouteAdmission({

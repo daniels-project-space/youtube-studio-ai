@@ -33,6 +33,7 @@ export type CreatorIntentViewerJobKind =
   | "understand_a_repeatable_editorial_lesson"
   | "enter_a_guided_listening_state"
   | "receive_a_concise_original_payoff"
+  | "understand_a_source_bound_archival_story"
   | "enter_an_original_instrumental_focus_session"
   | "solve_a_sourced_fact_challenge"
   | "understand_an_illustrated_explainer"
@@ -51,6 +52,7 @@ export type CreatorIntentEditorialGrammarKind =
   | "narrated_editorial_episode"
   | "guided_listening_episode"
   | "short_form_payoff_episode"
+  | "source_bound_documentary_short"
   | "original_music_loop_episode"
   | "sourced_quiz_challenge"
   | "illustrated_explainer_episode"
@@ -130,6 +132,7 @@ const CreatorIntentDiagnosisSchema = z.object({
       "understand_a_repeatable_editorial_lesson",
       "enter_a_guided_listening_state",
       "receive_a_concise_original_payoff",
+      "understand_a_source_bound_archival_story",
       "enter_an_original_instrumental_focus_session",
       "solve_a_sourced_fact_challenge",
       "understand_an_illustrated_explainer",
@@ -147,6 +150,7 @@ const CreatorIntentDiagnosisSchema = z.object({
       "narrated_editorial_episode",
       "guided_listening_episode",
       "short_form_payoff_episode",
+      "source_bound_documentary_short",
       "original_music_loop_episode",
       "sourced_quiz_challenge",
       "illustrated_explainer_episode",
@@ -226,6 +230,8 @@ function viewerJobKind(routeKey: ChannelProgramRouteKey): CreatorIntentViewerJob
       return "enter_a_guided_listening_state";
     case "shorts/foundation/v1":
       return "receive_a_concise_original_payoff";
+    case "documentary-collage-short/source-season/v1":
+      return "understand_a_source_bound_archival_story";
     case "music-loop/foundation/v1":
       return "enter_an_original_instrumental_focus_session";
     case "quizyear/certified-profile/v1":
@@ -257,6 +263,8 @@ function editorialGrammarKind(routeKey: ChannelProgramRouteKey): CreatorIntentEd
       return "guided_listening_episode";
     case "shorts/foundation/v1":
       return "short_form_payoff_episode";
+    case "documentary-collage-short/source-season/v1":
+      return "source_bound_documentary_short";
     case "music-loop/foundation/v1":
       return "original_music_loop_episode";
     case "quizyear/certified-profile/v1":
@@ -303,6 +311,21 @@ function claimConsequences(route: ChannelProgramRoute): Pick<
         },
       };
     case "certified_quiz_facts":
+      return {
+        claimMode: "factual_certified",
+        evidenceBurden: {
+          kind: "source_provenance_per_fact",
+          requiresExternalSources: true,
+          requiresPerClaimProvenance: true,
+          requiresFictionDisclosure: false,
+        },
+        ambiguity: {
+          state: "none",
+          reasons: [],
+          requiresEpisodeAdmission: false,
+        },
+      };
+    case "source_bound_documentary":
       return {
         claimMode: "factual_certified",
         evidenceBurden: {

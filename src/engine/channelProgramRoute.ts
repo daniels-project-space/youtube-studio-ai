@@ -43,6 +43,7 @@ const CHANNEL_PROGRAM_ROUTE_KEYS = [
   "narrated-stock/foundation/v1",
   "sleep/foundation/v1",
   "shorts/foundation/v1",
+  "documentary-collage-short/source-season/v1",
   "cinematic/foundation/v1",
   "quizyear/certified-profile/v1",
   "quizyear/sports-championship-timeline/v1",
@@ -65,6 +66,7 @@ export interface ChannelProgramRouteDirectives {
   readonly claimMode:
     | "editorial_lane_policy"
     | "certified_quiz_facts"
+    | "source_bound_documentary"
     | "fictional_scenario_no_external_claims";
   readonly topicRules: readonly string[];
   readonly scriptRules: readonly string[];
@@ -193,6 +195,49 @@ const AUTOMATIC_CHANNEL_PROGRAM_ROUTE_DEFINITION_ROWS: readonly ChannelProgramRo
     directives: editorialFoundation("A concise, original short-form episode with a clear viewer payoff."),
     requiredBlocks: ["topic_select", "script_gen", "qa_script"],
     requiredBlockOrder: [["topic_select", "script_gen"], ["script_gen", "qa_script"]],
+  },
+  {
+    key: "documentary-collage-short/source-season/v1",
+    family: "documentary_collage_short",
+    intentKind: "absent",
+    directives: {
+      viewerJob: "A compact archival story whose every spoken beat is traceable to an official reviewed source.",
+      claimMode: "source_bound_documentary",
+      topicRules: [
+        "Select only an unused episode from the reviewed documentary source season.",
+        "Never replace an exhausted source season with an invented or unsourced topic.",
+      ],
+      scriptRules: [
+        "Use the route-bound seven-beat narration unchanged.",
+        "Preserve every claim-to-source locator through the portrait render plan.",
+      ],
+      criticFocus: [
+        "Reject any narration that differs from the reviewed source episode plan.",
+        "Reject a missing, unknown, or duplicated claim-to-source link.",
+      ],
+    },
+    requiredBlocks: [
+      "documentary_source_plan",
+      "topic_select",
+      "script_gen",
+      "qa_script",
+      "short_strategy",
+      "documotion_short",
+      "short_scene_qa",
+      "thumbnail_gen",
+      "qa_visual",
+      "upload_draft",
+    ],
+    requiredBlockOrder: [
+      ["documentary_source_plan", "topic_select"],
+      ["topic_select", "script_gen"],
+      ["script_gen", "qa_script"],
+      ["qa_script", "short_strategy"],
+      ["short_strategy", "documotion_short"],
+      ["documotion_short", "short_scene_qa"],
+      ["short_scene_qa", "qa_visual"],
+      ["qa_visual", "upload_draft"],
+    ],
   },
   {
     key: "cinematic/foundation/v1",
@@ -483,7 +528,12 @@ export const CERTIFIED_CHANNEL_PROGRAM_ROUTE_DEFINITIONS = Object.freeze(
 
 const RouteDirectivesSchema = z.object({
   viewerJob: z.string().min(1).max(300),
-  claimMode: z.enum(["editorial_lane_policy", "certified_quiz_facts", "fictional_scenario_no_external_claims"]),
+  claimMode: z.enum([
+    "editorial_lane_policy",
+    "certified_quiz_facts",
+    "source_bound_documentary",
+    "fictional_scenario_no_external_claims",
+  ]),
   topicRules: z.array(z.string().min(1).max(400)).min(1).max(8),
   scriptRules: z.array(z.string().min(1).max(400)).min(1).max(8),
   criticFocus: z.array(z.string().min(1).max(400)).min(1).max(8),

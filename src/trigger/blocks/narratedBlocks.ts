@@ -44,6 +44,7 @@ import {
   parseChannelProgramRouteRunSeed,
   type ChannelProgramRouteRunSeed,
 } from "@/engine/channelProgramRoute";
+import { assertDocumentarySourceEpisodePlan } from "@/engine/documentarySourceEpisodePlan";
 import {
   createReferenceQualityMechanicsLedger,
   referenceQualityVisualReviewCriteriaForRoute,
@@ -618,6 +619,32 @@ export const scriptGen: Block = {
     const programRoute = programRouteForNarratedBlock(ctx, "script_gen");
     const programRouteCritique = programRouteReviewDirective(programRoute);
     const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "script_gen");
+    const documentaryEpisodePlan = ctx.store["documentaryEpisodePlan"];
+    if (documentaryEpisodePlan !== undefined) {
+      if (!programRoute) {
+        throw new Error("script_gen: documentary source episode requires its frozen program route");
+      }
+      const plan = assertDocumentarySourceEpisodePlan(documentaryEpisodePlan, programRoute);
+      if (plan.topic !== topic) {
+        throw new Error("script_gen: documentary topic differs from its reviewed source episode plan");
+      }
+      const script: Script = {
+        hook: plan.narrationSegments[0],
+        sections: plan.narrationSegments.slice(1).map((narration, index, rows) => ({
+          heading: index === rows.length - 1 ? "What the record changes" : `Source beat ${index + 2}`,
+          narration,
+          role: index === rows.length - 1 ? "outro" : "body",
+        })),
+        narrationText: plan.narrationText,
+        estDurationSec: plan.targetDurationSec,
+        programRouteFingerprint: programRoute.routeFingerprint,
+      };
+      ctx.log(
+        `script_gen: reused reviewed documentary source narration ${plan.episodeKey} ` +
+        `(${plan.narrationSegments.length} beats; no text-generation spend)`,
+      );
+      return { script, narrationText: script.narrationText };
+    }
     const sourceGrounding = [
       hasSourceAttributedDataStoryParams(ctx.params)
         ? dataStorySourceLedgerPrompt(assertDataStorySourceLedger(ctx.store["dataStorySourceLedger"]))
@@ -1020,6 +1047,18 @@ export const qaScript: Block = {
       programRouteFingerprint?: unknown;
       serializedProgramEpisodeContextFingerprint?: unknown;
     } | undefined;
+    if (ctx.store["documentaryEpisodePlan"] !== undefined) {
+      if (!programRoute) {
+        throw new Error("qa_script FAILED: documentary source episode requires its frozen program route");
+      }
+      const plan = assertDocumentarySourceEpisodePlan(
+        ctx.store["documentaryEpisodePlan"],
+        programRoute,
+      );
+      if (plan.narrationText !== narration) {
+        throw new Error("qa_script FAILED: narration differs from its reviewed documentary source plan");
+      }
+    }
     if (
       programRoute &&
       scriptForRoute?.programRouteFingerprint !== programRoute.routeFingerprint

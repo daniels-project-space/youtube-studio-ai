@@ -689,6 +689,37 @@ function registeredOriginalMusicProgramCapability(): Extract<AutonomousPlanningC
   };
 }
 
+function registeredDocumentarySourceSeasonCapability(): Extract<AutonomousPlanningCapability, { mode: "registered_non_gemini" }> {
+  return {
+    mode: "registered_non_gemini",
+    id: "documentary-official-source-season/v1",
+    plannerBlock: "documentary_source_plan",
+    provenance:
+      "route-bound reviewed official-source season; every seven-beat narration, source URL, locator, and claim link is fingerprinted before Topic Select, script QA, or DocuMotion can spend",
+    requiredEntries: [
+      { block: "documentary_source_plan" },
+      { block: "competitor_research" },
+      { block: "topic_select" },
+      { block: "script_gen" },
+      { block: "hook_craft" },
+      { block: "qa_script" },
+      { block: "originality_gate" },
+      { block: "compliance_check" },
+      { block: "short_strategy" },
+      { block: "documotion_short" },
+      { block: "short_scene_qa" },
+      { block: "length_check" },
+      { block: "metadata" },
+      { block: "thumbnail_gen" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+      { block: "notify" },
+      { block: "cleanup" },
+    ],
+    forbiddenGeminiBlocks: [],
+  };
+}
+
 /**
  * Cinematic is a distinct visual-control foundation, not a renamed narrated
  * essay. It seals the causal Story Spine, reusable studio assets, Visual
@@ -753,13 +784,7 @@ export const FAMILY_AUTONOMOUS_PLANNING: Readonly<
   sleep: registeredNarratedPlanningCapability("sleep"),
   comic: registeredSelfContainedPlanningCapability("comic"),
   shorts: registeredNarratedPlanningCapability("shorts"),
-  documentary_collage_short: {
-    mode: "unregistered",
-    missingPlanningRequirements: [
-      "a source-first route-owned episode plan",
-      "a matching channel-inception and composition binding",
-    ],
-  },
+  documentary_collage_short: registeredDocumentarySourceSeasonCapability(),
   whiteboard: registeredSelfContainedPlanningCapability("whiteboard"),
   loreshort: registeredSelfContainedPlanningCapability("loreshort"),
   quizyear: {

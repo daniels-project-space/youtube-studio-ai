@@ -272,6 +272,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
     defaultVoiceId: "sleepless_historian",
     thumbnailTemplate: "banana",
     pipeline: [
+      { block: "documentary_source_plan" },
       { block: "competitor_research" },
       { block: "topic_select", params: { targetSeconds: 52 } },
       { block: "script_gen", params: { style: "documentary_short", maxSeconds: 52, endWithSummary: true } },

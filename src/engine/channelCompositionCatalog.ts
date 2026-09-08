@@ -407,6 +407,20 @@ export const CHANNEL_COMPOSITION_DEFINITION_HISTORY = [
     requiredCapabilityKeys: [],
   },
   {
+    key: "source_bound_documentary_collage_short",
+    definitionVersion: "v1",
+    status: "current",
+    family: "documentary_collage_short",
+    title: "Source-bound documentary collage Short",
+    qualityFocus: [
+      "official-source claim traceability",
+      "seven-beat narrative progression",
+      "native portrait collage motion",
+      "final-master visual and source-provenance review",
+    ],
+    requiredCapabilityKeys: [],
+  },
+  {
     key: "interactive_curated_trivia",
     definitionVersion: "v1",
     status: "current",

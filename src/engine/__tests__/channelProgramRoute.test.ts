@@ -200,6 +200,43 @@ const sameNarratedRoute = resolveChannelProgramRoute(brief({
 }));
 assert.equal(sameNarratedRoute.routeKey, narratedRoute.routeKey, "bounded creator context must not choose a different route");
 
+const documentary = brief({
+  family: "documentary_collage_short",
+  nicheKey: "history",
+  concept: "Official-source archival history Shorts with a complete narrative payoff.",
+});
+const documentaryRoute = resolveChannelProgramRoute(documentary);
+assert.equal(documentaryRoute.routeKey, "documentary-collage-short/source-season/v1");
+assert.equal(documentaryRoute.directives.claimMode, "source_bound_documentary");
+assert.deepEqual(documentaryRoute.requiredBlocks, [
+  "documentary_source_plan",
+  "topic_select",
+  "script_gen",
+  "qa_script",
+  "short_strategy",
+  "documotion_short",
+  "short_scene_qa",
+  "thumbnail_gen",
+  "qa_visual",
+  "upload_draft",
+]);
+const documentaryDesign = designPipeline({
+  family: documentary.family,
+  nicheKey: documentary.nicheKey,
+  programBrief: documentary,
+  programRoute: documentaryRoute,
+});
+assertChannelProgramRoutePipelineCompatibility({
+  route: documentaryRoute,
+  programBrief: documentary,
+  pipeline: documentaryDesign.pipeline,
+});
+assert.ok(
+  documentaryDesign.pipeline.findIndex((entry) => entry.block === "documentary_source_plan")
+    < documentaryDesign.pipeline.findIndex((entry) => entry.block === "topic_select"),
+  "the reviewed episode/source receipt must exist before generic topic state is materialized",
+);
+
 const sports = brief({ family: "quizyear", programIntent: { kind: "sports_championship_timeline" } });
 const sportsRoute = resolveChannelProgramRoute(sports);
 assert.equal(sportsRoute.routeKey, "quizyear/sports-championship-timeline/v1");

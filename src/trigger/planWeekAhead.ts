@@ -45,6 +45,11 @@ import {
   channelProgramRouteRunSeed,
   type ChannelProgramRoute,
 } from "@/engine/channelProgramRoute";
+import {
+  DOCUMENTARY_SOURCE_PROGRAM_ROUTE_KEY,
+  buildDocumentarySourceEpisodePlan,
+  documentarySourceSeasonCandidates,
+} from "@/engine/documentarySourceEpisodePlan";
 import { assertChannelShowProfilePipelineCompatibility } from "@/engine/channelShowProfile";
 import type { PipelineEntry } from "@/engine/types";
 import { thumbnailRequestHash } from "@/lib/thumbnailCheckpoint";
@@ -396,10 +401,12 @@ export const planWeekAheadTask = task({
 
     let existing = await convex.query(api.contentPlan.listPlan, { ownerId, channelId });
     const keyPrefix = channelPrefix(ownerId, channel.slug);
+    const usesDocumentarySourceSeason =
+      routeAdmission.programRoute.routeKey === DOCUMENTARY_SOURCE_PROGRAM_ROUTE_KEY;
 
     let itemIds = admitted.itemIds as Id<"contentPlan">[] | undefined;
     if (admitted.topicState !== "complete") {
-      if (!hasAnthropicKey() || !hasFalNanoBananaProThumbnail()) {
+      if ((!usesDocumentarySourceSeason && !hasAnthropicKey()) || !hasFalNanoBananaProThumbnail()) {
         const modelScope = createModelUsageScope();
         const imageScope = createImageUsageScope();
         const checkpoint = buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot());
@@ -410,8 +417,8 @@ export const planWeekAheadTask = task({
           imageUsage: checkpoint.imageUsage, costUsd: checkpoint.costUsd,
           accountingComplete: checkpoint.accountingComplete,
         });
-        const error = !hasAnthropicKey()
-          ? "plan-week-ahead: Anthropic topic provider is not configured"
+        const error = !usesDocumentarySourceSeason && !hasAnthropicKey()
+          ? "plan-week-ahead: OpenRouter topic provider is not configured"
           : "plan-week-ahead: Fal Nano Banana Pro thumbnail provider is not configured";
         await convex.mutation(api.contentPlan.failPlanTopics, {
           ownerId, channelId, batchId, attempt: admitted.topicAttempt,
@@ -462,6 +469,16 @@ export const planWeekAheadTask = task({
         const imageScope = createImageUsageScope();
         try {
           const items = await modelScope.run(() => imageScope.run(async () => {
+            if (usesDocumentarySourceSeason) {
+              const candidates = documentarySourceSeasonCandidates({
+                count,
+                avoidTopics: existing.flatMap((row) => [row.topic, row.title ?? ""]),
+              });
+              for (const candidate of candidates) {
+                assertPlanWeekTopicFitsRoute(routeAdmission.programRoute, candidate.topic);
+              }
+              return [...candidates];
+            }
             const followups = detectFollowups(await loadLedger(keyPrefix));
             const quota = followups.length ? Math.min(followups.length, Math.max(1, Math.round(count / 3))) : 0;
             const followupBets = followups.slice(0, quota).map((followup) => ({
@@ -1011,6 +1028,20 @@ function buildPlanWeekPreparationManifest(args: {
     route: args.programRoute,
     programBrief: args.programBrief,
   });
+  const documentaryEpisodePlan =
+    args.programRoute.routeKey === DOCUMENTARY_SOURCE_PROGRAM_ROUTE_KEY
+      ? buildDocumentarySourceEpisodePlan({
+          topic: args.item.topic,
+          targetDurationSec: (() => {
+            const sourcePlan = Array.isArray(channel.pipeline)
+              ? (channel.pipeline as PipelineEntry[]).find((entry) => entry.block === "documentary_source_plan")
+              : undefined;
+            const requested = sourcePlan?.params?.targetSeconds;
+            return typeof requested === "number" ? requested : 52;
+          })(),
+          route: channelProgramRoute,
+        })
+      : undefined;
   const seedStore: Record<string, unknown> = {
     ...(channel.thumbnailer ? { thumbnailer: channel.thumbnailer } : {}),
     topicPool: identity.topicPool ?? [],
@@ -1041,6 +1072,7 @@ function buildPlanWeekPreparationManifest(args: {
     ...(channel.family ? { family: channel.family } : {}),
     ...(identity.thumbnailIdentity ? { thumbnailIdentity: identity.thumbnailIdentity } : {}),
     channelProgramRoute,
+    ...(documentaryEpisodePlan ? { documentaryEpisodePlan } : {}),
     ...(Array.isArray(identity.showProfile?.selectedCapabilityKeys)
       ? { channelSelectedCapabilityKeys: [...identity.showProfile.selectedCapabilityKeys] }
       : {}),

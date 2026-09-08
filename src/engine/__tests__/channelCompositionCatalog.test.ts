@@ -568,7 +568,7 @@ const futureCatalogV2 = [
     key: "future_certified_timeline",
     definitionVersion: "v1",
     status: "current" as const,
-    family: "documentary_collage_short" as const,
+    family: "children_learning" as const,
     title: "Future certified timeline",
     qualityFocus: ["timeline clarity"],
     requiredCapabilityKeys: [],

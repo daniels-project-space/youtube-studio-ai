@@ -66,8 +66,20 @@ assert.deepEqual(illustratedReadiness.blockers, []);
 assert.equal(familyChannelInceptionCapability("illustrated_explainer").mode, "registered_non_gemini");
 assert.equal(FAMILIES.illustrated_explainer.defaultThumbnailStyle, "banana");
 
+const documentaryReadiness = familyProductionReadiness("documentary_collage_short");
+assert.equal(
+  documentaryReadiness.productionReady,
+  true,
+  "Documentary Collage Short is admitted only through its finite reviewed official-source season and draft-only DocuMotion route",
+);
+assert.deepEqual(documentaryReadiness.blockers, []);
+assert.equal(
+  familyChannelInceptionCapability("documentary_collage_short").mode,
+  "registered_non_gemini",
+);
+
 for (const family of FAMILY_KEYS.filter(
-  (candidate) => !["quizyear", "narrated_stock", "sleep", "shorts", "cinematic", "music_loop", "whiteboard", "comic", "loreshort", "illustrated_explainer"].includes(candidate),
+  (candidate) => !["quizyear", "narrated_stock", "sleep", "shorts", "documentary_collage_short", "cinematic", "music_loop", "whiteboard", "comic", "loreshort", "illustrated_explainer"].includes(candidate),
 )) {
   const readiness = familyProductionReadiness(family);
   assert.equal(
@@ -133,6 +145,7 @@ assert.equal(
 );
 assert.equal(productionReadyFamilyFallback("sleep"), "sleep");
 assert.equal(productionReadyFamilyFallback("shorts"), "shorts");
+assert.equal(productionReadyFamilyFallback("documentary_collage_short"), "documentary_collage_short");
 assert.equal(
   productionReadyFamilyFallback("illustrated_explainer"),
   "illustrated_explainer",

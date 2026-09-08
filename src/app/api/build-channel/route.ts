@@ -563,18 +563,6 @@ export async function POST(request: Request) {
           error: `per-video budget must be at least $${minimumBudgetUsd.toFixed(2)} and at most $${maximumBudgetUsd.toFixed(2)}`,
         }, { status: 400 });
       }
-      if (familyKey === "documentary_collage_short") {
-        if (!Array.isArray(design.sourceReferences) || design.sourceReferences.length === 0) {
-          return NextResponse.json({
-            error: "documentary collage Shorts require a non-empty sourceReferences array",
-          }, { status: 400 });
-        }
-        if (!Array.isArray(design.claimEvidence) || design.claimEvidence.length === 0) {
-          return NextResponse.json({
-            error: "documentary collage Shorts require a non-empty claimEvidence array",
-          }, { status: 400 });
-        }
-      }
       if ((approvedForProbe || approvedForYoutubeCreation) && !approvedForSetupSpend) {
         return NextResponse.json(
           { error: "approve the one-time setup spend before enabling validation or YouTube creation" },

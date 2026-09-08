@@ -92,6 +92,19 @@ const EXPLICIT_CHANNEL_INCEPTION_CAPABILITIES: Readonly<
   narrated_stock: registeredNarratedChannelInceptionCapability("narrated_stock"),
   sleep: registeredNarratedChannelInceptionCapability("sleep"),
   shorts: registeredNarratedChannelInceptionCapability("shorts"),
+  documentary_collage_short: Object.freeze({
+    mode: "registered_non_gemini" as const,
+    id: "documentary-official-source-season-channel-foundation/v1",
+    provenance:
+      "route-bound official-source positioning and seven-episode starter season, receipt-bound channel art, immutable weekly preparation manifests, and a draft-only DocuMotion test render",
+    coveredStages: Object.freeze([
+      "official-source-positioning",
+      "receipt-bound-avatar-and-banner",
+      "source-first-starter-season",
+      "immutable-artifact-persistence",
+      "draft-only-test-render",
+    ]),
+  }),
   quizyear: Object.freeze({
     mode: "registered_non_gemini" as const,
     id: "quizyear-deterministic-channel-foundation/v1",

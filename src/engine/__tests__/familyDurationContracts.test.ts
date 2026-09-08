@@ -119,7 +119,7 @@ const documentary = designPipeline({
   lengthMinutes: 52 / 60,
 });
 assert.equal(documentary.episodeLengthSeconds, 52);
-for (const block of ["topic_select", "script_gen", "short_strategy", "documotion_short"]) {
+for (const block of ["documentary_source_plan", "topic_select", "script_gen", "short_strategy", "documotion_short"]) {
   const entry = documentary.pipeline.find((candidate) => candidate.block === block);
   assert.equal(
     Number(entry?.params?.[block === "script_gen" ? "maxSeconds" : "targetSeconds"]),
@@ -133,10 +133,11 @@ for (const block of ["topic_select", "script_gen", "short_strategy", "documotion
 // an unrelated target length merely because an upstream module was customized.
 {
   const repaired = enforceLengthContract(
-    corrupt(documentary.pipeline, ["topic_select", "short_strategy", "documotion_short", "length_check"]),
+    corrupt(documentary.pipeline, ["documentary_source_plan", "topic_select", "short_strategy", "documotion_short", "length_check"]),
     documentary.episodeLengthSeconds,
     "documentary_collage_short",
   ).pipeline;
+  assert.equal(params(repaired, "documentary_source_plan").targetSeconds, 52);
   assert.equal(params(repaired, "topic_select").targetSeconds, 52);
   assert.equal(params(repaired, "short_strategy").targetSeconds, 52);
   assert.equal(params(repaired, "documotion_short").targetSeconds, 52);

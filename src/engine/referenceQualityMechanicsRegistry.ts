@@ -139,6 +139,7 @@ export const ReferenceQualityMechanicsLedgerSchema = z.object({
   claimMode: z.enum([
     "editorial_lane_policy",
     "certified_quiz_facts",
+    "source_bound_documentary",
     "fictional_scenario_no_external_claims",
   ]),
   mechanicsKind: z.enum(["reference-quality-contract", "fictional-scenario-contract"]),

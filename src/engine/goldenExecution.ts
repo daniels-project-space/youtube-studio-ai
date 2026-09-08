@@ -216,7 +216,10 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
     executableIds: ["package_to_opening_plan"],
     note: "Production structural-evidence executable. It freezes the package before thumbnail work and binds the exact cover, final master, and a retained opening review frame during QA; it makes no semantic-equivalence or retention claim.",
   },
-  "topic-intel": { kind: "pipeline-module", executableIds: ["competitor_research", "topic_select"] },
+  "topic-intel": {
+    kind: "pipeline-module",
+    executableIds: ["documentary_source_plan", "competitor_research", "topic_select"],
+  },
   "serialized-program-episode-context": {
     kind: "pipeline-module",
     executableIds: ["serialized_program_episode_context"],
