@@ -207,9 +207,16 @@ function modulePowerPoints(module: GoldenModule): string[] {
   const lead = blurb(module.how)
     .split(/:\s|\s—\s|;\s|,\s(?=where|then|before|while)/i)[0]
     .replace(/\.$/, "");
+  const compactGates = module.gates
+    .slice(0, 3)
+    .map((gate) => gate.trim())
+    .filter((gate) => gate.length > 0 && gate.length <= 20);
+  const gatePoint = compactGates.length > 1
+    ? `Checks ${compactGates.join(" · ")}`
+    : module.gates[0];
   return [...new Set([
     compactPoint(lead, 76),
-    ...module.gates.slice(0, 1).map((gate) => compactPoint(gate, 76)),
+    ...(gatePoint ? [compactPoint(gatePoint, 76)] : []),
   ])].slice(0, 2);
 }
 function take2<T>(xs: readonly T[]): T[] { return xs.slice(0, 2); }

@@ -13,6 +13,7 @@ assert.match(page, /aria-label="Golden catalog summary"/);
 assert.match(page, /Catalog truth/);
 assert.match(page, /className=\{styles\.modulePowerPoints\}/);
 assert.match(page, /function modulePowerPoints/);
+assert.match(page, /Checks \$\{compactGates\.join\(" · "\)\}/);
 assert.match(page, /promotionProofCount === 0/);
 assert.match(page, /data-warning=\{executionIsWarning\}/);
 assert.match(page, /Catalog only · no compiler binding/);
