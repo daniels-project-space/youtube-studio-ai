@@ -116,7 +116,7 @@ export function layoutAnalyticsEfficiencyField(
         nodes[left].rawX - nodes[right].rawX,
         nodes[left].rawY - nodes[right].rawY,
       );
-      if (distance < nodes[left].radius + nodes[right].radius + 6) unite(left, right);
+      if (distance < Math.max(46, nodes[left].radius + nodes[right].radius + 6)) unite(left, right);
     }
   }
 
@@ -132,7 +132,7 @@ export function layoutAnalyticsEfficiencyField(
     const maxRadius = Math.max(...indexes.map((index) => nodes[index].radius));
     const columns = Math.ceil(Math.sqrt(indexes.length));
     const rowCount = Math.ceil(indexes.length / columns);
-    const spacing = maxRadius * 2 + 6;
+    const spacing = Math.max(46, maxRadius * 2 + 6);
     const width = (columns - 1) * spacing;
     const height = (rowCount - 1) * spacing;
     const centerX = indexes.reduce((sum, index) => sum + nodes[index].rawX, 0) / indexes.length;

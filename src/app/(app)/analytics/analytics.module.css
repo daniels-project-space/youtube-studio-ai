@@ -155,6 +155,7 @@
 .fieldNodeLink:focus .fieldNodeHalo { stroke: var(--color-accent); stroke-width: 2.5; }
 .fieldTruthLine { stroke: rgba(243, 240, 232, 0.2); stroke-width: 1; stroke-dasharray: 2 3; }
 .fieldLeader { stroke: rgba(243, 240, 232, 0.18); stroke-width: 0.8; }
+.fieldHitTarget { fill: transparent; stroke: none; }
 .fieldNodeHalo { fill: rgba(125, 211, 192, 0.035); stroke: rgba(125, 211, 192, 0.2); stroke-width: 1; }
 .fieldNode[data-selected="true"] .fieldNodeHalo { fill: rgba(255, 94, 42, 0.08); stroke: var(--color-accent); stroke-width: 2; }
 .fieldNode[data-selected="true"] .fieldNodeLabel { fill: var(--color-accent); }

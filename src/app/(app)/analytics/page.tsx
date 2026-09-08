@@ -364,6 +364,7 @@ function FleetEfficiencyField({
                 {node.label ? (
                   <line x1={node.x} y1={node.y} x2={node.label.x} y2={node.label.y - 3} className={styles.fieldLeader} />
                 ) : null}
+                <circle cx={node.x} cy={node.y} r="22" className={styles.fieldHitTarget} />
                 <circle cx={node.x} cy={node.y} r={node.radius + (node.selected ? 5 : 2)} className={styles.fieldNodeHalo} />
                 <circle cx={node.x} cy={node.y} r={node.radius} fill="url(#analytics-node)">
                   <title>{`${node.name}: ${compact(node.totalViews)} views · ${fmtUsd(node.costTotal)} spend · ${node.videoCount} videos. Open channel analytics.`}</title>

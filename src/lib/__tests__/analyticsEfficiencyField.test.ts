@@ -18,6 +18,14 @@ for (const node of tiedLayout) {
   assert.equal(node.rawX, 58, "the exact lower-spend coordinate remains available for a truth connector");
   assert.equal(node.rawY, 194, "the exact zero-reach coordinate remains available for a truth connector");
 }
+for (let left = 0; left < tiedLayout.length; left += 1) {
+  for (let right = left + 1; right < tiedLayout.length; right += 1) {
+    assert.ok(Math.hypot(
+      tiedLayout[left].x - tiedLayout[right].x,
+      tiedLayout[left].y - tiedLayout[right].y,
+    ) >= 44, "the 44px node hit targets must not obscure one another");
+  }
+}
 
 const labels = tiedLayout.flatMap((node) => node.label ? [node.label] : []);
 assert.equal(labels.length, 5, "the field labels a bounded, readable set");
