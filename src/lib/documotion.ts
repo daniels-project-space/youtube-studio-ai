@@ -824,7 +824,10 @@ async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Pr
         `SHOTS:\n${JSON.stringify(items)}\n` +
         `Return STRICT JSON {"fixes":[{"i":n,"title":"...","kicker":"...","circleLabel":"...","labels":["..."]}]} — ` +
         `include EVERY shot you changed; you MUST change any literal mundane-object title.`,
-      maxTokens: 1500,
+      // Up to eight changed shots with several text fields each. The measured
+      // list-shaped JSON floor is 2,000; less can consume a response without
+      // leaving enough budget to close the object.
+      maxTokens: 2000,
       temperature: 0.2,
     });
     let n = 0;
