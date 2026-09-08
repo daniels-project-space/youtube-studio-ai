@@ -661,7 +661,7 @@
 .operations-access-backdrop {
   position: fixed;
   inset: 0;
-  z-index: 120;
+  z-index: 240;
   display: grid;
   place-items: center;
   padding: 1rem;

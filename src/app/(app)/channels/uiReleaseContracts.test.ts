@@ -245,6 +245,14 @@ assert.match(ownerLockBadge, /operationsAccess !== "owner"/,
 assert.match(globalCss, /\.channel-fleet-inspector-backdrop\s*\{[\s\S]*?position: fixed/);
 assert.match(globalCss, /\.channel-fleet-inspector\s*\{[\s\S]*?height: 100dvh/);
 assert.match(globalCss, /prefers-reduced-motion[\s\S]*?\.channel-fleet-inspector \{ animation: none !important; \}/);
+const operationsBackdrop = globalCss.match(/\.operations-access-backdrop\s*\{([^}]*)\}/)?.[1] ?? "";
+const inspectorBackdrop = globalCss.match(/\.channel-fleet-inspector-backdrop\s*\{([^}]*)\}/)?.[1] ?? "";
+const operationsZ = Number(operationsBackdrop.match(/z-index:\s*(\d+)/)?.[1]);
+const inspectorZ = Number(inspectorBackdrop.match(/z-index:\s*(\d+)/)?.[1]);
+assert.ok(
+  Number.isFinite(operationsZ) && Number.isFinite(inspectorZ) && operationsZ > inspectorZ,
+  "owner verification must render above the channel inspector that requested it",
+);
 assert.match(detail, /Refresh intelligence/);
 assert.match(detail, /className="channel-check-control"[\s\S]*Made for kids/);
 assert.match(detail, /className="channel-check-control"[\s\S]*Scheduler enabled/);
