@@ -21,6 +21,8 @@ import { syntheticScenarioContract } from "@/engine/syntheticScenario";
 import { VISUAL_TREATMENT_KEYS } from "@/engine/visualTreatmentCatalog";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
+import { resolvePipelineModuleConfig } from "@/engine/runtimeModuleConfig";
+import type { ModuleConfigurationScope } from "@/engine/moduleRegistry";
 
 export const CHANNEL_PIPELINE_PREVIEW_VERSION = "channel-pipeline-preview/v1" as const;
 
@@ -53,6 +55,7 @@ const ChannelPipelinePreviewInputSchema = z.object({
   approvedForPublish: z.boolean().optional(),
   toggles: PreviewTogglesSchema.optional(),
   paramOverrides: z.unknown().optional(),
+  moduleConfig: z.unknown().optional(),
   sourceReferences: z.unknown().optional(),
   claimEvidence: z.unknown().optional(),
   capabilitySelections: z.unknown().optional(),
@@ -91,6 +94,7 @@ const PREVIEW_INPUT_FIELDS = [
   "approvedForPublish",
   "toggles",
   "paramOverrides",
+  "moduleConfig",
   "sourceReferences",
   "claimEvidence",
   "capabilitySelections",
@@ -138,13 +142,28 @@ export function channelPipelinePreviewFromCompiledDesign(input: {
   programBrief: ChannelProgramBrief;
   programRoute: ChannelProgramRoute;
   design: Pick<DesignResult, "pipeline" | "episodeLengthSeconds" | "contentLane">;
+  moduleConfig?: unknown;
+  moduleConfigScope?: ModuleConfigurationScope;
 }): ChannelPipelinePreview {
+  const configured = resolvePipelineModuleConfig({
+    entries: input.design.pipeline,
+    moduleConfig: input.moduleConfig,
+    scope: input.moduleConfigScope ?? "new_channel",
+  });
+  const hasModuleConfig = Object.keys(configured.frozenModuleConfig).length > 0;
   return Object.freeze({
     version: CHANNEL_PIPELINE_PREVIEW_VERSION,
     family: input.programBrief.family,
     routeKey: input.programRoute.routeKey,
     routeFingerprint: input.programRoute.fingerprint,
-    pipelineFingerprint: sha256Hex(canonicalJson(input.design.pipeline)),
+    pipelineFingerprint: sha256Hex(canonicalJson(
+      hasModuleConfig
+        ? {
+          pipeline: configured.effectivePipeline,
+          moduleConfig: configured.frozenModuleConfig,
+        }
+        : configured.effectivePipeline,
+    )),
     blocks: Object.freeze(input.design.pipeline.map((entry) => entry.block)),
     episodeLengthSeconds: input.design.episodeLengthSeconds,
     contentLane: input.design.contentLane.key,
@@ -197,5 +216,6 @@ export function compileChannelPipelinePreview(value: unknown): ChannelPipelinePr
     programBrief,
     programRoute,
     design,
+    moduleConfig: input.moduleConfig,
   });
 }

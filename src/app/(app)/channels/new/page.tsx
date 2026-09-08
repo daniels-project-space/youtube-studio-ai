@@ -22,7 +22,6 @@ import {
   CERTIFIED_QUIZ_PROFILE_OPTIONS,
   type CertifiedQuizProfileKey,
 } from "@/engine/certifiedQuizProfile";
-import { NEW_CHANNEL_MODULE_CATALOG, type ParamField } from "@/engine/moduleCatalog";
 import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { CHANNEL_INCEPTION_SETUP_COST_CEILING_USD } from "@/engine/channelInceptionContracts";
@@ -378,13 +377,9 @@ export default function NewChannelWizard() {
   // from a topic or advisor suggestion.
   const [syntheticScenarioProfile, setSyntheticScenarioProfile] = useState<SyntheticScenarioProfile | "">("");
   const [quizProfile, setQuizProfile] = useState<CertifiedQuizProfileKey>("world_geography");
-  // Advanced per-module param editor: paramOverrides[blockId][key] = value.
-  const [paramOverrides, setParamOverrides] = useState<Record<string, Record<string, unknown>>>({});
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [showPipelineStyle, setShowPipelineStyle] = useState(false);
   const [showAllNiches, setShowAllNiches] = useState(false);
-  // Pipeline style — per-module presets/knobs the new channel starts with
-  // (validated server-side by channels.setModuleConfig in design-channel).
+  // The one authoritative per-module config the preview, persisted channel,
+  // and frozen runtime invocation all resolve through the same registry.
   const [moduleConfig, setModuleConfig] = useState<ModuleConfigMap>({});
   const [clipNote, setClipNote] = useState<string | null>(null);
   const [executableFormatAlternatives, setExecutableFormatAlternatives] = useState<ExecutableFormatSuggestionAlternative[]>([]);
@@ -544,7 +539,7 @@ export default function NewChannelWizard() {
       publishMode,
       approvedForPublish,
       toggles,
-      ...(Object.keys(paramOverrides).length ? { paramOverrides } : {}),
+      ...(Object.keys(moduleConfig).length ? { moduleConfig } : {}),
       ...(selectedCapabilitySelections.length ? { capabilitySelections: selectedCapabilitySelections } : {}),
     });
   }, [
@@ -554,7 +549,7 @@ export default function NewChannelWizard() {
     family,
     footageTheme,
     lengthMinutes,
-    paramOverrides,
+    moduleConfig,
     programBrief,
     publishMode,
     selectedCapabilitySelections,
@@ -962,7 +957,6 @@ export default function NewChannelWizard() {
         ...(autoYoutube ? { requestedYoutubeName, requestedYoutubeHandle } : {}),
         approveSetupSpend,
         setupBudgetUsd: costAuthority.setupCapUsd,
-        paramOverrides: Object.keys(paramOverrides).length ? paramOverrides : undefined,
         moduleConfig: Object.keys(moduleConfig).length ? moduleConfig : undefined,
         exampleClipUrl: clipUrl.trim() || undefined,
       };
@@ -2008,49 +2002,11 @@ export default function NewChannelWizard() {
             )}
           </div>
 
-          {/* Advanced per-module param editor — tune any module's knobs. */}
+          {/* One authoritative control surface: preview, persisted config, and runtime all share this map. */}
           {!supervisedAdmission && (
-            <div className={styles.room}>
-              <button onClick={() => setShowAdvanced((s) => !s)} style={{ display: "flex", alignItems: "center", gap: "0.5rem", background: "none", border: "none", color: "var(--color-fg)", cursor: "pointer", font: "inherit", fontSize: "0.8rem", fontWeight: 600, padding: 0 }}>
-                <span style={{ transform: showAdvanced ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>›</span>
-                Advanced — tune module parameters
-                {Object.keys(paramOverrides).length > 0 && <span style={{ fontSize: "0.66rem", color: "var(--color-accent)" }}>· {Object.keys(paramOverrides).length} edited</span>}
-              </button>
-              {showAdvanced && (
-                <div style={{ display: "grid", gap: "0.9rem" }}>
-                  {NEW_CHANNEL_MODULE_CATALOG.filter((m) => preview.includes(m.block)).map((m) => (
-                    <div key={m.block} style={{ display: "grid", gap: "0.5rem", paddingBottom: "0.7rem", borderBottom: "1px solid var(--color-border)" }}>
-                      <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
-                        <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>{m.label}</span>
-                        {m.optional && <span style={{ fontSize: "0.62rem", color: "var(--color-accent)" }}>optional</span>}
-                        <span style={{ fontSize: "0.72rem", color: "var(--color-muted)" }}>{m.description}</span>
-                      </div>
-                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "0.5rem 1rem" }}>
-                        {m.params.map((f) => (
-                          <ParamControl key={f.key} field={f}
-                            value={paramOverrides[m.block]?.[f.key]}
-                            onChange={(v) => setParamOverrides((p) => {
-                              const block = { ...(p[m.block] ?? {}) };
-                              if (v === "" || v === undefined || v === null) delete block[f.key]; else block[f.key] = v;
-                              const next = { ...p };
-                              if (Object.keys(block).length) next[m.block] = block; else delete next[m.block];
-                              return next;
-                            })} />
-                        ))}
-                      </div>
-                    </div>
-                  ))}
-                  <div style={{ fontSize: "0.72rem", color: "var(--color-faint)" }}>Blank fields keep the smart default. Numbers are clamped to safe bounds on save.</div>
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Pipeline style — per-module presets/knobs (e.g. captions on/off). */}
-          {!supervisedAdmission && (
-            <details className={styles.routeCatalog} open={showPipelineStyle} onToggle={(event) => setShowPipelineStyle(event.currentTarget.open)}>
-              <summary><span><strong>Pipeline style controls</strong><small>Presets and knobs for the active modules; editable later in channel Settings.</small></span><b>Open controls +</b></summary>
-              {showPipelineStyle && <div className={styles.room}><ModuleConfigSection value={moduleConfig} onChange={setModuleConfig} activeBlockIds={preview} /></div>}
+            <details className={styles.routeCatalog}>
+              <summary><span><strong>Module controls</strong><small>{Object.keys(moduleConfig).length ? `${Object.keys(moduleConfig).length} customized · reflected in this preview` : "Optional · editable later"}</small></span><b>Configure +</b></summary>
+              <div className={styles.room}><ModuleConfigSection value={moduleConfig} onChange={setModuleConfig} activeBlockIds={preview} /></div>
             </details>
           )}
         </section>
@@ -2079,48 +2035,6 @@ export default function NewChannelWizard() {
 function Row({ label, children }: { label: string; children: ReactNode }) {
   return <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
     <span style={{ fontSize: "0.84rem", fontWeight: 500 }}>{label}</span><div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>{children}</div></div>;
-}
-function ParamControl({ field, value, onChange }: { field: ParamField; value: unknown; onChange: (v: unknown) => void }) {
-  const label = <span style={{ fontSize: "0.74rem", color: "var(--color-muted)" }}>{field.label}</span>;
-  if (field.type === "toggle") {
-    return (
-      <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.78rem", cursor: "pointer" }} title={field.help}>
-        <input type="checkbox" checked={value === true} onChange={(e) => onChange(e.target.checked ? true : undefined)} />
-        {field.label}
-      </label>
-    );
-  }
-  if (field.type === "select") {
-    return (
-      <label style={{ display: "grid", gap: "0.25rem" }} title={field.help}>
-        {label}
-        <select value={(value as string) ?? ""} onChange={(e) => onChange(e.target.value || undefined)} style={{ ...selStyle, fontSize: "0.8rem", padding: "0.4rem 0.55rem" }}>
-          <option value="">Default</option>
-          {field.options?.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
-      </label>
-    );
-  }
-  if (field.type === "number") {
-    return (
-      <label style={{ display: "grid", gap: "0.25rem" }} title={field.help}>
-        {label}
-        <input type="number" min={field.min} max={field.max} step={field.step}
-          value={value === undefined || value === null ? "" : (value as number)}
-          placeholder="default"
-          onChange={(e) => onChange(e.target.value === "" ? undefined : Number(e.target.value))}
-          style={{ ...inpStyle, fontSize: "0.8rem", padding: "0.4rem 0.55rem" }} />
-      </label>
-    );
-  }
-  return (
-    <label style={{ display: "grid", gap: "0.25rem" }} title={field.help}>
-      {label}
-      <input value={(value as string) ?? ""} placeholder="default"
-        onChange={(e) => onChange(e.target.value || undefined)}
-        style={{ ...inpStyle, fontSize: "0.8rem", padding: "0.4rem 0.55rem" }} />
-    </label>
-  );
 }
 function SummaryRow({ k, v }: { k: string; v: string }) {
   return <div className={styles.summaryRow}><span>{k}</span><span>{v}</span></div>;

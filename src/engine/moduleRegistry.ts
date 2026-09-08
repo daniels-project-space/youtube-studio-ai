@@ -26,6 +26,22 @@ export interface ModuleCard {
   customization?: CustomizationSurface;
 }
 
+export type ModuleConfigurationScope = "runtime" | "new_channel";
+
+function surfaceForScope(
+  blockId: string,
+  surface: CustomizationSurface,
+  scope: ModuleConfigurationScope,
+): CustomizationSurface {
+  if (scope !== "new_channel" || blockId !== "narration_tts") return surface;
+  return {
+    ...surface,
+    knobs: surface.knobs.map((knob) => knob.id === "ttsProvider"
+      ? { ...knob, values: knob.values?.filter((value) => value !== "qwen3") }
+      : knob),
+  };
+}
+
 /** Pipeline BLOCK ID (as it appears in a channel's pipeline[]) → its card. */
 export const MODULE_REGISTRY: Record<string, ModuleCard> = {
   timeline_assemble: ASSEMBLY_MODULE,
@@ -44,14 +60,25 @@ export function moduleCard(blockId: string): ModuleCard | undefined {
   return MODULE_REGISTRY[blockId];
 }
 
-export function moduleSurface(blockId: string): CustomizationSurface | undefined {
-  return MODULE_REGISTRY[blockId]?.customization;
+export function moduleSurface(
+  blockId: string,
+  scope: ModuleConfigurationScope = "runtime",
+): CustomizationSurface | undefined {
+  const surface = MODULE_REGISTRY[blockId]?.customization;
+  return surface ? surfaceForScope(blockId, surface, scope) : undefined;
 }
 
 /** Every registered module that exposes a customization surface (what the UI renders toggles for). */
-export function configurableModules(activeBlockIds?: readonly string[]): { blockId: string; card: ModuleCard; surface: CustomizationSurface }[] {
+export function configurableModules(
+  activeBlockIds?: readonly string[],
+  scope: ModuleConfigurationScope = "runtime",
+): { blockId: string; card: ModuleCard; surface: CustomizationSurface }[] {
   const active = activeBlockIds ? new Set(activeBlockIds) : undefined;
   return Object.entries(MODULE_REGISTRY)
     .filter(([blockId, card]) => card.customization && (!active || active.has(blockId)))
-    .map(([blockId, card]) => ({ blockId, card, surface: card.customization as CustomizationSurface }));
+    .map(([blockId, card]) => ({
+      blockId,
+      card,
+      surface: surfaceForScope(blockId, card.customization as CustomizationSurface, scope),
+    }));
 }

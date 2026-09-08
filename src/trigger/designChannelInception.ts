@@ -162,6 +162,7 @@ import {
   channelPipelinePreviewFromCompiledDesign,
   type ChannelPipelinePreviewSnapshot,
 } from "@/engine/channelPipelinePreview.server";
+import { resolvePipelineModuleConfig } from "@/engine/runtimeModuleConfig";
 import {
   assertChannelProgramRouteBinding,
   channelProgramRouteFingerprint,
@@ -1844,6 +1845,14 @@ export async function executeDesignChannel(
       : {}),
   };
   const design = designPipeline(designOptions);
+  const resolvedDesignModuleConfig = resolvePipelineModuleConfig({
+    entries: design.pipeline,
+    moduleConfig: payload.moduleConfig,
+    // New admissions use the current creator catalog. A retry may reproduce
+    // an older, still-valid channel setting without making that retired choice
+    // selectable for a new channel.
+    scope: existingAtStart ? "runtime" : "new_channel",
+  });
   // Seal the compiled baseline before any channel state is written. The final
   // architect may refine the pipeline later, but it must retain this profile's
   // selected-capability obligations and traceability.
@@ -1868,6 +1877,8 @@ export async function executeDesignChannel(
         programBrief,
         programRoute: programRouteForCompile!,
         design,
+        moduleConfig: resolvedDesignModuleConfig.frozenModuleConfig,
+        moduleConfigScope: existingAtStart ? "runtime" : "new_channel",
       }),
     );
   }
@@ -2074,6 +2085,9 @@ export async function executeDesignChannel(
     thumbnailer: family.defaultThumbnailStyle,
     template: archetype.template,
     pipeline: design.pipeline,
+    moduleConfig: Object.keys(resolvedDesignModuleConfig.frozenModuleConfig).length
+      ? resolvedDesignModuleConfig.frozenModuleConfig
+      : undefined,
     family: payload.family,
     contentLane: design.contentLane,
     disabledBlocks,
@@ -2245,7 +2259,9 @@ export async function executeDesignChannel(
     inception?: { requestSnapshot?: unknown; admission?: unknown };
   }).inception;
   const previousSnapshot = previousInception?.requestSnapshot;
-  const requestedModuleConfig = structuredClone(payload.moduleConfig ?? {});
+  const requestedModuleConfig = structuredClone(
+    resolvedDesignModuleConfig.frozenModuleConfig,
+  );
   const requestedModuleConfigFingerprint = channelInceptionContentSha256(
     requestedModuleConfig,
   );

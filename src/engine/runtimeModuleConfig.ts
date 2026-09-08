@@ -1,6 +1,8 @@
 import { resolveKnobs } from "./customization";
-import { moduleSurface } from "./moduleRegistry";
+import { moduleSurface, type ModuleConfigurationScope } from "./moduleRegistry";
 import type { PipelineEntry } from "./types";
+import { materializeRuntimePipelineParams } from "./pipelineCompiler";
+import { snapshotParamsByBlock } from "@/lib/pipelineInvocationSnapshot";
 
 export type RuntimeModuleConfig = Readonly<Record<string, unknown>>;
 
@@ -22,6 +24,15 @@ export interface RuntimeModuleConfigMerge {
     preset?: string;
     virtual?: true;
   }>[];
+}
+
+export interface ResolvedPipelineModuleConfig {
+  /** The exact pipeline the runner will see after applying channel controls. */
+  readonly effectivePipeline: readonly PipelineEntry[];
+  /** Canonical validated config safe to persist and fingerprint. */
+  readonly frozenModuleConfig: Readonly<Record<string, Record<string, unknown>>>;
+  /** Valid configurable modules omitted because the selected route does not use them. */
+  readonly skippedBlockIds: readonly string[];
 }
 
 /**
@@ -175,4 +186,58 @@ export function mergeRuntimeModuleConfig(input: {
     skippedBlockIds: [...skippedBlockIds].sort(),
     applied,
   };
+}
+
+/**
+ * Resolve onboarding/module controls through the same strict path used by the
+ * runner, then materialize their values into a previewable pipeline.
+ *
+ * A stale but valid module from a previous wizard route is safely omitted. An
+ * unknown or non-configurable id is rejected rather than becoming inert JSON.
+ * This gives channel creation one authoritative config representation while
+ * preserving the runner's immutable invocation behavior.
+ */
+export function resolvePipelineModuleConfig(input: {
+  readonly entries: readonly PipelineEntry[];
+  readonly moduleConfig?: unknown;
+  readonly scope?: ModuleConfigurationScope;
+}): ResolvedPipelineModuleConfig {
+  if (
+    input.moduleConfig !== undefined &&
+    (typeof input.moduleConfig !== "object" || input.moduleConfig === null || Array.isArray(input.moduleConfig))
+  ) {
+    throw new Error("channel moduleConfig must be an object keyed by a selected or supported virtual module id");
+  }
+  for (const [blockId, rawConfig] of Object.entries((input.moduleConfig ?? {}) as Record<string, unknown>)) {
+    const scopedSurface = moduleSurface(blockId, input.scope);
+    if (!scopedSurface) {
+      throw new Error(`moduleConfig[${blockId}] targets an unknown or non-configurable module`);
+    }
+    if (typeof rawConfig !== "object" || rawConfig === null || Array.isArray(rawConfig)) {
+      throw new Error(`moduleConfig[${blockId}] must be an object`);
+    }
+    const { preset: rawPreset, ...overrides } = rawConfig as Record<string, unknown>;
+    const preset = typeof rawPreset === "string" ? rawPreset : undefined;
+    const scoped = resolveKnobs(
+      scopedSurface,
+      preset,
+      overrides as Parameters<typeof resolveKnobs>[2],
+    );
+    if (!scoped.ok) {
+      throw new Error(`moduleConfig[${blockId}] is invalid for ${input.scope ?? "runtime"}: ${scoped.errors.join("; ")}`);
+    }
+  }
+  const merged = mergeRuntimeModuleConfig({
+    entries: input.entries,
+    paramsByBlock: snapshotParamsByBlock(input.entries),
+    moduleConfig: input.moduleConfig,
+  });
+  return Object.freeze({
+    effectivePipeline: Object.freeze(materializeRuntimePipelineParams(
+      input.entries,
+      merged.paramsByBlock,
+    )),
+    frozenModuleConfig: Object.freeze({ ...merged.frozenModuleConfig }),
+    skippedBlockIds: Object.freeze([...merged.skippedBlockIds]),
+  });
 }

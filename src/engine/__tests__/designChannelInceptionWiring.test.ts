@@ -79,15 +79,23 @@ assert.match(
 const legacyIdentityLookup = coordinator.indexOf("const existingAtStart = await convex.query(api.channels.getChannelBySlug");
 const serializedSeriesGate = coordinator.indexOf("const payloadSuppliesSeries");
 const baselineCompile = coordinator.indexOf("const design = designPipeline(");
+const moduleConfigResolution = coordinator.indexOf("const resolvedDesignModuleConfig = resolvePipelineModuleConfig({");
 const previewSnapshotGate = coordinator.lastIndexOf("assertChannelPipelinePreviewSnapshot(");
 const firstChannelWrite = coordinator.indexOf("api.channels.createChannel");
 assert(
   legacyIdentityLookup >= 0 &&
     serializedSeriesGate > legacyIdentityLookup &&
     baselineCompile > serializedSeriesGate &&
+    moduleConfigResolution > baselineCompile &&
+    previewSnapshotGate > moduleConfigResolution &&
     previewSnapshotGate > baselineCompile &&
     firstChannelWrite > previewSnapshotGate,
-  "the executor must inspect durable legacy identity, compile the exact route, and bind the reviewed preview before the first channel write",
+  "the executor must inspect durable legacy identity, compile the exact route/config, and bind the reviewed preview before the first channel write",
+);
+assert.match(
+  coordinator,
+  /api\.channels\.createChannel,[\s\S]*?pipeline: design\.pipeline,[\s\S]*?moduleConfig: Object\.keys\(resolvedDesignModuleConfig\.frozenModuleConfig\)\.length/,
+  "the resumable shell must atomically retain the reviewed config, including deterministic families that return before generic inception",
 );
 assert.match(newChannelUi, /pipelinePreviewSnapshot:\s*\{/,
   "the wizard must submit the exact compiler snapshot it displayed");

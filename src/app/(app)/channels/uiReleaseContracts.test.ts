@@ -26,6 +26,7 @@ const designer = [
 ].join("\n");
 const auditScript = readFileSync(join(root, "scripts/ui-fifth-pass-audit.mjs"), "utf8");
 const ownerLockBadge = readFileSync(join(root, "src/components/OwnerLockBadge.tsx"), "utf8");
+const moduleConfigSection = readFileSync(join(root, "src/components/ModuleConfigSection.tsx"), "utf8");
 
 const terminalError = wizard.match(/const terminalError = \(message: string\) => \{([\s\S]*?)\n    \};/)?.[1];
 assert.ok(terminalError, "terminal build recovery handler must exist");
@@ -140,7 +141,7 @@ assert.match(wizard, />Held: \{defaultFamilyReadiness\.blockers\[0\]\}/);
 assert.match(wizard, /defaultFamilyReadiness\.blockers\[0\]/);
 
 // Channel creation is a staged operating workflow rather than a card wall.
-// The foreground route, full catalog, advanced pipeline controls, and durable
+// The foreground route, full catalog, one authoritative module-control rack, and durable
 // build receipts use explicit progressive disclosure without inventing media.
 assert.match(wizard, /<h1>Create a channel<\/h1>/);
 assert.match(wizard, /import \{ NicheMotionGlyph \} from "@\/components\/NicheMotionGlyph"/);
@@ -152,8 +153,9 @@ assert.match(wizard, /const visibleNiches = showAllNiches \|\| selectedNicheOuts
 assert.match(wizard, /More territories/);
 assert.match(wizard, /id="channel-territory-grid"/);
 assert.match(wizard, /<details className=\{styles\.routeCatalog\} open=\{!fam\}>/);
-assert.match(wizard, /Pipeline style controls/);
-assert.match(wizard, /showPipelineStyle && <div className=\{styles\.room\}><ModuleConfigSection/);
+assert.match(wizard, /<strong>Module controls<\/strong>/);
+assert.match(wizard, /<ModuleConfigSection value=\{moduleConfig\} onChange=\{setModuleConfig\}/);
+assert.doesNotMatch(wizard, /showPipelineStyle|showAdvanced|paramOverrides/);
 assert.match(wizard, /<small>Progress<\/small>/);
 assert.match(wizard, /Private quality-control render/);
 assert.match(wizard, /status signal · no preview frames yet/);
@@ -161,9 +163,9 @@ assert.match(wizard, /STAGE_DESCRIPTIONS/);
 assert.match(wizard, /executionAuthorized \? "Authorized" : "Plan only"/);
 assert.match(wizard, /href="\/api\/operations\/authorize"[\s\S]*Verify owner to save/);
 // New creation must not revive the retired Qwen path. Historic records retain
-// their module receipts in the legacy catalog, but this UI only reads the
-// new-channel projection and contains no Qwen-specific controls or messaging.
-assert.match(wizard, /NEW_CHANNEL_MODULE_CATALOG\.filter/);
+// their module receipts in channel Settings, while controlled onboarding uses
+// the registry's new-channel projection.
+assert.match(moduleConfigSection, /channelId \? "runtime" : "new_channel"/);
 assert.doesNotMatch(wizard, /Qwen|qwen3|qwenSpeaker/);
 assert.match(wizardCss, /\.nicheGrid/);
 assert.match(wizardCss, /\.showMoreNiches/);

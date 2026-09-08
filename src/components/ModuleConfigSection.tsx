@@ -296,7 +296,7 @@ export function ModuleConfigSection({
     api.channels.listModuleLockAudits,
     channelId && ownerId ? { ownerId, channelId, limit: 4 } : "skip",
   );
-  const mods = configurableModules(activeBlockIds);
+  const mods = configurableModules(activeBlockIds, channelId ? "runtime" : "new_channel");
   const current = channelId ? (moduleConfig ?? {}) : (value ?? {});
   const [openBlockId, setOpenBlockId] = useState<string | null | undefined>(undefined);
   const visibleOpenBlockId = openBlockId === undefined || (

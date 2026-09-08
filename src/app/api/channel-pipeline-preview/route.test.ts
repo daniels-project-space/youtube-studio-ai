@@ -96,6 +96,11 @@ async function main(): Promise<void> {
   assert.doesNotMatch(wizardSource, /function previewBlocks|ARCHETYPES|FAMILY_CREW|CREW_ROLE_BLOCK/);
   assert.match(wizardSource, /fetch\("\/api\/channel-pipeline-preview"/);
   assert.match(wizardSource, /pipelinePreview\.status !== "ready"/);
+  assert.doesNotMatch(
+    wizardSource,
+    /paramOverrides|NEW_CHANNEL_MODULE_CATALOG|Advanced — tune module parameters/,
+    "new-channel creation must not expose a second config system beside moduleConfig",
+  );
 
   for (const family of ROUTED_FAMILIES) {
     const programBrief = briefFor(family);
@@ -201,6 +206,40 @@ async function main(): Promise<void> {
     chapterless.pipelineFingerprint,
     baseline.pipelineFingerprint,
     "the fingerprint must represent parameter-only compiler changes as well as visible block order",
+  );
+
+  const configured = await (await POST(request({
+    programBrief: narratedBrief,
+    toggles: DEFAULT_TOGGLES,
+    moduleConfig: { script_gen: { preset: "documentary" } },
+  }))).json() as { blocks: string[]; pipelineFingerprint: string };
+  assert.deepEqual(configured.blocks, baseline.blocks);
+  assert.notEqual(
+    configured.pipelineFingerprint,
+    baseline.pipelineFingerprint,
+    "the reviewed pipeline fingerprint must include the exact saved module controls",
+  );
+
+  const staleKnownConfig = await (await POST(request({
+    programBrief: narratedBrief,
+    toggles: DEFAULT_TOGGLES,
+    moduleConfig: { quiz_year: { countdownSeconds: 8 } },
+  }))).json() as { pipelineFingerprint: string };
+  assert.equal(
+    staleKnownConfig.pipelineFingerprint,
+    baseline.pipelineFingerprint,
+    "a valid control left behind by another route must be pruned from the canonical preview",
+  );
+
+  const unknownModuleConfig = await POST(request({
+    programBrief: narratedBrief,
+    toggles: DEFAULT_TOGGLES,
+    moduleConfig: { invented_module: { enabled: true } },
+  }));
+  assert.equal(unknownModuleConfig.status, 400);
+  assert.match(
+    (await unknownModuleConfig.json() as { error: string }).error,
+    /unknown or non-configurable module/,
   );
 
   const requiredCaptionResponse = await POST(request({

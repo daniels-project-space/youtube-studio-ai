@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 
 import { buildChannelProfile } from "@/engine/channelProfile";
-import { mergeRuntimeModuleConfig } from "@/engine/runtimeModuleConfig";
+import {
+  mergeRuntimeModuleConfig,
+  resolvePipelineModuleConfig,
+} from "@/engine/runtimeModuleConfig";
 import type { PipelineEntry } from "@/engine/types";
 import { resolveCrew } from "@/lib/crew/crewProfile";
 
@@ -161,5 +164,53 @@ assert.equal(craftOnly.paramsByBlock.script_gen.maxSeconds, 600);
 assert.equal(craftOnly.paramsByBlock.script_gen.endWithSummary, true);
 assert.equal(craftOnly.paramsByBlock.assemble.durationSec, 600);
 assert.equal(craftOnly.paramsByBlock.assemble.deblurIntro, false);
+
+const onboardingResolution = resolvePipelineModuleConfig({
+  entries: routeOwnedEntries,
+  moduleConfig: {
+    script_gen: { preset: "documentary" },
+    assemble: { deblurIntro: false },
+    // Valid but not present in this route: a stale wizard selection is pruned
+    // before persistence rather than breaking channel creation later.
+    metadata: { clickbaitLevel: 2 },
+  },
+});
+assert.deepEqual(onboardingResolution.frozenModuleConfig.script_gen, {
+  preset: "documentary",
+  style: "essay",
+  endWithSummary: true,
+});
+assert.equal(
+  onboardingResolution.effectivePipeline.find((entry) => entry.block === "script_gen")?.params?.endWithSummary,
+  true,
+  "the creation preview must materialize the same validated controls the runner applies",
+);
+assert.deepEqual(onboardingResolution.skippedBlockIds, ["metadata"]);
+assert.throws(
+  () => resolvePipelineModuleConfig({
+    entries: routeOwnedEntries,
+    moduleConfig: { invented_module: { enabled: true } },
+  }),
+  /unknown or non-configurable module/,
+  "unknown creation controls must fail before channel writes or provider admission",
+);
+assert.throws(
+  () => resolvePipelineModuleConfig({
+    entries: [{ block: "narration_tts" }],
+    moduleConfig: { narration_tts: { ttsProvider: "qwen3" } },
+    scope: "new_channel",
+  }),
+  /invalid for new_channel.*ttsProvider/,
+  "new channels cannot forge the retired narration route through moduleConfig",
+);
+assert.equal(
+  resolvePipelineModuleConfig({
+    entries: [{ block: "narration_tts" }],
+    moduleConfig: { narration_tts: { ttsProvider: "qwen3" } },
+    scope: "runtime",
+  }).frozenModuleConfig.narration_tts?.ttsProvider,
+  "qwen3",
+  "an existing channel retry retains its valid historical runtime configuration",
+);
 
 console.log("runtime module config merge tests passed");
