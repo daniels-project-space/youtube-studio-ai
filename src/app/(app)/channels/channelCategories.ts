@@ -61,6 +61,12 @@ export function channelCategoryFor(channel: CategoryAwareChannel): ChannelCatego
   return "other";
 }
 
+/** Human label for sparse legacy identities that predate a stored niche. */
+export function channelCategoryLabelFor(channel: CategoryAwareChannel): string {
+  const key = channelCategoryFor(channel);
+  return CATEGORIES.find((category) => category.key === key)?.label ?? "Independent channel";
+}
+
 export function groupChannelsByCategory<T extends CategoryAwareChannel>(
   channels: readonly T[],
 ): ChannelCategoryGroup<T>[] {

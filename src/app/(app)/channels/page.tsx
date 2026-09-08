@@ -27,7 +27,7 @@ import {
   isMainFleetChannel,
   pageChannels,
 } from "./channelCardVisibility";
-import { groupChannelsByCategory } from "./channelCategories";
+import { channelCategoryLabelFor, groupChannelsByCategory } from "./channelCategories";
 
 type ChannelSchedule = {
   frequency?: string;
@@ -313,7 +313,7 @@ export default function ChannelsPage() {
                     <Link href={`/channels/${c.slug}`}>
                       <h2>{c.name}</h2>
                     </Link>
-                    <p>{c.identity?.niche ?? `Template ${c.template}`}</p>
+                    <p>{c.identity?.niche ?? channelCategoryLabelFor(c)}</p>
                   </div>
                   {/* Sibling of the title, never inside its link: a button nested in an
                       anchor is invalid markup and every click would navigate away.
@@ -563,7 +563,7 @@ function ChannelFleetInspector({
             radius={13}
           />
           <div>
-            <strong>{channel.identity?.niche ?? `Template ${channel.template}`}</strong>
+            <strong>{channel.identity?.niche ?? channelCategoryLabelFor(channel)}</strong>
             <span>{creating ? "YouTube setup running" : linked ? "YouTube destination ready" : youtubeConnectionIssue(connector, false)}</span>
           </div>
           <OwnerLockBadge

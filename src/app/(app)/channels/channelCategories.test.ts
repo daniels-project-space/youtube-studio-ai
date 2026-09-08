@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { channelCategoryFor, groupChannelsByCategory } from "./channelCategories";
+import {
+  channelCategoryFor,
+  channelCategoryLabelFor,
+  groupChannelsByCategory,
+} from "./channelCategories";
 
 const channels = [
   { id: "seaside", name: "Seaside Ghibli Lofi", identity: { niche: "Lo-Fi Music" } },
@@ -18,6 +22,9 @@ assert.equal(channelCategoryFor(channels[3]), "money");
 assert.equal(channelCategoryFor(channels[4]), "money", "investory must not match the incidental `story` suffix");
 assert.equal(channelCategoryFor(channels[5]), "learning");
 assert.equal(channelCategoryFor(channels[6]), "other");
+assert.equal(channelCategoryLabelFor(channels[0]), "Sound & atmosphere");
+assert.equal(channelCategoryLabelFor(channels[3]), "Money & systems");
+assert.equal(channelCategoryLabelFor(channels[6]), "Independent channels");
 assert.deepEqual(
   groupChannelsByCategory(channels).map((group) => [group.key, group.channels.map((channel) => channel.id)]),
   [["sound", ["seaside"]], ["mindset", ["stoic"]], ["stories", ["inked"]], ["learning", ["quiz"]], ["money", ["chalk", "investory"]], ["other", ["odd"]]],

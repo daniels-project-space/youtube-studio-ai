@@ -213,6 +213,7 @@ assert.match(channels, /<progress[\s\S]*setup readiness/);
 assert.match(channels, /const identityArtwork = c\.identity\?\.bannerKey/);
 assert.match(channels, /const previewArtwork = identityArtwork \?\? latestArtwork \?\? planArtwork/);
 assert.match(channels, /const previewLabel = identityArtwork\s*\? null/);
+assert.match(channels, /channelCategoryLabelFor\(c\)/);
 assert.match(channels, /className="channel-card-banner"/);
 assert.match(channels, /link\.status === "active"/);
 assert.match(channels, /link\.scopeHealth === "healthy"/);
