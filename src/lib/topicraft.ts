@@ -93,6 +93,8 @@ export interface CraftTopicsArgs {
   styleGrammar?: string;
   topicPool?: string[];
   bannedWords?: string[];
+  /** Exact recurring motifs that must appear collectively across the returned slate. */
+  requiredCallbacks?: string[];
   count: number;
   /** Everything already done or planned (raw topic strings). */
   avoid?: string[];
@@ -142,6 +144,95 @@ const STOP = new Set([
 
 export function normTopic(s: string): string {
   return s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().replace(/\s+/g, " ");
+}
+
+/** Keep callback contracts compact and deterministic before they reach a paid prompt. */
+export function normalizeRequiredCallbacks(values: readonly string[] | undefined): string[] {
+  const normalized = (values ?? [])
+    .map((value) => value.trim().replace(/\s+/g, " ").slice(0, 60))
+    .filter((value) => normTopic(value).length >= 4);
+  return normalized.filter((value, index) => (
+    normalized.findIndex((candidate) => normTopic(candidate) === normTopic(value)) === index
+  )).slice(0, 4);
+}
+
+function callbackText(bet: TopicBet): string {
+  return normTopic([
+    bet.topic,
+    bet.angle,
+    bet.provisionalTitle,
+    bet.thumbnailMoment,
+    bet.hookPromise,
+  ].join(" "));
+}
+
+function betCoversCallback(bet: TopicBet, callback: string): boolean {
+  const haystack = ` ${callbackText(bet)} `;
+  const needle = ` ${normTopic(callback)} `;
+  return needle.trim().length > 0 && haystack.includes(needle);
+}
+
+/**
+ * Choose a count-bounded portfolio that covers the most required callbacks.
+ * This runs after the model judge, so a callback present only in a rejected bet
+ * cannot make an otherwise off-brand slate look compliant.
+ */
+export function selectRequiredCallbackPortfolio(
+  candidates: readonly TopicBet[],
+  count: number,
+  callbackValues: readonly string[] | undefined,
+): { bets: TopicBet[]; bench: TopicBet[]; missing: string[] } {
+  const callbacks = normalizeRequiredCallbacks(callbackValues);
+  const limit = Math.max(0, Math.floor(count));
+  const coverageMask = (bet: TopicBet): number => callbacks.reduce(
+    (mask, callback, index) => mask | (betCoversCallback(bet, callback) ? (1 << index) : 0),
+    0,
+  );
+  const prefer = (candidate: number[], current: number[] | undefined): boolean => {
+    if (!current) return true;
+    if (candidate.length !== current.length) return candidate.length < current.length;
+    for (let index = 0; index < candidate.length; index++) {
+      if (candidate[index] !== current[index]) return candidate[index] < current[index];
+    }
+    return false;
+  };
+
+  // Four callbacks means at most 16 states. Unlike a greedy set-cover pass,
+  // this cannot miss a valid count-bounded combination because an early bet
+  // happened to cover the largest (but wrong) subset.
+  const plans = new Map<number, number[]>([[0, []]]);
+  candidates.forEach((candidate, candidateIndex) => {
+    const mask = coverageMask(candidate);
+    for (const [priorMask, priorIndices] of [...plans.entries()]) {
+      if (priorIndices.length >= limit) continue;
+      const nextMask = priorMask | mask;
+      if (nextMask === priorMask) continue;
+      const nextIndices = [...priorIndices, candidateIndex];
+      if (prefer(nextIndices, plans.get(nextMask))) plans.set(nextMask, nextIndices);
+    }
+  });
+  const fullMask = (1 << callbacks.length) - 1;
+  const coveredBits = (mask: number): number => mask.toString(2).replace(/0/g, "").length;
+  const bestMask = [...plans.keys()].sort((left, right) => {
+    const coverageDelta = coveredBits(right) - coveredBits(left);
+    if (coverageDelta) return coverageDelta;
+    const leftPlan = plans.get(left) ?? [];
+    const rightPlan = plans.get(right) ?? [];
+    if (leftPlan.length !== rightPlan.length) return leftPlan.length - rightPlan.length;
+    return leftPlan.join(",").localeCompare(rightPlan.join(","));
+  })[0] ?? 0;
+  const selectedIndices = plans.get(plans.has(fullMask) ? fullMask : bestMask) ?? [];
+  const selected = selectedIndices.map((index) => candidates[index]);
+
+  for (const candidate of candidates) {
+    if (selected.length >= limit) break;
+    if (!selected.includes(candidate)) selected.push(candidate);
+  }
+  return {
+    bets: selected,
+    bench: candidates.filter((candidate) => !selected.includes(candidate)),
+    missing: callbacks.filter((callback) => !selected.some((bet) => betCoversCallback(bet, callback))),
+  };
 }
 
 function tokenSet(s: string): Set<string> {
@@ -401,7 +492,8 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
 
   const avoidRaw = [...new Set((a.avoid ?? []).map((s) => s.trim()).filter(Boolean))];
   const bannedWords = (a.bannedWords ?? []).filter(Boolean);
-  const identityGiven = Boolean(a.topicPool?.length || a.persona);
+  const requiredCallbacks = normalizeRequiredCallbacks(a.requiredCallbacks);
+  const identityGiven = Boolean(a.topicPool?.length || a.persona || requiredCallbacks.length);
 
   const today = new Date();
   const dateAnchor =
@@ -457,6 +549,11 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
             (a.topicPool?.length
               ? `\n- the channel's PROVEN topic territory + TITLE VOICE (match this register — subject range AND phrasing): ${a.topicPool.slice(0, 12).join("; ")}` +
                 `\n- borrow only the ANGLE from outliers/competitors, NEVER their FORMAT: if the examples above are narrative/story titles, do NOT output listicle "N Secrets…", "…Revealed", "You won't believe" or number-led list titles`
+              : "") +
+            (requiredCallbacks.length
+              ? `\n- REQUIRED RECURRING CALLBACKS: ${requiredCallbacks.map((callback) => `"${callback}"`).join(", ")}. ` +
+                `Across the COMPLETE returned slate, use every quoted phrase verbatim at least once in a topic, angle, or hookPromise. ` +
+                `Do not stuff every callback into every bet or force them into titles.`
               : "") +
             (a.targetSeconds ? `
 - VIDEO LENGTH: ~${Math.round(a.targetSeconds / 60)} minute(s). Every bet MUST be fully answerable at that scope: one tight story/mechanism/question, NEVER a survey topic ("the complete history of X" is an automatic fail at this length).` : "") +
@@ -544,7 +641,10 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
             `Score each 1-10 on ALL FOUR: demand (does its CITED evidence really prove people want this NOW), ` +
               `freshness (vs the done list — punish near-repeats), fit (identity + voice archetype), ` +
               `packageability (do title + thumbnail moment + hook promise form ONE click-winning promise unit). ` +
-              `Be harsh — 7 means genuinely strong.`,
+            `Be harsh — 7 means genuinely strong.`,
+            requiredCallbacks.length
+              ? `Portfolio identity rule: callback-bearing bets must use these phrases naturally and exactly: ${requiredCallbacks.map((callback) => `"${callback}"`).join(", ")}.`
+              : "",
             `Return STRICT JSON {"rankings":[{"idx":n,"demand":n,"freshness":n,"fit":n,"packageability":n}]}.`,
           ].filter(Boolean).join("\n\n"),
           // Measured on a realistic 8-bet slate: 1500 failed the JSON contract
@@ -592,13 +692,15 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
         if (!won.some((w) => normTopic(w.topic) === normTopic(g.topic))) won.push(g);
       }
       if (won.length >= count) {
-        const bets = won.slice(0, count);
-        const bench = won.slice(count);
-        log(
-          `topicraft: ${bets.length} bets + ${bench.length} bench in ${((Date.now() - t0) / 1000).toFixed(1)}s — ` +
-            bets.map((b) => `[${b.betType}${b.scores ? ` ${b.scores.demand}/${b.scores.fit}` : ""}] "${b.topic.slice(0, 50)}"`).join(" · "),
-        );
-        return { bets, bench, evidence, ...(ungatedByJudgeFailure ? { ungated: true } : {}) };
+        const portfolio = selectRequiredCallbackPortfolio(won, count, requiredCallbacks);
+        if (portfolio.missing.length === 0) {
+          log(
+            `topicraft: ${portfolio.bets.length} bets + ${portfolio.bench.length} bench in ${((Date.now() - t0) / 1000).toFixed(1)}s — ` +
+              portfolio.bets.map((b) => `[${b.betType}${b.scores ? ` ${b.scores.demand}/${b.scores.fit}` : ""}] "${b.topic.slice(0, 50)}"`).join(" · "),
+          );
+          return { bets: portfolio.bets, bench: portfolio.bench, evidence, ...(ungatedByJudgeFailure ? { ungated: true } : {}) };
+        }
+        lastIssues.unshift(`required callbacks missing from judged portfolio: ${portfolio.missing.join(", ")}`);
       }
       if (gated.length === 0) lastIssues.push("no bet gated demand/freshness/fit/packageability ≥7");
       fixNote =
@@ -611,10 +713,14 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
     log(`topicraft: attempt ${attempt + 1} produced no lint survivors -> ${attempt === 0 ? "retrying with fix" : "FAILING LOUD"}`);
   }
   if (won.length > 0) {
+    const portfolio = selectRequiredCallbackPortfolio(won, Math.min(count, won.length), requiredCallbacks);
+    if (portfolio.missing.length > 0) {
+      throw new Error(`topicraft: required callbacks missing after both attempts (${portfolio.missing.join(", ")})`);
+    }
     log(`topicraft: SHORTFALL — ${won.length}/${count} bets gated after two slates (shipping what passed)`);
     return {
-      bets: won.slice(0, count),
-      bench: won.slice(count),
+      bets: portfolio.bets,
+      bench: portfolio.bench,
       evidence,
       ...(ungatedByJudgeFailure ? { ungated: true } : {}),
     };

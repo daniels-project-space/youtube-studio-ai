@@ -1,7 +1,14 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { lintBet, normTopic, type TopicBet, type TopicEvidence } from "@/lib/topicraft";
+import {
+  lintBet,
+  normTopic,
+  normalizeRequiredCallbacks,
+  selectRequiredCallbackPortfolio,
+  type TopicBet,
+  type TopicEvidence,
+} from "@/lib/topicraft";
 
 // P2-6 (GOLDEN_MODULE_AUDIT_2026-08.md): "topic-intel has no dedicated unit
 // test for topicraft.ts's citation/dedupe/judge logic — only
@@ -186,3 +193,44 @@ console.log("topicraftBetLint.test.ts: lintBet() citation + dedupe logic verifie
 }
 
 console.log("topicraftBetLint.test.ts: craftTopics demand/freshness/fit/packageability >=7 judge gate pinned against live source");
+
+/* ---------------- recurring channel identity callbacks ------------------- */
+
+{
+  assert.deepEqual(
+    normalizeRequiredCallbacks(["  Human   Cost ", "human cost", "Evidence in the margins", "", "A", "fourth motif", "fifth motif"]),
+    ["Human Cost", "Evidence in the margins", "fourth motif", "fifth motif"],
+    "callback contracts must be trimmed, deduplicated and bounded before prompting",
+  );
+
+  const generic = baseBet({ topic: "How a single bridge defect became a national disaster" });
+  const callbackRich = baseBet({
+    topic: "The engineer who warned the city before the collapse",
+    angle: "Evidence in the margins reveals the human cost of official silence",
+  });
+  const portfolio = selectRequiredCallbackPortfolio(
+    [generic, callbackRich],
+    1,
+    ["human cost", "evidence in the margins"],
+  );
+  assert.equal(portfolio.bets[0], callbackRich, "selection must retain the judged bet that covers the channel callbacks");
+  assert.deepEqual(portfolio.missing, [], "one naturally callback-rich bet can satisfy multiple identity motifs");
+  assert.equal(portfolio.bench[0], generic, "a higher-ranked generic bet moves to the bench when it would erase channel identity");
+
+  const uncovered = selectRequiredCallbackPortfolio([generic], 1, ["human cost"]);
+  assert.deepEqual(uncovered.missing, ["human cost"], "missing callbacks must stay visible so craftTopics retries or fails closed");
+
+  const callbacks = ["alpha mark", "bravo mark", "charlie mark", "delta mark"];
+  const misleading = baseBet({ topic: "A distinct first bridge investigation", angle: "alpha mark and bravo mark" });
+  const leftHalf = baseBet({ topic: "A distinct second bridge investigation", angle: "alpha mark and charlie mark" });
+  const rightHalf = baseBet({ topic: "A distinct third bridge investigation", angle: "bravo mark and delta mark" });
+  const exactCover = selectRequiredCallbackPortfolio([misleading, leftHalf, rightHalf], 2, callbacks);
+  assert.deepEqual(
+    exactCover.bets,
+    [leftHalf, rightHalf],
+    "bounded selection must find an exact callback cover instead of getting trapped by the first greedy overlap",
+  );
+  assert.deepEqual(exactCover.missing, []);
+}
+
+console.log("topicraftBetLint.test.ts: required channel callbacks are selected and fail closed deterministically");

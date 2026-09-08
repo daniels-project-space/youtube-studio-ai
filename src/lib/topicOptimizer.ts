@@ -28,17 +28,7 @@ export interface OptimizeTopicsOpts {
     persona?: string;
     topicPool?: string[];
     bannedWords?: string[];
-    /**
-     * UNIMPLEMENTED END TO END — kept only because it is a persisted schema
-     * field. `bannedWords` is honoured here (topicraft: "NEVER use: ..."); this
-     * is its positive twin, the recurring phrases a channel must return to, and
-     * nothing anywhere ever puts a string in it. Channel Inception initialises
-     * it to `[]`, a re-inception carries `previous.requiredCallbacks ?? []`
-     * forward, planWeekAhead passes it here, and no consumer reads it. Wiring
-     * the consumer alone would change nothing — it would still be an empty
-     * array — so this stays declared and unread ON PURPOSE, and says so.
-     * Implementing it means writing the producer first.
-     */
+    /** Exact recurring identity motifs that the completed slate must cover. */
     requiredCallbacks?: string[];
     /** Per-channel clickbait dial 0-3; absent falls back to the voice default. */
     clickbaitLevel?: number;
@@ -131,6 +121,7 @@ export async function optimizeTopics(opts: OptimizeTopicsOpts): Promise<Optimize
     persona: opts.identity.persona,
     topicPool: opts.identity.topicPool,
     bannedWords: opts.identity.bannedWords,
+    requiredCallbacks: opts.identity.requiredCallbacks,
     count: opts.count,
     avoid: [
       ...(done as { key: string }[]).map((d) => d.key),

@@ -2646,6 +2646,7 @@ export async function executeDesignChannel(
         concept.persona,
         positioningProgramBrief.subcategory ?? "",
         ...concept.topicPool,
+        ...concept.requiredCallbacks,
       ].join(" ").toLowerCase();
       const bannedWords = (concept.bannedWords ?? []).filter((word) => {
         const clashes = Boolean(word) && selfText.includes(word.toLowerCase());
@@ -2661,7 +2662,9 @@ export async function executeDesignChannel(
         palette: previous.palette.length ? previous.palette : concept.palette,
         topicPool: concept.topicPool,
         bannedWords,
-        requiredCallbacks: previous.requiredCallbacks ?? [],
+        requiredCallbacks: previous.requiredCallbacks?.length
+          ? previous.requiredCallbacks
+          : concept.requiredCallbacks,
         cadence: previous.cadence || concept.cadence,
         nicheKey: positioningProgramBrief.nicheKey,
         niche: positioningNiche?.label ?? positioningProgramBrief.nicheKey,

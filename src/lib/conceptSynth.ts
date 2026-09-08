@@ -1,7 +1,8 @@
 /**
  * Channel-concept synthesis. Turns a one-line seed (+ optional niche research)
- * into a complete, normalized channel package via Claude. Output is validated
- * and defaulted so the builder never persists a malformed channel.
+ * into a complete, normalized channel package through the pinned creative-text
+ * route. Output is validated and defaulted so the builder never persists a
+ * malformed channel.
  */
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { ARCHETYPE_KEYS, getArchetype } from "@/engine/archetypes";
@@ -14,6 +15,8 @@ export interface ChannelConcept {
   palette: string[];
   topicPool: string[];
   bannedWords: string[];
+  /** Short, exact identity phrases that the planned slate must revisit. */
+  requiredCallbacks: string[];
   cadence: string;
   archetypeKey: string;
   voiceId?: string;
@@ -24,9 +27,15 @@ type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 const HEX = /^#[0-9a-fA-F]{6}$/;
 const CADENCES = new Set(["daily", "weekly", "biweekly", "monthly"]);
 
-function asStringArray(v: unknown, max: number): string[] {
+function asStringArray(v: unknown, max: number, maxChars = 160): string[] {
   if (!Array.isArray(v)) return [];
-  return v.filter((x): x is string => typeof x === "string" && x.trim().length > 0).slice(0, max);
+  const values = v
+    .filter((x): x is string => typeof x === "string")
+    .map((x) => x.trim().replace(/\s+/g, " ").slice(0, maxChars))
+    .filter(Boolean);
+  return values.filter((value, index) => (
+    values.findIndex((candidate) => candidate.toLowerCase() === value.toLowerCase()) === index
+  )).slice(0, max);
 }
 
 /** Deterministic fallback so the builder works even without an LLM key. */
@@ -40,6 +49,7 @@ function fallbackConcept(seed: string): ChannelConcept {
     palette: ["#0a0a1a", "#2ee6ff", "#ff2e88", "#ffb86c"],
     topicPool: [seed.trim()],
     bannedWords: [],
+    requiredCallbacks: [],
     cadence: "weekly",
     archetypeKey: "lofi-ambient",
   };
@@ -51,7 +61,7 @@ export async function synthChannelConcept(
   log: Logger = () => {},
 ): Promise<ChannelConcept> {
   if (!hasAnthropicKey()) {
-    log("conceptSynth: no Anthropic key — using deterministic fallback");
+    log("conceptSynth: no OpenRouter key — using deterministic fallback");
     return fallbackConcept(seed);
   }
 
@@ -72,6 +82,7 @@ export async function synthChannelConcept(
   "palette": string[] (3-5 hex colors like "#0a0a1a"),
   "topicPool": string[] (6-10 concrete video topic ideas),
   "bannedWords": string[] (0-6 words to avoid),
+  "requiredCallbacks": string[] (2-4 exact, distinctive 2-5 word motifs or promise phrases this channel can naturally revisit across a weekly slate; no generic calls to action),
   "cadence": one of "daily"|"weekly"|"biweekly"|"monthly",
   "archetypeKey": one of the archetypes above
 }`,
@@ -104,6 +115,7 @@ export async function synthChannelConcept(
     palette: palette.length >= 2 ? palette : fb.palette,
     topicPool: asStringArray(raw.topicPool, 12).length ? asStringArray(raw.topicPool, 12) : fb.topicPool,
     bannedWords: asStringArray(raw.bannedWords, 8),
+    requiredCallbacks: asStringArray(raw.requiredCallbacks, 4, 60),
     cadence,
     archetypeKey,
     voiceId: getArchetype(archetypeKey).defaultVoiceId,

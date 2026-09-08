@@ -241,6 +241,11 @@ assert.match(coordinator, /voiceColdOpenEvidence/);
 assert.doesNotMatch(coordinator, /\{ castVoice, gateColdOpen \}/,
   "channel inception must not route voice casting through the retired Gemini audio judge");
 assert.match(coordinator, /positioningIdentityProjection/);
+assert.match(
+  coordinator,
+  /requiredCallbacks:\s*previous\.requiredCallbacks\?\.length[\s\S]*?concept\.requiredCallbacks/,
+  "positioning must persist synthesized callbacks while preserving an owner's established callback contract",
+);
 assert.match(coordinator, /seoIdentityProjection/);
 assert.match(coordinator, /channelArtIdentityFromSource\(/,
   "channel artwork must use the shared identity derivation instead of duplicating a generic niche prompt");
