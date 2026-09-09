@@ -42,6 +42,9 @@ function install(preferred: string): void {
             idx,
             clickScore: line.includes(preferred) ? 10 : 7,
             direct: 9,
+            identityFit: 9,
+            grounding: "supported",
+            reason: "The supplied Doss source supports this promise",
           }));
           const winner = rankings.reduce((a, b) => (b.clickScore > a.clickScore ? b : a), rankings[0]);
           return { rankings, winner: winner.idx, runnerUp: rankings.find((r) => r.idx !== winner.idx)?.idx ?? 0 };
@@ -61,6 +64,8 @@ async function craft(warmStartTitle: string) {
     niche: "History",
     scriptExcerpt: "Desmond Doss saved 75 men at Hacksaw Ridge without touching a weapon; the army called him a coward.",
     warmStartTitle,
+    suggestions: [],
+    competitorTitles: [],
     log: () => {},
   });
 }

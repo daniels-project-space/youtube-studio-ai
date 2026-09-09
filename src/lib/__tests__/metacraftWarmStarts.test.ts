@@ -24,8 +24,6 @@
  * 0.8. Only the outright win is causal.
  */
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
 
 import { warmStartCandidates } from "@/lib/metacraft";
 
@@ -83,26 +81,6 @@ for (const blank of ["", "   ", "\n\t"]) {
   );
 }
 
-/* --------------------- it must still only COMPETE ------------------------- */
-
-// The candidates are lint-gated and then judge-ranked. If a future edit ever
-// let a warm start bypass that, the old `plannedTitle || craftedTitle` failure
-// returns — a title written before the script beating one written after it.
-const source = readFileSync(join(process.cwd(), "src/lib/metacraft.ts"), "utf8")
-  .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
-assert.match(
-  source,
-  /const candidates = \[\s*\n\s*\.\.\.warmStartCandidates\(/,
-  "warm starts must enter the SAME candidate array as the generated titles",
-);
-assert.match(
-  source,
-  /const survivors = candidates\.filter\(\(c\) => c\.lint\.pass\)/,
-  "every candidate, warm starts included, must pass the same lint",
-);
-assert.ok(
-  !/\ba\.warmStartTitle\s*\|\|/.test(source) && !/\ba\.betTitle\s*\|\|/.test(source),
-  "no warm start may short-circuit the crafted result with ||",
-);
-
-console.log("METACRAFT WARM STARTS PASS — pre-written titles compete, labelled honestly, never override");
+// Actual shared-pool lint, judge admission and postselection immutability are
+// exercised in titleDecision.test.ts and metadataTitleRecovery.test.ts.
+console.log("METACRAFT WARM STARTS PASS");
