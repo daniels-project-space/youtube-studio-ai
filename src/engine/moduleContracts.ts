@@ -503,7 +503,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   metadata: contract(["package.metadata"], {
     optionalConsumes: [
       "bannedWords", "chaptersText", "videoDurationSec", "attributions", "channelName", "niche", "persona",
-      "nicheIntel", "seoDatabank", "competitors", "narrationText", "script", "styleDNA", "topicBet", "plannedTitle",
+      "nicheIntel", "competitors", "narrationText", "script", "styleDNA", "topicBet", "plannedTitle",
       "serializedProgramEpisodeContext",
       // The channel's title register, frozen into the seed store at run start.
       "clickbaitLevel",

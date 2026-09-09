@@ -12,6 +12,7 @@ import {
   OpenRouterGenerationOutcomeUnknownError,
   openRouterJson,
   openRouterModel,
+  type OpenRouterJsonSchema,
 } from "@/lib/openRouter";
 
 /** @deprecated Kept only for source compatibility; errors are OpenRouter errors. */
@@ -42,6 +43,8 @@ export async function claudeJson<T = unknown>(args: {
   log?: (message: string) => void;
   /** An outer, schema-aware caller owns response reuse for this request. */
   memoize?: boolean;
+  /** Optional provider-enforced schema, also bound into this call's memo identity. */
+  jsonSchema?: OpenRouterJsonSchema;
 }): Promise<T> {
   const tier = args.tier ?? "flash";
   const maxTokens = Math.max(128, Math.min(tier === "pro" ? 16_000 : 8_000, Math.floor(args.maxTokens ?? 1_200)));
@@ -49,12 +52,16 @@ export async function claudeJson<T = unknown>(args: {
   if (!hasOpenRouterKey()) {
     throw new Error("claudeJson: OPENROUTER_API_KEY is required; direct Anthropic routing is retired");
   }
+  // The memo creator runs in a later microtask. Snapshot the contract now so
+  // caller mutation cannot separate its cache identity from the HTTP schema.
+  const jsonSchema = args.jsonSchema === undefined ? undefined : structuredClone(args.jsonSchema);
   const requestKey = modelRequestCacheKey("openrouter", model, {
     prompt: args.prompt,
     system: args.system?.trim() || undefined,
     maxTokens,
     temperature: args.temperature,
     responseFormat: "json",
+    ...(jsonSchema === undefined ? {} : { jsonSchema }),
   });
 
   return getOrCreateModelResponse(requestKey, {
@@ -70,6 +77,7 @@ export async function claudeJson<T = unknown>(args: {
       maxTokens,
       temperature: args.temperature,
       log: args.log,
+      ...(jsonSchema === undefined ? {} : { jsonSchema }),
     });
   }, { memoize: args.memoize });
 }

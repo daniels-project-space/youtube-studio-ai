@@ -73,6 +73,16 @@ type OpenRouterMessage = {
   content: unknown;
 };
 
+export type JsonSchemaValue = string | number | boolean | null |
+  readonly JsonSchemaValue[] | { readonly [key: string]: JsonSchemaValue };
+
+/** Opt-in structured output contract; schema-aware callers still validate the response locally. */
+export interface OpenRouterJsonSchema {
+  readonly name: string;
+  readonly strict: true;
+  readonly schema: Readonly<Record<string, JsonSchemaValue>>;
+}
+
 export type OpenRouterProviderPreferences = {
   only: string[];
   allow_fallbacks: boolean;
@@ -171,6 +181,7 @@ export async function openRouterChat(args: {
   maxTokens: number;
   temperature?: number;
   json?: boolean;
+  jsonSchema?: OpenRouterJsonSchema;
   kind?: ModelCallKind;
   log?: (message: string) => void;
 }): Promise<string> {
@@ -179,6 +190,10 @@ export async function openRouterChat(args: {
   if (!key) throw new Error("OpenRouter requires OPENROUTER_API_KEY");
   const provider = PROVIDERS[args.model];
   if (!provider) throw new Error(`OpenRouter model is not an approved pinned route: ${args.model}`);
+  if (args.jsonSchema !== undefined && (
+    !args.jsonSchema || typeof args.jsonSchema.name !== "string" || !/^[A-Za-z0-9_-]{1,64}$/.test(args.jsonSchema.name) ||
+    args.jsonSchema.strict !== true || !args.jsonSchema.schema || typeof args.jsonSchema.schema !== "object" || Array.isArray(args.jsonSchema.schema)
+  )) throw new Error("OpenRouter requires a named strict JSON schema object");
   const controller = new AbortController();
   const requestDeadline = setTimeout(() => controller.abort(), OPENROUTER_REQUEST_TIMEOUT_MS);
   let response: Response;
@@ -191,8 +206,10 @@ export async function openRouterChat(args: {
         messages: args.messages,
         max_tokens: args.maxTokens,
         ...(args.temperature === undefined ? {} : { temperature: args.temperature }),
-        ...(args.json ? { response_format: { type: "json_object" } } : {}),
-        provider,
+        ...(args.jsonSchema !== undefined
+          ? { response_format: { type: "json_schema", json_schema: args.jsonSchema } }
+          : args.json ? { response_format: { type: "json_object" } } : {}),
+        provider: args.jsonSchema !== undefined ? { ...provider, require_parameters: true } : provider,
       }),
       signal: controller.signal,
     });
@@ -288,7 +305,7 @@ export async function openRouterChat(args: {
       { status: response.status },
     );
   }
-  if (args.json) {
+  if (args.json || args.jsonSchema !== undefined) {
     try {
       parseJson(text);
     } catch (error) {
@@ -310,6 +327,7 @@ export async function openRouterJson<T>(args: {
   maxTokens: number;
   temperature?: number;
   log?: (message: string) => void;
+  jsonSchema?: OpenRouterJsonSchema;
 }): Promise<T> {
   const model = args.model?.trim() || openRouterModel(args.tier === "pro" ? "creative" : "intelligence");
   return parseJson<T>(await openRouterChat({
@@ -321,6 +339,7 @@ export async function openRouterJson<T>(args: {
     maxTokens: args.maxTokens,
     temperature: args.temperature,
     json: true,
+    ...(args.jsonSchema === undefined ? {} : { jsonSchema: args.jsonSchema }),
     log: args.log,
   }));
 }
