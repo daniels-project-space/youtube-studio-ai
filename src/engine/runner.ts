@@ -30,7 +30,7 @@ import {
   executionRetryDelayMs,
   type ExecutionRetryScope,
 } from "./executionErrors";
-import { configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
+import { assertExecutableManifest, configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
 import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
@@ -436,6 +436,19 @@ export async function runPipeline(
   resolved: ResolvedPipeline,
   opts: RunPipelineOptions,
 ): Promise<RunResult> {
+  // Recheck explicit code-owned opt-ins before persistence reads/writes, including
+  // callers holding a resolved manifest that changed after registration. Omitted
+  // policy leaves the established cached/paid resume path untouched.
+  for (const [index, manifest] of resolved.manifests.entries()) {
+    const block = resolved.blocks[index];
+    if (block?.resumePolicy !== undefined || manifest.block.resumePolicy !== undefined || manifest.retryAndResume.resumePolicy !== undefined) {
+      assertExecutableManifest(manifest);
+      if (manifest.block !== block) throw new Error(`block ${manifest.id} resume policy lost its code-owned executable binding`);
+      if (opts.remoteBlocks?.has(manifest.id) && opts.runRemoteBlock) {
+        throw new Error(`block ${manifest.id} resume policy requires local deterministic execution`);
+      }
+    }
+  }
   const log = opts.log ?? (() => {});
   const store: Record<string, unknown> = { ...(opts.seedStore ?? {}) };
   const artifactRefs: Record<string, ArtifactRef> = {};
@@ -819,7 +832,10 @@ export async function runPipeline(
     // completed paid work always requires explicit reconciliation/supersession.
     const cached = completedMap[block.id];
     let cachedFallbackToLocalRun = false;
-    if (cached && !opts.rehydrate) {
+    if (cached && manifest.retryAndResume.resumePolicy === "recompute_unpaid_deterministic") {
+      log(`block ${block.id}: code-owned resume policy — recomputing from current inputs`);
+      cachedFallbackToLocalRun = true;
+    } else if (cached && !opts.rehydrate) {
       if (manifest.costAndLatency.paid) {
         return await refusePaidCachedReplay("has no configured artifact rehydrator");
       }

@@ -32,6 +32,7 @@ import { ShortRetentionManifestSchema, ShortSceneQaSchema } from "./documentaryC
 import { VisualMatterManifestSchema, VisualMatterReferenceAssetSchema } from "./visualMatter";
 import { EpisodeGraphSchema, SceneManifestSchema } from "./episodeGraph";
 import { LearningContractSchema } from "./learningContract";
+import { WorkedExamplePreparationSchema, WorkedExampleRequestSchema } from "./workedExample";
 import {
   SyntheticScenarioContractSchema,
   SyntheticScenarioDisclosureSchema,
@@ -168,6 +169,8 @@ const qaReport = z.object({
 });
 
 const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; persist?: ArtifactContract["persist"] }> = {
+  workedExampleRequest: { type: "WorkedExampleRequest", schema: WorkedExampleRequestSchema },
+  workedExamplePreparation: { type: "WorkedExamplePreparation", schema: WorkedExamplePreparationSchema },
   topic: { type: "VideoIntent", schema: nonEmpty },
   title: { type: "PublicationTitle", schema: nonEmpty.max(100) },
   description: { type: "PublicationDescription", schema: z.string() },

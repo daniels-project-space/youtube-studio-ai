@@ -1,8 +1,9 @@
 # Structural efficiency and new capability wave
 
-Owner additions: 9 September 2026. Status: assessed and queued; the comic-page
-replacement and new capabilities are **not implemented or qualified** by this
-document. This extends goal items 152–178 while preserving the earlier 151.
+Owner additions: 9 September 2026. Status: active implementation; held portrait
+and arithmetic foundations have linked evidence below. The comic-page
+replacement and complete new-channel capabilities remain **unqualified**.
+This extends goal items 152–178 while preserving the earlier 151.
 
 ## Operating decision
 
@@ -67,6 +68,11 @@ Before paid tests, prove real request transport, namespace isolation, geometry,
 resolution budgets, reference/config cache invalidation and partial-retry
 behavior through the actual adapters. Unsupported reference conditioning must
 fail before spending, not silently degrade to text-only generation.
+
+The [held reference-boundary guard](NOVITA_REFERENCE_IMAGE_BOUNDARY_REVIEW_2026-09.md)
+now proves and enforces that refusal at the actual Novita image factory. Its
+text-only request/profile bytes remain unchanged. This closes silent loss at
+that invocation boundary, not the missing reference-conditioned provider path.
 
 Then compare complete actual videos: every panel must be drawn, characters
 recognizable across pages, speech readable and synchronized, unrevealed panels
@@ -179,6 +185,39 @@ That first [held portrait foundation](SCENE_COMPILER_PORTRAIT_FOUNDATION_REVIEW_
 now has actual native render/frame evidence and an independently reproduced
 transition repair. It remains a layout foundation, with topic-bound semantics
 and complete-channel integration still open.
+
+**Semantic connector finding:** a separate real Story Spine → Episode Graph →
+Scene Manifest audit exercised all ten current beat kinds, with and without a
+character. Seven kinds (`opening`, `claim`, `observation`, `problem`,
+`experiment`, `choice`, `result`) fall through the renderer's legacy selector.
+The actual `episode_graph.run` caller carries “Mira holds a seed.” and its
+character but selects a generic diagram. Do not fix this by mapping `result`
+to seeded chart values or screen-related prose to a placeholder interface.
+The next connector needs an explicit supported visual action/state, source
+binding and separate concise display copy; unsupported semantics must remain
+unresolved. Preserve historical manifests while qualifying new presentation
+versions independently. Portrait pixel/layout proof does not close this gap.
+Rerunnable current-state audit:
+`/tmp/ysa-worked-example-independent-OUkI5V/scene-semantic-bridge-audit.ts`.
+Root independently reproduced its20-case matrix, six invalid literal-kind
+refusals and actual runtime counterexample at
+`/tmp/ysa-scene-semantic-bridge-root.log` (exit0, zero network calls).
+
+**Arithmetic staging boundary:** the [held preparation implementation](WORKED_EXAMPLE_PREPARATION_REVIEW_2026-09.md)
+uses exact, bounded integer derivations with independently replayed steps and
+canonical English display/speech. It is registered on distinct typed ports,
+with actual-runner tests and independent root reruns. The existing compiler
+deliberately refuses its insertion without a catalog binding. Next, carry the
+verified projection through an explicit script adapter, independent editorial
+QA, actual TTS sentence timings and a content-bound math renderer. No arithmetic
+verifier may mark its own script approved or overwrite another module's work.
+Independent review also found stale/foreign preparation restored on resume.
+The held fix explicitly recomputes this small unpaid deterministic block from
+current inputs, while ordinary paid/unpaid restoration stays unchanged; root's
+actual-runner regression passes. The separate script-critic response repair
+rejects missing verdicts instead of approving them. Both are integration work
+required before exposing the new learning capability, not new per-video paid
+judges.
 
 **Reserve candidate:** verified software-demonstration capture could reuse
 browser automation and assembly for tutorials. The existing `screen` graphic

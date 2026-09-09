@@ -91,6 +91,7 @@ import {
 import {
   assertScriptApprovedForNarration,
   assertScriptCritiqueAccepted,
+  parseScriptCritique,
 } from "@/engine/scriptQualityGate";
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
 import { boundedInteger, isUsableNumber } from "@/engine/boundedNumber";
@@ -788,7 +789,7 @@ export const scriptGen: Block = {
       critique: async (draft, iter) => {
         if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
         try {
-          const crit = await claudeJson<{ pass?: boolean; issues?: string[] }>({
+          const crit = parseScriptCritique(await claudeJson<unknown>({
             prompt:
               `Critique this YouTube narration draft for quality and on-brand voice` +
               (req.persona ? ` (channel persona: ${req.persona})` : "") +
@@ -814,9 +815,9 @@ export const scriptGen: Block = {
             // trailing delimiter after the JSON block.
             maxTokens: 2500,
             temperature: 0.3,
-          });
-          const issues = (Array.isArray(crit.issues) ? crit.issues : []).filter(Boolean).slice(0, 6);
-          const rejected = crit.pass === false;
+          }));
+          const issues = crit.issues;
+          const rejected = !crit.pass;
           const rejectionIssues = issues.length
             ? issues
             : ["independent narrative critic rejected the draft without usable remediation"];
@@ -1120,7 +1121,7 @@ export const qaScript: Block = {
       // The hookcraft contract: the cold open's promise + the midpoint re-hook
       // are CRAFT_RULES law — verify them here instead of hoping.
       const hookLoop = (ctx.store["script"] as { hookLoop?: string } | undefined)?.hookLoop ?? "";
-      const res = await claudeJson<{ pass?: boolean; issues?: string[] }>({
+      const res = parseScriptCritique(await claudeJson<unknown>({
         prompt:
           `Critique this YouTube narration for quality and on-brand voice` +
           (persona ? ` (channel persona: ${persona})` : "") +
@@ -1160,9 +1161,8 @@ export const qaScript: Block = {
         // trailing delimiter after the JSON block.
         maxTokens: 2500,
         temperature: 0.3,
-      });
-      const issues = Array.isArray(res.issues) ? res.issues : [];
-      const pass = res.pass !== false;
+      }));
+      const { issues, pass } = res;
       ctx.log(`qa_script: pass=${pass}`, { issues: issues.slice(0, 5) });
       // HARD GATE: a confirmed craft-quality failure must not proceed into the
       // paid narration/visual stages that follow — same pattern as the sibling
