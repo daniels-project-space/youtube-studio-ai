@@ -13,7 +13,18 @@ const library = readFileSync(join(root, "src/app/(app)/library/page.tsx"), "utf8
 assert.match(videosQuery, /normalizeReleaseEvidenceStatus\(run\.releaseEvidenceStatus\)/);
 assert.match(videosQuery, /recordedReleaseEvidenceMasterKey/);
 assert.match(videosQuery, /sealedMasterKey/);
-assert.match(videosQuery, /videoKey:\s*sealedMasterKey\s*\?\?/);
+// Both single-run views must use the same retained-media boundary. Exact
+// sealed-key behavior (including a missing asset row and corrupt certificate)
+// is exercised through BOTH real viewer handlers in runCurrentThumbnail.test.ts,
+// rather than depending on whether the key is an inline property or a variable.
+for (const queryName of ["getRunMediaPresentation", "getVideoDetail"]) {
+  const declaration = `export const ${queryName} = query(`;
+  const start = videosQuery.indexOf(declaration);
+  assert.ok(start >= 0, `${queryName} remains an exposed query`);
+  const queryBody = videosQuery.slice(start).split("\nexport const ")[0]!;
+  assert.match(queryBody, /await retainedRunMedia\(ctx, run\)/,
+    `${queryName} must share retained master and current-thumbnail selection`);
+}
 assert.match(videoTypes, /releaseEvidenceStatus:\s*ReleaseEvidenceStatus/);
 assert.match(card, /ReleaseEvidenceBadge/);
 assert.match(card, /Master evidence/);
