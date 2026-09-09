@@ -865,6 +865,17 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     qualityRequired: true,
   }),
 
+  // Held typed arithmetic preparation, not script approval or catalog qualification.
+  worked_example_prepare: {
+    ...contract(["learning.integer_preparation"], {
+      requiredConsumes: ["workedExampleRequest"],
+      providerProfiles: [local],
+      maxCostUsd: 0,
+      qualityRequired: true,
+    }),
+    certificationEvidence: "workedExample core and registered-caller contract tests; narration/render handoff pending",
+  },
+
   // An operator-supplied, child-editor-signed episode intent. This happens
   // before generic story planning, but emits only a private-review handoff.
   curriculum_episode_seed: contract([

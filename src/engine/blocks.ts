@@ -29,6 +29,7 @@ import { STUDIO_ASSET_LIBRARY_BLOCKS } from "@/trigger/blocks/studioAssetLibrary
 import { STUDIO_REUSABLE_MEDIA_BLOCKS } from "@/trigger/blocks/studioReusableMediaBlocks";
 import { episodeGraphBlocks } from "@/trigger/blocks/episodeGraphBlocks";
 import { learningContractBlocks } from "@/trigger/blocks/learningContractBlocks";
+import { workedExampleBlocks } from "@/trigger/blocks/workedExampleBlocks";
 import { curriculumEpisodeSeedBlocks } from "@/trigger/blocks/curriculumEpisodeSeedBlocks";
 import { childrenShowBibleBlocks } from "@/trigger/blocks/childrenShowBibleBlocks";
 import { childContentSafetyBlocks } from "@/trigger/blocks/childrenSafetyBlocks";
@@ -75,6 +76,8 @@ export function registerAllBlocks(): void {
   for (const b of narrativeSeriesVisualControlsBlocks) register(b);
   // Renderer-neutral learning objective / retrieval-practice handoff.
   for (const b of learningContractBlocks) register(b);
+  // No archetype selects this held preparation-only port; no narration approval.
+  for (const b of workedExampleBlocks) register(b);
   // Pre-Story-Spine, operator-authored curriculum intent for supervised
   // children episodes. It emits a private child-editor receipt only.
   for (const b of curriculumEpisodeSeedBlocks) register(b);

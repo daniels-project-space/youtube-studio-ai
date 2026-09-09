@@ -10,8 +10,8 @@ subsequent graph refresh, independent review and any release.
 
 The main agent subsequently reviewed the complete runtime/test diff and reran
 the real-caller regression independently: exit 0, evidence at
-`/tmp/ysa-whiteboard-cache-main-review.log`. This is still held source, not a
-production release or a whole-video qualification.
+`/tmp/ysa-whiteboard-cache-main-review.log`. The isolated release and exact
+deployment status are recorded below; this is not whole-video qualification.
 
 Previously, changing only an approved storyboard's title deleted every indexed
 art file and cached narration/alignment, but retained the art receipts. The next
@@ -74,6 +74,33 @@ checks, narration bounds and Golden gate. Only external process/provider
 boundaries are fixtures. It reaches the narration boundary or, with retained
 audio/alignment fixtures, the final Python-render boundary. It does not claim
 new paid-image quality, completed-footage qualification or deployed success.
+
+## Isolated release qualification
+
+Revision `c2aed58e8eced4af4cbfb9b4d30a441ae1d0e2dc`, parent `01c35ac`,
+contains only the two source/test files and this initial review document.
+The frozen checkout is `/tmp/ysa-whiteboard-release-hvQLzL/repo`.
+
+- All641 direct production-readiness tests pass, including the existing actual
+  full-panel Whiteboard render test: `/tmp/ysa-whiteboard-release-direct-tests.log`.
+- Non-incremental typecheck, complete production build, lint (zero errors,
+  33 existing warnings) and all unchanged audit baselines pass. Logs use the
+  `/tmp/ysa-whiteboard-release-` prefix and `typecheck`, `build`, `lint`, `audit`.
+- Actual local assembly completes at31.021995 seconds with no warnings;
+  `/tmp/ysa-whiteboard-release-assembly.log`. No provider credentials are used.
+- Non-force main push succeeded. Vercel automatically deployed the exact Git
+  revision as `dpl_FcE1UidPzKaQi6GcTkgZLmhnvaVk`, READY, production alias
+  `youtube-studio-ai.vercel.app` assigned. Canonical `/api/health` matches.
+- Real production media proof passes desktop, phone and200% text on that
+  exact revision, before and after checks: three actual audio/video controls,
+  caption HTTP200, one consolidated query, no overflow/runtime errors.
+  Results/screenshots: `/tmp/ysa-run-media-layout-5pXlto/`; root inspected decoded
+  master frames and mobile layout. Retained legacy media is not quality-approved.
+
+Cloud CI `34405053924` is still running as of this update. Convex/Trigger worker
+deployment is **not yet verified**; the website revision alone does not prove
+that the rendering worker has this correction. Production checks were read-only;
+no paid Whiteboard job, publishing or storage mutation was triggered.
 
 ## Still open
 

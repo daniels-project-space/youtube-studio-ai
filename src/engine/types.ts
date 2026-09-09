@@ -138,6 +138,13 @@ export interface Block {
   produces: string[];
   /** Paid blocks are preflighted (budget/key/credits) + idempotent. */
   paid?: boolean;
+  /** Code-owned opt-in for audited, unpaid, side-effect-free local computation.
+   * Re-enter current-input admission on resume instead of trusting cached output.
+   * Never supplied by pipeline params, artifacts or paid checkpoint hooks. */
+  resumePolicy?: "recompute_unpaid_deterministic";
+  /** Code-owned read-only checkpoint validation, consulted only for sequential
+   * inline PAID execution. Config flags/serialized proofs cannot grant credit. */
+  inspectPaidInlineResume?: (ctx: InlineCheckpointContext) => Promise<InlineCheckpointInspection>;
   /**
    * Optional bounded projection for the durable run-stage row. The runner
    * retains the full patch in memory for immediate downstream blocks and
