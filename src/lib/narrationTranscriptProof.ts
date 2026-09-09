@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { z } from "zod";
 
 import { canonicalJson } from "@/lib/canonicalJson";
+import { WorkedExampleSpeechReportSchema, assertWorkedExampleSpeechAuditBinding } from "@/engine/workedExampleSpeech";
 
 export const NARRATION_TRANSCRIPT_PROOF_VERSION = "narration-transcript-proof/v1";
 export const NARRATION_TRANSCRIPT_PROOF_SCRIPT = "scripts/narration_transcript_proof.py";
@@ -134,6 +135,8 @@ export const FinalMasterNarrationTranscriptAuditSchema = z.object({
   }).strict(),
   sourceTranscript: NarrationTranscriptProofSchema,
   finalMasterTranscript: NarrationTranscriptProofSchema,
+  // Optional held arithmetic extension; absent fields preserve ordinary canonical audit bytes.
+  workedExampleCriticalSpeech: WorkedExampleSpeechReportSchema.optional(),
 }).strict();
 
 export type FinalMasterNarrationTranscriptAudit = z.infer<
@@ -401,6 +404,9 @@ export function assertFinalMasterNarrationTranscriptAudit(
   }
   if (audit.narration.startSec + audit.narration.durationSec > audit.finalMaster.durationSec + 0.75) {
     throw new Error("final-master narration transcript audit extends beyond the released master");
+  }
+  if (audit.workedExampleCriticalSpeech !== undefined) {
+    assertWorkedExampleSpeechAuditBinding(audit.workedExampleCriticalSpeech, sourceTranscript, finalMasterTranscript);
   }
   return audit;
 }

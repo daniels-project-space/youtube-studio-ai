@@ -15,9 +15,11 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { ExecutionError, classifyExecutionError } from "@/engine/executionErrors";
 import { COST_PATCH_KEY, type Block, type BlockPatch, type StageContext, type CachedOutputValidationContext } from "@/engine/types";
 import { currentWorkedExampleScript, createWorkedExampleAudioBinding, assertWorkedExampleTtsBindingInputs, assertWorkedExampleAudioMetadata, assertWorkedExampleAudioBytes } from "@/engine/workedExampleAudioBinding";
+import { prepareWorkedExampleSpeechAdmission, assertWorkedExampleSpeechProof, createWorkedExampleSpeechReport,
+  assertWorkedExampleSpeechReportCurrent, assertWorkedExampleSpeechFile, workedExampleSpeechRefusal,
+  workedExampleSpeechFailureEvidence, type WorkedExampleSpeechReport } from "@/engine/workedExampleSpeech";
 import {
   assertVoiceGatePreconditions,
   qualityProfile,
@@ -185,6 +187,8 @@ import {
   finalMasterNarrationTranscriptAuditObjectKey,
   prepareFinalMasterNarrationTranscriptAudit,
   sealFinalMasterNarrationSemanticEvidence,
+  assertFinalMasterNarrationSemanticEvidence,
+  assertFinalMasterNarrationTranscriptAudit,
   proveNarrationTranscript,
   sha256NarrationTranscriptSource,
   type FinalMasterNarrationSemanticEvidence,
@@ -4119,6 +4123,34 @@ export function persistQaVisualStageOutputs(patch: Readonly<BlockPatch>): BlockP
   return persisted;
 }
 
+/** Read-only arithmetic cache admission. Ordinary QA restoration remains untouched. */
+function currentWorkedExampleQaRestore(ctx: CachedOutputValidationContext) {
+  const admission = prepareWorkedExampleSpeechAdmission(ctx);
+  const qaReport = ctx.outputs.qaReport as Record<string, unknown> | undefined;
+  const validation = qaReport?.renderValidation as Record<string, unknown> | undefined;
+  if (!admission) {
+    if (validation?.workedExampleCriticalSpeech !== undefined) throw new Error("cached arithmetic QA has no current verified arithmetic inputs");
+    return;
+  }
+  if (ctx.outputs.qaPassed !== true || typeof ctx.outputs.finalMasterSha256 !== "string") throw new Error("cached arithmetic QA has no completed passing master identity");
+  const report = assertWorkedExampleSpeechReportCurrent(validation?.workedExampleCriticalSpeech, admission, ctx.outputs.finalMasterSha256);
+  const semantic = assertFinalMasterNarrationSemanticEvidence(validation?.finalMasterNarrationSemantic);
+  if (semantic.finalMaster.sha256 !== ctx.outputs.finalMasterSha256 || semantic.finalMaster.durationSec !== ctx.store.videoDurationSec ||
+    semantic.narration.durationSec !== ctx.store.narrationDurationSec || semantic.narration.sourceSha256 !== admission.source.sha256 ||
+    semantic.narration.expectedTextSha256 !== admission.expectedTextSha256) throw new Error("cached arithmetic QA source/master timeline differs from current inputs");
+  const currentStart = ctx.store.narrationStartSec === undefined
+    ? ctx.store.introApplied === true ? Math.max(0, Number(ctx.store.introSec ?? 0)) : 0
+    : Number(ctx.store.narrationStartSec);
+  if (!Number.isFinite(currentStart) || currentStart < 0 || semantic.narration.startSec !== currentStart) throw new Error("cached arithmetic QA narration offset differs");
+  for (const [observed, proof] of [[report.source, semantic.sourceTranscript], [report.finalMaster, semantic.finalMasterTranscript]] as const) {
+    if (observed.proofSha256 !== proof.proofSha256 || observed.sourceSha256 !== proof.source.sha256 || observed.sourceByteLength !== proof.source.byteLength ||
+      observed.expectedTextSha256 !== proof.expected.textSha256 || observed.transcriptTextSha256 !== proof.transcript.textSha256 || observed.timestampWordsSha256 !== proof.transcript.timestampWordsSha256) throw new Error("cached arithmetic QA report differs from retained transcript receipt summaries");
+  }
+  const ref = semantic.auditArtifact;
+  if (ref.r2Key !== finalMasterNarrationTranscriptAuditObjectKey(ctx.keyPrefix, ctx.runId, ref.contentSha256)) throw new Error("cached arithmetic QA audit key differs from current namespace/content identity");
+  return { report, semantic, ref };
+}
+
 export const qaVisual: Block = {
   id: "qa_visual",
   consumes: ["videoKey", "videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
@@ -4132,7 +4164,31 @@ export const qaVisual: Block = {
   ],
   paid: true,
   persistStageOutputs: persistQaVisualStageOutputs,
+  cachedOutputValidator: {
+    prepare: (ctx) => currentWorkedExampleQaRestore(ctx) ? [] : null,
+    validate: async (ctx) => {
+      const current = currentWorkedExampleQaRestore(ctx);
+      if (!current) throw new Error("arithmetic QA restore applicability changed");
+      await assertWorkedExampleSpeechFile(ctx.store.narrationLocalPath, current.report.source);
+      await assertWorkedExampleSpeechFile(ctx.store.videoLocalPath, current.report.finalMaster);
+      // Existing read buffers the object; timeout and post-read identity checks are
+      // not a streaming byte cap. Never substitute another key or run ASR on failure.
+      const bytes = await getObjectBytes(current.ref.r2Key, undefined, { timeoutMs: 30_000 });
+      if (bytes.byteLength !== current.ref.byteLength || createHash("sha256").update(bytes).digest("hex") !== current.ref.contentSha256) throw new Error("cached arithmetic QA audit bytes differ from retained receipt");
+      const audit = assertFinalMasterNarrationTranscriptAudit(JSON.parse(Buffer.from(bytes).toString("utf8")));
+      const prepared = prepareFinalMasterNarrationTranscriptAudit(audit);
+      if (!prepared.bytes.equals(Buffer.from(bytes)) || canonicalJson(audit.workedExampleCriticalSpeech) !== canonicalJson(current.report) ||
+        canonicalJson(prepared.sourceTranscript) !== canonicalJson(current.semantic.sourceTranscript) || canonicalJson(prepared.finalMasterTranscript) !== canonicalJson(current.semantic.finalMasterTranscript) ||
+        canonicalJson(audit.narration) !== canonicalJson(current.semantic.narration) || canonicalJson(audit.finalMaster) !== canonicalJson(current.semantic.finalMaster)) throw new Error("cached arithmetic QA audit is not the exact bound current report and proofs");
+      await assertWorkedExampleSpeechFile(ctx.store.narrationLocalPath, current.report.source);
+      await assertWorkedExampleSpeechFile(ctx.store.videoLocalPath, current.report.finalMaster);
+    },
+  },
   run: async (ctx) => {
+    const workedExampleSpeechAdmission = (() => {
+      try { return prepareWorkedExampleSpeechAdmission(ctx); }
+      catch (error) { throw workedExampleSpeechRefusal(error, "current-inputs"); }
+    })();
     // A legacy fictional route remains readable for audit, but must not mint
     // a new QA/certificate path without the sealed visual treatment that
     // binds its independently publishable thumbnail.
@@ -4854,211 +4910,6 @@ export const qaVisual: Block = {
         ? { referenceCriteria: reviewReferenceCriteria }
         : {}),
     };
-    // Whole-mix loudness cannot prove that dialogue survived a music/FX pass.
-    // Compare the actual authored narration waveform with the final master
-    // after the planned intro offset. This is local signal-presence evidence,
-    // not a claim that a waveform metric proves intelligibility.
-    const narrationDuration = Number(ctx.store["narrationDurationSec"] ?? 0);
-    const storedNarrationPath = typeof ctx.store["narrationLocalPath"] === "string"
-      ? ctx.store["narrationLocalPath"]
-      : undefined;
-    const narrationKey = opt(ctx, "narrationKey");
-    const expectsNarrationMixEvidence = narrationDuration >= 1.5 && Boolean(storedNarrationPath || narrationKey);
-    let finalNarrationMix: { correlation: number | null; narrationStartSec: number } | undefined;
-    let finalNarrationTranscript: { wordErrorRate: number; lexicalRecall: number; passed: boolean } | undefined;
-    let finalMasterNarrationSemantic: FinalMasterNarrationSemanticEvidence | undefined;
-    let finalMasterNarrationAudit:
-      | ReturnType<typeof prepareFinalMasterNarrationTranscriptAudit>
-      | undefined;
-    let finalMasterNarrationAuditKey: string | undefined;
-    let narrationCueTiming: NarrationCueTimingEvidence | undefined;
-    let narrationPerformance: ReturnType<typeof assertNarrationPerformanceEvidence> | undefined;
-    const narrationPerformanceEvidence: string[] = [];
-    const narrationCueTimingEvidence: string[] = [];
-    let resolvedNarrationSource: {
-      narrationPath: string;
-      expectedNarrationText: string;
-      sourceSha256?: string;
-      proof?: ReturnType<typeof proveNarrationTranscript>;
-    } | undefined;
-    // Source-only work: production runs this before review; drafts retain the
-    // original late invocation and advisory/error handling. The proof and any
-    // single downloaded source remain local to this attempt, not a reuse grant.
-    async function prepareNarrationSource(critical: string[]): Promise<void> {
-      if (!expectsNarrationMixEvidence) return;
-      try {
-        narrationPerformance = assertNarrationPerformanceEvidence(ctx.store["narrationPerformanceEvidence"]);
-        if (Math.abs(narrationPerformance.durationSec - narrationDuration) > 0.75) {
-          critical.push(
-            `narration performance evidence duration ${narrationPerformance.durationSec.toFixed(2)}s does not bind the authored narration ${narrationDuration.toFixed(2)}s`,
-          );
-        }
-        narrationPerformanceEvidence.push(
-          `narrationPerformance=local_ffmpeg`,
-          `narrationWps=${narrationPerformance.wordsPerSec.toFixed(2)}`,
-          `narrationLufs=${narrationPerformance.integratedLufs.toFixed(1)}`,
-        );
-      } catch (error) {
-        if (productionQa) {
-          critical.push(`narration performance evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-      // A required performance receipt is independent of source I/O/ASR.
-      // Once it has already failed, further evidence cannot make it valid.
-      if (productionQa && critical.length) return;
-      let expectedNarrationText = "";
-      // The exact spoken script is also a required input, independent of bytes.
-      // Keep drafts' original download-first/advisory behavior unchanged.
-      if (productionQa) {
-        expectedNarrationText = typeof ctx.store["narrationTranscriptText"] === "string"
-          ? ctx.store["narrationTranscriptText"].trim()
-          : "";
-        if (!expectedNarrationText) {
-          critical.push("narration transcript evidence unavailable: narration_tts did not preserve the exact spoken script");
-          return;
-        }
-      }
-      try {
-        let narrationPath = storedNarrationPath && existsSync(storedNarrationPath)
-          ? storedNarrationPath
-          : undefined;
-        if (!narrationPath) {
-          if (!narrationKey) throw new Error("narration local path is unavailable and no narrationKey can rehydrate it");
-          narrationPath = join(tmp, "qa-narration-source.mp3");
-          let sourceBytes: Uint8Array;
-          try { sourceBytes = await getObjectBytes(narrationKey); }
-          catch (error) {
-            // Only this pre-ASR, pre-review read can authorize the engine's
-            // bounded same-stage retry. Draft handling is unchanged.
-            if (productionQa && critical.length === 0) throw sourceReadUnavailable(error);
-            throw error;
-          }
-          await writeBytes(narrationPath, sourceBytes);
-        }
-        // Prove that the authored narration source says the approved spoken
-        // script. FFmpeg correlation below then proves that this same source
-        // survived into the final master. Neither signal alone can establish
-        // both facts.
-        if (!productionQa) {
-          expectedNarrationText = typeof ctx.store["narrationTranscriptText"] === "string"
-            ? ctx.store["narrationTranscriptText"].trim()
-            : "";
-        }
-        resolvedNarrationSource = { narrationPath, expectedNarrationText };
-        if (expectedNarrationText) {
-          try {
-            const sourceSha256 = await sha256NarrationTranscriptSource(narrationPath);
-            const proof = proveNarrationTranscript({
-              audioPath: narrationPath,
-              expectedText: expectedNarrationText,
-              sourceSha256,
-            });
-            resolvedNarrationSource = { narrationPath, expectedNarrationText, sourceSha256, proof };
-            finalNarrationTranscript = {
-              wordErrorRate: proof.assessment.wordErrorRate,
-              lexicalRecall: proof.assessment.lexicalRecall,
-              passed: proof.assessment.passed,
-            };
-            if (!proof.assessment.passed) {
-              critical.push(
-                `narration transcript fidelity failure: WER ${proof.assessment.wordErrorRate.toFixed(3)} / recall ${proof.assessment.lexicalRecall.toFixed(3)} outside certified bounds`,
-              );
-            }
-            ctx.log(
-              `qa_visual: narration transcript WER ${proof.assessment.wordErrorRate.toFixed(3)}, recall ${proof.assessment.lexicalRecall.toFixed(3)} ` +
-              `(${proof.assessment.passed ? "passed" : "failed"})`,
-            );
-            try {
-              narrationCueTiming = assertNarrationCueTimingEvidence({
-                sentenceTimings: ctx.store["sentenceTimings"],
-                transcriptProof: proof,
-                narrationDurationSec: narrationPerformance?.durationSec ?? narrationDuration,
-              });
-              narrationCueTimingEvidence.push(
-                `narrationCueTiming=${narrationCueTiming.timingAlignedTokenCount}/${narrationCueTiming.matchedTokenCount}`,
-                `narrationCueMatch=${narrationCueTiming.matchedTokenRatio.toFixed(3)}`,
-                `narrationCueAlignment=${narrationCueTiming.timingAlignedTokenRatio.toFixed(3)}`,
-                `narrationCueMaxDriftSec=${narrationCueTiming.maxTimingDriftSec.toFixed(3)}`,
-                "narrationCueEvaluator=faster-whisper-small.en/timestamped-source",
-              );
-              ctx.log(
-                `qa_visual: narration cue timing ${narrationCueTiming.timingAlignedTokenCount}/${narrationCueTiming.matchedTokenCount} ` +
-                `source words aligned (max drift ${narrationCueTiming.maxTimingDriftSec.toFixed(2)}s)`,
-              );
-            } catch (error) {
-              if (productionQa) {
-                critical.push(`narration cue timing evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
-              } else {
-                ctx.log(`qa_visual: narration cue timing evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
-              }
-            }
-          } catch (error) {
-            // The current process wrapper discards spawn error/status metadata.
-            // Do not guess retryability from stderr or label that as bad speech.
-            if (productionQa && critical.length === 0 && error instanceof Error &&
-              error.message.startsWith("narration transcript proof unavailable: baked transcriber failed (")) {
-              throw new ExecutionError(
-                `PAID_STAGE_RECONCILIATION_REQUIRED: QA_NARRATION_SOURCE_PROOF_UNAVAILABLE: ${error.message}; source availability is unclassified; retain audio and inspect the local proof worker, never regenerate speech`,
-                { code: "QA_NARRATION_SOURCE_PROOF_UNAVAILABLE", retryable: false, phase: "source-proof" },
-              );
-            }
-            if (productionQa) {
-              critical.push(`narration transcript evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
-            } else {
-              ctx.log(`qa_visual: narration transcript evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
-            }
-          }
-        }
-      } catch (error) {
-        if (error instanceof ExecutionError &&
-          (error.code === "QA_NARRATION_SOURCE_READ_UNAVAILABLE" || error.code === "QA_NARRATION_SOURCE_PROOF_UNAVAILABLE")) throw error;
-        if (productionQa) {
-          critical.push(`narration-mix evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
-        } else {
-          ctx.log(`qa_visual: narration-mix evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
-        }
-      }
-    }
-
-    function sourceReadUnavailable(error: unknown): ExecutionError {
-      const classified = classifyExecutionError(error);
-      const metadata = error as { name?: unknown; code?: unknown; status?: unknown; statusCode?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
-      const status = metadata?.status ?? metadata?.statusCode ?? metadata?.$metadata?.httpStatusCode;
-      // The installed Smithy socket/connect handler emits this exact name
-      // without a code. Normalize only that known read-boundary timeout shape.
-      const code = typeof metadata?.code === "string" ? metadata.code : metadata?.name === "TimeoutError" ? "ETIMEDOUT" : undefined;
-      // Require a structured read status/code, not the classifier's fallback
-      // matching of words such as "timeout" in an arbitrary exception string.
-      const structured = classifyExecutionError({
-        ...(typeof status === "number" ? { status } : {}),
-        ...(code === undefined ? {} : { code }),
-      }).retryable;
-      const retryable = structured && (classified.retryable || metadata?.name === "TimeoutError" && classified.kind === "unknown");
-      return new ExecutionError(
-        `PAID_STAGE_RECONCILIATION_REQUIRED: QA_NARRATION_SOURCE_READ_UNAVAILABLE: ${classified.message}; ${retryable ? "bounded same-stage source read retry is safe before ASR/review" : "source availability is unclassified or non-retryable"}; retain source evidence, never regenerate upstream speech`,
-        { code: "QA_NARRATION_SOURCE_READ_UNAVAILABLE", retryable, phase: "source-read",
-          ...(typeof status === "number" ? { status } : {}),
-          ...(classified.retryAfterMs === undefined ? {} : { retryAfterMs: classified.retryAfterMs }) },
-      );
-    }
-    function sourcePreflightRefusal(error: unknown): Error {
-      // The existing marker prevents result-based self-heal from repurchasing
-      // upstream speech. No visual repair signal exists before visual review.
-      return new ExecutionError(
-        `PAID_STAGE_RECONCILIATION_REQUIRED: QA_NARRATION_SOURCE_REFUSED: ${error instanceof Error ? error.message : String(error)}; retain narration/master evidence for manual review, never automatically regenerate`,
-        { code: "QA_NARRATION_SOURCE_REFUSED", retryable: false, phase: "source-preflight" },
-      );
-    }
-    async function assertPreflightSourceUnchanged(): Promise<void> {
-      if (!productionQa || !resolvedNarrationSource?.proof) return;
-      try {
-        const { narrationPath, sourceSha256, proof } = resolvedNarrationSource;
-        if (await sha256NarrationTranscriptSource(narrationPath) !== sourceSha256 || proof.source.sha256 !== sourceSha256) {
-          throw new Error("narration transcript source bytes changed after source proof");
-        }
-      } catch (error) { throw sourcePreflightRefusal(error); }
-    }
-
     // This is the visual release gate. It persists timestamped scene/cue/overlay
     // evidence, reviews provider-sized chronological batches, then creates a
     // dense 2fps pass for the sealed cinematic windows and a capped re-watch
@@ -5068,16 +4919,6 @@ export const qaVisual: Block = {
     // frames, reviewer receipt, and later release certificate cannot be paired
     // with a replacement master. This applies to every lane that may upload.
     const finalMasterSha256BeforeVisualReview = await sha256ShotAnalysisSource(video);
-    if (productionQa) {
-      const sourceCritical: string[] = [];
-      await prepareNarrationSource(sourceCritical);
-      if (sourceCritical.length) {
-        ctx.log("qa_visual: production narration source preflight held", { verdict: "hold", issues: sourceCritical,
-          sourceSha256: resolvedNarrationSource?.sourceSha256, expectedTextSha256: resolvedNarrationSource?.proof?.expected.textSha256 });
-        throw sourcePreflightRefusal(new Error(sourceCritical.join(" | ")));
-      }
-      await assertPreflightSourceUnchanged();
-    }
     const visualReview = await reviewRender(video, p.durationSec, reviewIntent, {
       runId: ctx.runId,
       keyPrefix: ctx.keyPrefix,
@@ -5118,7 +4959,6 @@ export const qaVisual: Block = {
     ) {
       throw new Error("qa_visual FAILED: final master changed during evidence-backed visual review");
     }
-    await assertPreflightSourceUnchanged();
     if (productionQa && !visualReview.ran) {
       throw new Error("qa_visual FAILED: required evidence-backed visual reviewer did not run");
     }
@@ -5565,75 +5405,203 @@ export const qaVisual: Block = {
         ctx.log(`qa_visual: audio meters skipped: ${e instanceof Error ? e.message : e}`);
       }
     }
-    // Reuse the preflight source proof without another ASR pass or download.
-    // Drafts still perform source work here, after review, as before.
-    if (!productionQa) await prepareNarrationSource(critical);
-    // Other final-review checks may run between visual review and the audit.
-    // Never pair their later mix/audit with bytes changed since source proof.
-    await assertPreflightSourceUnchanged();
-    if (resolvedNarrationSource) {
+    // Whole-mix loudness cannot prove that dialogue survived a music/FX pass.
+    // Compare the actual authored narration waveform with the final master
+    // after the planned intro offset. This is local signal-presence evidence,
+    // not a claim that a waveform metric proves intelligibility.
+    const narrationDuration = Number(ctx.store["narrationDurationSec"] ?? 0);
+    const storedNarrationPath = typeof ctx.store["narrationLocalPath"] === "string"
+      ? ctx.store["narrationLocalPath"]
+      : undefined;
+    const narrationKey = opt(ctx, "narrationKey");
+    const expectsNarrationMixEvidence = narrationDuration >= 1.5 && Boolean(storedNarrationPath || narrationKey);
+    let finalNarrationMix: { correlation: number | null; narrationStartSec: number } | undefined;
+    let finalNarrationTranscript: { wordErrorRate: number; lexicalRecall: number; passed: boolean } | undefined;
+    let finalMasterNarrationSemantic: FinalMasterNarrationSemanticEvidence | undefined;
+    let finalMasterNarrationAudit:
+      | ReturnType<typeof prepareFinalMasterNarrationTranscriptAudit>
+      | undefined;
+    let finalMasterNarrationAuditKey: string | undefined;
+    let workedExampleCriticalSpeech: WorkedExampleSpeechReport | undefined;
+    let narrationCueTiming: NarrationCueTimingEvidence | undefined;
+    let narrationPerformance: ReturnType<typeof assertNarrationPerformanceEvidence> | undefined;
+    const narrationPerformanceEvidence: string[] = [];
+    const narrationCueTimingEvidence: string[] = [];
+    if (expectsNarrationMixEvidence) {
       try {
-        const { narrationPath, expectedNarrationText, sourceSha256, proof } = resolvedNarrationSource;
-        if (proof && sourceSha256) {
-          // A pristine TTS transcript plus waveform correlation only proves
-          // the source text and signal presence separately. Re-audition the
-          // actual released master with the same pinned local transcriber so
-          // production release requires intelligible approved narration in
-          // the mix itself. This makes no claim about non-speech FX meaning.
-          if (productionQa) {
-            try {
-              const finalMasterTranscriptSha256 = await sha256NarrationTranscriptSource(video);
-              if (finalMasterTranscriptSha256 !== finalMasterSha256AfterVisualReview) {
-                throw new Error("final-master transcript source hash differs from the reviewed final master");
+        narrationPerformance = assertNarrationPerformanceEvidence(ctx.store["narrationPerformanceEvidence"]);
+        if (Math.abs(narrationPerformance.durationSec - narrationDuration) > 0.75) {
+          critical.push(
+            `narration performance evidence duration ${narrationPerformance.durationSec.toFixed(2)}s does not bind the authored narration ${narrationDuration.toFixed(2)}s`,
+          );
+        }
+        narrationPerformanceEvidence.push(
+          `narrationPerformance=local_ffmpeg`,
+          `narrationWps=${narrationPerformance.wordsPerSec.toFixed(2)}`,
+          `narrationLufs=${narrationPerformance.integratedLufs.toFixed(1)}`,
+        );
+      } catch (error) {
+        if (productionQa) {
+          critical.push(`narration performance evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      try {
+        let narrationPath = storedNarrationPath && existsSync(storedNarrationPath)
+          ? storedNarrationPath
+          : undefined;
+        if (!narrationPath) {
+          if (!narrationKey) throw new Error("narration local path is unavailable and no narrationKey can rehydrate it");
+          narrationPath = join(tmp, "qa-narration-source.mp3");
+          await writeBytes(narrationPath, await getObjectBytes(narrationKey));
+        }
+        // Prove that the authored narration source says the approved spoken
+        // script. FFmpeg correlation below then proves that this same source
+        // survived into the final master. Neither signal alone can establish
+        // both facts.
+        const expectedNarrationText = typeof ctx.store["narrationTranscriptText"] === "string"
+          ? ctx.store["narrationTranscriptText"].trim()
+          : "";
+        if (productionQa && !expectedNarrationText) {
+          critical.push("narration transcript evidence unavailable: narration_tts did not preserve the exact spoken script");
+        } else if (expectedNarrationText) {
+          try {
+            const sourceSha256 = await sha256NarrationTranscriptSource(narrationPath);
+            if (workedExampleSpeechAdmission) await assertWorkedExampleSpeechFile(narrationPath, {
+              sourceSha256: workedExampleSpeechAdmission.source.sha256, sourceByteLength: workedExampleSpeechAdmission.source.byteLength,
+            });
+            const proof = proveNarrationTranscript({
+              audioPath: narrationPath,
+              expectedText: expectedNarrationText,
+              sourceSha256,
+            });
+            if (workedExampleSpeechAdmission) {
+              try { assertWorkedExampleSpeechProof(workedExampleSpeechAdmission, proof, "source", sourceSha256); }
+              catch (error) {
+                ctx.log("qa_visual: arithmetic source critical speech held", { workedExampleCriticalSpeechFailure: workedExampleSpeechFailureEvidence(workedExampleSpeechAdmission, proof, "source") });
+                throw workedExampleSpeechRefusal(error, "source");
               }
-              const finalMasterProof = proveNarrationTranscript({
-                audioPath: video,
-                expectedText: expectedNarrationText,
-                sourceSha256: finalMasterTranscriptSha256,
-              });
-              const narration = {
-                sourceSha256,
-                expectedTextSha256: proof.expected.textSha256,
-                startSec: narrationStartSec,
-                durationSec: narrationPerformance?.durationSec ?? narrationDuration,
-              };
-              const preparedAudit = prepareFinalMasterNarrationTranscriptAudit({
-                version: FINAL_MASTER_NARRATION_TRANSCRIPT_AUDIT_VERSION,
-                finalMaster: {
-                  sha256: finalMasterSha256AfterVisualReview,
-                  durationSec: p.durationSec,
-                },
-                narration,
-                sourceTranscript: proof,
-                finalMasterTranscript: finalMasterProof,
-              });
-              const auditKey = finalMasterNarrationTranscriptAuditObjectKey(
-                ctx.keyPrefix,
-                ctx.runId,
-                preparedAudit.contentSha256,
+            }
+            finalNarrationTranscript = {
+              wordErrorRate: proof.assessment.wordErrorRate,
+              lexicalRecall: proof.assessment.lexicalRecall,
+              passed: proof.assessment.passed,
+            };
+            if (!proof.assessment.passed) {
+              critical.push(
+                `narration transcript fidelity failure: WER ${proof.assessment.wordErrorRate.toFixed(3)} / recall ${proof.assessment.lexicalRecall.toFixed(3)} outside certified bounds`,
               );
-              finalMasterNarrationSemantic = sealFinalMasterNarrationSemanticEvidence({
-                version: "final-master-narration-semantic-evidence/v1",
-                finalMaster: preparedAudit.audit.finalMaster,
-                narration: preparedAudit.audit.narration,
-                sourceTranscript: preparedAudit.sourceTranscript,
-                finalMasterTranscript: preparedAudit.finalMasterTranscript,
-                auditArtifact: {
-                  version: FINAL_MASTER_NARRATION_TRANSCRIPT_AUDIT_VERSION,
-                  r2Key: auditKey,
-                  contentSha256: preparedAudit.contentSha256,
-                  byteLength: preparedAudit.bytes.byteLength,
-                },
+            }
+            ctx.log(
+              `qa_visual: narration transcript WER ${proof.assessment.wordErrorRate.toFixed(3)}, recall ${proof.assessment.lexicalRecall.toFixed(3)} ` +
+              `(${proof.assessment.passed ? "passed" : "failed"})`,
+            );
+            try {
+              narrationCueTiming = assertNarrationCueTimingEvidence({
+                sentenceTimings: ctx.store["sentenceTimings"],
+                transcriptProof: proof,
+                narrationDurationSec: narrationPerformance?.durationSec ?? narrationDuration,
               });
-              finalMasterNarrationAudit = preparedAudit;
-              finalMasterNarrationAuditKey = auditKey;
+              narrationCueTimingEvidence.push(
+                `narrationCueTiming=${narrationCueTiming.timingAlignedTokenCount}/${narrationCueTiming.matchedTokenCount}`,
+                `narrationCueMatch=${narrationCueTiming.matchedTokenRatio.toFixed(3)}`,
+                `narrationCueAlignment=${narrationCueTiming.timingAlignedTokenRatio.toFixed(3)}`,
+                `narrationCueMaxDriftSec=${narrationCueTiming.maxTimingDriftSec.toFixed(3)}`,
+                "narrationCueEvaluator=faster-whisper-small.en/timestamped-source",
+              );
               ctx.log(
-                `qa_visual: final-master narration semantic proof WER ${finalMasterProof.assessment.wordErrorRate.toFixed(3)}, ` +
-                `recall ${finalMasterProof.assessment.lexicalRecall.toFixed(3)} ` +
-                `(${finalMasterNarrationSemantic.receiptFingerprint.slice(0, 12)}; audit ${preparedAudit.contentSha256.slice(0, 12)})`,
+                `qa_visual: narration cue timing ${narrationCueTiming.timingAlignedTokenCount}/${narrationCueTiming.matchedTokenCount} ` +
+                `source words aligned (max drift ${narrationCueTiming.maxTimingDriftSec.toFixed(2)}s)`,
               );
             } catch (error) {
-              critical.push(`final-master narration semantic evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+              if (productionQa) {
+                critical.push(`narration cue timing evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+              } else {
+                ctx.log(`qa_visual: narration cue timing evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
+              }
+            }
+            // A pristine TTS transcript plus waveform correlation only proves
+            // the source text and signal presence separately. Re-audition the
+            // actual released master with the same pinned local transcriber so
+            // production release requires intelligible approved narration in
+            // the mix itself. This makes no claim about non-speech FX meaning.
+            if (productionQa) {
+              try {
+                const finalMasterTranscriptSha256 = await sha256NarrationTranscriptSource(video);
+                if (finalMasterTranscriptSha256 !== finalMasterSha256AfterVisualReview) {
+                  throw new Error("final-master transcript source hash differs from the reviewed final master");
+                }
+                const finalMasterProof = proveNarrationTranscript({
+                  audioPath: video,
+                  expectedText: expectedNarrationText,
+                  sourceSha256: finalMasterTranscriptSha256,
+                });
+                if (workedExampleSpeechAdmission) {
+                  try { workedExampleCriticalSpeech = createWorkedExampleSpeechReport(workedExampleSpeechAdmission, proof, finalMasterProof, finalMasterTranscriptSha256); }
+                  catch (error) {
+                    ctx.log("qa_visual: arithmetic final-master critical speech held", { workedExampleCriticalSpeechFailure: workedExampleSpeechFailureEvidence(workedExampleSpeechAdmission, finalMasterProof, "final-master") });
+                    throw workedExampleSpeechRefusal(error, "final-master");
+                  }
+                  await assertWorkedExampleSpeechFile(narrationPath, workedExampleCriticalSpeech.source);
+                  await assertWorkedExampleSpeechFile(video, workedExampleCriticalSpeech.finalMaster);
+                }
+                const narration = {
+                  sourceSha256,
+                  expectedTextSha256: proof.expected.textSha256,
+                  startSec: narrationStartSec,
+                  durationSec: narrationPerformance?.durationSec ?? narrationDuration,
+                };
+                const preparedAudit = prepareFinalMasterNarrationTranscriptAudit({
+                  version: FINAL_MASTER_NARRATION_TRANSCRIPT_AUDIT_VERSION,
+                  finalMaster: {
+                    sha256: finalMasterSha256AfterVisualReview,
+                    durationSec: p.durationSec,
+                  },
+                  narration,
+                  sourceTranscript: proof,
+                  finalMasterTranscript: finalMasterProof,
+                  ...(workedExampleCriticalSpeech ? { workedExampleCriticalSpeech } : {}),
+                });
+                const auditKey = finalMasterNarrationTranscriptAuditObjectKey(
+                  ctx.keyPrefix,
+                  ctx.runId,
+                  preparedAudit.contentSha256,
+                );
+                finalMasterNarrationSemantic = sealFinalMasterNarrationSemanticEvidence({
+                  version: "final-master-narration-semantic-evidence/v1",
+                  finalMaster: preparedAudit.audit.finalMaster,
+                  narration: preparedAudit.audit.narration,
+                  sourceTranscript: preparedAudit.sourceTranscript,
+                  finalMasterTranscript: preparedAudit.finalMasterTranscript,
+                  auditArtifact: {
+                    version: FINAL_MASTER_NARRATION_TRANSCRIPT_AUDIT_VERSION,
+                    r2Key: auditKey,
+                    contentSha256: preparedAudit.contentSha256,
+                    byteLength: preparedAudit.bytes.byteLength,
+                  },
+                });
+                finalMasterNarrationAudit = preparedAudit;
+                finalMasterNarrationAuditKey = auditKey;
+                ctx.log(
+                  `qa_visual: final-master narration semantic proof WER ${finalMasterProof.assessment.wordErrorRate.toFixed(3)}, ` +
+                  `recall ${finalMasterProof.assessment.lexicalRecall.toFixed(3)} ` +
+                  `(${finalMasterNarrationSemantic.receiptFingerprint.slice(0, 12)}; audit ${preparedAudit.contentSha256.slice(0, 12)})`,
+                );
+              } catch (error) {
+                if (workedExampleSpeechAdmission) {
+                  if (workedExampleCriticalSpeech) ctx.log("qa_visual: arithmetic report retained; final-master evidence held", {
+                    workedExampleCriticalSpeechFailure: { verdict: "hold", scope: "final-master", report: workedExampleCriticalSpeech },
+                  });
+                  throw workedExampleSpeechRefusal(error, "final-master");
+                }
+                critical.push(`final-master narration semantic evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+              }
+            }
+          } catch (error) {
+            if (workedExampleSpeechAdmission) throw workedExampleSpeechRefusal(error, "source");
+            if (productionQa) {
+              critical.push(`narration transcript evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+            } else {
+              ctx.log(`qa_visual: narration transcript evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
             }
           }
         }
@@ -5653,6 +5621,7 @@ export const qaVisual: Block = {
             `(start ${narrationStartSec.toFixed(2)}s)`,
         );
       } catch (error) {
+        if (workedExampleSpeechAdmission) throw workedExampleSpeechRefusal(error, "source");
         if (productionQa) {
           critical.push(`narration-mix evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
         } else {
@@ -5660,6 +5629,7 @@ export const qaVisual: Block = {
         }
       }
     }
+    if (workedExampleSpeechAdmission && !workedExampleCriticalSpeech) throw workedExampleSpeechRefusal(new Error("required source/final-master arithmetic evidence missing"), "source/final-master");
     const narrationMixEvidence = finalNarrationMix
       ? [
           `narrationMixCorrelation=${finalNarrationMix.correlation ?? "unmeasured"}`,
@@ -5673,6 +5643,7 @@ export const qaVisual: Block = {
           `narrationTranscriptRecall=${finalNarrationTranscript.lexicalRecall.toFixed(3)}`,
           `narrationTranscriptProof=${finalNarrationTranscript.passed ? "passed" : "failed"}`,
           "narrationTranscriptEvaluator=faster-whisper-small.en/offline",
+          ...(workedExampleCriticalSpeech ? [`workedExampleCriticalSpeech=${workedExampleCriticalSpeech.reportFingerprint}`] : []),
         ]
       : [];
     const finalMasterNarrationSemanticEvidence = finalMasterNarrationSemantic
@@ -7080,6 +7051,7 @@ export const qaVisual: Block = {
           narrationMix: finalNarrationMix ?? undefined,
           finalMasterNarrationSemantic: finalMasterNarrationSemantic ?? undefined,
           narrationCueTiming,
+          ...(workedExampleCriticalSpeech ? { workedExampleCriticalSpeech } : {}),
         },
       },
       qualityEvidence,

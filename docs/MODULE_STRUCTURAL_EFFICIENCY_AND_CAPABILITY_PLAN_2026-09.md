@@ -168,6 +168,26 @@ For each selected addition, use the same deliverable sequence:
 
 ### First implementation shortlist, pending complete design/qualification
 
+**Teaching design decision, researched 2026-09-09:** the [IES practice guide](https://ies.ed.gov/ncee/wwc/PracticeGuide/1)
+rates alternating worked solutions with learner exercises, spacing and combining
+relevant visuals with explanation as moderately supported; repeated retrieval
+and explanatory questions have stronger support in that guide. It does not
+validate this app, arbitrary countdown lengths or our generated lessons.
+
+Engineering implication: arithmetic and language practice should share one
+small measured **prompt → response pause → reveal** timing primitive, with
+different content/verifier contracts. Arithmetic can eventually pair a worked
+example with an independently generated, verified learner exercise; language
+practice can replay the same qualified utterance within its lesson. Reuse the
+timeline and approved same-lesson assets, not answers across unrelated episodes
+or the English-only verifier for other languages. A frozen episode plan can
+schedule later review without regenerating all earlier media. YouTube playback
+alone supplies no individual mastery signal, so do not claim adaptive difficulty
+or invent learner analytics. Actual timing, hidden-answer-before-reveal,
+independent solution/pronunciation checks and unfamiliar-channel output remain
+required. This is a next versioned design, not a silent change to the current
+canonical arithmetic narration or a fourth unqualified catalog module.
+
 | Order | Capability and channel range | Existing foundation and actual gap | Main acceptance risk |
 | --- | --- | --- | --- |
 | 1 | Native portrait Scene Compiler: illustrated Shorts, compact explainers and learning clips | Extend Episode Graph/Scene Compiler. Both `sceneCompilerRender.ts:20` and `sceneCompilerBlocks.ts:60` currently refuse non-16:9 output. | Responsive composition and phone safe areas for every admitted scene type; removing the guard or center-cropping is not implementation. |
@@ -247,8 +267,21 @@ automatic producer and the creator/runtime seed-key mismatch; the [critical
 speech audit](WORKED_EXAMPLE_CRITICAL_SPEECH_AUDIT_2026-09.md) shows general
 transcript/timing metrics accepting a wrong final answer. The connector must
 carry explicit supported teaching intent, not infer arithmetic from keywords.
-The speech gate should reuse existing transcript work, not add a paid judge.
-Neither audit closes its respective runtime/qualification gap.
+The [held critical-speech implementation](WORKED_EXAMPLE_CRITICAL_SPEECH_REVIEW_2026-09.md)
+now reuses both existing transcript results and verifies exact ordered meaning,
+with 256 generated problems, 1,152 wrong-step mutations and actual caller/cache
+tests independently rerun by root. Cached QA checks one existing audit without
+re-review or regeneration. This does not qualify real speech or close the
+automatic request, renderer or complete-channel gaps.
+
+**Next shared QA efficiency/correctness work:** the existing fresh visual
+review still runs before transcript checks; failing-source fixtures pay one
+reviewer invocation. Investigate moving existing source checks earlier, with
+unchanged final-master identity and no duplicate ASR pass. Separately, actual
+Python-to-TS audit found inconsistent lexical-versus-timestamp word counts and
+acceptance of contradictory timestamp words. Fix both producer/consumer meaning
+of the count and complete ordered lexical coverage, not just the number or WER
+threshold. Neither proposed improvement is counted as a measured saving yet.
 
 **Reserve candidate:** verified software-demonstration capture could reuse
 browser automation and assembly for tutorials. The existing `screen` graphic
