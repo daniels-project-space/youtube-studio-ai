@@ -34,6 +34,7 @@ import { EpisodeGraphSchema, SceneManifestSchema } from "./episodeGraph";
 import { LearningContractSchema } from "./learningContract";
 import { WorkedExamplePreparationSchema, WorkedExampleRequestSchema } from "./workedExample";
 import { WorkedExampleEditorialApprovalSchema } from "./workedExampleNarration";
+import { WorkedExampleAudioBindingSchema } from "./workedExampleAudioBinding";
 import {
   SyntheticScenarioContractSchema,
   SyntheticScenarioDisclosureSchema,
@@ -173,6 +174,7 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   workedExampleRequest: { type: "WorkedExampleRequest", schema: WorkedExampleRequestSchema },
   workedExamplePreparation: { type: "WorkedExamplePreparation", schema: WorkedExamplePreparationSchema },
   workedExampleEditorialApproval: { type: "WorkedExampleEditorialApproval", schema: WorkedExampleEditorialApprovalSchema },
+  workedExampleAudioBinding: { type: "WorkedExampleAudioBinding", schema: WorkedExampleAudioBindingSchema },
   topic: { type: "VideoIntent", schema: nonEmpty },
   title: { type: "PublicationTitle", schema: nonEmpty.max(100) },
   description: { type: "PublicationDescription", schema: z.string() },

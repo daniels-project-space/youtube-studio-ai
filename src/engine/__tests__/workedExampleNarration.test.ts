@@ -127,11 +127,10 @@ async function main() {
     const voiceContext = { ...base, params: { ttsProvider: "fixture-provider-must-not-exist" }, store: { ...base.store, ...approval } };
     await assert.rejects(() => narrationTts.run(voiceContext), /TTS provider|ttsProvider|tts provider/,
       "matching independently produced approval reaches the unchanged provider-selection boundary");
-    const resumedQa = await runPipeline(validatePipeline([...entries, { block: "qa_script" }, { block: "narration_tts" }], ["workedExampleRequest"]), {
+    await assert.rejects(() => runPipeline(validatePipeline([...entries, { block: "qa_script" }, { block: "narration_tts" }], ["workedExampleRequest"]), {
       ...opts, budgetUsd: 1, sink: { async upsert() {}, async getCompleted() { return [{ block: "qa_script", outputs: { scriptApproved: true }, cost: 0.003 }]; } },
       rehydrate: async (_block, outputs) => ({ ok: true, outputs }),
-    });
-    assert.equal(resumedQa.ok, false); assert.match(resumedQa.error ?? "", /editorial approval does not match the current script/);
+    }), { code: "CACHED_OUTPUT_BINDING_REFUSED", message: /editorial approval does not match the current script/ });
     assert.equal(calls, 2, "cached legacy approval is held before TTS, not silently approved or re-bought");
     console.log(JSON.stringify({ actualRegisteredAdapter: "PASS", independentCriticAdmission: "PASS", tamperCasesBeforeBothConsumers: corruptions.length,
       duplicateWriterAndUnapprovedTtsRefused: true, actualResume: "PASS", productionCatalog: "held", fixtureCriticCalls: calls, liveProviderCalls: 0 }));

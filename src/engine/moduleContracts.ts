@@ -596,6 +596,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     qualityRequired: true,
   }),
   narration_tts: contract(["narration.timed"], {
+    optionalProduces: ["workedExampleAudioBinding"],
     optionalConsumes: [
       "styleDNA", "musicBrief", "script", "voiceId", "niche", "workedExampleRequest", "workedExamplePreparation", "workedExampleEditorialApproval",
       // Grounds the cold-open take judge in this channel's own voice standard.

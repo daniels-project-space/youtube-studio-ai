@@ -115,6 +115,10 @@ export interface TtsStitch {
 
 /** eleven_v3 doesn't support request stitching yet (verified live) — see above. */
 const V3_STITCH = process.env.ELEVENLABS_V3_STITCH === "1";
+/** Non-secret effective synthesis mode, captured once by the actual provider adapter. */
+export function elevenLabsV3StitchEnabled(): boolean {
+  return V3_STITCH;
+}
 
 // A single sentence/line synthesis should complete well below this ceiling.
 // Without a local bound, a post-submit hung socket can outlive the Trigger task

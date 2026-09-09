@@ -128,6 +128,27 @@ export interface ArtifactRef {
   payloadHash: string;
 }
 
+/** Read-only completed-output admission. Deliberately excludes spend, storage and sink capabilities. */
+export interface CachedOutputValidationContext {
+  readonly ownerId: string;
+  readonly channelId: string;
+  readonly runId: string;
+  readonly keyPrefix: string;
+  readonly params: Readonly<Record<string, unknown>>;
+  readonly store: Readonly<Record<string, unknown>>;
+  readonly outputs: Readonly<BlockPatch>;
+}
+
+export interface CachedOutputValidator {
+  /** Pure preflight: null preserves ordinary restoration; otherwise validate
+   * current metadata and demand only these declared local output artifacts.
+   * Called again after targeted current-input hydration. Never authorizes execution. */
+  prepare: (ctx: CachedOutputValidationContext) => readonly string[] | null;
+  /** Read-only final admission after demanded bytes have been materialized.
+   * A rejection is terminal, including for an unpaid block with a paid critic. */
+  validate: (ctx: CachedOutputValidationContext) => Promise<void>;
+}
+
 /** A registered, executable pipeline step. */
 export interface Block {
   /** Unique block id (matches `pipeline[].block`). */
@@ -142,6 +163,9 @@ export interface Block {
    * Re-enter current-input admission on resume instead of trusting cached output.
    * Never supplied by pipeline params, artifacts or paid checkpoint hooks. */
   resumePolicy?: "recompute_unpaid_deterministic";
+  /** Code-owned conditional validation before completed outputs are persisted
+   * against current inputs or merged. Missing/bad proof never grants a rerun. */
+  cachedOutputValidator?: CachedOutputValidator;
   /** Code-owned read-only checkpoint validation, consulted only for sequential
    * inline PAID execution. Config flags/serialized proofs cannot grant credit. */
   inspectPaidInlineResume?: (ctx: InlineCheckpointContext) => Promise<InlineCheckpointInspection>;

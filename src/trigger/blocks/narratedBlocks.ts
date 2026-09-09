@@ -16,7 +16,8 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { ExecutionError, classifyExecutionError } from "@/engine/executionErrors";
-import { COST_PATCH_KEY, type Block, type BlockPatch, type StageContext } from "@/engine/types";
+import { COST_PATCH_KEY, type Block, type BlockPatch, type StageContext, type CachedOutputValidationContext } from "@/engine/types";
+import { currentWorkedExampleScript, createWorkedExampleAudioBinding, assertWorkedExampleTtsBindingInputs, assertWorkedExampleAudioMetadata, assertWorkedExampleAudioBytes } from "@/engine/workedExampleAudioBinding";
 import {
   assertVoiceGatePreconditions,
   qualityProfile,
@@ -330,6 +331,53 @@ function splitSentences(text: string): string[] {
     .split(/(?<=[.!?])\s+(?=[A-Z"'“‘])/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
+}
+
+type NarrationChapterScript = { hook?: string; sections?: { heading: string; narration: string }[] };
+type NarrationChapterItem = { kind: "narration" | "heading"; text: string; chap?: number };
+/** Shared exact synthesis projection, including bounded headings and their spoken chapter numbers. */
+function narrationChapterItems(script: NarrationChapterScript): NarrationChapterItem[] {
+  const items: NarrationChapterItem[] = [];
+  if (script.hook) for (const s of splitSentences(sanitizeSpoken(script.hook))) items.push({ kind: "narration", text: s });
+  const sections = script.sections ?? [];
+  const lastIdx = sections.length - 1;
+  const eligibleChapterSections = sections
+    .map((sec, idx) => ({ heading: sec.heading, idx }))
+    .filter(({ idx }) => idx !== lastIdx && !(idx === 0 && sections.length >= 3));
+  const boundedChapterHeadings = boundNarrationChapterHeadings(eligibleChapterSections.map(({ heading }) => heading));
+  const chapterBySection = new Map<number, { heading: string; chap: number }>();
+  boundedChapterHeadings.forEach((heading, candidateIndex) => {
+    if (!heading) return;
+    chapterBySection.set(eligibleChapterSections[candidateIndex].idx, { heading, chap: chapterBySection.size + 1 });
+  });
+  sections.forEach((sec, idx) => {
+    const chapter = chapterBySection.get(idx);
+    if (chapter) items.push({ kind: "heading", text: chapter.heading, chap: chapter.chap });
+    for (const s of splitSentences(sanitizeSpoken(sec.narration))) items.push({ kind: "narration", text: s });
+  });
+  return items;
+}
+const speakChapterItem = (it: NarrationChapterItem) =>
+  it.kind === "heading" ? `Chapter ${it.chap}: ${it.text.replace(/[.:;,\s]+$/, "")}.` : it.text;
+
+function currentNarrationSpokenSequence(ctx: Pick<CachedOutputValidationContext, "store" | "params">): string[] {
+  const script = ctx.store.script as NarrationChapterScript | undefined;
+  if (ctx.params.chapterCards === true && (script?.sections?.length ?? 0) >= 2) return narrationChapterItems(script!).map(speakChapterItem);
+  return splitSentences(sanitizeSpoken(String(ctx.store.narrationText), { keepAudioTags: normalizeTtsProvider(ctx.params.ttsProvider) === "elevenlabs" }));
+}
+
+function prepareWorkedExampleQaRestore(ctx: CachedOutputValidationContext): readonly string[] | null {
+  const script = currentWorkedExampleScript(ctx);
+  if (!script && ctx.outputs.workedExampleEditorialApproval === undefined) return null;
+  assertWorkedExampleEditorialApproval(ctx.outputs.workedExampleEditorialApproval, script);
+  if (ctx.outputs.scriptApproved !== true) throw new Error("cached arithmetic QA has no affirmative current approval");
+  return [];
+}
+function prepareWorkedExampleAudioRestore(ctx: CachedOutputValidationContext): readonly string[] | null {
+  const script = currentWorkedExampleScript(ctx);
+  if (!script && ctx.outputs.workedExampleAudioBinding === undefined && ctx.store.workedExampleEditorialApproval === undefined) return null;
+  assertWorkedExampleAudioMetadata(ctx, currentNarrationSpokenSequence(ctx));
+  return ["narrationLocalPath"];
 }
 import {
   evaluateThumbnail,
@@ -1063,6 +1111,10 @@ export const qaScript: Block = {
   id: "qa_script",
   consumes: ["narrationText"],
   produces: ["scriptApproved", "workedExampleEditorialApproval"],
+  cachedOutputValidator: {
+    prepare: prepareWorkedExampleQaRestore,
+    validate: async (ctx) => { prepareWorkedExampleQaRestore(ctx); },
+  },
   run: async (ctx) => {
     const narration = str(ctx, "narrationText");
     const workedExampleScript = assertWorkedExampleNarrationBinding({
@@ -1211,8 +1263,13 @@ export const narrationTts: Block = {
     "narrationPerformanceEvidence",
     "sentenceTimings",
     "chapterPlan",
+    "workedExampleAudioBinding",
   ],
   paid: true,
+  cachedOutputValidator: {
+    prepare: prepareWorkedExampleAudioRestore,
+    validate: async (ctx) => { await assertWorkedExampleAudioBytes(ctx, currentNarrationSpokenSequence(ctx)); },
+  },
   run: async (ctx) => {
     assertScriptApprovedForNarration(ctx.store["scriptApproved"]);
     const workedExampleScript = assertWorkedExampleNarrationBinding({
@@ -1221,6 +1278,7 @@ export const narrationTts: Block = {
       ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId,
     });
     assertWorkedExampleEditorialApproval(ctx.store["workedExampleEditorialApproval"], workedExampleScript);
+    if (workedExampleScript) assertWorkedExampleTtsBindingInputs(ctx);
     const quality = qualityProfile(ctx.params["qualityProfile"]);
     // Unknown providers must fail before spend; they must never inherit the
     // historical Fish fallback just because a string was misspelled.
@@ -1416,32 +1474,10 @@ export const narrationTts: Block = {
     if (chapterMode && script?.sections) {
       const preSec = Number(ctx.params["chapterPreSec"] ?? 3); // silence as the card fades in, before the heading
       const postSec = Number(ctx.params["chapterPostSec"] ?? 3); // silence after the heading, as the card fades out
-      type Item = { kind: "narration" | "heading"; text: string; chap?: number };
-      const items: Item[] = [];
-      if (script.hook) for (const s of splitSentences(sanitizeSpoken(script.hook))) items.push({ kind: "narration", text: s });
       // Chapter cards belong to the BODY only: the INTRO (first section) flows
       // straight out of the cold open with no "Chapter 1" interrupt, and the
       // OUTRO (final section) lands as the closing narration with no card.
-      const lastIdx = script.sections.length - 1;
-      const eligibleChapterSections = script.sections
-        .map((sec, idx) => ({ heading: sec.heading, idx }))
-        .filter(({ idx }) => idx !== lastIdx && !(idx === 0 && script.sections!.length >= 3));
-      const boundedChapterHeadings = boundNarrationChapterHeadings(
-        eligibleChapterSections.map(({ heading }) => heading),
-      );
-      const chapterBySection = new Map<number, { heading: string; chap: number }>();
-      boundedChapterHeadings.forEach((heading, candidateIndex) => {
-        if (!heading) return;
-        chapterBySection.set(eligibleChapterSections[candidateIndex].idx, {
-          heading,
-          chap: chapterBySection.size + 1,
-        });
-      });
-      script.sections.forEach((sec, idx) => {
-        const chapter = chapterBySection.get(idx);
-        if (chapter) items.push({ kind: "heading", text: chapter.heading, chap: chapter.chap });
-        for (const s of splitSentences(sanitizeSpoken(sec.narration))) items.push({ kind: "narration", text: s });
-      });
+      const items = narrationChapterItems(script);
 
       const partPaths: string[] = [];
       const gaps: number[] = [];
@@ -1452,8 +1488,7 @@ export const narrationTts: Block = {
       let chap = 0;
       const flush = () => { if (footAccum > 0.1) { chapterPlan.push({ kind: "footage", durSec: footAccum }); footAccum = 0; } };
       // PARALLEL synthesis (small pool — Fish concurrency limit; see sentence mode).
-      const speakOf = (it: Item) =>
-        it.kind === "heading" ? `Chapter ${it.chap}: ${it.text.replace(/[.:;,\s]+$/, "")}.` : it.text;
+      const speakOf = speakChapterItem;
       const chapterCadencePlan = planNarrationCadence({
         sentences: items.map(speakOf),
         baseGapSec: baseGap,
@@ -1553,10 +1588,11 @@ export const narrationTts: Block = {
         ctx.log(`narration_tts: delivery rate ${rate.ok ? "OK" : "OFF-PACE"} — ${rate.detail}`);
       }
       const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
-      await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
+      const narrationBytes = await readBytes(local);
+      await putObject(narrationKey, narrationBytes, { contentType: "audio/mpeg" });
       await recordAsset(ctx, "narration", narrationKey, { durationSec, chapters: chap, mode: "chapter" });
       ctx.log(`narration_tts ok (chapter mode): ${durationSec.toFixed(0)}s, ${chap} chapters, ${sentenceTimings.length} sentences`);
-      return {
+      const outputs: BlockPatch = {
         narrationKey,
         narrationDurationSec: durationSec,
         narrationLocalPath: local,
@@ -1569,6 +1605,8 @@ export const narrationTts: Block = {
         chapterPlan,
         [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd),
       };
+      if (workedExampleScript) outputs.workedExampleAudioBinding = createWorkedExampleAudioBinding(ctx, outputs, items.map(speakOf), narrationBytes);
+      return outputs;
     }
 
     // Synth PER SENTENCE and concat with a silence gap → organic pauses, plus
@@ -1681,14 +1719,15 @@ export const narrationTts: Block = {
     }
 
     const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
-    await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
+    const narrationBytes = await readBytes(local);
+    await putObject(narrationKey, narrationBytes, { contentType: "audio/mpeg" });
     await recordAsset(ctx, "narration", narrationKey, {
       durationSec,
       sentences: sentences.length,
       gapSec: baseGap,
     });
     ctx.log(`narration_tts ok: ${durationSec}s, ${sentences.length} sentences (~${baseGap}s pauses)`);
-    return {
+    const outputs: BlockPatch = {
       narrationKey,
       narrationDurationSec: durationSec,
       narrationLocalPath: local,
@@ -1701,6 +1740,8 @@ export const narrationTts: Block = {
       chapterPlan: [],
       [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd),
     };
+    if (workedExampleScript) outputs.workedExampleAudioBinding = createWorkedExampleAudioBinding(ctx, outputs, sentences, narrationBytes);
+    return outputs;
     } catch (error) {
       const observedCostUsd = narrationTtsCost(
         ttsProvider,
