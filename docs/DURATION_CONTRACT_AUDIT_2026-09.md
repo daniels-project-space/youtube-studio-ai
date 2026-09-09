@@ -38,10 +38,26 @@ seconds would introduce one: QA currently falls back from narration duration to
    own engines must expose that evidence; inserting another TTS step would
    duplicate ownership and potentially spend.
 3. **Self-contained routes can lose the requested runtime gate.** The designer
-   removes `length_check` for Comic/Whiteboard/LoreShort. Its later length
+   removes `length_check` for Comic/Whiteboard/LoreShort; Music Loop also has no
+   such gate. Actual design/enforcement calls across all twelve families compile
+   these four without `master.length_passed`. Its later length
    enforcement only adjusts gates still present. Narration and master can agree
    while both violate the requested runtime. Final quality capability and a
    model-authored critic do not guarantee a deterministic duration assertion.
+4. **A cached final can regress to planned duration.** The operator-gated EDL
+   `renderTimeline` fresh path probes its final, but its whole-video cache-hit
+   path returned projected duration with no probe. The archived actual function
+   returned 93s for a 93s plan while a supplied cache probe would report 45s;
+   probe calls were zero. [The scoped cache correction](EDL_CACHED_MASTER_DURATION_REVIEW_2026-09.md)
+   is implemented and locally tested separately, not yet released. It leaves
+   the authored expectation and EDL enablement unchanged.
+
+Replayed actual orchestration/gate evidence:
+`/tmp/ysa-edl-cache-duration-ZcekQU/design-length-counterexamples.log` and
+`cached-counterexample-before.log`. Fixed QuizYear's current 80–80-second gate,
+DocuMotion's 20–60-second runtime gate versus 35–60-second authoring guidance,
+and QA's inclusive half/double ratio require explicit policy decisions; do not
+silently tighten or relax these while repairing measured metadata.
 
 Focused sources: `src/trigger/blocks/narratedBlocks.ts` (`lengthCheck`, `qaVisual`),
 `src/trigger/blocks/documentaryCollageShortBlocks.ts`, `src/lib/documotion.ts`,

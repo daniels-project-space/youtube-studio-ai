@@ -11,7 +11,6 @@
 import { createHash } from "node:crypto";
 import {
   validateTimeline,
-  projectedDurationSec,
   ReceiptSchema,
   type Timeline,
   type Receipt,
@@ -199,6 +198,16 @@ function transitionFromHints(transitions?: string): "hardcut" | "crossfade" | "d
   return undefined;
 }
 
+/** Final receipts describe the inspected artifact, never the authored plan.
+ * Validate before any final-cache write or publish, on fresh and cached paths. */
+async function probeFinalDuration(backend: RenderBackend, path: string): Promise<number> {
+  const durationSec = await backend.probe(path);
+  if (!Number.isFinite(durationSec) || durationSec <= 0) {
+    throw new Error("renderTimeline: final master duration must be a positive finite number");
+  }
+  return durationSec;
+}
+
 /** Execute a Timeline → finished video Receipt. Deterministic, idempotent, heal-aware. */
 export async function renderTimeline(timeline: Timeline, backend: RenderBackend, opts: RenderOpts = {}): Promise<Receipt> {
   // 1. VALIDATE BEFORE SPEND — fail loud, never render an invalid plan.
@@ -217,10 +226,13 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
   const finalKey = `render/${hashTimeline(t, ver)}.mp4`;
   const done = await backend.cacheGet(finalKey);
   if (done) {
+    // A cache key identifies the plan, not the current file's measured runtime.
+    // A bad cached artifact fails here; it must not silently buy another render.
+    const durationSec = await probeFinalDuration(backend, done);
     return ReceiptSchema.parse({
       videoKey: finalKey,
       videoLocalPath: done,
-      durationSec: projectedDurationSec(t),
+      durationSec,
       segmentsRendered: clipCount,
       cardsRendered: cardCount,
       overlaysApplied: t.overlays.length,
@@ -330,7 +342,7 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
   // 5. PROBE → CACHE → PUBLISH. Probe first (a corrupt final must fail BEFORE it
   // is published/cached); cache before publish so a publish failure retried later
   // hits the final-key cache instead of re-rendering everything.
-  const durationSec = await backend.probe(finalPath);
+  const durationSec = await probeFinalDuration(backend, finalPath);
   await backend.cachePut(finalKey, finalPath);
   const videoKey = await backend.publish(finalPath);
 
