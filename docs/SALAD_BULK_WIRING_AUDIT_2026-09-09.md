@@ -2,6 +2,38 @@
 
 ## Result and scope
 
+**Durable ERNIE follow-up, 9 September:** the actual worker HTTP endpoint and
+infrastructure proof-runner caller now share immutable request/image/model
+bindings, create-only R2 claims and separate completion receipts. A retry can
+reuse the exact checked R2 image or its same-worker completed take without
+inference. The old prompt-plus-upload-URL endpoint is rejected. The full suite
+passes 108 tests, including real HTTP gzip handling, checksum hydration and a
+complete lost-response/artifact/shutdown/capacity-release test. A live vault-backed
+R2 check initially caught compressed missing-object responses, now fixed and
+regression-tested; identical replay, conflicting writes and renewed grants pass.
+No GPU or production object was changed. Exact evidence and remaining limits:
+`/home/ubuntu/salad-media-infra/docs/DURABLE_ERNIE_JOBS_2026-09.md`.
+Backlog items 119/120 remain partial: no new worker image is deployed, no paid
+quality proof was produced, and cross-channel scheduling/prepared-media adoption
+are not implemented by this change. Expired/ambiguous claims cannot authorize
+another paid take. Controller-driven upload recovery remains separate work.
+
+Checkpoint: `673e8ae873b5256c1272222a735116e36ce15101` (parent `a8b69e2`).
+All 108 tests pass from the clean detached checkout at
+`/tmp/salad-durable-verify-U2xtXy/repo`; log:
+`/tmp/salad-durable-clean-checkpoint-tests.log`. No vendor checkout or uncommitted
+files were required. A separate CPU-only HTTP check mounted the exact checkpoint
+server/common files read-only into the existing pinned ERNIE image, with no
+network access or GPU devices. Its installed FastAPI 0.141.1/requests 2.32.5
+successfully started the endpoint, returned unready health without models,
+rejected legacy payloads (422) and invalid jobs (409), and shut down cleanly.
+This tests container compatibility, not a new deployed image or GPU inference.
+The live R2 receipt was independently read back: 390 bytes, SHA-256
+`a03debff771023c10c845fd1b48e5014e1b594622d764e7ec944afb590b4bbf9`.
+The original repository HEAD/index are preserved. The exact production app
+health alias was rechecked at revision `f7e954bfa5f99aff2967a7b32df2f63b19b7f31d`;
+this backend checkpoint has not been pushed or deployed.
+
 **Shared-capacity follow-up, 9 September:** the real infrastructure proof runner
 now reserves from an organization-scoped, fixed-bucket R2 CAS guard before
 provider creation. It permits three managed GPUs across tools/projects, fences
