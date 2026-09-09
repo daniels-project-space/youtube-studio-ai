@@ -1,5 +1,8 @@
 "use client";
 
+import { readTitleReview } from "@/lib/titleReviewPresentation";
+import { TitleReview } from "./TitleReview";
+
 /**
  * Expandable detail panel for a single pipeline block. Rendered inside
  * LivePipeline when a node is expanded. Shows the persisted inputs/outputs
@@ -84,6 +87,13 @@ export function StageRow({
   error?: string;
 }) {
   const nothing = isEmpty(inputs) && isEmpty(outputs) && !error;
+  const titleReview = readTitleReview(outputs);
+  const data = (
+    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(220px, 100%), 1fr))", gap: "0.9rem" }}>
+      {!isEmpty(inputs) && <JsonBlock label="Inputs" value={inputs} />}
+      {!isEmpty(outputs) && <JsonBlock label="Outputs" value={outputs} />}
+    </div>
+  );
 
   return (
     <div
@@ -112,22 +122,18 @@ export function StageRow({
         </div>
       )}
 
+      {titleReview && <TitleReview review={titleReview} />}
+
       {nothing ? (
         <div style={{ fontSize: "0.82rem", color: "var(--color-faint)" }}>
           No inputs or outputs recorded for this block.
         </div>
-      ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-            gap: "0.9rem",
-          }}
-        >
-          <JsonBlock label="Inputs" value={inputs} />
-          <JsonBlock label="Outputs" value={outputs} />
-        </div>
-      )}
+      ) : titleReview ? <details>
+        <summary style={{ cursor: "pointer", fontSize: "0.875rem", color: "var(--color-muted)", minHeight: 44, padding: "0.7rem 0" }}>
+          Technical data
+        </summary>
+        {data}
+      </details> : data}
     </div>
   );
 }
