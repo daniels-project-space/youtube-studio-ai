@@ -53,5 +53,15 @@ assert.match(topbar, /background:[\s\S]*var\(--color-canvas\);/,
   "tinted navigation has an opaque canvas base, not translucent page content");
 assert.match(css, /--color-canvas:\s*#[0-9a-f]{6};/i, "the navigation base token stays opaque");
 assert.doesNotMatch(topbar, /backdrop-filter:/, "an opaque bar does not need a backdrop-filter layer");
+const mobileDock = [...css.matchAll(/\.studio-sidebar\s*\{([^}]+)\}/g)].at(-1)?.[1];
+assert.ok(mobileDock, "mobile dock surface exists");
+assert.match(mobileDock, /background:[\s\S]*#070a13;/,
+  "scrolling content cannot paint through the dock gradient");
+assert.match(mobileDock, /backdrop-filter:\s*none;/,
+  "mobile dock overrides the desktop backdrop filter");
+const moreMenu = css.match(/\.studio-nav-more-menu\s*\{([^}]+)\}/)?.[1];
+assert.ok(moreMenu, "mobile destinations have their own surface");
+assert.match(moreMenu, /background:[\s\S]*#090d18;/,
+  "expanded navigation also has an opaque reading surface");
 
 console.log("Actual navigation route, compact-state and specialist-boundary contracts passed");

@@ -3,14 +3,17 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { readdirSync, readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import type { OpenRouterJsonSchema } from "../src/lib/openRouter";
 
 // Match the application's CJS/alias module identity so this ESM diagnostic
 // observes the same AsyncLocalStorage instance as the real transport.
 const require = createRequire(import.meta.url);
-const { createModelUsageScope } = require("../src/lib/modelUsage") as typeof import("../src/lib/modelUsage");
-const { openRouterChat } = require("../src/lib/openRouter") as typeof import("../src/lib/openRouter");
+const moduleRoot = resolve(process.env.ACCOUNTING_REPLAY_MODULE_ROOT ?? process.cwd());
+const jsonObjectOnly = process.argv.includes("--json-object-only");
+assert.ok(process.argv.slice(2).every(arg => arg === "--json-object-only"), "unknown replay option");
+const { createModelUsageScope } = require(join(moduleRoot, "src/lib/modelUsage")) as typeof import("../src/lib/modelUsage");
+const { openRouterChat } = require(join(moduleRoot, "src/lib/openRouter")) as typeof import("../src/lib/openRouter");
 
 type Row = Record<string, unknown>;
 const root = join(process.cwd(), "test-fixtures/title-pilot-2026-09");
@@ -21,7 +24,7 @@ const close = (actual: number, expected: number) => assert.ok(Math.abs(actual - 
 const originalFetch = globalThis.fetch, originalKey = process.env.OPENROUTER_API_KEY;
 process.env.OPENROUTER_API_KEY = "offline-retained-response-only";
 const ids = new Set<string>();
-let count = 0, providerReportedUsd = 0, replayAccountedUsd = 0, reasoningTokens = 0;
+let count = 0, schemaResponsesExcluded = 0, providerReportedUsd = 0, replayAccountedUsd = 0, reasoningTokens = 0;
 try {
   for (const file of files(root)) {
     const rows = readFileSync(file, "utf8").trim().split("\n").map(line => JSON.parse(line) as Row);
@@ -34,6 +37,12 @@ try {
       const body = request.body as Row;
       assert.equal(hash(JSON.stringify(body)), request.requestSha256);
       assert.equal(request.requestSha256, response.requestSha256);
+      const format = body.response_format as { type?: string; json_schema?: OpenRouterJsonSchema } | undefined;
+      if (jsonObjectOnly && format?.type !== "json_object") {
+        assert.equal(format?.type, "json_schema", "only the separately held structured-output experiments may be excluded");
+        schemaResponsesExcluded++;
+        continue;
+      }
       const payload = JSON.parse(rawBody);
       assert.equal(typeof payload.id, "string");
       assert.ok(!ids.has(payload.id), "duplicate provider receipt would count spend twice");
@@ -49,7 +58,6 @@ try {
         dispatches++;
         return new Response(rawBody, { status: Number(response.status), headers: { "content-type": "application/json" } });
       };
-      const format = body.response_format as { type?: string; json_schema?: OpenRouterJsonSchema } | undefined;
       const scope = createModelUsageScope();
       await scope.run(() => openRouterChat({
         model: String(body.model), messages: body.messages as Parameters<typeof openRouterChat>[0]["messages"],
@@ -71,10 +79,13 @@ try {
       reasoningTokens += result.reasoningTokens; count++;
     }
   }
-  assert.equal(count, 66, "all retained live pilot responses must be verified");
-  close(providerReportedUsd, 0.1895565);
+  assert.equal(count, jsonObjectOnly ? 30 : 66, "all retained responses in the explicit replay scope must be verified");
+  assert.equal(schemaResponsesExcluded, jsonObjectOnly ? 36 : 0);
+  if (!jsonObjectOnly) close(providerReportedUsd, 0.1895565);
   close(replayAccountedUsd, providerReportedUsd);
-  console.log(JSON.stringify({ responses: count, providerReportedUsd, replayAccountedUsd, reasoningTokens,
+  console.log(JSON.stringify({ responses: count, schemaResponsesExcluded, moduleRoot,
+    clientSha256: hash(readFileSync(join(moduleRoot, "src/lib/openRouter.ts"), "utf8")),
+    providerReportedUsd, replayAccountedUsd, reasoningTokens,
     requestAndResponseHashesVerified: true, liveRequests: 0, historicalWrites: 0 }, null, 2));
 } finally {
   globalThis.fetch = originalFetch;
