@@ -1,0 +1,42 @@
+# Recent saved videos — practical card and player pass
+
+This is a separate, unshipped follow-up to the released shared-media URL fix. The existing overview and all 151 goal requirements remain in scope.
+
+## Decisions and implementation
+
+- Compact 17rem/84%-width cards retain actual current stored thumbnails and the exact Lo-fi video frame path. No artwork, source selection, model configuration, stored record or query scope is changed.
+- Titles increase from 12.48px to 15px, metadata from 9.92px to 13px at default text size. Channel/date can wrap, dates use a real time element, and the technical “R2 masters” label is removed. The three-line card title intentionally truncates unusually long titles; full text is present in its accessible label, hover title and expanded player. This avoids every card inheriting excessive height from one long off-screen title.
+- Durations distinguish minutes from hours (including 1–8-hour Lo-fi); invalid numeric durations are not rendered. Carousel and close controls have a local 44px minimum. Previous/next availability follows actual scroll/resize state without additional data requests; repeated observer measurements preserve state when unchanged. Reduced motion also applies to the actual programmatic scroll call.
+- The native saved-video dialog retains Escape, focus containment/return, body-scroll restoration and real playback. Its title and channel are larger, without storage implementation jargon. `SignedVideoPlayer` is now its real playback caller; an initial signing failure has an explicit Retry video action that remounts only the source loader, not the dialog or shared cache.
+
+## Visual and interaction evidence
+
+The actual-component test first fails on the old presentation and passes the new one (`/tmp/ysa-recent-renders-{before,after}.log`). Only transport/signing/CSS loading is substituted in that server-render test; the real filtering, query arguments, duration formatting and JSX execute.
+
+The actual-page Chromium proof covers 1440px, 390px, 320px, desktop 200% text and phone 200% text. It checks computed type/control sizes, accessible full titles, metadata geometry, actual keyboard scrolling, decoded visible media, real saved-video playback, complete dialog title, overflow, Escape and focus return. Production runs never proxy responses. Local development borrows only existing public production session/media GETs. No data mutation, video generation or OAuth qualification occurs.
+
+The old UI fails size/clipping/control checks across those profiles (`/tmp/ysa-recent-renders-browser-old-oracle.log`, `/tmp/ysa-recent-renders-proof-nbzsao/`). During iteration two harness faults were corrected: focus return happens on the next animation frame, and font reflow can preserve a nonzero snap position. Neither was called an application fix. A genuine large-text edge remained: card padding caused the first snap position to be 4px, keeping Previous active. Matching scroll padding fixes that cause.
+
+Five-case pass 4 (`/tmp/ysa-recent-renders-proof-TqntEz/`) passed state/interaction assertions, but screenshot inspection found an image not yet painted on phone. The next oracle explicitly checks nonempty visible media, decoded natural dimensions and opacity, and calls image.decode before capture. Pass 5 (`/tmp/ysa-recent-renders-proof-orJ5Sq/`) passes and inspected phone/320px screenshots show the actual image. DOM readiness alone was not accepted as visual proof.
+
+## Shared background seam
+
+The earlier phone metadata “mask” was not a scrollbar or clipped text. `html, body` have 100% height, while long content overflows. The body's radial background images used default repetition, creating horizontal seams every viewport-height interval. The shared field now uses no-repeat/fixed attachment, preserving the gradients without repeated tiles. Pass 6 (`/tmp/ysa-recent-renders-proof-WJz32C/`) passes all five interaction/media profiles and checks the actual computed background behavior. The inspected phone screenshot no longer has the horizontal band through the card body. Broader cross-route visual checks and the isolated release gate remain pending.
+
+After integrating the signed player and current cache, all five actual-page profiles pass (`/tmp/ysa-recent-renders-integrated-browser.log`, `/tmp/ysa-recent-renders-proof-1PElJp/`); desktop, phone and 200%-text player screenshots were inspected. Root typecheck and focused lint pass. The cross-route check initially failed because a stopped/restarted temporary server lacked its public Convex URL, not because of an application rendering defect; restoring only that public configuration hot-reloaded the server. Cross-route and frozen release results are tracked separately below.
+
+## Playback expiry — behavior and independent proof
+
+Expiry is checked at request time, not a reason to restart a healthy buffered stream ([S3 signed-URL documentation](https://docs.aws.amazon.com/AmazonS3/latest/userguide/using-presigned-url.html)). The player therefore renews only on demonstrably expired signatures plus actual network demand/failure. It keeps the same native element, exact asset key, object origin/path, playback position, play/pause intent, rate, volume and mute. A changed signature cannot select another object. It neither changes server expiry/ownership rules nor invalidates sibling caches, starts background polling, or generates media.
+
+One automatic attempt per failed source prevents retry loops. A 15-second signing deadline and 20-second decoded-restoration deadline terminate stuck work. Manual retry is actionable even when a server returns the same signature. Source changes/unmount abort stale work; browser autoplay refusal exposes an honest Press play notice. This is connected to RecentVideos only; other media consumers are not silently claimed to have expiry recovery.
+
+The actual-component Chromium fixture passes all 16 scenarios (`/tmp/ysa-signed-video-proof-ZqcxES/results.json`): real HTTP range 403-to-206 recovery at paused 25s/playing 26s, same native node, unaffected sibling, settings and user intent during renewal, fresh-source failure bounds, coalesced events, wrong-object rejection, cancellation, identical-signature reload, healthy-buffered non-renewal and actual wall-clock deadlines. It uses the retained 31.021995-second assembly clip with accelerated signature-expiry metadata; it is not an hour-long production R2 session or video-quality approval. Full RecentVideos failure/retry integration is being tested separately, beyond this isolated player proof.
+
+No whole-page/final visual-program completion is claimed. The combined frozen gate, exact production alias and direct production UI verification remain required before shipping this batch.
+
+## Cross-route and end-navigation checks
+
+The strengthened actual-page carousel proof passes five profiles after navigating to the real final card and back, asserting both disabled-end controls (`/tmp/ysa-recent-renders-end-navigation.log`). Existing navigation proof passes nine combinations / 21 painted surfaces with zero unexpected changes (`/tmp/ysa-topbar-contrast-iOQnTM/`). The additional background proof covers Library, Channels, Golden and New Channel at 1440/390px: fixed/nonrepeating field and no document overflow in all eight cases (`/tmp/ysa-background-cross-route-rVAZRH/`); Golden and New Channel pixels were independently inspected. Those extra captures prove layout only: unproxied private server reads in that temporary environment lack R2 configuration and can show loading media. They are not being treated as successful media-loading or private-operation tests. The separate carousel proof uses genuine public production GET responses and requires decoded media.
+
+The real RecentVideos caller fixture exposed two additional defects: initial-load Retry and native-player Retry removed their focused button, leaving focus on BODY (`/tmp/ysa-recent-video-recovery-rSMStZ/`). Next Tab happened to return into the player in that Chromium run; an actual Tab escape is not claimed. The repairs focus the surviving dialog close control for an initial retry and the surviving native video for a manual media retry. Automatic recovery never moves focus. The same oracle must pass these cases after the fix; its remaining checks already prove actual expired-range recovery at 25s, unchanged same-key and different-key sibling previews, Escape/tab containment/focus return, and five open/close cycles without additional valid-cache signing.

@@ -45,9 +45,24 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install declared renderer system dependency
+        shell: bash
         run: |
-          sudo apt-get update
-          sudo apt-get install --yes --no-install-recommends ffmpeg
+          # Only Ubuntu supplies this dependency. Unrelated runner repositories
+          # (for example Chrome) must not block the renderer quality gate.
+          ubuntu_sources=/etc/apt/sources.list.d/ubuntu.sources
+          if [[ ! -s "$ubuntu_sources" ]]; then
+            echo "::error::Expected Ubuntu APT sources at $ubuntu_sources"
+            exit 1
+          fi
+          apt_options=(
+            -o "Dir::Etc::sourcelist=$ubuntu_sources"
+            -o "Dir::Etc::sourceparts=-"
+          )
+          # Keep other repositories' cached lists; retain APT signature/hash checks.
+          sudo apt-get "${apt_options[@]}" update --error-on=any --no-list-cleanup
+          sudo apt-get "${apt_options[@]}" install --yes --no-install-recommends ffmpeg
+          ffmpeg -version
+          ffprobe -version
       - name: Install
         run: |
           if [ "${{ steps.pm.outputs.pm }}" = "pnpm" ]; then
