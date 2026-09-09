@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { createHash } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
+import { mock } from "node:test";
+import { GetObjectCommand, ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
+import { getFunctionName } from "convex/server";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,7 +22,9 @@ import {
   createPackageToOpeningReceipt,
 } from "@/engine/packageToOpening";
 import { pruneRunObjectsWithVerifiedFinalMasterEvidence } from "@/lib/runArtifactPrune";
-import { ObjectDeletionError } from "@/lib/storage";
+import { ObjectDeletionError, getR2Client } from "@/lib/storage";
+import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
+import { sweepDueRunArtifactRetentions } from "@/trigger/runArtifactRetentionSweeper";
 
 const keyPrefix = "owner/alice/channel/casefile/";
 const runId = "run-byte-evidence";
@@ -324,6 +329,92 @@ async function pruneFixture(
   return { result, deleteCalls, objects };
 }
 
+/** Runs the actual sweeper → certificate checks → storage SDK wrapper boundary. */
+async function retentionWorkerDeletionOutcomes() {
+  const { privateKey } = generateKeyPairSync("ec", { namedCurve: "prime256v1" });
+  const env = {
+    R2_ACCOUNT_ID: "fixture", R2_ENDPOINT: "https://storage-fixture.invalid", R2_ACCESS_KEY_ID: "fixture",
+    R2_SECRET_ACCESS_KEY: "fixture", R2_BUCKET: "fixture", STUDIO_OWNER_ID: "owner-fixture",
+    STUDIO_CONVEX_JWT_PRIVATE_KEY: privateKey.export({ format: "pem", type: "pkcs8" }).toString(),
+    NEXT_PUBLIC_CONVEX_URL: "https://retention-fixture.convex.cloud",
+    VAULT_URL: "https://vault-fixture.invalid", VAULT_ACCESS_TOKEN: "fixture",
+  };
+  const previous = Object.fromEntries(Object.keys(env).map((key) => [key, process.env[key]]));
+  Object.assign(process.env, env);
+  const fetchMock = mock.method(globalThis, "fetch", async (url: string) => {
+    assert.equal(url, "https://vault-fixture.invalid/api/query", "unexpected network request");
+    return Response.json({ status: "success", value: [] });
+  });
+  try {
+    for (const mode of ["partial", "complete", "asset-row-failure"] as const) {
+      const f = buildFixture();
+      f.objects.set(`${keyPrefix}runs/${runId}/intermediates/parent-scene-02.mp4`, Buffer.from("second intermediate"));
+      const operations: string[] = [];
+      const storage = mock.method(getR2Client(), "send", async (command: unknown) => {
+        if (command instanceof GetObjectCommand) {
+          const bytes = f.objects.get(command.input.Key!);
+          assert.ok(bytes, "only exact existing evidence may be read");
+          return { Body: { transformToByteArray: async () => bytes,
+            [Symbol.asyncIterator]: async function* () { yield bytes; } } };
+        }
+        if (command instanceof ListObjectsV2Command) {
+          assert.equal(command.input.Prefix, `${keyPrefix}runs/${runId}/`);
+          return { Contents: [...f.objects.keys()].map((Key) => ({ Key })), IsTruncated: false };
+        }
+        assert.ok(command instanceof DeleteObjectsCommand);
+        assert.equal(command.input.Delete?.Quiet, false);
+        const rows = command.input.Delete!.Objects!;
+        assert.equal(rows.length, 2);
+        assert.ok(rows.every((row) => row.Key?.includes("/intermediates/")));
+        const deleted = mode === "partial" ? rows.slice(0, 1) : rows;
+        for (const row of deleted) f.objects.delete(row.Key!);
+        return { $metadata: { httpStatusCode: 200 }, Deleted: deleted,
+          Errors: mode === "partial" ? [{ ...rows[1], Code: "AccessDenied" }] : [] };
+      });
+      const query = mock.method(StudioConvexHttpClient.prototype, "query", async (reference: never) => {
+        assert.equal(getFunctionName(reference), "runArtifactRetentions:listReleaseChecks");
+        return [];
+      });
+      const mutation = mock.method(StudioConvexHttpClient.prototype, "mutation", async (reference: never, args: Record<string, unknown>) => {
+        const name = getFunctionName(reference);
+        operations.push(name);
+        if (name === "runArtifactRetentions:claimDue") return {
+          _id: "retention-fixture", ownerId: "owner-fixture", channelId: "channel-fixture", runId,
+          keyPrefix, certificateKey: f.certificateKey, additionalCertificateKeys: [],
+          keepNames: ["final.mp4"], leaseToken: args.leaseToken,
+        };
+        if (name === "assets:pruneRun") {
+          if (mode === "asset-row-failure") throw new Error("controlled asset-row write failure");
+          return null;
+        }
+        if (name === "runArtifactRetentions:complete") {
+          assert.equal(args.removedObjects, 2);
+          assert.equal(args.retainedObjectCount, 7);
+          return { status: "completed" };
+        }
+        assert.equal(name, "runArtifactRetentions:fail");
+        return { status: "pending" };
+      });
+      try {
+        const result = await sweepDueRunArtifactRetentions({ limit: 1 });
+        assert.deepEqual(result, { claimed: 1, completed: mode === "complete" ? 1 : 0,
+          blocked: 0, removedObjects: mode === "partial" ? 1 : 2 });
+        assert.deepEqual(operations, ["runArtifactRetentions:claimDue",
+          ...(mode === "partial" ? [] : ["assets:pruneRun"]),
+          mode === "complete" ? "runArtifactRetentions:complete" : "runArtifactRetentions:fail"]);
+        assert.equal(f.objects.size, mode === "partial" ? 8 : 7);
+        assert.ok(f.objects.has(f.certificate.finalMaster.r2Key));
+        assert.ok(f.objects.has(f.certificateKey));
+      } finally { storage.mock.restore(); query.mock.restore(); mutation.mock.restore(); }
+    }
+  } finally {
+    fetchMock.mock.restore();
+    for (const [key, value] of Object.entries(previous)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+}
+
 async function main() {
   await localUploadVerifierAvoidsR2MasterRestream();
 
@@ -570,6 +661,7 @@ async function main() {
     [],
     "cleanup must not delete anything when final-master bytes diverge",
   );
+  await retentionWorkerDeletionOutcomes();
 }
 
 main().then(() => console.log("final-master release evidence integrity tests passed"));
