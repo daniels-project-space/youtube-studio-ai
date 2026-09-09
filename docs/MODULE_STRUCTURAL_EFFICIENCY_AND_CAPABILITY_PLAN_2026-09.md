@@ -119,10 +119,11 @@ These are investigation targets, not already-measured improvements:
   A concrete earlier waste was reproduced in the actual Qwen qualification
   script and worker: adding listening verdicts submitted all six recordings
   again, with identical request keys. Worker caching retained model weights,
-  not generated audio. The held correction makes verdict finalization offline,
+  not generated audio. The [released correction](QWEN_QUALIFICATION_REUSE_REVIEW_2026-09.md) makes verdict finalization offline,
   validates exact retained request/receipt/audio identity and preserves original
   costs. Its actual-caller fixture reduces the standard two-pass workflow12→6
-  synthesis submissions; no real invoice saving or audio qualification claimed.
+  synthesis submissions; exact478c897 Vercel/Convex/Trigger20260909.29 deployment
+  is verified. No real invoice saving or audio qualification is claimed.
 - **Music:** derive the required duration and arrangement from settled
   narration/assembly timing; investigate qualified motifs or stems where the
   channel permits them. Avoid generating a replacement for an editing-only
@@ -232,6 +233,22 @@ exact approval at the voice entry. The complete audit still identifies the
 two missing production request consumers; planner/catalog admission, measured
 audio, renderer semantics and complete-video qualification remain open. Do not
 relabel canonical speech or fixture review as polished teaching.
+
+The [completed-audio resume correction](WORKED_EXAMPLE_AUDIO_RESUME_REVIEW_2026-09.md)
+now also passes 36 independent frozen boundary cases plus root's own actual
+caller/runner reruns. Current QA cannot authorize old speech; incorrect cached
+bytes or settings stop before persistence or replacement spend. Six ordinary
+provider/mode paths retain exact transport, output and cost parity. This closes
+the reproduced resume defect in staging, not pronunciation or route admission.
+
+Two independent follow-ups now have concrete evidence: the [request connector
+audit](WORKED_EXAMPLE_REQUEST_CONNECTOR_AUDIT_2026-09.md) identifies the missing
+automatic producer and the creator/runtime seed-key mismatch; the [critical
+speech audit](WORKED_EXAMPLE_CRITICAL_SPEECH_AUDIT_2026-09.md) shows general
+transcript/timing metrics accepting a wrong final answer. The connector must
+carry explicit supported teaching intent, not infer arithmetic from keywords.
+The speech gate should reuse existing transcript work, not add a paid judge.
+Neither audit closes its respective runtime/qualification gap.
 
 **Reserve candidate:** verified software-demonstration capture could reuse
 browser automation and assembly for tutorials. The existing `screen` graphic

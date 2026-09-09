@@ -14,6 +14,7 @@ import {
   COST_PATCH_KEY,
   type ArtifactRef,
   type Block,
+  type CachedOutputValidationContext,
   type CostModelUsageKind,
   type ModelUsageCostSnapshot,
   type ResumeRehydrationRequest,
@@ -26,6 +27,7 @@ import type { VisualRepairSignal } from "./healer";
 import { createHash } from "node:crypto";
 import { artifactContract, validateArtifact } from "./artifactSchemas";
 import {
+  ExecutionError,
   classifyExecutionError,
   executionRetryDelayMs,
   type ExecutionRetryScope,
@@ -831,6 +833,45 @@ export async function runPipeline(
     // A confirmed-missing artifact may be regenerated only for an unpaid block;
     // completed paid work always requires explicit reconciliation/supersession.
     const cached = completedMap[block.id];
+    const cachedValidationContext = (outputs: Record<string, unknown>): CachedOutputValidationContext => {
+      const inputKeys = [...Object.keys(manifest.consumes), ...Object.keys(manifest.optionalConsumes)];
+      const inputs = Object.fromEntries(inputKeys.filter((key) => key in store).map((key) => [key, store[key]]));
+      return Object.freeze({
+        ownerId: opts.ownerId, channelId: opts.channelId, runId: opts.runId, keyPrefix: opts.keyPrefix,
+        params: freezeCheckpointInputs(structuredClone(params)),
+        store: declaredArtifactStore(manifest, freezeCheckpointInputs(structuredClone(inputs)), new Set()),
+        outputs: freezeCheckpointInputs(structuredClone(outputs)),
+      });
+    };
+    const bindingRefusal = (error: unknown): ExecutionError => {
+      const message = `CACHED_OUTPUT_BINDING_REFUSED: completed block "${block.id}" requires reconciliation; ` +
+        `retaining its outputs and costs without automatic regeneration: ${error instanceof Error ? error.message : String(error)}`;
+      log(message);
+      return new ExecutionError(message, { code: "CACHED_OUTPUT_BINDING_REFUSED", retryable: false, phase: "cached_output_validation" });
+    };
+    let validatedLocalOutputKeys: readonly string[] | null = null;
+    if (cached && block.cachedOutputValidator !== undefined) {
+      try {
+        const validator = block.cachedOutputValidator;
+        const prepare = () => {
+          const keys = validator.prepare(cachedValidationContext(migrateCachedOutputsForResume(block.id, { ...cached })));
+          if (keys !== null && (!Array.isArray(keys) || keys.some((key) =>
+            typeof key !== "string" || !(key in manifest.produces || key in manifest.optionalProduces)))) {
+            throw new Error("cached output validator requested an undeclared output");
+          }
+          return keys;
+        };
+        validatedLocalOutputKeys = prepare();
+        if (validatedLocalOutputKeys !== null) {
+          if (!opts.rehydrate) throw new Error("no configured artifact rehydrator for bound completed output");
+          await rehydrateCachedInputsForLocalFallback(block, blockIndex);
+          validatedLocalOutputKeys = prepare();
+          if (validatedLocalOutputKeys === null) throw new Error("cached output validation changed applicability during input hydration");
+        }
+      } catch (error) {
+        throw bindingRefusal(error);
+      }
+    }
     let cachedFallbackToLocalRun = false;
     if (cached && manifest.retryAndResume.resumePolicy === "recompute_unpaid_deterministic") {
       log(`block ${block.id}: code-owned resume policy — recomputing from current inputs`);
@@ -844,12 +885,17 @@ export async function runPipeline(
     } else if (cached && opts.rehydrate) {
       try {
         const restored = await opts.rehydrate(block.id, { ...cached }, {
-          neededOutputKeys: localConsumerKeysAfter(blockIndex),
+          neededOutputKeys: validatedLocalOutputKeys === null
+            ? localConsumerKeysAfter(blockIndex)
+            : new Set([...localConsumerKeysAfter(blockIndex), ...validatedLocalOutputKeys]),
         });
         const outputs = migrateCachedOutputsForResume(block.id, restored.outputs);
         const { ok } = restored;
         if (ok) {
           delete outputs[COST_PATCH_KEY];
+          if (validatedLocalOutputKeys !== null) {
+            await block.cachedOutputValidator!.validate(cachedValidationContext(outputs));
+          }
           assertProduced(manifest, outputs);
           const allowedInputs = new Set([
             ...Object.keys(manifest.consumes),
@@ -876,12 +922,14 @@ export async function runPipeline(
           log(`block resumed (cached, no re-spend): ${block.id}`);
           return { status: "ok", cost: 0 };
         }
+        if (validatedLocalOutputKeys !== null) throw new Error("bound completed outputs could not be materialized");
         if (manifest.costAndLatency.paid) {
           return await refusePaidCachedReplay("has missing or non-rehydratable durable outputs");
         }
         log(`block ${block.id}: cached outputs not rehydratable — re-running unpaid block`);
         cachedFallbackToLocalRun = true;
       } catch (e) {
+        if (validatedLocalOutputKeys !== null) throw bindingRefusal(e);
         // A thrown rehydrate error means storage/auth/transport itself failed,
         // not that this artifact is known missing. Re-running a paid producer
         // under an R2 outage converts an infrastructure incident into spend.
