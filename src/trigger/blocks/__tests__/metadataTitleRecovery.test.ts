@@ -51,7 +51,7 @@ const load = (Module as unknown as { _load: (...args: unknown[]) => unknown })._
 globalThis.fetch = async () => { throw new Error("unexpected network"); };
 // Load only after the real provider/storage module seams have been isolated.
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { metadataOptimized, finishMetadata } = require("../intelligenceBlocks") as typeof import("../intelligenceBlocks");
+const { metadataOptimized, finishMetadata, metadataTitleArgsForStage } = require("../intelligenceBlocks") as typeof import("../intelligenceBlocks");
 function reset() {
   objects.clear(); calls = []; knownCost = 0; unpriced = 0; hasKey = true; packageFailures = 0;
   unknownPhase = ""; readFailure = ""; failWrite = ""; badUsage = false; unpricedPhase = ""; revoked = false;
@@ -73,6 +73,9 @@ async function main() {
   assert.ok(String(first.thumbnailDescription).includes(honest));
   assert.deepEqual(calls, ["generator", "judge", "package", "package", "comment"]);
   assert.equal(first.__costUsd, 0.05);
+  const manifest = JSON.parse(Buffer.from(objects.get("fixture/runs/run-fixture/metadata-title/v1/manifest.json")!).toString());
+  assert.deepEqual(manifest.args, JSON.parse(JSON.stringify({ ...metadataTitleArgsForStage(context()), perfContext: "Frozen real performance fixture" })),
+    "actual metadata body and read-only builder freeze byte-equivalent arguments");
   const before = calls.length;
   hasKey = false; knownCost = 0;
   const prior = scope.snapshot();

@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { StageContext } from "@/engine/types";
 import { ExecutionError } from "@/engine/executionErrors";
 import { getObjectBytes, putObject } from "@/lib/storage";
@@ -8,7 +8,7 @@ import { checkpointCostReceiptId, observeCheckpointCostReceipt, type CheckpointC
 import {
   assertTitleDecision, craftPinnedComment, hasMetacraft, isTitleResponseRetryable, packageSelectedTitle,
   selectTitle, titleInputFingerprint, youtubeSuggest, fetchCompetitorTitles,
-  type CraftedMetadata, type MetaCraftArgs, type TitleRuntime,
+  type CraftedMetadata, type MetaCraftArgs, type TitleDecision, type TitleRuntime,
 } from "@/lib/metacraft";
 
 interface Binding {
@@ -31,6 +31,25 @@ interface Outcome<T> {
   unpricedCalls: number;
 }
 interface CheckpointIo { get: typeof getObjectBytes; put: typeof putObject }
+type CheckpointIdentity = Pick<StageContext, "ownerId" | "channelId" | "runId" | "keyPrefix">;
+const SLOTS = ["selection", "package-1", "package-2", "comment"] as const;
+type OperationSlot = typeof SLOTS[number];
+interface Claim { binding: Binding; id: string }
+const verifiedCheckpoint = Symbol("verified-metadata-checkpoint");
+interface VerifiedMetadataCheckpoint {
+  readonly [verifiedCheckpoint]: true;
+  readonly binding: Binding;
+  readonly frozenInputHash: string;
+  readonly records: readonly { slot: OperationSlot; claimId: string; outcomeHash: string }[];
+  readonly receipts: readonly CheckpointCostReceipt[];
+  readonly costUsd: number;
+}
+export type MetadataCheckpointInspection =
+  | { kind: "fresh"; binding: Binding }
+  | { kind: "restorable"; proof: VerifiedMetadataCheckpoint }
+  | { kind: "continuable"; proof: VerifiedMetadataCheckpoint; remainingSlots: readonly OperationSlot[] }
+  | { kind: "held"; code: "METADATA_TITLE_RECONCILIATION_REQUIRED"; reason: string };
+
 const defaultIo: CheckpointIo = { get: getObjectBytes, put: putObject };
 function held(message: string): ExecutionError {
   return new ExecutionError("METADATA_TITLE_RECONCILIATION_REQUIRED: " + message, {
@@ -40,12 +59,150 @@ function held(message: string): ExecutionError {
 function isMissing(error: unknown): boolean {
   const e = error as { name?: string; $metadata?: { httpStatusCode?: number } };
   // NoSuchBucket and generic 404s are configuration failures, not absence.
-  return e?.name === "NoSuchKey" || e?.name === "NotFound";
+  return (e?.name === "NoSuchKey" || e?.name === "NotFound") &&
+    (e.$metadata?.httpStatusCode === undefined || e.$metadata.httpStatusCode === 404);
 }
 function isPrecondition(error: unknown): boolean {
   return (error as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode === 412;
 }
 function same(a: unknown, b: unknown): boolean { return JSON.stringify(a) === JSON.stringify(b); }
+function bindingFor(ctx: CheckpointIdentity, args: MetaCraftArgs): Binding {
+  return {
+    version: "metadata-title-checkpoint/v1", ownerId: ctx.ownerId, channelId: ctx.channelId,
+    runId: ctx.runId, keyPrefix: ctx.keyPrefix, inputHash: titleInputFingerprint(args),
+    model: openRouterModel("intelligence"),
+  };
+}
+function prefixFor(ctx: CheckpointIdentity): string {
+  return ctx.keyPrefix.replace(/\/?$/, "/") + "runs/" + ctx.runId + "/metadata-title/v1/";
+}
+async function readCheckpoint<T>(get: CheckpointIo["get"], key: string): Promise<T | null> {
+  let bytes: Uint8Array;
+  try { bytes = await get(key); }
+  catch (error) { if (isMissing(error)) return null; throw error; }
+  try {
+    const value = JSON.parse(Buffer.from(bytes).toString("utf8"));
+    // JSON null is a malformed record, never evidence of object absence.
+    if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("not a record");
+    return value as T;
+  } catch { throw held("unreadable checkpoint " + key); }
+}
+function assertManifest(manifest: Manifest, binding: Binding, args: MetaCraftArgs): void {
+  if (!same(manifest.binding, binding) || !manifest.args || typeof manifest.args.topic !== "string") {
+    throw held("run, source, channel, schema or model binding changed");
+  }
+  // Performance is fetched once at creation; every other argument must match.
+  if (titleInputFingerprint({ ...manifest.args, perfContext: args.perfContext }) !==
+    titleInputFingerprint({ ...args, perfContext: args.perfContext })) throw held("manifest input payload changed");
+  if (manifest.args.perfContext !== undefined && typeof manifest.args.perfContext !== "string") {
+    throw held("invalid frozen performance context");
+  }
+}
+function assertOutcome<T>(binding: Binding, key: string, claim: Claim | null, outcome: Outcome<T>): void {
+  if (!claim || !same(claim.binding, binding) || typeof claim.id !== "string" || !claim.id.trim() ||
+    !same(outcome.binding, binding) || claim.id !== outcome.claimId ||
+    outcome.cost?.id !== checkpointCostReceiptId(key, claim.id) ||
+    !["ok", "held", "rejected"].includes(outcome.status)) throw held("outcome has no matching paid claim");
+  if (!Number.isFinite(outcome.cost.costUsd) || outcome.cost.costUsd < 0 ||
+    !Number.isSafeInteger(outcome.unpricedCalls) || outcome.unpricedCalls < 0) throw held("invalid cost outcome");
+}
+function assertSavedPackage(args: MetaCraftArgs, decision: TitleDecision, metadata?: CraftedMetadata): asserts metadata is CraftedMetadata {
+  if (!metadata || metadata.title !== decision.title || metadata.titleAlternate !== decision.titleAlternate ||
+    typeof metadata.description !== "string" || !metadata.description.trim() || !Array.isArray(metadata.tags) ||
+    metadata.tags.length < 5 || metadata.tags.some((tag) => typeof tag !== "string" || !tag.trim())) {
+    throw held("both package attempts failed or saved package is invalid");
+  }
+  assertTitleDecision(args, metadata.titleDecision);
+  if (metadata.titleDecision.decisionFingerprint !== decision.decisionFingerprint ||
+    metadata.frame !== decision.frame || metadata.clickScore !== decision.clickScore || metadata.judged !== true ||
+    !same(metadata.suggests, decision.suggests) || !same(metadata.feed, decision.feed)) {
+    throw held("saved package does not match the admitted title decision");
+  }
+}
+
+type CheckpointRecords = Map<string, unknown | null>;
+async function readLedger(ctx: CheckpointIdentity, get: CheckpointIo["get"]): Promise<CheckpointRecords> {
+  const prefix = prefixFor(ctx);
+  const keys = [prefix + "manifest.json", ...SLOTS.flatMap((slot) => [prefix + slot + ".claim.json", prefix + slot + ".outcome.json"])];
+  // Fixed keys only, including when the manifest is missing. No bucket listing.
+  return new Map(await Promise.all(keys.map(async (key) => [key, await readCheckpoint(get, key)] as const)));
+}
+
+function inspectLedger(
+  ctx: CheckpointIdentity, args: MetaCraftArgs, records: CheckpointRecords,
+  observeReceipt: (receipt: CheckpointCostReceipt) => void = () => {},
+): MetadataCheckpointInspection {
+  const binding = bindingFor(ctx, args), prefix = prefixFor(ctx);
+  const manifest = records.get(prefix + "manifest.json") as Manifest | null;
+  if (!manifest) {
+    if ([...records.values()].some((record) => record !== null)) throw held("operation records exist without a manifest");
+    return { kind: "fresh", binding };
+  }
+  assertManifest(manifest, binding, args);
+  const outcomes = new Map<OperationSlot, Outcome<unknown>>();
+  const evidence: { slot: OperationSlot; claimId: string; outcomeHash: string }[] = [];
+  const receipts: CheckpointCostReceipt[] = [];
+  const claimIds = new Set<string>();
+  for (const slot of SLOTS) {
+    const key = prefix + slot;
+    const claim = records.get(key + ".claim.json") as Claim | null;
+    const outcome = records.get(key + ".outcome.json") as Outcome<unknown> | null;
+    if (outcome) {
+      assertOutcome(binding, key, claim, outcome);
+      if (claimIds.has(outcome.claimId)) throw held("paid claim identity reused across operations");
+      claimIds.add(outcome.claimId);
+      observeReceipt(outcome.cost);
+      receipts.push(outcome.cost);
+      if (outcome.unpricedCalls) throw held("checkpoint contains unpriced provider usage; reconcile before more spend");
+      if (outcome.status === "held") throw held(outcome.error ?? slot + " outcome unknown");
+      outcomes.set(slot, outcome);
+      evidence.push({ slot, claimId: outcome.claimId, outcomeHash: createHash("sha256").update(JSON.stringify(outcome)).digest("hex") });
+    } else if (claim) throw held(slot + " has an in-flight/unknown paid outcome; no automatic replay");
+  }
+  const selected = outcomes.get("selection") as Outcome<TitleDecision> | undefined;
+  const p1 = outcomes.get("package-1") as Outcome<CraftedMetadata> | undefined;
+  const p2 = outcomes.get("package-2") as Outcome<CraftedMetadata> | undefined;
+  const comment = outcomes.get("comment");
+  if (!selected && (p1 || p2 || comment)) throw held("package/comment precedes selection");
+  if (selected && selected.status !== "ok") throw held(selected.error ?? "title selection rejected");
+  if (selected) assertTitleDecision(manifest.args, selected.value!);
+  if (p2 && (!p1 || p1.status !== "rejected")) throw held("second package requires a rejected first package");
+  if (p1?.status === "ok") assertSavedPackage(manifest.args, selected!.value!, p1.value);
+  if (p2?.status === "ok") assertSavedPackage(manifest.args, selected!.value!, p2.value);
+  if (p2?.status === "rejected") throw held("both package attempts failed");
+  const packaged = p1?.status === "ok" || p2?.status === "ok";
+  if (comment && !packaged) throw held("comment precedes a valid package");
+  if (comment?.status === "ok" && (typeof comment.value !== "string" || !comment.value.trim())) {
+    throw held("saved optional comment is invalid");
+  }
+  const costUsd = receipts.reduce((sum, receipt) => sum + receipt.costUsd, 0);
+  if (!Number.isFinite(costUsd)) throw held("invalid cumulative checkpoint cost");
+  const proof: VerifiedMetadataCheckpoint = {
+    [verifiedCheckpoint]: true, binding, frozenInputHash: titleInputFingerprint(manifest.args),
+    records: evidence, receipts, costUsd,
+  };
+  if (comment) return { kind: "restorable", proof };
+  return { kind: "continuable", proof, remainingSlots: !selected ? SLOTS : packaged ? ["comment"] :
+    p1?.status === "rejected" ? ["package-2", "comment"] : ["package-1", "package-2", "comment"] };
+}
+
+/** Read-only state evidence, not spending authority or an atomic multi-object snapshot. */
+export async function inspectMetadataTitleCheckpoint(
+  ctx: CheckpointIdentity, args: MetaCraftArgs,
+  options: { get?: CheckpointIo["get"]; priorStage?: { status: string; costUsd: number } } = {},
+): Promise<MetadataCheckpointInspection> {
+  try {
+    const result = inspectLedger(ctx, args, await readLedger(ctx, options.get ?? getObjectBytes));
+    const prior = options.priorStage;
+    if (prior && (!Number.isFinite(prior.costUsd) || prior.costUsd < 0)) throw held("invalid prior stage cost");
+    if (result.kind === "fresh" && prior && (prior.costUsd > 0 || ["running", "failed", "ok"].includes(prior.status))) {
+      throw held("prior execution history has no matching checkpoint evidence");
+    }
+    return result;
+  } catch (error) {
+    return { kind: "held", code: "METADATA_TITLE_RECONCILIATION_REQUIRED", reason: error instanceof Error ? error.message : String(error) };
+  }
+}
 
 /** Immutable create-only claims prevent a retry/process replacement buying an ambiguous operation twice. */
 export async function craftCheckpointedMetadata(
@@ -54,6 +211,12 @@ export async function craftCheckpointedMetadata(
   options: { runtime?: TitleRuntime; io?: CheckpointIo; performanceContext?: () => Promise<string> } = {},
 ): Promise<{ metadata: CraftedMetadata; costUsd: number }> {
   const io = options.io ?? defaultIo;
+  const binding = bindingFor(ctx, args);
+  const prefix = prefixFor(ctx);
+  const records = await readLedger(ctx, io.get);
+  // Validate the complete saved operation graph before writes, research or paid work.
+  // Valid known receipts remain accounted even when a later record requires a hold.
+  inspectLedger(ctx, args, records, (receipt) => observeCheckpointCostReceipt(receipt, true));
   const runtime: TitleRuntime = {
     suggest: options.runtime?.suggest ?? youtubeSuggest,
     competitors: options.runtime?.competitors ?? fetchCompetitorTitles,
@@ -64,18 +227,9 @@ export async function craftCheckpointedMetadata(
       return (options.runtime?.json ?? claudeJson)<T>(request);
     },
   };
-  const binding: Binding = {
-    version: "metadata-title-checkpoint/v1", ownerId: ctx.ownerId, channelId: ctx.channelId,
-    runId: ctx.runId, keyPrefix: ctx.keyPrefix, inputHash: titleInputFingerprint(args),
-    model: openRouterModel("intelligence"),
-  };
-  const prefix = ctx.keyPrefix.replace(/\/?$/, "/") + "runs/" + ctx.runId + "/metadata-title/v1/";
   const read = async <T>(key: string): Promise<T | null> => {
-    let bytes: Uint8Array;
-    try { bytes = await io.get(key); }
-    catch (error) { if (isMissing(error)) return null; throw error; }
-    try { return JSON.parse(Buffer.from(bytes).toString("utf8")) as T; }
-    catch { throw held("unreadable checkpoint " + key); }
+    if (!records.has(key)) throw held("unexpected checkpoint key");
+    return records.get(key) as T | null;
   };
   const create = async (key: string, data: unknown): Promise<void> => {
     await ctx.assertRemoteChildExecutionLease?.({ reason: "paid_wave" });
@@ -91,14 +245,13 @@ export async function craftCheckpointedMetadata(
     try { await create(manifestKey, candidate); manifest = candidate; }
     catch (error) {
       if (!isPrecondition(error)) throw error;
-      manifest = await read<Manifest>(manifestKey);
+      manifest = await readCheckpoint<Manifest>(io.get, manifestKey);
     }
   }
-  if (!manifest || !same(manifest.binding, binding)) throw held("run, source, channel, schema or model binding changed");
+  if (!manifest) throw held("manifest creation outcome unknown");
+  assertManifest(manifest, binding, args);
   const frozenArgs: MetaCraftArgs = { ...manifest.args, log: ctx.log };
   // Performance is intentionally frozen once, not reread as a competing title input on recovery.
-  if (titleInputFingerprint({ ...manifest.args, perfContext: args.perfContext }) !==
-    titleInputFingerprint({ ...args, perfContext: args.perfContext })) throw held("manifest input payload changed");
   const receipts = new Map<string, CheckpointCostReceipt>();
   let previousUsage: { costUsd: number; unpricedCalls: number } | undefined;
   const observe = (outcome: Outcome<unknown>, restored: boolean) => {
@@ -126,9 +279,7 @@ export async function craftCheckpointedMetadata(
     const claim = await read<{ binding: Binding; id: string }>(key + ".claim.json");
     const existing = await read<Outcome<T>>(key + ".outcome.json");
     if (existing) {
-      if (!claim || !same(claim.binding, binding) || claim.id !== existing.claimId ||
-        existing.cost?.id !== checkpointCostReceiptId(key, claim.id) ||
-        !["ok", "held", "rejected"].includes(existing.status)) throw held("outcome has no matching paid claim");
+      assertOutcome(binding, key, claim, existing);
       observe(existing, true);
       return existing;
     }
@@ -167,13 +318,7 @@ export async function craftCheckpointedMetadata(
     if (packaged.status === "held") throw held(packaged.error ?? "package outcome unknown");
     if (packaged.status === "ok") { metadata = packaged.value; break; }
   }
-  if (!metadata || metadata.title !== selected.value.title || metadata.titleAlternate !== selected.value.titleAlternate ||
-    !metadata.description || !Array.isArray(metadata.tags) || metadata.tags.length < 5) throw held("both package attempts failed or saved package is invalid");
-  assertTitleDecision(frozenArgs, metadata.titleDecision);
-  if (metadata.titleDecision.decisionFingerprint !== selected.value.decisionFingerprint ||
-    metadata.frame !== selected.value.frame || metadata.clickScore !== selected.value.clickScore || metadata.judged !== true) {
-    throw held("saved package does not match the admitted title decision");
-  }
+  assertSavedPackage(frozenArgs, selected.value, metadata);
   try {
     const comment = await step("comment", () => craftPinnedComment(frozenArgs, selected.value!, runtime));
     if (comment.status === "held") throw held(comment.error ?? "optional comment outcome unknown");
