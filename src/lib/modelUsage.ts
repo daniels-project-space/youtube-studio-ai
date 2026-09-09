@@ -29,6 +29,9 @@ export interface ModelUsageRecord {
   audioInputTokens?: number;
   cachedAudioInputTokens?: number;
   totalTokens?: number;
+  /** Validated response-reported USD charge, including known external fees.
+   * When absent, the existing configured token-rate calculation is retained. */
+  reportedCostUsd?: number;
   /** A real provider charge exists, but its amount is absent/indeterminate. */
   unpricedReason?: string;
   /** Token cost is priceable, but an additional provider fee is not. */
@@ -46,7 +49,7 @@ export interface ModelUsageGroup {
   reasoningTokens: number;
   cachedInputTokens: number;
   totalTokens: number;
-  /** Exact known token charge at the configured/current public rate. */
+  /** Reported charge when supplied; otherwise the configured token-rate cost. */
   costUsd: number;
   unpricedCalls: number;
   unpricedReasons: string[];
@@ -60,7 +63,7 @@ export interface ModelUsageSummary {
   reasoningTokens: number;
   cachedInputTokens: number;
   totalTokens: number;
-  /** Exact known token charge. May be a lower bound when unpricedCalls > 0. */
+  /** Reported/configured charge; incomplete calls may have additional costs. */
   costUsd: number;
   unpricedCalls: number;
   groups: ModelUsageGroup[];
@@ -206,6 +209,13 @@ export function priceModelUsage(record: ModelUsageRecord): {
   costUsd?: number;
   unpricedReason?: string;
 } {
+  if (record.reportedCostUsd !== undefined) {
+    const costUsd = finiteNonNegative(record.reportedCostUsd);
+    if (costUsd === undefined || costUsd > Number.MAX_SAFE_INTEGER) return { unpricedReason: "provider reported an invalid USD charge" };
+    // Missing token detail or an unknown additional fee must not erase a
+    // received charge. Token diagnostics and cost completeness stay separate.
+    return { costUsd, ...(record.unpricedReason ? { unpricedReason: record.unpricedReason } : {}) };
+  }
   if (record.unpricedReason) return { unpricedReason: record.unpricedReason };
   const input = finiteNonNegative(record.inputTokens);
   const output = finiteNonNegative(record.outputTokens);

@@ -31,6 +31,7 @@ let afterResponse: (phase: Phase) => void = () => {};
 let calls: Phase[] = [], events: string[] = [], suggestionCalls = 0, performanceReads = 0;
 let rejectedSelections = 0, rejectedPackages = 0;
 let usageShape: "absent" | "native" | "legacy" | "invalid" = "absent";
+let reportedChargeFixture: Record<string, unknown> | undefined;
 let checkpointReads = 0;
 let beforeGet: (key: string) => void = () => {};
 let beforeStageWrite: (args: Record<string, unknown>) => void = () => {};
@@ -101,6 +102,7 @@ globalThis.fetch = async (input, init) => {
       ...(usageShape === "legacy" ? { reasoning_tokens: 190 } : {}),
       ...(usageShape === "native" || usageShape === "invalid"
         ? { completion_tokens_details: { reasoning_tokens: usageShape === "invalid" ? 201 : 190 } } : {}),
+      ...reportedChargeFixture,
     },
   });
 };
@@ -110,6 +112,7 @@ function harness(paidAdmissionFixture = false, sourceNarration = narration) {
   afterPut = () => {}; afterResponse = () => {}; process.env.OPENROUTER_API_KEY = "fixture-key-no-network";
   rejectedSelections = 0; rejectedPackages = 0;
   usageShape = "absent";
+  reportedChargeFixture = undefined;
   expectedNarration = sourceNarration; requestSizes = [];
   checkpointReads = 0; beforeGet = () => {}; beforeStageWrite = () => {};
   const run = { _id: "run-lease", ownerId: "owner-lease", channelId: "channel-lease", status: "running",
@@ -450,6 +453,31 @@ async function main() {
   const malformedRecovery = await h.execute(false, true);
   assert.equal(malformedRecovery.ok, false); equalCost(malformedRecovery.costTotal, 0.0015);
   assert.deepEqual(calls, ["generator"], "known-cost recovery does not repurchase the held operation");
+  for (const [charge, perCall] of [
+    [{ cost: 0.00075, is_byok: false }, 0.00075],
+    [{ cost: 0.0027, is_byok: false }, 0.0027],
+    [{ cost: 0, is_byok: false }, 0],
+    [{ cost: 0.00005, is_byok: true, cost_details: { upstream_inference_cost: 0.001 } }, 0.00105],
+  ] as const) {
+    h = harness(true); usageShape = "native"; reportedChargeFixture = charge;
+    const received = await h.execute(true, true);
+    assert.equal(received.ok, true, received.error);
+    assert.ok(Math.abs(received.costTotal - 4 * perCall) < 1e-12);
+    assert.ok(Math.abs(h.checkpointCost() - 4 * perCall) < 1e-12);
+    assert.ok(Math.abs(h.rows.get("metadata")!.cost! - 4 * perCall) < 1e-12);
+    const saved = structuredClone(objects);
+    h.rows.get("metadata")!.status = "failed"; delete process.env.OPENROUTER_API_KEY;
+    const restored = await h.execute(false, true);
+    assert.equal(restored.ok, true, restored.error); assert.equal(calls.length, 4);
+    assert.equal(restored.costTotal, received.costTotal); assert.deepEqual(objects, saved);
+  }
+  h = harness(true); reportedChargeFixture = { cost: 0.00005, is_byok: true };
+  const partialBill = await h.execute(true, true);
+  assert.equal(partialBill.ok, false); equalCost(partialBill.costTotal, 0.00005);
+  assert.deepEqual(calls, ["generator"], "unknown BYOK bill holds before buying a judge");
+  const partialReplay = await h.execute(false, true);
+  assert.equal(partialReplay.ok, false); equalCost(partialReplay.costTotal, 0.00005);
+  assert.deepEqual(calls, ["generator"], "partial bill recovery cannot retry the unknown operation");
   for (const [name, passage] of [
     ["long-form", "The archive describes the design, the inspection and the witnesses, without changing who survived.\n"],
     ["multilingual", "橋の記録。الوثيقة الأصلية。Ingenieurbericht: \"Prüfung\" — récit vérifié 🏗️\n"],
@@ -475,6 +503,7 @@ async function main() {
   console.log("Real paid metadata admission: 18 checkpoint reads, paid-fenced cost recovery before purchase, zero-cost replay, refused missing/unreadable/held ledgers and bounded retries passed (TEST envelope only)");
   console.log("Held-cost recovery: known charges survive unknown claims, partial R2 outage, stale/unavailable summary writes and repeated retries; no held body or duplicate purchase (fixture boundaries only)");
   console.log("Native/legacy inclusive reasoning costs persist exactly once through real stage handlers; malformed usage retains known cost and blocks later purchase (fixture boundaries only)");
+  console.log("Reported discount, priority, zero and BYOK charges survive actual metadata/stage-handler recovery; incomplete bills hold later dispatch (fixture boundaries only)");
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => {
   globalThis.fetch = originalFetch; loader._load = originalLoad;

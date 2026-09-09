@@ -200,6 +200,30 @@ function completionUsage(usage?: Record<string, unknown>): Pick<ModelUsageRecord
   return { outputTokens: completion - reasoning, reasoningTokens: reasoning };
 }
 
+// Response cost is denominated in USD credits. For BYOK, the router fee and
+// external inference bill are separate; for credit-funded calls, cost already
+// includes upstream inference. Never infer funding mode from matching amounts.
+function reportedCharge(usage?: Record<string, unknown>): Pick<ModelUsageRecord, "reportedCostUsd" | "unpricedReason"> {
+  if (!usage) return {};
+  const byok = usage.is_byok;
+  // Retain the former configured-rate path for legacy responses without a
+  // charge field. This is compatibility, not a new actual-bill receipt.
+  if (!Object.hasOwn(usage, "cost") && (byok === undefined || byok === false)) return {};
+  const valid = (value: unknown): value is number => typeof value === "number" && Number.isFinite(value) && value >= 0 && value <= Number.MAX_SAFE_INTEGER;
+  const reasons: string[] = [];
+  let known = valid(usage.cost), amount = known ? usage.cost as number : 0;
+  if (!known) reasons.push("OpenRouter credit charge is missing or invalid");
+  if (byok === true) {
+    const details = usage.cost_details;
+    const upstream = details && typeof details === "object" && !Array.isArray(details)
+      ? (details as Record<string, unknown>).upstream_inference_cost : undefined;
+    if (valid(upstream) && valid(amount + upstream)) { amount += upstream; known = true; }
+    else reasons.push("OpenRouter BYOK external charge is missing or invalid");
+  } else if (byok !== false) reasons.push("OpenRouter funding mode is missing or invalid");
+  return { ...(known ? { reportedCostUsd: amount } : {}),
+    ...(reasons.length ? { unpricedReason: reasons.join("; ") } : {}) };
+}
+
 export async function openRouterChat(args: {
   model: string;
   messages: OpenRouterMessage[];
@@ -280,6 +304,8 @@ export async function openRouterChat(args: {
     ? String((payload as { model?: unknown }).model ?? args.model)
     : args.model;
   const completion = completionUsage(usage);
+  const charge = reportedCharge(usage);
+  const incomplete = [completion.unpricedReason, charge.unpricedReason].filter(Boolean).join("; ");
   recordModelUsage({
     provider: "openrouter",
     model: returnedModel,
@@ -287,6 +313,8 @@ export async function openRouterChat(args: {
     requestId: payload && typeof payload === "object" ? String((payload as { id?: unknown }).id ?? "") || undefined : undefined,
     inputTokens: typeof usage?.prompt_tokens === "number" ? usage.prompt_tokens : undefined,
     ...completion,
+    ...charge,
+    ...(incomplete ? { unpricedReason: incomplete } : {}),
     cachedInputTokens: typeof usage?.prompt_tokens_details === "object" && usage.prompt_tokens_details
       && typeof (usage.prompt_tokens_details as { cached_tokens?: unknown }).cached_tokens === "number"
       ? (usage.prompt_tokens_details as { cached_tokens: number }).cached_tokens
