@@ -115,7 +115,7 @@ function ArtifactCard({
         </div>
         <div className={styles.proof}>
           <span className={styles.proofLabel}>Master evidence</span>
-          <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} />
+          <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} wrap />
         </div>
       </div>
     </>

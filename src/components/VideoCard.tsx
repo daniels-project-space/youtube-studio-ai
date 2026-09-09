@@ -57,7 +57,7 @@ export function VideoCard({
         </div>
         <div className="video-card-evidence">
           <span className="video-card-evidence-label">Master evidence</span>
-          <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} />
+          <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} wrap />
         </div>
       </div>
     </>

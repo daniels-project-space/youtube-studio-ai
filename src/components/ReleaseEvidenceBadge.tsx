@@ -20,10 +20,12 @@ export function ReleaseEvidenceBadge({
   status,
   size = "sm",
   compact = false,
+  wrap = false,
 }: {
   status?: string;
   size?: "sm" | "md";
   compact?: boolean;
+  wrap?: boolean;
 }) {
   const normalized = normalizeReleaseEvidenceStatus(status);
   const color = COLOR[normalized];
@@ -52,7 +54,8 @@ export function ReleaseEvidenceBadge({
         color,
         background: `color-mix(in srgb, ${color} 13%, transparent)`,
         border: `1px solid color-mix(in srgb, ${color} 29%, transparent)`,
-        whiteSpace: "nowrap",
+        whiteSpace: wrap ? "normal" : "nowrap",
+        ...(wrap ? { minWidth: 0, maxWidth: "100%" } : {}),
       }}
     >
       <span

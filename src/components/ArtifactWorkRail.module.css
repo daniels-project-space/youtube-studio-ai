@@ -159,6 +159,8 @@ button.card:focus-visible {
 
 .body {
   display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  min-width: 0;
   gap: 0.55rem;
   padding: 0.72rem 0.78rem 0.78rem;
 }
@@ -196,6 +198,7 @@ button.card:focus-visible {
 }
 
 .proof {
+  flex-wrap: wrap;
   padding-top: 0.52rem;
   border-top: 1px solid color-mix(in srgb, var(--color-border) 78%, transparent);
 }
