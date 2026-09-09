@@ -1,6 +1,6 @@
 # Production-only reasoning accounting correction
 
-Status: full frozen gate passed; production deployment verification pending.
+Status: full frozen gate and exact Vercel production verification passed; cloud CI verification pending.
 
 ## Scope
 
@@ -23,3 +23,7 @@ The replay helper and retained experimental corpus stay on the held checkpoint, 
 Frozen candidate `640d584f61c342ce4987eca2dc8959b3714cbbd9` independently replays the same 30 receipts at `/tmp/ysa-usage-frozen-A9f6by/repo`. Log `/tmp/ysa-openrouter-usage-frozen-replay.log` records the exact client SHA `a7547949b3f0cb42c5399bbe7570e557a2edc34a65c45f66edd445c7a5f47bf0`, unchanged $0.0844425 and 14,019 separately visible reasoning tokens. No retained response is converted, omitted silently or treated as a new paid quality result.
 
 Its own independent release gate passed all **632 direct tests**, typecheck, production build, lint (zero errors / 33 existing warnings), unchanged structural audits and the 24-defect proof generator. The actual hermetic assembly produced `/tmp/assembly-smoke-VGkTfP/bk_smoke_2_loudnorm.mp4` (31.021995 seconds). Logs are `/tmp/ysa-accounting-release-{tests,typecheck,lint,build,audit,defect-proof,assembly}.log`. This assembly checks existing renderer compatibility, not a new paid channel render or R2 upload. The exact five-file diff was reviewed before fast-forwarding production main; the root HEAD/index and held work remain unchanged. Deployment success must still be checked independently.
+
+## Production verification
+
+The exact production `/api/health` returns `640d584f61c342ce4987eca2dc8959b3714cbbd9`. GitHub/Vercel deployment `6352624602` is explicitly **Production**, successful at 14:53:43 UTC, with deployment URL `https://youtube-studio-mwk670mfs-danielmabro-news-projects.vercel.app` and Vercel receipt `D3TKVuRDfEqwN3EV92844XV4ETTP`; the separate earlier preview is not used as proof. Six actual navigation journeys on the production alias pass, with no proxy (`/tmp/ysa-accounting-production-navigation.log`, `/tmp/ysa-navigation-reflow-BHeFPm/`). Cloud CI `34366556622` remains in progress. No paid request was made to manufacture live parser evidence; exact retained-response replay and deployed artifact identity remain the scoped accounting proof.

@@ -23,6 +23,8 @@ type Row = NonNullable<Awaited<ReturnType<NonNullable<RunStageSink["getResumeSta
 const honest = "47 Engineers Died in the Bridge Collapse";
 const contradicted = "47 Engineers Survived the Bridge Collapse";
 const narration = "A sourced account. ".repeat(100) + "The bridge collapse killed 47 engineers. No engineers survived.";
+let expectedNarration = narration;
+let requestSizes: { phase: Phase; messageBytes: number }[] = [];
 const objects = new Map<string, Uint8Array>();
 let afterPut: (key: string) => void = () => {};
 let afterResponse: (phase: Phase) => void = () => {};
@@ -76,6 +78,9 @@ globalThis.fetch = async (input, init) => {
   const prompt = body.messages.find((message: { role: string }) => message.role === "user").content as string;
   const phase: Phase = prompt.startsWith("Write SEVEN") ? "generator" : prompt.startsWith("You are") ? "judge" :
     prompt.startsWith("Write the YouTube") ? "package" : "comment";
+  assert.ok(prompt.includes(JSON.stringify(expectedNarration)),
+    `${phase}: the complete JSON-escaped source reaches the actual HTTP boundary, not a truncated excerpt`);
+  requestSizes.push({ phase, messageBytes: Buffer.byteLength(JSON.stringify(body.messages)) });
   calls.push(phase); events.push("provider:" + phase);
   let value: unknown;
   if (phase === "generator") value = { candidates: [{ frame: "direct_verdict", title: honest }] };
@@ -100,11 +105,12 @@ globalThis.fetch = async (input, init) => {
   });
 };
 
-function harness(paidAdmissionFixture = false) {
+function harness(paidAdmissionFixture = false, sourceNarration = narration) {
   objects.clear(); calls = []; events = []; suggestionCalls = 0; performanceReads = 0;
   afterPut = () => {}; afterResponse = () => {}; process.env.OPENROUTER_API_KEY = "fixture-key-no-network";
   rejectedSelections = 0; rejectedPackages = 0;
   usageShape = "absent";
+  expectedNarration = sourceNarration; requestSizes = [];
   checkpointReads = 0; beforeGet = () => {}; beforeStageWrite = () => {};
   const run = { _id: "run-lease", ownerId: "owner-lease", channelId: "channel-lease", status: "running",
     leaseOwner: "worker-a", executionAttempts: 1, leaseExpiresAt: Date.now() + 120_000 };
@@ -184,7 +190,7 @@ function harness(paidAdmissionFixture = false) {
       ownerId: run.ownerId, channelId: run.channelId, runId: run._id,
       leaseOwner: run.leaseOwner, executionLeaseToken: run.executionAttempts,
     }) } : {}),
-    seedStore: { topic: "Bridge collapse", channelName: "Field Notes", narrationText: narration,
+    seedStore: { topic: "Bridge collapse", channelName: "Field Notes", narrationText: sourceNarration,
       plannedTitle: contradicted, competitors: [] },
     rehydrate: async (_block, outputs) => ({ ok: true, outputs }),
   });
@@ -444,6 +450,27 @@ async function main() {
   const malformedRecovery = await h.execute(false, true);
   assert.equal(malformedRecovery.ok, false); equalCost(malformedRecovery.costTotal, 0.0015);
   assert.deepEqual(calls, ["generator"], "known-cost recovery does not repurchase the held operation");
+  for (const [name, passage] of [
+    ["long-form", "The archive describes the design, the inspection and the witnesses, without changing who survived.\n"],
+    ["multilingual", "橋の記録。الوثيقة الأصلية。Ingenieurbericht: \"Prüfung\" — récit vérifié 🏗️\n"],
+  ] as const) {
+    const source = passage.repeat(1200) + "The bridge collapse killed 47 engineers. No engineers survived.";
+    h = harness(true, source); rejectedSelections = 1; rejectedPackages = 1;
+    const expanded = await h.execute(true, true);
+    assert.equal(expanded.ok, true, expanded.error);
+    assert.deepEqual(calls, ["generator", "judge", "generator", "judge", "package", "package", "comment"]);
+    assert.ok(requestSizes.every(row => row.messageBytes > 50_000));
+    assert.deepEqual((expanded.store.titleDecision as { sourceCoverage: unknown }).sourceCoverage,
+      { kind: "full_narration", providedChars: source.length, totalChars: source.length });
+    const original = structuredClone(objects);
+    h.rows.get("metadata")!.status = "failed"; delete process.env.OPENROUTER_API_KEY;
+    const replay = await h.execute(false, true);
+    assert.equal(replay.ok, true, replay.error); assert.equal(calls.length, 7);
+    assert.deepEqual(objects, original); assert.deepEqual(replay.store.titleDecision, expanded.store.titleDecision);
+    console.log(JSON.stringify({ sourcePreservationFixture: name, sourceChars: source.length,
+      sourceBytes: Buffer.byteLength(source), requests: requestSizes,
+      liveDispatches: 0, pricingQualification: false }));
+  }
   console.log("Real metadata engine/transport lease integration: 8 fresh checks, zero-purchase stale rejection, immutable completed outcomes, exact missing-work recovery and cost deduplication passed (fixture boundaries only)");
   console.log("Real paid metadata admission: 18 checkpoint reads, paid-fenced cost recovery before purchase, zero-cost replay, refused missing/unreadable/held ledgers and bounded retries passed (TEST envelope only)");
   console.log("Held-cost recovery: known charges survive unknown claims, partial R2 outage, stale/unavailable summary writes and repeated retries; no held body or duplicate purchase (fixture boundaries only)");
