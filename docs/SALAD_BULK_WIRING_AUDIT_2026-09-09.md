@@ -2,6 +2,25 @@
 
 ## Result and scope
 
+**Shared-capacity follow-up, 9 September:** the real infrastructure proof runner
+now reserves from an organization-scoped, fixed-bucket R2 CAS guard before
+provider creation. It permits three managed GPUs across tools/projects, fences
+dispatch against unused-close, and releases only after verified stop/deletion
+plus durable closure. A fresh live R2 storage-only test admitted three of four
+concurrent requests and rejected stale writes; all unused reservations closed.
+No GPU or production fleet state was mutated. The full infrastructure suite now
+passes 80 tests. Details and exact receipt:
+`/home/ubuntu/salad-media-infra/docs/FLEET_CAPACITY_2026-09.md`.
+This is a real first caller, not a completed cross-channel weekly dispatcher,
+unattended reaper or prepared-result consumer. Backlog item 117 remains partial.
+Infrastructure checkpoint: `a8b69e2e74812c48e949a40668cca83eb59779ae` (parent
+`079346c`). All 80 tests also passed from its clean detached checkout at
+`/tmp/salad-fleet-verify-XloXD2/repo`; no vendor checkout or uncommitted files
+were needed. Log: `/tmp/salad-fleet-clean-checkpoint-tests.log`. This checkpoint
+has not been pushed/deployed as a GPU runtime. Original checkout HEADs and
+indexes are unchanged; the production app remains on the separately verified
+`f7e954bfa5f99aff2967a7b32df2f63b19b7f31d` UI release.
+
 **Later implementation follow-up, 9 September:** the infrastructure proof runner's
 unverified-shutdown success bug described below is now repaired locally and
 fault-tested. See `/home/ubuntu/salad-media-infra/docs/SHUTDOWN_RECOVERY_2026-09.md`.
