@@ -27,12 +27,17 @@ let afterPut: (key: string) => void = () => {};
 let afterResponse: (phase: Phase) => void = () => {};
 let calls: Phase[] = [], events: string[] = [], suggestionCalls = 0, performanceReads = 0;
 let rejectedSelections = 0, rejectedPackages = 0;
+let checkpointReads = 0;
+let beforeGet: () => void = () => {};
+let beforeStageWrite: (args: Record<string, unknown>) => void = () => {};
 const loader = (Module as unknown as { _load: (...args: unknown[]) => unknown });
 const originalLoad = loader._load;
 loader._load = function(this: unknown, request: string, ...rest: unknown[]) {
   const actual = originalLoad.call(this, request, ...rest) as Record<string, unknown>;
   if (request.endsWith("/storage")) return { ...actual,
     getObjectBytes: async (key: string) => {
+      if (key.includes("/metadata-title/v1/")) checkpointReads++;
+      beforeGet();
       const value = objects.get(key);
       if (!value) throw Object.assign(new Error("not found"), { name: "NoSuchKey" });
       return Uint8Array.from(value);
@@ -89,10 +94,11 @@ globalThis.fetch = async (input, init) => {
   });
 };
 
-function harness() {
+function harness(paidAdmissionFixture = false) {
   objects.clear(); calls = []; events = []; suggestionCalls = 0; performanceReads = 0;
   afterPut = () => {}; afterResponse = () => {}; process.env.OPENROUTER_API_KEY = "fixture-key-no-network";
   rejectedSelections = 0; rejectedPackages = 0;
+  checkpointReads = 0; beforeGet = () => {}; beforeStageWrite = () => {};
   const run = { _id: "run-lease", ownerId: "owner-lease", channelId: "channel-lease", status: "running",
     leaseOwner: "worker-a", executionAttempts: 1, leaseExpiresAt: Date.now() + 120_000 };
   const channel = { _id: run.channelId, ownerId: run.ownerId };
@@ -149,15 +155,21 @@ function harness() {
   } };
   const writerClient = { mutation: async (ref: Parameters<StudioConvexHttpClient["mutation"]>[0], args: unknown) => {
     assert.equal(getFunctionName(ref), "runStages:upsertRunStage");
-    return (upsertRunStage as unknown as { _handler: (ctx: unknown, args: unknown) => Promise<unknown> })._handler(mutationCtx, args);
+    beforeStageWrite(args as Record<string, unknown>);
+    const value = await (upsertRunStage as unknown as { _handler: (ctx: unknown, args: unknown) => Promise<unknown> })._handler(mutationCtx, args);
+    if ((args as Record<string, unknown>).checkpointCostReceipts) events.push("stage:receipts-persisted");
+    return value;
   } } as unknown as StudioConvexHttpClient;
-  _clear(); registerManifest(manifestFromBlock(metadataOptimized, MODULE_CONTRACTS.metadata));
+  // This is an explicit TEST envelope for the fixed HTTP usage fixture below,
+  // not a qualified production ceiling or permission to flip metadata paid.
+  assert.equal(Boolean(metadataOptimized.paid), false);
+  _clear(); registerManifest(manifestFromBlock(paidAdmissionFixture ? { ...metadataOptimized, paid: true } : metadataOptimized,
+    paidAdmissionFixture ? { ...MODULE_CONTRACTS.metadata, maxCostUsd: 0.012 } : MODULE_CONTRACTS.metadata));
   const pipeline = validatePipeline([{ block: "metadata" }], ["topic"]);
-  assert.equal(pipeline.manifests[0].costAndLatency.paid, false,
-    "this lease test must not pretend the separate, unfinished budget admission is enabled");
-  const execute = (authority = true, fencedWrites = false) => runPipeline(pipeline, {
+  assert.equal(pipeline.manifests[0].costAndLatency.paid, paidAdmissionFixture);
+  const execute = (authority = true, fencedWrites = false, budgetUsd = paidAdmissionFixture ? 0.012 : 1) => runPipeline(pipeline, {
     ownerId: run.ownerId, channelId: run.channelId, runId: run._id, keyPrefix: "lease-fixture/",
-    budgetUsd: 1, defaultRetries: 0, sink: fencedWrites ? { ...sink, upsert: makeConvexSink(writerClient, run.ownerId, {
+    budgetUsd, defaultRetries: 0, sink: fencedWrites ? { ...sink, upsert: makeConvexSink(writerClient, run.ownerId, {
       leaseOwner: run.leaseOwner, executionLeaseToken: run.executionAttempts,
     }).upsert } : sink,
     executionLease: { leaseOwner: run.leaseOwner, executionLeaseToken: run.executionAttempts },
@@ -272,7 +284,76 @@ async function main() {
     assert.equal(h.rows.get("metadata")!.status, "ok");
     for (const [key, value] of beforeResume) assert.deepEqual(objects.get(key), value);
   }
+
+  // Real metadata through the paid-admission hook, with a clearly labelled
+  // fixture ceiling. These tests do not change the production classification.
+  h = harness(true);
+  const admitted = await h.execute(true, true);
+  assert.equal(admitted.ok, true, admitted.error); equalCost(admitted.costTotal, h.checkpointCost());
+  assert.equal(checkpointReads, 18, "engine inspection plus independent body revalidation: nine keys each");
+  h.rows.get("metadata")!.status = "failed";
+  delete process.env.OPENROUTER_API_KEY;
+  const replay = await h.execute(false, true, admitted.costTotal);
+  assert.equal(replay.ok, true, replay.error); equalCost(replay.costTotal, admitted.costTotal);
+  assert.equal(calls.length, 4); assert.equal(checkpointReads, 36);
+
+  for (const phase of ["judge", "package", "comment"] as const) {
+    h = harness(true); afterResponse = (received) => { if (received === phase) h.run.executionAttempts++; };
+    await assert.rejects(h.execute(true, true), /stale/);
+    assert.equal(h.rows.get("metadata")!.cost, 0);
+    const savedCost = h.checkpointCost(), savedObjects = structuredClone(objects), bought = calls.length;
+    afterResponse = () => {};
+    beforeStageWrite = (args) => {
+      if (args.status === "running" && args.checkpointCostReceipts) {
+        equalCost(Number(args.cost), savedCost);
+        assert.equal(calls.length, bought, "recover accepted cost durably before any further HTTP purchase");
+      }
+    };
+    const recovered = await h.execute(true, true);
+    assert.equal(recovered.ok, true, recovered.error); equalCost(recovered.costTotal, h.checkpointCost());
+    assert.deepEqual(calls, ["generator", "judge", "package", "comment"]);
+    for (const [key, bytes] of savedObjects) assert.deepEqual(objects.get(key), bytes);
+    const resumeEvents = events.slice(events.indexOf("stage:receipts-persisted"));
+    if (phase !== "comment") assert.ok(resumeEvents.includes("provider:comment"));
+  }
+
+  h = harness(true); afterResponse = (phase) => { if (phase === "judge") h.run.executionAttempts++; };
+  const partialAccounted = await h.execute();
+  assert.equal(partialAccounted.ok, false); equalCost(partialAccounted.costTotal, h.checkpointCost());
+  afterResponse = () => {};
+  const accountedResume = await h.execute(true, true);
+  assert.equal(accountedResume.ok, true, accountedResume.error); equalCost(accountedResume.costTotal, h.checkpointCost());
+  assert.equal(calls.length, 4);
+
+  h = harness(true); afterResponse = (phase) => { if (phase === "judge") h.run.executionAttempts++; };
+  await assert.rejects(h.execute(true, true), /stale/);
+  afterResponse = () => {};
+  beforeStageWrite = (args) => { if (args.status === "running" && args.checkpointCostReceipts) throw new Error("Convex write unavailable"); };
+  const persistFailed = await h.execute(true, true);
+  assert.equal(persistFailed.ok, false); assert.match(persistFailed.error!, /Convex write unavailable/);
+  equalCost(persistFailed.costTotal, h.checkpointCost());
+  assert.deepEqual(calls, ["generator", "judge"]);
+  beforeStageWrite = () => {};
+  assert.equal((await h.execute(true, true)).ok, true); assert.equal(calls.length, 4);
+
+  for (const budget of [0, NaN, Infinity, 0.011]) {
+    h = harness(true);
+    const denied = await h.execute(true, true, budget);
+    assert.equal(denied.ok, false); assert.equal(calls.length, 0); assert.equal(objects.size, 0);
+  }
+  h = harness(true); beforeGet = () => { throw new Error("R2 unavailable"); };
+  assert.equal((await h.execute(true, true)).ok, false); assert.equal(calls.length, 0); assert.equal(objects.size, 0);
+  h = harness(true); h.rows.set("metadata", { block: "metadata", status: "running", cost: 0 });
+  assert.equal((await h.execute(true, true)).ok, false); assert.equal(calls.length, 0); assert.equal(objects.size, 0);
+  h = harness(true); afterResponse = (phase) => { if (phase === "generator") h.run.executionAttempts++; };
+  await assert.rejects(h.execute(true, true), /stale/); afterResponse = () => {};
+  assert.equal((await h.execute(true, true)).ok, false); assert.deepEqual(calls, ["generator"]);
+  h = harness(true); rejectedSelections = 1; rejectedPackages = 1;
+  const admittedRetries = await h.execute(true, true);
+  assert.equal(admittedRetries.ok, true, admittedRetries.error); equalCost(admittedRetries.costTotal, h.checkpointCost());
+  assert.equal(calls.length, 7);
   console.log("Real metadata engine/transport lease integration: 8 fresh checks, zero-purchase stale rejection, immutable completed outcomes, exact missing-work recovery and cost deduplication passed (fixture boundaries only)");
+  console.log("Real paid metadata admission: 18 checkpoint reads, paid-fenced cost recovery before purchase, zero-cost replay, refused missing/unreadable/held ledgers and bounded retries passed (TEST envelope only)");
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => {
   globalThis.fetch = originalFetch; loader._load = originalLoad;

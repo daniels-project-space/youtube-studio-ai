@@ -62,7 +62,7 @@ import {
   generateFalNanoBananaLofiThumbnailWithReceipt,
   hasFalNanoBananaLofiThumbnail,
 } from "@/lib/falNanoBananaLofiThumbnail";
-import { craftCheckpointedMetadata } from "@/lib/metadataTitleCheckpoint";
+import { craftCheckpointedMetadata, inspectMetadataPaidInlineResume } from "@/lib/metadataTitleCheckpoint";
 import type { MetaCraftArgs } from "@/lib/metacraft";
 import { compositeProviderTypographyOverlay } from "@/lib/ffmpeg";
 import { hasVisionKey } from "@/lib/vision";
@@ -405,6 +405,7 @@ export const metadataOptimized: Block = {
     "title", "description", "thumbnailDescription", "tags", "estimatedViews",
     "estimatedViewsSource", "pinnedComment", "titleAlternate", "titleDecision",
   ],
+  inspectPaidInlineResume: (ctx) => inspectMetadataPaidInlineResume(ctx, metadataTitleArgsForStage(ctx)),
   run: async (ctx) => {
     const args = metadataTitleArgsForStage(ctx);
     const { topic, channelName = "this channel", niche = "", scriptExcerpt = "", continuityContext: serializedEpisodePrompt } = args;

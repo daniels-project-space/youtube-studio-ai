@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { StageContext } from "@/engine/types";
 import { ExecutionError } from "@/engine/executionErrors";
+import { verifiedInlineCheckpoint, type InlineCheckpointContext } from "@/engine/inlineCheckpointAdmission";
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { openRouterModel } from "@/lib/openRouter";
 import { claudeJson } from "@/lib/anthropic";
@@ -202,6 +203,25 @@ export async function inspectMetadataTitleCheckpoint(
   } catch (error) {
     return { kind: "held", code: "METADATA_TITLE_RECONCILIATION_REQUIRED", reason: error instanceof Error ? error.message : String(error) };
   }
+}
+
+/** Registered metadata adapter: only the real nine-key validator can mint the
+ * engine evidence. Budget, attribution and stage persistence belong to runner. */
+export async function inspectMetadataPaidInlineResume(ctx: InlineCheckpointContext, args: MetaCraftArgs) {
+  const inspected = await inspectMetadataTitleCheckpoint(ctx, args, { priorStage: ctx.priorStage });
+  if (inspected.kind === "held") throw held(inspected.reason);
+  if (inspected.kind === "fresh") return verifiedInlineCheckpoint(ctx.binding, {
+    kind: "fresh", ledgerFingerprint: null, receipts: [],
+  });
+  const proof = inspected.proof;
+  if (proof[verifiedCheckpoint] !== true || !same(proof.binding, bindingFor(ctx, args))) {
+    throw held("metadata inspection proof binding changed");
+  }
+  return verifiedInlineCheckpoint(ctx.binding, {
+    kind: inspected.kind, receipts: proof.receipts,
+    ledgerFingerprint: createHash("sha256").update(JSON.stringify({ binding: proof.binding,
+      frozenInputHash: proof.frozenInputHash, records: proof.records })).digest("hex"),
+  });
 }
 
 /** Immutable create-only claims prevent a retry/process replacement buying an ambiguous operation twice. */

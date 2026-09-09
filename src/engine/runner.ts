@@ -35,6 +35,7 @@ import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage"
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
 import { createCheckpointCostScope, incrementalObservedFailureCostUsd, type CheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
+import { reconcileInlineCheckpoint, type InlineCheckpointContext } from "./inlineCheckpointAdmission";
 
 export interface RunPipelineOptions {
   ownerId: string;
@@ -304,6 +305,14 @@ function stableJson(value: unknown): string {
 
 function hashPayload(value: unknown): string {
   return createHash("sha256").update(stableJson(value)).digest("hex");
+}
+
+function freezeCheckpointInputs<T>(value: T): T {
+  if (value && typeof value === "object") {
+    for (const child of Object.values(value)) freezeCheckpointInputs(child);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function artifactSummary(value: unknown): string {
@@ -747,14 +756,15 @@ export async function runPipeline(
         `resolved pipeline alignment mismatch at step ${blockIndex}: block=${block.id}, manifest=${manifest.id}`,
       );
     }
-    const params = opts.paramsByBlock?.[block.id] ?? resolved.entries[blockIndex]?.params ?? {};
-    const priorStage = priorStageMap.get(block.id);
+    let params = opts.paramsByBlock?.[block.id] ?? resolved.entries[blockIndex]?.params ?? {};
+    let priorStage = priorStageMap.get(block.id);
+    let bodyStore = store;
     const isRemoteExecution = opts.remoteBlocks?.has(block.id) === true && Boolean(opts.runRemoteBlock);
-    const costBaseline = executionCostBaseline(
+    let costBaseline = executionCostBaseline(
       priorStage,
       isRemoteExecution,
     );
-    const checkpointCostScope = createCheckpointCostScope(priorStage?.checkpointCostReceipts ?? [], costBaseline.priorCost);
+    let checkpointCostScope = createCheckpointCostScope(priorStage?.checkpointCostReceipts ?? [], costBaseline.priorCost);
     // Remote child work is normally keyed by Trigger's durable idempotency key;
     // a parent retry can reattach to that child instead of deadlocking itself.
     // A remote child marked as requiring reconciliation is different: it may
@@ -774,26 +784,6 @@ export async function runPipeline(
           (priorStage?.status === "running" ||
             (priorStage?.status === "failed" &&
               priorStage.error?.includes(PAID_STAGE_RECONCILIATION_MARKER)))));
-    if (paidStageNeedsReconciliation) {
-      const started = priorStage?.startedAt
-        ? ` (started ${new Date(priorStage.startedAt).toISOString()})`
-        : "";
-      const message =
-        `${PAID_STAGE_RECONCILIATION_MARKER}: paid block "${block.id}" was left ` +
-        `${priorStage?.status ?? "unknown"}${started}; refusing automatic replay because the ` +
-        "provider may already have accepted or completed the charge. Reconcile the provider receipt, then supersede the stage or start a new run.";
-      await opts.sink.upsert({
-        ownerId: opts.ownerId,
-        runId: opts.runId,
-        block: block.id,
-        status: "failed",
-        finishedAt: Date.now(),
-        error: message,
-      });
-      stages.push({ block: block.id, status: "failed" });
-      log(message);
-      return { status: "failed", cost: 0, error: message };
-    }
     // Debug snapshot only — SUMMARIZED. Persisting the full consumed values
     // (whole scripts, clip-path arrays, timing tables) shipped hundreds of KB
     // per stage transition to every open dashboard for zero consumer value.
@@ -893,6 +883,80 @@ export async function runPipeline(
         index: blockIndex,
         store,
       });
+    }
+
+    let inlineCheckpointAdmitted = false;
+    if (manifest.costAndLatency.paid && block.inspectPaidInlineResume !== undefined && !isRemoteExecution) {
+      try {
+        if (typeof block.inspectPaidInlineResume !== "function" || GROUP_OF.has(block.id) || opts.remoteBlocks?.has(block.id)) {
+          throw new Error("inline checkpoint admission requires an executable sequential local adapter");
+        }
+        if (opts.resume === false || !opts.sink.getResumeState) {
+          throw new Error("inline checkpoint admission requires the complete persisted resume state");
+        }
+        if (!Number.isFinite(opts.budgetUsd) || opts.budgetUsd <= 0 ||
+          configuredEnvelope === undefined || !Number.isFinite(configuredEnvelope) || configuredEnvelope <= 0) {
+          throw new Error("inline checkpoint admission requires a positive finite budget and module envelope");
+        }
+        const inputSnapshot = () => Object.fromEntries([...new Set([
+          ...Object.keys(manifest.consumes), ...Object.keys(manifest.optionalConsumes),
+        ])].filter((key) => Object.prototype.hasOwnProperty.call(store, key)).map((key) => [key, store[key]]));
+        const frozen = freezeCheckpointInputs(structuredClone({ params, store: inputSnapshot() }));
+        const binding = Object.freeze({ ownerId: opts.ownerId, channelId: opts.channelId, runId: opts.runId,
+          keyPrefix: opts.keyPrefix, moduleId: manifest.id, moduleVersion: manifest.version,
+          inputFingerprint: hashPayload(frozen) });
+        const inspectionContext: InlineCheckpointContext = Object.freeze({
+          ownerId: opts.ownerId, channelId: opts.channelId, runId: opts.runId, keyPrefix: opts.keyPrefix,
+          binding, params: frozen.params,
+          store: declaredArtifactStore(manifest, frozen.store, new Set()),
+          ...(priorStage ? { priorStage: Object.freeze({ status: priorStage.status, costUsd: priorStage.cost ?? 0 }) } : {}),
+        });
+        const proof = await block.inspectPaidInlineResume(inspectionContext);
+        if (hashPayload({ params, store: inputSnapshot() }) !== binding.inputFingerprint) {
+          throw new Error("inline checkpoint inputs changed during inspection");
+        }
+        const reconciled = reconcileInlineCheckpoint(binding, proof, priorStage ? {
+          status: priorStage.status, costUsd: priorStage.cost ?? 0, receipts: priorStage.checkpointCostReceipts ?? [],
+        } : undefined, configuredEnvelope);
+        // This is verified spend even when the subsequent summary write fails.
+        // Count it in a failed result too; persistence is still mandatory before
+        // permitting any new work or applying the reservation credit.
+        spentUsd += reconciled.discoveredCostUsd;
+        if (reconciled.needsPersistence) {
+          // Do not make a fresh claim or purchase until newly discovered R2
+          // charges and their identities are durable under the current fence.
+          await opts.sink.upsert({ ownerId: opts.ownerId, runId: opts.runId, block: block.id,
+            status: "running", cost: reconciled.priorCostUsd, checkpointCostReceipts: reconciled.receipts });
+        }
+        priorStage = { ...priorStage, status: priorStage?.status ?? "queued", cost: reconciled.priorCostUsd,
+          checkpointCostReceipts: reconciled.receipts };
+        priorStageMap.set(block.id, priorStage);
+        // Keep all historical spend carried. Credit changes reservation only,
+        // never the execution baseline or the fresh-usage accounting floor.
+        costBaseline = { priorCost: reconciled.priorCostUsd, carriedCost: reconciled.priorCostUsd,
+          creditedCost: reconciled.reservationCreditUsd };
+        checkpointCostScope = createCheckpointCostScope(reconciled.receipts, reconciled.priorCostUsd);
+        params = frozen.params; bodyStore = frozen.store;
+        inlineCheckpointAdmitted = true;
+      } catch (error) {
+        const message = `${PAID_STAGE_RECONCILIATION_MARKER}: inline checkpoint admission failed: ${error instanceof Error ? error.message : String(error)}`;
+        await opts.sink.upsert({ ownerId: opts.ownerId, runId: opts.runId, block: block.id,
+          status: "failed", finishedAt: Date.now(), error: message });
+        stages.push({ block: block.id, status: "failed" }); log(message);
+        return { status: "failed", cost: 0, error: message };
+      }
+    }
+    if (paidStageNeedsReconciliation && !inlineCheckpointAdmitted) {
+      const started = priorStage?.startedAt ? ` (started ${new Date(priorStage.startedAt).toISOString()})` : "";
+      const message = `${PAID_STAGE_RECONCILIATION_MARKER}: paid block "${block.id}" was left ` +
+        `${priorStage?.status ?? "unknown"}${started}; refusing automatic replay because the ` +
+        "provider may already have accepted or completed the charge. Reconcile the provider receipt, then supersede the stage or start a new run.";
+      await opts.sink.upsert({ ownerId: opts.ownerId, runId: opts.runId, block: block.id,
+        status: "failed", finishedAt: Date.now(), error: message });
+      stages.push({ block: block.id, status: "failed" }); log(message);
+      return { status: "failed", cost: 0, error: message };
+    }
+    if (configuredEnvelope !== undefined) {
       const additionalReservation = Math.max(0, configuredEnvelope - costBaseline.creditedCost);
       if (
         opts.budgetUsd > 0 &&
@@ -950,7 +1014,9 @@ export async function runPipeline(
           priorStageMap.get(candidate.id),
           opts.remoteBlocks?.has(candidate.id) === true && Boolean(opts.runRemoteBlock),
         );
-        reservedMaxCostUsd += Math.max(0, candidateEnvelope - candidateCostBaseline.creditedCost);
+        const credit = candidateIndex === blockIndex && inlineCheckpointAdmitted
+          ? costBaseline.creditedCost : candidateCostBaseline.creditedCost;
+        reservedMaxCostUsd += Math.max(0, candidateEnvelope - credit);
         blockIds.push(candidate.id);
       }
       const required = args.requiredFuturePaidBlockIds ?? [];
@@ -1075,7 +1141,7 @@ export async function runPipeline(
       ...(opts.assertInlinePaidExecutionLease ? { assertInlinePaidExecutionLease: opts.assertInlinePaidExecutionLease } : {}),
       keyPrefix: opts.keyPrefix,
       params,
-      store: declaredArtifactStore(manifest, store, optionalFallbacks, log),
+      store: declaredArtifactStore(manifest, bodyStore, optionalFallbacks, log),
       artifactRefs: inputRefs,
       budgetUsd: opts.budgetUsd,
       ...(configuredEnvelope === undefined ? {} : { stageBudgetUsd: configuredEnvelope }),
