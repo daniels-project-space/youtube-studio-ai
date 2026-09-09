@@ -43,21 +43,24 @@ const SETTINGS_ITEM = {
 const MOBILE_PRIMARY_COUNT = 4;
 const TOOLBOX_NAV_ITEMS = TOOLBOX_NAV_GROUPS.flatMap((group) => group.items);
 const MOBILE_CORE_ITEMS = PRIMARY_NAV_ITEMS.slice(MOBILE_PRIMARY_COUNT);
+const COMPACT_MORE_ITEMS = PRIMARY_NAV_ITEMS.slice(2, MOBILE_PRIMARY_COUNT);
 const MOBILE_MORE_ITEMS = [
   ...MOBILE_CORE_ITEMS,
   ...TOOLBOX_NAV_ITEMS,
   SETTINGS_ITEM,
 ];
 
-/** Grouped desktop rail that becomes a five-item mobile dock with an overflow menu. */
+/** Desktop rail with a mobile dock that adapts to available width and text size. */
 export function Sidebar() {
   const pathname = usePathname();
   const [moreOpenForPath, setMoreOpenForPath] = useState<string | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
+  const moreButtonRef = useRef<HTMLButtonElement>(null);
   const moreOpen = moreOpenForPath === pathname;
   const moreActive = MOBILE_MORE_ITEMS.some((item) =>
     item.href === "/" ? pathname === "/" : pathname.startsWith(item.href),
   );
+  const compactMoreActive = moreActive || COMPACT_MORE_ITEMS.some((item) => pathname.startsWith(item.href));
   const toolboxActive = TOOLBOX_NAV_ITEMS.some((item) =>
     pathname.startsWith(item.href),
   );
@@ -72,7 +75,10 @@ export function Sidebar() {
         setMoreOpenForPath(null);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMoreOpenForPath(null);
+      if (event.key === "Escape") {
+        setMoreOpenForPath(null);
+        if (moreRef.current?.contains(document.activeElement)) moreButtonRef.current?.focus();
+      }
     };
     document.addEventListener("pointerdown", closeOutside);
     document.addEventListener("keydown", closeOnEscape);
@@ -164,9 +170,11 @@ export function Sidebar() {
           <button
             type="button"
             className="studio-nav-item studio-nav-more-trigger"
+            ref={moreButtonRef}
             aria-expanded={moreOpen}
             aria-controls="studio-mobile-more-menu"
             data-active={moreActive ? "true" : undefined}
+            data-compact-active={compactMoreActive ? "true" : undefined}
             onClick={() => setMoreOpenForPath(moreOpen ? null : pathname)}
           >
             <span className="studio-nav-icon">
@@ -185,6 +193,7 @@ export function Sidebar() {
                 }
               }}
             >
+              {COMPACT_MORE_ITEMS.map((item) => <NavItem key={item.href} {...item} compactOnly />)}
               {MOBILE_CORE_ITEMS.map((item) => (
                 <NavItem
                   key={item.href}
