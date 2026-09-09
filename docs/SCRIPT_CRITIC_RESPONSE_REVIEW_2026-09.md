@@ -67,7 +67,26 @@ critic. `/tmp/ysa-script-critic-runner-debug.log` retains that failure. The test
 now uses actual registration and asserts the exact failure reason, not merely
 `ok: false`.
 
-Full isolated release qualification and exact cloud deployment verification
-remain pending. No
-live creative-quality or complete-video improvement is claimed by these
-response-shape tests.
+## Isolated release and production verification
+
+Released as `9acde4442bd1b3a7c9337f95f16e6922a2be0bf5`, with only this correction
+and the independently reviewed Novita reference-input refusal. Frozen checkout:
+`/tmp/ysa-critic-reference-release-ayRj4c/repo`. All644 direct production-readiness
+tests, non-incremental typecheck, complete build, lint (zero errors,33 existing
+warnings), unchanged audits and actual31.021995-second local assembly pass.
+Logs use `/tmp/ysa-critic-reference-release-`.
+
+CI `34406994386` and independent render parity `34406994415` completed
+successfully. Convex finished21:40:38UTC; Trigger `20260909.28`, worker
+`worker_cmtumjfsugbpa0qol0rho865v`, content hash
+`7a1a46e27d9322bc8dc3085f026a186a`, terminal deployment success21:42:45UTC.
+Vercel `dpl_DKjNovq68NpCiAfUXuJZ45LBYKj7` is READY, exact Git revision,
+canonical production alias assigned. `/api/health` independently matches.
+
+Read-only actual production playback passes; evidence is at
+`/tmp/ysa-9acde-production-DUhGrY/` and
+`/tmp/ysa-library-player-production-vWQ142/results.json`. Enlarged-phone review
+also found a pre-existing long-tag overflow, recorded separately in
+`LIGHTBOX_TAGS_REVIEW_2026-09.md`; this release does not fix that UI defect.
+No live creative-quality or complete-video improvement is claimed by these
+response-shape tests. No paid media generation or publication was triggered.

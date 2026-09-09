@@ -109,6 +109,11 @@ import {
 import { assertSourceBoundNarrationAlignment } from "@/engine/sourceBoundStorySpine";
 import { StorySpineSchema, storySpineVisualReviewLocks } from "@/engine/storySpine";
 import {
+  assertWorkedExampleNarrationBinding,
+  assertWorkedExampleEditorialApproval,
+  workedExampleEditorialApprovalFor,
+} from "@/engine/workedExampleNarration";
+import {
   assertCinematicAssemblyRoute,
   assertCinematicSequenceRenderBinding,
 } from "@/engine/cinematicSequenceRenderBinding";
@@ -1057,9 +1062,14 @@ export const hookCraft: Block = {
 export const qaScript: Block = {
   id: "qa_script",
   consumes: ["narrationText"],
-  produces: ["scriptApproved"],
+  produces: ["scriptApproved", "workedExampleEditorialApproval"],
   run: async (ctx) => {
     const narration = str(ctx, "narrationText");
+    const workedExampleScript = assertWorkedExampleNarrationBinding({
+      request: ctx.store["workedExampleRequest"], preparation: ctx.store["workedExamplePreparation"],
+      script: ctx.store["script"], narrationText: narration,
+      ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId,
+    });
     const programRoute = programRouteForNarratedBlock(ctx, "qa_script");
     const programRouteCritique = programRouteReviewDirective(programRoute);
     const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "qa_script");
@@ -1175,7 +1185,10 @@ export const qaScript: Block = {
           `narration/visual stages (${issues.slice(0, 5).join(" | ") || "no specific issues returned"})`,
         );
       }
-      return { scriptApproved: true };
+      return {
+        scriptApproved: true,
+        ...(workedExampleScript ? { workedExampleEditorialApproval: workedExampleEditorialApprovalFor(workedExampleScript) } : {}),
+      };
     } catch (e) {
       // A confirmed quality failure must propagate. A model/parse/network
       // error is also fail-closed: unverified is not approved for paid media.
@@ -1202,6 +1215,12 @@ export const narrationTts: Block = {
   paid: true,
   run: async (ctx) => {
     assertScriptApprovedForNarration(ctx.store["scriptApproved"]);
+    const workedExampleScript = assertWorkedExampleNarrationBinding({
+      request: ctx.store["workedExampleRequest"], preparation: ctx.store["workedExamplePreparation"],
+      script: ctx.store["script"], narrationText: ctx.store["narrationText"],
+      ownerId: ctx.ownerId, channelId: ctx.channelId, runId: ctx.runId,
+    });
+    assertWorkedExampleEditorialApproval(ctx.store["workedExampleEditorialApproval"], workedExampleScript);
     const quality = qualityProfile(ctx.params["qualityProfile"]);
     // Unknown providers must fail before spend; they must never inherit the
     // historical Fish fallback just because a string was misspelled.

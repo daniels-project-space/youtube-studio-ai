@@ -97,10 +97,13 @@ The frozen checkout is `/tmp/ysa-whiteboard-release-hvQLzL/repo`.
   Results/screenshots: `/tmp/ysa-run-media-layout-5pXlto/`; root inspected decoded
   master frames and mobile layout. Retained legacy media is not quality-approved.
 
-Cloud CI `34405053924` is still running as of this update. Convex/Trigger worker
-deployment is **not yet verified**; the website revision alone does not prove
-that the rendering worker has this correction. Production checks were read-only;
-no paid Whiteboard job, publishing or storage mutation was triggered.
+Cloud CI `34405053924` completed successfully. The canonical Convex deployment
+finished at21:20:49UTC; Trigger version `20260909.27` reached terminal deployment
+success at21:22:52UTC. Worker `worker_cmtultvwnfpm00wol4bepokqp`, content hash
+`fec860ea2e4e020cab5fd50c9bf15dd5`. The complete cloud job log is retained at
+`/tmp/ysa-whiteboard-release-cloud-deploy.log`. Production checks were read-only;
+no paid Whiteboard job, publishing or storage mutation was triggered. Worker
+deployment plus local actual-caller/render proof is not a new paid cloud render.
 
 ## Still open
 
