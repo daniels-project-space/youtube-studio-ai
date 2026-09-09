@@ -4,6 +4,17 @@ export const RUN_ARTIFACT_RETENTION_LEASE_MS = 90 * 60 * 1_000;
 export const RUN_ARTIFACT_RELEASE_CHECK_MS = 6 * 60 * 60 * 1_000;
 export const RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS = 5 * 60 * 1_000;
 
+/** Exact immutable cleanup scope, shared by the claimant and authority check. */
+export function runArtifactCleanupBinding(row: {
+  ownerId: string; channelId: string; runId: string; keyPrefix: string; certificateKey: string;
+  additionalCertificateKeys: readonly string[]; keepNames: readonly string[];
+  releaseVideoId?: string; releaseYouTubeChannelId?: string;
+}): string {
+  return JSON.stringify(["run-artifact-cleanup-scope/v1", row.ownerId, row.channelId, row.runId,
+    row.keyPrefix, row.certificateKey, row.additionalCertificateKeys, row.keepNames,
+    row.releaseVideoId, row.releaseYouTubeChannelId]);
+}
+
 export type RunArtifactReleaseMode = "private_draft" | "scheduled" | "public";
 
 export interface RunArtifactRetentionSchedule {

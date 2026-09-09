@@ -137,3 +137,58 @@ test("an empty deletion acknowledgement cannot stand in for object-level success
     send.mock.restore();
   }
 });
+
+test("every batch needs current authority; revocation stops later requests and preserves earlier counts", async () => {
+  const events: string[] = [];
+  let checks = 0;
+  const send = mock.method(getR2Client(), "send", async (command: unknown, options: { abortSignal: AbortSignal }) => {
+    assert.ok(command instanceof DeleteObjectsCommand);
+    assert.ok(options.abortSignal instanceof AbortSignal);
+    events.push("delete");
+    return { $metadata: { httpStatusCode: 200 }, Deleted: command.input.Delete?.Objects };
+  });
+  try {
+    await assert.rejects(deleteObjects(Array.from({ length: 2001 }, (_, i) => `test/${i}`), undefined, {
+      beforeBatch: async () => {
+        events.push("authorize");
+        if (++checks === 2) throw new Error("private authority detail");
+        return { expiresAt: Date.now() + 60_000 };
+      },
+    }), (error: unknown) => {
+      assert.ok(error instanceof ObjectDeletionError);
+      assert.equal(error.confirmedDeleted, 1000);
+      assert.doesNotMatch(error.message, /private authority detail/);
+      return true;
+    });
+    assert.deepEqual(events, ["authorize", "delete", "authorize"]);
+  } finally { send.mock.restore(); }
+});
+
+test("expired or invalid authority never sends an SDK request", async () => {
+  const send = mock.method(getR2Client(), "send", async () => { throw new Error("must not send"); });
+  try {
+    for (const expiresAt of [0, Date.now() - 1, NaN, Infinity]) {
+      await assert.rejects(deleteObjects(["test/a"], undefined, { beforeBatch: async () => ({ expiresAt }) }), /authority/);
+    }
+    assert.equal(send.mock.callCount(), 0);
+  } finally { send.mock.restore(); }
+});
+
+test("the grant deadline aborts an in-flight SDK operation and its retries", async () => {
+  const keepAlive = setTimeout(() => {}, 500);
+  let signal: AbortSignal | undefined;
+  const send = mock.method(getR2Client(), "send", async (_command: unknown, options: { abortSignal: AbortSignal }) => {
+    signal = options.abortSignal;
+    await new Promise((_resolve, reject) => signal!.addEventListener("abort", () => reject(signal!.reason), { once: true }));
+  });
+  try {
+    await assert.rejects(deleteObjects(["test/a"], undefined, {
+      beforeBatch: async () => ({ expiresAt: Date.now() + 25 }),
+    }), (error: unknown) => {
+      assert.ok(error instanceof ObjectDeletionError);
+      assert.equal(error.confirmedDeleted, 0);
+      return true;
+    });
+    assert.equal(signal?.aborted, true);
+  } finally { clearTimeout(keepAlive); send.mock.restore(); }
+});
