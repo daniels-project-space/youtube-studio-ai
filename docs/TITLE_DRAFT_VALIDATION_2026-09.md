@@ -63,7 +63,10 @@ inspector, exact historical receipt credit, a defensible whole-sequence cost
 envelope, per-call local execution-generation checks and frozen-run migration
 still need implementation and actual engine integration tests.
 
-The draft has not had a separate full Next.js production build or been deployed.
+At this earlier checkpoint, the draft had not had a separate full Next.js production build or been deployed.
+The subsequent [checkpoint-inspection slice](METADATA_CHECKPOINT_INSPECTION_2026-09.md)
+passed a full production build and 634/634 direct tests. It remains undeployed;
+engine-level paid admission is still unfinished.
 The exact deployed UI revision has its own passing CI, Vercel build, canonical
 Convex/Trigger release and direct desktop/mobile proof in
 [the run-media report](RUN_MEDIA_QUERY_EFFICIENCY_2026-09.md). Neither that UI

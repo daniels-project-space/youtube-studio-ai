@@ -10,7 +10,7 @@ import {
 } from "@/lib/serializedProgramEpisodeContext";
 import { serializedProgramEpisodeIdentity } from "@/lib/serializedProgramEpisode";
 
-function frozenSerializedProgramRoute(ctx: StageContext): ChannelProgramRouteRunSeed | undefined {
+function frozenSerializedProgramRoute(ctx: Pick<StageContext, "store">): ChannelProgramRouteRunSeed | undefined {
   const raw = ctx.store["channelProgramRoute"];
   if (raw === undefined) return undefined;
   const route = parseChannelProgramRouteRunSeed(raw);
@@ -24,7 +24,7 @@ function frozenSerializedProgramRoute(ctx: StageContext): ChannelProgramRouteRun
  * has to bind to the frozen route/run/topic before a consumer can use it.
  */
 export function serializedProgramEpisodeContextForStage(
-  ctx: StageContext,
+  ctx: Pick<StageContext, "store" | "runId">,
   stage: string,
 ): SerializedProgramEpisodeContext | undefined {
   const rawContext = ctx.store["serializedProgramEpisodeContext"];

@@ -63,6 +63,7 @@ import {
   hasFalNanoBananaLofiThumbnail,
 } from "@/lib/falNanoBananaLofiThumbnail";
 import { craftCheckpointedMetadata } from "@/lib/metadataTitleCheckpoint";
+import type { MetaCraftArgs } from "@/lib/metacraft";
 import { compositeProviderTypographyOverlay } from "@/lib/ffmpeg";
 import { hasVisionKey } from "@/lib/vision";
 import {
@@ -102,7 +103,7 @@ function convex(): ConvexHttpClient {
   return new ConvexHttpClient(url);
 }
 
-function str(ctx: StageContext, key: string): string {
+function str(ctx: Pick<StageContext, "store">, key: string): string {
   const v = ctx.store[key];
   if (typeof v !== "string" || v.length === 0) {
     throw new Error(`intel: expected non-empty string store["${key}"], got ${JSON.stringify(v)}`);
@@ -347,6 +348,56 @@ function buildThumbnailDescription(args: {
   ].join(" ");
 }
 
+/** The same complete, declared inputs bind inspection and execution. No I/O or logging. */
+export function metadataTitleArgsForStage(
+  ctx: Pick<StageContext, "store" | "params" | "runId">,
+): MetaCraftArgs {
+  const topic = str(ctx, "topic");
+  const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "metadata");
+  const serializedEpisodePrompt = serializedEpisodeContext
+    ? renderSerializedProgramEpisodeContextForPrompt(serializedEpisodeContext) : "";
+  const channelName = (ctx.store["channelName"] as string | undefined) ?? "this channel";
+  const niche = (ctx.store["niche"] as string | undefined) ?? "";
+  const persona = (ctx.store["persona"] as string | undefined) ?? "";
+  const plannedTitle = typeof ctx.store["plannedTitle"] === "string" ? ctx.store["plannedTitle"] as string : "";
+  const topicBet = ctx.store["topicBet"] as { provisionalTitle?: unknown } | undefined;
+  const nicheIntel = (ctx.store["nicheIntel"] as NicheIntel | null) ?? null;
+  const competitors = ctx.store["competitors"] as CompetitorRow[] | undefined;
+  const scriptDoc = ctx.store["script"] as {
+    hook?: string; hookLoop?: string; closingLine?: string;
+    sections?: { heading?: string; narration?: string; text?: string; content?: string }[];
+  } | undefined;
+  const narration = ctx.store["narrationText"];
+  const fullNarration = typeof narration === "string" && narration.trim().length > 0;
+  const scriptExcerpt = fullNarration ? narration : (scriptDoc?.sections ?? [])
+    .flatMap((section) => [section.heading, section.narration ?? section.text ?? section.content])
+    .filter((text): text is string => typeof text === "string").join("\n\n");
+  const route = ctx.store["channelProgramRoute"] as { family?: string } | undefined;
+  const format = typeof route?.family === "string" ? route.family : undefined;
+  // Actual music-loop format, not incidental words such as sleep or study in a narrated topic.
+  const isMusicNiche = format === "music_loop" || (!format && /\blo[\s-]?fi\b|\bmusic\b|\bbeats\b/i.test(niche));
+  const dnaSeo = (ctx.store["styleDNA"] as { seo?: { titleFormula?: string; descriptionStructure?: string } } | undefined)?.seo;
+  return {
+    topic, channelName, niche, persona, format, isMusicNiche,
+    language: ctx.params["language"] as string | undefined,
+    scriptExcerpt,
+    sourceCoverage: {
+      kind: fullNarration ? "full_narration" : scriptExcerpt ? "script_excerpt" : "topic_only",
+      providedChars: scriptExcerpt.length, totalChars: fullNarration ? scriptExcerpt.length : scriptExcerpt ? null : 0,
+    },
+    continuityContext: serializedEpisodePrompt || undefined,
+    coldOpen: scriptDoc?.hook, hookLoop: scriptDoc?.hookLoop, quote: scriptDoc?.closingLine,
+    competitorTitles: competitors === undefined ? undefined : competitors.flatMap((c) => c.topVideos)
+      .sort((x, y) => y.views - x.views).slice(0, 12).map((v) => ({ title: v.title, views: v.views })),
+    powerWords: (nicheIntel?.powerWords ?? []).map((p) => p.word).slice(0, 12),
+    titleFormula: dnaSeo?.titleFormula, descriptionStructure: dnaSeo?.descriptionStructure,
+    warmStartTitle: plannedTitle || undefined,
+    betTitle: typeof topicBet?.provisionalTitle === "string" ? topicBet.provisionalTitle : undefined,
+    clickbaitLevel: typeof ctx.params["clickbaitLevel"] === "number" ? ctx.params["clickbaitLevel"] as number :
+      typeof ctx.store["clickbaitLevel"] === "number" ? ctx.store["clickbaitLevel"] as number : undefined,
+  };
+}
+
 export const metadataOptimized: Block = {
   id: "metadata",
   consumes: ["topic"],
@@ -355,51 +406,11 @@ export const metadataOptimized: Block = {
     "estimatedViewsSource", "pinnedComment", "titleAlternate", "titleDecision",
   ],
   run: async (ctx) => {
-    const topic = str(ctx, "topic");
-    const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "metadata");
-    const serializedEpisodePrompt = serializedEpisodeContext
-      ? renderSerializedProgramEpisodeContextForPrompt(serializedEpisodeContext) : "";
-    const channelName = (ctx.store["channelName"] as string | undefined) ?? "this channel";
-    const niche = (ctx.store["niche"] as string | undefined) ?? "";
-    const persona = (ctx.store["persona"] as string | undefined) ?? "";
-    const plannedTitle = typeof ctx.store["plannedTitle"] === "string" ? ctx.store["plannedTitle"] as string : "";
-    const topicBet = ctx.store["topicBet"] as { provisionalTitle?: unknown } | undefined;
+    const args = metadataTitleArgsForStage(ctx);
+    const { topic, channelName = "this channel", niche = "", scriptExcerpt = "", continuityContext: serializedEpisodePrompt } = args;
     const nicheIntel = (ctx.store["nicheIntel"] as NicheIntel | null) ?? null;
-    const competitors = ctx.store["competitors"] as CompetitorRow[] | undefined;
-    const scriptDoc = ctx.store["script"] as {
-      hook?: string; hookLoop?: string; closingLine?: string;
-      sections?: { heading?: string; narration?: string; text?: string; content?: string }[];
-    } | undefined;
-    const narration = ctx.store["narrationText"];
-    const fullNarration = typeof narration === "string" && narration.trim().length > 0;
-    const scriptExcerpt = fullNarration ? narration : (scriptDoc?.sections ?? [])
-      .flatMap((section) => [section.heading, section.narration ?? section.text ?? section.content])
-      .filter((text): text is string => typeof text === "string").join("\n\n");
-    const route = ctx.store["channelProgramRoute"] as { family?: string } | undefined;
-    const format = typeof route?.family === "string" ? route.family : undefined;
-    // Actual music-loop format, not incidental words such as sleep or study in a narrated topic.
-    const isMusicNiche = format === "music_loop" || (!format && /\blo[\s-]?fi\b|\bmusic\b|\bbeats\b/i.test(niche));
-    const dnaSeo = (ctx.store["styleDNA"] as { seo?: { titleFormula?: string; descriptionStructure?: string } } | undefined)?.seo;
-    const { metadata: m, costUsd } = await craftCheckpointedMetadata(ctx, {
-      topic, channelName, niche, persona, format, isMusicNiche,
-      language: ctx.params["language"] as string | undefined,
-      scriptExcerpt,
-      sourceCoverage: {
-        kind: fullNarration ? "full_narration" : scriptExcerpt ? "script_excerpt" : "topic_only",
-        providedChars: scriptExcerpt.length, totalChars: fullNarration ? scriptExcerpt.length : scriptExcerpt ? null : 0,
-      },
-      continuityContext: serializedEpisodePrompt || undefined,
-      coldOpen: scriptDoc?.hook, hookLoop: scriptDoc?.hookLoop, quote: scriptDoc?.closingLine,
-      competitorTitles: competitors === undefined ? undefined : competitors.flatMap((c) => c.topVideos)
-        .sort((x, y) => y.views - x.views).slice(0, 12).map((v) => ({ title: v.title, views: v.views })),
-      powerWords: (nicheIntel?.powerWords ?? []).map((p) => p.word).slice(0, 12),
-      titleFormula: dnaSeo?.titleFormula, descriptionStructure: dnaSeo?.descriptionStructure,
-      warmStartTitle: plannedTitle || undefined,
-      betTitle: typeof topicBet?.provisionalTitle === "string" ? topicBet.provisionalTitle : undefined,
-      clickbaitLevel: typeof ctx.params["clickbaitLevel"] === "number" ? ctx.params["clickbaitLevel"] as number :
-        typeof ctx.store["clickbaitLevel"] === "number" ? ctx.store["clickbaitLevel"] as number : undefined,
-      log: ctx.log,
-    }, { performanceContext: () => loadPerformanceContext(ctx.keyPrefix, { lens: "ctr" }) });
+    const { metadata: m, costUsd } = await craftCheckpointedMetadata(ctx, args,
+      { performanceContext: () => loadPerformanceContext(ctx.keyPrefix, { lens: "ctr" }) });
     const { title, description, tags } = finishMetadata(ctx, { ...m, channelName, nicheIntel });
     let estimatedViews = nicheIntel?.medianViewsTop50 ?? nicheIntel?.avgViewsTop50 ?? 0;
     let estimatedViewsSource = "niche_fallback";
