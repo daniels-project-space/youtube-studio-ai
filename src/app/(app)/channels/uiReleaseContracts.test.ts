@@ -331,7 +331,12 @@ assert.match(globalCss, /\.channel-card-actions a,\s*\n\.channel-card-manage\s*\
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*?\.channel-card-banner \{ aspect-ratio: 16 \/ 5 !important/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*?\.channel-card-actions \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
 assert.match(scheduleCss, /\.itemLinks a\s*\{[\s\S]*?min-height: 36px/);
-assert.match(overviewCss, /\.sectionHeading > a,[\s\S]*?min-height: 36px/);
+// Links now live inside the heading's controls group. Check the actual rule
+// and its larger target, not the retired direct-child selector or exact 36px.
+const overviewHeadingRule = overviewCss.match(/[^{}]*\.sectionHeading a[^{}]*\{([^{}]*)\}/)?.[1];
+assert.ok(overviewHeadingRule, "overview section links need a touch-target rule");
+const overviewHeadingHeight = Number(overviewHeadingRule.match(/min-height:\s*(\d+)px/)?.[1]);
+assert.ok(overviewHeadingHeight >= 44, "overview heading links must remain at least 44px tall");
 assert.match(analyticsCss, /\.healthCopy > a\s*\{[\s\S]*?min-height: 36px/);
 assert.match(settingsCss, /\.lockedRoom > a\s*\{[\s\S]*?min-height: 36px/);
 assert.match(artifactRailCss, /\.action > a,[\s\S]*?min-height: 36px/);
