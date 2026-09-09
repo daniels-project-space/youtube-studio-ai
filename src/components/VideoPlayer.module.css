@@ -1,0 +1,86 @@
+.frame {
+  position: relative;
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #000;
+}
+
+.saved,
+.embed {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: 0;
+}
+
+.message {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.6rem;
+  padding: 0.75rem;
+  color: #d7e0ed;
+  font-size: 1rem;
+  line-height: 1.4;
+  text-align: center;
+}
+
+.message button {
+  min-width: 44px;
+  min-height: 44px;
+  max-width: 100%;
+  border: 1px solid #839bb8;
+  border-radius: 8px;
+  padding: 0.5rem 0.85rem;
+  background: #182638;
+  color: #fff;
+  font: inherit;
+  cursor: pointer;
+}
+
+.message button:focus-visible {
+  outline: 2px solid #90d7ff;
+  outline-offset: 2px;
+}
+
+/* Errors are readable content, not a fixed-height video overlay. Let the
+   dialog scroll that content at enlarged text sizes without clipping Retry.
+   Healthy playback and initial loading keep their stable 16:9 frame. */
+.frame:has(.message button),
+.frame:has([data-signed-video-state]:not([data-signed-video-state="ready"])) {
+  aspect-ratio: auto;
+}
+
+.saved:has(.message button),
+.saved:has([data-signed-video-state]:not([data-signed-video-state="ready"])) {
+  position: relative;
+  height: auto;
+}
+
+.message:has(button) {
+  position: relative;
+  min-height: 10rem;
+}
+
+.saved [data-signed-video-state]:not([data-signed-video-state="ready"]) {
+  height: auto;
+}
+
+.saved [data-signed-video-state]:not([data-signed-video-state="ready"]) > video {
+  height: auto;
+  aspect-ratio: 16 / 9;
+}
+
+.saved [data-signed-video-state]:not([data-signed-video-state="ready"]) > [role="status"] {
+  position: relative;
+}
+
+.saved [role="status"] > button {
+  max-width: 100%;
+}

@@ -92,6 +92,34 @@ publishing approval. The historic QA duration alone is not a current
 content-hash-bound repair receipt.
 
 Unchanged follow-ups: other producers' calculated durations, duplicate/mismatched
-master metadata selection, and certified-master duration projection. The root
-agent owns the separate UI-flooring repair verified by the companion proof;
-this patch does not edit UI source or the frozen UI release.
+master metadata selection, and certified-master duration projection. The
+producer patch and companion UI-flooring correction are separate concerns,
+qualified together in the release below.
+
+## Isolated release — 9 September
+
+Revision `46cf5771460bbc4aeacd44c8956d4417823b4be3`, parent `9795d2a`,
+contains the measured-duration changes plus the recent-card flooring correction
+and their proofs. The isolated tree passed all **639** direct tests, nonincremental
+typecheck, lint (zero errors, existing warnings), full build, structural audits,
+24 defect proofs and actual 31-second hermetic assembly. Both actual-caller
+native proofs passed again from that exact tree: retained master measured and
+persisted at 31.021995s with unchanged SHA-256 and corrupt-master rejection
+(`/tmp/ysa-motion-duration-proof-sfxLd1/`), and fractional control clip at
+31.766667s / native label 0:31 (`/tmp/ysa-recent-duration-proof-9ncN8Z/`).
+Logs: `/tmp/ysa-duration-release-*.log`. Generated `public/proof.html` is not
+committed; the original dirty worktree HEAD/index remains untouched.
+
+The revision was pushed without force. Vercel Production deployment
+**6357223002** succeeded at **19:03:13 UTC**, and the exact public alias health
+endpoint reports the full source SHA. Five direct-production carousel/playback
+profiles pass, with no proxies, mutations, errors or overflow
+(`/tmp/ysa-recent-renders-proof-YslomF/`); phone player pixels were inspected.
+Cloud CI **34392627171** completed successfully for that exact revision.
+Convex functions were ready at **19:15:33 UTC**; Trigger version
+**20260909.24** reached terminal deployed success at **19:17:42 UTC**.
+Worker `worker_cmtuhcws5erif0jolgmonqkfv` has content hash
+`6f741c685647efb3e6313126f3e0bed4`, changed from the preceding UI-only
+release's `0ecd15f2216b668800f75c1f2d0bcc17`. The terminal deployment receipt,
+not worker creation alone, confirms the producer rollout. Evidence log:
+`/tmp/ysa-duration-cloud-deploy.log`. No old duration row or video bytes changed.
