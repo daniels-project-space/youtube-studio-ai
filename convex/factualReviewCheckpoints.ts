@@ -17,6 +17,7 @@ import { canonicalJson } from "../src/lib/canonicalJson";
 import { assertPlanWeekPreparationPointer } from "../src/lib/planWeekPreparation";
 import { assertRunExecutionWriteFence, RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
 import { sha256Hex } from "../src/lib/sha256";
+import { runCostFloor } from "./runCostAccounting";
 
 const MAX_FACTUAL_REVIEW_RESUME_ENQUEUE_ATTEMPTS = 2;
 // The continuation shares its channel-level Trigger queue with long-form
@@ -163,7 +164,11 @@ function outputForStage(stage: unknown, block: string): UnknownRecord {
 async function retainedArtifactsForRun(
   ctx: ReviewCtx,
   runId: Id<"runs">,
-): Promise<{ artifacts: readonly FactualReviewArtifactBinding[]; stages: Map<string, UnknownRecord> }> {
+): Promise<{
+  artifacts: readonly FactualReviewArtifactBinding[];
+  stages: Map<string, UnknownRecord>;
+  stageRows: Doc<"runStages">[];
+}> {
   const [stageRows, artifactRows] = await Promise.all([
     ctx.db.query("runStages").withIndex("by_run", (q) => q.eq("runId", runId)).collect(),
     ctx.db.query("runArtifacts").withIndex("by_run", (q) => q.eq("runId", runId)).collect(),
@@ -209,7 +214,7 @@ async function retainedArtifactsForRun(
       schemaVersion: validText(artifact.schemaVersion, `factual review ${requirement.key} schema version`, 160),
     });
   }
-  return { artifacts: assertFactualReviewArtifactBindings(bound), stages };
+  return { artifacts: assertFactualReviewArtifactBindings(bound), stages, stageRows };
 }
 
 async function assertStoredSourceAuthority(
@@ -342,10 +347,11 @@ export const createAwaiting = mutation({
     }
     let sourceAuthority: FactualReviewSourceAuthority;
     let artifacts: readonly FactualReviewArtifactBinding[];
+    let stageRows: Doc<"runStages">[];
     try {
       sourceAuthority = factualReviewSourceAuthorityFromInvocation(run.pipelineInvocationSnapshot);
       await assertStoredSourceAuthority(ctx, args.ownerId, sourceAuthority);
-      ({ artifacts } = await retainedArtifactsForRun(ctx, args.runId));
+      ({ artifacts, stageRows } = await retainedArtifactsForRun(ctx, args.runId));
     } catch (error) {
       const message = `factual review checkpoint cannot retain exact reviewed work: ${
         error instanceof Error ? error.message : String(error)
@@ -362,21 +368,24 @@ export const createAwaiting = mutation({
       artifacts,
     });
     const existing = await checkpointForRun(ctx, args.runId);
+    if (existing && (
+      existing.checkpointFingerprint !== checkpointFingerprint ||
+      existing.decision !== "awaiting"
+    )) {
+      const error = "factual review checkpoint replay does not match its immutable awaiting receipt";
+      await blockCheckpoint(ctx, run, existing, now, error);
+      return { kind: "blocked" as const, error };
+    }
+    // Protective source/artifact/replay blocking above must never depend on a
+    // successful accounting read. Only a valid awaiting transition is floored.
+    const costTotal = await runCostFloor(ctx, run, args.costTotal, stageRows);
     if (existing) {
-      if (
-        existing.checkpointFingerprint !== checkpointFingerprint ||
-        existing.decision !== "awaiting"
-      ) {
-        const error = "factual review checkpoint replay does not match its immutable awaiting receipt";
-        await blockCheckpoint(ctx, run, existing, now, error);
-        return { kind: "blocked" as const, error };
-      }
       await ctx.db.patch(run._id, {
         status: "awaiting_factual_review",
         factualReviewCheckpointId: existing._id,
         factualReviewCheckpointFingerprint: existing.checkpointFingerprint,
         factualReviewState: "awaiting",
-        costTotal: args.costTotal,
+        costTotal,
         error: undefined,
         heartbeatAt: now,
         ...clearExecutionLeasePatch(),
@@ -409,7 +418,7 @@ export const createAwaiting = mutation({
       factualReviewCheckpointId: checkpointId,
       factualReviewCheckpointFingerprint: checkpointFingerprint,
       factualReviewState: "awaiting",
-      costTotal: args.costTotal,
+      costTotal,
       error: undefined,
       heartbeatAt: now,
       ...clearExecutionLeasePatch(),

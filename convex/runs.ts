@@ -63,6 +63,7 @@ import {
 } from "../src/lib/boundedConvexReads";
 import { normalizeReleaseEvidenceStatus } from "../src/lib/releaseEvidenceStatus";
 import { MAX_PUBLISH_CONTINUATION_ENQUEUE_ATTEMPTS } from "../src/lib/publishRetrySchedule";
+import { runCostFloor } from "./runCostAccounting";
 import {
   assertApprovedFactualReviewResume,
   requeueExpiredFactualReviewResumeForLease,
@@ -1436,10 +1437,11 @@ export const deferSerializedProgramEpisodeRetry = mutation({
     if (attempt > SERIALIZED_PROGRAM_EPISODE_BUSY_RETRY_MAX_ATTEMPTS) {
       throw new Error("serialized program episode retry attempts are exhausted; manual contention recovery is required");
     }
+    const costTotal = await runCostFloor(ctx, run, args.costTotal);
     await ctx.db.patch(args.runId, {
       status: "queued",
       finishedAt: undefined,
-      costTotal: args.costTotal,
+      costTotal,
       error,
       heartbeatAt: now,
       // Keep the queue lease beyond the scheduled not-before time so the
@@ -2861,10 +2863,11 @@ export const completeRun = mutation({
       run,
       args.finishedAt,
     );
+    const costTotal = await runCostFloor(ctx, run, args.costTotal);
     await ctx.db.patch(args.runId, {
       status: "ok",
       finishedAt: args.finishedAt,
-      costTotal: args.costTotal,
+      costTotal,
       error: undefined,
       heartbeatAt: args.finishedAt,
       leaseExpiresAt: undefined,
@@ -2916,7 +2919,11 @@ export const updateRun = mutation({
     for (const [k, val] of Object.entries(rest)) {
       if (val !== undefined) patch[k] = val;
     }
-    if (rest.status && ["ok", "failed", "canceled"].includes(rest.status)) {
+    const terminal = rest.status !== undefined && ["ok", "failed", "canceled"].includes(rest.status);
+    if (rest.costTotal !== undefined || terminal) {
+      patch.costTotal = await runCostFloor(ctx, existing, rest.costTotal);
+    }
+    if (terminal) {
       patch.heartbeatAt = rest.finishedAt ?? Date.now();
       patch.leaseExpiresAt = undefined;
       patch.leaseOwner = undefined;

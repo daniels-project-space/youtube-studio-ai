@@ -54,6 +54,10 @@ class MemoryQuery {
       }))
       .slice(0, count);
   }
+
+  async collect(): Promise<Row[]> {
+    return this.take(Number.MAX_SAFE_INTEGER);
+  }
 }
 
 class MemoryDb {

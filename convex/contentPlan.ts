@@ -54,6 +54,7 @@ import {
   orphanReadyRowsForMaintenance,
 } from "../src/lib/calendarMaintenance";
 import { completedPublishContinuationPatch } from "./publishContinuationState";
+import { runCostFloor } from "./runCostAccounting";
 import {
   RUN_QUEUE_LEASE_MS,
   assertRunExecutionWriteFence,
@@ -2475,8 +2476,19 @@ export const completeClaimedPlanRun = mutation({
     if (!liveStages.some((stage) => stage.status === "ok") || liveStages.some((stage) => stage.status !== "ok")) {
       throw new Error("scheduled plan cannot be used before durable pipeline stages succeed");
     }
+    const costTotal = await runCostFloor(ctx, run, args.costTotal, stages);
     if (item.status === "used") {
-      if (run.status !== "ok" || Math.abs(run.costTotal - args.costTotal) > 0.000001) {
+      const originalCallerCost = run.scheduledCompletionCallerCostTotal === undefined
+        ? run.costTotal
+        : run.scheduledCompletionCallerCostTotal;
+      if (!Number.isFinite(originalCallerCost) || originalCallerCost < 0) {
+        throw new Error("scheduled plan completion caller cost receipt is invalid");
+      }
+      if (
+        run.status !== "ok" ||
+        Math.abs(originalCallerCost - args.costTotal) > 0.000001 ||
+        Math.abs(run.costTotal - costTotal) > 0.000001
+      ) {
         throw new Error("scheduled plan completion replay mismatch");
       }
       // A lost response can re-observe its exact completed result, but it
@@ -2510,7 +2522,8 @@ export const completeClaimedPlanRun = mutation({
     await ctx.db.patch(args.runId, {
       status: "ok",
       finishedAt: args.finishedAt,
-      costTotal: args.costTotal,
+      costTotal,
+      scheduledCompletionCallerCostTotal: args.costTotal,
       error: undefined,
       heartbeatAt: args.finishedAt,
       leaseExpiresAt: undefined,
@@ -2560,10 +2573,11 @@ export const failClaimedPlanRun = mutation({
       args.executionLeaseToken,
     );
     const error = cleanError(args.error);
+    const costTotal = await runCostFloor(ctx, run, args.costTotal);
     await ctx.db.patch(args.runId, {
       status: "failed",
       finishedAt: args.failedAt,
-      ...(args.costTotal !== undefined ? { costTotal: validUsd(args.costTotal, "run cost") } : {}),
+      costTotal,
       error,
       heartbeatAt: args.failedAt,
       leaseExpiresAt: undefined,

@@ -318,6 +318,10 @@ function serializedEpisodeRetryRunCtx(options: {
             };
             range(q);
             return {
+              collect: async () => {
+                assert.equal(_table, "runStages", "the retry fixture only collects its empty stage ledger");
+                return [];
+              },
               take: async (_limit: number) =>
                 filters.every((filter) =>
                   filter.op === "eq"

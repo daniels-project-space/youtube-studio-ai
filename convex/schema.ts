@@ -749,6 +749,9 @@ export default defineSchema({
     startedAt: v.optional(v.number()),
     finishedAt: v.optional(v.number()),
     costTotal: v.number(),
+    // Original worker amount for idempotent scheduled completion. The stored
+    // costTotal may be higher after durable stage-cost reconciliation.
+    scheduledCompletionCallerCostTotal: v.optional(v.number()),
     error: v.optional(v.string()),
     videoAssetId: v.optional(v.id("assets")),
     youtubeVideoId: v.optional(v.string()),
