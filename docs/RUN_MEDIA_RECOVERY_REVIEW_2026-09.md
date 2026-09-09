@@ -64,6 +64,23 @@ Final targeted-run CSS hash: `54542561b24331d42e2072fce887d06fab051b4a31a9fe46ef
 
 The JSON contains all eight tested source hashes. Full `tsc --noEmit --incremental false --pretty false`, scoped ESLint, and proof/document whitespace checks pass. The proof subtask owns only the new script and this review document; runtime source, graph maintenance, Git, deployment, and production verification remain with the main agent.
 
+## Frozen candidate verification
+
+The isolated candidate `01c35ac00ce15e16f16a7fc41d5f53b61448d548` in
+`/tmp/ysa-run-edl-release-K3f1ZG/repo` passed the final complete **22-case**
+matrix. Evidence: `/tmp/ysa-run-media-proof-5oUuGA/results.json`, exit 0,
+empty failures and runtime errors, and unchanged source hashes throughout.
+This includes the final padding refinement and both file-signing Retry cases.
+The exact supplied retained fixture was
+`/tmp/assembly-smoke-DanWJe/bk_smoke_2_loudnorm.mp4`, with the same SHA-256 above.
+The helper and main agent inspected final screenshots, including
+`phone-small-large-text-initial-error.png` and
+`desktop-expired-paused-settled.png`. Status/Retry remain readable at 320px/200%
+text; paused recovery keeps the same native node at 25 seconds.
+
+Full isolated regression and production release are tracked separately; this
+paragraph does not claim deployment or legacy-footage creative approval.
+
 ## Limits and remaining lifecycle boundary
 
 This proves actual-component/local-native integration, not a deployed application or production asset's metadata/quality. Phone coverage is mobile Chromium emulation, not physical Safari/iOS. Expiry uses fixture clock advancement, not an hour of wall-clock playback. The signing server delays renewal by 120ms so the native expired Range reaches it before source replacement. The retained synthetic clip is not evidence of creative render quality or publication readiness.

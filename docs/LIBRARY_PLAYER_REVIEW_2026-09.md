@@ -80,9 +80,14 @@ dialog overflow. Native duration was 200.551 seconds; Escape returned focus.
 No data fixtures, proxies, auth substitution or API writes were used.
 Desktop/channel and phone production screenshots were visually inspected.
 
-Cloud CI **34396644330** remains in progress at this checkpoint. The latest
-fully confirmed backend is `46cf577` / Trigger `20260909.24`; this UI release
-does not claim a newer backend deployment yet.
+Cloud CI **34396644330** subsequently completed successfully on this exact
+revision. Canonical Convex was ready at **19:55:27 UTC**; Trigger
+**20260909.25** completed deployment at **19:57:25 UTC**, worker
+`worker_cmtuis4nheb790vmwcz50dz4x`, content hash
+`6f741c685647efb3e6313126f3e0bed4`. The retained terminal log is
+`/tmp/ysa-library-cloud-deploy.log`. The unchanged Trigger content hash is
+consistent with this UI-only release; it does not independently authorize
+skipping any future deployment.
 
 The inspected legacy video remains unverified. Its unrelated historical tags
 and `~28M est. views · tag_overlap` label are not new metadata or verified
