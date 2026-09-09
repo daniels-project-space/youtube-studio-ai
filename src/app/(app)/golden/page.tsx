@@ -193,7 +193,7 @@ const MODULE_DESTINATIONS: Readonly<Record<string, ModuleDestination>> = {
   "novita-render-farm": { href: "/novita-render", label: "Open render fleet" },
   "imagecraft-novita": { href: "/novita-render", label: "Open render fleet" },
   "videocraft-novita": { href: "/novita-render", label: "Open render fleet" },
-  lofi: { href: "/lofi", label: "Open music references" },
+  lofi: { href: "/lofi", label: "Open Lo-fi references" },
   loreshort: { href: "/loreshort", label: "Open lore references" },
   "studio-assets": { href: "/studio-assets", label: "Open Studio assets" },
   cinematic: { href: "/casefile", label: "Open Casefile desk" },
