@@ -4,7 +4,14 @@ import { readFileSync } from "node:fs";
 import {
   assertScriptApprovedForNarration,
   assertScriptCritiqueAccepted,
+  parseScriptCritique,
 } from "@/engine/scriptQualityGate";
+
+assert.deepEqual(parseScriptCritique({ pass: true, issues: [] }), { pass: true, issues: [] });
+assert.deepEqual(parseScriptCritique({ pass: false, issues: ["  Weak payoff.  "] }), { pass: false, issues: ["Weak payoff."] });
+for (const invalid of [{}, { pass: "true", issues: [] }, { pass: true }, { pass: true, issues: [false] }]) {
+  assert.throws(() => parseScriptCritique(invalid), /malformed script critique/);
+}
 
 assert.doesNotThrow(() => assertScriptCritiqueAccepted({ accepted: true }));
 assert.throws(
