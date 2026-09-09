@@ -127,10 +127,10 @@ the final 200% inspector, were visually reviewed. Evidence:
 
 CI `34323708501` completed successfully: full quality gate, canonical Convex
 deployment and Trigger deployment. Its cloud-runtime job completed at
-07:37:18 UTC. The CSS-follow-up CI `34324519037` was still running its full
-regression tests at the latest check; its final status must be checked separately.
-No completion of that pending cloud-release job is implied by the verified
-Vercel/browser result.
+07:37:18 UTC. The CSS-follow-up CI `34324519037` subsequently completed
+successfully as well: the full quality gate, cloud-runtime preflight, canonical
+Convex deployment and Trigger production deployment all report success.
+This was checked separately from the Vercel/browser result, not inferred from it.
 Final local code graph: 21,529 nodes, 52,611 edges; generated outputs stay excluded.
 
 ## Scope retained

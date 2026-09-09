@@ -2,6 +2,22 @@
 
 ## Result and scope
 
+**Later implementation follow-up, 9 September:** the infrastructure proof runner's
+unverified-shutdown success bug described below is now repaired locally and
+fault-tested. See `/home/ubuntu/salad-media-infra/docs/SHUTDOWN_RECOVERY_2026-09.md`.
+It saves create-only lifecycle records before GPU start, verifies zero instances
+before deletion, confirms deletion separately, and supports cleanup-only recovery
+after the original writer terminates. The real R2 conditional-write check passed;
+fresh Salad reads found zero groups/instances and no GPU mutation was made.
+The infrastructure checkpoint is `079346cceac0a068a68e76e326ea5f25cc325b88`,
+following a preserved pre-repair runtime checkpoint `7d3d8e6`. All 55 repository
+tests pass, including 32 proof/lifecycle tests; the original checkout/index and
+existing route changes were preserved. This checkpoint is not a deployed GPU
+image or a promotion of the unqualified weekly runtime.
+This does not complete the still-missing production fleet lease/controller or
+prepared-media adoption. The observations below describe the original audit;
+the implementation follow-up is not a retroactive claim of GPU qualification.
+
 Reuse the existing R2 model packs and ERNIE image. The missing production layer is a durable cross-channel job/controller contract, verified worker adapters, and adoption of prepared results by the scheduled runner. Model-file presence is not proof that those paths can render or recover correctly.
 
 The live preflight completed at **2026-09-09T01:38:04.548Z**. This audit used Graphify, current source/callers, recent Git history, relevant infrastructure/vault memory, the Cloudflare/R2 skill, and read-only provider checks. No GPU was created, started, resized, stopped or deleted; no inference, upload, publication, credential mutation or production write occurred. This document is the only repository change from this audit follow-up. The existing 151-item ledger remains authoritative; this does not replace earlier requirements.
