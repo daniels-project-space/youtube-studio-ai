@@ -3,7 +3,7 @@
 import { useId, type ReactNode } from "react";
 import type { VideoRow } from "@/lib/types";
 import { fmtDateTime } from "@/lib/format";
-import { fmtViews, youtubeThumb } from "@/lib/asset-url";
+import { youtubeThumb } from "@/lib/asset-url";
 import { ReleaseEvidenceBadge } from "./ReleaseEvidenceBadge";
 import { StageBadge } from "./StageBadge";
 import { MediaPreview } from "./MediaPreview";
@@ -83,7 +83,6 @@ function ArtifactCard({
   video: VideoRow;
   onOpen?: (video: VideoRow) => void;
 }) {
-  const views = fmtViews(video.estimatedViews);
   const cardContent = (
     <>
       <MediaPreview
@@ -118,7 +117,6 @@ function ArtifactCard({
           <span className={styles.proofLabel}>Master evidence</span>
           <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} />
         </div>
-        {views && <span className={styles.views}>~{views} est. views</span>}
       </div>
     </>
   );

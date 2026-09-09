@@ -7,6 +7,7 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
 import { useSelectedChannel } from "@/lib/channel-context";
 import type { ChannelRow, VideoRow } from "@/lib/types";
+import { orderLibraryVideos } from "@/lib/libraryOrder";
 import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
@@ -85,16 +86,7 @@ export default function LibraryPage() {
       return true;
     });
 
-    out.sort((a, b) => {
-      if (filters.sort === "views") {
-        const av = a.estimatedViews ?? -1;
-        const bv = b.estimatedViews ?? -1;
-        if (bv !== av) return bv - av;
-        return b.createdAt - a.createdAt; // tie-break / no-views fallback
-      }
-      return b.createdAt - a.createdAt;
-    });
-    return out;
+    return orderLibraryVideos(out, filters.sort);
   }, [libraryVideos, filters, selectedSlug, collection]);
 
   // The vault is an actual collection, not a stack of mostly-collapsed

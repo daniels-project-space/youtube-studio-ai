@@ -9,7 +9,6 @@ import { fmtDateTime } from "@/lib/format";
 import {
   youtubeThumb,
   useAssetUrl,
-  fmtViews,
 } from "@/lib/asset-url";
 import { VideoPlayer } from "./VideoPlayer";
 import { StageBadge } from "./StageBadge";
@@ -119,7 +118,6 @@ export function Lightbox({
 
   if (!video) return null;
 
-  const views = fmtViews(video.estimatedViews);
   const hasIntel = Boolean(video.thumbnailTitle || video.visualRationale);
 
   return (
@@ -234,12 +232,6 @@ export function Lightbox({
             color: "var(--color-muted)",
           }}
         >
-          {views && (
-            <span style={{ color: "var(--color-secondary)" }}>
-              ~{views} est. views
-              {video.estimatedViewsSource ? ` · ${video.estimatedViewsSource}` : ""}
-            </span>
-          )}
           {video.youtubeVideoId && (
             <a
               href={`https://www.youtube.com/watch?v=${video.youtubeVideoId}`}

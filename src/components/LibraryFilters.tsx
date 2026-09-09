@@ -1,9 +1,10 @@
 "use client";
 
 import type { ChannelRow } from "@/lib/types";
+import type { LibrarySortKey } from "@/lib/libraryOrder";
 import styles from "./LibraryFilters.module.css";
 
-export type SortKey = "date" | "views";
+export type SortKey = LibrarySortKey;
 export type StatusFilter = "all" | "ok" | "failed";
 
 export type LibraryFilterState = {
@@ -94,7 +95,7 @@ export function LibraryFilters({
           className={styles.select}
         >
           <option value="date">Newest</option>
-          <option value="views">Est. views</option>
+          <option value="oldest">Oldest</option>
         </select>
       </div>
 
