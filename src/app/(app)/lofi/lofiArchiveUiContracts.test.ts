@@ -12,7 +12,7 @@ async function main() {
   const root = process.cwd();
   const [page, styles, nicheCatalog, manifestBytes] = await Promise.all([
     readFile(join(root, "src/app/(app)/lofi/page.tsx"), "utf8"),
-    readFile(join(root, "src/app/(app)/lofi/lofi.module.css"), "utf8"),
+    readFile(join(root, "src/components/ReferenceStudy.module.css"), "utf8"),
     readFile(join(root, "src/lib/nicheCatalog.ts"), "utf8"),
     readFile(join(root, "src/engine/goldenProofMediaManifest.json"), "utf8"),
   ]);

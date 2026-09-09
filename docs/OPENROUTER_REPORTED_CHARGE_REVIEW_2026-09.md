@@ -1,6 +1,6 @@
 # Response-reported OpenRouter charges
 
-Status: targeted regression, actual engine/metadata recovery fixtures and retained-response replay passed; the isolated production gate and deployment are still pending.
+Status: isolated full gate and exact Vercel production verification passed; cloud CI `34373798730` remains in progress.
 
 ## Defect and scope
 
@@ -26,3 +26,11 @@ Targeted logs: `/tmp/ysa-openrouter-reported-cost-after.log`, `/tmp/ysa-openrout
 Production parent: `2093d7e11c259bb96d4613b285fcafb6d576adeb`. Ship only the shared reported-charge field/pricing branch, the OpenRouter charge helper/record handoff, its regression test and scoped documentation. Do not include the root's structured-output, title selector, metadata checkpoint, paid-admission or execution-lease drafts. Preserve the root HEAD/index and all earlier held work. No GPU, model, publication or destructive-data operation is required for this release.
 
 This advances accurate cost evidence and recovery; it is not a claimed provider-cost reduction or completion of the 151-item goal. Credit-dependent generation remains pending while unpaid validation and other actionable work continue.
+
+## Isolated release evidence
+
+Commit `552f84ca2b31438eb6044a8debcd85c517863a8e` was frozen at `/tmp/ysa-reported-charge-frozen-4X5wyM/repo`. Its own gate passed all **633 direct tests**, production build, typecheck, lint (zero errors / 33 existing warnings), unchanged structural audits and the 24-defect proof generator. Actual hermetic assembly produced `/tmp/assembly-smoke-B0mwOY/bk_smoke_2_loudnorm.mp4`, 31.021995 seconds. Logs: `/tmp/ysa-reported-charge-release-{tests,typecheck,lint,build,audit,defect-proof,assembly}.log`. This local synthetic-media assembly is compatibility evidence, not a new paid channel render or R2 upload.
+
+Frozen replay `/tmp/ysa-reported-charge-frozen-replay.log` verifies all 30 production-format responses against client SHA `fddda926e9fda521ff5342ad0039a25786b14a4ea84c0720dc4b21b61f68fadb`, unchanged $0.0844425, 14,019 reasoning tokens, exact request/response hashes and zero live requests. The other 36 structured-output experiments remain excluded from production and tested separately on the held draft. Only the reviewed five-file patch fast-forwarded main; root HEAD/index and all held work remained intact.
+
+The exact production `/api/health` reports `552f84ca2b31438eb6044a8debcd85c517863a8e`. GitHub/Vercel deployment **6353954304** is explicitly Production, successful at **16:00:07 UTC**, URL `https://youtube-studio-4ivfyhxrt-danielmabro-news-projects.vercel.app`. The production navigation replay is `/tmp/ysa-reported-charge-production-navigation.log`. Canonical Convex/Trigger completion must still be checked; a website deployment does not prove its background workers deployed.

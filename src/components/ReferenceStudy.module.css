@@ -1,5 +1,6 @@
 .page {
-  --lofi-sea: #87dcd4;
+  --reference-accent: #87dcd4;
+  --reference-accent-rgb: 135,220,212;
   display: grid;
   width: min(1200px, 100%);
   margin: 0 auto;
@@ -11,9 +12,9 @@
 .heading h1 { margin: 0; font: 650 2rem/1.15 var(--font-sans); letter-spacing: -.04em; }
 .heading p { margin: .4rem 0 0; color: var(--color-muted); font-size: 1rem; }
 .action { display: inline-flex; align-items: center; justify-content: center; gap: .65rem; min-height: 44px; padding: .65rem .9rem; border: 1px solid var(--color-border-strong); border-radius: 11px; background: rgba(222,235,255,.04); color: var(--color-fg); font-size: .875rem; font-weight: 600; line-height: 1.4; text-decoration: none; transition: background 160ms ease, border-color 160ms ease; }
-.action:hover { background: rgba(135,220,212,.1); border-color: var(--lofi-sea); }
-.action > span { color: var(--lofi-sea); }
-.action:focus-visible, .rules > summary:focus-visible { outline: 2px solid var(--lofi-sea); outline-offset: 4px; }
+.action:hover { background: rgba(var(--reference-accent-rgb),.1); border-color: var(--reference-accent); }
+.action > span { color: var(--reference-accent); }
+.action:focus-visible, .rules > summary:focus-visible { outline: 2px solid var(--reference-accent); outline-offset: 4px; }
 .action, .rules > summary { scroll-margin-block: 6rem; }
 
 .study { display: flex; flex-wrap: wrap; border: 1px solid var(--color-border); border-radius: 18px; overflow: hidden; background: linear-gradient(135deg,rgba(35,80,83,.22),rgba(21,24,40,.75)); }
@@ -22,25 +23,26 @@
 .referenceFrame figcaption { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .75rem; padding: 1rem 1.25rem; }
 .referenceFrame figcaption > div { display: grid; gap: .2rem; }
 .referenceFrame figcaption strong { font-size: 1.125rem; font-weight: 650; }
-.referenceFrame figcaption span { color: var(--color-muted); font-size: .875rem; }
-.studyNotes { flex: 1 1 18rem; min-width: 0; padding: 1.25rem; background: linear-gradient(160deg,rgba(135,220,212,.05),transparent); }
+.referenceFrame figcaption > div > span { color: var(--color-muted); font-size: .875rem; }
+.studyNotes { flex: 1 1 18rem; min-width: 0; padding: 1.25rem; background: linear-gradient(160deg,rgba(var(--reference-accent-rgb),.05),transparent); }
 .studyNotes h2, .rules h2 { margin: 0 0 1rem; font-size: 1.125rem; font-weight: 650; }
 .studyNotes ul { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,9.5rem),1fr)); gap: 1rem; margin: 0; padding: 0; list-style: none; }
-.studyNotes strong { color: var(--lofi-sea); font-size: 1rem; font-weight: 650; }
+.studyNotes strong { color: var(--reference-accent); font-size: 1rem; font-weight: 650; }
 .studyNotes p { margin: .3rem 0 0; color: var(--color-muted); font-size: .9375rem; line-height: 1.55; }
 .studyNotes .note { margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--color-border); }
+.studyNotes .coverageNote { margin: 0 0 1rem; padding-bottom: 1rem; border-bottom: 1px solid var(--color-border); color: var(--color-fg); }
 
 .rules { min-width: 0; border: 1px solid var(--color-border); border-radius: 14px; background: rgba(18,22,36,.68); }
 .rules > summary { display: flex; justify-content: space-between; align-items: center; gap: 1rem; min-height: 56px; padding: 1rem 1.25rem; border-radius: inherit; font-size: 1rem; font-weight: 600; cursor: pointer; list-style: none; }
 .rules > summary::-webkit-details-marker { display: none; }
-.rules > summary > span { color: var(--lofi-sea); font-size: 1.25rem; }
+.rules > summary > span { color: var(--reference-accent); font-size: 1.25rem; }
 .rules[open] > summary > span { transform: rotate(45deg); }
-.rules > summary:hover { background: rgba(135,220,212,.05); }
+.rules > summary:hover { background: rgba(var(--reference-accent-rgb),.05); }
 .rulesBody { display: flex; flex-wrap: wrap; gap: 1.5rem; padding: 1.25rem; border-top: 1px solid var(--color-border); }
 .rulesBody > section { flex: 1 1 22rem; min-width: 0; }
 .rulesBody ul, .rulesBody ol { display: grid; gap: 1.1rem; margin: 0; padding-left: 1.25rem; }
 .rulesBody li { padding-left: .2rem; }
-.rulesBody li::marker { color: var(--lofi-sea); }
+.rulesBody li::marker { color: var(--reference-accent); }
 .rulesBody strong { font-size: .9375rem; font-weight: 600; }
 .rulesBody p { margin: .3rem 0 0; color: var(--color-muted); font-size: .875rem; line-height: 1.6; }
 
@@ -51,3 +53,6 @@
   .referenceFrame figcaption, .studyNotes, .rulesBody { padding: 1rem; }
 }
 @media (prefers-reduced-motion: reduce) { .action { transition: none; } }
+
+.page[data-reference-theme="lore"] { --reference-accent: #e7b982; --reference-accent-rgb: 231,185,130; }
+.page[data-reference-theme="lore"] .study { background: linear-gradient(135deg,rgba(91,58,30,.22),rgba(21,24,40,.75)); }

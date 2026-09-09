@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { goldenProofMediaPresentation } from "@/engine/goldenProofMedia";
-import styles from "./lofi.module.css";
+import styles from "@/components/ReferenceStudy.module.css";
 
 // The archive may display only a currently admitted reference. It never
 // supplies a render preset or promotes historical media into production.
