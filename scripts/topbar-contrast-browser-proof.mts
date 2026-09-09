@@ -43,6 +43,9 @@ try {
       await switcher.click();
       await page.getByRole("listbox").getByRole("option").nth(1).waitFor({ timeout: 45000 });
       await switcher.click();
+      // Channel data can arrive before the Library collection. A short
+      // loading skeleton cannot exercise the required scrolled-content test.
+      if (path === "/library") await main.locator(".video-grid .video-card").first().waitFor({ timeout: 45000 });
       if (path !== "/library") await page.locator(".operations-access-label")
         .filter({ hasText: /^Verify owner$/ }).waitFor({ state: "attached" });
       await page.mouse.move(0, 0);

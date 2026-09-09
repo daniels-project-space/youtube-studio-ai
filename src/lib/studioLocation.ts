@@ -19,7 +19,7 @@ const EXACT_LOCATIONS: Record<string, StudioLocation> = {
   "/seo": { area: "Toolbox · Craft", title: "Packaging research" },
   "/settings": { area: "Workspace", title: "Settings" },
   "/novita-render": { area: "Toolbox · Infrastructure", title: "Render fleet" },
-  "/lofi": { area: "Toolbox · Infrastructure", title: "Music references" },
+  "/lofi": { area: "Toolbox · Craft", title: "Lo-fi references" },
   "/loreshort": { area: "Toolbox · Infrastructure", title: "Lore references" },
 };
 
