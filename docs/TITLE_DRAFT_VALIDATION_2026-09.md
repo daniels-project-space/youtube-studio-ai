@@ -67,6 +67,10 @@ At this earlier checkpoint, the draft had not had a separate full Next.js produc
 The subsequent [checkpoint-inspection slice](METADATA_CHECKPOINT_INSPECTION_2026-09.md)
 passed a full production build and 634/634 direct tests. It remains undeployed;
 engine-level paid admission is still unfinished.
+The subsequent [inline ownership slice](METADATA_INLINE_EXECUTION_LEASE_2026-09.md)
+implements per-request local checks and tests the actual engine/provider parser
+and fenced stage-write handler together. Its separate budget admission remains
+held; local test success is not production deployment evidence.
 The exact deployed UI revision has its own passing CI, Vercel build, canonical
 Convex/Trigger release and direct desktop/mobile proof in
 [the run-media report](RUN_MEDIA_QUERY_EFFICIENCY_2026-09.md). Neither that UI

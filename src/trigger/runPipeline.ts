@@ -17,6 +17,7 @@
 import { task, idempotencyKeys, tasks } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
+import { createInlinePaidExecutionLeaseCheck } from "./inlinePaidExecutionLease";
 import type { Id } from "../../convex/_generated/dataModel";
 import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline, preflight } from "@/engine/validate";
@@ -2058,6 +2059,9 @@ export const runPipelineTask = task({
         runId: payload.runId,
         channelId: payload.channelId,
         executionLease,
+        assertInlinePaidExecutionLease: createInlinePaidExecutionLeaseCheck(convex, {
+          ownerId, channelId: payload.channelId, runId: payload.runId, ...executionLease,
+        }),
         keyPrefix: invocation.keyPrefix,
         budgetUsd: invocation.budgetUsd,
         paramsByBlock,

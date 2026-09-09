@@ -217,11 +217,20 @@ export async function craftCheckpointedMetadata(
   // Validate the complete saved operation graph before writes, research or paid work.
   // Valid known receipts remain accounted even when a later record requires a hold.
   inspectLedger(ctx, args, records, (receipt) => observeCheckpointCostReceipt(receipt, true));
+  const assertNewWorkLease = async () => {
+    if (!ctx.assertInlinePaidExecutionLease) {
+      throw new ExecutionError("INLINE_PAID_EXECUTION_LEASE_REQUIRED: no local execution authority was supplied", {
+        code: "INLINE_PAID_EXECUTION_LEASE_REQUIRED", retryable: false,
+      });
+    }
+    await ctx.assertInlinePaidExecutionLease();
+    await ctx.assertRemoteChildExecutionLease?.({ reason: "paid_wave" });
+  };
   const runtime: TitleRuntime = {
     suggest: options.runtime?.suggest ?? youtubeSuggest,
     competitors: options.runtime?.competitors ?? fetchCompetitorTitles,
     json: async <T>(request: Parameters<typeof claudeJson>[0]) => {
-      await ctx.assertRemoteChildExecutionLease?.({ reason: "paid_wave" });
+      await assertNewWorkLease();
       const usage = snapshot();
       if (usage.unpricedCalls) throw held("unpriced usage blocks the next provider dispatch");
       return (options.runtime?.json ?? claudeJson)<T>(request);
@@ -231,8 +240,9 @@ export async function craftCheckpointedMetadata(
     if (!records.has(key)) throw held("unexpected checkpoint key");
     return records.get(key) as T | null;
   };
-  const create = async (key: string, data: unknown): Promise<void> => {
-    await ctx.assertRemoteChildExecutionLease?.({ reason: "paid_wave" });
+  const create = async (key: string, data: unknown, completedOutcome = false): Promise<void> => {
+    if (!completedOutcome) await assertNewWorkLease();
+    else await ctx.assertRemoteChildExecutionLease?.({ reason: "paid_wave" });
     await io.put(key, Buffer.from(JSON.stringify(data)), { contentType: "application/json", ifNoneMatch: "*" });
   };
   const manifestKey = prefix + "manifest.json";
@@ -304,7 +314,10 @@ export async function craftCheckpointedMetadata(
     // Observe before persisting: a failed write must still account the known charge.
     observeCheckpointCostReceipt(outcome.cost, false);
     receipts.set(outcome.cost.id, outcome.cost);
-    await create(key + ".outcome.json", outcome);
+    // A received response belongs to this already admitted immutable claim.
+    // Preserve it if the local generation changed while the provider worked;
+    // the next claim/request and the engine's durable writes remain fenced.
+    await create(key + ".outcome.json", outcome, true);
     observe(outcome, false);
     if (failure && outcome.status === "held") throw failure;
     return outcome;

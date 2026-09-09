@@ -61,6 +61,7 @@ function context(runId = "run-fixture"): StageContext {
     ownerId: "owner-fixture", channelId: "channel-fixture", runId, keyPrefix: "fixture/", params: {}, budgetUsd: 1,
     store: { topic: "Bridge collapse", channelName: "Field Notes", narrationText: source, plannedTitle: contradicted, competitors: [] },
     log: () => {}, modelUsageAccounting: () => ({ calls: calls.length, cacheHits: 0, costUsd: knownCost, unpricedCalls: unpriced }),
+    assertInlinePaidExecutionLease: async () => {},
   };
 }
 async function main() {

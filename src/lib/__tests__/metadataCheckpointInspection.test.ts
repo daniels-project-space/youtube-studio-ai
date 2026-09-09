@@ -32,6 +32,7 @@ const ctx: StageContext = {
   ownerId: "inspection-owner", channelId: "inspection-channel", runId: "inspection-run", keyPrefix: "fixture/",
   store: {}, params: {}, budgetUsd: 1, log: () => {},
   modelUsageAccounting: () => ({ calls, costUsd: spend, cacheHits: 0, unpricedCalls: 0 }),
+  assertInlinePaidExecutionLease: async () => {},
 };
 const io = {
   get: async (key: string) => {
