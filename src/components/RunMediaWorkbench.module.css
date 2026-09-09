@@ -3,6 +3,7 @@
 }
 
 .shell {
+  container-type: inline-size;
   position: relative;
   padding: 1.15rem;
   overflow: hidden;
@@ -16,7 +17,7 @@
 .header {
   display: flex;
   flex-wrap: wrap;
-  align-items: flex-end;
+  align-items: center;
   justify-content: space-between;
   gap: 1rem 1.4rem;
   margin-bottom: 1rem;
@@ -27,12 +28,11 @@
   max-width: 42rem;
 }
 
-.eyebrow,
 .assetKind {
   margin: 0 0 0.35rem;
   color: var(--color-accent);
   font-family: var(--font-mono);
-  font-size: 0.66rem;
+  font-size: 0.75rem;
   font-weight: 600;
   letter-spacing: 0.1em;
   text-transform: uppercase;
@@ -50,7 +50,7 @@
   max-width: 38rem;
   margin: 0.45rem 0 0;
   color: var(--color-muted);
-  font-size: 0.82rem;
+  font-size: 0.9rem;
   line-height: 1.5;
 }
 
@@ -59,14 +59,12 @@
   grid-template-columns: repeat(4, minmax(5.8rem, 1fr));
   width: min(100%, 34rem);
   margin: 0;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  overflow: hidden;
+  gap: 0.6rem 1rem;
 }
 
 .metric {
   min-width: 0;
-  padding: 0.7rem 0.8rem;
+  padding: 0.2rem 0.75rem 0.2rem 0;
   border-right: 1px solid var(--color-border);
 }
 
@@ -75,25 +73,19 @@
 }
 
 .metric dt {
-  overflow: hidden;
   color: var(--color-faint);
   font-family: var(--font-mono);
-  font-size: 0.6rem;
-  letter-spacing: 0.07em;
-  text-overflow: ellipsis;
-  text-transform: uppercase;
-  white-space: nowrap;
+  font-size: 0.75rem;
+  line-height: 1.4;
 }
 
 .metric dd {
-  overflow: hidden;
   margin: 0.32rem 0 0;
   color: var(--color-text);
   font-family: var(--font-mono);
-  font-size: 0.78rem;
+  font-size: 0.85rem;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .metric[data-tone="active"] dd {
@@ -128,15 +120,41 @@
   font-size: 1rem;
 }
 
+.primaryMedia {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  align-items: start;
+  gap: 1rem;
+}
+
+.primaryMedia[data-has-master] {
+  grid-template-columns: minmax(0, 1.8fr) minmax(0, 1fr);
+}
+
+.packaging {
+  display: grid;
+  min-width: 0;
+  gap: 0.75rem;
+  align-content: start;
+}
+
+.primaryMedia:not([data-has-master]) .packaging {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 18rem), 1fr));
+  align-items: start;
+}
+
 .mediaGrid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(100%, 15.5rem), 1fr));
   gap: 0.8rem;
+  align-items: start;
+  margin-top: 1rem;
 }
 
 .assetCard {
   display: grid;
   min-width: 0;
+  align-content: start;
   overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: 8px;
@@ -144,7 +162,6 @@
 }
 
 .assetCard.selectedMaster {
-  grid-column: span 2;
   border-color: color-mix(in srgb, var(--color-accent) 54%, var(--color-border));
 }
 
@@ -196,24 +213,8 @@
 }
 
 .selectedMaster .preview {
-  min-height: min(28rem, 45vw);
-}
-
-.masterFlag {
-  position: absolute;
-  z-index: 1;
-  top: 0.7rem;
-  left: 0.7rem;
-  padding: 0.28rem 0.48rem;
-  border: 1px solid color-mix(in srgb, var(--color-accent) 55%, transparent);
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--color-surface) 88%, transparent);
-  color: var(--color-accent);
-  font-family: var(--font-mono);
-  font-size: 0.61rem;
-  font-weight: 600;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
+  min-height: 0;
+  aspect-ratio: 16 / 9;
 }
 
 .image,
@@ -234,9 +235,8 @@
 
 .audioPreview {
   display: grid;
-  width: min(100%, 22rem);
-  gap: 0.8rem;
-  padding: 1rem;
+  width: 100%;
+  padding: 0.8rem;
   color: var(--color-muted);
   font-family: var(--font-mono);
   font-size: 0.72rem;
@@ -245,6 +245,17 @@
 
 .audioPreview audio {
   width: 100%;
+  min-width: 0;
+  color-scheme: dark;
+}
+
+.assetCard[data-media-type="audio"] .preview { min-height: 0; }
+
+.fileStatus {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.85rem;
 }
 
 .previewState {
@@ -252,39 +263,45 @@
   padding: 1rem;
   color: var(--color-muted);
   font-family: var(--font-mono);
-  font-size: 0.72rem;
+  font-size: 0.85rem;
   line-height: 1.45;
   text-align: center;
 }
 
 .assetBody {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   align-content: start;
   gap: 0.62rem;
   padding: 0.85rem 0.9rem 0.9rem;
 }
 
 .assetHeading {
+  grid-column: 1 / -1;
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.65rem;
+  flex-wrap: wrap;
 }
 
+.assetHeading > div { min-width: 0; }
+
 .assetHeading h3 {
-  overflow: hidden;
   margin: 0;
   color: var(--color-text);
-  font-size: 0.84rem;
+  font-size: 0.95rem;
   font-weight: 600;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
 }
 
 .sourceLink {
   flex: 0 0 auto;
   color: var(--color-secondary);
-  font-size: 0.7rem;
+  font-size: 0.85rem;
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
   text-decoration: none;
 }
 
@@ -308,13 +325,16 @@
   border-radius: 999px;
   color: var(--color-muted);
   font-family: var(--font-mono);
-  font-size: 0.61rem;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
 }
 
 .receiptDetails {
   min-width: 0;
+  justify-self: end;
+  align-self: center;
   color: var(--color-faint);
-  font-size: 0.61rem;
+  font-size: 0.75rem;
   line-height: 1.35;
 }
 
@@ -322,6 +342,8 @@
   width: fit-content;
   cursor: pointer;
   font-family: var(--font-mono);
+  min-height: 2.75rem;
+  align-content: center;
 }
 
 .receiptDetails code {
@@ -330,9 +352,8 @@
   margin-top: 0.35rem;
   color: var(--color-faint);
   font-family: var(--font-mono);
-  font-size: 0.61rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
 }
 
 .moreRow {
@@ -343,8 +364,12 @@
   gap: 0.7rem;
   margin-top: 0.9rem;
   color: var(--color-faint);
-  font-size: 0.72rem;
+  font-size: 0.85rem;
 }
+
+.receiptDetails[open] { grid-column: 1 / -1; width: 100%; }
+.currentThumbnailCard .receiptDetails { grid-column: 1 / -1; justify-self: start; }
+.facts { align-self: center; }
 
 .moreButton {
   padding: 0;
@@ -384,17 +409,21 @@
     border-right: 0;
   }
 
-  .metric:nth-child(-n + 2) {
-    border-bottom: 1px solid var(--color-border);
-  }
+}
 
-  .assetCard.selectedMaster {
-    grid-column: span 1;
-  }
+@container (max-width: 48rem) {
+  .primaryMedia[data-has-master] { grid-template-columns: minmax(0, 1fr); }
+}
 
-  .selectedMaster .preview {
-    min-height: 13rem;
-  }
+@container (max-width: 24rem) {
+  .assetBody { grid-template-columns: minmax(0, 1fr); }
+  .receiptDetails { grid-column: 1 / -1; justify-self: start; }
+}
+
+@container (max-width: 14rem) {
+  .metrics { grid-template-columns: minmax(0, 1fr); }
+  .metric { border-right: 0; }
+  .metric dd { overflow-wrap: normal; }
 }
 
 @media (max-width: 460px) {

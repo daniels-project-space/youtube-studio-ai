@@ -42,6 +42,9 @@ export function RunMediaWorkbench({
   const { media, historicalThumbnails } = partitionRunThumbnailAssets(ordered, currentThumbnail);
   const selectedMaster = selectedRunMaster(media, selectedVideoAssetId);
   const visible = visibleRunMedia(media, selectedMaster, showAll);
+  const supporting = visible.filter((asset) => asset._id !== selectedMaster?._id);
+  const documents = supporting.filter((asset) => mediaType(asset) === "file");
+  const previews = supporting.filter((asset) => mediaType(asset) !== "file");
   const hiddenCount = Math.max(0, media.length - visible.length);
   const stageState = summarizeStageReceipts(stages);
   const isActiveRun = runStatus === "running" || runStatus === "queued";
@@ -51,15 +54,10 @@ export function RunMediaWorkbench({
       <div className={styles.shell}>
         <header className={styles.header}>
           <div className={styles.headerCopy}>
-            <p className={styles.eyebrow}>Output</p>
             <h2 id="recorded-work-title" className={styles.title}>
               Media
             </h2>
-            <p className={styles.subtitle}>
-              {isActiveRun
-                ? "Saved output appears as stages finish."
-                : "Saved output from this run."}
-            </p>
+            {isActiveRun && <p className={styles.subtitle}>Saved output appears as stages finish.</p>}
           </div>
 
           <dl className={styles.metrics}>
@@ -83,16 +81,18 @@ export function RunMediaWorkbench({
           </div>
         ) : (
           <>
-            <div className={styles.mediaGrid}>
-              <CurrentThumbnailCard thumbnail={currentThumbnail} />
-              {visible.map((asset) => (
-                <RunMediaAssetCard
-                  key={asset._id}
-                  asset={asset}
-                  selectedMaster={asset._id === selectedMaster?._id}
-                />
-              ))}
+            <div className={styles.primaryMedia} data-has-master={selectedMaster ? true : undefined}>
+              {selectedMaster && <RunMediaAssetCard asset={selectedMaster} selectedMaster />}
+              <div className={styles.packaging}>
+                <CurrentThumbnailCard thumbnail={currentThumbnail} />
+                {documents.map((asset) => <RunMediaAssetCard key={asset._id} asset={asset} selectedMaster={false} />)}
+              </div>
             </div>
+            {previews.length > 0 && (
+              <div className={styles.mediaGrid}>
+                {previews.map((asset) => <RunMediaAssetCard key={asset._id} asset={asset} selectedMaster={false} />)}
+              </div>
+            )}
 
             {(hiddenCount > 0 || showAll) && (
               <div className={styles.moreRow}>
@@ -210,8 +210,7 @@ function RunMediaAssetCard({
       data-media-type={type}
       data-historical-thumbnail={historical || undefined}
     >
-      <div className={styles.preview}>
-        {selectedMaster && <span className={styles.masterFlag}>Selected master</span>}
+      {type !== "file" && <div className={styles.preview}>
         <MediaPreview
           asset={asset}
           type={type}
@@ -221,12 +220,12 @@ function RunMediaAssetCard({
           onMediaError={() => setMediaFailed(true)}
           label={label}
         />
-      </div>
+      </div>}
 
       <div className={styles.assetBody}>
         <div className={styles.assetHeading}>
           <div>
-            <p className={styles.assetKind}>{label}</p>
+            <p className={styles.assetKind}>{selectedMaster ? "Selected master" : label}</p>
             <h3>{fileName(asset.r2Key)}</h3>
           </div>
           {source.url && (
@@ -235,11 +234,18 @@ function RunMediaAssetCard({
               href={source.url}
               target="_blank"
               rel="noopener noreferrer"
+              aria-label={`Open ${label.toLowerCase()} source: ${fileName(asset.r2Key)}`}
             >
               Open source ↗
             </a>
           )}
         </div>
+
+        {type === "file" && !source.url && (
+          <p className={styles.fileStatus} role="status">
+            {source.status === "loading" ? "Preparing file link…" : "File link unavailable"}
+          </p>
+        )}
 
         {facts.length > 0 && (
           <ul className={styles.facts} aria-label={`${label} metadata`}>
@@ -322,7 +328,6 @@ function MediaPreview({
   if (type === "audio") {
     return (
       <div className={styles.audioPreview}>
-        <span>{assetLabel(asset.kind)}</span>
         <audio controls preload="metadata" src={url} onError={onMediaError}>
           Your browser cannot preview this saved audio.
         </audio>
