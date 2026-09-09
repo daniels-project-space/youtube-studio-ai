@@ -125,10 +125,12 @@ the final 200% inspector, were visually reviewed. Evidence:
 `/tmp/ysa-title-review-production-u3rVpX/results.json` and screenshots there.
 `previewPageTrack: false` is explicitly recorded.
 
-At this checkpoint, CI `34323708501` had passed its full quality gate and canonical
-Convex step and was deploying Trigger; the CSS-follow-up CI `34324519037` was
-still running. Their final statuses must be checked separately. No completion
-of those pending cloud-release jobs is implied by the verified Vercel/browser result.
+CI `34323708501` completed successfully: full quality gate, canonical Convex
+deployment and Trigger deployment. Its cloud-runtime job completed at
+07:37:18 UTC. The CSS-follow-up CI `34324519037` was still running its full
+regression tests at the latest check; its final status must be checked separately.
+No completion of that pending cloud-release job is implied by the verified
+Vercel/browser result.
 Final local code graph: 21,529 nodes, 52,611 edges; generated outputs stay excluded.
 
 ## Scope retained
