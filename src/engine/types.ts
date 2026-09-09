@@ -1,7 +1,7 @@
 import type { ImageUsageSummary } from "@/lib/imageUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
 import type { VisualArtifactAttempt } from "./visualArtifactAttemptLedger";
-import type { InlineCheckpointContext, VerifiedInlineCheckpoint } from "./inlineCheckpointAdmission";
+import type { InlineCheckpointContext, InlineCheckpointInspection } from "./inlineCheckpointAdmission";
 
 /**
  * Core block-engine contract (MASTER-PLAN §D).
@@ -145,7 +145,7 @@ export interface Block {
   paid?: boolean;
   /** Code-owned read-only checkpoint validation, consulted only for sequential
    * inline PAID execution. Config flags/serialized proofs cannot grant credit. */
-  inspectPaidInlineResume?: (ctx: InlineCheckpointContext) => Promise<VerifiedInlineCheckpoint>;
+  inspectPaidInlineResume?: (ctx: InlineCheckpointContext) => Promise<InlineCheckpointInspection>;
   /**
    * Optional bounded projection for the durable run-stage row. The runner
    * retains the full patch in memory for immediate downstream blocks and

@@ -28,7 +28,7 @@ let afterResponse: (phase: Phase) => void = () => {};
 let calls: Phase[] = [], events: string[] = [], suggestionCalls = 0, performanceReads = 0;
 let rejectedSelections = 0, rejectedPackages = 0;
 let checkpointReads = 0;
-let beforeGet: () => void = () => {};
+let beforeGet: (key: string) => void = () => {};
 let beforeStageWrite: (args: Record<string, unknown>) => void = () => {};
 const loader = (Module as unknown as { _load: (...args: unknown[]) => unknown });
 const originalLoad = loader._load;
@@ -37,7 +37,7 @@ loader._load = function(this: unknown, request: string, ...rest: unknown[]) {
   if (request.endsWith("/storage")) return { ...actual,
     getObjectBytes: async (key: string) => {
       if (key.includes("/metadata-title/v1/")) checkpointReads++;
-      beforeGet();
+      beforeGet(key);
       const value = objects.get(key);
       if (!value) throw Object.assign(new Error("not found"), { name: "NoSuchKey" });
       return Uint8Array.from(value);
@@ -347,13 +347,75 @@ async function main() {
   assert.equal((await h.execute(true, true)).ok, false); assert.equal(calls.length, 0); assert.equal(objects.size, 0);
   h = harness(true); afterResponse = (phase) => { if (phase === "generator") h.run.executionAttempts++; };
   await assert.rejects(h.execute(true, true), /stale/); afterResponse = () => {};
-  assert.equal((await h.execute(true, true)).ok, false); assert.deepEqual(calls, ["generator"]);
+  const heldPaid = await h.execute(true, true);
+  assert.equal(heldPaid.ok, false); assert.deepEqual(calls, ["generator"]);
+  equalCost(heldPaid.costTotal, h.checkpointCost());
+  equalCost(h.rows.get("metadata")!.cost!, h.checkpointCost());
+  const heldBytes = structuredClone(objects);
+  delete process.env.OPENROUTER_API_KEY;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const repeated = await h.execute(false, true, 0);
+    assert.equal(repeated.ok, false); equalCost(repeated.costTotal, heldPaid.costTotal);
+    assert.deepEqual(calls, ["generator"]); assert.deepEqual(objects, heldBytes);
+    assert.equal(h.rows.get("metadata")!.checkpointCostReceipts!.length, 1);
+  }
+
+  h = harness(true);
+  afterPut = (key) => {
+    if (key.endsWith("package-1.claim.json")) {
+      h.run.executionAttempts++; throw new Error("fixture: paid-claim acknowledgment lost");
+    }
+  };
+  await assert.rejects(h.execute(true, true), /stale/);
+  assert.equal(h.outcome("package-1"), undefined); assert.equal(h.rows.get("metadata")!.cost, 0);
+  afterPut = () => {};
+  const unknownPackage = await h.execute(true, true);
+  assert.equal(unknownPackage.ok, false); assert.match(unknownPackage.error!, /in-flight\/unknown paid outcome/);
+  equalCost(unknownPackage.costTotal, h.checkpointCost()); equalCost(h.rows.get("metadata")!.cost!, h.checkpointCost());
+  assert.deepEqual(calls, ["generator", "judge"], "an unknown claim never authorizes a replacement request");
+
+  // A transport outage on one fixed R2 key does not erase independently scoped
+  // known charges from readable keys; restore later without another purchase.
+  h = harness(true); const beforeReadFailure = await h.execute(true, true);
+  const rowBeforeReadFailure = h.rows.get("metadata")!;
+  Object.assign(rowBeforeReadFailure, { status: "running", cost: 0, checkpointCostReceipts: [] });
+  beforeGet = (key) => { if (key.endsWith("comment.outcome.json")) throw new Error("fixture R2 response unavailable"); };
+  const r2Held = await h.execute(true, true);
+  assert.equal(r2Held.ok, false); assert.match(r2Held.error!, /R2 response unavailable/);
+  equalCost(r2Held.costTotal, h.outcome("selection").cost.costUsd + h.outcome("package-1").cost.costUsd);
+  equalCost(h.rows.get("metadata")!.cost!, r2Held.costTotal); assert.equal(calls.length, 4);
+  beforeGet = () => {}; delete process.env.OPENROUTER_API_KEY;
+  const r2Restored = await h.execute(false, true);
+  assert.equal(r2Restored.ok, true, r2Restored.error); equalCost(r2Restored.costTotal, beforeReadFailure.costTotal);
+  assert.equal(calls.length, 4);
+
+  for (const failure of ["unavailable", "stale"] as const) {
+    h = harness(true); afterResponse = (phase) => { if (phase === "generator") h.run.executionAttempts++; };
+    await assert.rejects(h.execute(true, true), /stale/); afterResponse = () => {};
+    beforeStageWrite = (args) => {
+      if (args.status === "failed" && args.checkpointCostReceipts) {
+        if (failure === "stale") h.run.executionAttempts++;
+        else throw new Error("fixture held-cost summary unavailable");
+      }
+    };
+    if (failure === "stale") await assert.rejects(h.execute(true, true), /stale/);
+    else {
+      const failedSummary = await h.execute(true, true);
+      assert.equal(failedSummary.ok, false); equalCost(failedSummary.costTotal, h.checkpointCost());
+    }
+    assert.equal(h.rows.get("metadata")!.cost, 0); assert.deepEqual(calls, ["generator"]);
+    beforeStageWrite = () => {};
+    const saved = await h.execute(true, true);
+    assert.equal(saved.ok, false); equalCost(saved.costTotal, h.checkpointCost());
+    equalCost(h.rows.get("metadata")!.cost!, h.checkpointCost()); assert.deepEqual(calls, ["generator"]);
+  }
   h = harness(true); rejectedSelections = 1; rejectedPackages = 1;
   const admittedRetries = await h.execute(true, true);
   assert.equal(admittedRetries.ok, true, admittedRetries.error); equalCost(admittedRetries.costTotal, h.checkpointCost());
   assert.equal(calls.length, 7);
   console.log("Real metadata engine/transport lease integration: 8 fresh checks, zero-purchase stale rejection, immutable completed outcomes, exact missing-work recovery and cost deduplication passed (fixture boundaries only)");
   console.log("Real paid metadata admission: 18 checkpoint reads, paid-fenced cost recovery before purchase, zero-cost replay, refused missing/unreadable/held ledgers and bounded retries passed (TEST envelope only)");
+  console.log("Held-cost recovery: known charges survive unknown claims, partial R2 outage, stale/unavailable summary writes and repeated retries; no held body or duplicate purchase (fixture boundaries only)");
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => {
   globalThis.fetch = originalFetch; loader._load = originalLoad;

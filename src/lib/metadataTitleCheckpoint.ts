@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from "node:crypto";
 import type { StageContext } from "@/engine/types";
 import { ExecutionError } from "@/engine/executionErrors";
-import { verifiedInlineCheckpoint, type InlineCheckpointContext } from "@/engine/inlineCheckpointAdmission";
+import { verifiedInlineCheckpoint, verifiedInlineCostEvidence, type InlineCheckpointContext } from "@/engine/inlineCheckpointAdmission";
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { openRouterModel } from "@/lib/openRouter";
 import { claudeJson } from "@/lib/anthropic";
@@ -37,6 +37,13 @@ const SLOTS = ["selection", "package-1", "package-2", "comment"] as const;
 type OperationSlot = typeof SLOTS[number];
 interface Claim { binding: Binding; id: string }
 const verifiedCheckpoint = Symbol("verified-metadata-checkpoint");
+const verifiedCosts = Symbol("verified-metadata-costs-only");
+interface VerifiedMetadataCostEvidence {
+  readonly [verifiedCosts]: true;
+  readonly binding: Binding;
+  readonly ledgerFingerprint: string;
+  readonly receipts: readonly CheckpointCostReceipt[];
+}
 interface VerifiedMetadataCheckpoint {
   readonly [verifiedCheckpoint]: true;
   readonly binding: Binding;
@@ -49,7 +56,7 @@ export type MetadataCheckpointInspection =
   | { kind: "fresh"; binding: Binding }
   | { kind: "restorable"; proof: VerifiedMetadataCheckpoint }
   | { kind: "continuable"; proof: VerifiedMetadataCheckpoint; remainingSlots: readonly OperationSlot[] }
-  | { kind: "held"; code: "METADATA_TITLE_RECONCILIATION_REQUIRED"; reason: string };
+  | { kind: "held"; code: "METADATA_TITLE_RECONCILIATION_REQUIRED"; reason: string; costEvidence?: VerifiedMetadataCostEvidence };
 
 const defaultIo: CheckpointIo = { get: getObjectBytes, put: putObject };
 function held(message: string): ExecutionError {
@@ -122,11 +129,27 @@ function assertSavedPackage(args: MetaCraftArgs, decision: TitleDecision, metada
 }
 
 type CheckpointRecords = Map<string, unknown | null>;
-async function readLedger(ctx: CheckpointIdentity, get: CheckpointIo["get"]): Promise<CheckpointRecords> {
+async function readLedgerSnapshot(ctx: CheckpointIdentity, get: CheckpointIo["get"]) {
   const prefix = prefixFor(ctx);
   const keys = [prefix + "manifest.json", ...SLOTS.flatMap((slot) => [prefix + slot + ".claim.json", prefix + slot + ".outcome.json"])];
   // Fixed keys only, including when the manifest is missing. No bucket listing.
-  return new Map(await Promise.all(keys.map(async (key) => [key, await readCheckpoint(get, key)] as const)));
+  const responses = await Promise.all(keys.map(async (key) => {
+    try { return { key, value: await readCheckpoint(get, key) }; }
+    catch (error) { return { key, error }; }
+  }));
+  const records: CheckpointRecords = new Map(), readFailures: unknown[] = [];
+  for (const response of responses) {
+    // Failed reads are not absent records. Retain successful reads for cost-only
+    // evidence; the entire operation graph remains unadmittable on ANY failure.
+    if ("error" in response) readFailures.push(response.error);
+    else records.set(response.key, response.value);
+  }
+  return { records, readFailures };
+}
+async function readLedger(ctx: CheckpointIdentity, get: CheckpointIo["get"]): Promise<CheckpointRecords> {
+  const snapshot = await readLedgerSnapshot(ctx, get);
+  if (snapshot.readFailures.length) throw snapshot.readFailures[0];
+  return snapshot.records;
 }
 
 function inspectLedger(
@@ -187,13 +210,49 @@ function inspectLedger(
     p1?.status === "rejected" ? ["package-2", "comment"] : ["package-1", "package-2", "comment"] };
 }
 
+/** Charge validation does not require a successful creative result or a legal
+ * continuation graph. Scan ALL readable slots, not only the prefix before the
+ * first hold. Duplicate claim identities are ambiguous: count neither copy. */
+function inspectKnownCosts(ctx: CheckpointIdentity, args: MetaCraftArgs, records: CheckpointRecords): VerifiedMetadataCostEvidence | undefined {
+  const binding = bindingFor(ctx, args), prefix = prefixFor(ctx);
+  const manifest = records.get(prefix + "manifest.json") as Manifest | null;
+  if (!manifest) return;
+  try { assertManifest(manifest, binding, args); } catch { return; }
+  const claimCounts = new Map<string, number>();
+  for (const slot of SLOTS) {
+    const claim = records.get(prefix + slot + ".claim.json") as Claim | null;
+    if (claim && same(claim.binding, binding) && typeof claim.id === "string" && claim.id.trim()) {
+      claimCounts.set(claim.id, (claimCounts.get(claim.id) ?? 0) + 1);
+    }
+  }
+  const receipts: CheckpointCostReceipt[] = [];
+  for (const slot of SLOTS) {
+    const key = prefix + slot;
+    const claim = records.get(key + ".claim.json") as Claim | null;
+    const outcome = records.get(key + ".outcome.json") as Outcome<unknown> | null;
+    if (!outcome || !claim || claimCounts.get(claim.id) !== 1) continue;
+    try { assertOutcome(binding, key, claim, outcome); } catch { continue; }
+    // A positive unpricedCalls count means this is only the KNOWN component,
+    // not a claim that unknown usage was free. The encompassing hold remains.
+    receipts.push(Object.freeze({ ...outcome.cost }));
+  }
+  if (!receipts.length || !Number.isFinite(receipts.reduce((sum, row) => sum + row.costUsd, 0))) return;
+  return Object.freeze({ [verifiedCosts]: true as const, binding: Object.freeze(binding),
+    ledgerFingerprint: createHash("sha256").update(JSON.stringify([...records])).digest("hex"),
+    receipts: Object.freeze(receipts) });
+}
+
 /** Read-only state evidence, not spending authority or an atomic multi-object snapshot. */
 export async function inspectMetadataTitleCheckpoint(
   ctx: CheckpointIdentity, args: MetaCraftArgs,
   options: { get?: CheckpointIo["get"]; priorStage?: { status: string; costUsd: number } } = {},
 ): Promise<MetadataCheckpointInspection> {
+  let records: CheckpointRecords | undefined;
   try {
-    const result = inspectLedger(ctx, args, await readLedger(ctx, options.get ?? getObjectBytes));
+    const snapshot = await readLedgerSnapshot(ctx, options.get ?? getObjectBytes);
+    records = snapshot.records;
+    if (snapshot.readFailures.length) throw snapshot.readFailures[0];
+    const result = inspectLedger(ctx, args, records);
     const prior = options.priorStage;
     if (prior && (!Number.isFinite(prior.costUsd) || prior.costUsd < 0)) throw held("invalid prior stage cost");
     if (result.kind === "fresh" && prior && (prior.costUsd > 0 || ["running", "failed", "ok"].includes(prior.status))) {
@@ -201,7 +260,9 @@ export async function inspectMetadataTitleCheckpoint(
     }
     return result;
   } catch (error) {
-    return { kind: "held", code: "METADATA_TITLE_RECONCILIATION_REQUIRED", reason: error instanceof Error ? error.message : String(error) };
+    const costEvidence = records ? inspectKnownCosts(ctx, args, records) : undefined;
+    return { kind: "held", code: "METADATA_TITLE_RECONCILIATION_REQUIRED", reason: error instanceof Error ? error.message : String(error),
+      ...(costEvidence ? { costEvidence } : {}) };
   }
 }
 
@@ -209,7 +270,13 @@ export async function inspectMetadataTitleCheckpoint(
  * engine evidence. Budget, attribution and stage persistence belong to runner. */
 export async function inspectMetadataPaidInlineResume(ctx: InlineCheckpointContext, args: MetaCraftArgs) {
   const inspected = await inspectMetadataTitleCheckpoint(ctx, args, { priorStage: ctx.priorStage });
-  if (inspected.kind === "held") throw held(inspected.reason);
+  if (inspected.kind === "held") {
+    const costs = inspected.costEvidence;
+    if (!costs) throw held(inspected.reason);
+    if (costs[verifiedCosts] !== true || !same(costs.binding, bindingFor(ctx, args))) throw held("cost evidence binding changed");
+    return verifiedInlineCostEvidence(ctx.binding, { receipts: costs.receipts,
+      ledgerFingerprint: costs.ledgerFingerprint, reason: inspected.reason });
+  }
   if (inspected.kind === "fresh") return verifiedInlineCheckpoint(ctx.binding, {
     kind: "fresh", ledgerFingerprint: null, receipts: [],
   });

@@ -35,7 +35,7 @@ import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage"
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
 import { createCheckpointCostScope, incrementalObservedFailureCostUsd, type CheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
-import { reconcileInlineCheckpoint, type InlineCheckpointContext } from "./inlineCheckpointAdmission";
+import { reconcileInlineCheckpoint, reconcileInlineCheckpointCosts, type InlineCheckpointContext } from "./inlineCheckpointAdmission";
 
 export interface RunPipelineOptions {
   ownerId: string;
@@ -894,10 +894,6 @@ export async function runPipeline(
         if (opts.resume === false || !opts.sink.getResumeState) {
           throw new Error("inline checkpoint admission requires the complete persisted resume state");
         }
-        if (!Number.isFinite(opts.budgetUsd) || opts.budgetUsd <= 0 ||
-          configuredEnvelope === undefined || !Number.isFinite(configuredEnvelope) || configuredEnvelope <= 0) {
-          throw new Error("inline checkpoint admission requires a positive finite budget and module envelope");
-        }
         const inputSnapshot = () => Object.fromEntries([...new Set([
           ...Object.keys(manifest.consumes), ...Object.keys(manifest.optionalConsumes),
         ])].filter((key) => Object.prototype.hasOwnProperty.call(store, key)).map((key) => [key, store[key]]));
@@ -915,19 +911,35 @@ export async function runPipeline(
         if (hashPayload({ params, store: inputSnapshot() }) !== binding.inputFingerprint) {
           throw new Error("inline checkpoint inputs changed during inspection");
         }
-        const reconciled = reconcileInlineCheckpoint(binding, proof, priorStage ? {
+        const priorCheckpoint = priorStage ? {
           status: priorStage.status, costUsd: priorStage.cost ?? 0, receipts: priorStage.checkpointCostReceipts ?? [],
-        } : undefined, configuredEnvelope);
+        } : undefined;
+        const recovered = reconcileInlineCheckpointCosts(binding, proof, priorCheckpoint);
         // This is verified spend even when the subsequent summary write fails.
         // Count it in a failed result too; persistence is still mandatory before
         // permitting any new work or applying the reservation credit.
-        spentUsd += reconciled.discoveredCostUsd;
-        if (reconciled.needsPersistence) {
+        spentUsd += recovered.discoveredCostUsd;
+        if (proof.kind === "cost_only") {
+          const message = `${PAID_STAGE_RECONCILIATION_MARKER}: ${proof.reason}`;
+          // A single failed transition records known charges and the hold.
+          // Never mark this running, call its body, or grant reservation credit.
+          await opts.sink.upsert({ ownerId: opts.ownerId, runId: opts.runId, block: block.id,
+            status: "failed", finishedAt: Date.now(), error: message,
+            cost: recovered.priorCostUsd, checkpointCostReceipts: recovered.receipts });
+          stages.push({ block: block.id, status: "failed" }); log(message);
+          return { status: "failed", cost: recovered.discoveredCostUsd, error: message };
+        }
+        if (recovered.needsPersistence) {
           // Do not make a fresh claim or purchase until newly discovered R2
           // charges and their identities are durable under the current fence.
           await opts.sink.upsert({ ownerId: opts.ownerId, runId: opts.runId, block: block.id,
-            status: "running", cost: reconciled.priorCostUsd, checkpointCostReceipts: reconciled.receipts });
+            status: "running", cost: recovered.priorCostUsd, checkpointCostReceipts: recovered.receipts });
         }
+        if (!Number.isFinite(opts.budgetUsd) || opts.budgetUsd <= 0 ||
+          configuredEnvelope === undefined || !Number.isFinite(configuredEnvelope) || configuredEnvelope <= 0) {
+          throw new Error("inline checkpoint admission requires a positive finite budget and module envelope");
+        }
+        const reconciled = reconcileInlineCheckpoint(binding, proof, priorCheckpoint, configuredEnvelope);
         priorStage = { ...priorStage, status: priorStage?.status ?? "queued", cost: reconciled.priorCostUsd,
           checkpointCostReceipts: reconciled.receipts };
         priorStageMap.set(block.id, priorStage);

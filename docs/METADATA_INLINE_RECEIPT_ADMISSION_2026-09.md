@@ -7,6 +7,11 @@ GPU rental, production mutation, thumbnail change or publishing was performed.
 All 151 items in the additive goal ledger remain present. Missing credits are
 not a reason to stop the wider goal or silently downgrade a provider.
 
+**Subsequent implementation:** [held-cost recovery](METADATA_HELD_COST_RECOVERY_2026-09.md)
+adds separately typed cost-only reconciliation and partial-read evidence. It
+addresses the held-ledger summary gap listed below without granting a retry or
+reservation credit. The remaining production-admission hold is unchanged.
+
 ## What changed
 
 `Block.inspectPaidInlineResume` is a code-owned read-only adapter, considered

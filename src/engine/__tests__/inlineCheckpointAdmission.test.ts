@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { checkpointCostReceiptId, observeCheckpointCostReceipt, type CheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
-import { reconcileInlineCheckpoint, verifiedInlineCheckpoint, type InlineCheckpointBinding, type VerifiedInlineCheckpoint } from "../inlineCheckpointAdmission";
+import { reconcileInlineCheckpoint, reconcileInlineCheckpointCosts, verifiedInlineCheckpoint, verifiedInlineCostEvidence, type InlineCheckpointBinding, type VerifiedInlineCheckpoint } from "../inlineCheckpointAdmission";
 import { manifestFromBlock } from "../moduleManifest";
 import { _clear, registerManifest } from "../registry";
 import { runPipeline, type RunPipelineOptions } from "../runner";
@@ -54,6 +54,17 @@ function pureCases() {
   const many = Array.from({ length: 256 }, (_, i) => receipt(String(i), 0));
   assert.throws(() => proof("continuable", [...many, old]), /receipt count/);
   assert.throws(() => reconcileInlineCheckpoint(binding, original, { ...prior, costUsd: 0, receipts: many }, 0.05), /union limit/);
+  const costsOnly = verifiedInlineCostEvidence(binding, { ledgerFingerprint: "c".repeat(64), receipts: [old], reason: "unknown package response" });
+  const known = reconcileInlineCheckpointCosts(binding, costsOnly, undefined);
+  near(known.priorCostUsd, 0.03); assert.equal("reservationCreditUsd" in known, false);
+  assert.throws(() => reconcileInlineCheckpoint(binding, costsOnly, undefined, 100), /cost-only evidence cannot authorize/);
+  near(reconcileInlineCheckpointCosts(binding, costsOnly, prior).discoveredCostUsd, 0);
+  assert.throws(() => reconcileInlineCheckpointCosts(binding, JSON.parse(JSON.stringify(costsOnly)), undefined), /unverified\/serialized/);
+  assert.throws(() => reconcileInlineCheckpointCosts({ ...binding, runId: "other" }, costsOnly, undefined), /different inputs/);
+  assert.throws(() => reconcileInlineCheckpointCosts(binding, costsOnly, { ...prior, receipts: [] }), /unattributed historical/);
+  for (const invalid of [{ reason: "", receipts: [old] }, { reason: "held", receipts: [] }]) {
+    assert.throws(() => verifiedInlineCostEvidence(binding, { ...invalid, ledgerFingerprint: "c".repeat(64) }));
+  }
 }
 
 type Row = NonNullable<Awaited<ReturnType<NonNullable<RunStageSink["getResumeState"]>>>>[number];
@@ -154,6 +165,17 @@ async function main() {
   } });
   assert.equal(h.result.ok, false); assert.match(h.result.error!, /inputs changed during inspection/);
   assert.ok(!h.events.includes("body"));
+  for (const budget of [0, 0.02, 0.05, Infinity, NaN]) {
+    h = await engineCase({ budget, inspect: async (ctx) => verifiedInlineCostEvidence(ctx.binding,
+      { ledgerFingerprint: "d".repeat(64), receipts: [old], reason: "unknown accepted operation" }) });
+    assert.equal(h.result.ok, false); near(h.result.costTotal, 0.03); assert.deepEqual(h.events, []);
+    const row = h.rows.get(binding.moduleId)!;
+    assert.equal(row.status, "failed"); near(row.cost!, 0.03);
+    assert.deepEqual(row.checkpointCostReceipts, [old]); assert.match(row.error!, /RECONCILIATION_REQUIRED.*unknown accepted/);
+  }
+  h = await engineCase({ initial, inspect: async (ctx) => verifiedInlineCostEvidence(ctx.binding,
+    { ledgerFingerprint: "d".repeat(64), receipts: [old], reason: "still held" }) });
+  near(h.result.costTotal, 0.03); assert.equal(h.result.ok, false); assert.deepEqual(h.events, []);
   console.log("Inline checkpoint admission: exact receipt reconciliation, frozen bindings, durable-before-purchase recovery, remaining reservations and fail-closed cases passed (no external calls)");
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; });

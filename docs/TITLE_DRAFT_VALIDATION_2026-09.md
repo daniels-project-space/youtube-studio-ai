@@ -76,6 +76,11 @@ implements exact cost reconciliation and reservation credit in the runner, with
 real metadata integration under an explicit test-only paid envelope. Production
 request sizing, per-call allowance, contract migration and the existing output
 audit finding still hold the title rollout.
+The subsequent [held-cost slice](METADATA_HELD_COST_RECOVERY_2026-09.md) records
+known charges from a held or partially unreadable ledger without granting
+execution. The real fixture reproduction previously returned $0 for a retained
+$0.0015 response; the new path preserves it through repeated recovery with no
+new purchase. Production qualification remains distinct.
 The exact deployed UI revision has its own passing CI, Vercel build, canonical
 Convex/Trigger release and direct desktop/mobile proof in
 [the run-media report](RUN_MEDIA_QUERY_EFFICIENCY_2026-09.md). Neither that UI

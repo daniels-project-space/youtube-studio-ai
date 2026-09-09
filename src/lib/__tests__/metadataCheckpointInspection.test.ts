@@ -172,6 +172,45 @@ async function main() {
   for (const input of [{ ...args, language: "de" }, { ...args, competitorTitles: undefined }, { ...args, persona: "other" }]) {
     assert.equal((await inspect({}, input)).kind, "held");
   }
+  // Monetary evidence and permission to execute are deliberately independent.
+  // Check all slots, including valid receipts AFTER the first held/corrupt slot.
+  for (const [label, mutate, expectedCost, count] of [
+    ["held selection", () => edit("selection.outcome.json", (r) => { r.status = "held"; }), 0.04, 3],
+    ["unpriced selection", () => edit("selection.outcome.json", (r) => { r.unpricedCalls = 1; }), 0.04, 3],
+    ["missing selection outcome", () => objects.delete(prefix + "selection.outcome.json"), 0.02, 2],
+    ["invalid early receipt", () => edit("selection.outcome.json", (r) => { r.cost.id = "wrong"; }), 0.02, 2],
+    ["malformed later JSON", () => objects.set(prefix + "comment.outcome.json", Buffer.from("{")), 0.03, 2],
+    ["duplicate claim", () => {
+      const selectionClaim = JSON.parse(Buffer.from(objects.get(prefix + "selection.claim.json")!).toString());
+      edit("package-1.claim.json", (r) => { r.id = selectionClaim.id; });
+      edit("package-1.outcome.json", (r) => { r.claimId = selectionClaim.id; r.cost.id = checkpointCostReceiptId(prefix + "package-1", selectionClaim.id); });
+    }, 0.01, 1],
+  ] as const) {
+    restore(); mutate();
+    const result = await inspect();
+    assert.equal(result.kind, "held", label);
+    if (result.kind !== "held") throw new Error("unreachable");
+    const receipts = result.costEvidence!.receipts;
+    assert.equal(receipts.length, count, label);
+    assert.ok(Math.abs(receipts.reduce((sum, r) => sum + r.costUsd, 0) - expectedCost) < 1e-10, label);
+    assert.ok(Object.isFrozen(result.costEvidence) && Object.isFrozen(receipts) && Object.isFrozen(receipts[0]));
+  }
+  for (const key of ["comment.outcome.json", "package-1.claim.json", "manifest.json"]) {
+    restore(); reads = [];
+    const result = await inspectMetadataTitleCheckpoint(ctx, args, { get: async (requested) => {
+      const bytes = await io.get(requested);
+      if (requested === prefix + key) throw new Error("transient R2 failure");
+      return bytes;
+    } });
+    assert.equal(result.kind, "held"); assert.equal(reads.length, 9);
+    if (result.kind !== "held") throw new Error("unreachable");
+    if (key === "manifest.json") assert.equal(result.costEvidence, undefined, "missing scope proof cannot credit any receipt");
+    else assert.ok(Math.abs(result.costEvidence!.receipts.reduce((sum, r) => sum + r.costUsd, 0) - 0.03) < 1e-10);
+  }
+  restore(); edit("manifest.json", (r) => { r.binding.ownerId = "foreign"; });
+  const foreignCost = await inspect();
+  assert.equal(foreignCost.kind, "held");
+  if (foreignCost.kind === "held") assert.equal(foreignCost.costEvidence, undefined);
   restore(); edit("comment.outcome.json", (r) => { r.status = "rejected"; delete r.value; r.error = "known invalid optional text"; });
   assert.equal((await inspect()).kind, "restorable");
   assert.equal((await craftCheckpointedMetadata(ctx, args, { io, runtime, performanceContext })).metadata.pinnedComment, "");
