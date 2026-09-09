@@ -154,8 +154,8 @@ import {
 } from "@/engine/channelShowProfile";
 import {
   assertChildrenShowBibleSeeded,
-  childrenShowBibleSeedKeys,
 } from "@/engine/childrenShowBible";
+import { channelPipelineValidationSeedKeys } from "@/engine/channelPipelineSeedKeys";
 import { hasSourceAttributedDataStoryParams } from "@/engine/dataStory";
 import {
   admitReviewedEvidencePackForSourceDataStoryRun,
@@ -1613,25 +1613,6 @@ export const runPipelineTask = task({
           });
       assertPipelineVideoRuntimeReady(entries, reviewedLtxRuntime?.runtime);
 
-      // Compile the exact frozen entries. On a retry, a changed/revoked module
-      // implementation must fail closed before any stage/provider executes.
-      // contentLane is resolved from the persisted channel and placed in
-      // seedStore below. It is a channel-level policy input, not something a
-      // render block may synthesize or replace.
-      const resolved = validatePipeline(entries, ["contentLane", ...childrenShowBibleSeedKeys(contentLane)]);
-      // A signed Channel Inception probe is intentionally private: the frozen
-      // probe shape has no upload block, but retains every actual editorial
-      // and technical release requirement. Choose that narrow policy only
-      // after admission validation above; ordinary and forged invocations
-      // always keep the full publish-capable production contract.
-      const compilation = compilePipeline(
-        resolved,
-        probeBudgetAdmission ? PRIVATE_PROBE_CONTRACT_POLICY : undefined,
-      );
-      if (durableInvocation) {
-        assertPipelineInvocationCompilation(durableInvocation, compilation);
-      }
-
       const privateInvocationContext =
         payload.probeInvocationContext ?? payload.routeQualificationBenchmark?.invocationContext;
       let seedStore: Record<string, unknown>;
@@ -1798,6 +1779,23 @@ export const runPipelineTask = task({
         }
       } else if (seedStore[NARRATIVE_SERIES_RUN_SELECTOR_SEED_KEY] !== undefined) {
         throw new Error("pipeline invocation has a narrative series selector without a validated immutable plan");
+      }
+
+      // Compile only after selecting and admitting the actual seed store:
+      // current identity is not the source for durable, private or weekly runs.
+      // This projects only registered seed ports, not arbitrary payload keys.
+      const resolved = validatePipeline(entries, channelPipelineValidationSeedKeys(
+        contentLane,
+        seedStore["channelProgramRoute"],
+      ));
+      // Private probes keep their existing no-upload policy; ordinary runs
+      // retain the full production contract and exact frozen compilation guard.
+      const compilation = compilePipeline(
+        resolved,
+        probeBudgetAdmission ? PRIVATE_PROBE_CONTRACT_POLICY : undefined,
+      );
+      if (durableInvocation) {
+        assertPipelineInvocationCompilation(durableInvocation, compilation);
       }
 
       // Reviewed factual evidence is a deliberately narrow, provider-free
