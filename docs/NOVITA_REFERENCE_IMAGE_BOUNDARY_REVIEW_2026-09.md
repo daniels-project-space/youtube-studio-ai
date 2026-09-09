@@ -65,3 +65,14 @@ NOVITA_REFERENCE_BASELINE_SOURCE=/tmp/ysa-novita-reference-review-E0htth/novitaM
 The second command deliberately fails: it replays the original silent-drop bug.
 No source outside these three scoped files was changed for this correction.
 No paid calls, Git actions, deployment or Graphify refresh were performed.
+
+## Subsequent root-owned release
+
+Root independently reran the actual boundary regression and included this
+three-file slice in `9acde4442bd1b3a7c9337f95f16e6922a2be0bf5`. The complete
+644-test/build/audit/real-assembly qualification, successful CI and independent
+render parity, exact Convex/Trigger `20260909.28` deployment and READY Vercel
+canonical-alias receipts are documented in
+[the companion release review](SCRIPT_CRITIC_RESPONSE_REVIEW_2026-09.md).
+No reference-conditioned image generation or paid render is claimed. The guard
+is released; the actual reference-conditioning capability remains unimplemented.

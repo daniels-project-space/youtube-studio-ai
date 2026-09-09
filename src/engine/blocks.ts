@@ -76,7 +76,7 @@ export function registerAllBlocks(): void {
   for (const b of narrativeSeriesVisualControlsBlocks) register(b);
   // Renderer-neutral learning objective / retrieval-practice handoff.
   for (const b of learningContractBlocks) register(b);
-  // No archetype selects this held preparation-only port; no narration approval.
+  // Held arithmetic preparation + script adapter; no archetype or self-approval.
   for (const b of workedExampleBlocks) register(b);
   // Pre-Story-Spine, operator-authored curriculum intent for supervised
   // children episodes. It emits a private child-editor receipt only.

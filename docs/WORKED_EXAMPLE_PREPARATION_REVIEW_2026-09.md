@@ -189,6 +189,15 @@ opted-in producer's resume admission, not global cross-request provenance for ev
 upstream artifact. Future consumers still need their own trusted-request binding.
 The fingerprints remain integrity linkage, not signed authorization.
 
+The independent reviewer completed eight inverse resume cases and eight separate
+safety/omitted-policy controls with unchanged frozen source hashes. Its separate
+arithmetic oracle checked8,201 valid derivations, rejected8,201 incorrect steps
+and2,203 invalid divisions, plus25 forged-projection/namespace/magnitude/DAG
+cases. `arithmetic-counterexamples.log` and `resume-policy-counterexamples.log`
+in the same independent evidence directory retain the results. No remaining
+actionable defect was found in that bounded preparation slice; this is not
+proof of the still-missing complete video capability.
+
 ## Deliberately open before capability admission
 
 1. Explicit planner/route/catalog handoff, not automatic activation by a generic

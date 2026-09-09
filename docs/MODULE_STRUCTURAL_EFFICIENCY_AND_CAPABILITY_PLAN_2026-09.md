@@ -106,7 +106,7 @@ These are investigation targets, not already-measured improvements:
 
 - **Whiteboard repair:** the baseline supplied-plan change deleted indexed art
   and audio while retained receipts correctly refused a duplicate purchase.
-  The [held preservation repair](WHITEBOARD_CHANGED_PLAN_CACHE_REVIEW_2026-09.md)
+  The [released preservation repair](WHITEBOARD_CHANGED_PLAN_CACHE_REVIEW_2026-09.md)
   now compares the actual image/audio inputs and preserves equivalent paid
   work. Its real-caller regression and independent review pass. Genuine changed
   generation inputs preserve the prior files and refuse before spending;
@@ -116,6 +116,13 @@ These are investigation targets, not already-measured improvements:
 - **TTS:** compare natural contiguous speech units against per-line synthesis,
   preserving speaker changes, timing, pronunciation and resumability. Alignment
   and repair cost may outweigh fewer calls; listen to real comparisons.
+  A concrete earlier waste was reproduced in the actual Qwen qualification
+  script and worker: adding listening verdicts submitted all six recordings
+  again, with identical request keys. Worker caching retained model weights,
+  not generated audio. The held correction makes verdict finalization offline,
+  validates exact retained request/receipt/audio identity and preserves original
+  costs. Its actual-caller fixture reduces the standard two-pass workflow12→6
+  synthesis submissions; no real invoice saving or audio qualification claimed.
 - **Music:** derive the required duration and arrangement from settled
   narration/assembly timing; investigate qualified motifs or stems where the
   channel permits them. Avoid generating a replacement for an editing-only
@@ -218,6 +225,13 @@ actual-runner regression passes. The separate script-critic response repair
 rejects missing verdicts instead of approving them. Both are integration work
 required before exposing the new learning capability, not new per-video paid
 judges.
+
+The [held narration adapter](WORKED_EXAMPLE_NARRATION_ADAPTER_REVIEW_2026-09.md)
+now executes verified preparation→script/narration→independent QA and checks
+exact approval at the voice entry. The complete audit still identifies the
+two missing production request consumers; planner/catalog admission, measured
+audio, renderer semantics and complete-video qualification remain open. Do not
+relabel canonical speech or fixture review as polished teaching.
 
 **Reserve candidate:** verified software-demonstration capture could reuse
 browser automation and assembly for tutorials. The existing `screen` graphic

@@ -68,7 +68,7 @@ async function mathResume(): Promise<void> {
     assert.deepEqual(variant.cached, before, "old evidence is not mutated or deleted");
     assert.equal(result.costTotal, 0);
   }
-  assert.deepEqual(allManifests().filter((manifest) => manifest.block.resumePolicy !== undefined).map((manifest) => manifest.id), ["worked_example_prepare"]);
+  assert.deepEqual(allManifests().filter((manifest) => manifest.block.resumePolicy !== undefined).map((manifest) => manifest.id), ["worked_example_prepare", "worked_example_script"]);
   assert.equal(getManifest("worked_example_prepare")!.retryAndResume.resumePolicy, "recompute_unpaid_deterministic");
 }
 

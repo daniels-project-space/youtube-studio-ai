@@ -33,6 +33,7 @@ import { VisualMatterManifestSchema, VisualMatterReferenceAssetSchema } from "./
 import { EpisodeGraphSchema, SceneManifestSchema } from "./episodeGraph";
 import { LearningContractSchema } from "./learningContract";
 import { WorkedExamplePreparationSchema, WorkedExampleRequestSchema } from "./workedExample";
+import { WorkedExampleEditorialApprovalSchema } from "./workedExampleNarration";
 import {
   SyntheticScenarioContractSchema,
   SyntheticScenarioDisclosureSchema,
@@ -171,6 +172,7 @@ const qaReport = z.object({
 const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; persist?: ArtifactContract["persist"] }> = {
   workedExampleRequest: { type: "WorkedExampleRequest", schema: WorkedExampleRequestSchema },
   workedExamplePreparation: { type: "WorkedExamplePreparation", schema: WorkedExamplePreparationSchema },
+  workedExampleEditorialApproval: { type: "WorkedExampleEditorialApproval", schema: WorkedExampleEditorialApprovalSchema },
   topic: { type: "VideoIntent", schema: nonEmpty },
   title: { type: "PublicationTitle", schema: nonEmpty.max(100) },
   description: { type: "PublicationDescription", schema: z.string() },

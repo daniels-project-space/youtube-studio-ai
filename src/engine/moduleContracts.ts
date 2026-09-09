@@ -587,16 +587,17 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     ],
   }),
   qa_script: contract(["script.qa_passed"], {
+    optionalProduces: ["workedExampleEditorialApproval"],
     optionalConsumes: [
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
       "topic","script", "persona", "dataStorySourceLedger", "channelProgramRoute", "serializedProgramEpisodeContext",
-      "documentaryEpisodePlan"],
+      "documentaryEpisodePlan", "workedExampleRequest", "workedExamplePreparation"],
     qualityRequired: true,
   }),
   narration_tts: contract(["narration.timed"], {
     optionalConsumes: [
-      "styleDNA", "musicBrief", "script", "voiceId", "niche",
+      "styleDNA", "musicBrief", "script", "voiceId", "niche", "workedExampleRequest", "workedExamplePreparation", "workedExampleEditorialApproval",
       // Grounds the cold-open take judge in this channel's own voice standard.
           ],
     providerProfiles: [managed],
@@ -874,6 +875,13 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       qualityRequired: true,
     }),
     certificationEvidence: "workedExample core and registered-caller contract tests; narration/render handoff pending",
+  },
+  worked_example_script: {
+    ...contract(["learning.integer_narration_draft"], {
+      requiredConsumes: ["workedExampleRequest", "workedExamplePreparation"],
+      providerProfiles: [local], maxCostUsd: 0, qualityRequired: true,
+    }),
+    certificationEvidence: "held exact arithmetic speech adapter; independent editorial review, audition and renderer qualification required",
   },
 
   // An operator-supplied, child-editor-signed episode intent. This happens

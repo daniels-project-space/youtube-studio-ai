@@ -740,7 +740,7 @@ function catalogCitedFilePathsExistOrAreExplicitlyRetired(): void {
 function main(): void {
   registerAllBlocks();
   const manifests = allManifests();
-  assert.equal(manifests.length, 86, "all 86 executable blocks must have manifests");
+  assert.equal(manifests.length, 87, "all 87 executable blocks must have manifests");
   assert.deepEqual(
     manifests.filter((manifest) => manifest.certification.status === "legacy").map((manifest) => manifest.id),
     [],
