@@ -207,7 +207,9 @@ export function ChannelFolderWorkspace({
                     </span>
                   </button>
                   {canEdit ? (
-                    <details className={styles.roomMenu}>
+                    <details className={styles.roomMenu} onToggle={(event) => {
+                      if (event.currentTarget.open) event.currentTarget.closest("article")?.scrollIntoView({ block: "nearest", inline: "nearest", behavior: "instant" });
+                    }}>
                       <summary aria-label={`Manage ${folder.name}`}>•••</summary>
                       <div>
                         <button type="button" onClick={() => { setEditingId(folder._id); setRenameDraft(folder.name); setArmedRemove(null); }}>Rename</button>
