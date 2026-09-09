@@ -244,7 +244,7 @@ export default function LibraryPage() {
               <div className={styles.actions}>
                 {page.visible.length > LIBRARY_PAGE_SIZE ? (
                   <button type="button" className="btn-secondary" onClick={() => setVisibleLimit(LIBRARY_PAGE_SIZE)}>
-                    Latest {LIBRARY_PAGE_SIZE}
+                    Show fewer
                   </button>
                 ) : null}
                 {page.remaining > 0 ? (
