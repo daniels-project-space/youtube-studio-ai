@@ -1680,6 +1680,10 @@
 }
 
 @media (max-width: 860px) {
+  /* Match the existing content clearance so browser-driven keyboard focus
+     reveals the whole control above the fixed mobile navigation. */
+  html:has(.studio-sidebar) { scroll-padding-block-end: calc(7rem + env(safe-area-inset-bottom)); }
+
   .studio-shell :where(button, input, select, textarea, summary, a[class]) {
     min-height: 44px !important;
   }

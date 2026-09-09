@@ -35,7 +35,11 @@ try {
       assert.equal(await link.getAttribute("href"),"/api/operations/authorize");
       await link.focus();assert.equal(await link.evaluate(node=>node===document.activeElement),true);
       const target=await link.evaluate(node=>{
-        const box=node.getBoundingClientRect();return {height:box.height,visible:node.contains(document.elementFromPoint(box.x+box.width/2,box.y+box.height/2))};
+        const box=node.getBoundingClientRect();
+        // Edge midpoints stay inside rounded corners while detecting a dock
+        // covering the bottom of a target whose centre is still clickable.
+        const points=[[box.x+box.width/2,box.y+2],[box.x+box.width/2,box.bottom-2],[box.x+2,box.y+box.height/2],[box.right-2,box.y+box.height/2],[box.x+box.width/2,box.y+box.height/2]];
+        return {height:box.height,visible:points.every(([x,y])=>node.contains(document.elementFromPoint(x,y))),top:box.top,bottom:box.bottom};
       });
       if(!target.visible || target.height<44)failures.push(`${name}: owner action is covered or smaller than 44px`);
       const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1);

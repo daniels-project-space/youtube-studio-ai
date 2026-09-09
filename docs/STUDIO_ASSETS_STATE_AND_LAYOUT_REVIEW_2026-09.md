@@ -24,3 +24,13 @@ Graphify traced `StudioAssetsPage` to `useOperationsAccess`; the actual GET/POST
 - Source/API guard tests pass; root typecheck/scoped lint pass. No dependency, paid model, GPU, storage, publishing or real approval operation is needed for this slice.
 
 The frozen full release gate, provider/exact-alias verification and **production** version of the final proof remain required. This does not qualify genuine owner OAuth, real registry contents, asset-generation quality, automated library promotion or weekly prepared-media use. Those remain on the goal ledger.
+
+## Additional visual defect found before release
+
+Candidate `b690db386f47593c12beed3114437d07a78b3434` is frozen in `/tmp/ysa-studio-assets-release-wsB5QD/repo`; build/typecheck/zero-error lint, unchanged audits, defect proofs and actual assembly passed, while its 631-test suite continues. It has **not** been published to main.
+
+The enlarged-phone screenshot revealed the dock covering the lower part of the focused authorize button, although the centre-hit check passed. The first whole-target experiment sampled rounded transparent corners and produced false positives; the corrected edge-midpoint check rejects exactly the enlarged-phone case (`/tmp/ysa-studio-assets-full-target-baseline2.log`). The measured button ran from y=842 to y=950 while the dock started at y=902.
+
+This is a shared scroll-clearance defect, not an asset-rendering failure. A four-line global CSS change gives the mobile scrollport the same seven-rem bottom clearance already reserved by `.studio-main`, scoped to pages containing the Studio sidebar. No new observer, JavaScript, animation, provider call or additional layout spacer is added. The browser's native focus scroll moves the whole button above the dock (diagnostic y=606–714). The stronger actual-app test passes all five layouts (`/tmp/ysa-studio-assets-full-target-pass.log`). Navigation and Golden evidence regressions are also run because this property affects shared scrolling. This follow-up requires its own frozen successor gate; the prior candidate's tests are not silently relabelled as testing changed CSS.
+
+The separate efficiency audit found every UI release re-deploying an identical Trigger backend content hash (`101fa3a5b4b7ad6781cca1df216d69e9`). The current CI workflow deploys on every main push after tests. No workflow was changed here. A conservative, independently tested unchanged-runtime deployment check is a follow-up under the existing cost/efficiency requirements; it must not skip a needed backend migration or weaken release evidence.
