@@ -4,6 +4,14 @@ Status: read-only implementation design, 2026-09-09. **Not implemented or produc
 
 **Subsequent implementation:** the [read-only inspection/input-parity slice](METADATA_CHECKPOINT_INSPECTION_2026-09.md) and [per-request inline lease checks](METADATA_INLINE_EXECUTION_LEASE_2026-09.md) are now implemented in the local draft and connected to actual execution. The statements above describe this design review's original checkpoint. Engine budget admission, reservation/credit, frozen-contract migration and production qualification remain unfinished; no production paid flag was enabled.
 
+The later [verified receipt-admission slice](METADATA_INLINE_RECEIPT_ADMISSION_2026-09.md)
+implements the shared engine proof, exact cost reconciliation, durable-before-work
+summary and current-stage reservation credit. Actual metadata tests enable it
+under an explicitly fixture-only envelope. Numerical production/request bounds,
+per-request allowance and frozen-contract migration remain unfinished; metadata's
+production paid classification is unchanged. This is staged implementation, not
+completion of the full design below.
+
 ## Evidence and the integration point
 
 Graphify was used for `runPipeline`, `configuredMaxCostUsd` and `assertPipelineInvocationCompilation`, followed by their targeted current callers. Serena was unavailable. Owner lock discovery returned no marker files. An independent reviewer traced the actual service authentication and lease handlers.

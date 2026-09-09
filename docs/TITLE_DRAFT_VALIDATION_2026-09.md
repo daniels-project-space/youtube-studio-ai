@@ -71,6 +71,11 @@ The subsequent [inline ownership slice](METADATA_INLINE_EXECUTION_LEASE_2026-09.
 implements per-request local checks and tests the actual engine/provider parser
 and fenced stage-write handler together. Its separate budget admission remains
 held; local test success is not production deployment evidence.
+The later [verified receipt-admission slice](METADATA_INLINE_RECEIPT_ADMISSION_2026-09.md)
+implements exact cost reconciliation and reservation credit in the runner, with
+real metadata integration under an explicit test-only paid envelope. Production
+request sizing, per-call allowance, contract migration and the existing output
+audit finding still hold the title rollout.
 The exact deployed UI revision has its own passing CI, Vercel build, canonical
 Convex/Trigger release and direct desktop/mobile proof in
 [the run-media report](RUN_MEDIA_QUERY_EFFICIENCY_2026-09.md). Neither that UI
