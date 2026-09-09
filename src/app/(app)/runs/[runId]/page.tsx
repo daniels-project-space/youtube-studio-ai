@@ -51,16 +51,13 @@ export default function RunDetailPage({
     runId: runId as Id<"runs">,
     slim: true,
   }) as PipelineStage[] | undefined;
-  const assets = useQuery(
-    api.assets.listForRun,
-    run ? { runId: runId as Id<"runs"> } : "skip",
-  ) as RunMediaAsset[] | undefined;
-  // This exact-run query shares Library's current-thumbnail resolver. Raw run
-  // assets deliberately retain the original thumbnail after a later refresh.
-  const videoDetail = useQuery(
-    api.videos.getVideoDetail,
+  // One exact-run media subscription shares Library's current-thumbnail
+  // resolver without fetching full narration/SEO or reading assets twice.
+  const media = useQuery(
+    api.videos.getRunMediaPresentation,
     run ? { runId: runId as Id<"runs"> } : "skip",
   );
+  const assets = media?.assets as RunMediaAsset[] | undefined;
   const artifactRetention = useQuery(api.runArtifactRetentions.getForRun, {
     runId: runId as Id<"runs">,
   }) as ArtifactRetention | null | undefined;
@@ -128,6 +125,24 @@ export default function RunDetailPage({
 
   const channelName = channel?.name ?? "Channel";
   const channelSlug = channel?.slug;
+  // The title is only an accessible image label here. Reuse already-loaded
+  // metadata/asset titles in the same order as the full Library detail view.
+  const metadata = stages?.find((stage) => stage.block === "metadata")?.outputs as
+    | { title?: unknown }
+    | undefined;
+  const videoAsset = assets?.find((asset) => asset.kind === "video" && asset.r2Key === media?.currentThumbnail.videoKey)
+    ?? assets?.find((asset) => asset.kind === "video");
+  const videoMeta = videoAsset?.meta as { title?: unknown } | undefined;
+  const thumbnailMeta = assets?.find((asset) => asset.kind === "thumbnail")?.meta as
+    | { thumbnailTitle?: unknown }
+    | undefined;
+  const thumbnailTitle = [metadata?.title, videoMeta?.title, thumbnailMeta?.thumbnailTitle]
+    .find((title): title is string => typeof title === "string" && Boolean(title))
+    ?? channel?.name ?? "this run";
+  const currentThumbnail = media === undefined ? undefined : media === null ? null : {
+    ...media.currentThumbnail,
+    title: thumbnailTitle,
+  };
   const reportedStages = nodes.filter((node) => ["ok", "skipped"].includes(node.stage?.status ?? "queued")).length;
   const activeStage = nodes.find((node) => node.stage?.status === "running");
   const receiptProgress = nodes.length ? Math.round((reportedStages / nodes.length) * 100) : 0;
@@ -218,7 +233,7 @@ export default function RunDetailPage({
           stages={stages}
           runStatus={run.status}
           selectedVideoAssetId={run.videoAssetId ? String(run.videoAssetId) : undefined}
-          currentThumbnail={videoDetail}
+          currentThumbnail={currentThumbnail}
         />
       </div>
 
