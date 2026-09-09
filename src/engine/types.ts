@@ -65,6 +65,10 @@ export interface StageContext {
    * the broader run budget.
    */
   stageBudgetUsd?: number;
+  /** Fresh service/server-time check for this exact local worker generation.
+   * Checkpoint-aware inline providers require this before each new request.
+   * This asserts ownership only; it does not grant a budget or renew a lease. */
+  assertInlinePaidExecutionLease?: () => Promise<void>;
   /**
    * Re-evaluate the remaining compiler envelopes against the live artifact
    * store before a provider starts. This is for deterministic late-bound

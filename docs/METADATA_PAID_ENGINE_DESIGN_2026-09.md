@@ -2,7 +2,7 @@
 
 Status: read-only implementation design, 2026-09-09. **Not implemented or production-qualified.** The title rollout hold in `METADATA_PAID_ADMISSION_FOLLOWUP_2026-09.md` remains. No frozen title, transport, checkpoint or engine source was changed for this review; no provider calls, production mutations, deploys or graph updates were performed.
 
-**Subsequent implementation:** the [read-only inspection/input-parity slice](METADATA_CHECKPOINT_INSPECTION_2026-09.md) is now implemented in the local draft and connected to actual checkpoint execution. The statements above describe this design review's original checkpoint. Engine admission, local paid-call lease checks, reservation/credit and production qualification below remain unfinished; no production paid flag was enabled.
+**Subsequent implementation:** the [read-only inspection/input-parity slice](METADATA_CHECKPOINT_INSPECTION_2026-09.md) and [per-request inline lease checks](METADATA_INLINE_EXECUTION_LEASE_2026-09.md) are now implemented in the local draft and connected to actual execution. The statements above describe this design review's original checkpoint. Engine budget admission, reservation/credit, frozen-contract migration and production qualification remain unfinished; no production paid flag was enabled.
 
 ## Evidence and the integration point
 
