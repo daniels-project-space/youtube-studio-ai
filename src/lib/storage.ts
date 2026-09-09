@@ -12,8 +12,8 @@
  *   R2_ENDPOINT           - optional explicit endpoint override
  *   R2_PUBLIC_BASE_URL    - optional public/CDN base for served objects
  *
- * This is an intentionally minimal stub: it compiles and gives a typed
- * surface, but real upload/list logic is filled in per-feature.
+ * Production upload, integrity, listing, and deletion operations share this
+ * client. Destructive responses require object-level acknowledgement.
  */
 
 import {
@@ -241,21 +241,60 @@ export async function listObjects(prefix: string, bucket?: string): Promise<stri
   return keys;
 }
 
-/** Delete objects by key (batched in groups of 1000). Returns the count deleted. */
+/** An incomplete delete may already have removed some objects; never call it preserved. */
+export class ObjectDeletionError extends Error {
+  constructor(message: string, readonly confirmedDeleted: number, readonly requestedObjects: number) {
+    super(message);
+    this.name = "ObjectDeletionError";
+  }
+}
+
+/** Delete exact unique keys; every success must be acknowledged, including absent keys. */
 export async function deleteObjects(keys: string[], bucket?: string): Promise<number> {
   if (keys.length === 0) return 0;
+  if (keys.some((key) => typeof key !== "string" || !key || Buffer.byteLength(key, "utf8") > 1024)) {
+    throw new ObjectDeletionError("Object deletion requires valid exact keys", 0, keys.length);
+  }
+  const unique = [...new Set(keys)];
   const client = getR2Client();
   const Bucket = getBucket(bucket);
   let deleted = 0;
-  for (let i = 0; i < keys.length; i += 1000) {
-    const batch = keys.slice(i, i + 1000);
-    await client.send(
-      new DeleteObjectsCommand({
+  for (let i = 0; i < unique.length; i += 1000) {
+    const batch = unique.slice(i, i + 1000);
+    const requested = new Set(batch);
+    let response;
+    try {
+      response = await client.send(new DeleteObjectsCommand({
         Bucket,
-        Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
-      }),
-    );
-    deleted += batch.length;
+        Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: false },
+      }));
+    } catch {
+      throw new ObjectDeletionError("Object deletion outcome is unavailable", deleted, unique.length);
+    }
+    const acknowledged = new Set<string>();
+    const failed = new Set<string>();
+    const record = (rows: unknown, target: Set<string>): boolean => {
+      if (rows === undefined) return true;
+      if (!Array.isArray(rows)) return false;
+      for (const row of rows) {
+        const key = row?.Key;
+        if (typeof key !== "string" || !requested.has(key) || target.has(key)) return false;
+        target.add(key);
+      }
+      return true;
+    };
+    if (response?.$metadata?.httpStatusCode !== 200 ||
+        !record(response.Deleted, acknowledged) || !record(response.Errors, failed) ||
+        [...failed].some((key) => acknowledged.has(key))) {
+      throw new ObjectDeletionError("Object deletion acknowledgement is invalid", deleted, unique.length);
+    }
+    deleted += acknowledged.size;
+    if (failed.size || acknowledged.size !== batch.length) {
+      // HTTP 200 can contain per-object failures. Do not continue later batches
+      // or discard the confirmations from earlier ones. Provider text/keys are
+      // deliberately absent from errors which can reach logs or the browser.
+      throw new ObjectDeletionError("Object deletion is incomplete", deleted, unique.length);
+    }
   }
   return deleted;
 }

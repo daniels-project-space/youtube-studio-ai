@@ -3,6 +3,7 @@ import {
   verifyFinalMasterReleaseEvidenceObjects,
   type FinalMasterReleaseCertificate,
 } from "@/lib/finalMasterReleaseCertificate";
+import { ObjectDeletionError } from "@/lib/storage";
 
 /**
  * Delete a run's intermediates only after every retained release certificate
@@ -30,6 +31,9 @@ export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
   retainedObjectCount: number;
   error?: string;
 }> {
+  let retainedReleaseEvidence: string[] = [];
+  let retainedObjectCount = 0;
+  let removedObjects = 0;
   try {
     const certificates = [
       { certificateKey: args.certificateKey, certificate: args.certificate },
@@ -51,27 +55,34 @@ export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
         return retained;
       }),
     );
-    const retainedReleaseEvidence = [...new Set(retainedSets.flat())].sort();
+    retainedReleaseEvidence = [...new Set(retainedSets.flat())].sort();
     const prefix = `${args.keyPrefix}runs/${args.runId}/`;
     const keep = new Set([
       ...args.keepNames.map((name) => `${prefix}${name.replace(/^\/+/, "")}`),
       ...retainedReleaseEvidence,
     ]);
     const all = await args.listObjects(prefix);
+    if (all.some((key) => typeof key !== "string" || !key.startsWith(prefix) || key === prefix) ||
+        new Set(all).size !== all.length) {
+      throw new Error("cleanup listing contains duplicate or out-of-run objects");
+    }
     const deletable = all.filter((key) => !keep.has(key));
+    retainedObjectCount = all.length - deletable.length;
     const deleted = await args.deleteObjects(deletable);
+    if (Number.isSafeInteger(deleted) && deleted >= 0 && deleted <= deletable.length) removedObjects = deleted;
+    if (deleted !== deletable.length) throw new Error("cleanup deletion acknowledgement is incomplete");
     return {
       cleaned: true,
       removedObjects: deleted,
       retainedReleaseEvidence,
-      retainedObjectCount: all.length - deletable.length,
+      retainedObjectCount,
     };
   } catch (error) {
     return {
       cleaned: false,
-      removedObjects: 0,
-      retainedReleaseEvidence: [],
-      retainedObjectCount: 0,
+      removedObjects: error instanceof ObjectDeletionError ? error.confirmedDeleted : removedObjects,
+      retainedReleaseEvidence,
+      retainedObjectCount,
       error: error instanceof Error ? error.message : String(error),
     };
   }

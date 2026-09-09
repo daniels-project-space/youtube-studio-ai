@@ -150,6 +150,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
   const log = (message: string, extra?: Record<string, unknown>) =>
     console.log(`[run-artifact-retention] ${message}`, extra ?? "");
   await bootstrapSecrets(log, {
+    services: ["cloudflare", "youtube"],
     required: [
       "R2_ACCOUNT_ID",
       "R2_ACCESS_KEY_ID",
@@ -220,8 +221,9 @@ export async function sweepDueRunArtifactRetentions(input?: {
         listObjects,
         deleteObjects,
       });
+      removedObjects += pruning.removedObjects;
       if (!pruning.cleaned) {
-        throw new Error(pruning.error ?? "release evidence could not be revalidated");
+        throw new Error(`${pruning.removedObjects} deletion(s) confirmed; ${pruning.error ?? "release evidence could not be revalidated"}`);
       }
       await convex.mutation(api.assets.pruneRun, {
         runId: retention.runId,
@@ -237,7 +239,6 @@ export async function sweepDueRunArtifactRetentions(input?: {
         retainedReleaseEvidence: pruning.retainedReleaseEvidence,
       });
       completed++;
-      removedObjects += pruning.removedObjects;
       log(`completed ${retention.runId}: removed ${pruning.removedObjects} intermediate object(s)`);
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -249,7 +250,7 @@ export async function sweepDueRunArtifactRetentions(input?: {
         error: message,
       });
       if (failed?.status === "blocked") blocked++;
-      log(`preserved ${retention.runId}: ${message}`);
+      log(`cleanup incomplete ${retention.runId}: ${message}`);
     }
   }
 
