@@ -136,16 +136,19 @@ button.card:focus-visible {
 .mediaBadges {
   position: absolute;
   z-index: 2;
-  inset: 0.55rem 0.55rem auto;
+  inset: 0.3rem 0.55rem;
   display: flex;
-  flex-wrap: wrap;
+  flex-direction: column;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 0.4rem;
+  gap: 0.2rem;
   pointer-events: none;
 }
 
+.mediaBadges > * { flex-shrink: 0; }
+
 .sourceBadge {
+  align-self: flex-end;
   max-width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 999px;
