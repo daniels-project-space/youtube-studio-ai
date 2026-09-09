@@ -1,0 +1,21 @@
+# Production-only reasoning accounting correction
+
+Status: isolated release candidate; full frozen gate and production verification pending.
+
+## Scope
+
+This patch changes only the OpenRouter completion-usage adapter and its regression test. It does not deploy the held title selector/checkpoint/lease work, opt-in structured output support, module paid flags, model settings, prompt text, output ceilings, provider preferences, retries or generic pricing semantics. No historical record is rewritten. The source patch is 29 added / four replaced lines in the existing transport.
+
+OpenRouter's completion count already includes reasoning. The previous adapter separately charged the older flat reasoning count again, and did not read the current nested reasoning count for diagnostics. The corrected adapter separates visible output from reasoning before passing both to the existing shared accountant. A known inclusive count remains accounted when its breakdown is malformed, but the incomplete detail is explicitly flagged. Missing/invalid completion totals remain unpriced. Other providers' separate-output accounting stays unchanged.
+
+[OpenRouter's usage contract](https://openrouter.ai/docs/cookbook/administration/usage-accounting) documents the nested reasoning breakdown and response-level costs. [Its reasoning guide](https://openrouter.ai/docs/guides/best-practices/reasoning-tokens) describes reasoning as billable output. Source tracing used Graphify and current callers; installed Next dependency/testing guidance and lock markers were checked. This is correction of reported accounting, not a reduction in provider work or proof of invoice savings.
+
+## Verification scope
+
+- The 20-case test runs the actual production-only client/accounting code. It covers native and legacy breakdowns, equal/conflicting shapes, missing/null details, malformed counts, inferred totals, known-cost preservation, the existing starvation warning and unchanged one-request/token-limit behavior. The previous implementation fails the original eight defect cases; the corrected candidate passes.
+- The combined held checkpoint separately passed 644 tests, real assembly, build/typecheck/lint/audits and exact HTTP/R2/database-handler fixture recovery. Those results establish additional compatibility, not permission to release the held title code or a substitute for this candidate's own suite.
+- Thirty actual retained JSON-object requests/responses are replayed byte-for-byte through this candidate with the current request format, verified request/response SHA and unique provider receipts, unchanged costs and zero live dispatches. The other 36 historical experiments require structured-output support that is deliberately not in this release; they remain fully replayed against the held implementation, not silently passed or converted here. All 66 original response-reported charges still total $0.1895565.
+
+Candidate replay log: `/tmp/ysa-openrouter-usage-production-candidate-replay.log`. The diagnostic uses the candidate's own TypeScript path resolution and shared accounting instance (`TSX_TSCONFIG_PATH` and `ACCOUNTING_REPLAY_MODULE_ROOT`); the initial cross-worktree run failed its one-accounted-call assertion because the root alias resolved a different instance, before the correctly scoped rerun passed. No oracle value or application code changed to accommodate that failure.
+
+The replay helper and retained experimental corpus stay on the held checkpoint, outside this release. There is no new production endpoint exposing private accounting data and no paid request merely to demonstrate the parser. Current metadata's broader budget/recovery and other pipeline pre-dispatch checks remain separate unfinished work; marking malformed usage alone does not prove every caller stops before its next purchase.

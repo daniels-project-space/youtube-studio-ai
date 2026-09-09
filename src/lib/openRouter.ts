@@ -6,7 +6,7 @@
  * boundary and does not pass through this text/vision client.
  */
 import { recordModelUsage } from "@/lib/modelUsage";
-import type { ModelCallKind } from "@/lib/modelUsage";
+import type { ModelCallKind, ModelUsageRecord } from "@/lib/modelUsage";
 
 const OPENROUTER_CHAT_URL = "https://openrouter.ai/api/v1/chat/completions";
 // Final multimodal receipts can take longer than lightweight planning calls.
@@ -165,6 +165,31 @@ function responseText(value: unknown): string {
  */
 const REASONING_STARVATION_RATIO = 0.6;
 
+// OpenRouter completion_tokens includes reasoning; the shared accounting
+// contract keeps visible output and reasoning separate (native Gemini does
+// too). Normalize here, never change pricing semantics for other providers.
+function completionUsage(usage?: Record<string, unknown>): Pick<ModelUsageRecord,
+  "outputTokens" | "reasoningTokens" | "unpricedReason" | "additionalUnpricedReason"> {
+  const completion = usage?.completion_tokens;
+  const count = (value: unknown): value is number => typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+  if (!count(completion)) return { unpricedReason: "OpenRouter completion token count is missing or invalid" };
+  const details = usage?.completion_tokens_details;
+  const invalidDetails = details != null && (typeof details !== "object" || Array.isArray(details));
+  const nested = !invalidDetails && details != null ? (details as Record<string, unknown>).reasoning_tokens : undefined;
+  // Retain the flat breakdown used by older recorded responses, but never
+  // add it a second time or silently prefer conflicting provider evidence.
+  const flat = usage?.reasoning_tokens;
+  const reasoning = nested ?? flat ?? 0;
+  if (invalidDetails || !count(reasoning) || reasoning > completion ||
+    (nested != null && !count(nested)) || (flat != null && !count(flat)) ||
+    (nested != null && flat != null && nested !== flat)) {
+    // The inclusive completion total is still known. Preserve that charge
+    // while marking the malformed breakdown incomplete for spend admission.
+    return { outputTokens: completion, additionalUnpricedReason: "OpenRouter completion/reasoning breakdown is invalid or conflicting" };
+  }
+  return { outputTokens: completion - reasoning, reasoningTokens: reasoning };
+}
+
 export async function openRouterChat(args: {
   model: string;
   messages: OpenRouterMessage[];
@@ -237,14 +262,14 @@ export async function openRouterChat(args: {
   const returnedModel = payload && typeof payload === "object"
     ? String((payload as { model?: unknown }).model ?? args.model)
     : args.model;
+  const completion = completionUsage(usage);
   recordModelUsage({
     provider: "openrouter",
     model: returnedModel,
     kind: args.kind ?? "text",
     requestId: payload && typeof payload === "object" ? String((payload as { id?: unknown }).id ?? "") || undefined : undefined,
     inputTokens: typeof usage?.prompt_tokens === "number" ? usage.prompt_tokens : undefined,
-    outputTokens: typeof usage?.completion_tokens === "number" ? usage.completion_tokens : undefined,
-    reasoningTokens: typeof usage?.reasoning_tokens === "number" ? usage.reasoning_tokens : undefined,
+    ...completion,
     cachedInputTokens: typeof usage?.prompt_tokens_details === "object" && usage.prompt_tokens_details
       && typeof (usage.prompt_tokens_details as { cached_tokens?: unknown }).cached_tokens === "number"
       ? (usage.prompt_tokens_details as { cached_tokens: number }).cached_tokens
@@ -273,7 +298,7 @@ export async function openRouterChat(args: {
   // on every video, an advisor that never advised, a topic gate skipped on two
   // slates in three, and a safety scan that failed precisely when it had
   // something to report.
-  const reasoningTokens = typeof usage?.reasoning_tokens === "number" ? usage.reasoning_tokens : 0;
+  const reasoningTokens = completion.reasoningTokens ?? 0;
   if (reasoningTokens > 0 && reasoningTokens > args.maxTokens * REASONING_STARVATION_RATIO) {
     (args.log ?? (() => {}))(
       `openRouter: STARVATION RISK — reasoning used ${reasoningTokens} of the ${args.maxTokens}-token ceiling ` +
