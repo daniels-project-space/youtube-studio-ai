@@ -14,6 +14,9 @@ following a preserved pre-repair runtime checkpoint `7d3d8e6`. All 55 repository
 tests pass, including 32 proof/lifecycle tests; the original checkout/index and
 existing route changes were preserved. This checkpoint is not a deployed GPU
 image or a promotion of the unqualified weekly runtime.
+The same 55 tests also passed from the clean detached checkpoint at
+`/tmp/salad-shutdown-verify-0astKk/repo`, with no vendor checkout or uncommitted
+files required. Evidence: `/tmp/salad-shutdown-clean-checkpoint-tests.log`.
 This does not complete the still-missing production fleet lease/controller or
 prepared-media adoption. The observations below describe the original audit;
 the implementation follow-up is not a retroactive claim of GPU qualification.
