@@ -75,6 +75,10 @@
       radial-gradient(circle at 16% 12%, rgba(167, 139, 250, 0.08), transparent 28rem),
       radial-gradient(circle at 66% 78%, rgba(255, 115, 86, 0.052), transparent 34rem),
       var(--color-bg);
+    /* The body is viewport-height while long pages overflow it. Repeating this
+       field tiled visible horizontal seams through cards further down the page. */
+    background-repeat: no-repeat;
+    background-attachment: fixed;
     color: var(--color-fg);
     font-family: var(--font-sans);
     font-feature-settings: "ss01", "cv01";
