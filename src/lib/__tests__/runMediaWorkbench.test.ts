@@ -54,14 +54,44 @@ assert.deepEqual(mediaFacts({ durationSec: 42, width: 1920, height: 1080, engine
   "Engine ffmpeg",
 ]);
 assert.deepEqual(summarizeStageReceipts([{ block: "assemble", status: "running" }]), {
-  verifiedLabel: "0/1",
+  completedLabel: "0/1",
+  skippedLabel: "0",
   activeLabel: "Assemble",
   tone: "active",
 });
 assert.deepEqual(summarizeStageReceipts([{ block: "qa_visual", status: "failed" }]), {
-  verifiedLabel: "0/1",
+  completedLabel: "0/1",
+  skippedLabel: "0",
   activeLabel: "Needs attention",
   tone: "attention",
 });
+assert.deepEqual(summarizeStageReceipts(undefined), {
+  completedLabel: "…", skippedLabel: "…", activeLabel: "Loading", tone: "neutral",
+});
+assert.deepEqual(summarizeStageReceipts([]), {
+  completedLabel: "0/0", skippedLabel: "0", activeLabel: "Awaiting receipt", tone: "neutral",
+});
+assert.deepEqual(summarizeStageReceipts([{ block: "assemble", status: "ok" }]), {
+  completedLabel: "1/1", skippedLabel: "0", activeLabel: "No active stage", tone: "complete",
+});
+assert.deepEqual(summarizeStageReceipts([{ block: "qa_visual", status: "skipped" }]), {
+  completedLabel: "0/1", skippedLabel: "1", activeLabel: "No active stage", tone: "complete",
+}, "a skipped check is terminal progress, not completed or verified work");
+assert.deepEqual(summarizeStageReceipts([
+  { block: "assemble", status: "ok" }, { block: "qa_visual", status: "skipped" },
+]), {
+  completedLabel: "1/2", skippedLabel: "1", activeLabel: "No active stage", tone: "complete",
+});
+assert.deepEqual(summarizeStageReceipts([
+  { block: "assemble", status: "ok" }, { block: "qa_visual", status: "pending" },
+]), {
+  completedLabel: "1/2", skippedLabel: "0", activeLabel: "Awaiting receipt", tone: "neutral",
+});
+assert.deepEqual(summarizeStageReceipts([
+  { block: "assemble", status: "ok" }, { block: "thumbnail", status: "skipped" },
+  { block: "qa_visual", status: "failed" }, { block: "metadata", status: "running" },
+]), {
+  completedLabel: "1/4", skippedLabel: "1", activeLabel: "Metadata", tone: "active",
+}, "active and attention selection preserve existing execution behavior");
 
 console.log("RUN MEDIA WORKBENCH PASS");

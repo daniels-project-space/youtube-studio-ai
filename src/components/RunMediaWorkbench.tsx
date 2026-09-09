@@ -63,8 +63,8 @@ export function RunMediaWorkbench({
           </div>
 
           <dl className={styles.metrics}>
-            <Metric label="Stages" value={stages === undefined ? "…" : String(stages.length)} />
-            <Metric label="Verified" value={stageState.verifiedLabel} tone={stageState.tone} />
+            <Metric label="Completed stages" value={stageState.completedLabel} tone={stageState.tone} />
+            <Metric label="Skipped" value={stageState.skippedLabel} />
             <Metric label="Active stage" value={stageState.activeLabel} tone={stageState.tone} />
             <Metric label="Files" value={assets === undefined ? "…" : String(ordered.length)} />
           </dl>

@@ -86,6 +86,20 @@ try {
   assert.doesNotMatch(frameMarkup, /15-second source frame/,
     "short legacy clips must not be described as an exact 15-second frame");
   assert.deepEqual(requestedKeys, [videoKey], "LoFi frame also uses one active resolver");
+
+  for (const skipped of [0, 4, 16]) {
+    const stageMarkup = renderToStaticMarkup(createElement(RunMediaWorkbench, {
+      assets: [],
+      stages: Array.from({ length: 16 }, (_, index) => ({
+        block: "stage-" + index, status: index < skipped ? "skipped" : "ok",
+      })),
+      runStatus: "ok",
+      currentThumbnail: null,
+    }));
+    assert.ok(stageMarkup.includes(`<dt>Completed stages</dt><dd title="${16 - skipped}/16">${16 - skipped}/16</dd>`));
+    assert.ok(stageMarkup.includes(`<dt>Skipped</dt><dd title="${skipped}">${skipped}</dd>`));
+    assert.ok(!stageMarkup.includes("Verified"), "finished execution alone never grants quality approval");
+  }
 } finally {
   loader._load = originalLoad;
 }

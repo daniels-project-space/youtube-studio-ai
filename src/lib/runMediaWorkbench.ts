@@ -156,41 +156,45 @@ export function mediaFacts(meta: unknown): string[] {
 }
 
 export function summarizeStageReceipts(stages: readonly RunStageReceipt[] | undefined): {
-  verifiedLabel: string;
+  completedLabel: string;
+  skippedLabel: string;
   activeLabel: string;
   tone: "neutral" | "active" | "attention" | "complete";
 } {
   if (stages === undefined) {
-    return { verifiedLabel: "…", activeLabel: "Loading", tone: "neutral" };
+    return { completedLabel: "…", skippedLabel: "…", activeLabel: "Loading", tone: "neutral" };
   }
 
-  const verified = stages.filter((stage) => stage.status === "ok" || stage.status === "skipped").length;
+  // Execution progress is not quality approval. Skipped work is shown separately.
+  const completed = stages.filter((stage) => stage.status === "ok").length;
+  const skipped = stages.filter((stage) => stage.status === "skipped").length;
+  const progress = { completedLabel: `${completed}/${stages.length}`, skippedLabel: String(skipped) };
   const active = stages.find((stage) => stage.status === "running");
   const failed = stages.find((stage) => stage.status === "failed");
 
   if (active) {
     return {
-      verifiedLabel: `${verified}/${stages.length}`,
+      ...progress,
       activeLabel: assetLabel(active.block),
       tone: "active",
     };
   }
   if (failed) {
     return {
-      verifiedLabel: `${verified}/${stages.length}`,
+      ...progress,
       activeLabel: "Needs attention",
       tone: "attention",
     };
   }
-  if (stages.length > 0 && verified === stages.length) {
+  if (stages.length > 0 && completed + skipped === stages.length) {
     return {
-      verifiedLabel: `${verified}/${stages.length}`,
+      ...progress,
       activeLabel: "No active stage",
       tone: "complete",
     };
   }
   return {
-    verifiedLabel: `${verified}/${stages.length}`,
+    ...progress,
     activeLabel: "Awaiting receipt",
     tone: "neutral",
   };
