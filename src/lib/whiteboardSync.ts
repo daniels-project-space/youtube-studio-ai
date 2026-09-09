@@ -38,7 +38,7 @@
  *   });
  */
 import { fallbackVoiceKey } from "@/lib/tts";
-import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { fallbackLineArtStyle } from "@/lib/identitySpread";
@@ -601,6 +601,46 @@ function whiteboardSeed(styleId: string, artifactId: string): number {
     .readUInt32BE(0) & 0x7fffffff;
 }
 
+/** One projection shared by cache comparison and the actual image caller. */
+function whiteboardLayerArtRequest(
+  panel: NPanel,
+  layer: NLayer,
+  layerIndex: number,
+  styleId: string,
+  styleLock: string,
+): WhiteboardArtRequest {
+  const id = `art_${panel.idx}_${layerIndex}`;
+  return {
+    id,
+    prompt: whiteboardArtPrompt({
+      styleLock,
+      isScene: Number(layer.box?.[2] ?? 0) >= 0.32,
+      role: layer.role,
+      draw: layer.draw,
+      cue: layer.cue,
+      narration: panel.narration,
+    }),
+    negativePrompt: "text, letters, numbers, labels, logos, watermark, frame, border, grey background, photorealism, shading",
+    seed: whiteboardSeed(styleId, `${id}.png`),
+  };
+}
+
+function whiteboardPlanGenerationInputs(panels: NPanel[], styleId: string, styleLock: string) {
+  // Stored plans may retain pre-normalization whitespace/indices. Actual art
+  // and TTS always consume the normalized narration and sequential indices.
+  // Do not apply the NEW invocation's truncation bounds to the OLD plan: that
+  // could disguise a genuinely changed paid request as an equivalent one.
+  const normalized = panels.map((panel, idx) => ({
+    ...panel, idx, narration: panel.narration.split(/\s+/).filter(Boolean).join(" "),
+  }));
+  return {
+    narration: normalized.map((panel) => panel.narration).join(" "),
+    art: normalized.flatMap((panel) => panel.layers.flatMap((layer, index) =>
+      layer.kind === "art" ? [whiteboardLayerArtRequest(panel, layer, index, styleId, styleLock)] : [],
+    )),
+  };
+}
+
 async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>): Promise<void> {
   let i = 0;
   await Promise.all(Array.from({ length: Math.min(n, items.length) || 1 }, async () => {
@@ -1030,49 +1070,39 @@ export async function castWhiteboardSync(args: {
 
   // 1. storyboard — SUPPLIED (already critiqued) → cached → planned here.
   const planPath = join(args.runDir, "plan.json");
+  const onDisk = existsSync(planPath) ? await readFile(planPath, "utf8") : null;
+  const cachedGenerationFiles = (await readdir(args.runDir)).filter((name) =>
+    /^(?:art_\d+_\d+\.(?:png|jpg|webp|receipt\.json)|narration\.mp3|wwords\.json)$/.test(name),
+  );
+  if (onDisk === null && cachedGenerationFiles.length) {
+    throw new Error(
+      "whiteboardSync: cached generation artifacts exist but their frozen plan is missing; " +
+      "preserving paid cache — an explicit artifact revision is required before new spend",
+    );
+  }
   let title: string, panels: NPanel[], fullText: string;
   if (approvedPlan) {
     // Deep clone: the render mutates panel layers in place (`l.art`, cue
     // timings), and the caller keeps this object for its frozen checkpoint.
     ({ title, panels, fullText } = JSON.parse(JSON.stringify(approvedPlan)) as WhiteboardStoryboard);
-    const serialized = JSON.stringify({ title, panels, fullText }, null, 2);
-    // This engine's art cache is INDEX-keyed (art_<panel>_<layer>.png), so art
-    // bought for a different storyboard would be silently reused for the wrong
-    // layer. A resume that supplies the same frozen plan hits the equal branch
-    // and re-buys nothing; only a genuinely different plan drops the art.
-    const onDisk = existsSync(planPath) ? await readFile(planPath, "utf8") : null;
-    if (onDisk !== null && onDisk !== serialized) {
-      const stale = (await readdir(args.runDir)).filter((name) =>
-        /^(?:art_\d+_\d+\.(?:png|jpg|webp)|narration\.mp3|wwords\.json)$/.test(name),
-      );
-      await Promise.all(stale.map((name) => unlink(join(args.runDir, name)).catch(() => {})));
-      log(`storyboard: supplied plan differs from this runDir's cached plan — dropped ${stale.length} index-keyed art/audio cache file(s)`);
-    }
-    await writeFile(planPath, serialized, "utf8");
     log(`storyboard: using the supplied approved plan (${panels.length} panels) — zero planning calls`);
-  } else if (existsSync(planPath)) {
-    ({ title, panels, fullText } = JSON.parse(await readFile(planPath, "utf8")) as WhiteboardStoryboard);
+  } else if (onDisk !== null) {
+    ({ title, panels, fullText } = JSON.parse(onDisk) as WhiteboardStoryboard);
     log(`storyboard: loaded cached plan (${panels.length} panels)`);
   } else {
     ({ title, panels, fullText } = await buildStoryboard(brief, log));
-    await writeFile(planPath, JSON.stringify({ title, panels, fullText }, null, 2), "utf8");
   }
   // Old cached plans and model output both pass through the same spend bound.
   // Rebuild the narration from the accepted panels so discarded over-returned
   // panels cannot still incur TTS or appear in downstream metadata.
   const boundedPanels = boundWhiteboardNarration(panels.slice(0, requestedPanels), brief.targetWords);
   const boundedFullText = boundedPanels.map((panel) => panel.narration).join(" ");
-  const cachedNarrationChanged =
-    boundedPanels.length !== panels.length || boundedFullText !== fullText;
   panels = boundedPanels;
   panels.forEach((panel, index) => { panel.idx = index; });
   fullText = boundedFullText;
   // Applies equally to fresh planner output, local smoke plans, cached plans,
   // and sealed route receipts. No sparse board reaches image or TTS spend.
   assertWhiteboardGoldenStyle({ panels });
-  if (cachedNarrationChanged) {
-    await writeFile(planPath, JSON.stringify({ title, panels, fullText }, null, 2), "utf8");
-  }
 
   // 2. art layers (text-native style lock, no hidden img2img/provider route).
   // Every request repeats one canonical channel style clause and a stable seed;
@@ -1087,9 +1117,28 @@ export async function castWhiteboardSync(args: {
   const styleLock = brief.artStyle?.trim()
     ? `CHANNEL STYLE-DNA (${styleId}): ${brief.artStyle.trim()}`
     : `CHANNEL STYLE (${styleId}): ${fallbackLineArtStyle(brief.channelName?.trim() || styleId)}`;
+  if (onDisk !== null && cachedGenerationFiles.length) {
+    const previous = JSON.parse(onDisk) as WhiteboardStoryboard;
+    const compatible = JSON.stringify(
+      whiteboardPlanGenerationInputs(previous.panels, styleId, styleLock),
+    ) === JSON.stringify(whiteboardPlanGenerationInputs(panels, styleId, styleLock));
+    if (!compatible) {
+      // Indexed artifacts do not have a safe revision namespace. Preserve the
+      // frozen plan, paid bytes AND receipts; a future revision path must use
+      // the durable provider claims, never erase receipts to repurchase work.
+      throw new Error(
+        "whiteboardSync: cached art/audio generation inputs changed; " +
+        "preserving paid cache and plan — an explicit artifact revision is required before new spend",
+      );
+    }
+  }
+  // Only render-only/equivalent changes may replace a paid plan in this slice.
+  // Brief/provider identity is not stored in legacy plans; this comparison is
+  // not a migration to a fully request-bound cross-brief/provider cache.
+  const serialized = JSON.stringify({ title, panels, fullText }, null, 2);
+  if (onDisk !== serialized) await writeFile(planPath, serialized, "utf8");
   const artJobs: { p: NPanel; l: NLayer }[] = [];
   for (const p of panels) for (const l of p.layers) if (l.kind === "art") artJobs.push({ p, l });
-  const isSceneJob = (j: { l: NLayer }) => Number(j.l.box?.[2] ?? 0) >= 0.32;
   const artAssets: WhiteboardArtAsset[] = [];
   const renderArt = async ({ p, l }: { p: NPanel; l: NLayer }) => {
     const artId = `art_${p.idx}_${p.layers.indexOf(l)}`;
@@ -1136,23 +1185,9 @@ export async function castWhiteboardSync(args: {
     if (existsSync(receiptPath)) {
       throw new Error(`whiteboardSync: ${artId} has an attested provider receipt but no local bytes; refusing a duplicate paid submission`);
     }
-    const isScene = isSceneJob({ l });
-    const prompt = whiteboardArtPrompt({
-      styleLock,
-      isScene,
-      role: l.role,
-      draw: l.draw,
-      cue: l.cue,
-      narration: p.narration,
-    });
     let generated: WhiteboardGeneratedArt;
     try {
-      generated = await args.generateImage({
-        id: artId,
-        prompt,
-        negativePrompt: "text, letters, numbers, labels, logos, watermark, frame, border, grey background, photorealism, shading",
-        seed: whiteboardSeed(styleId, fn),
-      });
+      generated = await args.generateImage(whiteboardLayerArtRequest(p, l, p.layers.indexOf(l), styleId, styleLock));
     } catch (e) {
       // A missing layer produces a visually false explainer. More importantly,
       // a provider/mode mismatch must never become an invisible lower-quality
@@ -1185,10 +1220,6 @@ export async function castWhiteboardSync(args: {
   // 3. narration + alignment (cached → resumable)
   const mp3Path = join(args.runDir, "narration.mp3");
   const wpath = join(args.runDir, "wwords.json");
-  if (cachedNarrationChanged) {
-    await Promise.all([unlink(mp3Path).catch(() => {}), unlink(wpath).catch(() => {})]);
-    log("storyboard: bounded cached plan changed narration — invalidated stale TTS/alignment cache");
-  }
   let ttsCharactersGenerated = 0;
   if (!existsSync(mp3Path)) {
     // Honor a cast ElevenLabs voice when the channel was cast one; else Fish.

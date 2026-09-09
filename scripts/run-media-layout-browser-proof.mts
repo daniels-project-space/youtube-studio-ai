@@ -10,13 +10,21 @@ import { chromium } from "playwright";
 
 const production = "https://youtube-studio-ai.vercel.app";
 const base = process.env.UI_PROOF_BASE ?? production;
+const expectedRevision = process.env.EXPECTED_REVISION;
 assert.ok([production, "http://127.0.0.1:3010", "http://127.0.0.1:3312"].includes(base));
 const local = base !== production;
 const runId = "js74tws8jvgzc4tvat86htgv4h88ny68";
 const outputDir = await mkdtemp(join(tmpdir(), "ysa-run-media-layout-"));
 const browser = await chromium.launch({ executablePath: "/usr/bin/google-chrome", args: ["--no-sandbox"] });
 const errors: string[] = [], results: unknown[] = [];
+async function assertProductionRevision() {
+  if (local || !expectedRevision) return;
+  const response = await fetch(`${production}/api/health`, { cache: "no-store" });
+  assert.ok(response.ok, "production health must be readable");
+  assert.equal((await response.json()).revision, expectedRevision, "exact tested production revision");
+}
 try {
+  await assertProductionRevision();
   for (const [name, width, fontSize] of [["desktop", 1440, 16], ["mobile", 390, 16], ["large-text", 390, 32]] as const) {
     const context = await browser.newContext({ viewport: { width, height: 1100 } });
     try {
@@ -92,6 +100,15 @@ try {
         });
         assert.equal(played, true, "each saved video/audio control must start real muted playback");
       }
+      const master = section.locator("video").first();
+      await master.scrollIntoViewIfNeeded();
+      await master.evaluate((node: HTMLVideoElement) => { node.pause(); node.currentTime = Math.min(15, node.duration / 2); });
+      await page.waitForFunction(() => {
+        const node = document.querySelector<HTMLVideoElement>('[aria-labelledby="recorded-work-title"] video');
+        return node && !node.seeking && node.readyState >= 2 && !node.error
+          && Math.abs(node.currentTime - Math.min(15, node.duration / 2)) < 0.05;
+      });
+      await master.screenshot({ path: join(outputDir, `${name}-master-decoded.png`) });
       await captions.locator("summary").focus(); await page.keyboard.press("Enter");
       assert.equal(await captions.locator("details[open]").count(), 1, "storage disclosure works by keyboard");
       assert.equal(queries.filter((query) => query === "videos:getRunMediaPresentation").length, 1);
@@ -99,7 +116,8 @@ try {
       results.push({ name, ...geometry, captionRead: true, playbackControls: 3, mediaQueryCount: 1 });
     } finally { await context.close(); }
   }
+  await assertProductionRevision();
   assert.deepEqual(errors, []);
-  await writeFile(join(outputDir, "results.json"), JSON.stringify({ base, localViewerProxy: local, runId, results, errors }, null, 2));
+  await writeFile(join(outputDir, "results.json"), JSON.stringify({ base, expectedRevision, localViewerProxy: local, runId, results, errors }, null, 2));
   console.log(JSON.stringify({ outputDir, base, localViewerProxy: local, results, errors }, null, 2));
 } finally { await browser.close(); }

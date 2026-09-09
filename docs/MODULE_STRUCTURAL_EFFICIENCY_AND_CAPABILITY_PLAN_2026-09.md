@@ -84,16 +84,29 @@ panel detail, dropping QA coverage, or changing thumbnail policy is authorized
 merely by this design. If provider qualification is blocked, continue the
 unpaid implementation/tests and another actionable goal item.
 
+**Primary-source check, 9 September:** Baidu explicitly identifies comics and
+multi-panel compositions as target uses of ERNIE-Image. That supports a
+whole-page experiment, not a guarantee of our channel's visual quality.
+[Official model repository](https://github.com/baidu/ERNIE-Image).
+The documented Diffusers pipeline is text-to-image and its published usage
+does not establish reference-image conditioning. Verify the actual deployed
+worker's capability before designing around image references; do not assume
+that adding an `images` field to a request makes conditioning happen.
+[Official pipeline documentation](https://huggingface.co/docs/diffusers/main/api/pipelines/ernie_image).
+
 ## Structural opportunities beyond comics
 
 These are investigation targets, not already-measured improvements:
 
-- **Whiteboard repair:** current supplied-plan changes delete index-keyed art
-  and audio (`whiteboardSync.ts:1037`), while receipt-without-bytes refuses a
-  duplicate purchase (`:1137`). Check immutable per-asset/request identities
-  and selective revision directories so a small plan repair retains unrelated
-  paid work without defeating that safety fence. Reproduce this through the
-  real caller before implementing; deleting receipts is not the fix.
+- **Whiteboard repair:** the baseline supplied-plan change deleted indexed art
+  and audio while retained receipts correctly refused a duplicate purchase.
+  The [held preservation repair](WHITEBOARD_CHANGED_PLAN_CACHE_REVIEW_2026-09.md)
+  now compares the actual image/audio inputs and preserves equivalent paid
+  work. Its real-caller regression and independent review pass. Genuine changed
+  generation inputs preserve the prior files and refuse before spending;
+  per-artifact revisions and cross-brief/provider identity remain unfinished.
+  Integrate those with existing durable claims rather than deleting receipts
+  or introducing a second paid-work authority.
 - **TTS:** compare natural contiguous speech units against per-line synthesis,
   preserving speaker changes, timing, pronunciation and resumability. Alignment
   and repair cost may outweigh fewer calls; listen to real comparisons.
@@ -152,6 +165,16 @@ capabilities. Their scope is additive and individually tracked in items
 176–178. More formats are possible, but count the formats proved by actual
 automatic creation, not a theoretical combinatorial total.
 
+**Portrait staging boundary:** the first held stage develops native layout
+profiles and renderer/frame proof while the existing production 16:9 fence
+stays closed. Receipt schema, exact-master geometry/legibility QA, capability
+selection and compiler wiring are the next integration stage. The current
+illustrated family permits 60–900 seconds, default 300, so a portrait renderer
+alone is not a qualified Shorts format. Shorts duration and caption promises
+need their own tested contracts. Children's supervised 16:9 restriction stays
+unchanged. Any initially refused evidence/character layouts remain unfinished
+item 176 work, not a permanent scope exception or an invisible fallback.
+
 **Reserve candidate:** verified software-demonstration capture could reuse
 browser automation and assembly for tutorials. The existing `screen` graphic
 does not demonstrate a real application action. This is not currently ranked
@@ -160,3 +183,9 @@ and a safe-action policy make it a larger undertaking. Keep it in discovery;
 do not launch a browser-action pipeline under a generic screen-render label.
 
 A candidate name or attractive module card does not count as delivery.
+
+The [language-practice design](LANGUAGE_PRACTICE_CAPABILITY_DESIGN_2026-09.md)
+records the actual English-only transcript/short-utterance constraints, typed
+turn-track proposal and measured batching/replay experiment. Multilingual TTS
+inputs are not multilingual QA. Existing English model pins and quality
+thresholds are unchanged; the bilingual capability remains unqualified.

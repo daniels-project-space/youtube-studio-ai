@@ -78,11 +78,60 @@ The helper and main agent inspected final screenshots, including
 `desktop-expired-paused-settled.png`. Status/Retry remain readable at 320px/200%
 text; paused recovery keeps the same native node at 25 seconds.
 
-Full isolated regression and production release are tracked separately; this
-paragraph does not claim deployment or legacy-footage creative approval.
+The isolated candidate also passed all 640 direct tests, nonincremental
+typecheck, full build, lint with 0 errors/33 existing warnings, unchanged
+audits, 24 defect proofs, actual assembly and all five rendered parity
+scenarios. It was pushed to main non-force. Cloud CI `34399746884` and
+independent parity CI `34399747064` both completed successfully.
+
+## Production release and direct consumer proof
+
+Exact released revision: `01c35ac00ce15e16f16a7fc41d5f53b61448d548`.
+Canonical Convex completed at 20:27:09 UTC. Trigger version `20260909.26`
+completed at 20:29:23 UTC, worker `worker_cmtujx280fx870jmwvkhhqmc4`, content hash
+`b8a76dad0e589f8e56481b2beb470b63`. The terminal success, not just worker
+creation, is retained in `/tmp/ysa-run-edl-cloud-deploy.log`.
+
+No automatic Vercel deployment for this main revision appeared in the project
+inventory. After the cloud test and independent parity jobs passed, the main
+agent submitted the exact Git SHA once to the existing production project,
+using the vault credential. No local working-tree files, project settings,
+environment values or unrelated held changes were uploaded. This uses the
+documented [Git-source deployment API](https://vercel.com/docs/rest-api/deployments/create-a-new-deployment).
+Deployment `dpl_4NgZGFkTdEAfN65xkoLRWNSuBHtN` is READY with production target and
+the canonical `youtube-studio-ai.vercel.app` alias assigned. Its Git source and
+the live `/api/health` revision both match the exact release. The absent
+automatic trigger's cause has not been established; no speculative cause or
+automatic redeployment loop was added.
+
+The production-mode `scripts/run-media-layout-browser-proof.mts` passed all
+three profiles: 1440px desktop, 390px phone and 390px/32px-root enlarged text.
+The real run is `js74tws8jvgzc4tvat86htgv4h88ny68`. No authentication injection,
+request replacement, synthetic production data or mutation is used. The
+actual video and both audio tracks decode and play; exact captions return
+HTTP200 with SRT cues; keyboard storage disclosure works; one consolidated
+media query is used; all measured horizontal bounds fit. Evidence is
+`/tmp/ysa-run-media-layout-D4wWdi/results.json`.
+
+A follow-up strengthens the proof script with exact revision checks before
+and after, plus actual native seeking to 15 seconds and separately captured
+decoded-master frames. It repeats all three successful profiles at
+`/tmp/ysa-run-media-layout-9JrYLG/results.json`. The main agent inspected the
+desktop/phone/enlarged layout screenshots and all three decoded-master images.
+Long element screenshots include the live fixed navigation, and the earliest
+paused capture may show Chromium's native spinner; these are not substituted
+for the independently captured decoded-frame proof.
+
+Library regression also passed on this exact release:
+`/tmp/ysa-library-player-production-BX53SX/results.json`, all three Library
+desktop/phone and channel-Library cases. Each plays the actual retained master,
+pauses and seeks to 15 seconds with `readyState=4`, no native error, no runtime
+errors and no writes. Main-agent desktop/phone screenshot inspection is
+complete. Legacy estimated-view heuristics, unrelated SEO and channel footage
+quality remain unqualified; working playback does not close those concerns.
 
 ## Limits and remaining lifecycle boundary
 
-This proves actual-component/local-native integration, not a deployed application or production asset's metadata/quality. Phone coverage is mobile Chromium emulation, not physical Safari/iOS. Expiry uses fixture clock advancement, not an hour of wall-clock playback. The signing server delays renewal by 120ms so the native expired Range reaches it before source replacement. The retained synthetic clip is not evidence of creative render quality or publication readiness.
+The 22-case controlled expiry matrix proves actual-component/local-native integration; the separate direct production proof above validates the deployed consumer. Neither approves a production asset's metadata/quality. Phone coverage is mobile Chromium emulation, not physical Safari/iOS. Expiry uses fixture clock advancement, not an hour of wall-clock playback. The signing server delays renewal by 120ms so the native expired Range reaches it before source replacement. The retained synthetic clip is not evidence of creative render quality or publication readiness.
 
 The repaired source link follows an actively renewed player. An inactive source link left mounted beyond its own signing lifetime still has no click-time refresh; merely waiting does not renew it. That separate link lifecycle is not waived or claimed fixed by the active-player HTTP206 checks or initial file-signing Retry. Audio native-error recovery and image-error recovery remain outside this proof. Shared player retry deadlines and cancellation are covered by its existing focused proof; this consumer proof specifically checks initial-signing key races and sibling isolation.
