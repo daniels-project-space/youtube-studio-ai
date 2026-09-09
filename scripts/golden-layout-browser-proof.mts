@@ -59,8 +59,13 @@ try {
         const closedIssues=await card.locator(":scope > summary").evaluate(root=>{
           const box=root.getBoundingClientRect();
           return [...root.querySelectorAll<HTMLElement>("[role='heading'],strong,li,[class*='moduleStatus']")].filter(node=>{
-            const rect=node.getBoundingClientRect();
-            return rect.width>0 && (rect.left<box.left-1 || rect.right>box.right+1 || node.scrollWidth>node.clientWidth+1 || node.scrollHeight>node.clientHeight+1);
+            const rect=node.getBoundingClientRect(),style=getComputedStyle(node);
+            const range=document.createRange();range.selectNodeContents(node);const text=range.getBoundingClientRect();
+            // Font ink may extend past its line box while remaining fully visible.
+            // Overflow dimensions mean clipping only when the element clips them.
+            return rect.width>0 && (text.left<box.left-1 || text.right>box.right+1 || text.bottom>box.bottom+1
+              || (/hidden|clip/.test(style.overflowX) && node.scrollWidth>node.clientWidth+1)
+              || (/hidden|clip/.test(style.overflowY) && node.scrollHeight>node.clientHeight+1));
           }).map(node=>node.textContent);
         });
         if(closedIssues.length)failures.push(`${name}/${key}: clipped collapsed copy: ${closedIssues.join(" / ")}`);
