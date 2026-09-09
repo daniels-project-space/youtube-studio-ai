@@ -1,0 +1,82 @@
+{
+  "version": "title-baseline-source/v1",
+  "caseId": "rainy-neon-lofi-1780273017590",
+  "historicalReplayReady": false,
+  "liveGenerationPerformed": false,
+  "provenance": {
+    "deployment": "astute-camel-689",
+    "observedAt": "2026-09-08T23:43:45.441Z",
+    "queryMode": "convex run --inline-query; codegen/typecheck disabled; explicit field projections; no mutations",
+    "projectionNote": "Only title-relevant fields projected. Missing JSON fields were absent or undefined in this observation. Row payloads are not complete table documents. Current channel identity is NOT the run's historical configuration.",
+    "r2Bucket": "youtube-studio-ai",
+    "r2Inspection": {
+      "runId": "js74bqgxfxpzak00v445ppdazx87tq2h",
+      "prefix": "owner/owner_daniel/channel/rainy-neon-lofi-1780273017590/runs/js74bqgxfxpzak00v445ppdazx87tq2h/",
+      "objectCount": 2,
+      "textObjects": [],
+      "pages": 1
+    }
+  },
+  "availability": {
+    "narration": "not_recorded_music_format",
+    "separateHook": "not_recorded",
+    "competitors": "not_recorded",
+    "frozenHistoricalInvocation": false,
+    "missing": [
+      "historical frozen channel identity and metadata parameters",
+      "historical resolved model and title-judge receipt",
+      "historical YouTube suggestions",
+      "historical plannedTitle presence/value",
+      "historical performance-context string",
+      "historical topic-bet title presence/value",
+      "retained competitor evidence (absence is unknown, not an empty feed)"
+    ],
+    "permittedBenchmarkUse": "Provenance-backed historical source regression. A new current-identity replay must explicitly bind this observed current identity and frozen evidence; it is not a reproduction of the historical model invocation."
+  },
+  "source": {
+    "runId": "js74bqgxfxpzak00v445ppdazx87tq2h",
+    "run": {
+      "channelId": "j975923e1vv0ve8ds1xbprekv987vpfy",
+      "status": "ok",
+      "startedAt": 1780273982487,
+      "finishedAt": 1780274675301,
+      "hasInvocationSnapshot": false
+    },
+    "currentChannel": {
+      "id": "j975923e1vv0ve8ds1xbprekv987vpfy",
+      "name": "Rainy Neon Lofi",
+      "slug": "rainy-neon-lofi-1780273017590",
+      "contentLane": {
+        "family": "music_loop",
+        "key": "music_loop",
+        "primaryRenderer": "loop_clips",
+        "version": "content-lane/v1"
+      },
+      "identity": {
+        "persona": "Calm late-night lofi channel set in a rainy neon-soaked cyberpunk city."
+      },
+      "metadataParams": [
+        {}
+      ]
+    },
+    "stages": [
+      {
+        "id": "jn72ctecz9n6fzq6rj7pk2p6hh87tmkt",
+        "block": "metadata",
+        "status": "ok",
+        "startedAt": 1780274332559,
+        "finishedAt": 1780274332687,
+        "inputs": {
+          "topic": "rainy neon rooftop at midnight"
+        },
+        "outputs": {
+          "title": "rainy neon rooftop at midnight — Lofi Beats to Relax / Study To 🎧 Rainy Neon Lofi"
+        }
+      }
+    ],
+    "artifactSummary": {
+      "total": 0,
+      "titleRelevant": []
+    }
+  }
+}

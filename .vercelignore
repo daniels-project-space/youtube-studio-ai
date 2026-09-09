@@ -4,6 +4,7 @@
 output/
 motion-graphics/
 graphify-out/
+test-fixtures/
 .serena/
 .agents/
 .codex/

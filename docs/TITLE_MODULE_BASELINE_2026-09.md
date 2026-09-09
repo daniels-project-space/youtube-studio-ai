@@ -8,6 +8,8 @@ The audit used the existing Graphify graph, focused current-source inspection, t
 
 **The eight proposed bindings below are not frozen full metadata inputs.** They identify real retained runs and preserve the exact locally available title/identity fields. Their narration, topic, hook, channel configuration, evidence, and model receipts still need to be recovered and frozen before a valid generation comparison. Some inventory entries are legacy; their titles are not current-engine quality scores or owner-approved golden video titles. Owner-approved thumbnail headlines are a separate artifact.
 
+**Subsequent source capture:** [the source-availability report](TITLE_CORPUS_SOURCE_AVAILABILITY_2026-09.md) now records eight frozen real packets, including five full narrations and six competitor feeds. The initial inventory-only findings below remain historical audit context. Missing invocation/configuration evidence was not recovered or invented, so the packets support a declared current-identity experiment, not an exact historical replay. No live generation baseline has been run.
+
 ## Actual production chain
 
 1. `src/trigger/planWeekAhead.ts` prepares scheduled plans; `src/trigger/runPipeline.ts` seeds the selected plan's `plannedTitle` into pipeline inputs.

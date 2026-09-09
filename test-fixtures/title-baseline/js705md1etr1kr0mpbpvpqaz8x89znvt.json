@@ -1,0 +1,1222 @@
+{
+  "version": "title-baseline-source/v1",
+  "caseId": "chalk-compound-1783204937273",
+  "historicalReplayReady": false,
+  "liveGenerationPerformed": false,
+  "provenance": {
+    "deployment": "astute-camel-689",
+    "observedAt": "2026-09-08T23:43:45.441Z",
+    "queryMode": "convex run --inline-query; codegen/typecheck disabled; explicit field projections; no mutations",
+    "projectionNote": "Only title-relevant fields projected. Missing JSON fields were absent or undefined in this observation. Row payloads are not complete table documents. Current channel identity is NOT the run's historical configuration.",
+    "r2Bucket": "youtube-studio-ai",
+    "r2Inspection": {
+      "runId": "js705md1etr1kr0mpbpvpqaz8x89znvt",
+      "prefix": "owner/owner_daniel/channel/chalk-compound-1783204937273/runs/js705md1etr1kr0mpbpvpqaz8x89znvt/",
+      "objectCount": 2,
+      "textObjects": [],
+      "pages": 1
+    }
+  },
+  "availability": {
+    "narration": "retained",
+    "separateHook": "not_recorded",
+    "competitors": "retained",
+    "frozenHistoricalInvocation": false,
+    "missing": [
+      "historical frozen channel identity and metadata parameters",
+      "historical resolved model and title-judge receipt",
+      "historical YouTube suggestions",
+      "historical plannedTitle presence/value",
+      "historical performance-context string",
+      "separate script.hook/cold-open field (narration is retained; no hook inferred)",
+      "separate script.hookLoop promise field"
+    ],
+    "permittedBenchmarkUse": "Provenance-backed historical source regression. A new current-identity replay must explicitly bind this observed current identity and frozen evidence; it is not a reproduction of the historical model invocation."
+  },
+  "source": {
+    "runId": "js705md1etr1kr0mpbpvpqaz8x89znvt",
+    "run": {
+      "channelId": "j973233pdy3wbvs55jq1d4nsas89xraz",
+      "status": "ok",
+      "startedAt": 1783212502087,
+      "finishedAt": 1783213467451,
+      "hasInvocationSnapshot": false
+    },
+    "currentChannel": {
+      "id": "j973233pdy3wbvs55jq1d4nsas89xraz",
+      "name": "Chalk & Compound",
+      "slug": "chalk-compound-1783204937273",
+      "family": "whiteboard",
+      "contentLane": {
+        "family": "whiteboard",
+        "key": "whiteboard_explainer",
+        "primaryRenderer": "whiteboard_scribe",
+        "version": "content-lane/v1"
+      },
+      "identity": {
+        "persona": "A calm, authoritative guide who breaks down complex financial concepts into simple, visually compelling stories. The tone is educational and reassuring, never sensational or alarmist.",
+        "niche": "Finance"
+      },
+      "metadataParams": [
+        {}
+      ],
+      "styleSeo": {
+        "titleFormula": "How To [FINANCIAL CONCEPT] | Chalk & Compound",
+        "descriptionStructure": "This video from Chalk & Compound breaks down [FINANCIAL CONCEPT] into simple, understandable terms. We'll cover [KEY TOPIC 1], [KEY TOPIC 2], and [KEY TOPIC 3], giving you the clarity you need to make informed financial decisions. Watch as our hand-drawn animations demystify complex financial ideas. #Finance #Investing #Money #Education #ChalkAndCompound #[SPECIFICKEYWORD]"
+      }
+    },
+    "stages": [
+      {
+        "id": "jn7bteb1sg7tb11zfteekhegtn89zp94",
+        "block": "competitor_research",
+        "status": "ok",
+        "startedAt": 1783212516281,
+        "finishedAt": 1783212516542,
+        "outputs": {
+          "competitors": [
+            {
+              "topVideos": [
+                {
+                  "title": "Credit Card vs. Debit Card",
+                  "views": 55516294
+                },
+                {
+                  "title": "Investing Tips for Beginners",
+                  "views": 30784170
+                },
+                {
+                  "title": "What Is a 401(k)?",
+                  "views": 29097447
+                },
+                {
+                  "title": "How Do Taxes Work?",
+                  "views": 22786688
+                },
+                {
+                  "title": "What Is an Index Fund?",
+                  "views": 17919433
+                },
+                {
+                  "title": "Risk and Return",
+                  "views": 15552190
+                },
+                {
+                  "title": "How to Buy a House",
+                  "views": 13971673
+                },
+                {
+                  "title": "The Highest Paying Majors",
+                  "views": 6896729
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Spending $100 BILLION in 40 Seconds",
+                  "views": 39791246
+                },
+                {
+                  "title": "How Billionaires AVOID Paying Tax",
+                  "views": 12568147
+                },
+                {
+                  "title": "HOW RICH PEOPLE AVOID PAYING TAX",
+                  "views": 12128865
+                },
+                {
+                  "title": "Investing Tips for Beginners",
+                  "views": 10459905
+                },
+                {
+                  "title": "7 Side Hustles That Are Making Students Rich in 2026",
+                  "views": 7595007
+                },
+                {
+                  "title": "HOW TO GET RICH WITH INVESTING",
+                  "views": 7432881
+                },
+                {
+                  "title": "How to Invest As a Teen With $0",
+                  "views": 7346908
+                },
+                {
+                  "title": "5 EXTREMELY IMPORTANT BOOKS for your 20s",
+                  "views": 6971615
+                },
+                {
+                  "title": "The Only Investing Video You’ll Ever Need (Start With $100)",
+                  "views": 6591690
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The BEST Investment in Shark Tank History",
+                  "views": 38869222
+                },
+                {
+                  "title": "I Lost Huge Money on Robinhood",
+                  "views": 12695622
+                },
+                {
+                  "title": "Why I Don't Raise The Rent On My Tenants",
+                  "views": 7955815
+                },
+                {
+                  "title": "Money Advice From a Real Estate Billionaire",
+                  "views": 4321326
+                },
+                {
+                  "title": "Why Caleb Hammer Needs $15 MILLION",
+                  "views": 2023268
+                },
+                {
+                  "title": "How Much Money Real Estate Agents Make!",
+                  "views": 1012181
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "¿Qué Pasó Aquí?  🤔 #Acertijo #Dinero #Finanzas #Invertir #Inversiones",
+                  "views": 15835245
+                },
+                {
+                  "title": "El Peor Ladrón De Todos 🚨 #Dinero #Finanzas #Impuestos #Invertir #Inversiones #SAT",
+                  "views": 10799191
+                },
+                {
+                  "title": "¿Los Millonarios Pagan Impuestos? 🧾 #Dinero #Finanzas #FinanzasPersonales #Impuestos #Invertir",
+                  "views": 9946707
+                },
+                {
+                  "title": "El SAT Te Regresa Dinero 💰 #Dinero #Finanzas #Impuestos #Inversion #Inversiones #Invertir",
+                  "views": 4177257
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Invest in This – It’ll Be Worth $1.5 Million by 2030 | World Leading Investing Expert - Cathie Wood",
+                  "views": 7575314
+                },
+                {
+                  "title": "Ray Dalio: We’re Heading Into Very, Very Dark Times! America & The UK’s Decline Is Coming!",
+                  "views": 6829582
+                },
+                {
+                  "title": "Mohnish Pabrai: FASTEST Way To Financial Freedom! Proven Playbook For Quitting Your 9-5 In 9 Months!",
+                  "views": 5782712
+                },
+                {
+                  "title": "The Investing & Crypto Expert: \"We Only Have 6 Years Until Everything Changes!\" - Raoul Pal",
+                  "views": 5780788
+                },
+                {
+                  "title": "Passive Income Expert: How To Make $10k Per Month In 90 Days!",
+                  "views": 4916639
+                },
+                {
+                  "title": "Nischa Shah: They’re Lying To You About Buying a House! My 652510 Rule Built $200K Passive Income!",
+                  "views": 3843879
+                },
+                {
+                  "title": "The Savings Expert: Passive Income Is A Scam! Post-Traumatic Broke Syndrome Is Controlling Millions!",
+                  "views": 2574761
+                },
+                {
+                  "title": "The SIMPLE (& Proven) Way To Earn $100,000 From Nothing! | The Money Making Experts",
+                  "views": 2308652
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Level up your Multitap HAMSTER KOMBAT",
+                  "views": 38814082
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Car vs Gold Investing 🤑 | 1990 to 2025 Reality Check! #shorts #finance #money #education",
+                  "views": 28837741
+                },
+                {
+                  "title": "Why Buying a Car on Loan is Smarter Than Paying Cash! #shorts #investment #finance #money",
+                  "views": 7232518
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "When you get red envelope money",
+                  "views": 35678958
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "2K ki SIP - 10K ki SIP se ZYADA - KAISE? | Ankur Warikoo #shorts",
+                  "views": 17381643
+                },
+                {
+                  "title": "Rs. 100 ko INVEST karne ka SPLIT! | Ankur Warikoo #shorts",
+                  "views": 12650881
+                },
+                {
+                  "title": "10K se CROREPATI banne main Kitna TIME lagega?! | Ankur Warikoo #shorts",
+                  "views": 3646566
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How much gst is charged on gold purchase?",
+                  "views": 19887840
+                },
+                {
+                  "title": "Here’s how you can pay zero taxes on a 12 Lakhs salary. Read description",
+                  "views": 9466704
+                },
+                {
+                  "title": "Don’t book a PG or a hostel without watching this!! #shorts #youtubeshorts",
+                  "views": 4149644
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Best Investment advice for Parents 💵❤️ | Kuldeep Singhaniaa #shorts",
+                  "views": 26585988
+                },
+                {
+                  "title": "How Rothschild made Billions 🤯💵 | Power of Money | Kuldeep Singhaniaa #shorts",
+                  "views": 3319330
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Coming in for a landing 🚀 #binance  #bitcoin  #trading  #crypto   #cryptomemes",
+                  "views": 29183818
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Is it Safe to Invest in Bank Fixed Deposits?🤔 #shorts #fixeddeposit #kowshikmaridi",
+                  "views": 12060228
+                },
+                {
+                  "title": "Get Rs.50,000 Monthly By Doing Nothing! #shorts #trendingshorts #celltowerlease #NoEffortIncome",
+                  "views": 4578549
+                },
+                {
+                  "title": "Should We Pay Tax For Extra Source Of Income 🤔 #shorts #kowshikmaridi #tax",
+                  "views": 3689434
+                },
+                {
+                  "title": "ఇలా చేస్తే ప్రతినెలా మీ ఖాతాలో ₹9,250 పడతాయి..ఎలాగో తెలుసా? !! #shorts #postoffice #investing",
+                  "views": 3267138
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "💵 One kid saves, the other becomes rich",
+                  "views": 23022593
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How To Make Money On X",
+                  "views": 15038501
+                },
+                {
+                  "title": "TOP 5 MOST USELESS COLLEGE DEGREES",
+                  "views": 7557906
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "1 core money business || ft.@rajshamani #ytshort #dubailife #realestate #businessgrowth",
+                  "views": 20834707
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How hard is money laundering? - Patrick McKenzie",
+                  "views": 17751805
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Investing Rs.1,00,000 Randomly!",
+                  "views": 17113149
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Top 10 Investments of the past 100 years 🤑",
+                  "views": 15944731
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "infinite money glitch? 💀💵  #finance #crypto #money",
+                  "views": 15798167
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Yeti always Wins 🏆😎 #memecoin #crypto #bitcoin #meme #btc #solana #trading #business #usa #binance",
+                  "views": 15303481
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "When Is It A Financially Good Idea To Replace A Beater Car?",
+                  "views": 9537108
+                },
+                {
+                  "title": "The Top 5 Careers of Millionaires",
+                  "views": 5727747
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How Indian Currency Evolved: From Barter System to ₹1 Note | History of Rupee Explained #shorts",
+                  "views": 14673479
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Is Gold Savings Scheme the best way to invest in gold?  #gold #investing #money",
+                  "views": 7486301
+                },
+                {
+                  "title": "Spend Your Money When You Are Young",
+                  "views": 3966751
+                },
+                {
+                  "title": "Quit His High Paying Job For Freedom With Just 45k Passive Income.",
+                  "views": 3035202
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Car Loan vs Full Payment",
+                  "views": 12641927
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How The Rich Transfer Houses 🤑🏠 #finance #PersonalFinance #realestate #personalfinancetips #fin",
+                  "views": 12564870
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Trading Trick Will BLOW Your Mind!",
+                  "views": 12479484
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Sup #business #marketing #finance",
+                  "views": 11769031
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Reality of Trading Parithabangal 😅💹 #trading #investing",
+                  "views": 10727070
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Trading makes me happy !!! | #trading #money #viralshort #youtubeshorts",
+                  "views": 9429145
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "the $1 infinite money glitch? 💀💵 p1. #finance #money #crypto",
+                  "views": 9325693
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Buying the Costco Gold Bar! Here's why I did it...",
+                  "views": 8776677
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Can You Make ₹20,000 per Month from ₹1 Lakh? @PushkarRajThakurOfficial #trading #shorts #ytshorts",
+                  "views": 8370540
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "1 Rs Daily 1% Growth, 4 Saal me kitna hoga",
+                  "views": 7791869
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Value of Money",
+                  "views": 7765168
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Monkey Economics How Bank Work",
+                  "views": 7637066
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Zerodha vs Groww: कौन है Broker King? #shorts #tax #businessnews",
+                  "views": 5417574
+                },
+                {
+                  "title": "देश की TOP 10 REAL ESTATE COMPANIES? #shorts #realestateinvesting #trendingshorts",
+                  "views": 1688905
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Passive Income और मजा एक साथ #SanjayKathuria #profitsfirst #passiveincome",
+                  "views": 3812780
+                },
+                {
+                  "title": "Why SIPs Won't Make you Rich | #sip #compounding #shorts",
+                  "views": 3200578
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Too-good-to-be-true investment offers are often scams!",
+                  "views": 6753987
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "My mutual fund portfolio revealed total returns #mymutualfundportfolio #mutualfunds #invest #shorts",
+                  "views": 6565765
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "This is the actual power of passive income. #finance #invest #passiveincomestream #mutualfundsindia",
+                  "views": 6241502
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How ₹3 Crore Can Give You Lifetime Income | Smart Investment Strategy #stockmarket",
+                  "views": 5813511
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Gold Explained, Finally",
+                  "views": 5304617
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Richest People In History",
+                  "views": 5136807
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How to grow your money without paying taxes on it #shorts #finance",
+                  "views": 4747544
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Russia Says U.S. Planning $37 Trillion Crypto Reset",
+                  "views": 4548122
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Taxes be like… 💸😭😂 #shorts #funny #comedy #youtubeshorts #money #finance #rich #wealth",
+                  "views": 4465671
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Los IMPUESTOS por INVERTIR en BOLSA 📈👨‍⚖️ #finanzas #impuestos #inversiones #sat #bolsadevalores",
+                  "views": 3794682
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Credit, Taxes, Retirement & Debt—Know Them Early, Win for Life",
+                  "views": 3552111
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Black Money Dominates Indian Real Estate?",
+                  "views": 2500204
+                },
+                {
+                  "title": "How Builders Sell Luxury Apartments #shorts",
+                  "views": 1008465
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "$2,500 RENT vs $2,500 MORTGAGE | Why BUYING Is More Difficult Than RENTING 🤔🏡",
+                  "views": 3283065
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Psychology of Money in 33 minutes | Animated Book Summary",
+                  "views": 2959070
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "I'm Sorry, But You Just Can't Win Financially Without Understanding Economics",
+                  "views": 2927495
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Power of Compounding",
+                  "views": 2818913
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "4 ETFs You Will Ever Need",
+                  "views": 2589980
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Why the UK's Economy is Awful",
+                  "views": 2451793
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "INCOME TAX INSPECTOR SALARY 🤑 | KD Live #incometax #incometaxinspector #salary #ssccglsalary #ssccgl",
+                  "views": 2330715
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Complete Finance MasterClass 2025 | For people in 20's & 30's",
+                  "views": 2269018
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "TDS kya hai explained in Hindi #tds #taxdeductedatsource #finance #accounting",
+                  "views": 1312720
+                },
+                {
+                  "title": "Why no tax till 12 lakh ?  New Income tax slab rate for FY25-26 🔥 #budget #incometaxrate #incometax",
+                  "views": 903686
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Financial Literacy for Dummies (Like Me) with JL Collins",
+                  "views": 2192362
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Explaining Basic Financial Concepts YOU Should Understand",
+                  "views": 1994263
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Les fameux tarifs de Trump 💸#investissement #economies #finance #epargne #taxes #investissement",
+                  "views": 1921461
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Entire INDIAN Economics in 18 Mins",
+                  "views": 1828111
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Buying a 4 plex like this is smart.#investing investing #realestateinvesting #realestate #money",
+                  "views": 1729463
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The $7.9 Trillion Company You've Never Heard Of",
+                  "views": 1583729
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Real Estate Vs Stocks — The Real Math (Which One Will Make You More Money?)",
+                  "views": 1514547
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Investing in Real Estate? Beware of this      #realestate #realestateinvesting",
+                  "views": 1408911
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "SMART Real Estate Investment Strategy #financewithsharan #shorts",
+                  "views": 1405690
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "RD vs PPF vs SIP | ₹1000 Monthly for 15 Years | कौन बेस्ट है?",
+                  "views": 1327338
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "House Tax Hack! 🏠 #realestate #personalfinance #finance",
+                  "views": 1325886
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Why Trump’s tariffs are a massive mistake",
+                  "views": 1301349
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Real Estate Vs Stocks: Where to Invest? Raj Shamani #Shorts",
+                  "views": 1272003
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Rothschilds - History’s Richest Family Documentary",
+                  "views": 1245878
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Out the door price explainer video for car buying",
+                  "views": 1178814
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Every Major Economic Theory Explained in 20 Minutes",
+                  "views": 1174779
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Codie Sanchez Explains Why Real Estate Is a Terrible Business Model",
+                  "views": 1105458
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Weird History Of Money...",
+                  "views": 1047503
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Indian Tax System Explained | All you need to know | Easiest explanation Ever | Aaditya Iyengar CFA",
+                  "views": 969073
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Entire Map of Money in 21 Min.",
+                  "views": 946845
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Most Violent Trading Loss in History",
+                  "views": 790220
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How to Buy Your First Rental Property in 2025 (Step-by-Step Guide!)",
+                  "views": 740115
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "What REALLY Caused the 2008 Crash? 💸🤔 #shorts #finance #economy #crisis #trendingshorts",
+                  "views": 592896
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Commerce project | evolution of money 3d model #commerce #project #diy",
+                  "views": 429652
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Complete Economics Marathon - Movie Style in 1.5 Hr || SSC, UPSC & State Exams || Quick Revision",
+                  "views": 372868
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "CA Foundation Business Economics: Public Finance | Free Chanakya 3.0 Batch | Love Kaushik Sir",
+                  "views": 362547
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "A (Brief) 2,000 Year History Of Economic Collapses",
+                  "views": 254962
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The 2008 Financial Crisis in 12 Minutes (Casual Economics)",
+                  "views": 219804
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "What is ECONOMICS? #finance #money #shorts",
+                  "views": 166565
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How America Replaced Britain as the World’s Economic Superpower",
+                  "views": 163738
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Rothschild fortune vs. today’s billionaires",
+                  "views": 57213
+                },
+                {
+                  "title": "Just how wealthy was the Medieval Vatican? | Financial History in 60 seconds",
+                  "views": 1517
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Last Time This Started, Lots of Ordinary People Became Millionaires",
+                  "views": 36162
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Which Economic Books do I recommend? (Patreon Q&A video)",
+                  "views": 33226
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "reality of 38trillion dollar.... #facts #debt #finance #economics #usa #shorts",
+                  "views": 25619
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Great Depression: The Crash That Shook the World 💥📉",
+                  "views": 19977
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How America Fooled Us",
+                  "views": 17833
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "BREAKING Buffett Made a Surprise Move Analysts Say Its a Direct Response to Canada's Trade Win Trump",
+                  "views": 14968
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "2 Must-Read Books to Master Indian Economy 📚 | Finance Insights #books #bookrecommendations",
+                  "views": 10367
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The History of The US Economy",
+                  "views": 9941
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Dr. Charles Calomiris | The History of Financial Crises | Lecture 1 (Official)",
+                  "views": 8903
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Broke the World Economy with a Tree | Financial Stories Simplified #finance #economy #history",
+                  "views": 8346
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "AMERICAN GOLD #history #gold #money #finance #usd #dollar #usdollar #greatdepression #fdr",
+                  "views": 4184
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Money History #money #finance #history #shorts #short #shortsfeed",
+                  "views": 981
+                },
+                {
+                  "title": "Money History #money #finance #history #shorts #short #shortsfeed",
+                  "views": 670
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Beyond Coins: A Fresh Look at Financial History",
+                  "views": 1431
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Debt May Be the Most Profitable Product Ever #economics #history #money #financialhistory",
+                  "views": 1353
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "44 Nations Chose the Dollar Over Their Own Currency #money #geopolitics #reserve",
+                  "views": 1122
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Dollar That Broke the World! #finance #history #facts #shorts",
+                  "views": 948
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "One Man Broke Britain's Currency in a Single Day 💰",
+                  "views": 606
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Most Valuable Company in History #money #psychology #finance #facts",
+                  "views": 563
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Surprising Origin of Credit Cards! #finance  #history  #innovation  #creditcards  #money",
+                  "views": 463
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How foreign money turned into Thailand's worst nightmare #finance #history #money #globaleconomy",
+                  "views": 359
+                }
+              ]
+            }
+          ],
+          "nicheIntel": {
+            "powerWords": [
+              {
+                "word": "how"
+              },
+              {
+                "word": "vs"
+              },
+              {
+                "word": "best"
+              },
+              {
+                "word": "tips"
+              },
+              {
+                "word": "why"
+              },
+              {
+                "word": "top"
+              }
+            ],
+            "optimalTitleLen": 42
+          }
+        }
+      },
+      {
+        "id": "jn7ekdnfbxzxcz33qpawyxzqxh89ybp7",
+        "block": "topic_select",
+        "status": "ok",
+        "startedAt": 1783212516614,
+        "finishedAt": 1783212533833,
+        "outputs": {
+          "topic": "The basic conceptual framework of taxation",
+          "topicBet": {
+            "provisionalTitle": "How Do Taxes Work? A Visual Explanation"
+          }
+        }
+      },
+      {
+        "id": "jn7cfb6wydhmt9wq7jzd6979js89zwng",
+        "block": "whiteboard_scribe",
+        "status": "ok",
+        "startedAt": 1783212624698,
+        "finishedAt": 1783213410972,
+        "outputs": {
+          "narrationText": "At its core, taxation is how a society pools its resources to fund shared needs. Instead of everyone building their own roads or hiring private firefighters, we chip in a portion of our income. This collective pot allows the government to provide public goods that benefit everyone, creating a foundation for a functioning economy. The most common way governments collect this money is through an income tax. When you earn money from a job or a business, a percentage goes to the state. This system is often progressive, meaning those who earn more pay a higher rate, which aims to balance the financial burden across different income levels. Another major pillar is the consumption tax, like sales tax or value-added tax. Every time you buy a coffee, a pair of shoes, or a new car, a small extra charge is added to the price. Unlike income tax, this targets what you spend rather than what you earn, capturing revenue at the point of sale. Governments also tax what you own, primarily through property taxes. If you own a house or a piece of land, you pay an annual fee based on its assessed value. This revenue often stays local, funding community services like public schools, parks, and local infrastructure that directly impact your neighborhood. The primary goal of these taxes is generating revenue to keep the lights on for the nation. But taxation also serves as a tool for wealth redistribution. By funding social safety nets, healthcare, and education, the system attempts to reduce extreme inequality and provide a baseline of support for vulnerable citizens. Beyond just raising money, taxes are used to steer public behavior. Governments apply heavy excise taxes, often called sin taxes, to things like cigarettes and alcohol to discourage their use. Conversely, they offer tax breaks for activities they want to encourage, like installing solar panels or saving for retirement. However, taxation isn't without its downsides, as it introduces economic friction. When taxes are too high, they can discourage people from working hard or businesses from investing, leading to what economists call deadweight loss. Finding the sweet spot where revenue is maximized without stifling economic growth is a constant political balancing act. Ultimately, taxation represents a fundamental social contract between a government and its citizens. We agree to surrender a portion of our private wealth in exchange for order, infrastructure, and services. When this system is transparent and fair, it builds trust, ensuring the engine of society keeps running smoothly for generations to come."
+        }
+      },
+      {
+        "id": "jn7116z7vj8b9tqbhcjvy03jtn89y3y9",
+        "block": "metadata",
+        "status": "ok",
+        "startedAt": 1783213412426,
+        "finishedAt": 1783213417631,
+        "inputs": {
+          "topic": "The basic conceptual framework of taxation"
+        },
+        "outputs": {
+          "title": "Taxation Isn't Complex: A Simple Framework",
+          "titleAlternate": ""
+        }
+      }
+    ],
+    "artifactSummary": {
+      "total": 0,
+      "titleRelevant": []
+    }
+  }
+}

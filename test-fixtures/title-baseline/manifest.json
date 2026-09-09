@@ -1,0 +1,208 @@
+{
+  "version": "title-baseline-manifest/v1",
+  "observedAt": "2026-09-08T23:43:45.441Z",
+  "deployment": "astute-camel-689",
+  "purpose": "Historical source regression corpus; not exact historical model invocation replay",
+  "liveGenerationPerformed": false,
+  "providerModelCalls": 0,
+  "historicalReplayReadyCases": 0,
+  "caseCount": 8,
+  "completeNarrationCases": 5,
+  "hashConventions": {
+    "sha256": "SHA-256 of exact UTF-8 fixture file bytes",
+    "sourceProjectionSha256": "SHA-256 of JSON.stringify(parsedFixture.source), preserving stored object field order",
+    "narrationSha256": "SHA-256 of exact UTF-8 retained narration string, without whitespace normalization"
+  },
+  "cases": [
+    {
+      "runId": "js76ghf4s44b4w5d97cs2f49bd89znxa",
+      "channelId": "j97btry53hv0y363bwq6w69yx989wqr0",
+      "channelName": "Inked Histories",
+      "file": "test-fixtures/title-baseline/js76ghf4s44b4w5d97cs2f49bd89znxa.json",
+      "byteLength": 30760,
+      "sha256": "6e91a83df7226ede72bdcd72cce65dfb95827ce5338b35839fc7d93a8c6d73cd",
+      "sourceProjectionSha256": "b17ce3aa94cce1f60d1bcae8dfc56a2b4f9dad70054c4e8aadb4887ec60a510b",
+      "narration": [
+        {
+          "stageId": "jn75arcy88zn2ah2ahxcptprt589zw66",
+          "block": "motion_comic",
+          "sourcePath": "runStages.outputs.narrationText",
+          "characters": 2915,
+          "sha256": "bbf3313ad8da0e1661e78069815a170adc25b2872b9388c17021fa2d86e790f6"
+        }
+      ]
+    },
+    {
+      "runId": "js705md1etr1kr0mpbpvpqaz8x89znvt",
+      "channelId": "j973233pdy3wbvs55jq1d4nsas89xraz",
+      "channelName": "Chalk & Compound",
+      "file": "test-fixtures/title-baseline/js705md1etr1kr0mpbpvpqaz8x89znvt.json",
+      "byteLength": 42043,
+      "sha256": "66ef00c9b197c209815a0947c007b767c8ebbc66821e4beeba56c4b62d4eac19",
+      "sourceProjectionSha256": "1a03630a1dc84befc37d61fa0882ba2c6c63970ed48989cfba22f7e8a8c61830",
+      "narration": [
+        {
+          "stageId": "jn7cfb6wydhmt9wq7jzd6979js89zwng",
+          "block": "whiteboard_scribe",
+          "sourcePath": "runStages.outputs.narrationText",
+          "characters": 2592,
+          "sha256": "03cb6b228d2341dc078cef89b757c720993f300ab571b7cf58d74a0b83678d98"
+        }
+      ]
+    },
+    {
+      "runId": "js72d9gty4nrqqq7wevv0m0hyd89xgk9",
+      "channelId": "j97eadtp9nnhj5v2q7e6c93b2989w9gb",
+      "channelName": "Gratitude Springs",
+      "file": "test-fixtures/title-baseline/js72d9gty4nrqqq7wevv0m0hyd89xgk9.json",
+      "byteLength": 11310,
+      "sha256": "b20fcaecbdd81691afb88c260482f2fca1e6001e7ba86391d28f175b47abaf92",
+      "sourceProjectionSha256": "ad4c9e90d75b53eb6a5b7d611a0acf6b0189070c22d95d51427fe306b7e509e8",
+      "narration": [
+        {
+          "stageId": "jn7bq24qb4a4mgxg00bv4wx09189wyd5",
+          "block": "script_gen",
+          "sourcePath": "runStages.outputs.narrationText",
+          "characters": 2894,
+          "sha256": "ca8b7072b604869d25448995186491812a3ed3352076f30a587fd1370f643f5b"
+        }
+      ]
+    },
+    {
+      "runId": "js7eh3rvdhjyqwkmnseb0qtvfh88mrq7",
+      "channelId": "j97ax079vqhn58tkhg2yhdty9x87xaj5",
+      "channelName": "The Quiet Stoic",
+      "file": "test-fixtures/title-baseline/js7eh3rvdhjyqwkmnseb0qtvfh88mrq7.json",
+      "byteLength": 33158,
+      "sha256": "228e8ae39577f02eb90bc98d4388fadc9ce5e5b4d3f8a46d0e9f62e11f1e8147",
+      "sourceProjectionSha256": "ad98aeb9dc18436d8ffe34191e4411d8c84ab7ae7c91e8195b2936b35f0bf464",
+      "narration": [
+        {
+          "stageId": "jn7235pyg7j36t5x5n8vj8c7ps88n96b",
+          "block": "script_gen",
+          "sourcePath": "runStages.outputs.narrationText",
+          "characters": 3648,
+          "sha256": "9a7b7acabdce786a3896c75b8f9f3188151df39dbe846924ada54d0777ef0793"
+        }
+      ]
+    },
+    {
+      "runId": "js72sy9xyvxtptvtbbg2z8aegs88ez4t",
+      "channelId": "j973w7hx3s1g29w04ntfdja9ms88d7v6",
+      "channelName": "Investory",
+      "file": "test-fixtures/title-baseline/js72sy9xyvxtptvtbbg2z8aegs88ez4t.json",
+      "byteLength": 58868,
+      "sha256": "9341834d2c1edbd1a19a52c2c54a5d44493a8a011085a562aaaffb59367fca4e",
+      "sourceProjectionSha256": "3a32458ec0137247c1961a9620c4545dc8a971eadc64826c64b6b637935c6aec",
+      "narration": [
+        {
+          "stageId": "jn73vfk0pmxbexbrxfhgzeysk588fcje",
+          "block": "script_gen",
+          "sourcePath": "runStages.outputs.narrationText",
+          "characters": 10040,
+          "sha256": "384842735e7c22540c36b60b127a7863b3c16cad2afe69594bdaa27b5b8c6e89"
+        }
+      ]
+    },
+    {
+      "runId": "js743qy08vp7z2rb367cg8spgd88aaye",
+      "channelId": "j978et30ex8mksrjs6kpyc7gad88ar0x",
+      "channelName": "Seaside Ghibli Lofi",
+      "file": "test-fixtures/title-baseline/js743qy08vp7z2rb367cg8spgd88aaye.json",
+      "byteLength": 40292,
+      "sha256": "f26b9ad6bb7922fb02d91b7d532e98b7721a0e7ddd59a6490378a70aa4c2dfec",
+      "sourceProjectionSha256": "99e046e6462f5ce95c10e73db535a04e63e6b4036d7ebb4a7457f710a30c13a1",
+      "narration": []
+    },
+    {
+      "runId": "js71tzddw482bhs41tgw0gsztn88bhv7",
+      "channelId": "j977t0zqt4e2xf99qgz7qfv7w18899st",
+      "channelName": "Drift & Study",
+      "file": "test-fixtures/title-baseline/js71tzddw482bhs41tgw0gsztn88bhv7.json",
+      "byteLength": 19101,
+      "sha256": "863f24f48a0c53487d02941a60b9d22f446035eb22477da4934b196208b1d9f3",
+      "sourceProjectionSha256": "85fe9a06557083294222053de44988232a577c58d8263febda0e78df9a89eb24",
+      "narration": []
+    },
+    {
+      "runId": "js74bqgxfxpzak00v445ppdazx87tq2h",
+      "channelId": "j975923e1vv0ve8ds1xbprekv987vpfy",
+      "channelName": "Rainy Neon Lofi",
+      "file": "test-fixtures/title-baseline/js74bqgxfxpzak00v445ppdazx87tq2h.json",
+      "byteLength": 3043,
+      "sha256": "45c11653bc27208e18a8c6a77ee84c27f80b678df4bf168023b1acb070d6e461",
+      "sourceProjectionSha256": "d55b467f9831253a756e2e3d468c8ce0eb180b6a9ca6ffc050395294f9104c54",
+      "narration": []
+    }
+  ],
+  "newerCandidateDiscovery": {
+    "method": "Read-only canonical Convex by_channel_started descending take(10) per selected channel; explicit fields only",
+    "reportedBy": "collaboration subagent library_finish",
+    "rowsInspected": 50,
+    "invocationSnapshotCount": 0,
+    "nonNullReleaseEvidenceStatuses": [
+      "not_ready"
+    ],
+    "scopeWarning": "Bounded selected-channel search, not a claim about all retained runs. Missing run.videoAssetId is not proof that assets are missing.",
+    "channels": [
+      {
+        "channelId": "j97btry53hv0y363bwq6w69yx989wqr0",
+        "rowsInspected": 7,
+        "latestRunId": "js7cvnsea1neyn5nxxbf2f5ca58e01v0",
+        "sourceRunId": "js76ghf4s44b4w5d97cs2f49bd89znxa",
+        "finding": "Latest is thumbnail-refresh successor, not new narrated output"
+      },
+      {
+        "channelId": "j973233pdy3wbvs55jq1d4nsas89xraz",
+        "rowsInspected": 6,
+        "latestRunId": "js7644m42q9vecb387hqder7md8e0fm4",
+        "sourceRunId": "js705md1etr1kr0mpbpvpqaz8x89znvt",
+        "finding": "Latest is thumbnail-refresh successor, not new narrated output"
+      },
+      {
+        "channelId": "j97eadtp9nnhj5v2q7e6c93b2989w9gb",
+        "rowsInspected": 4,
+        "latestRunId": "js796mk1nrpg4wcrxkcnxbsm8d8e12eq",
+        "sourceRunId": "js72d9gty4nrqqq7wevv0m0hyd89xgk9",
+        "finding": "Latest is thumbnail-refresh successor, not new narrated output"
+      },
+      {
+        "channelId": "j97ax079vqhn58tkhg2yhdty9x87xaj5",
+        "rowsInspected": 10,
+        "latestRunId": "js7f40rzt3ctzte7ghh9pgpxp18e106h",
+        "sourceRunId": "js7fvf3g4tsh4s4f522phazzwd87yq13",
+        "finding": "All ten inspected rows are thumbnail-only refreshes; bounded window does not inspect all older originals"
+      },
+      {
+        "channelId": "j973w7hx3s1g29w04ntfdja9ms88d7v6",
+        "rowsInspected": 9,
+        "latestOriginalRunId": "js72sy9xyvxtptvtbbg2z8aegs88ez4t",
+        "finding": "Newest three are thumbnail refreshes; latest original is already in proposed corpus"
+      },
+      {
+        "channelId": "j978et30ex8mksrjs6kpyc7gad88ar0x",
+        "rowsInspected": 2,
+        "runIds": [
+          "js743qy08vp7z2rb367cg8spgd88aaye",
+          "js77vzt7gyb2k79be7y7ypcka588bcsf"
+        ],
+        "finding": "Both legacy OK; no frozen invocation"
+      },
+      {
+        "channelId": "j977t0zqt4e2xf99qgz7qfv7w18899st",
+        "rowsInspected": 2,
+        "runIds": [
+          "js71tzddw482bhs41tgw0gsztn88bhv7",
+          "js75bzg8mq31wf92rq9w4bepf5889m94"
+        ],
+        "finding": "Both legacy OK; no frozen invocation"
+      },
+      {
+        "channelId": "j975923e1vv0ve8ds1xbprekv987vpfy",
+        "rowsInspected": 10,
+        "newestOkRunId": "js74bqgxfxpzak00v445ppdazx87tq2h",
+        "finding": "Newest six failed; newest OK is already in proposed corpus"
+      }
+    ]
+  }
+}

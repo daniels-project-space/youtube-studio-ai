@@ -1,0 +1,1170 @@
+{
+  "version": "title-baseline-source/v1",
+  "caseId": "investory-1781107671769",
+  "historicalReplayReady": false,
+  "liveGenerationPerformed": false,
+  "provenance": {
+    "deployment": "astute-camel-689",
+    "observedAt": "2026-09-08T23:43:45.441Z",
+    "queryMode": "convex run --inline-query; codegen/typecheck disabled; explicit field projections; no mutations",
+    "projectionNote": "Only title-relevant fields projected. Missing JSON fields were absent or undefined in this observation. Row payloads are not complete table documents. Current channel identity is NOT the run's historical configuration.",
+    "r2Bucket": "youtube-studio-ai",
+    "r2Inspection": {
+      "runId": "js72sy9xyvxtptvtbbg2z8aegs88ez4t",
+      "prefix": "owner/owner_daniel/channel/investory-1781107671769/runs/js72sy9xyvxtptvtbbg2z8aegs88ez4t/",
+      "objectCount": 2,
+      "textObjects": [],
+      "pages": 1
+    }
+  },
+  "availability": {
+    "narration": "retained",
+    "separateHook": "retained",
+    "competitors": "retained",
+    "frozenHistoricalInvocation": false,
+    "missing": [
+      "historical frozen channel identity and metadata parameters",
+      "historical resolved model and title-judge receipt",
+      "historical YouTube suggestions",
+      "historical plannedTitle presence/value",
+      "historical performance-context string",
+      "historical topic-bet title presence/value",
+      "separate script.hookLoop promise field"
+    ],
+    "permittedBenchmarkUse": "Provenance-backed historical source regression. A new current-identity replay must explicitly bind this observed current identity and frozen evidence; it is not a reproduction of the historical model invocation."
+  },
+  "source": {
+    "runId": "js72sy9xyvxtptvtbbg2z8aegs88ez4t",
+    "run": {
+      "channelId": "j973w7hx3s1g29w04ntfdja9ms88d7v6",
+      "status": "ok",
+      "startedAt": 1781177249523,
+      "finishedAt": 1781195293027,
+      "hasInvocationSnapshot": false
+    },
+    "currentChannel": {
+      "id": "j973w7hx3s1g29w04ntfdja9ms88d7v6",
+      "name": "Investory",
+      "slug": "investory-1781107671769",
+      "contentLane": {
+        "family": "narrated_stock",
+        "key": "narrated_documentary",
+        "primaryRenderer": "stock_footage",
+        "version": "content-lane/v1"
+      },
+      "identity": {
+        "persona": "A calm, authoritative narrator who demystifies wealth-building through cinematic storytelling, making complex financial concepts feel accessible and aspirational without hype or fluff.",
+        "niche": "Finance"
+      },
+      "metadataParams": [
+        {
+          "language": "en"
+        }
+      ],
+      "styleSeo": {
+        "titleFormula": "[POWER_WORD] [SPECIFIC_FINANCIAL_CONCEPT] [WORKS/IS/EXPLAINED] — e.g. 'How Compound Interest Actually Works', 'Why Index Funds Beat 90% of Investors', 'The Real Cost of Credit Card Debt' — always lead with How/Why/What/Top; include a number when listing; keep under 60 characters; no ALL-CAPS in title",
+        "descriptionStructure": "Line 1-2: restate the core thesis as a standalone value proposition (hook for search snippet); Line 3: timestamp chapter list (minimum 4 chapters for watch-time signals); Line 4-6: 3 keyword-rich contextual sentences covering the topic naturally; Line 7: soft CTA to subscribe framed as identity ('If you think clearly about money, subscribe'); Line 8-10: 8-12 hashtags mixing broad (#finance #investing #moneytips) with specific (#indexfunds #wealthbuilding #financialliteracy)"
+      }
+    },
+    "stages": [
+      {
+        "id": "jn74vqzrmtba2cwqg7ybyfccfx88e29j",
+        "block": "competitor_research",
+        "status": "ok",
+        "startedAt": 1781193079763,
+        "finishedAt": 1781193080012,
+        "outputs": {
+          "competitors": [
+            {
+              "topVideos": [
+                {
+                  "title": "Credit Card vs. Debit Card",
+                  "views": 55483038
+                },
+                {
+                  "title": "How Do Taxes Work?",
+                  "views": 22235867
+                },
+                {
+                  "title": "Risk and Return",
+                  "views": 15548801
+                },
+                {
+                  "title": "How to Buy a House",
+                  "views": 13963453
+                },
+                {
+                  "title": "The Highest Paying Majors",
+                  "views": 6876733
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How Billionaires AVOID Paying Tax",
+                  "views": 12465175
+                },
+                {
+                  "title": "HOW RICH PEOPLE AVOID PAYING TAX",
+                  "views": 11377339
+                },
+                {
+                  "title": "Investing Tips for Beginners",
+                  "views": 10283227
+                },
+                {
+                  "title": "7 Side Hustles That Are Making Students Rich in 2026",
+                  "views": 7551446
+                },
+                {
+                  "title": "HOW TO GET RICH WITH INVESTING",
+                  "views": 7143424
+                },
+                {
+                  "title": "How to Invest As a Teen With $0",
+                  "views": 6737940
+                },
+                {
+                  "title": "5 EXTREMELY IMPORTANT BOOKS for your 20s",
+                  "views": 6734760
+                },
+                {
+                  "title": "The Only Investing Video You’ll Ever Need (Start With $100)",
+                  "views": 6530698
+                },
+                {
+                  "title": "The BEST Investment in History",
+                  "views": 4974905
+                },
+                {
+                  "title": "How to Buy a House in your 20s",
+                  "views": 3511457
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Level up your Multitap HAMSTER KOMBAT",
+                  "views": 36129154
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "When you get red envelope money",
+                  "views": 34690279
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How much gst is charged on gold purchase?",
+                  "views": 19882395
+                },
+                {
+                  "title": "Here’s how you can pay zero taxes on a 12 Lakhs salary. Read description",
+                  "views": 9452321
+                },
+                {
+                  "title": "Don’t book a PG or a hostel without watching this!! #shorts #youtubeshorts",
+                  "views": 4127830
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Invest in This – It’ll Be Worth $1.5 Million by 2030 | World Leading Investing Expert - Cathie Wood",
+                  "views": 7465290
+                },
+                {
+                  "title": "The Investing & Crypto Expert: \"We Only Have 6 Years Until Everything Changes!\" - Raoul Pal",
+                  "views": 5720121
+                },
+                {
+                  "title": "Mohnish Pabrai: FASTEST Way To Financial Freedom! Proven Playbook For Quitting Your 9-5 In 9 Months!",
+                  "views": 5644444
+                },
+                {
+                  "title": "Passive Income Expert: How To Make $10k Per Month In 90 Days!",
+                  "views": 4801654
+                },
+                {
+                  "title": "Nischa Shah: They’re Lying To You About Buying a House! My 652510 Rule Built $200K Passive Income!",
+                  "views": 3797348
+                },
+                {
+                  "title": "The Savings Expert: Passive Income Is A Scam! Post-Traumatic Broke Syndrome Is Controlling Millions!",
+                  "views": 2533658
+                },
+                {
+                  "title": "The SIMPLE (& Proven) Way To Earn $100,000 From Nothing! | The Money Making Experts",
+                  "views": 2276243
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "El Peor Ladrón De Todos 🚨 #Dinero #Finanzas #Impuestos #Invertir #Inversiones #SAT",
+                  "views": 10627555
+                },
+                {
+                  "title": "¿Los Millonarios Pagan Impuestos? 🧾 #Dinero #Finanzas #FinanzasPersonales #Impuestos #Invertir",
+                  "views": 9944081
+                },
+                {
+                  "title": "El SAT Te Regresa Dinero 💰 #Dinero #Finanzas #Impuestos #Inversion #Inversiones #Invertir",
+                  "views": 4175600
+                },
+                {
+                  "title": "¿Impuestos Por Retirar Efectivo? 💵 #Banco #Dinero #Finanzas #Invertir #Inversiones #Negocios",
+                  "views": 689935
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "I Lost Huge Money on Robinhood",
+                  "views": 12672001
+                },
+                {
+                  "title": "Why I Don't Raise The Rent On My Tenants",
+                  "views": 7955137
+                },
+                {
+                  "title": "Money Advice From a Real Estate Billionaire",
+                  "views": 4320224
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Where was this when I first started trading 👀 #chartai #trading #forex #stocks #crypto",
+                  "views": 24208014
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "₹6000 Crore Rupees in Online Wallet, But He FORGOT Password! CRAZY Story of Stefan Thomas #shorts",
+                  "views": 13746074
+                },
+                {
+                  "title": "Why CORRUPT People Keep Their BLACK MONEY in SWISS Bank? Unique LAWS Of Switzerland #shorts",
+                  "views": 7741182
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "1 core money business || ft.@rajshamani #ytshort #dubailife #realestate #businessgrowth",
+                  "views": 20813504
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How hard is money laundering? - Patrick McKenzie",
+                  "views": 17744959
+                },
+                {
+                  "title": "Why China Ignores Basic Economics - Victor Shih",
+                  "views": 1048015
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Rs. 100 ko INVEST karne ka SPLIT! | Ankur Warikoo #shorts",
+                  "views": 12413934
+                },
+                {
+                  "title": "10K se CROREPATI banne main Kitna TIME lagega?! | Ankur Warikoo #shorts",
+                  "views": 3377343
+                },
+                {
+                  "title": "ALL Investment OPTIONS Explained! | Investing Strategies 2025 | Ankur Warikoo Hindi",
+                  "views": 2658440
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Bro thinks he’s Warren Buffet  #daytrading #collegelife #cryptotrading #stocktrading #aitools",
+                  "views": 16351976
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How To Make Money On X",
+                  "views": 15011817
+                },
+                {
+                  "title": "The Lowest IQ In Financial Audit History",
+                  "views": 1101274
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Top 10 Investments of the past 100 years 🤑",
+                  "views": 15937541
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "infinite money glitch? 💀💵  #finance #crypto #money",
+                  "views": 15797394
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Yeti always Wins 🏆😎 #memecoin #crypto #bitcoin #meme #btc #solana #trading #business #usa #binance",
+                  "views": 15303010
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How Indian Currency Evolved: From Barter System to ₹1 Note | History of Rupee Explained #shorts",
+                  "views": 14670066
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Is Gold Savings Scheme the best way to invest in gold?  #gold #investing #money",
+                  "views": 7450095
+                },
+                {
+                  "title": "Spend Your Money When You Are Young",
+                  "views": 3951118
+                },
+                {
+                  "title": "Quit His High Paying Job For Freedom With Just 45k Passive Income.",
+                  "views": 2951526
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Sup #business #marketing #finance",
+                  "views": 11388323
+                },
+                {
+                  "title": "Doesn’t mean we’re wrong. #finance #mortgage #economy",
+                  "views": 2631563
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Buying the Costco Gold Bar! Here's why I did it...",
+                  "views": 8768937
+                },
+                {
+                  "title": "Should You Pay Off Your Mortgage Early or Invest? | Financial Advisor Explains",
+                  "views": 1849063
+                },
+                {
+                  "title": "If I Started Investing In 2026, This Is What I Would Do (Full Beginner’s Guide)",
+                  "views": 1799439
+                },
+                {
+                  "title": "Stock Market for Beginners 2025/2026 – The Ultimate Investing Guide",
+                  "views": 1600828
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Car Loan vs Full Payment",
+                  "views": 12633646
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How The Rich Transfer Houses 🤑🏠 #assets #finance #personalfinance",
+                  "views": 9087571
+                },
+                {
+                  "title": "How The Rich Transfer Houses! 🤑🏠 #finance #money #realestate",
+                  "views": 3511326
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How The Rich Transfer Houses 🤑🏠 #finance #PersonalFinance #realestate #personalfinancetips #fin",
+                  "views": 12564056
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Get Rs.50,000 Monthly By Doing Nothing! #shorts #trendingshorts #celltowerlease #NoEffortIncome",
+                  "views": 4575219
+                },
+                {
+                  "title": "Should We Pay Tax For Extra Source Of Income 🤔 #shorts #kowshikmaridi #tax",
+                  "views": 3399720
+                },
+                {
+                  "title": "ఇలా చేస్తే ప్రతినెలా మీ ఖాతాలో ₹9,250 పడతాయి..ఎలాగో తెలుసా? !! #shorts #postoffice #investing",
+                  "views": 3126830
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Influencers That Have Scammed Their Fans",
+                  "views": 5270829
+                },
+                {
+                  "title": "Richest People In History",
+                  "views": 5125410
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Trading makes me happy !!! | #trading #money #viralshort #youtubeshorts",
+                  "views": 9391842
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "the $1 infinite money glitch? 💀💵 p1. #finance #money #crypto",
+                  "views": 9325468
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Can You Make ₹20,000 per Month from ₹1 Lakh? @PushkarRajThakurOfficial #trading #shorts #ytshorts",
+                  "views": 8356934
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Value of Money",
+                  "views": 7761338
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Why Buying a Car on Loan is Smarter Than Paying Cash! #shorts #investment #finance #money",
+                  "views": 7224335
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "My mutual fund portfolio revealed total returns #mymutualfundportfolio #mutualfunds #invest #shorts",
+                  "views": 6471287
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "This is the actual power of passive income. #finance #invest #passiveincomestream #mutualfundsindia",
+                  "views": 6241111
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "entrepreneur suggests business ideas 💡 #income #business #savings #money",
+                  "views": 6126033
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Why Graham Stephan QUIT Real Estate Investing",
+                  "views": 5841075
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Master Financial Literacy in 54 Minutes: Everything They Never Taught You About Money!",
+                  "views": 2564752
+                },
+                {
+                  "title": "If I Started Investing in 2026, This Is What I'd Do",
+                  "views": 1757661
+                },
+                {
+                  "title": "Ex-Banker Explains: How to Invest for Beginners in 2026",
+                  "views": 1486552
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How ₹3 Crore Can Give You Lifetime Income | Smart Investment Strategy #stockmarket",
+                  "views": 5730581
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Top 5 Careers of Millionaires",
+                  "views": 5676261
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "🎥 E-commerce Calculation Series Day 04: Selling Watch Unit Economics ⌚💰 #ecommercetips",
+                  "views": 5507497
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Gold Explained, Finally",
+                  "views": 5242368
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How to grow your money without paying taxes on it #shorts #finance",
+                  "views": 4747169
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How Singapore Got So Crazy Rich",
+                  "views": 4706274
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Russia Says U.S. Planning $37 Trillion Crypto Reset",
+                  "views": 4539363
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Best Financial Advice You’ll Ever Hear",
+                  "views": 4485924
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Taxes be like… 💸😭😂 #shorts #funny #comedy #youtubeshorts #money #finance #rich #wealth",
+                  "views": 4439196
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "It’s Impossible to Tax a Trillionaire 😳 #short #shorts #stocks #business #taxes #investing #wealth",
+                  "views": 3928273
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Passive Income और मजा एक साथ #SanjayKathuria #profitsfirst #passiveincome",
+                  "views": 3805367
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Los IMPUESTOS por INVERTIR en BOLSA 📈👨‍⚖️ #finanzas #impuestos #inversiones #sat #bolsadevalores",
+                  "views": 3697432
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Tax Secrets of Billionaires: How Elon Musk Paid $0 in 2018",
+                  "views": 3614961
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Credit, Taxes, Retirement & Debt—Know Them Early, Win for Life",
+                  "views": 3550440
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How Rothschild made Billions 🤯💵 | Power of Money | Kuldeep Singhaniaa #shorts",
+                  "views": 3304305
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "$2,500 RENT vs $2,500 MORTGAGE | Why BUYING Is More Difficult Than RENTING 🤔🏡",
+                  "views": 3266319
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Why governments are 'addicted' to debt | FT Film",
+                  "views": 3065853
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "ALL OF ECONOMICS in 20 minutes",
+                  "views": 2884860
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Psychology of Money in 33 minutes | Animated Book Summary",
+                  "views": 2868725
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Top 5 highest paid jobs in Dubai #dubai🇦🇪 #realestatedubai #realtordubai #jobseekertips #realtor",
+                  "views": 2637541
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Bill Ackman: Investing, Financial Battles, Harvard, DEI, X & Free Speech | Lex Fridman Podcast #413",
+                  "views": 2606537
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Gold vs Silver. Who won after 26 years. #shorts #money #finance #education",
+                  "views": 2541246
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Rental Income Is Your Path To 100x Growth - Ajitesh K #shorts",
+                  "views": 2502145
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Why the UK's Economy is Awful",
+                  "views": 2372974
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "I found the best source of passive income",
+                  "views": 2364319
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Game Theory #6:  The World's Bank",
+                  "views": 1179608
+                },
+                {
+                  "title": "Secret History #1:  How Power Works",
+                  "views": 1177012
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Complete Finance MasterClass 2025 | For people in 20's & 30's",
+                  "views": 2230641
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Howard Marks: 78 Years of Investing Wisdom in 60 Minutes (MUST WATCH)",
+                  "views": 2199943
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "TDS kya hai explained in Hindi #tds #taxdeductedatsource #finance #accounting",
+                  "views": 1279848
+                },
+                {
+                  "title": "Why no tax till 12 lakh ?  New Income tax slab rate for FY25-26 🔥 #budget #incometaxrate #incometax",
+                  "views": 886503
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Stock Market For Beginners 2026 | Step by Step Guide",
+                  "views": 2153581
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Les fameux tarifs de Trump 💸#investissement #economies #finance #epargne #taxes #investissement",
+                  "views": 1921431
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Explaining Basic Financial Concepts YOU Should Understand",
+                  "views": 1920354
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Anupam Mittal’s Real Estate Investment #financewithsharan #shorts",
+                  "views": 1877964
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "If You Don't Understand Bonds, You Don't Understand Money",
+                  "views": 1875374
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Entire INDIAN Economics in 18 Mins",
+                  "views": 1699650
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Bank of America – The Cartel of U.S. Finance | Full Documentary",
+                  "views": 1107671
+                },
+                {
+                  "title": "American Express - The Trillion Dollar Money Machine | Documentary",
+                  "views": 548848
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "This is What “Always” Happens Before a Market Crash",
+                  "views": 1606924
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The $7.9 Trillion Company You've Never Heard Of",
+                  "views": 1527290
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How Just One Man Triggered the Great Depression In 1929",
+                  "views": 1496747
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Debt Paradox",
+                  "views": 1377895
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Why Trump’s tariffs are a massive mistake",
+                  "views": 1300044
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "RD vs PPF vs SIP | ₹1000 Monthly for 15 Years | कौन बेस्ट है?",
+                  "views": 1264390
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Rothschilds - History’s Richest Family Documentary",
+                  "views": 1218830
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Every Major Economic Theory Explained in 20 Minutes",
+                  "views": 1155287
+                },
+                {
+                  "title": "What are the 30 Most Influential Books in Economics & Finance?",
+                  "views": 23037
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Out the door price explainer video for car buying",
+                  "views": 1152819
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Weird History Of Money...",
+                  "views": 1009494
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Indian Tax System Explained | All you need to know | Easiest explanation Ever | Aaditya Iyengar CFA",
+                  "views": 957396
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Entire Map of Money in 21 Min.",
+                  "views": 841468
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How British Merchants \"Perfected\" Money Laundering",
+                  "views": 469602
+                },
+                {
+                  "title": "A (Brief) 2,000 Year History Of Economic Collapses",
+                  "views": 252820
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "History of Money | Gold Standard and FIAT Currency",
+                  "views": 614084
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "What REALLY Caused the 2008 Crash? 💸🤔 #shorts #finance #economy #crisis #trendingshorts",
+                  "views": 592421
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Dirty Money Game: System That Made Rothschild Family Richest In The World",
+                  "views": 525752
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How America Crushed Japan’s Economic Rise",
+                  "views": 362217
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Complete Economics Marathon - Movie Style in 1.5 Hr || SSC, UPSC & State Exams || Quick Revision",
+                  "views": 355401
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "CA Foundation Business Economics: Public Finance | Free Chanakya 3.0 Batch | Love Kaushik Sir",
+                  "views": 348102
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "What is ECONOMICS? #finance #money #shorts",
+                  "views": 161127
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Japan’s Lost Decade: An Economic Crisis in 16 Minutes",
+                  "views": 144754
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "移民・財政・エリートが生む構造的問題【経済史】～フランス～後半",
+                  "views": 107561
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How India Invented Banking 2,000 Years Ago  #aitihasik #hostory",
+                  "views": 72130
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "MeatEater's Steven Rinella on the Economic History of Hunting | Odd Lots",
+                  "views": 59434
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Rothschild fortune vs. today’s billionaires",
+                  "views": 54899
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Which Finance Degree is the Best? #oxford #lse #lbs #collegeadmissions #postgrad #mastersdegree #uni",
+                  "views": 41186
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The History of Money: From Bartering to Banknotes 💰 Economy for Kids | @HappyLearningENG",
+                  "views": 40338
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Which Economic Books do I recommend? (Patreon Q&A video)",
+                  "views": 32930
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "From Wall Street To Bay Street: The History Of Finance In North America",
+                  "views": 20440
+                }
+              ]
+            }
+          ],
+          "nicheIntel": {
+            "powerWords": [
+              {
+                "word": "how"
+              },
+              {
+                "word": "why"
+              },
+              {
+                "word": "vs"
+              },
+              {
+                "word": "top"
+              },
+              {
+                "word": "tips"
+              },
+              {
+                "word": "best"
+              },
+              {
+                "word": "real"
+              }
+            ],
+            "optimalTitleLen": 52
+          }
+        }
+      },
+      {
+        "id": "jn7dx719hr53hswgt0mmks6mzd88f6a7",
+        "block": "topic_select",
+        "status": "ok",
+        "startedAt": 1781177260026,
+        "finishedAt": 1781193080122,
+        "outputs": {
+          "topic": "The Silent Momentum: How Starting with Little Builds Substantial Wealth"
+        }
+      },
+      {
+        "id": "jn73vfk0pmxbexbrxfhgzeysk588fcje",
+        "block": "script_gen",
+        "status": "ok",
+        "startedAt": 1781177394091,
+        "finishedAt": 1781193101113,
+        "outputs": {
+          "narrationText": "Many believe substantial wealth demands substantial starting capital. This is the financial industry's most elegant illusion.\n\nMost people believe substantial wealth begins with substantial capital. They envision a hefty down payment, a large inheritance, or a winning lottery ticket. This creates a paralyzing hurdle. You might feel you need ten thousand dollars, fifty thousand dollars, or even a hundred thousand dollars just to get started. This perception, often reinforced by traditional financial advice, is a widespread misunderstanding. According to a 2023 survey by Fidelity Investments, nearly 70 percent of young adults cited insufficient starting capital as their primary barrier to investing. This isn't just about saving. It's about a foundational belief that limits action. What if that belief was fundamentally flawed? What if the real barrier wasn't a lack of money, but a lack of perspective? We often overlook the hidden power of consistent, small contributions. This oversight, this capital delusion, prevents countless individuals from ever taking the first step. It keeps them on the sidelines, waiting for a sum that may never materialize, missing years of potential growth.\n\nMost financial advice focuses on the dramatic: the hot stock tip, the sudden market surge, the overnight success. But what if true wealth isn't built in those seismic shifts, but in something far quieter, far more dependable? What if the most powerful force in your financial life is something most investors never consider? We call it Silent Momentum. It's the subtle, relentless accumulation that happens almost imperceptibly, a hidden advantage for the patient. It’s why, according to a 2023 study by Fidelity, an investor contributing just $100 per month consistently for 30 years often outperforms those making sporadic, larger investments. This is not about market timing or risky ventures. This is about harnessing an overlooked truth: the profound power of gradual accumulation. It's a force available to anyone, yet largely ignored. Here is what changes everything: understanding this quiet compounding. It’s what transforms small, consistent actions into substantial wealth.\n\nWhat if the most powerful financial engine isn't about finding the next big stock, but understanding a mathematical certainty? Most investors never truly grasp this. We call it compounding. Think of it like a snowball. You start with a small pack of snow. As it rolls, it picks up more snow, and crucially, the snow it just picked up also starts picking up new snow. It’s not just growing; its growth itself is growing. According to a 2023 analysis by Charles Schwab, the average S&P 500 annual return over the last 50 years is approximately 10.2%. This means your initial capital, along with the returns it generates, begins to earn returns on itself. This is what changes everything. Your money starts working for you, and then the money your money earned starts working for you too. It’s a self-perpetuating cycle, subtle at first, then undeniably powerful.\n\nMost investors chase the 'big win.' They wait for a large bonus, or a market dip, to make a substantial lump-sum investment. What if I told you that strategy, while intuitive, is often outperformed by something far less dramatic? Here is what changes everything: consistency. Imagine two investors. One waits, saving for a single 10,000-dollar investment at year-end. The other contributes 200 dollars every single week, totaling the same amount. According to a 2023 analysis by Charles Schwab, the consistent weekly investor, over a 20-year period, typically accumulates as much as 30 percent more wealth due to dollar-cost averaging and uninterrupted compounding. It is not about timing the market; it is about time in the market. This disciplined rhythm builds wealth like erosion carves a canyon—imperceptibly at first, then undeniably over decades. What most people miss is how this steady habit insulates you from volatility, transforming market dips from disasters into opportunities to acquire more assets at lower prices. This quiet, continuous effort, far more than any sporadic large injection, is the true engine of substantial wealth.\n\nWhat if the most powerful asset for building wealth isn't an investment you pick, but a force you simply allow? Most investors fixate on returns. They chase hot stocks or the next big thing. But here is what changes everything: time. Imagine two individuals. Both invest two hundred dollars every month. The first starts at age twenty-five. The second waits just ten years, starting at age thirty-five. Both earn a consistent seven percent annual return. According to financial models based on historical market averages, by age sixty-five, the early starter has accumulated over four hundred thousand dollars. The one who waited? They have less than two hundred thousand dollars. That ten-year delay cost them over two hundred thousand dollars in potential wealth. This isn't about clever stock picking. It's about the relentless, compounding power of time itself. As Benjamin Franklin once noted, “Time is money.” He meant it literally. Every year of delay exacts a substantial, often invisible, tax on your future.\n\nMost investors focus on market timing. They obsess over the perfect entry point. What they consistently overlook is the psychological pivot. That shift from initial discomfort to unshakeable conviction. It begins with small, consistent contributions. A weekly transfer of twenty-five dollars. A commitment to saving just two percent of every paycheck. This isn't about the immediate financial impact. It's about the behavioral conditioning. According to research from the University of Pennsylvania, the mere act of consistent saving, regardless of amount, significantly boosts an individual's financial self-efficacy within six months. You begin to trust yourself. You cultivate a discipline previously absent. This trust, this discipline, it compounds.\n\nThe initial resistance is real. That voice asking if twenty-five dollars truly matters. But here is what changes everything: watching those small amounts accumulate. Seeing your balance grow, even incrementally. That visual feedback reinforces the habit. It transforms a perceived sacrifice into a tangible gain. This isn't just about money. It's about mastering your own impulses. It's about the quiet satisfaction of long-term vision. As the investor Charlie Munger once stated, “The big money is not in the buying and selling, but in the waiting.” This psychological ascent is the waiting. It’s the internal fortitude that allows wealth to truly build.\n\nWhat if the most profound wealth isn't built with a sudden windfall, but with something far less dramatic: quiet, consistent accumulation? Most investors never consider how small, repeated actions truly compound. We often hear stories of overnight success, but the real echoes of accumulation whisper a different truth.\n\nConsider the archetype of the meticulous shopkeeper, reinvesting a modest portion of daily earnings. A century ago, this was a common path to prosperity. Or think of Warren Buffett. His initial capital was incredibly modest. According to a 2017 study by Columbia Business School, over 99% of Buffett's wealth was accumulated after his 50th birthday. This wasn't about flashy trades. It was about relentless, disciplined compounding.\n\nThis quiet determination is what changes everything. It’s the consistent, almost imperceptible growth that defines substantial wealth over decades. It’s what most people overlook when they chase immediate returns.\n\nMost financial advice begins with a number: a target, a starting sum. But what if the true ‘little’ isn’t a dollar amount at all? It’s the decision to begin, the mental shift that redefines opportunity. We’re often told to chase large sums, yet the foundational act of wealth building often starts unnoticed. Consider the investor who began with a commitment, not just cash. According to a 2023 study by Fidelity, consistent small contributions, as little as fifty dollars a month, can outperform sporadic large investments over a twenty-year period. The crucial insight here isn’t the fifty dollars. It's the consistent action it represents. This isn't about overcoming obstacles, but perceiving them differently. It’s the ability to see a forgotten skill as seed capital, or a few spare hours as investment time. This perspective is what changes everything. It’s the silent momentum of recognizing that true wealth begins not on a balance sheet, but in the quiet commitment to act.\n\nWhat we've explored today is not a shortcut, but a profound reorientation of perspective. We began by dismantling the Capital Delusion, that pervasive myth dictating you need a lot to make a lot. Instead, we unveiled the Silent Momentum, revealing how even minimal, consistent inputs, fueled by the exponential engine of compounding, become the architects of substantial wealth over time. The unsung power of consistency, combined with time, the ultimate multiplier, transforms small habits into significant fortunes, an ascent as psychological as it is financial. We saw this not as an abstract theory, but as a real-world arc, echoing through countless financial journeys. It redefines 'little' not as insignificant, but as the essential starting point for an unstoppable force.\n\nThe central takeaway is this: wealth building is less about the magnitude of your initial resources and far more about the disciplined application of consistent effort, amplified by the silent, relentless force of compounding. It’s a journey where patience is not merely a virtue, but a powerful financial tool.\n\nAs you reflect on your own financial path, remember that the most formidable wealth is often not built with a sudden surge, but through the quiet, persistent accumulation of small, intentional actions. The power of starting, even with what feels like very little, unlocks a momentum that is ultimately unstoppable. The quiet force of momentum is always at work.",
+          "script": {
+            "hook": "Many believe substantial wealth demands substantial starting capital. This is the financial industry's most elegant illusion.",
+            "closingLine": "The quiet force of momentum is always at work.",
+            "narrationText": "Many believe substantial wealth demands substantial starting capital. This is the financial industry's most elegant illusion.\n\nMost people believe substantial wealth begins with substantial capital. They envision a hefty down payment, a large inheritance, or a winning lottery ticket. This creates a paralyzing hurdle. You might feel you need ten thousand dollars, fifty thousand dollars, or even a hundred thousand dollars just to get started. This perception, often reinforced by traditional financial advice, is a widespread misunderstanding. According to a 2023 survey by Fidelity Investments, nearly 70 percent of young adults cited insufficient starting capital as their primary barrier to investing. This isn't just about saving. It's about a foundational belief that limits action. What if that belief was fundamentally flawed? What if the real barrier wasn't a lack of money, but a lack of perspective? We often overlook the hidden power of consistent, small contributions. This oversight, this capital delusion, prevents countless individuals from ever taking the first step. It keeps them on the sidelines, waiting for a sum that may never materialize, missing years of potential growth.\n\nMost financial advice focuses on the dramatic: the hot stock tip, the sudden market surge, the overnight success. But what if true wealth isn't built in those seismic shifts, but in something far quieter, far more dependable? What if the most powerful force in your financial life is something most investors never consider? We call it Silent Momentum. It's the subtle, relentless accumulation that happens almost imperceptibly, a hidden advantage for the patient. It’s why, according to a 2023 study by Fidelity, an investor contributing just $100 per month consistently for 30 years often outperforms those making sporadic, larger investments. This is not about market timing or risky ventures. This is about harnessing an overlooked truth: the profound power of gradual accumulation. It's a force available to anyone, yet largely ignored. Here is what changes everything: understanding this quiet compounding. It’s what transforms small, consistent actions into substantial wealth.\n\nWhat if the most powerful financial engine isn't about finding the next big stock, but understanding a mathematical certainty? Most investors never truly grasp this. We call it compounding. Think of it like a snowball. You start with a small pack of snow. As it rolls, it picks up more snow, and crucially, the snow it just picked up also starts picking up new snow. It’s not just growing; its growth itself is growing. According to a 2023 analysis by Charles Schwab, the average S&P 500 annual return over the last 50 years is approximately 10.2%. This means your initial capital, along with the returns it generates, begins to earn returns on itself. This is what changes everything. Your money starts working for you, and then the money your money earned starts working for you too. It’s a self-perpetuating cycle, subtle at first, then undeniably powerful.\n\nMost investors chase the 'big win.' They wait for a large bonus, or a market dip, to make a substantial lump-sum investment. What if I told you that strategy, while intuitive, is often outperformed by something far less dramatic? Here is what changes everything: consistency. Imagine two investors. One waits, saving for a single 10,000-dollar investment at year-end. The other contributes 200 dollars every single week, totaling the same amount. According to a 2023 analysis by Charles Schwab, the consistent weekly investor, over a 20-year period, typically accumulates as much as 30 percent more wealth due to dollar-cost averaging and uninterrupted compounding. It is not about timing the market; it is about time in the market. This disciplined rhythm builds wealth like erosion carves a canyon—imperceptibly at first, then undeniably over decades. What most people miss is how this steady habit insulates you from volatility, transforming market dips from disasters into opportunities to acquire more assets at lower prices. This quiet, continuous effort, far more than any sporadic large injection, is the true engine of substantial wealth.\n\nWhat if the most powerful asset for building wealth isn't an investment you pick, but a force you simply allow? Most investors fixate on returns. They chase hot stocks or the next big thing. But here is what changes everything: time. Imagine two individuals. Both invest two hundred dollars every month. The first starts at age twenty-five. The second waits just ten years, starting at age thirty-five. Both earn a consistent seven percent annual return. According to financial models based on historical market averages, by age sixty-five, the early starter has accumulated over four hundred thousand dollars. The one who waited? They have less than two hundred thousand dollars. That ten-year delay cost them over two hundred thousand dollars in potential wealth. This isn't about clever stock picking. It's about the relentless, compounding power of time itself. As Benjamin Franklin once noted, “Time is money.” He meant it literally. Every year of delay exacts a substantial, often invisible, tax on your future.\n\nMost investors focus on market timing. They obsess over the perfect entry point. What they consistently overlook is the psychological pivot. That shift from initial discomfort to unshakeable conviction. It begins with small, consistent contributions. A weekly transfer of twenty-five dollars. A commitment to saving just two percent of every paycheck. This isn't about the immediate financial impact. It's about the behavioral conditioning. According to research from the University of Pennsylvania, the mere act of consistent saving, regardless of amount, significantly boosts an individual's financial self-efficacy within six months. You begin to trust yourself. You cultivate a discipline previously absent. This trust, this discipline, it compounds.\n\nThe initial resistance is real. That voice asking if twenty-five dollars truly matters. But here is what changes everything: watching those small amounts accumulate. Seeing your balance grow, even incrementally. That visual feedback reinforces the habit. It transforms a perceived sacrifice into a tangible gain. This isn't just about money. It's about mastering your own impulses. It's about the quiet satisfaction of long-term vision. As the investor Charlie Munger once stated, “The big money is not in the buying and selling, but in the waiting.” This psychological ascent is the waiting. It’s the internal fortitude that allows wealth to truly build.\n\nWhat if the most profound wealth isn't built with a sudden windfall, but with something far less dramatic: quiet, consistent accumulation? Most investors never consider how small, repeated actions truly compound. We often hear stories of overnight success, but the real echoes of accumulation whisper a different truth.\n\nConsider the archetype of the meticulous shopkeeper, reinvesting a modest portion of daily earnings. A century ago, this was a common path to prosperity. Or think of Warren Buffett. His initial capital was incredibly modest. According to a 2017 study by Columbia Business School, over 99% of Buffett's wealth was accumulated after his 50th birthday. This wasn't about flashy trades. It was about relentless, disciplined compounding.\n\nThis quiet determination is what changes everything. It’s the consistent, almost imperceptible growth that defines substantial wealth over decades. It’s what most people overlook when they chase immediate returns.\n\nMost financial advice begins with a number: a target, a starting sum. But what if the true ‘little’ isn’t a dollar amount at all? It’s the decision to begin, the mental shift that redefines opportunity. We’re often told to chase large sums, yet the foundational act of wealth building often starts unnoticed. Consider the investor who began with a commitment, not just cash. According to a 2023 study by Fidelity, consistent small contributions, as little as fifty dollars a month, can outperform sporadic large investments over a twenty-year period. The crucial insight here isn’t the fifty dollars. It's the consistent action it represents. This isn't about overcoming obstacles, but perceiving them differently. It’s the ability to see a forgotten skill as seed capital, or a few spare hours as investment time. This perspective is what changes everything. It’s the silent momentum of recognizing that true wealth begins not on a balance sheet, but in the quiet commitment to act.\n\nWhat we've explored today is not a shortcut, but a profound reorientation of perspective. We began by dismantling the Capital Delusion, that pervasive myth dictating you need a lot to make a lot. Instead, we unveiled the Silent Momentum, revealing how even minimal, consistent inputs, fueled by the exponential engine of compounding, become the architects of substantial wealth over time. The unsung power of consistency, combined with time, the ultimate multiplier, transforms small habits into significant fortunes, an ascent as psychological as it is financial. We saw this not as an abstract theory, but as a real-world arc, echoing through countless financial journeys. It redefines 'little' not as insignificant, but as the essential starting point for an unstoppable force.\n\nThe central takeaway is this: wealth building is less about the magnitude of your initial resources and far more about the disciplined application of consistent effort, amplified by the silent, relentless force of compounding. It’s a journey where patience is not merely a virtue, but a powerful financial tool.\n\nAs you reflect on your own financial path, remember that the most formidable wealth is often not built with a sudden surge, but through the quiet, persistent accumulation of small, intentional actions. The power of starting, even with what feels like very little, unlocks a momentum that is ultimately unstoppable. The quiet force of momentum is always at work.",
+            "sectionHeadings": [
+              "The Capital Delusion",
+              "Unveiling Silent Momentum",
+              "The Exponential Engine: Compounding Unlocked",
+              "The Unsung Power of Consistency",
+              "Time: The Ultimate Multiplier",
+              "From Habit to Fortune: The Psychological Ascent",
+              "Echoes of Accumulation: Real-World Arcs",
+              "Beyond the Balance Sheet: Redefining 'Little'",
+              "Conclusion"
+            ]
+          }
+        }
+      },
+      {
+        "id": "jn7aqtztj0fy1krp9smvxfgc3988e5s7",
+        "block": "metadata",
+        "status": "ok",
+        "startedAt": 1781180915270,
+        "finishedAt": 1781195200412,
+        "inputs": {
+          "topic": "The Silent Momentum: How Starting with Little Builds Substantial Wealth"
+        },
+        "outputs": {
+          "title": "How Small Starts Build Real Wealth: The Silent Momentum"
+        }
+      }
+    ],
+    "artifactSummary": {
+      "total": 0,
+      "titleRelevant": []
+    }
+  }
+}

@@ -1,0 +1,123 @@
+{
+  "version": "title-baseline-source/v1",
+  "caseId": "gratitude-springs-1783204939314",
+  "historicalReplayReady": false,
+  "liveGenerationPerformed": false,
+  "provenance": {
+    "deployment": "astute-camel-689",
+    "observedAt": "2026-09-08T23:43:45.441Z",
+    "queryMode": "convex run --inline-query; codegen/typecheck disabled; explicit field projections; no mutations",
+    "projectionNote": "Only title-relevant fields projected. Missing JSON fields were absent or undefined in this observation. Row payloads are not complete table documents. Current channel identity is NOT the run's historical configuration.",
+    "r2Bucket": "youtube-studio-ai",
+    "r2Inspection": {
+      "runId": "js72d9gty4nrqqq7wevv0m0hyd89xgk9",
+      "prefix": "owner/owner_daniel/channel/gratitude-springs-1783204939314/runs/js72d9gty4nrqqq7wevv0m0hyd89xgk9/",
+      "objectCount": 2,
+      "textObjects": [],
+      "pages": 1
+    }
+  },
+  "availability": {
+    "narration": "retained",
+    "separateHook": "retained",
+    "competitors": "not_recorded",
+    "frozenHistoricalInvocation": false,
+    "missing": [
+      "historical frozen channel identity and metadata parameters",
+      "historical resolved model and title-judge receipt",
+      "historical YouTube suggestions",
+      "historical plannedTitle presence/value",
+      "historical performance-context string",
+      "historical topic-bet title presence/value",
+      "retained competitor evidence (absence is unknown, not an empty feed)"
+    ],
+    "permittedBenchmarkUse": "Provenance-backed historical source regression. A new current-identity replay must explicitly bind this observed current identity and frozen evidence; it is not a reproduction of the historical model invocation."
+  },
+  "source": {
+    "runId": "js72d9gty4nrqqq7wevv0m0hyd89xgk9",
+    "run": {
+      "channelId": "j97eadtp9nnhj5v2q7e6c93b2989w9gb",
+      "status": "ok",
+      "startedAt": 1783208171226,
+      "finishedAt": 1783216515143,
+      "hasInvocationSnapshot": false
+    },
+    "currentChannel": {
+      "id": "j97eadtp9nnhj5v2q7e6c93b2989w9gb",
+      "name": "Gratitude Springs",
+      "slug": "gratitude-springs-1783204939314",
+      "family": "sleep",
+      "contentLane": {
+        "family": "sleep",
+        "key": "ambient_guided",
+        "primaryRenderer": "stock_footage",
+        "version": "content-lane/v1"
+      },
+      "identity": {
+        "persona": "A calm, warm guided-gratitude meditation channel: gentle female guide, unhurried, speaking softly to one listener.",
+        "niche": "ambient sleep meditation"
+      },
+      "metadataParams": [
+        {}
+      ],
+      "styleSeo": {
+        "titleFormula": "[Benefit] Gratitude Meditation | [Focus] for [Issue] - [Duration] | Calm Sleep & Healing Frequencies",
+        "descriptionStructure": "Begin with a strong benefit statement and keywords. Follow with a brief explanation of the meditation's purpose (gratitude, calm, healing). Include specific frequencies if applicable. Add time markers for different phases (e.g., introduction, guided meditation, silent reflection). Conclude with calls to action (subscribe, watch other videos) and relevant hashtags."
+      }
+    },
+    "stages": [
+      {
+        "id": "jn75dszk6375amgvy1y4s2q9c189wk11",
+        "block": "topic_select",
+        "status": "ok",
+        "startedAt": 1783208183923,
+        "finishedAt": 1783214857568,
+        "outputs": {
+          "topic": "7 Days of Gratitude — Part 4 of 7: Gratitude for the People Beside You"
+        }
+      },
+      {
+        "id": "jn7bq24qb4a4mgxg00bv4wx09189wyd5",
+        "block": "script_gen",
+        "status": "ok",
+        "startedAt": 1783208420677,
+        "finishedAt": 1783214857701,
+        "outputs": {
+          "narrationText": "You spend so many waking hours pouring your energy into the world... Now, it is time to rest.\n\n[softly] Your mind holds onto the faces and voices you encountered today... the demands, the conversations, the passing moments... [pause] Tonight, on day four of our practice, we gently release the strangers... and draw close the warmth of the people beside you... the ones who simply let you be... [long pause] Breathe in their quiet acceptance... let it soften your jaw, your neck, your chest... as my voice guides you into the deepest sanctuary of sleep...\n\nWelcome to Gratitude Springs. If you have carried the friction of a hundred hurried interactions with you to this moment... give yourself permission to set it down. Tonight, we will simply breathe and find our way back to peace. [softly] We are entering a space where nothing is required of you. The endless loop of conversations, the need to explain yourself, the rush to meet expectations... let them all dissolve into the shadows of the room.\n\nImagine a secluded forest grove as the evening settles. The trees here stand close together... their roots softly intertwined beneath the cool, damp earth. They do not ask anything of one another. They do not compete for the moonlight. They simply exist... anchoring each other against the wind. [pause] The people who truly know you are like these steadfast trees. When you are with them, you do not need to perform. You do not need to be perfect. You only need to be present.\n\nAnd if your mind has drifted back to the noise of the afternoon... simply guide it back to the breath... no judgment, just gentle awareness. Notice the subtle rhythm of your chest rising and falling. Feel the warmth spreading through your limbs... allowing each muscle to release its grip. We are trading the exhaustion of pleasing the world... for the deep, emotional relief of being entirely accepted.\n\nLet us draw that comfort even closer now. As you sink deeper into the quiet dark... bring just one face to your mind. Someone who stands beside you... someone who loves the quietest, simplest version of you. [inhales deeply] Breathe in the absolute safety of their presence. [exhales] Feel how easily your shoulders drop when you remember you are not alone. Let their quiet devotion be the softest blanket covering you tonight.\n\nThe demands of the day have completely faded. You have traded the stressful armor of daily interactions for a pure, simple gratitude toward your closest companions. [whispers] My voice will soon fade... leaving you to float peacefully into sleep on the gentle sounds of the forest... carrying this simple gratitude with you into your dreams.\n\nTonight, we remembered that true rest arrives when we let go of the world's endless expectations. We found profound relief in the silent, steady love of those who walk beside us. Sleep deeply now, completely held by their quiet grace.",
+          "script": {
+            "hook": "You spend so many waking hours pouring your energy into the world... Now, it is time to rest.\n\n[softly] Your mind holds onto the faces and voices you encountered today... the demands, the conversations, the passing moments... [pause] Tonight, on day four of our practice, we gently release the strangers... and draw close the warmth of the people beside you... the ones who simply let you be... [long pause] Breathe in their quiet acceptance... let it soften your jaw, your neck, your chest... as my voice guides you into the deepest sanctuary of sleep...",
+            "hookLoop": "The listener will find emotional relief and deep sleep by trading the stress of daily interactions for gratitude toward their closest companions.",
+            "closingLine": "Rest in the quiet grace of those who walk beside you.",
+            "narrationText": "You spend so many waking hours pouring your energy into the world... Now, it is time to rest.\n\n[softly] Your mind holds onto the faces and voices you encountered today... the demands, the conversations, the passing moments... [pause] Tonight, on day four of our practice, we gently release the strangers... and draw close the warmth of the people beside you... the ones who simply let you be... [long pause] Breathe in their quiet acceptance... let it soften your jaw, your neck, your chest... as my voice guides you into the deepest sanctuary of sleep...\n\nWelcome to Gratitude Springs. If you have carried the friction of a hundred hurried interactions with you to this moment... give yourself permission to set it down. Tonight, we will simply breathe and find our way back to peace. [softly] We are entering a space where nothing is required of you. The endless loop of conversations, the need to explain yourself, the rush to meet expectations... let them all dissolve into the shadows of the room.\n\nImagine a secluded forest grove as the evening settles. The trees here stand close together... their roots softly intertwined beneath the cool, damp earth. They do not ask anything of one another. They do not compete for the moonlight. They simply exist... anchoring each other against the wind. [pause] The people who truly know you are like these steadfast trees. When you are with them, you do not need to perform. You do not need to be perfect. You only need to be present.\n\nAnd if your mind has drifted back to the noise of the afternoon... simply guide it back to the breath... no judgment, just gentle awareness. Notice the subtle rhythm of your chest rising and falling. Feel the warmth spreading through your limbs... allowing each muscle to release its grip. We are trading the exhaustion of pleasing the world... for the deep, emotional relief of being entirely accepted.\n\nLet us draw that comfort even closer now. As you sink deeper into the quiet dark... bring just one face to your mind. Someone who stands beside you... someone who loves the quietest, simplest version of you. [inhales deeply] Breathe in the absolute safety of their presence. [exhales] Feel how easily your shoulders drop when you remember you are not alone. Let their quiet devotion be the softest blanket covering you tonight.\n\nThe demands of the day have completely faded. You have traded the stressful armor of daily interactions for a pure, simple gratitude toward your closest companions. [whispers] My voice will soon fade... leaving you to float peacefully into sleep on the gentle sounds of the forest... carrying this simple gratitude with you into your dreams.\n\nTonight, we remembered that true rest arrives when we let go of the world's endless expectations. We found profound relief in the silent, steady love of those who walk beside us. Sleep deeply now, completely held by their quiet grace.",
+            "sectionHeadings": [
+              "Arrival",
+              "The Journey",
+              "Deepening",
+              "Integration",
+              "The Landing",
+              "In Summary"
+            ]
+          }
+        }
+      },
+      {
+        "id": "jn747hkde7h4xn2sdwr8vke5qx89z4s7",
+        "block": "metadata",
+        "status": "ok",
+        "startedAt": 1783211709806,
+        "finishedAt": 1783216462515,
+        "inputs": {
+          "topic": "7 Days of Gratitude — Part 4 of 7: Gratitude for the People Beside You"
+        },
+        "outputs": {
+          "title": "Gratitude for the People Beside You Brings Deep Sleep",
+          "titleAlternate": "How Focusing on Companions Brings Deep Relief & Sleep"
+        }
+      }
+    ],
+    "artifactSummary": {
+      "total": 0,
+      "titleRelevant": []
+    }
+  }
+}

@@ -1,0 +1,558 @@
+{
+  "version": "title-baseline-source/v1",
+  "caseId": "drift-study-1780962831581",
+  "historicalReplayReady": false,
+  "liveGenerationPerformed": false,
+  "provenance": {
+    "deployment": "astute-camel-689",
+    "observedAt": "2026-09-08T23:43:45.441Z",
+    "queryMode": "convex run --inline-query; codegen/typecheck disabled; explicit field projections; no mutations",
+    "projectionNote": "Only title-relevant fields projected. Missing JSON fields were absent or undefined in this observation. Row payloads are not complete table documents. Current channel identity is NOT the run's historical configuration.",
+    "r2Bucket": "youtube-studio-ai",
+    "r2Inspection": {
+      "runId": "js71tzddw482bhs41tgw0gsztn88bhv7",
+      "prefix": "owner/owner_daniel/channel/drift-study-1780962831581/runs/js71tzddw482bhs41tgw0gsztn88bhv7/",
+      "objectCount": 2,
+      "textObjects": [],
+      "pages": 1
+    }
+  },
+  "availability": {
+    "narration": "not_recorded_music_format",
+    "separateHook": "not_recorded",
+    "competitors": "retained",
+    "frozenHistoricalInvocation": false,
+    "missing": [
+      "historical frozen channel identity and metadata parameters",
+      "historical resolved model and title-judge receipt",
+      "historical YouTube suggestions",
+      "historical plannedTitle presence/value",
+      "historical performance-context string",
+      "historical topic-bet title presence/value"
+    ],
+    "permittedBenchmarkUse": "Provenance-backed historical source regression. A new current-identity replay must explicitly bind this observed current identity and frozen evidence; it is not a reproduction of the historical model invocation."
+  },
+  "source": {
+    "runId": "js71tzddw482bhs41tgw0gsztn88bhv7",
+    "run": {
+      "channelId": "j977t0zqt4e2xf99qgz7qfv7w18899st",
+      "status": "ok",
+      "startedAt": 1780966675775,
+      "finishedAt": 1780967765326,
+      "hasInvocationSnapshot": false
+    },
+    "currentChannel": {
+      "id": "j977t0zqt4e2xf99qgz7qfv7w18899st",
+      "name": "Drift & Study",
+      "slug": "drift-study-1780962831581",
+      "family": "music_loop",
+      "contentLane": {
+        "family": "music_loop",
+        "key": "music_loop",
+        "primaryRenderer": "loop_clips",
+        "version": "content-lane/v1"
+      },
+      "identity": {
+        "persona": "A quiet, cozy companion for late-night study sessions and rainy afternoons. The channel speaks through atmosphere — warm, unhurried, and gently nostalgic.",
+        "niche": "Lo-Fi Music"
+      },
+      "metadataParams": [
+        {}
+      ]
+    },
+    "stages": [
+      {
+        "id": "jn745nxxwq4dsxe17a54d9neks88bjdp",
+        "block": "competitor_research",
+        "status": "ok",
+        "startedAt": 1780966684006,
+        "finishedAt": 1780966684156,
+        "outputs": {
+          "competitors": [
+            {
+              "topVideos": [
+                {
+                  "title": "Naam Chale (Official Video) Vikram Sarkar | New Haryanvi Songs Haryanavi 2025 |Latest Haryanvi Songs",
+                  "views": 206067017
+                },
+                {
+                  "title": "Falani (Official Music Video) Vikram Sarkar | New Haryanvi Songs 2025 | Latest Haryanvi Songs 2025",
+                  "views": 43916441
+                },
+                {
+                  "title": "Asla Tera Yaar Bhi Rakhe (Official Video) R Maan | Komal | New Haryanvi Songs Haryanavi 2024 | Been",
+                  "views": 38705434
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Cheli : Kehar Kharkiya | Yogesh Verma | Harry Lather | Yashika Sharma | Haryanvi Song",
+                  "views": 210157749
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Hopeless (Official Video) Amanraj Gill | Prem Lata | New Haryanvi Song 2025",
+                  "views": 95024941
+                },
+                {
+                  "title": "CIRCLE (Official Video) Amanraj Gill | Manisha Sharma, Shivani Yadav | New Haryanvi Song 2025",
+                  "views": 73004173
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Rasraj Ji Maharaj - वीर हनुमाना अति बलवाना - Lofi Version Veer Hanumana Ati Balwana - LoFi bhajan",
+                  "views": 60898602
+                },
+                {
+                  "title": "Rasraj Ji Maharaj - रामा रामा रटते रटते - Rama Rama Ratate Ratate - Slowed & Reverb #lofibhajans",
+                  "views": 37890928
+                },
+                {
+                  "title": "ऐसी कृपा करो श्री राधे - Aesi Kripa Karo Shree Radhe- Lofi Version - Radha Rani Bhajan@lofibhajans",
+                  "views": 28398284
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Vakaalat | Masoom Sharma | Biru Kataria, Sweta Chauhan | Ashu Twinkle | New Haryanvi Song 2024",
+                  "views": 68070459
+                },
+                {
+                  "title": "Badmash Jamai | Masoom Sharma, Manisha Sharma | Kay D, Shivani Yadav | New Haryanvi Song 2024",
+                  "views": 44579730
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Sochta hoon_🔥||[slowed+reverb]_||bast lofi song 🎶 #youtube #song #lofi",
+                  "views": 109440939
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Alone lofi songs || Sad songs 😍 || mind fresh Songs || mashup songs #alone #lofi #songs",
+                  "views": 96660183
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "bewafa sad song  😭| (slowed + reverb)#bewafa #bewafasonga #lofi",
+                  "views": 82354473
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "A true frnds 🫶🫂❣️ #love #song #radheradhe #jaishreekrishna #krishna #lofi #newsong #art #quotes",
+                  "views": 81781413
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "GAADI 150 (Official Video) Vikram Sarkar | New Haryanvi Songs Haryanavi 2025 | Latest Haryanvi Songs",
+                  "views": 80499221
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Onno Groher Chand | অন্য গ্রহের চাঁদ | Lofi Remix | Sohan Ali | NabruNation",
+                  "views": 43350168
+                },
+                {
+                  "title": "Ekhon Ami | এখন আমি | Lofi Remix | Shopnolok @ Ov | Ayon Chaklader | NabruNation",
+                  "views": 35514175
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "SAD LOFI SONGS | HEART 💔 BROKEN🥺 LOFI MASHUP | SLOW + REVERB LOFI MIX | #sad #trending #songs",
+                  "views": 78233587
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Falak Tak Chal Sath Mere || ( Slowed + Reverb ) | Lyrics | Lofi | Lofi Song | Raj BROTHERS",
+                  "views": 75741813
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Yeh Tune Kya Kiya | One upon the time in mumbaai | Javed Bashir | [ Slowed + reverb ] | LO-FI song",
+                  "views": 72193978
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "love 💕 ringtone❤️ New song video ringtone lofi song #ringtonesar #newringtone #ringtone #viral #love",
+                  "views": 59559048
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Feelings of Love Jukebox | Best of Arijit Singh | Non Stop Love.",
+                  "views": 55015372
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Wo Mera Nabi Hai (Slow+Reverb Naat) | Syed Hassan Ullah Hussani | Lofi Naat 2024",
+                  "views": 52707889
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Labon Ko (Slowed + Reverb) | KK | Zesan Rahaman",
+                  "views": 49131354
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Pov : \" Feel This Beautiful Song \" 🥰✨👀#shorts #lyrics #lofigirlmusic ‎@n_Lo-fi",
+                  "views": 49101517
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Gani song || ( slowed + reverb ) || Akhil || Lofi Music",
+                  "views": 48035852
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Adharam Madhuram Lofi - Krishna Bhajan | Bhakti Song | Bhajan Song | Madhurashtakam",
+                  "views": 45538668
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Alone Night -24  Mash-up l Lofi pupil | Bollywood spongs  | Chillout Lo-fi Mix #KaranK2official",
+                  "views": 44796240
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Sector 15 (Music Video) Khasa Aala Chahar | New Haryanvi Song 2024",
+                  "views": 41029984
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Teya Dora - Dzanum | Lofi Version | Slowed + reverb | Moye Moye #lofimusic #trending #viral #shorts",
+                  "views": 40048655
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Ishq Sufiyana (Slowed + Reverb) | Kamal Khan | The Dirty Picture | SR Lofi",
+                  "views": 20475733
+                },
+                {
+                  "title": "Sahiba (Slowed + Reverb) | Aditya Rikhari | SR Lofi",
+                  "views": 15066085
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Ijazat Falak [slowed  & reverb] lofi song ||We Jaan waliya [slowed & reverb] lofi song ....",
+                  "views": 34585409
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "TOP 5 Viral Romantic Songs 2025🥰🎧l Jhol- Pal Pal- Finding Her|#explore #song #ytshorts",
+                  "views": 34010051
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Mann mera (Original Version) | Slowed + Reverb | Gajendra Verma | #song #lofi #slowedandreverb",
+                  "views": 33063151
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Khoobsurat Love Mashup 2024 | Swaraj Komejwar & RishiRaj Visuals | LoFi Chillout",
+                  "views": 32919139
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Mere Sare 🥀 Wade 💫  #love #foryoou #explorepage #emotional #lofimusic #statusvideo #bts",
+                  "views": 32271898
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Raajhana Ve | [ Slowed +Reverbs ] | Best Lofi Song | SK Lofi Music #trending #Song ",
+                  "views": 31985645
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "#video Kamariya Aithe Lagi | Slowed Reverb #lofisong #bhjpurilofisong #Lofi #djremix #lofisadsong",
+                  "views": 31421301
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Tere Liye😍🥀🔥#dance #ytshorts #trending #music #lofibeats #lofi #lofisong #aiims #aiimsrishikesh",
+                  "views": 26931189
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Jhol (Slowed + Reverb) - Maanu x Annural Khalid | Coke Studio Pakistan | Also Holic",
+                  "views": 25652266
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "LOFI LOVE sourav joshi vlogs New song.. 💝#souravjoshivlogs #bharti #song #edit's #fanpage #trending",
+                  "views": 24972101
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "90's Chill Lofi ☕️ Study Music Lofi Rain Chillhop Beats ☔️ Lofi Rain Playlist",
+                  "views": 24622407
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Ki Kore Bolbo Tomai Song Lofi (কি করে বলবো তোমায় ) ❤️‍🩹 || Bengali sad song || Palak mucchal",
+                  "views": 24487076
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Main Kabhi Bhoolunga Na Tujhe || Saudebaazi ft. Aakrosh [Lofi + Slowed + Reverb ] Aini Lofi",
+                  "views": 23699440
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Heart' touching love stories 💞 heeriye lofi mix song status || love ringtone Hindi songs status 🥰",
+                  "views": 22896920
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "\"Tere Mast Mast Do Nain lofi Full Song Dabangg | Salman Khan, Sonakshi Sinha | Rahat Fateh Ali Khan\"",
+                  "views": 22684555
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Vishal Mishra Mashup 2025 | Hiren Chawda | Best of Vishal Mishra | Mushkil Hai | Khoobsurat",
+                  "views": 22184774
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Ek Mulaqat X Barbaad - Mashup (Full Version) Lo-fi 2307 | Jubin Nautiyal & Arijit | Latest 4K Mashup",
+                  "views": 19784923
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Sankatmochan Hanuman Ashtak-Lofi",
+                  "views": 19144610
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Heer - Ali Raza & Shjr | Lofi Version",
+                  "views": 18249289
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Long Drive Le Chal || Slowed & Reverb || Lufi Song | Rider Song | #slowed #reverb #lufi #song #rider",
+                  "views": 17930585
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Viral Chill Songs Playlist 2025 💿 | Non-Stop Trending Lofi + Bollywood Mix | Part 1",
+                  "views": 17691226
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "1 Hour of Night Hindi Lofi Songs To \\Chill \\Relax \\Refreshing",
+                  "views": 16167019
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "TERA FITOOR JAB SE CHADH GYA RE |genius| [slowed+reverb] lofi song",
+                  "views": 15924161
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Love - Mashup slowed and reverb song || Mind relax lofi song || #lofimusic #lofihiphop",
+                  "views": 15059271
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "🎧2027 Ultimate Mind Relaxing Lofi Beats | Study, Sleep & Chill 😍✨",
+                  "views": 13885284
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Make you feel positive and peaceful 🍀 Lofi Coffee ☕ ~ Lofi Hip Hop - Lofi Music [ Study/ Relax ]",
+                  "views": 12277728
+                }
+              ]
+            }
+          ],
+          "nicheIntel": {
+            "powerWords": [
+              {
+                "word": "new"
+              },
+              {
+                "word": "best"
+              },
+              {
+                "word": "top"
+              }
+            ],
+            "optimalTitleLen": 91
+          }
+        }
+      },
+      {
+        "id": "jn74ztmh1nk7xve7b6hptsbvwh88an6s",
+        "block": "topic_select",
+        "status": "ok",
+        "startedAt": 1780966684213,
+        "finishedAt": 1780966702126,
+        "outputs": {
+          "topic": "Train Window Reflections — Lo-Fi for Twilight Journeys"
+        }
+      },
+      {
+        "id": "jn70jmr7jcyq1qnjche158t5q988aqse",
+        "block": "metadata",
+        "status": "ok",
+        "startedAt": 1780967391709,
+        "finishedAt": 1780967464715,
+        "inputs": {
+          "topic": "Train Window Reflections — Lo-Fi for Twilight Journeys"
+        },
+        "outputs": {
+          "title": "Train Window Reflections: Your Quiet Journey for Late-Night Focus & Cozy Thoughts (LOFI)"
+        }
+      }
+    ],
+    "artifactSummary": {
+      "total": 0,
+      "titleRelevant": []
+    }
+  }
+}

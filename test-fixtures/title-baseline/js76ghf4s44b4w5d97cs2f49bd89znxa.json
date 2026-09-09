@@ -1,0 +1,877 @@
+{
+  "version": "title-baseline-source/v1",
+  "caseId": "inked-histories-1783204937695",
+  "historicalReplayReady": false,
+  "liveGenerationPerformed": false,
+  "provenance": {
+    "deployment": "astute-camel-689",
+    "observedAt": "2026-09-08T23:43:45.441Z",
+    "queryMode": "convex run --inline-query; codegen/typecheck disabled; explicit field projections; no mutations",
+    "projectionNote": "Only title-relevant fields projected. Missing JSON fields were absent or undefined in this observation. Row payloads are not complete table documents. Current channel identity is NOT the run's historical configuration.",
+    "r2Bucket": "youtube-studio-ai",
+    "r2Inspection": {
+      "runId": "js76ghf4s44b4w5d97cs2f49bd89znxa",
+      "prefix": "owner/owner_daniel/channel/inked-histories-1783204937695/runs/js76ghf4s44b4w5d97cs2f49bd89znxa/",
+      "objectCount": 2,
+      "textObjects": [],
+      "pages": 1
+    }
+  },
+  "availability": {
+    "narration": "retained",
+    "separateHook": "not_recorded",
+    "competitors": "retained",
+    "frozenHistoricalInvocation": false,
+    "missing": [
+      "historical frozen channel identity and metadata parameters",
+      "historical resolved model and title-judge receipt",
+      "historical YouTube suggestions",
+      "historical plannedTitle presence/value",
+      "historical performance-context string",
+      "separate script.hook/cold-open field (narration is retained; no hook inferred)",
+      "separate script.hookLoop promise field"
+    ],
+    "permittedBenchmarkUse": "Provenance-backed historical source regression. A new current-identity replay must explicitly bind this observed current identity and frozen evidence; it is not a reproduction of the historical model invocation."
+  },
+  "source": {
+    "runId": "js76ghf4s44b4w5d97cs2f49bd89znxa",
+    "run": {
+      "channelId": "j97btry53hv0y363bwq6w69yx989wqr0",
+      "status": "ok",
+      "startedAt": 1783214057129,
+      "finishedAt": 1783215152384,
+      "hasInvocationSnapshot": false
+    },
+    "currentChannel": {
+      "id": "j97btry53hv0y363bwq6w69yx989wqr0",
+      "name": "Inked Histories",
+      "slug": "inked-histories-1783204937695",
+      "family": "comic",
+      "contentLane": {
+        "family": "comic",
+        "key": "motion_comic",
+        "primaryRenderer": "motion_comic",
+        "version": "content-lane/v1"
+      },
+      "identity": {
+        "persona": "A scholarly yet dramatic narrator, guiding viewers through the turning pages of history as if revealing a lost epic. The tone is immersive and reverent, focusing on the human story within grand events.",
+        "niche": "History"
+      },
+      "metadataParams": [
+        {}
+      ],
+      "styleSeo": {
+        "titleFormula": "WHY [SURPRISING FACT/EVENT] CHANGED HISTORY: The [PERSON/EVENT] Story",
+        "descriptionStructure": "Discover the untold story of [PERSON/EVENT] in this deep dive into [HISTORICAL PERIOD/TOPIC]. We explore the [KEY CONFLICT/DILEMMA] and its lasting impact. \\n\\n Chapters: \\n [0:00] The Hook \\n [1:30] Context \\n [3:45] The Turning Point \\n [7:00] Legacy \\n\\n #History #Documentary #[HistoricalPeriod] #[KeyPerson/Event] #UntoldHistory"
+      }
+    },
+    "stages": [
+      {
+        "id": "jn7defcmr673sfxmf4p8c2128h89y4bh",
+        "block": "competitor_research",
+        "status": "ok",
+        "startedAt": 1783214072384,
+        "finishedAt": 1783214072551,
+        "outputs": {
+          "competitors": [
+            {
+              "topVideos": [
+                {
+                  "title": "Invention of glass...",
+                  "views": 361575058
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Loneliest Man In History",
+                  "views": 81384432
+                },
+                {
+                  "title": "Why Were We Never Taught This History In School",
+                  "views": 58934490
+                },
+                {
+                  "title": "Biggest Unsolved Theft In History",
+                  "views": 41042398
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "He saved 75 wounded soldiers at hacksaw ridge. #war #futurelink",
+                  "views": 60193897
+                },
+                {
+                  "title": "Sniper shot over 400 enemies during World War II. #futurelink #war",
+                  "views": 51736474
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Battery History :",
+                  "views": 96421346
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Watch That Changed History 😨 (fiction)",
+                  "views": 50779726
+                },
+                {
+                  "title": "He Dug Up A Civil War Sword In His Backyard 😱",
+                  "views": 44266156
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "An Intricate Look at Mujahideen Fighting Soviets In 1984 #documentary #afghanistan #coldwar",
+                  "views": 86372195
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "\"using MP40 strike back NAZI SS\" - WWII Guns #ww2 #war #shorts #Blood&Gold #viral",
+                  "views": 80158132
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Greatest Survival Story in Human History | Dhruv Rathee",
+                  "views": 27961237
+                },
+                {
+                  "title": "Iran Israel War | Why is ENTIRE Middle East under Attack? | Dhruv Rathee",
+                  "views": 23784568
+                },
+                {
+                  "title": "How was Planet Earth Born? | The 4.6 Billion Year History of our Solar System | Dhruv Rathee",
+                  "views": 14658048
+                },
+                {
+                  "title": "Iran vs Israel War | Does Iran REALLY Have Nukes? | Dhruv Rathee",
+                  "views": 13227558
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "#history #military #podcast",
+                  "views": 29121479
+                },
+                {
+                  "title": "#podcast #military #history",
+                  "views": 15924672
+                },
+                {
+                  "title": "#podcast #military #history",
+                  "views": 13218374
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Most Disturbing Job in History 😳",
+                  "views": 20096584
+                },
+                {
+                  "title": "Who is the Most Popular Person in History? 😳 #shorts",
+                  "views": 18786180
+                },
+                {
+                  "title": "I Explored the History of the Mona Lisa.. 😳 #shorts",
+                  "views": 18498039
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "THIS is a CLIP! \"Garand Hand\" 40mm M811 High-Explosive Incendiary Point-Detonating Round M247 L/70",
+                  "views": 34136935
+                },
+                {
+                  "title": "RADIO PROXIMITY FUZE: General Electric Helps Beat Kamikazes & Win WW2 #military #history #technology",
+                  "views": 9536038
+                },
+                {
+                  "title": "BIG bullet, BIGGER clip, BIGGEST gun!! BOOM BOOM BOOM #military #army #history #bullet #helldivers2",
+                  "views": 8843868
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "“Creepy Song” I Know You Belong To Me of World War 2 #shorts #songlyrics #worldwar2 #viralvideo",
+                  "views": 51682215
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Why North and South Korea Are Still at War 🇰🇷 Enemies After 70 Years 😱",
+                  "views": 25347560
+                },
+                {
+                  "title": "Why Chile Is So Long & So Thin 🇨🇱 🌶️ History of the Longest & Narrowest Country 🤯",
+                  "views": 24753998
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The history of displaying pregnancy in public! #history #art",
+                  "views": 19289964
+                },
+                {
+                  "title": "The history of pink and blue for girls and boys! #history #art",
+                  "views": 19081030
+                },
+                {
+                  "title": "The story of the Danaides #history #art #painting",
+                  "views": 10836832
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Biggest Misconception Of Indian History CF-EP-1 | #shorts",
+                  "views": 45881056
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "“I Was 18-Year-Old in The War! That Is Child Abuse!” - Vietnam Veteran",
+                  "views": 43818900
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "60s before NUKE... (Japan) #shorts #4k #history #extra",
+                  "views": 22338958
+                },
+                {
+                  "title": "What if Germany won WW2 #shorts #4k #history #extra",
+                  "views": 20170591
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "D-DAY VET \"I'm The ONLY ONE Left From My Unit\"",
+                  "views": 27961527
+                },
+                {
+                  "title": "The Difference Between a WWII VET and a VIETNAM VET",
+                  "views": 13149241
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Evolution of War Movie Deaths (1950s - now)",
+                  "views": 41009057
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "“Someone Here Thinks His War Is Over.” | Generation War (2013) #shorts #generationwar #movie #war",
+                  "views": 22962568
+                },
+                {
+                  "title": "“Kalashnikov Test Fire.” | Kalashnikov AK-47 (2020) #shorts #kalashnikov #movie #movies #war #ww2",
+                  "views": 16927227
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "POV: US - Mexican Conflict (1846) #historymemes #history #humour",
+                  "views": 38720897
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Henry Ford’s Model T-orture! - Worst Dads in History #shorts",
+                  "views": 13192462
+                },
+                {
+                  "title": "Judy Garland’s Pill-Pusher Mom | Worst Mom's in History | Extra History #shorts",
+                  "views": 12930571
+                },
+                {
+                  "title": "The Gross History of White Bread 🤢 - Extra History #shorts",
+                  "views": 12490693
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "**🔥History Ka Sabse Bada Aur Ajeeb Insaan, जो 3500 साल तक ज़िंदा रहा!😨🌊🔥 – UNBELIEVABLE\" || #shorts",
+                  "views": 37827659
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Top Countries Likely to Go to War in 2025 #history #geography #countries #worldwar #shorts",
+                  "views": 36656211
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The history of love",
+                  "views": 34408752
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Western Front in a nutshell #countryballs #history",
+                  "views": 34365062
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Top Safest Countries for World War 3",
+                  "views": 34217768
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How music artist see the world #mapping #geography #maps #flags #history #short #fyp #world #artist",
+                  "views": 33881822
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Living Relatives Of Historical Figures",
+                  "views": 31388790
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "M3 Grant @ TANKFEST | #shorts",
+                  "views": 28054677
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Grenade Trap Bunkers of WWII",
+                  "views": 27470727
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "LOST CITIES | Discovered places of lost civilizations",
+                  "views": 17920193
+                },
+                {
+                  "title": "ANCIENT MYSTERIES | Unexplained Archaeological Places",
+                  "views": 8275881
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Luis Brown - History (Video Oficial)",
+                  "views": 24717035
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "🌊 The biggest TSUNAMIS in History 🌊 3D Comparison",
+                  "views": 24650961
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How different countries Teach History #shorts",
+                  "views": 24094013
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Sizes Of History",
+                  "views": 23995020
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The weirdest deaths in history (Part 1)",
+                  "views": 23905807
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Was History Rewritten ? 🤯💀 - Tartaria - The most advanced civilization | Kuldeep Singhaniaa #shorts",
+                  "views": 13359203
+                },
+                {
+                  "title": "History of Indian Flag 🇮🇳😱 | Kuldeep Singhaniaa #shorts",
+                  "views": 10485908
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Iran and israel war 2025 - situation animation (countryballs)",
+                  "views": 23610746
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Sweet history of Nutella",
+                  "views": 23483670
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Feeding Soldiers In The Revolutionary War  #history #18thcenturycooking #revolutionarywar",
+                  "views": 22552051
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Proof Is Out There: Top 7 TERRIFYING Unexplained Phenomena | History",
+                  "views": 12147374
+                },
+                {
+                  "title": "Lost Civilizations Beneath Antarctica? | Ancient Aliens | History",
+                  "views": 8920933
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "That was close 😂 #army #militaryhistory",
+                  "views": 20278135
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "⚠️ BIG HOLE found Inside EARTH",
+                  "views": 19643148
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "3+ Hours Of WW2 Facts To Fall Asleep To",
+                  "views": 10824189
+                },
+                {
+                  "title": "3 Hours Of WW2 Facts To Fall Asleep To",
+                  "views": 8531487
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "German Tanks Transformation (1917-2025)",
+                  "views": 18797161
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Israel’s Secret Military Methods",
+                  "views": 17950766
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How is it possible?🤯😱 #ancient #temple #technology #history #hindugod #shorts #shortsfeed #india",
+                  "views": 17308822
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "History of America #countryballs",
+                  "views": 16495674
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "A young german soldier has surrendered to the Americans #ww2 #history #army #war",
+                  "views": 16343059
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Did you ever notice this? #dday #wwiireenactment #wwiihistory #wwii #ww2 #ww2history",
+                  "views": 16137532
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "6-year-old boy became a soldier and made military achievements. #war #biography #movieclips",
+                  "views": 15841955
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Historian Reveals SECRET Hair Styles of Victorian Women",
+                  "views": 15790397
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Biggest Mistake of History",
+                  "views": 15200531
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Professor Jiang: World War 3 Is About To Begin, Let Me Explain!",
+                  "views": 14965635
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The shortest war in history..",
+                  "views": 14916334
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Hidden History About Mamata Banerjee | Ankit Avasthi",
+                  "views": 14892933
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "A grand discovery has shocked the world #facts #history #ancient #ancienttreasures #ancientplaces",
+                  "views": 14561518
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "They STOLE $45 Trillion From INDIA - How RICHEST COUNTRY On Earth Turned To Middle Ranked #shorts",
+                  "views": 14487398
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "1945-1953 From World War to Cold War",
+                  "views": 13509688
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "COUNTRYBALLS: History of Vietnam",
+                  "views": 13217536
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How Does Japan Teach WW2?? #shorts #history #interesting #ww2 #wwii #japan #worldhistory #ryankelly",
+                  "views": 12804691
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "OLDEST People in the World History",
+                  "views": 12516357
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "CR7 SCORED THE MOST BEAUTIFUL GOAL IN UCL HISTORY AND STOPPED THE WORLD SHOWING WHO IS THE KING",
+                  "views": 12497121
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "History of Germany 🇩🇪 | Evolution of Germany",
+                  "views": 12256924
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Evolution of China #history #shorts",
+                  "views": 12146975
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "History of RUSSIA 🇷🇺🤯",
+                  "views": 12137189
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "This is what happens when you get too close to a SR-71 Blackbird. #usa #russia #china #blackbird",
+                  "views": 11880965
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Oldest Nation in the World?",
+                  "views": 11521742
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "HISTORY OF RUSSIA 📜 #countryhumans",
+                  "views": 11112532
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Why wasn't Portugal Conquered by Spain? #shorts #japan #map",
+                  "views": 10681750
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The LONGEST tank-to-tank kill in military history",
+                  "views": 9967444
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Real Reason Japan Surrendered in WWII",
+                  "views": 9715149
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How Much Ammo Did A WWII Soldier Carry?",
+                  "views": 9439621
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Knights Templar | Forbidden History and their Secret Quest for Atlantis",
+                  "views": 9374534
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Worst Mistakes in Human History 🤔",
+                  "views": 9332948
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Ancient Weapons vs Modern Armor #facts #war #medieval #ancient #history #interestingfacts #amazing",
+                  "views": 8951150
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "423 Years of American History in 13 Minutes",
+                  "views": 7873990
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Saddams very public purge PART 4 #iraq #war #history",
+                  "views": 7782951
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Jesus Strand: A Search for DNA",
+                  "views": 0
+                }
+              ]
+            }
+          ],
+          "nicheIntel": {
+            "powerWords": [
+              {
+                "word": "why"
+              },
+              {
+                "word": "top"
+              },
+              {
+                "word": "how"
+              }
+            ],
+            "optimalTitleLen": 51
+          }
+        }
+      },
+      {
+        "id": "jn7en75prwwstpfn87eq23a60n89zr2x",
+        "block": "topic_select",
+        "status": "ok",
+        "startedAt": 1783214072617,
+        "finishedAt": 1783214094645,
+        "outputs": {
+          "topic": "The preservation mechanism of buried battlefield relics",
+          "topicBet": {
+            "provisionalTitle": "How a Civil War Sword Survived a Century in Dirt"
+          }
+        }
+      },
+      {
+        "id": "jn75arcy88zn2ah2ahxcptprt589zw66",
+        "block": "motion_comic",
+        "status": "ok",
+        "startedAt": 1783214100906,
+        "finishedAt": 1783215046374,
+        "outputs": {
+          "narrationText": "Beneath the quiet, emerald fields of northern France lies a silent, suffocating world where the brutal march of time simply stopped. Here, a dense, oxygen-starved layer of thick blue clay swallowed the relentless chaos of the Great War, sealing away shattered lives in a perfect, anaerobic vault beneath the grass. This mud is practically solid concrete, Doctor Thorne. The secret to this eerie preservation is the complete absence of oxygen, the very element required by bacteria to break down organic matter. When the trench walls collapsed in the freezing winter of nineteen-seventeen, the heavy, waterlogged earth smothered everything, halting the natural cycle of decay dead in its tracks. Dig gently, Leo. The clay remembers absolutely everything. Striking the dense subsoil, Leo’s trowel uncovers a patch of surprisingly supple brown leather, a delicate material that should have rotted to dust a century ago. Encased in its protective shell of wet earth, the officer's satchel has survived the decades in a state of suspended animation, untouched by air. Look at this! The leather stitching is completely intact. But the moment this subterranean vault is breached, the clock begins ticking once more, as sudden exposure to the atmosphere threatens to destroy what the earth kept. The sudden influx of oxygen awakens dormant microbes, meaning the relic will rapidly disintegrate if it isn't stabilized immediately by the excavation team. Get the stabilization gel! The air will ruin it. Working with breathless urgency, Doctor Thorne applies a specialized chemical sealant to the porous leather, replacing the lost moisture before the fibers can dry and crack. The heavy trench mud had acted as a perfect barrier against the elements, a miraculous tomb of chemistry that preserved even the faintest oil stains. It looks like it was dropped yesterday. With agonizing care, she unfastens the tarnished brass buckle, revealing a cache of folded paper that defies all logical expectations of a battlefield grave. Because the surrounding soil was highly acidic, the sheer density of the clay created a localized micro-environment, a sealed pocket where fragile paper could somehow survive. There is a letter inside. Perfectly dry. The neat, cursive ink remains startlingly vivid across the yellowed page, carrying a fallen soldier's final, desperate thoughts to a family he would never see again. The very mud that dragged these young men down into the dark also became their ultimate protector, refusing to let their final words fade away. To my dearest mother... We often think of the earth as a devourer of things, a relentless natural force that reclaims all human endeavor through dust and decay. Yet in the suffocating embrace of these forgotten trenches, the battlefield became a desperate museum, holding its breath for a hundred years to deliver one last message. Some voices refuse to be buried forever."
+        }
+      },
+      {
+        "id": "jn7dk182vx4jrbgnm6bx6xx85h89y7rw",
+        "block": "metadata",
+        "status": "ok",
+        "startedAt": 1783215047564,
+        "finishedAt": 1783215052955,
+        "inputs": {
+          "topic": "The preservation mechanism of buried battlefield relics"
+        },
+        "outputs": {
+          "title": "7 Secrets of Battlefield Relic Preservation Revealed",
+          "titleAlternate": ""
+        }
+      }
+    ],
+    "artifactSummary": {
+      "total": 0,
+      "titleRelevant": []
+    }
+  }
+}

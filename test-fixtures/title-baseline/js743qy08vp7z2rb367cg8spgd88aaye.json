@@ -1,0 +1,1186 @@
+{
+  "version": "title-baseline-source/v1",
+  "caseId": "rainy-desk-lofi-1781024512939",
+  "historicalReplayReady": false,
+  "liveGenerationPerformed": false,
+  "provenance": {
+    "deployment": "astute-camel-689",
+    "observedAt": "2026-09-08T23:43:45.441Z",
+    "queryMode": "convex run --inline-query; codegen/typecheck disabled; explicit field projections; no mutations",
+    "projectionNote": "Only title-relevant fields projected. Missing JSON fields were absent or undefined in this observation. Row payloads are not complete table documents. Current channel identity is NOT the run's historical configuration.",
+    "r2Bucket": "youtube-studio-ai",
+    "r2Inspection": {
+      "runId": "js743qy08vp7z2rb367cg8spgd88aaye",
+      "prefix": "owner/owner_daniel/channel/rainy-desk-lofi-1781024512939/runs/js743qy08vp7z2rb367cg8spgd88aaye/",
+      "objectCount": 2,
+      "textObjects": [],
+      "pages": 1
+    }
+  },
+  "availability": {
+    "narration": "not_recorded_music_format",
+    "separateHook": "not_recorded",
+    "competitors": "retained",
+    "frozenHistoricalInvocation": false,
+    "missing": [
+      "historical frozen channel identity and metadata parameters",
+      "historical resolved model and title-judge receipt",
+      "historical YouTube suggestions",
+      "historical plannedTitle presence/value",
+      "historical performance-context string",
+      "historical topic-bet title presence/value"
+    ],
+    "permittedBenchmarkUse": "Provenance-backed historical source regression. A new current-identity replay must explicitly bind this observed current identity and frozen evidence; it is not a reproduction of the historical model invocation."
+  },
+  "source": {
+    "runId": "js743qy08vp7z2rb367cg8spgd88aaye",
+    "run": {
+      "channelId": "j978et30ex8mksrjs6kpyc7gad88ar0x",
+      "status": "ok",
+      "startedAt": 1781026365195,
+      "finishedAt": 1781027414194,
+      "hasInvocationSnapshot": false
+    },
+    "currentChannel": {
+      "id": "j978et30ex8mksrjs6kpyc7gad88ar0x",
+      "name": "Seaside Ghibli Lofi",
+      "slug": "rainy-desk-lofi-1781024512939",
+      "contentLane": {
+        "family": "music_loop",
+        "key": "music_loop",
+        "primaryRenderer": "loop_clips",
+        "version": "content-lane/v1"
+      },
+      "identity": {
+        "persona": "A quiet, cozy corner of the internet where time slows down. The channel feels like a late-night study session in a warmly lit room, no words needed — just sound and soft motion.",
+        "niche": "Lo-Fi Music"
+      },
+      "metadataParams": [
+        {}
+      ],
+      "styleSeo": {
+        "titleFormula": "[Mood] Seaside Ghibli Lofi ~ [scene / use-case] to study & relax to (X Hours) 🌊",
+        "descriptionStructure": "Line 1: gentle seaside scene-setting invitation. Line 2: use-case (study / relax / sleep). Line 3: loop duration. Line 4: channel tagline. Line 5: keyword block (ghibli lofi, seaside lofi, lofi hip hop, study music, ocean sounds, relaxing). Line 6: playlist links."
+      }
+    },
+    "stages": [
+      {
+        "id": "jn7chqw541d28mny52ybzrg3r188bpky",
+        "block": "competitor_research",
+        "status": "ok",
+        "startedAt": 1781026373044,
+        "finishedAt": 1781026373247,
+        "outputs": {
+          "competitors": [
+            {
+              "topVideos": [
+                {
+                  "title": "I painted Luffy…",
+                  "views": 62140458
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The last words...\"I'll leave the rest to you\"😭",
+                  "views": 57196028
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Hago figura de Luffy técnica Gomu Gomu globo. Manualidades One Piece",
+                  "views": 55751968
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Wait for her reaction🤯🗣️That was amazing😳 #kauntujhe #bollywoodsongs #bollywood #hindi #msdhoni",
+                  "views": 29322029
+                },
+                {
+                  "title": "She made my day🥹✨ #pehlebhimain #vishalmishra #animalmovie #bollywood #hindisong #piano",
+                  "views": 25545944
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "CLIMA LINDO (SLOWED)",
+                  "views": 52242440
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "We shocked everyone in the cafe @Poviolinist | Pirates of the Caribbean 🔥",
+                  "views": 52051867
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Wait… This Café is 2D!?",
+                  "views": 50441484
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "En la cafetería más Kawaii de España… ¿decimos lo que pensamos? 😂🩷",
+                  "views": 42215307
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Teya Dora - Dzanum | Lofi Version | Slowed + reverb | Moye Moye #lofimusic #trending #viral #shorts",
+                  "views": 40049897
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "The Amazing Digital Circus Cafe has NO EXIT! #shorts #theamazingdigitalcircus",
+                  "views": 33230045
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "MA! 😨 7 weeks and 3 days melody on #BOCLAA  #lofi #7weeksand3days #yungatita #singing #musicgame",
+                  "views": 14019198
+                },
+                {
+                  "title": "MA! 🥹 #BOCLAA song inspired by 7 weeks #yungatita #7weeksand3days #instrument #piano #singing #lofi",
+                  "views": 12569982
+                },
+                {
+                  "title": "BOO 😳 #BOCLAA remake #chords #musicgame #looping #augmentedreality #iosgame #lofi #chill",
+                  "views": 5818900
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Make you feel positive and peaceful 🍀 Lofi Coffee ☕ ~ Lofi Hip Hop - Lofi Music [ Study/ Relax ]",
+                  "views": 12281198
+                },
+                {
+                  "title": "Ghibli Coffee Shop ☕️ Music to put you in a better mood 🌿 lofi hip hop - lofi songs | study / relax",
+                  "views": 10757153
+                },
+                {
+                  "title": "Rainy Day ☔ Chilling Your Mood 🎧 Chill Lo-fi Hip Hop to Study / Relax / Work 🌲 Lofi Coffee ☕",
+                  "views": 3728808
+                },
+                {
+                  "title": "Cafe in the Morning🌻Take a time to work/relax/study with Lofi Music🎧~ Lofi Coffee☕[ Chill Hip Hop ]",
+                  "views": 1999338
+                },
+                {
+                  "title": "Ghibli Vibes 🌻 ~ Lofi Coffee ☕ | Deep focus to study / relax / work [ Lofi Hip Hop - Lofi Music ]",
+                  "views": 750376
+                },
+                {
+                  "title": "Ghibli Coffee & Rainy Lofi Chill ☔️ Peaceful & Relaxing Day Study/Work ☕️ Lofi Hip Hop - Lofi Coffee",
+                  "views": 277026
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Such a beautiful café 😍 Location: Ruru Shibuya",
+                  "views": 27424296
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "90's Chill Lofi ☕️ Study Music Lofi Rain Chillhop Beats ☔️ Lofi Rain Playlist",
+                  "views": 24636846
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Main Kabhi Bhoolunga Na Tujhe || Saudebaazi ft. Aakrosh [Lofi + Slowed + Reverb ] Aini Lofi",
+                  "views": 23711197
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "#Luffy #Onepiece",
+                  "views": 12583386
+                },
+                {
+                  "title": "#Luffy #Onepiece",
+                  "views": 10734998
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "👀 #thebhimsenart #art #drawing #monkeydluffy #anime",
+                  "views": 23279468
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Italians🇮🇹 give me 🏆 for this coffee😎",
+                  "views": 23131296
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Mafia - Slowed & Reverb | Bhartiya Radio | Lofi | Trending Song | Hit Song | Gangster Theme",
+                  "views": 21822988
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "lofi hip hop mix 📚 beats to relax/study to (Part 1)",
+                  "views": 7384200
+                },
+                {
+                  "title": "Bedtime Lofi 💤  8 hours of relaxing beats to sleep to",
+                  "views": 4717827
+                },
+                {
+                  "title": "sleep ambient music 💤 relaxing radio to fall asleep to",
+                  "views": 3772800
+                },
+                {
+                  "title": "medieval lofi radio 🏰 - beats to scribe manuscripts to",
+                  "views": 3687500
+                },
+                {
+                  "title": "Peaceful Day 🎹 [calm piano]",
+                  "views": 1892251
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Less talk....  more action. / Lo-fi for study, work ( with Rain sounds)",
+                  "views": 10974912
+                },
+                {
+                  "title": "Why the rush? - lo-fi beats for work/study / cat jazz",
+                  "views": 4033829
+                },
+                {
+                  "title": "Relax mind, get some coffee ☂️ Beats for Study / Lo-fi Rain / Jazzy HipHop / Chillhop",
+                  "views": 3438829
+                },
+                {
+                  "title": "Let go of what you can't control. | Lo-fi Rain | Study Beats | Cafe Music",
+                  "views": 1452430
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Luffy painting 🎨🖌✨️#painting #artshorts #acrylicpainting #anime #art #artist #luffy #gears5 #drawing",
+                  "views": 19588716
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "THIS Is WHY I HATE DRAWING!!😤✍️ - #art #shorts",
+                  "views": 18519956
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Mann Mera (Original Version) [Slowed Reverb] | Gajendra Verma | Obito Uchiha | Sirchox",
+                  "views": 17895549
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Sony SMC-210DL6 M35, 1986 & Digger #shorts #retrogaming #vintagecomputer",
+                  "views": 17630467
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Lo Fi Radio 🧘",
+                  "views": 17326785
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "#onepiece #luffy",
+                  "views": 16452724
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "1 Hour of Night Hindi Lofi Songs To \\Chill \\Relax \\Refreshing",
+                  "views": 16170171
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Luffy and Ace Zoro badass moments #onepiece #luffy #ace #zoro",
+                  "views": 15505645
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Ｓｍｏｋｅ　Ａｎｄ　Ｃｈｉｌｌ 🚬 Lofi Hip Hop 🎵 [ Beats To Smoke / Chill / Relax / Stress Relief ]",
+                  "views": 9754464
+                },
+                {
+                  "title": "Lofi Relax 🍃 Lofi Hip Hop | Calming Music 🎶 Deep Focus, Relaxing Music",
+                  "views": 5702674
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Love - Mashup slowed and reverb song || Mind relax lofi song || #lofimusic #lofihiphop",
+                  "views": 15077552
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Mafia - Slowed & Reverb | Bhartiya Radio | Lofi | Trending Song | Hit Song | Gangster Theme",
+                  "views": 14586885
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Forest Cafe Jazz Music | Morning Tranquill Jazz with Nature Therapy for Stress Relief, Study & Work",
+                  "views": 14463552
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "One Piece: Luffy Trapped Like a Mouse! #anime",
+                  "views": 14355225
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Dragon Ball Edit - Father Of Anime 🗿 #dbz #naruto #onepiece #bleach #anime",
+                  "views": 14255671
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "nostalgia hits hard  #piano #minecraft #pianocover #minecraftmusic",
+                  "views": 13969387
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Relaxing Piano Music & Rain Sounds for Deep Sleep, Stress Relief and Anxiety, Meditation, Calming",
+                  "views": 13939966
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "🎧2027 Ultimate Mind Relaxing Lofi Beats | Study, Sleep & Chill 😍✨",
+                  "views": 13891867
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Interstellar - Hans Zimmer (Soft Version) Sleep, Study, Relax - 1 Hour",
+                  "views": 11876042
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "How Luffy Got X Scar on His Chest! || Onepiece",
+                  "views": 11675738
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Sochta Hoon old lofi song 🥀💔😊[ Slowed+Revere ] #lofi #old#oldsong #oldisgoldsongs #1994",
+                  "views": 10776322
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Romantic Lofi Mashup | Slowed + Reverb | Lofi mix",
+                  "views": 10702324
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "When Someone Says I Love You #anime #phonk #short",
+                  "views": 10485924
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "TUM SE HI : jab we met | Mohit Chauhan | slowed-reverb | LO-FI VERSION | Sleepy head #trending",
+                  "views": 10251241
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "My crush's sister fall in love because of this 😍 #pianosoinapp #piano #pianotutorial",
+                  "views": 9970584
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Drawing That Statue From Solo leveling |Glowart|#anime #animedrawing #penart",
+                  "views": 9547304
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Incredibly SCARY 8D Audio 👻  #8d #8daudio  #fyp #sound #music #8dmusic #3daudio",
+                  "views": 5717223
+                },
+                {
+                  "title": "HEADPHONES and SPEAKERS TEST 🎧 [Left and Right Test] #headphonesTest #speakersTest #stereoSoundTest",
+                  "views": 3568957
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "One Piece Luffy Drawing ✏️ #sadimkhan #shorts @mariakhan.03 @mukeem03",
+                  "views": 9214671
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Heart Broken Sad Lofi Songs 💔 | Breakup Songs | Hindi Emotional Sad Songs | Alone Mood Off Mix 2025",
+                  "views": 9211889
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Morning Tea ☕ Dopamine morning with Lofi Cafe 🍂 Lofi Deep Focus to study / relax  [ Lofi Hip Hop ]",
+                  "views": 4306912
+                },
+                {
+                  "title": "Seaside Coffee 🍵 Feel your peace & Relax 🌱 Coffee Morning | Lofi Hip Hop - Chill to work, relax",
+                  "views": 2933627
+                },
+                {
+                  "title": "Snow Coffee ☕ Winter Lofi Chill ❄️ Deep Focus for study/work with [ Lofi Hip Hop - Lofi Cafe ]",
+                  "views": 1840256
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "𝙻𝚘𝚏𝚒 𝚁𝚘𝚘𝚖 / 𝙶𝚞𝚒𝚝𝚊𝚛 𝙻𝚘𝚏𝚒 / 𝙲𝚊𝚏𝚎 𝙼𝚞𝚜𝚒𝚌 / 𝙴𝚊𝚜𝚢 𝚕𝚒𝚜𝚝𝚎𝚗𝚒𝚗𝚐 / 𝙱𝙶𝙼 / 𝙻𝚘𝚏𝚒 𝙼𝚞𝚜𝚒𝚌 / 𝚅𝚎𝚛.𝟾",
+                  "views": 8611300
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "A cozy small LOFT #bedroomdecorideas #aestheticroomdecor #healingscenery #relax  #interior #loft",
+                  "views": 8538135
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Nhạc Chill Quán Cafe - Những Ca Khúc Lofi Nhẹ Nhàng Hay Nhất Dành Cho Quán Cafe - Nhạc Lofi 2026",
+                  "views": 4599293
+                },
+                {
+                  "title": "Nhạc Chill Quán Cafe - Những Ca Khúc Lofi Nhẹ Nhàng Hay Nhất Dành Cho Quán Cafe - Nhạc Lofi 2025",
+                  "views": 3666091
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Top 10 Most Popular Sad Songs In The World Part -2",
+                  "views": 8124378
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "RADIO MUSIC LYRICS THEORY 😱 #conspiracy #theory #mystery #music",
+                  "views": 8022486
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Coffee Lofi ☕1 Hour Cafe Song 🎵 Stream cafe ✨cute & relaxing music 🍪 Make Your Day Better",
+                  "views": 7634512
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Mind Relax Lofi Song | Mind Relax Lofi Mashup | Mind Fresh Lofi Songs | Slowed and Reverb",
+                  "views": 7574113
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "🌍🥺lofi radio || study music || lofi hip hop ☁️ chilledcow 🥰 the bootleg boy || lofi chill beats ||",
+                  "views": 7315477
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Quiet Solitude - Lofi Song ~ Lofi hip hop mix ~ Stress Relief / Relaxing Music / Smoke & Chill",
+                  "views": 7246445
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "NIGHT VIBES Mashup | Night Vibes Songs | Hindi Lofi Songs To \\Chill \\Relax \\Refreshing",
+                  "views": 7129152
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Alan Becker lofi radio - beats to animate to",
+                  "views": 6863206
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Lofty Library 📚｜Soothing and Relaxing Jazz + Rain Sounds｜Study & Work Music｜Animal Crossing Ambience",
+                  "views": 6517031
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Minecraft Nostalgia",
+                  "views": 6411044
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Learning Espresso by Sabrina Carpenter with AI #piano #learnpiano #pianocover #pianotutorial #tech",
+                  "views": 6399963
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Soft Lofi Room 🎧 Chill Vibes for Peaceful Study & Relaxation",
+                  "views": 4175209
+                },
+                {
+                  "title": "2hour 🌠Night Lo-fi Playlist - Chill radio beats Music for Cozy Vibes / Relax/Study/Work/Coffee/sleep",
+                  "views": 2218898
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "2026 Ultimate Mind Relaxing Lofi Beats | Study Sleep & Chill lofi | #lofimusic #trendingsong song19",
+                  "views": 6328322
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "I went to the Kirby Cafe in Japan!",
+                  "views": 6217449
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Non Stop Lofi Mashup | 24/7 Live | Hindi Heart Touching Songs | Lofi Songs | Lofi Live",
+                  "views": 6183682
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Relaxing Winter Snowfall with Soft Jazz Music on Cozy Cabin Ambience ⛄ Fireplace Sounds for Unwind",
+                  "views": 6086050
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Stranger Things is so nostalgic | Kids - Kyle Dixon & Michael Stein | Stranger Things Edit",
+                  "views": 5926392
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "𝐂𝐨𝐳𝐲 𝐂𝐨𝐟𝐟𝐞𝐞 𝐒𝐡𝐨𝐩 𝐀𝐦𝐛𝐢𝐞𝐧𝐜𝐞 | 𝐃𝐚𝐫𝐤 𝐀𝐜𝐚𝐝𝐞𝐦𝐢𝐚 𝐌𝐮𝐬𝐢𝐜 𝐟𝐨𝐫 𝐒𝐭𝐮𝐝𝐲𝐢𝐧𝐠, 𝐑𝐞𝐚𝐝𝐢𝐧𝐠, 𝐖𝐫𝐢𝐭𝐢𝐧𝐠 | 𝐌𝐞𝐥𝐚𝐧𝐜𝐡𝐨𝐥𝐢𝐜 𝐏𝐢𝐚𝐧𝐨",
+                  "views": 5819273
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Chill Lofi Beats Mix [chill lo-fi hip hop beats/Study & Relax Music] Vol. 32",
+                  "views": 5600279
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "2026 Ultimate Mind Relaxing Lofi Beats | Study Sleep & Chill lofi | #lofimusic #trendingsong song 1",
+                  "views": 5449459
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Capybara Cafe",
+                  "views": 5412906
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Top Bengali Lofi Mashup Song 🎵 ll Bengali hit Song ll ♥️ #please_subscribe_my_channel #",
+                  "views": 5203816
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Kisi Ki Yaadon Mein Khoye Hue ( Slowed + Reverb ) | Old Hindi Songs Lofi Slowed Reverb",
+                  "views": 4903119
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "90s Superhit song ❤️ | Old is Gold | Evergreen Romantic Song | Bollywood Lofi mix ",
+                  "views": 4888401
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Lofi Work Space 📂 Deep Focus Study/Work Concentration [chill lo-fi hip hop beats]",
+                  "views": 4641734
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "SAD BROKEN HARD LOFI SONG 2025 | 2025 Ultimate Mind Relaxing Lofi Beats | Study, Sleep & Chill 💫",
+                  "views": 4582081
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Most nostalgic songs of all time - Part 1 #music #nostalgia",
+                  "views": 4571278
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Premikkumbol X Dilshad | Malayalam Lofi | Yawar Abdal | Premikkumbol Neeyum Njanum | eternaL",
+                  "views": 4537003
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Chill Vibes 🎧😌💨 Lofi hip hop ~ Healing Music, Relaxing, Study To",
+                  "views": 4506573
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "ＳＬＥＥＰＹ Lofi Cat 💤 Listen to it to escape from a hard day with my cat 💤 Beats To Sleep / Chill To",
+                  "views": 4431936
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Viral Chill Songs Playlist 2025 💿 | Non-Stop Trending Lofi + Bollywood Mix| Part 8 | LATE NIGHT VIBE",
+                  "views": 4422876
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "2026 Ultimate Mind Relaxing Lofi Beats | Study Sleep & Chill lofi 💫(Part  2.4) #sad #trendingsong ",
+                  "views": 4351553
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Feel the Flow: Neo Soul & Jazz Hip Hop Grooves",
+                  "views": 4339947
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "スタジオジブリの最高の曲🍀あなたの記憶に焼き付く、スタジオジブリの最高の曲を紹介🍀Spirited Away, My neighbor Totoro, Kiki's Delivery Service",
+                  "views": 4327614
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "/𝐧𝐨 𝐬𝐭𝐚𝐫𝐬 | 80's Tokyo Funky Lofi Playlist 🎧 | Broadcasting Beyond | Relax & Chill & Study to",
+                  "views": 4308857
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "90's Lofi City 🌧️ Rainy Lofi Hip Hop 🎶 Lofi Music & Rain Sounds",
+                  "views": 4256033
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Japan Coastal Vibes 🌅 Lofi Mix for Focus and Relaxation",
+                  "views": 3860698
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Lofi HipHop配信してるやつ【アニメ】",
+                  "views": 3592644
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Kainbeats - Under the Stars [Chill Lofi Hip Hop]",
+                  "views": 3384250
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Jazz at the Library 📚 1 Hour Jazz Music 📖 Library Ambience | Studying Music | Work Aid 🎧",
+                  "views": 3246871
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Night Smoke Lofi 🚬 Lofi Hip Hop & Chillhop Mix ~ Relaxed Vibes for Smoking",
+                  "views": 3186359
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "2026 Ultimate Mind Relax Beautiful Mashup 🥰 | Study, Sleep & Chill Lofi #lofimusic #trendingsong ",
+                  "views": 2922117
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "a cozy day in the life",
+                  "views": 2891967
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Upbeat Lofi - Deep Focus & Energy for Work [R&B, Neo Soul, Lofi Hiphop]",
+                  "views": 2845373
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Relaxing Jazz Music at Cozy Coffee Shop Ambience ☕ Soft Jazz Instrumental for Work & Study",
+                  "views": 2758358
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Sunrise High-Mountain Studio 🌅  | Neo Soul, R&B Lofi Upbeat Chill Mix",
+                  "views": 2657399
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Alto Choyate Ektu Darano || Relaxing LoFI Version || আলতো ছোঁয়াতে একটু দাঁড়ানো | Bangla LoFi Mix",
+                  "views": 2639436
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Old PUBG MOBILE ❤️‍🩹 #pubgmobile #bgmi #shorts",
+                  "views": 2592953
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Waffle’s Forest Book Nook 📚 Soft Lofi to Escape With#lofihiphop #chillmusic #coffeemusic #studymusic",
+                  "views": 1760423
+                },
+                {
+                  "title": "Otter’s Cozy Café Vibes 🌞 Calm Lofi for Work& Relax #lofihiphop #chillmusic #coffeemusic #studymusic",
+                  "views": 808862
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭 90s Japanese Lofi Hiphop ☕️Nostalgic Chill Vibes",
+                  "views": 2425024
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Elegant June Night Jazz & Gentle Rain Sound by the Window | Relaxing Piano Jazz for Sleep Tight",
+                  "views": 2195634
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Tamil × Malayalam Romantic melodies lofi ~ malayalam lofi / tamil lofi | old songs lofi playlist",
+                  "views": 2190620
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Top 3 most popular old song 🎧 || OLD SONGS || LOFI DMR ",
+                  "views": 2182649
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "[𝐏𝐥𝐚𝐲𝐥𝐢𝐬𝐭]90s Japanese Lofi 📼 Nostalgic Chill Vibes",
+                  "views": 2158991
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Cozy Library Coffee Shop Lofi ☕ — Deep Focus to Work, Study & Relax | Lofi Music",
+                  "views": 2030367
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "【ジブリ BGM】ジブリメドレーピアノ🥀 ベストジブリコレクション 🥀 ジブリ史上最高のリラックス BGM 💖 となりのトトロ, 魔女の宅急便, 崖の上のポニョ",
+                  "views": 2019368
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "“90s Rooftop Sleep | Calm Night” #90snostalgia #90s #villagelife #cozyaesthetic #studioghibli",
+                  "views": 1936774
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Animal Crossing ambience - Cozy Antique café ☕ Chatters + Lo-fi Smooth Jazz Piano Music Play list 🎧",
+                  "views": 1841571
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Rainy Night by the Fireplace with sleepy cat  – Cozy Lofi for Reading & Relaxation 🌧️🔥🐾",
+                  "views": 1288480
+                },
+                {
+                  "title": "Rainy Day in a Forest Cabin | Cozy Fireplace & Cat Lofi Ambience 🌧️🐾",
+                  "views": 226606
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Satisfying & Relaxing Video with LoFi Cozy Music | Try Not to Say WOW",
+                  "views": 1509529
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "3 hour of Studio Ghibli | Relaxing Piano Music (relax, study, sleep) Soft and Tranquil Melodies",
+                  "views": 1049660
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "anemoia: nostalgia for a time or a place one has never known | quiet night with rain sound",
+                  "views": 1035424
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "【8時間スタジオジブリピアノ広告なし】宮崎駿アニメーションソング-スーパーコレクション, 千と千尋の神隠し、天空の城ラピュタ、ハウルの動く城💖8hrs Studio Ghibli Orchestra",
+                  "views": 844241
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Laufey good mood playlist [Instrumental and Rain]",
+                  "views": 817654
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Vibing with Calcifer in Howls Moving Castle | 8 Hour calming fireplace noise | Ghibli Atmosphere",
+                  "views": 648504
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Chill Morning Vibes 🌞 ~ Lofi Cat 90's 🐈 ~ Deep Focus to Relax//Study [ Lofi Hip Hop ~ Ghibli Lofi ]",
+                  "views": 645445
+                }
+              ]
+            },
+            {
+              "topVideos": [
+                {
+                  "title": "Studio Ghibli but it's lofi beats",
+                  "views": 278952
+                }
+              ]
+            }
+          ],
+          "nicheIntel": {
+            "powerWords": [
+              {
+                "word": "amazing"
+              },
+              {
+                "word": "relaxing"
+              },
+              {
+                "word": "why"
+              },
+              {
+                "word": "deep"
+              },
+              {
+                "word": "ultimate"
+              },
+              {
+                "word": "how"
+              }
+            ],
+            "optimalTitleLen": 72
+          }
+        }
+      },
+      {
+        "id": "jn77xn12xhrd3kv71fwjawcwh588akh6",
+        "block": "topic_select",
+        "status": "ok",
+        "startedAt": 1781026373353,
+        "finishedAt": 1781026437220,
+        "outputs": {
+          "topic": "Rainy Lighthouse Keeper's Desk Lofi"
+        }
+      },
+      {
+        "id": "jn77bgqpdfw7h2qdfhs3aweem188aeb8",
+        "block": "metadata",
+        "status": "ok",
+        "startedAt": 1781027017737,
+        "finishedAt": 1781027087469,
+        "inputs": {
+          "topic": "Rainy Lighthouse Keeper's Desk Lofi"
+        },
+        "outputs": {
+          "title": "Rainy Lighthouse Keeper's Desk Lofi ~ Cozy Ambience for Deep Focus & Study [3 HRS]"
+        }
+      }
+    ],
+    "artifactSummary": {
+      "total": 0,
+      "titleRelevant": []
+    }
+  }
+}
