@@ -15,6 +15,8 @@ function joinClassNames(...names: Array<string | undefined>) {
 export type MediaPreviewPresentation = {
   source: MediaPreviewSource;
   state: "loading" | "ready" | "unavailable";
+  /** The resolved displayed source, so composition slots need no second presign hook. */
+  src: string | null;
 };
 
 /**
@@ -39,6 +41,7 @@ export function MediaPreview({
   unavailableLabel = "Preview unavailable",
   emptyContent,
   overlay,
+  footer,
 }: {
   assetKey?: string | null;
   /** A paused 15-second frame from a saved final master; used only as a truthful Lo-Fi fallback. */
@@ -58,6 +61,8 @@ export function MediaPreview({
   unavailableLabel?: string;
   emptyContent?: ReactNode;
   overlay?: (presentation: MediaPreviewPresentation) => ReactNode;
+  /** Render controls outside the artwork without resolving its source again. */
+  footer?: (presentation: MediaPreviewPresentation) => ReactNode;
 }) {
   const signedAsset = useAssetUrlState(assetKey);
   const signedVideoStill = useAssetUrlState(videoStillKey);
@@ -92,11 +97,12 @@ export function MediaPreview({
   const state = selection.src && loadedSrc === selection.src
     ? "ready"
     : selection.state;
-  const presentation = { source: selection.source, state };
+  const presentation = { source: selection.source, state, src: selection.src };
   const isDecorative = alt.length === 0;
   const visibleStateLabel = state === "loading" ? loadingLabel : unavailableLabel;
 
   return (
+    <>
     <div
       className={joinClassNames(styles.preview, className)}
       style={{ aspectRatio, ...style }}
@@ -177,5 +183,7 @@ export function MediaPreview({
 
       {overlay?.(presentation)}
     </div>
+    {footer?.(presentation)}
+    </>
   );
 }

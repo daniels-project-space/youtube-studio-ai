@@ -2,18 +2,22 @@
 
 import { useState } from "react";
 import { useAssetUrlState } from "@/lib/asset-url";
+import { MediaPreview as CurrentMediaPreview } from "@/components/MediaPreview";
 import {
   assetLabel,
   fileName,
   mediaFacts,
   mediaType,
   orderRunMedia,
+  partitionRunThumbnailAssets,
+  runCurrentThumbnailSource,
   selectedRunMaster,
   summarizeStageReceipts,
   visibleRunMedia,
   type MediaType,
   type RunMediaAsset,
   type RunStageReceipt,
+  type RunCurrentThumbnail,
 } from "@/lib/runMediaWorkbench";
 import styles from "./RunMediaWorkbench.module.css";
 
@@ -24,17 +28,21 @@ export function RunMediaWorkbench({
   stages,
   runStatus,
   selectedVideoAssetId,
+  currentThumbnail,
 }: {
   assets: readonly RunMediaAsset[] | undefined;
   stages: readonly RunStageReceipt[] | undefined;
   runStatus: string;
   selectedVideoAssetId?: string;
+  currentThumbnail: RunCurrentThumbnail | null | undefined;
 }) {
   const [showAll, setShowAll] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const ordered = assets ? orderRunMedia(assets) : [];
-  const selectedMaster = selectedRunMaster(ordered, selectedVideoAssetId);
-  const visible = visibleRunMedia(ordered, selectedMaster, showAll);
-  const hiddenCount = Math.max(0, ordered.length - visible.length);
+  const { media, historicalThumbnails } = partitionRunThumbnailAssets(ordered, currentThumbnail);
+  const selectedMaster = selectedRunMaster(media, selectedVideoAssetId);
+  const visible = visibleRunMedia(media, selectedMaster, showAll);
+  const hiddenCount = Math.max(0, media.length - visible.length);
   const stageState = summarizeStageReceipts(stages);
   const isActiveRun = runStatus === "running" || runStatus === "queued";
 
@@ -66,7 +74,7 @@ export function RunMediaWorkbench({
           <div className={styles.loading} aria-live="polite" aria-busy="true">
             Loading media…
           </div>
-        ) : ordered.length === 0 ? (
+        ) : ordered.length === 0 && !currentThumbnail?.thumbnailKey && !currentThumbnail?.videoKey ? (
           <div className={styles.empty}>
             <strong>No retained media yet</strong>
             <span>
@@ -76,6 +84,7 @@ export function RunMediaWorkbench({
         ) : (
           <>
             <div className={styles.mediaGrid}>
+              <CurrentThumbnailCard thumbnail={currentThumbnail} />
               {visible.map((asset) => (
                 <RunMediaAssetCard
                   key={asset._id}
@@ -89,7 +98,7 @@ export function RunMediaWorkbench({
               <div className={styles.moreRow}>
                 {hiddenCount > 0 && (
                   <span>
-                    {visible.length} of {ordered.length} files
+                    {visible.length} of {media.length} media files
                   </span>
                 )}
                 <button
@@ -97,14 +106,69 @@ export function RunMediaWorkbench({
                   className={styles.moreButton}
                   onClick={() => setShowAll((current) => !current)}
                 >
-                  {showAll ? "Show recent" : `Show all ${ordered.length}`}
+                  {showAll ? "Show recent" : `Show all ${media.length}`}
                 </button>
               </div>
+            )}
+            {historicalThumbnails.length > 0 && (
+              <details
+                className={styles.historicalThumbnails}
+                open={historyOpen}
+                onToggle={(event) => setHistoryOpen(event.currentTarget.open)}
+              >
+                <summary>Historical thumbnails <span>{historicalThumbnails.length}</span></summary>
+                {historyOpen && (
+                  <div className={styles.mediaGrid}>
+                    {historicalThumbnails.map((asset) => (
+                      <RunMediaAssetCard key={asset._id} asset={asset} selectedMaster={false} historical />
+                    ))}
+                  </div>
+                )}
+              </details>
             )}
           </>
         )}
       </div>
     </section>
+  );
+}
+
+function CurrentThumbnailCard({ thumbnail }: { thumbnail: RunCurrentThumbnail | null | undefined }) {
+  const source = thumbnail ? runCurrentThumbnailSource(thumbnail) : null;
+  const key = source?.assetKey ?? source?.videoStillKey;
+  const frame = thumbnail?.thumbnailPresentation === "lofi_frame_pending";
+  return (
+    <article className={`${styles.assetCard} ${styles.currentThumbnailCard}`} data-current-thumbnail={thumbnail?.thumbnailPresentation ?? "retained"}>
+      {thumbnail === undefined ? (
+        <div className={styles.preview} aria-busy="true" role="status">Loading current thumbnail…</div>
+      ) : (
+        <CurrentMediaPreview
+          className={styles.currentThumbnailPreview}
+          imageClassName={styles.currentThumbnailImage}
+          assetKey={source?.assetKey}
+          videoStillKey={source?.videoStillKey}
+          alt={`Current thumbnail for ${thumbnail?.title ?? "this run"}`}
+          unavailableLabel="No current thumbnail available"
+          footer={({ src, state }) => (
+            <div className={styles.assetBody}>
+              <div className={styles.assetHeading}>
+                <p className={styles.assetKind}>{frame ? "Source video frame" : "Current thumbnail"}</p>
+                {src && state === "ready" && (
+                  <a
+                    className={styles.sourceLink}
+                    href={src}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={frame ? "Open source video" : "Open current thumbnail source"}
+                  >Open source ↗</a>
+                )}
+              </div>
+              {key && <details className={styles.receiptDetails}><summary>Storage</summary><code title={key}>{key}</code></details>}
+            </div>
+          )}
+        />
+      )}
+    </article>
   );
 }
 
@@ -128,20 +192,23 @@ function Metric({
 function RunMediaAssetCard({
   asset,
   selectedMaster,
+  historical = false,
 }: {
   asset: RunMediaAsset;
   selectedMaster: boolean;
+  historical?: boolean;
 }) {
   const source = useAssetUrlState(asset.r2Key);
   const [mediaFailed, setMediaFailed] = useState(false);
   const type = mediaType(asset);
   const facts = mediaFacts(asset.meta);
-  const label = assetLabel(asset.kind);
+  const label = historical ? "Historical thumbnail" : assetLabel(asset.kind);
 
   return (
     <article
       className={`${styles.assetCard} ${selectedMaster ? styles.selectedMaster : ""}`}
       data-media-type={type}
+      data-historical-thumbnail={historical || undefined}
     >
       <div className={styles.preview}>
         {selectedMaster && <span className={styles.masterFlag}>Selected master</span>}
@@ -152,6 +219,7 @@ function RunMediaAssetCard({
           url={source.url}
           failed={mediaFailed}
           onMediaError={() => setMediaFailed(true)}
+          label={label}
         />
       </div>
 
@@ -197,6 +265,7 @@ function MediaPreview({
   url,
   failed,
   onMediaError,
+  label,
 }: {
   asset: RunMediaAsset;
   type: MediaType;
@@ -204,6 +273,7 @@ function MediaPreview({
   url: string | null;
   failed: boolean;
   onMediaError: () => void;
+  label: string;
 }) {
   if (status === "loading") {
     return <div className={styles.previewState}>Loading retained preview…</div>;
@@ -228,7 +298,7 @@ function MediaPreview({
       <img
         className={styles.image}
         src={url}
-        alt={`Retained ${assetLabel(asset.kind)} for this run`}
+        alt={`${label} from the original run`}
         loading="lazy"
         onError={onMediaError}
       />

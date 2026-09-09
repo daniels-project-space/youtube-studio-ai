@@ -55,6 +55,12 @@ export default function RunDetailPage({
     api.assets.listForRun,
     run ? { runId: runId as Id<"runs"> } : "skip",
   ) as RunMediaAsset[] | undefined;
+  // This exact-run query shares Library's current-thumbnail resolver. Raw run
+  // assets deliberately retain the original thumbnail after a later refresh.
+  const videoDetail = useQuery(
+    api.videos.getVideoDetail,
+    run ? { runId: runId as Id<"runs"> } : "skip",
+  );
   const artifactRetention = useQuery(api.runArtifactRetentions.getForRun, {
     runId: runId as Id<"runs">,
   }) as ArtifactRetention | null | undefined;
@@ -207,10 +213,12 @@ export default function RunDetailPage({
 
       <div id="recorded-work" className={styles.anchorTarget}>
         <RunMediaWorkbench
+          key={runId}
           assets={assets}
           stages={stages}
           runStatus={run.status}
           selectedVideoAssetId={run.videoAssetId ? String(run.videoAssetId) : undefined}
+          currentThumbnail={videoDetail}
         />
       </div>
 

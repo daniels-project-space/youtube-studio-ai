@@ -16,6 +16,43 @@ export type RunStageReceipt = {
   status: string;
 };
 
+/** Exact-run presentation returned by videos.getVideoDetail, also used by Library. */
+export type RunCurrentThumbnail = {
+  title: string;
+  thumbnailKey: string | null;
+  thumbnailPresentation?: "current_golden_candidate" | "lofi_rendered_frame" | "lofi_frame_pending";
+  videoKey: string | null;
+};
+
+/**
+ * Current packaging is a separate projection, not a rewrite of immutable run
+ * assets. Keep original thumbnails explicitly historical; never flash them as
+ * current while the canonical query loads or when Lo-Fi rejects generic art.
+ */
+export function partitionRunThumbnailAssets(
+  assets: readonly RunMediaAsset[],
+  current: RunCurrentThumbnail | null | undefined,
+): { media: RunMediaAsset[]; historicalThumbnails: RunMediaAsset[] } {
+  return {
+    media: assets.filter((asset) => asset.kind.toLowerCase() !== "thumbnail"),
+    historicalThumbnails: assets.filter((asset) =>
+      asset.kind.toLowerCase() === "thumbnail" && asset.r2Key !== current?.thumbnailKey,
+    ),
+  };
+}
+
+export function runCurrentThumbnailSource(current: RunCurrentThumbnail): {
+  assetKey: string | null;
+  videoStillKey?: string | null;
+} {
+  return {
+    assetKey: current.thumbnailKey,
+    ...(current.thumbnailPresentation === "lofi_frame_pending"
+      ? { videoStillKey: current.videoKey }
+      : {}),
+  };
+}
+
 export type MediaType = "image" | "video" | "audio" | "file";
 
 const INITIAL_MEDIA_LIMIT = 12;
