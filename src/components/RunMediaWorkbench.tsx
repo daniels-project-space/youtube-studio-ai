@@ -54,15 +54,10 @@ export function RunMediaWorkbench({
       <div className={styles.shell}>
         <header className={styles.header}>
           <div className={styles.headerCopy}>
-            <p className={styles.eyebrow}>Output</p>
             <h2 id="recorded-work-title" className={styles.title}>
               Media
             </h2>
-            <p className={styles.subtitle}>
-              {isActiveRun
-                ? "Saved output appears as stages finish."
-                : "Saved output from this run."}
-            </p>
+            {isActiveRun && <p className={styles.subtitle}>Saved output appears as stages finish.</p>}
           </div>
 
           <dl className={styles.metrics}>

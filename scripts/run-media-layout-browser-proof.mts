@@ -10,7 +10,7 @@ import { chromium } from "playwright";
 
 const production = "https://youtube-studio-ai.vercel.app";
 const base = process.env.UI_PROOF_BASE ?? production;
-assert.ok([production, "http://127.0.0.1:3010"].includes(base));
+assert.ok([production, "http://127.0.0.1:3010", "http://127.0.0.1:3312"].includes(base));
 const local = base !== production;
 const runId = "js74tws8jvgzc4tvat86htgv4h88ny68";
 const outputDir = await mkdtemp(join(tmpdir(), "ysa-run-media-layout-"));
@@ -37,15 +37,20 @@ try {
         });
       }
       await page.goto(`${base}/runs/${runId}`, { waitUntil: "domcontentloaded" });
-      await page.evaluate((size) => { document.documentElement.style.fontSize = `${size}px`; }, fontSize);
       const section = page.getByRole("region", { name: "Media", exact: true });
       await section.waitFor({ timeout: 45_000 });
+      await page.evaluate((size) => { document.documentElement.style.fontSize = `${size}px`; }, fontSize);
       await section.locator("[data-current-thumbnail] img").waitFor();
+      await section.locator("[data-current-thumbnail] img").scrollIntoViewIfNeeded();
+      await page.waitForFunction(() => {
+        const image = document.querySelector<HTMLImageElement>("[data-current-thumbnail] img");
+        return image?.complete && image.naturalWidth > 0;
+      });
       await page.waitForFunction(() => [...document.querySelectorAll<HTMLMediaElement>(
         '[aria-labelledby="recorded-work-title"] video, [aria-labelledby="recorded-work-title"] audio',
       )].length === 3 && [...document.querySelectorAll<HTMLMediaElement>(
         '[aria-labelledby="recorded-work-title"] video, [aria-labelledby="recorded-work-title"] audio',
-      )].every((media) => media.readyState >= 2 && !media.error), { timeout: 30_000 });
+      )].every((media) => media.readyState >= 2 && !media.error), undefined, { timeout: 30_000 });
       await section.scrollIntoViewIfNeeded();
       const geometry = await section.evaluate((root) => ({
         viewport: innerWidth, document: document.documentElement.scrollWidth,
@@ -62,6 +67,8 @@ try {
         })),
       }));
       await section.screenshot({ path: join(outputDir, `${name}.png`) });
+      await page.screenshot({ path: join(outputDir, `${name}-page.png`), fullPage: true });
+      console.log(JSON.stringify({ outputDir, name, geometry }));
       assert.deepEqual(geometry.overflowing, [], `${name}: nested horizontal clipping`);
       assert.ok(geometry.document <= geometry.viewport, `${name}: page overflow`);
       if (name === "desktop") assert.ok(geometry.cards.find((card) => card.type === "file")!.height < 210,
@@ -73,11 +80,23 @@ try {
       const captionResponse = await context.request.get(captionUrl);
       assert.equal(captionResponse.status(), 200);
       assert.match(await captionResponse.text(), /\d{2}:\d{2}:\d{2},\d{3} --> /);
+      for (const media of await section.locator("video,audio").all()) {
+        const played = await media.evaluate(async (node: HTMLMediaElement) => {
+          node.muted = true;
+          const start = node.currentTime;
+          await node.play();
+          try {
+            await new Promise((resolve) => setTimeout(resolve, 750));
+            return node.currentTime > start + 0.1;
+          } finally { node.pause(); }
+        });
+        assert.equal(played, true, "each saved video/audio control must start real muted playback");
+      }
       await captions.locator("summary").focus(); await page.keyboard.press("Enter");
       assert.equal(await captions.locator("details[open]").count(), 1, "storage disclosure works by keyboard");
       assert.equal(queries.filter((query) => query === "videos:getRunMediaPresentation").length, 1);
       assert.ok(!queries.some((query) => ["assets:listRunAssets", "videos:getRunCurrentThumbnail"].includes(query)));
-      results.push({ name, ...geometry, captionRead: true, mediaQueryCount: 1 });
+      results.push({ name, ...geometry, captionRead: true, playbackControls: 3, mediaQueryCount: 1 });
     } finally { await context.close(); }
   }
   assert.deepEqual(errors, []);
