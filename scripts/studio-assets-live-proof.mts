@@ -44,7 +44,9 @@ try {
       if(!target.visible || target.height<44)failures.push(`${name}: owner action is covered or smaller than 44px`);
       const overflow=await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth+1);
       if(overflow)failures.push(`${name}: horizontal page overflow`);
-      await page.screenshot({path:join(outputDir,`${name}.png`),fullPage:true});
+      // Capture the actual scrolled viewport: full-page stitching relocates
+      // fixed navigation and misrepresents the focused button's clearance.
+      await page.screenshot({path:join(outputDir,`${name}.png`)});
       results.push({name,height,target,overflow});
     } finally {await Promise.all(context.pages().map(page=>page.unrouteAll({behavior:"ignoreErrors"})));await context.close();}
   }
