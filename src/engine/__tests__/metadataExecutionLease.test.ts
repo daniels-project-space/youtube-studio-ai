@@ -28,6 +28,7 @@ let afterPut: (key: string) => void = () => {};
 let afterResponse: (phase: Phase) => void = () => {};
 let calls: Phase[] = [], events: string[] = [], suggestionCalls = 0, performanceReads = 0;
 let rejectedSelections = 0, rejectedPackages = 0;
+let usageShape: "absent" | "native" | "legacy" | "invalid" = "absent";
 let checkpointReads = 0;
 let beforeGet: (key: string) => void = () => {};
 let beforeStageWrite: (args: Record<string, unknown>) => void = () => {};
@@ -91,7 +92,11 @@ globalThis.fetch = async (input, init) => {
   afterResponse(phase);
   return Response.json({ id: "fixture-" + calls.length, model: body.model,
     choices: [{ message: { content: JSON.stringify(value) } }],
-    usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200 },
+    usage: { prompt_tokens: 1000, completion_tokens: 200, total_tokens: 1200,
+      ...(usageShape === "legacy" ? { reasoning_tokens: 190 } : {}),
+      ...(usageShape === "native" || usageShape === "invalid"
+        ? { completion_tokens_details: { reasoning_tokens: usageShape === "invalid" ? 201 : 190 } } : {}),
+    },
   });
 };
 
@@ -99,6 +104,7 @@ function harness(paidAdmissionFixture = false) {
   objects.clear(); calls = []; events = []; suggestionCalls = 0; performanceReads = 0;
   afterPut = () => {}; afterResponse = () => {}; process.env.OPENROUTER_API_KEY = "fixture-key-no-network";
   rejectedSelections = 0; rejectedPackages = 0;
+  usageShape = "absent";
   checkpointReads = 0; beforeGet = () => {}; beforeStageWrite = () => {};
   const run = { _id: "run-lease", ownerId: "owner-lease", channelId: "channel-lease", status: "running",
     leaseOwner: "worker-a", executionAttempts: 1, leaseExpiresAt: Date.now() + 120_000 };
@@ -417,9 +423,31 @@ async function main() {
   const admittedRetries = await h.execute(true, true);
   assert.equal(admittedRetries.ok, true, admittedRetries.error); equalCost(admittedRetries.costTotal, h.checkpointCost());
   assert.equal(calls.length, 7);
+  for (const shape of ["native", "legacy"] as const) {
+    h = harness(true); usageShape = shape;
+    const normalized = await h.execute(true, true);
+    assert.equal(normalized.ok, true, normalized.error);
+    equalCost(normalized.costTotal, 0.006); equalCost(h.checkpointCost(), 0.006);
+    equalCost(h.rows.get("metadata")!.cost!, 0.006);
+    assert.deepEqual(calls, ["generator", "judge", "package", "comment"]);
+    const savedReceipts = structuredClone(objects);
+    delete process.env.OPENROUTER_API_KEY;
+    const restored = await h.execute(false, true);
+    assert.equal(restored.ok, true, restored.error); equalCost(restored.costTotal, 0.006);
+    assert.equal(calls.length, 4); assert.deepEqual(objects, savedReceipts, "normalization never rewrites existing immutable outcomes");
+  }
+  h = harness(true); usageShape = "invalid";
+  const malformedUsage = await h.execute(true, true);
+  assert.equal(malformedUsage.ok, false); equalCost(malformedUsage.costTotal, 0.0015);
+  assert.deepEqual(calls, ["generator"], "malformed reasoning holds before the next paid judge request");
+  delete process.env.OPENROUTER_API_KEY;
+  const malformedRecovery = await h.execute(false, true);
+  assert.equal(malformedRecovery.ok, false); equalCost(malformedRecovery.costTotal, 0.0015);
+  assert.deepEqual(calls, ["generator"], "known-cost recovery does not repurchase the held operation");
   console.log("Real metadata engine/transport lease integration: 8 fresh checks, zero-purchase stale rejection, immutable completed outcomes, exact missing-work recovery and cost deduplication passed (fixture boundaries only)");
   console.log("Real paid metadata admission: 18 checkpoint reads, paid-fenced cost recovery before purchase, zero-cost replay, refused missing/unreadable/held ledgers and bounded retries passed (TEST envelope only)");
   console.log("Held-cost recovery: known charges survive unknown claims, partial R2 outage, stale/unavailable summary writes and repeated retries; no held body or duplicate purchase (fixture boundaries only)");
+  console.log("Native/legacy inclusive reasoning costs persist exactly once through real stage handlers; malformed usage retains known cost and blocks later purchase (fixture boundaries only)");
 }
 main().catch((error) => { console.error(error); process.exitCode = 1; }).finally(() => {
   globalThis.fetch = originalFetch; loader._load = originalLoad;
