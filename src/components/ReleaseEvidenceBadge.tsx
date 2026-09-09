@@ -50,7 +50,7 @@ export function ReleaseEvidenceBadge({
         padding: pad,
         fontSize,
         fontWeight: 500,
-        borderRadius: 999,
+        borderRadius: wrap ? "0.65rem" : 999,
         color,
         background: `color-mix(in srgb, ${color} 13%, transparent)`,
         border: `1px solid color-mix(in srgb, ${color} 29%, transparent)`,

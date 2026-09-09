@@ -138,6 +138,7 @@ button.card:focus-visible {
   z-index: 2;
   inset: 0.55rem 0.55rem auto;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 0.4rem;
@@ -145,6 +146,7 @@ button.card:focus-visible {
 }
 
 .sourceBadge {
+  max-width: 100%;
   border: 1px solid rgba(255, 255, 255, 0.2);
   border-radius: 999px;
   background: rgba(8, 9, 13, 0.72);
@@ -187,15 +189,19 @@ button.card:focus-visible {
 }
 
 .metadata {
+  flex-wrap: wrap;
   color: var(--color-faint);
   font-size: 0.71rem;
 }
 
 .metadata span {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.metadata time { max-width: 100%; }
 
 .proof {
   flex-wrap: wrap;

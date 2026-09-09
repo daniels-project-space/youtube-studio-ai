@@ -101,7 +101,7 @@ function ArtifactCard({
             <StageBadge status={video.status} size="sm" />
             {state === "ready" && source !== "unavailable" && (
               <span className={styles.sourceBadge}>
-                {source === "reviewed" ? "Reviewed ERNIE" : source === "r2" ? "R2 preview" : source === "youtube" ? "YouTube preview" : "Public preview"}
+                {source === "reviewed" ? "Reviewed" : source === "r2" ? "Saved" : source === "youtube" ? "YouTube" : "Public"}
               </span>
             )}
           </div>
