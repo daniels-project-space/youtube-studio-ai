@@ -27,12 +27,19 @@ const compiled = await esbuild.build({
     import {createRoot} from 'react-dom/client';
     import {flushSync} from 'react-dom';
     import {MediaPreview} from './src/components/MediaPreview';
+    import {useAssetUrlState} from './src/lib/asset-url';
+    window.previewErrors=[];
+    function Probe({assetKey,tag}) {
+      const state=useAssetUrlState(assetKey,()=>window.previewErrors.push(tag));
+      return <output data-probe-status={state.status}>{state.status}</output>;
+    }
     function Fixture() {
       const [props,setProps] = useState({alt:'Preview fixture'});
-      window.setPreviewProps = value => flushSync(()=>setProps({...value,alt:'Preview fixture'}));
-      return <MediaPreview {...props} />;
+      const [copies,setCopies] = useState(1);
+      window.setPreviewProps = (value,count=1) => flushSync(()=>{setProps({...value,alt:'Preview fixture'});setCopies(count)});
+      return props.probe ? <Probe {...props}/> : <>{Array.from({length:copies},(_,index)=><MediaPreview key={index} {...props} />)}</>;
     }
-    createRoot(document.getElementById('root')).render(<Fixture/>);
+    createRoot(document.getElementById('root')).render(<React.StrictMode><Fixture/></React.StrictMode>);
   `},
   plugins:[{name:"fixture-css", setup(build:FixtureBuild) {
     build.onLoad({filter:/\.module\.css$/}, () => ({loader:"js", contents:"export default new Proxy({}, {get:(_,key)=>String(key)})"}));
@@ -40,15 +47,18 @@ const compiled = await esbuild.build({
   }}],
 });
 const calls:string[] = [];
+const generations=new Map<string,number>();
 const server=createServer(async (req,res)=>{
   const url=new URL(req.url ?? "/", "http://fixture.invalid");
   if (url.pathname === "/") {res.setHeader("Content-Type","text/html");res.end('<div id="root" style="max-width:600px"></div><script src="/bundle.js"></script>');return;}
   if (url.pathname === "/bundle.js") {res.setHeader("Content-Type","application/javascript");res.end(compiled.outputFiles[0].contents);return;}
   if (url.pathname === "/api/asset-url") {
     const key=url.searchParams.get("key") ?? "";calls.push(key);
+    generations.set(key,(generations.get(key) ?? 0)+1);
     if (key.endsWith("-denied")) {res.statusCode=403;res.end();return;}
     res.setHeader("Content-Type","application/json");
-    res.end(JSON.stringify({url:key.endsWith(".mp4") ? "/master.mp4" : "/thumbnail.png"}));return;
+    const media=key.endsWith(".mp4") ? "/master.mp4" : "/thumbnail.png";
+    res.end(JSON.stringify({url:`${media}?receipt=${encodeURIComponent(key)}-${generations.get(key)}`}));return;
   }
   const bytes=url.pathname === "/thumbnail.png" ? imageBytes : url.pathname === "/master.mp4" ? videoBytes : null;
   if (!bytes) {res.statusCode=404;res.end();return;}
@@ -101,6 +111,51 @@ try {
       if (fixture.element === "video") await page.screenshot({path:join(outputDir,fixture.name.replaceAll(" ","-")+".png")});
     } catch(error) {failures.push(`${fixture.name}: ${String(error)}`);}
   }
+  calls.length=0;
+  const renderCopies = (count:number) => page.evaluate(count=>(window as unknown as {
+    setPreviewProps:(props:unknown,count:number)=>void;
+  }).setPreviewProps({assetKey:"coalesced.png"},count),count);
+  const waitCopies = async (count:number) => {
+    await page.waitForFunction(count=>document.querySelectorAll("img").length===count,count,{timeout:12000});
+    // Newly appended images below the viewport are deliberately lazy. Make
+    // each eligible before treating delayed decoding as an application fault.
+    for (const image of await page.locator("img").all()) await image.scrollIntoViewIfNeeded();
+    await page.waitForFunction(count=>{
+      const images=[...document.querySelectorAll("img")];
+      return images.length===count && images.every(i=>i.complete && i.naturalWidth>0) &&
+        document.querySelectorAll('[data-preview-state="ready"]').length===count;
+    },count,{timeout:12000});
+  };
+  await renderCopies(6);await waitCopies(6);
+  try { assert.deepEqual(calls,["coalesced.png"],"six concurrent previews share one signing request");
+    results.push({name:"six concurrent previews",requests:calls.length});
+  } catch(error) {failures.push(String(error));}
+  const originalSrc=await page.locator("img").first().getAttribute("src");
+  calls.length=0;
+  await page.clock.setFixedTime(new Date(Date.now()+10*60_000));
+  await renderCopies(7);await waitCopies(7);
+  // Force the old instances to render after the new mount populated the cache.
+  await renderCopies(7);await waitCopies(7);
+  try {
+    assert.deepEqual(calls,["coalesced.png"],"one fresh link for an expired new mount");
+    assert.equal(await page.locator("img").first().getAttribute("src"),originalSrc,
+      "a new cache receipt must not reset media already mounted with a valid URL");
+    assert.notEqual(await page.locator("img").last().getAttribute("src"),originalSrc);
+    results.push({name:"expired cache/new mount, stable existing media",requests:calls.length});
+  } catch(error) {failures.push(String(error));}
+  calls.length=0;
+  const setProbe = (tag:string) => page.evaluate(tag=>(window as unknown as {
+    setPreviewProps:(props:unknown)=>void;
+  }).setPreviewProps({probe:true,assetKey:"callback-denied",tag}),tag);
+  await setProbe("initial");
+  await page.locator('[data-probe-status="error"]').waitFor({timeout:12000});
+  for(let index=0;index<5;index++) await setProbe(`new-callback-${index}`);
+  try {
+    assert.deepEqual(calls,["callback-denied"],"callback identity alone cannot create signing retries");
+    assert.deepEqual(await page.evaluate(()=>(window as unknown as {previewErrors:string[]}).previewErrors),["initial"]);
+    results.push({name:"callback rerenders do not refetch",requests:calls.length});
+  } catch(error) {failures.push(String(error));}
+  await page.evaluate(()=>(window as unknown as {setPreviewProps:(props:unknown)=>void}).setPreviewProps({}));
   const report={outputDir,results,failures,errors};
   await writeFile(join(outputDir,"results.json"),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
   assert.deepEqual(errors,[]);assert.deepEqual(failures,[]);
