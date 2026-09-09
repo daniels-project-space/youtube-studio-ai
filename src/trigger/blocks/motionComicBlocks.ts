@@ -680,7 +680,7 @@ export const motionComicBlock: Block = {
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await putObjectFromFile(videoKey, res.outPath, { contentType: "video/mp4" });
-    const videoDurationSec = Math.round(res.durationMs / 1000);
+    const videoDurationSec = res.durationMs / 1000;
     await recordAsset(ctx, "video", videoKey, {
       durationSec: videoDurationSec,
       engine: "motion_comic",
