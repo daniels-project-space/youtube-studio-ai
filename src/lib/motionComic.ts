@@ -643,6 +643,7 @@ export interface MotionComicResult {
   narrationStartSec: number;
   title: string;
   panels: number;
+  /** Measured runtime of outPath after final mux/normalization, not the panel schedule. */
   durationMs: number;
   runDir: string;
   /** Full spoken text (all lines, tags stripped, panel order) — downstream
@@ -1885,7 +1886,14 @@ export async function castMotionComic(args: {
     log("mix loudness-normalized to -14 LUFS");
   } catch (e) { log(`loudnorm skipped: ${e instanceof Error ? e.message : e}`); }
 
-  const durationMs = Math.round((PREROLL_MS / 1000 + panelDur.reduce((a, b) => a + b, 0)) * 1000);
+  // The page renderer adds turns and a closing hold; muxing/normalization can
+  // also change the container endpoint. Only the exact final file is authority
+  // for persisted playback duration, including when normalization was skipped.
+  const durationSec = await ffprobeDuration(args.outPath);
+  const durationMs = durationSec * 1000;
+  if (!Number.isFinite(durationSec) || durationSec <= 0 || !Number.isFinite(durationMs)) {
+    throw new Error("motionComic: final master duration could not be measured; refusing a planned-duration fallback");
+  }
   // Script-equivalent for downstream blocks (metadata/compliance): every line
   // in panel order with the ElevenLabs emotion tags stripped.
   const narrationText = spokenNarration.join(" ");

@@ -30,7 +30,8 @@ try {
   assert.equal(render(), "", "unrendered plans cannot open a nonexistent master");
   rows = undefined;
   assert.equal((render().match(/aria-hidden="true"/g) ?? []).length, 3);
-  for (const [durationSec, expected] of [[30, "0:30"], [180, "3:00"], [3600, "1:00:00"],
+  for (const [durationSec, expected] of [[30, "0:30"], [180, "3:00"], [200.551, "3:20"],
+    [59.999, "0:59"], [3599.999, "59:59"], [3600, "1:00:00"],
     [28831, "8:00:31"], [-10, null], [Number.NaN, null], [Infinity, null]] as const) {
     rows = [{ _id: "saved-master", title: "A complete saved video title", channelName: "Seaside Study",
       videoKey: "owner/fixture/run/final.mp4", createdAt: 0, durationSec }];

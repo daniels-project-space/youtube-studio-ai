@@ -27,11 +27,12 @@ const renderDate = new Intl.DateTimeFormat("en-GB", {
 
 function fmtDur(seconds?: number) {
   if (!Number.isFinite(seconds) || !seconds || seconds < 0) return "";
-  const rounded = Math.round(seconds);
-  const hours = Math.floor(rounded / 3600);
-  const minutes = Math.floor(rounded / 60) % 60;
-  const tail = `${String(minutes).padStart(2, "0")}:${String(rounded % 60).padStart(2, "0")}`;
-  return hours ? `${hours}:${tail}` : `${minutes}:${String(rounded % 60).padStart(2, "0")}`;
+  // Match native video controls: a fractional final second is not a full second.
+  const wholeSeconds = Math.floor(seconds);
+  const hours = Math.floor(wholeSeconds / 3600);
+  const minutes = Math.floor(wholeSeconds / 60) % 60;
+  const tail = `${String(minutes).padStart(2, "0")}:${String(wholeSeconds % 60).padStart(2, "0")}`;
+  return hours ? `${hours}:${tail}` : `${minutes}:${String(wholeSeconds % 60).padStart(2, "0")}`;
 }
 
 /** Recent rendered masters. Cards preview and open only saved R2 media, never YouTube artwork. */
