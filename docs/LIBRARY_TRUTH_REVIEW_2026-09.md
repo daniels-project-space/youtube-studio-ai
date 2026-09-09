@@ -72,3 +72,45 @@ assertions remain. This is an intentional contract update, not removal of a
 failing product-behavior check. The unchanged five-profile native browser proof
 also checks visible ready-state source badges and persisted evidence separately.
 The final isolated release must rerun the complete suite with this correction.
+
+## Canonical release and read-only production verification
+
+The combined release is `d24a00e72835d102e8753783b1e83e7227d77111`. Its isolated
+649-test runner, nonincremental typecheck, full lint (zero errors, 33 existing
+warnings), production build, unchanged baseline audits, and actual local
+FFmpeg assembly passed. An initial build rejected an escaping dependency
+symlink; the exact same source built successfully with dependencies inside its
+worktree. No application workaround was added for that test-environment issue.
+
+Vercel deployment `dpl_9tygyAGsXQVY6QRwk9edJXMFaHLy` is READY for that exact SHA
+and owns `youtube-studio-ai.vercel.app`. CI `34416314791` completed successfully;
+canonical Convex was ready at 23:29:23 UTC and Trigger version `20260909.30`
+completed at 23:31:24 UTC (worker `worker_cmtuqf85oiweg0vof0nk8u5pp`, content hash
+`c6cefee47f0154c864a90245f74c2c17`). The canonical health endpoint still returned
+the exact revision after cloud completion. Metadata and logs are retained in
+`/tmp/ysa-d24a00-production-1ckiQU/`.
+
+Ordinary actual Library/channel native playback passed at
+`/tmp/ysa-library-player-production-9VD2GV/results.json`. The actual production
+Library's 320/390/1440 enlarged-text checks passed at
+`/tmp/ysa-library-truth-production-gjBKOf/run-VLHrAv/results.json`: real stored
+rows, both date sorts, paging, channel/search filters, all 30 saved tags, exact
+current thumbnail, native play/pause/15-second seek, keyboard ownership and
+focus restoration. The retained real master is 200.551 seconds, not the local
+diagnostic fixture. No stored rows were changed and no mutations were sent.
+Production playback and narrow-screen images were independently inspected.
+
+The original enlarged run remains at `run-zOyQJe/results.json`: its visible-text
+oracle also counted zero-area screen-reader text and deliberately ellipsized
+channel names. The revised oracle recognizes only their actual computed clip
+properties, retains full strings and styles, and still checks visible card and
+element bounds. It explicitly does not call an ellipsized name fully visible;
+the first such channel's full name is separately checked in the real Lightbox.
+This is an evidence correction, not a CSS change or blanket class exclusion.
+
+ArtifactWorkRail has no current production caller; its earlier qualification
+is local actual-component evidence only. A separate downstream channel Library
+check exposed a genuine implicit-grid/nowrap clipping defect at 390px/200%
+(`/tmp/ysa-library-truth-production-gjBKOf/channel-uY4ZMs/results.json`). It is
+not hidden by the main Library pass and needs its own repair and production
+recheck. None of these UI checks certify the legacy video's visual quality.

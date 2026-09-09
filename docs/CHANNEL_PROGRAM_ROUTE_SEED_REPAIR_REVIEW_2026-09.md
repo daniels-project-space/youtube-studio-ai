@@ -167,3 +167,27 @@ and `isolation-parity.log`. Canonical HEAD remains
 `2c8e64a0e973808e11a5bb177543f0a3ebe0c632` and its index digest remains
 `f3e8d3229ce162131585040daf3071c9050fe9c273934dcebb5243359407eda1`.
 This is a local qualification and commit preparation, not a push or deployment.
+
+## Isolated release and deployment completion
+
+The repair was isolated onto final Library release `0b2c16b20ad7a6c45604e199bf5cfdc495232983`
+as `d24a00e72835d102e8753783b1e83e7227d77111`. Only the four unrelated held inline
+paid-execution-lease lines were excluded from the root runtime projection;
+the released `runPipeline.ts` SHA-256 is
+`8a7f1136fb6e146ec62bd9c1223bb8a944e71f895508c35004e53865ade21546`.
+The actual selected-caller regression independently passed 33 cases, and the
+complete isolated runner passed all 649 tests. Build/typecheck, full lint,
+baseline audits and local FFmpeg assembly also passed. Root HEAD and index
+were preserved; the exact reviewed release was pushed non-forcibly.
+
+CI `34416314791` is successful for the exact released SHA. Convex completed
+at 23:29:23 UTC; Trigger `20260909.30` at 23:31:24 UTC, worker
+`worker_cmtuqf85oiweg0vof0nk8u5pp`, content hash
+`c6cefee47f0154c864a90245f74c2c17`. Vercel
+`dpl_9tygyAGsXQVY6QRwk9edJXMFaHLy` is READY on the canonical production alias,
+and the health endpoint returned the exact SHA after the cloud deployment.
+Evidence is retained in `/tmp/ysa-d24a00-production-1ckiQU/`.
+
+This establishes deployment of the repaired existing connector, not an
+authenticated paid inception/run, weekly provider execution, or admission of
+the unfinished worked-example, portrait, or language-practice capabilities.

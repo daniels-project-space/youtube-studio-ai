@@ -441,8 +441,11 @@
 .analyticsEmpty p { max-width: 28rem; margin: 0; color: var(--color-faint); font-size: 0.72rem; line-height: 1.55; }
 .analyticsEmpty a { color: var(--color-blueprint); font-size: 0.68rem; font-weight: 650; text-decoration: none; }
 
-.libraryWorkspace { gap: 0.8rem; }
+.libraryWorkspace { grid-template-columns: minmax(0,1fr); min-width: 0; gap: 0.8rem; }
+.libraryWorkspace > * { min-width: 0; }
 .libraryWorkspace .workspaceIntro { margin-bottom: 0.45rem; }
+.libraryWorkspace .workspaceIntroCopy { min-width: 0; }
+.libraryWorkspace .sectionRail span { min-width: 0; white-space: normal; overflow-wrap: anywhere; line-height: 1.4; }
 .libraryEmpty { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 1rem; min-height: 138px; padding: 1rem 1.1rem; border-top: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); }
 .libraryEmpty > span { display: grid; width: 44px; height: 44px; place-items: center; border: 1px solid var(--color-border-strong); border-radius: 50%; color: var(--color-blueprint); font-family: var(--font-display); font-size: 1.4rem; }
 .libraryEmpty > div { display: grid; gap: 0.28rem; }

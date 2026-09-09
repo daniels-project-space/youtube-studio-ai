@@ -273,6 +273,15 @@ function runBakedNarrationTranscriptProof(command: string, args: readonly string
   };
 }
 
+/**
+ * Exact lexical policy used by narration_transcript_proof.py, not semantic
+ * normalization. Punctuation/sign differences and words versus digits are not
+ * resolved here; raw observations and existing WER/recall metrics stay intact.
+ */
+export function narrationTranscriptLexicalTokens(text: string): string[] {
+  return text.toLowerCase().match(/[a-z0-9]+(?:'[a-z0-9]+)?/g) ?? [];
+}
+
 export function assertNarrationTranscriptProof(proof: NarrationTranscriptProof, expected: {
   sourceSha256: string;
   sourceByteLength: number;
@@ -291,6 +300,12 @@ export function assertNarrationTranscriptProof(proof: NarrationTranscriptProof, 
   }
   if (receipt.transcript.wordCount !== receipt.transcript.words.length) {
     throw unavailable("proof transcript word count does not match its timestamped words");
+  }
+  const transcriptTokens = narrationTranscriptLexicalTokens(receipt.transcript.text);
+  const timestampTokens = narrationTranscriptLexicalTokens(receipt.transcript.words.map((word) => word.text).join(" "));
+  if (!transcriptTokens.length || transcriptTokens.length !== timestampTokens.length ||
+      transcriptTokens.some((token, index) => token !== timestampTokens[index])) {
+    throw unavailable("proof timestamped words do not cover the transcript lexical sequence");
   }
   const shouldPass = receipt.assessment.wordErrorRate <= receipt.assessment.thresholds.maxWordErrorRate
     && receipt.assessment.lexicalRecall >= receipt.assessment.thresholds.minLexicalRecall;
