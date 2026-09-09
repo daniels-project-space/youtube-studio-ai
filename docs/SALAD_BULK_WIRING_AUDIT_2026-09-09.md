@@ -2,6 +2,48 @@
 
 ## Result and scope
 
+**Upload recovery and built candidate follow-up, 9 September:** the real ERNIE
+controller now attempts bounded storage-only recovery after checking R2, with
+fresh grants and no second generation call. The endpoint has no renderer callback
+and cannot claim a fresh job. Busy workers return immediately, and repeated HTTP
+cancellation no longer releases the GPU lock while its native thread runs.
+All 122 infrastructure tests pass, including transient PNG/result upload faults,
+lost recovery responses, cancellation, full teardown and credential admission.
+
+Worker checkpoint `9f84a60dccaa11c03bd85cde098c8ff9b65d8e1d` passed 118 tests from
+its clean checkout and is pushed on the infrastructure checkpoint branch. Its
+rebuilt image passed CPU-only real HTTP checks with no source mounts, and the
+packaged file hashes match. Published candidate, verified by registry manifest
+and config digests:
+`ghcr.io/danielmabro-new/salad-media-infra@sha256:a4ecde7eac08bb6ed4db606a954560f631f2eb20abb064e7d56c386f2480faca`.
+No active image default, app production release or model settings were changed.
+
+Live preflight discovered that `github/GHCR_SALAD_PULL_TOKEN` has GitHub admin
+permissions, not the intended read-only package access. The controller now rejects
+it before R2 job writes or provider creation. The key was used only locally for
+the scoped candidate publication; temporary local registry credentials were
+removed. No credential was forwarded to a worker, and no GPU was rented. The
+owner was asked to replace that vault entry with a `read:packages`-only token.
+This is a route-specific deployment hold, not a global goal blocker. Full details:
+`/home/ubuntu/salad-media-infra/docs/DURABLE_ERNIE_JOBS_2026-09.md`.
+Weekly aggregation/adoption, unattended recovery and genuine GPU quality proof
+remain open; the storage-only recovery gap described in the older notes below is
+now repaired, not a reason to mark the whole healer or weekly system complete.
+
+Controller checkpoint `b799e8009d0dcbbd459ffe5994886707a3c388aa` is pushed on
+`checkpoint/salad-registry-safety-20260909`. All 122 tests also pass from its clean
+checkout `/tmp/salad-guard-verify-Emsddp/repo`; log:
+`/tmp/salad-guard-clean-tests.log`. The previous 118-test worker checkpoint has
+its own clean-checkout log at `/tmp/salad-recovery-clean-tests.log`. Original
+repository HEADs/indexes remain unchanged. Graphify was refreshed code-only and
+remains excluded from builds. A compact, create-only/read-back validation record
+is retained in R2 bucket `salad-render-infra` at
+`salad-media-tests/20260909/ernie-recovery-candidate-9f84a60/validation.json`.
+Its schema explicitly states zero native inference/GPU mutations and
+`modelQualityQualified: false`; it is not a renderer qualification receipt.
+Production app health was rechecked at revision
+`f7e954bfa5f99aff2967a7b32df2f63b19b7f31d`; no production app change is claimed.
+
 **Durable ERNIE follow-up, 9 September:** the actual worker HTTP endpoint and
 infrastructure proof-runner caller now share immutable request/image/model
 bindings, create-only R2 claims and separate completion receipts. A retry can
