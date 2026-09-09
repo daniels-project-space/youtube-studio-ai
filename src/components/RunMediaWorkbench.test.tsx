@@ -37,6 +37,8 @@ try {
   assert.ok(html.indexOf('data-media-type="video"') < html.indexOf('data-current-thumbnail='),
     "selected master comes first in reading and keyboard order");
   assert.equal((html.match(/<video /g) ?? []).length, 1);
+  assert.match(html, /data-signed-video-state="ready"/);
+  assert.match(html, /aria-label="Video: final.mp4"/);
   assert.equal((html.match(/<audio /g) ?? []).length, 1);
   const file = html.match(/<article[^>]*data-media-type="file"[\s\S]*?<\/article>/)?.[0];
   assert.ok(file);
@@ -56,6 +58,10 @@ try {
     assert.ok(pending);
     assert.doesNotMatch(pending, /href=/, "no fake or stale source link during URL failure/loading");
     assert.match(pending, state === "loading" ? /Preparing file link/ : /File link unavailable/);
+    if (state === "error") {
+      assert.match(pending, /Retry link/);
+      assert.match(render(), /Retry video/);
+    }
   }
   status = "ready";
   assert.doesNotMatch(render(assets.filter((asset) => asset.kind !== "video")), /data-has-master="true"/);

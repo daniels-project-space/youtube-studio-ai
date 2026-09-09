@@ -24,7 +24,13 @@ PREVIEW_TEST_VIDEO=/tmp/assembly-smoke-frkUeC/bk_smoke_2_loudnorm.mp4 npx --no-i
 
 ## Native recovery and modal coverage
 
-The 20 baseline desktop/phone cases passed in `/tmp/ysa-library-player-proof-ChFnM2/results.json`. Viewports were 1280×900 and 390×844. The full proof also includes four large-root-font cases at 390px and 320px; those are separate from the baseline count above.
+Final result: all 24 cases passed in `/tmp/ysa-library-player-proof-HUrYQW/results.json`, with no unexpected browser runtime errors and no tested-source changes during the run. This includes 20 baseline desktop/phone cases at 1280×900 and 390×844, plus four 200%-root-font cases at 390px and 320px. The unchanged targeted navigation/text collision oracle also passed in `/tmp/ysa-library-player-proof-kjv1Rj/results.json` before the full run.
+
+The main agent's source repairs prefer the saved key, preserve explicit loading/retry states, respect native keyboard ownership, let error content determine its height, give the header title a full-width row, and place 44px gallery navigation below the player. Shared SignedVideoPlayer JavaScript/CSS remained unchanged during the Library layout repairs.
+
+At both enlarged phone sizes, all measured status/text/button rectangles fit the actual frame; rendered-text/gallery overlap is empty and status-badge/Close overlap is zero. Retry was scrolled into view where needed, verified inside the visible dialog with a real pointer hit test, and activated with an ordinary click. This does not substitute offscreen rectangle checks for usability.
+
+Independently inspected final screenshots include `desktop-precedence.png`, `phone-precedence.png`, `desktop-expired-paused.png`, `phone-expired-playing.png`, `phone-small-large-text-initial-retry-error-scrolled.png`, and `phone-small-large-text-native-retry-error-scrolled.png` under the final evidence directory. Healthy/recovered clips have decoded pixels; error text and Retry are unobstructed. Long content remains intentionally scrollable inside the modal.
 
 - Saved master wins when both keys exist; the actual native clip decodes at 15 seconds with `readyState=4`, paused, and no media error. YouTube remains an explicit external link.
 - Initial signing failure and native media failure expose real manual Retry. Each retry makes one new signing request, preserves the modal, and keeps focus inside while the temporary button disappears. Loading is not mislabeled as missing media.
@@ -39,6 +45,48 @@ The 20 baseline desktop/phone cases passed in `/tmp/ysa-library-player-proof-ChF
 Chromium could briefly retain its native loading spinner after the recovered paused element already reported decoded media. `/tmp/ysa-library-player-proof-9l9w20/results.json` records native events and phase mutations on both profiles. While `seeking=true`, loaded-data/can-play observations remained in `recovering`; transition to `ready` was observed with `readyState=4` and `seeking=false`. Three seconds later, the element remained at 25 seconds, paused, `networkState=1`, and error-free; screenshots were clean before any play action. An additional explicit play→pause advanced to approximately 25.314 seconds on the same element.
 
 This did not reproduce premature recovery completion. No controls were hidden and no user state was changed to manufacture the primary paused screenshot. The subsequent play→pause screenshots are separately named.
+
+## Final checks and source binding
+
+`tsc --noEmit --incremental false --pretty false`, scoped ESLint for `scripts/library-player-browser-proof.mts`, and whitespace checks passed. The final JSON records the retained-media hash and source hashes captured before bundling and checked again after execution. Key tested hashes:
+
+- Lightbox: `45252e5f2eca379486e79c2d26b621deaa1d0460258fc47842d18f4624004490`
+- VideoPlayer: `f72e568bcd917fc153fdeae00b80cbfa9e90c076e15b75ed456eb7c20b867aae`
+- VideoPlayer component CSS: `4b88b73921847f4cc44caa9077dab31aac6893ad99c5dbba1da8e985b37900c6`
+
+The proof/review subtask changed only `scripts/library-player-browser-proof.mts` and this document. Application-source repairs, Git, graph maintenance, release, and production verification remain with the main agent.
+
+## Isolated release and direct production playback
+
+Revision `d3ddace58ad4b6777632f2b92ae85c3996f950cc`, parent `46cf577`,
+passed all **640** direct tests, nonincremental typecheck, lint (zero errors;
+33 existing warnings), full build, unchanged structural audits, 24 defect
+proofs and actual 31-second hermetic assembly. The exact isolated tree also
+passed all 24 native Library cases again:
+`/tmp/ysa-library-player-proof-Buek4I/results.json`.
+Gate logs: `/tmp/ysa-library-release-*.log`. It excludes held fingerprint,
+title/lease and subsequent Run Media/EDL changes; the original dirty worktree
+HEAD/index remains untouched. Generated `public/proof.html` is not committed.
+
+After the non-force main push, Vercel Production deployment **6357917078**
+succeeded at **19:43:12 UTC**. The exact `youtube-studio-ai.vercel.app`
+health endpoint reports the complete revision. Direct production checks passed
+on Library desktop/phone and the Inked Histories channel Library tab:
+`/tmp/ysa-library-player-production-a5dKLH/results.json`, log
+`/tmp/ysa-library-production-after.log`. Each opened the same retained run
+`js76ghf4s44b4w5d97cs2f49bd89znxa` without an iframe, played, paused and sought
+to 15 seconds with decoded media, no media/browser error and no horizontal
+dialog overflow. Native duration was 200.551 seconds; Escape returned focus.
+No data fixtures, proxies, auth substitution or API writes were used.
+Desktop/channel and phone production screenshots were visually inspected.
+
+Cloud CI **34396644330** remains in progress at this checkpoint. The latest
+fully confirmed backend is `46cf577` / Trigger `20260909.24`; this UI release
+does not claim a newer backend deployment yet.
+
+The inspected legacy video remains unverified. Its unrelated historical tags
+and `~28M est. views · tag_overlap` label are not new metadata or verified
+YouTube analytics; those remain a separate information-quality follow-up.
 
 ## Limits
 
