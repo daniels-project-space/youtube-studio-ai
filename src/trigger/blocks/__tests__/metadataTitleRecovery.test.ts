@@ -3,6 +3,7 @@ import Module from "node:module";
 import type { StageContext } from "@/engine/types";
 import { createCheckpointCostScope } from "@/lib/checkpointCostAccounting";
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
+import { readTitleReview } from "@/lib/titleReviewPresentation";
 
 process.env.OPENROUTER_API_KEY = "fixture-key";
 const honest = "47 Engineers Died in the Bridge Collapse";
@@ -71,6 +72,11 @@ async function main() {
   assert.equal(first.title, honest);
   assert.equal(first.titleAlternate, "");
   assert.ok(first.titleDecision);
+  const presented = readTitleReview(first);
+  assert.ok(presented && presented.state === "recorded", "actual module output must feed the run inspector");
+  assert.equal(presented.selected.title, honest);
+  assert.equal(presented.options[0].grounding, "contradicted");
+  assert.equal(presented.source, "Full narration");
   assert.ok(String(first.thumbnailDescription).includes(honest));
   assert.deepEqual(calls, ["generator", "judge", "package", "package", "comment"]);
   assert.equal(first.__costUsd, 0.05);

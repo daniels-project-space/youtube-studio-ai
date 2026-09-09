@@ -81,6 +81,10 @@ known charges from a held or partially unreadable ledger without granting
 execution. The real fixture reproduction previously returned $0 for a retained
 $0.0015 response; the new path preserves it through repeated recovery with no
 new purchase. Production qualification remains distinct.
+The later [title-review UI slice](TITLE_REVIEW_UI_2026-09.md) gives the saved
+decision a real run-inspector consumer without another subscription. Its output
+audit finding is resolved against the unchanged baseline; the independent
+production cost-envelope, per-call allowance and contract-migration holds remain.
 The exact deployed UI revision has its own passing CI, Vercel build, canonical
 Convex/Trigger release and direct desktop/mobile proof in
 [the run-media report](RUN_MEDIA_QUERY_EFFICIENCY_2026-09.md). Neither that UI

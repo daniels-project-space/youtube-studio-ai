@@ -1,4 +1,4 @@
-.page { display: grid; min-width: 0; gap: .7rem; padding-bottom: 2rem; }
+.page { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: .7rem; padding-bottom: 2rem; }
 .anchorTarget { scroll-margin-top: 5rem; }
 
 .backLink { display: inline-flex; align-items: center; gap: 0.34rem; color: var(--color-faint); font-size: 0.67rem; font-weight: 650; text-decoration: none; transition: color 140ms ease, transform 140ms ease; }

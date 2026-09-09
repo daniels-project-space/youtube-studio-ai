@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readTitleReview } from "@/lib/titleReviewPresentation";
 import Module from "node:module";
 import { getFunctionName } from "convex/server";
 import { assertInlineLease } from "../../../convex/runExecutionAdmission";
@@ -209,6 +210,9 @@ async function main() {
   const restored = await h.execute(false);
   assert.equal(restored.ok, true, restored.error); assert.equal(calls.length, 4);
   assert.deepEqual(restored.store.titleDecision, originalDecision);
+  assert.deepEqual(readTitleReview(restored.store), readTitleReview(fresh.store),
+    "real engine restoration retains the same human-readable review without another purchase");
+  assert.equal(readTitleReview(restored.store)?.state, "recorded");
   assert.deepEqual(objects, originalObjects); equalCost(restored.costTotal, fresh.costTotal);
   assert.equal(performanceReads, 1); assert.equal(suggestionCalls, 1);
   assert.deepEqual(h.stats(), { checks: 8, reads: 24 });
