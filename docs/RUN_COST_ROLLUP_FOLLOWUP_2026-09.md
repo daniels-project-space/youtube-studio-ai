@@ -1,6 +1,6 @@
 # Run cost rollup follow-up — 8 September 2026
 
-Status: bounded projection fix implemented and locally validated on 9 September 2026; not deployed by this agent. The original read-only audit below was against `2792c0e`. No provider calls, production mutations, deployment, code generation, or commit were performed in this follow-up. Reproductions invoke real Convex handlers against an in-memory database and the real engine runner, not a live Convex deployment. See the implementation/remaining-scope section at the end.
+Status: bounded projection fix implemented and locally validated on 9 September 2026, then committed as `d7642ef` and deployed by the parent in release `9caa54c`. [Release evidence](GOAL_MODULE_AND_UI_HARDENING_BACKLOG_2026-09.md#current-evidence-not-whole-phase-completion) records the 626-test CI gate, canonical Convex/Trigger deployment and live read-only compatibility check. The original read-only audit below was against `2792c0e`. Reproductions invoke real Convex handlers against an in-memory database and the real engine runner, not a live Convex deployment. No paid provider call or production test mutation was used. See the implementation/remaining-scope section at the end.
 
 ## Finding
 
