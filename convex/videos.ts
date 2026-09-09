@@ -163,6 +163,60 @@ async function currentLibraryThumbnail(
     : { key: input.sourceThumbnail?.r2Key ?? null };
 }
 
+/**
+ * The exact retained-media boundary shared by the run workbench and the full
+ * Library lightbox. Keep original asset records intact; current packaging is
+ * a separate projection using the same master/provenance/Lo-Fi rules.
+ */
+async function retainedRunMedia(ctx: QueryCtx, run: Doc<"runs">) {
+  const [assets, channel, sealedMasterKey] = await Promise.all([
+    ctx.db.query("assets").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
+    ctx.db.get(run.channelId),
+    normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus) === "release_evidence_recorded"
+      ? recordedMasterKey(ctx, run._id)
+      : Promise.resolve(undefined),
+  ]);
+  const fallbackVideoAsset = assets.find((asset) => asset.kind === "video");
+  const videoAsset = sealedMasterKey
+    ? assets.find((asset) => asset.kind === "video" && asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
+    : fallbackVideoAsset;
+  const thumbAsset = assets.find((asset) => asset.kind === "thumbnail");
+  const videoKey = sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
+  const thumbnail = await currentLibraryThumbnail(ctx, {
+    ownerId: run.ownerId,
+    runId: run._id,
+    channelId: run.channelId,
+    channel,
+    sourceThumbnail: thumbAsset,
+    sourceVideoKey: videoKey,
+  });
+  return {
+    assets,
+    channel,
+    videoAsset,
+    thumbAsset,
+    currentThumbnail: {
+      thumbnailKey: thumbnail.key,
+      ...(thumbnail.presentation ? { thumbnailPresentation: thumbnail.presentation } : {}),
+      videoKey,
+    },
+  };
+}
+
+/**
+ * One reactive read for the run page's media and current packaging. Script
+ * and SEO remain in the on-demand lightbox query, not every thumbnail view.
+ */
+export const getRunMediaPresentation = query({
+  args: { runId: v.id("runs") },
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run) return null;
+    const { assets, currentThumbnail } = await retainedRunMedia(ctx, run);
+    return { assets, currentThumbnail };
+  },
+});
+
 export const listVideos = query({
   args: {
     ownerId: v.string(),
@@ -457,30 +511,9 @@ export const getVideoDetail = query({
       }
     }
 
-    const assets = await ctx.db
-      .query("assets")
-      .withIndex("by_run", (q) => q.eq("runId", args.runId))
-      .collect();
-    const fallbackVideoAsset = assets.find((a) => a.kind === "video");
-    const sealedMasterKey = normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus) === "release_evidence_recorded"
-      ? await recordedMasterKey(ctx, args.runId)
-      : undefined;
-    const videoAsset = sealedMasterKey
-      ? assets.find((asset) => asset.kind === "video" && asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
-      : fallbackVideoAsset;
-    const thumbAsset = assets.find((a) => a.kind === "thumbnail");
+    const { videoAsset, thumbAsset, channel, currentThumbnail } = await retainedRunMedia(ctx, run);
     const vMeta = (videoAsset?.meta ?? {}) as Record<string, unknown>;
     const tMeta = (thumbAsset?.meta ?? {}) as Record<string, unknown>;
-
-    const channel = await ctx.db.get(run.channelId);
-    const thumbnail = await currentLibraryThumbnail(ctx, {
-      ownerId: run.ownerId,
-      runId: run._id,
-      channelId: run.channelId,
-      channel,
-      sourceThumbnail: thumbAsset,
-      sourceVideoKey: sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null,
-    });
     const title =
       (typeof mOut.title === "string" && mOut.title) ||
       (typeof vMeta.title === "string" && vMeta.title) ||
@@ -495,9 +528,7 @@ export const getVideoDetail = query({
         ? (mOut.tags.filter((t) => typeof t === "string") as string[])
         : [],
       script,
-      thumbnailKey: thumbnail.key,
-      ...(thumbnail.presentation ? { thumbnailPresentation: thumbnail.presentation } : {}),
-      videoKey: sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null,
+      ...currentThumbnail,
       estimatedViews:
         typeof mOut.estimatedViews === "number"
           ? (mOut.estimatedViews as number)
