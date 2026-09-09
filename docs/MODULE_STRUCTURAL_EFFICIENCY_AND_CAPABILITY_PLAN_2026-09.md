@@ -175,6 +175,11 @@ need their own tested contracts. Children's supervised 16:9 restriction stays
 unchanged. Any initially refused evidence/character layouts remain unfinished
 item 176 work, not a permanent scope exception or an invisible fallback.
 
+That first [held portrait foundation](SCENE_COMPILER_PORTRAIT_FOUNDATION_REVIEW_2026-09.md)
+now has actual native render/frame evidence and an independently reproduced
+transition repair. It remains a layout foundation, with topic-bound semantics
+and complete-channel integration still open.
+
 **Reserve candidate:** verified software-demonstration capture could reuse
 browser automation and assembly for tutorials. The existing `screen` graphic
 does not demonstrate a real application action. This is not currently ranked
