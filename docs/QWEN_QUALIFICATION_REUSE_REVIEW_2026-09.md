@@ -1,9 +1,11 @@
-# Held Qwen qualification reuse — 9 September 2026
+# Qwen qualification reuse — released 9 September 2026
 
 Scope: the standalone qualification workflow and a pure extraction of its
 existing client request/receipt contract. No worker, provider routing, model,
-precision, attention, output encoding, production flags, credentials or deployment
-changed. No genuine audio was synthesized or qualified during this work.
+precision, attention, output encoding, production flags or credentials changed
+by the correction. No genuine audio was synthesized or qualified during
+this work. The isolated app code release is verified below; this does not enable
+the Qwen worker or approve any unreviewed voice.
 
 ## Root cause and correction
 
@@ -135,3 +137,26 @@ inference dependencies were guarded too; no real GPU or invoice was measured.
 - Observed test workflow submissions drop from 12 to 6 for generation followed
   by verdict finalization. This is a concrete avoided-work count, not measured
   dollar savings or proof of accepted audio quality. No production flag was set.
+
+## Isolated release proof
+
+Commit `478c897acabb2db23d61198bfb2cbbe4788b9479` contains this correction and the
+saved-tag wrapping fix, with no held arithmetic/portrait capability. All646
+direct tests, nonincremental typecheck, build, baseline contract audits and real
+local assembly passed. Lint has zero errors and33 existing warnings. Root also
+independently reran retained-audio, actual qualification-caller and receipt tests.
+
+GitHub CI `34409974434` completed successfully at22:16:01UTC. Canonical Convex
+reported ready at22:13:56UTC. Trigger `20260909.29` completed at22:15:59UTC:
+worker `worker_cmtunq8ehhkeh0jn4qud926wu`, content hash
+`765abebd968c4a8c4e11197178d4d31c`. Vercel deployment
+`dpl_2aRvyzQyXXcTNfNfwDyxX4vFinod` is READY, production-targeted and assigned to
+`youtube-studio-ai.vercel.app` at this exact commit. Root checked provider API
+metadata independently. Canonical health remained exact after cloud completion.
+
+Evidence: `/tmp/ysa-478c897-production-vVYwrP/`, including `ci-terminal.json`,
+`cloud-receipt-exact.log`, `health-after-cloud.json`, and `PRODUCTION_REVIEW.md`.
+There was no same-commit separate render-parity CI run: its unchanged path filter
+does not match these files. The preceding exact9acde render-parity run34406994415
+passed; this release's local assembly passed separately. No remote media, GPU,
+worker qualification flag, credentials or retained production audio were changed.

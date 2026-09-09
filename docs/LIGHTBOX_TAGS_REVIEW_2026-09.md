@@ -1,6 +1,6 @@
 # Saved SEO tag reflow — September 2026
 
-Status: locally verified, held for the owner's isolated UI release. This is not yet a production-fix claim.
+Status: released in `478c897acabb2db23d61198bfb2cbbe4788b9479`; exact provider and full-shell production verification completed below.
 
 ## Confirmed defect and narrow repair
 
@@ -40,4 +40,12 @@ Source before SHA-256: `45252e5f2eca379486e79c2d26b621deaa1d0460258fc47842d18f46
 
 ## Limits and handoff
 
-The local transport shell supplies representative base typography/theme tokens; its 2px width difference from the full production shell is explicit above. This is real native playback of a retained diagnostic clip, not the 200.551-second production master and not a whole-footage/content-quality approval. Tag chips have no copy button; exact selectable text is verified without writing the host clipboard. The existing YouTube link is checked, not opened externally. Provider selection, auth, signing recovery, shared cache and publication behavior are unchanged. Final deployed full-shell verification remains the owner's release step. Graph update, Git and deploy are owner-coordinated, not performed by this slice.
+The local transport shell supplies representative base typography/theme tokens; its 2px width difference from the full production shell is explicit above. This is real native playback of a retained diagnostic clip, not the 200.551-second production master and not a whole-footage/content-quality approval. Tag chips have no copy button; exact selectable text is verified without writing the host clipboard. The existing YouTube link is checked, not opened externally. Provider selection, auth, signing recovery, shared cache and publication behavior are unchanged.
+
+## Exact production verification
+
+The [joint release receipt](QWEN_QUALIFICATION_REUSE_REVIEW_2026-09.md) records all646 tests, build/typecheck/audits/actual assembly, exact Vercel deployment and canonical alias, Convex and terminal Trigger20260909.29. Production evidence is `/tmp/ysa-478c897-production-vVYwrP/`; ordinary native-media regression is `/tmp/ysa-library-player-production-D6uCUg/results.json`.
+
+Full-shell review corrected a fixture-coverage assumption: the local proof has16 representative saved tags, while the actual production record has30. The final production oracle checks **all30** exact strings and text ranges at320/390/1440px with200% root text. Dialog client/scroll widths are294/294,364/364,958/958px. All tags fit, remain selectable, and Script toggling preserves the same paused video DOM at15seconds. The actual retained200.551-second production master responds with206 Range data; readyState4, no seeking, media errors, page errors or production writes. Twelve production screenshots were inspected by the independent reviewer; root also inspected enlarged phone tags and desktop player.
+
+The supplementary blanket44px-control oracle reports the existing desktop Script toggle at34.5625px. This is retained as a separate finding, not hidden or described as an overall pass. The requested tag, text, native-player and action checks pass; phone targets satisfy44px. No claim of complete accessibility compliance or historical video/SEO quality is made. The original16-tag subset results and the final30-tag results both remain available.
