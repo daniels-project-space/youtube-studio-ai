@@ -1,6 +1,6 @@
 # Reference-page batch: Lore and Lo-fi
 
-Status: three local visual/interaction passes passed and screenshots inspected; isolated full release gate and production verification pending. No media, runtime admission, provider setting, paid route or owner authority is changed.
+Status: release `2eedd75359b86b85202b767159c8fdc2345f1baa` passed its full isolated gate and is verified on the exact production web alias. Cloud CI remains in progress. No media, runtime admission, provider setting, paid route or owner authority is changed.
 
 ## Baseline and design decision
 
@@ -23,3 +23,5 @@ Local dev is the isolated port-3312 application. Its three read-only auth/asset/
 The parent code graph is updated once after the batch, not for every visual pass. Focused tests, typecheck and lint run during iteration; one full frozen gate covers both pages and shared styling before deployment. All 151 goal items and the new owner throughput rule remain in scope; this batch does not finish all Studio pages or production pipeline qualification.
 
 Final local pass: five cases per page pass, Lore **74** default-visible words and Lo-fi **67**, zero errors, mutations, horizontal clipping or new image bytes. Final captures `/tmp/ysa-reference-lore-06jJxL/` and `/tmp/ysa-reference-lofi-8iOztc/` were inspected, including desktop composition, enlarged-phone full-story/runtime sections and Lo-fi reference boundaries at actual viewport resolution. The expanded long-form requirements are deliberately retained, not claimed as a completed runtime or hidden by truncation. Final focused real-component tests, typecheck and lint logs are `/tmp/ysa-reference-pages-final-{targeted,typecheck,lint}.log`.
+
+Production release evidence: all **633** direct tests, typecheck, production build, lint (zero errors, 33 existing warnings), unchanged structural audits, 24-defect proof generation and actual hermetic assembly passed in `/tmp/ysa-reference-pages-frozen-csB1KN/repo`. Logs `/tmp/ysa-reference-pages-release-*.log`. GitHub Production deployment **6354359134** succeeded at **16:21:32 UTC, 9 September**; the exact `youtube-studio-ai.vercel.app/api/health` alias returned this commit. Both five-case browser proofs then passed **without auth/media proxies**, with unchanged browser-received image SHA and no errors/mutations. Logs `/tmp/ysa-reference-pages-{lore,lofi}-production.log`; captures `/tmp/ysa-reference-lore-xdIiS6/` and `/tmp/ysa-reference-lofi-O1VZDe/`. Desktop Lore composition and enlarged-phone Lo-fi requirements were visually inspected. Cloud CI **34376140513** is tracked separately and is not yet claimed complete.
