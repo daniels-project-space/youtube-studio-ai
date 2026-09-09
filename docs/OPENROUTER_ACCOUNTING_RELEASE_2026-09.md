@@ -1,6 +1,6 @@
 # Production-only reasoning accounting correction
 
-Status: full frozen gate and exact Vercel production verification passed; cloud CI verification pending.
+Status: full frozen gate and exact Vercel/Convex/Trigger production verification passed.
 
 ## Scope
 
@@ -27,3 +27,5 @@ Its own independent release gate passed all **632 direct tests**, typecheck, pro
 ## Production verification
 
 The exact production `/api/health` returns `640d584f61c342ce4987eca2dc8959b3714cbbd9`. GitHub/Vercel deployment `6352624602` is explicitly **Production**, successful at 14:53:43 UTC, with deployment URL `https://youtube-studio-mwk670mfs-danielmabro-news-projects.vercel.app` and Vercel receipt `D3TKVuRDfEqwN3EV92844XV4ETTP`; the separate earlier preview is not used as proof. Six actual navigation journeys on the production alias pass, with no proxy (`/tmp/ysa-accounting-production-navigation.log`, `/tmp/ysa-navigation-reflow-BHeFPm/`). Cloud CI `34366556622` remains in progress. No paid request was made to manufacture live parser evidence; exact retained-response replay and deployed artifact identity remain the scoped accounting proof.
+
+Cloud CI **34366556622** subsequently completed successfully: canonical Convex ready **15:06:36 UTC**, Trigger **20260909.17** deployed **15:08:40 UTC**, worker `worker_cmtu8gmha9lk30iluc8ya7ac7`, content hash `2ceab162b9e682837cba2a5e0cad909d`. Log: `/tmp/ysa-accounting-cloud-deploy.log`. The later mobile-only release `2093d7e` retains the exact accounting source and passed its own 632-test gate and complete web/cloud verification; it does not include the held title work. The current broader request-envelope investigation is recorded separately in [the input/rate review](METADATA_REQUEST_ENVELOPE_REVIEW_2026-09.md).

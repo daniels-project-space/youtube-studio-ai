@@ -1,6 +1,6 @@
 # Mobile navigation reading surfaces
 
-Status: three local passes complete; frozen release gate and production verification pending.
+Status: three local passes, full frozen gate and production web/cloud verification passed.
 
 ## Defect and bounded repair
 
@@ -25,3 +25,17 @@ Evidence:
 - Actual navigation journeys: `/tmp/ysa-mobile-nav-journeys-pass3.log`, `/tmp/ysa-navigation-reflow-jsRNG3/`.
 
 This is one shared-shell follow-up, not completion of the requested entire Studio redesign. Interior Library filter density, other pages/subpanels and real owner/publishing workflows remain separate work. No provider credit or GPU was used.
+
+## Frozen release gate
+
+Candidate `2093d7e11c259bb96d4613b285fcafb6d576adeb`, based on accounting release `640d584`, changes only the mobile CSS, navigation regression test, shared pixel proof and this report. Its isolated worktree `/tmp/ysa-mobile-nav-frozen-NscjNN/repo` passed all **632 direct tests**, typecheck, production build, lint (zero errors / 33 existing warnings), unchanged structural audit, 24-defect proof generation and an actual hermetic 31.021995-second assembly (`/tmp/assembly-smoke-rv7o7F/bk_smoke_2_loudnorm.mp4`). Logs: `/tmp/ysa-mobile-nav-release-{tests,typecheck,lint,build,audit,defect-proof,assembly}.log`.
+
+The frozen browser script independently passed all 21 cases against byte-identical CSS in the isolated local application (`/tmp/ysa-mobile-nav-frozen-browser.log`). The four-file release diff was checked before fast-forwarding main; no held title/lease/full-source experiment code is included. Exact Vercel alias and cloud deployment verification remain separate pending steps.
+
+## Production verification
+
+The exact `https://youtube-studio-ai.vercel.app/api/health` returned `2093d7e11c259bb96d4613b285fcafb6d576adeb` before and after live checks. Vercel receipt `Dogqn6y3TqSUCDLLVr1hoPDfVVWz` succeeded; deployment `6352892453` is explicitly Production, successful at 15:06:44 UTC, URL `https://youtube-studio-5trcph1na-danielmabro-news-projects.vercel.app`. Earlier Preview status is not used as the release receipt.
+
+All **21 live painted-surface comparisons report zero changed pixels**, zero browser errors and zero private-inventory requests. The six separate live navigation journeys pass. Enlarged Lo-Fi menu and small-phone Library/menu screenshots were inspected; no development overlay is present. These runs use the exact production alias with no GET proxy or owner fixture. Evidence: `/tmp/ysa-mobile-nav-production-2093d7e.log`, `/tmp/ysa-topbar-contrast-CbsbGN/`, `/tmp/ysa-mobile-nav-production-journeys-2093d7e.log`, `/tmp/ysa-navigation-reflow-s5RYOz/`.
+
+Cloud CI **34367972866** completed successfully. Canonical Convex functions were ready at **15:18:35 UTC**; Trigger **20260909.18** deployed at **15:20:37 UTC**, worker `worker_cmtu8w2wg96530jlvr2f45jru`, content hash `2ceab162b9e682837cba2a5e0cad909d`. Log: `/tmp/ysa-mobile-nav-cloud-deploy.log`. This closes the deployment steps listed as pending in the frozen-candidate record above, not the wider UI or paid module goal.
