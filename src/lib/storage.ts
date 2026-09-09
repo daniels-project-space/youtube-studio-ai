@@ -250,7 +250,10 @@ export class ObjectDeletionError extends Error {
 }
 
 /** Delete exact unique keys; every success must be acknowledged, including absent keys. */
-export async function deleteObjects(keys: string[], bucket?: string): Promise<number> {
+export async function deleteObjects(keys: string[], bucket?: string, options: {
+  /** Revoke stale cleanup workers before each batch; the grant bounds transport retries too. */
+  beforeBatch?: () => Promise<{ expiresAt: number }>;
+} = {}): Promise<number> {
   if (keys.length === 0) return 0;
   if (keys.some((key) => typeof key !== "string" || !key || Buffer.byteLength(key, "utf8") > 1024)) {
     throw new ObjectDeletionError("Object deletion requires valid exact keys", 0, keys.length);
@@ -262,12 +265,25 @@ export async function deleteObjects(keys: string[], bucket?: string): Promise<nu
   for (let i = 0; i < unique.length; i += 1000) {
     const batch = unique.slice(i, i + 1000);
     const requested = new Set(batch);
+    let timeoutMs = 30_000;
+    if (options.beforeBatch) {
+      try {
+        const grant = await options.beforeBatch();
+        if (!Number.isSafeInteger(grant?.expiresAt) || grant.expiresAt <= Date.now()) {
+          throw new Error("expired grant");
+        }
+        timeoutMs = Math.min(timeoutMs, grant.expiresAt - Date.now());
+        if (timeoutMs <= 0) throw new Error("expired grant");
+      } catch {
+        throw new ObjectDeletionError("Object deletion authority check failed", deleted, unique.length);
+      }
+    }
     let response;
     try {
       response = await client.send(new DeleteObjectsCommand({
         Bucket,
         Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: false },
-      }));
+      }), { abortSignal: AbortSignal.timeout(timeoutMs) });
     } catch {
       throw new ObjectDeletionError("Object deletion outcome is unavailable", deleted, unique.length);
     }

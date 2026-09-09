@@ -7,7 +7,11 @@ import { parseFinalMasterReleaseCertificateBytes } from "@/lib/finalMasterReleas
 import { pruneRunObjectsWithVerifiedFinalMasterEvidence } from "@/lib/runArtifactPrune";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
-import { type RunArtifactReleaseObservation } from "@/lib/runArtifactRetention";
+import {
+  type RunArtifactReleaseObservation,
+  RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS,
+  runArtifactCleanupBinding,
+} from "@/lib/runArtifactRetention";
 import { requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { getAccessToken } from "@/lib/youtube";
 import {
@@ -134,6 +138,8 @@ type ClaimedRetention = {
   additionalCertificateKeys: string[];
   keepNames: string[];
   leaseToken: string;
+  releaseVideoId?: string;
+  releaseYouTubeChannelId?: string;
 };
 
 function convexClient(): ConvexHttpClient {
@@ -200,6 +206,27 @@ export async function sweepDueRunArtifactRetentions(input?: {
       if (retention.leaseToken !== leaseToken) {
         throw new Error("claimed artifact retention returned a mismatched lease token");
       }
+      const binding = runArtifactCleanupBinding(retention);
+      let deletionObservation: {
+        connectorId: Id<"youtubeAuth">; connectorVersion: number; observedAt: number;
+        observation: RunArtifactReleaseObservation | null;
+      } | undefined;
+      const authorizeNextBatch = async (): Promise<{ expiresAt: number }> => {
+        if (!deletionObservation || Date.now() - deletionObservation.observedAt >= RUN_ARTIFACT_RELEASE_OBSERVATION_MAX_AGE_MS / 2) {
+          if (!retention.releaseVideoId) throw new Error("claimed cleanup has no bound released video");
+          const connector = await requireYouTubeConnector(convex, { ownerId, channelId: retention.channelId });
+          const videos = await fetchRunArtifactReleaseObservations({
+            accessToken: await getAccessToken(connector.refreshToken), videoIds: [retention.releaseVideoId],
+          });
+          deletionObservation = {
+            connectorId: connector.connectorId, connectorVersion: connector.tokenVersion,
+            observedAt: Date.now(), observation: videos.get(retention.releaseVideoId) ?? null,
+          };
+        }
+        return convex.mutation(api.runArtifactRetentions.authorizeDeletion, {
+          ownerId, retentionId: retention._id, leaseToken, binding, ...deletionObservation,
+        });
+      };
       const certificate = parseFinalMasterReleaseCertificateBytes(
         await getObjectBytes(retention.certificateKey),
       );
@@ -219,7 +246,11 @@ export async function sweepDueRunArtifactRetentions(input?: {
         getObjectBytes,
         getObjectIntegrity,
         listObjects,
-        deleteObjects,
+        deleteObjects: async (keys) => {
+          // Even an empty R2 list must not permit stale asset-row pruning.
+          if (!keys.length) await authorizeNextBatch();
+          return deleteObjects(keys, undefined, { beforeBatch: authorizeNextBatch });
+        },
       });
       removedObjects += pruning.removedObjects;
       if (!pruning.cleaned) {
