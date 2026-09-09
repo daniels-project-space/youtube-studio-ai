@@ -19,6 +19,7 @@ import {
   createPackageToOpeningReceipt,
 } from "@/engine/packageToOpening";
 import { pruneRunObjectsWithVerifiedFinalMasterEvidence } from "@/lib/runArtifactPrune";
+import { ObjectDeletionError } from "@/lib/storage";
 
 const keyPrefix = "owner/alice/channel/casefile/";
 const runId = "run-byte-evidence";
@@ -283,6 +284,10 @@ async function localUploadVerifierAvoidsR2MasterRestream(): Promise<void> {
 async function pruneFixture(
   fixture: ReturnType<typeof buildFixture>,
   additionalFixtures: Array<ReturnType<typeof buildFixture>> = [],
+  overrides: {
+    list?: (keys: string[]) => string[];
+    delete?: (keys: string[], objects: Map<string, Buffer>) => Promise<number>;
+  } = {},
 ) {
   const objects = new Map(fixture.objects);
   for (const additional of additionalFixtures) {
@@ -305,9 +310,14 @@ async function pruneFixture(
     keepNames: ["final.mp4", "thumbnail.jpg"],
     getObjectBytes: getObjectBytes(objects),
     getObjectIntegrity: getObjectIntegrity(objects),
-    listObjects: async (prefix) => [...objects.keys()].filter((key) => key.startsWith(prefix)),
+    listObjects: async (prefix) => {
+      const keys = [...objects.keys()].filter((key) => key.startsWith(prefix));
+      return overrides.list ? overrides.list(keys) : keys;
+    },
     deleteObjects: async (keys) => {
       deleteCalls.push([...keys]);
+      if (overrides.delete) return overrides.delete(keys, objects);
+      for (const key of keys) objects.delete(key);
       return keys.length;
     },
   });
@@ -445,6 +455,43 @@ async function main() {
     [[`${keyPrefix}runs/${runId}/intermediates/parent-scene-01.mp4`]],
     "cleanup must retain the certificate, receipt, manifest, frames, and final master",
   );
+  assert.equal(validCleanup.objects.size, 7);
+  assert.equal(validCleanup.result.retainedObjectCount, 7);
+  for (const key of validCleanup.result.retainedReleaseEvidence) assert.ok(validCleanup.objects.has(key));
+
+  for (const badKey of ["owner/bob/channel/other/runs/other/final.mp4", `${keyPrefix}runs/${runId}-other/a`, `${keyPrefix}runs/${runId}/`]) {
+    const badListing = await pruneFixture(buildFixture(), [], { list: (keys) => [...keys, badKey] });
+    assert.equal(badListing.result.cleaned, false);
+    assert.equal(badListing.result.removedObjects, 0);
+    assert.equal(badListing.deleteCalls.length, 0, "listing must be scoped before any destructive request");
+  }
+  const duplicateListing = await pruneFixture(buildFixture(), [], { list: (keys) => [...keys, keys[0]] });
+  assert.equal(duplicateListing.result.cleaned, false);
+  assert.equal(duplicateListing.deleteCalls.length, 0);
+
+  for (const deleted of [0, -1, 2, NaN, 0.5]) {
+    const shortDelete = await pruneFixture(buildFixture(), [], { delete: async () => deleted });
+    assert.equal(shortDelete.result.cleaned, false, "only an exact acknowledgement count may complete cleanup");
+    assert.equal(shortDelete.result.removedObjects, 0);
+    assert.equal(shortDelete.result.retainedObjectCount, 7);
+  }
+
+  const partialFixture = buildFixture();
+  partialFixture.objects.set(`${keyPrefix}runs/${runId}/intermediates/parent-scene-02.mp4`, Buffer.from("another intermediate"));
+  const partial = await pruneFixture(partialFixture, [], {
+    delete: async (keys, objects) => {
+      objects.delete(keys[0]);
+      throw new ObjectDeletionError("Object deletion is incomplete", 1, keys.length);
+    },
+  });
+  assert.equal(partial.result.cleaned, false);
+  assert.equal(partial.result.removedObjects, 1);
+  assert.equal(partial.result.retainedObjectCount, 7);
+  for (const key of partial.result.retainedReleaseEvidence) assert.ok(partial.objects.has(key));
+  const retry = await pruneFixture({ ...partialFixture, objects: partial.objects });
+  assert.equal(retry.result.cleaned, true);
+  assert.equal(retry.result.removedObjects, 1, "a retry must target only the intermediate still present");
+  assert.equal(retry.objects.size, 7);
 
   const parentForDerivativeCleanup = buildFixture();
   const shortForDerivativeCleanup = buildFixture("short");
