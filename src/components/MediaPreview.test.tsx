@@ -49,6 +49,20 @@ try {
     "source controls are a sibling after the artwork, never an overlay inside it");
   assert.deepEqual(requestedKeys, [currentKey], "footer composition adds no second active source resolver");
 
+  const previewFailures: string[] = [];
+  for (const [name, props, expectedKeys] of [
+    ["stored thumbnail", {assetKey: currentKey, videoStillKey: "unused-master.mp4"}, [currentKey]],
+    ["reviewed thumbnail", {assetKey: currentKey, videoStillKey: "unused-master.mp4", reviewedSrc: "https://media.example.test/reviewed.png"}, []],
+  ] as const) {
+    requestedKeys.length = 0;
+    const result = renderToStaticMarkup(createElement(MediaPreview, {...props, alt: name}));
+    try { assert.deepEqual(requestedKeys, expectedKeys, `${name}: sign only the chosen source`); }
+    catch (error) { previewFailures.push(String(error)); }
+    try { assert.equal((result.match(/Loading preview/g) ?? []).length, 1, `${name}: one visible loading label`); }
+    catch (error) { previewFailures.push(String(error)); }
+  }
+  assert.deepEqual(previewFailures, []);
+
   requestedKeys.length = 0;
   const assets = [{ _id: "old-thumbnail", _creationTime: 1, kind: "thumbnail", r2Key: oldKey }];
   const runMarkup = renderToStaticMarkup(createElement(RunMediaWorkbench, {
