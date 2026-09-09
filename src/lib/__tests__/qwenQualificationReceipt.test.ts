@@ -14,8 +14,9 @@
  *     as a failure, because "we could not check" must never read as "it is fine";
  *   - the human verdict is a required input with no default, since the doc asks
  *     for a register/performance verdict and no number replaces listening;
- *   - the hash covers the measurements AND the verdicts, so editing either after
- *     the fact invalidates the receipt the runtime checks;
+ *   - the hash covers the measurements AND the verdicts, so editing either
+ *     changes the retained benchmark digest. Runtime readiness currently checks
+ *     flag/digest format, not this report's hash or authenticated provenance;
  *   - instruction following is judged as a RELATION between two takes (calm vs
  *     energetic pace), which a single take cannot fake.
  *
@@ -36,7 +37,7 @@ function main(): void {
   assert.match(CODE, /if \(m\.wer === null\) failures\.push/, "an unmeasured WER must fail");
   assert.match(CODE, /if \(m\.lufs === null\) failures\.push/, "unmeasured loudness must fail");
   assert.match(CODE, /if \(m\.truePeakDbtp === null\) failures\.push/, "an unmeasured peak must fail");
-  assert.match(CODE, /if \(!receipt\) failures\.push/, "a missing worker runtime receipt must fail");
+  assert.match(CODE, /if \(!receipt\) throw new Error/, "a missing worker runtime receipt must fail before audio measurement");
 
   // ---- any failure suppresses the receipt ---------------------------------
   const failAt = CODE.indexOf("if (allFailures.length) {");
@@ -49,9 +50,14 @@ function main(): void {
   // ---- the human verdict has no default -----------------------------------
   assert.match(
     CODE,
-    /const missingVerdicts = measured\.filter\(\(m\) => !verdicts\[m\.take\.id\]\?\.trim\(\)\)/,
+    /const missingVerdicts = measured\.filter\(\(m\) => !verdicts\[m\.take\.id\]\)/,
     "a take with no recorded verdict must block the receipt",
   );
+  // qwenQualificationResume.test.ts exercises these through the actual CLI,
+  // current request validator and Python receipt contract with transports guarded.
+  assert.match(CODE, /value\.audioSha256 !== m\.audioSha256/, "listening verdict must bind the reviewed audio bytes");
+  assert.match(CODE, /value\.decision !== "accept" && value\.decision !== "reject"/, "a verdict needs an explicit acceptance decision");
+  assert.match(CODE, /!value\.verdict\.trim\(\)/, "SHA-bound verdicts still require human listening notes");
   assert.ok(
     !/humanVerdict: verdicts\[m\.take\.id\] \?\? "(pass|ok|approved)"/.test(CODE),
     "the verdict must never default to an approval",

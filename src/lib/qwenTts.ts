@@ -358,7 +358,7 @@ function validateReceipt(args: {
   return value as unknown as QwenTtsReceipt;
 }
 
-export async function synthQwenNarration(args: {
+export interface QwenTtsRequestArgs {
   text: string;
   speaker: string;
   language?: string;
@@ -366,8 +366,10 @@ export async function synthQwenNarration(args: {
   speed?: number;
   seed?: number;
   maxCostUsd?: number;
-  onReceipt?: (receipt: QwenTtsReceipt) => void;
-}): Promise<Uint8Array> {
+}
+
+/** Pure request identity, shared by live submission and offline qualification. */
+export function prepareQwenTtsRequest(args: QwenTtsRequestArgs) {
   const text = args.text.replace(/\s+/g, " ").trim();
   if (!text || text.length > 8_000) throw new QwenTtsError("Qwen3 TTS text must contain 1–8000 characters");
   if (!(QWEN3_TTS_SPEAKERS as readonly string[]).includes(args.speaker)) {
@@ -419,6 +421,30 @@ export async function synthQwenNarration(args: {
     },
   } as const;
   const requestKey = sha256(canonicalJson(payload));
+  return { payload, requestKey };
+}
+
+/** Validate retained bytes against the CURRENT request, not a receipt's own claim.
+ * Integrity linkage only: this neither authorizes spend nor proves worker identity. */
+export function validateRetainedQwenTtsAudio(args: QwenTtsRequestArgs, audio: Uint8Array, receipt: unknown): QwenTtsReceipt {
+  const { payload, requestKey } = prepareQwenTtsRequest(args);
+  // Reuse the live size/header checks as well as its complete attestation checks.
+  if (!(audio instanceof Uint8Array) || audio.byteLength < 1_000 || audio.byteLength > 36_000_000) {
+    throw new Error("Qwen3 TTS retained audio is outside the bounded size");
+  }
+  strictBase64(Buffer.from(audio).toString("base64"));
+  return validateReceipt({
+    value: receipt, requestKey, textSha256: payload.textSha256,
+    instructionSha256: payload.instructionSha256, speaker: payload.speaker,
+    language: payload.language, seed: payload.seed, audio, maxCostUsd: payload.maxCostUsd,
+    idleShutdownSeconds: payload.runtime.idleShutdownMaxSeconds,
+  });
+}
+
+export async function synthQwenNarration(args: QwenTtsRequestArgs & {
+  onReceipt?: (receipt: QwenTtsReceipt) => void;
+}): Promise<Uint8Array> {
+  const { payload, requestKey } = prepareQwenTtsRequest(args);
   let response: Response;
   try {
     response = await fetch(workerUrl(), {
@@ -464,11 +490,11 @@ export async function synthQwenNarration(args: {
       requestKey,
       textSha256: payload.textSha256,
       instructionSha256: payload.instructionSha256,
-      speaker,
-      language: typedLanguage,
-      seed,
+      speaker: payload.speaker,
+      language: payload.language,
+      seed: payload.seed,
       audio,
-      maxCostUsd,
+      maxCostUsd: payload.maxCostUsd,
       idleShutdownSeconds: payload.runtime.idleShutdownMaxSeconds,
     });
     args.onReceipt?.(receipt);

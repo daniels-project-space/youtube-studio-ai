@@ -323,7 +323,10 @@ export function Lightbox({
                   color: "var(--color-muted)",
                   background: "var(--color-surface)",
                   border: "1px solid var(--color-border)",
-                  whiteSpace: "nowrap",
+                  whiteSpace: "normal",
+                  minWidth: 0,
+                  maxWidth: "100%",
+                  overflowWrap: "anywhere",
                 }}
               >
                 {tag}
