@@ -1,0 +1,22 @@
+# Shared preview lifecycle — local repair, production pending
+
+## Verified causes, not assumed render failures
+
+The Studio capture exposed two copies of “Loading preview.” A live read-only browser check then established that the retained Neon Rain Penthouse master does decode and pause at 15 seconds (duration 180s, readyState 4, no media error). Other off-screen lazy images remain loading until scrolled into view; that observation is not proof of missing files. No legacy upload or generated asset was changed.
+
+The shared `MediaPreview` component had three independent defects: duplicate loading labels; unconditional signing of both a thumbnail and an unused master (even while a reviewed URL is shown); and video fallback detection based on the mere presence of `reviewedSrc`, rather than whether that reviewed source survived loading. After reviewed-image failure, the last defect mounts an image element with an MP4 URL and can remain loading indefinitely.
+
+The repair keeps the original reviewed/stored/fallback source precedence, stable hooks, existing ownership boundary and provenance labels. Hooks resolve only the source currently eligible to display, and activate retained-source signing if the reviewed image fails. A native saved-video fallback remains a video after that failure. One loading label remains. No provider/model settings, thumbnail generation, published video or storage contents were changed.
+
+## Evidence
+
+- Actual-component server-render test reproduced four assertions before the fix (`/tmp/ysa-media-preview-before.log`): unnecessary signers and duplicate labels in stored/reviewed cases. The repaired component, media selection and both run-media/preview contract tests pass.
+- `scripts/media-preview-browser-proof.mts` bundles the real React component and real asset URL hook into a disposable local Chromium fixture. Only source media/signing HTTP responses are local fixtures; external network access is blocked. It uses an existing owner-provided PNG and an already-rendered 31-second assembly MP4, not new paid media.
+- The same browser oracle fails four cases on the frozen old source (`/tmp/ysa-media-preview-browser-before.log`, `/tmp/ysa-media-preview-proof-0LpcWU/`): three unnecessary-signing paths and a real 12-second native-fallback timeout. It passes all seven cases on the repair (`/tmp/ysa-media-preview-browser.log`, `/tmp/ysa-media-preview-proof-S8mpAf/`), including image recovery, native frame recovery, direct native preview, denied source and explicit fallback.
+- Native video evidence checks actual decoded frame readiness, pause and currentTime 15s. A screenshot was inspected; its color-bar footage is an assembly test fixture, not evidence of channel-output quality. Exact request assertions prove two-to-one resolver use for stored-thumbnail-plus-master and zero signing while an available reviewed source is displayed. No dollar saving is claimed.
+- Root typecheck and zero-warning changed-file lint pass (`/tmp/ysa-media-preview-typecheck.log`, `/tmp/ysa-media-preview-lint.log`). Actual deployed surfaces and a separate frozen release gate remain pending. This repair is deliberately excluded from the in-flight overview/CI release `dd6e176`.
+- A second check uses the actual local Studio UI with public read-only production session/media resolution (not a fixture model response). Desktop and 390px phone both show the retained Neon Rain master at currentTime 15, duration 180, readyState 4, paused, with no media/page error or horizontal overflow. The loading overlay is gone once decoded; phone pixels were inspected. Evidence `/tmp/ysa-preview-live-xyghJN/`. This is local UI plus real retained media, not exact production deployment verification.
+
+Shared consumers traced in the existing graph include RecentVideos, LatestVideoWidget, VideoCard, ArtifactWorkRail, DayByDaySchedule, AssetImg and the current thumbnail in RunMediaWorkbench. Their source/provenance contracts are retained; full live page verification is not implied by fixture coverage.
+
+Separate candidate **69ad0870d090bb035ffb771cd9830d3a137ac68e**, parent `dd6e176`, is frozen at `/tmp/ysa-preview-release-h5i1Rx/repo`. Its full gate and repeated actual-browser fixture proof are running (`/tmp/ysa-preview-release-*.log`). It is not on main. Graph update completed after the media code changes: 21,809 nodes / 53,000 edges / 714 communities; ignored build-excluded graph outputs only, no external semantic work.
