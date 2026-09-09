@@ -1,6 +1,14 @@
-# Cloud release efficiency — inspected, not implemented
+# Cloud release efficiency — queued-revision guard implemented; input reuse pending
 
-This follow-up is part of the existing goal's Trigger/Convex usage reduction. No workflow or deployment authority was changed during the overview batch.
+This follow-up is part of the existing goal's Trigger/Convex usage reduction. The first bounded change protects deployment ordering and skips obsolete queued releases. Unchanged-runtime fingerprinting and inherited-deployment receipts are still pending; this guard does not claim those savings.
+
+## Implemented and tested locally
+
+The serialized cloud job keeps all waiting jobs (`queue: max`, no in-progress cancellation). Directly after tooling installation, `scripts/cloud-runtime-release-policy.mjs` verifies the trusted workflow SHA against the actual checkout and observes current main through Git. Both actual Convex/Trigger steps require its affirmative output and the preceding step's success. An obsolete source revision skips both providers; missing/malformed/unreachable evidence fails closed with credential-safe diagnostics. Once the pair begins, no mid-pair cancellation/check is added.
+
+A second edge matters: documentation-only pushes are ignored by this CI workflow and therefore create no replacement deployment. When SHAs differ, the guard fetches the observed immutable main object and compares endpoint trees, including renames as removal/addition. Only a diff consisting entirely of the exact CI-ignored Markdown/docs/Serena paths permits the already-tested code release to continue. Unknown or runtime files still supersede it. The checkout/worktree does not move; shallow CI history is sufficient. This is equality outside ignored paths, not a general runtime dependency classifier.
+
+`src/lib/__tests__/cloudRuntimeReleasePolicy.test.mjs` exercises real local bare Git transport and the actual CLI, including current/stale revisions, retries, docs-only catch-up, invalid/missing evidence, credential-safe failure and unchanged checkout/remote refs. It also parses the real YAML and proves the ignored-path agreement, queue policy, guard placement and both conditional deployment callers. The initial workflow fails the missing-caller oracle (`/tmp/ysa-cloud-policy-before.log`); the repaired version passes (`/tmp/ysa-cloud-policy-after.log`). No dummy provider deployment or paid render was used. Full isolated release gate and live CI confirmation remain pending.
 
 ## Current evidence
 

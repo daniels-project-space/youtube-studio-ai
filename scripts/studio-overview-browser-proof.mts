@@ -72,7 +72,7 @@ try {
       await page.screenshot({ path: join(outputDir,`${name}.png`), fullPage: true });
       const geometry = await main.evaluate(root => ({ width: document.documentElement.clientWidth,
         scrollWidth: document.documentElement.scrollWidth, height: document.documentElement.scrollHeight,
-        controls: [...root.querySelectorAll<HTMLElement>('[data-overview-widget] summary,[data-overview-widget] header > a,[data-channel-rail] a')]
+        controls: [...root.querySelectorAll<HTMLElement>('[data-overview-widget] summary,[data-overview-widget] header > a,[data-channel-rail] a,section[aria-labelledby="channel-relay-title"] header a,section[aria-labelledby="channel-relay-title"] header button,[aria-label="Current production and release queue"] header a')]
           .map(node => ({ text: node.textContent?.trim(), height: node.getBoundingClientRect().height })),
         clipped: [...root.querySelectorAll<HTMLElement>('[data-overview-widget] strong,[data-overview-widget] small')]
           .filter(node => node.clientWidth > 0 && node.scrollWidth > node.clientWidth+1).map(node=>node.textContent),

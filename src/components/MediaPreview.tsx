@@ -64,13 +64,16 @@ export function MediaPreview({
   /** Render controls outside the artwork without resolving its source again. */
   footer?: (presentation: MediaPreviewPresentation) => ReactNode;
 }) {
-  const signedAsset = useAssetUrlState(assetKey);
-  const signedVideoStill = useAssetUrlState(videoStillKey);
   const [reviewedFailedSrc, setReviewedFailedSrc] = useState<string | null>(null);
   const [r2FailedKey, setR2FailedKey] = useState<string | null>(null);
   const [videoStillFailedKey, setVideoStillFailedKey] = useState<string | null>(null);
   const [fallbackFailedSrc, setFallbackFailedSrc] = useState<string | null>(null);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  const showingReviewed = Boolean(reviewedSrc && reviewedFailedSrc !== reviewedSrc);
+  // Resolve only the source we can actually display. Fallback hooks remain
+  // mounted, but do not sign an unused master or an image hidden by a review.
+  const signedAsset = useAssetUrlState(showingReviewed ? undefined : assetKey);
+  const signedVideoStill = useAssetUrlState(!showingReviewed && !assetKey ? videoStillKey : undefined);
 
   const imageSelection = selectMediaPreview({
     assetKey,
@@ -90,10 +93,10 @@ export function MediaPreview({
     fallbackImageFailed: true,
   });
   const fallbackSelection = assetKey ? imageSelection : videoStillKey ? videoStillSelection : imageSelection;
-  const selection = reviewedSrc && reviewedFailedSrc !== reviewedSrc
+  const selection = showingReviewed && reviewedSrc
     ? { source: "reviewed" as const, src: reviewedSrc, state: "loading" as const }
     : fallbackSelection;
-  const showingVideoStill = !reviewedSrc && !assetKey && Boolean(videoStillKey) && selection.source === "r2";
+  const showingVideoStill = !showingReviewed && !assetKey && Boolean(videoStillKey) && selection.source === "r2";
   const state = selection.src && loadedSrc === selection.src
     ? "ready"
     : selection.state;
@@ -177,7 +180,6 @@ export function MediaPreview({
           {state === "unavailable" && emptyContent && (
             <span className={styles.screenReaderOnly}>{unavailableLabel}</span>
           )}
-          {state === "loading" && <span className={styles.stateLabel}>{visibleStateLabel}</span>}
         </span>
       )}
 

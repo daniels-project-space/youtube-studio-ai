@@ -140,6 +140,9 @@ jobs:
       contents: read
     concurrency:
       group: youtube-studio-cloud-runtimes
+      # Preserve the latest waiting revision even if an older quality gate
+      # finishes late. The in-job main check will discard stale revisions.
+      queue: max
       cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
@@ -149,7 +152,11 @@ jobs:
           cache: npm
       - name: Install deploy tooling
         run: npm ci --no-audit --no-fund
+      - name: Verify cloud release still matches main
+        id: release_policy
+        run: node scripts/cloud-runtime-release-policy.mjs
       - name: Deploy canonical Convex runtime
+        if: steps.release_policy.outputs.deploy == 'true'
         env:
           # This deploy key is created for dev:astute-camel-689, the canonical
           # live data/function deployment. Never substitute `convex deploy`:
@@ -157,6 +164,7 @@ jobs:
           CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
         run: npx --no-install convex dev --once --typecheck=disable
       - name: Deploy Trigger production tasks
+        if: steps.release_policy.outputs.deploy == 'true'
         env:
           TRIGGER_ACCESS_TOKEN: ${{ secrets.TRIGGER_ACCESS_TOKEN }}
         # Runtime/provider values stay in Trigger's protected Production
