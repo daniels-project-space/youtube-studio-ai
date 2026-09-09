@@ -1,4 +1,4 @@
-# Shared preview lifecycle — local repair, production pending
+# Shared preview lifecycle — production release verified
 
 ## Verified causes, not assumed render failures
 
@@ -18,3 +18,9 @@ The repair keeps the original reviewed/stored/fallback source precedence, stable
 - A second check uses the actual local Studio UI with public read-only production session/media resolution (not a fixture model response). Desktop and 390px phone both show the retained Neon Rain master at currentTime 15, duration 180, readyState 4, paused, with no media/page error or horizontal overflow. The loading overlay is gone once decoded; phone pixels were inspected. Evidence `/tmp/ysa-preview-live-xyghJN/`. This is local UI plus real retained media, not exact production deployment verification.
 
 Shared consumers traced in the existing graph include RecentVideos, LatestVideoWidget, VideoCard, ArtifactWorkRail, DayByDaySchedule, AssetImg and the current thumbnail in RunMediaWorkbench. Their source/provenance contracts are retained; full live page verification is not implied by fixture coverage.
+
+Release **69ad0870d090bb035ffb771cd9830d3a137ac68e**, parent `dd6e176`, is frozen at `/tmp/ysa-preview-release-h5i1Rx/repo` and on main. All 634 direct tests, typecheck, build, lint (zero errors; 33 existing warnings), unchanged audits, 24 defect proofs, actual assembly and seven native browser fixture cases passed (`/tmp/ysa-preview-release-*.log`). Production deployment 6355517325 succeeded at 17:25:14 UTC on 9 September; the exact alias reports the full revision. The five production overview profiles pass with no errors or mutations (`/tmp/ysa-preview-production-overview.log`, `/tmp/ysa-overview-proof-qUgpBP/`). These overview checks alone do not prove native-frame decoding on every consumer.
+
+Cloud CI **34382724352** succeeded. Canonical Convex was ready at 17:33:52 UTC; Trigger **20260909.22** deployed at 17:35:55 UTC, worker `worker_cmtudq4lzbq2u0pmwgo381pg3`, content hash `0ecd15f2216b668800f75c1f2d0bcc17`. Evidence `/tmp/ysa-preview-cloud-deploy.log`. The preceding overview release's cloud CI **34381359899** also succeeded: Convex 17:22:16 UTC, Trigger **20260909.21** 17:24:18 UTC, worker `worker_cmtudb5g8bhfv0jlvwaktm579`, same content hash. Unchanged worker content is evidence of redundant deployment work, not a measured dollar saving.
+
+Graph update completed after the media code changes: 21,809 nodes / 53,000 edges / 714 communities; ignored build-excluded graph outputs only, no external semantic work. Shared signing/cache lifetime is a separate follow-up documented in [the asset URL review](ASSET_URL_CACHE_REVIEW_2026-09.md); it is not part of this release.
