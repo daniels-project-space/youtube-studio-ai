@@ -453,9 +453,16 @@ async function synthFullScriptOneShot(
   // 15+ min — on timeout we fall back to chunked generation. maxTokens sized to a
   // full long-form script (~10k words) + thinking, not the old bloated 48k.
   const ONE_SHOT_TIMEOUT_MS = Number(process.env.SCRIPT_ONESHOT_TIMEOUT_MS ?? 300_000);
+  const oneShotController = new AbortController();
+  let oneShotTimedOut = false;
   try {
-    const o = await Promise.race([
-      claudeJson<{ sections?: { heading?: string; narration?: string }[]; closing_line?: string }>({
+    const timeout = setTimeout(() => {
+      oneShotTimedOut = true;
+      oneShotController.abort(new Error(`scriptGen one-shot timed out after ${ONE_SHOT_TIMEOUT_MS}ms`));
+    }, ONE_SHOT_TIMEOUT_MS);
+    let o: { sections?: { heading?: string; narration?: string }[]; closing_line?: string };
+    try {
+      o = await claudeJson<{ sections?: { heading?: string; narration?: string }[]; closing_line?: string }>({
       model,
       maxTokens: 22000,
       temperature: 0.8,
@@ -480,9 +487,14 @@ async function synthFullScriptOneShot(
         `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
           `Return STRICT JSON {"sections":[{"heading":string,"narration":string}],"closing_line":string}.`,
       ].filter(Boolean).join("\n\n"),
-      }),
-      new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`scriptGen one-shot timed out after ${ONE_SHOT_TIMEOUT_MS}ms`)), ONE_SHOT_TIMEOUT_MS)),
-    ]) as { sections?: { heading?: string; narration?: string }[]; closing_line?: string };
+      signal: oneShotController.signal,
+      });
+    } finally {
+      // Unlike Promise.race, clearing the timer and forwarding its abort signal
+      // ensures a timed-out provider request cannot keep running while the
+      // chunked fallback starts buying overlapping work.
+      clearTimeout(timeout);
+    }
     const sections: ScriptSection[] = (o.sections ?? [])
       .map((s) => ({ heading: cleanHeading(typeof s.heading === "string" ? s.heading : ""), narration: spoken(req, typeof s.narration === "string" ? s.narration : "") }))
       .filter((s) => s.narration.length > 0);
@@ -546,7 +558,10 @@ async function synthFullScriptOneShot(
     log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${estSeconds(narrationText)}s) ✓`);
     return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop, crafted };
   } catch (e) {
-    log(`scriptGen one-shot (${model}) failed (${e instanceof Error ? e.message : e}) — falling back to chunked`);
+    const detail = oneShotTimedOut
+      ? `timed out after ${ONE_SHOT_TIMEOUT_MS}ms (provider request aborted)`
+      : e instanceof Error ? e.message : e;
+    log(`scriptGen one-shot (${model}) failed (${detail}) — falling back to chunked`);
     return null;
   }
 }

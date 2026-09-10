@@ -37,6 +37,20 @@ async function main(): Promise<void> {
       if (prompt === "OpenRouter pre-admission 400") {
         return Response.json({ error: { message: "invalid request" } }, { status: 400 });
       }
+      if (prompt === "OpenRouter caller abort") {
+        assert.ok(init?.signal, "caller cancellation is composed into the request signal");
+        return new Promise<never>((_, reject) => {
+          if (init?.signal?.aborted) {
+            reject(Object.assign(new Error("caller aborted"), { name: "AbortError" }));
+            return;
+          }
+          init?.signal?.addEventListener(
+            "abort",
+            () => reject(Object.assign(new Error("caller aborted"), { name: "AbortError" })),
+            { once: true },
+          );
+        });
+      }
       return new Response(JSON.stringify({
         id: "or-test",
         model: payload.model,
@@ -124,6 +138,22 @@ async function main(): Promise<void> {
       assert.ok(taskOutcome.error instanceof Error);
       assert.equal(taskOutcome.error.name, "AbortTaskRunError", `${prompt} must not trigger task replay`);
     }
+
+    const callerAbort = new AbortController();
+    const pendingCallerAbort = openRouterChat({
+      model: OPENROUTER_MODELS.intelligence,
+      messages: [{ role: "user", content: "OpenRouter caller abort" }],
+      maxTokens: 64,
+      signal: callerAbort.signal,
+    });
+    // Let the mocked fetch attach its listener before cancelling the caller.
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    callerAbort.abort(new Error("caller cancelled the long-form request"));
+    await assert.rejects(
+      pendingCallerAbort,
+      (error: unknown) => error instanceof OpenRouterGenerationOutcomeUnknownError,
+      "caller cancellation must abort the underlying provider request",
+    );
 
     const before400: number = requests.length;
     await assert.rejects(

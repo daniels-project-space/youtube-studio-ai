@@ -222,6 +222,8 @@ export async function openRouterChat(args: {
   json?: boolean;
   kind?: ModelCallKind;
   log?: (message: string) => void;
+  /** Optional caller cancellation, composed with the route's hard deadlines. */
+  signal?: AbortSignal;
 }): Promise<string> {
   assertNoOpenAiModel(args.model);
   const key = process.env.OPENROUTER_API_KEY?.trim();
@@ -229,6 +231,11 @@ export async function openRouterChat(args: {
   const provider = PROVIDERS[args.model];
   if (!provider) throw new Error(`OpenRouter model is not an approved pinned route: ${args.model}`);
   const controller = new AbortController();
+  const callerSignal = args.signal;
+  const abortFromCaller = (): void => controller.abort(callerSignal?.reason);
+  const detachCaller = (): void => callerSignal?.removeEventListener("abort", abortFromCaller);
+  if (callerSignal?.aborted) controller.abort(callerSignal.reason);
+  else callerSignal?.addEventListener("abort", abortFromCaller, { once: true });
   const requestDeadline = setTimeout(() => controller.abort(), OPENROUTER_REQUEST_TIMEOUT_MS);
   let response: Response;
   try {
@@ -246,6 +253,7 @@ export async function openRouterChat(args: {
       signal: controller.signal,
     });
   } catch (error) {
+    detachCaller();
     throw new OpenRouterGenerationOutcomeUnknownError(
       `request transport failed after dispatch (${error instanceof Error ? error.message : String(error)})`,
       { cause: error },
@@ -269,6 +277,7 @@ export async function openRouterChat(args: {
     );
   } finally {
     clearTimeout(bodyDeadline);
+    detachCaller();
   }
   if (!response.ok) {
     const message = payload && typeof payload === "object"
@@ -363,6 +372,7 @@ export async function openRouterJson<T>(args: {
   maxTokens: number;
   temperature?: number;
   log?: (message: string) => void;
+  signal?: AbortSignal;
 }): Promise<T> {
   const model = args.model?.trim() || openRouterModel(args.tier === "pro" ? "creative" : "intelligence");
   return parseJson<T>(await openRouterChat({
@@ -375,6 +385,7 @@ export async function openRouterJson<T>(args: {
     temperature: args.temperature,
     json: true,
     log: args.log,
+    signal: args.signal,
   }));
 }
 

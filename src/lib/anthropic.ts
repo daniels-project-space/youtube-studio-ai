@@ -40,6 +40,8 @@ export async function claudeJson<T = unknown>(args: {
   maxTokens?: number;
   temperature?: number;
   log?: (message: string) => void;
+  /** Optional caller cancellation forwarded to the pinned OpenRouter request. */
+  signal?: AbortSignal;
   /** An outer, schema-aware caller owns response reuse for this request. */
   memoize?: boolean;
 }): Promise<T> {
@@ -70,6 +72,7 @@ export async function claudeJson<T = unknown>(args: {
       maxTokens,
       temperature: args.temperature,
       log: args.log,
+      signal: args.signal,
     });
   }, { memoize: args.memoize });
 }
