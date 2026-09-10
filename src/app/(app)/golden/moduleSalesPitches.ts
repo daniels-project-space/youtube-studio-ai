@@ -101,6 +101,11 @@ export const MODULE_SALES_PITCHES: Readonly<Record<string, ModuleSalesPitch>> = 
     promise: "Make every episode teach something measurable.",
     bullets: ["One clear objective", "Built-in recall practice"],
   },
+  "worked-example": {
+    title: "Worked Examples",
+    promise: "Make each calculation click.",
+    bullets: ["Steps reveal on cue", "Answers stay verifiable"],
+  },
   "children-show-bible": {
     title: "Children’s Show Bible",
     promise: "Build a show children can follow and learn from.",
