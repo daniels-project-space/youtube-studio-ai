@@ -3,12 +3,12 @@
   "audit-fail-open-gates": 1,
   "audit-silent-degradation": 13,
   "audit-inert-inputs": 2,
-  "audit-inert-consumes": 6,
+  "audit-inert-consumes": 12,
   "audit-dead-capability-gates": 12,
   "audit-unbounded-normalized": 2,
   "audit-inert-produces": 67,
-  "audit-unchecked-number-clamps": 3,
+  "audit-unchecked-number-clamps": 5,
   "audit-contract-consumes-drift": 0,
-  "audit-unproducible-consumes": 3,
+  "audit-unproducible-consumes": 5,
   "audit-undeclared-store-reads": 2
 }
