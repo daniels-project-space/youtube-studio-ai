@@ -12,6 +12,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { usePathname } from "next/navigation";
+import { shouldShowOperationsTrigger } from "./operationsAccessRoutes";
 
 export type OperationsAccessState =
   | "checking"
@@ -123,7 +124,7 @@ export function OperationsAccess() {
   } = useOperationsAccessContext();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const isLibraryRoute = pathname === "/library" || pathname.startsWith("/library/");
+  const showTrigger = shouldShowOperationsTrigger(pathname);
 
   useEffect(() => () => {
     requestAbortRef.current?.abort();
@@ -253,9 +254,9 @@ export function OperationsAccess() {
 
   return (
     <>
-      {/* Library thumbnails apply automatically. Keep session capabilities and
-          explicitly requested dialogs available without a global login prompt. */}
-      {!isLibraryRoute ? <button
+      {/* Keep the session probe global so owner-only desks can stay reactive,
+          but surface its trigger only where the page has a nearby owner action. */}
+      {showTrigger ? <button
         ref={triggerRef}
         type="button"
         className={`operations-access-trigger${unlocked ? " is-unlocked" : ""}`}

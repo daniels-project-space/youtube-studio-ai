@@ -25,6 +25,11 @@ assert.match(
   /<OperationsAccessProvider>[\s\S]*<OperationsAccess \/>[\s\S]*\{children\}[\s\S]*<\/OperationsAccessProvider>/,
   "the access probe must cover both the trigger and every page",
 );
+const routes = read("./operationsAccessRoutes.ts");
+assert.match(routes, /OWNER_ACTION_ROUTE_PREFIXES/);
+assert.match(routes, /pathname\.startsWith\(`\$\{prefix\}\/`\)/);
+assert.doesNotMatch(routes, /\/library/,
+  "read-only library work remains outside the global owner trigger");
 
 const library = read("../app/(app)/library/page.tsx");
 assert.match(
