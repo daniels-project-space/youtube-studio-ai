@@ -50,7 +50,7 @@ import { claudeJson, claudeJsonPro, hasAnthropicKey, retryOnUnusableOutput } fro
 import { youtubeSuggest, lintTitle, resolveClickbaitLevel } from "@/lib/metacraft";
 import { fetchNicheOutliers, type OutlierVideo } from "@/lib/outliers";
 import { fetchRedditTrends, type TrendSignal } from "@/lib/trends";
-import { embedText, cosine } from "@/lib/embeddings";
+import { embedText, cosine, hasEmbedKey } from "@/lib/embeddings";
 import { resolveVoiceDoctrine } from "@/engine/golden";
 
 // The complete topic-intel surface, re-exported for standalone consumers.
@@ -431,6 +431,15 @@ async function semanticDedupe(
   log: (m: string) => void,
 ): Promise<TopicBet[]> {
   if (bets.length === 0) return bets;
+  // The embeddings compatibility surface is deliberately disabled while
+  // Gemini is thumbnail-only. Do not even construct Promise.all() work that
+  // will throw for every candidate: lexical lint above is the approved,
+  // zero-provider fallback and this short-circuit removes a needless failed
+  // call per slate (plus its misleading error path).
+  if (!hasEmbedKey()) {
+    log("topicraft: semantic dedupe disabled by provider policy — token-overlap lint is the complete gate");
+    return bets;
+  }
   const sample = avoid.slice(-40);
   try {
     const [betVecs, avoidVecs] = await Promise.all([
