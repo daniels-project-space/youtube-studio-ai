@@ -539,6 +539,8 @@ export interface CraftedMetadata {
   clickScore: number | null;
   /** False when the title passed lint but was never judged against the feed. */
   judged: boolean;
+  /** True when ancillary description/tag packaging degraded after title selection. */
+  packageFallback: boolean;
   /** The real autocomplete queries used as evidence. */
   suggests: string[];
   /** The real competitor titles judged against. */
@@ -573,6 +575,29 @@ export function warmStartCandidates(
   if (planned) out.push({ frame: "planned", title: planned });
   if (bet && bet !== planned) out.push({ frame: "topic-bet", title: bet });
   return out;
+}
+
+/**
+ * Keep a validated title when the ancillary package call is unavailable.
+ * This is deliberately factual and small: it never invents a claim, URL, or
+ * keyword, and the returned receipt marks that only the package degraded.
+ */
+function deterministicMetadataPackage(title: string, topic: string, niche?: string): {
+  description: string;
+  tags: string[];
+} {
+  const cleanTitle = title.trim();
+  const cleanTopic = topic.trim();
+  const description = [
+    cleanTitle.endsWith(".") ? cleanTitle : `${cleanTitle}.`,
+    cleanTopic && cleanTopic !== cleanTitle ? `Topic: ${cleanTopic}.` : "",
+  ].filter(Boolean).join("\n\n");
+  const phraseTags = [cleanTitle, cleanTopic, niche?.trim() ?? ""];
+  const wordTags = `${cleanTitle} ${cleanTopic}`
+    .toLowerCase()
+    .match(/[a-z0-9][a-z0-9'’-]{2,}/g) ?? [];
+  const tags = [...new Set([...phraseTags, ...wordTags].map((tag) => tag.trim()).filter(Boolean))];
+  return { description, tags };
 }
 
 export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> {
@@ -785,27 +810,44 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       const w = survivors[best];
       // ONE description+tags, written FOR the winner (parallel work already done).
       // Mechanical structured output — flash, no thinking.
-      const pkg = await claudeJson<{ description?: string; tagsCsv?: string }>({
-        prompt: [
-          `Write the YouTube description + tags for this video.`,
-          `TITLE: "${w.title}" | Channel: "${a.channelName ?? ""}" | Niche: ${a.niche ?? "general"}`,
-          a.quote ? `THE QUOTE (open the description with it): "${a.quote}"` : "",
-          a.coldOpen ? `COLD OPEN (the description must promise the same video):\n"${a.coldOpen.slice(0, 400)}"` : "",
-          suggests.length ? `REAL SEARCH QUERIES (lean keyword phrasing on these):\n- ${suggests.join("\n- ")}` : "",
-          `DESCRIPTION: ${a.descriptionStructure ? `follow the channel structure: ${a.descriptionStructure}. ` : ""}` +
-            `(1) THE QUOTE${a.quote ? "" : " (or the strongest hook line)"} + 1-2 punchy lines, primary keyword in the ` +
-            `VERY FIRST sentence; (2) ONE ≤60-word value paragraph; (3) a "Subscribe for more:" CTA line WITHOUT ` +
-            `inventing any URL; (4) "Keywords: " line with 14-20 comma-separated phrases; (5) one line of 8-12 ` +
-            `#hashtags. Never paste the script.`,
-          `TAGS: 25-30 comma-separated, the real search queries + entities THIS video mentions.${lang}`,
-          `Return STRICT JSON {"description":string,"tagsCsv":string}.`,
-        ].filter(Boolean).join("\n\n"),
-        maxTokens: 2500,
-        temperature: 0.8,
-      });
-      const description = String(pkg.description ?? "").trim();
-      const tags = String(pkg.tagsCsv ?? "").split(",").map((t) => t.trim()).filter(Boolean);
-      if (!description || tags.length < 5) throw new Error("metacraft: winner package came back empty");
+      let description = "";
+      let tags: string[] = [];
+      let packageFallback = false;
+      try {
+        const pkg = await claudeJson<{ description?: string; tagsCsv?: string }>({
+          prompt: [
+            `Write the YouTube description + tags for this video.`,
+            `TITLE: "${w.title}" | Channel: "${a.channelName ?? ""}" | Niche: ${a.niche ?? "general"}`,
+            a.quote ? `THE QUOTE (open the description with it): "${a.quote}"` : "",
+            a.coldOpen ? `COLD OPEN (the description must promise the same video):\n"${a.coldOpen.slice(0, 400)}"` : "",
+            suggests.length ? `REAL SEARCH QUERIES (lean keyword phrasing on these):\n- ${suggests.join("\n- ")}` : "",
+            `DESCRIPTION: ${a.descriptionStructure ? `follow the channel structure: ${a.descriptionStructure}. ` : ""}` +
+              `(1) THE QUOTE${a.quote ? "" : " (or the strongest hook line)"} + 1-2 punchy lines, primary keyword in the ` +
+              `VERY FIRST sentence; (2) ONE ≤60-word value paragraph; (3) a "Subscribe for more:" CTA line WITHOUT ` +
+              `inventing any URL; (4) "Keywords: " line with 14-20 comma-separated phrases; (5) one line of 8-12 ` +
+              `#hashtags. Never paste the script.`,
+            `TAGS: 25-30 comma-separated, the real search queries + entities THIS video mentions.${lang}`,
+            `Return STRICT JSON {"description":string,"tagsCsv":string}.`,
+          ].filter(Boolean).join("\n\n"),
+          maxTokens: 2500,
+          temperature: 0.8,
+        });
+        description = String(pkg.description ?? "").trim();
+        tags = String(pkg.tagsCsv ?? "").split(",").map((t) => t.trim()).filter(Boolean);
+        if (!description || tags.length < 5) throw new Error("winner package came back empty");
+      } catch (e) {
+        // The title decision is already complete. Do not throw it away and
+        // re-enter legacy title selection; retain it with a truthful package
+        // fallback that downstream finishing can still clamp and persist.
+        packageFallback = true;
+        const fallback = deterministicMetadataPackage(w.title, a.topic, a.niche);
+        description = fallback.description;
+        tags = fallback.tags;
+        a.log?.(
+          `metacraft: winner package failed after title selection (${e instanceof Error ? e.message : e}) — ` +
+          `preserving the judged title with deterministic package fallback`,
+        );
+      }
       const pinnedComment = await pinnedPromise;
       a.log?.(
         `metacraft: [${w.frame}] wins (${judged ? `click ${score}/10` : "UNJUDGED — lint only"}) ` +
@@ -820,6 +862,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         frame: w.frame,
         clickScore: score,
         judged,
+        packageFallback,
         suggests,
         feed,
       };

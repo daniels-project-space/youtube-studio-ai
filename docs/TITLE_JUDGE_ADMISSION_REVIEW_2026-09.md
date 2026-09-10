@@ -38,7 +38,14 @@ and ≥7 direct gate and deterministic tie-break.
 - Focused tests, scoped ESLint, and TypeScript pass. The existing full
   production-readiness gate remains required for release.
 
+The same seam now preserves a validated title when the later description/tag
+package call fails. `CraftedMetadata.packageFallback` is explicit and the
+module emits a deterministic, factual package instead of throwing into the
+legacy title tournament. `metacraftWarmStart.test.ts` exercises that failure
+after selection and verifies the selected title remains intact. This is a
+reliability safeguard, not a claim that the degraded package is equivalent to
+the normal SEO package.
+
 This improves decision truthfulness and prevents accidental bad admissions; a
 held-out title corpus and authorized watch-time/CTR experiment are still
 required before claiming output-quality or business gains.
-

@@ -22,12 +22,14 @@ const CRAFTED = "The Army Called Him a Coward Until Hacksaw Ridge";
 /** Judge stub: whichever title we nominate as the winner scores highest. */
 let preferredTitle = CRAFTED;
 let malformedJudgeAttempts = 0;
+let packageFailureAttempts = 0;
 let judgeAttempts = 0;
 let installed = false;
 
-function install(preferred: string, malformedAttempts = 0): void {
+function install(preferred: string, malformedAttempts = 0, packageFailures = 0): void {
   preferredTitle = preferred;
   malformedJudgeAttempts = malformedAttempts;
+  packageFailureAttempts = packageFailures;
   judgeAttempts = 0;
   if (installed) return;
   installed = true;
@@ -43,6 +45,7 @@ function install(preferred: string, malformedAttempts = 0): void {
       claudeJson: async ({ prompt }: { prompt: string }) => {
         if (prompt.includes("pinned comment")) return { comment: "What would you have done?" };
         if (prompt.includes("description + tags")) {
+          if (packageFailureAttempts-- > 0) throw new Error("package temporarily unavailable");
           return { description: "A description long enough to pass.", tagsCsv: "a,b,c,d,e,f" };
         }
         if (prompt.startsWith("You are a YouTube CTR strategist")) {
@@ -101,6 +104,15 @@ async function main(): Promise<void> {
   const recovered = await craft("");
   assert.equal(recovered.title, CRAFTED);
   assert.equal(recovered.judged, true, "the recovered title must have a real judge receipt");
+
+  // A package failure happens after title selection. The selected title must
+  // survive with an explicit deterministic package fallback instead of being
+  // replaced by the legacy tournament path.
+  install(CRAFTED, 0, 1);
+  const packageRecovered = await craft("");
+  assert.equal(packageRecovered.title, CRAFTED);
+  assert.equal(packageRecovered.packageFallback, true, "the package degradation must be explicit");
+  assert.match(packageRecovered.description, /Hacksaw Ridge/, "fallback description must retain the selected title");
 
   // If both bounded attempts return malformed judge evidence, the caller must
   // fail closed before buying the winner's description package.
