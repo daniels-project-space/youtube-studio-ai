@@ -1,5 +1,6 @@
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { v } from "convex/values";
+import { weightedTagOverlapBenchmark } from "../src/lib/seoViewBenchmark";
 
 /**
  * SEO / niche-intelligence store (competitor-intelligence engine, v1 port).
@@ -9,7 +10,11 @@ import { v } from "convex/values";
  *   seoDatabank       — Gemini-synthesised strategy (title templates, hooks,
  *                       gaps) derived from the competitor corpus.
  *
- * `viewEstimate` ports the legacy overlap-weighted view predictor verbatim.
+ * `viewEstimate` returns a bounded comparable-video benchmark. It keeps the
+ * historical source/fallback labels for stored metadata while using a
+ * weighted median so one viral outlier cannot dominate the result. The
+ * response also records the comparable count and method so the UI can name
+ * the evidence population instead of presenting a prediction as a promise.
  */
 
 const thumbnailStyleGuideValidator = v.object({
@@ -139,12 +144,11 @@ export const getDatabank = query({
 });
 
 /**
- * Overlap-weighted view predictor (ported verbatim from legacy autostudio).
+ * Comparable-video benchmark for a candidate tag set.
  *
- *   overlap = |myTags ∩ competitorVideo.tags| (case-insensitive)
- *   keep videos with overlap > 0; sort desc; take top 20.
- *   if ≥3 matches:  estimate = Σ(views·overlap) / Σ(overlap)
- *   else:           fall back to niche median (or avg) views of the top 50.
+ * Matching remains case-insensitive and overlap-weighted, but the helper
+ * uses a weighted median over at most twenty relevant videos. This makes the
+ * central signal stable when a single competitor is an extreme outlier.
  */
 export const viewEstimate = query({
   args: {
@@ -167,7 +171,7 @@ export const viewEstimate = query({
       (niche?.medianViewsTop50 || niche?.avgViewsTop50 || 0) as number;
 
     if (myTags.size === 0) {
-      return { estimatedViews: fallback, source: "niche_fallback" as const };
+      return weightedTagOverlapBenchmark([], fallback);
     }
 
     const competitorRows = await ctx.db
@@ -188,28 +192,6 @@ export const viewEstimate = query({
       }
     }
 
-    scored.sort((a, b) => b.overlap - a.overlap);
-    const top = scored.slice(0, 20);
-
-    if (top.length >= 3) {
-      let num = 0;
-      let den = 0;
-      for (const s of top) {
-        num += s.views * s.overlap;
-        den += s.overlap;
-      }
-      const estimate = den > 0 ? Math.round(num / den) : fallback;
-      return {
-        estimatedViews: estimate,
-        source: "tag_overlap" as const,
-        matches: top.length,
-      };
-    }
-
-    return {
-      estimatedViews: fallback,
-      source: "niche_fallback" as const,
-      matches: top.length,
-    };
+    return weightedTagOverlapBenchmark(scored, fallback);
   },
 });

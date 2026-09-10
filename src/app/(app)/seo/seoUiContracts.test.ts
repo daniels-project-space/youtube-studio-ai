@@ -14,8 +14,12 @@ assert.match(page, /Metadata is not pixel evidence/);
 assert.match(page, /function ResearchEvidenceLedger/);
 assert.match(page, /Visual attributes stored/,
   "a measured state must explain the stored visual claim instead of contradicting itself");
-assert.match(page, /modeled views/,
-  "tag overlap must be presented as a model rather than a promised audience outcome");
+assert.match(page, /benchmark midpoint/,
+  "comparable views must be presented as a benchmark rather than a promised audience outcome");
+assert.match(page, /Comparable public videos/,
+  "the benchmark must name the evidence population instead of exposing an implementation label");
+assert.doesNotMatch(page, /tag overlap \(\$\{estimate\.matches\} matches\)/,
+  "implementation terminology should not be the user-facing result label");
 assert.match(page, /fetch\("\/api\/research"/,
   "the research action must remain connected to the real queue boundary");
 assert.match(page, /ArrowRight/);

@@ -890,7 +890,7 @@ function ViewEstimateWidget({
 
   return (
     <section className={styles.estimateRoom}>
-      <SeoSectionHeading eyebrow="Compare" title="Tag overlap" detail="Comparison to the saved niche sample." />
+      <SeoSectionHeading eyebrow="Compare" title="Audience benchmark" detail="Comparable public videos in the saved niche sample." />
       <div className={styles.estimateWorkbench}>
         <label>
           <span>Candidate tag set</span>
@@ -909,10 +909,10 @@ function ViewEstimateWidget({
               {compact(estimate.estimatedViews)}
             </span>
             <span>
-              modeled views ·{" "}
+              benchmark midpoint ·{" "}
               {estimate.source === "tag_overlap"
-                ? `tag overlap (${estimate.matches} matches)`
-                : "niche fallback"}
+                ? `${estimate.matches} comparable videos`
+                : "niche sample fallback"}
             </span>
           </div>
         )}
