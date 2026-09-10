@@ -15,6 +15,12 @@ assert.match(page, /summary\.pinned/,
   "the schedule header must distinguish pinned exceptions from cadence projections");
 assert.match(page, /api\.contentPlan\.setScheduledAt/,
   "the redesigned exact-date control must remain connected to the scheduling mutation");
+assert.match(page, /useOperationsAccess/,
+  "schedule edits must read the shared owner capability before mutating");
+assert.match(page, /if \(operationsAccess !== "owner"\)/,
+  "schedule mutations must open contextual owner verification instead of failing silently");
+assert.match(page, /canEdit=\{operationsAccess === "owner"\}/,
+  "schedule controls must expose their current edit capability");
 assert.match(page, /Open \$\{nextEvent\.title\} production details/,
   "the next scheduled release must open its exact production record");
 assert.match(page, /channelHref\(nextEvent\.slug, "week-ahead", nextEvent\.id\)/,
@@ -30,6 +36,12 @@ assert.match(board, /event\.thumbnailSource === "rendered_video_frame"/,
   "Lo-Fi scheduled cards must show their final-frame state instead of requesting a generic planner image");
 assert.match(styles, /prefers-reduced-motion: reduce/,
   "schedule motion must expose a reduced-motion path");
+const queue = readFileSync(`${here}/ScheduleQueue.tsx`, "utf8");
+assert.match(queue, /Verify owner to save date changes/,
+  "exact-date controls must explain the owner boundary in place");
+const cadence = readFileSync(`${here}/ChannelScheduleEditor.tsx`, "utf8");
+assert.match(cadence, /onRequestOwner/);
+assert.match(cadence, /Verify owner to save/);
 assert.doesNotMatch(page, /<PageHeader/,
   "Schedule must keep its own release-clock composition instead of the generic page header");
 

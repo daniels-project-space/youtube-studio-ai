@@ -50,7 +50,17 @@ function scheduleDraft(channel: ChannelRow): DraftSchedule {
   };
 }
 
-export function ChannelScheduleEditor({ channel, color }: { channel: ChannelRow; color: string }) {
+export function ChannelScheduleEditor({
+  channel,
+  color,
+  canEdit,
+  onRequestOwner,
+}: {
+  channel: ChannelRow;
+  color: string;
+  canEdit: boolean;
+  onRequestOwner: () => void;
+}) {
   const [draft, setDraft] = useState<DraftSchedule>(() => scheduleDraft(channel));
   const [dirty, setDirty] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -65,6 +75,10 @@ export function ChannelScheduleEditor({ channel, color }: { channel: ChannelRow;
   };
 
   const save = async () => {
+    if (!canEdit) {
+      onRequestOwner();
+      return;
+    }
     setSaving(true);
     setMessage(null);
     try {
@@ -192,7 +206,7 @@ export function ChannelScheduleEditor({ channel, color }: { channel: ChannelRow;
           {message?.text ?? `${frequencyLabel(draft.frequency)} · ${draft.localTime} ${draft.timezone}${usesTimeDefaults ? " · defaults" : ""}`}
         </span>
         <button type="button" className={styles.saveButton} disabled={!dirty || saving} onClick={() => void save()}>
-          {saving ? "Saving…" : dirty ? "Save schedule" : "Saved"}
+          {saving ? "Saving…" : dirty && !canEdit ? "Verify owner to save" : dirty ? "Save schedule" : "Saved"}
         </button>
       </div>
     </article>

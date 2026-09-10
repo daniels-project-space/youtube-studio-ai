@@ -20,10 +20,12 @@ export function ScheduleQueue({
   events,
   onPin,
   onUnpin,
+  canEdit,
 }: {
   events: CalendarEvent[];
   onPin: (event: CalendarEvent, isoDay: string) => Promise<void>;
   onUnpin: (event: CalendarEvent) => Promise<void>;
+  canEdit: boolean;
 }) {
   return (
     <section className={styles.section} aria-labelledby="next-up-title">
@@ -47,6 +49,7 @@ export function ScheduleQueue({
               event={event}
               onPin={onPin}
               onUnpin={onUnpin}
+              canEdit={canEdit}
             />
           ))}
         </div>
@@ -59,10 +62,12 @@ function UpcomingCard({
   event,
   onPin,
   onUnpin,
+  canEdit,
 }: {
   event: CalendarEvent;
   onPin: (event: CalendarEvent, isoDay: string) => Promise<void>;
   onUnpin: (event: CalendarEvent) => Promise<void>;
+  canEdit: boolean;
 }) {
   const dateKey = civilDayKey(event.date);
   const exactTime = event.timestamp === undefined
@@ -105,9 +110,11 @@ function UpcomingCard({
             onChange={(changeEvent) => {
               if (changeEvent.target.value) void onPin(event, changeEvent.target.value);
             }}
+            aria-describedby={!canEdit ? `${event.key}-schedule-owner-hint` : undefined}
           />
         </label>
         {event.pinned && <button type="button" onClick={() => void onUnpin(event)}>Use cadence</button>}
+        {!canEdit && <small id={`${event.key}-schedule-owner-hint`}>Verify owner to save date changes.</small>}
       </div>
     </article>
   );

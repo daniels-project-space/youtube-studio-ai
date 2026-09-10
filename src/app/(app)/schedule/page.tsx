@@ -7,6 +7,10 @@ import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { SkeletonList } from "@/components/Skeleton";
 import { useOwnerId } from "@/lib/owner-context";
+import {
+  useOperationsAccess,
+  useRequestOperationsAccess,
+} from "@/components/OperationsAccess";
 import { civilDayKey, scheduledTimestampForDay } from "@/lib/scheduleCalendar";
 import { CalendarPanel } from "./CalendarPanel";
 import {
@@ -34,6 +38,8 @@ type ScheduleView = "week" | "month" | "cadence";
 
 export default function SchedulePage() {
   const ownerId = useOwnerId();
+  const operationsAccess = useOperationsAccess();
+  const requestOperationsAccess = useRequestOperationsAccess();
   const [offset, setOffset] = useState(0);
   const [scope, setScope] = useState("all");
   const [scheduleView, setScheduleView] = useState<ScheduleView>("week");
@@ -132,6 +138,10 @@ export default function SchedulePage() {
 
   const pinEvent = async (event: CalendarEvent, isoDay: string) => {
     if (!event.id) return;
+    if (operationsAccess !== "owner") {
+      requestOperationsAccess();
+      return;
+    }
     const channel = channelById.get(event.channelId);
     const localTime = channel?.schedule?.localTime ?? "09:00";
     const timeZone = channel?.schedule?.timezone ?? "UTC";
@@ -153,6 +163,10 @@ export default function SchedulePage() {
 
   const unpinEvent = async (event: CalendarEvent) => {
     if (!event.id) return;
+    if (operationsAccess !== "owner") {
+      requestOperationsAccess();
+      return;
+    }
     try {
       await reschedule({ id: event.id as Id<"contentPlan">, scheduledAt: null });
       setNotice({ tone: "ok", text: `${event.title} is back on its channel cadence.` });
@@ -315,7 +329,12 @@ export default function SchedulePage() {
                   <small>{upcoming.length} upcoming</small>
                 </summary>
                 <div className={styles.queueDisclosureBody}>
-                  <ScheduleQueue events={upcoming} onPin={pinEvent} onUnpin={unpinEvent} />
+                  <ScheduleQueue
+                    events={upcoming}
+                    onPin={pinEvent}
+                    onUnpin={unpinEvent}
+                    canEdit={operationsAccess === "owner"}
+                  />
                 </div>
               </details>
             </>
@@ -354,6 +373,8 @@ export default function SchedulePage() {
                       key={channelScheduleEditorKey(channel)}
                       channel={channel}
                       color={channelColors.get(channel._id) ?? CHANNEL_COLORS[0]}
+                      canEdit={operationsAccess === "owner"}
+                      onRequestOwner={requestOperationsAccess}
                     />
                   ))}
                 </div>
