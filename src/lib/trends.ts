@@ -69,8 +69,9 @@ export async function fetchRedditTrends(
           }
           completed++;
           return signals;
-        } catch {
+        } catch (error) {
           /* one sub failing is fine; the packet is not cached until all finish */
+          log(`trends: r/${sub} request failed (${error instanceof Error ? error.message : String(error)})`);
           return [];
         }
       }));
