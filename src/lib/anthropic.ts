@@ -74,7 +74,13 @@ export async function claudeJson<T = unknown>(args: {
       log: args.log,
       signal: args.signal,
     });
-  }, { memoize: args.memoize });
+  }, {
+    memoize: args.memoize,
+    // A caller-owned deadline must never abort a response that another
+    // sibling joined. Completed responses remain reusable; only the
+    // cancellation-sensitive in-flight sharing is disabled by default.
+    coalesceInFlight: args.signal === undefined,
+  });
 }
 
 /**

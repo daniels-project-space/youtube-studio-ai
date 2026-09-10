@@ -348,7 +348,7 @@ export async function getOrCreateModelResponse<T>(
   key: string,
   details: Pick<ModelUsageRecord, "provider" | "model" | "kind">,
   create: () => Promise<T>,
-  options?: { memoize?: boolean },
+  options?: { memoize?: boolean; coalesceInFlight?: boolean },
 ): Promise<T> {
   const state = storage.getStore();
   // A caller with a stricter validation contract owns its outer memo. In that
@@ -359,16 +359,19 @@ export async function getOrCreateModelResponse<T>(
   const completed = getCachedModelResponse<T>(key, details);
   if (completed !== undefined) return completed;
 
-  const inFlight = state.inFlightResponses.get(key);
-  if (inFlight) {
-    groupFor(state, details).cacheHits++;
-    return inFlight as Promise<T>;
+  const coalesceInFlight = options?.coalesceInFlight !== false;
+  if (coalesceInFlight) {
+    const inFlight = state.inFlightResponses.get(key);
+    if (inFlight) {
+      groupFor(state, details).cacheHits++;
+      return inFlight as Promise<T>;
+    }
   }
 
   // Defer invocation by one microtask so a synchronous throw has the same
   // cleanup semantics as a rejected provider promise.
   const started = Promise.resolve().then(create);
-  state.inFlightResponses.set(key, started);
+  if (coalesceInFlight) state.inFlightResponses.set(key, started);
   try {
     const value = await started;
     // Adapters may also persist a durable receipt immediately after the paid
@@ -379,7 +382,7 @@ export async function getOrCreateModelResponse<T>(
   } finally {
     // Do not retain failures: an ambiguous provider error must stay visible to
     // the caller's safety policy, never become a synthetic cache entry.
-    if (state.inFlightResponses.get(key) === started) {
+    if (coalesceInFlight && state.inFlightResponses.get(key) === started) {
       state.inFlightResponses.delete(key);
     }
   }
