@@ -406,6 +406,70 @@ export function lintTitle(
   return { pass: issues.length === 0, issues };
 }
 
+export interface TitleJudgeRanking {
+  idx: number;
+  clickScore: number;
+  direct: number;
+}
+
+export interface TitleJudgeAdmission {
+  pass: boolean;
+  rankings: TitleJudgeRanking[];
+  issues: string[];
+}
+
+/**
+ * Validate the model's complete ranking before it can influence selection.
+ * A missing score is not a generous score: it is incomplete evidence. Keeping
+ * this deterministic and exported makes the judge boundary testable without a
+ * provider call and prevents a malformed response from becoming a title.
+ */
+export function validateTitleJudgeResponse(
+  value: unknown,
+  candidateCount: number,
+): TitleJudgeAdmission {
+  const issues: string[] = [];
+  const rankings = (value as { rankings?: unknown } | null)?.rankings;
+  if (!Array.isArray(rankings) || rankings.length !== candidateCount) {
+    issues.push(`judge must rank every candidate exactly once (${candidateCount} required)`);
+    return { pass: false, rankings: [], issues };
+  }
+  const seen = new Set<number>();
+  const admitted: TitleJudgeRanking[] = [];
+  rankings.forEach((raw, position) => {
+    const row = raw as { idx?: unknown; clickScore?: unknown; direct?: unknown } | null;
+    const idx = row?.idx;
+    const clickScore = row?.clickScore;
+    const direct = row?.direct;
+    if (
+      typeof idx !== "number" || !Number.isInteger(idx) || idx < 0 || idx >= candidateCount
+    ) {
+      issues.push(`judge ranking ${position + 1} has an invalid candidate index`);
+      return;
+    }
+    if (seen.has(idx)) {
+      issues.push(`judge ranking repeats candidate ${idx}`);
+      return;
+    }
+    if (
+      typeof clickScore !== "number" || !Number.isFinite(clickScore) || clickScore < 1 || clickScore > 10
+    ) {
+      issues.push(`judge ranking ${position + 1} has an invalid clickScore`);
+      return;
+    }
+    if (
+      typeof direct !== "number" || !Number.isFinite(direct) || direct < 1 || direct > 10
+    ) {
+      issues.push(`judge ranking ${position + 1} has an invalid direct score`);
+      return;
+    }
+    seen.add(idx);
+    admitted.push({ idx, clickScore, direct });
+  });
+  if (seen.size !== candidateCount) issues.push("judge ranking omitted at least one candidate");
+  return { pass: issues.length === 0, rankings: issues.length === 0 ? admitted : [], issues };
+}
+
 export interface MetaCraftArgs {
   topic: string;
   channelName?: string;
@@ -666,8 +730,15 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           maxTokens: 2500,
           temperature: 0.2,
         });
-        const ranked = (j.rankings ?? []).filter(
-          (r) => typeof r.idx === "number" && r.idx >= 0 && r.idx < survivors.length && (r.clickScore ?? 0) >= 7 && (r.direct ?? 10) >= 7,
+        const admission = validateTitleJudgeResponse(j, survivors.length);
+        if (!admission.pass) {
+          lastIssues.push(...admission.issues);
+          fixNote = `THE PREVIOUS JUDGE RESPONSE WAS INCOMPLETE OR MALFORMED. Fix every one of these: ${[...new Set(admission.issues)].slice(0, 6).join("; ")}.`;
+          a.log?.(`metacraft: judge response rejected (${admission.issues.join("; ")}) -> ${attempt === 0 ? "retrying" : "FAILING LOUD"}`);
+          continue;
+        }
+        const ranked = admission.rankings.filter(
+          (r) => r.clickScore >= 7 && r.direct >= 7,
         );
         ranked.sort((x, y) => {
           const judgeDelta = (y.clickScore ?? 0) + (y.direct ?? 0) - ((x.clickScore ?? 0) + (x.direct ?? 0));

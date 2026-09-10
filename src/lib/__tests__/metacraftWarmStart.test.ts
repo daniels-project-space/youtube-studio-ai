@@ -20,7 +20,17 @@ const WEAK_PLANNED = "Understanding The Historical Events At Hacksaw Ridge";
 const CRAFTED = "The Army Called Him a Coward Until Hacksaw Ridge";
 
 /** Judge stub: whichever title we nominate as the winner scores highest. */
-function install(preferred: string): void {
+let preferredTitle = CRAFTED;
+let malformedJudgeAttempts = 0;
+let judgeAttempts = 0;
+let installed = false;
+
+function install(preferred: string, malformedAttempts = 0): void {
+  preferredTitle = preferred;
+  malformedJudgeAttempts = malformedAttempts;
+  judgeAttempts = 0;
+  if (installed) return;
+  installed = true;
   const load = (Module as unknown as { _load: (...a: unknown[]) => unknown })._load;
   (Module as unknown as { _load: (...a: unknown[]) => unknown })._load = function patched(
     this: unknown, request: string, ...rest: unknown[]
@@ -36,11 +46,14 @@ function install(preferred: string): void {
           return { description: "A description long enough to pass.", tagsCsv: "a,b,c,d,e,f" };
         }
         if (prompt.startsWith("You are a YouTube CTR strategist")) {
+          if (judgeAttempts++ < malformedJudgeAttempts) {
+            return { rankings: [{ idx: 0, clickScore: 10 }] };
+          }
           // Rank the candidates as listed, promoting `preferred`.
           const lines = prompt.split("CANDIDATES:\n")[1]?.split("\n\n")[0]?.split("\n") ?? [];
           const rankings = lines.map((line, idx) => ({
             idx,
-            clickScore: line.includes(preferred) ? 10 : 7,
+            clickScore: line.includes(preferredTitle) ? 10 : 7,
             direct: 9,
           }));
           const winner = rankings.reduce((a, b) => (b.clickScore > a.clickScore ? b : a), rankings[0]);
@@ -81,6 +94,18 @@ async function main(): Promise<void> {
   install(CRAFTED);
   const none = await craft("");
   assert.equal(none.title, CRAFTED);
+
+  // A malformed first judge response must trigger the existing bounded retry,
+  // not silently turn a missing directness score into a pass.
+  install(CRAFTED, 1);
+  const recovered = await craft("");
+  assert.equal(recovered.title, CRAFTED);
+  assert.equal(recovered.judged, true, "the recovered title must have a real judge receipt");
+
+  // If both bounded attempts return malformed judge evidence, the caller must
+  // fail closed before buying the winner's description package.
+  install(CRAFTED, 99);
+  await assert.rejects(() => craft(""), /both attempts failed the gate/);
 
   console.log("METACRAFT WARM START PASS");
 }

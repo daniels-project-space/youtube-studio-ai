@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { lintTitle } from "@/lib/metacraft";
+import { lintTitle, validateTitleJudgeResponse } from "@/lib/metacraft";
 
 // P2-1 (GOLDEN_MODULE_AUDIT_2026-08.md): "metadata gate internals unverified
 // (clickScore >=7, payoff-in-50-chars, claims-grounding lint) and no dedicated
@@ -218,6 +218,33 @@ import { lintTitle } from "@/lib/metacraft";
 
 console.log("metacraftGates.test.ts: lintTitle payoff-window + claims-grounding lint behavior verified");
 
+/* --------------------- strict judge-response admission -------------------- */
+
+{
+  const valid = validateTitleJudgeResponse({
+    rankings: [
+      { idx: 0, clickScore: 8, direct: 9 },
+      { idx: 1, clickScore: 7, direct: 7 },
+    ],
+  }, 2);
+  assert.equal(valid.pass, true, "a complete finite ranking should be admitted");
+  assert.deepEqual(valid.rankings.map((row) => row.idx), [0, 1]);
+
+  for (const [name, value] of [
+    ["missing direct", { rankings: [{ idx: 0, clickScore: 9 }, { idx: 1, clickScore: 8, direct: 8 }] }],
+    ["duplicate index", { rankings: [{ idx: 0, clickScore: 9, direct: 9 }, { idx: 0, clickScore: 8, direct: 8 }] }],
+    ["fractional index", { rankings: [{ idx: 0.5, clickScore: 9, direct: 9 }, { idx: 1, clickScore: 8, direct: 8 }] }],
+    ["out-of-range score", { rankings: [{ idx: 0, clickScore: 11, direct: 9 }, { idx: 1, clickScore: 8, direct: 8 }] }],
+    ["incomplete coverage", { rankings: [{ idx: 0, clickScore: 9, direct: 9 }] }],
+  ] as const) {
+    const result = validateTitleJudgeResponse(value, 2);
+    assert.equal(result.pass, false, `${name} judge evidence must fail closed`);
+    assert.equal(result.rankings.length, 0, `${name} cannot leak a partial ranking downstream`);
+  }
+}
+
+console.log("metacraftGates.test.ts: malformed, incomplete and missing-direct judge responses fail closed");
+
 /* ------- craftMetadata judge gate (clickScore & direct >=7) -- pinned ------ */
 //
 // craftMetadata() ranks title candidates through a live permitted-model judge call and
@@ -229,11 +256,19 @@ console.log("metacraftGates.test.ts: lintTitle payoff-window + claims-grounding 
 // unnoticed, per P2-1's own effort note ("Read + add one unit test").
 {
   const source = readFileSync(join(process.cwd(), "src/lib/metacraft.ts"), "utf8");
-  const gateExpr = "(r.clickScore ?? 0) >= 7 && (r.direct ?? 10) >= 7";
+  const gateExpr = "r.clickScore >= 7 && r.direct >= 7";
   assert.ok(
     source.includes(gateExpr),
     "metacraft.ts: craftMetadata's judge gate must still require BOTH clickScore >=7 AND direct >=7 " +
       "(catalog claim: 'clickScore >=7') — literal expression not found, gate may have moved or weakened",
+  );
+  assert.ok(
+    source.includes("validateTitleJudgeResponse(j, survivors.length)"),
+    "metacraft.ts: judge responses must pass the strict complete-ranking admission boundary",
+  );
+  assert.ok(
+    !source.includes("(r.direct ?? 10) >= 7"),
+    "metacraft.ts: omitted directness must never default to a passing score",
   );
   // The gate's own rejection message, surfaced in the retry-fix-loop, is the
   // second half of the wiring proof: a rejected slate must say so and retry.
