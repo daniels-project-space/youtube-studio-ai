@@ -18,8 +18,8 @@
  * self-guards with a fallback verdict.
  */
 
-import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { mkdir, mkdtemp, readFile, rename, rm, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -113,14 +113,28 @@ function providerChain(allowed?: readonly VisionProvider[]): VisionProvider[] {
 const PREP_MAX_DIM = Number(process.env.VISION_MAX_DIM || 768);
 
 async function prepLocalImage(path: string): Promise<Buffer | null> {
+  let original: Buffer;
+  try {
+    // Read once both for a content-addressed cache key and for the decode
+    // fallback. A path can be reused for a newly rendered frame; path-only
+    // keys would silently let an old prepared image stand in for new pixels.
+    original = await readFile(path);
+  } catch {
+    return null;
+  }
+  const contentKey = createHash("sha1").update(original).digest("hex").slice(0, 16);
+  const out = join(await cacheDir(), `prep-${contentKey}-${PREP_MAX_DIM}.jpg`);
+  try {
+    const cached = await readFile(out);
+    if (cached.length > 0) return cached;
+  } catch {
+    // Cache miss; prepare below.
+  }
+  const temp = join(await cacheDir(), `.prep-${contentKey}-${randomUUID()}.tmp.jpg`);
   try {
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
     const run = promisify(execFile);
-    const out = join(
-      await cacheDir(),
-      `prep-${createHash("sha1").update(path).digest("hex").slice(0, 16)}-${PREP_MAX_DIM}.jpg`,
-    );
     const ffmpeg = process.env.FFMPEG_BIN ?? "ffmpeg";
     await run(ffmpeg, [
       "-y",
@@ -132,16 +146,19 @@ async function prepLocalImage(path: string): Promise<Buffer | null> {
       "4",
       "-frames:v",
       "1",
-      out,
+      temp,
     ]);
-    return await readFile(out);
+    const prepared = await readFile(temp);
+    if (prepared.length === 0) return original;
+    // rename is atomic on the local filesystem, so a concurrent identical
+    // review can never observe a partially-written JPEG in the shared cache.
+    await rename(temp, out);
+    return prepared;
   } catch {
     // ffmpeg unavailable/failed → send the original bytes rather than dropping
-    try {
-      return await readFile(path);
-    } catch {
-      return null;
-    }
+    return original;
+  } finally {
+    await unlink(temp).catch(() => {});
   }
 }
 
