@@ -97,7 +97,7 @@ async function main(): Promise<void> {
     const lateQa = [...noQa, { block: "qa_script" }];
     assert.throws(() => validatePipeline(lateQa), /scriptApproved/);
     assert.throws(() => validatePipeline([{ block: "script_gen" }, { block: "script_gen" }], ["topic"]), /duplicate producer/);
-    assert.throws(() => compilePipeline(validatePipeline([{ block: "worked_example_prepare" }, ...design.pipeline], ["workedExampleRequest"])), /worked_example_prepare.*no catalog binding/,
+    assert.throws(() => compilePipeline(validatePipeline([{ block: "worked_example_prepare" }, ...design.pipeline], ["workedExampleRequest"])), /worked-example modules are registered private-review foundations only/,
       "held registration must not accidentally admit this module to the production compiler");
 
     for (const archetype of Object.values(ARCHETYPES)) assert.ok(archetype.pipeline.every((entry) => entry.block !== "worked_example_prepare"));
