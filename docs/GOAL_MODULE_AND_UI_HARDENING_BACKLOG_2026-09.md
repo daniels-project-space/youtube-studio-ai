@@ -191,6 +191,7 @@ Primary sources:
 
 - [ ] **72 — Build a provider-call graph.** Attribute every external call to module, artifact, cache key, attempt, and accepted/rejected output; unknown cost is a failing measurement.
 - [ ] **73 — Eliminate duplicate research calls.** Share immutable, freshness-bound YouTube/audience/evidence packets between topic, title, SEO, script, and packaging consumers.
+  **Partial (10 September):** `metacraft.youtubeSuggest` and `fetchCompetitorTitles` now normalize equivalent seeds, coalesce concurrent requests, reuse successful public evidence for a bounded five-minute TTL, return defensive copies, and leave failures retryable. Focused offline tests prove one request for concurrent/repeated autocomplete and competitor searches, plus a fresh request after a simulated 503. The broader cross-module audience/evidence packet and quota measurement remain open.
 - [ ] **74 — Audit YouTube quota shape.** Minimize `part` and `fields`, batch video IDs, cache stable responses/ETags, and measure quota units per completed video before and after.
 - [ ] **75 — Audit Trigger task granularity.** Merge tasks only when they share retry/failure fate; preserve separate tasks where checkpointing, queueing, cost attribution, or independent retries matter.
 - [ ] **76 — Audit Trigger waiting/concurrency.** Replace accidental active polling and unsafe parallel waits with checkpoints, batch waits, explicit resource queues, and bounded backoff.
