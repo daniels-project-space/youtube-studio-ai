@@ -928,6 +928,13 @@ a.nextRelease:focus-visible { border-radius: 8px; outline: 2px solid var(--color
   padding: 0 0.62rem;
 }
 
+.dateActions > small {
+  max-width: 10rem;
+  color: var(--color-faint);
+  font-size: 0.59rem;
+  line-height: 1.3;
+}
+
 .emptyState {
   display: grid;
   gap: 0.3rem;
