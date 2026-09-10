@@ -92,8 +92,13 @@ const source = readFileSync(join(process.cwd(), "src/lib/metacraft.ts"), "utf8")
   .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 assert.match(
   source,
-  /const candidates = \[\s*\n\s*\.\.\.warmStartCandidates\(/,
-  "warm starts must enter the SAME candidate array as the generated titles",
+  /const rawCandidates = \[\s*\n\s*\.\.\.warmStartCandidates\(/,
+  "warm starts must enter the candidate pool alongside generated titles",
+);
+assert.match(
+  source,
+  /const candidates = rawCandidates\s*\n\s*\.filter\(\(c\) => \{[\s\S]*?seenTitles/,
+  "duplicate warm/generated titles must be removed before the shared lint and judge",
 );
 assert.match(
   source,

@@ -195,6 +195,76 @@ export interface TitleLint {
   issues: string[];
 }
 
+export interface TitleQualitySignal {
+  /** A deterministic 0–100 tie-break signal; it is never a substitute for the feed judge. */
+  score: number;
+  length: number;
+  words: number;
+  /** Number of grounded or concrete terms visible before the mobile fold. */
+  earlySpecifics: number;
+  repeatedTerms: number;
+}
+
+const QUALITY_STOPWORDS = new Set([
+  ...TITLE_STOPWORDS,
+  "about", "because", "could", "does", "doesnt", "gets", "just", "more", "most", "really", "still",
+  "than", "then", "there", "turns", "very", "well", "would",
+]);
+
+function titleTokens(value: string): string[] {
+  return value.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? [];
+}
+
+/**
+ * Small, deterministic quality signal used only to break ties after the
+ * provider judge. It encodes the platform guidance that titles should be
+ * succinct, accurate, and immediately legible on mobile without pretending a
+ * local heuristic can predict CTR. Keeping it local adds no provider calls.
+ */
+export function titleQualitySignal(title: string, grounding = ""): TitleQualitySignal {
+  const trimmed = title.trim();
+  const length = trimmed.length;
+  const words = trimmed ? trimmed.split(/\s+/).length : 0;
+  const tokens = titleTokens(trimmed);
+  const groundingTerms = new Set(
+    titleTokens(grounding).filter((word) => !QUALITY_STOPWORDS.has(word)),
+  );
+  const firstFold = trimmed.slice(0, 50);
+  const earlyTokens = titleTokens(firstFold);
+  const originalWords = firstFold.match(/[A-Za-z][A-Za-z'-]{2,}/g) ?? [];
+  const earlySpecifics = new Set(
+    earlyTokens.filter((word) => groundingTerms.has(word)),
+  ).size +
+    (/[0-9]/.test(firstFold) ? 1 : 0) +
+    (originalWords.slice(1).some((word, index) =>
+      /^[A-Z]/.test(word) && !QUALITY_STOPWORDS.has(earlyTokens[index + 1] ?? ""),
+    ) ? 1 : 0);
+  const counts = new Map<string, number>();
+  for (const token of tokens) {
+    if (!QUALITY_STOPWORDS.has(token)) counts.set(token, (counts.get(token) ?? 0) + 1);
+  }
+  const repeatedTerms = [...counts.values()].filter((count) => count > 1).length;
+
+  let score = 40;
+  if (length >= 40 && length <= 70) score += 22;
+  else if (length >= 30 && length <= 76) score += 12;
+  else score -= 8;
+  if (words >= 5 && words <= 12) score += 10;
+  else if (words >= 4 && words <= 14) score += 4;
+  score += Math.min(earlySpecifics, 3) * 7;
+  if (earlyTokens.length > 0 && groundingTerms.has(earlyTokens[0])) score += 5;
+  score -= repeatedTerms * 7;
+  if (/[!?]{2,}|\.\.\.|\s[-|•]\s/.test(trimmed)) score -= 4;
+
+  return {
+    score: Math.max(0, Math.min(100, score)),
+    length,
+    words,
+    earlySpecifics,
+    repeatedTerms,
+  };
+}
+
 /**
  * Deterministic title lint — the measurable gates, enforced instead of asked
  * for. `grounding` is the haystack the title's claims must exist in (topic +
@@ -472,8 +542,10 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           `TITLE RULES — SHORT and DIRECT: 40-70 characters. The title is the POINT ITSELF, never a setup for ` +
             `the point — no scene-setting fragments, no atmospheric prefixes, no two-part colon constructions ` +
             `(a short established format prefix like "Mission log:" is fine). Front-load the primary keyword and ` +
-            `any payoff number inside the first 50 chars. ONE honest claim — every number and name MUST appear ` +
-            `in the cold open/script (they were fact-checked there). No channel name, no filler starts` +
+            `any payoff number inside the first 50 chars. Make the first 3-5 words reveal the subject or stake; ` +
+            `use one concrete noun and one vivid tension verb, then stop. Avoid abstract labels, keyword piles, ` +
+            `stacked adjectives, and repeated words. ONE honest claim — every number and name MUST appear in the ` +
+            `cold open/script (they were fact-checked there). No channel name, no filler starts` +
             `${allowHype ? "" : ", no hype-bait"}.${lang}`,
           fixNote,
           `Return STRICT JSON {"candidates":[{"frame":string,"title":string}]}.`,
@@ -488,18 +560,32 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       continue;
     }
 
-    const candidates = [
+    const rawCandidates = [
       // The scheduled plan's title competes on the same terms as the rest. If
       // it is the strongest option it still wins; it simply no longer wins by
       // being written first.
       ...warmStartCandidates(a.warmStartTitle, a.betTitle),
       ...(gen.candidates ?? []).map((c) => ({ frame: String(c.frame ?? "unknown"), title: String(c.title ?? "").trim() })),
-    ]
-      .filter((c) => c.title)
-      .map((c) => ({ ...c, lint: lintTitle(c.title, { grounding, channelName: a.channelName, isMusicNiche: a.isMusicNiche, allowHype }) }));
+    ].filter((c) => c.title);
+    const seenTitles = new Set<string>();
+    const candidates = rawCandidates
+      .filter((c) => {
+        const key = c.title.toLowerCase().replace(/\s+/g, " ").trim();
+        if (seenTitles.has(key)) return false;
+        seenTitles.add(key);
+        return true;
+      })
+      .map((c) => ({
+        ...c,
+        lint: lintTitle(c.title, { grounding, channelName: a.channelName, isMusicNiche: a.isMusicNiche, allowHype }),
+        quality: titleQualitySignal(c.title, grounding),
+      }));
     const survivors = candidates.filter((c) => c.lint.pass);
     lastIssues = candidates.flatMap((c) => c.lint.issues);
-    a.log?.(`metacraft: ${candidates.length} titles, ${survivors.length} pass lint (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
+    a.log?.(
+      `metacraft: ${candidates.length} unique titles, ${survivors.length} pass lint` +
+      ` (best local signal ${Math.max(0, ...survivors.map((c) => c.quality.score))}/100, ${((Date.now() - t0) / 1000).toFixed(1)}s)`,
+    );
 
     if (survivors.length >= 1) {
       let best = 0;
@@ -528,7 +614,11 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         const ranked = (j.rankings ?? []).filter(
           (r) => typeof r.idx === "number" && r.idx >= 0 && r.idx < survivors.length && (r.clickScore ?? 0) >= 7 && (r.direct ?? 10) >= 7,
         );
-        ranked.sort((x, y) => (y.clickScore ?? 0) + (y.direct ?? 0) - ((x.clickScore ?? 0) + (x.direct ?? 0)));
+        ranked.sort((x, y) => {
+          const judgeDelta = (y.clickScore ?? 0) + (y.direct ?? 0) - ((x.clickScore ?? 0) + (x.direct ?? 0));
+          if (judgeDelta) return judgeDelta;
+          return (survivors[y.idx!]?.quality.score ?? 0) - (survivors[x.idx!]?.quality.score ?? 0);
+        });
         if (ranked.length) {
           best = ranked[0].idx!;
           // The runner-up is the CTR swap's only experiment. It is deliberately
@@ -547,6 +637,10 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           }
           score = ranked[0].clickScore ?? null;
           judged = true;
+          a.log?.(
+            `metacraft: deterministic title tie-break ${survivors[best]?.quality.score ?? 0}/100` +
+            `${runner >= 0 ? ` vs ${survivors[runner]?.quality.score ?? 0}/100` : ""}`,
+          );
         } else {
           lastIssues.push("no candidate gated clickScore+direct ≥7");
           fixNote = `THE PREVIOUS ATTEMPT WAS REJECTED. Fix every one of these: ${[...new Set(lastIssues)].slice(0, 6).join("; ")}.`;
