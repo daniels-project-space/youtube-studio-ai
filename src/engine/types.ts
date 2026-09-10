@@ -166,9 +166,6 @@ export interface Block {
   /** Code-owned conditional validation before completed outputs are persisted
    * against current inputs or merged. Missing/bad proof never grants a rerun. */
   cachedOutputValidator?: CachedOutputValidator;
-  /** Code-owned read-only checkpoint validation, consulted only for sequential
-   * inline PAID execution. Config flags/serialized proofs cannot grant credit. */
-  inspectPaidInlineResume?: (ctx: InlineCheckpointContext) => Promise<InlineCheckpointInspection>;
   /**
    * Optional bounded projection for the durable run-stage row. The runner
    * retains the full patch in memory for immediate downstream blocks and

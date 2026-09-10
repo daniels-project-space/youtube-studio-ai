@@ -61,7 +61,7 @@ async function main() {
     assert.deepEqual(stageWrites.filter((row) => row.status === "ok").map((row) => row.block), entries.map((entry) => entry.block));
     assert.throws(() => validatePipeline([...entries, { block: "script_gen" }], ["workedExampleRequest", "topic"]), /duplicate producer/);
     assert.throws(() => validatePipeline([...entries, { block: "narration_tts" }], ["workedExampleRequest"]), /scriptApproved/);
-    assert.throws(() => compilePipeline(validatePipeline(entries, ["workedExampleRequest"])), /Production policy requires capability "topic.researched"/, "a held adapter pair is not an admitted production pipeline");
+    assert.throws(() => compilePipeline(validatePipeline(entries, ["workedExampleRequest"])), /worked-example modules are registered private-review foundations only/, "a held adapter pair is not an admitted production pipeline");
 
     // Known-current draft reaches the UNCHANGED actual independent critic. Its response
     // is a transport fixture, not a claim about the real draft's editorial quality.

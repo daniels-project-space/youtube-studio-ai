@@ -306,6 +306,15 @@ function hashPayload(value: unknown): string {
   return createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
+/** Freeze cloned checkpoint inputs so validators cannot mutate the resume view. */
+function freezeCheckpointInputs<T>(value: T): T {
+  if (value && typeof value === "object") {
+    for (const child of Object.values(value as Record<string, unknown>)) freezeCheckpointInputs(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 function artifactSummary(value: unknown): string {
   if (typeof value === "string") return value.length <= 300 ? value : `${value.slice(0, 300)}…[${value.length} chars]`;
   if (Array.isArray(value)) return `[array:${value.length}]`;
