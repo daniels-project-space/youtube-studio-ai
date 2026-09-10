@@ -46,8 +46,17 @@ export function channelMotionMotifFor({
   channelName?: string | null;
 }): ChannelMotionMotif {
   const name = channelName?.toLowerCase() ?? "";
-  if (/drawn|inked|whiteboard|chalk/.test(name)) return "pen";
+  const nicheKey = niche?.trim().toLowerCase() ?? "";
+  // Named channels are allowed to refine a broad niche, but each refinement
+  // must still describe the channel's actual subject. Keep the examples
+  // deliberately explicit: Inked Histories is an opening/closing history
+  // book, Drawn Past is the pen-drawn format, and Chalk & Compound is finance
+  // ledger work rather than a generic sketch icon.
+  if (/drawn\s*past|drawn/.test(name)) return "pen";
+  if (/inked\s*histories|history|historical/.test(name)) return "book";
+  if (/chalk/.test(name)) return nicheKey === "finance" ? "ledger" : "lesson";
+  if (/whiteboard/.test(name)) return "lesson";
   if (/stoic|meditat|gratitude/.test(name)) return "mind";
   if (/lofi|rain|ambient|frequency/.test(name)) return "lofi";
-  return NICHE_MOTIFS[niche ?? ""] ?? "lesson";
+  return NICHE_MOTIFS[nicheKey] ?? "lesson";
 }

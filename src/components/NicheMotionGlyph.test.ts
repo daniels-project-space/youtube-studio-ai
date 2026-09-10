@@ -9,7 +9,11 @@ const css = readFileSync(join(root, "src/components/NicheMotionGlyph.module.css"
 const channelCreator = readFileSync(join(root, "src/app/(app)/channels/new/page.tsx"), "utf8");
 
 assert.equal(channelMotionMotifFor({ niche: "history" }), "book");
+assert.equal(channelMotionMotifFor({ niche: " History " }), "book");
 assert.equal(channelMotionMotifFor({ niche: "history", channelName: "The Drawn Past" }), "pen");
+assert.equal(channelMotionMotifFor({ niche: "history", channelName: "Inked Histories" }), "book");
+assert.equal(channelMotionMotifFor({ niche: "finance", channelName: "Chalk & Compound" }), "ledger");
+assert.equal(channelMotionMotifFor({ niche: "educational", channelName: "The Chalk Classroom" }), "lesson");
 assert.equal(channelMotionMotifFor({ niche: "finance" }), "ledger");
 assert.equal(channelMotionMotifFor({ channelName: "Gratitude Springs" }), "mind");
 assert.equal(channelMotionMotifFor({ channelName: "Neon Rain LoFi" }), "lofi");
