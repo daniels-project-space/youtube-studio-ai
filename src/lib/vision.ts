@@ -26,7 +26,7 @@ import {
   FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST,
   NON_GOOGLE_VISION_MAX_IMAGES_PER_REQUEST,
 } from "@/engine/visualReviewBudget";
-import { recordModelUsage } from "@/lib/modelUsage";
+import { getOrCreateModelResponse } from "@/lib/modelUsage";
 import { hasOpenRouterKey, openRouterChat, openRouterModel } from "@/lib/openRouter";
 
 /** Exact image limit for one OpenRouter vision-provider request. */
@@ -104,8 +104,6 @@ function providerChain(allowed?: readonly VisionProvider[]): VisionProvider[] {
   return chain;
 }
 
-const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
 /* ------------------------------------------------------------------ *
  * Frame preparation: downscale to ≤VISION_MAX_DIM px JPEG via ffmpeg.
  * A judge grading composition/legibility does not need 4K frames; this
@@ -173,20 +171,6 @@ function cacheDir(): Promise<string> {
   }
   return cacheDirP;
 }
-
-/**
- * Coalesce identical reviews while one request is in flight.
- *
- * The durable verdict cache is intentionally written only after a complete
- * provider response. Without this small process-local seam, two blocks that
- * reach the same frame/question at the same time both observe a cache miss and
- * buy the same review. The key is the exact cache key below, so JSON mode,
- * tier, token ceiling, provider route, prompt, and image bytes all remain
- * isolated. `noCache` callers bypass this map because they explicitly ask for
- * a fresh stochastic judgement. Rejected requests are removed in `finally`,
- * allowing a subsequent caller to make a deliberate retry.
- */
-const inflightVerdicts = new Map<string, Promise<string>>();
 
 async function cacheGet(key: string): Promise<string | null> {
   try {
@@ -271,8 +255,6 @@ export const VISION_GATE_MAX_TOKENS = 8192;
  * The practical consequence is VISION_GATE_MAX_TOKENS above: since reasoning
  * cannot be switched off, the ceiling has to be able to absorb it.
  */
-  process.env.VISION_REASONING_EFFORT === "default" ? "default" : "none";
-
 async function openRouterVision(
   prompt: string,
   images: Buffer[],
@@ -299,13 +281,6 @@ async function openRouterVision(
     json: opts.json,
     kind: "vision",
   });
-}
-
-function sampleEvenly<T>(items: T[], max: number): T[] {
-  if (items.length <= max) return items;
-  const out: T[] = [];
-  for (let i = 0; i < max; i++) out.push(items[Math.round((i * (items.length - 1)) / (max - 1))]);
-  return out;
 }
 
 /* ------------------------------------------------------------------ *
@@ -344,9 +319,9 @@ async function visionBuffers(
     .update(prompt)
     .update(String(!!args.json))
     .update(String(effective.maxTokens))
-    // Reasoning mode is part of the verdict's identity: the two modes measurably
-    // disagree on borderline frames, so flipping VISION_REASONING_EFFORT must
-    // re-judge rather than replay the other mode's cached answer.
+    // The tier is part of the verdict's identity: bulk and final envelopes can
+    // carry different image limits and answer contracts, so never replay one
+    // tier's cached answer for another.
     .update(chain.join(","))
     .update(args.tier ?? "standard")
     .update(buffers.map((b) => createHash("sha1").update(b).digest("hex")).join(","))
@@ -356,11 +331,7 @@ async function visionBuffers(
     if (hit) return hit;
   }
   if (chain.length === 0) throw new VisionError("no vision provider keyed (OPENROUTER_API_KEY)");
-  if (!args.noCache) {
-    const existing = inflightVerdicts.get(cacheKey);
-    if (existing) return existing;
-  }
-  const request = (async (): Promise<string> => {
+  const request = (): Promise<string> => (async (): Promise<string> => {
     const errors: string[] = [];
     for (const provider of chain) {
       try {
@@ -373,13 +344,17 @@ async function visionBuffers(
     }
     throw new VisionError(`all vision providers failed: ${errors.join(" | ")}`);
   })();
-  if (args.noCache) return request;
-  inflightVerdicts.set(cacheKey, request);
-  try {
-    return await request;
-  } finally {
-    if (inflightVerdicts.get(cacheKey) === request) inflightVerdicts.delete(cacheKey);
-  }
+  // Keep coalescing inside the existing run-scoped model memo. A global map
+  // would hide the shared provider charge from a different AsyncLocalStorage
+  // accounting scope, making one job appear free. The model primitive records
+  // the joiner as a cache hit and drops rejected requests automatically.
+  const model = openRouterModel(args.tier === "bulk" ? "visionBulk" : args.tier === "final" ? "visionFinal" : "visionStandard");
+  return getOrCreateModelResponse(
+    cacheKey,
+    { provider: "openrouter", model, kind: "vision" },
+    request,
+    { memoize: !args.noCache },
+  );
 }
 
 /** Local image files + prompt → raw pinned OpenRouter model text. */
@@ -409,7 +384,6 @@ export async function visionUrls(args: {
   maxTokens?: number;
   /** Skip the verdict cache (for deliberately-stochastic judging/tests). */
   noCache?: boolean;
-  /** See VISION_REASONING_EFFORT — defaults to "none". */
   /** Cost/quality lane: cheap triage, normal analysis, or a final admission. */
   tier?: VisionTier;
   /** Restrict this request to a declared vision provider. */

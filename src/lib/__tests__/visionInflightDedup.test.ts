@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 
+import { createModelUsageScope } from "@/lib/modelUsage";
 import { visionUrls } from "@/lib/vision";
 
 async function main(): Promise<void> {
@@ -35,13 +36,15 @@ async function main(): Promise<void> {
     };
 
     const prompt = `vision-inflight-coalescing-${Date.now()}-${Math.random()}`;
-    const [first, second] = await Promise.all([
+    const modelScope = createModelUsageScope();
+    const [first, second] = await modelScope.run(() => Promise.all([
       visionUrls({ prompt, imageUrls: ["https://images.test/inflight.jpg"], json: true }),
       visionUrls({ prompt, imageUrls: ["https://images.test/inflight.jpg"], json: true }),
-    ]);
+    ]));
     assert.equal(first, second, "identical concurrent reviews share the same provider result");
     assert.equal(providerPosts, 1, "identical concurrent reviews make one provider POST");
     assert.equal(imageGets, 2, "input downloads remain caller-local; only paid review work is coalesced");
+    assert.equal(modelScope.snapshot().cacheHits, 1, "the coalesced joiner is visible as a model cache hit");
 
     const failedPrompt = `vision-inflight-failure-cleanup-${Date.now()}-${Math.random()}`;
     global.fetch = async (input, init) => {
@@ -54,14 +57,16 @@ async function main(): Promise<void> {
       providerPosts += 1;
       return Response.json({ error: { message: "temporary upstream failure" } }, { status: 503 });
     };
-    await assert.rejects(
-      () => visionUrls({ prompt: failedPrompt, imageUrls: ["https://images.test/inflight.jpg"], json: true }),
-      /all vision providers failed/,
-    );
-    await assert.rejects(
-      () => visionUrls({ prompt: failedPrompt, imageUrls: ["https://images.test/inflight.jpg"], json: true }),
-      /all vision providers failed/,
-    );
+    await modelScope.run(async () => {
+      await assert.rejects(
+        () => visionUrls({ prompt: failedPrompt, imageUrls: ["https://images.test/inflight.jpg"], json: true }),
+        /all vision providers failed/,
+      );
+      await assert.rejects(
+        () => visionUrls({ prompt: failedPrompt, imageUrls: ["https://images.test/inflight.jpg"], json: true }),
+        /all vision providers failed/,
+      );
+    });
     assert.equal(providerPosts, 3, "a failed request is removed so a deliberate later retry can proceed");
   } finally {
     global.fetch = originalFetch;
