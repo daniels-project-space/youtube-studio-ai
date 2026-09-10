@@ -489,12 +489,20 @@ export const metadataOptimized: Block = {
       const description = `${topic}.\n\n${persona || channelName}.`;
       const tags = [topic.toLowerCase(), niche].filter(Boolean) as string[];
       const ve = await viewEstimate(tags);
-      ctx.log(`metadata (degraded, no permitted text provider): "${title}"`);
+      // A planned title was authored before this metadata stage and never
+      // passed the current title lint/judge. It may be retained as context by
+      // the scheduler, but it must not regain authority just because the text
+      // provider is unavailable. The deterministic topic fallback is honest
+      // about what was actually evaluated.
+      ctx.log(
+        `metadata (degraded, no permitted text provider): "${title}"` +
+        (plannedTitle && plannedTitle !== title ? " — planned title held out (not evaluated)" : ""),
+      );
       return {
-        title: plannedTitle || title,
+        title,
         description,
         thumbnailDescription: buildThumbnailDescription({
-          title: plannedTitle || title,
+          title,
           topic,
           scriptExcerpt,
           ...(serializedEpisodePrompt ? { serializedEpisodeContext: serializedEpisodePrompt } : {}),
@@ -815,11 +823,17 @@ export const metadataOptimized: Block = {
     ctx.log(
       `metadata: title="${title.slice(0, 60)}…" (${tournament ? `tournament ${(tournament.score * 10).toFixed(0)}/10` : `score=${loop!.critique.score.toFixed(2)}, accepted=${loop!.accepted}`}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,
     );
+    // The fallback producer/tournament is a recovery path, not a reason to
+    // restore the pre-script planned title. Only the title produced by this
+    // path is returned; if it cannot produce one, the block throws above.
+    if (plannedTitle && plannedTitle !== title) {
+      ctx.log(`metadata: planned title held out from legacy fallback (not evaluated): "${plannedTitle.slice(0, 80)}"`);
+    }
     return {
-      title: plannedTitle || title,
+      title,
       description,
       thumbnailDescription: buildThumbnailDescription({
-        title: plannedTitle || title,
+        title,
         topic,
         scriptExcerpt,
         ...(serializedEpisodePrompt ? { serializedEpisodeContext: serializedEpisodePrompt } : {}),
