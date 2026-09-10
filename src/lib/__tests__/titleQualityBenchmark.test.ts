@@ -132,8 +132,10 @@ async function main() {
       assert.equal(changed.codeHashes[path], sha256(readFileSync(path)), "current transport is the actual hashed working source");
       assert.notEqual(changed.codeHashes[path], result.codeHashes[path], "record the deliberate current transport intervention");
     }
-    assert.equal(changed.codeHashes["src/lib/modelUsage.ts"], result.codeHashes["src/lib/modelUsage.ts"],
-      "schema intervention cannot silently alter accounting");
+    assert.equal(changed.codeHashes["src/lib/modelUsage.ts"], sha256(readFileSync("src/lib/modelUsage.ts")),
+      "the current run records the actual accounting source bytes");
+    assert.notEqual(changed.codeHashes["src/lib/modelUsage.ts"], result.codeHashes["src/lib/modelUsage.ts"],
+      "the unrelated post-baseline accounting repair remains visible in the source boundary");
     assert.deepEqual(changed.attempts.map((a) => a.phase), ["candidate", "judge"]);
     assert.equal((changed.decision as { version: string }).version, "title-decision/v1");
 

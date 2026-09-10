@@ -129,7 +129,7 @@ async function main() {
         choices: [{ message: { content: JSON.stringify({ rankings: [
           { idx: 0, clickScore: 8, direct: 9, identityFit: 9, grounding: "supported", reason: "Synthetic supported control." },
           { idx: 1, clickScore: 1, direct: 8, identityFit: 1, grounding: "unsupported", reason: "Synthetic invalid enum reproduces the live contract failure, not a new quality judgment." },
-        ] }) } }], usage: { prompt_tokens: 100, completion_tokens: 100, cost: 0.001 } }) }),
+        ] }) } }], usage: { prompt_tokens: 100, completion_tokens: 100, cost: 0.001, is_byok: false } }) }),
     });
     assert.equal(invalidEnum.status, "failed", "provider schema opt-in does not replace local fail-closed validation");
     assert.equal(invalidEnum.calibration, null, "an invalid enum is never normalized or counted as a semantic pass");

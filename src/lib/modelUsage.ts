@@ -93,6 +93,18 @@ interface ScopeState {
 
 const storage = new AsyncLocalStorage<ScopeState>();
 
+/**
+ * Internal compatibility bridge for isolated historical replays.
+ *
+ * A replay may load an older copy of this module so its source fingerprint
+ * remains truthful, while provider adapters still need to record into the
+ * live run's usage scope. The bridge exposes only the current async-local
+ * store and is intentionally read-only to callers.
+ */
+export function currentModelUsageStateForCompatibility(): unknown {
+  return storage.getStore();
+}
+
 // Structured-output contracts are executable objects (for example Zod schemas),
 // not stable JSON. An opaque WeakMap identity is deliberately conservative: two
 // independently constructed contracts never share a response, while the same

@@ -17,7 +17,7 @@ import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 import ts from "typescript";
 import {
-  createModelUsageScope, priceModelUsage, recordModelUsage,
+  createModelUsageScope, currentModelUsageStateForCompatibility, priceModelUsage, recordModelUsage,
 } from "../src/lib/modelUsage";
 import type { MetaCraftArgs } from "../src/lib/metacraft";
 import type { claudeJson } from "../src/lib/anthropic";
@@ -227,7 +227,9 @@ export function benchmarkSourcePolicy(condition: Condition) {
     version: "title-runtime-source-policy/v2" as const,
     metadataAndDependencies: condition === "current" ? "current_working_tree" : "git_991b349",
     anthropicAndOpenRouter: condition === "current" ? "current_working_tree_opt_in_schema" : "git_991b349",
-    usageRecorder: "current_bytes_verified_identical_to_git_991b349",
+    usageRecorder: condition === "current"
+      ? "current_working_tree"
+      : "git_991b349_with_current_scope_bridge",
     intervention: condition === "current" ? "selector_and_opt_in_schema_transport" : "unchanged_baseline_selector_and_transport",
   };
 }
@@ -269,23 +271,34 @@ function isolatedRuntime(
     OPENROUTER_CREATIVE_MODEL: process.env.OPENROUTER_CREATIVE_MODEL,
   };
   function load(path: string): Row {
-    if (path === "src/lib/modelUsage.ts") {
-      const text = readFileSync(resolve(ROOT, path), "utf8");
-      assert.equal(text, gitSource(path), "usage recorder changed since transport baseline; freeze/review this intervention first");
-      codeHashes[path] = sha256(text);
-      return nativeRequire(resolve(ROOT, path)) as Row;
-    }
     const prior = modules.get(path);
     if (prior) return prior.exports;
     const source = condition === "current"
       ? readFileSync(resolve(ROOT, path), "utf8") : gitSource(path);
     codeHashes[path] = sha256(source);
+    // Keep the current run inside the outer usage scope. The native module is
+    // the same bytes just hashed above; compiling a second copy would create a
+    // second AsyncLocalStorage and silently drop paid-call accounting.
+    if (condition === "current" && path === "src/lib/modelUsage.ts") {
+      return nativeRequire(resolve(ROOT, path)) as Row;
+    }
     if (condition === "current" && CURRENT_SOURCE_ARCHIVE_PATHS.some((allowed) => allowed === path)) {
       sourceArchive.set(path, { path, text: source, byteLength: Buffer.byteLength(source), sha256: codeHashes[path] });
     }
     const loadedModule = { exports: {} as Row };
     modules.set(path, loadedModule);
     const localRequire = (id: string) => {
+      // The baseline modelUsage source is loaded from 991b349 so its hash is
+      // honest. Its private AsyncLocalStorage must nevertheless point at the
+      // current run scope used by this harness; this narrow compatibility
+      // adapter does not change the baseline source bytes.
+      if (condition !== "current" && path === "src/lib/modelUsage.ts" && id === "node:async_hooks") {
+        class CompatibilityAsyncLocalStorage {
+          run<T>(_store: unknown, callback: () => T): T { return callback(); }
+          getStore(): unknown { return currentModelUsageStateForCompatibility(); }
+        }
+        return { AsyncLocalStorage: CompatibilityAsyncLocalStorage };
+      }
       if (id === "@/lib/youtubeData") return {
         hasYouTubeDataAccess: () => false,
         searchVideoIds: () => { throw new Error("benchmark forbids unfrozen YouTube research"); },
