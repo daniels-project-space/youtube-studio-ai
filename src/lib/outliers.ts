@@ -14,6 +14,7 @@ import {
   fetchVideoDetails,
   fetchChannelStats,
 } from "@/lib/youtubeData";
+import { createPublicEvidenceCache, normalizeEvidenceKey } from "@/lib/publicEvidenceCache";
 
 export interface OutlierVideo {
   title: string;
@@ -28,6 +29,12 @@ export interface OutlierVideo {
 }
 
 const DAY = 86_400_000;
+const outlierCache = createPublicEvidenceCache<OutlierVideo[]>();
+
+/** Test/support hook; failed requests are never retained in this cache. */
+export function clearOutlierEvidenceCache(): void {
+  outlierCache.clear();
+}
 
 /**
  * Fetch the top breakout videos for a niche query. Best-effort: returns [] with no
@@ -48,37 +55,60 @@ export async function fetchNicheOutliers(
   } = {},
 ): Promise<OutlierVideo[]> {
   const log = opts.log ?? (() => {});
-  if (!hasYouTubeDataAccess() || !query.trim()) return [];
-  try {
-    const publishedAfter = new Date(Date.now() - (opts.windowDays ?? 120) * DAY).toISOString();
-    const ids = await searchVideoIds({ query, maxResults: opts.maxResults ?? 25, publishedAfter });
-    if (ids.length === 0) return [];
-    const details = await fetchVideoDetails(ids);
-    const stats = await fetchChannelStats(details.map((d) => d.channelId));
-    const subsByChannel = new Map(stats.map((s) => [s.channelId, s.subscriberCount]));
-    const floor = opts.subsFloor ?? 1000;
-    const minDur = opts.minDurationSec ?? 0;
-    const scored = details
-      .filter((d) => d.views > 0 && d.durationSec >= minDur)
-      .map((d) => {
-        const subs = subsByChannel.get(d.channelId) ?? 0;
-        return {
-          title: d.title,
-          channelTitle: d.channelTitle,
-          views: d.views,
-          subs,
-          score: d.views / Math.max(subs, floor),
-          videoId: d.youtubeVideoId,
-          publishedAt: d.publishedAt,
-          durationSec: d.durationSec,
-        };
-      })
-      .sort((a, b) => b.score - a.score)
-      .slice(0, 12);
-    log(`outliers: ${scored.length} for "${query}"${scored[0] ? ` (top ${scored[0].score.toFixed(0)}x)` : ""}`);
-    return scored;
-  } catch (e) {
-    log(`outliers failed (${e instanceof Error ? e.message : e})`);
-    return [];
-  }
+  const key = normalizeEvidenceKey(query);
+  if (!hasYouTubeDataAccess() || !key) return [];
+  const maxResults = opts.maxResults ?? 25;
+  const minDurationSec = opts.minDurationSec ?? 0;
+  const windowDays = opts.windowDays ?? 120;
+  const subsFloor = opts.subsFloor ?? 1000;
+  const cacheKey = `${key}|max=${maxResults}|min=${minDurationSec}|window=${windowDays}|floor=${subsFloor}`;
+  const cached = outlierCache.get(cacheKey);
+  if (cached) return cached.map((value) => ({ ...value }));
+  const pending = outlierCache.getInflight(cacheKey);
+  if (pending) return (await pending).map((value) => ({ ...value }));
+
+  const request = (async (): Promise<OutlierVideo[]> => {
+    let successful = false;
+    try {
+      const publishedAfter = new Date(Date.now() - windowDays * DAY).toISOString();
+      const ids = await searchVideoIds({ query: key, maxResults, publishedAfter });
+      if (ids.length === 0) {
+        successful = true;
+        outlierCache.set(cacheKey, []);
+        return [];
+      }
+      const details = await fetchVideoDetails(ids);
+      const stats = await fetchChannelStats(details.map((d) => d.channelId));
+      const subsByChannel = new Map(stats.map((s) => [s.channelId, s.subscriberCount]));
+      const scored = details
+        .filter((d) => d.views > 0 && d.durationSec >= minDurationSec)
+        .map((d) => {
+          const subs = subsByChannel.get(d.channelId) ?? 0;
+          return {
+            title: d.title,
+            channelTitle: d.channelTitle,
+            views: d.views,
+            subs,
+            score: d.views / Math.max(subs, subsFloor),
+            videoId: d.youtubeVideoId,
+            publishedAt: d.publishedAt,
+            durationSec: d.durationSec,
+          };
+        })
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 12);
+      successful = true;
+      outlierCache.set(cacheKey, scored);
+      log(`outliers: ${scored.length} for "${key}"${scored[0] ? ` (top ${scored[0].score.toFixed(0)}x)` : ""}`);
+      return scored;
+    } catch (e) {
+      log(`outliers failed (${e instanceof Error ? e.message : e})`);
+      return [];
+    } finally {
+      outlierCache.deleteInflight(cacheKey);
+      if (!successful) outlierCache.delete(cacheKey);
+    }
+  })();
+  outlierCache.setInflight(cacheKey, request);
+  return (await request).map((value) => ({ ...value }));
 }

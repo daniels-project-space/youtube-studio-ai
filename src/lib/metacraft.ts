@@ -34,6 +34,7 @@
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { searchVideoIds, fetchVideoDetails, hasYouTubeDataAccess } from "@/lib/youtubeData";
 import { resolveVoiceDoctrine } from "@/engine/golden";
+import { createPublicEvidenceCache, normalizeEvidenceKey } from "@/lib/publicEvidenceCache";
 
 export function hasMetacraft(): boolean {
   return hasAnthropicKey();
@@ -109,53 +110,22 @@ const TITLE_STOPWORDS = new Set([
  * still fresh. It is intentionally short-lived and bounded so demand signals
  * refresh during planning and a long-lived server cannot grow without limit.
  */
-const EVIDENCE_CACHE_TTL_MS = 5 * 60_000;
-const EVIDENCE_CACHE_MAX_ENTRIES = 128;
-type EvidenceCacheEntry<T> = { expiresAt: number; value: T };
-const suggestCache = new Map<string, EvidenceCacheEntry<string[]>>();
-const suggestInflight = new Map<string, Promise<string[]>>();
-const competitorCache = new Map<string, EvidenceCacheEntry<{ title: string; views: number }[]>>();
-const competitorInflight = new Map<string, Promise<{ title: string; views: number }[]>>();
-
-function evidenceKey(seed: string): string {
-  return seed.trim().replace(/\s+/gu, " ").toLowerCase();
-}
-
-function cachedEvidence<T>(cache: Map<string, EvidenceCacheEntry<T>>, key: string): T | undefined {
-  const entry = cache.get(key);
-  if (!entry) return undefined;
-  if (entry.expiresAt <= Date.now()) {
-    cache.delete(key);
-    return undefined;
-  }
-  return entry.value;
-}
-
-function storeEvidence<T>(cache: Map<string, EvidenceCacheEntry<T>>, key: string, value: T): void {
-  cache.delete(key);
-  cache.set(key, { expiresAt: Date.now() + EVIDENCE_CACHE_TTL_MS, value });
-  while (cache.size > EVIDENCE_CACHE_MAX_ENTRIES) {
-    const oldest = cache.keys().next().value;
-    if (oldest === undefined) break;
-    cache.delete(oldest);
-  }
-}
+const suggestCache = createPublicEvidenceCache<string[]>();
+const competitorCache = createPublicEvidenceCache<{ title: string; views: number }[]>();
 
 /** Test/support hook; production callers never need to invalidate evidence. */
 export function clearMetacraftEvidenceCache(): void {
   suggestCache.clear();
-  suggestInflight.clear();
   competitorCache.clear();
-  competitorInflight.clear();
 }
 
 /** Live YouTube autocomplete — the real query strings people type. */
 export async function youtubeSuggest(seed: string): Promise<string[]> {
-  const key = evidenceKey(seed);
+  const key = normalizeEvidenceKey(seed);
   if (!key) return [];
-  const cached = cachedEvidence(suggestCache, key);
+  const cached = suggestCache.get(key);
   if (cached) return [...cached];
-  const pending = suggestInflight.get(key);
+  const pending = suggestCache.getInflight(key);
   if (pending) return [...(await pending)];
 
   const request = (async (): Promise<string[]> => {
@@ -169,18 +139,18 @@ export async function youtubeSuggest(seed: string): Promise<string[]> {
       const j = (await res.json()) as [string, string[]];
       const values = Array.isArray(j?.[1]) ? j[1].slice(0, 8) : [];
       successful = true;
-      storeEvidence(suggestCache, key, values);
+      suggestCache.set(key, values);
       return values;
     } catch {
       return [];
     } finally {
-      suggestInflight.delete(key);
+      suggestCache.deleteInflight(key);
       // A failed request is intentionally not cached. A later planning wave
       // gets a real retry instead of inheriting a transient network outage.
       if (!successful) suggestCache.delete(key);
     }
   })();
-  suggestInflight.set(key, request);
+  suggestCache.setInflight(key, request);
   return [...(await request)];
 }
 
@@ -198,11 +168,11 @@ export async function fetchCompetitorTitles(
     log?.("metacraft: no YouTube Data access (key or OAuth) — skipping live competitor research");
     return [];
   }
-  const key = evidenceKey(seed);
+  const key = normalizeEvidenceKey(seed);
   if (!key) return [];
-  const cached = cachedEvidence(competitorCache, key);
+  const cached = competitorCache.get(key);
   if (cached) return cached.map((value) => ({ ...value }));
-  const pending = competitorInflight.get(key);
+  const pending = competitorCache.getInflight(key);
   if (pending) return (await pending).map((value) => ({ ...value }));
 
   const request = (async (): Promise<{ title: string; views: number }[]> => {
@@ -216,17 +186,17 @@ export async function fetchCompetitorTitles(
         .sort((x, y) => y.views - x.views)
         .slice(0, 10);
       successful = true;
-      storeEvidence(competitorCache, key, values);
+      competitorCache.set(key, values);
       return values;
     } catch (e) {
       log?.(`metacraft: competitor research failed (${e instanceof Error ? e.message : e}) — continuing without`);
       return [];
     } finally {
-      competitorInflight.delete(key);
+      competitorCache.deleteInflight(key);
       if (!successful) competitorCache.delete(key);
     }
   })();
-  competitorInflight.set(key, request);
+  competitorCache.setInflight(key, request);
   return (await request).map((value) => ({ ...value }));
 }
 
