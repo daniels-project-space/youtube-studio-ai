@@ -47,13 +47,17 @@ const store: Record<string, unknown> = { workedExampleRequest: request, workedEx
 };
 store.workedExampleAudioBinding = createWorkedExampleAudioBinding({ ...scope, params: {}, store }, store, expected.replace(/\s+/g, " ").split(/(?<=[.!?])\s+(?=[A-Z"'“‘])/), readFileSync(sourcePath));
 let sourceObserved = expected, masterObserved = expected, audits: ReturnType<typeof transcript.prepareFinalMasterNarrationTranscriptAudit>[] = [];
+let probeDuration = duration;
+let cueObservations: Array<{ passed: boolean; error?: string }> = [];
 let transcriptCalls = 0, reviewerCalls = 0, sentinelCalls = 0, writes = 0;
+let transcriptScopes: Array<"source" | "final-master"> = [];
 let auditGet: ((key: string, options: { timeoutMs?: number } | undefined) => Promise<Uint8Array>) | undefined;
 let timestampText: string | undefined, timestampScope: "source" | "final-master" = "source", rawTimestampWords = false;
 const logs: string[] = [];
 const sentinel = new Error("GUARDED_POST_AUDIO_QUALITY_BOUNDARY");
 function proofFor(options: transcript.NarrationTranscriptProofOptions) {
   transcriptCalls++;
+  transcriptScopes.push(options.audioPath === masterPath ? "final-master" : "source");
   const observed = options.audioPath === masterPath ? masterObserved : sourceObserved;
   const metrics = spawnSync("python3", ["-c", `import importlib.util,json,sys
 spec=importlib.util.spec_from_file_location('proof','scripts/narration_transcript_proof.py');m=importlib.util.module_from_spec(spec);spec.loader.exec_module(m)
@@ -65,7 +69,7 @@ print(json.dumps({'reference':r,'words':h,'wer':w,'recall':l,'missing':sorted({x
   const result: transcript.NarrationTranscriptProof = { schemaVersion: "narration-transcript-proof/v1", provider: "faster-whisper",
     model: { id: transcript.NARRATION_TRANSCRIPT_MODEL_ID, revision: transcript.NARRATION_TRANSCRIPT_MODEL_REVISION, packageVersion: "1.2.1", computeType: "int8-cpu" },
     source: { sha256: options.sourceSha256, byteLength: readFileSync(options.audioPath).length }, expected: { textSha256: hash(options.expectedText), wordCount: m.reference.length },
-    transcript: { text: observed, wordCount: m.words.length, words: observedWords.map((text: string, index: number) => ({ text, startMs: index * 300, endMs: index * 300 + 250 })) },
+    transcript: { text: observed, wordCount: observedWords.length, words: observedWords.map((text: string, index: number) => ({ text, startMs: index * 300, endMs: index * 300 + 250 })) },
     assessment: { wordErrorRate: m.wer, lexicalRecall: m.recall, missingNumericTerms: m.missing, thresholds: { maxWordErrorRate: 0.18, minLexicalRecall: 0.92 }, passed: m.wer <= 0.18 && m.recall >= 0.92 } };
   // Actual process caller and strict proof consumer, with only its external ASR result supplied.
   return transcript.proveNarrationTranscript({ ...options, runner: () => ({ status: 0, stdout: JSON.stringify(result), stderr: "" }) });
@@ -76,7 +80,12 @@ function actualBlock(path: string): Block {
   const guardedRequire = (name: string) => {
     const actual = requireLocal(name);
     if (name === "@/lib/storage") return { ...actual, getObjectBytes: async (key: string, _bucket?: string, options?: { timeoutMs?: number }) => { if (auditGet) return auditGet(key, options); assert.equal(key, "guarded-thumbnail"); return Buffer.from("thumbnail-process-fixture"); }, putObject: async () => { writes++; throw new Error("unapproved storage write"); } };
-    if (name === "@/lib/ffmpeg") return { ...actual, probe: async () => ({ hasVideo: true, hasAudio: true, durationSec: duration, width: 1920, height: 1080 }), measureAudio: async () => ({ integratedLufs: -18, windowMeanDb: -22 }), measureNarrationMixCorrelation: async () => ({ correlation: 0.99 }) };
+    if (name === "@/lib/ffmpeg") return { ...actual, probe: async () => ({ hasVideo: true, hasAudio: true, durationSec: probeDuration, width: 1920, height: 1080 }), measureAudio: async () => ({ integratedLufs: -18, windowMeanDb: -22 }), measureNarrationMixCorrelation: async () => ({ correlation: 0.99 }) };
+    // Observe the real gate without replacing its evidence, return or failure.
+    if (name === "@/lib/narrationCueTiming") return { ...actual, assertNarrationCueTimingEvidence: (...args: unknown[]) => {
+      try { const evidence = actual.assertNarrationCueTimingEvidence(...args); cueObservations.push({ passed: true }); return evidence; }
+      catch (error) { cueObservations.push({ passed: false, error: String(error) }); throw error; }
+    } };
     if (name === "@/lib/visualReview") return { ...actual, reviewRender: async (_path: string, _duration: number, _intent: unknown, options: { sourceSha256: string }) => { reviewerCalls++; return { ran: true, verdict: "pass", defects: [], evidence: { source: { sha256: options.sourceSha256 }, frames: [], coverage: { maxGapSec: 1, maxAllowedGapSec: 2, focusedWindows: [] } }, focusWindows: [], broadQualityScore: { score: 9, broadBatchCount: 1 }, summary: "Guarded transport fixture, not a visual review." }; } };
     if (name === "@/lib/videoVerifier") return { ...actual, evaluateThumbnail: async () => ({ score: 9, issues: [] }), evaluateSeo: async () => ({ score: 9, issues: [] }), evaluateIdentity: async () => ({ score: 9, issues: [] }) };
     if (name === "@/lib/renderValidate") return { ...actual, validateRender: async () => ({ ran: true, verdict: "pass", issues: [], temporalDynamism: { verdict: "not_required", source: "guarded", maxFrozenHoldSec: 0, frozenIntervals: [], evaluatedIntervals: [], violatingIntervals: [] }, visualPacing: { verdict: "not_required", usable: true, policy: { mode: "exempt" }, maxHoldSec: 0, medianHoldSec: 0, changeTimestampsSec: [] } }) };
@@ -201,11 +210,11 @@ async function cacheCases(block: Block, audit: ReturnType<typeof transcript.prep
 async function freshControls(block: Block) {
   const results: unknown[] = [];
   const invoke = async (seed: Record<string, unknown>, selectedParams: Record<string, unknown> = params, selectedBlock = block) => {
-    transcriptCalls = 0; reviewerCalls = 0; sentinelCalls = 0; audits = []; logs.length = 0;
+    transcriptCalls = 0; reviewerCalls = 0; sentinelCalls = 0; audits = []; logs.length = 0; cueObservations = []; transcriptScopes = [];
     let error: unknown;
     try { await selectedBlock.run({ ...scope, params: selectedParams, store: seed, budgetUsd: 100, stageBudgetUsd: 100, log: (message, extra) => logs.push(extra ? `${message} ${JSON.stringify(extra)}` : message) }); }
     catch (caught) { error = caught; }
-    return { error, transcriptCalls, reviewerCalls, sentinelCalls, audit: audits[0], logs: [...logs] };
+    return { error, transcriptCalls, reviewerCalls, sentinelCalls, audit: audits[0], logs: [...logs], cueObservations: [...cueObservations], transcriptScopes: [...transcriptScopes] };
   };
   for (const observed of [expected.replace("seventy eight", "seventy-eight"), expected.replace(prepared.projection.answerSpeech, "The answer is negative 961.")]) {
     assert.notEqual(observed, expected); assert.deepEqual(parseWorkedExampleSpeech(observed), parseWorkedExampleSpeech(expected));
@@ -226,26 +235,42 @@ async function freshControls(block: Block) {
     results.push({ name, place, arithmeticHeld: true, transcriptCalls: got.transcriptCalls, reviewerCalls: got.reviewerCalls });
   }
   sourceObserved = expected; masterObserved = expected;
-  timestampText = expected.replace("seventy eight", "seventy seven"); // Same count; real receipt-shape validator must accept before the independent meaning check refuses.
+  timestampText = expected.replace("seventy eight", "seventy seven"); // Same count, but the shared full-receipt validator now requires ordered lexical coverage.
   for (const scope of ["source", "final-master"] as const) {
     timestampScope = scope;
-    const wordMismatch = await invoke(store); assert.match(String(wordMismatch.error), new RegExp(`${scope}.*critical arithmetic meaning differs`)); assert.equal(wordMismatch.transcriptCalls, scope === "source" ? 1 : 2);
+    const wordMismatch = await invoke(store); assert.match(String(wordMismatch.error), new RegExp(`WORKED_EXAMPLE_CRITICAL_SPEECH_REFUSED \\(${scope}\\): narration transcript proof unavailable: proof timestamped words do not cover the transcript lexical sequence`)); assert.equal(wordMismatch.transcriptCalls, scope === "source" ? 1 : 2);
   }
   timestampText = undefined;
   results.push({ name: "segment-text-correct-timestamp-words-wrong-both-scopes", arithmeticHeld: true });
   const chapterText = [draft.script.hook, ...draft.script.sections.map((section, index) => `${index > 0 && index < draft.script.sections.length - 1 ? `Chapter ${index}: ${section.heading}. ` : ""}${section.narration}`)].join(" ");
-  const chapterStore: Record<string, unknown> = { ...store, narrationTranscriptText: chapterText, sentenceTimings: [{ text: chapterText, start: 0, end: duration }] };
+  // Synthetic clocks follow the complete spoken headings, not the shorter base lesson.
+  const chapterDuration = chapterText.split(/\s+/).length * 0.3 + 2;
+  const chapterStore: Record<string, unknown> = { ...store, narrationTranscriptText: chapterText, sentenceTimings: [{ text: chapterText, start: 0, end: chapterDuration }],
+    narrationDurationSec: chapterDuration, videoDurationSec: chapterDuration,
+    narrationPerformanceEvidence: { ...(store.narrationPerformanceEvidence as object), durationSec: chapterDuration, wordCount: chapterText.split(/\s+/).length, wordsPerSec: chapterText.split(/\s+/).length / chapterDuration } };
   chapterStore.workedExampleAudioBinding = createWorkedExampleAudioBinding({ ...scope, params: { chapterCards: true }, store: chapterStore }, chapterStore, [chapterText], readFileSync(sourcePath));
   sourceObserved = chapterText; masterObserved = chapterText;
+  const shortChapter: Record<string, unknown> = { ...chapterStore, narrationDurationSec: duration, videoDurationSec: duration,
+    narrationPerformanceEvidence: store.narrationPerformanceEvidence, sentenceTimings: [{ text: chapterText, start: 0, end: duration }] };
+  shortChapter.workedExampleAudioBinding = createWorkedExampleAudioBinding({ ...scope, params: { chapterCards: true }, store: shortChapter }, shortChapter, [chapterText], readFileSync(sourcePath));
+  const short = await invoke(shortChapter, { ...params, chapterCards: true });
+  assert.equal(short.error, sentinel); assert.equal(short.transcriptCalls, 2); assert.equal(short.reviewerCalls, 1);
+  assert.deepEqual(short.cueObservations, [{ passed: false, error: "Error: narration cue timing evidence unavailable: transcript word 103 extends beyond the authored narration duration" }]);
+  results.push({ name: "chapter-headings-short-source-duration", actualCueRejected: true, legacyLateCollectionBeforeSentinel: true, fullQaApproved: false });
+  probeDuration = chapterDuration;
   const chapter = await invoke(chapterStore, { ...params, chapterCards: true }); assert.equal(chapter.error, sentinel, String(chapter.error)); assert.ok(chapter.audit?.audit.workedExampleCriticalSpeech);
+  assert.equal(chapter.transcriptCalls, 2); assert.equal(chapter.reviewerCalls, 1); assert.deepEqual(chapter.cueObservations, [{ passed: true }]);
+  assert.deepEqual(chapter.transcriptScopes, ["source", "final-master"]);
+  assert.ok(chapter.logs.some((line) => line.includes("source words aligned")));
+  assert.equal(chapter.audit.audit.sourceTranscript.assessment.passed, true); assert.equal(chapter.audit.audit.finalMasterTranscript.assessment.passed, true);
   for (const place of ["source", "final-master"] as const) {
     sourceObserved = place === "source" ? chapterText.replace("Chapter 1", "Chapter 2") : chapterText;
     masterObserved = place === "final-master" ? chapterText.replace("Chapter 1", "Chapter 2") : chapterText;
     const changed = await invoke(chapterStore, { ...params, chapterCards: true }); assert.match(String(changed.error), /WORKED_EXAMPLE_CRITICAL_SPEECH_REFUSED/); assert.match(String(changed.error), new RegExp(place));
   }
-  results.push({ name: "chapter-headings-good-and-reordered-both-scopes", passed: true });
-  // Retain a grouped numeral observation with the actual worker's lexical count.
-  // A single Whisper timestamp token for 2,157 has a pre-existing token-count incompatibility.
+  results.push({ name: "chapter-headings-good-and-reordered-both-scopes", actualCuePassed: true, arithmeticAuditBound: true, fullQaApproved: false });
+  probeDuration = duration;
+  // Grouped numeral transport follows the separately proven timestamp-unit count.
   let groupedSeed: Record<string, unknown> | undefined, groupedExpected = "", groupedObserved = "";
   for (let n = 0; n < 50 && !groupedSeed; n++) {
     const req = { ...request, seed: `grouped-${n}`, operations: ["multiply", "multiply", "add", "exact_divide"] }, prep = prepareWorkedExample(req);
@@ -259,8 +284,26 @@ async function freshControls(block: Block) {
   }
   assert.ok(groupedSeed); assert.notEqual(groupedExpected, groupedObserved); assert.deepEqual(parseWorkedExampleSpeech(groupedObserved), parseWorkedExampleSpeech(groupedExpected));
   sourceObserved = groupedObserved; masterObserved = groupedExpected; rawTimestampWords = true;
-  const grouped = await invoke(groupedSeed); assert.match(String(grouped.error), /transcript word count does not match its timestamped words/); assert.equal(grouped.transcriptCalls, 1); rawTimestampWords = false;
-  results.push({ name: "equivalent-grouped-numeral-single-ASR-token", arithmeticParserEquivalent: true, existingSharedReceiptHeld: true, reason: String(grouped.error) });
+  const shortGrouped = await invoke(groupedSeed);
+  assert.equal(shortGrouped.error, sentinel); assert.equal(shortGrouped.transcriptCalls, 2); assert.equal(shortGrouped.reviewerCalls, 1);
+  assert.deepEqual(shortGrouped.cueObservations, [{ passed: false, error: "Error: narration cue timing evidence unavailable: transcript word 103 extends beyond the authored narration duration" }]);
+  results.push({ name: "grouped-numeral-short-source-duration", actualCueRejected: true, legacyLateCollectionBeforeSentinel: true, fullQaApproved: false });
+  const groupedDuration = Math.max(groupedExpected.split(/\s+/).length, groupedObserved.split(/\s+/).length) * 0.3 + 2;
+  const timedGrouped: Record<string, unknown> = { ...groupedSeed, narrationDurationSec: groupedDuration, videoDurationSec: groupedDuration,
+    sentenceTimings: [{ text: groupedExpected, start: 0, end: groupedDuration }],
+    narrationPerformanceEvidence: { ...(store.narrationPerformanceEvidence as object), durationSec: groupedDuration, wordCount: groupedExpected.split(/\s+/).length, wordsPerSec: groupedExpected.split(/\s+/).length / groupedDuration } };
+  timedGrouped.workedExampleAudioBinding = createWorkedExampleAudioBinding({ ...scope, params: {}, store: timedGrouped }, timedGrouped, [groupedExpected], readFileSync(sourcePath));
+  probeDuration = groupedDuration;
+  const grouped = await invoke(timedGrouped); assert.equal(grouped.error, sentinel, String(grouped.error)); assert.equal(grouped.transcriptCalls, 2); assert.equal(grouped.reviewerCalls, 1);
+  assert.deepEqual(grouped.transcriptScopes, ["source", "final-master"]);
+  assert.deepEqual(grouped.cueObservations, [{ passed: true }]); assert.ok(grouped.logs.some((line) => line.includes("source words aligned")));
+  assert.ok(grouped.audit?.audit.workedExampleCriticalSpeech);
+  assert.equal(grouped.audit.audit.sourceTranscript.transcript.wordCount, 105); assert.equal(grouped.audit.audit.finalMasterTranscript.transcript.wordCount, 110);
+  assert.equal(grouped.audit.audit.sourceTranscript.assessment.wordErrorRate, 6 / 110); assert.equal(grouped.audit.audit.sourceTranscript.assessment.lexicalRecall, 104 / 110);
+  assert.equal(grouped.audit.audit.sourceTranscript.assessment.passed, true); assert.equal(grouped.audit.audit.finalMasterTranscript.assessment.passed, true);
+  assert.equal(grouped.audit.audit.finalMasterTranscript.assessment.wordErrorRate, 0); assert.equal(grouped.audit.audit.finalMasterTranscript.assessment.lexicalRecall, 1);
+  rawTimestampWords = false; probeDuration = duration;
+  results.push({ name: "equivalent-grouped-numeral-single-ASR-token", arithmeticParserEquivalent: true, actualCuePassed: true, sourceProofs: 1, finalMasterProofs: 1, arithmeticAuditBound: true, fullQaApproved: false });
   sourceObserved = expected; masterObserved = expected;
   for (const change of ["draft", "missing-approval", "missing-audio-binding"]) {
     const seed = structuredClone(store); if (change === "missing-approval") delete seed.workedExampleEditorialApproval; if (change === "missing-audio-binding") delete seed.workedExampleAudioBinding;

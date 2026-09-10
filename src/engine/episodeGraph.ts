@@ -6,7 +6,13 @@
 import { sha256Hex } from "@/lib/sha256";
 import { z } from "zod";
 
-import { StorySpineSchema, type StorySpine } from "./storySpine";
+import { StorySpineSchema, storySpineFingerprint, type StorySpine } from "./storySpine";
+import {
+  WorkedExampleVisualPlanSchema,
+  WorkedExampleVisualReferenceSchema,
+  assertWorkedExampleVisualHandoff,
+  workedExampleVisualReference,
+} from "./workedExampleVisual";
 import {
   SyntheticScenarioProfileSchema,
   SyntheticScenarioVisualKindSchema,
@@ -95,7 +101,12 @@ export const EpisodeVisualStateSchema = z.object({
   evidenceVisualIntent: EvidenceVisualIntentSchema.optional(),
   /** Required review-bound data when the declared intent is factual. */
   evidenceVisualManifest: EvidenceVisualManifestSchema.optional(),
+  /** Held content-bound arithmetic grammar; requires the complete root visual plan. */
+  workedExampleVisual: WorkedExampleVisualReferenceSchema.optional(),
 }).superRefine((visualState, ctx) => {
+  if (Object.hasOwn(visualState, "workedExampleVisual") && ["syntheticScenarioProfile", "syntheticScenarioVisualKind", "scenarioVisualTreatmentFingerprint", "evidenceVisualIntent", "evidenceVisualManifest"].some((key) => Object.hasOwn(visualState, key))) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "arithmetic visual cannot mix factual or fictional scenario grammar" });
+  }
   if (!visualState.evidenceVisualIntent) {
     if (visualState.evidenceVisualManifest) {
       ctx.addIssue({ code: z.ZodIssueCode.custom, message: "evidence visual manifest requires an explicit factual visual intent" });
@@ -177,6 +188,10 @@ export const EpisodeGraphSchema = z.object({
   sources: z.array(EpisodeSourceSchema).min(1),
   characters: z.array(EpisodeCharacterSchema),
   settings: z.array(EpisodeSettingSchema),
+  workedExampleVisualPlan: WorkedExampleVisualPlanSchema.optional(),
+}).superRefine((graph, ctx) => {
+  try { assertWorkedExampleVisualHandoff(graph, graph.beats, false); }
+  catch (error) { ctx.addIssue({ code: z.ZodIssueCode.custom, message: error instanceof Error ? error.message : "invalid arithmetic graph handoff" }); }
 });
 export type EpisodeGraph = z.infer<typeof EpisodeGraphSchema>;
 export type EpisodeGraphInput = Omit<EpisodeGraph, "version"> & {
@@ -216,6 +231,10 @@ export const SceneManifestSchema = z.object({
   episodeId: stableId("episode"),
   renderer: z.literal(DETERMINISTIC_SCENE_RENDERER),
   externalProviderCalls: z.literal(0),
+  workedExampleVisualPlan: WorkedExampleVisualPlanSchema.optional(),
+}).superRefine((manifest, ctx) => {
+  try { assertWorkedExampleVisualHandoff(manifest, manifest.scenes, true); }
+  catch (error) { ctx.addIssue({ code: z.ZodIssueCode.custom, message: error instanceof Error ? error.message : "invalid arithmetic manifest handoff" }); }
 });
 export type SceneManifest = z.infer<typeof SceneManifestSchema>;
 
@@ -413,6 +432,27 @@ export function buildEpisodeGraph(input: EpisodeGraphInput): EpisodeGraph {
 /** Backwards-friendly verb for callers that prefer validate-style naming. */
 export const validateEpisodeGraph = assertEpisodeGraph;
 
+/** Held pure presentation adapter, not a runtime caller or approval boundary.
+ * The active caller must separately revalidate the plan against its complete current bundle. */
+export function bindWorkedExampleVisualPlan(value: unknown, planValue: unknown, storySpine: StorySpine): EpisodeGraph {
+  const graph = assertEpisodeGraphAgainstStorySpine(value, storySpine);
+  const plan = WorkedExampleVisualPlanSchema.parse(planValue);
+  if (plan.source.storySpineFingerprint !== storySpineFingerprint(storySpine)) throw new Error("arithmetic visual plan belongs to a different Story Spine");
+  for (const beat of graph.beats) {
+    if (["syntheticScenarioProfile", "syntheticScenarioVisualKind", "scenarioVisualTreatmentFingerprint", "evidenceVisualIntent", "evidenceVisualManifest"].some((key) => Object.hasOwn(beat.visualState, key))) {
+      throw new Error("arithmetic visual cannot replace factual or fictional scenario grammar");
+    }
+  }
+  if (graph.beats.length !== plan.slots.length) throw new Error("arithmetic visual graph requires complete ordered sentence coverage");
+  return assertEpisodeGraph({
+    ...graph, workedExampleVisualPlan: plan,
+    beats: graph.beats.map((beat, index) => {
+      const slot = plan.slots[index];
+      return { ...beat, visualState: { action: slot.label, props: [], workedExampleVisual: workedExampleVisualReference(plan, slot) } };
+    }),
+  });
+}
+
 /**
  * Optional bridge to the existing Story Spine. It does not modify that schema;
  * it simply proves the graph's duration, timed evidence, characters, and
@@ -421,6 +461,9 @@ export const validateEpisodeGraph = assertEpisodeGraph;
 export function assertEpisodeGraphAgainstStorySpine(value: unknown, storySpine: StorySpine): EpisodeGraph {
   const graph = assertEpisodeGraph(value);
   const spine = StorySpineSchema.parse(storySpine);
+  if (graph.workedExampleVisualPlan && graph.workedExampleVisualPlan.source.storySpineFingerprint !== storySpineFingerprint(spine)) {
+    throw new Error("arithmetic episode graph differs from its bound timed Story Spine");
+  }
   if (Math.abs(graph.durationSec - spine.timedScript.narrationDurationSec) > EPSILON) {
     throw new Error(
       `episode graph duration ${graph.durationSec} does not match Story Spine duration ${spine.timedScript.narrationDurationSec}`,
@@ -543,6 +586,9 @@ export function compileSceneManifest(value: unknown, storySpine?: StorySpine): S
     // bounded for safe-area typography while the full purpose remains in the
     // graph for editorial diagnostics.
     label: (() => {
+      if (graph.workedExampleVisualPlan) {
+        return graph.workedExampleVisualPlan.slots.find((slot) => slot.beatId === beat.id)!.label;
+      }
       const presentationClaim = beat.claim?.trim() || beat.scenePurpose;
       return Array.from(presentationClaim).length <= 240
         ? presentationClaim
@@ -552,7 +598,9 @@ export function compileSceneManifest(value: unknown, storySpine?: StorySpine): S
     ...(beat.settingId ? { settingId: beat.settingId } : {}),
     camera: beat.camera,
     visualState: { ...beat.visualState, props: [...beat.visualState.props].sort() },
-    text: beat.text,
+    text: graph.workedExampleVisualPlan
+      ? graph.workedExampleVisualPlan.slots.find((slot) => slot.beatId === beat.id)!.label
+      : beat.text,
     narrationSentenceIds: [...beat.storySpineSentenceIds].sort(),
     causalInputBeatIds: graph.causalEdges
       .filter((edge) => edge.toBeatId === beat.id)
@@ -573,6 +621,7 @@ export function compileSceneManifest(value: unknown, storySpine?: StorySpine): S
     episodeId: graph.episodeId,
     renderer: DETERMINISTIC_SCENE_RENDERER,
     externalProviderCalls: 0,
+    ...(graph.workedExampleVisualPlan ? { workedExampleVisualPlan: graph.workedExampleVisualPlan } : {}),
   });
 }
 

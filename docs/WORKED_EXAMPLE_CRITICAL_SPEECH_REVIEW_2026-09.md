@@ -61,7 +61,7 @@ ARITHMETIC_SPEECH_PARITY_SOURCE=/tmp/ysa-arithmetic-critical-qa-w8XFln/narratedB
 
 ASR is fallible. This gate checks retained recognized critical meaning, not human pronunciation, pedagogical value, display/renderer fidelity, or signed origin. Public content fingerprints provide integrity linkage, not authorization; upstream artifact provenance and the held production connector remain separate requirements.
 
-Actual qaVisual accepts the tested equivalent hyphenated-word and plain negative-digit observations through both arithmetic and existing shared gates. A semantically equivalent grouped numeral represented as one ASR timestamp token can still fail the existing Python lexical-word-count versus TS timestamp-word-count check before arithmetic verification. The grouped observation is retained as an explicit shared-contract compatibility hold, not silently made successful; neither Python nor that TS check was changed. Other semantically valid rewrites can likewise be held by unchanged general WER/cue gates.
+At the original arithmetic-slice freeze, actual qaVisual accepted the tested equivalent hyphenated-word and plain negative-digit observations through both arithmetic and existing shared gates. A semantically equivalent grouped numeral represented as one ASR timestamp token failed the then-existing Python lexical-word-count versus TS timestamp-word-count check before arithmetic verification. That before observation is retained; the subsequent separate shared-contract repair and fixture reconciliation are documented below. Other semantically valid rewrites can still be held by unchanged general WER/cue gates.
 
 Exactly seven files changed: new `src/engine/workedExampleSpeech.ts`, new `src/engine/__tests__/workedExampleSpeech.test.ts`, new `src/trigger/blocks/__tests__/workedExampleSpeechQa.test.ts`, additive `src/lib/narrationTranscriptProof.ts`, additive qa_visual consumes in `src/engine/moduleContracts.ts`, narrow qaVisual edits in `src/trigger/blocks/narratedBlocks.ts`, and this review. No provider, planner, renderer, global threshold, price, engine restore API, policy/admission, Git or graph changes.
 
@@ -84,3 +84,91 @@ timestamp words with equal counts. Its before evidence is retained at
 repair is separate from this frozen arithmetic slice; it must preserve raw
 observations and all existing fidelity thresholds. A count-only patch would
 accept incomplete timestamp coverage and is explicitly not sufficient.
+
+## Canonical shared-count integration check — 2026-09-09
+
+After the separately qualified count/ordered-coverage repair (`2b751360`),
+independent canonical comparison confirms Python and all six standalone test
+files match their frozen hashes. Canonical TypeScript differs only by this
+existing optional arithmetic extension; removing the new coverage additions
+recovers the exact prior held TS hash `9f8c36ca...d1fbf`.
+
+Evidence: `/tmp/ysa-canonical-transcript-integration-n6NVIp`. The verifier passes
+256 generated problems, 1,152 wrong-step mutations and 18 critical changes;
+the actual Python-to-TS regression passes all 22 cases. The unchanged held
+caller initially failed its line-232 expectation because contradictory
+timestamp text now fails the shared ordered-coverage guard earlier. Only that
+specific source/final-master error expectation and its comment were reconciled;
+no runtime, reviewer counts or semantic-negative assertions changed. The full
+caller then passes with the original `7437fbda...a07b4` ordinary source:
+`exactBeforeParity=true`, equal audit bytes and equal transcript/reviewer calls.
+The 23 real-runner cache controls and lexically consistent wrong-meaning
+refusals remain exercised. Original failure and passing rerun are retained as
+`workedExampleSpeechQa.log` and `workedExampleSpeechQa-reconciled.log`.
+
+At the first integration pass the held caller's grouped-number fixture was
+still an **old-producer simulation**: `proofFor` hand-built
+`transcript.wordCount` from lexical `m.words.length`. That count-error assertion
+was not current Python behavior. The standalone 22-case actual producer test
+establishes repaired count/coverage behavior, not semantic word/digit
+equivalence, real ASR quality or production arithmetic admission.
+
+### Corrected fixture count exposes a separate timing failure — 2026-09-10
+
+With explicit authorization, only the held fixture's count was changed to
+`observedWords.length`, retaining the old grouped-count assertion for a before
+run. `workedExampleSpeechQa-count-before-assertion.log` now exits 1 at that
+obsolete assertion because the caller reaches `GUARDED_POST_AUDIO_QUALITY_BOUNDARY`.
+This is **not full QA approval**. Diagnostic-only temporary observation,
+without changing any assertion or real gate return/throw, records:
+
+- Grouped source `negative 2,259`: 105 timestamp entries, expected lexical
+  count 110, WER `6/110`, recall `104/110`, no missing numeric terms; aggregate
+  thresholds pass. Master: 110 entries, WER 0, recall 1.
+- One source and one master transcription fixture call, one reviewer fixture
+  call, one sentinel; a bound arithmetic/semantic audit is constructed.
+- The real source cue gate throws: `transcript word 103 extends beyond the
+  authored narration duration`. The reused duration is 30.2 seconds but the
+  source timestamps end at 31.45 seconds. The existing caller collects this
+  failure in `critical[]` before the artificial post-audio sentinel.
+
+Exact diagnostics are retained in `grouped-before-summary-final.jsonl` and
+`grouped-before-cue-diagnostic.log` under the same evidence directory. The
+canonical test at this checkpoint retained the deliberately obsolete grouped
+assertion, so this before run correctly failed. No global timing/quality
+threshold, runtime or provider was changed.
+
+### Authorized positive/negative fixture reconciliation
+
+The positive chapter and grouped-number fixtures now bind their complete
+synthetic spoken duration, performance, sentence clock, audio binding and
+guarded media-probe duration. Chapter timing follows the independently reviewed
+fixture approach; the grouped fixture is 35 seconds. A transparent observer
+calls the genuine `assertNarrationCueTimingEvidence`, retaining its exact
+return or thrown error. Both positives explicitly require that actual cue
+gate to pass, source then final-master proof calls, the bound arithmetic audit
+and unchanged transcript assessment metrics. Reaching the artificial sentinel
+alone is never considered sufficient.
+
+Both original 30.2-second chapter/grouped fixtures remain explicit negative
+cases. Each requires the actual cue error that transcript word 103 exceeds
+the authored duration. This existing caller collects that error before the
+sentinel, with one reviewer and two proof calls; these are not early-hold
+claims. Results explicitly record `fullQaApproved=false`. Any later source
+preflight composition must preserve these cases and separately prove its
+earlier refusal behavior.
+
+The complete focused caller passes in `workedExampleSpeechQa-final.log`,
+including the 23 cache controls, retained semantic negatives, explicit
+source/master scopes and exact ordinary audit-byte/call parity against frozen
+`7437fbda...a07b4`. The grouped source has 105 timestamp units, WER `6/110`
+and recall `104/110`; the master has 110 units, WER 0 and recall 1. The separate
+256-problem verifier and actual 22-case Python-to-TS producer regression also
+pass. Final scoped lint and canonical nonincremental typecheck results are
+retained with the final diff and hashes in the same evidence directory.
+
+This follow-up changes only the held caller test and this note. Raw observed
+speech, runtime gates, thresholds, provider configuration and the peer's
+isolated preflight source are unchanged. All speech/media transports here are
+explicitly synthetic: no paid calls, real ASR/listening, full visual QA,
+production arithmetic admission or deployment is claimed.
