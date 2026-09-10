@@ -1770,7 +1770,10 @@
   .studio-nav-more-menu .studio-nav-item[data-compact-only] { display: none; }
 
   @container studio-navigation (max-width: 22rem) {
-    .studio-nav { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    /* Let the longest label own its real width instead of painting beyond an
+       equal-width target. Compact inline padding leaves room for all three. */
+    .studio-nav { grid-template-columns: repeat(3, minmax(min-content, 1fr)); }
+    .studio-nav-item { padding-inline: 0.2rem; }
     .studio-nav-group[data-nav-group="workspace"] .studio-nav-item:nth-child(n + 3) { display: none; }
     .studio-nav-more-menu .studio-nav-item[data-compact-only] { display: flex; }
     .studio-nav-more-trigger[data-compact-active="true"] {
@@ -1843,12 +1846,22 @@
 
 @media (max-width: 680px) {
   .studio-main { padding: 1.2rem 0.9rem calc(6.4rem + env(safe-area-inset-bottom)); }
-  .studio-topbar { gap: 0.7rem; padding: 0.65rem 0.9rem; }
+  .studio-topbar { container: studio-topbar / inline-size; flex-wrap: wrap; gap: 0.7rem; padding: 0.65rem 0.9rem; }
   .studio-mobile-brand strong { font-size: 0.82rem; }
-  .studio-topbar-actions { flex: 1; gap: 0.45rem; }
-  .channel-switcher { flex: 1; min-width: 0; width: auto; }
+  /* Reflow the action group as a unit when enlarged text cannot share the
+     brand row. Keep both controls and the existing type sizes intact. */
+  .studio-topbar-actions { position: relative; flex: 1; min-width: min(100%, 13rem); gap: 0.45rem; }
+  .channel-switcher { position: static; flex: 1; min-width: 0; width: auto; }
   .channel-switcher-label small { display: none; }
   .channel-switcher-button { padding-inline: 0.5rem; gap: 0.35rem; }
+  /* Anchor to the whole action group, including the owner control. Its bounds
+     leave full option text room without pushing a minimum-width menu offscreen. */
+  .channel-switcher-menu { left: 0 !important; right: 0; width: 100%; max-width: 100%; }
+  @container studio-topbar (max-width: 13rem) {
+    /* The selector already carries the Studio mark or channel avatar. Reclaim
+       only the duplicate decoration, never an action, at enlarged text sizes. */
+    .studio-mobile-brand { display: none; }
+  }
   .operations-access-trigger {
     width: 44px;
     min-width: 44px;
