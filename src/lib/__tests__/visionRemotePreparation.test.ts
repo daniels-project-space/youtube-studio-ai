@@ -27,12 +27,23 @@ async function main(): Promise<void> {
     ]);
     const original = await readFile(source);
     let prepared: Buffer | undefined;
+    let providerPosts = 0;
     global.fetch = async (input, init) => {
       const url = String(input);
       if (url === "https://images.test/large.jpg") {
         return new Response(original, { status: 200, headers: { "content-type": "image/jpeg" } });
       }
+      if (url === "https://images.test/error.html") {
+        return new Response("<html>upstream error</html>", { status: 200, headers: { "content-type": "text/html" } });
+      }
+      if (url === "https://images.test/too-large.jpg") {
+        return new Response(new Uint8Array([1, 2, 3]), {
+          status: 200,
+          headers: { "content-type": "image/jpeg", "content-length": String(25 * 1024 * 1024 + 1) },
+        });
+      }
       assert.equal(url, "https://openrouter.ai/api/v1/chat/completions");
+      providerPosts += 1;
       const body = JSON.parse(String(init?.body)) as { messages?: Array<{ content?: Array<{ image_url?: { url?: string } }> }> };
       const imageUrl = body.messages?.[0]?.content?.[1]?.image_url?.url ?? "";
       prepared = Buffer.from(imageUrl.split(",")[1] ?? "", "base64");
@@ -59,6 +70,17 @@ async function main(): Promise<void> {
     const [width, height] = stdout.trim().split(",").map(Number);
     assert.ok(width <= 768 && height <= 768, `remote frames are downscaled before review (got ${width}x${height})`);
     assert.ok(prepared.length < original.length, "downscaling reduces the review payload for a large remote frame");
+    await assert.rejects(
+      () => visionUrls({ prompt: `vision-remote-html-${Date.now()}`, imageUrls: ["https://images.test/error.html"], json: true, noCache: true }),
+      /could not fetch required image/,
+      "declared HTML responses never reach the paid reviewer",
+    );
+    await assert.rejects(
+      () => visionUrls({ prompt: `vision-remote-size-${Date.now()}`, imageUrls: ["https://images.test/too-large.jpg"], json: true, noCache: true }),
+      /could not fetch required image/,
+      "oversized remote responses are rejected before buffering/review",
+    );
+    assert.equal(providerPosts, 1, "invalid remote payloads do not trigger extra provider calls");
   } finally {
     global.fetch = originalFetch;
     if (saved.key === undefined) delete process.env.OPENROUTER_API_KEY;

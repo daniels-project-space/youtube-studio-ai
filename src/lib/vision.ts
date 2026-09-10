@@ -146,10 +146,20 @@ async function prepLocalImage(path: string): Promise<Buffer | null> {
 }
 
 async function fetchRemoteImage(url: string): Promise<Buffer | null> {
+  // A signed R2 URL may omit Content-Type, so only reject a declared
+  // non-image response. This keeps HTML/error documents and JSON API payloads
+  // from becoming billable "image" review requests while preserving existing
+  // object-store compatibility.
+  const maxBytes = 25 * 1024 * 1024;
   try {
     const r = await fetch(url, { signal: AbortSignal.timeout(30_000) });
     if (!r.ok) return null;
-    return Buffer.from(await r.arrayBuffer());
+    const contentType = r.headers.get("content-type")?.split(";", 1)[0]?.trim().toLowerCase();
+    if (contentType && !contentType.startsWith("image/")) return null;
+    const advertisedLength = Number(r.headers.get("content-length"));
+    if (Number.isFinite(advertisedLength) && advertisedLength > maxBytes) return null;
+    const body = Buffer.from(await r.arrayBuffer());
+    return body.byteLength <= maxBytes ? body : null;
   } catch {
     return null;
   }
