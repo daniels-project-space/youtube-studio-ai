@@ -19,7 +19,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -152,6 +152,27 @@ async function fetchRemoteImage(url: string): Promise<Buffer | null> {
     return Buffer.from(await r.arrayBuffer());
   } catch {
     return null;
+  }
+}
+
+/**
+ * Remote frames need the same payload budget as local frames. `visionUrls`
+ * used to pass the downloaded original bytes straight to OpenRouter, so an
+ * R2 4K still silently bypassed the ≤768px preparation contract that
+ * `visionLocal` enforced. Stage the response through the same ffmpeg scaler
+ * and remove the temporary source even when decoding fails; the local helper
+ * deliberately falls back to the original bytes when ffmpeg is unavailable.
+ */
+async function prepRemoteImage(url: string): Promise<Buffer | null> {
+  const raw = await fetchRemoteImage(url);
+  if (!raw) return null;
+  const dir = await mkdtemp(join(tmpdir(), "ysa-vision-remote-"));
+  const source = join(dir, "source.image");
+  try {
+    await writeFile(source, raw);
+    return await prepLocalImage(source);
+  } finally {
+    await rm(dir, { recursive: true, force: true }).catch(() => {});
   }
 }
 
@@ -403,7 +424,7 @@ export async function visionUrls(args: {
   }
   const buffers: Buffer[] = [];
   for (const u of args.imageUrls) {
-    const b = await fetchRemoteImage(u);
+    const b = await prepRemoteImage(u);
     if (!b) throw new VisionError(`could not fetch required image ${u}`);
     buffers.push(b);
   }
