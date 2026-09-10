@@ -870,7 +870,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
 
   // Held typed arithmetic preparation, not script approval or catalog qualification.
   worked_example_prepare: {
-    ...contract(["learning.integer_preparation"], {
+    ...contract(["learning.integer_preparation", "learning.worked_example_held"], {
       requiredConsumes: ["workedExampleRequest"],
       providerProfiles: [local],
       maxCostUsd: 0,
@@ -879,7 +879,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     certificationEvidence: "workedExample core and registered-caller contract tests; narration/render handoff pending",
   },
   worked_example_script: {
-    ...contract(["learning.integer_narration_draft"], {
+    ...contract(["learning.integer_narration_draft", "learning.worked_example_held"], {
       requiredConsumes: ["workedExampleRequest", "workedExamplePreparation"],
       providerProfiles: [local], maxCostUsd: 0, qualityRequired: true,
     }),

@@ -737,6 +737,16 @@ export function compilePipeline(
     validatePublicationApproval(entry);
   }
 
+  // Worked-example arithmetic is registered for controlled private review,
+  // but its decoded-clock/native-render/natural-speech qualification is still
+  // held. Keep it out of ordinary production compilation even though the
+  // Golden registry now has an auditable private-release owner for the ABI.
+  if (capabilities.has("learning.worked_example_held")) {
+    throw new PipelinePolicyError(
+      "worked-example modules are registered private-review foundations only; decoded narration, native renderer, and editorial qualification are still held",
+    );
+  }
+
   for (const capability of policy.requiredCapabilities) requireCapability(capabilities, capability);
 
   enforcePrivateOnlyPublication(resolved.entries, capabilities);
