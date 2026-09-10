@@ -121,7 +121,98 @@ export interface HookLint {
   issues: string[];
 }
 
+/**
+ * Cheap, deterministic quality signal used only when the provider does not
+ * return a usable `best` index. The retention judge remains authoritative;
+ * this signal prevents a malformed/partial judge response from silently
+ * defaulting to the first candidate and gives us a measurable local baseline
+ * without another model call.
+ */
+export interface HookQualitySignal {
+  score: number;
+  firstSentenceWords: number;
+  concreteAnchors: number;
+  topicMatches: number;
+  repeatedTerms: number;
+}
+
+const QUALITY_STOPWORDS = new Set([
+  "about", "after", "again", "because", "before", "being", "could", "does", "from", "have", "into",
+  "just", "more", "most", "only", "over", "that", "their", "there", "these", "this", "what", "when",
+  "where", "which", "while", "with", "would", "your", "will", "they", "them", "than", "then", "were",
+]);
+const SENTENCE_CAPITALS = new Set([
+  "A", "An", "And", "As", "At", "Before", "But", "By", "Each", "Every", "For", "From", "He", "How",
+  "I", "In", "It", "Most", "No", "On", "One", "She", "That", "The", "Their", "They", "This", "Until",
+  "We", "When", "What", "Why", "You",
+]);
+
+function contentTerms(value: string): string[] {
+  return value
+    .toLowerCase()
+    .match(/[a-z][a-z0-9'-]{3,}/g)
+    ?.filter((term) => !QUALITY_STOPWORDS.has(term)) ?? [];
+}
+
+function countRepeatedTerms(value: string): number {
+  const counts = new Map<string, number>();
+  for (const term of contentTerms(value)) counts.set(term, (counts.get(term) ?? 0) + 1);
+  return [...counts.values()].reduce((sum, count) => sum + Math.max(0, count - 1), 0);
+}
+
+function likelyNameTokens(value: string): string[] {
+  return value
+    .split(/\s+/)
+    .map((token) => token.replace(/^[^A-Za-z]+|[^A-Za-z]+$/g, ""))
+    .filter((token) => /^[A-Z][a-z]{2,}$/.test(token) && !SENTENCE_CAPITALS.has(token));
+}
+
+/**
+ * Return a stable local signal for hook quality. It rewards topic words and
+ * concrete anchors in the first three spoken sentences, while penalising
+ * repetition. It is intentionally advisory: the provider judge still owns
+ * the final decision whenever it supplies a valid candidate index.
+ */
+export function hookQualitySignal(
+  hook: string,
+  opening: string,
+  opts: { topic?: string; title?: string } = {},
+): HookQualitySignal {
+  const hookSentences = sentences(hook);
+  const firstSentenceWords = hookSentences.length ? words(hookSentences[0]) : 0;
+  const head = [hook, ...sentences(opening).slice(0, 2)].join(" ");
+  const anchors = [
+    ...(head.match(/\b\d{2,4}\b/g) ?? []),
+    ...likelyNameTokens(head),
+  ];
+  const topicTerms = new Set(contentTerms(`${opts.topic ?? ""} ${opts.title ?? ""}`));
+  const headTerms = new Set(contentTerms(head));
+  const topicMatches = [...topicTerms].filter((term) => headTerms.has(term)).length;
+  const repeatedTerms = countRepeatedTerms(`${hook} ${opening}`);
+
+  let score = 54;
+  if (firstSentenceWords >= 8 && firstSentenceWords <= 20) score += 18;
+  else if (firstSentenceWords > 20) score -= Math.min(18, firstSentenceWords - 20);
+  else if (firstSentenceWords > 0) score -= Math.min(12, 8 - firstSentenceWords);
+  score += Math.min(24, anchors.length * 8);
+  score += Math.min(24, topicMatches * 8);
+  score -= Math.min(24, repeatedTerms * 6);
+  return {
+    score: Math.max(0, Math.min(100, score)),
+    firstSentenceWords,
+    concreteAnchors: anchors.length,
+    topicMatches,
+    repeatedTerms,
+  };
+}
+
 const WPS = 3.1; // matches scriptGen's calibrated TTS rate
+
+// Four candidates of 50–110 words each fit comfortably under this ceiling.
+// Keeping the ceiling close to the structured output prevents malformed
+// providers from spending a large completion on a short creative brief.
+export const HOOK_MAX_OUTPUT_TOKENS = 3200;
+export const HOOK_JUDGE_MAX_OUTPUT_TOKENS = 1400;
 
 function words(t: string): number {
   return t.split(/\s+/).filter(Boolean).length;
@@ -167,7 +258,7 @@ export function lintHook(
   if (!opts.skipConcreteness) {
     const head = [hook, ...sentences(opening).slice(0, 2)].join(" ");
     const hasDigit = /\d/.test(head);
-    const midCaps = (head.match(/(?<![.!?…]\s)(?<!^)\b[A-Z][a-z]{2,}/g) ?? []).length;
+    const midCaps = likelyNameTokens(head).length;
     if (!hasDigit && midCaps < 1) issues.push("no concrete anchor (no number, name, or place) in the first 3 sentences");
   }
 
@@ -467,30 +558,45 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         `${lang}`,
         fixNote,
       ].filter(Boolean).join("\n\n"),
-      maxTokens: 9000,
+      maxTokens: HOOK_MAX_OUTPUT_TOKENS,
       temperature: 0.95,
       log: a.log,
     });
 
-    const candidates = (gen.candidates ?? [])
+    const rawCandidates = (gen.candidates ?? [])
       .map((c) => ({
         device: String(c.device ?? "unknown"),
         hook: String(c.hook ?? "").trim(),
         opening: String(c.opening ?? "").trim(),
         loop: String(c.loop ?? "").trim(),
       }))
-      .filter((c) => c.hook && c.opening)
-      .map((c) => ({ ...c, lint: lintHook(c.hook, c.opening, { skipConcreteness, gentle: a.style === "meditation" }) }));
+      .filter((c) => c.hook && c.opening);
+    const seenCandidates = new Set<string>();
+    const candidates = rawCandidates
+      .filter((c) => {
+        const fingerprint = `${c.hook}\n${c.opening}`.toLowerCase().replace(/\s+/g, " ").trim();
+        if (seenCandidates.has(fingerprint)) return false;
+        seenCandidates.add(fingerprint);
+        return true;
+      })
+      .map((c) => ({
+        ...c,
+        lint: lintHook(c.hook, c.opening, { skipConcreteness, gentle: a.style === "meditation" }),
+        quality: hookQualitySignal(c.hook, c.opening, { topic: a.topic, title: a.title }),
+      }));
     const survivors = candidates.filter((c) => c.lint.pass);
     lastIssues = candidates.flatMap((c) => c.lint.issues);
-    a.log?.(`hookcraft: ${candidates.length} candidates, ${survivors.length} pass lint${survivors.length ? "" : ` (${lastIssues.slice(0, 3).join("; ")})`}`);
+    a.log?.(
+      `hookcraft: ${rawCandidates.length} generated, ${candidates.length} unique, ${survivors.length} pass lint` +
+      `${survivors.length ? ` (best local signal ${Math.max(...survivors.map((c) => c.quality.score))}/100)` : ` (${lastIssues.slice(0, 3).join("; ")})`}`,
+    );
 
     if (survivors.length) {
       // Judge the lint survivors (cheap fast model; judge down = lint-only pass).
       let verdicts: HookVerdict[] = [];
       /** False once the judge has failed — carried onto the chosen hook. */
       let judgeRan = true;
-      let best = 0;
+      let best: number | undefined;
       try {
         const j = await claudeJson<{ verdicts?: HookVerdict[]; best?: number }>({
           prompt: [
@@ -511,11 +617,11 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
             ...survivors.map((c, i) => `CANDIDATE ${i} (${c.device}):\n${c.hook}\n${c.opening}`),
             `Return STRICT JSON {"verdicts":[{"punch":n,"specificity":n,"curiosity":n,"voiceMatch":n,"promise":n,"honest":bool,"note":"<=15 words"}],"best":n}.`,
           ].filter(Boolean).join("\n\n"),
-          maxTokens: 2000,
+          maxTokens: HOOK_JUDGE_MAX_OUTPUT_TOKENS,
           temperature: 0.2,
         });
         verdicts = j.verdicts ?? [];
-        best = typeof j.best === "number" && j.best >= 0 && j.best < survivors.length ? j.best : 0;
+        best = typeof j.best === "number" && j.best >= 0 && j.best < survivors.length ? j.best : undefined;
       } catch (e) {
         // FAIL-OPEN, DELIBERATELY AND LOUDLY — see isEmptyVerdict above.
         //
@@ -532,11 +638,31 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         );
       }
 
+      // If the judge returned scores but omitted/invalidated `best`, use its
+      // own composite first and the deterministic local signal only as a tie
+      // breaker. If it returned nothing, the local signal is the honest,
+      // repeatable fallback instead of silently choosing array position 0.
+      if (best === undefined) {
+        const ranked = survivors.map((candidate, index) => {
+          const v = verdicts[index];
+          const judgeScore = v && !isEmptyVerdict(v)
+            ? (v.punch ?? 0) + (v.specificity ?? 0) + (v.curiosity ?? 0) + (v.voiceMatch ?? 0) + (v.promise ?? 0)
+            : -1;
+          return { index, judgeScore, localScore: candidate.quality.score };
+        }).sort((a, b) => b.judgeScore - a.judgeScore || b.localScore - a.localScore || a.index - b.index);
+        best = ranked[0]?.index ?? 0;
+        a.log?.(
+          `hookcraft: judge best missing/invalid — selected candidate ${best + 1} via ` +
+          `${verdicts.length ? "judge composite + local tie-break" : "local quality signal"}`,
+        );
+      }
+
       // Prefer the judge's pick if it gates; else any gating candidate. The
       // judge-gated pick must then survive the grounded fact-check — a false
       // claim rejects the candidate and the next gating one gets its turn.
       const fiction = isFictionRegister(a.niche, a.style);
-      const order = [best, ...survivors.map((_, i) => i).filter((i) => i !== best)];
+      const selectedBest = best ?? 0;
+      const order = [selectedBest, ...survivors.map((_, i) => i).filter((i) => i !== selectedBest)];
       const factProblems: string[] = [];
       for (const i of order) {
         const v = verdicts[i] ?? {};

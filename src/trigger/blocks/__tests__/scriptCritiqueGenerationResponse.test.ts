@@ -50,11 +50,11 @@ async function main(): Promise<void> {
       let value: unknown;
       if (prompt.startsWith("You are the cold-open director.")) {
         kind = "candidates";
-        assert.equal(body.max_tokens, 9000);
+        assert.equal(body.max_tokens, 3200);
         value = { candidates: ["cold_open_scene", "curiosity_gap", "result_first", "problem_agitation"].map((device) => ({ device, hook, opening, loop })) };
       } else if (prompt.startsWith("You are a brutal YouTube retention judge.")) {
         kind = "judge";
-        assert.equal(body.max_tokens, 2000);
+        assert.equal(body.max_tokens, 1400);
         value = { verdicts: Array.from({ length: 4 }, () => ({ punch: 9, specificity: 9, curiosity: 9,
           voiceMatch: 9, promise: 9, honest: true, note: "Concrete fictional garden mystery." })), best: 0 };
       } else if (prompt.startsWith("Write a YouTube narration script about:")) {
@@ -93,7 +93,7 @@ async function main(): Promise<void> {
       });
       assert.equal(requests.filter((request) => request.kind === "candidates").length, 1, `${label}: hook candidates generated exactly once`);
       assert.equal(requests.filter((request) => request.kind === "judge").length, 1, `${label}: hook judge runs exactly once`);
-      assert.ok(logs.some((line) => /4 candidates, 4 pass lint/.test(line)), "real deterministic hook lint ran");
+      assert.ok(logs.some((line) => /4 generated, 1 unique, 1 pass lint/.test(line)), "real deterministic hook lint ran before duplicate candidates were judged");
       assert.equal(Object.hasOwn(result.store, "scriptApproved"), false, "generation never substitutes for independent qa_script approval");
       return { result, stages, logs };
     }
