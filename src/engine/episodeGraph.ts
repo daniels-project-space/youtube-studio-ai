@@ -448,7 +448,16 @@ export function bindWorkedExampleVisualPlan(value: unknown, planValue: unknown, 
     ...graph, workedExampleVisualPlan: plan,
     beats: graph.beats.map((beat, index) => {
       const slot = plan.slots[index];
-      return { ...beat, visualState: { action: slot.label, props: [], workedExampleVisual: workedExampleVisualReference(plan, slot) } };
+      // The arithmetic plan may carry a decoder-derived audible clock whose
+      // endpoints differ from the container-duration Story Spine by codec
+      // padding. Once bound, the graph and every downstream scene must use
+      // that exact plan clock rather than silently reverting to format time.
+      return {
+        ...beat,
+        t0: slot.t0,
+        t1: slot.t1,
+        visualState: { action: slot.label, props: [], workedExampleVisual: workedExampleVisualReference(plan, slot) },
+      };
     }),
   });
 }

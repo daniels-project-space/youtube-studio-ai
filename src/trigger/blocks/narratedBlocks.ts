@@ -17,6 +17,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type BlockPatch, type StageContext, type CachedOutputValidationContext } from "@/engine/types";
 import { currentWorkedExampleScript, createWorkedExampleAudioBinding, assertWorkedExampleTtsBindingInputs, assertWorkedExampleAudioMetadata, assertWorkedExampleAudioBytes } from "@/engine/workedExampleAudioBinding";
+import { NarrationSegmentMeasurementSchema, type NarrationSegmentProbeAttempt } from "@/lib/narrationSegmentClock";
 import { prepareWorkedExampleSpeechAdmission, assertWorkedExampleSpeechProof, createWorkedExampleSpeechReport,
   assertWorkedExampleSpeechReportCurrent, assertWorkedExampleSpeechFile, workedExampleSpeechRefusal,
   workedExampleSpeechFailureEvidence, type WorkedExampleSpeechReport } from "@/engine/workedExampleSpeech";
@@ -223,6 +224,7 @@ import { assertSourceProofMediaClipBytes } from "@/lib/sourceProofMedia";
 import { buildChapters } from "@/lib/assemblyai";
 import {
   probe,
+  probeDecodedAudioSamples,
   assembleBeatBody,
   assembleAuthoredBody,
   applyNameCardOverlay,
@@ -368,6 +370,62 @@ function currentNarrationSpokenSequence(ctx: Pick<CachedOutputValidationContext,
   const script = ctx.store.script as NarrationChapterScript | undefined;
   if (ctx.params.chapterCards === true && (script?.sections?.length ?? 0) >= 2) return narrationChapterItems(script!).map(speakChapterItem);
   return splitSentences(sanitizeSpoken(String(ctx.store.narrationText), { keepAudioTags: normalizeTtsProvider(ctx.params.ttsProvider) === "elevenlabs" }));
+}
+
+/** Arithmetic-only observation/recovery. Never request another provider take to repair a local probe. */
+async function measureArithmeticNarrationPart(path: string, paidBytes: Uint8Array, text: string) {
+  const sha256 = (bytes: string | Uint8Array) => createHash("sha256").update(bytes).digest("hex");
+  const audio = { sha256: sha256(paidBytes), byteLength: paidBytes.byteLength };
+  const assertRetainedBytes = async () => {
+    const bytes = await readBytes(path);
+    if (bytes.byteLength !== audio.byteLength || sha256(bytes) !== audio.sha256) throw new Error("arithmetic narration probe source differs from retained paid bytes; refusing regeneration");
+  };
+  const attempts: NarrationSegmentProbeAttempt[] = [];
+  const wordCount = text.split(/\s+/).filter(Boolean).length;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    await assertRetainedBytes();
+    let observed: Awaited<ReturnType<typeof probe>> | undefined;
+    try { observed = await probe(path); }
+    catch { attempts.push({ outcome: "unavailable" }); }
+    if (observed) {
+      if (!Number.isFinite(observed.durationSec) || observed.durationSec <= 0) attempts.push({ outcome: "invalid", reason: "duration" });
+      else if (!observed.hasAudio) attempts.push({ outcome: "invalid", reason: "no_audio" });
+      else {
+        await assertRetainedBytes();
+        // Keep the cheap format measurement for legacy provenance, but also
+        // capture the decoder's audible sample clock whenever it is available.
+        // A missing decoded observation is intentionally non-fatal here: the
+        // downstream arithmetic visual admission will hold rather than invent
+        // a reveal clock from container padding.
+        let decoded: Awaited<ReturnType<typeof probeDecodedAudioSamples>> | undefined;
+        try {
+          decoded = await probeDecodedAudioSamples(path);
+          await assertRetainedBytes();
+        } catch {
+          decoded = undefined;
+        }
+        attempts.push({ outcome: "measured", durationSec: observed.durationSec, hasAudio: true });
+        return { audio, textSha256: sha256(text), measurement: NarrationSegmentMeasurementSchema.parse({
+          source: "ffprobe_format_duration", durationSec: observed.durationSec, wordCount, attempts,
+          ...(decoded ? { decoded: { source: "ffprobe_decoded_samples", sampleRate: decoded.sampleRate, sampleCount: decoded.sampleCount, durationSec: decoded.durationSec } } : {}),
+        }) };
+      }
+    }
+  }
+  await assertRetainedBytes();
+  return { audio, textSha256: sha256(text), measurement: NarrationSegmentMeasurementSchema.parse({ source: "word_count_estimate", durationSec: Math.max(1, wordCount / 2.5), wordCount, attempts }) };
+}
+
+/** Final decoded clock is only admissible when no post-concat voice transform
+ * can change the sample timeline. Unknown/legacy FX therefore stay held too. */
+async function measureArithmeticFinalDecoded(path: string, voiceFx: string | undefined) {
+  if (voiceFx !== undefined && voiceFx !== "none") return undefined;
+  try {
+    const decoded = await probeDecodedAudioSamples(path);
+    return { source: "ffprobe_decoded_samples" as const, sampleRate: decoded.sampleRate, sampleCount: decoded.sampleCount, durationSec: decoded.durationSec };
+  } catch {
+    return undefined;
+  }
 }
 
 function prepareWorkedExampleQaRestore(ctx: CachedOutputValidationContext): readonly string[] | null {
@@ -1517,14 +1575,16 @@ export const narrationTts: Block = {
         const p = join(tmp, `utt_${i}.mp3`);
         await writeBytes(p, bytes);
         let dur = 0;
-        try { dur = (await probe(p)).durationSec; } catch { dur = Math.max(1, speak.split(/\s+/).length / 2.5); probeEstimates++; }
+        const clock = workedExampleScript ? await measureArithmeticNarrationPart(p, bytes, speak) : undefined;
+        if (clock) { dur = clock.measurement.durationSec; if (clock.measurement.source === "word_count_estimate") probeEstimates++; }
+        else { try { dur = (await probe(p)).durationSec; } catch { dur = Math.max(1, speak.split(/\s+/).length / 2.5); probeEstimates++; } }
         // Runaway-take guard (deterministic): v3 once rendered 13 minutes for
         // 65 words on a tag-heavy slow script. Code catches what ears cannot.
         const wcnt = speak.split(/\s+/).filter(Boolean).length;
         if (dur > Math.max(12, wcnt * 1.3)) {
           throw new Error(`narration_tts: runaway take (${dur.toFixed(0)}s for ${wcnt} words) — v3 blowout`);
         }
-        return { p, dur };
+        return { p, dur, clock };
       });
       assertNarrationTimingMeasurementIntegrity({
         sentenceCount: items.length,
@@ -1565,7 +1625,8 @@ export const narrationTts: Block = {
       await concatAudioWithGaps(partPaths, gaps, local);
       local = await applyVoiceFx(local, voiceFx, join(tmp, "narration_fx.mp3"));
       let durationSec = 0;
-      try { durationSec = (await probe(local)).durationSec; } catch { durationSec = cursor; }
+      let finalDurationSource: "ffprobe_format_duration" | "cursor_fallback" = "ffprobe_format_duration";
+      try { durationSec = (await probe(local)).durationSec; } catch { durationSec = cursor; finalDurationSource = "cursor_fallback"; }
       const narrationTranscriptText = items.map(speakOf).join(" ");
       const narrationPerformanceEvidence = await preflightNarrationPerformance({
         audioPath: local,
@@ -1609,7 +1670,19 @@ export const narrationTts: Block = {
         chapterPlan,
         [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd),
       };
-      if (workedExampleScript) outputs.workedExampleAudioBinding = createWorkedExampleAudioBinding(ctx, outputs, items.map(speakOf), narrationBytes);
+      if (workedExampleScript) {
+        let cueIndex = 0;
+        const decodedFinal = synthed.every((part) => Boolean(part.clock?.measurement.decoded))
+          ? await measureArithmeticFinalDecoded(local, voiceFx)
+          : undefined;
+        outputs.workedExampleAudioBinding = createWorkedExampleAudioBinding(ctx, outputs, items.map(speakOf), narrationBytes, {
+          mode: "chapter",
+          segments: synthed.map((part, index) => ({ ...part.clock!, cueIndex: items[index].kind === "heading" ? null : cueIndex++, gapAfterSec: gaps[index] })),
+          finalDuration: { source: finalDurationSource, usedSec: durationSec, performanceProbeSec: narrationPerformanceEvidence.durationSec },
+          reconciliation: { inputCursorSec: cursor, measuredDurationSec: cursor, scale: 1 },
+          ...(decodedFinal ? { decodedFinal } : {}),
+        });
+      }
       return outputs;
     }
 
@@ -1646,13 +1719,15 @@ export const narrationTts: Block = {
       const p = join(tmp, `sent_${i}.mp3`);
       await writeBytes(p, bytes);
       let dur = 0;
-      try { dur = (await probe(p)).durationSec; } catch { probeFailures++; dur = Math.max(1, s.split(/\s+/).length / 2.5); }
+      const clock = workedExampleScript ? await measureArithmeticNarrationPart(p, bytes, s) : undefined;
+      if (clock) { dur = clock.measurement.durationSec; if (clock.measurement.source === "word_count_estimate") probeFailures++; }
+      else { try { dur = (await probe(p)).durationSec; } catch { probeFailures++; dur = Math.max(1, s.split(/\s+/).length / 2.5); } }
       // Runaway-take guard (deterministic) — see chapter mode.
       const wcnt2 = s.split(/\s+/).filter(Boolean).length;
       if (dur > Math.max(12, wcnt2 * 1.3)) {
         throw new Error(`narration_tts: runaway take (${dur.toFixed(0)}s for ${wcnt2} words) — v3 blowout`);
       }
-      return { p, dur };
+      return { p, dur, clock };
     });
     // Do not build an edit timeline around several estimated sentence lengths.
     // The final master can only reconcile a small, bounded probe miss; beyond
@@ -1676,10 +1751,12 @@ export const narrationTts: Block = {
     await concatAudioWithGaps(partPaths, gaps, local);
     local = await applyVoiceFx(local, voiceFx, join(tmp, "narration_fx.mp3"));
     let durationSec = 0;
+    let finalDurationSource: "ffprobe_format_duration" | "cursor_fallback" = "ffprobe_format_duration";
     try {
       durationSec = (await probe(local)).durationSec;
     } catch {
       durationSec = cursor;
+      finalDurationSource = "cursor_fallback";
     }
     // TIMING RECONCILIATION: a failed per-sentence probe injected an ESTIMATED
     // duration into the cumulative cursor. If the final take materially differs,
@@ -1744,7 +1821,18 @@ export const narrationTts: Block = {
       chapterPlan: [],
       [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd),
     };
-    if (workedExampleScript) outputs.workedExampleAudioBinding = createWorkedExampleAudioBinding(ctx, outputs, sentences, narrationBytes);
+      if (workedExampleScript) {
+        const decodedFinal = parts.every((part) => Boolean(part.clock?.measurement.decoded))
+          ? await measureArithmeticFinalDecoded(local, voiceFx)
+          : undefined;
+        outputs.workedExampleAudioBinding = createWorkedExampleAudioBinding(ctx, outputs, sentences, narrationBytes, {
+          mode: "sentence",
+          segments: parts.map((part, index) => ({ ...part.clock!, cueIndex: index, gapAfterSec: index < parts.length - 1 ? gaps[index] : 0 })),
+          finalDuration: { source: finalDurationSource, usedSec: durationSec, performanceProbeSec: narrationPerformanceEvidence.durationSec },
+          reconciliation: { inputCursorSec: cursor, measuredDurationSec: probeFailures > 0 && durationSec > 0 ? durationSec : cursor, scale: reconciledTiming.scale },
+          ...(decodedFinal ? { decodedFinal } : {}),
+        });
+      }
     return outputs;
     } catch (error) {
       const observedCostUsd = narrationTtsCost(

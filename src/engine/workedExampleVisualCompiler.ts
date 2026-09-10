@@ -2,6 +2,7 @@
  * Keep this server-side dependency out of browser-facing EpisodeGraph schemas. */
 import { canonicalJson } from "@/lib/canonicalJson";
 import { assertNarrationPerformanceEvidence } from "@/lib/narrationPerformance";
+import { assertNarrationSegmentClockDecodedOutputs, decodedSentenceTimings, narrationSegmentClockFingerprint } from "@/lib/narrationSegmentClock";
 import type { CachedOutputValidationContext } from "./types";
 import { assertWorkedExampleNarrationBinding } from "./workedExampleNarration";
 import { assertWorkedExamplePreparation } from "./workedExample";
@@ -41,24 +42,43 @@ export function compileWorkedExampleVisualPlan(input: WorkedExampleVisualCompile
   if (!script) throw new Error("arithmetic visual requires a verified current script");
   const spoken = workedExampleVisualSentences(preparation);
   const audio = assertWorkedExampleAudioMetadata(input, spoken);
+  const segmentClock = assertNarrationSegmentClockDecodedOutputs(audio, input.outputs);
   assertNarrationPerformanceEvidence(input.outputs.narrationPerformanceEvidence);
   const spine = validateStorySpine(StorySpineSchema.parse(input.storySpine));
   if (spine.timedScript.narrationDurationSec !== input.outputs.narrationDurationSec) throw new Error("arithmetic visual Story Spine duration differs from bound narration");
   if (!Array.isArray(input.outputs.sentenceTimings) || input.outputs.sentenceTimings.length !== spoken.length) throw new Error("arithmetic visual requires exactly one bound timing entry per canonical sentence");
   const timings = input.outputs.sentenceTimings as Array<{ text: string; start: number; end: number }>;
   if (spine.timedScript.sentences.length !== spoken.length || spine.narrativeBeats.length !== spoken.length) throw new Error("arithmetic visual v1 requires one Story Spine beat per exact spoken sentence");
+  const decodedTimings = decodedSentenceTimings(segmentClock, spoken);
+  const sampleQuantizationTolerance = (segmentClock.segments.length + 1) / segmentClock.decodedFinal!.sampleRate;
+  if (segmentClock.decodedFinal!.durationSec > spine.timedScript.narrationDurationSec + sampleQuantizationTolerance) {
+    throw new Error("arithmetic visual decoded sample clock exceeds the bound narration duration");
+  }
   const sentences = spine.timedScript.sentences.map((sentence, index) => {
     const timing = timings[index];
     if (sentence.text !== spoken[index] || timing.text !== spoken[index] || sentence.t0 !== timing.start || sentence.t1 !== timing.end) throw new Error("arithmetic visual Story Spine changed the bound ordered sentence text/timing");
-    return { id: sentence.id, text: sentence.text, start: sentence.t0, end: sentence.t1 };
+    const decoded = decodedTimings[index]!;
+    // A one-sample round-up can put the decoded endpoint a fraction past the
+    // container's bound duration. The admission guard above allows exactly
+    // that codec quantization; clamp only the final visual endpoint to the
+    // already-bound master duration, never a larger unmeasured correction.
+    const end = index === decodedTimings.length - 1 && decoded.end > spine.timedScript.narrationDurationSec
+      ? spine.timedScript.narrationDurationSec
+      : decoded.end;
+    return { id: sentence.id, text: sentence.text, start: decoded.start, end };
   });
   const beats = spine.narrativeBeats.map((beat, index) => {
     if (canonicalJson(beat.sourceSentenceIds) !== canonicalJson([sentences[index].id])) throw new Error("arithmetic visual Story Spine beat has missing, reordered or merged sentence references");
-    return { id: beat.id, sentenceId: sentences[index].id, t0: beat.t0, t1: beat.t1 };
+    return {
+      id: beat.id,
+      sentenceId: sentences[index].id,
+      t0: index === 0 ? 0 : sentences[index - 1]!.end,
+      t1: index === sentences.length - 1 ? spine.timedScript.narrationDurationSec : sentences[index]!.end,
+    };
   });
   return createWorkedExampleVisualPlan({ preparation, durationSec: spine.timedScript.narrationDurationSec, sentences, beats,
     source: { scriptFingerprint: audio.scriptFingerprint, inputFingerprint: audio.inputFingerprint,
-      timingFingerprint: audio.timingFingerprint, storySpineFingerprint: storySpineFingerprint(spine), artifact: audio.artifact } });
+      timingFingerprint: audio.timingFingerprint, segmentClockFingerprint: narrationSegmentClockFingerprint(segmentClock), storySpineFingerprint: storySpineFingerprint(spine), artifact: audio.artifact } });
 }
 
 /** Required again at the future active consumer boundary. Metadata integrity is not proof
