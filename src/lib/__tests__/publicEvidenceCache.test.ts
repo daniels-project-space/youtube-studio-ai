@@ -1,12 +1,16 @@
 import assert from "node:assert/strict";
 import {
   clearMetacraftEvidenceCache,
-  fetchCompetitorTitles,
   youtubeSuggest,
 } from "@/lib/metacraft";
 import { fetchNicheOutliers, clearOutlierEvidenceCache } from "@/lib/outliers";
 import { fetchRedditTrends, clearTrendEvidenceCache } from "@/lib/trends";
 import { createPublicEvidenceCache, normalizeEvidenceKey } from "@/lib/publicEvidenceCache";
+import {
+  clearYouTubeDataEvidenceCache,
+  fetchVideoDetails,
+  searchVideoIds,
+} from "@/lib/youtubeData";
 
 const originalFetch = globalThis.fetch;
 const originalYouTubeKey = process.env.YOUTUBE_DATA_API_KEY;
@@ -34,6 +38,7 @@ async function main(): Promise<void> {
   clearMetacraftEvidenceCache();
   clearOutlierEvidenceCache();
   clearTrendEvidenceCache();
+  clearYouTubeDataEvidenceCache();
   globalThis.fetch = async (input) => {
     const url = String(input);
     calls.push(url);
@@ -98,6 +103,33 @@ async function main(): Promise<void> {
   assert.equal(calls.filter((url) => url.includes("www.googleapis.com/youtube/v3/channels?")).length, 1);
   outliersA[0].title = "caller mutation";
   assert.equal((await fetchNicheOutliers("WORLD HISTORY"))[0]?.title, "History Outlier");
+  clearYouTubeDataEvidenceCache();
+
+  const [sharedSearchA, sharedSearchB] = await Promise.all([
+    searchVideoIds({ query: " Shared   research " }),
+    searchVideoIds({ query: "shared research" }),
+  ]);
+  assert.deepEqual(sharedSearchA, sharedSearchB);
+  assert.equal(
+    calls.filter((url) => url.includes("www.googleapis.com/youtube/v3/search?")).length,
+    2,
+    "equivalent low-level YouTube searches must share one request across callers",
+  );
+  sharedSearchA.push("caller mutation");
+  assert.deepEqual(await searchVideoIds({ query: "SHARED RESEARCH" }), ["one"]);
+
+  const [sharedDetailsA, sharedDetailsB] = await Promise.all([
+    fetchVideoDetails(["one"]),
+    fetchVideoDetails(["one"]),
+  ]);
+  assert.deepEqual(sharedDetailsA, sharedDetailsB);
+  assert.equal(
+    calls.filter((url) => url.includes("www.googleapis.com/youtube/v3/videos?")).length,
+    2,
+    "equivalent low-level detail hydrations must share one request",
+  );
+  sharedDetailsA[0].tags.push("caller mutation");
+  assert.deepEqual((await fetchVideoDetails(["one"]))[0]?.tags, []);
 
   clearTrendEvidenceCache();
   let redditAttempt = 0;

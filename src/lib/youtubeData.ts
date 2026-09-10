@@ -8,7 +8,21 @@
  * functions throw loud only when actually invoked, so build never crashes.
  */
 
+import {
+  createPublicEvidenceCache,
+  normalizeEvidenceKey,
+} from "@/lib/publicEvidenceCache";
+
 const BASE = "https://www.googleapis.com/youtube/v3";
+const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
+const searchEvidenceCache = createPublicEvidenceCache<string[]>(SEARCH_CACHE_TTL_MS);
+const videoDetailsCache = createPublicEvidenceCache<VideoDetail[]>(SEARCH_CACHE_TTL_MS);
+
+/** Clear public YouTube evidence between isolated tests or an operator reset. */
+export function clearYouTubeDataEvidenceCache(): void {
+  searchEvidenceCache.clear();
+  videoDetailsCache.clear();
+}
 
 export class YouTubeDataError extends Error {
   constructor(message: string) {
@@ -84,18 +98,39 @@ export async function searchVideoIds(args: {
   publishedAfter?: string; // RFC3339, e.g. 2024-01-01T00:00:00Z
   relevanceLanguage?: string;
 }): Promise<string[]> {
-  const json = await get<SearchResponse>("search", {
-    part: "id",
-    q: args.query,
-    type: "video",
-    order: "viewCount",
-    maxResults: String(args.maxResults ?? 25),
+  const key = `search:${JSON.stringify({
+    query: normalizeEvidenceKey(args.query),
+    maxResults: args.maxResults ?? 25,
+    publishedAfter: args.publishedAfter ?? "",
     relevanceLanguage: args.relevanceLanguage ?? "en",
-    ...(args.publishedAfter ? { publishedAfter: args.publishedAfter } : {}),
-  });
-  return (json.items ?? [])
-    .map((i) => i.id?.videoId)
-    .filter((id): id is string => Boolean(id));
+  })}`;
+  const cached = searchEvidenceCache.get(key);
+  if (cached) return [...cached];
+  const active = searchEvidenceCache.getInflight(key);
+  if (active) return [...(await active)];
+
+  const request = (async () => {
+    const json = await get<SearchResponse>("search", {
+      part: "id",
+      q: args.query,
+      type: "video",
+      order: "viewCount",
+      maxResults: String(args.maxResults ?? 25),
+      relevanceLanguage: args.relevanceLanguage ?? "en",
+      ...(args.publishedAfter ? { publishedAfter: args.publishedAfter } : {}),
+    });
+    return (json.items ?? [])
+      .map((i) => i.id?.videoId)
+      .filter((id): id is string => Boolean(id));
+  })();
+  searchEvidenceCache.setInflight(key, request);
+  try {
+    const result = await request;
+    searchEvidenceCache.set(key, result);
+    return [...result];
+  } finally {
+    searchEvidenceCache.deleteInflight(key);
+  }
 }
 
 export interface VideoDetail {
@@ -138,40 +173,61 @@ export function parseIsoDuration(iso: string): number {
 
 /** videos.list for a batch of ids (≤50) → full snippet/stats/duration. */
 export async function fetchVideoDetails(ids: string[]): Promise<VideoDetail[]> {
-  const out: VideoDetail[] = [];
-  for (let i = 0; i < ids.length; i += 50) {
-    const batch = ids.slice(i, i + 50);
-    if (batch.length === 0) continue;
-    const json = await get<VideosResponse>("videos", {
-      part: "snippet,contentDetails,statistics",
-      id: batch.join(","),
-    });
-    for (const it of json.items ?? []) {
-      const sn = it.snippet ?? {};
-      const st = it.statistics ?? {};
-      const thumbs = sn.thumbnails ?? {};
-      const thumbUrl =
-        thumbs.maxres?.url ??
-        thumbs.high?.url ??
-        thumbs.medium?.url ??
-        thumbs.default?.url ??
-        "";
-      out.push({
-        youtubeVideoId: it.id,
-        title: sn.title ?? "",
-        channelId: sn.channelId ?? "",
-        channelTitle: sn.channelTitle ?? "Unknown",
-        views: Number(st.viewCount) || 0,
-        likes: Number(st.likeCount) || 0,
-        comments: Number(st.commentCount) || 0,
-        tags: sn.tags ?? [],
-        thumbnailUrl: thumbUrl,
-        durationSec: parseIsoDuration(it.contentDetails?.duration ?? ""),
-        publishedAt: sn.publishedAt ?? "",
+  if (ids.length === 0) return [];
+  const key = `video-details:${ids.join(",")}`;
+  const cached = videoDetailsCache.get(key);
+  if (cached) return cached.map(cloneVideoDetail);
+  const active = videoDetailsCache.getInflight(key);
+  if (active) return (await active).map(cloneVideoDetail);
+
+  const request = (async () => {
+    const out: VideoDetail[] = [];
+    for (let i = 0; i < ids.length; i += 50) {
+      const batch = ids.slice(i, i + 50);
+      if (batch.length === 0) continue;
+      const json = await get<VideosResponse>("videos", {
+        part: "snippet,contentDetails,statistics",
+        id: batch.join(","),
       });
+      for (const it of json.items ?? []) {
+        const sn = it.snippet ?? {};
+        const st = it.statistics ?? {};
+        const thumbs = sn.thumbnails ?? {};
+        const thumbUrl =
+          thumbs.maxres?.url ??
+          thumbs.high?.url ??
+          thumbs.medium?.url ??
+          thumbs.default?.url ??
+          "";
+        out.push({
+          youtubeVideoId: it.id,
+          title: sn.title ?? "",
+          channelId: sn.channelId ?? "",
+          channelTitle: sn.channelTitle ?? "Unknown",
+          views: Number(st.viewCount) || 0,
+          likes: Number(st.likeCount) || 0,
+          comments: Number(st.commentCount) || 0,
+          tags: sn.tags ?? [],
+          thumbnailUrl: thumbUrl,
+          durationSec: parseIsoDuration(it.contentDetails?.duration ?? ""),
+          publishedAt: sn.publishedAt ?? "",
+        });
+      }
     }
+    return out;
+  })();
+  videoDetailsCache.setInflight(key, request);
+  try {
+    const result = await request;
+    videoDetailsCache.set(key, result);
+    return result.map(cloneVideoDetail);
+  } finally {
+    videoDetailsCache.deleteInflight(key);
   }
-  return out;
+}
+
+function cloneVideoDetail(detail: VideoDetail): VideoDetail {
+  return { ...detail, tags: [...detail.tags] };
 }
 
 // --------------------------- Stats refresh ---------------------------
