@@ -1,4 +1,5 @@
 import type { SceneManifest } from "@/engine/episodeGraph";
+import { preflightWorkedExampleLayout } from "./workedExampleLayout";
 
 /** Local renderer profiles, not production admission or quality receipts. */
 export const SCENE_LANDSCAPE_PROFILE = "scene-layout/landscape-v1" as const;
@@ -65,7 +66,9 @@ const scenarioKinds: Record<string, readonly string[]> = {
 };
 
 /** Fail before browser/bundling for unfinished portrait grammars and unsafe copy. */
-export function preflightSceneLayout(manifest: SceneManifest, layout: ResolvedSceneLayout): void {
+export function preflightSceneLayout(manifest: SceneManifest, layout: ResolvedSceneLayout) {
+  const workedExample = preflightWorkedExampleLayout(manifest, layout.width, layout.height);
+  if (workedExample) return workedExample;
   if (layout.id !== SCENE_PORTRAIT_PROFILE) return;
   if (manifest.audience !== "general") throw new Error("Portrait children grammar is unfinished and is not admitted by this visual foundation.");
   if (!Number.isFinite(manifest.durationSec) || manifest.durationSec <= 0 || !manifest.scenes.length) throw new Error("Portrait manifest requires a positive duration and scenes.");

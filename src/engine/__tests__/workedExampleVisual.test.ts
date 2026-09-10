@@ -7,7 +7,8 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 import { prepareWorkedExample, type WorkedExampleRequest } from "@/engine/workedExample";
 import { draftWorkedExampleNarration, workedExampleEditorialApprovalFor } from "@/engine/workedExampleNarration";
-import { createWorkedExampleAudioBinding } from "@/engine/workedExampleAudioBinding";
+import { createWorkedExampleAudioBinding, WorkedExampleAudioBindingSchema } from "@/engine/workedExampleAudioBinding";
+import { narrationClockBindingFingerprint, narrationSegmentClockFingerprint, type NarrationSegmentClockObservations } from "@/lib/narrationSegmentClock";
 import { planStorySpine } from "@/engine/storySpine";
 import * as currentGraph from "@/engine/episodeGraph";
 import { buildEpisodeGraphFromStorySpine } from "@/trigger/blocks/episodeGraphBlocks";
@@ -54,7 +55,22 @@ function fixture(seed = request.seed, operations = request.operations) {
       sentenceTimings, chapterPlan: [] },
     storySpine: planStorySpine({ topic: "Verified integer operations", narrationDurationSec: cursor, sentenceTimings }), aspectRatio: "16:9",
   };
-  input.outputs = { ...input.outputs, workedExampleAudioBinding: createWorkedExampleAudioBinding(input, input.outputs, sentences, fakeBytes) };
+  // Explicitly synthetic observations exercise the contract; actual ffprobe producer tests live in workedExampleAudioSource.test.ts.
+  const observations: NarrationSegmentClockObservations = {
+    mode: "sentence", segments: sentenceTimings.map((cue, index) => ({
+      textSha256: sha256Hex(cue.text), audio: { sha256: sha256Hex(`synthetic-part-${index}`), byteLength: 123 }, cueIndex: index,
+      gapAfterSec: index < sentences.length - 1 ? 0.25 : 0,
+      measurement: { source: "ffprobe_format_duration", durationSec: cue.end - cue.start, wordCount: cue.text.split(/\s+/).length,
+        attempts: [{ outcome: "measured", durationSec: cue.end - cue.start, hasAudio: true }],
+        decoded: { source: "ffprobe_decoded_samples", sampleRate: 44100, sampleCount: Math.round((cue.end - cue.start) * 44100), durationSec: Math.round((cue.end - cue.start) * 44100) / 44100 } },
+    })),
+    finalDuration: { source: "ffprobe_format_duration", usedSec: cursor, performanceProbeSec: cursor },
+    reconciliation: { inputCursorSec: cursor, measuredDurationSec: cursor, scale: 1 },
+    decodedFinal: { source: "ffprobe_decoded_samples", sampleRate: 44100,
+      sampleCount: sentenceTimings.reduce((sum, cue, index) => sum + Math.round((cue.end - cue.start) * 44100) + (index < sentences.length - 1 ? Math.round(0.25 * 44100) : 0), 0),
+      durationSec: sentenceTimings.reduce((sum, cue, index) => sum + Math.round((cue.end - cue.start) * 44100) + (index < sentences.length - 1 ? Math.round(0.25 * 44100) : 0), 0) / 44100 },
+  };
+  input.outputs = { ...input.outputs, workedExampleAudioBinding: createWorkedExampleAudioBinding(input, input.outputs, sentences, fakeBytes, observations) };
   return input;
 }
 const clone = <T,>(value: T): T => structuredClone(value);
@@ -118,7 +134,7 @@ try {
     assert.deepEqual(plan.sentences.map((sentence) => sentence.text), actual);
     assert.deepEqual(plan.slots.map((slot) => slot.phase), ["problem", "step", "step", "step", "answer"]);
     assert.deepEqual(plan.slots.map((slot) => slot.label), ["The problem", "Step 1", "Step 2", "Step 3", "Review the answer"]);
-    assert.equal(plan.steps[0].revealAtSec, (base.outputs.sentenceTimings as Array<{ end: number }>)[1].end);
+    assert.equal(plan.steps[0].revealAtSec, plan.sentences[1].end, "reveal uses the decoder-derived sentence endpoint");
   });
   test("safe scene compilation preserves exact complete plan; ordinary prose is not display math", () => {
     const manifest = currentGraph.compileSceneManifest(graph, base.storySpine as ReturnType<typeof planStorySpine>);
@@ -183,6 +199,25 @@ try {
   reject("changed actual TTS controls", (input) => { input.params = { ...input.params, voiceId: "foreign" }; });
   reject("changed audio object identity", (input) => { input.outputs = { ...input.outputs, narrationKey: "foreign.mp3" }; });
   reject("stale timing binding", (input) => { (input.outputs.sentenceTimings as Array<{ end: number }>)[0].end += 0.1; });
+  reject("legacy final-only binding restores audio but cannot qualify arithmetic visuals", (input) => {
+    const binding = WorkedExampleAudioBindingSchema.parse(input.outputs.workedExampleAudioBinding);
+    delete binding.segmentClock;
+    assert.doesNotThrow(() => WorkedExampleAudioBindingSchema.parse(binding));
+    input.outputs = { ...input.outputs, workedExampleAudioBinding: binding };
+  }, /measured segment clock is unavailable/);
+  reject("foreign clock from a different current source bundle", (input) => {
+    const foreign = fixture("foreign-current-bundle");
+    const binding = WorkedExampleAudioBindingSchema.parse(input.outputs.workedExampleAudioBinding);
+    binding.segmentClock = WorkedExampleAudioBindingSchema.parse(foreign.outputs.workedExampleAudioBinding).segmentClock;
+    input.outputs = { ...input.outputs, workedExampleAudioBinding: binding };
+  }, /different audio/);
+  reject("recomputed core hash cannot disguise a foreign ordered segment clock", (input) => {
+    const foreign = fixture("foreign-current-bundle");
+    const binding = WorkedExampleAudioBindingSchema.parse(input.outputs.workedExampleAudioBinding);
+    binding.segmentClock = WorkedExampleAudioBindingSchema.parse(foreign.outputs.workedExampleAudioBinding).segmentClock;
+    binding.segmentClock!.bindingFingerprint = narrationClockBindingFingerprint(binding);
+    input.outputs = { ...input.outputs, workedExampleAudioBinding: binding };
+  }, /ordered submitted text/);
   reject("wrong transcript binding", (input) => { input.outputs = { ...input.outputs, narrationTranscriptText: "forged" }; });
   reject("unsupported portrait", (input) => { Object.assign(input, { aspectRatio: "9:16" }); }, /landscape/);
   reject("missing landscape choice", (input) => { Object.assign(input, { aspectRatio: undefined }); }, /landscape/);
@@ -212,6 +247,13 @@ try {
     const edited = clone(plan); edited.source.artifact.sha256 = "a".repeat(64); rehashPlan(edited);
     assert.doesNotThrow(() => WorkedExampleVisualPlanSchema.parse(edited), "self-contained schema is not external source authority");
     assert.throws(() => assertWorkedExampleVisualPlanCurrent(edited, base), /complete source bundle/);
+  });
+  test("recomputed plan hash cannot substitute a different segment-clock receipt", () => {
+    const edited = clone(plan); edited.source.segmentClockFingerprint = "b".repeat(64); rehashPlan(edited);
+    assert.doesNotThrow(() => WorkedExampleVisualPlanSchema.parse(edited));
+    assert.throws(() => assertWorkedExampleVisualPlanCurrent(edited, base), /complete source bundle/);
+    const binding = WorkedExampleAudioBindingSchema.parse(base.outputs.workedExampleAudioBinding);
+    assert.equal(plan.source.segmentClockFingerprint, narrationSegmentClockFingerprint(binding.segmentClock!));
   });
   test("full-marker detection includes explicitly undefined partial bundles", () => {
     const ordinary = { ...base, store: {}, outputs: {} };

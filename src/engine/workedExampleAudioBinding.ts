@@ -4,6 +4,7 @@ import { constants } from "node:fs";
 import { open } from "node:fs/promises";
 import { z } from "zod";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { NarrationSegmentClockSchema, assertNarrationSegmentClockBinding, assertNarrationSegmentClockOutputs, createNarrationSegmentClock, type NarrationSegmentClockObservations } from "@/lib/narrationSegmentClock";
 import { elevenLabsV3StitchEnabled } from "@/lib/tts";
 import type { CachedOutputValidationContext } from "./types";
 import { assertWorkedExampleEditorialApproval, assertWorkedExampleNarrationBinding, workedExampleEditorialApprovalFor } from "./workedExampleNarration";
@@ -21,7 +22,11 @@ export const WorkedExampleAudioBindingSchema = z.object({
   spokenSequence: z.array(z.string().min(1).max(8192)).min(1).max(256),
   artifact: z.object({ key: z.string().min(1).max(1024), sha256: sha, byteLength: z.number().int().positive().max(MAX_AUDIO_BYTES) }).strict(),
   timingFingerprint: sha,
-}).strict();
+  segmentClock: NarrationSegmentClockSchema.optional(),
+}).strict().superRefine((binding, ctx) => {
+  try { assertNarrationSegmentClockBinding(binding); }
+  catch (error) { ctx.addIssue({ code: "custom", message: error instanceof Error ? error.message : "invalid segment clock" }); }
+});
 export type WorkedExampleAudioBinding = z.infer<typeof WorkedExampleAudioBindingSchema>;
 
 /** Closed list of narration_tts declared inputs; changes must update this policy and its tests.
@@ -90,17 +95,20 @@ function timingFingerprint(outputs: Readonly<Record<string, unknown>>): string {
 /** Call only after actual fresh TTS, final local evidence and upload completion.
  * `bytes` must be the SAME finalized bytes supplied to that upload, never a transcript.
  * Exported hashing is not an authorization boundary: consumers still check active inputs and bytes. */
-export function createWorkedExampleAudioBinding(ctx: InputContext, outputs: Readonly<Record<string, unknown>>, spokenSequence: readonly string[], bytes: Uint8Array): WorkedExampleAudioBinding {
+export function createWorkedExampleAudioBinding(ctx: InputContext, outputs: Readonly<Record<string, unknown>>, spokenSequence: readonly string[], bytes: Uint8Array, clockObservations?: NarrationSegmentClockObservations): WorkedExampleAudioBinding {
   const current = currentInputBinding(ctx);
   const expectedKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
   if (outputs.narrationKey !== expectedKey) throw new Error("arithmetic audio source key differs from the active caller");
-  return WorkedExampleAudioBindingSchema.parse({
+  const binding = WorkedExampleAudioBindingSchema.parse({
     version: WORKED_EXAMPLE_AUDIO_BINDING_VERSION,
     preparationFingerprint: current.preparationFingerprint, scriptFingerprint: current.scriptFingerprint,
     inputFingerprint: current.inputFingerprint, spokenSequence,
     artifact: { key: expectedKey, sha256: digest(bytes), byteLength: bytes.byteLength },
     timingFingerprint: timingFingerprint(outputs),
   });
+  if (clockObservations !== undefined) binding.segmentClock = createNarrationSegmentClock(binding, clockObservations);
+  assertNarrationSegmentClockOutputs(binding, outputs);
+  return WorkedExampleAudioBindingSchema.parse(binding);
 }
 
 /** Pure current-input admission must precede audio GET/hash work. */
@@ -114,6 +122,7 @@ export function assertWorkedExampleAudioMetadata(ctx: CachedOutputValidationCont
   const expectedKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
   if (binding.artifact.key !== expectedKey || ctx.outputs.narrationKey !== expectedKey) throw new Error("cached arithmetic audio source key differs from active output");
   if (binding.timingFingerprint !== timingFingerprint(ctx.outputs)) throw new Error("cached arithmetic audio timing/transcript metadata changed");
+  assertNarrationSegmentClockOutputs(binding, ctx.outputs);
   return binding;
 }
 

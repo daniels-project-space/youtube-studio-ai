@@ -3581,6 +3581,49 @@ export async function probe(path: string): Promise<ProbeResult> {
   };
 }
 
+export interface DecodedAudioProbeResult {
+  /** The sample rate negotiated by the decoder, not a nominal input setting. */
+  sampleRate: number;
+  /** Sum of decoded frame samples after the demuxer's skip/discard handling. */
+  sampleCount: number;
+  durationSec: number;
+  hasAudio: boolean;
+}
+
+/**
+ * Measure the audible construction clock without using a codec container's
+ * padded `format.duration`. FFprobe's decoded audio frames expose `nb_samples`
+ * after MP3 encoder-delay/skip-sample handling. This is intentionally separate
+ * from `probe`: ordinary narration keeps its existing cheap metadata path, and
+ * callers must explicitly opt into this more expensive arithmetic-only proof.
+ */
+export async function probeDecodedAudioSamples(path: string): Promise<DecodedAudioProbeResult> {
+  const { stdout } = await run(FFPROBE, [
+    "-v", "error",
+    "-select_streams", "a:0",
+    "-show_streams", "-show_frames",
+    "-show_entries", "stream=codec_type,sample_rate:frame=nb_samples",
+    "-of", "json",
+    path,
+  ], 120_000);
+  const json = JSON.parse(stdout) as {
+    streams?: Array<{ codec_type?: string; sample_rate?: string | number }>;
+    frames?: Array<{ nb_samples?: string | number }>;
+  };
+  const stream = (json.streams ?? [])[0];
+  const sampleRate = Number(stream?.sample_rate ?? 0);
+  const frames = json.frames ?? [];
+  const sampleCount = frames.reduce((sum, frame) => {
+    const count = Number(frame.nb_samples ?? 0);
+    return Number.isSafeInteger(count) && count >= 0 ? sum + count : Number.NaN;
+  }, 0);
+  if (stream?.codec_type !== "audio" || !Number.isSafeInteger(sampleRate) || sampleRate <= 0
+    || !Number.isSafeInteger(sampleCount) || sampleCount <= 0) {
+    throw new FfmpegError("decoded audio probe did not produce a positive audio sample clock");
+  }
+  return { sampleRate, sampleCount, durationSec: sampleCount / sampleRate, hasAudio: true };
+}
+
 /* --------------------------- intro card (Remotion) ---------------------- */
 
 /** npx invocation for a single CLI command with a timeout. */

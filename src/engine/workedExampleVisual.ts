@@ -32,7 +32,7 @@ const PlanShape = z.object({
   aspectRatio: z.literal("16:9"),
   preparation: WorkedExamplePreparationSchema,
   source: z.object({
-    scriptFingerprint: sha, inputFingerprint: sha, timingFingerprint: sha, storySpineFingerprint: sha,
+    scriptFingerprint: sha, inputFingerprint: sha, timingFingerprint: sha, storySpineFingerprint: sha, segmentClockFingerprint: sha,
     artifact: z.object({ key: z.string().min(1).max(1024), sha256: sha, byteLength: z.number().int().positive().max(256 * 1024 * 1024) }).strict(),
   }).strict(),
   durationSec: z.number().finite().positive().max(36000),

@@ -153,6 +153,11 @@ async function main() {
   assert.deepEqual([...Object.keys(manifest.consumes), ...Object.keys(manifest.optionalConsumes)].sort(), [...WORKED_EXAMPLE_TTS_INPUT_KEYS].sort());
   assert.doesNotThrow(() => validateArtifact(artifactContract("workedExampleAudioBinding"), current.outputs.workedExampleAudioBinding));
   assert.throws(() => validateArtifact(artifactContract("workedExampleAudioBinding"), { ...current.outputs.workedExampleAudioBinding as object, unrecognized: true }));
+  for (const [name, segmentClock] of [["undefined", undefined], ["null", null], ["partial", { version: "narration-segment-clock/v1" }]] as const) {
+    const speech = structuredClone(current.outputs);
+    speech.workedExampleAudioBinding = { ...speech.workedExampleAudioBinding as object, segmentClock };
+    await attempt(`present-malformed-segment-clock-${name}`, { speech });
+  }
   await attempt("stale-qa-and-speech-401", { qa: stale.approval, speech: stale.outputs });
   await attempt("current-qa-stale-speech-401", { speech: stale.outputs });
   const legacy = structuredClone(current.outputs); delete legacy.workedExampleAudioBinding;

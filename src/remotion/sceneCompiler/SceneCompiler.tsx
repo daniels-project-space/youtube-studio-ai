@@ -20,6 +20,7 @@ import {
   type EvidenceVisualManifest,
 } from "@/engine/evidenceVisualManifest";
 import { SCENE_PORTRAIT_LAYOUT, SCENE_PORTRAIT_PROFILE, portraitLabelLines, preflightSceneLayout, resolveSceneLayout, type SceneLayoutProfileId } from "./layoutProfile";
+import { WorkedExampleScene } from "./WorkedExampleScene";
 
 export const SCENE_COMPILER_FPS = 30;
 export const SCENE_COMPILER_COMPOSITION_ID = "SceneManifest";
@@ -880,11 +881,16 @@ function activeSceneIndex(scenes: readonly NormalizedScene[], second: number): n
 export const SceneCompiler: FC<SceneCompilerProps> = ({ manifest, layoutProfile }) => {
   const frame = useCurrentFrame();
   const { fps, width, height } = useVideoConfig();
-  const layout = useMemo(() => {
+  const { layout, workedExample } = useMemo(() => {
     const resolved = resolveSceneLayout({ layoutProfile, width, height });
-    if (manifest) preflightSceneLayout(manifest, resolved);
-    return resolved;
+    const workedExample = manifest ? preflightSceneLayout(manifest, resolved) : undefined;
+    return { layout: resolved, workedExample };
   }, [manifest, layoutProfile, width, height]);
+  if (workedExample) {
+    if (fps !== SCENE_COMPILER_FPS) throw new Error("Worked-example visual foundation requires native 30fps.");
+    const palette = paletteFor(workedExample.preparation.fingerprint);
+    return <WorkedExampleScene plan={workedExample} frame={frame} fps={fps} palette={palette} grid={<Grid palette={palette} />} />;
+  }
   const portrait = layout.id === SCENE_PORTRAIT_PROFILE;
   const scenes = (manifest?.scenes ?? [])
     .map((scene) => normalizeScene(scene, manifest?.audience ?? "general"))
