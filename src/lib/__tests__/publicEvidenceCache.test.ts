@@ -8,7 +8,11 @@ import { fetchRedditTrends, clearTrendEvidenceCache } from "@/lib/trends";
 import { createPublicEvidenceCache, normalizeEvidenceKey } from "@/lib/publicEvidenceCache";
 import {
   clearYouTubeDataEvidenceCache,
+  clearYouTubeDataMetrics,
   fetchVideoDetails,
+  fetchVideoStats,
+  fetchChannelStats,
+  getYouTubeDataMetrics,
   searchVideoIds,
 } from "@/lib/youtubeData";
 
@@ -39,6 +43,7 @@ async function main(): Promise<void> {
   clearOutlierEvidenceCache();
   clearTrendEvidenceCache();
   clearYouTubeDataEvidenceCache();
+  clearYouTubeDataMetrics();
   globalThis.fetch = async (input) => {
     const url = String(input);
     calls.push(url);
@@ -101,9 +106,14 @@ async function main(): Promise<void> {
   assert.equal(calls.filter((url) => url.includes("www.googleapis.com/youtube/v3/search?")).length, 1);
   assert.equal(calls.filter((url) => url.includes("www.googleapis.com/youtube/v3/videos?")).length, 1);
   assert.equal(calls.filter((url) => url.includes("www.googleapis.com/youtube/v3/channels?")).length, 1);
+  const outlierSearchUrl = calls.find((url) => url.includes("www.googleapis.com/youtube/v3/search?"));
+  assert.ok(outlierSearchUrl);
+  assert.equal(new URL(outlierSearchUrl).searchParams.get("part"), "snippet");
+  assert.equal(new URL(outlierSearchUrl).searchParams.get("fields"), "items(id/videoId)");
   outliersA[0].title = "caller mutation";
   assert.equal((await fetchNicheOutliers("WORLD HISTORY"))[0]?.title, "History Outlier");
   clearYouTubeDataEvidenceCache();
+  clearYouTubeDataMetrics();
 
   const [sharedSearchA, sharedSearchB] = await Promise.all([
     searchVideoIds({ query: " Shared   research " }),
@@ -130,6 +140,30 @@ async function main(): Promise<void> {
   );
   sharedDetailsA[0].tags.push("caller mutation");
   assert.deepEqual((await fetchVideoDetails(["one"]))[0]?.tags, []);
+  const detailUrl = calls.find((url) => url.includes("www.googleapis.com/youtube/v3/videos?"));
+  assert.ok(detailUrl);
+  assert.equal(new URL(detailUrl).searchParams.get("part"), "snippet,contentDetails,statistics");
+  assert.match(new URL(detailUrl).searchParams.get("fields") ?? "", /items\(id,snippet\(/);
+
+  const stats = await fetchVideoStats([" one ", "one", "two"]);
+  assert.equal(stats.length, 1);
+  const statsUrl = calls.filter((url) => url.includes("www.googleapis.com/youtube/v3/videos?")).at(-1);
+  assert.ok(statsUrl);
+  assert.equal(new URL(statsUrl).searchParams.get("id"), "one,two");
+  assert.equal(new URL(statsUrl).searchParams.get("fields"), "items(id,snippet(channelId),statistics(viewCount,likeCount,commentCount))");
+
+  await fetchChannelStats([" channel-one ", "channel-one", ""]);
+  const channelUrl = calls.filter((url) => url.includes("www.googleapis.com/youtube/v3/channels?")).at(-1);
+  assert.ok(channelUrl);
+  assert.equal(new URL(channelUrl).searchParams.get("id"), "channel-one");
+  assert.equal(new URL(channelUrl).searchParams.get("fields"), "items(id,statistics(subscriberCount,viewCount,videoCount))");
+  const metrics = getYouTubeDataMetrics();
+  assert.deepEqual(metrics.search, { requests: 1, estimatedQuotaUnits: 1, cacheHits: 1, coalescedRequests: 1 });
+  assert.deepEqual(metrics.videos, { requests: 2, estimatedQuotaUnits: 2, cacheHits: 1, coalescedRequests: 1 });
+  assert.deepEqual(metrics.channels, { requests: 1, estimatedQuotaUnits: 1, cacheHits: 0, coalescedRequests: 0 });
+  const metricsCopy = getYouTubeDataMetrics();
+  metricsCopy.videos.requests = 999;
+  assert.equal(getYouTubeDataMetrics().videos.requests, 2, "metrics snapshots must be defensive");
 
   clearTrendEvidenceCache();
   let redditAttempt = 0;

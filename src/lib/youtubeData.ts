@@ -18,6 +18,65 @@ const SEARCH_CACHE_TTL_MS = 5 * 60 * 1000;
 const searchEvidenceCache = createPublicEvidenceCache<string[]>(SEARCH_CACHE_TTL_MS);
 const videoDetailsCache = createPublicEvidenceCache<VideoDetail[]>(SEARCH_CACHE_TTL_MS);
 
+/**
+ * The current list-method quota basis is one unit per request.  Keep this
+ * observation separate from provider billing: YouTube can change quota
+ * buckets, while the request count and shape remain useful locally.
+ */
+export type YouTubeDataMethod = "search.list" | "videos.list" | "channels.list";
+
+export interface YouTubeDataMethodMetrics {
+  requests: number;
+  estimatedQuotaUnits: number;
+  cacheHits: number;
+  coalescedRequests: number;
+}
+
+export interface YouTubeDataMetrics {
+  search: YouTubeDataMethodMetrics;
+  videos: YouTubeDataMethodMetrics;
+  channels: YouTubeDataMethodMetrics;
+}
+
+const youtubeDataMetrics: Record<YouTubeDataMethod, YouTubeDataMethodMetrics> = {
+  "search.list": { requests: 0, estimatedQuotaUnits: 0, cacheHits: 0, coalescedRequests: 0 },
+  "videos.list": { requests: 0, estimatedQuotaUnits: 0, cacheHits: 0, coalescedRequests: 0 },
+  "channels.list": { requests: 0, estimatedQuotaUnits: 0, cacheHits: 0, coalescedRequests: 0 },
+};
+
+function recordRequest(method: YouTubeDataMethod): void {
+  const metric = youtubeDataMetrics[method];
+  metric.requests += 1;
+  metric.estimatedQuotaUnits += 1;
+}
+
+function recordCacheHit(method: YouTubeDataMethod): void {
+  youtubeDataMetrics[method].cacheHits += 1;
+}
+
+function recordCoalescedRequest(method: YouTubeDataMethod): void {
+  youtubeDataMetrics[method].coalescedRequests += 1;
+}
+
+/** Reset process-local request observations between audits or isolated runs. */
+export function clearYouTubeDataMetrics(): void {
+  for (const metric of Object.values(youtubeDataMetrics)) {
+    metric.requests = 0;
+    metric.estimatedQuotaUnits = 0;
+    metric.cacheHits = 0;
+    metric.coalescedRequests = 0;
+  }
+}
+
+/** Return a defensive snapshot suitable for a scorecard or diagnostic panel. */
+export function getYouTubeDataMetrics(): YouTubeDataMetrics {
+  return {
+    search: { ...youtubeDataMetrics["search.list"] },
+    videos: { ...youtubeDataMetrics["videos.list"] },
+    channels: { ...youtubeDataMetrics["channels.list"] },
+  };
+}
+
 /** Clear public YouTube evidence between isolated tests or an operator reset. */
 export function clearYouTubeDataEvidenceCache(): void {
   searchEvidenceCache.clear();
@@ -77,6 +136,8 @@ async function get<T>(
   } else {
     throw new YouTubeDataError("no YouTube Data access (set YOUTUBE_DATA_API_KEY or OAuth)");
   }
+  const method = `${path}.list` as YouTubeDataMethod;
+  if (method in youtubeDataMetrics) recordRequest(method);
   const res = await fetch(url, { headers });
   const json = (await res.json()) as T & { error?: { message?: string } };
   if (!res.ok) {
@@ -105,13 +166,22 @@ export async function searchVideoIds(args: {
     relevanceLanguage: args.relevanceLanguage ?? "en",
   })}`;
   const cached = searchEvidenceCache.get(key);
-  if (cached) return [...cached];
+  if (cached) {
+    recordCacheHit("search.list");
+    return [...cached];
+  }
   const active = searchEvidenceCache.getInflight(key);
-  if (active) return [...(await active)];
+  if (active) {
+    recordCoalescedRequest("search.list");
+    return [...(await active)];
+  }
 
   const request = (async () => {
     const json = await get<SearchResponse>("search", {
-      part: "id",
+      // search.list currently requires the snippet part; fields narrows the
+      // response to the only nested value consumed by this reader.
+      part: "snippet",
+      fields: "items(id/videoId)",
       q: args.query,
       type: "video",
       order: "viewCount",
@@ -173,20 +243,28 @@ export function parseIsoDuration(iso: string): number {
 
 /** videos.list for a batch of ids (≤50) → full snippet/stats/duration. */
 export async function fetchVideoDetails(ids: string[]): Promise<VideoDetail[]> {
-  if (ids.length === 0) return [];
-  const key = `video-details:${ids.join(",")}`;
+  const uniqueIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
+  if (uniqueIds.length === 0) return [];
+  const key = `video-details:${uniqueIds.join(",")}`;
   const cached = videoDetailsCache.get(key);
-  if (cached) return cached.map(cloneVideoDetail);
+  if (cached) {
+    recordCacheHit("videos.list");
+    return cached.map(cloneVideoDetail);
+  }
   const active = videoDetailsCache.getInflight(key);
-  if (active) return (await active).map(cloneVideoDetail);
+  if (active) {
+    recordCoalescedRequest("videos.list");
+    return (await active).map(cloneVideoDetail);
+  }
 
   const request = (async () => {
     const out: VideoDetail[] = [];
-    for (let i = 0; i < ids.length; i += 50) {
-      const batch = ids.slice(i, i + 50);
+    for (let i = 0; i < uniqueIds.length; i += 50) {
+      const batch = uniqueIds.slice(i, i + 50);
       if (batch.length === 0) continue;
       const json = await get<VideosResponse>("videos", {
         part: "snippet,contentDetails,statistics",
+        fields: "items(id,snippet(title,channelId,channelTitle,tags,publishedAt,thumbnails(maxres/url,high/url,medium/url,default/url)),statistics(viewCount,likeCount,commentCount),contentDetails(duration))",
         id: batch.join(","),
       });
       for (const it of json.items ?? []) {
@@ -249,14 +327,16 @@ export async function fetchVideoStats(
   ids: string[],
   access: YouTubeDataAccess = {},
 ): Promise<VideoStat[]> {
+  const uniqueIds = [...new Set(ids.map((id) => id.trim()).filter(Boolean))];
   const out: VideoStat[] = [];
-  for (let i = 0; i < ids.length; i += 50) {
-    const batch = ids.slice(i, i + 50);
+  for (let i = 0; i < uniqueIds.length; i += 50) {
+    const batch = uniqueIds.slice(i, i + 50);
     if (batch.length === 0) continue;
     const json = await get<VideosResponse>(
       "videos",
       {
         part: "snippet,statistics",
+        fields: "items(id,snippet(channelId),statistics(viewCount,likeCount,commentCount))",
         id: batch.join(","),
       },
       access,
@@ -300,7 +380,7 @@ export async function fetchChannelStats(
   access: YouTubeDataAccess = {},
 ): Promise<ChannelStat[]> {
   const out: ChannelStat[] = [];
-  const unique = [...new Set(channelIds.filter(Boolean))];
+  const unique = [...new Set(channelIds.map((id) => id.trim()).filter(Boolean))];
   for (let i = 0; i < unique.length; i += 50) {
     const batch = unique.slice(i, i + 50);
     if (batch.length === 0) continue;
@@ -308,6 +388,7 @@ export async function fetchChannelStats(
       "channels",
       {
         part: "statistics",
+        fields: "items(id,statistics(subscriberCount,viewCount,videoCount))",
         id: batch.join(","),
       },
       access,
