@@ -7,6 +7,7 @@ async function main(): Promise<void> {
   const saved = {
     key: process.env.OPENROUTER_API_KEY,
     providers: process.env.VISION_PROVIDERS,
+    bulkModel: process.env.OPENROUTER_VISION_BULK_MODEL,
   };
   const originalFetch = global.fetch;
   let imageGets = 0;
@@ -14,6 +15,7 @@ async function main(): Promise<void> {
   try {
     process.env.OPENROUTER_API_KEY = "test-openrouter-key";
     process.env.VISION_PROVIDERS = "openrouter";
+    delete process.env.OPENROUTER_VISION_BULK_MODEL;
     global.fetch = async (input, init) => {
       const url = String(input);
       if (url === "https://images.test/inflight.jpg") {
@@ -26,10 +28,11 @@ async function main(): Promise<void> {
       assert.equal(url, "https://openrouter.ai/api/v1/chat/completions");
       assert.ok(init?.signal, "the coalesced provider request keeps its bounded signal");
       providerPosts += 1;
+      const body = JSON.parse(String(init?.body)) as { model?: string };
       await new Promise((resolve) => setTimeout(resolve, 20));
       return Response.json({
         id: `inflight-${providerPosts}`,
-        model: "google/gemini-3.7-flash",
+        model: body.model,
         choices: [{ message: { content: '{"verdict":"pass"}' } }],
         usage: { prompt_tokens: 8, completion_tokens: 3, total_tokens: 11 },
       });
@@ -45,6 +48,14 @@ async function main(): Promise<void> {
     assert.equal(providerPosts, 1, "identical concurrent reviews make one provider POST");
     assert.equal(imageGets, 2, "input downloads remain caller-local; only paid review work is coalesced");
     assert.equal(modelScope.snapshot().cacheHits, 1, "the coalesced joiner is visible as a model cache hit");
+
+    const modelPrompt = `vision-cache-model-binding-${Date.now()}-${Math.random()}`;
+    await modelScope.run(async () => {
+      await visionUrls({ prompt: modelPrompt, imageUrls: ["https://images.test/inflight.jpg"], json: true, tier: "bulk" });
+      process.env.OPENROUTER_VISION_BULK_MODEL = "mistralai/ministral-3b-2512";
+      await visionUrls({ prompt: modelPrompt, imageUrls: ["https://images.test/inflight.jpg"], json: true, tier: "bulk" });
+    });
+    assert.equal(providerPosts, 3, "changing the approved model invalidates the prior disk verdict key");
 
     const failedPrompt = `vision-inflight-failure-cleanup-${Date.now()}-${Math.random()}`;
     global.fetch = async (input, init) => {
@@ -67,13 +78,15 @@ async function main(): Promise<void> {
         /all vision providers failed/,
       );
     });
-    assert.equal(providerPosts, 3, "a failed request is removed so a deliberate later retry can proceed");
+    assert.equal(providerPosts, 5, "a failed request is removed so a deliberate later retry can proceed");
   } finally {
     global.fetch = originalFetch;
     if (saved.key === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = saved.key;
     if (saved.providers === undefined) delete process.env.VISION_PROVIDERS;
     else process.env.VISION_PROVIDERS = saved.providers;
+    if (saved.bulkModel === undefined) delete process.env.OPENROUTER_VISION_BULK_MODEL;
+    else process.env.OPENROUTER_VISION_BULK_MODEL = saved.bulkModel;
   }
   console.log("VISION IN-FLIGHT DEDUP PASS — concurrent reviews coalesce without hiding deliberate retries");
 }

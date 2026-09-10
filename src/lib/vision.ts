@@ -258,7 +258,7 @@ export const VISION_GATE_MAX_TOKENS = 8192;
 async function openRouterVision(
   prompt: string,
   images: Buffer[],
-  opts: { json?: boolean; maxTokens?: number; tier?: VisionTier },
+  opts: { json?: boolean; maxTokens?: number; tier?: VisionTier; model?: string },
 ): Promise<string> {
   if (images.length > VISION_MAX_IMAGES_PER_REQUEST) {
     throw new VisionError(
@@ -266,7 +266,7 @@ async function openRouterVision(
     );
   }
   const key = opts.tier === "bulk" ? "visionBulk" : opts.tier === "final" ? "visionFinal" : "visionStandard";
-  const model = openRouterModel(key);
+  const model = opts.model ?? openRouterModel(key);
   return openRouterChat({
     model,
     messages: [{
@@ -315,6 +315,8 @@ async function visionBuffers(
     ...args,
     maxTokens: Math.max(args.maxTokens ?? 0, VISION_GATE_MAX_TOKENS),
   };
+  const modelKey = args.tier === "bulk" ? "visionBulk" : args.tier === "final" ? "visionFinal" : "visionStandard";
+  const model = openRouterModel(modelKey);
   const cacheKey = createHash("sha1")
     .update(prompt)
     .update(String(!!args.json))
@@ -324,6 +326,10 @@ async function visionBuffers(
     // tier's cached answer for another.
     .update(chain.join(","))
     .update(args.tier ?? "standard")
+    // Approved model overrides are allowed for qualification and controlled
+    // comparison. Bind the resolved model so an old model's verdict can never
+    // masquerade as evidence for a new one.
+    .update(model)
     .update(buffers.map((b) => createHash("sha1").update(b).digest("hex")).join(","))
     .digest("hex");
   if (!args.noCache) {
@@ -335,7 +341,7 @@ async function visionBuffers(
     const errors: string[] = [];
     for (const provider of chain) {
       try {
-        const text = await openRouterVision(prompt, buffers, effective);
+        const text = await openRouterVision(prompt, buffers, { ...effective, model });
         await cachePut(cacheKey, text);
         return text;
       } catch (e) {
@@ -348,7 +354,6 @@ async function visionBuffers(
   // would hide the shared provider charge from a different AsyncLocalStorage
   // accounting scope, making one job appear free. The model primitive records
   // the joiner as a cache hit and drops rejected requests automatically.
-  const model = openRouterModel(args.tier === "bulk" ? "visionBulk" : args.tier === "final" ? "visionFinal" : "visionStandard");
   return getOrCreateModelResponse(
     cacheKey,
     { provider: "openrouter", model, kind: "vision" },
