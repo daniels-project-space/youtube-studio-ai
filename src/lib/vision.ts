@@ -174,6 +174,20 @@ function cacheDir(): Promise<string> {
   return cacheDirP;
 }
 
+/**
+ * Coalesce identical reviews while one request is in flight.
+ *
+ * The durable verdict cache is intentionally written only after a complete
+ * provider response. Without this small process-local seam, two blocks that
+ * reach the same frame/question at the same time both observe a cache miss and
+ * buy the same review. The key is the exact cache key below, so JSON mode,
+ * tier, token ceiling, provider route, prompt, and image bytes all remain
+ * isolated. `noCache` callers bypass this map because they explicitly ask for
+ * a fresh stochastic judgement. Rejected requests are removed in `finally`,
+ * allowing a subsequent caller to make a deliberate retry.
+ */
+const inflightVerdicts = new Map<string, Promise<string>>();
+
 async function cacheGet(key: string): Promise<string | null> {
   try {
     return await readFile(join(await cacheDir(), `${key}.txt`), "utf8");
@@ -342,17 +356,30 @@ async function visionBuffers(
     if (hit) return hit;
   }
   if (chain.length === 0) throw new VisionError("no vision provider keyed (OPENROUTER_API_KEY)");
-  const errors: string[] = [];
-  for (const provider of chain) {
-    try {
-      const text = await openRouterVision(prompt, buffers, effective);
-      await cachePut(cacheKey, text);
-      return text;
-    } catch (e) {
-      errors.push(`${provider}: ${e instanceof Error ? e.message : e}`);
-    }
+  if (!args.noCache) {
+    const existing = inflightVerdicts.get(cacheKey);
+    if (existing) return existing;
   }
-  throw new VisionError(`all vision providers failed: ${errors.join(" | ")}`);
+  const request = (async (): Promise<string> => {
+    const errors: string[] = [];
+    for (const provider of chain) {
+      try {
+        const text = await openRouterVision(prompt, buffers, effective);
+        await cachePut(cacheKey, text);
+        return text;
+      } catch (e) {
+        errors.push(`${provider}: ${e instanceof Error ? e.message : e}`);
+      }
+    }
+    throw new VisionError(`all vision providers failed: ${errors.join(" | ")}`);
+  })();
+  if (args.noCache) return request;
+  inflightVerdicts.set(cacheKey, request);
+  try {
+    return await request;
+  } finally {
+    if (inflightVerdicts.get(cacheKey) === request) inflightVerdicts.delete(cacheKey);
+  }
 }
 
 /** Local image files + prompt → raw pinned OpenRouter model text. */
