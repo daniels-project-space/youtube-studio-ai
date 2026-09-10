@@ -19,7 +19,6 @@ import { PageHeader, SectionTitle } from "@/components/PageHeader";
 import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
 import type { ChannelModuleLock } from "@/lib/channelModuleLock";
 import { RunCard } from "@/components/RunCard";
-import { StageBadge } from "@/components/StageBadge";
 import { StatCard } from "@/components/StatCard";
 import { Chart, compact, type ChartSeries } from "@/components/Chart";
 import { VideoGrid } from "@/components/VideoGrid";
@@ -240,11 +239,15 @@ export default function ChannelHubPage({
   const ytStatus = searchParams.get("yt");
   const ytGot = searchParams.get("got");
 
-  const selectTab = (next: Tab) => {
+  const tabHref = (next: Tab, planId?: string) => {
     const query = new URLSearchParams(searchParams.toString());
     query.set("tab", QUERY_BY_TAB[next]);
     query.delete("plan");
-    router.replace(`/channels/${encodeURIComponent(slug)}?${query.toString()}`, { scroll: false });
+    if (planId) query.set("plan", planId);
+    return `/channels/${encodeURIComponent(slug)}?${query.toString()}`;
+  };
+  const selectTab = (next: Tab) => {
+    router.replace(tabHref(next), { scroll: false });
   };
 
   const channel = useQuery(api.channels.getChannelBySlug, {
@@ -295,8 +298,7 @@ export default function ChannelHubPage({
   }
   if (
     channelCard === undefined ||
-    headerPlan === undefined ||
-    (needsRuns && runs === undefined)
+    headerPlan === undefined
   ) {
     return (
       <>
@@ -353,6 +355,8 @@ export default function ChannelHubPage({
     Boolean(channel.schedule?.frequency && channel.schedule?.localTime && channel.schedule?.timezone),
   ];
   const readinessDone = readinessChecks.filter(Boolean).length;
+  const readinessLabels = ["identity", "voice", "thumbnail", "pipeline", "schedule"];
+  const missingSetup = readinessLabels.filter((_, index) => !readinessChecks[index]);
   const modulePath = (channel.pipeline ?? []).map((entry) => entry.block.replaceAll("_", " "));
   const latestArtwork = channelCard.latestThumbnailKey;
   const plannedArtwork = (nextPlan?.item.thumbnailSource !== "rendered_video_frame"
@@ -384,6 +388,7 @@ export default function ChannelHubPage({
         name={channel.name}
         palette={id.palette}
         height={192}
+        className={styles.channelBanner}
       >
         <div className={styles.heroContent}>
           <div className={styles.heroIdentity}>
@@ -395,30 +400,18 @@ export default function ChannelHubPage({
               radius={22}
             />
             <div className={styles.heroTitle}>
-              <span className={styles.heroKicker}>Channel · {channel.language ?? "primary"}</span>
               <h1>{channel.name}</h1>
               <div className={styles.heroMeta}>
                 <span>{id.niche ?? channel.template}</span>
-                <i aria-hidden="true" />
                 <span>{channelCard.recentPublishedCount} published</span>
-                <i aria-hidden="true" />
                 <span>{channel.schedule?.frequency ?? id.cadence ?? "Cadence not set"}</span>
+                {channel.language && channel.language !== "primary" && <span>{channel.language}</span>}
               </div>
             </div>
           </div>
-          <div className={styles.heroDecision}>
-            <small>Next video</small>
-            <strong>{nextPlan?.item.title || nextPlan?.item.topic || "Build the ready queue"}</strong>
-            <span>
-              {nextPlan?.timestamp
-                ? formatZonedScheduleTimestamp(nextPlan.timestamp, nextPlan.timeZone, { weekday: true })
-                : "No production slot reserved"}
-            </span>
-          </div>
           <div className={styles.heroStatus}>
-            <StageBadge status={channel.status === "active" ? "ok" : channel.status} />
             {!bannerArtFreshness.current && (
-              <Link className={styles.artFreshnessLink} href="?tab=identity">
+              <Link className={styles.artFreshnessLink} href={tabHref("Identity")} scroll={false}>
                 Art needs refresh
               </Link>
             )}
@@ -427,13 +420,13 @@ export default function ChannelHubPage({
       </ChannelBanner>
 
       <section className={styles.operatingProfile} aria-label="Channel operating profile">
-        <div className={styles.operatingSignal} data-tone={channel.status === "active" ? "ready" : "attention"}>
+        <Link href={tabHref("Settings")} scroll={false} className={styles.operatingSignal} data-signal="status" data-tone={channel.status === "active" ? "ready" : "attention"}>
           <small>Status</small>
           <strong>{channel.status === "active" ? "Active" : channel.status}</strong>
-          <span>{channelCard.lastRunStatus ? `Last run ${channelCard.lastRunStatus}` : "No run history"}</span>
-        </div>
-        <div className={styles.operatingSignal}>
-          <small>Next production</small>
+          <span>{channelCard.lastRunStatus ? `Last run: ${channelCard.lastRunStatus}` : "No run history"}</span>
+        </Link>
+        <Link href={tabHref("Week ahead", nextPlan ? String(nextPlan.item._id) : undefined)} scroll={false} className={styles.operatingSignal} data-signal="next">
+          <small>Next</small>
           <strong>
             {nextPlan?.timestamp
               ? formatZonedScheduleTimestamp(nextPlan.timestamp, nextPlan.timeZone, { weekday: true })
@@ -446,21 +439,21 @@ export default function ChannelHubPage({
               ? `${nextPlan.pinned ? "Pinned" : "Projected"} · ${nextPlan.item.title || nextPlan.item.topic}`
               : "Ready queue is clear"}
           </span>
-        </div>
-        <div className={styles.operatingSignal} data-tone={readinessDone === readinessChecks.length ? "ready" : "attention"}>
-          <small>Config readiness</small>
+        </Link>
+        <Link href={tabHref("Settings")} scroll={false} className={styles.operatingSignal} data-signal="setup" data-tone={readinessDone === readinessChecks.length ? "ready" : "attention"}>
+          <small>Setup</small>
           <strong>
             {readinessDone}/{readinessChecks.length} complete
           </strong>
-          <span>Identity · voice · thumbnail · pipeline · schedule</span>
-        </div>
-        <div className={styles.operatingSignal}>
-          <small>Module path</small>
+          <span>{missingSetup.length ? `Needs ${missingSetup.join(", ")}` : "All five configured"}</span>
+        </Link>
+        <Link href={tabHref("Pipeline")} scroll={false} className={styles.operatingSignal} data-signal="pipeline">
+          <small>Pipeline</small>
           <strong>{modulePath.length} module{modulePath.length === 1 ? "" : "s"}</strong>
           <span title={modulePath.join(" → ")}>
-            {modulePath.length ? `${modulePath.slice(0, 3).join(" → ")}${modulePath.length > 3 ? ` → +${modulePath.length - 3}` : ""}` : "Not configured"}
+            {modulePath.length ? `Starts with ${modulePath[0]}` : "Not configured"}
           </span>
-        </div>
+        </Link>
       </section>
 
       {channel.inception && <ChannelInceptionProgress inception={channel.inception} />}
@@ -522,7 +515,8 @@ export default function ChannelHubPage({
         </nav>
       )}
 
-      <div className={styles.view} data-view={QUERY_BY_TAB[tab]}>
+      <div className={styles.view} data-view={QUERY_BY_TAB[tab]} aria-busy={needsRuns && runs === undefined}>
+      {needsRuns && runs === undefined ? <SkeletonList rows={4} /> : <>
       {tab === "Overview" && (
         <OverviewTab
           channel={channel}
@@ -564,6 +558,7 @@ export default function ChannelHubPage({
         />
       )}
       {tab === "Settings" && <SettingsTab channel={channel} />}
+      </>}
       </div>
     </>
   );
