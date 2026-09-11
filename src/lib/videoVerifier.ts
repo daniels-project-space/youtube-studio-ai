@@ -91,20 +91,47 @@ function parseVerdictJson(raw: string): unknown {
   return undefined;
 }
 
-function coerce(raw: unknown): Verdict {
+/**
+ * Admit only the score shape the vision prompt declares. A previous fallback
+ * treated `{pass:true}` without a numeric score as an 8/10 verdict, and
+ * clamped an out-of-range score into the release band. Both cases convert
+ * malformed provider output into quality evidence. Invalid responses now
+ * become a visible zero-score verdict so the owning QA gate can fail closed.
+ */
+export function normalizeVisionVerdict(raw: unknown): Verdict {
   const v = raw && typeof raw === "object"
     ? raw as { score?: unknown; issues?: unknown; pass?: unknown }
     : {};
-  const hasScore = typeof v.score === "number" && Number.isFinite(v.score);
-  const hasPass = typeof v.pass === "boolean";
-  const score = hasScore ? v.score as number : v.pass === false ? 3 : v.pass === true ? 8 : 0;
-  const issues = Array.isArray(v.issues)
-    ? v.issues.filter((x): x is string => typeof x === "string").slice(0, MAX_ISSUES)
+  const numericScore = typeof v.score === "number" ? v.score : Number.NaN;
+  const finiteScore = Number.isFinite(numericScore);
+  const hasScore = finiteScore && numericScore >= 0 && numericScore <= 10;
+  const rawIssues = v.issues;
+  const issuesArray = Array.isArray(rawIssues);
+  const issueValues: unknown[] = issuesArray ? rawIssues : [];
+  const issuesWellFormed = issuesArray && issueValues.length <= MAX_ISSUES && issueValues.every(
+    (issue: unknown) => typeof issue === "string" && Boolean(issue.trim()) && issue.length <= 500,
+  );
+  const issues = issuesArray
+    ? issueValues.filter((x): x is string => typeof x === "string").slice(0, MAX_ISSUES)
     : [];
-  if (!hasScore && !hasPass) {
-    issues.unshift("Vision reviewer returned no usable score or pass verdict.");
+  if (!hasScore) {
+    issues.unshift(
+      finiteScore
+        ? "Vision reviewer returned a score outside the declared 0–10 range."
+        : "Vision reviewer returned no usable numeric 0–10 score.",
+    );
   }
-  return { score: clampScore(score), issues: issues.slice(0, MAX_ISSUES) };
+  if (!issuesWellFormed) {
+    issues.unshift(
+      issuesArray
+        ? "Vision reviewer returned malformed issue evidence."
+        : "Vision reviewer returned no issues array.",
+    );
+  }
+  return {
+    score: clampScore(hasScore && issuesWellFormed ? numericScore : 0),
+    issues: issues.slice(0, MAX_ISSUES),
+  };
 }
 
 /**
@@ -120,7 +147,7 @@ async function gradeImage(
 ): Promise<Verdict> {
   if (!hasNonGoogleVisionKey() || imagePaths.length === 0) return SKIP;
   try {
-    return coerce(parseVerdictJson(await visionLocal({
+    return normalizeVisionVerdict(parseVerdictJson(await visionLocal({
       prompt,
       imagePaths,
       json: true,
