@@ -97,7 +97,7 @@ assert.match(
 );
 assert.match(
   source,
-  /const candidates = rawCandidates\s*\n\s*\.filter\(\(c\) => \{[\s\S]*?seenTitles/,
+  /const exactUnique = rawCandidates\.filter\(\(c\) => \{[\s\S]*?seenTitles/,
   "duplicate warm/generated titles must be removed before the shared lint and judge",
 );
 assert.match(
