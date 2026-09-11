@@ -47,6 +47,65 @@ export interface Critique {
   fatal?: boolean;
 }
 
+export interface CritiqueAdmission {
+  /** True only when the returned value is a complete, usable Critique. */
+  pass: boolean;
+  critique: Critique | null;
+  issues: string[];
+}
+
+const MAX_CRITIQUE_ISSUES = 32;
+const MAX_CRITIQUE_ISSUE_LENGTH = 500;
+
+/**
+ * Validate the shared producer/director boundary before a verdict can affect
+ * best-of selection or be fed into another paid-capable producer. Individual
+ * modules still own their domain checks; this catches the cross-module failure
+ * where a provider decoder returns NaN, a string score, or an unbounded issue
+ * payload and the loop quietly ranks it as quality evidence.
+ */
+export function validateCritiqueResponse(value: unknown): CritiqueAdmission {
+  const issues: string[] = [];
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return { pass: false, critique: null, issues: ["critic returned a non-object verdict"] };
+  }
+  const row = value as Record<string, unknown>;
+  if (typeof row.score !== "number" || !Number.isFinite(row.score) || row.score < 0 || row.score > 1) {
+    issues.push("critic score must be a finite number from 0 to 1");
+  }
+  if (typeof row.pass !== "boolean") {
+    issues.push("critic pass must be an explicit boolean");
+  }
+  if (!Array.isArray(row.issues)) {
+    issues.push("critic issues must be an array of actionable strings");
+  } else {
+    if (row.issues.length > MAX_CRITIQUE_ISSUES) {
+      issues.push(`critic returned ${row.issues.length} issues (maximum ${MAX_CRITIQUE_ISSUES})`);
+    }
+    row.issues.forEach((issue, index) => {
+      if (typeof issue !== "string" || !issue.trim()) {
+        issues.push(`critic issue ${index + 1} is empty or not text`);
+      } else if (issue.length > MAX_CRITIQUE_ISSUE_LENGTH) {
+        issues.push(`critic issue ${index + 1} exceeds ${MAX_CRITIQUE_ISSUE_LENGTH} characters`);
+      }
+    });
+  }
+  if (row.fatal !== undefined && typeof row.fatal !== "boolean") {
+    issues.push("critic fatal must be boolean when present");
+  }
+  if (issues.length) return { pass: false, critique: null, issues };
+  return {
+    pass: true,
+    critique: {
+      score: row.score as number,
+      pass: row.pass as boolean,
+      issues: (row.issues as string[]).map((issue) => issue.trim()),
+      ...(row.fatal === undefined ? {} : { fatal: row.fatal as boolean }),
+    },
+    issues: [],
+  };
+}
+
 /**
  * PER-CHANNEL CRITIQUE GROUNDING (P1-1).
  *
@@ -163,7 +222,13 @@ export async function produceAndCritique<T>(
   for (let iter = 1; iter <= maxIters; iter++) {
     const value = await o.produce(priorIssues, iter);
     lastValue = value;
-    const critique = await o.critique(value, iter);
+    const admission = validateCritiqueResponse(await o.critique(value, iter));
+    if (!admission.pass || !admission.critique) {
+      throw new Error(
+        `${label}: malformed critique response — ${admission.issues.join("; ")}`,
+      );
+    }
+    const critique = admission.critique;
     history.push(critique);
     log(
       `${label}: iter ${iter}/${maxIters} score=${critique.score.toFixed(2)} pass=${critique.pass}`,

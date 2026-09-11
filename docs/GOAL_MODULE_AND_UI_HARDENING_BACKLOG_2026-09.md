@@ -76,6 +76,7 @@ This is an additive goal ledger, not a replacement plan. Earlier unfinished work
 - A single 25–76 character lint band is too blunt for every format. Search-led explainers, terse motivational titles, serialized lore, children’s learning, Lo-Fi, and Shorts need different tested bounds without allowing each channel to invent arbitrary rules.
 - The system records alternates and has a title-swap path, but experiments are not yet a first-class title/thumbnail package with a statistically useful outcome ledger on every eligible channel.
 - Existing fleet audits already catch inert inputs, single-constant convergence, silent degradation, and reasoning-token starvation. They are a strong base, but each remaining module still needs a domain oracle and real before/after corpus.
+- The shared producer/director loop previously trusted each caller to return a finite score, boolean verdict, and bounded issue list. That left a cross-module hole: one malformed provider decoder could become ranked quality evidence or expand the next prompt without a common admission check.
 - Trigger and Convex usage has several proven efficiencies already (request memoization, immutable receipts, bounded retries), but no complete per-module call/cost/latency ledger yet proves which steps can be eliminated or consolidated.
 - The UI has had multiple large visual passes, but hierarchy is still inconsistent: some pages expose global owner controls unrelated to the page, some panels repeat evidence prose, and some progress views spend too much area on decoration instead of state and next action.
 
@@ -149,6 +150,8 @@ Primary sources:
 - [ ] **32 — Publish a before/after title report.** Show corpus outputs, owner-choice agreement, promise-match, diversity, length/front-load distribution, calls, cost, and latency with the exact revision and model route.
 
 ### C. Every remaining module, inspected and improved separately
+
+**Shared critique seam partial (11 September):** `produceAndCritique` now admits only a finite 0–1 score, explicit boolean verdict, bounded non-empty issue strings, and a boolean fatal marker. Malformed results fail closed before best-of selection or another iteration, with a focused regression covering NaN, out-of-range, type-confused, oversized, and overlong verdicts. Domain-specific critics and their calibrated quality oracles remain separately open.
 
 - [ ] **33 — Topic Intel / Topicraft.** Measure novelty, demand evidence, saturation, channel fit, provenance, and title leakage; eliminate duplicate YouTube research already gathered elsewhere.
   **Partial (11 September):** the judge now requires a complete finite 1–10 ranking with unique zero-based bet indexes before any score can gate a portfolio. Missing, duplicated, out-of-range, or malformed rows fail visibly into the existing `ungated` marker; no partial ranking is treated as quality evidence. Held-out demand/novelty calibration and shared evidence-packet reuse remain open.
