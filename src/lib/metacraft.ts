@@ -844,7 +844,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         description = fallback.description;
         tags = fallback.tags;
         a.log?.(
-          `metacraft: winner package failed after title selection (${e instanceof Error ? e.message : e}) — ` +
+          `metacraft: winner package FAILED after title selection (${e instanceof Error ? e.message : e}) — ` +
           `preserving the judged title with deterministic package fallback`,
         );
       }
