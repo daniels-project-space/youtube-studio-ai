@@ -511,6 +511,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // declared, so `metadata` failed with an undeclared-read error on every
       // run exactly as the five crew briefs did. See CREW_GROUNDING_CONSUMES.
       "channelProgramRoute",
+      // Format-aware title profiles are derived from the frozen route/lane;
+      // keep those reads explicit so the metadata block cannot silently infer
+      // a format from ambient store state.
+      "family", "contentLane",
     ],
   }),
   package_to_opening_plan: contract(["package.opening_bound"], {
