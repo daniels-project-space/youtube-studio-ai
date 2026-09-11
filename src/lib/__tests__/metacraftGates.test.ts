@@ -7,7 +7,7 @@ import { lintTitle, validateTitleJudgeResponse } from "@/lib/metacraft";
 // (clickScore >=7, payoff-in-50-chars, claims-grounding lint) and no dedicated
 // test exists." This file exercises the two gates that are deterministic and
 // callable in isolation (lintTitle's payoff-window + claims-grounding checks),
-// then pins the clickScore/direct >=7 judge gate — which lives inside
+// then pins the clickScore/direct/identity >=7 + supported-grounding judge gate — which lives inside
 // craftMetadata's live permitted-model/YouTube-Data round trip and cannot run without
 // network + ANTHROPIC_API_KEY — via a source-anchored assertion so a silent
 // weakening of the threshold breaks this test instead of shipping quietly.
@@ -223,19 +223,20 @@ console.log("metacraftGates.test.ts: lintTitle payoff-window + claims-grounding 
 {
   const valid = validateTitleJudgeResponse({
     rankings: [
-      { idx: 0, clickScore: 8, direct: 9 },
-      { idx: 1, clickScore: 7, direct: 7 },
+      { idx: 0, clickScore: 8, direct: 9, identityFit: 8, grounding: "supported", reason: "fits the source and channel" },
+      { idx: 1, clickScore: 7, direct: 7, identityFit: 7, grounding: "supported", reason: "fits the source and channel" },
     ],
   }, 2);
   assert.equal(valid.pass, true, "a complete finite ranking should be admitted");
   assert.deepEqual(valid.rankings.map((row) => row.idx), [0, 1]);
 
   for (const [name, value] of [
-    ["missing direct", { rankings: [{ idx: 0, clickScore: 9 }, { idx: 1, clickScore: 8, direct: 8 }] }],
-    ["duplicate index", { rankings: [{ idx: 0, clickScore: 9, direct: 9 }, { idx: 0, clickScore: 8, direct: 8 }] }],
-    ["fractional index", { rankings: [{ idx: 0.5, clickScore: 9, direct: 9 }, { idx: 1, clickScore: 8, direct: 8 }] }],
-    ["out-of-range score", { rankings: [{ idx: 0, clickScore: 11, direct: 9 }, { idx: 1, clickScore: 8, direct: 8 }] }],
-    ["incomplete coverage", { rankings: [{ idx: 0, clickScore: 9, direct: 9 }] }],
+    ["missing direct", { rankings: [{ idx: 0, clickScore: 9 }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
+    ["missing identity fit", { rankings: [{ idx: 0, clickScore: 9, direct: 9, grounding: "supported", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
+    ["duplicate index", { rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, grounding: "supported", reason: "ok" }, { idx: 0, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
+    ["fractional index", { rankings: [{ idx: 0.5, clickScore: 9, direct: 9, identityFit: 9, grounding: "supported", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
+    ["out-of-range score", { rankings: [{ idx: 0, clickScore: 11, direct: 9, identityFit: 9, grounding: "supported", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
+    ["incomplete coverage", { rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, grounding: "supported", reason: "ok" }] }],
   ] as const) {
     const result = validateTitleJudgeResponse(value, 2);
     assert.equal(result.pass, false, `${name} judge evidence must fail closed`);
@@ -259,7 +260,7 @@ console.log("metacraftGates.test.ts: malformed, incomplete and missing-direct ju
   const gateExpr = "r.clickScore >= 7 && r.direct >= 7";
   assert.ok(
     source.includes(gateExpr),
-    "metacraft.ts: craftMetadata's judge gate must still require BOTH clickScore >=7 AND direct >=7 " +
+    "metacraft.ts: craftMetadata's judge gate must still require clickScore >=7 AND direct >=7 " +
       "(catalog claim: 'clickScore >=7') — literal expression not found, gate may have moved or weakened",
   );
   assert.ok(
@@ -277,6 +278,10 @@ console.log("metacraftGates.test.ts: malformed, incomplete and missing-direct ju
   assert.ok(
     source.includes("title judge unavailable") && source.includes("FAILING LOUD"),
     "metacraft.ts: judge transport failures must be named and fail closed after the bounded retry",
+  );
+  assert.ok(
+    source.includes("r.identityFit >= 7") && source.includes('r.grounding === "supported"'),
+    "metacraft.ts: a title must clear identity fit and source grounding as well as click/direct scores",
   );
   // The gate's own rejection message, surfaced in the retry-fix-loop, is the
   // second half of the wiring proof: a rejected slate must say so and retry.

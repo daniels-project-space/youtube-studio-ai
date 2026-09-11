@@ -54,10 +54,12 @@ configured provider outage marks the metadata stage failed and lets the normal
 healer retry it. `metadataTitleGateFailure.test.ts` exercises the actual block
 seam with a failing provider and proves no unjudged fallback is persisted.
 
-The browser-facing title-decision receipt remains a separate follow-up: the
-current block exposes the judged title and alternate through its existing
-outputs, while a complete indexed candidate/ranking receipt still needs to be
-wired before this area can be marked fully complete.
+The metadata block now emits the complete indexed candidate/ranking receipt
+(`titleDecision`) consumed by the existing read-only run-stage title review.
+The receipt carries the selected/alternate indexes, all three scores, source
+grounding, bounded rationale, attempt count, and whether the context was a
+script excerpt or topic-only. The browser adapter still treats it as recorded
+model assessment—not a new fact-check or audience-performance claim.
 
 This improves decision truthfulness and prevents accidental bad admissions; a
 held-out title corpus and authorized watch-time/CTR experiment are still

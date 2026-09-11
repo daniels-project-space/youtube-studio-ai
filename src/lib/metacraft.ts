@@ -25,7 +25,7 @@
  *   const meta = await craftMetadata({ topic, channelName, niche, coldOpen,
  *     hookLoop, quote, competitorTitles, log });
  *   // meta.title · meta.description · meta.tags · meta.titleAlternate (CTR
- *   // swap) · meta.pinnedComment · meta.frame/clickScore/suggests/feed
+ *   // swap) · meta.titleDecision · meta.pinnedComment · meta.frame/clickScore/suggests/feed
  *
  * Deps: GEMINI_API_KEY (vault "gemini"); live competitor research rides
  * youtubeData.ts (API key OR the vault's OAuth refresh token) and degrades
@@ -410,6 +410,30 @@ export interface TitleJudgeRanking {
   idx: number;
   clickScore: number;
   direct: number;
+  identityFit: number;
+  grounding: "supported" | "contradicted" | "insufficient";
+  reason: string;
+}
+
+/** Immutable, browser-readable record of the title selection that was judged.
+ * The presentation layer validates this shape but never reruns the judge. */
+export interface TitleDecisionReceipt {
+  version: "title-decision/v1";
+  judged: true;
+  title: string;
+  titleAlternate: string;
+  clickScore: number;
+  directness: number;
+  winnerIndex: number;
+  alternateIndex: number | null;
+  attempts: number;
+  sourceCoverage: {
+    kind: "script_excerpt" | "topic_only";
+    providedChars: number;
+    totalChars: number | null;
+  };
+  candidates: { frame: string; title: string }[];
+  rankings: TitleJudgeRanking[];
 }
 
 export interface TitleJudgeAdmission {
@@ -437,10 +461,20 @@ export function validateTitleJudgeResponse(
   const seen = new Set<number>();
   const admitted: TitleJudgeRanking[] = [];
   rankings.forEach((raw, position) => {
-    const row = raw as { idx?: unknown; clickScore?: unknown; direct?: unknown } | null;
+    const row = raw as {
+      idx?: unknown;
+      clickScore?: unknown;
+      direct?: unknown;
+      identityFit?: unknown;
+      grounding?: unknown;
+      reason?: unknown;
+    } | null;
     const idx = row?.idx;
     const clickScore = row?.clickScore;
     const direct = row?.direct;
+    const identityFit = row?.identityFit;
+    const grounding = row?.grounding;
+    const reason = row?.reason;
     if (
       typeof idx !== "number" || !Number.isInteger(idx) || idx < 0 || idx >= candidateCount
     ) {
@@ -463,8 +497,22 @@ export function validateTitleJudgeResponse(
       issues.push(`judge ranking ${position + 1} has an invalid direct score`);
       return;
     }
+    if (
+      typeof identityFit !== "number" || !Number.isFinite(identityFit) || identityFit < 1 || identityFit > 10
+    ) {
+      issues.push(`judge ranking ${position + 1} has an invalid identity-fit score`);
+      return;
+    }
+    if (grounding !== "supported" && grounding !== "contradicted" && grounding !== "insufficient") {
+      issues.push(`judge ranking ${position + 1} has an invalid grounding verdict`);
+      return;
+    }
+    if (typeof reason !== "string" || reason.trim().length === 0 || reason.length > 2_000) {
+      issues.push(`judge ranking ${position + 1} has an invalid reason`);
+      return;
+    }
     seen.add(idx);
-    admitted.push({ idx, clickScore, direct });
+    admitted.push({ idx, clickScore, direct, identityFit, grounding, reason: reason.trim() });
   });
   if (seen.size !== candidateCount) issues.push("judge ranking omitted at least one candidate");
   return { pass: issues.length === 0, rankings: issues.length === 0 ? admitted : [], issues };
@@ -541,6 +589,8 @@ export interface CraftedMetadata {
   judged: boolean;
   /** True when ancillary description/tag packaging degraded after title selection. */
   packageFallback: boolean;
+  /** Indexed candidate/ranking receipt consumed by the run-stage title review UI. */
+  titleDecision: TitleDecisionReceipt;
   /** The real autocomplete queries used as evidence. */
   suggests: string[];
   /** The real competitor titles judged against. */
@@ -736,17 +786,31 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       let runner = -1;
       let score: number | null = null;
       let judged = false;
+      let titleDecision: TitleDecisionReceipt | null = null;
       try {
-        const j = await claudeJson<{ rankings?: { idx?: number; clickScore?: number; direct?: number }[]; winner?: number; runnerUp?: number }>({
+        const j = await claudeJson<{
+          rankings?: {
+            idx?: number;
+            clickScore?: number;
+            direct?: number;
+            identityFit?: number;
+            grounding?: "supported" | "contradicted" | "insufficient";
+            reason?: string;
+          }[];
+          winner?: number;
+          runnerUp?: number;
+        }>({
           prompt: [
             `You are a YouTube CTR strategist judging a real feed. Topic: "${a.topic}".`,
             feedClause,
             a.coldOpen ? `THE COLD OPEN the title must promise-match:\n"${a.coldOpen.slice(0, 350)}"` : "",
             `CANDIDATES:\n${survivors.map((c, i) => `${i}. [${c.frame}] ${c.title}`).join("\n")}`,
-            `Score each 1-10 on BOTH: clickScore (would it win the click in this feed while staying honest, ` +
-              `on-register, and promise-matched) AND direct (is it the point itself — short, no setup, no ` +
-              `atmosphere; penalize two-part constructions and anything a scroller must decode)? ` +
-              `Return STRICT JSON {"rankings":[{"idx":n,"clickScore":n,"direct":n}],"winner":n,"runnerUp":n}.`,
+            `For EVERY candidate, first classify grounding as supported, contradicted, or insufficient and give ` +
+            `a concise source-aware reason. Then score 1-10 on clickScore (would it win the click in this feed ` +
+            `while staying honest, on-register, and promise-matched), direct (is it the point itself — short, ` +
+            `no setup, no atmosphere; penalize two-part constructions and anything a scroller must decode), and ` +
+            `identityFit (does it match this channel's audience, voice, and format). ` +
+            `Return STRICT JSON {"rankings":[{"idx":n,"clickScore":n,"direct":n,"identityFit":n,"grounding":"supported|contradicted|insufficient","reason":"source-aware explanation"}],"winner":n,"runnerUp":n}.`,
           ].filter(Boolean).join("\n\n"),
           // Reasoning route: the ceiling must cover the thinking AND the list.
           // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
@@ -763,7 +827,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           continue;
         }
         const ranked = admission.rankings.filter(
-          (r) => r.clickScore >= 7 && r.direct >= 7,
+          (r) => r.clickScore >= 7 && r.direct >= 7 && r.identityFit >= 7 && r.grounding === "supported",
         );
         ranked.sort((x, y) => {
           const judgeDelta = (y.clickScore ?? 0) + (y.direct ?? 0) - ((x.clickScore ?? 0) + (x.direct ?? 0));
@@ -788,6 +852,26 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           }
           score = ranked[0].clickScore ?? null;
           judged = true;
+          const selectedRanking = admission.rankings.find((r) => r.idx === best);
+          if (!selectedRanking) throw new Error("winner ranking disappeared after admission");
+          titleDecision = {
+            version: "title-decision/v1",
+            judged: true,
+            title: survivors[best].title,
+            titleAlternate: runner >= 0 ? survivors[runner]?.title ?? "" : "",
+            clickScore: selectedRanking.clickScore,
+            directness: selectedRanking.direct,
+            winnerIndex: best,
+            alternateIndex: runner >= 0 ? runner : null,
+            attempts: attempt + 1,
+            sourceCoverage: {
+              kind: a.scriptExcerpt?.trim() ? "script_excerpt" : "topic_only",
+              providedChars: a.scriptExcerpt?.trim().length ?? 0,
+              totalChars: null,
+            },
+            candidates: survivors.map((candidate) => ({ frame: candidate.frame, title: candidate.title })),
+            rankings: admission.rankings,
+          };
           a.log?.(
             `metacraft: deterministic title tie-break ${survivors[best]?.quality.score ?? 0}/100` +
             `${runner >= 0 ? ` vs ${survivors[runner]?.quality.score ?? 0}/100` : ""}`,
@@ -856,6 +940,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         );
       }
       const pinnedComment = await pinnedPromise;
+      if (!titleDecision) throw new Error("metacraft: title decision receipt missing after judge admission");
       a.log?.(
         `metacraft: [${w.frame}] wins (${judged ? `click ${score}/10` : "UNJUDGED — lint only"}) ` +
         `in ${((Date.now() - t0) / 1000).toFixed(1)}s — "${w.title}"`,
@@ -870,6 +955,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         clickScore: score,
         judged,
         packageFallback,
+        titleDecision,
         suggests,
         feed,
       };

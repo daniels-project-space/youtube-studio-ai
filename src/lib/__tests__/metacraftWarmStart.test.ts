@@ -14,6 +14,7 @@ process.env.OPENROUTER_API_KEY = "test-key-for-selection-logic";
 
 import assert from "node:assert/strict";
 import Module from "node:module";
+import { readTitleReview } from "@/lib/titleReviewPresentation";
 
 const GOOD_PLANNED = "Desmond Doss Saved 75 Men Without Touching a Weapon";
 const WEAK_PLANNED = "Understanding The Historical Events At Hacksaw Ridge";
@@ -61,6 +62,9 @@ function install(preferred: string, malformedAttempts = 0, packageFailures = 0, 
             idx,
             clickScore: line.includes(preferredTitle) ? 10 : 7,
             direct: 9,
+            identityFit: 9,
+            grounding: "supported" as const,
+            reason: "The fixture title is grounded and matches the channel identity.",
           }));
           const winner = rankings.reduce((a, b) => (b.clickScore > a.clickScore ? b : a), rankings[0]);
           return { rankings, winner: winner.idx, runnerUp: rankings.find((r) => r.idx !== winner.idx)?.idx ?? 0 };
@@ -90,6 +94,8 @@ async function main(): Promise<void> {
   assert.equal(kept.title, GOOD_PLANNED, "a planned title that wins on merit must still ship");
   assert.equal(kept.frame, "planned", "and must be identifiable as the planned one");
   assert.equal(kept.judged, true, "it ships having been judged, not by precedence");
+  const keptReview = readTitleReview({ title: kept.title, titleDecision: kept.titleDecision });
+  assert.ok(keptReview && keptReview.state === "recorded", "the selected title must carry a readable decision receipt");
 
   install(CRAFTED);
   const replaced = await craft(WEAK_PLANNED);

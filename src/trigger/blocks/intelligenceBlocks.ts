@@ -369,6 +369,7 @@ export const metadataOptimized: Block = {
     "estimatedViewsSource",
     "pinnedComment",
     "titleAlternate",
+    "titleDecision",
   ],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
@@ -465,6 +466,7 @@ export const metadataOptimized: Block = {
         tags,
         pinnedComment: "",
         titleAlternate: "",
+        titleDecision: null,
         ...ve,
       };
     }
@@ -550,6 +552,7 @@ export const metadataOptimized: Block = {
         tags,
         pinnedComment: m.pinnedComment,
         titleAlternate: m.titleAlternate,
+        titleDecision: m.titleDecision,
         ...ve,
       };
     } catch (e) {
