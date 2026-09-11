@@ -46,13 +46,13 @@
 }
 
 .heroCopy h1 {
-  max-width: 12.5ch;
-  margin: 0.65rem 0 0.82rem;
+  max-width: 14.5ch;
+  margin: 0.55rem 0 0.72rem;
   font-family: var(--font-display);
-  font-size: clamp(2.4rem, 4.6vw, 4.85rem);
+  font-size: clamp(2.2rem, 3.7vw, 3.9rem);
   font-weight: 520;
   letter-spacing: -0.055em;
-  line-height: 0.94;
+  line-height: 0.98;
 }
 
 .heroCopy > p {
@@ -666,7 +666,7 @@
 @media (max-width: 1080px) {
   .governanceHero { grid-template-columns: 1fr; }
   .heroCopy { padding-right: clamp(1.5rem, 3.5vw, 3rem); }
-  .heroCopy h1 { max-width: 15ch; }
+  .heroCopy h1 { max-width: 16ch; }
   .policyMap { margin: 0 clamp(1.5rem, 3.5vw, 3rem) clamp(1.5rem, 3.5vw, 3rem); }
   .governanceMetrics { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .governanceMetric:nth-child(3) { border-right: 0; }
@@ -691,7 +691,7 @@
 @media (max-width: 620px) {
   .governanceHero { margin-inline: -0.2rem; border-radius: 15px; }
   .heroCopy { padding: 1.2rem 0.95rem; }
-  .heroCopy h1 { font-size: clamp(2.3rem, 12vw, 3.45rem); }
+  .heroCopy h1 { font-size: clamp(2.15rem, 10vw, 3.1rem); }
   .scopeControl { grid-template-columns: 32px minmax(0, 1fr); }
   .authorityStamp { grid-column: 2; border-top: 1px solid var(--color-border); border-left: 0; padding-top: 0.55rem; padding-left: 0; }
   .policyMap { margin: 0 0.7rem 1rem; padding-inline: 0.6rem; }
@@ -740,7 +740,7 @@
 }
 
 @media (max-width: 430px) {
-  .heroCopy h1 { font-size: 2.62rem; }
+  .heroCopy h1 { font-size: 2.45rem; }
   .policyCore { width: 80px; height: 80px; }
   .governanceMetric { gap: 0.45rem; padding-inline: 0.68rem; }
   .governanceMetric > span { display: none; }
