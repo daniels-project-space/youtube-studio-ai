@@ -60,7 +60,18 @@
 .meta { display: flex; flex-wrap: wrap; gap: .22rem .6rem; margin-top: .34rem; color: var(--color-faint); font: .6rem/1.25 var(--font-mono); }
 .meta a { color: var(--color-blueprint); }
 .meta a:hover { color: var(--color-fg); }
-.actions { display: grid; align-content: center; gap: .35rem; }
+.actions { display: flex; flex-wrap: wrap; align-content: center; gap: .35rem; }
+.actions > .action,
+.actions > .generateAction,
+.actions > .retireAction,
+.actions > .acceptAction { flex: 1 1 calc(50% - .35rem); min-width: 0; }
+.actions > .candidateProgress,
+.actions > .candidateReady,
+.actions > .candidateFailed,
+.actions > .replacementDone,
+.actions > .retirementDone,
+.actions > .acceptConfirm,
+.actions > .retireConfirm { flex: 1 1 100%; min-width: 0; }
 .action,
 .generateAction,
 .more { min-height: 31px; display: inline-flex; align-items: center; justify-content: center; gap: .3rem; padding: .35rem .5rem; border: 1px solid var(--color-border); border-radius: 7px; color: var(--color-muted); background: rgba(243,240,232,.02); font-size: .61rem; font-weight: 650; text-align: center; cursor: pointer; }
