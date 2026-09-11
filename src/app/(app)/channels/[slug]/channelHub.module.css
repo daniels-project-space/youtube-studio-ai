@@ -264,7 +264,8 @@
 .inceptionStage[data-status="running"] > i { border-color: var(--color-blueprint); color: var(--color-blueprint); box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-blueprint) 10%, transparent); }
 .inceptionStage[data-status="failed"], .inceptionStage[data-status="blocked"] { color: var(--color-failed); }
 .inceptionStage[data-status="failed"] > i, .inceptionStage[data-status="blocked"] > i { border-color: var(--color-failed); color: var(--color-failed); }
-.inceptionStageError { grid-column: 1 / -1; overflow-wrap: anywhere; color: var(--color-failed); font-size: 0.47rem; line-height: 1.3; }
+.inceptionStageError { display: grid; grid-column: 1 / -1; gap: 0.12rem; overflow-wrap: anywhere; color: var(--color-failed); font-size: 0.47rem; line-height: 1.3; }
+.inceptionStageError em { color: color-mix(in srgb, var(--color-failed) 70%, var(--color-fg)); font-size: 0.42rem; font-style: normal; }
 
 @keyframes inception-scan { 50% { opacity: 0.25; } }
 

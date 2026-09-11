@@ -36,6 +36,10 @@ assert.doesNotMatch(terminalError, /submitPending|fetch\(/, "a blocker must not 
 assert.match(wizard, /href=\{`\/channels\/\$\{encodeURIComponent\(activeBuild\.slug\)\}`\}/);
 assert.match(wizard, /The exact build identity is preserved/);
 assert.match(detail, /className=\{styles\.inceptionStageError\}[\s\S]*role="alert"/);
+assert.match(detail, /import \{ failureReason \} from "@\/lib\/failureReason"/);
+assert.match(detail, /const failure = stage\.error \? failureReason\(stage\.error\) : null/);
+assert.match(detail, /failure\.reason\}\{failure\.block/);
+assert.match(detail, /failure\.hint \? <em>\{failure\.hint\}<\/em>/);
 
 // The no-Gemini policy must be legible in the creator itself: an optional
 // reference URL is retained as operator context, never presented as a live

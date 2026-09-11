@@ -45,6 +45,7 @@ import { buildPipelineTopology } from "@/lib/pipelineTopology";
 import { AUTO_VOICE_ID, VOICES } from "@/lib/voices";
 import { useAssetUrl, useAssetUrlState } from "@/lib/asset-url";
 import { assessYouTubeSetup } from "@/lib/youtubeSetupStatus";
+import { failureReason } from "@/lib/failureReason";
 import { NICHE_CATALOG_EVIDENCE, NICHES, subcategoryTags } from "@/lib/nicheCatalog";
 import {
   formatZonedScheduleTimestamp,
@@ -612,25 +613,29 @@ function ChannelInceptionProgress({
       </summary>
       <div className={styles.inceptionBody}>
         <div className={styles.inceptionStages}>
-          {stages.map((stage, index) => (
-            <div
-              className={styles.inceptionStage}
-              data-status={stage.status}
-              key={stage.key}
-              title={stage.error ?? `${stage.label}: ${stage.status}`}
-            >
-              <i aria-hidden="true">{String(index + 1).padStart(2, "0")}</i>
-              <span>
-                <strong>{stage.label}</strong>
-                <small>{stage.status.replaceAll("_", " ")}</small>
-              </span>
-              {stage.error && (
-                <small className={styles.inceptionStageError} role="alert">
-                  {stage.error}
-                </small>
-              )}
-            </div>
-          ))}
+          {stages.map((stage, index) => {
+            const failure = stage.error ? failureReason(stage.error) : null;
+            return (
+              <div
+                className={styles.inceptionStage}
+                data-status={stage.status}
+                key={stage.key}
+                title={stage.error ?? `${stage.label}: ${stage.status}`}
+              >
+                <i aria-hidden="true">{String(index + 1).padStart(2, "0")}</i>
+                <span>
+                  <strong>{stage.label}</strong>
+                  <small>{stage.status.replaceAll("_", " ")}</small>
+                </span>
+                {failure && (
+                  <small className={styles.inceptionStageError} role="alert">
+                    {failure.reason}{failure.block ? ` · ${failure.block}` : ""}
+                    {failure.hint ? <em>{failure.hint}</em> : null}
+                  </small>
+                )}
+              </div>
+            );
+          })}
         </div>
       </div>
     </details>
