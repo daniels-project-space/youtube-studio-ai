@@ -42,6 +42,7 @@ import {
   createChannelProgramBrief,
   SERIALIZED_PROGRAM_VERSION,
 } from "@/engine/channelProgramBrief";
+import { failureReason } from "@/lib/failureReason";
 import {
   certifiedChannelCompositionDefinition,
   findCertifiedChannelComposition,
@@ -309,6 +310,7 @@ export default function NewChannelWizard() {
   const pollSessionRef = useRef<ActiveBuildSession | null>(null);
   const submissionGateRef = useRef(new ChannelBuildSubmissionGate());
   const pollCallbackRef = useRef<((session: ActiveBuildSession) => void) | null>(null);
+  const summarizedError = error ? failureReason(error) : null;
 
   // selections
   const [nicheKey, setNicheKey] = useState<string>("");
@@ -1380,8 +1382,13 @@ export default function NewChannelWizard() {
       {error && <div className={styles.errorPanel} role="alert">
         <span className={styles.errorCopy}>
           <strong>Channel setup needs attention</strong>
-          <span>{error}</span>
+          {summarizedError && <span>{summarizedError.reason}{summarizedError.block ? ` · ${summarizedError.block}` : ""}</span>}
+          {summarizedError?.hint && <small>{summarizedError.hint}</small>}
           {activeBuild && <small>The exact build identity is preserved. Provider work will not restart automatically.</small>}
+          <details className={styles.errorTechnical}>
+            <summary>Technical detail</summary>
+            <code>{error}</code>
+          </details>
         </span>
         <span className={styles.errorActions}>
           {reviewHrefs.map((href) => (

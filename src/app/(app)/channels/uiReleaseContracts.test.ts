@@ -52,6 +52,10 @@ assert.match(wizard, /cannot authorize or silently replace one/);
 assert.match(wizard, /Creator foundation: verified no-Gemini planning/);
 assert.match(wizard, /preflight\.planning\.plannerBlock/);
 assert.match(wizard, /preflight\.planning\.provenance/);
+assert.match(wizard, /import \{ failureReason \} from "@\/lib\/failureReason"/);
+assert.match(wizard, /const summarizedError = error \? failureReason\(error\) : null/);
+assert.match(wizard, /summarizedError\.reason\}\{summarizedError\.block/);
+assert.match(wizard, /<summary>Technical detail<\/summary>/);
 
 // Audience and sample episodes are decision-bearing creator input, not inert
 // UI text. They must enter both the no-provider format request and the sealed

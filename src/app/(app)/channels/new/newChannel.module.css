@@ -56,6 +56,9 @@
 .errorCopy strong { color: var(--color-failed); font-family: var(--font-display); font-size: 1rem; font-weight: 560; }
 .errorCopy > span { color: var(--color-muted); font-size: .75rem; line-height: 1.5; overflow-wrap: anywhere; }
 .errorCopy small { color: var(--color-faint); font-size: .64rem; }
+.errorTechnical { min-width: 0; margin-top: .1rem; border-top: 1px solid color-mix(in srgb,var(--color-failed) 20%,transparent); padding-top: .35rem; }
+.errorTechnical summary { width: fit-content; cursor: pointer; color: color-mix(in srgb,var(--color-failed) 78%,var(--color-fg)); font: 700 .58rem/1 var(--font-mono); }
+.errorTechnical code { display: block; max-height: 7rem; margin-top: .35rem; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--color-faint); font: .58rem/1.45 var(--font-mono); }
 .errorActions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: .45rem; }
 
 .sectionIntro { display: grid; grid-template-columns: minmax(0,1fr) auto; align-items: end; gap: 1rem; margin: 0 0 .7rem; padding: 0 .1rem .62rem; border-bottom: 1px solid var(--color-border); }
@@ -258,6 +261,8 @@
 
 @media (max-width: 680px) {
   .page { padding-bottom: calc(10rem + env(safe-area-inset-bottom)); }
+  .errorPanel { grid-template-columns: 1fr; align-items: start; }
+  .errorActions { justify-content: flex-start; }
   .hero { grid-template-columns: 1fr; min-height: 0; padding: .9rem .8rem; border-radius: 16px; }
   .heroGlyph { display: block; position: absolute; top: .55rem; right: .6rem; width: 92px; height: 64px; opacity: .68; pointer-events: none; }
   .heroNicheGlyph { inset: 13px 27px; }
