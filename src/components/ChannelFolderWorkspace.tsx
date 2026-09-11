@@ -202,7 +202,7 @@ export function ChannelFolderWorkspace({
                     <span className={styles.roomCopy}><strong>{folder.name}</strong><small>{roomChannels.length ? `${roomChannels.length} ${roomChannels.length === 1 ? "channel" : "channels"}` : "Ready for a channel"}</small></span>
                     <span className={styles.avatars} aria-hidden="true">
                       {roomChannels.slice(0, 3).map((channel) => (
-                        <ChannelAvatar key={channel._id} imageKey={channel.identity?.imageKey} name={channel.name} palette={channel.identity?.palette} size={24} radius={7} />
+                        <ChannelAvatar key={channel._id} imageKey={channel.identity?.imageKey} name={channel.name} niche={channel.identity?.niche} palette={channel.identity?.palette} size={24} radius={7} />
                       ))}
                     </span>
                   </button>

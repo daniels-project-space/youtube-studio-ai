@@ -396,6 +396,7 @@ export default function ChannelHubPage({
             <ChannelAvatar
               imageKey={id.imageKey}
               name={channel.name}
+              niche={id.niche}
               palette={id.palette}
               size={88}
               radius={22}

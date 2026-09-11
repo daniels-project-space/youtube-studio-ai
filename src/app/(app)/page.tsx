@@ -431,7 +431,7 @@ function RelayCard({ channel }: { channel: ChannelRow }) {
       <ChannelBanner bannerKey={identity?.bannerKey} fallbackKeys={[identity?.imageKey]}
         name={channel.name} palette={identity?.palette} aspectRatio="16 / 6" />
       <div className={styles.relayCardBody}>
-        <ChannelAvatar imageKey={identity?.imageKey} name={channel.name} palette={identity?.palette} size={32} radius={9} />
+        <ChannelAvatar imageKey={identity?.imageKey} name={channel.name} niche={identity?.niche} palette={identity?.palette} size={32} radius={9} />
         <span><strong>{channel.name}</strong><small>{channel.status}</small></span>
         <i aria-hidden="true">↗</i>
       </div>

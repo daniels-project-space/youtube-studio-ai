@@ -115,6 +115,7 @@ export function ChannelScheduleEditor({
           <ChannelAvatar
             imageKey={channel.identity?.imageKey}
             name={channel.name}
+            niche={channel.identity?.niche}
             palette={channel.identity?.palette}
             size={34}
             radius={10}

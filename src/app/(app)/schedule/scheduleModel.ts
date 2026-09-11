@@ -37,7 +37,7 @@ export type ChannelRow = {
   name: string;
   slug: string;
   status: string;
-  identity?: { cadence?: string; palette?: string[]; imageKey?: string };
+  identity?: { cadence?: string; niche?: string; palette?: string[]; imageKey?: string };
   schedule?: ChannelSchedule;
 };
 

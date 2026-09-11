@@ -72,6 +72,7 @@ export function ChannelSwitcher() {
           <ChannelAvatar
             imageKey={current.identity?.imageKey}
             name={current.name}
+            niche={current.identity?.niche}
             palette={current.identity?.palette}
             size={24}
             radius={7}
@@ -110,6 +111,7 @@ export function ChannelSwitcher() {
               key={c._id}
               label={c.name}
               imageKey={c.identity?.imageKey}
+              niche={c.identity?.niche}
               palette={c.identity?.palette}
               active={c.slug === selectedSlug}
               onClick={() => {
@@ -133,12 +135,14 @@ export function ChannelSwitcher() {
 function DropdownItem({
   label,
   imageKey,
+  niche,
   palette,
   active,
   onClick,
 }: {
   label: string;
   imageKey?: string;
+  niche?: string | null;
   palette?: string[];
   active: boolean;
   onClick: () => void;
@@ -152,10 +156,11 @@ function DropdownItem({
       className="channel-switcher-option"
       data-active={active ? "true" : undefined}
     >
-      {imageKey || palette?.length ? (
+      {imageKey || palette?.length || niche ? (
         <ChannelAvatar
           imageKey={imageKey}
           name={label}
+          niche={niche}
           palette={palette}
           size={27}
           radius={7}

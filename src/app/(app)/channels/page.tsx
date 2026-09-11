@@ -315,6 +315,7 @@ export default function ChannelsPage() {
                   <ChannelAvatar
                     imageKey={c.identity?.imageKey}
                     name={c.name}
+                    niche={c.identity?.niche}
                     palette={c.identity?.palette}
                     size={48}
                     radius={12}
@@ -564,6 +565,7 @@ function ChannelFleetInspector({
           <ChannelAvatar
             imageKey={channel.identity?.imageKey}
             name={channel.name}
+            niche={channel.identity?.niche}
             palette={channel.identity?.palette}
             size={54}
             radius={13}

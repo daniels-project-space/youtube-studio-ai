@@ -2,6 +2,7 @@
 
 import { useCallback, useState } from "react";
 import { invalidateAssetUrl, useAssetUrlState } from "@/lib/asset-url";
+import { NicheMotionGlyph } from "@/components/NicheMotionGlyph";
 
 /**
  * Channel avatar / banner. Presigns the R2 art key via /api/asset-url; while it
@@ -50,6 +51,7 @@ export function ChannelAvatar({
   imageKey,
   fallbackKeys = [],
   name,
+  niche,
   palette,
   size = 56,
   radius = 14,
@@ -57,6 +59,7 @@ export function ChannelAvatar({
   imageKey?: string | null;
   fallbackKeys?: Array<string | null | undefined>;
   name: string;
+  niche?: string | null;
   palette?: string[];
   size?: number;
   radius?: number;
@@ -87,6 +90,10 @@ export function ChannelAvatar({
           onError={onError}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
+      ) : niche ? (
+        <span style={{ width: "68%", height: "68%", display: "block" }}>
+          <NicheMotionGlyph niche={niche} channelName={name} />
+        </span>
       ) : (
         <span
           style={{
