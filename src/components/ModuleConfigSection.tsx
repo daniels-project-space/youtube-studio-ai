@@ -24,6 +24,7 @@ import {
   type ChannelModuleLock,
 } from "@/lib/channelModuleLock";
 import { CHANNEL_UNLOCK_CONFIRMATION } from "@/lib/channelLockContract";
+import { failureReason } from "@/lib/failureReason";
 import { useOwnerId } from "@/lib/owner-context";
 import { ModuleConfigPanel, type ModuleConfigValue } from "./ModuleConfigPanel";
 import styles from "./ModuleConfigSection.module.css";
@@ -73,6 +74,7 @@ function ModuleCard({
   const [local, setLocal] = useState<ModuleConfigValue>(value);
   const moduleLocked = Boolean(lock);
   const locked = channelLocked || moduleLocked;
+  const failure = err ? failureReason(err) : null;
 
   const handle = async (next: ModuleConfigValue) => {
     setLocal(next);
@@ -184,7 +186,16 @@ function ModuleCard({
             </div>
           )}
           <ModuleConfigPanel surface={surface} value={local} onChange={handle} disabled={busy || lockBusy || locked} />
-          {err && <div className={styles.error} role="alert">{err}</div>}
+          {failure && (
+            <div className={styles.error} role="alert">
+              <strong>{failure.reason}{failure.block ? ` · ${failure.block}` : ""}</strong>
+              {failure.hint ? <span>{failure.hint}</span> : null}
+              <details className={styles.errorTechnical}>
+                <summary>Technical detail</summary>
+                <code>{err}</code>
+              </details>
+            </div>
+          )}
         </div>
       </div>
     </details>

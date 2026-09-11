@@ -253,6 +253,8 @@
 }
 
 .error {
+  display: grid;
+  gap: 0.2rem;
   margin-top: 0.75rem;
   border: 1px solid color-mix(in srgb, var(--color-failed) 50%, transparent);
   border-radius: 10px;
@@ -262,6 +264,12 @@
   font-size: 0.72rem;
   line-height: 1.4;
 }
+
+.error strong { font-weight: 650; }
+.error span { color: color-mix(in srgb, var(--color-failed) 72%, white); font-size: 0.66rem; }
+.errorTechnical { margin-top: 0.15rem; border-top: 1px solid color-mix(in srgb, var(--color-failed) 22%, transparent); padding-top: 0.35rem; }
+.errorTechnical summary { width: fit-content; cursor: pointer; color: color-mix(in srgb, var(--color-failed) 78%, white); font-size: 0.62rem; font-weight: 650; }
+.errorTechnical code { display: block; max-height: 8rem; margin-top: 0.3rem; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; color: var(--color-faint); font: 0.61rem/1.45 var(--font-mono); }
 
 .empty {
   display: grid;
