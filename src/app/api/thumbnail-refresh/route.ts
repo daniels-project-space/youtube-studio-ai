@@ -217,7 +217,10 @@ function candidateRequestBody(value: unknown): { sourceRunId: string; confirmed:
   }
   if (
     typeof body.sourceRunId !== "string" ||
-    !/^[A-Za-z0-9_-]{8,256}$/.test(body.sourceRunId)
+    // Convex run IDs are opaque, fixed-width 32-character identifiers. Keep
+    // malformed input out of the validator so it cannot echo internal
+    // request metadata back to an unauthenticated browser caller.
+    !/^[A-Za-z0-9]{32}$/.test(body.sourceRunId)
   ) throw new Error("sourceRunId is invalid");
   return { sourceRunId: body.sourceRunId, confirmed: true };
 }

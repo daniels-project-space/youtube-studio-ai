@@ -59,6 +59,7 @@ assert.match(route, /ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_KEY/);
 assert.match(route, /assertPinnedErnieThumbnailRefreshBatch/);
 assert.match(route, /previewRunId/);
 assert.match(route, /createCandidateShell/);
+assert.match(route, /\^\[A-Za-z0-9\]\{32\}\$/);
 assert.match(route, /issueStudioActionApproval/);
 assert.match(route, /sourceChanged:\s*false/);
 assert.match(route, /youtubeChanged:\s*false/);
