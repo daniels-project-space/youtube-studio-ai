@@ -233,7 +233,9 @@
 .stageState { display: grid; justify-items: end; gap: .14rem; }
 .stageState strong { color: var(--stage-tone); font: 700 .5rem/1 var(--font-mono); text-transform: uppercase; }
 .stageState small { color: var(--color-faint); font-size: .5rem; }
-.stageError { grid-column: 2 / -1; color: var(--color-failed); font-size: .58rem; line-height: 1.4; overflow-wrap: anywhere; }
+.stageError { display: grid; grid-column: 2 / -1; gap: .15rem; color: var(--color-failed); font-size: .58rem; line-height: 1.4; overflow-wrap: anywhere; }
+.stageError strong { font-size: .58rem; font-weight: 650; }
+.stageError small { color: color-mix(in srgb, var(--color-failed) 72%, var(--color-fg)); font-size: .52rem; }
 .proofWindow { display: grid; grid-template-columns: minmax(0,1fr) 210px; gap: 1rem; margin: .85rem; padding: .9rem; border: 1px solid color-mix(in srgb,var(--creator-tone) 42%,var(--color-border)); background: linear-gradient(110deg,color-mix(in srgb,var(--creator-tone) 6%,transparent),transparent 60%); }
 .proofCopy { display: grid; align-content: center; gap: .25rem; }
 .proofCopy small { color: var(--creator-tone); font: 700 .48rem/1 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; }

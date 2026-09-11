@@ -56,6 +56,9 @@ assert.match(wizard, /import \{ failureReason \} from "@\/lib\/failureReason"/);
 assert.match(wizard, /const summarizedError = error \? failureReason\(error\) : null/);
 assert.match(wizard, /summarizedError\.reason\}\{summarizedError\.block/);
 assert.match(wizard, /<summary>Technical detail<\/summary>/);
+assert.match(wizard, /const stageFailure = stage\.error \? failureReason\(stage\.error\) : null/);
+assert.match(wizard, /className=\{styles\.stageError\}[\s\S]*stageFailure\.reason/);
+assert.doesNotMatch(wizard, /<span className=\{styles\.stageError\} role="alert">\{stage\.error\}<\/span>/);
 
 // Audience and sample episodes are decision-bearing creator input, not inert
 // UI text. They must enter both the no-provider format request and the sealed

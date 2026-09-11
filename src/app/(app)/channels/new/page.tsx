@@ -1285,17 +1285,25 @@ export default function NewChannelWizard() {
             </section>}
 
             {stageRows.length ? <div className={styles.stageList}>
-              {stageRows.map((stage, index) => (
-                <div className={styles.stageRow} data-state={stage.status} key={stage.moduleKey}>
-                  <span className={styles.stageIndex}>{String(index + 1).padStart(2, "0")}</span>
-                  <span className={styles.stageCopy}>
-                    <strong>{STAGE_LABELS[stage.moduleKey] ?? stage.moduleKey}</strong>
-                    <span>{STAGE_DESCRIPTIONS[stage.moduleKey] ?? stage.executionPhase ?? "Durable channel-inception stage"}</span>
-                  </span>
-                  <span className={styles.stageState}><strong>{stage.status}</strong><small>{stage.attempts > 1 ? `attempt ${stage.attempts}` : stage.executionPhase ?? "receipt state"}</small></span>
-                  {stage.error && <span className={styles.stageError} role="alert">{stage.error}</span>}
-                </div>
-              ))}
+              {stageRows.map((stage, index) => {
+                const stageFailure = stage.error ? failureReason(stage.error) : null;
+                return (
+                  <div className={styles.stageRow} data-state={stage.status} key={stage.moduleKey}>
+                    <span className={styles.stageIndex}>{String(index + 1).padStart(2, "0")}</span>
+                    <span className={styles.stageCopy}>
+                      <strong>{STAGE_LABELS[stage.moduleKey] ?? stage.moduleKey}</strong>
+                      <span>{STAGE_DESCRIPTIONS[stage.moduleKey] ?? stage.executionPhase ?? "Durable channel-inception stage"}</span>
+                    </span>
+                    <span className={styles.stageState}><strong>{stage.status}</strong><small>{stage.attempts > 1 ? `attempt ${stage.attempts}` : stage.executionPhase ?? "receipt state"}</small></span>
+                    {stageFailure && (
+                      <span className={styles.stageError} role="alert">
+                        <strong>{stageFailure.reason}{stageFailure.block ? ` · ${stageFailure.block}` : ""}</strong>
+                        {stageFailure.hint ? <small>{stageFailure.hint}</small> : null}
+                      </span>
+                    )}
+                  </div>
+                );
+              })}
             </div> : <div className={styles.stageList} aria-busy="true">
               {Object.keys(STAGE_LABELS).map((key, index) => <div className={styles.stageRow} data-state="queued" key={key}>
                 <span className={styles.stageIndex}>{String(index + 1).padStart(2, "0")}</span>
