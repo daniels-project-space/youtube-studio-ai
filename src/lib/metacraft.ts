@@ -811,6 +811,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             `no setup, no atmosphere; penalize two-part constructions and anything a scroller must decode), and ` +
             `identityFit (does it match this channel's audience, voice, and format). ` +
             `Return STRICT JSON {"rankings":[{"idx":n,"clickScore":n,"direct":n,"identityFit":n,"grounding":"supported|contradicted|insufficient","reason":"source-aware explanation"}],"winner":n,"runnerUp":n}.`,
+            `Use each zero-based candidate index exactly once; do not use one-based positions.`,
           ].filter(Boolean).join("\n\n"),
           // Reasoning route: the ceiling must cover the thinking AND the list.
           // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
