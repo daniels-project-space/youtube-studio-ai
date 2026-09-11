@@ -34,6 +34,8 @@ assert.match(panel, /Render Nano candidate/);
 assert.match(panel, /Resume candidate delivery/);
 assert.match(panel, /Candidate authorization interrupted/);
 assert.match(panel, /become the Library image after production QA/);
+assert.match(panel, /compactFailureMessage/);
+assert.match(panel, /YouTube declined the thumbnail update; custom thumbnails may be unavailable\./);
 assert.doesNotMatch(panel, /Use on YouTube/);
 assert.doesNotMatch(panel, /confirmYoutubeVideoId/);
 assert.match(panel, /sync to their exact connected YouTube video automatically/);

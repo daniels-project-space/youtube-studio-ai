@@ -99,6 +99,16 @@ function isLofiChannel(row: Pick<ThumbnailInventoryRow, "channelName" | "channel
   return /lo[\s-]?fi/i.test(`${row.channelName} ${row.channelSlug}`);
 }
 
+/** Keep provider payloads out of the row layout; the run link retains detail. */
+function compactFailureMessage(message?: string): string {
+  const normalized = message?.replace(/\s+/g, " ").trim();
+  if (!normalized) return "Update blocked — inspect the run for details.";
+  if (/permission|forbidden|403|thumbnails\.set/i.test(normalized)) {
+    return "YouTube declined the thumbnail update; custom thumbnails may be unavailable.";
+  }
+  return normalized.length > 180 ? `${normalized.slice(0, 177)}…` : normalized;
+}
+
 function ThumbnailRefreshPreview({
   row,
   candidate = false,
@@ -527,7 +537,12 @@ export function ThumbnailRefreshInventoryPanel({
                     <span className={styles.replacementDone}>Active in Library</span>
                   ) : null}
                   {row.replacement?.status === "blocked" ? (
-                    <span className={styles.candidateFailed}>{row.replacement.error ?? "YouTube update blocked"}</span>
+                    <span
+                      className={styles.candidateFailed}
+                      title={row.replacement.error ?? "YouTube update blocked"}
+                    >
+                      {compactFailureMessage(row.replacement.error)}
+                    </span>
                   ) : null}
                   {row.candidate?.status === "failed" ? (
                     <span className={styles.candidateFailed}>Candidate stopped — inspect evidence</span>
