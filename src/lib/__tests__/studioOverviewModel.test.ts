@@ -17,6 +17,7 @@ const failedRun: StudioOverviewRun = {
   _id: "runs:failed",
   status: "failed",
   costTotal: 1.25,
+  error: "narration_tts: Fish Audio key missing",
   channelName: "Quiet Signal",
   channelSlug: "quiet-signal",
 };
@@ -58,6 +59,7 @@ test("the overview derives issues only from real actionable state", () => {
   assert.equal(snapshot.overduePlans.length, 1);
   assert.equal(snapshot.disconnectedChannels.length, 1, "only the active channel needs a connector");
   assert.equal(snapshot.issues.length, 5);
+  assert.equal(snapshot.issues.find((issue) => issue.kind === "failed_run")?.detail, "Fish Audio key / credits missing · narration_tts");
   assert.equal(snapshot.decision.href, "/runs/runs%3Astalled");
   assert.equal(snapshot.recordedSpend, 2);
   assert.equal(snapshot.successRate, 50);
@@ -85,6 +87,24 @@ test("a healthy connector and live run produce a precise monitor decision", () =
   assert.equal(snapshot.runningCount, 1);
   assert.equal(snapshot.decision.href, "/runs/runs%3Alive");
   assert.equal(snapshot.decision.action, "Monitor run");
+});
+
+test("a failed run without an error still gets an honest fallback", () => {
+  const snapshot = buildStudioOverview({
+    channels: channels.slice(0, 1),
+    recentRuns: [{ ...failedRun, _id: "runs:no-error", error: "" }],
+    activeRuns: [],
+    plan: [],
+    youtubeLinks: [{
+      channelId: "channels:one",
+      status: "active",
+      scopeHealth: "healthy",
+      ytChannelId: "UC-real",
+    }],
+    now: 3_000,
+  });
+
+  assert.equal(snapshot.issues[0]?.detail, "Failed (no error recorded)");
 });
 
 test("ready work without a date is described as editorially ready, not scheduled", () => {

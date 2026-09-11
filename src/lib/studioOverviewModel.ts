@@ -1,8 +1,13 @@
+import { failureReason } from "@/lib/failureReason";
+
 export type StudioOverviewRun = {
   _id: string;
   status: string;
   startedAt?: number;
   costTotal: number;
+  /** Raw run error retained only so the overview can show the same
+   * human-readable, bounded reason as the issue inbox. */
+  error?: string;
   channelName: string;
   channelSlug: string;
 };
@@ -92,6 +97,11 @@ function planName(plan: StudioOverviewPlan): string {
   return plan.title?.trim() || plan.topic;
 }
 
+function runFailureDetail(run: Pick<StudioOverviewRun, "error">): string {
+  const info = failureReason(run.error);
+  return `${info.reason}${info.block ? ` · ${info.block}` : ""}`;
+}
+
 export function buildStudioOverview(args: {
   channels: StudioOverviewChannel[];
   recentRuns: StudioOverviewRun[];
@@ -150,7 +160,7 @@ export function buildStudioOverview(args: {
       key: `failed:${run._id}`,
       kind: "failed_run" as const,
       title: run.channelName,
-      detail: "Run failed",
+      detail: runFailureDetail(run),
       href: runHref(run),
     })),
     ...failedPlans.map((item) => ({
