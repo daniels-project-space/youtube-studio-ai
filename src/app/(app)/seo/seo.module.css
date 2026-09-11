@@ -48,13 +48,13 @@
 }
 
 .heroCopy h1 {
-  max-width: 12.5ch;
-  margin: 0.65rem 0 0.82rem;
+  max-width: 14.5ch;
+  margin: 0.55rem 0 0.72rem;
   font-family: var(--font-display);
-  font-size: clamp(2.45rem, 4.7vw, 4.9rem);
+  font-size: clamp(2.2rem, 3.7vw, 3.9rem);
   font-weight: 520;
   letter-spacing: -0.055em;
-  line-height: 0.94;
+  line-height: 0.98;
 }
 
 .heroCopy > p {
@@ -496,7 +496,7 @@
 @media (max-width: 1080px) {
   .packagingHero { grid-template-columns: 1fr; }
   .heroCopy { padding-right: clamp(1.5rem, 3.5vw, 3rem); }
-  .heroCopy h1 { max-width: 15ch; }
+  .heroCopy h1 { max-width: 16ch; }
   .territoryMap { margin: 0 clamp(1.5rem, 3.5vw, 3rem) clamp(1.5rem, 3.5vw, 3rem); }
   .nicheChooser { grid-template-columns: 1fr; }
 }
@@ -504,7 +504,7 @@
 @media (max-width: 700px) {
   .packagingHero { margin-inline: -0.2rem; border-radius: 15px; }
   .heroCopy { padding: 1.2rem 0.95rem; }
-  .heroCopy h1 { font-size: clamp(2.35rem, 12vw, 3.5rem); }
+  .heroCopy h1 { font-size: clamp(2.15rem, 10vw, 3.1rem); }
   .heroHandoff { grid-template-columns: 32px minmax(0, 1fr); }
   .heroHandoff .researchActionWrap { grid-column: 2; justify-items: start; }
   .territoryMap { margin: 0 0.7rem 1rem; padding-inline: 0.6rem; }
@@ -565,7 +565,7 @@
     grid-template-columns: 1fr;
   }
 
-  .heroCopy h1 { font-size: 2.65rem; }
+  .heroCopy h1 { font-size: 2.45rem; }
   .packagingMetric { gap: 0.45rem; padding-inline: 0.7rem; }
   .packagingMetric > span { display: none; }
   .packagingMetric strong { font-size: 1.1rem; }
