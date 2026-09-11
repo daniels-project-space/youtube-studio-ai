@@ -71,7 +71,7 @@ assert.ok(publicAssetPageStart >= 0 && privateAssetPageStart > publicAssetPageSt
 const publicAssetPage = studioAssets.slice(publicAssetPageStart, privateAssetPageStart);
 assert.match(
   publicAssetPage,
-  /return <OwnedStudioAssetsPage access=\{operationsAccess\} \/>/,
+  /return <OwnedStudioAssetsPage key=\{operationsAccess === "owner" \? "owner" : "viewer"\} access=\{operationsAccess\} \/>/,
   "the toolkit remains useful before owner elevation",
 );
 assert.equal(publicAssetPage.match(/<OwnedStudioAssetsPage/g)?.length, 1);

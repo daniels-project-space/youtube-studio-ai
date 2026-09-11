@@ -317,7 +317,9 @@ function AssetRoomIntro({ room }: { room: AssetRoom }) {
 
 export default function StudioAssetsPage() {
   const operationsAccess = useOperationsAccess();
-  return <OwnedStudioAssetsPage access={operationsAccess} />;
+  // Remount when the session crosses the elevation boundary so the initial
+  // room follows the new mode without synchronously setting state in an effect.
+  return <OwnedStudioAssetsPage key={operationsAccess === "owner" ? "owner" : "viewer"} access={operationsAccess} />;
 }
 
 function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperationsAccess> }) {
@@ -470,10 +472,6 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
       previewOriginRef.current = null;
     };
   }, [preview]);
-
-  useEffect(() => {
-    if (publicMode && room !== "catalog" && room !== "runtime") setRoom("catalog");
-  }, [publicMode, room]);
 
   useEffect(() => {
     const timer = window.setTimeout(() => void refresh(), 0);

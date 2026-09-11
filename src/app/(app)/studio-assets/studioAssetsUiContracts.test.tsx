@@ -16,7 +16,7 @@ async function main(): Promise<void> {
   assert.match(source, /function ViewerBoundary/);
   assert.match(source, /Read-only catalog/);
   assert.match(source, /Private approvals stay protected/);
-  assert.match(source, /return <OwnedStudioAssetsPage access=\{operationsAccess\} \/>/,
+  assert.match(source, /return <OwnedStudioAssetsPage key=\{operationsAccess === "owner" \? "owner" : "viewer"\} access=\{operationsAccess\} \/>/,
     "the toolkit remains useful before owner elevation");
   assert.match(source, /publicMode/,
     "viewer mode must expose the public-safe catalog without private inventory");
