@@ -48,9 +48,16 @@ the normal SEO package.
 
 Transport/provider failures in the judge itself now enter the same bounded
 two-attempt loop and fail loudly after the second failure; they no longer ship
-the first lint survivor as `UNJUDGED`. The caller-level legacy recovery contract
-still needs the shared title-decision receipt before this area can be marked
-complete.
+the first lint survivor as `UNJUDGED`. `metadataOptimized` now propagates that
+failure instead of entering its legacy tournament/critique recovery path, so a
+configured provider outage marks the metadata stage failed and lets the normal
+healer retry it. `metadataTitleGateFailure.test.ts` exercises the actual block
+seam with a failing provider and proves no unjudged fallback is persisted.
+
+The browser-facing title-decision receipt remains a separate follow-up: the
+current block exposes the judged title and alternate through its existing
+outputs, while a complete indexed candidate/ranking receipt still needs to be
+wired before this area can be marked fully complete.
 
 This improves decision truthfulness and prevents accidental bad admissions; a
 held-out title corpus and authorized watch-time/CTR experiment are still

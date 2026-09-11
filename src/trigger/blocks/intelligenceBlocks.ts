@@ -529,7 +529,8 @@ export const metadataOptimized: Block = {
     // METACRAFT — the engine: live autocomplete evidence + 7 framed candidates
     // (latest Pro) + deterministic lint (claims grounded in the fact-checked
     // script, mobile truncation, register) + feed judge with the title-promise
-    // contract. Falls through to the legacy tournament/loop only on failure.
+    // contract. A configured provider failure is a hard metadata-stage failure:
+    // no legacy path may publish a title that never received the current judge.
     try {
       const m = await craftMetadata({
         topic,
@@ -597,12 +598,24 @@ export const metadataOptimized: Block = {
         ...ve,
       };
     } catch (e) {
-      ctx.log(`metadata: metacraft failed (${e instanceof Error ? e.message : e}) — legacy tournament fallback`);
+      const detail = e instanceof Error ? e.message : String(e);
+      ctx.log(
+        `metadata: METACRAFT TITLE GATE FAILED — no unjudged fallback will be persisted (${detail})`,
+      );
+      throw new Error(`metadata: title gate failed; no unjudged fallback: ${detail}`, { cause: e });
     }
 
+    /*
+     * Legacy tournament/critique recovery remains below for source-compatible
+     * history and diagnostics, but it is intentionally unreachable: the strict
+     * catch above throws before an unjudged title can enter either path. Keep
+     * this explicit so a future edit cannot mistake it for a release fallback.
+    */
+    const titleFormula = dnaSeo?.titleFormula ?? "";
+    const descriptionStructure = dnaSeo?.descriptionStructure ?? "";
     const dnaSeoClause =
-      (dnaSeo?.titleFormula ? `CHANNEL TITLE FORMULA (Style DNA — prefer this shape): ${dnaSeo.titleFormula}\n` : "") +
-      (dnaSeo?.descriptionStructure ? `CHANNEL DESCRIPTION STRUCTURE (Style DNA): ${dnaSeo.descriptionStructure}\n` : "");
+      (titleFormula ? `CHANNEL TITLE FORMULA (Style DNA — prefer this shape): ${titleFormula}\n` : "") +
+      (descriptionStructure ? `CHANNEL DESCRIPTION STRUCTURE (Style DNA): ${descriptionStructure}\n` : "");
 
     // TITLE TOURNAMENT — the comparative path: 5 candidates across DISTINCT
     // high-CTR frames, judged against the niche's REAL top titles WITH their
@@ -686,11 +699,12 @@ export const metadataOptimized: Block = {
           };
           ctx.log(
             `metadata TOURNAMENT: ${cands.length} frames judged vs ${titlesWithViews.length} real top titles → ` +
-            `winner [${cands[wIdx].frame}] ${wScore}/10: "${tournament.title.slice(0, 70)}"`,
+            `winner [${cands[wIdx].frame}] ${wScore}/10: "${cands[wIdx].title.trim().slice(0, 70)}"`,
           );
         }
       } catch (e) {
-        ctx.log(`metadata tournament failed (legacy loop): ${e instanceof Error ? e.message : e}`);
+        const detail = String(e);
+        ctx.log(`metadata tournament failed (legacy loop): ${detail}`);
       }
     }
 
@@ -820,8 +834,11 @@ export const metadataOptimized: Block = {
     ({ title, description, tags } = finishMetadata(ctx, { title, description, tags, channelName, nicheIntel }));
 
     const ve = await viewEstimate(tags);
+    const legacyScore = tournament
+      ? `tournament ${((tournament?.score ?? 0) * 10).toFixed(0)}/10`
+      : `score=${loop!.critique.score.toFixed(2)}, accepted=${loop!.accepted}`;
     ctx.log(
-      `metadata: title="${title.slice(0, 60)}…" (${tournament ? `tournament ${(tournament.score * 10).toFixed(0)}/10` : `score=${loop!.critique.score.toFixed(2)}, accepted=${loop!.accepted}`}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,
+      `metadata: title="${title.slice(0, 60)}…" (${legacyScore}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,
     );
     // The fallback producer/tournament is a recovery path, not a reason to
     // restore the pre-script planned title. Only the title produced by this
