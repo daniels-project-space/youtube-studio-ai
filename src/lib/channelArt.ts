@@ -288,14 +288,20 @@ function parseCritique(kind: ArtKind, raw: unknown): {
   if (typeof verdict.score !== "number" || !Number.isFinite(verdict.score)) {
     throw new Error(`channelArt: ${kind} judge returned an invalid score`);
   }
-  const score = Math.max(0, Math.min(1, verdict.score));
+  if (verdict.score < 0 || verdict.score > 1) {
+    throw new Error(`channelArt: ${kind} judge returned an out-of-range score`);
+  }
+  const score = verdict.score;
   const checks = kind === "avatar"
     ? (["circleSafe", "tinyLegible", "singleMark", "noScene", "noText"] as const)
     : (["safeArea", "edgeToEdge", "noText"] as const);
   const failedChecks = checks.filter((check) => verdict[check] !== true);
-  const issues = Array.isArray(verdict.issues)
-    ? verdict.issues.filter((issue): issue is string => typeof issue === "string").slice(0, 6)
-    : [];
+  if (!Array.isArray(verdict.issues) || verdict.issues.length > 32 || verdict.issues.some(
+    (issue) => typeof issue !== "string" || !issue.trim() || issue.length > 500,
+  )) {
+    throw new Error(`channelArt: ${kind} judge returned malformed issues`);
+  }
+  const issues = verdict.issues.map((issue) => issue.trim()).slice(0, 6);
   for (const check of failedChecks) issues.push(`${check} check failed or was omitted`);
   const pass = failedChecks.length === 0 && score >= SCORE_THRESHOLD[kind];
   return { score, pass, issues };

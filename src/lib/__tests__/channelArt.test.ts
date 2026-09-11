@@ -406,6 +406,30 @@ async function assertLetterboxedBannerFailsClosed(): Promise<void> {
   assert(![...state.persisted.keys()].some((key) => key.endsWith("art/banner/letterbox-v1/approved.jpg")));
 }
 
+async function assertOutOfRangeScoreFailsClosed(): Promise<void> {
+  const { runtime, state } = fakeRuntime({
+    verdicts: {
+      // A provider score outside the declared 0..1 contract must not be
+      // clamped to 1 and promoted as an approval.
+      banner: [{ score: 4, safeArea: true, edgeToEdge: true, noText: true, issues: [] }],
+    },
+  });
+  await assert.rejects(
+    generateChannelArt("owner-test", "bad-score", IDENTITY, () => {}, {
+      runtime,
+      avatar: false,
+      banner: true,
+      maxAttempts: 1,
+      version: { banner: "bad-score-v1" },
+      existing: { imageKey: "owners/owner-test/channels/bad-score/art/avatar/approved.jpg" },
+    }),
+    /out-of-range score/i,
+  );
+  assert.equal(state.bannerRenders.length, 1);
+  assert([...state.persisted.keys()].some((key) => key.endsWith("art/banner/bad-score-v1/rejection.json")));
+  assert(![...state.persisted.keys()].some((key) => key.endsWith("art/banner/bad-score-v1/approved.jpg")));
+}
+
 async function assertExistingAvatarsArePreserved(): Promise<void> {
   for (const channel of ["quiet-stoic", "stoic-truths"]) {
     const { runtime, state } = fakeRuntime({ hasJudge: false });
@@ -568,6 +592,7 @@ async function main(): Promise<void> {
   await assertMissingJudgeFailsBeforeSpend();
   await assertRejectedCandidateNeverReturns();
   await assertLetterboxedBannerFailsClosed();
+  await assertOutOfRangeScoreFailsClosed();
   await assertExistingAvatarsArePreserved();
   await assertPerAssetPreservation();
   await assertIndependentlyLeasedAssetGeneration();
