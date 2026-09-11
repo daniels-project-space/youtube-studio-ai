@@ -319,6 +319,13 @@ function tokenSet(s: string): Set<string> {
   return new Set(normTopic(s).split(" ").filter((w) => w.length > 2 && !STOP.has(w)));
 }
 
+/** Evidence tokens retain hyphenated words so a citation cannot credit one
+ * side of an unrelated compound (`atlas` ≠ `atlas-like`). */
+function evidenceTokenSet(s: string): Set<string> {
+  const tokens = s.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? [];
+  return new Set(tokens.map((token) => token.replace(/'s$/, "")).filter((token) => token.length > 2 && !STOP.has(token)));
+}
+
 function jaccard(a: Set<string>, b: Set<string>): number {
   if (a.size === 0 || b.size === 0) return 0;
   let inter = 0;
@@ -328,9 +335,13 @@ function jaccard(a: Set<string>, b: Set<string>): number {
 
 /** Distinctive (≥4-char, non-stopword) tokens shared between two strings. */
 function sharedTokens(cited: string, source: string): number {
-  const src = source.toLowerCase();
+  // Compare normalized token sets rather than raw substrings. A citation for
+  // `art` must not be credited by `partial`, and `iron` must not be credited
+  // by `ironic`; false evidence matches make demand scoring look grounded
+  // while quietly accepting fabricated signals.
+  const srcTokens = evidenceTokenSet(source);
   let n = 0;
-  for (const w of tokenSet(cited)) if (w.length >= 4 && src.includes(w)) n++;
+  for (const w of evidenceTokenSet(cited)) if (w.length >= 4 && srcTokens.has(w)) n++;
   return n;
 }
 

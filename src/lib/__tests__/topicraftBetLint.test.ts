@@ -75,6 +75,18 @@ const lintOpts = {
   assert.ok(result.issues.some((i) => i.includes("matches none of the supplied outlier signals")));
 }
 
+// A citation token must be a complete evidence token, not a substring inside
+// a hyphenated or otherwise unrelated word.
+{
+  const nearWordEvidence: TopicEvidence = {
+    ...evidence,
+    outliers: [{ ...evidence.outliers[0], title: "The partial atlas-like bridge" }],
+  };
+  const result = lintBet(baseBet({ evidence: "outlier: atlas" }), { ...lintOpts, evidence: nearWordEvidence });
+  assert.equal(result.pass, false, "a citation that only appears inside an unrelated compound must be rejected");
+  assert.ok(result.issues.some((i) => i.includes("matches none of the supplied outlier signals")));
+}
+
 // A citation tag for a category with zero supplied signals must fail.
 {
   const noCompetitors: TopicEvidence = { ...evidence, competitors: [] };
