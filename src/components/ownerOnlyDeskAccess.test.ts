@@ -66,25 +66,22 @@ assert.match(editorialEvidence, /Source snapshots and review fingerprints remain
 const studioAssets = read("../app/(app)/studio-assets/page.tsx");
 assert.match(studioAssets, /const operationsAccess = useOperationsAccess\(\)/);
 const publicAssetPageStart = studioAssets.indexOf("export default function StudioAssetsPage()");
-const privateAssetPageStart = studioAssets.indexOf("function OwnedStudioAssetsPage()");
+const privateAssetPageStart = studioAssets.indexOf("function OwnedStudioAssetsPage({ access }");
 assert.ok(publicAssetPageStart >= 0 && privateAssetPageStart > publicAssetPageStart);
 const publicAssetPage = studioAssets.slice(publicAssetPageStart, privateAssetPageStart);
 assert.match(
   publicAssetPage,
-  /if \(operationsAccess === "owner"\) return <OwnedStudioAssetsPage \/>/,
-  "private inventory and actions mount only for owner access, and unmount on access loss",
+  /return <OwnedStudioAssetsPage access=\{operationsAccess\} \/>/,
+  "the toolkit remains useful before owner elevation",
 );
 assert.equal(publicAssetPage.match(/<OwnedStudioAssetsPage/g)?.length, 1);
-assert.match(publicAssetPage, /<LockedAssetRegistry access=\{operationsAccess\}/);
-assert.match(publicAssetPage, /summary=\{null\}/);
-assert.doesNotMatch(publicAssetPage, /fetch\(|useEffect\(|useState\(/,
-  "the public wrapper must not hold private data or initiate inventory reads");
+assert.doesNotMatch(publicAssetPage, /<LockedAssetRegistry/);
 const privateAssetPage = studioAssets.slice(privateAssetPageStart);
 assert.match(privateAssetPage, /window\.setTimeout\(\(\) => void refresh\(\), 0\)/);
 assert.match(privateAssetPage, /window\.clearTimeout\(timer\)/);
 assert.match(privateAssetPage, /registryRequestRef\.current\?\.abort\(\)/);
 assert.match(privateAssetPage, /signal: controller\.signal/);
-assert.match(studioAssets, /Approvals, adapters, and private previews remain unloaded/);
+assert.match(studioAssets, /Private approvals stay protected/);
 
 for (const path of [
   "../app/(app)/editorial-evidence/page.tsx",

@@ -259,11 +259,11 @@ function AssetHero({
     <header className={styles.hero} aria-busy={access === "checking" || (access === "owner" && loading) || undefined}>
       <div className={styles.heroCopy}>
         <h1>Studio assets</h1>
-        <p>Reusable media, recipes &amp; character assets.</p>
+        <p>Reusable media, recipes, and visual treatments.</p>
       </div>
-      {access === "owner" ? <button type="button" className={styles.refresh} disabled={loading} onClick={onRefresh}>
-        {loading ? "Reading registry…" : "Refresh registry"}
-      </button> : null}
+      <button type="button" className={styles.refresh} disabled={loading} onClick={onRefresh}>
+        {loading ? "Refreshing…" : access === "owner" ? "Refresh registry" : "Refresh catalog"}
+      </button>
       {summary ? <ul className={styles.metricRail} aria-label="Registry summary">
         <li><span>Ready to reuse</span><strong>{summary.approved}</strong></li>
         <li><span>Awaiting review</span><strong>{summary.pending}</strong></li>
@@ -273,26 +273,29 @@ function AssetHero({
   );
 }
 
-function LockedAssetRegistry({ access }: { access: Exclude<ReturnType<typeof useOperationsAccess>, "owner"> }) {
+function ViewerBoundary() {
   return (
-    <section className={styles.lockedRegistry} aria-live={access === "checking" ? "polite" : undefined}>
+    <aside className={styles.viewerBoundary}>
       <div className={styles.lockedCopy}>
-        <h2>{access === "checking" ? "Checking access…" : access === "unavailable" ? "Access check unavailable" : "Private asset library"}</h2>
-        <p>{access === "checking" ? "Reading this browser session." : "Approvals, adapters, and private previews remain unloaded."}</p>
+        <strong>Read-only catalog</strong>
+        <span>Explore render-ready concepts without opening private inventory.</span>
       </div>
-      {access !== "checking" ? <a href="/api/operations/authorize" className={styles.refresh}>Verify with YouTube</a> : null}
-    </section>
+      <span className={styles.boundaryPill}>Private approvals stay protected</span>
+    </aside>
   );
 }
 
-function AssetRoomTabs({ room, setRoom, counts }: { room: AssetRoom; setRoom: (room: AssetRoom) => void; counts: Record<AssetRoom, number> }) {
-  const rooms: { id: AssetRoom; label: string }[] = [
+function AssetRoomTabs({ room, setRoom, counts, publicMode }: { room: AssetRoom; setRoom: (room: AssetRoom) => void; counts: Record<AssetRoom, number>; publicMode: boolean }) {
+  const rooms: { id: AssetRoom; label: string }[] = (publicMode ? [
+    { id: "catalog" as const, label: "Catalog" },
+    { id: "runtime" as const, label: "Workers" },
+  ] : [
     { id: "approved", label: "Inventory" },
     { id: "decisions", label: "Decisions" },
     { id: "identity", label: "Characters" },
     { id: "runtime", label: "Workers" },
     { id: "catalog", label: "Catalog" },
-  ];
+  ]);
   return (
     <nav className={styles.roomTabs} aria-label="Studio asset rooms">
       {rooms.map(item => <button key={item.id} type="button" aria-pressed={room === item.id} className={room === item.id ? styles.roomTabActive : ""} onClick={() => setRoom(item.id)}><strong>{item.label}</strong><span>{counts[item.id]}</span></button>)}
@@ -314,17 +317,12 @@ function AssetRoomIntro({ room }: { room: AssetRoom }) {
 
 export default function StudioAssetsPage() {
   const operationsAccess = useOperationsAccess();
-  // Private state is discarded when owner access is lost, including previews.
-  // A later owner session must obtain its own inventory, not reuse old counts.
-  if (operationsAccess === "owner") return <OwnedStudioAssetsPage />;
-  return <div className={styles.page}>
-    <AssetHero access={operationsAccess} summary={null} loading={false} onRefresh={() => {}} />
-    <LockedAssetRegistry access={operationsAccess} />
-  </div>;
+  return <OwnedStudioAssetsPage access={operationsAccess} />;
 }
 
-function OwnedStudioAssetsPage() {
-  const [room, setRoom] = useState<AssetRoom>("approved");
+function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperationsAccess> }) {
+  const publicMode = access !== "owner";
+  const [room, setRoom] = useState<AssetRoom>(() => publicMode ? "catalog" : "approved");
   const [assets, setAssets] = useState<StudioAsset[]>([]);
   const [reusableMedia, setReusableMedia] = useState<StudioReusableMedia[]>([]);
   const [candidates, setCandidates] = useState<StudioAssetPromotionCandidate[]>([]);
@@ -474,12 +472,16 @@ function OwnedStudioAssetsPage() {
   }, [preview]);
 
   useEffect(() => {
+    if (publicMode && room !== "catalog" && room !== "runtime") setRoom("catalog");
+  }, [publicMode, room]);
+
+  useEffect(() => {
     const timer = window.setTimeout(() => void refresh(), 0);
     return () => {
       window.clearTimeout(timer);
       registryRequestRef.current?.abort();
     };
-  }, [refresh]);
+  }, [access, refresh]);
 
   const summary = useMemo(() => ({
     approved: assets.filter((asset) => asset.status === "approved").length + reusableMedia.filter((asset) => asset.status === "approved").length,
@@ -502,18 +504,19 @@ function OwnedStudioAssetsPage() {
   return (
     <div className={styles.page}>
       <AssetHero
-        access="owner"
-        summary={registryReady ? summary : null}
+        access={access}
+        summary={registryReady && !publicMode ? summary : null}
         loading={loading}
         onRefresh={() => { void refresh(); }}
       />
+      {publicMode ? <ViewerBoundary /> : null}
 
       {loading ? <p className={styles.loadStatus} role="status">Loading Studio asset registry…</p> : null}
       {loadError ? <div className={styles.error} role="alert"><strong>Inventory unavailable</strong><p>{loadError}</p></div> : null}
       {message ? <p className={styles.error} role="alert">{message}</p> : null}
       {previewError ? <p className={styles.error} role="alert">{previewError}</p> : null}
       {registryReady ? <>
-      <AssetRoomTabs room={room} setRoom={setRoom} counts={roomCounts} />
+      <AssetRoomTabs room={room} setRoom={setRoom} counts={roomCounts} publicMode={publicMode} />
       <AssetRoomIntro room={room} />
 
       {!loading && room === "runtime" && directLtxRuntime ? <section className={styles.runtimeBanner} aria-label="Direct LTX runtime readiness">

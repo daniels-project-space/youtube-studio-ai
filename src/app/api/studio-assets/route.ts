@@ -20,7 +20,7 @@ import { resolveOwnerReviewedLtxRuntime } from "@/lib/reviewedLtxRuntimeStateRun
 import { listActiveMusicVideoA2VidRuntimeAdmissions } from "@/lib/musicVideoA2VidStateRuntime";
 import { listAcceptedCharacterLoRAInventory } from "@/lib/narrativeSeriesStateRuntime";
 import { selfHostedMusicVideoA2VidStudioReadiness } from "@/engine/selfHostedLtxMusicVideoA2Vid";
-import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
+import { getStudioActor, requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import {
   parseFinalMasterReleaseCertificateBytes,
   verifyFinalMasterReleaseEvidenceObjects,
@@ -46,6 +46,47 @@ function convexClient(): StudioConvexHttpClient {
 }
 
 /**
+ * The catalog is deliberately public-safe: it contains creative contracts and
+ * official provenance, never owner inventory, storage keys, signed URLs, or
+ * benchmark receipts. Keeping this projection available without elevation
+ * means the Toolkit is useful as a product surface instead of a blank login
+ * wall, while private approvals and previews remain owner-bound below.
+ */
+function publicCatalog() {
+  return {
+    curatedLtxCatalog: studioCuratedLtxCatalog().map((candidate) => ({
+      ...candidate,
+      recommendedWorkflowProfiles: candidate.adapterClass === "ic_lora"
+        ? OFFICIAL_LTX_COMFY_IC_LORA_WORKFLOW_PROFILES
+          .filter((profile) => profile.guideKinds.some((kind) => candidate.controls.includes(kind)))
+          .map((profile) => ({
+            workflowId: profile.workflowId,
+            qualityRole: profile.qualityRole,
+            guideKinds: [...profile.guideKinds],
+          }))
+        : [],
+      executionTarget: candidate.adapterClass === "ic_lora"
+        ? {
+            provider: COMFY_IC_LORA_REQUIRED_PROVIDER,
+            gpuSku: COMFY_IC_LORA_REQUIRED_GPU_SKU,
+            minimumVramGb: COMFY_IC_LORA_MINIMUM_VRAM_GB,
+            executor: "dedicated_comfyui_ltx" as const,
+          }
+        : null,
+    })),
+    visualTreatmentCatalog: VISUAL_TREATMENT_CATALOG.map((treatment) => ({
+      key: treatment.key,
+      label: treatment.label,
+      description: treatment.description,
+      activePlanningFamilies: treatment.channelType.supportedFamilies.filter((family) => family === "cinematic"),
+      futureFamilySeeds: treatment.channelType.supportedFamilies.filter((family) => family !== "cinematic"),
+      qaBenchmarkCount: treatment.qaBenchmarks.length,
+      rendererPrerequisites: [...treatment.runtime.rendererPrerequisites],
+    })),
+  };
+}
+
+/**
  * Studio asset inventory plus an explicit owner approval decision. This is
  * deliberately not an upload, model-download, training, or render route. Its
  * normal response never contains R2 locations or signed URLs; a separate
@@ -54,13 +95,14 @@ function convexClient(): StudioConvexHttpClient {
  */
 export async function GET(request: Request) {
   try {
-    const actor = await requireStudioActor(request);
-    const client = convexClient();
     const requestedPreview = new URL(request.url).searchParams.get("preview");
+    const actor = await getStudioActor(request);
     if (requestedPreview !== null) {
+      if (!actor) throw new StudioAuthError("authentication required");
       if (!FINGERPRINT.test(requestedPreview)) {
         return NextResponse.json({ ok: false, error: "invalid Studio asset preview request" }, { status: 400 });
       }
+      const client = convexClient();
       const preview = await resolveStudioAssetApprovedImagePreview({
         client,
         ownerId: actor.ownerId,
@@ -83,6 +125,29 @@ export async function GET(request: Request) {
         { headers: { "Cache-Control": "private, no-store" } },
       );
     }
+    const catalog = publicCatalog();
+    if (!actor) {
+      return NextResponse.json({
+        ok: true,
+        ownerAccess: false,
+        // Viewer mode intentionally has no owner inventory. The catalog and
+        // runtime boundary are still useful without disclosing private state.
+        assets: [],
+        reusableMedia: [],
+        candidates: [],
+        releaseFeedback: [],
+        acceptedCharacterLoRAs: [],
+        directLtxRuntime: {
+          status: "unattested" as const,
+          gpuSku: "RTX 5090",
+          vramGb: 0,
+          benchmarkedProfileCount: 0,
+        },
+        ...catalog,
+        musicVideoA2Vid: selfHostedMusicVideoA2VidStudioReadiness({ activeRuntimeAdmissions: [] }),
+      });
+    }
+    const client = convexClient();
     const [assets, reusableMedia, candidates, releaseFeedback, acceptedCharacterLoRAs, directLtxRuntime, activeMusicVideoA2VidAdmissions] = await Promise.all([
       listStudioAssetLibraryInventory({ client, ownerId: actor.ownerId }),
       listStudioReusableMediaInventory({ client, ownerId: actor.ownerId }),
@@ -95,34 +160,9 @@ export async function GET(request: Request) {
     // These official descriptors are intentionally separate from installed,
     // approved assets. A descriptor is not a downloaded model or permission
     // to create a render.
-    const curatedLtxCatalog = studioCuratedLtxCatalog().map((candidate) => ({
-      ...candidate,
-      // A profile tells an operator which official graph family is appropriate
-      // for this candidate's declared control. It is still not a local graph,
-      // installed model, or execution permission.
-      recommendedWorkflowProfiles: candidate.adapterClass === "ic_lora"
-        ? OFFICIAL_LTX_COMFY_IC_LORA_WORKFLOW_PROFILES
-          .filter((profile) => profile.guideKinds.some((kind) => candidate.controls.includes(kind)))
-          .map((profile) => ({
-            workflowId: profile.workflowId,
-            qualityRole: profile.qualityRole,
-            guideKinds: [...profile.guideKinds],
-          }))
-        : [],
-      // IC-LoRA controls are never routed through the older direct-LTX
-      // worker. This browser-safe requirement is derived from the same
-      // contract that rejects a mismatched work order before spend.
-      executionTarget: candidate.adapterClass === "ic_lora"
-        ? {
-            provider: COMFY_IC_LORA_REQUIRED_PROVIDER,
-            gpuSku: COMFY_IC_LORA_REQUIRED_GPU_SKU,
-            minimumVramGb: COMFY_IC_LORA_MINIMUM_VRAM_GB,
-            executor: "dedicated_comfyui_ltx" as const,
-          }
-        : null,
-    }));
     return NextResponse.json({
       ok: true,
+      ownerAccess: true,
       assets,
       reusableMedia,
       candidates,
@@ -136,25 +176,13 @@ export async function GET(request: Request) {
         vramGb: directLtxRuntime.runtime.vramGb,
         benchmarkedProfileCount: directLtxRuntime.runtime.benchmarkedVideoProfileRevisions.length,
       },
-      curatedLtxCatalog,
+      ...catalog,
       musicVideoA2Vid: selfHostedMusicVideoA2VidStudioReadiness({
         activeRuntimeAdmissions: activeMusicVideoA2VidAdmissions,
       }),
       // Planning/QA profiles are deliberately separate from stored approved
       // assets and model descriptors. They describe what the existing Visual
       // Matter path can lock and review—not a renderer permission.
-      visualTreatmentCatalog: VISUAL_TREATMENT_CATALOG.map((treatment) => ({
-        key: treatment.key,
-        label: treatment.label,
-        description: treatment.description,
-        // The catalog's family list is a supervised future seed. Today only
-        // cinematic has a treatment-consuming Visual Matter path; never
-        // present the remaining seeds as live compatibility.
-        activePlanningFamilies: treatment.channelType.supportedFamilies.filter((family) => family === "cinematic"),
-        futureFamilySeeds: treatment.channelType.supportedFamilies.filter((family) => family !== "cinematic"),
-        qaBenchmarkCount: treatment.qaBenchmarks.length,
-        rendererPrerequisites: [...treatment.runtime.rendererPrerequisites],
-      })),
     });
   } catch (error) {
     if (error instanceof StudioAuthError) {

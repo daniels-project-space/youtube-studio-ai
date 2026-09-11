@@ -13,14 +13,18 @@ async function main(): Promise<void> {
   for (const room of ["approved", "decisions", "identity", "runtime", "catalog"]) {
     assert.match(source, new RegExp(`room === "${room}"`), `missing isolated ${room} room`);
   }
-  assert.match(source, /function LockedAssetRegistry/);
-  assert.match(source, /Approvals, adapters, and private previews remain unloaded/);
-  assert.match(source, /Private asset library/);
-  assert.match(source, /Access check unavailable/);
-  assert.match(source, /if \(operationsAccess === "owner"\) return <OwnedStudioAssetsPage \/>/,
-    "private inventory state must unmount when owner access is lost");
-  assert.match(source, /summary=\{registryReady \? summary : null\}/,
-    "only a successful current inventory may expose counts");
+  assert.match(source, /function ViewerBoundary/);
+  assert.match(source, /Read-only catalog/);
+  assert.match(source, /Private approvals stay protected/);
+  assert.match(source, /return <OwnedStudioAssetsPage access=\{operationsAccess\} \/>/,
+    "the toolkit remains useful before owner elevation");
+  assert.match(source, /publicMode/,
+    "viewer mode must expose the public-safe catalog without private inventory");
+  assert.match(source, /Refresh catalog/);
+  assert.match(source, /publicMode \? \[/,
+    "viewer mode must keep private inventory tabs out of the way");
+  assert.match(source, /summary=\{registryReady && !publicMode \? summary : null\}/,
+    "only a successful owner inventory may expose private counts");
   assert.match(source, /const registryReady = loaded && !loading && !loadError/);
   assert.match(source, /registryRequestRef\.current\?\.abort\(\)/);
   assert.match(source, /signal: controller\.signal/);
@@ -85,7 +89,14 @@ async function main(): Promise<void> {
   assert.match(source, /qualityMetric/);
   assert.match(source, /qualityPhase/);
   assert.doesNotMatch(source, /asset\.resource\.r2Key/);
-  assert.match(api, /requireStudioActor/);
+  assert.match(api, /getStudioActor/);
+  assert.match(api, /ownerAccess: false/);
+  assert.match(api, /ownerAccess: true/);
+  assert.match(api, /function publicCatalog/);
+  assert.match(api, /if \(!actor\)/,
+    "catalog GET must have a read-only viewer path");
+  assert.match(api, /requireStudioActor/,
+    "mutating approval and private preview paths remain owner-bound");
   assert.match(api, /resolveStudioAssetApprovedImagePreview/);
   assert.match(api, /presignDownload\(preview\.r2Key, \{ expiresIn: 300 \}\)/);
   assert.match(api, /Cache-Control": "private, no-store/);
