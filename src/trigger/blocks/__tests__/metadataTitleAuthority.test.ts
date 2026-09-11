@@ -60,6 +60,7 @@ async function main(): Promise<void> {
     /legacy tournament fallback|legacy tournament\/critique recovery/,
     "the retired unjudged tournament/critique recovery path must not remain executable",
   );
+  assert.match(source, /titleDecision: m\.titleDecision/, "the metadata block must persist the judged decision for run-stage review");
 
   console.log("METADATA TITLE AUTHORITY PASS — fallbacks cannot override evaluated or deterministic titles");
 }
