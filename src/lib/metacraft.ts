@@ -343,6 +343,15 @@ function numberVariants(tok: string): string[] {
   return [...v];
 }
 
+/** Match a spoken or digit number as a complete token/phrase, never as a
+ * substring inside an unrelated word ("one" in "someone", "ten" in
+ * "intense"). Punctuation and hyphens around a phrase remain valid. */
+function containsNumberVariant(haystack: string, variant: string): boolean {
+  const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, "i");
+  return pattern.test(haystack);
+}
+
 /**
  * Timestamped chapter list from a narration chapterPlan (YouTube indexes these
  * as key moments). Returns "" when there are <2 chapters or no plan — callers
@@ -519,7 +528,7 @@ export function titleOpeningSignal(title: string, opening: string): TitleOpening
   const titleNumbers = title.match(/\d[\d,.]*/g) ?? [];
   const openingHaystack = opening.toLowerCase();
   const numbersMatch = titleNumbers.every((number) =>
-    numberVariants(number).some((variant) => openingHaystack.includes(variant.toLowerCase())),
+    numberVariants(number).some((variant) => containsNumberVariant(openingHaystack, variant.toLowerCase())),
   );
   return {
     matchedTerms,
@@ -610,7 +619,7 @@ export function lintTitle(
     const hay = o.grounding.toLowerCase();
     // Numbers: every digit token must exist in the grounding (as digits or words).
     for (const tok of t.match(/\d[\d,.]*/g) ?? []) {
-      if (!numberVariants(tok).some((v) => hay.includes(v.toLowerCase())))
+      if (!numberVariants(tok).some((v) => containsNumberVariant(hay, v.toLowerCase())))
         issues.push(`ungrounded number "${tok}" — not in the script`);
     }
     // Proper nouns must exist in the grounding. Title-Cased titles capitalize

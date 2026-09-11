@@ -72,6 +72,27 @@ assert.equal(
   false,
   "a numeric-only promise must not bypass the opening-number check",
 );
+assert.equal(
+  titleOpeningSignal("Why 1?", "Someone kept the archive quiet.").numbersMatch,
+  false,
+  "spoken one must not match inside an unrelated word",
+);
+assert.equal(
+  titleOpeningSignal("Why 10?", "An intense review of the archive follows.").numbersMatch,
+  false,
+  "spoken ten must not match inside an unrelated word",
+);
+assert.equal(
+  titleOpeningSignal("Why 47?", "Forty-seven records were sealed.").numbersMatch,
+  true,
+  "a hyphenated spoken number remains a valid opening match",
+);
+assert.ok(
+  lintTitle("The Signal 1 Changed Everything", {
+    grounding: "The signal changed everything for someone in the archive.",
+  }).issues.some((issue) => issue.includes('ungrounded number "1"')),
+  "grounding must not accept a digit from a substring inside an unrelated word",
+);
 const mismatchLint = lintTitle("The Bridge That Killed 47 Engineers", {
   grounding: "Investigators confirmed 47 engineers died when the bridge gave way.",
   opening: "Today we examine a quiet village archive and the letter it preserved.",
