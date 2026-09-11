@@ -718,7 +718,8 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
         </div>
         <div className={styles.grid}>
           {curatedLtxCatalog.map((candidate) => (
-            <article className={styles.card} key={candidate.id}>
+            <details className={styles.card} key={candidate.id}>
+              <summary className={styles.cardSummary}>
               <div className={styles.cardHead}>
                 <div>
                   <span className={styles.kind}>{candidate.adapterClass === "ic_lora" ? "IC-LoRA control" : "standard LoRA"}</span>
@@ -726,6 +727,8 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
                 </div>
                 <span className={styles.muted}>not installed</span>
               </div>
+              <span className={styles.cardToggle}>View details</span>
+              </summary>
               <p className={styles.execution}>{curatedExecutionLabel(candidate)}</p>
               <dl className={styles.meta}>
                 <div><dt>Base model</dt><dd>LTX {candidate.baseModelVersions.join(", ")}</dd></div>
@@ -743,7 +746,7 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
               </p> : null}
               <p className={styles.recipe}>{candidate.notes.join(" ")}</p>
               <a className={styles.source} href={candidate.sourceUrl} target="_blank" rel="noreferrer">Official model card</a>
-            </article>
+            </details>
           ))}
         </div>
       </section> : null}
@@ -758,7 +761,8 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
         </div>
         <div className={styles.grid}>
           {visualTreatmentCatalog.map((treatment) => (
-            <article className={styles.card} key={treatment.key}>
+            <details className={styles.card} key={treatment.key}>
+              <summary className={styles.cardSummary}>
               <div className={styles.cardHead}>
                 <div>
                   <span className={styles.kind}>Planning + QA only</span>
@@ -766,6 +770,8 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
                 </div>
                 <span className={styles.muted}>no renderer admitted</span>
               </div>
+              <span className={styles.cardToggle}>View details</span>
+              </summary>
               <p className={styles.execution}>Canonical plan → character and setting sheets → storyboard/motion locks → visual review</p>
               <dl className={styles.meta}>
                 <div><dt>Benchmarks</dt><dd>{treatment.qaBenchmarkCount} visual checks</dd></div>
@@ -777,7 +783,7 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
               <p className={styles.recipe}>{treatment.description}</p>
               {treatment.futureFamilySeeds.length ? <p className={styles.adapter}>Future supervised route seeds: {treatment.futureFamilySeeds.map(kindLabel).join(", ")} · not enabled by this catalog</p> : null}
               <p className={styles.adapter}>Renderer gate: {treatment.rendererPrerequisites[0] ?? "adapter benchmark required"}</p>
-            </article>
+            </details>
           ))}
         </div>
       </section> : null}
