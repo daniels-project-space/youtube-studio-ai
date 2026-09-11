@@ -1352,7 +1352,19 @@ export default function NewChannelWizard() {
             <span><i />Recoverable by design</span>
           </div>
         </div>
-        <div className={styles.heroGlyph} aria-hidden="true"><i /><i /><i /><span>CH</span></div>
+        <div
+          className={styles.heroGlyph}
+          role="img"
+          aria-label={`${niche?.label ?? "Channel"} identity preview`}
+          data-motif={nicheKey || "technology"}
+        >
+          <i /><i /><i />
+          <NicheMotionGlyph
+            niche={nicheKey || "technology"}
+            channelName={name || undefined}
+            className={styles.heroNicheGlyph}
+          />
+        </div>
       </header>
 
       <nav className={styles.stepRail} aria-label="Channel creation stages">

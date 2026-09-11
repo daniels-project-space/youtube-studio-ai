@@ -146,6 +146,8 @@ assert.match(wizard, /defaultFamilyReadiness\.blockers\[0\]/);
 assert.match(wizard, /<h1>Create a channel<\/h1>/);
 assert.match(wizard, /import \{ NicheMotionGlyph \} from "@\/components\/NicheMotionGlyph"/);
 assert.match(wizard, /<NicheMotionGlyph niche=\{n\.key\}/);
+assert.match(wizard, /className=\{styles\.heroNicheGlyph\}/);
+assert.match(wizard, /data-motif=\{nicheKey \|\| "technology"\}/);
 assert.doesNotMatch(wizard, /function NicheGlyph/);
 assert.match(channels, /<NicheMotionGlyph niche=\{c\.identity\?\.niche\} channelName=\{c\.name\}/);
 assert.match(channels, /className="channel-card-motif"/);

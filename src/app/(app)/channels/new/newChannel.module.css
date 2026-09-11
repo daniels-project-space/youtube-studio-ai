@@ -37,7 +37,8 @@
 .heroGlyph > i:nth-child(1) { top: 5px; left: 84px; }
 .heroGlyph > i:nth-child(2) { right: 20px; bottom: 50px; border-color: var(--color-blueprint); }
 .heroGlyph > i:nth-child(3) { bottom: 5px; left: 54px; border-color: var(--color-secondary); }
-.heroGlyph span { position: absolute; top: 43px; left: 72px; font: 500 1.65rem/1 var(--font-display); letter-spacing: -.07em; }
+.heroNicheGlyph { position: absolute; inset: 21px 51px; color: var(--creator-tone); filter: drop-shadow(0 0 14px color-mix(in srgb,var(--creator-tone) 25%,transparent)); }
+.heroGlyph[data-motif="technology"] .heroNicheGlyph { color: var(--color-blueprint); }
 
 .stepRail { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: .4rem; margin: 0 0 1.25rem; padding: .38rem; border: 1px solid var(--color-border); border-radius: 16px; background: rgba(10,14,25,.58); box-shadow: 0 1px 0 rgba(255,255,255,.05) inset; backdrop-filter: blur(16px); }
 .stepNode { --step-tone: var(--color-faint); position: relative; display: grid; grid-template-columns: auto minmax(0,1fr); gap: .12rem .5rem; min-width: 0; padding: .58rem .65rem; border: 1px solid transparent; border-radius: 11px; color: var(--color-faint); }
