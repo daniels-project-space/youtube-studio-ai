@@ -865,8 +865,10 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       feed.map((c) => `${c.views >= 1e6 ? `${(c.views / 1e6).toFixed(1)}M` : `${Math.round(c.views / 1e3)}k`} — "${c.title}"`).join("\n")
     : "";
 
-  // Pinned comment doesn't depend on the winning title — craft it in parallel
-  // with the judging pass (it seeds discussion about the episode's tension).
+  // Pinned comment doesn't depend on the winning title, so once a title is
+  // admitted we can craft it in parallel with the ancillary package (it seeds
+  // discussion about the episode's tension). Keeping this lazy avoids paying
+  // for an optional comment when title generation/judging fails closed.
   //
   // maxTokens was 300, and that produced an EMPTY pinned comment on every video
   // ever made. The route is a reasoning model: the ceiling has to cover the
@@ -877,7 +879,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
   // There is no safe universal floor to hoist this to — how much the model
   // reasons depends on the prompt, and simpler prompts clear 700 comfortably.
   // What makes the class survivable is the logging below, not the number.
-  const pinnedPromise = claudeJson<{ comment?: string }>({
+  const makePinnedComment = (): Promise<string> => claudeJson<{ comment?: string }>({
     prompt:
       `Write ONE pinned comment (≤200 chars) for a video about "${a.topic}"${a.niche ? ` (${a.niche})` : ""}: a ` +
       `SPECIFIC, genuinely curious question that seeds discussion about the video's core tension — never generic ` +
@@ -1113,6 +1115,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       }
 
       const w = survivors[best];
+      const pinnedPromise = makePinnedComment();
       // ONE description+tags, written FOR the winner (parallel work already done).
       // Mechanical structured output — flash, no thinking.
       let description = "";

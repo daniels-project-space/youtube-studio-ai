@@ -26,6 +26,7 @@ let malformedJudgeAttempts = 0;
 let judgeFailureAttempts = 0;
 let packageFailureAttempts = 0;
 let judgeAttempts = 0;
+let pinnedCalls = 0;
 let installed = false;
 
 function install(preferred: string, malformedAttempts = 0, packageFailures = 0, judgeFailures = 0): void {
@@ -34,6 +35,7 @@ function install(preferred: string, malformedAttempts = 0, packageFailures = 0, 
   judgeFailureAttempts = judgeFailures;
   packageFailureAttempts = packageFailures;
   judgeAttempts = 0;
+  pinnedCalls = 0;
   if (installed) return;
   installed = true;
   const load = (Module as unknown as { _load: (...a: unknown[]) => unknown })._load;
@@ -46,7 +48,10 @@ function install(preferred: string, malformedAttempts = 0, packageFailures = 0, 
       ...resolved,
       hasAnthropicKey: () => true,
       claudeJson: async ({ prompt }: { prompt: string }) => {
-        if (prompt.includes("pinned comment")) return { comment: "What would you have done?" };
+        if (prompt.includes("pinned comment")) {
+          pinnedCalls += 1;
+          return { comment: "What would you have done?" };
+        }
         if (prompt.includes("description + tags")) {
           if (packageFailureAttempts-- > 0) throw new Error("package temporarily unavailable");
           return { description: "A description long enough to pass.", tagsCsv: "a,b,c,d,e,f" };
@@ -132,6 +137,12 @@ async function main(): Promise<void> {
   // fail closed before buying the winner's description package.
   install(CRAFTED, 99);
   await assert.rejects(() => craft(""), /both attempts failed the gate/);
+
+  // The pinned comment is optional and must be lazy: a title gate failure must
+  // not spend a provider call on an ancillary artifact that cannot ship.
+  install(CRAFTED, 0, 0, 99);
+  await assert.rejects(() => craft(""), /both attempts failed the gate/);
+  assert.equal(pinnedCalls, 0, "failed title admission must not buy an optional pinned comment");
 
   console.log("METACRAFT WARM START PASS");
 }
