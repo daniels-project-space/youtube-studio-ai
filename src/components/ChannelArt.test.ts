@@ -27,12 +27,14 @@ try {
   const banner = renderToStaticMarkup(
     createElement(ChannelBanner, {
       name: "Test channel",
+      niche: "history",
       aspectRatio: "16 / 9",
       palette: ["#111111", "#222222"],
     }),
   );
   assert.match(banner, /aspect-ratio:16 \/ 9/);
   assert.match(banner, /linear-gradient\(135deg, #111111, #222222\)/);
+  assert.match(banner, /data-motif="book"/, "artwork-free banners keep the channel motif visible");
 } finally {
   loader._load = originalLoad;
 }

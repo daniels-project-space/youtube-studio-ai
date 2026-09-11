@@ -429,7 +429,7 @@ function RelayCard({ channel }: { channel: ChannelRow }) {
   return (
     <Link href={`/channels/${encodeURIComponent(channel.slug)}`} className={styles.relayCard} data-channel-slug={channel.slug}>
       <ChannelBanner bannerKey={identity?.bannerKey} fallbackKeys={[identity?.imageKey]}
-        name={channel.name} palette={identity?.palette} aspectRatio="16 / 6" />
+        name={channel.name} niche={identity?.niche} palette={identity?.palette} aspectRatio="16 / 6" />
       <div className={styles.relayCardBody}>
         <ChannelAvatar imageKey={identity?.imageKey} name={channel.name} niche={identity?.niche} palette={identity?.palette} size={32} radius={9} />
         <span><strong>{channel.name}</strong><small>{channel.status}</small></span>

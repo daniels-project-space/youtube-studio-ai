@@ -296,6 +296,7 @@ export default function ChannelsPage() {
                   bannerKey={previewArtwork}
                   fallbackKeys={[latestArtwork, planArtwork]}
                   name={c.name}
+                  niche={c.identity?.niche}
                   palette={c.identity?.palette}
                   aspectRatio="16 / 5"
                   className="channel-card-banner"
@@ -556,6 +557,7 @@ function ChannelFleetInspector({
           bannerKey={channel.identity?.bannerKey}
           fallbackKeys={[latestArtwork, planArtwork]}
           name={channel.name}
+          niche={channel.identity?.niche}
           palette={channel.identity?.palette}
           aspectRatio="16 / 5"
           className="channel-fleet-inspector-banner"

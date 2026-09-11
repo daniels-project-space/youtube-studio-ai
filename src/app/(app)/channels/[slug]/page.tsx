@@ -388,6 +388,7 @@ export default function ChannelHubPage({
         bannerKey={id.bannerKey}
         fallbackKeys={[latestArtwork, plannedArtwork]}
         name={channel.name}
+        niche={id.niche}
         palette={id.palette}
         height={192}
         className={styles.channelBanner}

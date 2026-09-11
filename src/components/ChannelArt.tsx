@@ -114,6 +114,7 @@ export function ChannelBanner({
   bannerKey,
   fallbackKeys = [],
   name,
+  niche,
   palette,
   height = 160,
   aspectRatio,
@@ -123,6 +124,8 @@ export function ChannelBanner({
   bannerKey?: string | null;
   fallbackKeys?: Array<string | null | undefined>;
   name: string;
+  /** Used to keep artwork-free banners identifiable while media resolves. */
+  niche?: string | null;
   palette?: string[];
   height?: number;
   aspectRatio?: string;
@@ -169,6 +172,33 @@ export function ChannelBanner({
             "linear-gradient(to top, rgba(10,10,11,0.85) 0%, rgba(10,10,11,0.25) 55%, rgba(10,10,11,0.1) 100%)",
         }}
       />
+      {!url && niche && (
+        <span
+          aria-hidden="true"
+          style={{
+            position: "absolute",
+            right: "7%",
+            top: "12%",
+            width: "24%",
+            maxWidth: 108,
+            minWidth: 52,
+            aspectRatio: "1",
+            display: "grid",
+            placeItems: "center",
+            color: "rgba(255,255,255,0.72)",
+            opacity: 0.62,
+            border: "1px solid rgba(255,255,255,0.16)",
+            borderRadius: "50%",
+            background: "rgba(8,10,18,0.24)",
+            boxShadow: "inset 0 0 24px rgba(255,255,255,0.06), 0 12px 30px rgba(0,0,0,0.18)",
+            pointerEvents: "none",
+          }}
+        >
+          <span style={{ width: "62%", height: "62%", display: "block" }}>
+            <NicheMotionGlyph niche={niche} channelName={name} />
+          </span>
+        </span>
+      )}
       {children && (
         <div style={{ position: "absolute", inset: 0 }}>{children}</div>
       )}
