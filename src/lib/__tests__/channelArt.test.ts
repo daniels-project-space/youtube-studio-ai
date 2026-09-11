@@ -201,6 +201,46 @@ function assertIdentityDerivationUsesTheChannelWorld(): void {
 }
 
 function assertNameBoundWorldsRepairStaleImportedIdentity(): void {
+  const gratitude = bannerPrompt(channelArtIdentityFromSource({
+    name: "Gratitude Springs",
+    identity: {
+      persona: "a host beside a stack of spa stones", styleGrammar: "generic meditation photography", niche: "Health",
+      creativeBrief: { iconicMotif: "balanced stones", vibe: "relaxation" },
+    },
+    styleDNA: {
+      setting: "a dark stone spa", composition: "close-up stones", motifs: ["stones"], visualAvoid: [],
+    },
+  }));
+  assert.match(gratitude, /woman floating in clear dawn water/i);
+  assert.match(gratitude, /water lilies/i);
+  assert.match(gratitude, /DO NOT INTRODUCE:.*stone-only composition/i);
+  assert.doesNotMatch(gratitude, /generic meditation photography/i);
+
+  const stoic = bannerPrompt(channelArtIdentityFromSource({
+    name: "The Quiet Stoic",
+    identity: {
+      persona: "a generic wellness host", styleGrammar: "soft spa photography", niche: "Psychology",
+      creativeBrief: { iconicMotif: "a bowl of stones", vibe: "relaxation" },
+    },
+    styleDNA: { setting: "a dark spa room", composition: "stones by water", motifs: ["stones"], visualAvoid: [] },
+  }));
+  assert.match(stoic, /weathered marble philosopher bust/i);
+  assert.match(stoic, /olive branch/i);
+  assert.match(stoic, /DO NOT INTRODUCE:.*generic meditation stones/i);
+
+  const inked = bannerPrompt(channelArtIdentityFromSource({
+    name: "Inked Histories",
+    identity: {
+      persona: "a fantasy battle host", styleGrammar: "video game concept art", niche: "History",
+      creativeBrief: { iconicMotif: "a glowing sword", vibe: "epic" },
+    },
+    styleDNA: { setting: "a fantasy battlefield", composition: "hero with armor", motifs: ["magic", "sword"], visualAvoid: [] },
+  }));
+  assert.match(inked, /cinematic archival etching/i);
+  assert.match(inked, /weathered relic/i);
+  assert.match(inked, /DO NOT INTRODUCE:.*video-game fantasy/i);
+  assert.doesNotMatch(inked, /video game concept art/i);
+
   const seaside = bannerPrompt(channelArtIdentityFromSource({
     name: "Seaside Ghibli Lofi",
     identity: {

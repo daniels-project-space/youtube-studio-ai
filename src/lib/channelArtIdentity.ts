@@ -92,6 +92,58 @@ function textList(value: unknown): string[] | undefined {
  */
 function nameBoundArtWorld(identity: ArtIdentity): Partial<ArtIdentity> {
   const name = identity.name.toLowerCase();
+  if (/\b(gratitude|serenity|sanctuary)\b/u.test(name)) {
+    return {
+      persona: "a calm, non-identifiable woman floating weightlessly in a natural water sanctuary",
+      styleGrammar: "luminous hand-painted wellness editorial, tactile watercolor, quiet cinematic daylight",
+      palette: ["#0b2637", "#397a86", "#9ec9c4", "#e8d8b7", "#f4efe6"],
+      iconicMotif: "a serene woman floating in clear dawn water, surrounded by water lilies and soft reeds",
+      vibe: "quiet gratitude, spacious breath, and gentle renewal",
+      worldSetting: "a broad natural water sanctuary at first light, with a calm floating figure, reeds, lilies, and slow concentric ripples",
+      worldComposition: "one serene floating figure in the safe area with generous open water and luminous sky; the scene must breathe rather than become a stone still-life",
+      worldMotifs: ["floating woman", "sunlit ripples", "water lilies", "soft reeds", "mist above open water"],
+      visualAvoid: ["stone-only composition", "generic spa stones", "dark cave", "neon lighting", "photorealistic CGI"],
+    };
+  }
+  if (/\b(stoic|stoicism)\b/u.test(name)) {
+    return {
+      persona: "a humane stoic guide grounded in disciplined attention and ordinary life",
+      styleGrammar: "minimal marble-and-paper editorial, warm museum light, tactile film grain, restrained classical geometry",
+      palette: ["#11151b", "#353e48", "#b39a6a", "#e8dfc9", "#6e7e82"],
+      iconicMotif: "a weathered marble philosopher bust beside one olive branch and an open journal",
+      vibe: "still courage, clear judgment, and practical calm",
+      worldSetting: "a quiet classical study opening onto a sunlit courtyard, where marble, paper, and one living olive branch share the frame",
+      worldComposition: "one centered bust or seated guide with a single grounded prop; leave clean negative space and avoid a crowded motivational collage",
+      worldMotifs: ["weathered marble", "olive branch", "open journal", "courtyard light", "linen paper"],
+      visualAvoid: ["generic meditation stones", "neon wellness room", "luxury lifestyle photography", "glossy app icon", "photorealistic CGI"],
+    };
+  }
+  if (/\bdrawn\s*past\b/u.test(name)) {
+    return {
+      persona: "a patient visual historian drawing the past into view one line at a time",
+      styleGrammar: "hand-drawn archival ink, graphite and warm paper, expressive editorial linework, subtle ember accents",
+      palette: ["#171313", "#4a3127", "#b4673d", "#eadcc4", "#85807a"],
+      iconicMotif: "a black fountain pen drawing a historical map and a single witness figure across heavy paper",
+      vibe: "discovery through evidence, human consequence, and crafted lines",
+      worldSetting: "a tactile historian's desk where a real ink line reveals maps, artifacts, and human witnesses without becoming a game interface",
+      worldComposition: "the pen and one evidence scene own the safe area; paper grain and restrained archival marks carry the outer frame",
+      worldMotifs: ["fountain pen", "hand-drawn map", "archival paper", "witness silhouette", "ember-red annotation"],
+      visualAvoid: ["video-game UI", "fantasy armor", "generic parchment wallpaper", "glossy 3D render", "unrelated modern props"],
+    };
+  }
+  if (/\b(inked\s*histories|history|historical)\b/u.test(name)) {
+    return {
+      persona: "a meticulous visual historian uncovering overlooked human evidence",
+      styleGrammar: "cinematic archival etching, bold ink contours, weathered paper, restrained firelight and museum-grade composition",
+      palette: ["#161518", "#3b3030", "#b46b43", "#e9ddc8", "#6f7475"],
+      iconicMotif: "an open field book and a weathered relic lit by a narrow amber shaft of archival light",
+      vibe: "buried evidence, human stakes, and a past that refuses to stay quiet",
+      worldSetting: "a museum-archive worktable opening into a shadowed historical scene, with real artifacts and human consequence rather than fantasy spectacle",
+      worldComposition: "one artifact or witness moment dominates the safe area; smoky negative space and a warm archival edge carry the wide frame",
+      worldMotifs: ["open field book", "weathered relic", "archival amber light", "etched witness", "burning paper edge"],
+      visualAvoid: ["video-game fantasy", "generic medieval battle", "plastic 3D props", "modern UI overlays", "photorealistic CGI"],
+    };
+  }
   if (/\b(seaside|coast(?:al)?|ocean|shore|beach|harbour|harbor)\b/u.test(name)) {
     return {
       persona: "a quiet, non-identifiable study figure in a hand-painted coastal world",
