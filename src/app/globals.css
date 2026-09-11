@@ -2011,6 +2011,7 @@
 
 .channel-card {
   min-width: 0;
+  container-type: inline-size;
   display: grid;
   align-content: start;
   gap: 0.5rem;
@@ -2179,6 +2180,26 @@
 .channel-live-state-queued strong { color: var(--color-amber); }
 .channel-live-state-inactive { background: rgba(137, 146, 161, 0.055); }
 .channel-live-state-inactive strong { color: var(--color-muted); }
+
+/* Compact fleet tiles keep identity, title, and live state legible instead of
+ * squeezing four horizontal controls into a narrow card. The container query
+ * applies to the desktop fleet's 198px tiles while leaving the roomy and
+ * mobile layouts unchanged. */
+@container (max-width: 205px) {
+  .channel-card-identity {
+    display: grid;
+    grid-template-columns: 48px 24px minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    align-items: center;
+    column-gap: .38rem;
+    row-gap: .24rem;
+  }
+  .channel-card-identity > [aria-label$=" avatar"] { grid-row: 1 / span 2; }
+  .channel-card-motif { grid-column: 2; grid-row: 1 / span 2; width: 24px; height: 24px; }
+  .channel-card-title { grid-column: 3; grid-row: 1; align-self: end; }
+  .channel-live-state { grid-column: 3; grid-row: 2; width: 100%; min-width: 0; padding: .22rem .3rem; }
+  .channel-live-state strong { font-size: .58rem; }
+}
 
 .channel-card-operating-row {
   display: grid;
