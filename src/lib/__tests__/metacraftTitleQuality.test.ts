@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { areNearDuplicateTitles, dedupeTitleCandidates, deterministicTitleFallback, lintTitle, resolveTitleProfile, titleQualitySignal } from "@/lib/metacraft";
+import { areNearDuplicateTitles, dedupeTitleCandidates, deterministicTitleFallback, lintTitle, resolveTitleProfile, titleOpeningSignal, titleQualitySignal } from "@/lib/metacraft";
 
 const grounding = "Chernobyl failed one safety test and the ignored warning changed the outcome.";
 const concrete = titleQualitySignal("Chernobyl Failed One Safety Test", grounding);
@@ -44,6 +44,38 @@ assert.ok(
   "short-form profile must enforce its own hard ceiling",
 );
 
+// The title must begin paying off in the first spoken beat. This is a lexical
+// floor, deliberately weaker than semantic judging: one shared content term
+// is enough, while a concrete numeric promise must be spoken there as well.
+const openingMatch = titleOpeningSignal(
+  "Chernobyl Failed One Safety Test",
+  "Chernobyl failed one safety test, and the ignored warning changed the outcome.",
+);
+assert.equal(openingMatch.pass, true);
+assert.ok(openingMatch.matchedTerms.includes("chernobyl"));
+assert.equal(
+  lintTitle("Chernobyl Failed One Safety Test", {
+    grounding,
+    opening: "Chernobyl failed one safety test before the warning was ignored.",
+  }).pass,
+  true,
+  "a title whose subject starts in the opening must pass the promise floor",
+);
+const openingMismatch = titleOpeningSignal(
+  "The Bridge That Killed 47 Engineers",
+  "Today we examine a quiet village archive and the letter it preserved.",
+);
+assert.equal(openingMismatch.pass, false);
+assert.equal(openingMismatch.numbersMatch, false);
+const mismatchLint = lintTitle("The Bridge That Killed 47 Engineers", {
+  grounding: "Investigators confirmed 47 engineers died when the bridge gave way.",
+  opening: "Today we examine a quiet village archive and the letter it preserved.",
+});
+assert.ok(
+  mismatchLint.issues.filter((issue) => issue.includes("opening promise mismatch")).length >= 2,
+  "a subject and numeric promise absent from the opening must fail visibly",
+);
+
 const setup = titleQualitySignal("What Really Happened And Why It Matters", grounding);
 assert.ok(concrete.frontLoadedTerms > setup.frontLoadedTerms, "front-loaded subject terms must be measurable");
 assert.ok(concrete.score > setup.score, "generic setup must lose the local impact tie-break");
@@ -74,5 +106,6 @@ assert.match(
 assert.match(source, /FORMAT PROFILE/, "the generator must receive the resolved format profile");
 assert.match(source, /titleProfile\.targetMinChars/, "the judge must see the same profile envelope as the generator");
 assert.match(source, /dedupeTitleCandidates\(exactUnique\)/, "paraphrase-only candidate slates must be reduced before judging");
+assert.match(source, /opening: \[a\.coldOpen, a\.hookLoop\]/, "metacraft must apply the independent opening promise floor before judging");
 
 console.log("METACRAFT TITLE QUALITY PASS");

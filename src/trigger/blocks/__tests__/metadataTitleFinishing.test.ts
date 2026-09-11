@@ -25,6 +25,27 @@ function context() {
   assert.equal(result.title, "Chernobyl Failed One Safety Test");
 }
 
+// Normalization must retain the opening promise boundary too: a title can be
+// grounded somewhere in the script yet still promise a subject the first beat
+// never starts.
+{
+  const { ctx, logs } = context();
+  assert.throws(
+    () => finishMetadata(ctx, {
+      title: "Inked Histories: Chernobyl Failed One Safety Test",
+      description: "d",
+      tags: ["history"],
+      channelName: "Inked Histories",
+      nicheIntel: null,
+      grounding: "Chernobyl failed one safety test. Today we examine a quiet village archive.",
+      opening: "Today we examine a quiet village archive and the letter it preserved.",
+      titleProfile: "searchable_long",
+    }),
+    /normalized title failed title gate.*opening promise mismatch/,
+  );
+  assert.ok(logs.some((message) => /normalized title failed the shared title gate/.test(message)));
+}
+
 // A stale/legacy path may contain a title claim that the current source packet
 // cannot support. The post-processing boundary must fail closed instead of
 // silently shipping that normalized title.

@@ -493,6 +493,42 @@ export function titleQualitySignal(
   };
 }
 
+export interface TitleOpeningSignal {
+  /** Content terms shared by the title and the spoken opening. */
+  matchedTerms: string[];
+  /** Content terms used as the deterministic promise anchor. */
+  titleTerms: string[];
+  /** Every numeric promise in the title appears in the opening. */
+  numbersMatch: boolean;
+  /** False when the title has no spoken anchor or a concrete number drifts. */
+  pass: boolean;
+}
+
+/**
+ * Cheap, explainable promise-to-opening check. The model still judges the
+ * title's meaning, but this catches the most damaging failure locally: a
+ * title promising a subject/number that the first spoken beat never starts.
+ * We intentionally require only one shared content term; synonyms and
+ * rhetorical openings remain the judge's job rather than being rejected by a
+ * brittle lexical oracle.
+ */
+export function titleOpeningSignal(title: string, opening: string): TitleOpeningSignal {
+  const titleTerms = [...contentTitleTokens(title)];
+  const openingTerms = contentTitleTokens(opening);
+  const matchedTerms = titleTerms.filter((term) => openingTerms.has(term));
+  const titleNumbers = title.match(/\d[\d,.]*/g) ?? [];
+  const openingHaystack = opening.toLowerCase();
+  const numbersMatch = titleNumbers.every((number) =>
+    numberVariants(number).some((variant) => openingHaystack.includes(variant.toLowerCase())),
+  );
+  return {
+    matchedTerms,
+    titleTerms,
+    numbersMatch,
+    pass: titleTerms.length === 0 || (matchedTerms.length > 0 && numbersMatch),
+  };
+}
+
 /**
  * Deterministic title lint — the measurable gates, enforced instead of asked
  * for. `grounding` is the haystack the title's claims must exist in (topic +
@@ -507,6 +543,8 @@ export function lintTitle(
     isMusicNiche?: boolean;
     allowHype?: boolean;
     profile?: TitleProfileId;
+    /** The first spoken beat (cold open + hook loop) that must begin the title promise. */
+    opening?: string;
   } = {},
 ): TitleLint {
   const issues: string[] = [];
@@ -526,6 +564,16 @@ export function lintTitle(
   if (!o.isMusicNiche && LOFI_LEAK.test(t)) issues.push("off-niche lofi/study framing");
   if (o.channelName && o.channelName !== "this channel" && t.toLowerCase().includes(o.channelName.toLowerCase()))
     issues.push("contains the channel name");
+
+  if (o.opening?.trim()) {
+    const openingSignal = titleOpeningSignal(t, o.opening);
+    if (!openingSignal.matchedTerms.length && openingSignal.titleTerms.length) {
+      issues.push("opening promise mismatch — no title subject or payoff term appears in the first spoken beat");
+    }
+    if (!openingSignal.numbersMatch) {
+      issues.push("opening promise mismatch — a title number is not spoken in the first beat");
+    }
+  }
 
   // Mobile truncation: browse shows ~50 characters.
   //
@@ -972,6 +1020,9 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           isMusicNiche: a.isMusicNiche,
           allowHype,
           profile: titleProfile.id,
+          opening: [a.coldOpen, a.hookLoop]
+            .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            .join("\n"),
         }),
         quality: titleQualitySignal(c.title, grounding, titleProfile.id),
       }));

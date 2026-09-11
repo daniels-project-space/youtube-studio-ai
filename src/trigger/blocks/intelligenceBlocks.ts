@@ -272,6 +272,8 @@ export function finishMetadata(
     nicheIntel: NicheIntel | null;
     /** Optional source packet used to re-lint after title normalization. */
     grounding?: string;
+    /** First spoken beat used to re-check title promise after normalization. */
+    opening?: string;
     titleProfile?: TitleProfileId;
     isMusicNiche?: boolean;
   },
@@ -293,6 +295,7 @@ export function finishMetadata(
       channelName: o.channelName,
       isMusicNiche: o.isMusicNiche,
       profile: o.titleProfile,
+      opening: o.opening,
     });
     if (!normalizedLint.pass) {
       ctx.log(`metadata: normalized title failed the shared title gate: ${normalizedLint.issues.join("; ")}`);
@@ -575,6 +578,9 @@ export const metadataOptimized: Block = {
         channelName,
         nicheIntel,
         grounding: [topic, scriptExcerpt, scriptDoc?.hook, scriptDoc?.hookLoop, (ctx.store["script"] as { closingLine?: string } | undefined)?.closingLine]
+          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+          .join("\n"),
+        opening: [scriptDoc?.hook, scriptDoc?.hookLoop]
           .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
           .join("\n"),
         titleProfile,
