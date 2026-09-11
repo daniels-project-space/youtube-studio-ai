@@ -44,6 +44,11 @@ export function failureReason(error?: string | null): FailureInfo {
     if (r.test.test(raw)) return { block, reason: r.reason, hint: r.hint };
   }
   // Fallback: first sentence/line of the raw error, trimmed.
-  const first = raw.split(/[\n.]/)[0].replace(/^[a-z_]+:\s*/i, "").slice(0, 140);
+  const first = raw
+    .split(/[\n.]/)[0]
+    .replace(/^[a-z_]+:\s*/i, "")
+    .replace(/\/(?:tmp|home|var|workspace|app|root)\/\S+/gi, "[path]")
+    .replace(/\b(api[_ -]?key|token|secret|authorization)\s*[:=]\s*\S+/gi, "$1 [redacted]")
+    .slice(0, 140);
   return { block, reason: first || "Failed" };
 }
