@@ -525,7 +525,7 @@ export function titleOpeningSignal(title: string, opening: string): TitleOpening
     matchedTerms,
     titleTerms,
     numbersMatch,
-    pass: titleTerms.length === 0 || (matchedTerms.length > 0 && numbersMatch),
+    pass: numbersMatch && (titleTerms.length === 0 || matchedTerms.length > 0),
   };
 }
 

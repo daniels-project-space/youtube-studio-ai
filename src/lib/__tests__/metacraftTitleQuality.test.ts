@@ -67,6 +67,11 @@ const openingMismatch = titleOpeningSignal(
 );
 assert.equal(openingMismatch.pass, false);
 assert.equal(openingMismatch.numbersMatch, false);
+assert.equal(
+  titleOpeningSignal("Why 47?", "Today we examine a quiet village archive.").pass,
+  false,
+  "a numeric-only promise must not bypass the opening-number check",
+);
 const mismatchLint = lintTitle("The Bridge That Killed 47 Engineers", {
   grounding: "Investigators confirmed 47 engineers died when the bridge gave way.",
   opening: "Today we examine a quiet village archive and the letter it preserved.",
