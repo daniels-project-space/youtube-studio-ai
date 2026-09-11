@@ -93,7 +93,9 @@ function ArtifactCard({
         assetKey={video.thumbnailKey}
         reviewedSrc={video.reviewedThumbnailUrl}
         videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
-        fallbackSrc={video.thumbnailPresentation === "lofi_frame_pending"
+        // Never mask a retained/current candidate with stale public artwork.
+        // YouTube is a fallback only for rows that have no retained key.
+        fallbackSrc={video.thumbnailKey || video.thumbnailPresentation === "lofi_frame_pending"
           ? undefined
           : video.youtubeVideoId ? youtubeThumb(video.youtubeVideoId) : undefined}
         fallbackSource="youtube"

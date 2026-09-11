@@ -85,6 +85,8 @@ for (const source of [videoCard, schedule]) {
   assert.match(source, /MediaPreview/);
   assert.match(source, /fallbackSource="youtube"/);
 }
+assert.match(videoCard, /video\.thumbnailKey \|\| video\.thumbnailPresentation === "lofi_frame_pending"/);
+assert.match(schedule, /event\.thumbnailKey\s*\?/);
 assert.match(mediaPreview, /useAssetUrlState/);
 assert.match(mediaPreview, /data-preview-source=/);
 assert.match(mediaPreview, /decoding="async"/);

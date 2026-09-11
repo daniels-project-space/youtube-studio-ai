@@ -51,7 +51,10 @@ export function VideoCard({
         assetKey={video.thumbnailKey}
         reviewedSrc={video.reviewedThumbnailUrl}
         videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
-        fallbackSrc={video.thumbnailPresentation === "lofi_frame_pending"
+        // A retained key is authoritative. If its signed preview fails, show
+        // an honest unavailable state rather than silently swapping in an old
+        // public YouTube image and making the Library look unrefreshed.
+        fallbackSrc={video.thumbnailKey || video.thumbnailPresentation === "lofi_frame_pending"
           ? undefined
           : video.youtubeVideoId ? youtubeThumb(video.youtubeVideoId) : undefined}
         fallbackSource="youtube"

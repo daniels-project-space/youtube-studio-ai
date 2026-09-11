@@ -49,6 +49,12 @@ for (const source of [videoCard, rail, daySchedule]) {
   assert.match(source, /fallbackSource="youtube"/);
   assert.doesNotMatch(source, /useAssetUrl\(/);
 }
+assert.match(videoCard, /fallbackSrc=\{video\.thumbnailKey \|\| video\.thumbnailPresentation === "lofi_frame_pending"/,
+  "a retained Library thumbnail must not fall back to stale YouTube artwork");
+assert.match(rail, /fallbackSrc=\{video\.thumbnailKey \|\| video\.thumbnailPresentation === "lofi_frame_pending"/,
+  "the artifact rail must preserve current thumbnail identity");
+assert.match(daySchedule, /fallbackSrc=\{event\.thumbnailKey\s*\?/,
+  "scheduled artwork must not mask a retained thumbnail with YouTube art");
 
 // Status and proof badges remain tied to their actual persisted fields rather
 // than being replaced by a preview's source label.

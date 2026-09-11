@@ -108,7 +108,11 @@ function DayEventCard({ event, priority = false }: { event: CalendarEvent; prior
           className={styles.dayEventMedia}
           dataTone={event.readiness}
           assetKey={event.thumbnailKey}
-          fallbackSrc={event.youtubeVideoId ? youtubeThumb(event.youtubeVideoId) : undefined}
+          // Planned artwork wins; an old YouTube image is only useful when no
+          // retained thumbnail has been recorded for this event.
+          fallbackSrc={event.thumbnailKey
+            ? undefined
+            : event.youtubeVideoId ? youtubeThumb(event.youtubeVideoId) : undefined}
           fallbackSource="youtube"
           alt=""
           priority={priority}
