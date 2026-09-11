@@ -151,7 +151,7 @@ Primary sources:
 
 ### C. Every remaining module, inspected and improved separately
 
-**Shared critique seam partial (11 September):** `produceAndCritique` now admits only a finite 0–1 score, explicit boolean verdict, bounded non-empty issue strings, and a boolean fatal marker. Malformed results fail closed before best-of selection or another iteration, with a focused regression covering NaN, out-of-range, type-confused, oversized, and overlong verdicts. Domain-specific critics and their calibrated quality oracles remain separately open.
+**Shared critique seam partial (11 September):** `produceAndCritique` now admits only a finite 0–1 score, explicit boolean verdict, bounded non-empty issue strings, and a boolean fatal marker. Malformed results fail closed before best-of selection or another iteration, with a focused regression covering NaN, out-of-range, type-confused, oversized, and overlong verdicts. The shared storyboard critic now uses that same admission boundary and rejects out-of-range scores instead of clamping them into evidence. Domain-specific critics and their calibrated quality oracles remain separately open.
 
 - [ ] **33 — Topic Intel / Topicraft.** Measure novelty, demand evidence, saturation, channel fit, provenance, and title leakage; eliminate duplicate YouTube research already gathered elsewhere.
   **Partial (11 September):** the judge now requires a complete finite 1–10 ranking with unique zero-based bet indexes before any score can gate a portfolio. Missing, duplicated, out-of-range, or malformed rows fail visibly into the existing `ungated` marker; no partial ranking is treated as quality evidence. Held-out demand/novelty calibration and shared evidence-packet reuse remain open.

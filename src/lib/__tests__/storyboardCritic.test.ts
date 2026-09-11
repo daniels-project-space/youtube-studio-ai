@@ -24,7 +24,7 @@ async function main(): Promise<void> {
       return new Response(JSON.stringify({
         id: "or-storyboard-test",
         model: "google/gemini-3.7-flash",
-        choices: [{ message: { content: '{"score":1.2,"pass":false,"issues":["Panel 2: show the causal change."]}' } }],
+        choices: [{ message: { content: '{"score":0.9,"pass":false,"issues":["Panel 2: show the causal change."]}' } }],
         usage: { prompt_tokens: 12, completion_tokens: 8 },
       }), { status: 200, headers: { "content-type": "application/json" } });
     };
@@ -38,7 +38,7 @@ async function main(): Promise<void> {
       channel: { channelName: "Test Channel", laneEmphasis: ["causal clarity"] },
     });
     assert.deepEqual(verdict, {
-      score: 1,
+      score: 0.9,
       pass: false,
       issues: ["Panel 2: show the causal change."],
     });
@@ -57,6 +57,21 @@ async function main(): Promise<void> {
       }),
       null,
       "malformed critic output must not be turned into an approving verdict",
+    );
+
+    global.fetch = async () => new Response(JSON.stringify({
+      choices: [{ message: { content: '{"score":1.2,"pass":false,"issues":[]}' } }],
+    }), { status: 200, headers: { "content-type": "application/json" } });
+    assert.equal(
+      await critiqueStoryboardText({
+        label: "out-of-range verdict",
+        topic: "topic",
+        candidate: "candidate",
+        rubric: "rubric",
+        costWarning: "warning",
+      }),
+      null,
+      "out-of-range scores must be rejected rather than clamped into evidence",
     );
 
     delete process.env.OPENROUTER_API_KEY;

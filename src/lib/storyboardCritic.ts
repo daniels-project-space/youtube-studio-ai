@@ -1,4 +1,8 @@
-import { channelCritiqueBrief, type ChannelCritiqueContext } from "@/engine/critiqueLoop";
+import {
+  channelCritiqueBrief,
+  type ChannelCritiqueContext,
+  validateCritiqueResponse,
+} from "@/engine/critiqueLoop";
 import { claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
 
 export interface StoryboardCriticVerdict {
@@ -84,17 +88,16 @@ export async function critiqueStoryboardText(args: {
       temperature: 0.2,
       log: args.log,
     });
-    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
-    const verdict = raw as { score?: unknown; pass?: unknown; issues?: unknown };
-    if (typeof verdict.score !== "number" || !Number.isFinite(verdict.score) || typeof verdict.pass !== "boolean") {
-      return null;
-    }
+    const admission = validateCritiqueResponse(raw);
+    if (!admission.pass || !admission.critique) return null;
+    const verdict = admission.critique;
     return {
-      score: Math.min(1, Math.max(0, verdict.score)),
+      // The shared admission boundary rejects out-of-range values; clamping a
+      // malformed score would turn invalid provider evidence into a seemingly
+      // valid approval.
+      score: verdict.score,
       pass: verdict.pass,
-      issues: Array.isArray(verdict.issues)
-        ? verdict.issues.map((issue) => String(issue ?? "").trim()).filter(Boolean).slice(0, 6)
-        : [],
+      issues: verdict.issues.slice(0, 8),
     };
   } catch {
     return null;
