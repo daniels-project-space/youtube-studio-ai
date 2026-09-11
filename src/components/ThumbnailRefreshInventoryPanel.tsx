@@ -435,20 +435,26 @@ export function ThumbnailRefreshInventoryPanel({
                   {row.candidate ? <ThumbnailRefreshPreview row={row} candidate /> : null}
                 </div>
                 <div className={styles.rowCopy}>
-                  <span className={styles.status} data-tone={display.tone}>{display.label}</span>
-                  <h3>{row.title}</h3>
-                  <p>{row.evidenceReason}</p>
-                  <p>
-                    {row.thumbnailReplayStatus === "ready_for_thumbnail_only"
-                      ? "Exact thumbnail inputs retained. "
-                      : row.thumbnailReplayStatus === "ready_for_private_successor"
-                        ? "Current Golden Nano Banana Pro module snapshotted. "
-                        : "Thumbnail candidate is unavailable. "}
-                    {row.thumbnailReplayReason}
-                  </p>
-                  {row.legacyCleanupAction === "retire" ? (
-                    <p className={styles.retirementReason}>{row.legacyCleanupExplanation}</p>
-                  ) : null}
+                  <div className={styles.titleLine}>
+                    <span className={styles.status} data-tone={display.tone}>{display.label}</span>
+                    <h3>{row.title}</h3>
+                  </div>
+                  <p className={styles.rowSummary} title={row.evidenceReason}>{row.evidenceReason}</p>
+                  <details className={styles.evidenceDetails}>
+                    <summary>Evidence &amp; replay</summary>
+                    <p>{row.evidenceReason}</p>
+                    <p>
+                      {row.thumbnailReplayStatus === "ready_for_thumbnail_only"
+                        ? "Exact thumbnail inputs retained. "
+                        : row.thumbnailReplayStatus === "ready_for_private_successor"
+                          ? "Current Golden Nano Banana Pro module snapshotted. "
+                          : "Thumbnail candidate is unavailable. "}
+                      {row.thumbnailReplayReason}
+                    </p>
+                    {row.legacyCleanupAction === "retire" ? (
+                      <p className={styles.retirementReason}>{row.legacyCleanupExplanation}</p>
+                    ) : null}
+                  </details>
                   <div className={styles.meta}>
                     {row.channelSlug ? <Link href={`/channels/${row.channelSlug}`}>{row.channelName}</Link> : <span>{row.channelName}</span>}
                     <span>{fmtDateTime(row.createdAt)}</span>

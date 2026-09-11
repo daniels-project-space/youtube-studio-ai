@@ -34,7 +34,7 @@
 .ernieGalleryCard strong { overflow: hidden; color: var(--color-fg); font-size: .58rem; font-weight: 670; text-overflow: ellipsis; white-space: nowrap; }
 .ernieGalleryCard a + div a { overflow: hidden; color: var(--color-primary); font: .5rem/1.1 var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
 .list { display: grid; gap: .55rem; margin-top: .8rem; }
-.row { position: relative; display: grid; grid-template-columns: minmax(10.5rem, 13rem) minmax(0,1fr) minmax(120px,auto); align-items: center; gap: 1rem; padding: .68rem; border: 1px solid var(--color-border); border-radius: 11px; background: rgba(243,240,232,.018); }
+.row { position: relative; display: grid; grid-template-columns: minmax(10rem, 12rem) minmax(0,1fr) minmax(145px, 170px); align-items: center; gap: .75rem; padding: .55rem; border: 1px solid var(--color-border); border-radius: 11px; background: rgba(243,240,232,.018); }
 .row::before { content: ""; position: absolute; top: -1px; left: .8rem; width: 32px; height: 1px; background: var(--color-blueprint); }
 .preview { position: relative; display: grid; min-height: 5.5rem; overflow: hidden; border: 1px solid var(--color-border); border-radius: 8px; background: var(--color-canvas); aspect-ratio: 16 / 9; }
 .previewStack { display: grid; gap: .35rem; }
@@ -44,15 +44,20 @@
 .previewEmpty { display: grid; place-items: center; padding: .65rem; color: var(--color-faint); font-size: .62rem; text-align: center; }
 .previewSource { position: absolute; right: .35rem; bottom: .35rem; padding: .2rem .32rem; border: 1px solid rgba(255,255,255,.12); border-radius: 5px; color: rgba(255,255,255,.82); background: rgba(5,7,5,.7); font: 700 .48rem/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; backdrop-filter: blur(8px); }
 .rowCopy { min-width: 0; }
-.status { display: inline-flex; margin-bottom: .3rem; padding: .2rem .38rem; border: 1px solid var(--color-border); border-radius: 5px; color: var(--color-muted); background: rgba(243,240,232,.02); font: 700 .5rem/1 var(--font-mono); letter-spacing: .07em; text-transform: uppercase; }
+.titleLine { display: flex; align-items: center; gap: .42rem; min-width: 0; }
+.status { display: inline-flex; flex: 0 0 auto; padding: .2rem .38rem; border: 1px solid var(--color-border); border-radius: 5px; color: var(--color-muted); background: rgba(243,240,232,.02); font: 700 .5rem/1 var(--font-mono); letter-spacing: .07em; text-transform: uppercase; }
 .status[data-tone="ready"] { border-color: rgba(182,223,98,.24); color: var(--color-secondary); background: rgba(182,223,98,.055); }
 .status[data-tone="review"] { border-color: rgba(245,158,11,.25); color: var(--color-amber); background: rgba(245,158,11,.05); }
 .status[data-tone="warning"] { border-color: rgba(251,113,133,.24); color: var(--color-failed); background: rgba(251,113,133,.05); }
-.row h3 { overflow: hidden; margin: 0; font-size: .79rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.rowCopy > p { display: -webkit-box; max-width: 58rem; margin: .24rem 0 0; overflow: hidden; color: var(--color-muted); font-size: .65rem; line-height: 1.43; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
-.rowCopy > p + p { color: var(--color-faint); }
-.rowCopy > .retirementReason { color: var(--color-failed); }
-.meta { display: flex; flex-wrap: wrap; gap: .22rem .6rem; margin-top: .42rem; color: var(--color-faint); font: .54rem/1.3 var(--font-mono); }
+.row h3 { min-width: 0; overflow: hidden; margin: 0; font-size: .77rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.rowSummary { display: -webkit-box; max-width: 58rem; margin: .25rem 0 0; overflow: hidden; color: var(--color-muted); font-size: .62rem; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
+.evidenceDetails { margin-top: .25rem; color: var(--color-faint); font-size: .58rem; }
+.evidenceDetails summary { width: fit-content; color: var(--color-blueprint); font: 700 .5rem/1 var(--font-mono); letter-spacing: .055em; text-transform: uppercase; cursor: pointer; }
+.evidenceDetails summary:hover { color: var(--color-fg); }
+.evidenceDetails p { max-width: 58rem; margin: .25rem 0 0; color: var(--color-muted); line-height: 1.4; }
+.evidenceDetails p + p { color: var(--color-faint); }
+.evidenceDetails .retirementReason { color: var(--color-failed); }
+.meta { display: flex; flex-wrap: wrap; gap: .22rem .6rem; margin-top: .34rem; color: var(--color-faint); font: .52rem/1.25 var(--font-mono); }
 .meta a { color: var(--color-blueprint); }
 .meta a:hover { color: var(--color-fg); }
 .actions { display: grid; align-content: center; gap: .35rem; }
