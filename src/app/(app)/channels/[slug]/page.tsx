@@ -30,6 +30,7 @@ import {
 } from "@/components/OperationsAccess";
 import { SkeletonList } from "@/components/Skeleton";
 import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
+import { NicheMotionGlyph } from "@/components/NicheMotionGlyph";
 import { LatestVideoWidget } from "@/components/LatestVideoWidget";
 import { StatsCharts } from "@/components/StatsCharts";
 import {
@@ -399,6 +400,9 @@ export default function ChannelHubPage({
               size={88}
               radius={22}
             />
+            <span className={styles.heroMotif} aria-hidden="true">
+              <NicheMotionGlyph niche={id.niche} channelName={channel.name} />
+            </span>
             <div className={styles.heroTitle}>
               <h1>{channel.name}</h1>
               <div className={styles.heroMeta}>

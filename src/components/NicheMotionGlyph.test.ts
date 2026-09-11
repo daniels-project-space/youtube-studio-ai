@@ -15,7 +15,8 @@ assert.equal(channelMotionMotifFor({ niche: "history", channelName: "Inked Histo
 assert.equal(channelMotionMotifFor({ niche: "finance", channelName: "Chalk & Compound" }), "ledger");
 assert.equal(channelMotionMotifFor({ niche: "educational", channelName: "The Chalk Classroom" }), "lesson");
 assert.equal(channelMotionMotifFor({ niche: "finance" }), "ledger");
-assert.equal(channelMotionMotifFor({ channelName: "Gratitude Springs" }), "mind");
+assert.equal(channelMotionMotifFor({ channelName: "Gratitude Springs" }), "lotus");
+assert.equal(channelMotionMotifFor({ channelName: "Seaside Ghibli Lofi" }), "seaside");
 assert.equal(channelMotionMotifFor({ channelName: "Neon Rain LoFi" }), "lofi");
 assert.match(glyph, /channelMotionMotifFor/);
 assert.match(channelCreator, /<NicheMotionGlyph niche=\{n\.key\}/);
@@ -23,6 +24,8 @@ assert.doesNotMatch(channelCreator, /function NicheGlyph/);
 assert.match(css, /data-motif="book"/);
 assert.match(css, /@keyframes bookTurnLeft/);
 assert.match(css, /@keyframes penDraw/);
+assert.match(css, /@keyframes lotusOpen/);
+assert.match(css, /@keyframes seasideTide/);
 assert.match(css, /prefers-reduced-motion/);
 
 console.log("Channel motion glyph system tests passed");

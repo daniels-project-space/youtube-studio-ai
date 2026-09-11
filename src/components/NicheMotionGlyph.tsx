@@ -37,6 +37,8 @@ export function NicheMotionGlyph({
       {motif === "summit" && <Summit />}
       {motif === "health" && <Health />}
       {motif === "business" && <Business />}
+      {motif === "lotus" && <Lotus />}
+      {motif === "seaside" && <Seaside />}
     </svg>
   );
 }
@@ -85,4 +87,10 @@ function Health() {
 }
 function Business() {
   return <><circle cx="16" cy="16" r="11.5" stroke="currentColor" strokeWidth="1" opacity=".38" /><path d="M9.5 21.5h13M11 19v-4m5 4V11m5 8v-5" stroke="currentColor" strokeWidth="1.55" strokeLinecap="round" /><path className={styles.businessArrow} d="m11 13 4-3 2.5 1.8L21 8.5" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /></>;
+}
+function Lotus() {
+  return <><circle cx="16" cy="16" r="11.5" stroke="currentColor" strokeWidth="1" opacity=".38" /><path className={styles.lotusPetal} d="M16 20.8c-3.5 0-5.8-1.7-6.7-4.4 2.8-.2 5.1.8 6.7 3.2 1.6-2.4 3.9-3.4 6.7-3.2-.9 2.7-3.2 4.4-6.7 4.4Z" stroke="currentColor" strokeWidth="1.2" strokeLinejoin="round" /><path d="M16 19.5c-2.1-2.3-2.7-5.1 0-8.1 2.7 3 2.1 5.8 0 8.1Zm-1.1 2.6H10m7.1 0H22" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" strokeLinejoin="round" /><path className={styles.lotusRipple} d="M8.5 23.5c2.2-1.1 4.5-1.1 7.5 0 3-1.1 5.3-1.1 7.5 0" stroke="currentColor" strokeWidth="1" strokeLinecap="round" /></>;
+}
+function Seaside() {
+  return <><circle cx="16" cy="16" r="11.5" stroke="currentColor" strokeWidth="1" opacity=".38" /><circle className={styles.seasideSun} cx="21.5" cy="10.5" r="2.25" stroke="currentColor" strokeWidth="1.1" /><path className={styles.seasideWave} d="M8.5 17c1.6-1.4 3.1-1.4 4.7 0s3.1 1.4 4.7 0 3.1-1.4 4.7 0M8.5 21c1.6-1.4 3.1-1.4 4.7 0s3.1 1.4 4.7 0 3.1-1.4 4.7 0" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /><path d="M10.2 14.4h5.5" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" /></>;
 }

@@ -13,7 +13,9 @@ export type ChannelMotionMotif =
   | "pen"
   | "summit"
   | "health"
-  | "business";
+  | "business"
+  | "lotus"
+  | "seaside";
 
 const NICHE_MOTIFS: Record<string, ChannelMotionMotif> = {
   lofi: "lofi",
@@ -56,7 +58,9 @@ export function channelMotionMotifFor({
   if (/inked\s*histories|history|historical/.test(name)) return "book";
   if (/chalk/.test(name)) return nicheKey === "finance" ? "ledger" : "lesson";
   if (/whiteboard/.test(name)) return "lesson";
-  if (/stoic|meditat|gratitude/.test(name)) return "mind";
+  if (/gratitude|serenity|sanctuary/.test(name)) return "lotus";
+  if (/stoic|meditat/.test(name)) return "compass";
+  if (/seaside|ghibli|coast|ocean/.test(name)) return "seaside";
   if (/lofi|rain|ambient|frequency/.test(name)) return "lofi";
   return NICHE_MOTIFS[nicheKey] ?? "lesson";
 }

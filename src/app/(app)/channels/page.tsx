@@ -15,6 +15,7 @@ import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
 import { IconChannels } from "@/components/icons";
 import { OwnerLockBadge } from "@/components/OwnerLockBadge";
 import { ChannelFolderWorkspace } from "@/components/ChannelFolderWorkspace";
+import { NicheMotionGlyph } from "@/components/NicheMotionGlyph";
 import {
   useOperationsAccess,
   useRequestOperationsAccess,
@@ -318,6 +319,13 @@ export default function ChannelsPage() {
                     size={48}
                     radius={12}
                   />
+                  <span
+                    className="channel-card-motif"
+                    aria-hidden="true"
+                    title={`${c.name} identity symbol`}
+                  >
+                    <NicheMotionGlyph niche={c.identity?.niche} channelName={c.name} />
+                  </span>
                   <div className="channel-card-title">
                     <Link href={`/channels/${c.slug}`}>
                       <h2>{c.name}</h2>
@@ -560,6 +568,9 @@ function ChannelFleetInspector({
             size={54}
             radius={13}
           />
+          <span className="channel-fleet-inspector-motif" aria-hidden="true">
+            <NicheMotionGlyph niche={channel.identity?.niche} channelName={channel.name} />
+          </span>
           <div>
             <strong>{channel.identity?.niche ?? channelCategoryLabelFor(channel)}</strong>
             <span>{creating ? "YouTube setup running" : linked ? "YouTube destination ready" : youtubeConnectionIssue(connector, false)}</span>
