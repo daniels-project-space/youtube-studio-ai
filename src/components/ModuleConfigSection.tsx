@@ -217,6 +217,7 @@ function ChannelLockControl({
   const unlockChannel = useMutation(api.channels.unlockChannel);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const lockFailure = error ? failureReason(error) : null;
 
   const changeLock = async () => {
     if (busy) return;
@@ -261,7 +262,16 @@ function ChannelLockControl({
       >
         {busy ? "Working…" : locked ? "Unlock channel" : "Lock channel"}
       </button>
-      {error && <div className={styles.error} role="alert">{error}</div>}
+      {lockFailure && (
+        <div className={styles.error} role="alert">
+          <strong>{lockFailure.reason}{lockFailure.block ? ` · ${lockFailure.block}` : ""}</strong>
+          {lockFailure.hint ? <span>{lockFailure.hint}</span> : null}
+          <details className={styles.errorTechnical}>
+            <summary>Technical detail</summary>
+            <code>{error}</code>
+          </details>
+        </div>
+      )}
     </div>
   );
 }

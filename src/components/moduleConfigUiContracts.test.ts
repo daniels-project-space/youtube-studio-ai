@@ -16,6 +16,8 @@ assert.match(section, /import \{ failureReason \} from "@\/lib\/failureReason"/u
 assert.match(section, /const failure = err \? failureReason\(err\) : null/u);
 assert.match(section, /failure\.reason\}\{failure\.block/u);
 assert.match(section, /<summary>Technical detail<\/summary>/u);
+assert.match(section, /const lockFailure = error \? failureReason\(error\) : null/u);
+assert.match(section, /lockFailure\.reason\}\{lockFailure\.block/u);
 assert.doesNotMatch(section, /<div className=\{styles\.error\} role="alert">\{err\}<\/div>/u);
 assert.match(panel, /function humanLabel/u, "internal camel/snake case must not leak into operator labels");
 assert.match(panel, /knob\.type === "text"[\s\S]*<textarea/u, "text directions must render as text instead of a numeric slider");
