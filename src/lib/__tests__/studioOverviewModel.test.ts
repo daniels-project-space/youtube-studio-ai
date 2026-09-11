@@ -107,6 +107,29 @@ test("a failed run without an error still gets an honest fallback", () => {
   assert.equal(snapshot.issues[0]?.detail, "Failed (no error recorded)");
 });
 
+test("media probe failures stay compact and actionable", () => {
+  const snapshot = buildStudioOverview({
+    channels: channels.slice(0, 1),
+    recentRuns: [{
+      ...failedRun,
+      _id: "runs:probe",
+      error: "ffprobe exited 1: /tmp/private-run/video_finished",
+    }],
+    activeRuns: [],
+    plan: [],
+    youtubeLinks: [{
+      channelId: "channels:one",
+      status: "active",
+      scopeHealth: "healthy",
+      ytChannelId: "UC-real",
+    }],
+    now: 3_000,
+  });
+
+  assert.equal(snapshot.issues[0]?.detail, "Render media validation failed");
+  assert.doesNotMatch(snapshot.issues[0]?.detail ?? "", /private-run|video_finished/);
+});
+
 test("ready work without a date is described as editorially ready, not scheduled", () => {
   const unscheduled = { ...readyPlan, scheduledAt: undefined };
   const snapshot = buildStudioOverview({
