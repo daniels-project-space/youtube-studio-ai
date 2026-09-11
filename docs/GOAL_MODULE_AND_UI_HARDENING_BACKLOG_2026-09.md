@@ -188,6 +188,7 @@ Primary sources:
 - [ ] **63 — Assembly / EDL.** Replace the documented-but-orphaned contract with the executed renderer contract; prove idempotency, checkpoint recovery, LUFS, A/V sync, transitions, no dead air, and render parity.
 - [ ] **64 — SEO Metadata beyond titles.** Measure descriptions, chapters, tags, pinned comments, policy compliance, language, duplication, and actual search value; stop producing fields whose measured value is negligible.
 - [ ] **65 — Artifact + Shot Gates.** Consolidate overlapping image/video judges, route defects to the responsible module, and prove final acceptance cannot pass with missing scenes or stale artifacts.
+  **Partial (11 September):** the shared vision-artifact normalizer now requires a finite in-range 0–10 score and a bounded issue array; missing, out-of-range, or type-confused provider output becomes a visible zero-score verdict instead of a clamped approval. Cross-artifact consolidation and final stale-artifact admission remain open.
 - [ ] **66 — Final Master Story Coverage.** Watch the complete output, score every narrated claim/beat against on-screen coverage, and require re-review after any repaired artifact changes.
 - [ ] **67 — Whiteboard / Drawn Cinema.** Test that the full story is drawn, not only early panels; enforce stroke/build continuity, hand timing, identity, legibility, and no unexplained static gaps.
 - [ ] **68 — Motion Comic.** Test page/panel continuity, character identity, speech/narration alignment, composition, motion restraint, and complete story coverage.
