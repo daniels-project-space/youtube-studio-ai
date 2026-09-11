@@ -130,6 +130,28 @@ test("media probe failures stay compact and actionable", () => {
   assert.doesNotMatch(snapshot.issues[0]?.detail ?? "", /private-run|video_finished/);
 });
 
+test("configuration failures name the missing QA dependency", () => {
+  const snapshot = buildStudioOverview({
+    channels: channels.slice(0, 1),
+    recentRuns: [{
+      ...failedRun,
+      _id: "runs:qa-provider",
+      error: "no configured production QA provider: thumbnail_gen",
+    }],
+    activeRuns: [],
+    plan: [],
+    youtubeLinks: [{
+      channelId: "channels:one",
+      status: "active",
+      scopeHealth: "healthy",
+      ytChannelId: "UC-real",
+    }],
+    now: 3_000,
+  });
+
+  assert.equal(snapshot.issues[0]?.detail, "Production QA provider not configured");
+});
+
 test("ready work without a date is described as editorially ready, not scheduled", () => {
   const unscheduled = { ...readyPlan, scheduledAt: undefined };
   const snapshot = buildStudioOverview({

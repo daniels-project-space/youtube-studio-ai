@@ -24,6 +24,7 @@ const RULES: { test: RegExp; reason: string; hint?: string }[] = [
   { test: /OOM|KILLED|out of memory|TASK_PROCESS_OOM/i, reason: "Render ran out of memory", hint: "Heavy encode — shorten the video or bump the machine." },
   { test: /\b(?:ffprobe|ffmpeg)\b.*\b(?:exited|spawn failed|could not inspect|invalid data|no such file)\b/i, reason: "Render media validation failed", hint: "Inspect the retained output and retry the failed stage." },
   { test: /length_check|minSeconds|maxSeconds|outside|too short|too long/i, reason: "Video length outside the allowed range" },
+  { test: /no configured production (?:qa|quality) provider|production (?:qa|quality) provider.*not configured/i, reason: "Production QA provider not configured", hint: "Configure a production QA provider before retrying." },
   { test: /qa[_\s]?visual|qa did not pass|qaPassed|quality gate/i, reason: "QA quality gate failed", hint: "Footage/thumbnail/SEO scored too low." },
   { test: /originality|too similar|duplicate/i, reason: "Originality gate failed (too similar to a past video)" },
   { test: /compliance|sensitive|policy/i, reason: "Compliance gate flagged the content" },
