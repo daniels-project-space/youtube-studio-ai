@@ -79,6 +79,73 @@ export interface TopicBet {
   scores?: { demand: number; freshness: number; fit: number; packageability: number };
 }
 
+export interface TopicJudgeRanking {
+  idx: number;
+  demand: number;
+  freshness: number;
+  fit: number;
+  packageability: number;
+}
+
+export interface TopicJudgeAdmission {
+  pass: boolean;
+  rankings: TopicJudgeRanking[];
+  issues: string[];
+}
+
+/**
+ * Validate a complete Topicraft judge response before any score can gate a
+ * topic. A partial or repeated ranking is not evidence for the omitted bet;
+ * returning an empty admission makes the caller mark the slate ungated rather
+ * than silently treating missing scores as zero or as a pass.
+ */
+export function validateTopicJudgeResponse(
+  value: unknown,
+  candidateCount: number,
+): TopicJudgeAdmission {
+  const issues: string[] = [];
+  const rankings = (value as { rankings?: unknown } | null)?.rankings;
+  if (!Array.isArray(rankings) || rankings.length !== candidateCount) {
+    issues.push(`judge must rank every bet exactly once (${candidateCount} required)`);
+    return { pass: false, rankings: [], issues };
+  }
+  const seen = new Set<number>();
+  const admitted: TopicJudgeRanking[] = [];
+  rankings.forEach((raw, position) => {
+    const row = raw as {
+      idx?: unknown;
+      demand?: unknown;
+      freshness?: unknown;
+      fit?: unknown;
+      packageability?: unknown;
+    } | null;
+    const idx = row?.idx;
+    if (typeof idx !== "number" || !Number.isInteger(idx) || idx < 0 || idx >= candidateCount) {
+      issues.push(`judge ranking ${position + 1} has an invalid bet index`);
+      return;
+    }
+    if (seen.has(idx)) {
+      issues.push(`judge ranking repeats bet ${idx}`);
+      return;
+    }
+    const scores = [row?.demand, row?.freshness, row?.fit, row?.packageability];
+    if (scores.some((score) => typeof score !== "number" || !Number.isFinite(score) || score < 1 || score > 10)) {
+      issues.push(`judge ranking ${position + 1} has an invalid 1-10 score`);
+      return;
+    }
+    seen.add(idx);
+    admitted.push({
+      idx,
+      demand: row!.demand as number,
+      freshness: row!.freshness as number,
+      fit: row!.fit as number,
+      packageability: row!.packageability as number,
+    });
+  });
+  if (seen.size !== candidateCount) issues.push("judge ranking omitted at least one bet");
+  return { pass: issues.length === 0, rankings: issues.length === 0 ? admitted : [], issues };
+}
+
 export interface TopicEvidence {
   outliers: OutlierVideo[];
   trends: TrendSignal[];
@@ -663,10 +730,11 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
           maxTokens: 3000,
           temperature: 0.2,
         }), () => log("topicraft: judge returned unusable text — re-judging once (a second billed call, against admitting an ungated slate)"));
-        const ranked = (j.rankings ?? [])
-          .filter((r): r is Required<typeof r> =>
-            typeof r.idx === "number" && r.idx >= 0 && r.idx < survivors.length &&
-            (r.demand ?? 0) >= 7 && (r.freshness ?? 0) >= (isMusicNiche ? 5 : 7) && (r.fit ?? 0) >= 7 && (r.packageability ?? 0) >= 7,
+        const admission = validateTopicJudgeResponse(j, survivors.length);
+        if (!admission.pass) throw new Error(`judge response rejected (${admission.issues.join("; ")})`);
+        const ranked = admission.rankings
+          .filter((r) =>
+            r.demand >= 7 && r.freshness >= (isMusicNiche ? 5 : 7) && r.fit >= 7 && r.packageability >= 7,
           )
           .sort((x, y) => y.demand + y.freshness + y.fit + y.packageability - (x.demand + x.freshness + x.fit + x.packageability));
         gated = ranked.map((r) => ({

@@ -151,6 +151,7 @@ Primary sources:
 ### C. Every remaining module, inspected and improved separately
 
 - [ ] **33 — Topic Intel / Topicraft.** Measure novelty, demand evidence, saturation, channel fit, provenance, and title leakage; eliminate duplicate YouTube research already gathered elsewhere.
+  **Partial (11 September):** the judge now requires a complete finite 1–10 ranking with unique zero-based bet indexes before any score can gate a portfolio. Missing, duplicated, out-of-range, or malformed rows fail visibly into the existing `ungated` marker; no partial ranking is treated as quality evidence. Held-out demand/novelty calibration and shared evidence-packet reuse remain open.
 - [ ] **34 — Episode Graph.** Test causal order, retention beats, duration feasibility, and scene coverage across documentary, essay, story, quiz, music, and short formats.
 - [ ] **35 — Self-Contained Story.** Prove the handoff includes every fact, identity rule, and render requirement needed downstream without hidden store reads.
 - [ ] **36 — Casefile Documentary.** Validate source-to-claim traceability, uncertainty language, chronology, and no unsupported dramatization on real and adversarial cases.
