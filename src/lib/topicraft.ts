@@ -648,6 +648,9 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
           `CHANNEL IDENTITY (hard guardrail — every bet MUST fit):\n` +
             `- niche: ${a.niche || "n/a"} | persona: ${a.persona || "n/a"}${a.styleGrammar ? ` | style: ${a.styleGrammar}` : ""}` +
             (doctrine ? `\n- voice archetype "${doctrine.voice}": every bet must sound like a video THIS channel would make` : "") +
+            (a.family || a.contentLane
+              ? `\n- sealed format route: family=${a.family || "n/a"}, content lane=${a.contentLane || "n/a"}; respect this format's scope and audience promise`
+              : "") +
             (a.topicPool?.length
               ? `\n- the channel's PROVEN topic territory + TITLE VOICE (match this register — subject range AND phrasing): ${a.topicPool.slice(0, 12).join("; ")}` +
                 `\n- borrow only the ANGLE from outliers/competitors, NEVER their FORMAT: if the examples above are narrative/story titles, do NOT output listicle "N Secrets…", "…Revealed", "You won't believe" or number-led list titles`
