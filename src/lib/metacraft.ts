@@ -79,6 +79,101 @@ export const CLICKBAIT_DIRECTION: Record<ClickbaitLevel, string> = {
      "say it as bluntly as it deserves. Never promise anything the video does not deliver.",
 };
 
+/**
+ * Format-aware title envelope. YouTube's 100-character ceiling is universal,
+ * but the useful browse window is not: a short, a serialized lore episode and
+ * a searchable documentary need different amounts of context. The hard bounds
+ * stay deliberately forgiving; the target band is what the generator and the
+ * local tie-breaker optimise for. This keeps the module channel-aware without
+ * hard-coding one niche's preferred headline shape onto every channel.
+ */
+export type TitleProfileId =
+  | "browse_long"
+  | "searchable_long"
+  | "serialized_lore"
+  | "motivational"
+  | "children_quiz"
+  | "music_loop"
+  | "short_form"
+  | "general";
+
+export interface TitleProfile {
+  id: TitleProfileId;
+  hardMinChars: number;
+  hardMaxChars: number;
+  targetMinChars: number;
+  targetMaxChars: number;
+  targetMinWords: number;
+  targetMaxWords: number;
+  discovery: "searchable" | "intriguing" | "hybrid";
+  guidance: string;
+}
+
+export const TITLE_PROFILES: Record<TitleProfileId, TitleProfile> = {
+  browse_long: {
+    id: "browse_long", hardMinChars: 25, hardMaxChars: 76,
+    targetMinChars: 40, targetMaxChars: 70, targetMinWords: 5, targetMaxWords: 12,
+    discovery: "hybrid", guidance: "Lead with the subject, then one clear tension or consequence.",
+  },
+  searchable_long: {
+    id: "searchable_long", hardMinChars: 28, hardMaxChars: 76,
+    targetMinChars: 38, targetMaxChars: 68, targetMinWords: 5, targetMaxWords: 11,
+    discovery: "searchable", guidance: "Put the exact subject or problem first; add one differentiated payoff.",
+  },
+  serialized_lore: {
+    id: "serialized_lore", hardMinChars: 25, hardMaxChars: 74,
+    targetMinChars: 36, targetMaxChars: 66, targetMinWords: 5, targetMaxWords: 11,
+    discovery: "hybrid", guidance: "Name the canon subject first and tease one specific revelation; avoid episode filler.",
+  },
+  motivational: {
+    id: "motivational", hardMinChars: 24, hardMaxChars: 72,
+    targetMinChars: 34, targetMaxChars: 64, targetMinWords: 4, targetMaxWords: 10,
+    discovery: "intriguing", guidance: "State the emotional or behavioural turn plainly; promise a usable shift, not hype.",
+  },
+  children_quiz: {
+    id: "children_quiz", hardMinChars: 22, hardMaxChars: 72,
+    targetMinChars: 30, targetMaxChars: 62, targetMinWords: 4, targetMaxWords: 10,
+    discovery: "searchable", guidance: "Make the question or learning outcome obvious in the opening words.",
+  },
+  music_loop: {
+    id: "music_loop", hardMinChars: 20, hardMaxChars: 76,
+    targetMinChars: 28, targetMaxChars: 60, targetMinWords: 4, targetMaxWords: 10,
+    discovery: "searchable", guidance: "Lead with the mood/use case and keep duration or format suffixes at the end.",
+  },
+  short_form: {
+    id: "short_form", hardMinChars: 18, hardMaxChars: 65,
+    targetMinChars: 24, targetMaxChars: 52, targetMinWords: 3, targetMaxWords: 9,
+    discovery: "intriguing", guidance: "Deliver the subject and turn in one compact phrase; omit setup.",
+  },
+  general: {
+    id: "general", hardMinChars: 25, hardMaxChars: 76,
+    targetMinChars: 40, targetMaxChars: 70, targetMinWords: 5, targetMaxWords: 12,
+    discovery: "hybrid", guidance: "Be accurate, concise and immediately legible to a new viewer.",
+  },
+};
+
+/** Resolve a profile from an explicit route setting, then durable lane/family. */
+export function resolveTitleProfile(
+  explicit?: string,
+  context: { family?: string; contentLane?: string; niche?: string } = {},
+): TitleProfileId {
+  if (explicit && Object.prototype.hasOwnProperty.call(TITLE_PROFILES, explicit)) {
+    return explicit as TitleProfileId;
+  }
+  const key = `${context.contentLane ?? ""} ${context.family ?? ""} ${context.niche ?? ""}`.toLowerCase();
+  if (/music_loop|lo-?fi|ambient|study beats|chillhop|sleep music/.test(key)) return "music_loop";
+  if (/short_form|documentary_collage_short|\bshorts\b/.test(key)) return "short_form";
+  if (/lore_micro_doc|loreshort|lore|fantasy canon|star wars|tolkien/.test(key)) return "serialized_lore";
+  if (/children|quiz|trivia|learning/.test(key)) return "children_quiz";
+  if (/motivat|self[- ]?improv|stoic|mindset|psychology/.test(key)) return "motivational";
+  if (/search|explainer|documentary|history|finance|tax|invest/.test(key)) return "searchable_long";
+  return "browse_long";
+}
+
+function profileFor(id?: TitleProfileId): TitleProfile {
+  return TITLE_PROFILES[id ?? "general"] ?? TITLE_PROFILES.general;
+}
+
 /** The level for a channel: explicit dial first, else the voice's own default. */
 export function resolveClickbaitLevel(
   explicit: number | undefined,
@@ -254,10 +349,15 @@ export interface TitleLint {
 export interface TitleQualitySignal {
   /** A deterministic 0–100 tie-break signal; it is never a substitute for the feed judge. */
   score: number;
+  profile: TitleProfileId;
   length: number;
   words: number;
   /** Number of grounded or concrete terms visible before the mobile fold. */
   earlySpecifics: number;
+  /** Grounded/concrete terms in the first four words. */
+  frontLoadedTerms: number;
+  /** Whether the title sits inside the format profile's preferred envelope. */
+  inTargetBand: boolean;
   repeatedTerms: number;
 }
 
@@ -277,7 +377,12 @@ function titleTokens(value: string): string[] {
  * succinct, accurate, and immediately legible on mobile without pretending a
  * local heuristic can predict CTR. Keeping it local adds no provider calls.
  */
-export function titleQualitySignal(title: string, grounding = ""): TitleQualitySignal {
+export function titleQualitySignal(
+  title: string,
+  grounding = "",
+  profileId: TitleProfileId = "general",
+): TitleQualitySignal {
+  const profile = profileFor(profileId);
   const trimmed = title.trim();
   const length = trimmed.length;
   const words = trimmed ? trimmed.split(/\s+/).length : 0;
@@ -295,6 +400,10 @@ export function titleQualitySignal(title: string, grounding = ""): TitleQualityS
     (originalWords.slice(1).some((word, index) =>
       /^[A-Z]/.test(word) && !QUALITY_STOPWORDS.has(earlyTokens[index + 1] ?? ""),
     ) ? 1 : 0);
+  const frontLoadedTerms = new Set(
+    titleTokens(trimmed.split(/\s+/).slice(0, 4).join(" "))
+      .filter((word) => groundingTerms.has(word)),
+  ).size;
   const counts = new Map<string, number>();
   for (const token of tokens) {
     if (!QUALITY_STOPWORDS.has(token)) counts.set(token, (counts.get(token) ?? 0) + 1);
@@ -302,21 +411,29 @@ export function titleQualitySignal(title: string, grounding = ""): TitleQualityS
   const repeatedTerms = [...counts.values()].filter((count) => count > 1).length;
 
   let score = 40;
-  if (length >= 40 && length <= 70) score += 22;
-  else if (length >= 30 && length <= 76) score += 12;
+  const inTargetBand = length >= profile.targetMinChars && length <= profile.targetMaxChars &&
+    words >= profile.targetMinWords && words <= profile.targetMaxWords;
+  if (inTargetBand) score += 22;
+  else if (length >= profile.hardMinChars && length <= profile.hardMaxChars) score += 10;
   else score -= 8;
-  if (words >= 5 && words <= 12) score += 10;
-  else if (words >= 4 && words <= 14) score += 4;
+  if (words >= profile.targetMinWords && words <= profile.targetMaxWords) score += 10;
+  else if (words >= Math.max(3, profile.targetMinWords - 1) && words <= profile.targetMaxWords + 2) score += 4;
   score += Math.min(earlySpecifics, 3) * 7;
+  score += Math.min(frontLoadedTerms, 2) * 5;
   if (earlyTokens.length > 0 && groundingTerms.has(earlyTokens[0])) score += 5;
+  const opening = earlyTokens.slice(0, 3);
+  if (opening.length >= 2 && !opening.some((word) => groundingTerms.has(word))) score -= 8;
   score -= repeatedTerms * 7;
   if (/[!?]{2,}|\.\.\.|\s[-|•]\s/.test(trimmed)) score -= 4;
 
   return {
     score: Math.max(0, Math.min(100, score)),
+    profile: profile.id,
     length,
     words,
     earlySpecifics,
+    frontLoadedTerms,
+    inTargetBand,
     repeatedTerms,
   };
 }
@@ -329,18 +446,25 @@ export function titleQualitySignal(title: string, grounding = ""): TitleQualityS
  */
 export function lintTitle(
   title: string,
-  o: { grounding?: string; channelName?: string; isMusicNiche?: boolean; allowHype?: boolean } = {},
+  o: {
+    grounding?: string;
+    channelName?: string;
+    isMusicNiche?: boolean;
+    allowHype?: boolean;
+    profile?: TitleProfileId;
+  } = {},
 ): TitleLint {
   const issues: string[] = [];
   const t = title.trim();
+  const profile = profileFor(o.profile);
   if (!t) return { pass: false, issues: ["empty title"] };
   // 85 was far outside the module's own 40-70 doctrine, so the target was
   // advice and only the extreme was a gate. Measured across the real content
   // plan that produced a median of 73 characters with 70% past the point browse
   // truncates. 76 keeps slack for a genuinely long proper noun while ending the
   // drift; the generator is still asked for 40-70.
-  if (t.length > 76) issues.push(`${t.length} chars > 76 — shorter and more to the point (aim 40-70)`);
-  if (t.length < 25) issues.push(`${t.length} chars — too short (aim 40-70)`);
+  if (t.length > profile.hardMaxChars) issues.push(`${t.length} chars > ${profile.hardMaxChars} — shorter and more to the point (aim ${profile.targetMinChars}-${profile.targetMaxChars})`);
+  if (t.length < profile.hardMinChars) issues.push(`${t.length} chars — too short (aim ${profile.targetMinChars}-${profile.targetMaxChars})`);
   if (FILLER_START.test(t)) issues.push("filler start — front-load the payoff, not throat-clearing");
   if (SETUP_COLON.test(t)) issues.push("scene-setting setup before a colon — state the point directly");
   if (!o.allowHype && HYPE.test(t)) issues.push("hype blacklist phrase breaks the register");
@@ -568,6 +692,8 @@ export interface MetaCraftArgs {
   betTitle?: string;
   /** 0-3; omitted falls back to the channel voice's own default. */
   clickbaitLevel?: number;
+  /** Format-aware title envelope; omitted callers resolve to browse_long. */
+  titleProfile?: TitleProfileId;
   log?: (m: string) => void;
 }
 
@@ -658,6 +784,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
   const t0 = Date.now();
   const doctrine = resolveVoiceDoctrine(a.niche);
   const clickbait = resolveClickbaitLevel(a.clickbaitLevel, doctrine?.voice);
+  const titleProfile = profileFor(a.titleProfile ?? "general");
   // Level 3 is the only setting that may reach for the hype register; the lint
   // still refuses anything the script cannot support at every level.
   const allowHype = clickbait >= 3;
@@ -736,7 +863,11 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           a.powerWords?.length ? `POWER WORDS: ${a.powerWords.slice(0, 12).join(", ")}` : "",
           a.perfContext ?? "",
           `CLICKBAIT LEVEL ${clickbait}/3 — ${CLICKBAIT_DIRECTION[clickbait]}`,
-          `TITLE RULES — SHORT and DIRECT: 40-70 characters. The title is the POINT ITSELF, never a setup for ` +
+          `FORMAT PROFILE "${titleProfile.id}" — ${titleProfile.discovery} discovery. ` +
+            `${titleProfile.guidance} Target ${titleProfile.targetMinChars}-${titleProfile.targetMaxChars} characters ` +
+            `and ${titleProfile.targetMinWords}-${titleProfile.targetMaxWords} words (hard limits ` +
+            `${titleProfile.hardMinChars}-${titleProfile.hardMaxChars}; YouTube's absolute ceiling is 100).`,
+          `TITLE RULES — SHORT and DIRECT: the title is the POINT ITSELF, never a setup for ` +
             `the point — no scene-setting fragments, no atmospheric prefixes, no two-part colon constructions ` +
             `(a short established format prefix like "Mission log:" is fine). Front-load the primary keyword and ` +
             `any payoff number inside the first 50 chars. Make the first 3-5 words reveal the subject or stake; ` +
@@ -774,8 +905,14 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       })
       .map((c) => ({
         ...c,
-        lint: lintTitle(c.title, { grounding, channelName: a.channelName, isMusicNiche: a.isMusicNiche, allowHype }),
-        quality: titleQualitySignal(c.title, grounding),
+        lint: lintTitle(c.title, {
+          grounding,
+          channelName: a.channelName,
+          isMusicNiche: a.isMusicNiche,
+          allowHype,
+          profile: titleProfile.id,
+        }),
+        quality: titleQualitySignal(c.title, grounding, titleProfile.id),
       }));
     const survivors = candidates.filter((c) => c.lint.pass);
     lastIssues = candidates.flatMap((c) => c.lint.issues);
@@ -805,6 +942,10 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         }>({
           prompt: [
             `You are a YouTube CTR strategist judging a real feed. Topic: "${a.topic}".`,
+            `FORMAT PROFILE "${titleProfile.id}" — ${titleProfile.discovery} discovery; ` +
+              `prefer candidates inside ${titleProfile.targetMinChars}-${titleProfile.targetMaxChars} characters ` +
+              `and ${titleProfile.targetMinWords}-${titleProfile.targetMaxWords} words unless a shorter, clearer ` +
+              `candidate communicates the promise better.`,
             feedClause,
             a.coldOpen ? `THE COLD OPEN the title must promise-match:\n"${a.coldOpen.slice(0, 350)}"` : "",
             `CANDIDATES:\n${survivors.map((c, i) => `${i}. [${c.frame}] ${c.title}`).join("\n")}`,

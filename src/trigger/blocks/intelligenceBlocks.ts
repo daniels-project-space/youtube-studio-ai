@@ -61,7 +61,7 @@ import {
   generateFalNanoBananaLofiThumbnailWithReceipt,
   hasFalNanoBananaLofiThumbnail,
 } from "@/lib/falNanoBananaLofiThumbnail";
-import { craftMetadata } from "@/lib/metacraft";
+import { craftMetadata, resolveTitleProfile } from "@/lib/metacraft";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { hasVisionKey } from "@/lib/vision";
 import {
@@ -385,6 +385,18 @@ export const metadataOptimized: Block = {
     const channelName = (ctx.store["channelName"] as string | undefined) ?? "this channel";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
     const persona = (ctx.store["persona"] as string | undefined) ?? "";
+    const titleProfile = resolveTitleProfile(
+      typeof ctx.params["titleProfile"] === "string" ? String(ctx.params["titleProfile"]) : undefined,
+      {
+        family: typeof ctx.store["family"] === "string" ? String(ctx.store["family"]) : undefined,
+        contentLane: typeof ctx.store["contentLane"] === "string"
+          ? String(ctx.store["contentLane"])
+          : typeof (ctx.store["contentLane"] as { key?: unknown } | null)?.key === "string"
+            ? String((ctx.store["contentLane"] as { key: string }).key)
+            : undefined,
+        niche,
+      },
+    );
 
     const topicBet = ctx.store["topicBet"] as { provisionalTitle?: unknown } | null | undefined;
     const topicBetProvisionalTitle =
@@ -525,6 +537,7 @@ export const metadataOptimized: Block = {
           : typeof ctx.store["clickbaitLevel"] === "number"
             ? (ctx.store["clickbaitLevel"] as number)
             : undefined,
+        titleProfile,
         log: ctx.log,
       });
       let { title, description, tags } = m;

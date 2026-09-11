@@ -61,6 +61,8 @@ async function main(): Promise<void> {
     "the retired unjudged tournament/critique recovery path must not remain executable",
   );
   assert.match(source, /titleDecision: m\.titleDecision/, "the metadata block must persist the judged decision for run-stage review");
+  assert.match(source, /resolveTitleProfile/, "metadata must resolve a format-aware title profile before generation");
+  assert.match(source, /titleProfile,/, "the resolved title profile must be passed into the title engine");
 
   console.log("METADATA TITLE AUTHORITY PASS — fallbacks cannot override evaluated or deterministic titles");
 }

@@ -10,22 +10,25 @@ const grounding = {
 function Scores({ option }: { option: TitleReviewOption }) {
   return <dl className={styles.scores} aria-label="Model ratings out of ten">
     {[["Pull", option.pull], ["Clarity", option.clarity], ["Identity", option.identity]].map(([label, value]) =>
-      <div key={label}><dt>{label}</dt><dd>{value}<small>/10</small></dd></div>)}
+      <div className={styles.score} key={label}>
+        <div className={styles.scoreMeta}><dt>{label}</dt><dd>{value}<small>/10</small></dd></div>
+        <span className={styles.scoreTrack} aria-hidden="true"><span style={{ width: `${Number(value) * 10}%` }} /></span>
+      </div>)}
   </dl>;
 }
 
 export function TitleReview({ review }: { review: TitleReviewPresentation }) {
   if (review.state === "unavailable") return <aside className={styles.warning}>
-    Saved title review is incomplete or unsupported. Inspect the technical data below.
+    Title review unavailable <span>· inspect technical data</span>
   </aside>;
   const otherOptions = review.options.filter((option) => !option.selected);
   return <section className={styles.root} aria-label="Saved title review">
     <header className={styles.header}>
-      <strong>Title review</strong>
+      <div className={styles.heading}><strong>Title review</strong><span className={styles.status}>Judged</span></div>
       <span>{review.source} · {review.attempts} {review.attempts === 1 ? "pass" : "passes"}</span>
     </header>
     {review.state === "title_changed" && <p className={styles.warning}>
-      The saved package title differs from this selection. These ratings describe the earlier title.
+      Package title differs from this reviewed winner.
     </p>}
     <div className={styles.selection}>
       <div><span className={styles.label}>Selected title</span>
@@ -37,7 +40,7 @@ export function TitleReview({ review }: { review: TitleReviewPresentation }) {
       </div>
       <Scores option={review.selected} />
     </div>
-    <p className={styles.note}>Model assessment, not a fact-check or measured audience performance.</p>
+    <p className={styles.note}>Source-bound model assessment · not fact-check or audience data</p>
     {otherOptions.length > 0 && <details className={styles.comparison}>
       <summary>Compare {otherOptions.length} other {otherOptions.length === 1 ? "title" : "titles"}</summary>
       <ol className={styles.options}>
