@@ -331,6 +331,7 @@ assert.match(settings, /\/api\/youtube-revoke/);
 // High-frequency navigation and channel-management actions must remain usable
 // touch targets on both desktop and the mobile bottom-navigation layout.
 assert.match(globalCss, /\.channel-card-title > a\s*\{[\s\S]*?min-height: 36px/);
+assert.match(globalCss, /\.channel-card-grid\s*\{[\s\S]*?minmax\(min\(100%, 190px\), 1fr\)/);
 assert.match(globalCss, /\.channel-fleet-inspector-nav a\s*\{[\s\S]*?min-height: 40px/);
 assert.match(globalCss, /\.channel-account-action\s*\{[\s\S]*?min-height: 38px/);
 assert.match(globalCss, /\.channel-card-actions a,\s*\n\.channel-card-manage\s*\{[\s\S]*?min-height: 40px/);

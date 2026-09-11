@@ -2004,8 +2004,8 @@
 
 .channel-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 218px), 1fr));
-  gap: 0.62rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 1fr));
+  gap: 0.55rem;
 }
 
 .channel-card {
