@@ -229,10 +229,15 @@ console.log("metacraftGates.test.ts: lintTitle payoff-window + claims-grounding 
   }, 2);
   assert.equal(valid.pass, true, "a complete finite ranking should be admitted");
   assert.deepEqual(valid.rankings.map((row) => row.idx), [0, 1]);
+  assert.equal(valid.rankings[0].grounding, "supported");
+  assert.equal(valid.rankings[0].identityFit, 8);
 
   for (const [name, value] of [
     ["missing direct", { rankings: [{ idx: 0, clickScore: 9 }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
     ["missing identity fit", { rankings: [{ idx: 0, clickScore: 9, direct: 9, grounding: "supported", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
+    ["invalid grounding", { rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, grounding: "maybe", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
+    ["empty reason", { rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, grounding: "supported", reason: "" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
+    ["out-of-range identity fit", { rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 11, grounding: "supported", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
     ["duplicate index", { rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, grounding: "supported", reason: "ok" }, { idx: 0, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
     ["fractional index", { rankings: [{ idx: 0.5, clickScore: 9, direct: 9, identityFit: 9, grounding: "supported", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
     ["out-of-range score", { rankings: [{ idx: 0, clickScore: 11, direct: 9, identityFit: 9, grounding: "supported", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
