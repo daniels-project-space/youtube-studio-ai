@@ -309,7 +309,10 @@ export function ModuleConfigSection({
   );
   const mods = configurableModules(activeBlockIds, channelId ? "runtime" : "new_channel");
   const current = channelId ? (moduleConfig ?? {}) : (value ?? {});
-  const [openBlockId, setOpenBlockId] = useState<string | null | undefined>(undefined);
+  // Runtime settings start as a compact card stack; onboarding keeps the
+  // first module open so the creator can see the available controls without
+  // adding an extra click to the initial decision flow.
+  const [openBlockId, setOpenBlockId] = useState<string | null | undefined>(() => channelId ? null : undefined);
   const visibleOpenBlockId = openBlockId === undefined || (
     openBlockId !== null && !mods.some((module) => module.blockId === openBlockId)
   )

@@ -9,6 +9,7 @@ const css = readFileSync(join(root, "src/components/ModuleConfigSection.module.c
 
 assert.match(section, /open=\{open\}/u);
 assert.match(section, /openBlockId[\s\S]*setOpenBlockId/u, "the rack must coordinate one open stage instead of stacking panels");
+assert.match(section, /useState<string \| null \| undefined>\(\(\) => channelId \? null : undefined\)/u, "runtime settings start collapsed while onboarding keeps the first decision visible");
 assert.match(section, /styles\.capabilities/u, "each stage must explain its useful capabilities");
 assert.match(section, /role="alert"/u, "save errors remain assistive-technology visible");
 assert.match(section, /import \{ failureReason \} from "@\/lib\/failureReason"/u);
