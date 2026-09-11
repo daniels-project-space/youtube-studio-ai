@@ -46,6 +46,7 @@ export function DayByDaySchedule({
         .sort((a, b) => (a.timestamp ?? a.date.getTime()) - (b.timestamp ?? b.date.getTime())),
     };
   });
+  let prioritizedPreviews = 0;
 
   return (
     <section className={styles.section} aria-labelledby="day-by-day-title">
@@ -71,7 +72,11 @@ export function DayByDaySchedule({
             <div className={styles.dayColumnEvents}>
               {dayEvents.length === 0 ? (
                 <span className={styles.dayEmpty}>No releases</span>
-              ) : dayEvents.map((event) => <DayEventCard event={event} key={event.key} />)}
+              ) : dayEvents.map((event) => {
+                const priority = prioritizedPreviews < 3;
+                prioritizedPreviews += 1;
+                return <DayEventCard event={event} key={event.key} priority={priority} />;
+              })}
             </div>
           </article>
         ))}
@@ -83,7 +88,7 @@ export function DayByDaySchedule({
 /** Preview the exact persisted plan or published-video artwork in the default
  * operational board, rather than making an operator open the hidden queue just
  * to see what is actually scheduled. */
-function DayEventCard({ event }: { event: CalendarEvent }) {
+function DayEventCard({ event, priority = false }: { event: CalendarEvent; priority?: boolean }) {
   return (
     <Link
       className={styles.dayEvent}
@@ -106,6 +111,7 @@ function DayEventCard({ event }: { event: CalendarEvent }) {
           fallbackSrc={event.youtubeVideoId ? youtubeThumb(event.youtubeVideoId) : undefined}
           fallbackSource="youtube"
           alt=""
+          priority={priority}
           aspectRatio="16 / 9"
           unavailableLabel="Preview unavailable"
         />

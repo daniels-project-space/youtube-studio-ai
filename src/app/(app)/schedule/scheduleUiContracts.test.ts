@@ -30,6 +30,8 @@ assert.match(page, /Month map/);
 assert.match(page, /Cadence controls/);
 assert.match(board, /aspectRatio="16 \/ 9"/,
   "the operational week board must show packaging artwork at a legible video ratio");
+assert.match(board, /prioritizedPreviews < 3/,
+  "the first scheduled artwork cards must load promptly without eager-loading the whole calendar");
 assert.match(board, /event\.type === "planned" \? event\.id : undefined/,
   "planned calendar cards must carry the exact plan item into the channel workspace");
 assert.match(board, /event\.thumbnailSource === "rendered_video_frame"/,
