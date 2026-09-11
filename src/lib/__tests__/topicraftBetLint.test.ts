@@ -203,6 +203,9 @@ console.log("topicraftBetLint.test.ts: lintBet() citation + dedupe logic verifie
     source.includes('lastIssues.push("no bet gated demand/freshness/fit/packageability ≥7")'),
     "topicraft.ts: the judge-rejection path must still exist so a fully-rejected slate triggers a real retry, not a silent pass",
   );
+  assert.match(source, /resolveTitleProfile\(a\.titleProfile, \{ niche: a\.niche \}\)/, "topicraft must resolve the shared title profile before generation");
+  assert.match(source, /profile: o\.titleProfile/, "topicraft bet lint must pass the resolved profile into metacraft lintTitle");
+  assert.match(source, /titleProfile: titleProfileId/, "topicraft must thread the resolved profile into each bet lint call");
 }
 
 console.log("topicraftBetLint.test.ts: craftTopics demand/freshness/fit/packageability >=7 judge gate pinned against live source");
