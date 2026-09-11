@@ -38,6 +38,8 @@ export type ThumbnailRefreshInventoryItem = Readonly<{
   candidateStatus?: string;
   candidateDispatchState?: string;
   candidateDispatchLastError?: string;
+  /** Terminal candidate run error, e.g. a missing provider, kept separate from outbox delivery errors. */
+  candidateError?: string;
   candidateCostTotal?: number;
   candidateThumbnailKey?: string | null;
   replacementId?: string;

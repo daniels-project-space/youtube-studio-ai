@@ -392,6 +392,7 @@ export const listInventory = query({
           candidateStatus: candidate.status,
           candidateDispatchState: candidate.thumbnailRefreshDispatchState,
           candidateDispatchLastError: candidate.thumbnailRefreshDispatchLastError,
+          candidateError: candidate.error,
           candidateCostTotal: candidate.costTotal,
           candidateThumbnailKey: candidateThumbnail?.r2Key ?? null,
         } : {}),

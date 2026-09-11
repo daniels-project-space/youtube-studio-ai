@@ -10,6 +10,7 @@ const route = read("src/app/api/thumbnail-refresh/route.ts");
 const acceptRoute = read("src/app/api/thumbnail-refresh/accept/route.ts");
 const ernieBatchRoute = read("src/app/api/thumbnail-refresh/ernie-batch/route.ts");
 const ernieBatchTask = read("src/trigger/ernieThumbnailBatchApply.ts");
+const convexRefresh = read("convex/thumbnailRefresh.ts");
 const library = read("src/app/(app)/library/page.tsx");
 
 // Legacy review can now request one bounded, separate candidate. Stored media
@@ -64,6 +65,8 @@ assert.match(route, /ERNIE_THUMBNAIL_REFRESH_BATCH_MANIFEST_KEY/);
 assert.match(route, /assertPinnedErnieThumbnailRefreshBatch/);
 assert.match(route, /previewRunId/);
 assert.match(route, /createCandidateShell/);
+assert.match(route, /candidateError \?\? item\.candidateDispatchLastError/);
+assert.match(convexRefresh, /candidateError: candidate\.error/);
 assert.match(route, /\^\[A-Za-z0-9\]\{32\}\$/);
 assert.match(route, /issueStudioActionApproval/);
 assert.match(route, /sourceChanged:\s*false/);

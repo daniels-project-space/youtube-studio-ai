@@ -176,7 +176,7 @@ export async function GET(request: Request) {
               runId: item.candidateRunId,
               status: item.candidateStatus,
               dispatchState: item.candidateDispatchState,
-              error: item.candidateDispatchLastError,
+              error: item.candidateError ?? item.candidateDispatchLastError,
               costTotal: item.candidateCostTotal ?? 0,
               thumbnailPresent: Boolean(item.candidateThumbnailKey),
             },
