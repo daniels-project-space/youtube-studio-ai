@@ -830,7 +830,9 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           (r) => r.clickScore >= 7 && r.direct >= 7 && r.identityFit >= 7 && r.grounding === "supported",
         );
         ranked.sort((x, y) => {
-          const judgeDelta = (y.clickScore ?? 0) + (y.direct ?? 0) - ((x.clickScore ?? 0) + (x.direct ?? 0));
+          const judgeDelta =
+            (y.clickScore ?? 0) + (y.direct ?? 0) + (y.identityFit ?? 0) -
+            ((x.clickScore ?? 0) + (x.direct ?? 0) + (x.identityFit ?? 0));
           if (judgeDelta) return judgeDelta;
           return (survivors[y.idx!]?.quality.score ?? 0) - (survivors[x.idx!]?.quality.score ?? 0);
         });
