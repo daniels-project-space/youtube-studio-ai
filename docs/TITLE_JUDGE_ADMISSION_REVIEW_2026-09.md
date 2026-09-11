@@ -58,8 +58,10 @@ The metadata block now emits the complete indexed candidate/ranking receipt
 (`titleDecision`) consumed by the existing read-only run-stage title review.
 The receipt carries the selected/alternate indexes, all three scores, source
 grounding, bounded rationale, attempt count, and whether the context was a
-script excerpt or topic-only. The browser adapter still treats it as recorded
-model assessment—not a new fact-check or audience-performance claim.
+script excerpt or topic-only. It is sealed with a canonical SHA-256 content
+fingerprint; the browser adapter verifies that digest before presenting it and
+still treats the result as recorded model assessment—not a new fact-check or
+audience-performance claim.
 
 This improves decision truthfulness and prevents accidental bad admissions; a
 held-out title corpus and authorized watch-time/CTR experiment are still

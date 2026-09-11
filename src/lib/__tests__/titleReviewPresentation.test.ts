@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { readTitleReview } from "../titleReviewPresentation";
+import { titleDecisionFingerprint } from "../titleDecisionFingerprint";
 
 const title = "47 Engineers Died in the Bridge Collapse";
 function outputs() {
-  return { title, titleDecision: {
+  const titleDecision = {
     version: "title-decision/v1", judged: true, title, titleAlternate: "The Design Error Behind the Bridge Collapse",
     clickScore: 9, directness: 8, winnerIndex: 1, alternateIndex: 2, attempts: 1,
     sourceCoverage: { kind: "full_narration", providedChars: 8400, totalChars: 8400 },
@@ -15,7 +16,14 @@ function outputs() {
       { idx: 0, clickScore: 10, direct: 10, identityFit: 9, grounding: "contradicted", reason: "The narration says no engineers survived." },
       { idx: 1, clickScore: 9, direct: 8, identityFit: 9, grounding: "supported", reason: "The source states that 47 engineers died." },
     ],
-  } };
+  };
+  return { title, titleDecision: { ...titleDecision, fingerprint: titleDecisionFingerprint(titleDecision) } };
+}
+
+function resign(out: ReturnType<typeof outputs>): void {
+  const { fingerprint: _fingerprint, ...body } = out.titleDecision;
+  void _fingerprint;
+  out.titleDecision.fingerprint = titleDecisionFingerprint(body);
 }
 
 const input = outputs(), before = structuredClone(input);
@@ -37,12 +45,13 @@ assert.equal(readTitleReview({ titleDecision: outputs().titleDecision })?.state,
 for (const kind of ["script_excerpt", "topic_only"]) {
   const out = outputs();
   out.titleDecision.sourceCoverage = { kind, providedChars: kind === "topic_only" ? 0 : 100, totalChars: 8400 };
+  resign(out);
   const result = readTitleReview(out);
   assert.ok(result && result.state === "recorded");
   assert.equal(result.source, kind === "topic_only" ? "Topic only" : "Script excerpt");
 }
 // Browser validation is a shape check, not a rerun of the source-aware judge.
-const changedVerdict = outputs(); changedVerdict.titleDecision.rankings[2].grounding = "insufficient";
+const changedVerdict = outputs(); changedVerdict.titleDecision.rankings[2].grounding = "insufficient"; resign(changedVerdict);
 const recordedVerdict = readTitleReview(changedVerdict);
 assert.ok(recordedVerdict && recordedVerdict.state === "recorded");
 assert.equal(recordedVerdict.selected.grounding, "insufficient", "show the recorded model verdict, never upgrade it to proof");
@@ -67,6 +76,7 @@ const mutations: Array<(out: ReturnType<typeof outputs>) => void> = [
   (o) => { o.titleDecision.attempts = 3; },
   (o) => { o.titleDecision.sourceCoverage.totalChars = 9000; },
   (o) => { o.titleDecision.sourceCoverage.providedChars = -1; },
+  (o) => { o.titleDecision.fingerprint = "0".repeat(64); },
 ];
 for (const mutate of mutations) {
   const out = outputs(); mutate(out);

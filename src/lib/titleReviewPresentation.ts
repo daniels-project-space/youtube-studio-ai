@@ -1,8 +1,12 @@
 /** Read-only presentation of a saved model review, never a release/quality gate.
  * Deliberately independent of metacraft's server-only provider and crypto code.
  * The pipeline validates the complete receipt; this reader handles legacy,
- * malformed and slim browser data without claiming to reverify its fingerprint.
+ * malformed and slim browser data while verifying the receipt's content
+ * fingerprint. A valid fingerprint proves integrity, not factual truth or
+ * measured audience performance.
  */
+import { isTitleDecisionFingerprint, titleDecisionFingerprint } from "@/lib/titleDecisionFingerprint";
+
 export type TitleReviewOption = {
   title: string;
   reason: string;
@@ -43,6 +47,7 @@ export function readTitleReview(outputs: unknown): TitleReviewPresentation | nul
   const unavailable: TitleReviewPresentation = { state: "unavailable" };
   const receipt = record(out["titleDecision"]);
   if (!receipt || receipt.version !== "title-decision/v1" || receipt.judged !== true ||
+      !isTitleDecisionFingerprint(receipt.fingerprint) ||
       !text(receipt.title, 100) || !Array.isArray(receipt.candidates) ||
       receipt.candidates.length < 1 || receipt.candidates.length > 16 ||
       !Array.isArray(receipt.rankings) || receipt.rankings.length !== receipt.candidates.length ||
@@ -50,6 +55,7 @@ export function readTitleReview(outputs: unknown): TitleReviewPresentation | nul
       !(receipt.alternateIndex === null || index(receipt.alternateIndex, receipt.candidates.length)) ||
       receipt.alternateIndex === receipt.winnerIndex ||
       ![1, 2].includes(receipt.attempts as number)) return unavailable;
+  if (receipt.fingerprint !== titleDecisionFingerprint(receipt)) return unavailable;
   const coverage = record(receipt.sourceCoverage);
   if (!coverage || !Number.isSafeInteger(coverage.providedChars) || Number(coverage.providedChars) < 0 ||
       !(coverage.totalChars === null || (Number.isSafeInteger(coverage.totalChars) &&

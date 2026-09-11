@@ -35,6 +35,7 @@ import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { searchVideoIds, fetchVideoDetails, hasYouTubeDataAccess } from "@/lib/youtubeData";
 import { resolveVoiceDoctrine } from "@/engine/golden";
 import { createPublicEvidenceCache, normalizeEvidenceKey } from "@/lib/publicEvidenceCache";
+import { titleDecisionFingerprint } from "@/lib/titleDecisionFingerprint";
 
 export function hasMetacraft(): boolean {
   return hasAnthropicKey();
@@ -419,6 +420,8 @@ export interface TitleJudgeRanking {
  * The presentation layer validates this shape but never reruns the judge. */
 export interface TitleDecisionReceipt {
   version: "title-decision/v1";
+  /** Content address of every field below, excluding this field itself. */
+  fingerprint: string;
   judged: true;
   title: string;
   titleAlternate: string;
@@ -428,7 +431,7 @@ export interface TitleDecisionReceipt {
   alternateIndex: number | null;
   attempts: number;
   sourceCoverage: {
-    kind: "script_excerpt" | "topic_only";
+    kind: "full_narration" | "script_excerpt" | "topic_only";
     providedChars: number;
     totalChars: number | null;
   };
@@ -861,7 +864,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
             .join("\n")
             .trim();
-          titleDecision = {
+          const decisionBody: Omit<TitleDecisionReceipt, "fingerprint"> = {
             version: "title-decision/v1",
             judged: true,
             title: survivors[best].title,
@@ -878,6 +881,10 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             },
             candidates: survivors.map((candidate) => ({ frame: candidate.frame, title: candidate.title })),
             rankings: admission.rankings,
+          };
+          titleDecision = {
+            ...decisionBody,
+            fingerprint: titleDecisionFingerprint(decisionBody),
           };
           a.log?.(
             `metacraft: deterministic title tie-break ${survivors[best]?.quality.score ?? 0}/100` +
