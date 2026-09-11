@@ -93,6 +93,19 @@ assert.ok(
   }).issues.some((issue) => issue.includes('ungrounded number "1"')),
   "grounding must not accept a digit from a substring inside an unrelated word",
 );
+assert.ok(
+  lintTitle("The Atlas archive changed everything in one night", {
+    grounding: "The archival note describes an atlas-like map.",
+  }).issues.some((issue) => issue.includes('ungrounded name "Atlas"')),
+  "grounding must not accept a proper noun from a substring inside an unrelated word",
+);
+assert.equal(
+  lintTitle("The Atlas archive changed everything in one night", {
+    grounding: "The curator opened the Atlas archive before dawn and catalogued the evidence.",
+  }).pass,
+  true,
+  "a complete proper-noun token remains a valid grounding match",
+);
 const mismatchLint = lintTitle("The Bridge That Killed 47 Engineers", {
   grounding: "Investigators confirmed 47 engineers died when the bridge gave way.",
   opening: "Today we examine a quiet village archive and the letter it preserved.",

@@ -352,6 +352,14 @@ function containsNumberVariant(haystack: string, variant: string): boolean {
   return pattern.test(haystack);
 }
 
+/** Match a proper-noun token without treating a hyphenated compound as the
+ * standalone name (for example, `atlas` must not match `atlas-like`). */
+function containsNameToken(haystack: string, token: string): boolean {
+  const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`(?:^|[^a-z0-9'-])${escaped}(?:$|[^a-z0-9'-])`, "i");
+  return pattern.test(haystack);
+}
+
 /**
  * Timestamped chapter list from a narration chapterPlan (YouTube indexes these
  * as key moments). Returns "" when there are <2 chapters or no plan — callers
@@ -629,13 +637,13 @@ export function lintTitle(
     if (isTitleCase) {
       for (const run of t.match(/\b[A-Z][a-z'-]{3,}(?:\s+[A-Z][a-z'-]{2,})+\b/g) ?? []) {
         const ws = run.split(/\s+/).filter((w) => !TITLE_STOPWORDS.has(w.toLowerCase()));
-        if (ws.length && !ws.some((w) => hay.includes(w.toLowerCase())))
+        if (ws.length && !ws.some((w) => containsNameToken(hay, w.toLowerCase())))
           issues.push(`ungrounded name "${run}" — not in the script`);
       }
     } else {
       for (let i = 1; i < words.length; i++) {
         const w = words[i];
-        if (w.length >= 4 && /^[A-Z]/.test(w) && !TITLE_STOPWORDS.has(w.toLowerCase()) && !hay.includes(w.toLowerCase()))
+        if (w.length >= 4 && /^[A-Z]/.test(w) && !TITLE_STOPWORDS.has(w.toLowerCase()) && !containsNameToken(hay, w.toLowerCase()))
           issues.push(`ungrounded name "${w}" — not in the script`);
       }
     }
