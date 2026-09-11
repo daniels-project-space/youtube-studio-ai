@@ -2815,6 +2815,10 @@ button.video-card-open { cursor: pointer; }
 .video-card-meta time { flex: 0 0 auto; max-width: 100%; }
 .video-card-evidence { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 0.45rem; min-width: 0; }
 .video-card-evidence-label { color: var(--color-faint); font: 0.62rem/1.2 var(--font-mono); letter-spacing: 0.025em; text-transform: uppercase; }
+.video-card-thumbnail-label { color: var(--color-secondary); font: 0.58rem/1.2 var(--font-mono); letter-spacing: 0.02em; }
+.video-card-thumbnail-label[data-tone="current_golden_candidate"] { color: var(--color-ok); }
+.video-card-thumbnail-label[data-tone="lofi_rendered_frame"],.video-card-thumbnail-label[data-tone="lofi_frame_pending"] { color: var(--color-accent); }
+.video-card-thumbnail-label[data-tone="retained_source"] { color: var(--color-faint); }
 .video-card-views { color: var(--color-secondary); font: 0.65rem/1.35 var(--font-mono); }
 .video-card-footer { min-height: 39px; display: flex; align-items: center; justify-content: space-between; gap: .55rem; padding: .42rem .65rem; border-top: 1px solid var(--color-border); color: var(--color-faint); background: rgba(0,0,0,.11); font-size: .57rem; }
 .video-card-library-action { min-height: 27px; padding: .3rem .48rem; border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-muted); background: rgba(243,240,232,.025); font: 650 .6rem/1 var(--font-sans); cursor: pointer; }

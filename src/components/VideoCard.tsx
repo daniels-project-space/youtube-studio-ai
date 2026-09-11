@@ -7,6 +7,19 @@ import { ReleaseEvidenceBadge } from "./ReleaseEvidenceBadge";
 import { IconLibrary } from "./icons";
 import { MediaPreview } from "./MediaPreview";
 
+function thumbnailLabel(video: VideoRow): string {
+  switch (video.thumbnailPresentation) {
+    case "current_golden_candidate":
+      return "Current thumbnail";
+    case "lofi_rendered_frame":
+      return "4K master frame";
+    case "lofi_frame_pending":
+      return "15s frame pending";
+    default:
+      return video.thumbnailKey ? "Retained source" : "No thumbnail yet";
+  }
+}
+
 /**
  * A single finished-video tile: 16:9 thumbnail + status badge + title (2-line
  * clamp) + channel/date + retained-master evidence. Thumbnail
@@ -57,6 +70,9 @@ export function VideoCard({
         </div>
         <div className="video-card-evidence">
           <span className="video-card-evidence-label">Master evidence</span>
+          <span className="video-card-thumbnail-label" data-tone={video.thumbnailPresentation ?? "retained_source"}>
+            {thumbnailLabel(video)}
+          </span>
           <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} wrap />
         </div>
       </div>
@@ -64,7 +80,7 @@ export function VideoCard({
   );
 
   return (
-    <article className="glass video-card" data-library-state={video.libraryState ?? "active"}>
+    <article className="glass video-card" data-library-state={video.libraryState ?? "active"} data-thumbnail-presentation={video.thumbnailPresentation ?? "retained_source"}>
       {onOpen ? (
         <button
           type="button"
