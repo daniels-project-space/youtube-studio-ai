@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { lintTitle, resolveTitleProfile, titleQualitySignal } from "@/lib/metacraft";
+import { areNearDuplicateTitles, dedupeTitleCandidates, lintTitle, resolveTitleProfile, titleQualitySignal } from "@/lib/metacraft";
 
 const grounding = "Chernobyl failed one safety test and the ignored warning changed the outcome.";
 const concrete = titleQualitySignal("Chernobyl Failed One Safety Test", grounding);
@@ -41,6 +41,23 @@ const setup = titleQualitySignal("What Really Happened And Why It Matters", grou
 assert.ok(concrete.frontLoadedTerms > setup.frontLoadedTerms, "front-loaded subject terms must be measurable");
 assert.ok(concrete.score > setup.score, "generic setup must lose the local impact tie-break");
 
+assert.equal(
+  areNearDuplicateTitles("Chernobyl Failed One Safety Test", "Chernobyl One Safety Test Failed"),
+  true,
+  "word-order paraphrases should not consume separate candidate slots",
+);
+assert.equal(
+  areNearDuplicateTitles("Chernobyl Failed One Safety Test", "Why Chernobyl's Warning Changed Everything"),
+  false,
+  "a different curiosity hypothesis must remain available to the judge",
+);
+const slate = dedupeTitleCandidates([
+  { frame: "direct", title: "Chernobyl Failed One Safety Test" },
+  { frame: "contrarian", title: "Chernobyl One Safety Test Failed" },
+  { frame: "curiosity", title: "Why Chernobyl's Warning Changed Everything" },
+]);
+assert.deepEqual(slate.map((candidate) => candidate.frame), ["direct", "curiosity"]);
+
 const source = readFileSync(join(process.cwd(), "src/lib/metacraft.ts"), "utf8");
 assert.match(
   source,
@@ -49,5 +66,6 @@ assert.match(
 );
 assert.match(source, /FORMAT PROFILE/, "the generator must receive the resolved format profile");
 assert.match(source, /titleProfile\.targetMinChars/, "the judge must see the same profile envelope as the generator");
+assert.match(source, /dedupeTitleCandidates\(exactUnique\)/, "paraphrase-only candidate slates must be reduced before judging");
 
 console.log("METACRAFT TITLE QUALITY PASS");

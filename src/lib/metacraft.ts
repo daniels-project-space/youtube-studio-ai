@@ -371,6 +371,38 @@ function titleTokens(value: string): string[] {
   return value.toLowerCase().match(/[a-z][a-z'-]{2,}/g) ?? [];
 }
 
+function contentTitleTokens(value: string): Set<string> {
+  return new Set(titleTokens(value).filter((word) => !QUALITY_STOPWORDS.has(word)));
+}
+
+/**
+ * Remove only obvious paraphrase duplicates from a candidate slate. Exact
+ * dedupe alone lets seven frames collapse into the same headline with minor
+ * word-order changes; an aggressive embedding call would add cost and can
+ * erase legitimate format variants. This lexical guard requires at least
+ * three content terms and a very high overlap, so genuinely different hooks
+ * (searchable vs curiosity vs verdict) remain available to the judge.
+ */
+export function areNearDuplicateTitles(a: string, b: string): boolean {
+  const left = contentTitleTokens(a);
+  const right = contentTitleTokens(b);
+  if (left.size < 3 || right.size < 3) return false;
+  const intersection = [...left].filter((word) => right.has(word)).length;
+  const union = new Set([...left, ...right]).size;
+  const jaccard = intersection / Math.max(1, union);
+  const containment = intersection / Math.min(left.size, right.size);
+  return jaccard >= 0.8 || containment >= 0.92;
+}
+
+export function dedupeTitleCandidates<T extends { title: string }>(candidates: T[]): T[] {
+  const kept: T[] = [];
+  for (const candidate of candidates) {
+    if (kept.some((prior) => areNearDuplicateTitles(prior.title, candidate.title))) continue;
+    kept.push(candidate);
+  }
+  return kept;
+}
+
 /**
  * Small, deterministic quality signal used only to break ties after the
  * provider judge. It encodes the platform guidance that titles should be
@@ -896,13 +928,17 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       ...(gen.candidates ?? []).map((c) => ({ frame: String(c.frame ?? "unknown"), title: String(c.title ?? "").trim() })),
     ].filter((c) => c.title);
     const seenTitles = new Set<string>();
-    const candidates = rawCandidates
-      .filter((c) => {
-        const key = c.title.toLowerCase().replace(/\s+/g, " ").trim();
-        if (seenTitles.has(key)) return false;
-        seenTitles.add(key);
-        return true;
-      })
+    const exactUnique = rawCandidates.filter((c) => {
+      const key = c.title.toLowerCase().replace(/\s+/g, " ").trim();
+      if (seenTitles.has(key)) return false;
+      seenTitles.add(key);
+      return true;
+    });
+    const uniqueRawCandidates = dedupeTitleCandidates(exactUnique);
+    if (uniqueRawCandidates.length < exactUnique.length) {
+      a.log?.(`metacraft: removed ${exactUnique.length - uniqueRawCandidates.length} paraphrase-duplicate title candidate(s)`);
+    }
+    const candidates = uniqueRawCandidates
       .map((c) => ({
         ...c,
         lint: lintTitle(c.title, {

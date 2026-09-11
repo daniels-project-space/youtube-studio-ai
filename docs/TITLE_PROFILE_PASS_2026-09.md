@@ -37,6 +37,12 @@ tie-breaker. `titleQualitySignal` now records `frontLoadedTerms`,
 The provider judge remains authoritative; these local signals only break an
 otherwise equal judge score and add no provider/Convex/Trigger work.
 
+Before the judge, exact duplicates are now followed by a conservative lexical
+paraphrase guard. It removes only candidates with at least three shared content
+terms and ≥0.8 Jaccard or ≥0.92 containment; distinct search, curiosity and
+verdict hypotheses remain in the pool. This is intentionally embedding-free and
+therefore adds no paid call or latency budget.
+
 ## Verification
 
 - `metacraftTitleQuality.test.ts` covers lane/profile resolution, short-form
