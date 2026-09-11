@@ -63,6 +63,7 @@ export function LatestVideoWidget({
             alt={v?.title ?? "latest video"}
             style={{ width: "100%", height: "100%" }}
             unavailableLabel="Retained preview unavailable"
+            priority
           />
           {v?.durationSec ? (
             <span

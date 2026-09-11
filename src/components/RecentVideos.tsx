@@ -116,7 +116,7 @@ export function RecentVideos({
           ? Array.from({ length: 3 }, (_, index) => (
               <div key={index} className={`${styles.card} ${styles.skeleton}`} aria-hidden="true" />
             ))
-          : renders.map((video) => (
+          : renders.map((video, index) => (
               <button
                 type="button"
                 key={video._id}
@@ -135,6 +135,7 @@ export function RecentVideos({
                     alt=""
                     style={{ width: "100%", height: "100%" }}
                     unavailableLabel="Retained preview unavailable"
+                    priority={index < 3}
                   />
                   <span className={styles.play} aria-hidden="true">▶</span>
                   {fmtDur(video.durationSec) ? (

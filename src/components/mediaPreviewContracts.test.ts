@@ -36,11 +36,13 @@ for (const source of [assetImg, videoCard, rail, daySchedule]) {
 // retained thumbnail must show a paused retained-master frame, never a stale
 // public YouTube hqdefault image.
 assert.match(latestVideo, /videoStillKey=\{v\?\.videoKey/);
+assert.match(latestVideo, /priority\s*\/?>/);
 assert.doesNotMatch(latestVideo, /i\.ytimg\.com|fallbackSource="youtube"/);
 
 // The Studio's R2-only carousel filters to saved masters, so a missing
 // thumbnail can always use that exact master as its preview source.
 assert.match(recentVideos, /videoStillKey=\{video\.videoKey\}/);
+assert.match(recentVideos, /priority=\{index < 3\}/);
 assert.doesNotMatch(recentVideos, /i\.ytimg\.com|fallbackSource="youtube"/);
 
 for (const source of [videoCard, rail, daySchedule]) {
