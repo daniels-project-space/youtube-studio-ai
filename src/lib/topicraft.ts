@@ -176,6 +176,10 @@ export interface CraftTopicsArgs {
   perfContext?: string;
   /** Target video length (seconds) — bets must be answerable at this scope. */
   targetSeconds?: number;
+  /** Sealed route identity used to resolve a profile when niche text is broad. */
+  family?: string;
+  /** Sealed content lane identity used to resolve a profile when niche text is broad. */
+  contentLane?: string;
   /** Sealed route instruction supplied by the frozen invocation, never UI input. */
   programDirective?: string;
   /** Pre-fetched competitor top titles (databank) — no live fetch happens here. */
@@ -561,7 +565,11 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
   const count = Math.max(1, a.count);
   const want = count + 4;
   const doctrine = resolveVoiceDoctrine(a.niche);
-  const titleProfileId = resolveTitleProfile(a.titleProfile, { niche: a.niche });
+  const titleProfileId = resolveTitleProfile(a.titleProfile, {
+    family: a.family,
+    contentLane: a.contentLane,
+    niche: a.niche,
+  });
   const titleProfile = TITLE_PROFILES[titleProfileId];
   // The provisional title is linted with the same rules the metadata engine
   // uses, so it has to read the same clickbait dial. Leaving this as the old

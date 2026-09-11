@@ -15,6 +15,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { loadPerformanceContext } from "@/lib/performance";
 import { craftTopics, loadOutlierBank, type BetType } from "@/lib/topicraft";
+import type { TitleProfileId } from "@/lib/metacraft";
 
 export interface OptimizeTopicsOpts {
   convex: ConvexHttpClient;
@@ -34,6 +35,10 @@ export interface OptimizeTopicsOpts {
     clickbaitLevel?: number;
   };
   channelName?: string;
+  /** Sealed route context; lets Topicraft choose the same profile as metadata. */
+  family?: string;
+  contentLane?: string;
+  titleProfile?: TitleProfileId;
   /** Extra topics to treat as already-taken (e.g. the current content plan). */
   alsoAvoid?: string[];
   /** Disable provider embeddings only when the caller applies a deterministic near-duplicate gate. */
@@ -133,6 +138,9 @@ export async function optimizeTopics(opts: OptimizeTopicsOpts): Promise<Optimize
     outliers,
     powerWords,
     clickbaitLevel: opts.identity.clickbaitLevel,
+    family: opts.family,
+    contentLane: opts.contentLane,
+    titleProfile: opts.titleProfile,
     providerSemanticDedupe: opts.providerSemanticDedupe,
     programDirective: opts.programDirective,
     beforeProviderSpend: opts.beforeProviderSpend,

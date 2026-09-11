@@ -493,6 +493,8 @@ export const planWeekAheadTask = task({
             const optimized = freshCount
               ? await optimizeTopics({
                   convex, ownerId, channelId, keyPrefix,
+                  family: routeAdmission.programRoute.family,
+                  contentLane: routeAdmission.programRoute.contentLaneKey,
                   // Four bench candidates replace paid embedding fan-out; the
                   // deterministic gate below removes exact and near duplicates.
                   count: freshCount + 4,

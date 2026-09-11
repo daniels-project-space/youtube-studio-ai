@@ -2820,6 +2820,8 @@ export async function executeDesignChannel(
         ownerId,
         channelId,
         keyPrefix: channelPrefix(ownerId, slug),
+        family: resolvedProgramRoute?.family,
+        contentLane: resolvedProgramRoute?.contentLaneKey,
         count: 24,
         identity,
         log,
