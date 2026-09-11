@@ -712,6 +712,91 @@ async function lofiReferenceEvidenceBindsInputFrame(root: string): Promise<void>
   );
 }
 
+async function nativeLofiEvidenceBindsSingleReference(root: string): Promise<void> {
+  const io = new MemoryCheckpointIo();
+  const requestHash = thumbnailRequestHash({ lane: "lofi-native-reference", iteration: 1 });
+  const requestContext = thumbnailNanoBananaRequestContext({
+    keyPrefix: "owner/o/channel/lofi/",
+    runId: "run-lofi-native-reference",
+    requestHash,
+  });
+  const profile = FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE;
+  const reference = Buffer.from("exact-native-15-second-reference-frame");
+  const sourceFrameSha256 = createHash("sha256").update(reference).digest("hex");
+  const prompt = "Native edit. Preserve the exact frame and render only the custom quality emblem \"4K\".";
+  const providerRequestCanonicalJson = canonicalJson({
+    apiVersion: profile.apiVersion,
+    context: requestContext,
+    endpoint: profile.model,
+    body: {
+      prompt,
+      num_images: 1,
+      aspect_ratio: profile.aspectRatio,
+      output_format: "png",
+      safety_tolerance: "4",
+      image_urls: [`data:image/jpeg;base64,${reference.toString("base64")}`],
+      limit_generations: true,
+    },
+  });
+  const providerResponseMetadataCanonicalJson = canonicalJson({
+    requestId: "lofi-native-response",
+    description: "fixture",
+    image: { url: "https://fal.media/native-fixture.png", content_type: "image/png" },
+  });
+  const evidence = {
+    version: "thumbnail-lofi-fal-nano-banana-evidence/v2" as const,
+    requestContext,
+    mode: "lofi-render-frame-native" as const,
+    sourceFrameSha256,
+    backgroundSsim: 0.999,
+    expectedText: ["4K"],
+    receipt: {
+      provider: profile.provider,
+      model: profile.model,
+      apiVersion: profile.apiVersion,
+      providerRequestId: "lofi-native-response",
+      route: profile.route,
+      width: profile.accountingWidth,
+      height: profile.accountingHeight,
+      promptUtf8Bytes: Buffer.byteLength(prompt, "utf8"),
+      referenceSha256: sourceFrameSha256,
+      outputCostUsd: profile.outputImageUsd,
+      costUsd: profile.outputImageUsd,
+      sourceContentType: "image/png",
+      providerRequestCanonicalJson,
+      providerRequestSha256: createHash("sha256")
+        .update(`fal-nano-banana-lofi-provider\0${providerRequestCanonicalJson}`)
+        .digest("hex"),
+      providerResponseMetadataCanonicalJson,
+      providerResponseMetadataSha256: createHash("sha256")
+        .update(`fal-nano-banana-lofi-response-metadata\0${providerResponseMetadataCanonicalJson}`)
+        .digest("hex"),
+      responseSha256: "8".repeat(64),
+      createdAt: 1_900_000_000_000,
+    },
+  };
+  const localImagePath = join(root, "lofi-native", "thumbnail.jpg");
+  await mkdir(join(root, "lofi-native"), { recursive: true });
+  let session = await openThumbnailCheckpoint({
+    checkpointRoot: "owner/o/channel/lofi/runs/run-lofi-native/thumbnail-checkpoints",
+    requestHash,
+    localImagePath,
+  }, io);
+  session = await beginThumbnailPaidWork(session, io);
+  await writeFile(localImagePath, Buffer.from("native Nano Banana Lo-Fi edit"));
+  session = await saveThumbnailGenerationCheckpoint(session, evidence.receipt.costUsd, evidence, io);
+  const restoredEvidence = session.manifest?.version === 2 || session.manifest?.version === 3
+    ? session.manifest.providerEvidence
+    : undefined;
+  assert.equal(restoredEvidence?.version, "thumbnail-lofi-fal-nano-banana-evidence/v2");
+  assert.equal(
+    restoredEvidence?.version === "thumbnail-lofi-fal-nano-banana-evidence/v2"
+      ? restoredEvidence.mode
+      : undefined,
+    "lofi-render-frame-native",
+  );
+}
+
 async function main(): Promise<void> {
   const root = await mkdtemp(join(tmpdir(), "thumbnail-checkpoint-test-"));
   try {
@@ -724,6 +809,7 @@ async function main(): Promise<void> {
     await nanoEvidenceSurvivesRemoteRecovery(root);
     await nativeProEvidenceBindsPromptAndCopy(root);
     await lofiReferenceEvidenceBindsInputFrame(root);
+    await nativeLofiEvidenceBindsSingleReference(root);
     console.log("thumbnail checkpoint tests: ok");
   } finally {
     await rm(root, { recursive: true, force: true });

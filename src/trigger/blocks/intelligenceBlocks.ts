@@ -36,7 +36,6 @@ import {
   LOFI_RENDER_THUMBNAIL_CONTRACT,
   lofiNanoBananaEditPrompt,
   measureLofiThumbnailBackgroundSsim,
-  measureLofiTypographyMatteUniformity,
   prepareLofiThumbnailReference,
 } from "@/lib/lofiThumbnail";
 import {
@@ -63,7 +62,6 @@ import {
   hasFalNanoBananaLofiThumbnail,
 } from "@/lib/falNanoBananaLofiThumbnail";
 import { craftMetadata } from "@/lib/metacraft";
-import { compositeProviderTypographyOverlay } from "@/lib/ffmpeg";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { hasVisionKey } from "@/lib/vision";
 import {
@@ -94,6 +92,7 @@ import { refreshNicheResearchCore } from "@/lib/nicheResearch";
 import { loadOutlierBank } from "@/lib/topicraft";
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { rasterImageDimensions } from "@/lib/imageDimensions";
 
 /* ----------------------------- helpers --------------------------------- */
 
@@ -824,7 +823,6 @@ export const thumbnailGen: Block = {
         outJpg: string;
         requestHash: string;
         backgroundSsim: number;
-        typographyMatteUniformity: number;
         refQA: ThumbnailGateVerdict | null;
         providerEvidence?: ThumbnailNanoBananaEvidence;
       }
@@ -844,7 +842,6 @@ export const thumbnailGen: Block = {
             contract: LOFI_RENDER_THUMBNAIL_CONTRACT.version,
             sourceVideoKey,
             sourceFrameSha256: reference.sourceFrameSha256,
-            typographyMatteSha256: reference.typographyMatteSha256,
             sourceFrameTimeSec: reference.sourceFrameTimeSec,
             badge: LOFI_RENDER_THUMBNAIL_CONTRACT.badge,
             badgeTone: reference.badgeTone,
@@ -880,10 +877,9 @@ export const thumbnailGen: Block = {
                 : undefined;
             if (
               (checkpoint.manifest.version !== 2 && checkpoint.manifest.version !== 3) ||
-              checkpointEvidence?.version !== "thumbnail-lofi-fal-nano-banana-evidence/v1" ||
-              checkpointEvidence.mode !== "lofi-render-frame-reference" ||
-              checkpointEvidence.sourceFrameSha256 !== reference.sourceFrameSha256 ||
-              checkpointEvidence.typographyMatteSha256 !== reference.typographyMatteSha256
+              checkpointEvidence?.version !== "thumbnail-lofi-fal-nano-banana-evidence/v2" ||
+              checkpointEvidence.mode !== "lofi-render-frame-native" ||
+              checkpointEvidence.sourceFrameSha256 !== reference.sourceFrameSha256
             ) {
               throw new Error("thumbnail_gen: Lo-Fi checkpoint lacks its exact Nano Banana reference evidence");
             }
@@ -895,36 +891,23 @@ export const thumbnailGen: Block = {
               prompt,
               referenceImage: reference.referenceImage,
               referenceMimeType: "image/jpeg",
-              typographyMatteImage: reference.typographyMatteImage,
-              typographyMatteMimeType: "image/png",
               idempotencyContext: requestContext,
             });
             nanoBananaImageCostUsd += generated.receipt.costUsd;
-            const providerImagePath = join(tmp, "nano-banana-provider-image");
-            await writeBytes(providerImagePath, generated.bytes);
-            await compositeProviderTypographyOverlay({
-              baseFramePath: reference.referenceFramePath,
-              providerOverlayPath: providerImagePath,
-              outPath: outJpg,
-              width: LOFI_RENDER_THUMBNAIL_CONTRACT.outputWidth,
-              height: LOFI_RENDER_THUMBNAIL_CONTRACT.outputHeight,
-              matteColor: LOFI_RENDER_THUMBNAIL_CONTRACT.typographyMatteColor,
-            });
-            const typographyMatteUniformity = await measureLofiTypographyMatteUniformity({
-              providerOverlayPath: providerImagePath,
-            });
+            // Nano Banana owns the complete edit. Do not composite text or
+            // redraw the frame locally; the preservation gate below rejects a
+            // provider result that changes more than the small emblem zone.
+            await writeBytes(outJpg, generated.bytes);
             const backgroundSsim = await measureLofiThumbnailBackgroundSsim({
               referenceFramePath: reference.referenceFramePath,
               candidatePath: outJpg,
             });
             const providerEvidence: ThumbnailNanoBananaEvidence = {
-              version: "thumbnail-lofi-fal-nano-banana-evidence/v1",
+              version: "thumbnail-lofi-fal-nano-banana-evidence/v2",
               requestContext,
               receipt: generated.receipt,
-              mode: "lofi-render-frame-reference",
+              mode: "lofi-render-frame-native",
               sourceFrameSha256: reference.sourceFrameSha256,
-              typographyMatteSha256: reference.typographyMatteSha256,
-              typographyMatteUniformity,
               backgroundSsim,
               expectedText: [LOFI_RENDER_THUMBNAIL_CONTRACT.badge],
             };
@@ -941,10 +924,9 @@ export const thumbnailGen: Block = {
             checkpoint.manifest?.version === 2 || checkpoint.manifest?.version === 3
               ? checkpoint.manifest.providerEvidence
               : undefined;
-          if (providerEvidence?.version !== "thumbnail-lofi-fal-nano-banana-evidence/v1") {
-            throw new Error("thumbnail_gen: Lo-Fi checkpoint lacks Fal typography-overlay evidence");
+          if (providerEvidence?.version !== "thumbnail-lofi-fal-nano-banana-evidence/v2") {
+            throw new Error("thumbnail_gen: Lo-Fi checkpoint lacks native Fal reference-edit evidence");
           }
-          const typographyMatteUniformity = providerEvidence.typographyMatteUniformity;
           const backgroundSsim = await measureLofiThumbnailBackgroundSsim({
             referenceFramePath: reference.referenceFramePath,
             candidatePath: outJpg,
@@ -952,19 +934,15 @@ export const thumbnailGen: Block = {
           if (Math.abs(backgroundSsim - providerEvidence.backgroundSsim) > 0.002) {
             throw new Error("thumbnail_gen: Lo-Fi checkpoint background-preservation evidence drifted");
           }
-          if (
-            typographyMatteUniformity < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumTypographyMatteUniformity ||
-            backgroundSsim < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumBackgroundSsim
-          ) {
+          if (backgroundSsim < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumBackgroundSsim) {
             ctx.log(
-              `thumbnail_gen: rejected Lo-Fi overlay because matte uniformity ${typographyMatteUniformity.toFixed(6)} ` +
-              `or frame SSIM ${backgroundSsim.toFixed(6)} is below its preservation threshold`,
+              `thumbnail_gen: rejected native Lo-Fi edit because frame SSIM ${backgroundSsim.toFixed(6)} ` +
+              `is below its preservation threshold`,
             );
             return {
               outJpg,
               requestHash,
               backgroundSsim,
-              typographyMatteUniformity,
               refQA: null,
               providerEvidence,
             };
@@ -1028,7 +1006,6 @@ export const thumbnailGen: Block = {
             outJpg,
             requestHash,
             backgroundSsim,
-            typographyMatteUniformity,
             refQA,
             providerEvidence:
               checkpoint.manifest?.version === 2 || checkpoint.manifest?.version === 3
@@ -1037,12 +1014,9 @@ export const thumbnailGen: Block = {
           };
         },
         critique: async (attempt, iter) => {
-          if (
-            attempt.typographyMatteUniformity < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumTypographyMatteUniformity ||
-            attempt.backgroundSsim < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumBackgroundSsim
-          ) {
+          if (attempt.backgroundSsim < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumBackgroundSsim) {
             return {
-              score: Math.min(attempt.typographyMatteUniformity, attempt.backgroundSsim),
+              score: attempt.backgroundSsim,
               pass: false,
               issues: [
                 "Preserve the supplied daytime/nighttime, palette, lighting, objects, and composition exactly; change pixels only where the bottom-right 4K emblem is drawn.",
@@ -1074,13 +1048,6 @@ export const thumbnailGen: Block = {
             `${LOFI_RENDER_THUMBNAIL_CONTRACT.minimumBackgroundSsim.toFixed(3)})`,
         );
       }
-      if (winner.typographyMatteUniformity < LOFI_RENDER_THUMBNAIL_CONTRACT.minimumTypographyMatteUniformity) {
-        throw new Error(
-          `thumbnail_gen: Lo-Fi Nano Banana did not return a clean typography matte ` +
-            `(uniformity ${winner.typographyMatteUniformity.toFixed(6)} < ` +
-            `${LOFI_RENDER_THUMBNAIL_CONTRACT.minimumTypographyMatteUniformity.toFixed(3)})`,
-        );
-      }
       assertThumbnailGate(quality, refQA, "Lo-Fi Nano Banana 15-second-frame candidate");
       const passed = refQA !== null && thumbnailGatePassed(refQA);
       const publishable = quality === "production" ? true : passed;
@@ -1107,7 +1074,7 @@ export const thumbnailGen: Block = {
           })
         : undefined;
       await putObject(thumbnailKey, thumbnailBytes, {
-        contentType: "image/jpeg",
+        contentType: rasterImageDimensions(thumbnailBytes).contentType,
         metadata: {
           "thumbnail-request-sha256": winner.requestHash,
           "thumbnail-provider-route": providerEvidence.receipt.route,
@@ -1129,7 +1096,6 @@ export const thumbnailGen: Block = {
         sourceFrameTimeSec: reference.sourceFrameTimeSec,
         sourceResolution: `${reference.sourceWidth}x${reference.sourceHeight}`,
         backgroundSsim: winner.backgroundSsim,
-        typographyMatteUniformity: winner.typographyMatteUniformity,
         ...(thumbnailCurrentCandidateEvidence ? { thumbnailCurrentCandidateEvidence } : {}),
       });
       ctx.log(

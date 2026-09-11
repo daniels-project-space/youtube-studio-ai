@@ -27,7 +27,6 @@ async function main(): Promise<void> {
   const previousFetch = globalThis.fetch;
   const previousFalKey = process.env.FAL_KEY;
   const referencePng = pngHeader(1_280, 720);
-  const typographyMattePng = pngHeader(1_280, 720);
   const providerPng = pngHeader(1_344, 768);
   let submissions = 0;
   let downloads = 0;
@@ -47,16 +46,11 @@ async function main(): Promise<void> {
         assert.match(String(body.prompt), /"Night Focus"/);
         assert.match(String(body.prompt), /"4K"/);
         const imageUrls = body.image_urls as string[];
-        assert.equal(imageUrls.length, 2);
-        assert.match(imageUrls[1] ?? "", /^data:image\/png;base64,/);
-        assert.deepEqual(
-          Buffer.from((imageUrls[1] ?? "").split(",", 2)[1] ?? "", "base64"),
-          referencePng,
-        );
+        assert.equal(imageUrls.length, 1);
         assert.match(imageUrls[0] ?? "", /^data:image\/png;base64,/);
         assert.deepEqual(
           Buffer.from((imageUrls[0] ?? "").split(",", 2)[1] ?? "", "base64"),
-          typographyMattePng,
+          referencePng,
         );
         return new Response(JSON.stringify({
           images: [{
@@ -91,8 +85,6 @@ async function main(): Promise<void> {
       prompt: "Preserve the supplied frame. Add exactly \"Night Focus\" and \"4K\".",
       referenceImage: referencePng,
       referenceMimeType: "image/png",
-      typographyMatteImage: typographyMattePng,
-      typographyMatteMimeType: "image/png",
       idempotencyContext: "owner-fixture/channel-fixture/run-fixture/lofi-thumbnail-attempt-1",
     });
     const first = await usageScope.run(async () => {
@@ -108,10 +100,7 @@ async function main(): Promise<void> {
     assert.equal(first.receipt.model, "fal-ai/nano-banana/edit");
     assert.equal(first.receipt.route, profile.route);
     assert.equal(first.receipt.referenceSha256, createHash("sha256").update(referencePng).digest("hex"));
-    assert.equal(
-      first.receipt.typographyMatteSha256,
-      createHash("sha256").update(typographyMattePng).digest("hex"),
-    );
+    assert.equal(first.receipt.typographyMatteSha256, undefined);
     assert.equal(first.receipt.costUsd, 0.039);
     const usage = usageScope.snapshot();
     assert.equal(usage.calls, 1);
@@ -124,8 +113,6 @@ async function main(): Promise<void> {
         prompt: "wrong MIME",
         referenceImage: referencePng,
         referenceMimeType: "image/jpeg",
-        typographyMatteImage: typographyMattePng,
-        typographyMatteMimeType: "image/png",
         idempotencyContext: "invalid-reference-fixture",
       }),
       /MIME image\/jpeg does not match image\/png bytes/,

@@ -16,16 +16,16 @@ async function main(): Promise<void> {
   assert.equal(LOFI_RENDER_THUMBNAIL_CONTRACT.minimumWidth, 3_840);
   assert.equal(LOFI_RENDER_THUMBNAIL_CONTRACT.minimumHeight, 2_160);
   assert.equal(LOFI_RENDER_THUMBNAIL_CONTRACT.minimumBackgroundSsim, 0.995);
-  assert.equal(LOFI_RENDER_THUMBNAIL_CONTRACT.minimumTypographyMatteUniformity, 0.98);
   const prompt = lofiNanoBananaEditPrompt({
     visualLanguage: { treatment: "neon", font: "rounded" },
   });
-  assert.match(prompt, /exact 15-second video frame/i);
+  assert.match(prompt, /exact 15-second frame/i);
   assert.match(prompt, /"4K"/);
   assert.match(prompt, /read-only channel thumbnail visual language/i);
-  assert.match(prompt, /Every output pixel outside the 4K emblem.*must remain exact solid #00ff00/i);
   assert.match(prompt, /Never place the 4K mark on a filled rectangle, pill, card, banner/i);
   assert.match(prompt, /Nano Banana itself must render the emblem/i);
+  assert.match(prompt, /one attached image/i);
+  assert.match(prompt, /no local overlay or compositor/i);
   assert.match(prompt, /bottom-right corner/i);
   assert.match(prompt, /custom quality emblem/i);
   assert.match(prompt, /Do not add a headline, mood label, title, subtitle, or any other writing/i);

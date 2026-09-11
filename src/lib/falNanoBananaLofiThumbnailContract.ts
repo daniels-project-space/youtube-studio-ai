@@ -2,12 +2,14 @@
  * Sealed Fal Nano Banana edit contract for Lo-Fi video-frame thumbnails.
  *
  * This is deliberately separate from both the normal direct thumbnail module
- * and the square channel-avatar adapter. It may add the two approved text
- * elements, but it must edit one exact 1280x720 frame derived from a rendered
- * video and may never fall back to another provider or model.
+ * and the square channel-avatar adapter. It may add the one approved 4K
+ * emblem, but it must edit one exact 1280x720 frame derived from a rendered
+ * video and may never fall back to another provider or model. Typography is
+ * rendered by Nano Banana itself; a local compositor is not part of this
+ * contract.
  */
 export const FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE = {
-  contractVersion: "fal-nano-banana-lofi-thumbnail/v1",
+  contractVersion: "fal-nano-banana-lofi-thumbnail/v2",
   provider: "fal",
   model: "fal-ai/nano-banana/edit",
   apiVersion: "fal-model-api/v1",
@@ -19,6 +21,7 @@ export const FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE = {
   accountingHeight: 768,
   allowText: true,
   allowFallback: false,
+  inputMode: "single-reference-native-overlay",
   maxPromptUtf8Bytes: 3_000,
   maxReferenceBytes: 2_000_000,
   outputImageUsd: 0.039,
@@ -35,7 +38,8 @@ export interface FalNanoBananaLofiThumbnailReceipt {
   height: number;
   promptUtf8Bytes: number;
   referenceSha256: string;
-  typographyMatteSha256: string;
+  /** Historical v1 receipts carried a chroma-matte hash; native v2 omits it. */
+  typographyMatteSha256?: string;
   outputCostUsd: typeof FAL_NANO_BANANA_LOFI_THUMBNAIL_PROFILE.outputImageUsd;
   costUsd: number;
   sourceContentType: string;

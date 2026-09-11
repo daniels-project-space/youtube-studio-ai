@@ -138,8 +138,6 @@ export async function generateFalNanoBananaLofiThumbnailWithReceipt(args: {
   prompt: string;
   referenceImage: Buffer;
   referenceMimeType?: "image/jpeg" | "image/png" | "image/webp";
-  typographyMatteImage: Buffer;
-  typographyMatteMimeType?: "image/png";
   idempotencyContext: string;
 }): Promise<FalNanoBananaLofiThumbnailResult> {
   await hydrateFalCredential();
@@ -175,25 +173,6 @@ export async function generateFalNanoBananaLofiThumbnailWithReceipt(args: {
     );
   }
   const referenceSha256 = sha256(args.referenceImage);
-  if (!args.typographyMatteImage.byteLength ||
-    args.typographyMatteImage.byteLength > PROFILE.maxReferenceBytes) {
-    throw new Error(
-      `fal Lo-Fi Nano Banana typography matte must be 1-${PROFILE.maxReferenceBytes} bytes`,
-    );
-  }
-  const matteDimensions = rasterImageDimensions(args.typographyMatteImage);
-  if (
-    matteDimensions.width !== PROFILE.referenceWidth ||
-    matteDimensions.height !== PROFILE.referenceHeight ||
-    matteDimensions.contentType !== "image/png" ||
-    (args.typographyMatteMimeType !== undefined && args.typographyMatteMimeType !== "image/png")
-  ) {
-    throw new Error(
-      `fal Lo-Fi Nano Banana typography matte must be image/png ` +
-        `${PROFILE.referenceWidth}x${PROFILE.referenceHeight}`,
-    );
-  }
-  const typographyMatteSha256 = sha256(args.typographyMatteImage);
   const body = {
     prompt,
     num_images: 1,
@@ -201,7 +180,6 @@ export async function generateFalNanoBananaLofiThumbnailWithReceipt(args: {
     output_format: "png",
     safety_tolerance: "4",
     image_urls: [
-      `data:image/png;base64,${args.typographyMatteImage.toString("base64")}`,
       `data:${referenceMimeType};base64,${args.referenceImage.toString("base64")}`,
     ],
     limit_generations: true,
@@ -334,7 +312,6 @@ export async function generateFalNanoBananaLofiThumbnailWithReceipt(args: {
       height: dimensions.height,
       promptUtf8Bytes,
       referenceSha256,
-      typographyMatteSha256,
       outputCostUsd: PROFILE.outputImageUsd,
       costUsd: PROFILE.outputImageUsd,
       sourceContentType: dimensions.contentType,

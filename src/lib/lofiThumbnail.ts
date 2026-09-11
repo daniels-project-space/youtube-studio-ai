@@ -14,21 +14,17 @@ import {
   imageToJpeg,
   imageRegionLuma,
   measureImageRegionSsim,
-  measureImageRegionUniformity,
   probe,
-  solidImage,
 } from "@/lib/ffmpeg";
 
 export const LOFI_RENDER_THUMBNAIL_CONTRACT = {
-  version: "lofi-nano-banana-reference-thumbnail/v1",
+  version: "lofi-nano-banana-reference-thumbnail/v2",
   route: "nano-banana-lofi-video-reference",
   minimumWidth: 3_840,
   minimumHeight: 2_160,
   outputWidth: 1_280,
   outputHeight: 720,
   badge: "4K",
-  typographyMatteColor: "#00ff00",
-  minimumTypographyMatteUniformity: 0.98,
   /** Outside the provider-rendered bottom-right emblem, the video frame is immutable. */
   minimumBackgroundSsim: 0.995,
 } as const;
@@ -37,9 +33,6 @@ export type LofiThumbnailReference = Readonly<{
   baseFramePath: string;
   referenceFramePath: string;
   referenceImage: Buffer;
-  typographyMattePath: string;
-  typographyMatteImage: Buffer;
-  typographyMatteSha256: string;
   badgeTone: "black" | "white";
   sourceFrameTimeSec: number;
   sourceWidth: number;
@@ -59,12 +52,11 @@ export function lofiNanoBananaEditPrompt(args: {
   const badgeTone = args.badgeTone ?? "black";
   const badgeOutline = badgeTone === "black" ? "white" : "black";
   return [
-    "Typography-overlay task with two attached images. Image 1 is the solid chroma-green output canvas and is the only image you may edit. Image 2 is the exact video frame and is visual context only.",
-    "Return Image 1 with provider-rendered lettering added. Do not reproduce, redraw, fade, wash out, or composite Image 2 into the result.",
-    `Every output pixel outside the 4K emblem, its tight outline, and its tight shadow must remain exact solid ${LOFI_RENDER_THUMBNAIL_CONTRACT.typographyMatteColor}.`,
-    "Do not redraw, relight, recolor, retime, restyle, sharpen, blur, crop, move, add, or remove any scene element from Image 2. Day must remain day; night must remain night.",
-    "Image 2 is the exact 15-second video frame. It is the finished artwork, not inspiration and not a scene to reinterpret.",
-    "Add exactly one element and no others: a custom quality emblem containing exactly \"4K\" in the bottom-right corner. Nano Banana itself must render the emblem into its returned image. Do not add a headline, mood label, title, subtitle, or any other writing.",
+    "Native image-edit task with one attached image: it is the exact 15-second frame from the finished 4K Lo-Fi video and is the only source of scene pixels.",
+    "Return that same frame with exactly one provider-rendered addition and no local overlay or compositor: Nano Banana itself must render the emblem — a custom quality emblem containing exactly \"4K\" in the bottom-right corner.",
+    "Do not add a headline, mood label, title, subtitle, or any other writing.",
+    "Do not redraw, relight, recolor, retime, restyle, sharpen, blur, crop, move, add, or remove any scene element. Day must remain day; night must remain night.",
+    "The supplied frame is finished artwork, not inspiration and not a scene to reinterpret.",
     `For local contrast, the 4K emblem lettering must be pure ${badgeTone} with a tight pure ${badgeOutline} outline. Never use cream, beige, gold, gray, pastel, translucent, or low-contrast letter fill.`,
     `Use this read-only channel thumbnail visual language only for the emblem design: ${style}.`,
     "Golden-module symbol standard: a compact, deliberately designed 4K quality mark with crisp spacing and mobile-size legibility. A tight outline or shadow may touch the glyphs only.",
@@ -91,19 +83,6 @@ export async function measureLofiThumbnailBackgroundSsim(args: {
       { x: 0, y: 580, width: 1_050, height: 140 },
     ],
     { canvasWidth: 1_280, canvasHeight: 720 },
-  );
-}
-
-/** The provider output must remain chroma matte outside the 4K emblem zone. */
-export async function measureLofiTypographyMatteUniformity(args: {
-  providerOverlayPath: string;
-}): Promise<number> {
-  return measureImageRegionUniformity(
-    args.providerOverlayPath,
-    [
-      { x: 0, y: 0, width: 1_280, height: 560 },
-      { x: 0, y: 560, width: 1_020, height: 160 },
-    ],
   );
 }
 
@@ -138,15 +117,6 @@ export async function prepareLofiThumbnailReference(args: {
   const sourceFrameSha256 = createHash("sha256")
     .update(referenceImage)
     .digest("hex");
-  const typographyMattePath = join(args.tmpDir, "lofi-typography-matte.png");
-  await solidImage(
-    typographyMattePath,
-    LOFI_RENDER_THUMBNAIL_CONTRACT.outputWidth,
-    LOFI_RENDER_THUMBNAIL_CONTRACT.outputHeight,
-    LOFI_RENDER_THUMBNAIL_CONTRACT.typographyMatteColor,
-  );
-  const typographyMatteImage = await readFile(typographyMattePath);
-  const typographyMatteSha256 = createHash("sha256").update(typographyMatteImage).digest("hex");
   const badgeLuma = await imageRegionLuma(
     referenceFramePath,
     { x: 1_050, y: 590, width: 230, height: 130 },
@@ -159,9 +129,6 @@ export async function prepareLofiThumbnailReference(args: {
     baseFramePath,
     referenceFramePath,
     referenceImage,
-    typographyMattePath,
-    typographyMatteImage,
-    typographyMatteSha256,
     badgeTone,
     sourceFrameTimeSec,
     sourceWidth: width,

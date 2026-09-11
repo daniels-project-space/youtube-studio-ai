@@ -24,6 +24,16 @@ assert.doesNotMatch(
   /generateLofiNanoBananaThumbnailWithReceipt/,
   "the Lo-Fi side lane must not call the direct-Google thumbnail adapter",
 );
+assert.doesNotMatch(
+  block,
+  /compositeProviderTypographyOverlay|measureLofiTypographyMatteUniformity|typographyMatteImage/,
+  "Lo-Fi typography must be rendered by the native provider, never a local FFmpeg/matte compositor",
+);
+assert.match(
+  block,
+  /version: "thumbnail-lofi-fal-nano-banana-evidence\/v2"[\s\S]*mode: "lofi-render-frame-native"/,
+  "the active Lo-Fi evidence must identify the native single-reference edit",
+);
 assert.match(
   lofi,
   /assemble[\s\S]*thumbnail_gen[\s\S]*qa_visual/,
