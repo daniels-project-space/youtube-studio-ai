@@ -39,6 +39,8 @@ assert.match(panel, /confirmCandidateSpend:\s*true/);
 assert.match(panel, /Render Nano candidate/);
 assert.match(panel, /Resume candidate delivery/);
 assert.match(panel, /Candidate authorization interrupted/);
+assert.match(panel, /row\.candidate\.error/);
+assert.match(panel, /compactFailureMessage\(row\.candidate\.error\)/);
 assert.match(panel, /become the Library image after production QA/);
 assert.match(panel, /compactFailureMessage/);
 assert.match(panel, /YouTube declined the thumbnail update; custom thumbnails may be unavailable\./);

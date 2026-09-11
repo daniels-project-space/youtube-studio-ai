@@ -555,7 +555,14 @@ export function ThumbnailRefreshInventoryPanel({
                     </span>
                   ) : null}
                   {row.candidate?.status === "failed" ? (
-                    <span className={styles.candidateFailed}>Candidate stopped — inspect evidence</span>
+                    <span
+                      className={styles.candidateFailed}
+                      title={row.candidate.error ?? "Candidate stopped — inspect evidence"}
+                    >
+                      {row.candidate.error
+                        ? compactFailureMessage(row.candidate.error)
+                        : "Candidate stopped — inspect evidence"}
+                    </span>
                   ) : null}
                   {row.candidate ? (
                     <Link href={`/runs/${row.candidate.runId}`} className={styles.action}>Inspect candidate</Link>
