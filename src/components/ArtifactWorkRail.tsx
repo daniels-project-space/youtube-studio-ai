@@ -67,8 +67,8 @@ export function ArtifactWorkRail({
           aria-label={`${title} video artifacts`}
           tabIndex={0}
         >
-          {visible.map((video) => (
-            <ArtifactCard key={video._id} video={video} onOpen={onOpen} />
+          {visible.map((video, index) => (
+            <ArtifactCard key={video._id} video={video} onOpen={onOpen} priority={index < 3} />
           ))}
         </div>
       )}
@@ -79,9 +79,11 @@ export function ArtifactWorkRail({
 function ArtifactCard({
   video,
   onOpen,
+  priority = false,
 }: {
   video: VideoRow;
   onOpen?: (video: VideoRow) => void;
+  priority?: boolean;
 }) {
   const cardContent = (
     <>
@@ -96,6 +98,7 @@ function ArtifactCard({
           : video.youtubeVideoId ? youtubeThumb(video.youtubeVideoId) : undefined}
         fallbackSource="youtube"
         alt={video.title}
+        priority={priority}
         overlay={({ source, state }) => (
           <div className={styles.mediaBadges}>
             <StageBadge status={video.status} size="sm" />

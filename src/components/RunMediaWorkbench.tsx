@@ -149,6 +149,7 @@ function CurrentThumbnailCard({ thumbnail }: { thumbnail: RunCurrentThumbnail | 
           assetKey={source?.assetKey}
           videoStillKey={source?.videoStillKey}
           alt={`Current thumbnail for ${thumbnail?.title ?? "this run"}`}
+          priority={!frame}
           unavailableLabel="No current thumbnail available"
           footer={({ src, state }) => (
             <div className={styles.assetBody}>
