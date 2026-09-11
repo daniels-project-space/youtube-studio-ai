@@ -461,6 +461,10 @@ export function ThumbnailRefreshInventoryPanel({
                           : "Thumbnail candidate is unavailable. "}
                       {row.thumbnailReplayReason}
                     </p>
+                    <p>
+                      {row.thumbnailPresent ? "Thumbnail retained." : "No thumbnail asset retained."} 
+                      Master proof: {row.releaseEvidenceStatus.replaceAll("_", " ")}.
+                    </p>
                     {row.legacyCleanupAction === "retire" ? (
                       <p className={styles.retirementReason}>{row.legacyCleanupExplanation}</p>
                     ) : null}
@@ -468,14 +472,14 @@ export function ThumbnailRefreshInventoryPanel({
                   <div className={styles.meta}>
                     {row.channelSlug ? <Link href={`/channels/${row.channelSlug}`}>{row.channelName}</Link> : <span>{row.channelName}</span>}
                     <span>{fmtDateTime(row.createdAt)}</span>
-                    <span>{row.thumbnailPresent ? "thumbnail retained" : "no thumbnail asset"}</span>
-                    <span>master proof: {row.releaseEvidenceStatus.replaceAll("_", " ")}</span>
-                    <span>
-                      {row.thumbnailReplayStatus === "ready_for_thumbnail_only"
-                        ? "exact thumbnail replay eligible"
-                        : row.thumbnailReplayStatus === "ready_for_private_successor"
-                          ? "Nano candidate ready"
-                          : "channel setup required"}
+                    <span
+                      title={row.thumbnailReplayStatus === "ready_for_private_successor"
+                        ? "Nano candidate ready"
+                        : row.thumbnailReplayStatus === "ready_for_thumbnail_only"
+                          ? "Exact thumbnail replay eligible"
+                          : "Channel setup required"}
+                    >
+                      {row.candidate ? "candidate active" : "awaiting candidate"}
                     </span>
                     {row.candidate ? (
                       <span>candidate: {row.candidate.status.replaceAll("_", " ")} · ${row.candidate.costTotal.toFixed(2)}</span>

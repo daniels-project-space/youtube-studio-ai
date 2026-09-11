@@ -49,15 +49,15 @@
 .status[data-tone="ready"] { border-color: rgba(182,223,98,.24); color: var(--color-secondary); background: rgba(182,223,98,.055); }
 .status[data-tone="review"] { border-color: rgba(245,158,11,.25); color: var(--color-amber); background: rgba(245,158,11,.05); }
 .status[data-tone="warning"] { border-color: rgba(251,113,133,.24); color: var(--color-failed); background: rgba(251,113,133,.05); }
-.row h3 { min-width: 0; overflow: hidden; margin: 0; font-size: .77rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.rowSummary { display: -webkit-box; max-width: 58rem; margin: .25rem 0 0; overflow: hidden; color: var(--color-muted); font-size: .62rem; line-height: 1.35; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
-.evidenceDetails { margin-top: .25rem; color: var(--color-faint); font-size: .58rem; }
+.row h3 { min-width: 0; overflow: hidden; margin: 0; font-size: .84rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.rowSummary { display: -webkit-box; max-width: 58rem; margin: .25rem 0 0; overflow: hidden; color: var(--color-muted); font-size: .68rem; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 1; }
+.evidenceDetails { margin-top: .25rem; color: var(--color-faint); font-size: .62rem; }
 .evidenceDetails summary { width: fit-content; color: var(--color-blueprint); font: 700 .5rem/1 var(--font-mono); letter-spacing: .055em; text-transform: uppercase; cursor: pointer; }
 .evidenceDetails summary:hover { color: var(--color-fg); }
 .evidenceDetails p { max-width: 58rem; margin: .25rem 0 0; color: var(--color-muted); line-height: 1.4; }
 .evidenceDetails p + p { color: var(--color-faint); }
 .evidenceDetails .retirementReason { color: var(--color-failed); }
-.meta { display: flex; flex-wrap: wrap; gap: .22rem .6rem; margin-top: .34rem; color: var(--color-faint); font: .52rem/1.25 var(--font-mono); }
+.meta { display: flex; flex-wrap: wrap; gap: .22rem .6rem; margin-top: .34rem; color: var(--color-faint); font: .6rem/1.25 var(--font-mono); }
 .meta a { color: var(--color-blueprint); }
 .meta a:hover { color: var(--color-fg); }
 .actions { display: grid; align-content: center; gap: .35rem; }
@@ -73,7 +73,7 @@
 .candidateProgress,
 .candidateReady,
 .candidateFailed,
-.replacementDone { display: flex; align-items: center; gap: .4rem; padding: .42rem .5rem; border: 1px solid var(--color-border); border-radius: 7px; color: var(--color-muted); font: .58rem/1.25 var(--font-mono); }
+.replacementDone { display: flex; align-items: center; gap: .4rem; padding: .42rem .5rem; border: 1px solid var(--color-border); border-radius: 7px; color: var(--color-muted); font: .62rem/1.3 var(--font-mono); }
 .candidateProgress i { width: 7px; height: 7px; border: 1px solid var(--color-blueprint); border-top-color: transparent; border-radius: 50%; animation: candidate-spin .85s linear infinite; }
 .candidateReady { border-color: rgba(182,223,98,.25); color: var(--color-secondary); }
 .replacementDone { border-color: rgba(182,223,98,.35); color: var(--color-secondary); background: rgba(182,223,98,.07); }
