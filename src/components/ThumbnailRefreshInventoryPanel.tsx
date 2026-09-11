@@ -112,9 +112,11 @@ function compactFailureMessage(message?: string): string {
 function ThumbnailRefreshPreview({
   row,
   candidate = false,
+  priority = false,
 }: {
   row: ThumbnailInventoryRow;
   candidate?: boolean;
+  priority?: boolean;
 }) {
   const [storedUrl, setStoredUrl] = useState<string | null>(null);
   const [storedPreviewFailed, setStoredPreviewFailed] = useState(false);
@@ -163,7 +165,8 @@ function ThumbnailRefreshPreview({
         <img
           src={src}
           alt={`${row.title} ${candidate ? "new candidate" : "current thumbnail"} preview`}
-          loading="lazy"
+          loading={priority ? "eager" : "lazy"}
+          fetchPriority={priority ? "high" : "auto"}
           decoding="async"
           onError={() => setStoredPreviewFailed(true)}
         />
@@ -426,7 +429,7 @@ export function ThumbnailRefreshInventoryPanel({
 
       {visible.length ? (
         <div className={styles.list}>
-          {visible.map((row) => {
+          {visible.map((row, index) => {
             const display = STATUS_COPY[row.thumbnailEvidenceStatus];
             const dispatchCanResume = row.candidate &&
               ["awaiting_approval", "pending"].includes(row.candidate.dispatchState ?? "");
@@ -441,8 +444,8 @@ export function ThumbnailRefreshInventoryPanel({
             return (
               <article className={styles.row} key={row.runId}>
                 <div className={styles.previewStack} data-has-candidate={row.candidate ? "true" : undefined}>
-                  <ThumbnailRefreshPreview row={row} />
-                  {row.candidate ? <ThumbnailRefreshPreview row={row} candidate /> : null}
+                  <ThumbnailRefreshPreview row={row} priority={index < 4} />
+                  {row.candidate ? <ThumbnailRefreshPreview row={row} candidate priority={index < 4} /> : null}
                 </div>
                 <div className={styles.rowCopy}>
                   <div className={styles.titleLine}>
