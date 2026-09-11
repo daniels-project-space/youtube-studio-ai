@@ -68,10 +68,11 @@ for (const id of ["library-search", "library-channel", "library-status", "librar
 assert.match(globalCss, /--color-failed: #fb7185/);
 assert.doesNotMatch(globalCss, /\.channel-live-state-inactive\s*\{\s*opacity:/);
 assert.match(globalCss, /\.channel-live-state small[\s\S]*display: none/);
-// The compact fleet card keeps its deliberate 218px operating width. This is
-// still materially smaller than the old card treatment while leaving room for
-// the two-column queue/published strip and 44px action targets.
-assert.match(globalCss, /\.channel-card-grid[\s\S]*min\(100%, 218px\)/);
+// The compact fleet card keeps its deliberate 198px operating width. The
+// narrow identity row reflows its live state below the title so the smaller
+// tile remains readable while preserving the two-column metrics and actions.
+assert.match(globalCss, /\.channel-card-grid[\s\S]*minmax\(min\(100%, 190px\), 198px\)/);
+assert.match(globalCss, /@container \(max-width: 205px\)[\s\S]*\.channel-live-state \{[\s\S]*min-width: 0/);
 assert.match(globalCss, /\.channel-card-readiness progress/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-card-grid \{[\s\S]*grid-auto-flow: column/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-card-grid \{[\s\S]*scroll-snap-type: x proximity/);
