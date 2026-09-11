@@ -9,7 +9,6 @@ for (const pathname of [
   "/novita-render",
   "/casefile",
   "/editorial-evidence",
-  "/studio-assets",
 ]) {
   assert.equal(
     shouldShowOperationsTrigger(pathname),

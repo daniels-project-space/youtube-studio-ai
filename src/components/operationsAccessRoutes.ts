@@ -9,7 +9,6 @@ const OWNER_ACTION_ROUTE_PREFIXES = [
   "/novita-render",
   "/casefile",
   "/editorial-evidence",
-  "/studio-assets",
 ] as const;
 
 export function shouldShowOperationsTrigger(pathname: string | null): boolean {
