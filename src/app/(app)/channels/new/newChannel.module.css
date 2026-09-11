@@ -259,7 +259,8 @@
 @media (max-width: 680px) {
   .page { padding-bottom: calc(10rem + env(safe-area-inset-bottom)); }
   .hero { grid-template-columns: 1fr; min-height: 0; padding: .9rem .8rem; border-radius: 16px; }
-  .heroGlyph { display: none; }
+  .heroGlyph { display: block; position: absolute; top: .55rem; right: .6rem; width: 92px; height: 64px; opacity: .68; pointer-events: none; }
+  .heroNicheGlyph { inset: 13px 27px; }
   .hero h1 { font-size: 2rem; }
   .stepRail { grid-template-columns: repeat(4,minmax(68px,1fr)); gap: .25rem; overflow-x: auto; }
   .stepNode { grid-template-columns: 1fr; justify-items: center; padding: .5rem .35rem; text-align: center; }
