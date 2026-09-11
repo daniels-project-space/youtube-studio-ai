@@ -55,6 +55,11 @@ async function main(): Promise<void> {
     /METACRAFT TITLE GATE FAILED — no unjudged fallback will be persisted/,
     "a configured provider failure must fail closed instead of entering an unjudged legacy recovery path",
   );
+  assert.doesNotMatch(
+    source,
+    /legacy tournament fallback|legacy tournament\/critique recovery/,
+    "the retired unjudged tournament/critique recovery path must not remain executable",
+  );
 
   console.log("METADATA TITLE AUTHORITY PASS — fallbacks cannot override evaluated or deterministic titles");
 }

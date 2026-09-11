@@ -73,7 +73,6 @@ import {
   selectGoldenThumbnailPattern,
   type ThumbnailPlaybook,
 } from "@/lib/thumbnailLab";
-import { agentJson } from "@/agents/mastra";
 import { produceAndCritique, type ChannelCritiqueContext } from "@/engine/critiqueLoop";
 import { laneQualityPolicy } from "@/engine/contentLane";
 import {
@@ -91,20 +90,6 @@ import {
 import { loadPerformanceContext } from "@/lib/performance";
 import { renderSerializedProgramEpisodeContextForPrompt } from "@/lib/serializedProgramEpisodeContext";
 import { serializedProgramEpisodeContextForStage } from "@/trigger/serializedProgramEpisodeContext";
-import { z } from "zod";
-
-/** SEO chunk structured-output schemas (validated on Mastra + REST). */
-const seoSchema = z.object({
-  title: z.string(),
-  description: z.string(),
-  tags: z.array(z.string()).optional().default([]),
-});
-const seoDirectorSchema = z.object({
-  score: z.number().optional(),
-  issues: z.array(z.string()).optional().default([]),
-});
-/** lofi/study-music framing — flagged when the channel niche is NOT music. */
-const LOFI_LEAK = /lo-?fi|beats to (relax|study)|study music|chill beats/i;
 import { refreshNicheResearchCore } from "@/lib/nicheResearch";
 import { loadOutlierBank } from "@/lib/topicraft";
 import { join } from "node:path";
@@ -263,10 +248,6 @@ interface NicheIntel {
   medianViewsTop50?: number;
   avgViewsTop50?: number;
 }
-interface SeoDatabank {
-  titleTemplates?: string[];
-  hookPatterns?: string[];
-}
 interface CompetitorRow {
   topVideos: { title: string; views: number; tags: string[] }[];
 }
@@ -410,13 +391,7 @@ export const metadataOptimized: Block = {
       typeof topicBet?.provisionalTitle === "string" ? topicBet.provisionalTitle.trim() : "";
 
     const nicheIntel = (ctx.store["nicheIntel"] as NicheIntel | null) ?? null;
-    const databank = (ctx.store["seoDatabank"] as SeoDatabank | null) ?? null;
     const competitors = (ctx.store["competitors"] as CompetitorRow[] | null) ?? [];
-    const competitorTitles = competitors
-      .flatMap((c) => c.topVideos)
-      .sort((a, b) => b.views - a.views)
-      .slice(0, 12)
-      .map((v) => v.title);
     const powerWords = (nicheIntel?.powerWords ?? []).map((p) => p.word).slice(0, 12);
     const titleMax = nicheIntel?.optimalTitleLen ?? 70;
     // Music niches legitimately use "lofi / study / relax" framing; others don't.
@@ -424,15 +399,6 @@ export const metadataOptimized: Block = {
 
     // Localization: write title/description/tags in the channel's spoken language.
     const language = ctx.params["language"] as string | undefined;
-    const LANG_NAMES: Record<string, string> = {
-      es: "Spanish", de: "German", fr: "French", pt: "Portuguese", it: "Italian", nl: "Dutch",
-    };
-    const langDirective =
-      language && language !== "en"
-        ? `- LANGUAGE: Write the title, description, and tags in ${LANG_NAMES[language] ?? language} ` +
-          `(keep proper names/quotes in their original form). Hashtags and keywords should be in that language too.\n`
-        : "";
-
     // Script context grounds the SEO in the ACTUAL video (narrated archetypes).
     let scriptExcerpt = "";
     const nt = ctx.store["narrationText"];
@@ -446,22 +412,11 @@ export const metadataOptimized: Block = {
     }
     if (serializedEpisodePrompt) {
       // Keep serial continuity in the same bounded script-grounding channel
-      // used by every metadata path, including provider fallbacks.
+      // used by both the judged provider path and the deterministic no-provider path.
       scriptExcerpt = `${serializedEpisodePrompt}\n\n${scriptExcerpt}`.trim().slice(0, 1_400);
     }
 
-    // TITLE-PROMISE CONTRACT: title, thumbnail and the first 15 seconds are ONE
-    // promise unit — the title must state the SAME promise/loop the crafted
-    // cold open makes (the research's "topic confirmation": the hook confirms
-    // the clicked promise, so the title must BE that promise).
     const scriptDoc = ctx.store["script"] as { hook?: string; hookLoop?: string } | undefined;
-    const promiseContract =
-      scriptDoc?.hook || scriptDoc?.hookLoop
-        ? `THE VIDEO'S COLD OPEN (the first thing a clicking viewer hears):\n"${(scriptDoc.hook ?? "").slice(0, 400)}"\n` +
-          (scriptDoc.hookLoop ? `Its promise: "${scriptDoc.hookLoop}"\n` : "") +
-          `TITLE-PROMISE CONTRACT: the title must state the SAME promise this cold open makes (different ` +
-          `words welcome, same contract) — never promise anything the cold open doesn't set up.\n`
-        : "";
 
     const viewEstimate = async (tags: string[]) => {
       let estimatedViews = nicheIntel?.medianViewsTop50 ?? nicheIntel?.avgViewsTop50 ?? 0;
@@ -605,261 +560,6 @@ export const metadataOptimized: Block = {
       throw new Error(`metadata: title gate failed; no unjudged fallback: ${detail}`, { cause: e });
     }
 
-    /*
-     * Legacy tournament/critique recovery remains below for source-compatible
-     * history and diagnostics, but it is intentionally unreachable: the strict
-     * catch above throws before an unjudged title can enter either path. Keep
-     * this explicit so a future edit cannot mistake it for a release fallback.
-    */
-    const titleFormula = dnaSeo?.titleFormula ?? "";
-    const descriptionStructure = dnaSeo?.descriptionStructure ?? "";
-    const dnaSeoClause =
-      (titleFormula ? `CHANNEL TITLE FORMULA (Style DNA — prefer this shape): ${titleFormula}\n` : "") +
-      (descriptionStructure ? `CHANNEL DESCRIPTION STRUCTURE (Style DNA): ${descriptionStructure}\n` : "");
-
-    // TITLE TOURNAMENT — the comparative path: 5 candidates across DISTINCT
-    // high-CTR frames, judged against the niche's REAL top titles WITH their
-    // view counts ("would it win the click in this feed"). Iterating a single
-    // candidate deadlocked at sub-bar scores; competition against evidence
-    // converges. Falls back to the legacy loop on any failure.
-    let tournament: { title: string; description: string; tags: string[]; score: number } | null = null;
-    if (competitorTitles.length >= 5) {
-      try {
-        const titlesWithViews = competitors
-          .flatMap((c) => c.topVideos)
-          .sort((a, b) => b.views - a.views)
-          .slice(0, 12)
-          .map((v) => `${(v.views / 1e6).toFixed(1)}M views — "${v.title}"`);
-        const genSchema = z.object({
-          candidates: z.array(z.object({
-            frame: z.string(),
-            title: z.string(),
-            description: z.string(),
-            tagsCsv: z.string(),
-          })).default([]),
-        });
-        const gen = await agentJson({
-          role: "producer",
-          schema: genSchema,
-          log: ctx.log,
-          maxTokens: 2200,
-          temperature: 0.85,
-          prompt:
-            `Write FIVE complete SEO metadata candidates for a video about "${topic}" on "${channelName}" — ` +
-            `one per frame: (1) specific-number, (2) curiosity-gap, (3) contrarian/counterintuitive, ` +
-            `(4) how/why-mechanism, (5) stakes/warning.\n` +
-            `NICHE: ${niche || "general"} | PERSONA: ${persona || "n/a"}\n` +
-            (scriptExcerpt ? `SCRIPT EXCERPT:\n${scriptExcerpt}\n` : "") +
-            promiseContract +
-            dnaSeoClause +
-            (powerWords.length ? `POWER WORDS: ${powerWords.join(", ")}\n` : "") +
-            langDirective +
-            `Each candidate: title (obey the channel formula above when given; never the channel name; one clear ` +
-            `honest promise), description (hook line + ≤60-word paragraph + "Subscribe for more:" CTA + ` +
-            `"Keywords: " line + hashtags line), tagsCsv (25-30 comma-separated tags relevant to THIS video).\n` +
-            `Return STRICT JSON {"candidates":[{"frame","title","description","tagsCsv"}]}.`,
-        });
-        const cands = (gen.candidates ?? [])
-          .map((c) => ({ ...c, tags: (c.tagsCsv ?? "").split(",").map((t) => t.trim()).filter(Boolean) }))
-          .filter((c) =>
-            c.title && c.title.length >= 25 && c.title.length <= 100 &&
-            c.description && c.description.length >= 40 &&
-            (isMusicNiche || !LOFI_LEAK.test(`${c.title} ${c.description}`)),
-          );
-        if (cands.length >= 3) {
-          const judgeSchema = z.object({
-            rankings: z.array(z.object({ idx: z.number(), clickScore: z.number(), why: z.string() })).default([]),
-            winner: z.number().optional(),
-          });
-          const judged = await agentJson({
-            role: "director",
-            schema: judgeSchema,
-            log: ctx.log,
-            maxTokens: 1200,
-            temperature: 0.3,
-            system: "You are the DIRECTOR: a YouTube CTR strategist judging a real feed. Return ONLY JSON.",
-            prompt:
-              `THE FEED — this niche's top performers (real views):\n${titlesWithViews.join("\n")}\n\n` +
-              `CANDIDATE TITLES for "${topic}":\n` +
-              cands.map((c, i) => `${i + 1}. [${c.frame}] ${c.title}`).join("\n") +
-              (promiseContract ? `\n\n${promiseContract}` : "") +
-              `\n\nScore each candidate 1-10: would it WIN the click placed in this exact feed (against those ` +
-              `titles), while staying honest, on the channel formula${dnaSeoClause ? " given above" : ""}` +
-              `${promiseContract ? ", AND keeping the title-promise contract (a title whose promise the cold open doesn't confirm bleeds retention)" : ""}? ` +
-              `Penalize hype that breaks a premium register. Return STRICT JSON ` +
-              `{"rankings":[{"idx":1-based,"clickScore":1-10,"why":string}],"winner":1-based}.`,
-          });
-          const wIdx = Math.min(cands.length - 1, Math.max(0, (judged.winner ?? 1) - 1));
-          const wScore = (judged.rankings ?? []).find((r) => (r.idx ?? 0) - 1 === wIdx)?.clickScore ?? 0;
-          tournament = {
-            title: cands[wIdx].title.trim(),
-            description: cands[wIdx].description.trim(),
-            tags: cands[wIdx].tags,
-            score: wScore / 10,
-          };
-          ctx.log(
-            `metadata TOURNAMENT: ${cands.length} frames judged vs ${titlesWithViews.length} real top titles → ` +
-            `winner [${cands[wIdx].frame}] ${wScore}/10: "${cands[wIdx].title.trim().slice(0, 70)}"`,
-          );
-        }
-      } catch (e) {
-        const detail = String(e);
-        ctx.log(`metadata tournament failed (legacy loop): ${detail}`);
-      }
-    }
-
-    // Producer ↔ Director SEO loop: niche-aware, script-grounded, high-CTR.
-    const loop = tournament ? null : await produceAndCritique<{
-      title: string;
-      description: string;
-      tags: string[];
-    }>({
-      label: "metadata/seo",
-      threshold: 0.8,
-      maxIters: 3,
-      log: ctx.log,
-      produce: async (priorIssues) => {
-        const out = await agentJson({
-          role: "producer",
-          schema: seoSchema,
-          log: ctx.log,
-          // Reasoning route: the ceiling covers the thinking AND the list. Measured —
-          // an agentJson list failed at 500 and passed at 1000; an 8-item ranking
-          // failed at 1500 and passed at 2500. See scripts/audit-json-contract-ceilings.ts,
-          // which could not see this call at all until it learned to resolve a schema
-          // passed by reference.
-          maxTokens: 2500,
-          temperature: 0.8,
-          prompt:
-            `Write YouTube SEO metadata for a video about "${topic}" on the channel "${channelName}".\n` +
-            `NICHE: ${niche || "general"}\nPERSONA: ${persona || "n/a"}\n` +
-            (scriptExcerpt ? `SCRIPT EXCERPT:\n${scriptExcerpt}\n` : "") +
-            promiseContract +
-            (competitorTitles.length ? `TOP COMPETITOR TITLES:\n${competitorTitles.join("\n")}\n` : "") +
-            (powerWords.length ? `POWER WORDS: ${powerWords.join(", ")}\n` : "") +
-            (databank?.titleTemplates?.length ? `TITLE TEMPLATES:\n${databank.titleTemplates.join("\n")}\n` : "") +
-            (perfCtx ? perfCtx + "\n" : "") +
-            dnaSeoClause +
-            `RULES:\n` +
-            // The channel's own DNA title formula is AUTHORITATIVE when present —
-            // appending it under contradictory generic rules (60-90 chars +
-            // "(NICHE) in caps" vs the DNA's "<60 chars, no all-caps") deadlocked
-            // the producer↔Director loop at sub-bar scores forever.
-            (dnaSeo?.titleFormula
-              ? `- title: FOLLOW THE CHANNEL TITLE FORMULA above EXACTLY — its length/case/shape constraints WIN ` +
-                `over any generic advice. Front-load the PRIMARY KEYWORD, use a CURIOSITY GAP (show the WHAT, hide ` +
-                `the HOW), address the viewer with "you" where natural, ONE clear promise per title. ` +
-                `NEVER promise something the video doesn't deliver. Do NOT include the channel name ("${channelName}").\n`
-              : `- title: 60-90 characters (aim LONG — 70-100 char titles earn +10-14% CTR; no fluff). Front-load the ` +
-                `PRIMARY KEYWORD in the first ~40 chars. Strongly prefer a NUMBER/LIST framing when the topic suits it ` +
-                `(e.g. "9 Keys to …", "7 Daily Habits …"), put the NICHE in caps in parentheses near the end, and append ` +
-                `"| <relevant figure>" when one fits. ` +
-                `Use a CURIOSITY GAP (show the WHAT, hide the HOW — +CTR), address the viewer with "you" where natural ` +
-                `(personal pronouns lift CTR), and lean on a proven high-CTR frame: specific-number list, curiosity gap, ` +
-                `transformation promise, warning ("…That Kill…"), versus, or "Why …". An end bracket like "(Explained)" / ` +
-                `"[2026]" can add a click. ONE clear promise per title. ` +
-                `NEVER promise something the video doesn't deliver. Do NOT include the channel name ("${channelName}").\n`) +
-            `- description: SEO-RICH but NOT the script. Structure exactly: (1) 2-3 punchy emotional HOOK lines, with ` +
-            `the PRIMARY KEYWORD worked into the VERY FIRST sentence (above-the-fold text is weighted most by search); ` +
-            `(2) ONE short paragraph (≤60 words) summarizing the value; (3) a "Subscribe for more:" call-to-action ` +
-            `line; (4) a line starting "Keywords: " with 14-20 comma-separated SEO keywords/phrases; (5) a final ` +
-            `line of 8-12 relevant #hashtags. Do NOT paste the script, transcript, narration, or quotes.\n` +
-            `- tags: 25-30 relevant tags (include the niche, the key figures/entities THIS video actually mentions, ` +
-            `and long-tail phrases).\n` +
-            `- MATCH THE NICHE. Do NOT use "lofi" / "beats to relax / study" / study-music framing unless the niche actually IS lofi/study/ambient music.\n` +
-            langDirective +
-            (priorIssues.length ? `FIX these issues from the last attempt: ${priorIssues.join("; ")}\n` : "") +
-            `Return STRICT JSON {"title":string,"description":string,"tags":string[]}.`,
-        });
-        return {
-          title: (out.title ?? "").trim(),
-          description: (out.description ?? "").trim(),
-          tags: (out.tags ?? []).filter(Boolean),
-        };
-      },
-      critique: async (cand) => {
-        // DETERMINISTIC checks (computed, not model-judged).
-        const issues: string[] = [];
-        if (!cand.title) issues.push("empty title");
-        if (cand.title.length > 100) issues.push(`title ${cand.title.length} chars > 100 (YouTube hard limit)`);
-        if (cand.title.length < 30) issues.push(`title ${cand.title.length} chars — too short (aim 60-90)`);
-        // hook + one short paragraph: enforce a sane floor AND ceiling so the
-        // model never dumps the script into the description.
-        const descNoTags = cand.description.replace(/#\w+/g, "").trim();
-        if (descNoTags.length < 40) issues.push("description too short (need hook + paragraph + CTA + keywords)");
-        if (descNoTags.length > 1800) issues.push("description too long — trim toward the structured SEO template (no script/transcript)");
-        if (cand.tags.length < 5) issues.push("fewer than 5 tags");
-        const lofiLeak =
-          !isMusicNiche && (LOFI_LEAK.test(cand.title) || LOFI_LEAK.test(cand.description));
-        if (lofiLeak) issues.push(`off-niche lofi/study-music framing for a "${niche}" video — remove it`);
-
-        // SUBJECTIVE: Director scores CTR + on-brand fit + clarity.
-        let dirScore = 0.7;
-        let dirIssues: string[] = [];
-        if (hasAnthropicKey()) {
-          try {
-            const v = await agentJson({
-              role: "director",
-              schema: seoDirectorSchema,
-              log: ctx.log,
-              // Reasoning route: the ceiling covers the thinking AND the list. Measured —
-              // an agentJson list failed at 500 and passed at 1000; an 8-item ranking
-              // failed at 1500 and passed at 2500. See scripts/audit-json-contract-ceilings.ts,
-              // which could not see this call at all until it learned to resolve a schema
-              // passed by reference.
-              maxTokens: 2500,
-              temperature: 0.3,
-              system: "You are the DIRECTOR: a YouTube SEO + CTR strategist. Return ONLY JSON.",
-              prompt:
-                `Channel "${channelName}" — niche: ${niche || "n/a"}; persona: ${persona || "n/a"}.\n` +
-                `TITLE: ${cand.title}\nDESCRIPTION (first 200): ${cand.description.slice(0, 200)}\nTAGS: ${cand.tags.join(", ")}\n\n` +
-                `Score 0..1 on click appeal, on-niche/on-brand fit, and clarity. Penalize generic or off-niche framing. Return JSON {"score":number,"issues":string[]}.`,
-            });
-            dirScore = typeof v.score === "number" ? Math.max(0, Math.min(1, v.score)) : 0.7;
-            dirIssues = Array.isArray(v.issues) ? v.issues : [];
-          } catch (e) {
-            ctx.log(`metadata: director failed (continuing): ${e instanceof Error ? e.message : e}`);
-          }
-        }
-        const hardFail = !cand.title || lofiLeak;
-        return {
-          score: hardFail ? Math.min(dirScore, 0.4) : dirScore,
-          pass: !hardFail && issues.length === 0 && dirScore >= 0.8,
-          issues: [...issues, ...dirIssues],
-        };
-      },
-    });
-
-    let { title, description, tags } = tournament ?? loop!.value;
-    ({ title, description, tags } = finishMetadata(ctx, { title, description, tags, channelName, nicheIntel }));
-
-    const ve = await viewEstimate(tags);
-    const legacyScore = tournament
-      ? `tournament ${((tournament?.score ?? 0) * 10).toFixed(0)}/10`
-      : `score=${loop!.critique.score.toFixed(2)}, accepted=${loop!.accepted}`;
-    ctx.log(
-      `metadata: title="${title.slice(0, 60)}…" (${legacyScore}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,
-    );
-    // The fallback producer/tournament is a recovery path, not a reason to
-    // restore the pre-script planned title. Only the title produced by this
-    // path is returned; if it cannot produce one, the block throws above.
-    if (plannedTitle && plannedTitle !== title) {
-      ctx.log(`metadata: planned title held out from legacy fallback (not evaluated): "${plannedTitle.slice(0, 80)}"`);
-    }
-    return {
-      title,
-      description,
-      thumbnailDescription: buildThumbnailDescription({
-        title,
-        topic,
-        scriptExcerpt,
-        ...(serializedEpisodePrompt ? { serializedEpisodeContext: serializedEpisodePrompt } : {}),
-      }),
-      tags,
-      pinnedComment: "",
-      titleAlternate: "",
-      ...ve,
-    };
   },
 };
 
