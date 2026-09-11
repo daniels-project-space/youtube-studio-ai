@@ -105,7 +105,9 @@ function ArtifactCard({
           <>
             <div className={styles.mediaBadges}>
               <StageBadge status={video.status} size="sm" />
-              {state === "ready" && source !== "unavailable" && (
+              {state === "ready" && source !== "unavailable" &&
+              video.thumbnailPresentation !== "lofi_rendered_frame" &&
+              video.thumbnailPresentation !== "lofi_frame_pending" && (
                 <span className={styles.sourceBadge}>
                   {source === "reviewed" ? "Reviewed" : source === "r2" ? "Saved" : source === "youtube" ? "YouTube" : "Public"}
                 </span>

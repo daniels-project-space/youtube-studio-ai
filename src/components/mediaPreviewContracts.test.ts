@@ -75,6 +75,8 @@ assert.match(rail, /source === "youtube" \? "YouTube" : "Public"/);
 assert.doesNotMatch(rail, /Reviewed ERNIE/);
 assert.match(rail, /status=\{video\.releaseEvidenceStatus\}/);
 assert.match(rail, /state === "ready" && source !== "unavailable"/);
+assert.match(rail, /source !== "unavailable" &&\s*video\.thumbnailPresentation !== "lofi_rendered_frame"/,
+  "Lo-Fi rail cards must reserve the corner for the 4K emblem");
 assert.match(rail, /aria-label=\{`\$\{title\} video artifacts`\}/);
 assert.match(rail, /tabIndex=\{0\}/);
 
