@@ -172,7 +172,7 @@ export function ChannelBanner({
             "linear-gradient(to top, rgba(10,10,11,0.85) 0%, rgba(10,10,11,0.25) 55%, rgba(10,10,11,0.1) 100%)",
         }}
       />
-      {!url && niche && (
+      {!url && (
         <span
           aria-hidden="true"
           style={{

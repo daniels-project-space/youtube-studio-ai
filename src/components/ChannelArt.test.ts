@@ -35,6 +35,11 @@ try {
   assert.match(banner, /aspect-ratio:16 \/ 9/);
   assert.match(banner, /linear-gradient\(135deg, #111111, #222222\)/);
   assert.match(banner, /data-motif="book"/, "artwork-free banners keep the channel motif visible");
+
+  const nameOnlyBanner = renderToStaticMarkup(
+    createElement(ChannelBanner, { name: "Rainy Neon Lofi", aspectRatio: "16 / 9" }),
+  );
+  assert.match(nameOnlyBanner, /data-motif="lofi"/, "channel name still identifies a banner when niche metadata is descriptive");
 } finally {
   loader._load = originalLoad;
 }
