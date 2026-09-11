@@ -856,6 +856,10 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           judged = true;
           const selectedRanking = admission.rankings.find((r) => r.idx === best);
           if (!selectedRanking) throw new Error("winner ranking disappeared after admission");
+          const sourceText = [a.scriptExcerpt, a.coldOpen, a.hookLoop, a.quote]
+            .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+            .join("\n")
+            .trim();
           titleDecision = {
             version: "title-decision/v1",
             judged: true,
@@ -867,8 +871,8 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             alternateIndex: runner >= 0 ? runner : null,
             attempts: attempt + 1,
             sourceCoverage: {
-              kind: a.scriptExcerpt?.trim() ? "script_excerpt" : "topic_only",
-              providedChars: a.scriptExcerpt?.trim().length ?? 0,
+              kind: sourceText ? "script_excerpt" : "topic_only",
+              providedChars: sourceText.length,
               totalChars: null,
             },
             candidates: survivors.map((candidate) => ({ frame: candidate.frame, title: candidate.title })),
