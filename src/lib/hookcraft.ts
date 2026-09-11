@@ -349,6 +349,66 @@ export interface HookVerdict {
   note?: string;
 }
 
+export interface HookJudgeAdmission {
+  pass: boolean;
+  verdicts: HookVerdict[];
+  issues: string[];
+}
+
+/**
+ * Validate the judge's complete per-candidate verdict before it can select a
+ * cold open. Missing axes used to be interpreted as perfect scores; that is
+ * only safe for a response that actually contains a verdict for every
+ * candidate. A malformed response therefore becomes the existing loud,
+ * lint-only path instead of a fabricated perfect review.
+ */
+export function validateHookJudgeResponse(
+  value: unknown,
+  candidateCount: number,
+): HookJudgeAdmission {
+  const issues: string[] = [];
+  const verdicts = (value as { verdicts?: unknown } | null)?.verdicts;
+  if (!Array.isArray(verdicts) || verdicts.length !== candidateCount) {
+    issues.push(`judge must score every candidate exactly once (${candidateCount} required)`);
+    return { pass: false, verdicts: [], issues };
+  }
+  const admitted: HookVerdict[] = [];
+  verdicts.forEach((raw, position) => {
+    const row = raw as {
+      punch?: unknown;
+      specificity?: unknown;
+      curiosity?: unknown;
+      voiceMatch?: unknown;
+      promise?: unknown;
+      honest?: unknown;
+      note?: unknown;
+    } | null;
+    const scores = [row?.punch, row?.specificity, row?.curiosity, row?.voiceMatch, row?.promise];
+    if (scores.some((score) => typeof score !== "number" || !Number.isFinite(score) || score < 1 || score > 10)) {
+      issues.push(`judge verdict ${position + 1} has an invalid 1-10 score`);
+      return;
+    }
+    if (typeof row?.honest !== "boolean") {
+      issues.push(`judge verdict ${position + 1} is missing its honesty verdict`);
+      return;
+    }
+    if (row.note !== undefined && (typeof row.note !== "string" || row.note.length > 240)) {
+      issues.push(`judge verdict ${position + 1} has an invalid note`);
+      return;
+    }
+    admitted.push({
+      punch: row!.punch as number,
+      specificity: row!.specificity as number,
+      curiosity: row!.curiosity as number,
+      voiceMatch: row!.voiceMatch as number,
+      promise: row!.promise as number,
+      honest: row!.honest as boolean,
+      ...(typeof row!.note === "string" ? { note: row!.note.trim() } : {}),
+    });
+  });
+  return { pass: issues.length === 0, verdicts: issues.length === 0 ? admitted : [], issues };
+}
+
 export interface CraftedHook {
   /** The ≤7s spoken hook (1-2 sentences). */
   hook: string;
@@ -620,7 +680,9 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           maxTokens: HOOK_JUDGE_MAX_OUTPUT_TOKENS,
           temperature: 0.2,
         });
-        verdicts = j.verdicts ?? [];
+        const admission = validateHookJudgeResponse(j, survivors.length);
+        if (!admission.pass) throw new Error(`judge response rejected (${admission.issues.join("; ")})`);
+        verdicts = admission.verdicts;
         best = typeof j.best === "number" && j.best >= 0 && j.best < survivors.length ? j.best : undefined;
       } catch (e) {
         // FAIL-OPEN, DELIBERATELY AND LOUDLY — see isEmptyVerdict above.
