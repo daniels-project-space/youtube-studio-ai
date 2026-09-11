@@ -91,10 +91,6 @@ function inventoryCounts(rows: readonly ThumbnailInventoryRow[]) {
   );
 }
 
-function youtubeThumbnailUrl(videoId: string): string {
-  return `https://i.ytimg.com/vi/${encodeURIComponent(videoId)}/hqdefault.jpg`;
-}
-
 function isLofiChannel(row: Pick<ThumbnailInventoryRow, "channelName" | "channelSlug">): boolean {
   return /lo[\s-]?fi/i.test(`${row.channelName} ${row.channelSlug}`);
 }
@@ -138,27 +134,32 @@ function ThumbnailRefreshPreview({
         return payload.preview.url;
       })
       .then((url) => {
-        if (current) setStoredUrl(url);
+        if (current) {
+          setStoredUrl(url);
+        }
       })
       .catch(() => {
-        // The public YouTube image below remains an honest fallback; do not
-        // turn one failed retained-object preview into a queue-level error.
+        // A failed retained-object preview is an honest unavailable state. Do
+        // not request stale/dead public YouTube artwork as a visual fallback.
+        if (current) setStoredPreviewFailed(true);
       });
     return () => { current = false; };
   }, [candidate, previewPresent, previewRunId]);
 
-  const fallback = !candidate && row.youtubeVideoId ? youtubeThumbnailUrl(row.youtubeVideoId) : null;
-  const src = storedUrl && !storedPreviewFailed ? storedUrl : fallback;
+  // The queue is a retained-artifact review surface. Never request public
+  // YouTube artwork here: it can be stale, dead, or a different thumbnail
+  // generation while the owner-bound candidate is still being evaluated.
+  const src = storedUrl && !storedPreviewFailed ? storedUrl : null;
   const source = storedUrl && !storedPreviewFailed
       ? candidate ? "new Library thumbnail" : "previous thumbnail"
-    : fallback
-      ? "current YouTube image"
+    : previewPresent && !storedPreviewFailed
+      ? "loading retained preview"
       : "no image retained";
 
   return (
     <div
       className={styles.preview}
-      data-preview-source={source === "new Library thumbnail" ? "candidate" : source === "previous thumbnail" ? "retained" : fallback ? "youtube" : "unavailable"}
+      data-preview-source={source === "new Library thumbnail" ? "candidate" : source === "previous thumbnail" ? "retained" : "unavailable"}
     >
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -171,7 +172,9 @@ function ThumbnailRefreshPreview({
           onError={() => setStoredPreviewFailed(true)}
         />
       ) : (
-        <span className={styles.previewEmpty}>No preview retained</span>
+        <span className={styles.previewEmpty}>
+          {previewPresent && !storedPreviewFailed ? "Loading preview…" : "No preview retained"}
+        </span>
       )}
       <span className={styles.previewSource}>{source}</span>
     </div>
