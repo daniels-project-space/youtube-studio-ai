@@ -117,12 +117,26 @@ export function LivePipeline({
         </div>
       </header>
 
-      <div className={styles.receiptMeter} style={{ "--pipeline-receipts": `${receiptPercent}%` } as CSSProperties} aria-label={`${receiptPercent}% of planned stages complete`}>
+      <div
+        className={styles.receiptMeter}
+        style={{ "--pipeline-receipts": `${receiptPercent}%` } as CSSProperties}
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={receiptPercent}
+        aria-label={`${receiptPercent}% of planned stages complete`}
+      >
         <i /><span>{receiptPercent}% complete</span>
       </div>
 
       {active && (
-        <section className={styles.activeStage} aria-label="Current persisted stage">
+        <section
+          className={styles.activeStage}
+          role="status"
+          aria-live="polite"
+          aria-atomic="true"
+          aria-label="Current persisted stage"
+        >
           <span className={styles.activeGlyph} aria-hidden="true"><i /><i /><i /></span>
           <div>
             <small>Now running</small>

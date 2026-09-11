@@ -11,6 +11,9 @@ const runDetail = read("src/app/(app)/runs/[runId]/page.tsx");
 assert.match(pipeline, /planSource\?: "frozen" \| "legacy"/);
 assert.match(pipeline, /Waiting for the next stage/);
 assert.match(pipeline, /Using the saved legacy plan/);
+assert.match(pipeline, /role="progressbar"/);
+assert.match(pipeline, /aria-valuenow={receiptPercent}/);
+assert.match(pipeline, /role="status"[\s\S]*aria-live="polite"/);
 
 assert.match(runDetail, /api\.runs\.getRunPresentation/);
 assert.match(runDetail, /run\.pipeline\?\.entries\.length/);
