@@ -46,8 +46,7 @@ export function readTitleReview(outputs: unknown): TitleReviewPresentation | nul
   if (!out || out["titleDecision"] === undefined) return null;
   const unavailable: TitleReviewPresentation = { state: "unavailable" };
   const receipt = record(out["titleDecision"]);
-  if (!receipt || receipt.version !== "title-decision/v1" || receipt.judged !== true ||
-      !isTitleDecisionFingerprint(receipt.fingerprint) ||
+  if (!receipt || (receipt.version !== "title-decision/v1" && receipt.version !== "title-decision/v2") || receipt.judged !== true ||
       !text(receipt.title, 100) || !Array.isArray(receipt.candidates) ||
       receipt.candidates.length < 1 || receipt.candidates.length > 16 ||
       !Array.isArray(receipt.rankings) || receipt.rankings.length !== receipt.candidates.length ||
@@ -55,7 +54,11 @@ export function readTitleReview(outputs: unknown): TitleReviewPresentation | nul
       !(receipt.alternateIndex === null || index(receipt.alternateIndex, receipt.candidates.length)) ||
       receipt.alternateIndex === receipt.winnerIndex ||
       ![1, 2].includes(receipt.attempts as number)) return unavailable;
-  if (receipt.fingerprint !== titleDecisionFingerprint(receipt)) return unavailable;
+  // v1 was emitted before sealing existed. Keep its already-persisted reviews
+  // readable, but require and verify the digest on every new v2 receipt.
+  if (receipt.version === "title-decision/v2" &&
+      (!isTitleDecisionFingerprint(receipt.fingerprint) ||
+       receipt.fingerprint !== titleDecisionFingerprint(receipt))) return unavailable;
   const coverage = record(receipt.sourceCoverage);
   if (!coverage || !Number.isSafeInteger(coverage.providedChars) || Number(coverage.providedChars) < 0 ||
       !(coverage.totalChars === null || (Number.isSafeInteger(coverage.totalChars) &&

@@ -419,7 +419,7 @@ export interface TitleJudgeRanking {
 /** Immutable, browser-readable record of the title selection that was judged.
  * The presentation layer validates this shape but never reruns the judge. */
 export interface TitleDecisionReceipt {
-  version: "title-decision/v1";
+  version: "title-decision/v2";
   /** Content address of every field below, excluding this field itself. */
   fingerprint: string;
   judged: true;
@@ -865,7 +865,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             .join("\n")
             .trim();
           const decisionBody: Omit<TitleDecisionReceipt, "fingerprint"> = {
-            version: "title-decision/v1",
+            version: "title-decision/v2",
             judged: true,
             title: survivors[best].title,
             titleAlternate: runner >= 0 ? survivors[runner]?.title ?? "" : "",

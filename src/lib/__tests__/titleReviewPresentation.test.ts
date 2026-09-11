@@ -5,7 +5,7 @@ import { titleDecisionFingerprint } from "../titleDecisionFingerprint";
 const title = "47 Engineers Died in the Bridge Collapse";
 function outputs() {
   const titleDecision = {
-    version: "title-decision/v1", judged: true, title, titleAlternate: "The Design Error Behind the Bridge Collapse",
+    version: "title-decision/v2", judged: true, title, titleAlternate: "The Design Error Behind the Bridge Collapse",
     clickScore: 9, directness: 8, winnerIndex: 1, alternateIndex: 2, attempts: 1,
     sourceCoverage: { kind: "full_narration", providedChars: 8400, totalChars: 8400 },
     candidates: [{ title: "47 Engineers Survived the Bridge Collapse" }, { title },
@@ -37,6 +37,10 @@ assert.equal(review.options[0].grounding, "contradicted");
 assert.equal(review.options[0].selected, false, "the highest click score is not necessarily the selected title");
 assert.equal(review.options[2].alternate, true);
 assert.deepEqual(input, before, "presentation never rewrites the decision or input arrays");
+const legacy = outputs() as { title: string; titleDecision: Record<string, unknown> };
+legacy.titleDecision.version = "title-decision/v1";
+delete legacy.titleDecision.fingerprint;
+assert.ok(readTitleReview(legacy)?.state === "recorded", "persisted v1 reviews remain readable after v2 sealing");
 for (const value of [null, undefined, [], false, "legacy", {}, { title }, { titleDecision: undefined }]) {
   assert.equal(readTitleReview(value), null, "legacy outputs must not acquire invented review evidence");
 }
