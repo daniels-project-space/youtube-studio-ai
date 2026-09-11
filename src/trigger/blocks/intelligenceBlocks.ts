@@ -61,7 +61,13 @@ import {
   generateFalNanoBananaLofiThumbnailWithReceipt,
   hasFalNanoBananaLofiThumbnail,
 } from "@/lib/falNanoBananaLofiThumbnail";
-import { craftMetadata, lintTitle, resolveTitleProfile, type TitleProfileId } from "@/lib/metacraft";
+import {
+  craftMetadata,
+  deterministicTitleFallback,
+  lintTitle,
+  resolveTitleProfile,
+  type TitleProfileId,
+} from "@/lib/metacraft";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { hasVisionKey } from "@/lib/vision";
 import {
@@ -427,7 +433,6 @@ export const metadataOptimized: Block = {
     const nicheIntel = (ctx.store["nicheIntel"] as NicheIntel | null) ?? null;
     const competitors = (ctx.store["competitors"] as CompetitorRow[] | null) ?? [];
     const powerWords = (nicheIntel?.powerWords ?? []).map((p) => p.word).slice(0, 12);
-    const titleMax = nicheIntel?.optimalTitleLen ?? 70;
     // Music niches legitimately use "lofi / study / relax" framing; others don't.
     const isMusicNiche = /lofi|lo-fi|study|chill|ambient|sleep|relax|music|beats/i.test(niche);
 
@@ -474,7 +479,7 @@ export const metadataOptimized: Block = {
 
     // Degrade only when the permitted non-Google text provider is unavailable.
     if (!hasAnthropicKey()) {
-      const title = topic.slice(0, titleMax);
+      const title = deterministicTitleFallback(topic, titleProfile);
       const description = `${topic}.\n\n${persona || channelName}.`;
       const tags = [topic.toLowerCase(), niche].filter(Boolean) as string[];
       const ve = await viewEstimate(tags);

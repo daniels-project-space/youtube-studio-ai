@@ -174,6 +174,29 @@ function profileFor(id?: TitleProfileId): TitleProfile {
   return TITLE_PROFILES[id ?? "general"] ?? TITLE_PROFILES.general;
 }
 
+/**
+ * Honest no-provider title fallback. Keep the topic intact when it fits the
+ * profile; otherwise clip at a word boundary inside that profile's hard
+ * envelope. This never invents a suffix, urgency claim, year, bracket, or
+ * unsupported long-title uplift.
+ */
+export function deterministicTitleFallback(
+  topic: string,
+  profile?: TitleProfileId,
+): string {
+  const normalized = topic.replace(/\s+/g, " ").trim();
+  if (!normalized) return "";
+  const { hardMaxChars } = profileFor(profile);
+  if (normalized.length <= hardMaxChars) return normalized;
+
+  const clipped = normalized
+    .slice(0, hardMaxChars + 1)
+    .replace(/\s+\S*$/, "")
+    .replace(/[,:;.!?\-–—]+$/, "")
+    .trim();
+  return clipped || normalized.slice(0, hardMaxChars).trim();
+}
+
 /** The level for a channel: explicit dial first, else the voice's own default. */
 export function resolveClickbaitLevel(
   explicit: number | undefined,

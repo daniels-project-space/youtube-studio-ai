@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { areNearDuplicateTitles, dedupeTitleCandidates, lintTitle, resolveTitleProfile, titleQualitySignal } from "@/lib/metacraft";
+import { areNearDuplicateTitles, dedupeTitleCandidates, deterministicTitleFallback, lintTitle, resolveTitleProfile, titleQualitySignal } from "@/lib/metacraft";
 
 const grounding = "Chernobyl failed one safety test and the ignored warning changed the outcome.";
 const concrete = titleQualitySignal("Chernobyl Failed One Safety Test", grounding);
@@ -25,6 +25,13 @@ assert.equal(resolveTitleProfile(undefined, { contentLane: "music_loop" }), "mus
 assert.equal(resolveTitleProfile(undefined, { contentLane: "lore_micro_doc" }), "serialized_lore");
 assert.equal(resolveTitleProfile(undefined, { niche: "tax education" }), "searchable_long");
 assert.equal(resolveTitleProfile("motivational"), "motivational");
+
+const fallback = deterministicTitleFallback(
+  "A very long topic with a concrete promise that should stop cleanly at a word boundary for mobile viewers",
+  "short_form",
+);
+assert.ok(fallback.length <= 65, "deterministic fallback must obey the selected hard envelope");
+assert.equal(fallback, "A very long topic with a concrete promise that should stop", "fallback should clip at a word boundary");
 
 const shortTitle = "Morning Habit Changes Your Routine";
 const shortProfile = titleQualitySignal(shortTitle, shortTitle, "short_form");

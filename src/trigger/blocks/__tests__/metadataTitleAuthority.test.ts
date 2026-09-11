@@ -63,6 +63,9 @@ async function main(): Promise<void> {
   assert.match(source, /titleDecision: m\.titleDecision/, "the metadata block must persist the judged decision for run-stage review");
   assert.match(source, /resolveTitleProfile/, "metadata must resolve a format-aware title profile before generation");
   assert.match(source, /titleProfile,/, "the resolved title profile must be passed into the title engine");
+  assert.match(source, /deterministicTitleFallback\(topic, titleProfile\)/, "no-provider fallback must use the shared profile envelope");
+  assert.doesNotMatch(source, /optimalTitleLen\s*\?\?/,
+    "niche research must not reintroduce an arbitrary long-title fallback envelope");
 
   console.log("METADATA TITLE AUTHORITY PASS — fallbacks cannot override evaluated or deterministic titles");
 }
