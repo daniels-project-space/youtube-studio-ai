@@ -180,7 +180,7 @@ console.log("topicraftBetLint.test.ts: lintBet() citation + dedupe logic verifie
 {
   const source = readFileSync(join(process.cwd(), "src/lib/topicraft.ts"), "utf8");
   const gateExpr =
-    '(r.demand ?? 0) >= 7 && (r.freshness ?? 0) >= (isMusicNiche ? 5 : 7) && (r.fit ?? 0) >= 7 && (r.packageability ?? 0) >= 7';
+    'r.demand >= 7 && r.freshness >= (isMusicNiche ? 5 : 7) && r.fit >= 7 && r.packageability >= 7';
   assert.ok(
     source.includes(gateExpr),
     "topicraft.ts: craftTopics' judge gate must still require demand/fit/packageability >=7 and freshness >=7 " +

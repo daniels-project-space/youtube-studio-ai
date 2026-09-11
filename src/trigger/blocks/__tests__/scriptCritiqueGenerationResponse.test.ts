@@ -55,7 +55,11 @@ async function main(): Promise<void> {
       } else if (prompt.startsWith("You are a brutal YouTube retention judge.")) {
         kind = "judge";
         assert.equal(body.max_tokens, 1400);
-        value = { verdicts: Array.from({ length: 4 }, () => ({ punch: 9, specificity: 9, curiosity: 9,
+        // Four provider candidates intentionally collapse to one unique
+        // survivor before judging; return exactly one verdict for the actual
+        // candidate list so the strict hook admission contract is exercised
+        // without manufacturing scores for removed candidates.
+        value = { verdicts: Array.from({ length: 1 }, () => ({ punch: 9, specificity: 9, curiosity: 9,
           voiceMatch: 9, promise: 9, honest: true, note: "Concrete fictional garden mystery." })), best: 0 };
       } else if (prompt.startsWith("Write a YouTube narration script about:")) {
         kind = "script";
