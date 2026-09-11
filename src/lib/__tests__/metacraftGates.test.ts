@@ -270,6 +270,14 @@ console.log("metacraftGates.test.ts: malformed, incomplete and missing-direct ju
     !source.includes("(r.direct ?? 10) >= 7"),
     "metacraft.ts: omitted directness must never default to a passing score",
   );
+  assert.ok(
+    !source.includes("shipping on lint alone"),
+    "metacraft.ts: a judge transport failure must never ship a lint-only title",
+  );
+  assert.ok(
+    source.includes("title judge unavailable") && source.includes("FAILING LOUD"),
+    "metacraft.ts: judge transport failures must be named and fail closed after the bounded retry",
+  );
   // The gate's own rejection message, surfaced in the retry-fix-loop, is the
   // second half of the wiring proof: a rejected slate must say so and retry.
   assert.ok(

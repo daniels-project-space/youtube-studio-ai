@@ -46,6 +46,12 @@ after selection and verifies the selected title remains intact. This is a
 reliability safeguard, not a claim that the degraded package is equivalent to
 the normal SEO package.
 
+Transport/provider failures in the judge itself now enter the same bounded
+two-attempt loop and fail loudly after the second failure; they no longer ship
+the first lint survivor as `UNJUDGED`. The caller-level legacy recovery contract
+still needs the shared title-decision receipt before this area can be marked
+complete.
+
 This improves decision truthfulness and prevents accidental bad admissions; a
 held-out title corpus and authorized watch-time/CTR experiment are still
 required before claiming output-quality or business gains.

@@ -799,12 +799,19 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           continue;
         }
       } catch (e) {
-        // The result already carries `judged: false` and `clickScore: null`, and
-        // the metadata block prints UNJUDGED from them — so this one was never
-        // invisible. The wording is aligned with hookcraft and topicraft anyway:
-        // "lint-only pass" describes a downgrade, and what happened is that the
-        // title was never scored against the feed at all.
-        a.log?.(`metacraft: JUDGE FAILED (${e instanceof Error ? e.message : e}) — this title was NOT scored against the feed; shipping on lint alone`);
+        // A transport/provider exception is not a score. Do not silently turn
+        // it into a lint-only title: retry the bounded title attempt and fail
+        // the module if the judge remains unavailable. The caller can then
+        // surface an incomplete metadata stage rather than persisting a title
+        // that was never scored against the feed.
+        const detail = e instanceof Error ? e.message : String(e);
+        lastIssues.push(`title judge unavailable: ${detail.slice(0, 160)}`);
+        fixNote = `THE TITLE JUDGE DID NOT RETURN A RESPONSE. Retry the complete ranking with valid JSON; do not ship an unjudged title.`;
+        a.log?.(
+          `metacraft: JUDGE FAILED (${detail}) — title was NOT scored against the feed; ` +
+          `${attempt === 0 ? "retrying" : "FAILING LOUD"}`,
+        );
+        continue;
       }
 
       const w = survivors[best];
