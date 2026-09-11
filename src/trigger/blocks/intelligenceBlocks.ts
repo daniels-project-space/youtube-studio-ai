@@ -61,7 +61,7 @@ import {
   generateFalNanoBananaLofiThumbnailWithReceipt,
   hasFalNanoBananaLofiThumbnail,
 } from "@/lib/falNanoBananaLofiThumbnail";
-import { craftMetadata, resolveTitleProfile } from "@/lib/metacraft";
+import { craftMetadata, lintTitle, resolveTitleProfile, type TitleProfileId } from "@/lib/metacraft";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { hasVisionKey } from "@/lib/vision";
 import {
@@ -258,7 +258,17 @@ interface CompetitorRow {
  */
 export function finishMetadata(
   ctx: StageContext,
-  o: { title: string; description: string; tags: string[]; channelName: string; nicheIntel: NicheIntel | null },
+  o: {
+    title: string;
+    description: string;
+    tags: string[];
+    channelName: string;
+    nicheIntel: NicheIntel | null;
+    /** Optional source packet used to re-lint after title normalization. */
+    grounding?: string;
+    titleProfile?: TitleProfileId;
+    isMusicNiche?: boolean;
+  },
 ): { title: string; description: string; tags: string[] } {
   let { title, description, tags } = o;
   if (o.channelName && o.channelName !== "this channel") {
@@ -270,6 +280,18 @@ export function finishMetadata(
       .replace(/\s{2,}/g, " ")
       .replace(/\s*[|\-–—:•]\s*$/, "")
       .trim();
+  }
+  if (o.grounding?.trim()) {
+    const normalizedLint = lintTitle(title, {
+      grounding: o.grounding,
+      channelName: o.channelName,
+      isMusicNiche: o.isMusicNiche,
+      profile: o.titleProfile,
+    });
+    if (!normalizedLint.pass) {
+      ctx.log(`metadata: normalized title failed the shared title gate: ${normalizedLint.issues.join("; ")}`);
+      throw new Error(`metadata: normalized title failed title gate (${normalizedLint.issues.join("; ")})`);
+    }
   }
   const bannedWords = ((ctx.store["bannedWords"] as string[] | undefined) ?? [])
     .map((w) => w.toLowerCase().trim())
@@ -541,7 +563,18 @@ export const metadataOptimized: Block = {
         log: ctx.log,
       });
       let { title, description, tags } = m;
-      ({ title, description, tags } = finishMetadata(ctx, { title, description, tags, channelName, nicheIntel }));
+      ({ title, description, tags } = finishMetadata(ctx, {
+        title,
+        description,
+        tags,
+        channelName,
+        nicheIntel,
+        grounding: [topic, scriptExcerpt, scriptDoc?.hook, scriptDoc?.hookLoop, (ctx.store["script"] as { closingLine?: string } | undefined)?.closingLine]
+          .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+          .join("\n"),
+        titleProfile,
+        isMusicNiche,
+      }));
       const ve = await viewEstimate(tags);
       ctx.log(
         `metadata: METACRAFT [${m.frame}] ${m.judged ? `click ${m.clickScore}/10` : "UNJUDGED"} — ` +
