@@ -19,10 +19,11 @@ export function VideoGrid({
 }) {
   return (
     <div className="video-grid">
-      {videos.map((v) => (
+      {videos.map((v, index) => (
         <VideoCard
           key={v._id}
           video={v}
+          priority={index < 4}
           onOpen={onOpen}
           libraryAction={libraryAction ? {
             label: libraryAction.label,

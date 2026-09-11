@@ -42,6 +42,7 @@ export function MediaPreview({
   emptyContent,
   overlay,
   footer,
+  priority = false,
 }: {
   assetKey?: string | null;
   /** A paused 15-second frame from a saved final master; used only as a truthful Lo-Fi fallback. */
@@ -63,6 +64,8 @@ export function MediaPreview({
   overlay?: (presentation: MediaPreviewPresentation) => ReactNode;
   /** Render controls outside the artwork without resolving its source again. */
   footer?: (presentation: MediaPreviewPresentation) => ReactNode;
+  /** Prioritize above-the-fold artwork while keeping the rest lazy. */
+  priority?: boolean;
 }) {
   const [reviewedFailedSrc, setReviewedFailedSrc] = useState<string | null>(null);
   const [r2FailedKey, setR2FailedKey] = useState<string | null>(null);
@@ -121,7 +124,8 @@ export function MediaPreview({
           className={joinClassNames(styles.image, imageClassName)}
           src={selection.src}
           alt={alt}
-          loading="lazy"
+          loading={priority ? "eager" : "lazy"}
+          fetchPriority={priority ? "high" : "auto"}
           decoding="async"
           onLoad={() => setLoadedSrc(selection.src)}
           onError={() => {

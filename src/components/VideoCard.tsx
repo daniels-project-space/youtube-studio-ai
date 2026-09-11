@@ -31,6 +31,7 @@ export function VideoCard({
   video,
   onOpen,
   libraryAction,
+  priority = false,
 }: {
   video: VideoRow;
   onOpen?: (video: VideoRow) => void;
@@ -39,6 +40,7 @@ export function VideoCard({
     busy: boolean;
     onAction: () => void;
   };
+  priority?: boolean;
 }) {
   const content = (
     <>
@@ -54,6 +56,7 @@ export function VideoCard({
           : video.youtubeVideoId ? youtubeThumb(video.youtubeVideoId) : undefined}
         fallbackSource="youtube"
         alt={video.title}
+        priority={priority}
         emptyContent={<IconLibrary width={28} height={28} />}
         overlay={() => (
           <span className="video-card-badge">

@@ -45,6 +45,7 @@ try {
   assert.equal(presentations.length, 1);
   assert.equal(presentations[0].src, source, "footer receives the same resolved source as the artwork");
   assert.match(markup, /<img[^>]+src="https:\/\/media\.example\.test\/current\.png"/);
+  assert.match(markup, /loading="lazy"/, "non-priority previews remain lazy");
   assert.match(markup, /<\/div><footer><a href="https:\/\/media\.example\.test\/current\.png">Open source<\/a><\/footer>/,
     "source controls are a sibling after the artwork, never an overlay inside it");
   assert.deepEqual(requestedKeys, [currentKey], "footer composition adds no second active source resolver");
@@ -62,6 +63,14 @@ try {
     catch (error) { previewFailures.push(String(error)); }
   }
   assert.deepEqual(previewFailures, []);
+
+  const priorityMarkup = renderToStaticMarkup(createElement(MediaPreview, {
+    assetKey: currentKey,
+    alt: "Priority thumbnail",
+    priority: true,
+  }));
+  assert.match(priorityMarkup, /loading="eager"/, "above-the-fold previews opt into eager loading");
+  assert.match(priorityMarkup, /fetchPriority="high"/, "above-the-fold previews receive high fetch priority");
 
   requestedKeys.length = 0;
   const assets = [{ _id: "old-thumbnail", _creationTime: 1, kind: "thumbnail", r2Key: oldKey }];
