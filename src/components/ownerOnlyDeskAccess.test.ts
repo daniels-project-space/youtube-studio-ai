@@ -34,10 +34,10 @@ assert.doesNotMatch(routes, /\/library/,
 const library = read("../app/(app)/library/page.tsx");
 assert.match(
   library,
-  /<ThumbnailRefreshInventoryPanel[\s\S]*canManage=\{operationsAccess === "owner"\}/,
+  /<ThumbnailRefreshInventoryPanel[\s\S]*canManage=\{operationsAccess === "owner"\}[\s\S]*canQueueCandidates/,
 );
 assert.doesNotMatch(library, /<OwnerOnlyNotice/,
-  "thumbnail evidence and automatic sync status stay visible without an owner-login wall");
+  "thumbnail evidence, candidate refresh and automatic sync status stay visible without an owner-login wall");
 
 const novitaDesk = read("../app/(app)/novita-render/page.tsx");
 assert.match(novitaDesk, /const operationsAccess = useOperationsAccess\(\)/);

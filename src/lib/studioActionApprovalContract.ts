@@ -17,11 +17,12 @@ export type StudioAction =
 
 /**
  * The single non-interactive approval actor admitted by the Studio. It is
- * deliberately scoped to immutable, QA-passed thumbnail promotion: a reviewed
- * batch may enter the candidate ledger and a completed candidate may move to
- * its already-bound YouTube video without a repeated OAuth/session ceremony.
- * Paid generation, deletion and every unrelated action still require an
- * authenticated operator.
+ * deliberately scoped to the thumbnail lane: a Library request may allocate
+ * one separately bound, cost-capped candidate, a reviewed batch may enter the
+ * candidate ledger, and a completed candidate may move to its already-bound
+ * YouTube video without a repeated OAuth/session ceremony. Source, byte,
+ * channel, connector and QA checks remain independent of this actor. Paid
+ * deletion and every unrelated action still require an authenticated operator.
  */
 export const AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX =
   "owner-policy:thumbnail-auto-apply:" as const;
@@ -32,6 +33,7 @@ export function studioActionActorIsAllowed(
 ): boolean {
   return actor.startsWith("authenticated-operator:") || (
     [
+      "thumbnail-refresh-candidate",
       "thumbnail-ernie-batch-apply",
       "thumbnail-ernie-batch-import",
       "youtube-thumbnail-replacement",

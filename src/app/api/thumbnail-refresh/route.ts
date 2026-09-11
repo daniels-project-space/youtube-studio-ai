@@ -5,7 +5,7 @@ import {
   ERNIE_THUMBNAIL_REFRESH_BATCH_OWNER_ID,
   assertPinnedErnieThumbnailRefreshBatch,
 } from "@/lib/ernieThumbnailRefreshBatch";
-import { getStudioActor, requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
+import { getStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { getObjectBytes, presignDownload } from "@/lib/storage";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { listThumbnailRefreshInventory } from "@/lib/thumbnailRefreshRuntime";
@@ -21,9 +21,45 @@ import {
   issueStudioActionApproval,
   studioActionApprovalFingerprint,
 } from "@/lib/studioActionApproval";
+import {
+  isSameOriginThumbnailRefreshRequest,
+  thumbnailRefreshPolicyActor,
+} from "@/lib/thumbnailRefreshAccess";
 import type { Id } from "../../../../convex/_generated/dataModel";
 
 export const runtime = "nodejs";
+
+/**
+ * Candidate refresh is intentionally usable from the Library without an
+ * OAuth ceremony. It is still not an open cross-site write: browser calls
+ * must carry this app's origin, and the server binds the request to the one
+ * configured Studio owner before the immutable source/cost checks run.
+ */
+async function thumbnailCandidateOwner(request: Request): Promise<{
+  ownerId: string;
+  role: "owner";
+  authKind: "session" | "service";
+  policyActor: string;
+}> {
+  const actor = await getStudioActor(request);
+  if (actor) {
+    return {
+      ...actor,
+      policyActor: `authenticated-operator:${actor.ownerId}`,
+    };
+  }
+  const requestOrigin = request.headers.get("origin");
+  if (!isSameOriginThumbnailRefreshRequest({ requestUrl: request.url, requestOrigin })) {
+    throw new StudioAuthError("thumbnail refresh must come from the Studio", 403);
+  }
+  const ownerId = process.env.STUDIO_OWNER_ID ?? "owner_daniel";
+  return {
+    ownerId,
+    role: "owner",
+    authKind: "service",
+    policyActor: thumbnailRefreshPolicyActor(ownerId),
+  };
+}
 
 function convexClient(): StudioConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -194,7 +230,7 @@ function candidateRequestBody(value: unknown): { sourceRunId: string; confirmed:
  */
 export async function POST(request: Request) {
   try {
-    const actor = await requireStudioActor(request);
+    const actor = await thumbnailCandidateOwner(request);
     if (!process.env.TRIGGER_SECRET_KEY) {
       return NextResponse.json({ ok: false, error: "thumbnail candidate worker is not deployed" }, { status: 503 });
     }
@@ -252,7 +288,7 @@ export async function POST(request: Request) {
           maximumCostUsd,
           dispatchKey: provisionalDispatchKey,
         }),
-        actor: `authenticated-operator:${actor.ownerId}`,
+        actor: actor.policyActor,
         evidence: "Owner requested one separate production-QA thumbnail candidate; source and YouTube media remain unchanged",
         maxCostUsd: maximumCostUsd,
       });

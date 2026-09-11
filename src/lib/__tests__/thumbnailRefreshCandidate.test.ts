@@ -14,6 +14,11 @@ import {
   studioActionApprovalFingerprint,
   verifyStudioActionApproval,
 } from "@/lib/studioActionApproval";
+import { AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX } from "@/lib/studioActionApprovalContract";
+import {
+  isSameOriginThumbnailRefreshRequest,
+  thumbnailRefreshPolicyActor,
+} from "@/lib/thumbnailRefreshAccess";
 
 process.env.STUDIO_CONVEX_JWT_PRIVATE_KEY = "thumbnail-refresh-candidate-test-key";
 
@@ -55,6 +60,35 @@ assert.equal(verifyStudioActionApproval(approval, {
   maximumCostUsd: identity.maximumCostUsd,
   now: 1_100,
 }), true);
+const sessionFreeApproval = issueStudioActionApproval({
+  action: "thumbnail-refresh-candidate",
+  ownerId: identity.ownerId,
+  subject,
+  actor: `${AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX}${identity.ownerId}`,
+  evidence: "same-origin Library request for one capped candidate",
+  maxCostUsd: identity.maximumCostUsd,
+  now: 1_000,
+});
+assert.equal(verifyStudioActionApproval(sessionFreeApproval, {
+  action: "thumbnail-refresh-candidate",
+  ownerId: identity.ownerId,
+  subject,
+  maximumCostUsd: identity.maximumCostUsd,
+  now: 1_100,
+}), true, "Library candidate refresh can use the scoped thumbnail policy actor");
+assert.equal(thumbnailRefreshPolicyActor(identity.ownerId), `${AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX}${identity.ownerId}`);
+assert.equal(isSameOriginThumbnailRefreshRequest({
+  requestUrl: "https://studio.example.test/api/thumbnail-refresh",
+  requestOrigin: "https://studio.example.test",
+}), true);
+assert.equal(isSameOriginThumbnailRefreshRequest({
+  requestUrl: "https://studio.example.test/api/thumbnail-refresh",
+  requestOrigin: "https://evil.example.test",
+}), false, "a session-free candidate request cannot be cross-site");
+assert.equal(isSameOriginThumbnailRefreshRequest({
+  requestUrl: "https://studio.example.test/api/thumbnail-refresh",
+  requestOrigin: null,
+}), false, "non-browser requests do not receive anonymous write authority");
 assert.throws(
   () => assertThumbnailRefreshCandidateDispatch({ ...dispatch, replayFingerprint: "b".repeat(64) }),
   /dispatch key does not match/,

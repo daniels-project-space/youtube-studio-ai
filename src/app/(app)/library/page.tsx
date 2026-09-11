@@ -196,6 +196,7 @@ export default function LibraryPage() {
             <ThumbnailRefreshInventoryPanel
               selectedChannelSlug={selectedSlug}
               canManage={operationsAccess === "owner"}
+              canQueueCandidates
             />
           </div>
         </details>

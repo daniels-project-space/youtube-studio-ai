@@ -167,15 +167,20 @@ function ThumbnailRefreshPreview({
 
 /**
  * Public packaging evidence queue. Read-only status and previews do not need
- * an owner session; paid generation and destructive retirement controls still
- * require the owner capability passed by the Library page.
+ * an owner session. A thumbnail candidate is a separately bound, capped
+ * production-QA action and can be queued directly from the Library; the
+ * destructive YouTube retirement control still requires the owner capability.
  */
 export function ThumbnailRefreshInventoryPanel({
   selectedChannelSlug,
   canManage = false,
+  canQueueCandidates = true,
 }: {
   selectedChannelSlug?: string | null;
+  /** Owner-only destructive actions (currently permanent YouTube removal). */
   canManage?: boolean;
+  /** Bounded thumbnail candidates do not require an OAuth ceremony. */
+  canQueueCandidates?: boolean;
 }) {
   const [inventory, setInventory] = useState<readonly ThumbnailInventoryRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -384,7 +389,7 @@ export function ThumbnailRefreshInventoryPanel({
         </div>
       </header>
 
-      {canManage && lofiFrameCandidates.length ? (
+      {canQueueCandidates && lofiFrameCandidates.length ? (
         <div className={styles.lofiFrameBatch}>
           <div>
             <span className={styles.lofiFrameMark} aria-hidden="true">4K</span>
@@ -463,7 +468,7 @@ export function ThumbnailRefreshInventoryPanel({
                   </div>
                 </div>
                 <div className={styles.actions}>
-                  {canManage && row.legacyCleanupAction !== "retire" && row.refreshAction === "owner_review_required" && row.thumbnailReplayStatus !== "private_successor_unavailable" && !row.candidate ? (
+                  {canQueueCandidates && row.legacyCleanupAction !== "retire" && row.refreshAction === "owner_review_required" && row.thumbnailReplayStatus !== "private_successor_unavailable" && !row.candidate ? (
                     <button
                       type="button"
                       className={styles.generateAction}
@@ -479,7 +484,7 @@ export function ThumbnailRefreshInventoryPanel({
                             : "Render Nano candidate"} · ≤$${THUMBNAIL_REFRESH_MAXIMUM_COST_USD.toFixed(2)}`}
                     </button>
                   ) : null}
-                  {canManage && dispatchCanResume ? (
+                  {canQueueCandidates && dispatchCanResume ? (
                     <button
                       type="button"
                       className={styles.generateAction}
