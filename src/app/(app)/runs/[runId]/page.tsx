@@ -23,6 +23,7 @@ import {
 } from "@/components/RunMediaWorkbench";
 import { blockLabel, LOFI_BLOCK_IDS } from "@/lib/blocks";
 import { fmtDateTime, fmtUsd } from "@/lib/format";
+import { failureReason } from "@/lib/failureReason";
 import { IconChevron, IconExternal } from "@/components/icons";
 import styles from "./runDetail.module.css";
 
@@ -125,6 +126,7 @@ export default function RunDetailPage({
 
   const channelName = channel?.name ?? "Channel";
   const channelSlug = channel?.slug;
+  const failure = run.error ? failureReason(run.error) : null;
   // The title is only an accessible image label here. Reuse already-loaded
   // metadata/asset titles in the same order as the full Library detail view.
   const metadata = stages?.find((stage) => stage.block === "metadata")?.outputs as
@@ -213,9 +215,16 @@ export default function RunDetailPage({
           />
         </div>
 
-        {run.error && (
+        {failure && (
           <div className={`glass ${styles.errorPanel}`} role="alert">
-            {run.error}
+            <div className={styles.errorSummary}>
+              <strong>{failure.reason}{failure.block ? ` · ${failure.block}` : ""}</strong>
+              {failure.hint && <span>{failure.hint}</span>}
+            </div>
+            <details className={styles.errorTechnical}>
+              <summary>Technical detail</summary>
+              <code>{run.error}</code>
+            </details>
           </div>
         )}
       </section>

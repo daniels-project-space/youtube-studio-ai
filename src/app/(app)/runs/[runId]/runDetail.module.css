@@ -65,7 +65,13 @@
 .fieldValue { display: flex; min-height: 1.2rem; align-items: center; gap: 0.32rem; overflow: hidden; color: var(--color-muted); font-size: 0.72rem; font-weight: 620; text-overflow: ellipsis; white-space: nowrap; }
 .fieldMono { font-family: var(--font-mono); font-size: 0.65rem; }
 .videoLink { display: inline-flex; align-items: center; gap: 0.32rem; color: var(--color-secondary); font-weight: 700; text-decoration: none; }
-.errorPanel { margin-top: 0.7rem; padding: 0.8rem 0.95rem; border: 1px solid color-mix(in srgb,var(--color-failed) 36%,transparent); border-radius: 8px; color: var(--color-failed); background: color-mix(in srgb,var(--color-failed) 5%,transparent); font-family: var(--font-mono); font-size: 0.73rem; line-height: 1.55; white-space: pre-wrap; }
+.errorPanel { display: grid; min-width: 0; gap: .6rem; margin-top: 0.7rem; padding: 0.8rem 0.95rem; border: 1px solid color-mix(in srgb,var(--color-failed) 36%,transparent); border-radius: 8px; color: var(--color-failed); background: color-mix(in srgb,var(--color-failed) 5%,transparent); font-family: var(--font-mono); font-size: 0.73rem; line-height: 1.55; }
+.errorSummary { display: grid; min-width: 0; gap: .2rem; }
+.errorSummary strong { overflow-wrap: anywhere; font-family: inherit; font-size: .76rem; }
+.errorSummary span { color: color-mix(in srgb,var(--color-failed) 72%,var(--color-fg)); font-size: .66rem; }
+.errorTechnical { min-width: 0; border-top: 1px solid color-mix(in srgb,var(--color-failed) 18%,transparent); padding-top: .45rem; }
+.errorTechnical summary { width: fit-content; cursor: pointer; color: color-mix(in srgb,var(--color-failed) 78%,var(--color-fg)); font-size: .6rem; font-weight: 700; }
+.errorTechnical code { display: block; max-height: 14rem; margin-top: .4rem; overflow: auto; overflow-wrap: anywhere; white-space: pre-wrap; }
 
 .retentionStrip { --retention-tone: var(--color-faint); display: grid; min-width: 0; grid-template-columns: auto minmax(10rem,.75fr) minmax(8rem,1.25fr) minmax(12rem,1fr); align-items: center; gap: .72rem; min-height: 56px; margin: -.7rem 0 1.35rem; padding: .62rem .78rem; border: 1px solid var(--color-border); border-radius: 12px; background: linear-gradient(110deg,color-mix(in srgb,var(--retention-tone) 7%,transparent),rgba(10,15,25,.52)); }
 .retentionStrip[data-status="active"], .retentionStrip[data-status="waiting"] { --retention-tone: var(--color-secondary); }
