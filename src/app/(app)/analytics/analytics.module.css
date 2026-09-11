@@ -53,13 +53,13 @@
 }
 
 .heroLead h1 {
-  max-width: 12ch;
-  margin: 0.65rem 0 0.8rem;
+  max-width: 14ch;
+  margin: 0.55rem 0 0.72rem;
   font-family: var(--font-display);
-  font-size: clamp(2.45rem, 4.7vw, 5rem);
+  font-size: clamp(2.2rem, 3.7vw, 3.9rem);
   font-weight: 520;
   letter-spacing: -0.055em;
-  line-height: 0.94;
+  line-height: 0.98;
 }
 
 .heroLead > p {
@@ -392,7 +392,7 @@
 @media (max-width: 1120px) {
   .learningHero { grid-template-columns: 1fr; }
   .heroLead { padding-right: clamp(1.5rem, 3.5vw, 3rem); }
-  .heroLead h1 { max-width: 15ch; }
+  .heroLead h1 { max-width: 16ch; }
   .efficiencyField { margin: 0 clamp(1.5rem, 3.5vw, 3rem) clamp(1.5rem, 3.5vw, 3rem); }
   .sectionHeading { grid-template-columns: minmax(240px, 0.8fr) minmax(260px, 1.2fr); }
   .sectionHeading > a { grid-column: 2; justify-self: start; }
@@ -404,7 +404,7 @@
 @media (max-width: 760px) {
   .learningHero { margin-inline: -0.2rem; border-radius: 15px; }
   .heroLead { padding: 1.2rem 0.95rem; }
-  .heroLead h1 { font-size: clamp(2.35rem, 12vw, 3.5rem); }
+  .heroLead h1 { font-size: clamp(2.15rem, 10vw, 3.1rem); }
   .efficiencyField { margin: 0 0.7rem 1rem; padding-inline: 0.55rem; }
   .efficiencyField svg { min-height: 190px; }
   .fieldLegend { align-items: flex-start; flex-direction: column; gap: 0.3rem; }
@@ -430,7 +430,7 @@
 }
 
 @media (max-width: 430px) {
-  .heroLead h1 { font-size: 2.65rem; }
+  .heroLead h1 { font-size: 2.45rem; }
   .heroMetric { gap: 0.52rem; padding-inline: 0.72rem; }
   .heroMetric > span { display: none; }
   .heroMetric strong { font-size: 1.45rem; }
