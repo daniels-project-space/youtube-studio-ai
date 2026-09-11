@@ -47,7 +47,14 @@
 import type { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
 import { claudeJson, claudeJsonPro, hasAnthropicKey, retryOnUnusableOutput } from "@/lib/anthropic";
-import { youtubeSuggest, lintTitle, resolveClickbaitLevel } from "@/lib/metacraft";
+import {
+  youtubeSuggest,
+  lintTitle,
+  resolveClickbaitLevel,
+  resolveTitleProfile,
+  TITLE_PROFILES,
+  type TitleProfileId,
+} from "@/lib/metacraft";
 import { fetchNicheOutliers, type OutlierVideo } from "@/lib/outliers";
 import { fetchRedditTrends, type TrendSignal } from "@/lib/trends";
 import { embedText, cosine, hasEmbedKey } from "@/lib/embeddings";
@@ -68,7 +75,7 @@ export interface TopicBet {
   topic: string;
   angle: string;
   betType: BetType;
-  /** Judge-linted 40-70 char title — the packageability proof + a metacraft warm start. */
+  /** Judge-linted, format-profiled title — the packageability proof + a metacraft warm start. */
   provisionalTitle: string;
   /** One-sentence scene that enacts the topic — the banana brief's seed. */
   thumbnailMoment: string;
@@ -179,6 +186,8 @@ export interface CraftTopicsArgs {
   powerWords?: string[];
   /** Clickbait dial 0-3; omitted falls back to the channel voice's own default. */
   clickbaitLevel?: number;
+  /** Optional format envelope shared with metadata finishing; omitted derives from niche. */
+  titleProfile?: TitleProfileId;
   /** Disable paid embedding fan-out when the caller supplies its own deterministic near-duplicate gate. */
   providerSemanticDedupe?: boolean;
   /** Durable fence invoked once, immediately before Topicraft enters a paid provider. */
@@ -396,6 +405,7 @@ export function lintBet(
     channelName?: string;
     allowHype?: boolean;
     isMusicNiche?: boolean;
+    titleProfile?: TitleProfileId;
     topicPool?: string[];
   },
 ): BetLint {
@@ -478,7 +488,13 @@ export function lintBet(
     // isMusicNiche was never wired here — metacraft's LOFI_LEAK lint then
     // rejected every on-brand title ON A LOFI CHANNEL, and with the pool topic
     // in no-repeat memory the whole render died at topic_select forever.
-    const lt = lintTitle(title, { grounding, channelName: o.channelName, allowHype: o.allowHype, isMusicNiche: o.isMusicNiche });
+    const lt = lintTitle(title, {
+      grounding,
+      channelName: o.channelName,
+      allowHype: o.allowHype,
+      isMusicNiche: o.isMusicNiche,
+      profile: o.titleProfile,
+    });
     if (!lt.pass) issues.push(...lt.issues.map((i) => `title: ${i}`));
   }
 
@@ -545,6 +561,8 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
   const count = Math.max(1, a.count);
   const want = count + 4;
   const doctrine = resolveVoiceDoctrine(a.niche);
+  const titleProfileId = resolveTitleProfile(a.titleProfile, { niche: a.niche });
+  const titleProfile = TITLE_PROFILES[titleProfileId];
   // The provisional title is linted with the same rules the metadata engine
   // uses, so it has to read the same clickbait dial. Leaving this as the old
   // one-archetype binary would let topicraft reject the very framing metacraft
@@ -651,7 +669,8 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
             `- topic: a specific video topic (never a broad category)\n` +
             `- angle: one line — the unique take that earns the click\n` +
             `- betType: "hero" | "hub" | "help"\n` +
-            `- provisionalTitle: 40-70 chars, the POINT ITSELF — no setup-colon constructions, no filler starts, ` +
+            `- provisionalTitle: ${titleProfile.targetMinChars}-${titleProfile.targetMaxChars} chars (hard ${titleProfile.hardMinChars}-${titleProfile.hardMaxChars}), ` +
+            `the POINT ITSELF — ${titleProfile.guidance} No setup-colon constructions, no filler starts, ` +
             `payoff inside the first 50 chars; every number and name must come from the evidence or the topic itself` +
             (allowHype ? "" : "; no hype-bait") +
             (a.powerWords?.length ? `; power words that work here: ${a.powerWords.slice(0, 10).join(", ")}` : "") + `\n` +
@@ -689,7 +708,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
       const lint = lintBet(c, {
         evidence, perfContext: a.perfContext, identityGiven, bannedWords,
         avoidNorm, avoidTokens, keptTokens, channelName: a.channelName, allowHype, isMusicNiche,
-        topicPool: a.topicPool,
+        topicPool: a.topicPool, titleProfile: titleProfileId,
       });
       if (lint.pass) keptTokens.push(tokenSet(c.topic));
       return { ...c, lint };
@@ -708,6 +727,8 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
         const j = await retryOnUnusableOutput(() => claudeJson<{ rankings?: { idx?: number; demand?: number; freshness?: number; fit?: number; packageability?: number }[] }>({
           prompt: [
             `You are a YouTube growth strategist auditing topic BETS for "${a.channelName ?? "this channel"}" (${a.niche ?? "general"}).`,
+            `TITLE ENVELOPE: ${titleProfile.id} (${titleProfile.targetMinChars}-${titleProfile.targetMaxChars} target chars, hard ${titleProfile.hardMinChars}-${titleProfile.hardMaxChars}). ` +
+              `Packageability means the provisional title follows this envelope and reads as ${titleProfile.guidance.toLowerCase()}`,
             a.programDirective
               ? `SEALED PROGRAM ROUTE — reject any bet that violates these directives:\n${a.programDirective}`
               : "",
