@@ -62,9 +62,14 @@ export function VideoCard({
         priority={priority}
         emptyContent={<IconLibrary width={28} height={28} />}
         overlay={() => (
-          <span className="video-card-badge">
-            <StageBadge status={video.status} size="sm" />
-          </span>
+          <>
+            <span className="video-card-badge">
+              <StageBadge status={video.status} size="sm" />
+            </span>
+            {video.thumbnailPresentation === "lofi_rendered_frame" || video.thumbnailPresentation === "lofi_frame_pending" ? (
+              <span className="video-card-lofi-quality" aria-label="4K source-frame thumbnail">4K</span>
+            ) : null}
+          </>
         )}
       />
 

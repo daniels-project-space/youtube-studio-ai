@@ -162,6 +162,26 @@ button.card:focus-visible {
   text-transform: uppercase;
 }
 
+.lofiQualityBadge {
+  position: absolute;
+  z-index: 3;
+  right: 0.55rem;
+  bottom: 0.3rem;
+  display: grid;
+  min-width: 25px;
+  min-height: 18px;
+  place-items: center;
+  padding: 0 0.24rem;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  border-radius: 4px;
+  color: #fff;
+  background: transparent;
+  font: 800 0.55rem/1 var(--font-mono);
+  letter-spacing: 0.055em;
+  text-shadow: 0 1px 5px rgba(0, 0, 0, 0.9), 0 0 2px rgba(0, 0, 0, 0.95);
+  pointer-events: none;
+}
+
 .body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);

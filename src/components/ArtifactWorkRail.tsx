@@ -102,14 +102,19 @@ function ArtifactCard({
         alt={video.title}
         priority={priority}
         overlay={({ source, state }) => (
-          <div className={styles.mediaBadges}>
-            <StageBadge status={video.status} size="sm" />
-            {state === "ready" && source !== "unavailable" && (
-              <span className={styles.sourceBadge}>
-                {source === "reviewed" ? "Reviewed" : source === "r2" ? "Saved" : source === "youtube" ? "YouTube" : "Public"}
-              </span>
-            )}
-          </div>
+          <>
+            <div className={styles.mediaBadges}>
+              <StageBadge status={video.status} size="sm" />
+              {state === "ready" && source !== "unavailable" && (
+                <span className={styles.sourceBadge}>
+                  {source === "reviewed" ? "Reviewed" : source === "r2" ? "Saved" : source === "youtube" ? "YouTube" : "Public"}
+                </span>
+              )}
+            </div>
+            {video.thumbnailPresentation === "lofi_rendered_frame" || video.thumbnailPresentation === "lofi_frame_pending" ? (
+              <span className={styles.lofiQualityBadge} aria-label="4K source-frame thumbnail">4K</span>
+            ) : null}
+          </>
         )}
       />
       <div className={styles.body}>

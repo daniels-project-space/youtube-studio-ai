@@ -2798,6 +2798,25 @@ button.video-card-open { cursor: pointer; }
 .video-card:hover .video-card-image { transform: scale(1.025); }
 .video-card-placeholder { position: absolute; inset: 0; display: grid; place-items: center; color: var(--color-faint); background: linear-gradient(135deg, rgba(224, 162, 96, 0.08), rgba(106, 215, 193, 0.06)); }
 .video-card-badge { position: absolute; z-index: 1; top: 7px; left: 7px; }
+.video-card-lofi-quality {
+  position: absolute;
+  z-index: 1;
+  right: 7px;
+  bottom: 7px;
+  display: grid;
+  min-width: 25px;
+  min-height: 18px;
+  place-items: center;
+  padding: 0 .24rem;
+  border: 1px solid rgba(255,255,255,.72);
+  border-radius: 4px;
+  color: #fff;
+  background: transparent;
+  font: 800 .55rem/1 var(--font-mono);
+  letter-spacing: .055em;
+  text-shadow: 0 1px 5px rgba(0,0,0,.9), 0 0 2px rgba(0,0,0,.95);
+  pointer-events: none;
+}
 .video-card-body { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: 0.3rem; padding: 0.62rem 0.7rem 0.72rem; }
 .video-card-body h3 {
   display: -webkit-box;

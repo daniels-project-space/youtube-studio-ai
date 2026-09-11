@@ -55,6 +55,10 @@ assert.match(rail, /fallbackSrc=\{video\.thumbnailKey \|\| video\.thumbnailPrese
   "the artifact rail must preserve current thumbnail identity");
 assert.match(daySchedule, /fallbackSrc=\{event\.thumbnailKey\s*\?/,
   "scheduled artwork must not mask a retained thumbnail with YouTube art");
+assert.match(videoCard, /video-card-lofi-quality/,
+  "Lo-Fi cards need a visible 4K source-frame emblem");
+assert.match(rail, /lofiQualityBadge/,
+  "artifact rail needs the same Lo-Fi 4K emblem");
 
 // Status and proof badges remain tied to their actual persisted fields rather
 // than being replaced by a preview's source label.
