@@ -947,6 +947,21 @@ export default defineSchema({
     musicAuditionQualityReceiptKey: v.optional(v.string()),
     musicAuditionQualityReceiptFingerprint: v.optional(v.string()),
     musicAuditionApprovalFingerprint: v.optional(v.string()),
+    // The native-audio approval has its own bounded continuation outbox. A
+    // Trigger acknowledgement is not enough: this lets the exact approved
+    // receipt be reissued if a queued worker never claims the run.
+    musicAuditionResumeState: v.optional(v.union(
+      v.literal("pending"),
+      v.literal("queued"),
+      v.literal("consumed"),
+      v.literal("blocked"),
+    )),
+    musicAuditionResumeAttempts: v.optional(v.number()),
+    musicAuditionResumeUpdatedAt: v.optional(v.number()),
+    musicAuditionResumeQueuedAt: v.optional(v.number()),
+    musicAuditionResumeQueueDeadlineAt: v.optional(v.number()),
+    musicAuditionResumeTriggerRunId: v.optional(v.string()),
+    musicAuditionResumeLastError: v.optional(v.string()),
     // Owner-selected, immutable source-data-story packs use a dedicated
     // initial-dispatch outbox. This is intentionally distinct from ordinary
     // cadence: no scheduled plan may carry factual claims or replace this
@@ -1086,6 +1101,12 @@ export default defineSchema({
       "ownerId",
       "factualReviewResumeState",
       "factualReviewResumeQueueDeadlineAt",
+    ])
+    .index("by_owner_music_audition_resume", ["ownerId", "musicAuditionResumeState"])
+    .index("by_owner_music_audition_resume_queue_deadline", [
+      "ownerId",
+      "musicAuditionResumeState",
+      "musicAuditionResumeQueueDeadlineAt",
     ])
     .index("by_owner_reviewed_data_story_initial_dispatch", [
       "ownerId",

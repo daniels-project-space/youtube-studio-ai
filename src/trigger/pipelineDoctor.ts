@@ -29,6 +29,7 @@ import { publishPipelineResumeEnqueueAttempt } from "@/lib/publishRetrySchedule"
 import { syncChannelPipelines } from "@/lib/goldenChannelSync";
 import { listRunHistorySince } from "@/lib/runHistory";
 import { dispatchPendingFactualReviewContinuations } from "@/trigger/factualReviewContinuationDispatcher";
+import { dispatchPendingMusicAuditionContinuations } from "@/trigger/musicAuditionContinuationDispatcher";
 
 const DAY = 86_400_000;
 
@@ -342,6 +343,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
   // key as the immediate handoff.
   let publishContinuationsQueued = 0;
   let factualReviewContinuationsQueued = 0;
+  let musicAuditionContinuationsQueued = 0;
   try {
     publishContinuationsQueued = await recoverPendingPublishContinuations(
       convex,
@@ -369,8 +371,21 @@ async function sweep(ownerId: string, log: (m: string) => void) {
       }`,
     );
   }
+  try {
+    musicAuditionContinuationsQueued = (await dispatchPendingMusicAuditionContinuations({
+      convex,
+      ownerId,
+      log,
+    })).triggered;
+  } catch (error) {
+    log(
+      `music-audition continuation recovery failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
 
-  log(`sweep: ${failures.length} failure(s), ${healed.length} healed run(s), ${retentionQueued.length} retention job(s), ${publishContinuationsQueued} publish continuation(s), ${factualReviewContinuationsQueued} factual-review continuation(s), ${missingCaps.size} missing capability(ies)`);
+  log(`sweep: ${failures.length} failure(s), ${healed.length} healed run(s), ${retentionQueued.length} retention job(s), ${publishContinuationsQueued} publish continuation(s), ${factualReviewContinuationsQueued} factual-review continuation(s), ${musicAuditionContinuationsQueued} music-audition continuation(s), ${missingCaps.size} missing capability(ies)`);
 
   // ENGAGEMENT: post the owner HOOK-QUESTION comment on freshly PUBLIC videos
   // (an engagement signal the algorithm rewards). Dedupe = the channel already
@@ -466,6 +481,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     researchTriggered,
     publishContinuationsQueued,
     factualReviewContinuationsQueued,
+    musicAuditionContinuationsQueued,
     channelPipelineSync,
     diagnosis,
   };
@@ -492,7 +508,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
       log(`telegram digest failed: ${e instanceof Error ? e.message : e}`);
     }
   }
-  return { ok: true, reportKey: key, failures: failures.length, healedRuns: healed.length, retentionQueued: retentionQueued.length, publishContinuationsQueued, factualReviewContinuationsQueued, channelPipelineSync, commentsPosted, actions };
+  return { ok: true, reportKey: key, failures: failures.length, healedRuns: healed.length, retentionQueued: retentionQueued.length, publishContinuationsQueued, factualReviewContinuationsQueued, musicAuditionContinuationsQueued, channelPipelineSync, commentsPosted, actions };
 }
 
 export const pipelineDoctorSchedule = schedules.task({

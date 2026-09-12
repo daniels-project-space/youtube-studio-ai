@@ -69,6 +69,10 @@ import {
   requeueExpiredFactualReviewResumeForLease,
   terminalizeFactualReviewResumeForLease,
 } from "./factualReviewCheckpoints";
+import {
+  assertApprovedMusicAuditionResume,
+  terminalizeMusicAuditionResumeForLease,
+} from "./musicAuditionCheckpoints";
 import { assertReviewedDataStoryInitialAdmissionLease } from "./reviewedDataStoryRunAdmissions";
 import { assertRouteQualificationBenchmarkDispatchLease } from "./routeQualificationBenchmarkRuns";
 
@@ -977,6 +981,15 @@ export const claimExecutionLease = mutation({
       approvalFingerprint: v.string(),
       invocationSha256: v.string(),
     })),
+    // Only the Music3 owner-audition outbox may release this exact native WAV
+    // to assembly. The quality receipt itself is reloaded server-side.
+    musicAuditionResume: v.optional(v.object({
+      checkpointId: v.id("musicAuditionCheckpoints"),
+      checkpointFingerprint: v.string(),
+      qualityReceiptFingerprint: v.string(),
+      approvalFingerprint: v.string(),
+      invocationSha256: v.string(),
+    })),
     // Only the dedicated reviewed-data-story outbox may cross its initial
     // manual boundary. The facts remain reload-only in runPipeline.
     reviewedDataStoryInitialAdmission: v.optional(v.object({
@@ -1011,6 +1024,8 @@ export const claimExecutionLease = mutation({
       kind: v.literal("factual_review_ineligible"),
       error: v.string(),
     }),
+    v.object({ kind: v.literal("music_audition_awaiting"), error: v.string() }),
+    v.object({ kind: v.literal("music_audition_ineligible"), error: v.string() }),
     v.object({
       kind: v.literal("reviewed_data_story_initial_awaiting"),
       error: v.string(),
@@ -1044,6 +1059,12 @@ export const claimExecutionLease = mutation({
         error: run.error ?? "factual review is terminally blocked; create a fresh revision",
       };
     }
+    if (run.status === "music_audition_blocked" || run.status === "music_audition_rejected") {
+      return {
+        kind: "music_audition_ineligible" as const,
+        error: run.error ?? "music audition is terminally blocked; create a fresh native track",
+      };
+    }
     if (run.status === "reviewed_data_story_admission_blocked") {
       return {
         kind: "reviewed_data_story_initial_ineligible" as const,
@@ -1057,6 +1078,7 @@ export const claimExecutionLease = mutation({
       };
     }
     let factualReviewResuming = false;
+    let musicAuditionResuming = false;
     let reviewedDataStoryInitialResuming = false;
     let routeQualificationBenchmarkResuming = false;
     if (run.status === "awaiting_route_qualification_benchmark_dispatch") {
@@ -1198,6 +1220,37 @@ export const claimExecutionLease = mutation({
       });
       return { kind: "factual_review_ineligible" as const, error: message };
     }
+    if (run.status === "awaiting_music_audition") {
+      if (!args.musicAuditionResume) {
+        return {
+          kind: "music_audition_awaiting" as const,
+          error: "music audition is awaiting explicit owner approval",
+        };
+      }
+      try {
+        await assertApprovedMusicAuditionResume(ctx, {
+          ownerId: args.ownerId, channelId: args.channelId, runId: args.runId,
+          checkpointId: args.musicAuditionResume.checkpointId,
+          checkpointFingerprint: args.musicAuditionResume.checkpointFingerprint,
+          qualityReceiptFingerprint: args.musicAuditionResume.qualityReceiptFingerprint,
+          approvalFingerprint: args.musicAuditionResume.approvalFingerprint,
+          invocationSha256: args.musicAuditionResume.invocationSha256,
+        });
+        musicAuditionResuming = true;
+      } catch (error) {
+        const message = `music audition resume rejected before execution: ${error instanceof Error ? error.message : String(error)}`;
+        await terminalizeMusicAuditionResumeForLease(ctx, {
+          ownerId: args.ownerId, channelId: args.channelId, runId: args.runId, reason: message, now: args.now,
+        });
+        return { kind: "music_audition_ineligible" as const, error: message };
+      }
+    } else if (args.musicAuditionResume && run.musicAuditionResumeState !== "consumed") {
+      const message = "music audition resume was supplied for a run that is not its approved awaiting receipt";
+      await terminalizeMusicAuditionResumeForLease(ctx, {
+        ownerId: args.ownerId, channelId: args.channelId, runId: args.runId, reason: message, now: args.now,
+      });
+      return { kind: "music_audition_ineligible" as const, error: message };
+    }
     const isFanoutReceipt = hasBundleFanoutReceipt(run);
     const fanoutState = run.bundleDispatchState === undefined
       ? undefined
@@ -1237,6 +1290,7 @@ export const claimExecutionLease = mutation({
     }
     if (
       !factualReviewResuming &&
+      !musicAuditionResuming &&
       !reviewedDataStoryInitialResuming &&
       !routeQualificationBenchmarkResuming
     ) {
@@ -1339,6 +1393,14 @@ export const claimExecutionLease = mutation({
             factualReviewResumeUpdatedAt: args.now,
             factualReviewResumeQueueDeadlineAt: undefined,
             factualReviewResumeLastError: undefined,
+          }
+        : {}),
+      ...(musicAuditionResuming
+        ? {
+            musicAuditionResumeState: "consumed" as const,
+            musicAuditionResumeUpdatedAt: args.now,
+            musicAuditionResumeQueueDeadlineAt: undefined,
+            musicAuditionResumeLastError: undefined,
           }
         : {}),
       ...(reviewedDataStoryInitialResuming

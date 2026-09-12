@@ -185,6 +185,7 @@ import { resolveOwnerReviewedLtxRuntime } from "@/lib/reviewedLtxRuntimeStateRun
 import type { ThirdPartyStockEvidenceReference } from "@/lib/thirdPartyStockEvidence";
 import { payloadSeedInputs } from "@/lib/payloadSeedInputs";
 import { createMusicAuditionCheckpoint } from "@/engine/musicAuditionCheckpoint";
+import { MusicProgramQualityReceiptSchema } from "@/engine/channelMusicProgram";
 
 const MAX_SELF_HEALS = 2;
 const FACTUAL_REVIEW_FROZEN_BLOCK_IDS = new Set([
@@ -207,7 +208,10 @@ const factualReviewCheckpointsApi = (api as unknown as {
 }).factualReviewCheckpoints;
 
 const musicAuditionCheckpointsApi = (api as unknown as {
-  readonly musicAuditionCheckpoints: { readonly createAwaiting: never };
+  readonly musicAuditionCheckpoints: {
+    readonly createAwaiting: never;
+    readonly assertApprovedMusicAuditionResume: never;
+  };
 }).musicAuditionCheckpoints;
 
 // This read-only bridge intentionally does not add a writer, endpoint, or
@@ -293,6 +297,14 @@ export interface RunPipelineInput {
   factualReviewResume?: {
     checkpointId: string;
     checkpointFingerprint: string;
+    approvalFingerprint: string;
+    invocationSha256: string;
+  };
+  /** Exact owner-approved native Music3 audition continuation. */
+  musicAuditionResume?: {
+    checkpointId: string;
+    checkpointFingerprint: string;
+    qualityReceiptFingerprint: string;
     approvalFingerprint: string;
     invocationSha256: string;
   };
@@ -1059,6 +1071,17 @@ export const runPipelineTask = task({
               },
             }
           : {}),
+        ...(payload.musicAuditionResume
+          ? {
+              musicAuditionResume: {
+                checkpointId: payload.musicAuditionResume.checkpointId as Id<"musicAuditionCheckpoints">,
+                checkpointFingerprint: payload.musicAuditionResume.checkpointFingerprint,
+                qualityReceiptFingerprint: payload.musicAuditionResume.qualityReceiptFingerprint,
+                approvalFingerprint: payload.musicAuditionResume.approvalFingerprint,
+                invocationSha256: payload.musicAuditionResume.invocationSha256,
+              },
+            }
+          : {}),
         ...(payload.reviewedDataStoryInitialAdmission && payload.reviewedEvidencePackSelector
           ? {
               reviewedDataStoryInitialAdmission: {
@@ -1107,6 +1130,12 @@ export const runPipelineTask = task({
           runId: payload.runId,
           error: lease.error,
         };
+      }
+      if (lease.kind === "music_audition_awaiting") {
+        return { ok: true, awaitingMusicAudition: true, runId: payload.runId, message: lease.error };
+      }
+      if (lease.kind === "music_audition_ineligible") {
+        return { ok: false, musicAuditionBlocked: true, runId: payload.runId, error: lease.error };
       }
       if (lease.kind === "reviewed_data_story_initial_awaiting") {
         // A generic/scheduler task is never allowed to turn a reviewed-pack
@@ -2059,6 +2088,36 @@ export const runPipelineTask = task({
         }
         log("factual review continuation: retained narration rehydrated before visual work (TTS not re-run)");
       }
+      if (payload.musicAuditionResume) {
+        // Claiming the lease proved the immutable owner decision; recheck it
+        // immediately before engine construction and seed only the receipt key
+        // upload_draft needs. The persisted music stage remains sealed.
+        const approved = await convex.query(musicAuditionCheckpointsApi.assertApprovedMusicAuditionResume, {
+          ownerId,
+          channelId: payload.channelId as Id<"channels">,
+          runId: payload.runId as Id<"runs">,
+          checkpointId: payload.musicAuditionResume.checkpointId as Id<"musicAuditionCheckpoints">,
+          checkpointFingerprint: payload.musicAuditionResume.checkpointFingerprint,
+          qualityReceiptFingerprint: payload.musicAuditionResume.qualityReceiptFingerprint,
+          approvalFingerprint: payload.musicAuditionResume.approvalFingerprint,
+          invocationSha256: payload.musicAuditionResume.invocationSha256,
+        } as never) as unknown as { qualityReceiptKey: string };
+        // Fail before any later visual/render provider is reached if retention
+        // has lost or altered the exact server-created approval receipt. The
+        // fuller program/runtime binding is rechecked again at upload_draft.
+        let persistedQualityReceipt: unknown;
+        try {
+          persistedQualityReceipt = JSON.parse(Buffer.from(await getObjectBytes(approved.qualityReceiptKey)).toString("utf8"));
+        } catch (error) {
+          throw new Error(`music audition continuation cannot reload its immutable quality receipt before visual work: ${error instanceof Error ? error.message : String(error)}`);
+        }
+        const parsedQualityReceipt = MusicProgramQualityReceiptSchema.parse(persistedQualityReceipt);
+        if (parsedQualityReceipt.fingerprint !== payload.musicAuditionResume.qualityReceiptFingerprint) {
+          throw new Error("music audition continuation quality receipt fingerprint no longer matches the approved immutable receipt");
+        }
+        seedStore.musicQualityReceiptKey = approved.qualityReceiptKey;
+        log("music audition continuation: exact owner-approved quality receipt restored; native audio remains sealed");
+      }
       // Declared BEFORE engineOpts so runRemoteBlock's closure can key the
       // child-task idempotency on the durable current heal cycle. A recovered
       // parent must start at h1/h2 rather than accidentally reattaching h0.
@@ -2081,9 +2140,9 @@ export const runPipelineTask = task({
         // New source-data materialization only: persist the deterministic
         // Story Spine/Episode Graph handoff and deliberately return to the
         // owner before any stock, generated visual, or render block starts.
-        ...(requiresFactualReviewCheckpoint && !payload.factualReviewResume
+        ...(requiresFactualReviewCheckpoint && !payload.factualReviewResume && !payload.musicAuditionResume
           ? { stopAfterBlockId: "episode_graph" }
-          : requiresMusicAuditionCheckpoint
+          : requiresMusicAuditionCheckpoint && !payload.musicAuditionResume
             ? { stopAfterBlockId: "music" }
             : {}),
         defaultRetries: invocation.defaultRetries,
@@ -2218,7 +2277,8 @@ export const runPipelineTask = task({
       if (result.status === "awaiting_review") {
         const isFactualBoundary = requiresFactualReviewCheckpoint &&
           payload.factualReviewResume === undefined && result.stoppedAfterBlockId === "episode_graph";
-        const isMusicBoundary = requiresMusicAuditionCheckpoint && result.stoppedAfterBlockId === "music";
+        const isMusicBoundary = requiresMusicAuditionCheckpoint &&
+          payload.musicAuditionResume === undefined && result.stoppedAfterBlockId === "music";
         if (!isFactualBoundary && !isMusicBoundary) {
           // Do not reinterpret an unexpected runner boundary as a success or
           // feed it into self-heal. It has not reached a visual provider, and
@@ -2325,6 +2385,10 @@ export const runPipelineTask = task({
           log(
             "factual review fence: refusing self-heal that would change approved narration or story planning; manual revision required",
           );
+          break;
+        }
+        if (payload.musicAuditionResume !== undefined && plan.rerunBlocks.includes("music")) {
+          log("music audition fence: refusing self-heal that would replace the owner-approved native track; manual revision required");
           break;
         }
         const advanced = await convex.mutation(api.runs.advanceSelfHealGeneration, {
