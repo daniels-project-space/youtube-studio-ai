@@ -154,6 +154,7 @@ import {
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 import { synthNarration, hasFishKey, normalizeTtsProvider, stripAudioTags } from "@/lib/tts";
 import {
   hasQwenTtsConfig,
@@ -961,6 +962,10 @@ export const hookCraft: Block = {
           observedCostUsd += PRICE.boundedTextPassUsd;
           drafted = typeof out.hook === "string" ? out.hook.trim() : "";
         } catch (e) {
+          // A transport outcome after dispatch may already have consumed the
+          // paid planner request. Do not turn it into a first-line fallback:
+          // that makes a healer replay unaccounted work as though nothing ran.
+          if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
           ctx.log(`hook_craft: permitted text planner failed (${e instanceof Error ? e.message : e})`);
         }
         const hook = drafted || firstLine();
@@ -1031,6 +1036,10 @@ export const hookCraft: Block = {
             ? { score: Math.min(0.99, score) + 0.01 * iter, pass: false, issues: rejectionIssues }
             : { score, pass: true, issues: [] };
         } catch (e) {
+          // Preserve the exact ambiguous provider boundary for the retry
+          // policy. Wrapping it would make a possibly billed critic request
+          // look like an ordinary safe failure.
+          if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
           throw new Error(
             `hook_craft FAILED: independent hook critic unavailable — refusing an unreviewed promise (${e instanceof Error ? e.message : e})`,
           );
