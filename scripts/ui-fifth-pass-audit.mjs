@@ -80,6 +80,7 @@ async function pageInventory(page) {
         return {
           tag: element.tagName.toLowerCase(),
           label: text(effectiveTarget) || element.getAttribute("aria-label") || element.getAttribute("placeholder") || "",
+          href: element.tagName === "A" ? element.getAttribute("href") : null,
           width: Math.round(box.width),
           height: Math.round(box.height),
           effectiveTarget: effectiveTarget === element ? element.tagName.toLowerCase() : effectiveTarget.tagName.toLowerCase(),
@@ -88,6 +89,15 @@ async function pageInventory(page) {
           touchTarget,
         };
       });
+    const actionableIssues = controls.flatMap((control) => {
+      if (control.tag === "a" && (!control.href || control.href === "#")) {
+        return [{ kind: "link-without-destination", label: control.label }];
+      }
+      if (control.tag === "button" && !control.label) {
+        return [{ kind: "button-without-label", label: "" }];
+      }
+      return [];
+    });
     return {
       title: document.title,
       h1: Array.from(document.querySelectorAll("h1")).filter(visible).map(text),
@@ -135,6 +145,7 @@ async function pageInventory(page) {
         };
       }).slice(0, 40),
       controls,
+      actionableIssues,
       overflow: {
         viewportWidth: window.innerWidth,
         bodyScrollWidth: body.scrollWidth,
@@ -272,7 +283,7 @@ const auditedRecords = records.map((record) => {
   return { ...record, smallTouchTargets, blockingFixedIframes };
 });
 const report = {
-  contract: "studio-ui-seventh-pass-audit/v3",
+  contract: "studio-ui-seventh-pass-audit/v4",
   baseUrl,
   capturedAt: new Date().toISOString(),
   routes: auditedRecords,
@@ -285,6 +296,7 @@ const failures = auditedRecords.filter((record) =>
     || record.pageErrors?.length
     || record.consoleErrors?.length
     || record.smallTouchTargets.length
+    || record.inventory?.actionableIssues?.length
     || record.blockingFixedIframes.length,
 );
 console.log(`Captured ${records.length} route/viewport states in ${outputDir}`);
@@ -300,6 +312,9 @@ if (failures.length) {
       ...(failure.consoleErrors ?? []),
       ...(failure.smallTouchTargets ?? []).map((control) =>
         `${control.tag} ${control.width}x${control.height} ${control.label}`,
+      ),
+      ...(failure.inventory?.actionableIssues ?? []).map((issue) =>
+        `${issue.kind}${issue.label ? ` ${issue.label}` : ""}`,
       ),
       ...(failure.blockingFixedIframes ?? []).map((frame) =>
         `fixed iframe ${frame.width}x${frame.height} ${frame.title || frame.src}`,
