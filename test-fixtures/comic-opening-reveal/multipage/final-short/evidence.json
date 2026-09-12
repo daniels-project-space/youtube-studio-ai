@@ -1,0 +1,5358 @@
+{
+  "scope": "Actual native frames/encoder. Repeated legacy comic poster; not channel/story/voice-quality proof.",
+  "renderer": "/tmp/ysa-next-bcb/scripts/mc_page_render.py",
+  "rendererSha256": "c0fb69bfa7bd457a0ec0d674aa62428eaa42b7db2c17dd4ff80d87ac7a6d8eb6",
+  "sourceSha256": "f5397e45f9c9be9b127fb99133f476f678c512620b6dc743507dd8db40d7b20f",
+  "outputSha256": "b44169661979c9dd38d17c3237202ca6617138d581580af9c5c5dde97a834862",
+  "probe": {
+    "programs": [],
+    "streams": [
+      {
+        "width": 1920,
+        "height": 1080,
+        "r_frame_rate": "24/1",
+        "nb_read_frames": "253"
+      }
+    ],
+    "format": {
+      "duration": "10.541667"
+    }
+  },
+  "segments": [
+    [
+      "est",
+      0,
+      null,
+      0.0,
+      0.01
+    ],
+    [
+      "panel",
+      0,
+      0,
+      0.01,
+      1.02
+    ],
+    [
+      "panel",
+      0,
+      1,
+      1.02,
+      2.0300000000000002
+    ],
+    [
+      "panel",
+      0,
+      2,
+      2.0300000000000002,
+      3.04
+    ],
+    [
+      "panel",
+      0,
+      3,
+      3.04,
+      4.05
+    ],
+    [
+      "turn",
+      0,
+      null,
+      4.05,
+      5.35
+    ],
+    [
+      "panel",
+      1,
+      0,
+      5.35,
+      6.359999999999999
+    ],
+    [
+      "panel",
+      1,
+      1,
+      6.359999999999999,
+      7.369999999999999
+    ],
+    [
+      "panel",
+      1,
+      2,
+      7.369999999999999,
+      8.379999999999999
+    ],
+    [
+      "tail",
+      1,
+      null,
+      8.379999999999999,
+      10.579999999999998
+    ]
+  ],
+  "sampledFrames": [
+    0,
+    12,
+    24,
+    36,
+    48,
+    60,
+    72,
+    84,
+    96,
+    108,
+    120,
+    132,
+    144,
+    156,
+    168,
+    180,
+    192,
+    204,
+    216,
+    228,
+    240,
+    252
+  ],
+  "rawFrameSha256": [
+    "c22ee6a110668ca684404239940afd88a968a7c3e630c30147fe087938278b95",
+    "7cde9bdc6ce2bae5460eacb96ef990ebe39072952ac0e88b2bf94cbc3bd4a125",
+    "f9c628baca6cd3be0063cf534a93804cef208fed60c42a2ffb49651f9d096c7b",
+    "740ea59ca09853f06110ced6db5f40c843f77f8fa7ed5a531cc6391ac2aee159",
+    "873d2c05c41ebdf351e218b407ff1c4e23b92a5309b4ff61a896281c4a62eece",
+    "20082ca058fd8e375e6dbb8791b572b1a4188e45fc922e361d8f0f1ef10a0230",
+    "b1b24206d5e51e48e5e6332ab9db7a805dc3be65ef670ba518a6d6c7d30b4d86",
+    "aa4ae7ebe1600f98a001db835683c16bf0a57b070f22b0e75faf2fc8f6983696",
+    "41efd7638fefc96526c54d890fc4a84dc5cbea4d36c0e3aeae52eccf5c60a60c",
+    "ada3016872ae4ffea00a84d3f57bb8406fcb99163284835a1f58e99ca06c8fcd",
+    "3fda36dc45b4308d42ad38b741285f7c9f1ce7768d511dfffc38584b86825368",
+    "7c508a7ed48863e5c13f80b389f7ba75ecbdf7cfd75ec5f3319e49cf2af8cb03",
+    "3bc5c4d43cb1951608a07d1776168d80d7988a767f1bc5db6148986d43474aec",
+    "5543ce5552476b2d462dbcb1550925d5677284105ffcb2b308ea53510a23a8c3",
+    "0f3c40eb90915a7eca980d2c41ea1d37c4e23aaee247699d4cbbeca9eaa67555",
+    "d7cce50490af146fa3f54064dcc6e176811293017bc773178b8ac67845332126",
+    "21a7960d8cf9f8bb596ca1294598029154850456a101c75f7d2378a0c27fa64d",
+    "bfe4f2ce977d3a2c6a748ba999440bd266c3b574798d0dabfcf6d1b5fff2fd6c",
+    "2f4ef01921573aa263c4b242b27e388fc8939b372bc897489f2a797c44f84476",
+    "72617ca688d3b53797c8b2d9ff16af24bf53425e932e8d9d54af07dc00427ab2",
+    "09713db551bcd9cfce2dc5dad27f4d0eeb3309bc1d2565a6eb294e6ae282d43f",
+    "35b82a986646432215b32d2add1066c3baefb180dbc82dc7e80846287134eb91",
+    "4399e62738d118000806bd016a8b2bc57cfb0c60dc2084b592207f9c0850a9af",
+    "f7a6a76699a9559d2cce886daa18003d7f205d7024478674172611b544e0e97f",
+    "f967d8bf45f8bf4756edf75eb22eb5c412dfd18254448005b5111baeb67c0631",
+    "7b7f35c3dbc867fc3733db5bc95b784686defb6b1a052716ad6701464ac484d6",
+    "b0785737116fb498c6136537975c0adf6d11b2d60023b7d0cbf92d36cc261485",
+    "1efe34e5e8654c76883b9c00a8e1a1c44b3e800bfc4f6424d68dd3e379091766",
+    "c50123bff2e414ad0e50f47927dc41e6ea17644b37ed68d3dd03c69fed2bf430",
+    "03250e8a0c639634bbb3dd95297360a6586dbf9bbc1153d7162dba7bf6fe44a1",
+    "029195cac614b5c5cb06a85222b4a53bb3d1a6edb38d12495f8d48ba87c42747",
+    "7fdbc1ad07eed4c89c2683cfe39c6ef4b3e4cdd5d0c3ecf33289f4e5c99a3f0a",
+    "bfad39fbaf3838056163124915ed6ba29cba68b8d0a6ef237bbdaf48ccb8ea07",
+    "405c0b2ca3bdb94c626ab5d6f61b5cbf26f25b8f95c3ede695a879920529dc0d",
+    "95d9c06fe3cad624de62eb75fbefbcc5fd486e55845466611c22ba3f7f123cca",
+    "369ef6531701d5de52e26ea661b512554ee9df0bb744f325de8f8311d2cdb1a0",
+    "33c17030ba84fdd3d8729640557064f69d730f70f7b311cc5fda5a2754f3d469",
+    "3e0620387b8c6b39cef5638003e2ed5c65a46edb65b5c0df91a84509a9f204fa",
+    "c0e7e8556c99f7903ee47b1f9dce2a2fe022540c6443694b38a24f2a1a2d593b",
+    "172df2bfaa01a3adada2d49cc3d5c63f72fd8870802b4bde50c58e447601c033",
+    "54216f5010382109a5e70419d9e4db8a5e0259b53280c02fa5b1159321d8d92b",
+    "8941e1eb71c9ec29e09de33091e1c3f3b726138ea64f6a8da3fc4a5dc09e4397",
+    "31db0141bc3482725460ed9d18afb19c9e1deb6184214bd732268fb8b4530442",
+    "df6f182e75a93c9b7c4311182a0fc02608be2aaf4cb7385a3a3ed47bcb4c2178",
+    "6eece88c8c2dd876deabb5b867300defb0a2d0f8ec4db2777b0589e3bd33b38f",
+    "845e12dd23aa34524ecae06d3a36e58aaddb06ab56a2b3575a298a4b04cb133f",
+    "2d4ecbec37057be5b3ed5d39504f68f5a6b70733edd666082805426d6e9f7517",
+    "4073f0ff4f37d32846f004b69e75675941b40bf68bc21dec45cb08fcf145dc1b",
+    "c50bf4e4f9d70026490925dad87ed2487560419b44aee77869ad9370e9b6fb67",
+    "87a46428763a5b72d566cc955736ad58226fa8080a7a238ce55574be1a777ba8",
+    "af051656d8d3077a5b1dac9264b124d1898ea4fed515d7daf3fce4f65b834d96",
+    "c65d01709c9008340cbbcfcd81b62e9b9798f8d1736614b3103c2a12b0666cd1",
+    "5c2dd6981d9fab3c2ffc6cdd2094fd4097c33b2d85136d5802823a4fd6b6cf4a",
+    "3672939c754b25801535ca2ff5e6bae3b0b5bc6486e76ee1e7adff2f8d452ff2",
+    "52c2027bdfc4043ac24465ae88e15f1a02c1098f252af701441c0afb2b7629b7",
+    "f4234e8300bb27f2701b006f53dc89a2555480e6dc1de73ed86a52aabc06534e",
+    "ccfea4c7be3206acd5b2aaf735c77d68afe922b6401a93c15568c180f024bffc",
+    "342cb7fc34ac6f7580e336049d7ec6f1c880e1a58c22e96d31eb8fe85af9ea2a",
+    "cab604f03928e74684edc5b401501c5e723f6d0e3735244a83a620d1a47717e3",
+    "20db5f41997c3fe16cbd6591013bd7ed9eb6d4a7e8a45174981701a083c5dee0",
+    "6978bfe820b292eb95a7309335e9f7079b3876db44b76efd82ae93a74f1c5f67",
+    "6b54037ac7a4ca0a732c817c015c9e33a25fce903b68c1b4009ddbb19838851c",
+    "708ca82dfa776c0412c13e81dde772b12d2bc01c0858ccf348e25682181982ee",
+    "653071a42f46bc56fb929ddc231ff818200bbfab55e3722714f494221880d62a",
+    "cf7ed9e4a5f725c6c697d2fd6b9b27e668ac4fda39543bc3f8d384561c5d7508",
+    "8b15db7a46dfd6576490dfabd7ca7df3a80a6ce9bf6b33e41da9bf361c1dcea5",
+    "2ed4363b10924cd62a47e8b41626b83eb0110772f7243466748484eb82d9db0c",
+    "a9d030fbd490c39b31a2deb780a2639ccc8fe701b087b300a536f1aa49a643f8",
+    "cc59d9b43adf37222b9ef562e6c235b95f3ed6bfad00154b3a841b9c026fcb04",
+    "d32abb3d71b13a03970d74f031a8496170faf61f6c9b5f9032b1c1b1af8eecac",
+    "55d8f1a1f0f8d894811ac2ef2ba5beacb84346eb8bacc00fda26149cb3589d62",
+    "c5ef8df260e293d710af5182ec46cbcd214caaa697378db2e3eadf9ddf4cea72",
+    "1858b163e47dda8538b6d662f6c004a21c681467dda05123499fe62632d111c9",
+    "7509eec43fe775515d87bde32a7aa2ed7cfea4fef0a55ad971c12bb484a91f08",
+    "13d84231fc4c59845563809e0923e6b381e06e03ac5a9040a9fd5700f741c9da",
+    "272d3a5192880f401a8ad30f8eaf9112436ba68ba9415fea42c201f04163d884",
+    "7f4cdbbe1ee0e5a04390bcd9ebae59a6b4d63f728d4ad82b7c1ab0ef03d77d12",
+    "0169b615ef96a99bda3b037388baf953a48ae7fdfce512ea89a9798913e25432",
+    "0697c484bf40805093af50297763dc52e2ad7ed3af32619b7926c5fcf836006e",
+    "874a9f9cd81b2ade7e81ba5c6a4c868c22736b7484b408b2c28dde67b146e6ce",
+    "7a181dd9124819e205b9bef5164b3f3ca70d2c93473cf7fff9f5f43575510ae6",
+    "58aeaa923df84ec915980e2357a7e6ce370be09edded03d8aee70f72413d69bc",
+    "01a50501090cc82617ffca03b112e7731b7ad477c92ae8b0d6783652c1a4a6f3",
+    "5ab33f3d19e506b20f654745e8c4a4e9ee9a1430f695c0cf2d006120b248b339",
+    "71882d4fdfa3767c924bbb8cbb8a571359b37374b8942ef6c751bc1615c4e04d",
+    "da136f14df291878a02efe8ec36c6f56ecd630d312d6402977f4a2b141dff7c5",
+    "ebf2b9a92d3b4fcc45d7728ab52a6dd51aa198a8e1da1ee4bd79f98de55ac124",
+    "d6f0f42e696e296ed1f396f8874e9e2207e60787fdba4ad29065b2ec3b0a9f13",
+    "ee4bacbb65ca4e9ab7ecb0db6c1a1010686df385e51c0aee21b33e51fc48922f",
+    "4bcd311ada9698b9e34bbbc571665a9f2f40decf69a2a06deb04068abd384445",
+    "52a66a8993103e6eaa4dacf11a41f5e23bd3605cc585a8dbf31bd9cd7ef79108",
+    "ac666dda31bc7d5fe806bc18c154646a64d93d34a5006bf25604e550c23fb549",
+    "21a851e137c7b272a6410f49d42ab43498c30ebe9cd57eed81a2faf7ae33b745",
+    "e45c59a00bf03b9a62499e93ff1d06c2b0d0f3fc4396a970f1b37fc73e1cb0bc",
+    "587dcc2ee52ef3284f7847b4f67a45a2f86d4c4c0b3cd628d12400ffbd721bf2",
+    "aa1e3135dad9f3f6dbfa05367b5b84d1f4230908e29efa2f26c4ae2116c8578b",
+    "b7c41f94894351378f116159471617833e25ef8b803174ada1599bc27f6faa6d",
+    "5045cdc649acf91dd0198352d166d96b13bf1e597191256704f7c44cd6dc1f96",
+    "fafebb7138a6aeb4995b3454e974075c523180f0117eb7365a4192acae12ba75",
+    "e558af08ce14cb4d054c3d5988b8119e3ee97f3b4e831375f5a41b4e5bfb7bcf",
+    "3f77bf1af6354ff0171fead80d72eb6aa97435f4b52a6072777565a49121f061",
+    "84a10f82876e512e536ab362497c22631cf998018d124b39a554a0dd06ec0f11",
+    "3ea60226d5ec8657e49eef4c7b38de716bf4acee8c148af867271fc77f1daaee",
+    "a314dace78a14066c4e0574b1ba382fa0fb21d83a33aa14729d5a2244757ab01",
+    "67041605822db2c351406d8c34dda1c059e545cb46587fa7661a0f52f3a2355f",
+    "b16377cfb9f2d5b4cee783e786817d3c1173b9cb4c3275b12d2ed4a77cf864fb",
+    "fcb25549e80a6ee75952514dad5c3ca975d2281e011ec819b5d740b0aa953b6e",
+    "e4604b762f9e830921ed52368f045d2fa60c81a0981855a3d3bdfc6f2474bfa1",
+    "56e790efc798bb1210b072a0f8fbaacd3f02dbc9071a32b61f53416340a67808",
+    "99a924a045fc91cb25dfaf1fa462e4ad61c9985d0183bc794fa651a21ab5ec47",
+    "0114fc537af85cb221f5d6f26995395f2a9619300db8fa421d60e5af2cea0073",
+    "30b041a3358f6988d168dda4e77d42abd319e1e6b03f6a82699ec8460255105e",
+    "f7c994c92e109c9c0c3faccc583d28a99d360a13eff0150431ba6badd2f14928",
+    "02e832e287a17dab2f1ae11a920816269246ac5ef746c23a1ae9095377a3d43a",
+    "d928148ace09f414cfbdd88d297b5af29540eaa332c5db73e08c18ab2989466a",
+    "2f6085a0f6418aead1fb7bb7da75525f1e21be6e9ddfaf776afeac1b1bdc161f",
+    "caee9c6ed1a4c42b7192b50821afd1c3f764f0ab423c482fb9e4d39a9137362a",
+    "95bb6e7a006694e59b18ee8f150f2cd5f775852f70a2b5954d3860ddf4163a3a",
+    "4ce055acfdf9bb4d1f2f8465e3efea5896bea77afd55c5209fa39be960803d48",
+    "4ac29e7a1218229398643797415de7c4cb2cd6366e1fb4badccfdd91409524a6",
+    "2f3846bc57df1390a48cdc4643bc1c8e1421bea4a6ea95cf615296e7f93c752a",
+    "7ac0794a5fbe03b9fff82ff1c90c3689dcc6833b089b44d9612da1d6c051373c",
+    "14413db58bdee19e3cb3a79760748eda3dd2d2cba034379f9b483d585338e598",
+    "1dc43bd6aaef59e754dc121ff90d621a762f4be306714101fc963788562a12d7",
+    "b47aef0fcecd5fe5eb05bc88142b1235d51f77ddb5d083be93d96f5993ec017a",
+    "384027d1093b4dc5be2c38addad554be6f805b68e201257f72391b899f92457b",
+    "14fbc08daa239acc7b45850948186883c267573a5130352986b09fcc73be9ebd",
+    "633f1d34866758ee55e5f43772900a548e24f2c9cdabc5ce4814c953aa61a74e",
+    "e10e3c4d45f7cad37f24c24c6b2cefa7120d369530d721d3846a811e6cb4b97a",
+    "483df71c631fb6c69520d20e387933fc6b223a2a6ce28dcffaf2ce27029fbbcd",
+    "b460d395144bc58c95abffc5a44ce1740fa4fd116fde0579be46b69d08854686",
+    "8c1c5409bcc317618676d4663e94d38704bc595866e3df89c00bf2a97e6da4ab",
+    "597f515b17794164dd7dc2be4642da4cd4d56c00ee416c4e47a2bcb7bf0b09da",
+    "63930ca870d56ed77471ba3ef2046dcbd7e5cd24d5c3c233951158c55abfcb63",
+    "50bbe156e3f91a752e3a65d05f2726abd3ac1d8b32486309e0111a373597483e",
+    "5bb534c57075393d3d31283ad714605d4eb6a392f4ec96886f6d16c8dfc1c8f6",
+    "2ed760fbd604f6380957b5e5299da42997d7393546aedfc213ca45bf86c652ab",
+    "e3c8db27e57404446ac53046d63b0344cf4f11bae3d2ae4a37d0d5c0ec666949",
+    "ac1f5f3391c38ec8586dd8883333c0fc16806ff138d8d931845f4a60c5743426",
+    "a902662aaef222d81161417450bd53a529f04ab4b4936762c376b5b96d9c62d3",
+    "f6c9af3fa1d804e50f623fcd448679ec546fc4340697a66de0ac91e8a2700567",
+    "dcef4e07df204648d29d67729a5a518758f5caae494d3a41adf7efa1c4a3ef09",
+    "3c565823df1d4b0f69f318ecdd9f44ea1073efc96ed856e4252fa01c40b08614",
+    "7e74e484e5207d4c0c5eff771c3e9bbe64773698e0eabc1cea8636fd7ac48675",
+    "03997273925f28c11fab762f9fd4d614daaac46d5569ce2499e3efeaa2eae3db",
+    "f66323c12a0594215cace0ee7e6767c6e706fb1e0b10a6536cfba4bf2433246a",
+    "6be7d5fd7bc9004134210acf73adf326a74028408c38bc3d327a5ced4ee1e40e",
+    "9d0df50fed5202488bb265c23a414d8bfbdb96a1fc42ecf61e9c5b3dc9de995a",
+    "b3d2c953e69f738b1fb2a3814977f42e7ec882db1b6c72067f8469431b5b9d5b",
+    "af47432a836375ff959935c58229419e70a864fb942708c39743cdfff23a99c9",
+    "66e7d0ae7690700664442160ed3f01b678e07e2bb8ae063a68096dd9ac1a5565",
+    "b863d491beeb15e04fc0eb2270b9a5a135d0a031de6f670b4afe61d3a81b4a49",
+    "90b8f985bff01d800dcf04c3effa5bfef937b184db449af18d9a1cbd43206c64",
+    "9964cd91590584e3ee7b3b138f4dfc6f5eafe9c8d03bca2bcc394e421aa7ae17",
+    "25391185e777bf527da8d11a19489785990d4be19976e1bf78f3c2672e0bfc30",
+    "80cda1e84fc9ed9543c8575e36f3918018a024c197d8d30c729a922fda859611",
+    "3f01a779a3695e7798a96a521b3cb2e6517a30780bbb8f0cbb4179283fabf9ad",
+    "fb27402eeb82c593a92220de8abd29eb2f2c1cc5e70a63ee772fdc5f093108a4",
+    "af9ec53aec4ba2a0587e5e0be1e9e811991a717fde664bc4a1724abde910ac1d",
+    "ee13ddf6f37e45870c4a7beeaef2f1359d260fa76df4365160f96d3b7e5b5734",
+    "54a582a9a5e12e59a07acb8958f64de6074ff4cdbaf6c17dc475faebe9168331",
+    "ec2a8197db634069aa41562bd7dc534c6718ffa89d27b04c3ad2819939e02991",
+    "2fece8a51a5bea252a89ae59caf8b011c8fb3b25730c404fc110576296ddf98e",
+    "9d65926aaffd2ca8ee7f022aef90a55b2f6ada9f86704670ef4cb4e93168a60a",
+    "03fc329da23730cd8dd2fb9dba0693c482fd012ae6635d591fb44c7beb8e23b2",
+    "feb5be4d9e1c234260d2f69bdec7c295f5ebb19f51e3e5ff9c57f00e065fec23",
+    "02d67ef5cf203b30a4476770764f9c39cee55f53212dec070e24cfb14abef718",
+    "643cd15ca42ab70b2f09eb8ca04777f40861d4fc341a02663cdd9b0ce22e2ef4",
+    "4b868ec98e8a5cacf1f3009126de15de2a2e4b913ff38e32fdb4734a7fd61dda",
+    "b2b9e301ec56758d1c5245bf8ed3698826b99888ce56dfc849c9a62bb120b68a",
+    "73f8b574c42dc33b85ac99e834124657f1e9c724cec07db160a95d0e2799a200",
+    "3ff743a4a09b4e9adb52bc23c97242123f3f11fce4d2529eeb507f15572fdd19",
+    "7c9d9ed828a264ebf5659435630b2b13ca1c57d466f5bc2c6d3797f730867d62",
+    "f9d40b6ab34ea3662da3c11ab9ce4b3652d55f3ed9a4fd94040d57f36d5bdc0f",
+    "7dd0225b1c20cc98dc32e35933ef99a99743dfead12fb22ac1e4f55063a1f1f5",
+    "cc27aabce86f5cb5c674bd6159829183bea249c8ad760c09876b1f27b1c92d20",
+    "933403d1dee81c1e848365e8169535d194d4d4ff295de8c5df6bf0793bf1d3c4",
+    "9eb278d110173b3a90899f9febcdddb79b93260c9af37dad5196cfcd6003ac68",
+    "5b3721a310b7f564fc491bd03777f496afd21bf9b3a7ec461356bbd5a169c13f",
+    "a28a19740c072544db542e01424d98b5aeeee0cfd9dc2dfa5b6fabf5ae6a6fb2",
+    "6c647d6d90b069c034286486a2b6de8fd773df0bbc6d1b8bb7604cd03b37d7d8",
+    "e127ec58db2baadac06bb2d64b5d11ba7edf33a83fac5ac8f0d2895b1da282ca",
+    "5b06bf8a78c1858d54bc687e969658af8d8e07da6b38b7a6c971a66290ee5da2",
+    "f38c6b0e62296a2f23f45717f8ba8d1df96a4a05c29000501096a65610c513da",
+    "6aa54f3da3bfb65d7021363ef8d7da537525b1e4879c74c39b2138bdd915ffb6",
+    "7e280f67b6b3c356cb8a3dc6cb97b08c3b86b8cd8021bed9cd9c9b3e9ebbf2d4",
+    "6085c1cf564a49de85209d6fe1de3b1ba9d4bd84c03e6ffe6b39ff6c0652fdc9",
+    "ab870b0e11c8a96ca0c2e3303d3bd688be9844681b61cc3d4f8c59665d82ddd6",
+    "37276a91c30ea1384f9b8b2550be8ee9f4a03209d3e942dc7e131969b5798141",
+    "dd22e5e8701285753085bd93abb4133eaf2dcac9666d09e6f6c7880d9e71ddf5",
+    "e069309a7ec3e7a1bf4c5e6aaa14d04d19aa6d6279eb065f2302bb83dbea7d18",
+    "96fc35023daf24280a9dd03f4a9e284b4b776e93d9d388641df491fe56f565ea",
+    "a8ea02cfc1b110ae8e3c748258304c3876875c0a9b6f11ffe724ce8c3ca234be",
+    "6529e7ec312032407ca3bdfd5e7512fd2440c13276ce971b47a3de86c70e8d64",
+    "3101d4fbd8f8671402d2e2fd93d1d058595a9b68d38c078c6e234d553407a19b",
+    "7700dcf3ca692d98b87cadbc394cb73c38a30d0bb436fd74974750b1e9e28ebc",
+    "994c5917bcda6b03aebab549be3130e874acbc6666bf8d6260a385aec2805762",
+    "e84c0a7014e675b30c0a3a7c78c9f42823a06aee0f9edefaf94365b737f68161",
+    "2a947e27abfde0592e0534098ce70e81e0d0859baeee1ef45523d509619a81b7",
+    "72e99da13332fb17b952e2c0fd482699e9ecfb01e3d3b41294828fbb40ced36d",
+    "8dd2cff25d08ea5daa067eb7b2912b8f23d9e38e849f47cf7b0c024e739c0eea",
+    "a39bed38be259f1d680d4835c1680f17dc71b56cabb51d04ec19b71b18c0fc2f",
+    "a91b66a690f8aa462a897718b8f7849d8acc3cfef56e6ca0504d0d355c6eb354",
+    "f7f2567fd78a6d11755f67c6cb83ee5645b0d876e56c9f30ba36964f6fc0676d",
+    "b867df466bf69518f45be8d4e142066203d07ba4d80e6e1299851072447172b0",
+    "51d922a63c91ba26e6d6ba8e384d2b3399a504fdc30f2264e66fc56827e2d306",
+    "c67e6a9a7afd1023d35091be0d9ab68bc9a3c45f1de34c09b692d219913f80d3",
+    "7fe81684a1dff51390ac17399f74e410ba46816f0907dc23b969edf6902af929",
+    "2c51281338e2a9ae112e82cc23df9cbf8ad6a9e27f4a9a81226f35ba956ea487",
+    "b50b8121a1f8072083acc5607a3aed547b7a694703bac077957337a479127196",
+    "cf2a1fc564eea8ff60737ba4efe7a86a9d8bb70ef5021dbffb635fce4f978154",
+    "892021e1f2cf72ead0de9befbd20da54169fdcc36f3fa4db138a4a652a1ab9e0",
+    "9ecb387a401713ed93e4c4f4c53d629caae3a6f63c2c2b366f94467e20f4368e",
+    "64a6044b8690baa54933935b00503fb8453f8e3159ae4d5e6edf2ce08feecf02",
+    "1ac22bbd5d3ea3302da3a27bea9e2f5fad05c8971f20854e3c4ded45cb999da0",
+    "f727a721bf50c72cb85eaea519a76d6454d7da32e3ef4470a53c93f64b8eca09",
+    "edbd4a9b64a60aee5c2c76db504bc26b34d714b9619051954c1d740a82ec5cd8",
+    "5d53103474ed922f3d4dde1c0b81cd2ebdc3dbc5d40b1bd531e4b3f74da8b62c",
+    "448b26c256371b74404119657b2f388dbfaa50af2d6e2d8658b277c2ab4a1bfb",
+    "e8888ac2566ddab8a1164a1496e9a3e307f1b2546987dba9f8e1f4f783c9d33a",
+    "a08e5a87d936fa6c1d24b9151232e2425f9c3cb3fa667220049ec131bab38aa3",
+    "4e82dcdc5a285460af4c20cce87251c6fe176553278aea455e2728490b915257",
+    "74e43cbb001b39556c4d4ec545c7b40368d291c8ee14c0acd332f5ba577c9463",
+    "2c51e60384eceb06e712483e8fe2b9be2ad64649ccdaab2a1e1432c8371adb17",
+    "19bfc74bd2cdfcae49f1eaa7b3ab1e3f5f10f36002562d062e0c2a2a6835abb5",
+    "9dc9eaaa0765691c2fb852b3804e321e9f3b1516b86e021cc70c768b337197a4",
+    "2469685329e8d2067b9b440d544497a78bd9b600fffbca95b8b07d90d8a66a0e",
+    "7d8679d658ea6cf4d22d2dd2f9e2af36925f4b53dae756f016ef32c229678d9a",
+    "4ea06d9277884937424324e1692fba7ada216a2f81cc05bcdbf13671833ba2fa",
+    "128961ca3733506235067ec953c961fbcfacbfeb9aaa66178fc4e6548a910b66",
+    "cf1532a75e54e3907ffb9ac7ecb36caefed74b7e178c0849a4b7a363c9ae223e",
+    "548a6708e76031d3f8155b9503291e05262290396d9a3486637eeff0f0e8861e",
+    "1118938b5ee662c2aa14188ddaa63b05c7ca52b9e2f6082dc104aa0cf600c428",
+    "a1f74f4bfe8e8a98944982d232b3bbc4e232108cce166396b909010c5a3c9b7f",
+    "ea962cbf7713900e4515d893312eb028d6f50ca414f37cb3d862e57e1e511bcc",
+    "f0e6f743ad8e97a11a26a902142a7849fa72ec199ea6dd28704bb59d75e2174a",
+    "f7d9e9cc0bb600236a0999e7a5819c0e6fff7f38386983cd31b46d4beb99b8a2",
+    "8abcf543ce3d7835f2d5a54e6599e2ad115e9b0370624ae2e9cf571fa3548a5e",
+    "6cb89fe226af98e025bb73d310e599b3e21c2c73c8546997af6eff03f6162fea",
+    "f801d5d6806072da0b9f533d56c0c54120f42ed75844843655c4b79d429d3662",
+    "5e1b442392f9691005fc9340f555458b2c87d305aa69771d06939ad40f547d68",
+    "d1d988aeb9dfec7b994a7778aad2c4e30e1991e4bb9403703a5ea718e3332dcc",
+    "67bc36be855938b855eb522809808ab398969cc433fd79bdaac9cf0aa6d53197",
+    "b92529f2bc2ffbb00f11e5faab982ca81ad263a3f6a4fa80b19e4ab692084696",
+    "8605a4ea1423dc211dc63b84200226ae9ee4b429f2eb5dac6733766d7ca99cb5",
+    "e4dbc784382f48eb4ee43f369882fcad547c90314cc8a11c472aa1f8e34d9610",
+    "38e930c893afaa3e24624e0177973d5e859b7b1f9f192963b615fc5d232e1ac6",
+    "1b00889b2326a57d5aba00e7919dfaa4272bb9794632f249b5eb230014c51a4a",
+    "5b67b3ef7c6ed42d8b09546b495d5ef9fd0027360b38505c5485228b3c5666e2",
+    "95787ba4b8bc57891eef421e449c34405ebf81c41798da5ea32dcd6d484d2fec",
+    "c744b866109e3f424f4b356a629e11fd66dd76fd9b2fc6d2ac11cbe7a28fb06f",
+    "0e4e2a564321ed662cb8738ee75b7ffd13e5bf5584faeaa2299a9918c25bc1d9",
+    "5beb0adf16a5ac432d7017b94b7706f0c373f71388bd0a5fac9ea9da1ab8153b"
+  ],
+  "observations": [
+    {
+      "frame": 0,
+      "t": 0.0,
+      "segment": [
+        "est",
+        0,
+        null,
+        0.0,
+        0.01
+      ],
+      "openingPixelCoverage": 0.11954169651384909,
+      "calls": [
+        {
+          "t": 0.0,
+          "hand": [
+            853.0,
+            231.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 1,
+      "t": 0.041666666666666664,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 0.19157787129894938,
+      "calls": [
+        {
+          "t": 0.041666666666666664,
+          "hand": [
+            1332.0,
+            97.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 2,
+      "t": 0.08333333333333333,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 0.2919464840019102,
+      "calls": [
+        {
+          "t": 0.08333333333333333,
+          "hand": [
+            1263.0,
+            513.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 3,
+      "t": 0.125,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 0.35528096147723653,
+      "calls": [
+        {
+          "t": 0.125,
+          "hand": [
+            818.0,
+            306.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 4,
+      "t": 0.16666666666666666,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 0.41821125835721107,
+      "calls": [
+        {
+          "t": 0.16666666666666666,
+          "hand": [
+            383.0,
+            276.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 5,
+      "t": 0.20833333333333334,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 0.5045442335243553,
+      "calls": [
+        {
+          "t": 0.20833333333333334,
+          "hand": [
+            410.0,
+            335.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 6,
+      "t": 0.25,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 0.5572941539318689,
+      "calls": [
+        {
+          "t": 0.25,
+          "hand": [
+            1103.0,
+            369.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 7,
+      "t": 0.2916666666666667,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 0.6485481833014963,
+      "calls": [
+        {
+          "t": 0.2916666666666667,
+          "hand": [
+            377.0,
+            628.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 8,
+      "t": 0.3333333333333333,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 0.7283520873129576,
+      "calls": [
+        {
+          "t": 0.3333333333333333,
+          "hand": [
+            1210.0,
+            467.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 9,
+      "t": 0.375,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 0.8432749323463865,
+      "calls": [
+        {
+          "t": 0.375,
+          "hand": [
+            974.0,
+            506.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 10,
+      "t": 0.4166666666666667,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.4166666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 11,
+      "t": 0.4583333333333333,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.4583333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 12,
+      "t": 0.5,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.5,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 13,
+      "t": 0.5416666666666666,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.5416666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 14,
+      "t": 0.5833333333333334,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.5833333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 15,
+      "t": 0.625,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.625,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 16,
+      "t": 0.6666666666666666,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.6666666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 17,
+      "t": 0.7083333333333334,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.7083333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 18,
+      "t": 0.75,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.75,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 19,
+      "t": 0.7916666666666666,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.7916666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 20,
+      "t": 0.8333333333333334,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.8333333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 21,
+      "t": 0.875,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.875,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 22,
+      "t": 0.9166666666666666,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.9166666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 23,
+      "t": 0.9583333333333334,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 0.9583333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 24,
+      "t": 1.0,
+      "segment": [
+        "panel",
+        0,
+        0,
+        0.01,
+        1.02
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.0,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 25,
+      "t": 1.0416666666666667,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.0416666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 26,
+      "t": 1.0833333333333333,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.0833333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 27,
+      "t": 1.125,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.125,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 28,
+      "t": 1.1666666666666667,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.1666666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 29,
+      "t": 1.2083333333333333,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.2083333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 30,
+      "t": 1.25,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.25,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 31,
+      "t": 1.2916666666666667,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.2916666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 32,
+      "t": 1.3333333333333333,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.3333333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 33,
+      "t": 1.375,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.375,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 34,
+      "t": 1.4166666666666667,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.4166666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 35,
+      "t": 1.4583333333333333,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.4583333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 36,
+      "t": 1.5,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.5,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 37,
+      "t": 1.5416666666666667,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.5416666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 38,
+      "t": 1.5833333333333333,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.5833333333333333,
+          "hand": [
+            355.0,
+            762.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 39,
+      "t": 1.625,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.625,
+          "hand": [
+            248.0,
+            938.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 40,
+      "t": 1.6666666666666667,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.6666666666666667,
+          "hand": [
+            418.0,
+            825.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 41,
+      "t": 1.7083333333333333,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.7083333333333333,
+          "hand": [
+            590.0,
+            925.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 42,
+      "t": 1.75,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.75,
+          "hand": [
+            450.0,
+            822.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 43,
+      "t": 1.7916666666666667,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.7916666666666667,
+          "hand": [
+            434.0,
+            929.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 44,
+      "t": 1.8333333333333333,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.8333333333333333,
+          "hand": [
+            506.0,
+            856.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 45,
+      "t": 1.875,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.875,
+          "hand": [
+            618.0,
+            922.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 46,
+      "t": 1.9166666666666667,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.9166666666666667,
+          "hand": [
+            421.0,
+            939.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 47,
+      "t": 1.9583333333333333,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 1.9583333333333333,
+          "hand": [
+            314.0,
+            722.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 48,
+      "t": 2.0,
+      "segment": [
+        "panel",
+        0,
+        1,
+        1.02,
+        2.0300000000000002
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.0,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 49,
+      "t": 2.0416666666666665,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.0416666666666665,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 50,
+      "t": 2.0833333333333335,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.0833333333333335,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 51,
+      "t": 2.125,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.125,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 52,
+      "t": 2.1666666666666665,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.1666666666666665,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 53,
+      "t": 2.2083333333333335,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.2083333333333335,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 54,
+      "t": 2.25,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.25,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 55,
+      "t": 2.2916666666666665,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.2916666666666665,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 56,
+      "t": 2.3333333333333335,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.3333333333333335,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 57,
+      "t": 2.375,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.375,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 58,
+      "t": 2.4166666666666665,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.4166666666666665,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 59,
+      "t": 2.4583333333333335,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.4583333333333335,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 60,
+      "t": 2.5,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.5,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 61,
+      "t": 2.5416666666666665,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.5416666666666665,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 62,
+      "t": 2.5833333333333335,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.5833333333333335,
+          "hand": [
+            1026.0,
+            740.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 63,
+      "t": 2.625,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.625,
+          "hand": [
+            811.0,
+            792.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 64,
+      "t": 2.6666666666666665,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.6666666666666665,
+          "hand": [
+            804.0,
+            810.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 65,
+      "t": 2.7083333333333335,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.7083333333333335,
+          "hand": [
+            1080.0,
+            861.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 66,
+      "t": 2.75,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.75,
+          "hand": [
+            897.0,
+            798.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 67,
+      "t": 2.7916666666666665,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.7916666666666665,
+          "hand": [
+            852.0,
+            904.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 68,
+      "t": 2.8333333333333335,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.8333333333333335,
+          "hand": [
+            924.0,
+            907.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 69,
+      "t": 2.875,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.875,
+          "hand": [
+            979.0,
+            974.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 70,
+      "t": 2.9166666666666665,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.9166666666666665,
+          "hand": [
+            879.0,
+            961.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 71,
+      "t": 2.9583333333333335,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 2.9583333333333335,
+          "hand": [
+            993.0,
+            701.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 72,
+      "t": 3.0,
+      "segment": [
+        "panel",
+        0,
+        2,
+        2.0300000000000002,
+        3.04
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.0,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 73,
+      "t": 3.0416666666666665,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.0416666666666665,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 74,
+      "t": 3.0833333333333335,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.0833333333333335,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 75,
+      "t": 3.125,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.125,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 76,
+      "t": 3.1666666666666665,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.1666666666666665,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 77,
+      "t": 3.2083333333333335,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.2083333333333335,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 78,
+      "t": 3.25,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.25,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 79,
+      "t": 3.2916666666666665,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.2916666666666665,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 80,
+      "t": 3.3333333333333335,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.3333333333333335,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 81,
+      "t": 3.375,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.375,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 82,
+      "t": 3.4166666666666665,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.4166666666666665,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 83,
+      "t": 3.4583333333333335,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.4583333333333335,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 84,
+      "t": 3.5,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.5,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 85,
+      "t": 3.5416666666666665,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.5416666666666665,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 86,
+      "t": 3.5833333333333335,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.5833333333333335,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 87,
+      "t": 3.625,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.625,
+          "hand": [
+            1250.0,
+            817.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 88,
+      "t": 3.6666666666666665,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.6666666666666665,
+          "hand": [
+            1312.0,
+            863.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 89,
+      "t": 3.7083333333333335,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.7083333333333335,
+          "hand": [
+            1577.0,
+            784.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 90,
+      "t": 3.75,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.75,
+          "hand": [
+            1385.0,
+            798.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 91,
+      "t": 3.7916666666666665,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.7916666666666665,
+          "hand": [
+            1296.0,
+            864.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 92,
+      "t": 3.8333333333333335,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.8333333333333335,
+          "hand": [
+            1289.0,
+            773.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 93,
+      "t": 3.875,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.875,
+          "hand": [
+            1405.0,
+            934.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 94,
+      "t": 3.9166666666666665,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.9166666666666665,
+          "hand": [
+            1373.0,
+            972.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 95,
+      "t": 3.9583333333333335,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 3.9583333333333335,
+          "hand": [
+            1183.0,
+            858.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 96,
+      "t": 4.0,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.0,
+          "hand": [
+            1513.0,
+            1042.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 97,
+      "t": 4.041666666666667,
+      "segment": [
+        "panel",
+        0,
+        3,
+        3.04,
+        4.05
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.041666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 98,
+      "t": 4.083333333333333,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.083333333333333,
+          "hand": null
+        },
+        {
+          "t": 4.083333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 99,
+      "t": 4.125,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.125,
+          "hand": null
+        },
+        {
+          "t": 4.125,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 100,
+      "t": 4.166666666666667,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.166666666666667,
+          "hand": null
+        },
+        {
+          "t": 4.166666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 101,
+      "t": 4.208333333333333,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.208333333333333,
+          "hand": null
+        },
+        {
+          "t": 4.208333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 102,
+      "t": 4.25,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.25,
+          "hand": null
+        },
+        {
+          "t": 4.25,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 103,
+      "t": 4.291666666666667,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.291666666666667,
+          "hand": null
+        },
+        {
+          "t": 4.291666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 104,
+      "t": 4.333333333333333,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.333333333333333,
+          "hand": null
+        },
+        {
+          "t": 4.333333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 105,
+      "t": 4.375,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.375,
+          "hand": null
+        },
+        {
+          "t": 4.375,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 106,
+      "t": 4.416666666666667,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.416666666666667,
+          "hand": null
+        },
+        {
+          "t": 4.416666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 107,
+      "t": 4.458333333333333,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.458333333333333,
+          "hand": null
+        },
+        {
+          "t": 4.458333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 108,
+      "t": 4.5,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.5,
+          "hand": null
+        },
+        {
+          "t": 4.5,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 109,
+      "t": 4.541666666666667,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.541666666666667,
+          "hand": null
+        },
+        {
+          "t": 4.541666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 110,
+      "t": 4.583333333333333,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.583333333333333,
+          "hand": null
+        },
+        {
+          "t": 4.583333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 111,
+      "t": 4.625,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.625,
+          "hand": null
+        },
+        {
+          "t": 4.625,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 112,
+      "t": 4.666666666666667,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.666666666666667,
+          "hand": null
+        },
+        {
+          "t": 4.666666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 113,
+      "t": 4.708333333333333,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.708333333333333,
+          "hand": null
+        },
+        {
+          "t": 4.708333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 114,
+      "t": 4.75,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.75,
+          "hand": null
+        },
+        {
+          "t": 4.75,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 115,
+      "t": 4.791666666666667,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.791666666666667,
+          "hand": null
+        },
+        {
+          "t": 4.791666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 116,
+      "t": 4.833333333333333,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.833333333333333,
+          "hand": null
+        },
+        {
+          "t": 4.833333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 117,
+      "t": 4.875,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.875,
+          "hand": null
+        },
+        {
+          "t": 4.875,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 118,
+      "t": 4.916666666666667,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.916666666666667,
+          "hand": null
+        },
+        {
+          "t": 4.916666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 119,
+      "t": 4.958333333333333,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 4.958333333333333,
+          "hand": null
+        },
+        {
+          "t": 4.958333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 120,
+      "t": 5.0,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.0,
+          "hand": null
+        },
+        {
+          "t": 5.0,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 121,
+      "t": 5.041666666666667,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.041666666666667,
+          "hand": null
+        },
+        {
+          "t": 5.041666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 122,
+      "t": 5.083333333333333,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.083333333333333,
+          "hand": null
+        },
+        {
+          "t": 5.083333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 123,
+      "t": 5.125,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.125,
+          "hand": null
+        },
+        {
+          "t": 5.125,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 124,
+      "t": 5.166666666666667,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.166666666666667,
+          "hand": null
+        },
+        {
+          "t": 5.166666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 125,
+      "t": 5.208333333333333,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.208333333333333,
+          "hand": null
+        },
+        {
+          "t": 5.208333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 126,
+      "t": 5.25,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.25,
+          "hand": null
+        },
+        {
+          "t": 5.25,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 127,
+      "t": 5.291666666666667,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.291666666666667,
+          "hand": null
+        },
+        {
+          "t": 5.291666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 128,
+      "t": 5.333333333333333,
+      "segment": [
+        "turn",
+        0,
+        null,
+        4.05,
+        5.35
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.333333333333333,
+          "hand": null
+        },
+        {
+          "t": 5.333333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 129,
+      "t": 5.375,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.375,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 130,
+      "t": 5.416666666666667,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.416666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 131,
+      "t": 5.458333333333333,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.458333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 132,
+      "t": 5.5,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.5,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 133,
+      "t": 5.541666666666667,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.541666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 134,
+      "t": 5.583333333333333,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.583333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 135,
+      "t": 5.625,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.625,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 136,
+      "t": 5.666666666666667,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.666666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 137,
+      "t": 5.708333333333333,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.708333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 138,
+      "t": 5.75,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.75,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 139,
+      "t": 5.791666666666667,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.791666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 140,
+      "t": 5.833333333333333,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.833333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 141,
+      "t": 5.875,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.875,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 142,
+      "t": 5.916666666666667,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.916666666666667,
+          "hand": [
+            779.0,
+            182.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 143,
+      "t": 5.958333333333333,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 5.958333333333333,
+          "hand": [
+            721.0,
+            296.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 144,
+      "t": 6.0,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.0,
+          "hand": [
+            1182.0,
+            358.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 145,
+      "t": 6.041666666666667,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.041666666666667,
+          "hand": [
+            1062.0,
+            267.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 146,
+      "t": 6.083333333333333,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.083333333333333,
+          "hand": [
+            607.0,
+            167.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 147,
+      "t": 6.125,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.125,
+          "hand": [
+            375.0,
+            509.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 148,
+      "t": 6.166666666666667,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.166666666666667,
+          "hand": [
+            926.0,
+            342.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 149,
+      "t": 6.208333333333333,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.208333333333333,
+          "hand": [
+            385.0,
+            609.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 150,
+      "t": 6.25,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.25,
+          "hand": [
+            1216.0,
+            447.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 151,
+      "t": 6.291666666666667,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.291666666666667,
+          "hand": [
+            1084.0,
+            603.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 152,
+      "t": 6.333333333333333,
+      "segment": [
+        "panel",
+        1,
+        0,
+        5.35,
+        6.359999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.333333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 153,
+      "t": 6.375,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.375,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 154,
+      "t": 6.416666666666667,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.416666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 155,
+      "t": 6.458333333333333,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.458333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 156,
+      "t": 6.5,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.5,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 157,
+      "t": 6.541666666666667,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.541666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 158,
+      "t": 6.583333333333333,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.583333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 159,
+      "t": 6.625,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.625,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 160,
+      "t": 6.666666666666667,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.666666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 161,
+      "t": 6.708333333333333,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.708333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 162,
+      "t": 6.75,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.75,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 163,
+      "t": 6.791666666666667,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.791666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 164,
+      "t": 6.833333333333333,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.833333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 165,
+      "t": 6.875,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.875,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 166,
+      "t": 6.916666666666667,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.916666666666667,
+          "hand": [
+            528.0,
+            739.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 167,
+      "t": 6.958333333333333,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 6.958333333333333,
+          "hand": [
+            641.0,
+            876.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 168,
+      "t": 7.0,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.0,
+          "hand": [
+            582.0,
+            905.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 169,
+      "t": 7.041666666666667,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.041666666666667,
+          "hand": [
+            372.0,
+            870.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 170,
+      "t": 7.083333333333333,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.083333333333333,
+          "hand": [
+            224.0,
+            851.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 171,
+      "t": 7.125,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.125,
+          "hand": [
+            432.0,
+            929.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 172,
+      "t": 7.166666666666667,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.166666666666667,
+          "hand": [
+            495.0,
+            921.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 173,
+      "t": 7.208333333333333,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.208333333333333,
+          "hand": [
+            491.0,
+            1065.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 174,
+      "t": 7.25,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.25,
+          "hand": [
+            647.0,
+            908.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 175,
+      "t": 7.291666666666667,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.291666666666667,
+          "hand": [
+            506.0,
+            712.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 176,
+      "t": 7.333333333333333,
+      "segment": [
+        "panel",
+        1,
+        1,
+        6.359999999999999,
+        7.369999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.333333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 177,
+      "t": 7.375,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.375,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 178,
+      "t": 7.416666666666667,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.416666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 179,
+      "t": 7.458333333333333,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.458333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 180,
+      "t": 7.5,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.5,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 181,
+      "t": 7.541666666666667,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.541666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 182,
+      "t": 7.583333333333333,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.583333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 183,
+      "t": 7.625,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.625,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 184,
+      "t": 7.666666666666667,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.666666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 185,
+      "t": 7.708333333333333,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.708333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 186,
+      "t": 7.75,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.75,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 187,
+      "t": 7.791666666666667,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.791666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 188,
+      "t": 7.833333333333333,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.833333333333333,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 189,
+      "t": 7.875,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.875,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 190,
+      "t": 7.916666666666667,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.916666666666667,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 191,
+      "t": 7.958333333333333,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 7.958333333333333,
+          "hand": [
+            1462.0,
+            868.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 192,
+      "t": 8.0,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.0,
+          "hand": [
+            986.0,
+            798.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 193,
+      "t": 8.041666666666666,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.041666666666666,
+          "hand": [
+            1031.0,
+            814.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 194,
+      "t": 8.083333333333334,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.083333333333334,
+          "hand": [
+            827.0,
+            836.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 195,
+      "t": 8.125,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.125,
+          "hand": [
+            1125.0,
+            896.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 196,
+      "t": 8.166666666666666,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.166666666666666,
+          "hand": [
+            1239.0,
+            872.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 197,
+      "t": 8.208333333333334,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.208333333333334,
+          "hand": [
+            1238.0,
+            932.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 198,
+      "t": 8.25,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.25,
+          "hand": [
+            1430.0,
+            967.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 199,
+      "t": 8.291666666666666,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.291666666666666,
+          "hand": [
+            1098.0,
+            1098.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 200,
+      "t": 8.333333333333334,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.333333333333334,
+          "hand": [
+            1372.0,
+            1149.0
+          ]
+        }
+      ]
+    },
+    {
+      "frame": 201,
+      "t": 8.375,
+      "segment": [
+        "panel",
+        1,
+        2,
+        7.369999999999999,
+        8.379999999999999
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.375,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 202,
+      "t": 8.416666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.416666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 203,
+      "t": 8.458333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.458333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 204,
+      "t": 8.5,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.5,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 205,
+      "t": 8.541666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.541666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 206,
+      "t": 8.583333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.583333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 207,
+      "t": 8.625,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.625,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 208,
+      "t": 8.666666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.666666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 209,
+      "t": 8.708333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.708333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 210,
+      "t": 8.75,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.75,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 211,
+      "t": 8.791666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.791666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 212,
+      "t": 8.833333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.833333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 213,
+      "t": 8.875,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.875,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 214,
+      "t": 8.916666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.916666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 215,
+      "t": 8.958333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 8.958333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 216,
+      "t": 9.0,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.0,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 217,
+      "t": 9.041666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.041666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 218,
+      "t": 9.083333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.083333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 219,
+      "t": 9.125,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.125,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 220,
+      "t": 9.166666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.166666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 221,
+      "t": 9.208333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.208333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 222,
+      "t": 9.25,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.25,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 223,
+      "t": 9.291666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.291666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 224,
+      "t": 9.333333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.333333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 225,
+      "t": 9.375,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.375,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 226,
+      "t": 9.416666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.416666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 227,
+      "t": 9.458333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.458333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 228,
+      "t": 9.5,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.5,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 229,
+      "t": 9.541666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.541666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 230,
+      "t": 9.583333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.583333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 231,
+      "t": 9.625,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.625,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 232,
+      "t": 9.666666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.666666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 233,
+      "t": 9.708333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.708333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 234,
+      "t": 9.75,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.75,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 235,
+      "t": 9.791666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.791666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 236,
+      "t": 9.833333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.833333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 237,
+      "t": 9.875,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.875,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 238,
+      "t": 9.916666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.916666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 239,
+      "t": 9.958333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 9.958333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 240,
+      "t": 10.0,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.0,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 241,
+      "t": 10.041666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.041666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 242,
+      "t": 10.083333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.083333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 243,
+      "t": 10.125,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.125,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 244,
+      "t": 10.166666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.166666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 245,
+      "t": 10.208333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.208333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 246,
+      "t": 10.25,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.25,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 247,
+      "t": 10.291666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.291666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 248,
+      "t": 10.333333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.333333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 249,
+      "t": 10.375,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.375,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 250,
+      "t": 10.416666666666666,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.416666666666666,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 251,
+      "t": 10.458333333333334,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.458333333333334,
+          "hand": null
+        }
+      ]
+    },
+    {
+      "frame": 252,
+      "t": 10.5,
+      "segment": [
+        "tail",
+        1,
+        null,
+        8.379999999999999,
+        10.579999999999998
+      ],
+      "openingPixelCoverage": 1.0,
+      "calls": [
+        {
+          "t": 10.5,
+          "hand": null
+        }
+      ]
+    }
+  ],
+  "bubbleTimeline": {
+    "version": "motion-comic-review/v1",
+    "bubbles": [
+      {
+        "id": "cue-0",
+        "panelIndex": 0,
+        "startSec": 0.64,
+        "endSec": 1.02,
+        "rect": [
+          0.46705,
+          0.14236,
+          0.08668,
+          0.10069
+        ],
+        "keepClear": []
+      },
+      {
+        "id": "cue-1",
+        "panelIndex": 1,
+        "startSec": 1.65,
+        "endSec": 2.03,
+        "rect": [
+          0.41704,
+          0.18333,
+          0.18386,
+          0.10556
+        ],
+        "keepClear": []
+      },
+      {
+        "id": "cue-2",
+        "panelIndex": 2,
+        "startSec": 2.66,
+        "endSec": 3.04,
+        "rect": [
+          0.41704,
+          0.18333,
+          0.18386,
+          0.10556
+        ],
+        "keepClear": []
+      },
+      {
+        "id": "cue-3",
+        "panelIndex": 3,
+        "startSec": 3.67,
+        "endSec": 4.05,
+        "rect": [
+          0.41704,
+          0.18333,
+          0.18386,
+          0.10556
+        ],
+        "keepClear": []
+      },
+      {
+        "id": "cue-4",
+        "panelIndex": 4,
+        "startSec": 5.98,
+        "endSec": 6.36,
+        "rect": [
+          0.46705,
+          0.14236,
+          0.08668,
+          0.10069
+        ],
+        "keepClear": []
+      },
+      {
+        "id": "cue-5",
+        "panelIndex": 5,
+        "startSec": 6.99,
+        "endSec": 7.37,
+        "rect": [
+          0.40606,
+          0.18,
+          0.18788,
+          0.1
+        ],
+        "keepClear": []
+      },
+      {
+        "id": "cue-6",
+        "panelIndex": 6,
+        "startSec": 8.0,
+        "endSec": 8.38,
+        "rect": [
+          0.4578,
+          0.18,
+          0.10751,
+          0.1
+        ],
+        "keepClear": []
+      }
+    ]
+  }
+}

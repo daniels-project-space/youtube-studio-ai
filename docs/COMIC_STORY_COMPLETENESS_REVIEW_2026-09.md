@@ -1,6 +1,6 @@
 # Comic story completeness — 12 September 2026
 
-Status: **committed at `e5f94ab`; frozen local release gate passed; exact production deployment still pending**. This closes two reproduced omission boundaries inside the current comic engine; it does not claim the page-generation/character-reference/hand-reveal rework is complete.
+Status: **runtime committed at `e5f94ab`; release `2a9bbdd` verified on the exact production alias, canonical Convex and Trigger production**. This closes two reproduced omission boundaries inside the current comic engine; it does not claim the page-generation/character-reference/hand-reveal rework is complete.
 
 Reviewed runtime freeze: `src/lib/motionComic.ts` SHA256 `3eab4e712c4b7abcded4dad4fe0e4e9fdb335ea45a025f99e18707e0ea06db82`. The final 58-case run reproduces every retained case result in `after.json`; the final eight valid handoffs remain identical to the original baseline. No production release claim is attached to this local hash.
 
@@ -64,3 +64,13 @@ Separately, the [native opening A/B experiment](../test-fixtures/comic-opening-r
 The larger comic rework remains open: one generated image per page, real immutable character-reference conditioning, complete ordered page-region reveals including the opening, faster readable tracing, native rendered A/B quality/cost measurements, durable paid-job recovery, and automatic unfamiliar-channel qualification. Existing valid duration/keep-clear tests do not substitute for those requirements.
 
 Voice-cache qualification is also still incomplete: cached line audio is selected by `existsSync`, without a content/input fingerprint, and `probeDur` retains its existing fallback/minimum-duration behavior. These control-flow tests deliberately supply known cache inputs; they do not prove arbitrary cached speech is uncorrupted, matches the approved text/voice, or has valid natural timing. This batch does not expand into that separate cache-integrity repair.
+
+## Exact release handles — do not restart
+
+Revision `2a9bbdddd024aebe340604790d1f3cf224144b5b` (runtime from `e5f94ab`, unchanged frozen hashes) is pushed to main and the checkpoint branch. [Cloud CI 34696239565](https://github.com/daniels-project-space/youtube-studio-ai/actions/runs/34696239565) is confirmed in progress. Vercel production deployment `dpl_6Ks37xro16o6G5zcHueuYmFXmJaA` is confirmed queued at that exact SHA; preview `dpl_FDzFX3h352rFLcvs6x9ZKEsDhumt` is building separately and must not be mistaken for the production alias. At the initial post-push check, `/api/health` still returned the previously verified `ef645f3` release (canonical Convex ready 12:50:53 UTC; Trigger `20260912.23`). New backend or alias deployment is not yet claimed. Keep the exact CI/deployment handles, poll authoritative state, and do not push another main revision while this backend release is in flight.
+
+Publishing both refs caused duplicate Vercel builds for the same SHA. For future accepted releases, push main only unless a separate checkpoint preview is actually needed; keep local checkpoints without incurring a redundant web build. This is a release-workflow efficiency change, not a provider/project-configuration mutation or a waived validation gate.
+
+Follow-up: Vercel `dpl_6Ks37xro16o6G5zcHueuYmFXmJaA` is now **READY / production** and explicitly lists `youtube-studio-ai.vercel.app`. The exact alias `/api/health` returned HTTP 200 and revision `2a9bbdddd024aebe340604790d1f3cf224144b5b`. Cloud CI `34696239565` remains in its production-readiness test step; new Convex/Trigger readiness is not yet claimed.
+
+Final release verification supersedes the pending observations above: **Cloud CI `34696239565` completed successfully**, including all 685 direct tests at 13:34:06 UTC, canonical `astute-camel-689` functions ready at 13:36:07 UTC, and **Trigger production `20260912.24` deployed at 13:38:07 UTC**. The exact web alias was checked again after backend completion. This is deployment evidence for the frozen completeness/retry code, not a new live generated-comic or page-level qualification.

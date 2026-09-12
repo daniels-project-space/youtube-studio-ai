@@ -1,0 +1,495 @@
+{
+  "scope": "Production opening/schedule/render-loop regression with synthetic page data.\n\nThe actual top-level opening code (including its missing-art guard), schedule,\nframe functions and complete frame loop execute unchanged. Only page inputs,\nreview-file persistence and encoder stdin are replaced. Tiny page/output sizes\nkeep this in the ordinary CI gate; native real-art qualification is separate.\n",
+  "rendererSha256": "c0fb69bfa7bd457a0ec0d674aa62428eaa42b7db2c17dd4ff80d87ac7a6d8eb6",
+  "legacyRendererSha256": "b537b219400b638b288171cd48afdd23f5c8746fb98ad4e0282c875cf4e43e31",
+  "casesPassed": 30,
+  "panelsCompleteAtSegmentEnd": 210,
+  "firstFramePartialArtAndVisibleHand": 30,
+  "missingOpeningRejected": true,
+  "legacyOpeningViolationDemonstrated": true,
+  "legacyShortPanelViolationDemonstrated": true,
+  "ordinaryNonOpeningFramesCompared": 7311,
+  "ordinaryNonOpeningFramesChanged": 0,
+  "cases": [
+    {
+      "est": 0,
+      "fps": 30,
+      "durations": [
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3
+      ],
+      "frames": 588,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 519
+    },
+    {
+      "est": 0,
+      "fps": 30,
+      "durations": [
+        1,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3
+      ],
+      "frames": 549,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 519
+    },
+    {
+      "est": 0.01,
+      "fps": 30,
+      "durations": [
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3
+      ],
+      "frames": 588,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 518
+    },
+    {
+      "est": 0.01,
+      "fps": 30,
+      "durations": [
+        1,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3
+      ],
+      "frames": 549,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 518
+    },
+    {
+      "est": 0.03333333333333333,
+      "fps": 30,
+      "durations": [
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3
+      ],
+      "frames": 589,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 519
+    },
+    {
+      "est": 0.03333333333333333,
+      "fps": 30,
+      "durations": [
+        1,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3
+      ],
+      "frames": 550,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 519
+    },
+    {
+      "est": 0.04,
+      "fps": 30,
+      "durations": [
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3
+      ],
+      "frames": 589,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 518
+    },
+    {
+      "est": 0.04,
+      "fps": 30,
+      "durations": [
+        1,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3
+      ],
+      "frames": 550,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 518
+    },
+    {
+      "est": 0.1,
+      "fps": 30,
+      "durations": [
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3
+      ],
+      "frames": 591,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 519
+    },
+    {
+      "est": 0.1,
+      "fps": 30,
+      "durations": [
+        1,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3
+      ],
+      "frames": 552,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 519
+    },
+    {
+      "est": 1.7,
+      "fps": 30,
+      "durations": [
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3
+      ],
+      "frames": 639,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 519
+    },
+    {
+      "est": 1.7,
+      "fps": 30,
+      "durations": [
+        1,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3,
+        2.3
+      ],
+      "frames": 600,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 519
+    },
+    {
+      "est": 0,
+      "fps": 30,
+      "durations": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "frames": 315,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 0.01,
+      "fps": 30,
+      "durations": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "frames": 315,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 0.1,
+      "fps": 30,
+      "durations": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "frames": 317,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 1.7,
+      "fps": 30,
+      "durations": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "frames": 366,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 0.017,
+      "fps": 24,
+      "durations": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "frames": 252,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 0.017,
+      "fps": 30,
+      "durations": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "frames": 315,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 0.017,
+      "fps": 24,
+      "durations": [
+        1.01,
+        1.01,
+        1.01,
+        1.01,
+        1.01,
+        1.01,
+        1.01
+      ],
+      "frames": 254,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 0.017,
+      "fps": 30,
+      "durations": [
+        1.01,
+        1.01,
+        1.01,
+        1.01,
+        1.01,
+        1.01,
+        1.01
+      ],
+      "frames": 317,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 0.017,
+      "fps": 24,
+      "durations": [
+        1.1,
+        1.1,
+        1.1,
+        1.1,
+        1.1,
+        1.1,
+        1.1
+      ],
+      "frames": 269,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 242
+    },
+    {
+      "est": 0.017,
+      "fps": 30,
+      "durations": [
+        1.1,
+        1.1,
+        1.1,
+        1.1,
+        1.1,
+        1.1,
+        1.1
+      ],
+      "frames": 336,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 302
+    },
+    {
+      "est": 0.073,
+      "fps": 24,
+      "durations": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "frames": 253,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 0.073,
+      "fps": 30,
+      "durations": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "frames": 317,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 0.073,
+      "fps": 24,
+      "durations": [
+        1.01,
+        1.01,
+        1.01,
+        1.01,
+        1.01,
+        1.01,
+        1.01
+      ],
+      "frames": 255,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 0.073,
+      "fps": 30,
+      "durations": [
+        1.01,
+        1.01,
+        1.01,
+        1.01,
+        1.01,
+        1.01,
+        1.01
+      ],
+      "frames": 319,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 0.073,
+      "fps": 24,
+      "durations": [
+        1.1,
+        1.1,
+        1.1,
+        1.1,
+        1.1,
+        1.1,
+        1.1
+      ],
+      "frames": 270,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 241
+    },
+    {
+      "est": 0.073,
+      "fps": 30,
+      "durations": [
+        1.1,
+        1.1,
+        1.1,
+        1.1,
+        1.1,
+        1.1,
+        1.1
+      ],
+      "frames": 338,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 302
+    },
+    {
+      "est": 0,
+      "fps": 24,
+      "durations": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "frames": 252,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    },
+    {
+      "est": 1.7,
+      "fps": 24,
+      "durations": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "frames": 292,
+      "completePanels": 7,
+      "ordinaryNonOpeningFramesUnchanged": 0
+    }
+  ]
+}

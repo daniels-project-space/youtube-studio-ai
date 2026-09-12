@@ -1,0 +1,93 @@
+{
+  "scope": "Exact tuple and full skeleton trajectory parity, actual unchanged image crop/ink extraction. CPU-only; no media encoding or provider spend.",
+  "sourceSha256": "b537b219400b638b288171cd48afdd23f5c8746fb98ad4e0282c875cf4e43e31",
+  "candidateSha256": "3e696e950883b3f260960072a0e41b13ee3317ace8710e30e0857458c36308b7",
+  "imageSha256": "f5397e45f9c9be9b127fb99133f476f678c512620b6dc743507dd8db40d7b20f",
+  "python": "3.12.3 (main, Aug 31 2026, 10:18:26) [GCC 13.3.0]",
+  "numpy": "2.2.6",
+  "scipy": "1.13.1",
+  "platform": "Linux-6.8.0-139-generic-x86_64-with-glibc2.39",
+  "originalRawReportSha256": "d49a0967d7972b84120a35e23b67cd6c4e1a1111d609120d8ad259be28115eeb",
+  "syntheticSummary": {
+    "cases": 250,
+    "randomSeed": 20260912,
+    "baselineSeconds": 2.493185190774966,
+    "candidateSeconds": 3.448262001387775
+  },
+  "realArt": [
+    {
+      "name": "opening-full-width",
+      "size": [
+        1396,
+        576
+      ],
+      "inkPixels": 651056,
+      "skeletonPixels": 27761,
+      "acceptedTrajectoryPoints": 27675,
+      "largestConnected": {
+        "name": "opening-full-width-largest-connected",
+        "points": 25458,
+        "baselineSeconds": 78.10235251899576,
+        "candidateSeconds": 2.250877976010088,
+        "speedup": 34.69861687368775,
+        "baselineSequenceSha256": "4bcc273cf97b66a85a76f91edc4da466893a50d3e7fee7d4b571687f3e068225",
+        "candidateSequenceSha256": "4bcc273cf97b66a85a76f91edc4da466893a50d3e7fee7d4b571687f3e068225"
+      },
+      "baselineSeconds": 81.68150997004705,
+      "candidateSeconds": 2.5836860869894736,
+      "speedup": 31.614332089864224,
+      "baselineSequenceSha256": "ca7f386aaf3e04b45342bb27661373a5f5da8c405b1c2e937c4d10333a0cf288",
+      "candidateSequenceSha256": "ca7f386aaf3e04b45342bb27661373a5f5da8c405b1c2e937c4d10333a0cf288"
+    },
+    {
+      "name": "medium-wide",
+      "size": [
+        446,
+        360
+      ],
+      "inkPixels": 128229,
+      "skeletonPixels": 8576,
+      "acceptedTrajectoryPoints": 8557,
+      "largestConnected": {
+        "name": "medium-wide-largest-connected",
+        "points": 7725,
+        "baselineSeconds": 7.116816004971042,
+        "candidateSeconds": 0.7243839080329053,
+        "speedup": 9.824646746083928,
+        "baselineSequenceSha256": "480fa2bfe5ee2e9ccc628b26da66bd3dd1945936d515537bf02ede94821c2d6d",
+        "candidateSequenceSha256": "480fa2bfe5ee2e9ccc628b26da66bd3dd1945936d515537bf02ede94821c2d6d"
+      },
+      "baselineSeconds": 7.470462196040899,
+      "candidateSeconds": 0.7585674540023319,
+      "speedup": 9.848118524760665,
+      "baselineSequenceSha256": "a6c7118935363c00d7cc12b6045df4d162549e756072d85165ad779639afda47",
+      "candidateSequenceSha256": "a6c7118935363c00d7cc12b6045df4d162549e756072d85165ad779639afda47"
+    },
+    {
+      "name": "small-third-width",
+      "size": [
+        495,
+        450
+      ],
+      "inkPixels": 177706,
+      "skeletonPixels": 10410,
+      "acceptedTrajectoryPoints": 10391,
+      "largestConnected": {
+        "name": "small-third-width-largest-connected",
+        "points": 9402,
+        "baselineSeconds": 10.721501324034762,
+        "candidateSeconds": 0.7457397149992175,
+        "speedup": 14.377001932968007,
+        "baselineSequenceSha256": "95d820295ccef646ef642f9a332319bea860c8829bff6f601a012c2790b22863",
+        "candidateSequenceSha256": "95d820295ccef646ef642f9a332319bea860c8829bff6f601a012c2790b22863"
+      },
+      "baselineSeconds": 11.004464906989597,
+      "candidateSeconds": 1.0618506770115346,
+      "speedup": 10.363476847762144,
+      "baselineSequenceSha256": "5061b57d26af6dc3bb15d63aeb6c4e0491c14c917bc408a5d04206d478cd08bd",
+      "candidateSequenceSha256": "5061b57d26af6dc3bb15d63aeb6c4e0491c14c917bc408a5d04206d478cd08bd"
+    }
+  ],
+  "exactCasesPassed": 256,
+  "peakCombinedProcessRssKiB": 390612
+}

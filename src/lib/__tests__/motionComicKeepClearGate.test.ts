@@ -107,10 +107,7 @@ assert.ok(
   openingMissingGuard > openingSeedIdx,
   "mc_page_render.py must fail closed when first-panel art is missing rather than render a blank opening",
 );
-const openingComposite = renderSource.indexOf('opening_pane["art"]', openingMissingGuard);
-assert.ok(
-  openingComposite > openingMissingGuard,
-  "mc_page_render.py must composite approved first-panel art into the page before the preroll frames are rendered",
-);
-
-console.log("motionComicKeepClearGate.test.ts: opening panel is mandatory and visible during the preroll");
+// Actual frame-zero hand/art and complete-by-segment-end behavior is exercised
+// by motionComicRevealSchedule.test.mjs. Do not pin the former prepaint here:
+// it made the opening visible by bypassing the required hand-drawn reveal.
+console.log("motionComicKeepClearGate.test.ts: opening panel is mandatory; keep-clear failures remain fatal");

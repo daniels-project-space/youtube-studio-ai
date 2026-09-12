@@ -1,0 +1,49 @@
+{
+  "scope": "250 fresh original-vs-hybrid tuple comparisons plus actual real-art hybrid traces compared exactly to frozen v1 and retained original baseline SHA256 sequences. Original expensive wall times are reused explicitly, not remeasured.",
+  "sourceSha256": "b537b219400b638b288171cd48afdd23f5c8746fb98ad4e0282c875cf4e43e31",
+  "candidateSha256": "315ac5b2a7d0b023b3c782482bda31a0276ef1ed616477e12cd8990ca50c2e99",
+  "imageSha256": "f5397e45f9c9be9b127fb99133f476f678c512620b6dc743507dd8db40d7b20f",
+  "retainedBaselineEvidence": "/tmp/comic-walk-exact-benchmark-20260912.json",
+  "retainedBaselineEvidenceSha256": "d49a0967d7972b84120a35e23b67cd6c4e1a1111d609120d8ad259be28115eeb",
+  "realArt": [
+    {
+      "size": [
+        1396,
+        576
+      ],
+      "acceptedTrajectoryPoints": 27675,
+      "retainedOriginalBaselineSeconds": 81.68150997004705,
+      "freshHybridSeconds": 2.6727089239866473,
+      "speedupAgainstRetainedBaseline": 30.561318981271572,
+      "sequenceSha256": "ca7f386aaf3e04b45342bb27661373a5f5da8c405b1c2e937c4d10333a0cf288"
+    },
+    {
+      "size": [
+        446,
+        360
+      ],
+      "acceptedTrajectoryPoints": 8557,
+      "retainedOriginalBaselineSeconds": 7.470462196040899,
+      "freshHybridSeconds": 0.7550664249574766,
+      "speedupAgainstRetainedBaseline": 9.893781459639946,
+      "sequenceSha256": "a6c7118935363c00d7cc12b6045df4d162549e756072d85165ad779639afda47"
+    },
+    {
+      "size": [
+        495,
+        450
+      ],
+      "acceptedTrajectoryPoints": 10391,
+      "retainedOriginalBaselineSeconds": 11.004464906989597,
+      "freshHybridSeconds": 0.9189516380429268,
+      "speedupAgainstRetainedBaseline": 11.975020720813545,
+      "sequenceSha256": "5061b57d26af6dc3bb15d63aeb6c4e0491c14c917bc408a5d04206d478cd08bd"
+    }
+  ],
+  "syntheticSummary": {
+    "freshOriginalVsHybridCases": 250,
+    "randomSeed": 20260912,
+    "baselineSeconds": 2.502639735757839,
+    "hybridSeconds": 2.5102315656258725
+  }
+}

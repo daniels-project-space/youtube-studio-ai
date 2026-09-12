@@ -1,0 +1,6 @@
+{
+  "scope": "Actual runtime walk AST is identical to the independently measured hybrid candidate",
+  "runtimeSourceSha256": "c0fb69bfa7bd457a0ec0d674aa62428eaa42b7db2c17dd4ff80d87ac7a6d8eb6",
+  "candidateSourceSha256": "315ac5b2a7d0b023b3c782482bda31a0276ef1ed616477e12cd8990ca50c2e99",
+  "walkAstSha256": "aecbf1a336cd66b2fc3371d6ede8c6bfcebbdc2715d19cb3dabda97d89836547"
+}

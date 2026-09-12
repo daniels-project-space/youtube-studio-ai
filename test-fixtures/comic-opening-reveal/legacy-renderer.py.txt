@@ -39,51 +39,10 @@ def lerp(a, b, t):
 
 
 def walk(pts):
-    pts = list(map(tuple, pts))
-    # Keep the simpler original path where measured tree overhead dominates.
-    if len(pts) <= 512:
-        cur = min(pts, key=lambda p: (p[1], p[0])); pts.remove(cur); order = [cur]
-        while pts:
-            a = np.array(pts); i = int(((a[:, 0] - cur[0]) ** 2 + (a[:, 1] - cur[1]) ** 2).argmin())
-            cur = tuple(a[i]); order.append(cur); pts.pop(i)
-        return order
-    first = min(range(len(pts)), key=lambda i: (pts[i][1], pts[i][0]))
-    points = np.asarray(pts)
-    active = np.ones(len(points), dtype=bool)
-    active[first] = False
-    order = [pts[first]]
-    current = first
-    remaining = len(points) - 1
-    tree = None
-    tree_ids = None
-    while remaining:
-        if remaining <= 64:
-            candidates = np.flatnonzero(active)
-        else:
-            if tree is None or remaining * 2 < len(tree_ids):
-                tree_ids = np.flatnonzero(active)
-                tree = cKDTree(points[tree_ids])
-            count = min(8, len(tree_ids))
-            while True:
-                _, nearest = tree.query(points[current], k=count)
-                candidates = tree_ids[np.atleast_1d(nearest)]
-                candidates = candidates[active[candidates]]
-                if len(candidates):
-                    break
-                count = min(count * 2, len(tree_ids))
-            delta = points[candidates[0]] - points[current]
-            distance2 = int(delta[0] ** 2 + delta[1] ** 2)
-            # Include every equal-distance point; tree tie order is not stable.
-            radius = math.nextafter(math.sqrt(distance2), math.inf)
-            candidates = tree_ids[tree.query_ball_point(points[current], radius)]
-            candidates = candidates[active[candidates]]
-        delta = points[candidates] - points[current]
-        distance2 = delta[:, 0] ** 2 + delta[:, 1] ** 2
-        tied = candidates[distance2 == distance2.min()]
-        current = int(tied.min())  # Original-list-index tie break, including duplicates.
-        order.append(tuple(points[current]))
-        active[current] = False
-        remaining -= 1
+    pts = list(map(tuple, pts)); cur = min(pts, key=lambda p: (p[1], p[0])); pts.remove(cur); order = [cur]
+    while pts:
+        a = np.array(pts); i = int(((a[:, 0] - cur[0]) ** 2 + (a[:, 1] - cur[1]) ** 2).argmin())
+        cur = tuple(a[i]); order.append(cur); pts.pop(i)
     return order
 
 
@@ -304,11 +263,16 @@ def build_page(subset):
 nP = max(1, math.ceil(N / PER_PAGE)); base = max(1, math.ceil(N / nP))
 PAGES = [build_page(panels[s:s + base]) for s in range(0, N, base)]
 
-# The opening uses the same actual hand/mask reveal as the later panels.
-# Start on its art region and draw during the existing narration preroll.
+# The opening is an actual story hook, never an empty page of panel borders.
+# `castMotionComic` has already made panel_0 mandatory before this local
+# renderer is called.  Surface that approved art during the preroll, then keep
+# the first camera beat on it instead of pretending to draw a blank template.
 opening_pane = PAGES[0]["panes"][0] if PAGES and PAGES[0]["panes"] else None
 if opening_pane is None:
     raise RuntimeError("motionComic opening panel art is missing; refusing empty template opening")
+ox, oy, ow, oh = opening_pane["box"]
+PAGES[0]["world"][PAGES[0]["PY"] + oy:PAGES[0]["PY"] + oy + oh, PAGES[0]["PX"] + ox:PAGES[0]["PX"] + ox + ow] = opening_pane["art"]
+opening_pane["intro_visible"] = True
 
 
 # ---------------- camera (per page) ----------------
@@ -345,19 +309,6 @@ def render_page_frame(pg, cam, hand_pt=None, active=None, t=0.0):
             crop.paste(body, (int(bx - ix0), int(by - iy0)), body)
     sub = (x0f - ix0, y0f - iy0, x0f - ix0 + vw, y0f - iy0 + vh)
     return crop.resize((OW, OH), Image.BILINEAR, box=sub)
-
-
-def reveal_panel(pg, pane, progress):
-    if pane is None or progress <= 0:
-        return None, None
-    progress = min(progress, 1.0)
-    x, y, w, h = pane["box"]
-    mask = pane["order2d"] <= progress
-    pg["world"][pg["PY"] + y:pg["PY"] + y + h, pg["PX"] + x:pg["PX"] + x + w][mask] = pane["art"][mask]
-    if progress >= 1.0:
-        return None, None
-    k = min(int(progress * len(pane["traj"])), len(pane["traj"]) - 1)
-    return (pg["PX"] + x + pane["traj"][k, 0], pg["PY"] + y + pane["traj"][k, 1]), pane
 
 
 def page_turn(Pold, Pnew, q):
@@ -401,11 +352,7 @@ total = t; nframes = int(total * FPS)
 with open(os.path.join(RUN_DIR, "motion_comic_review_timeline.json"), "w") as review_out:
     json.dump({"version": "motion-comic-review/v1", "bubbles": review_bubbles}, review_out)
 
-est_from = frame_box(PAGES[0], 0); est_from = [est_from[0], est_from[1], est_from[2] * 1.06]
-# A short/zero preroll must still visibly draw instead of flashing finished art.
-# Continue the same absolute-time reveal into the first narration beat; the
-# existing 0.45-second minimum fits its minimum one-second panel duration.
-opening_draw_span = max(0.45, EST)
+est_from = frame_top(PAGES[0]); est_from = [est_from[0], est_from[1], est_from[2] * 1.12]
 BR = lambda c, tt: (c[0] + 2.4 * math.sin(tt * 0.42 + 1.3), c[1] + 1.9 * math.sin(tt * 0.34 + 0.4), c[2])
 
 ff = subprocess.Popen(
@@ -420,32 +367,25 @@ for f in range(nframes):
             seg = s; break
     kind, pi, li, st, en = seg
     if kind == "est":
-        pg = PAGES[0]; cam = lerp(est_from, frame_box(pg, 0), smoothstep(t / opening_draw_span))
-        progress = (t + 1.0 / FPS) / opening_draw_span
-        hand_pt, active = reveal_panel(pg, opening_pane, progress)
-        frame = render_page_frame(pg, list(BR(cam, t)), hand_pt, active, t)
+        pg = PAGES[0]; cam = lerp(est_from, frame_top(pg), smoothstep((t - st) / max(0.1, en - st)))
+        frame = render_page_frame(pg, list(BR(cam, t)), None, None, t)
     elif kind == "panel":
         pg = PAGES[pi]; panel = pg["panels"][li]; pane = pg["panes"][li]; local = t - st; hand_pt = None; active = None
         f_to = frame_box(pg, li)
         if local < MOVE:
-            if pi == 0 and li == 0:
-                cam = lerp(est_from, f_to, smoothstep(t / opening_draw_span))
-            else:
-                f_from = frame_box(pg, li - 1) if li > 0 and pg["panes"][li - 1] else frame_top(pg)
-                cam = lerp(f_from, f_to, smoothstep(local / MOVE))
+            f_from = frame_box(pg, li - 1) if li > 0 and pg["panes"][li - 1] else frame_top(pg)
+            cam = lerp(f_from, f_to, smoothstep(local / MOVE))
         else:
             hf = min(1.0, (local - MOVE) / max(0.1, panel["dur"] - MOVE))
             cam = [f_to[0], f_to[1] - 0.012 * f_to[2] * hf, f_to[2] * (1 - 0.045 * hf)]
-        if pane is not None:
-            # Panel intervals exclude their end. Reserve an actual display
-            # frame for complete art, including the minimum one-second beat.
-            # Ordinary-duration reveals retain their original timing exactly.
-            draw_span = min(max(0.45, (panel["dur"] - MOVE - HOLD) * DRAW_FRAC),
-                            max(1.0 / FPS, panel["dur"] - MOVE - 1.0 / FPS - 1e-9))
-            prog = (local - MOVE) / draw_span
-            if pi == 0 and li == 0:
-                prog = (t + 1.0 / FPS) / opening_draw_span
-            hand_pt, active = reveal_panel(pg, pane, prog)
+        if pane is not None and not (pi == 0 and li == 0 and pane.get("intro_visible")):
+            draw_span = max(0.45, (panel["dur"] - MOVE - HOLD) * DRAW_FRAC); prog = (local - MOVE) / draw_span
+            if prog > 0:
+                prog = min(prog, 1.0); x, y, w, h = pane["box"]; mask = pane["order2d"] <= prog
+                pg["world"][pg["PY"] + y:pg["PY"] + y + h, pg["PX"] + x:pg["PX"] + x + w][mask] = pane["art"][mask]
+                if prog < 1.0:
+                    k = min(int(prog * len(pane["traj"])), len(pane["traj"]) - 1)
+                    hand_pt = (pg["PX"] + x + pane["traj"][k, 0], pg["PY"] + y + pane["traj"][k, 1]); active = pane
         frame = render_page_frame(pg, list(BR(cam, t)), hand_pt, active, t)
     elif kind == "turn":
         q = smoothstep((t - st) / max(0.1, en - st))
