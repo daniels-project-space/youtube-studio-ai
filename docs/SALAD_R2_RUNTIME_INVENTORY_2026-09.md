@@ -2,6 +2,8 @@
 
 This is observed evidence, not GPU qualification. All API operations performed for this inventory were reads or read-only availability POSTs. No group was created, started, resized, stopped or deleted.
 
+**12 September ERNIE update:** the [exact stored-worker follow-up](ERNIE_REFERENCE_CAPABILITY_REVIEW_2026-09.md) verifies the newer `20260910-v3` bundle. Its durable multi-aspect warm batches supersede this document's square-only/no-dedup ERNIE description. Real image-reference conditioning is still absent; the actual validator and model workflow were checked. Other historical observations below are not refreshed by that focused investigation.
+
 ## Live account and hardware
 
 Vault namespace `salad` contains `SALAD_API_KEY`, `SALAD_ORG`, `SALAD_PROJECT`, and legacy `SALAD_LTX_*` / `SALAD_R2_*` fields. Authenticated reads succeeded. The configured project had zero container groups and two existing queues: `minimax-music3-jobs`, `ernie-image-smoke-jobs`. Organization quota: 10 replicas; used: 0.

@@ -48,6 +48,10 @@ The [actual Diffusers ERNIE pipeline](https://github.com/huggingface/diffusers/b
 
 **Decision:** do not wire an `images` field that this upstream silently cannot consume, infer a custom R2 worker's capability from a model name, or substitute Fal without a qualified provider decision. Verify the actual deployed worker separately; a custom reference-capable extension would need byte-level request and real-pixel proof. The complete-page reveal/coverage work can proceed independently, but the full reference-conditioned page-generation milestone remains open. No provider call, GPU rental, model/configuration change or quality downgrade was made for this check.
 
+### Actual R2 worker check — 12 September, 14:12 UTC
+
+The [stored-worker follow-up](ERNIE_REFERENCE_CAPABILITY_REVIEW_2026-09.md) now verifies the latest ERNIE bundle by full archive hash against its R2 manifest and matching local source. Its newer durable multi-aspect batches supersede the old square-only inventory, but their actual validator rejects all four tested image-reference fields. Legacy and batch workflows both use text conditioning and empty latents; the ERNIE model code has no reference-conditioning path. Five exact stored code archives were inspected; no weight download, inference or GPU mutation was needed. Real reference-conditioned generation remains pending an appropriate, explicitly permitted route and quality pilot—not an unverified JSON adapter.
+
 Make a **reviewed page artifact** the shared production unit between story planning, image generation, reveal, recovery, and assembly. Do not bolt an atlas image onto the existing per-panel paid loop.
 
 1. The automated planner produces a typed page plan from the accepted story: stable page/panel IDs, ordered story-beat IDs, channel/style identity, participating character IDs, actual source-region geometry, narration cues, protected faces/lettering space, and required visual details. Permit genuinely different page layouts; the current fixed-grid atlas alone is not the requested layout freedom.

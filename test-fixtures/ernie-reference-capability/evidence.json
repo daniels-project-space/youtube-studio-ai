@@ -1,0 +1,526 @@
+{
+  "observedAt": "2026-09-12T14:12:45.175Z",
+  "scope": "Read-only current local source, exact R2 code archives/manifests, and live Salad group inventory. No app/report/backlog edits, model weights fetched, code deployed, GPU lifecycle operations, provider inference, or reference-conditioning quality claim.",
+  "verdict": "No implemented image-reference conditioning in the inspected ERNIE worker/model path. Newer durable multi-aspect batches exist; the September8 square-only/no-dedup inventory is stale.",
+  "modelManifest": {
+    "bucket": "salad-render-infra",
+    "key": "ernie-image-sft-v1/immutable-manifest.json",
+    "bytes": 1171,
+    "sha256": "4147d735ed0663a83460034da391f5a4c081aefef44ef2f37ad7163f7e275637",
+    "exactManifestBytesVerified": true,
+    "sourceRepo": "Comfy-Org/ERNIE-Image",
+    "sourceRevision": "01bcb3f1acdb1454ee579d2796ecc4c156873eea",
+    "modelFiles": 4,
+    "listedModelBytes": 30998316546,
+    "modelFileBytesListedAndMatched": true,
+    "modelFileContentHashesIndependentlyRead": false
+  },
+  "latestBundle": {
+    "key": "worker-bootstrap/ernie-image-salad-3090/20260910-v3/worker.tar.gz",
+    "sha256": "84350c1ff8aeeb6028cfc6eb52b43dd601320d30d92f9874d8f093590be3d999",
+    "bytes": 11657447,
+    "manifestSha256": "b400ec1ee6eed0ff9f5fbdfd1b5fd539169c0d685a0cb731539a0b85c368f6f3",
+    "archiveMatchesManifest": true,
+    "comfyuiRevision": "3216c62e9962c3babd28a4dfea6e5aef50b8fe16"
+  },
+  "actualSourceFindings": [
+    {
+      "file": "/home/ubuntu/salad-media-infra/common/ernie_batch_job.py",
+      "line": 116,
+      "fact": "validate_item requires exactly id,prompt,negativePrompt,width,height,seed. A controlled1536x1024 valid item passed; adding referenceImages,image_url,reference_latents,or image each raised BatchJobError before any I/O."
+    },
+    {
+      "file": "/home/ubuntu/salad-media-infra/common/durable_image_job.py",
+      "line": 59,
+      "fact": "Legacy immutable spec is also an exact closed field set with prompt and seed, no image reference."
+    },
+    {
+      "file": "/home/ubuntu/salad-media-infra/routes/ernie/server.py",
+      "line": 231,
+      "fact": "Legacy _render encodes prompt text, constructs EmptyFlux2LatentImage and samples denoise1.0; no VAE reference encode or reference injection."
+    },
+    {
+      "file": "/home/ubuntu/salad-media-infra/routes/ernie/server.py",
+      "line": 257,
+      "fact": "_render_batch stages prompt enhancement, text encoding, empty latent sampling and output decode. Images are published after decode; there is no input-image fetch/encode path."
+    },
+    {
+      "file": "/home/ubuntu/salad-media-infra/vendor/ComfyUI/comfy/model_base.py",
+      "line": 2910,
+      "fact": "ErnieImage.extra_conds adds cross-attention text only; it does not pass reference_latents."
+    },
+    {
+      "file": "/home/ubuntu/salad-media-infra/vendor/ComfyUI/comfy/ldm/ernie/model.py",
+      "line": 244,
+      "fact": "ErnieImageModel.forward embeds noisy output x plus text context. The kwargs branch reads transformer/rope options, not reference images or reference latents."
+    }
+  ],
+  "actualValidatorChecks": {
+    "acceptedControl": "1536x1024 prompt/negativePrompt/seed batch item",
+    "rejectedExtraFields": [
+      "referenceImages",
+      "image_url",
+      "reference_latents",
+      "image"
+    ],
+    "exception": "BatchJobError",
+    "networkCalls": 0,
+    "renders": 0
+  },
+  "archives": [
+    {
+      "key": "worker-bootstrap/ernie-image-salad-3090/20260910-v3/worker.tar.gz",
+      "sha256": "84350c1ff8aeeb6028cfc6eb52b43dd601320d30d92f9874d8f093590be3d999",
+      "compressedBytes": 11657447,
+      "uncompressedMemberBytes": 44215213,
+      "archiveMatchesManifest": true,
+      "selectedMembers": [
+        {
+          "name": "COMFYUI_REVISION",
+          "sha256": "aeb7582b7166cd6553eeb43091e99928fb8205afab71c3de8414e06a394ebc17",
+          "bytes": 41,
+          "revision": "3216c62e9962c3babd28a4dfea6e5aef50b8fe16"
+        },
+        {
+          "name": "ComfyUI/comfy/ldm/ernie/model.py",
+          "sha256": "187a359779f0408f49e68e68157fd767f44ef6bd8e94fedefd3bc0e850995e10",
+          "bytes": 13464,
+          "matchesCurrentLocal": true,
+          "symbols": [
+            {
+              "name": "ErnieImageEmbedND3",
+              "line": 24,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImagePatchEmbedDynamic",
+              "line": 44,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageAttention",
+              "line": 86,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageFeedForward",
+              "line": 134,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageSharedAdaLNBlock",
+              "line": 145,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageAdaLNContinuous",
+              "line": 179,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageModel",
+              "line": 193,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        },
+        {
+          "name": "ComfyUI/comfy/model_base.py",
+          "sha256": "45082978479efb4726b96185d89de440563e16f17446af92c4655b587ef6aee6",
+          "bytes": 142204,
+          "matchesCurrentLocal": true,
+          "symbols": [
+            {
+              "name": "ErnieImage",
+              "line": 2910,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        },
+        {
+          "name": "ComfyUI/comfy/supported_models.py",
+          "sha256": "0154e4af43335f896361020d42c8bdcfd24990cf2ffa05b56603c1509b37c9a8",
+          "bytes": 85835,
+          "symbols": [
+            {
+              "name": "ErnieImage",
+              "line": 2355,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        },
+        {
+          "name": "common/durable_image_job.py",
+          "sha256": "4900f6f2d2a9242f9a177f34081701d3e6c5334f590ba03142e0752198db7e47",
+          "bytes": 14608,
+          "matchesCurrentLocal": true,
+          "symbols": [
+            {
+              "name": "validate_spec",
+              "line": 59,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        },
+        {
+          "name": "common/ernie_batch_job.py",
+          "sha256": "d04f52138608c4fc82d157c45129f89a8f06089f6a1f038a6c498c8ef7735481",
+          "bytes": 29019,
+          "matchesCurrentLocal": true,
+          "symbols": [
+            {
+              "name": "validate_item",
+              "line": 116,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        },
+        {
+          "name": "route.json",
+          "sha256": "1d5b59e7d2d8b2636548556226f90666cfc45205ec7bea2a2a93cf990e458082",
+          "bytes": 708
+        },
+        {
+          "name": "server.py",
+          "sha256": "8947d49bed3f8e90c351a8841a5af7aa709b0e7a8d4addf58bc1dd8718bb485b",
+          "bytes": 24972,
+          "matchesCurrentLocal": true,
+          "symbols": [
+            {
+              "name": "ImageRequest",
+              "line": 75,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "_render",
+              "line": 231,
+              "hasEmptyFlux2LatentImage": true,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "_render_batch",
+              "line": 257,
+              "hasEmptyFlux2LatentImage": true,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "worker-bootstrap/novita-shared-workers/20260829-v100/worker.tar.gz",
+      "sha256": "aa790ef921b5de562d6dfcd03861e8b59222ec14b1576bfad7a23f0f58a9476a",
+      "compressedBytes": 51531,
+      "uncompressedMemberBytes": 188837,
+      "archiveMatchesManifest": null,
+      "selectedMembers": [
+        {
+          "name": "workers/ernie_image/worker.py",
+          "sha256": "51fa70bad1ad53279e37145b40cfe57dfd8626d6012849c1fab03d7feef18c39",
+          "bytes": 20537,
+          "symbols": []
+        }
+      ]
+    },
+    {
+      "key": "worker-runtime/comfyui/3ac5d7941dfa2504555260512132d1cb5664648d/source.tar.gz",
+      "sha256": "0c929ec6294749e22de2ee5c2463ddaac7c31378097a53467be568aea18ce927",
+      "compressedBytes": 12110650,
+      "uncompressedMemberBytes": 45300784,
+      "archiveMatchesManifest": null,
+      "selectedMembers": [
+        {
+          "name": "ComfyUI-3ac5d7941dfa2504555260512132d1cb5664648d/comfy/ldm/ernie/model.py",
+          "sha256": "187a359779f0408f49e68e68157fd767f44ef6bd8e94fedefd3bc0e850995e10",
+          "bytes": 13464,
+          "symbols": [
+            {
+              "name": "ErnieImageEmbedND3",
+              "line": 24,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImagePatchEmbedDynamic",
+              "line": 44,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageAttention",
+              "line": 86,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageFeedForward",
+              "line": 134,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageSharedAdaLNBlock",
+              "line": 145,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageAdaLNContinuous",
+              "line": 179,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageModel",
+              "line": 193,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        },
+        {
+          "name": "ComfyUI-3ac5d7941dfa2504555260512132d1cb5664648d/comfy/model_base.py",
+          "sha256": "8a66ec5d6e441303f4a3c22b40d9c4f0d94e2edcdc97d073d1b1cea04c9f3de9",
+          "bytes": 136271,
+          "symbols": [
+            {
+              "name": "ErnieImage",
+              "line": 2779,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        },
+        {
+          "name": "ComfyUI-3ac5d7941dfa2504555260512132d1cb5664648d/comfy/supported_models.py",
+          "sha256": "0f978036c17dfee74d106f04f0d361198c0d444b4e1839e2cd8920a9dcebd40c",
+          "bytes": 84613,
+          "symbols": [
+            {
+              "name": "ErnieImage",
+              "line": 2316,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "worker-runtime/comfyui/72865f4f27eaf5396f8f36370e0a2be3a9a090ee/source.tar.gz",
+      "sha256": "f27e166e9b9fbf4743669a1a492980a5f6f57c6697d6e460d3121c4131771047",
+      "compressedBytes": 11801519,
+      "uncompressedMemberBytes": 44007220,
+      "archiveMatchesManifest": null,
+      "selectedMembers": [
+        {
+          "name": "ComfyUI-72865f4f27eaf5396f8f36370e0a2be3a9a090ee/comfy/ldm/ernie/model.py",
+          "sha256": "187a359779f0408f49e68e68157fd767f44ef6bd8e94fedefd3bc0e850995e10",
+          "bytes": 13464,
+          "symbols": [
+            {
+              "name": "ErnieImageEmbedND3",
+              "line": 24,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImagePatchEmbedDynamic",
+              "line": 44,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageAttention",
+              "line": 86,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageFeedForward",
+              "line": 134,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageSharedAdaLNBlock",
+              "line": 145,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageAdaLNContinuous",
+              "line": 179,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageModel",
+              "line": 193,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        },
+        {
+          "name": "ComfyUI-72865f4f27eaf5396f8f36370e0a2be3a9a090ee/comfy/model_base.py",
+          "sha256": "28f8df94cc26e3dc925ef512ec1b067083acdd00a9f92dd47b46f63e377f05f4",
+          "bytes": 131506,
+          "symbols": [
+            {
+              "name": "ErnieImage",
+              "line": 2697,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        },
+        {
+          "name": "ComfyUI-72865f4f27eaf5396f8f36370e0a2be3a9a090ee/comfy/supported_models.py",
+          "sha256": "919c6cf70f1282167bfbb6564a6aa84fafd0fe70fd539939ea3620ae10e234e5",
+          "bytes": 83933,
+          "symbols": [
+            {
+              "name": "ErnieImage",
+              "line": 2291,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "key": "worker-runtime/comfyui/e20d433a4966dcc88fa5abbae6ace824cb78b263/source.tar.gz",
+      "sha256": "2e6bfaf40ca64c6da9190027fc721bcaef4e2f0301b915052868349622c478e1",
+      "compressedBytes": 12101246,
+      "uncompressedMemberBytes": 45251971,
+      "archiveMatchesManifest": null,
+      "selectedMembers": [
+        {
+          "name": "ComfyUI-e20d433a4966dcc88fa5abbae6ace824cb78b263/comfy/ldm/ernie/model.py",
+          "sha256": "187a359779f0408f49e68e68157fd767f44ef6bd8e94fedefd3bc0e850995e10",
+          "bytes": 13464,
+          "symbols": [
+            {
+              "name": "ErnieImageEmbedND3",
+              "line": 24,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImagePatchEmbedDynamic",
+              "line": 44,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageAttention",
+              "line": 86,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageFeedForward",
+              "line": 134,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageSharedAdaLNBlock",
+              "line": 145,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageAdaLNContinuous",
+              "line": 179,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            },
+            {
+              "name": "ErnieImageModel",
+              "line": 193,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        },
+        {
+          "name": "ComfyUI-e20d433a4966dcc88fa5abbae6ace824cb78b263/comfy/model_base.py",
+          "sha256": "8a66ec5d6e441303f4a3c22b40d9c4f0d94e2edcdc97d073d1b1cea04c9f3de9",
+          "bytes": 136271,
+          "symbols": [
+            {
+              "name": "ErnieImage",
+              "line": 2779,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        },
+        {
+          "name": "ComfyUI-e20d433a4966dcc88fa5abbae6ace824cb78b263/comfy/supported_models.py",
+          "sha256": "0f978036c17dfee74d106f04f0d361198c0d444b4e1839e2cd8920a9dcebd40c",
+          "bytes": 84613,
+          "symbols": [
+            {
+              "name": "ErnieImage",
+              "line": 2316,
+              "hasEmptyFlux2LatentImage": false,
+              "referenceConditioningTokensPresent": false
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "oldSharedWorker": {
+    "member": "workers/ernie_image/worker.py",
+    "sha256": "51fa70bad1ad53279e37145b40cfe57dfd8626d6012849c1fab03d7feef18c39",
+    "requestFunctionLine": 95,
+    "renderBaseLine": 317,
+    "emptyFluxLatentLine": 332,
+    "renderInputs": [
+      "prompt",
+      "width",
+      "height",
+      "seed",
+      "steps"
+    ],
+    "note": "The old shared Novita archive is also text-to-image; its presence does not qualify a current Salad deployment."
+  },
+  "live": {
+    "observedAt": "2026-09-12T14:12:45.175Z",
+    "operation": "GET configured Salad project container groups",
+    "groupCount": 0,
+    "runningWorkerInspected": false,
+    "inferenceAttempted": false
+  },
+  "nextFeasibleStep": "Keep the existing ERNIE capability explicitly text-to-image. Real cross-page character reference input requires a genuinely reference-capable model/adapter and conditioning graph, then digest-bound reference ingestion/job fingerprints and measured consistency qualification. Adding a JSON reference field, repeating text/seed, or silently substituting generic img2img does not implement that feature. Any backend/model change needs its own approved scope; none was made here.",
+  "limitations": [
+    "No model-weight bytes downloaded or rehashed; the manifest and object lengths were verified.",
+    "Code archive hashes were fully computed; the latest worker matched its stored manifest. Older standalone ComfyUI archive hashes were observed, not matched to an independent signed provenance receipt.",
+    "No inference or output-quality result; currently zero Salad groups.",
+    "The broader ComfyUI package supports other architectures with references, but that is not evidence that ERNIE's own adapter accepts them."
+  ],
+  "tooling": {
+    "inspectionScript": "/tmp/ernie-r2-reference-audit-20260912.mjs",
+    "archiveScript": "/tmp/ernie-r2-archive-audit-20260912.mjs",
+    "inMemoryParser": "/tmp/ernie-r2-archive-inspect-20260912.py",
+    "liveRead": "/tmp/ernie-salad-live-read-20260912.mjs",
+    "cloudflareReadCompatibility": "https://developers.cloudflare.com/r2/api/s3/api/"
+  }
+}

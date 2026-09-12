@@ -1,6 +1,6 @@
 # Complete comic reveal and exact-order tracing — 12 September 2026
 
-Status: **frozen full local release gate passed; deployment verification pending**. This is a concrete part of backlog items 68, 154, 155 and 158, not completion of the one-image-per-page or character-reference rework.
+Status: **production verified at `9cbab32`, including Trigger `20260912.25`**. This is a concrete part of backlog items 68, 154, 155 and 158, not completion of the one-image-per-page or character-reference rework.
 
 Runtime `scripts/mc_page_render.py` SHA256: `c0fb69bfa7bd457a0ec0d674aa62428eaa42b7db2c17dd4ff80d87ac7a6d8eb6`.
 
@@ -30,7 +30,19 @@ Already terminal exit 0:
 
 **All 687 direct production-readiness tests and actual hermetic assembly passed**, log `/tmp/comic-reveal-readiness-20260912.log`, execution handle `54652` terminal exit 0 on 12 September. The actual four-segment 1080p assembly encoded 31.021995 seconds against a 31-second plan with no warnings; it used local synthetic assets, not a provider or new channel. Runtime and all four permanent test/harness hashes were rechecked unchanged after completion. This reuses the frozen validation rather than restarting it.
 
-The real caller in `src/lib/motionComic.ts` invokes this exact `scripts/mc_page_render.py`, and `trigger.config.ts` includes it in the deployed runtime's additional files. Commit/push and exact Vercel/Convex/Trigger verification remain required; local success is not yet a production claim.
+The real caller in `src/lib/motionComic.ts` invokes this exact `scripts/mc_page_render.py`, and `trigger.config.ts` includes it in the deployed runtime's additional files. The deployed native-build context comes from the exact guarded main revision, not from the JavaScript-only content hash.
+
+Release commit **`9cbab32b161a067de80afcacec6db25129459bba`** is pushed to `main`. Exact Vercel Production deployment `dpl_EGTmR7ZotP6SroSR4ScX3JNMWWPb` is READY and aliases `youtube-studio-ai.vercel.app`; that alias's `/api/health` returned HTTP 200 with the exact revision, checked again after backend completion.
+
+GitHub CI **`34698421642` completed successfully**. Exact terminal evidence on 12 September UTC:
+
+- All 687 direct tests passed at 14:21:32; actual hermetic assembly passed at 14:22:08.
+- No structural audit regressed; all 14 executed original-defect examples still fail as expected.
+- The main-revision guard returned `deploy: true` for `9cbab32` at 14:23:45.
+- Canonical Convex **`astute-camel-689` functions ready at 14:23:47**.
+- Trigger production **`20260912.25 was deployed at 14:25:50`** (not merely initialized or building).
+
+No successor was pushed during that guarded release. This verifies deployment of the repaired current panel renderer; it does not represent a newly generated, reference-conditioned comic or a paid end-to-end channel qualification.
 
 The preceding, separate story-completeness/paid-retry release `2a9bbdd` is already verified on the exact web alias, canonical Convex and Trigger production `20260912.24`; see [its release receipt](COMIC_STORY_COMPLETENESS_REVIEW_2026-09.md).
 
