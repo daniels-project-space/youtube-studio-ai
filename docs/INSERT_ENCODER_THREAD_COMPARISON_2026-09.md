@@ -65,6 +65,8 @@ Source-fidelity JSON SHA: `cb6b539bbefce200df33ce6822b95de456e4a574d99fb0a2a803e
 
 ## Subsequent study — not a changed verdict
 
+**Completed:** the [full-length native comparison](INSERT_ENCODER_FULL_LENGTH_REVIEW_2026-09.md) does not justify adoption. Both 390-frame outputs preserve the final native media contract, but combined wall time changes only about 1.7% and individual frames regress despite better averages. No application encoder setting was changed. The following paragraph records the original study setup, not a still-running job.
+
 The main agent separately inspected the frame 18 and 23 black/white sheets and confirmed the visible block/streak difference. A full-length, source-fidelity study is now underway: one two-thread 390-frame candidate and one unchanged-auto baseline use the exact same preserved original PNGs. The completed historical retry cannot be reused as its pixel baseline because its browser PNGs have no retained full hash binding.
 
 The initial stitcher-only experiment has no audio. The actual full module's per-frame empty asset records cause Remotion to add silent Opus; the complete study must preserve that real audio/mux path and compare its streams/duration, not present encoder-only output as the full module. The candidate's video may be reused through Remotion's own pre-encoded video-copy path if decoded video/alpha/timestamps are proven unchanged by muxing. No application codec/thread setting has changed. Multiple insert types and actual final assembly remain required before production adoption.
