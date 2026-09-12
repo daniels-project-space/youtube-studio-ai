@@ -1,0 +1,72 @@
+// Independent control-flow probe. All provider/storage/native I/O remains
+// controlled by the production-seam test harness; this is NOT media proof.
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+
+const repo = "/tmp/ysa-next-bcb";
+process.chdir(repo);
+const path = `${repo}/src/lib/__tests__/motionComicStoryCompleteness.test.mjs`;
+const runtime = await readFile(`${repo}/src/lib/motionComic.ts`);
+const expected = "3eab4e712c4b7abcded4dad4fe0e4e9fdb335ea45a025f99e18707e0ea06db82";
+assert.equal(createHash("sha256").update(runtime).digest("hex"), expected, "frozen runtime must match");
+assert.equal(process.env.MOTION_COMIC_COMPLETENESS_BASELINE_SOURCE, undefined);
+assert.equal(process.env.MOTION_COMIC_COMPLETENESS_EVIDENCE_OUTPUT, undefined);
+let script = await readFile(path, "utf8");
+console.log(JSON.stringify({ scope: "Controlled I/O; actual cast/block, remote cost wrapper and retry policy; no paid calls or native-media proof", runtimeSha256: expected, harnessSha256: createHash("sha256").update(script).digest("hex") }));
+function replaceOnce(before, after) {
+  assert.equal(script.split(before).length, 2, `unique probe seam: ${before}`);
+  script = script.replace(before, after);
+}
+replaceOnce("createRequire(import.meta.url)", `createRequire(${JSON.stringify(`file://${path}`)})`);
+replaceOnce('export {classifyExecutionError} from "./src/engine/executionErrors";', 'export {executeRemoteCostTrackedBlock} from "./src/trigger/remoteChildCostTransport"; export {classifyExecutionError} from "./src/engine/executionErrors";');
+replaceOnce("classifyExecutionError, taskErrorForRetryPolicy } = loaded.exports;", "classifyExecutionError, taskErrorForRetryPolicy, executeRemoteCostTrackedBlock } = loaded.exports;");
+replaceOnce('if (current.voiceResponseFailure === "http500")', 'if (current.voiceResponseFailure === "rate429") return new Response("Explicit capacity rejection", { status: 429 });\n      if (current.voiceResponseFailure === "http500")');
+const start = script.indexOf("  for (const count of [4, 8, 10, 12])");
+const end = script.indexOf("  if (process.env.MOTION_COMIC_COMPLETENESS_EVIDENCE_OUTPUT)");
+assert.ok(start >= 0 && end > start, "bounded test replacement locations");
+script = script.slice(0, start) + `
+  async function remoteAbort(entry) {
+    terminalRetryPolicy(entry);
+    noDerivedWork(entry);
+    let finish, remoteError, begun=0;
+    try {
+      await executeRemoteCostTrackedBlock({
+        paid:true, priorCostUsd:0, checkpointCostReceipts:[],
+        execute:async()=>{throw entry.error;},
+        transport:{
+          begin:async()=>{begun++;},
+          finish:async(result)=>{finish=result; return {costUsd:result.costUsd,complete:result.complete,attempts:1};},
+        },
+      });
+    } catch(error) {remoteError=error;}
+    assert.equal(begun,1);
+    assert.equal(finish.status,'failed');
+    assert.equal(finish.complete,false,'unaccounted paid outcomes remain fenced');
+    assert.equal(remoteError.retryable,false);
+    assert.equal(remoteError.status,entry.error.status);
+    assert.equal(remoteError.code,entry.error.code);
+    assert.equal(taskErrorForRetryPolicy(remoteError).error.name,'AbortTaskRunError');
+    return {remoteRetryable:remoteError.retryable,remoteAccountingComplete:finish.complete,remoteTaskErrorName:taskErrorForRetryPolicy(remoteError).error.name};
+  }
+  for(const voiceResponseFailure of ['unreadable200','tiny200','http500','rate429']) for(const throughBlock of [false,true]) {
+    const entry=await runCase('independent-'+voiceResponseFailure+'-'+throughBlock,{throughBlock,extraLinePanel:9,voiceResponseFailure,warmVoices:false,warmMusic:false});
+    assert.equal(entry.error?.name,'TerminalDialogueResponseError');
+    const status=voiceResponseFailure==='http500'?500:voiceResponseFailure==='rate429'?429:200;
+    assert.equal(entry.error.status,status);
+    if(voiceResponseFailure==='unreadable200')assert.equal(entry.error.cause,entry.providerError);
+    const submissions=entry.voiceRequests.filter(id=>id==='panel-9-line-1').length;
+    assert.equal(submissions,voiceResponseFailure==='rate429'?3:1);
+    assert.equal(Object.keys(entry.cache).filter(file=>/^line_/.test(file)).length,10);
+    console.log(JSON.stringify({case:entry.name,throughBlock,submissions,status,...await remoteAbort(entry)}));
+  }
+  for(const reason of ['prebill','nearblack']) for(const throughBlock of [false,true]) {
+    const entry=await runCase('independent-art-'+reason+'-'+throughBlock,{count:4,throughBlock,terminalArtPanel:3,failedArt:reason==='prebill'?[3]:[],nearBlackArt:reason==='nearblack'?3:undefined,warmVoices:false,warmMusic:false});
+    assert.equal(entry.error,entry.artTerminalError);
+    assert.equal(entry.error.code,'CONTROLLED_UNKNOWN_PAID_ART');
+    assert.deepEqual(entry.imageRequests.filter(id=>id.startsWith('panel-3-')),['panel-3-primary','panel-3-recovery']);
+    assert.equal(entry.lumaReadings.includes(0),reason==='nearblack');
+    console.log(JSON.stringify({case:entry.name,throughBlock,exactErrorPreserved:true,measuredNearBlack:entry.lumaReadings.includes(0),...await remoteAbort(entry)}));
+  }
+` + script.slice(end);
+await import("data:text/javascript;base64," + Buffer.from(script).toString("base64"));

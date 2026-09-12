@@ -1,0 +1,191 @@
+{
+  "scope": "Real cast/block control flow with external providers, storage, native process I/O and measurements controlled. No native media, paid calls, downstream qa_visual or real-world creative assessment.",
+  "sourceSha256": "bad109aad913b7297170219eae68496b7f4bc1c2a47afbed6b2c269f04672568",
+  "candidateGateInMemoryOnly": false,
+  "storyboardPreflight": "actual motionComicStoryboardDefects returned []",
+  "cases": [
+    {
+      "name": "all-ten",
+      "error": null,
+      "imageRequests": [
+        "panel-0-primary",
+        "panel-1-primary",
+        "panel-2-primary",
+        "panel-3-primary",
+        "panel-4-primary",
+        "panel-5-primary",
+        "panel-6-primary",
+        "panel-7-primary",
+        "panel-8-primary",
+        "panel-9-primary"
+      ],
+      "rendererPanels": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "narrationCues": 10,
+      "assetPanels": null
+    },
+    {
+      "name": "missing-last",
+      "error": null,
+      "imageRequests": [
+        "panel-0-primary",
+        "panel-1-primary",
+        "panel-2-primary",
+        "panel-3-primary",
+        "panel-4-primary",
+        "panel-5-primary",
+        "panel-6-primary",
+        "panel-7-primary",
+        "panel-8-primary",
+        "panel-9-primary",
+        "panel-9-recovery"
+      ],
+      "rendererPanels": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "narrationCues": 9,
+      "assetPanels": null
+    },
+    {
+      "name": "resume-last-only",
+      "error": null,
+      "imageRequests": [
+        "panel-9-primary"
+      ],
+      "rendererPanels": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "narrationCues": 10,
+      "assetPanels": null
+    },
+    {
+      "name": "missing-last-two",
+      "error": "Error: motionComic: only 8/10 panels have art (<90% coverage) — aborting before voice/render spend",
+      "imageRequests": [
+        "panel-0-primary",
+        "panel-1-primary",
+        "panel-2-primary",
+        "panel-3-primary",
+        "panel-4-primary",
+        "panel-5-primary",
+        "panel-6-primary",
+        "panel-7-primary",
+        "panel-8-primary",
+        "panel-8-recovery",
+        "panel-9-primary",
+        "panel-9-recovery"
+      ],
+      "rendererPanels": [],
+      "narrationCues": null,
+      "assetPanels": null
+    },
+    {
+      "name": "missing-opening",
+      "error": "Error: motionComic: opening panel has no approved art — aborting before voice/render spend rather than opening on an empty comic template",
+      "imageRequests": [
+        "panel-0-primary",
+        "panel-0-recovery",
+        "panel-1-primary",
+        "panel-2-primary",
+        "panel-3-primary",
+        "panel-4-primary",
+        "panel-5-primary",
+        "panel-6-primary",
+        "panel-7-primary",
+        "panel-8-primary",
+        "panel-9-primary"
+      ],
+      "rendererPanels": [],
+      "narrationCues": null,
+      "assetPanels": null
+    },
+    {
+      "name": "block-all-ten",
+      "error": null,
+      "imageRequests": [
+        "panel-0-primary",
+        "panel-1-primary",
+        "panel-2-primary",
+        "panel-3-primary",
+        "panel-4-primary",
+        "panel-5-primary",
+        "panel-6-primary",
+        "panel-7-primary",
+        "panel-8-primary",
+        "panel-9-primary"
+      ],
+      "rendererPanels": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8,
+        9
+      ],
+      "narrationCues": 10,
+      "assetPanels": 10
+    },
+    {
+      "name": "block-missing-last",
+      "error": null,
+      "imageRequests": [
+        "panel-0-primary",
+        "panel-1-primary",
+        "panel-2-primary",
+        "panel-3-primary",
+        "panel-4-primary",
+        "panel-5-primary",
+        "panel-6-primary",
+        "panel-7-primary",
+        "panel-8-primary",
+        "panel-9-primary",
+        "panel-9-recovery"
+      ],
+      "rendererPanels": [
+        0,
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7,
+        8
+      ],
+      "narrationCues": 9,
+      "assetPanels": 9
+    }
+  ],
+  "root": "/tmp/comic-missing-panel-proof-kB107p"
+}

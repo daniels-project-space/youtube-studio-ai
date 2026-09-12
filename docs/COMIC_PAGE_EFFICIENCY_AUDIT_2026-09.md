@@ -40,6 +40,14 @@ The production `visual_matter_references` contract (`src/engine/moduleContracts.
 
 ## Recommended high-impact root change
 
+### Upstream capability check — 12 September follow-up
+
+The [official ERNIE-Image repository](https://github.com/baidu/ERNIE-Image) describes text-to-image generation and multi-panel composition, with separate SFT and Turbo recipes. This supports investigating native page composition, **not** claiming image-conditioned character continuity. Its inspected upstream revision is `1f30f5bb499726c606da0a24cc2a4a6c4d6ad775`.
+
+The [actual Diffusers ERNIE pipeline](https://github.com/huggingface/diffusers/blob/303f3a7061f53054287fb847a2c59078ea2b0218/src/diffusers/pipelines/ernie_image/pipeline_ernie_image.py), pinned to the latest returned file-changing commit, accepts text, text embeddings and initial latents; it has no reference-image or reference-encoder input. Its denoising call supplies image latents plus text conditioning. Supplying initial noise/latents or describing a reference in words is not an implemented visual-reference adapter. The same implementation supports prompt batches and precomputed text embeddings; these are candidate efficiency experiments, not measured savings, and any cache must bind exact text/model/PE settings.
+
+**Decision:** do not wire an `images` field that this upstream silently cannot consume, infer a custom R2 worker's capability from a model name, or substitute Fal without a qualified provider decision. Verify the actual deployed worker separately; a custom reference-capable extension would need byte-level request and real-pixel proof. The complete-page reveal/coverage work can proceed independently, but the full reference-conditioned page-generation milestone remains open. No provider call, GPU rental, model/configuration change or quality downgrade was made for this check.
+
 Make a **reviewed page artifact** the shared production unit between story planning, image generation, reveal, recovery, and assembly. Do not bolt an atlas image onto the existing per-panel paid loop.
 
 1. The automated planner produces a typed page plan from the accepted story: stable page/panel IDs, ordered story-beat IDs, channel/style identity, participating character IDs, actual source-region geometry, narration cues, protected faces/lettering space, and required visual details. Permit genuinely different page layouts; the current fixed-grid atlas alone is not the requested layout freedom.

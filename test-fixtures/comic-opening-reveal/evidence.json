@@ -1,0 +1,125 @@
+{
+  "scope": "Mechanical reveal baseline only; repeated source deliberately cannot qualify story, originality, generated quality, narration or character continuity.",
+  "rendererSha256": "b537b219400b638b288171cd48afdd23f5c8746fb98ad4e0282c875cf4e43e31",
+  "sourceSha256": "2b001621b42ecd0d5055da119b60393236bb0474c05624897cebe429aab137d7",
+  "outputSha256": "20058b361f39626695bd7e379acd4a8a9f36a2b708f1b5017ed842d9b1137d9a",
+  "outputBytes": 4011778,
+  "probe": {
+    "programs": [],
+    "streams": [
+      {
+        "width": 1920,
+        "height": 1080,
+        "r_frame_rate": "30/1",
+        "nb_read_frames": "392"
+      }
+    ],
+    "format": {
+      "duration": "13.066667"
+    }
+  },
+  "frames": [
+    {
+      "timestampSec": 0,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-00.png",
+      "sha256": "efe4d3ba4a8b242757ec0fbf8782f74ddacb11c60c4ba7d2b897f3817c42cb12"
+    },
+    {
+      "timestampSec": 0.3,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-01.png",
+      "sha256": "85d71e026bce5436abbc21d4bd7d2b4ba7fd53e44964aa92d7bb3b3a179c3912"
+    },
+    {
+      "timestampSec": 1,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-02.png",
+      "sha256": "def024832f4153b3be2dad290d604031f3543dd3d949cb7d99bafe3e02c42ac0"
+    },
+    {
+      "timestampSec": 1.8,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-03.png",
+      "sha256": "1e8ece930a653447b9f33ef8ff247b91c75c416b9c9aebbda110a3818d519f2f"
+    },
+    {
+      "timestampSec": 2.5,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-04.png",
+      "sha256": "8cf5c07f5c42796bd6fbe86e76710c6585550381363b91f9a1d4506507eac264"
+    },
+    {
+      "timestampSec": 3.4,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-05.png",
+      "sha256": "48611610eecace28e7416c0dcaecb1544a1c732044d9d0f16377615144927010"
+    },
+    {
+      "timestampSec": 4.2,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-06.png",
+      "sha256": "69f8dbe2406cc7553da5e2d8a16abbd5a91979e0a62af1c6a98ab0ba2dfd94d8"
+    },
+    {
+      "timestampSec": 4.7,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-07.png",
+      "sha256": "2cd7bc7443945b816844f2440f4309331de4becb50eb36d3a0d35fd5f9c196d0"
+    },
+    {
+      "timestampSec": 5.1,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-08.png",
+      "sha256": "81c2a51a7784fe336f672e6784b7963f64b6e2a027c83c0d84deb213423ebe18"
+    },
+    {
+      "timestampSec": 5.9,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-09.png",
+      "sha256": "c85cc7ff5c4ad35b2a7b9374a094e22dee14fe5765f64ef2888f1d8ccf8aca07"
+    },
+    {
+      "timestampSec": 6.5,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-10.png",
+      "sha256": "1c8220ab3fe20b0bad9c1976de6ef63377ef86712a100c37482db33b2098885d"
+    },
+    {
+      "timestampSec": 7.1,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-11.png",
+      "sha256": "797ae52bae6fd39cdff37e135412fd333dfe784e685ca4b6494ec14d12e66850"
+    },
+    {
+      "timestampSec": 7.5,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-12.png",
+      "sha256": "8b49a0f5211ce5695270b0342252c163f4591b73cec582598383face457c46f1"
+    },
+    {
+      "timestampSec": 8.2,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-13.png",
+      "sha256": "0b4a1aa0d0913d4b93831ff0ab25c304651225193c614a8c507f1fbc8533b3c5"
+    },
+    {
+      "timestampSec": 8.8,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-14.png",
+      "sha256": "c8d115bc33d20dec6bf92d798b9bdb3ef8a106e647bba6c6a940bc5b5456951b"
+    },
+    {
+      "timestampSec": 9.4,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-15.png",
+      "sha256": "bcb4022237035ff49f34048733201e40a8620fd5b2875131b2db34d9db1422d6"
+    },
+    {
+      "timestampSec": 9.8,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-16.png",
+      "sha256": "a1495635f15ab63a1096ecfc7a34accda7fae890382bd8e2c01e4adf4f70da87"
+    },
+    {
+      "timestampSec": 10.5,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-17.png",
+      "sha256": "c69594d7092de4a277079755ec77b0e65404b8857b0837bb0190daf65385fe92"
+    },
+    {
+      "timestampSec": 11.4,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-18.png",
+      "sha256": "0f96f7365263b7aab527de0a532c0ad16fb9616c5092da587464459d95203d93"
+    },
+    {
+      "timestampSec": 12.8,
+      "path": "/tmp/comic-opening-native-m8ClZs/sample-19.png",
+      "sha256": "087ab1a1d7345b441ce33fc99495a75f4cfd01b57e6df29aea59bfd1a722d25e"
+    }
+  ],
+  "sheet": "/tmp/comic-opening-native-m8ClZs/contact-sheet.png",
+  "visualVerdict": "unreviewed"
+}

@@ -1,0 +1,347 @@
+{
+  "title": "Repairing the River Crossing",
+  "logline": "Two workers locate the broken bridge joint and repair it before the crossing.",
+  "narratorVoiceId": "JBFqnCBsd6RMkjVDRZzb",
+  "characters": [
+    {
+      "id": "mara",
+      "name": "Mara",
+      "visual": {
+        "age": "adult",
+        "build": "average",
+        "face": "angular",
+        "hair": "dark_short",
+        "wardrobe": "workwear",
+        "palette": "blue_accent",
+        "accessory": "none"
+      },
+      "voiceId": "EXAVITQu4vr4xnSDxMaL"
+    },
+    {
+      "id": "orin",
+      "name": "Orin",
+      "visual": {
+        "age": "adult",
+        "build": "average",
+        "face": "weathered",
+        "hair": "grey",
+        "wardrobe": "workwear",
+        "palette": "red_accent",
+        "accessory": "none"
+      },
+      "voiceId": "CwhRBWXzGAHq8TQ4Fs17"
+    }
+  ],
+  "panels": [
+    {
+      "visual": {
+        "environment": "waterfront",
+        "era": "modern",
+        "subjects": [
+          "worker"
+        ],
+        "objects": [
+          "rope",
+          "bridge",
+          "tool_kit"
+        ],
+        "action": "urgent_movement",
+        "relations": [
+          "subject_observes_object"
+        ],
+        "mood": "tense",
+        "lighting": "daylight"
+      },
+      "characters": [
+        "mara",
+        "orin"
+      ],
+      "shot": "wide",
+      "lines": [
+        {
+          "speaker": "narrator",
+          "text": "The river rose while Mara reached the damaged crossing."
+        }
+      ]
+    },
+    {
+      "visual": {
+        "environment": "waterfront",
+        "era": "modern",
+        "subjects": [
+          "worker"
+        ],
+        "objects": [
+          "rope",
+          "bridge",
+          "tool_kit"
+        ],
+        "action": "examining",
+        "relations": [
+          "subject_observes_object"
+        ],
+        "mood": "tense",
+        "lighting": "daylight"
+      },
+      "characters": [
+        "mara",
+        "orin"
+      ],
+      "shot": "medium",
+      "lines": [
+        {
+          "speaker": "narrator",
+          "text": "Orin found a fractured joint beneath the swinging deck."
+        }
+      ]
+    },
+    {
+      "visual": {
+        "environment": "waterfront",
+        "era": "modern",
+        "subjects": [
+          "worker"
+        ],
+        "objects": [
+          "rope",
+          "bridge",
+          "tool_kit"
+        ],
+        "action": "discovering",
+        "relations": [
+          "subject_observes_object"
+        ],
+        "mood": "tense",
+        "lighting": "daylight"
+      },
+      "characters": [
+        "mara",
+        "orin"
+      ],
+      "shot": "close",
+      "lines": [
+        {
+          "speaker": "narrator",
+          "text": "A loosened bracket had pulled the support rope sideways."
+        }
+      ]
+    },
+    {
+      "visual": {
+        "environment": "waterfront",
+        "era": "modern",
+        "subjects": [
+          "worker"
+        ],
+        "objects": [
+          "rope",
+          "bridge",
+          "tool_kit"
+        ],
+        "action": "protecting",
+        "relations": [
+          "subject_observes_object"
+        ],
+        "mood": "tense",
+        "lighting": "daylight"
+      },
+      "characters": [
+        "mara",
+        "orin"
+      ],
+      "shot": "wide",
+      "lines": [
+        {
+          "speaker": "narrator",
+          "text": "Mara secured the walkway before either worker went below."
+        }
+      ]
+    },
+    {
+      "visual": {
+        "environment": "waterfront",
+        "era": "modern",
+        "subjects": [
+          "worker"
+        ],
+        "objects": [
+          "rope",
+          "bridge",
+          "tool_kit"
+        ],
+        "action": "carrying_gear",
+        "relations": [
+          "subject_observes_object"
+        ],
+        "mood": "tense",
+        "lighting": "daylight"
+      },
+      "characters": [
+        "mara",
+        "orin"
+      ],
+      "shot": "medium",
+      "lines": [
+        {
+          "speaker": "narrator",
+          "text": "Orin carried the replacement tools to the exposed joint."
+        }
+      ]
+    },
+    {
+      "visual": {
+        "environment": "waterfront",
+        "era": "modern",
+        "subjects": [
+          "worker"
+        ],
+        "objects": [
+          "rope",
+          "bridge",
+          "tool_kit"
+        ],
+        "action": "repairing",
+        "relations": [
+          "subject_repairs_object"
+        ],
+        "mood": "tense",
+        "lighting": "daylight"
+      },
+      "characters": [
+        "mara",
+        "orin"
+      ],
+      "shot": "close",
+      "lines": [
+        {
+          "speaker": "narrator",
+          "text": "Together they seated the bracket against the intact beam."
+        }
+      ]
+    },
+    {
+      "visual": {
+        "environment": "waterfront",
+        "era": "modern",
+        "subjects": [
+          "worker"
+        ],
+        "objects": [
+          "rope",
+          "bridge",
+          "tool_kit"
+        ],
+        "action": "operating_equipment",
+        "relations": [
+          "subject_observes_object"
+        ],
+        "mood": "tense",
+        "lighting": "daylight"
+      },
+      "characters": [
+        "mara",
+        "orin"
+      ],
+      "shot": "wide",
+      "lines": [
+        {
+          "speaker": "narrator",
+          "text": "Mara tightened the repair while Orin held the tension."
+        }
+      ]
+    },
+    {
+      "visual": {
+        "environment": "waterfront",
+        "era": "modern",
+        "subjects": [
+          "worker"
+        ],
+        "objects": [
+          "rope",
+          "bridge",
+          "tool_kit"
+        ],
+        "action": "deliberate_work",
+        "relations": [
+          "subject_observes_object"
+        ],
+        "mood": "tense",
+        "lighting": "daylight"
+      },
+      "characters": [
+        "mara",
+        "orin"
+      ],
+      "shot": "medium",
+      "lines": [
+        {
+          "speaker": "narrator",
+          "text": "They checked the adjoining joints before removing their supports."
+        }
+      ]
+    },
+    {
+      "visual": {
+        "environment": "waterfront",
+        "era": "modern",
+        "subjects": [
+          "worker"
+        ],
+        "objects": [
+          "rope",
+          "bridge",
+          "tool_kit"
+        ],
+        "action": "watchful_pause",
+        "relations": [
+          "subject_observes_object"
+        ],
+        "mood": "hopeful",
+        "lighting": "daylight"
+      },
+      "characters": [
+        "mara",
+        "orin"
+      ],
+      "shot": "close",
+      "lines": [
+        {
+          "speaker": "narrator",
+          "text": "The repaired crossing remained steady beneath its first test."
+        }
+      ]
+    },
+    {
+      "visual": {
+        "environment": "waterfront",
+        "era": "modern",
+        "subjects": [
+          "worker"
+        ],
+        "objects": [
+          "rope",
+          "bridge",
+          "tool_kit"
+        ],
+        "action": "purposeful_travel",
+        "relations": [
+          "subject_observes_object"
+        ],
+        "mood": "hopeful",
+        "lighting": "daylight"
+      },
+      "characters": [
+        "mara",
+        "orin"
+      ],
+      "shot": "wide",
+      "lines": [
+        {
+          "speaker": "narrator",
+          "text": "The final safety inspection allowed both workers to cross."
+        }
+      ]
+    }
+  ]
+}

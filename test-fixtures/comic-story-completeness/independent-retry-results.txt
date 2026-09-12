@@ -1,0 +1,14 @@
+{"scope":"Controlled I/O; actual cast/block, remote cost wrapper and retry policy; no paid calls or native-media proof","runtimeSha256":"3eab4e712c4b7abcded4dad4fe0e4e9fdb335ea45a025f99e18707e0ea06db82","harnessSha256":"a14d4b427f44a5de41ab1b3c2463cda6bf52332a89358e72603d38465d2cebc3"}
+{"case":"independent-unreadable200-false","throughBlock":false,"submissions":1,"status":200,"remoteRetryable":false,"remoteAccountingComplete":false,"remoteTaskErrorName":"AbortTaskRunError"}
+{"case":"independent-unreadable200-true","throughBlock":true,"submissions":1,"status":200,"remoteRetryable":false,"remoteAccountingComplete":false,"remoteTaskErrorName":"AbortTaskRunError"}
+{"case":"independent-tiny200-false","throughBlock":false,"submissions":1,"status":200,"remoteRetryable":false,"remoteAccountingComplete":false,"remoteTaskErrorName":"AbortTaskRunError"}
+{"case":"independent-tiny200-true","throughBlock":true,"submissions":1,"status":200,"remoteRetryable":false,"remoteAccountingComplete":false,"remoteTaskErrorName":"AbortTaskRunError"}
+{"case":"independent-http500-false","throughBlock":false,"submissions":1,"status":500,"remoteRetryable":false,"remoteAccountingComplete":false,"remoteTaskErrorName":"AbortTaskRunError"}
+{"case":"independent-http500-true","throughBlock":true,"submissions":1,"status":500,"remoteRetryable":false,"remoteAccountingComplete":false,"remoteTaskErrorName":"AbortTaskRunError"}
+{"case":"independent-rate429-false","throughBlock":false,"submissions":3,"status":429,"remoteRetryable":false,"remoteAccountingComplete":false,"remoteTaskErrorName":"AbortTaskRunError"}
+{"case":"independent-rate429-true","throughBlock":true,"submissions":3,"status":429,"remoteRetryable":false,"remoteAccountingComplete":false,"remoteTaskErrorName":"AbortTaskRunError"}
+{"case":"independent-art-prebill-false","throughBlock":false,"exactErrorPreserved":true,"measuredNearBlack":false,"remoteRetryable":false,"remoteAccountingComplete":false,"remoteTaskErrorName":"AbortTaskRunError"}
+{"case":"independent-art-prebill-true","throughBlock":true,"exactErrorPreserved":true,"measuredNearBlack":false,"remoteRetryable":false,"remoteAccountingComplete":false,"remoteTaskErrorName":"AbortTaskRunError"}
+{"case":"independent-art-nearblack-false","throughBlock":false,"exactErrorPreserved":true,"measuredNearBlack":true,"remoteRetryable":false,"remoteAccountingComplete":false,"remoteTaskErrorName":"AbortTaskRunError"}
+{"case":"independent-art-nearblack-true","throughBlock":true,"exactErrorPreserved":true,"measuredNearBlack":true,"remoteRetryable":false,"remoteAccountingComplete":false,"remoteTaskErrorName":"AbortTaskRunError"}
+Motion Comic story completeness: 12 actual cast/block cases PASS; no paid calls or native media; art + partial-line failures block, accepted caches survive recovery

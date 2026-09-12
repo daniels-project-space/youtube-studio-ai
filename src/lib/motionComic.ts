@@ -1640,7 +1640,10 @@ export async function castMotionComic(args: {
       if (!motionComicImageRecoveryAllowed(e)) throw e;
       log(`panel ${i} art failed (${e instanceof Error ? e.message : e}) — one simplified/well-lit retry`);
       try { await cacheVisible(await args.generateImage(providerRequest(simple, "recovery")), simpleHash); log(`panel ${i} ✓ (retry)`); }
-      catch (e2) { log(`panel ${i} art FAILED twice: ${e2 instanceof Error ? e2.message : e2}`); }
+      catch (e2) {
+        if (!motionComicImageRecoveryAllowed(e2)) throw e2;
+        log(`panel ${i} art FAILED twice: ${e2 instanceof Error ? e2.message : e2}`);
+      }
     }
     if (primary) {
       try { await cacheVisible(primary, requestHash); log(`panel ${i} ✓ (${p.shot})`); }
@@ -1648,20 +1651,28 @@ export async function castMotionComic(args: {
         if (!(e instanceof Error && e.message === "panel art near-black")) throw e;
         log(`panel ${i} art failed (near-black) — one simplified/well-lit retry`);
         try { await cacheVisible(await args.generateImage(providerRequest(simple, "recovery")), simpleHash); log(`panel ${i} ✓ (retry)`); }
-        catch (e2) { log(`panel ${i} art FAILED twice: ${e2 instanceof Error ? e2.message : e2}`); }
+        catch (e2) {
+          if (!motionComicImageRecoveryAllowed(e2)) throw e2;
+          log(`panel ${i} art FAILED twice: ${e2 instanceof Error ? e2.message : e2}`);
+        }
       }
     }
   });
 
-  // COVERAGE FLOOR: a couple of lost panels degrade gracefully, but below 90%
-  // the story has holes. Throw NOW — before the voice/music/render spend —
-  // rather than publish a broken video (the cached art survives for a retry).
-  const artOk = plan.panels.filter((_, i) => existsSync(rd(`panel_${i}.png`))).length;
-  if (!existsSync(rd("panel_0.png"))) {
-    throw new Error("motionComic: opening panel has no approved art — aborting before voice/render spend rather than opening on an empty comic template");
-  }
-  if (artOk < plan.panels.length * 0.9) {
-    throw new Error(`motionComic: only ${artOk}/${plan.panels.length} panels have art (<90% coverage) — aborting before voice/render spend`);
+  // Every approved story beat needs art. A percentage floor silently removed
+  // late panels (and their narration) from an otherwise successful master.
+  // Keep accepted, hash-bound art intact so recovery buys only missing work.
+  const missingArtPanelIds = plan.panels.flatMap((_, i) =>
+    existsSync(rd(`panel_${i}.png`)) ? [] : [`panel-${i}`],
+  );
+  if (missingArtPanelIds.length) {
+    const reason = missingArtPanelIds.includes("panel-0")
+      ? "opening panel has no approved art"
+      : "approved panel art is incomplete";
+    throw Object.assign(new Error(
+      `motionComic: ${reason}; missing ${missingArtPanelIds.join(", ")} — ` +
+      "accepted art retained; aborting before voice/music/render spend",
+    ), { code: "MOTION_COMIC_ART_INCOMPLETE", missingPanelIds: missingArtPanelIds });
   }
 
   // 3b. VISION letterer — clear-space anchor + mouth per bubble + keep-clear boxes (cached)
@@ -1701,6 +1712,7 @@ export async function castMotionComic(args: {
   let ttsCharactersGenerated = 0;
   const panelDur: number[] = [], panelBubbles: MotionComicTimelineBubble[][] = [], panelAvoid: number[][][] = [], panelHasAudio: boolean[] = [];
   const panelSpokenLines: Array<Array<{ text: string; durationSec: number }>> = [];
+  const panelLineFiles: string[][] = [];
   const repairAvoidForPanel = (panelIndex: number): number[][] =>
     (brief.layoutRepair ?? [])
       .filter((repair) => repair.action === "reflow_bubble" && repair.panelIndex === panelIndex)
@@ -1724,9 +1736,13 @@ export async function castMotionComic(args: {
           );
         } catch (e) {
           // elevenDialogue already exhausted its three bounded transport
-          // attempts. Never start a second synthesis cycle here.
+          // attempts or classified the outcome as terminal. Preserve that
+          // exact error and retry policy; a generic completeness error would
+          // let Trigger retry an outcome-ambiguous paid voice request.
           log(`voice ${i}.${k} FAILED after provider retries: ${e instanceof Error ? e.message : e}`);
-          continue;
+          throw Object.assign(e instanceof Error ? e : new Error(String(e), { cause: e }), {
+            missingPanelIds: [`panel-${i}`], missingLineIds: [`panel-${i}-line-${k}`],
+          });
         }
         try {
           await writeFile(lf, audio);
@@ -1735,7 +1751,15 @@ export async function castMotionComic(args: {
           // hiccup must never repurchase speech.
           log(`voice ${i}.${k} cache write failed (${e instanceof Error ? e.message : e}) — retrying local write`);
           try { await writeFile(lf, audio); }
-          catch (e2) { log(`voice ${i}.${k} cache write FAILED twice: ${e2 instanceof Error ? e2.message : e2}`); continue; }
+          catch (e2) {
+            log(`voice ${i}.${k} cache write FAILED twice: ${e2 instanceof Error ? e2.message : e2}`);
+            // The provider already returned paid bytes. Preserve the original
+            // I/O failure but explicitly forbid a task/block resubmission.
+            throw Object.assign(e2 instanceof Error ? e2 : new Error(String(e2), { cause: e2 }), {
+              retryable: false,
+              missingPanelIds: [`panel-${i}`], missingLineIds: [`panel-${i}-line-${k}`],
+            });
+          }
         }
       }
       const d = await probeDur(lf);
@@ -1750,12 +1774,6 @@ export async function castMotionComic(args: {
       spokenLines.push({ text: stripTags(lines[k].text), durationSec: d });
       off += d;
     }
-    // A panel that lost EVERY line has no audio → the renderer drops it AND
-    // its story beat. That is a coverage hole, not graceful degradation —
-    // fail loud before the music/render spend (line mp3s are cached for retry).
-    if (lines.length && !lineFiles.length) {
-      throw new Error(`motionComic: panel ${i} lost ALL ${lines.length} voice line(s) — aborting before render spend`);
-    }
     // A post-render overlay defect must change the local layout inputs, not
     // replay the exact same cached bubble placement.  Keep art, voice and
     // music intact; only the forbidden geometry changes before page render.
@@ -1763,6 +1781,13 @@ export async function castMotionComic(args: {
     const dur = off + TAIL_GAP;
     panelBubbles[i] = bubbles; panelDur[i] = dur; panelHasAudio[i] = lineFiles.length > 0;
     panelSpokenLines[i] = spokenLines;
+    panelLineFiles[i] = lineFiles;
+  }
+
+  // Only encode derived panel audio after the full accepted narration exists.
+  // A late failed line keeps all paid caches and incurs no partial padding work.
+  for (let i = 0; i < plan.panels.length; i++) {
+    const lineFiles = panelLineFiles[i], dur = panelDur[i], bubbles = panelBubbles[i];
     // build padded per-panel audio = concat lines, padded with silence to `dur`
     if (lineFiles.length) {
       await writeFile(rd(`alist_${i}.txt`), lineFiles.map((f) => `file '${f}'`).join("\n"));
