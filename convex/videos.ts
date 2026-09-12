@@ -511,7 +511,37 @@ export const getVideoDetail = query({
       }
     }
 
-    const { videoAsset, thumbAsset, channel, currentThumbnail } = await retainedRunMedia(ctx, run);
+    // The story-spine receipt is the canonical handoff for timed visual work.
+    // Keep this projection deliberately small: the full prompts and continuity
+    // ledger remain in the stage receipt, while the run page gets enough real
+    // timing/content to verify that the scheduled package is actually usable.
+    const spineOut = await stageOutputs("story_spine");
+    const rawShotList = Array.isArray(spineOut.shotList) ? spineOut.shotList : [];
+    const boundedText = (value: unknown, max = 180): string | null =>
+      typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null;
+    const shotList = rawShotList.slice(0, 64).flatMap((value, index) => {
+      if (!value || typeof value !== "object" || Array.isArray(value)) return [];
+      const shot = value as Record<string, unknown>;
+      const t0 = typeof shot.t0 === "number" && Number.isFinite(shot.t0) ? shot.t0 : null;
+      const t1 = typeof shot.t1 === "number" && Number.isFinite(shot.t1) ? shot.t1 : null;
+      if (t0 === null || t1 === null || t1 <= t0) return [];
+      return [{
+        id: typeof shot.id === "string" && shot.id.trim() ? shot.id.trim().slice(0, 80) : `shot-${index + 1}`,
+        t0,
+        t1,
+        coveragePurpose: boundedText(shot.coveragePurpose),
+        literalContent: boundedText(shot.literalContent),
+        cameraMove: boundedText(shot.cameraMove, 100),
+        shotScale: boundedText(shot.shotScale, 80),
+      }];
+    });
+
+    const { assets, videoAsset, thumbAsset, channel, currentThumbnail } = await retainedRunMedia(ctx, run);
+    const subtitleAsset = assets.find((asset) => ["captions", "subtitle", "subtitles"].includes(asset.kind));
+    const subtitleMeta = (subtitleAsset?.meta ?? {}) as Record<string, unknown>;
+    const subtitleCueCount = typeof subtitleMeta.cues === "number" && Number.isFinite(subtitleMeta.cues)
+      ? subtitleMeta.cues
+      : null;
     const vMeta = (videoAsset?.meta ?? {}) as Record<string, unknown>;
     const tMeta = (thumbAsset?.meta ?? {}) as Record<string, unknown>;
     const title =
@@ -541,6 +571,11 @@ export const getVideoDetail = query({
         typeof mOut.pinnedComment === "string" ? mOut.pinnedComment : null,
       titleAlternate:
         typeof mOut.titleAlternate === "string" ? mOut.titleAlternate : null,
+      shotList,
+      shotListCount: rawShotList.length,
+      shotListTruncated: rawShotList.length > 64,
+      subtitleSaved: Boolean(subtitleAsset),
+      subtitleCueCount,
     };
   },
 });

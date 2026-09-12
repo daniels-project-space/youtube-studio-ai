@@ -152,8 +152,14 @@ assert.match(runDetail, /RunPackageShelf/);
 assert.match(runDetail, /api\.videos\.getVideoDetail/);
 assert.match(runDetail, /Episode package/);
 assert.match(runDetail, /Open retained visuals and exports/);
+assert.match(runDetail, /story_spine/);
+assert.match(runDetail, /shotListCount/);
+assert.match(runDetail, /subtitleSaved/);
+assert.match(runDetail, /packageShotList/);
 assert.match(runDetailCss, /grid-template-columns: repeat\(6,\s*minmax\(0,\s*1fr\)\)/);
 assert.match(runDetailCss, /\.packageShelf/);
+assert.match(runDetailCss, /\.packageArtifacts/);
+assert.match(runDetailCss, /\.packageShotList/);
 assert.match(runDetailCss, /\.packageItem\[data-state="ready"\]/);
 assert.match(runDetailCss, /@media \(max-width: 540px\)/);
 

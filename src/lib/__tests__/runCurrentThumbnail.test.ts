@@ -285,8 +285,10 @@ test("combined viewer response removes duplicate asset reads and all script/SEO-
   f.rows.runStages.push({ _id: "script", _creationTime: 1, runId: sourceRunId, block: "motion_comic", outputs: { narrationText: narration } });
   const old = { assets: await f.oldAssets(), detail: await f.detail() };
   const oldReads = f.reads.length;
-  assert.equal(oldReads, 8, "old two-subscription path reads assets twice and probes three script routes plus metadata");
+  assert.equal(oldReads, 9, "detail reads assets once, probes metadata/story spine and three script routes");
   assert.equal((old.detail as unknown as { script: string }).script, narration, "the on-demand Lightbox retains its full response");
+  assert.equal((old.detail as unknown as { shotListCount: number }).shotListCount, 0);
+  assert.equal((old.detail as unknown as { subtitleSaved: boolean }).subtitleSaved, false);
   f.reads.length = 0;
   const combined = await f.media();
   assert.equal(f.reads.length, 3);

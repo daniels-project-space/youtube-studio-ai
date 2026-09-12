@@ -419,6 +419,19 @@ function RunPackageShelf({
     tags?: string[];
     script?: string | null;
     titleAlternate?: string | null;
+    shotList?: Array<{
+      id: string;
+      t0: number;
+      t1: number;
+      coveragePurpose?: string | null;
+      literalContent?: string | null;
+      cameraMove?: string | null;
+      shotScale?: string | null;
+    }>;
+    shotListCount?: number;
+    shotListTruncated?: boolean;
+    subtitleSaved?: boolean;
+    subtitleCueCount?: number | null;
   } | null | undefined;
 
   // Deliberately use exact block ids here. A QA receipt such as `qa_visual`
@@ -436,7 +449,7 @@ function RunPackageShelf({
     value === "ready" ? "Ready" : value === "working" ? "Working" : value === "blocked" ? "Blocked" : "Waiting";
 
   const scriptStage = stage("script_gen", "whiteboard_scribe", "motion_comic");
-  const shotStage = stage("scene_planner", "shot_list", "storyboard");
+  const shotStage = stage("story_spine", "scene_planner", "shot_list", "storyboard");
   const visualStage = stage("keyframes", "loop_clips", "stock_footage", "visual_gen", "image_gen");
   const seoStage = stage("metadata", "quiz_metadata");
   const narrationStage = stage("narration_tts", "tts", "voice");
@@ -488,11 +501,41 @@ function RunPackageShelf({
           ) : detail === null ? (
             <span className={styles.packageLoading}>No metadata receipt is saved for this run yet.</span>
           ) : (
-            <div className={styles.packageDetailGrid}>
-              <div><small>Title</small><strong>{detail.title || "Untitled"}</strong>{detail.titleAlternate && <span>Alt: {detail.titleAlternate}</span>}</div>
-              <div><small>SEO</small><span>{detail.tags?.length ? `${detail.tags.length} tags · description saved` : detail.description ? "Description saved" : "No SEO body yet"}</span></div>
-              <div className={styles.packageScript}><small>Script / narration text</small><p>{detail.script || "No narration text saved yet; inspect the stage receipts for the live failure or pending state."}</p></div>
-            </div>
+            <>
+              <div className={styles.packageDetailGrid}>
+                <div><small>Title</small><strong>{detail.title || "Untitled"}</strong>{detail.titleAlternate && <span>Alt: {detail.titleAlternate}</span>}</div>
+                <div><small>SEO</small><span>{detail.tags?.length ? `${detail.tags.length} tags · description saved` : detail.description ? "Description saved" : "No SEO body yet"}</span></div>
+                <div className={styles.packageScript}><small>Script / narration text</small><p>{detail.script || "No narration text saved yet; inspect the stage receipts for the live failure or pending state."}</p></div>
+              </div>
+              <div className={styles.packageArtifacts} aria-label="Saved shot and subtitle artifacts">
+                <div className={styles.packageArtifact}>
+                  <small>Shot list</small>
+                  <strong>{detail.shotListCount ? `${detail.shotListCount} timed shots` : "Not saved"}</strong>
+                  <span>{detail.shotListTruncated ? "Preview capped at 64" : detail.shotList?.length ? "Timing receipt attached" : "No timed visual handoff"}</span>
+                </div>
+                <div className={styles.packageArtifact}>
+                  <small>Subtitles</small>
+                  <strong>{detail.subtitleSaved ? `${detail.subtitleCueCount ?? "SRT"} cues saved` : "Not saved"}</strong>
+                  <span>{detail.subtitleSaved ? "Caption asset retained" : "No caption asset recorded"}</span>
+                </div>
+              </div>
+              {detail.shotList?.length ? (
+                <div className={styles.packageShotPreview}>
+                  <div className={styles.packageShotHeading}><small>Timed shot preview</small><span>{detail.shotListTruncated ? `Showing 6 of ${detail.shotListCount ?? detail.shotList.length}` : "First six receipts"}</span></div>
+                  <ol className={styles.packageShotList} aria-label="Saved shot list preview">
+                    {detail.shotList.slice(0, 6).map((shot) => (
+                      <li key={`${shot.id}-${shot.t0}`}>
+                        <time className={styles.packageShotTime}>{shot.t0.toFixed(1)}–{shot.t1.toFixed(1)}s</time>
+                        <span className={styles.packageShotCopy}>
+                          <strong>{shot.id}</strong>
+                          <small>{shot.coveragePurpose || shot.literalContent || shot.cameraMove || "Timed visual beat"}</small>
+                        </span>
+                      </li>
+                    ))}
+                  </ol>
+                </div>
+              ) : null}
+            </>
           )}
           <a className={styles.packageMediaLink} href="#recorded-work">Open retained visuals and exports ↓</a>
         </div>
