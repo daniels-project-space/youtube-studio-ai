@@ -1,0 +1,43 @@
+{
+  "version": "title-number-grounding-comparison/v1",
+  "date": "2026-09-12",
+  "purpose": "Targeted numeric-presence regression, not semantic/factual or creative quality certification",
+  "baselineCommit": "9c38b0178bec1413f3da7a67ea284501b31907d3",
+  "sourceManifest": "test-fixtures/title-baseline/manifest.json",
+  "sourcePassages": 16,
+  "sourceChannels": ["Inked Histories", "Gratitude Springs", "The Quiet Stoic", "Investory"],
+  "hashes": {
+    "src/lib/titleNumbers.ts": "a64babb30eb505112e526d6491e3e76c21604c8c81663bf7cad4a0909cab8957",
+    "src/lib/__tests__/metacraftNumberGrounding.test.ts": "31b5c2e20ab2bfee30730b57971d4cfc923124b22820e2c607639c969e279aeb",
+    "src/trigger/blocks/__tests__/metadataSourceHandoff.test.ts": "b312f8c2b9cb8e3d877c00518880e7a5d193114916aa794614576d0b5c70499f"
+  },
+  "before": {
+    "validSourceClaimsAccepted": 20,
+    "validSourceClaimsTotal": 29,
+    "corruptedSourceClaimsRejected": 22,
+    "corruptedSourceClaimsTotal": 39,
+    "edgeAndFormatterCorrect": 39,
+    "edgeAndFormatterTotal": 81,
+    "correct": 81,
+    "total": 149
+  },
+  "after": {
+    "validSourceClaimsAccepted": 29,
+    "validSourceClaimsTotal": 29,
+    "corruptedSourceClaimsRejected": 39,
+    "corruptedSourceClaimsTotal": 39,
+    "edgeAndFormatterCorrect": 81,
+    "edgeAndFormatterTotal": 81,
+    "correct": 149,
+    "total": 149
+  },
+  "providerCalls": 0,
+  "integration": "Actual metadata block, generation/review/ancillary external seams controlled; valid output sealed/read by UI adapter; two invalid numeric sources rejected before judge or ancillary purchase",
+  "limitations": [
+    "Targeted cases, not representative fleet accuracy",
+    "Source presence does not establish factual truth, units or whole-promise entailment",
+    "English spellout only; ambiguous notation matches literally",
+    "Alphanumeric identity aliases remain the semantic judge's responsibility",
+    "No new creative-quality, audience, paid-media or publication experiment"
+  ]
+}

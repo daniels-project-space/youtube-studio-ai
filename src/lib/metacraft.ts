@@ -36,6 +36,7 @@ import { searchVideoIds, fetchVideoDetails, hasYouTubeDataAccess } from "@/lib/y
 import { resolveVoiceDoctrine } from "@/engine/golden";
 import { createPublicEvidenceCache, normalizeEvidenceKey } from "@/lib/publicEvidenceCache";
 import { titleDecisionFingerprint } from "@/lib/titleDecisionFingerprint";
+import { unmatchedTitleNumbers } from "@/lib/titleNumbers";
 
 export function hasMetacraft(): boolean {
   return hasAnthropicKey();
@@ -319,39 +320,6 @@ export async function fetchCompetitorTitles(
   return (await request).map((value) => ({ ...value }));
 }
 
-/** Spoken-word variants of a number token so titles ground against narration
- * that SPEAKS its numbers ("37" ↔ "thirty-seven", "476" ↔ "four seventy-six"). */
-function numberVariants(tok: string): string[] {
-  const n = Number(tok.replace(/[,.]/g, ""));
-  if (!Number.isFinite(n)) return [tok];
-  const ones = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten",
-    "eleven", "twelve", "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"];
-  const tens = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"];
-  const small = (x: number): string =>
-    x < 20 ? ones[x] : `${tens[Math.floor(x / 10)]}${x % 10 ? `-${ones[x % 10]}` : ""}`;
-  const v = new Set<string>([tok, String(n), n.toLocaleString("en-US")]);
-  if (n >= 0 && n < 100) v.add(small(n));
-  if (n >= 100 && n < 1000) {
-    v.add(`${ones[Math.floor(n / 100)]} hundred${n % 100 ? ` ${small(n % 100)}` : ""}`);
-    if (n % 100) v.add(`${ones[Math.floor(n / 100)]} ${small(n % 100)}`); // "four seventy-six"
-  }
-  if (n >= 1000 && n < 10000) {
-    const h = Math.floor(n / 100) % 10 === 0 ? null : `${small(Math.floor(n / 100))}${n % 100 ? ` ${small(n % 100)}` : " hundred"}`;
-    if (h) v.add(h); // "fifteen eighteen"
-    v.add(`${small(Math.floor(n / 1000))} thousand${n % 1000 ? ` ${small(n % 1000)}` : ""}`);
-  }
-  return [...v];
-}
-
-/** Match a spoken or digit number as a complete token/phrase, never as a
- * substring inside an unrelated word ("one" in "someone", "ten" in
- * "intense"). Punctuation and hyphens around a phrase remain valid. */
-function containsNumberVariant(haystack: string, variant: string): boolean {
-  const escaped = variant.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  const pattern = new RegExp(`(?:^|[^a-z0-9])${escaped}(?:$|[^a-z0-9])`, "i");
-  return pattern.test(haystack);
-}
-
 /** Match a proper-noun token without treating a hyphenated compound as the
  * standalone name (for example, `atlas` must not match `atlas-like`). */
 function containsNameToken(haystack: string, token: string): boolean {
@@ -530,11 +498,7 @@ export function titleOpeningSignal(title: string, opening: string): TitleOpening
   const titleTerms = [...contentTitleTokens(title)];
   const openingTerms = contentTitleTokens(opening);
   const matchedTerms = titleTerms.filter((term) => openingTerms.has(term));
-  const titleNumbers = title.match(/\d[\d,.]*/g) ?? [];
-  const openingHaystack = opening.toLowerCase();
-  const numbersMatch = titleNumbers.every((number) =>
-    numberVariants(number).some((variant) => containsNumberVariant(openingHaystack, variant.toLowerCase())),
-  );
+  const numbersMatch = unmatchedTitleNumbers(title, opening).length === 0;
   return {
     matchedTerms,
     titleTerms,
@@ -622,11 +586,8 @@ export function lintTitle(
 
   if (o.grounding) {
     const hay = o.grounding.toLowerCase();
-    // Numbers: every digit token must exist in the grounding (as digits or words).
-    for (const tok of t.match(/\d[\d,.]*/g) ?? []) {
-      if (!numberVariants(tok).some((v) => containsNumberVariant(hay, v.toLowerCase())))
-        issues.push(`ungrounded number "${tok}" — not in the script`);
-    }
+    for (const tok of unmatchedTitleNumbers(t, o.grounding))
+      issues.push(`ungrounded number "${tok}" — not in the script`);
     // Proper nouns must exist in the grounding. Title-Cased titles capitalize
     // EVERY word, so there the check narrows to capitalized runs of ≥2 words —
     // and a run passes when ANY of its non-stopword words exists (only fully-

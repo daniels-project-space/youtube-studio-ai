@@ -78,6 +78,23 @@ async function main() {
   await run({ narrationText: ' ', script: { narrationText: full } });
   assert.equal(contextFrom(prompts[0]).source.text, full, 'Script-owned narration remains full source when top-level narration is absent');
 
+  // Exact quantities survive the real caller, judge, finishing and sealed UI
+  // receipt. The controlled judge would approve anything it sees, so a bad
+  // numeric promise must be removed BEFORE that paid semantic review.
+  const priorCandidate = candidate;
+  candidate = 'Returns of 10.2 Percent Change the Outcome';
+  const numericSource = 'Returns of ten point two percent change the outcome.';
+  const numeric = await run({ topic: 'Returns and outcomes', narrationText: numericSource, script: { hook: numericSource } });
+  assert.equal(numeric.title, candidate);
+  const { readTitleReview: readNumericReview } = await import('../../../lib/titleReviewPresentation');
+  assert.equal(readNumericReview(numeric)?.state, 'recorded');
+  for (const badSource of ['Returns of one hundred two percent change the outcome.', 'Returns of ten point zero two percent change the outcome.']) {
+    await assert.rejects(() => run({ topic: 'Returns and outcomes', narrationText: badSource, script: { hook: badSource } }), /ungrounded number|opening promise mismatch/);
+    assert.equal(prompts.filter((prompt) => prompt.startsWith('You are a YouTube CTR strategist')).length, 0);
+    assert.equal(prompts.filter((prompt) => prompt.includes('description + tags') || prompt.includes('pinned comment')).length, 0);
+  }
+  candidate = priorCandidate;
+
   // Five retained narrations cross the block unchanged, even when the controlled
   // candidate fails lint. No corpus text or expected creative answer is edited.
   const manifest = JSON.parse(readFileSync('test-fixtures/title-baseline/manifest.json', 'utf8'));

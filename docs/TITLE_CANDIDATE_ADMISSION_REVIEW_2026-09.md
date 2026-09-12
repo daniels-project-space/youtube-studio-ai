@@ -33,3 +33,7 @@ The lexical comparison no longer treats a bag of shared words as semantic equiva
 These are falsifiable orchestration and candidate-preservation checks, not new model-quality, audience or cost measurements. In the reproduced failure they avoid an unnecessary second generation; sending previously hidden candidates to a judge may increase its input/output tokens. No blanket cost-saving percentage is asserted.
 
 The complete-source, warm-start, title-quality, finishing and receipt behavior remain covered by their existing tests. Local typecheck, production build, changed-file lint, all targeted title suites and the full structural audit passed; no audit regressed. The cloud CI/deployment outcome remains a separate release gate. Earlier title, module, comic, fleet and UI backlog work remains open.
+
+## Production release
+
+Commit `9c38b0178bec1413f3da7a67ea284501b31907d3` is verified on the exact `youtube-studio-ai.vercel.app` health response. Vercel's provider API confirms deployment `dpl_5W2yHNXj3c4fSnj2NFw3Qw6vYhNP`, production target, `READY`, that exact revision and the canonical alias. [CI 34687432917](https://github.com/daniels-project-space/youtube-studio-ai/actions/runs/34687432917) completed successfully with **679 direct tests**, actual 31.02-second assembly, unchanged audits and Convex deployment. Trigger version **20260912.20** deployed at 10:19:16 UTC; the runtime job completed at 10:19:20 UTC. These are terminal release observations; the subsequent number-grounding work is a separate revision.
