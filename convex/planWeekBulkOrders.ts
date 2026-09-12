@@ -122,21 +122,122 @@ export const markDispatched = mutation({
     if (byChannel.size !== order.children.length || order.children.some((child) => !byChannel.has(String(child.channelId)))) {
       throw new Error("plan-week bulk dispatch receipt is incomplete");
     }
-    const children = order.children.map((child) => ({
-      ...child,
-      status: "queued" as const,
-      triggerRunId: byChannel.get(String(child.channelId))!,
-    }));
-    if (order.status === "dispatched") {
-      const same = order.children.every((child, index) => {
-        const next = children[index];
-        return child.status === next.status && child.triggerRunId === next.triggerRunId;
-      });
-      if (!same) throw new Error("plan-week bulk dispatch replay mismatch");
+    const children = order.children.map((child) => {
+      const triggerRunId = byChannel.get(String(child.channelId))!;
+      if (child.triggerRunId && child.triggerRunId !== triggerRunId) {
+        throw new Error("plan-week bulk dispatch replay mismatch");
+      }
+      return {
+        ...child,
+        // A child can start between tasks.trigger and this receipt mutation.
+        // Preserve that terminal/running state while attaching the exact run id.
+        status: child.status === "pending" ? "queued" as const : child.status,
+        triggerRunId,
+      };
+    });
+    const status = children.some((child) => child.status === "failed")
+      ? "failed"
+      : children.every((child) => child.status === "succeeded")
+        ? "succeeded"
+        : children.some((child) => child.status === "running")
+          ? "running"
+          : "dispatched";
+    if (order.status === status && order.children.every((child, index) => {
+      const next = children[index];
+      return child.status === next.status && child.triggerRunId === next.triggerRunId;
+    })) {
       return { orderId: order._id, reused: true, status: order.status };
     }
-    await ctx.db.patch(order._id, { status: "dispatched", children, updatedAt: Date.now() });
-    return { orderId: order._id, reused: false, status: "dispatched" as const };
+    await ctx.db.patch(order._id, { status, children, updatedAt: Date.now() });
+    return { orderId: order._id, reused: false, status };
+  },
+});
+
+export const markChildStarted = mutation({
+  args: {
+    ownerId: v.string(),
+    fingerprint: v.string(),
+    channelId: v.id("channels"),
+    triggerRunId: v.string(),
+  },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "plan-week bulk child start");
+    const order = await ctx.db.query("planWeekBulkOrders")
+      .withIndex("by_fingerprint", (q) => q.eq("ownerId", args.ownerId).eq("fingerprint", args.fingerprint))
+      .unique();
+    if (!order) throw new Error("plan-week bulk order not found");
+    const child = order.children.find((entry) => String(entry.channelId) === String(args.channelId));
+    if (!child || (child.triggerRunId && child.triggerRunId !== args.triggerRunId)) {
+      throw new Error("plan-week bulk child start identity mismatch");
+    }
+    if (child.status === "succeeded") return { reused: true, status: order.status };
+    if (child.status === "running" && child.triggerRunId === args.triggerRunId) {
+      return { reused: true, status: order.status };
+    }
+    if (child.status === "failed" && child.triggerRunId !== args.triggerRunId) {
+      throw new Error("plan-week bulk child terminal state cannot be claimed by another run");
+    }
+    if (child.status !== "pending" && child.status !== "queued" && child.status !== "failed") {
+      throw new Error("plan-week bulk child is not startable");
+    }
+    const now = Date.now();
+    const children = order.children.map((entry) => entry.channelId === args.channelId
+      ? {
+          ...entry,
+          status: "running" as const,
+          triggerRunId: args.triggerRunId,
+          startedAt: now,
+          finishedAt: undefined,
+          error: undefined,
+        }
+      : entry);
+    await ctx.db.patch(order._id, { status: "running", children, updatedAt: now });
+    return { reused: false, status: "running" as const };
+  },
+});
+
+export const markChildFinished = mutation({
+  args: {
+    ownerId: v.string(),
+    fingerprint: v.string(),
+    channelId: v.id("channels"),
+    triggerRunId: v.string(),
+    status: v.union(v.literal("succeeded"), v.literal("failed")),
+    error: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "plan-week bulk child completion");
+    const order = await ctx.db.query("planWeekBulkOrders")
+      .withIndex("by_fingerprint", (q) => q.eq("ownerId", args.ownerId).eq("fingerprint", args.fingerprint))
+      .unique();
+    if (!order) throw new Error("plan-week bulk order not found");
+    const child = order.children.find((entry) => String(entry.channelId) === String(args.channelId));
+    if (!child || (child.triggerRunId && child.triggerRunId !== args.triggerRunId)) {
+      throw new Error("plan-week bulk child completion identity mismatch");
+    }
+    if (child.status === args.status) return { reused: true, status: order.status };
+    if (child.status === "succeeded" || child.status === "failed") {
+      throw new Error("plan-week bulk child terminal state cannot change");
+    }
+    const error = args.error?.trim().slice(0, 1_000) || undefined;
+    if (args.status === "failed" && !error) throw new Error("failed bulk child requires an error");
+    const now = Date.now();
+    const children = order.children.map((entry) => entry.channelId === args.channelId
+      ? {
+          ...entry,
+          status: args.status,
+          triggerRunId: args.triggerRunId,
+          finishedAt: now,
+          error,
+        }
+      : entry);
+    const status = children.some((entry) => entry.status === "failed")
+      ? "failed"
+      : children.every((entry) => entry.status === "succeeded")
+        ? "succeeded"
+        : "running";
+    await ctx.db.patch(order._id, { status, children, updatedAt: now });
+    return { reused: false, status };
   },
 });
 

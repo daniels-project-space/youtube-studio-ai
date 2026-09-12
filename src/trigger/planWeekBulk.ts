@@ -58,6 +58,7 @@ export const planWeekBulkTask = task({
         count: channel.count,
         requestKey: channel.requestKey,
         budgetCapUsd: channel.reservation.totalUsd,
+        bulkOrderFingerprint: order.fingerprint,
       }, {
         concurrencyKey: channel.channelId,
         idempotencyKey,

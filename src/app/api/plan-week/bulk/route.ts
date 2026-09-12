@@ -14,9 +14,9 @@ function convexClient(): StudioConvexHttpClient {
 }
 
 /**
- * Read the immutable parent handoff without exposing provider credentials or
- * making the browser repeat the owner verification ceremony. Child provider
- * progress remains owned by the per-channel planner receipts.
+ * Read the owner-scoped parent handoff and live child progress without
+ * exposing provider credentials or making the browser repeat an owner
+ * verification ceremony. This endpoint never re-enqueues work.
  */
 export async function GET(request: Request) {
   try {
@@ -30,6 +30,10 @@ export async function GET(request: Request) {
       fingerprint,
     });
     if (!row) return NextResponse.json({ ok: false, error: "bulk order not found" }, { status: 404 });
+    const progress = row.children.reduce<Record<string, number>>((counts, child) => {
+      counts[child.status] = (counts[child.status] ?? 0) + 1;
+      return counts;
+    }, {});
     return NextResponse.json({
       ok: true,
       orderId: String(row._id),
@@ -41,12 +45,23 @@ export async function GET(request: Request) {
       channelCount: row.channelIds.length,
       totalItems: row.totalItems,
       reservedCostUsd: row.reservedCostUsd,
+      progress: {
+        pending: progress.pending ?? 0,
+        queued: progress.queued ?? 0,
+        running: progress.running ?? 0,
+        succeeded: progress.succeeded ?? 0,
+        failed: progress.failed ?? 0,
+        completed: (progress.succeeded ?? 0) + (progress.failed ?? 0),
+      },
       children: row.children.map((child) => ({
         channelId: String(child.channelId),
         requestKey: child.requestKey,
         count: child.count,
         status: child.status,
         triggerRunId: child.triggerRunId ?? null,
+        startedAt: child.startedAt ?? null,
+        finishedAt: child.finishedAt ?? null,
+        error: child.error ?? null,
       })),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,

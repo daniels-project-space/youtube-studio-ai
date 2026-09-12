@@ -123,8 +123,39 @@ export interface PlanWeekArgs {
   budgetCapUsd?: number;
   /** Stable caller key; Trigger run identity is the fallback for automatic retries. */
   requestKey?: string;
+  /** Parent weekly-bulk fingerprint used for durable child progress. */
+  bulkOrderFingerprint?: string;
   /** Fail-closed contract for an audited, already-existing failed batch. */
   recovery?: PlanWeekRecoveryExpectation;
+}
+
+type PlanWeekTaskContext = {
+  run: { id: string; version?: string };
+  attempt: { number: number };
+};
+
+type BulkChildProgressBinding = {
+  convex?: ConvexHttpClient;
+  ownerId?: string;
+  channelId?: Id<"channels">;
+};
+
+async function reportBulkChildFinished(
+  payload: PlanWeekArgs,
+  ctx: PlanWeekTaskContext,
+  binding: BulkChildProgressBinding,
+  status: "succeeded" | "failed",
+  error?: string,
+): Promise<void> {
+  if (!payload.bulkOrderFingerprint || !binding.convex || !binding.ownerId || !binding.channelId) return;
+  await binding.convex.mutation(api.planWeekBulkOrders.markChildFinished, {
+    ownerId: binding.ownerId,
+    fingerprint: payload.bulkOrderFingerprint,
+    channelId: binding.channelId,
+    triggerRunId: ctx.run.id,
+    status,
+    ...(error ? { error } : {}),
+  });
 }
 
 class AmbiguousTopicCheckpointError extends Error {}
@@ -313,6 +344,27 @@ export const planWeekAheadTask = task({
   maxDuration: 1800,
   retry: { maxAttempts: 3, minTimeoutInMs: 5_000, maxTimeoutInMs: 60_000, factor: 2 },
   run: async (payload: PlanWeekArgs, { ctx }) => {
+    const binding: BulkChildProgressBinding = {};
+    try {
+      return await runPlanWeekAhead(payload, ctx, binding);
+    } catch (error) {
+      if (payload.bulkOrderFingerprint && binding.convex && binding.ownerId && binding.channelId) {
+        try {
+          await reportBulkChildFinished(payload, ctx, binding, "failed", errorMessage(error));
+        } catch (progressError) {
+          console.error("[plan-week-ahead] failed to persist bulk child failure", progressError);
+        }
+      }
+      throw error;
+    }
+  },
+});
+
+async function runPlanWeekAhead(
+  payload: PlanWeekArgs,
+  ctx: PlanWeekTaskContext,
+  binding: BulkChildProgressBinding,
+): Promise<unknown> {
     const log = (m: string, x?: Record<string, unknown>) => console.log(`[plan-week-ahead] ${m}`, x ?? "");
     await bootstrapSecrets(log);
     if (payload.recovery) exactRecoveryInvocation(payload, ctx.run.version);
@@ -326,6 +378,17 @@ export const planWeekAheadTask = task({
     if (!channel) abortTask(`channel not found: ${payload.channelId}`);
     const ownerId = channel.ownerId;
     if (payload.ownerId !== ownerId) abortTask("plan-week-ahead: owner/channel mismatch");
+    binding.convex = convex;
+    binding.ownerId = ownerId;
+    binding.channelId = channelId;
+    if (payload.bulkOrderFingerprint) {
+      await convex.mutation(api.planWeekBulkOrders.markChildStarted, {
+        ownerId,
+        fingerprint: payload.bulkOrderFingerprint,
+        channelId,
+        triggerRunId: ctx.run.id,
+      });
+    }
     let routeAdmission: ReturnType<typeof assertPlanWeekChannelRouteAdmission>;
     try {
       routeAdmission = assertPlanWeekChannelRouteAdmission(channel);
@@ -381,6 +444,7 @@ export const planWeekAheadTask = task({
       abortTask("plan-week recovery guard: Convex returned a different batch");
     }
     if (admitted.status === "ready") {
+      await reportBulkChildFinished(payload, ctx, binding, "succeeded");
       return { ok: true, planned: admitted.itemIds?.length ?? count, reused: true, costUsd: admitted.actualCostUsd };
     }
     log(`admitted batch ${requestKey}: reserve $${reservation.totalUsd.toFixed(4)}`, {
@@ -936,9 +1000,9 @@ export const planWeekAheadTask = task({
       if (final.status === "failed" && !final.retryable) abortTask(error);
       throw new Error(error);
     }
+    await reportBulkChildFinished(payload, ctx, binding, "succeeded");
     return { ok: true, planned: final.planned, reused: admitted.reused, costUsd: final.actualCostUsd };
-  },
-});
+}
 
 function deterministicFollowupTopic(subject: string, kind: "sequel" | "deep_dive" | "variation"): string {
   const clean = subject.trim().replace(/\s+/g, " ").replace(/[.:;!?-]+$/, "");

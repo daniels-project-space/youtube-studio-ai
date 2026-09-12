@@ -8,4 +8,7 @@ assert.match(source, /requireStudioActor\(request\)/);
 assert.match(source, /api\.planWeekBulkOrders\.getByFingerprint/);
 assert.match(source, /Cache-Control.*private, no-store/);
 assert.match(source, /bulk order not found/);
+assert.match(source, /completed:.*succeeded/);
+assert.match(source, /startedAt: child\.startedAt/);
+assert.match(source, /finishedAt: child\.finishedAt/);
 console.log("plan-week bulk status route contracts passed");

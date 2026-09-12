@@ -2085,13 +2085,22 @@ export default defineSchema({
     totalItems: v.number(),
     reservedCostUsd: v.number(),
     triggerRunId: v.string(),
-    status: v.string(), // admitted|dispatched
+    status: v.string(), // admitted|dispatched|running|succeeded|failed
     children: v.array(v.object({
       channelId: v.id("channels"),
       requestKey: v.string(),
       count: v.number(),
-      status: v.union(v.literal("pending"), v.literal("queued")),
+      status: v.union(
+        v.literal("pending"),
+        v.literal("queued"),
+        v.literal("running"),
+        v.literal("succeeded"),
+        v.literal("failed"),
+      ),
       triggerRunId: v.optional(v.string()),
+      startedAt: v.optional(v.number()),
+      finishedAt: v.optional(v.number()),
+      error: v.optional(v.string()),
     })),
     createdAt: v.number(),
     updatedAt: v.number(),
