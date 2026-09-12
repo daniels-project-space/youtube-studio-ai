@@ -47,16 +47,21 @@ const INK = "#f3f1ea";
 
 /** Animate a display value like "$534,000" / "87%" from 0 → final. */
 function animateValue(display: string, t: number): string {
-  const m = display.match(/-?\d[\d,.\s]*/);
+  // The settled card must show the exact admitted value, including precision,
+  // sign, spacing and locale notation. Animation is never a second formatter.
+  if (t >= 1) return display;
+  const m = display.match(/-?\d[\d,.]*/);
   if (!m) return display;
   const numStr = m[0];
-  const clean = numStr.replace(/[,\s]/g, "");
+  if (!/^-?(?:\d+|\d{1,3}(?:,\d{3})+)(?:\.\d+)?$/.test(numStr)) return display;
+  if (/[:/]/.test(display.slice((m.index ?? 0) + numStr.length, (m.index ?? 0) + numStr.length + 1))) return display;
+  const clean = numStr.replace(/,/g, "");
   const target = parseFloat(clean);
   if (!Number.isFinite(target)) return display;
   const hasDecimals = /\.\d/.test(clean);
   const cur = target * t;
   const formatted = hasDecimals
-    ? cur.toFixed(Math.min(2, (clean.split(".")[1] ?? "").length))
+    ? cur.toFixed(Math.min(20, (clean.split(".")[1] ?? "").length))
     : Math.round(cur).toLocaleString("en-US");
   return display.replace(numStr, formatted);
 }
@@ -234,13 +239,17 @@ export const DataInsert: React.FC<DataInsertProps> = ({
   } else if (kind === "bar_compare") {
     const bs = (bars ?? []).slice(0, 4).filter((b) => b && Number.isFinite(b.value));
     if (bs.length >= 2) {
-      const max = Math.max(...bs.map((b) => Math.abs(b.value))) || 1;
+      const low = Math.min(0, ...bs.map((b) => b.value));
+      const high = Math.max(0, ...bs.map((b) => b.value));
+      const span = high - low || 1;
+      const zero = -low / span;
       const best = bs.reduce((a, b) => (b.value > a.value ? b : a), bs[0]);
       const rowH = Math.round(H / bs.length);
       body = (
         <div style={{ width: W }}>
           {bs.map((b, i) => {
-            const frac = (Math.abs(b.value) / max) * dataT;
+            const frac = (Math.abs(b.value) / span) * dataT;
+            const left = b.value < 0 ? zero - frac : zero;
             const isBest = b === best;
             return (
               <div key={i} style={{ marginBottom: Math.round(rowH * 0.28) }}>
@@ -257,10 +266,13 @@ export const DataInsert: React.FC<DataInsertProps> = ({
                     {animateValue(b.display ?? String(b.value), dataT)}
                   </span>
                 </div>
-                <div style={{ height: Math.round(rowH * 0.34), background: "rgba(255,255,255,0.12)", borderRadius: 6, overflow: "hidden" }}>
+                <div style={{ position: "relative", height: Math.round(rowH * 0.34), background: "rgba(255,255,255,0.12)", borderRadius: 6, overflow: "hidden" }}>
+                  <div style={{ position: "absolute", left: `${zero * 100}%`, top: 0, bottom: 0, borderLeft: "1px solid rgba(255,255,255,0.7)" }} />
                   <div
                     style={{
-                      width: `${Math.max(1.5, frac * 100)}%`,
+                      position: "absolute",
+                      left: `${left * 100}%`,
+                      width: `${frac * 100}%`,
                       height: "100%",
                       background: isBest ? ac : "rgba(255,255,255,0.55)",
                       borderRadius: 6,

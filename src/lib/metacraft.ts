@@ -36,7 +36,7 @@ import { searchVideoIds, fetchVideoDetails, hasYouTubeDataAccess } from "@/lib/y
 import { resolveVoiceDoctrine } from "@/engine/golden";
 import { createPublicEvidenceCache, normalizeEvidenceKey } from "@/lib/publicEvidenceCache";
 import { titleDecisionFingerprint } from "@/lib/titleDecisionFingerprint";
-import { unmatchedTitleNumbers } from "@/lib/titleNumbers";
+import { unmatchedTitleNumbers } from "@/lib/numericClaims";
 
 export function hasMetacraft(): boolean {
   return hasAnthropicKey();

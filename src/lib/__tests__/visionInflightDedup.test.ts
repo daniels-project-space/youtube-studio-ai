@@ -49,6 +49,22 @@ async function main(): Promise<void> {
     assert.equal(imageGets, 2, "input downloads remain caller-local; only paid review work is coalesced");
     assert.equal(modelScope.snapshot().cacheHits, 1, "the coalesced joiner is visible as a model cache hit");
 
+    const beforeDiskHit = modelScope.snapshot();
+    const diskHit = await modelScope.run(() => visionUrls({ prompt, imageUrls: ["https://images.test/inflight.jpg"], json: true }));
+    assert.equal(diskHit, first);
+    const afterDiskHit = modelScope.snapshot();
+    assert.equal(afterDiskHit.cacheHits, beforeDiskHit.cacheHits + 1, "completed disk reuse is counted even when image preparation finishes after the first request");
+    assert.equal(afterDiskHit.calls, beforeDiskHit.calls);
+    assert.equal(afterDiskHit.costUsd, beforeDiskHit.costUsd);
+    assert.equal(providerPosts, 1, "a disk hit never dispatches another provider request");
+
+    const laterScope = createModelUsageScope();
+    await laterScope.run(() => visionUrls({ prompt, imageUrls: ["https://images.test/inflight.jpg"], json: true }));
+    assert.equal(laterScope.snapshot().cacheHits, 1, "a later run owns its disk-reuse observation");
+    assert.equal(laterScope.snapshot().calls, 0);
+    assert.equal(laterScope.snapshot().costUsd, 0, "historical provider cost is not charged to the new scope");
+    assert.equal(providerPosts, 1);
+
     const modelPrompt = `vision-cache-model-binding-${Date.now()}-${Math.random()}`;
     await modelScope.run(async () => {
       await visionUrls({ prompt: modelPrompt, imageUrls: ["https://images.test/inflight.jpg"], json: true, tier: "bulk" });

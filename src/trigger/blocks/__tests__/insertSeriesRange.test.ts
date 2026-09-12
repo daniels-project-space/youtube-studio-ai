@@ -92,9 +92,13 @@ function main(): void {
   // No series is not a violation: big-stat and bar inserts carry none.
   assert.equal(seriesWithinSpokenRange(chart({ anchorValues: ["100", "200"] })), true);
 
-  // One anchor gives no range to police, and anchorsSpoken already refuses an
-  // insert with no spoken anchor — this gate must not double-refuse.
-  assert.equal(seriesWithinSpokenRange(chart({ anchorValues: ["100"], series: [50, 900] })), true);
+  // A single-value stat has no series. A curve with one anchor cannot use that
+  // exception to invent both its floor and peak.
+  assert.equal(seriesWithinSpokenRange(chart({ anchorValues: ["100"], series: [50, 900] })), false);
+  assert.equal(seriesWithinSpokenRange(chart({ anchorValues: ["-10", "-2"], series: [-10, -6, -2] })), true);
+  assert.equal(seriesWithinSpokenRange(chart({ anchorValues: ["-10", "-2"], series: [-10.1, -6, -2] })), true, 'Negative and positive ranges use the same relative tolerance');
+  assert.equal(seriesWithinSpokenRange(chart({ anchorValues: ["-10", "-2"], series: [2, 6, 10] })), false);
+  assert.equal(seriesWithinSpokenRange(chart({ anchorValues: ["1.2 million", "2 million"], series: [1200000, 1500000, 2000000] })), true);
 
   // A non-finite point cannot be inside any range. Note this holds even without
   // the explicit Number.isFinite guard — NaN and +/-Infinity all fail the range
@@ -144,13 +148,11 @@ function main(): void {
   assert.ok(tolerance > 0, "some tolerance is needed or a smooth curve's endpoint rounds into a failure");
   assert.ok(tolerance <= 0.05, `tolerance ${tolerance} is wide enough to admit invented magnitudes`);
 
-  // Fewer than two anchors means there is no range to police, and anchorsSpoken
-  // already refuses an insert with no spoken anchor — so the gate must not
-  // double-refuse and silently drop legitimate single-value inserts.
+  // Require a range only when a series exists; stat/bar behavior is checked above.
   assert.match(
     SOURCE,
-    /if \(anchors\.length < 2\) return true;/,
-    "a single-anchor insert has no range and must pass this gate to anchorsSpoken",
+    /if \(anchors\.length < 2\) return false;/,
+    "a plotted curve cannot fabricate the second anchor",
   );
 
   console.log("INSERT SERIES RANGE PASS — plotted curves cannot leave their spoken anchors");

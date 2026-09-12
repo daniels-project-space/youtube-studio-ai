@@ -330,6 +330,12 @@ export function getCachedModelResponse<T>(
   return state.responses.get(key) as T;
 }
 
+/** Record persisted response reuse without inventing a new provider charge. */
+export function recordModelCacheHit(details: Pick<ModelUsageRecord, "provider" | "model" | "kind">): void {
+  const state = storage.getStore();
+  if (state) groupFor(state, details).cacheHits++;
+}
+
 export function cacheModelResponse(key: string, value: unknown): void {
   storage.getStore()?.responses.set(key, value);
 }

@@ -1,0 +1,32 @@
+{
+  "date": "2026-09-12",
+  "baselineRevision": "b7175fd0b410f3230371c347d46e0d027cc26f4d",
+  "scope": "Actual module gates with controlled external boundaries; three real local diagnostic renders, not model-authored channel outputs",
+  "paidCalls": 0,
+  "numericPipelineCases": 33,
+  "ambiguousPaidOutcomePreservation": true,
+  "titleNumberRegressionPairs": 149,
+  "originalDirectorCalibrationRequalified": false,
+  "sourceSha256": {
+    "src/remotion/DataInsert.tsx": "046c81e241123e23f40be86bfa17f0e7ad95b5ebdb443a36fcf524e8d9ca700a",
+    "src/lib/numericClaims.ts": "e947b29b0f90b3ef6d35ea4c071a1b2365e9de0ab53419221fd6f0df19039519",
+    "src/trigger/blocks/insertBlocks.ts": "2d0163b96381383f69e5d0f75bbbd5fd004d72b49166a1a2409a91c4bf27a58a"
+  },
+  "review": {
+    "verdict": "pass for declared numeric-render regression scope only",
+    "reviewer": "Codex independent inspection of physical encoded-frame composites",
+    "framesReviewed": 27,
+    "compositeSampleSeconds": [0, 0.5, 1, 1.6, 2.3, 4, 6, 6.666666666666667, 6.966666666666667],
+    "coverage": {"startSec": 0, "endSec": 6.966666666666667, "maxGapSec": 2},
+    "previewBackground": "#33424d, diagnostic only",
+    "repairCycles": 0,
+    "blockingFindings": [],
+    "findings": [{"artifact": "signed-comparison", "timestampSec": 0.5, "severity": "minor", "confidence": "high", "evidence": "Entering negative counter briefly reads -0%; final value is correctly -2%.", "repair": "Consider canonicalising intermediate rounded zero in a separately re-reviewed presentation pass."}],
+    "notQualified": ["model-generated insert selection", "whole-channel footage", "audio/narration alignment", "portrait/mobile presentation", "scene-art collisions", "full factual/citation truth"]
+  },
+  "artifacts": [
+    {"id": "exact-precision", "video": "test-fixtures/insert-exact-numbers/media/exact-precision.webm", "videoSha256": "502cae9c053c2c5c36bfdee34560132c42e2474b05068c7d3bbed7f701b37a3c", "bytes": 430258, "width": 1920, "height": 1080, "durationSec": 7.008, "composite": "test-fixtures/insert-exact-numbers/media/exact-precision-composite.png", "compositeSha256": "f4479939ed90796d6007830da8ac6fcbdd4baacd18693e5a700ecb5a88446094"},
+    {"id": "magnitude-spacing", "video": "test-fixtures/insert-exact-numbers/media/magnitude-spacing.webm", "videoSha256": "de393828c4f98c152076924f5166d73d8a3345b093537cf331f1fd634d67616c", "bytes": 384965, "width": 1920, "height": 1080, "durationSec": 7.008, "composite": "test-fixtures/insert-exact-numbers/media/magnitude-spacing-composite.png", "compositeSha256": "26953a76aeb963d03dca677a1f5fb2f2f93208a701846202e03d28e233a00cb5"},
+    {"id": "signed-comparison", "video": "test-fixtures/insert-exact-numbers/media/signed-comparison.webm", "videoSha256": "400d61c2d92af282ccd850355a729c47dbd09c8514541950d60b72c42ddddc1c", "bytes": 452690, "width": 1920, "height": 1080, "durationSec": 7.008, "composite": "test-fixtures/insert-exact-numbers/media/signed-comparison-composite.png", "compositeSha256": "e4f2a517f9703367d26db6077941904023f7007b44bc938b39530a4a1eed3649"}
+  ]
+}

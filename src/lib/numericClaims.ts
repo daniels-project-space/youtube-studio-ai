@@ -1,5 +1,6 @@
 /**
- * Exact numeric-presence floor for titles, not semantic/factual entailment.
+ * Exact numeric-presence floor shared by titles and data inserts, not
+ * semantic/factual entailment.
  * Parse complete English quantities once: 10.2 is neither 102 nor 10, and
  * two million is not two. Keep decimal arithmetic as strings/BigInts, never
  * rounded chart values. Other locales' ambiguous notation stays literal.
@@ -8,11 +9,18 @@ const SMALL = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'e
   'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen', 'eighteen', 'nineteen'];
 const TENS = ['twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
 const SCALES = new Map([['thousand', 3], ['million', 6], ['billion', 9], ['trillion', 12]]);
-const SHORT_SCALES = new Map([['k', 3], ['m', 6], ['b', 9], ['bn', 9], ['tn', 12]]);
+const SHORT_SCALES = new Map([['k', 3], ['m', 6], ['mm', 6], ['mn', 6], ['b', 9], ['bn', 9], ['t', 12], ['tn', 12]]);
 interface Token { text: string; start: number; end: number }
 interface Decimal { coefficient: bigint; places: number }
 interface Parsed { value: Decimal; end: number }
-interface Mention { raw: string; key: string; digit: boolean }
+export interface NumericMention {
+  raw: string;
+  /** Exact equality key; never compare floating-point plot values for evidence. */
+  key: string;
+  digit: boolean;
+  /** Finite approximation for plot geometry only; null for literal-only forms. */
+  plotValue: number | null;
+}
 const pow10 = (power: number) => BigInt(10) ** BigInt(power);
 const integer = (value: number): Decimal => ({ coefficient: BigInt(value), places: 0 });
 
@@ -35,7 +43,7 @@ function scale(value: Decimal, power: number): Decimal {
     : { coefficient: value.coefficient, places: value.places - power };
 }
 
-function mentions(input: string): Mention[] {
+export function numericMentions(input: string): NumericMention[] {
   const text = input.normalize('NFKC').toLowerCase().replace(/−/g, '-');
   const tokens: Token[] = [...text.matchAll(/\d+(?:[.,:/]\d+)*|\.\d+|[\p{L}]+|[^\s]/gu)]
     .map((match) => ({ text: match[0], start: match.index!, end: match.index! + match[0].length }));
@@ -91,7 +99,7 @@ function mentions(input: string): Mention[] {
     }
     return { value, end };
   }
-  const found: Mention[] = [];
+  const found: NumericMention[] = [];
   for (let i = 0; i < tokens.length;) {
     const start = i;
     let sign = 1;
@@ -111,7 +119,7 @@ function mentions(input: string): Mention[] {
     let part = atom(i);
     if (!part) {
       // Ambiguous digit notation can only match the exact same complete token.
-      if (token && /^\d/.test(token.text)) found.push({ raw: text.slice(tokens[start].start, token.end), key: `literal:${sign}:${token.text}`, digit: true });
+      if (token && /^\d/.test(token.text)) found.push({ raw: text.slice(tokens[start].start, token.end), key: `literal:${sign}:${token.text}`, digit: true, plotValue: null });
       i = first + 1; continue;
     }
     let value = integer(0), lastPower = Infinity;
@@ -130,15 +138,16 @@ function mentions(input: string): Mention[] {
     if (/^(?:st|nd|rd|th)$/.test(at(i) ?? '') && tokens[i - 1].end === tokens[i].start) i++;
     value.coefficient *= BigInt(sign);
     const raw = text.slice(tokens[start].start, tokens[i - 1].end);
-    found.push({ raw, key: key(value), digit: /\d/.test(raw) });
+    const plotValue = Number(value.coefficient) / (10 ** value.places);
+    found.push({ raw, key: key(value), digit: /\d/.test(raw), plotValue: Number.isFinite(plotValue) ? plotValue : null });
   }
   return found;
 }
 
 /** Compare complete quantities; leave units, causal claims and aliases to the judge. */
 export function unmatchedTitleNumbers(title: string, source: string): string[] {
-  const claimed = mentions(title).filter((mention) => mention.digit);
+  const claimed = numericMentions(title).filter((mention) => mention.digit);
   if (!claimed.length) return [];
-  const available = new Set(mentions(source).map((mention) => mention.key));
+  const available = new Set(numericMentions(source).map((mention) => mention.key));
   return claimed.filter((mention) => !available.has(mention.key)).map((mention) => mention.raw);
 }

@@ -26,7 +26,7 @@ import {
   FINAL_VISUAL_REVIEW_MAX_IMAGES_PER_REQUEST,
   NON_GOOGLE_VISION_MAX_IMAGES_PER_REQUEST,
 } from "@/engine/visualReviewBudget";
-import { getOrCreateModelResponse } from "@/lib/modelUsage";
+import { getOrCreateModelResponse, recordModelCacheHit } from "@/lib/modelUsage";
 import { hasOpenRouterKey, openRouterChat, openRouterModel } from "@/lib/openRouter";
 
 /** Exact image limit for one OpenRouter vision-provider request. */
@@ -382,7 +382,10 @@ async function visionBuffers(
     .digest("hex");
   if (!args.noCache) {
     const hit = await cacheGet(cacheKey);
-    if (hit) return hit;
+    if (hit) {
+      recordModelCacheHit({ provider: "openrouter", model, kind: "vision" });
+      return hit;
+    }
   }
   if (chain.length === 0) throw new VisionError("no vision provider keyed (OPENROUTER_API_KEY)");
   const request = (): Promise<string> => (async (): Promise<string> => {

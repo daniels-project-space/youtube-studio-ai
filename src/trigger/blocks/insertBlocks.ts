@@ -34,6 +34,8 @@ import { putObject } from "@/lib/storage";
 import { renderDataInsert } from "@/lib/remotionRender";
 import { boundedInteger } from "@/engine/boundedNumber";
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
+import { numericMentions } from "@/lib/numericClaims";
+import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 
 const KINDS = ["big_stat", "line_chart", "bar_compare", "annotated_line", "lower_third"] as const;
 type InsertKind = (typeof KINDS)[number];
@@ -63,7 +65,7 @@ export interface InsertPlanItem {
  * device, never an invention. Every substantive word of the citation must
  * appear in the sentence.
  */
-function sourceSpoken(citation: string, sentence: string): boolean {
+export function sourceSpoken(citation: string, sentence: string): boolean {
   const s = sentence.toLowerCase();
   const words = citation
     .toLowerCase()
@@ -72,17 +74,6 @@ function sourceSpoken(citation: string, sentence: string): boolean {
     .filter((w) => w.length > 3 && !/^(19|20)\d\d$/.test(w));
   if (words.length === 0) return false;
   return words.every((w) => s.includes(w));
-}
-
-/** All digit-groups in a text, normalized (commas/spaces stripped). */
-function digitGroups(text: string): Set<string> {
-  const out = new Set<string>();
-  for (const m of text.replace(/[,\s](?=\d)/g, "").matchAll(/\d+(?:\.\d+)?/g)) {
-    out.add(m[0]);
-    // also index the integer part so "534,000.50" anchors "534000"
-    out.add(m[0].split(".")[0]);
-  }
-  return out;
 }
 
 /**
@@ -106,15 +97,15 @@ export function seriesWithinSpokenRange(item: InsertPlanItem): boolean {
   const series = item.series ?? [];
   if (!series.length) return true;
   const anchors = (item.anchorValues ?? [])
-    .flatMap((a) => Array.from(String(a).replace(/[,\s]/g, "").matchAll(/\d+(?:\.\d+)?/g)))
-    .map((m) => Number(m[0]))
-    .filter((n) => Number.isFinite(n));
-  // With fewer than two anchors there is no range to stay inside; anchorsSpoken
-  // already refuses an insert with no spoken anchor at all.
-  if (anchors.length < 2) return true;
+    .flatMap((a) => numericMentions(String(a)))
+    .map((mention) => mention.plotValue)
+    .filter((value): value is number => value !== null);
+  // No series above is fine for a stat/bar. A plotted curve, however, cannot
+  // establish a range from one anchor and invent the other endpoint.
+  if (anchors.length < 2) return false;
   const low = Math.min(...anchors);
   const high = Math.max(...anchors);
-  const span = Math.max(Math.abs(high), 1) * SERIES_OVERSHOOT_TOLERANCE;
+  const span = Math.max(Math.abs(low), Math.abs(high), 1) * SERIES_OVERSHOOT_TOLERANCE;
   return series.every((value) =>
     Number.isFinite(value) && value >= low - span && value <= high + span,
   );
@@ -143,129 +134,6 @@ export function seriesWithinSpokenRange(item: InsertPlanItem): boolean {
  * `series` is deliberately excluded — its points are interpolated between the
  * anchors by design, and seriesWithinSpokenRange bounds them instead.
  */
-const MAGNITUDES: [RegExp, number][] = [
-  [/^(k|thousand)$/, 1e3],
-  [/^(m|mm|mn|million)$/, 1e6],
-  [/^(b|bn|billion)$/, 1e9],
-  [/^(t|tn|trillion)$/, 1e12],
-];
-
-function magnitudeOf(word: string | undefined): number | undefined {
-  if (!word) return undefined;
-  const lower = word.toLowerCase();
-  return MAGNITUDES.find(([re]) => re.test(lower))?.[1];
-}
-
-/**
- * Number WORDS, because narration is written to be read aloud.
- *
- * Measured against the real Insert Director on the one channel that uses this
- * block, a digits-only reading of "spoken" rejected six of eleven planned
- * inserts and every single rejection was wrong: "an annual return of ten point
- * two percent" rendered as "10.2%", "over the twenty-year period" titled
- * "20-Year Return". The figures were spoken; they were spelled.
- */
-const NUMBER_WORDS: Record<string, number> = {
-  zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9,
-  ten: 10, eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16,
-  seventeen: 17, eighteen: 18, nineteen: 19,
-};
-const TENS_WORDS: Record<string, number> = {
-  twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70, eighty: 80, ninety: 90,
-};
-
-/** Every number spelled out in a text, e.g. "ten point two" -> 10.2. */
-function spelledNumbers(text: string): number[] {
-  const tokens = text.toLowerCase().split(/[^a-z]+/).filter(Boolean);
-  const found: number[] = [];
-  for (let i = 0; i < tokens.length; ) {
-    let value: number | undefined;
-    if (TENS_WORDS[tokens[i]] !== undefined) {
-      value = TENS_WORDS[tokens[i]];
-      i++;
-      // "twenty five" and "twenty-five" tokenize identically.
-      if (NUMBER_WORDS[tokens[i]] !== undefined && NUMBER_WORDS[tokens[i]] < 10) {
-        value += NUMBER_WORDS[tokens[i]];
-        i++;
-      }
-    } else if (NUMBER_WORDS[tokens[i]] !== undefined) {
-      value = NUMBER_WORDS[tokens[i]];
-      i++;
-    } else {
-      i++;
-      continue;
-    }
-    if (tokens[i] === "hundred") {
-      value *= 100;
-      i++;
-      if (TENS_WORDS[tokens[i]] !== undefined) { value += TENS_WORDS[tokens[i]]; i++; }
-      if (NUMBER_WORDS[tokens[i]] !== undefined && NUMBER_WORDS[tokens[i]] < 10) { value += NUMBER_WORDS[tokens[i]]; i++; }
-    }
-    // "ten point two" — spoken decimals.
-    if (tokens[i] === "point") {
-      let decimals = "";
-      let j = i + 1;
-      while (NUMBER_WORDS[tokens[j]] !== undefined && NUMBER_WORDS[tokens[j]] < 10) {
-        decimals += String(NUMBER_WORDS[tokens[j]]);
-        j++;
-      }
-      if (decimals) {
-        value = Number(`${value}.${decimals}`);
-        i = j;
-      }
-    }
-    found.push(value);
-    const scale = magnitudeOf(tokens[i]);
-    if (scale !== undefined) {
-      found.push(value * scale);
-      i++;
-    }
-  }
-  return found;
-}
-
-/**
- * The numbers a sentence speaks, including magnitude-WORD expansions: narration
- * says "534 thousand" far more often than "534,000", and a chart that renders
- * the full figure for it is formatting, not invention.
- */
-function spokenNumberSet(sentence: string): Set<string> {
-  const spoken = digitGroups(sentence);
-  for (const m of sentence.replace(/[,\s](?=\d)/g, "").matchAll(/(\d+(?:\.\d+)?)\s*([a-zA-Z]+)/g)) {
-    const scale = magnitudeOf(m[2]);
-    if (scale === undefined) continue;
-    const scaled = Number(m[1]) * scale;
-    if (Number.isFinite(scaled)) {
-      spoken.add(String(scaled));
-      spoken.add(String(Math.round(scaled)));
-    }
-  }
-  for (const value of spelledNumbers(sentence)) {
-    spoken.add(String(value));
-    spoken.add(String(Math.round(value)));
-  }
-  return spoken;
-}
-
-/** True when every digit-group in a to-be-rendered string was spoken. */
-function numbersSpokenIn(text: string, spoken: Set<string>): boolean {
-  for (const m of text.replace(/[,\s](?=\d)/g, "").matchAll(/(\d+(?:\.\d+)?)\s*([a-zA-Z]*)/g)) {
-    const raw = m[1];
-    // A zero baseline is scaffolding, not a claim: an axis beginning at
-    // "Year 0" asserts nothing, and demanding the script say "zero" out loud
-    // rejects the most ordinary axis there is.
-    if (Number(raw) === 0) continue;
-    if (spoken.has(raw) || spoken.has(raw.split(".")[0])) continue;
-    const scale = magnitudeOf(m[2]);
-    if (scale !== undefined) {
-      const scaled = Number(raw) * scale;
-      if (spoken.has(String(scaled)) || spoken.has(String(Math.round(scaled)))) continue;
-    }
-    return false;
-  }
-  return true;
-}
-
 /**
  * The first field carrying an unspoken numeral, or null when clean.
  *
@@ -301,10 +169,10 @@ export function unspokenRenderedField(
   sentence: string,
   narration?: string,
 ): UnspokenRender | null {
-  const inSentence = spokenNumberSet(sentence);
+  const inSentence = new Set(numericMentions(sentence).map((mention) => mention.key));
   // Without a narration the sentence is all the context there is, which keeps
   // the two scopes identical rather than silently lenient.
-  const inNarration = narration ? spokenNumberSet(narration) : inSentence;
+  const inNarration = narration ? new Set(numericMentions(narration).map((mention) => mention.key)) : inSentence;
   const quantities: [string, unknown][] = [
     ["value", item.value],
     ...(item.bars ?? []).flatMap((b, i) => [
@@ -323,7 +191,14 @@ export function unspokenRenderedField(
     for (const [name, value] of fields) {
       if (value === undefined || value === null) continue;
       const rendered = String(value);
-      if (!numbersSpokenIn(rendered, scope)) return { field: name, rendered };
+      if (typeof value === 'number' && !Number.isFinite(value)) return { field: name, rendered };
+      const claims = numericMentions(rendered).filter((mention) => mention.digit);
+      // Only the plot's zero axis is scaffolding. A hero “0”, a zero-valued
+      // bar or a “0 losses” caption still makes a factual claim.
+      const allowZeroAxis = name.startsWith('xLabels[');
+      if (claims.some((claim) => !scope.has(claim.key) && !(allowZeroAxis && claim.key === '0:0'))) {
+        return { field: name, rendered };
+      }
     }
   }
   return null;
@@ -338,18 +213,18 @@ export function unspokenRenderedField(
  * return of ten point two percent" — a correct figure, correctly attributed,
  * silently refused because narration is written to be read aloud.
  */
-function anchorsSpoken(item: InsertPlanItem, sentence: string): boolean {
-  const spoken = spokenNumberSet(sentence);
+export function anchorsSpoken(item: InsertPlanItem, sentence: string): boolean {
+  const spoken = new Set(numericMentions(sentence).map((mention) => mention.key));
   if (spoken.size === 0) return false;
-  const anchors = (item.anchorValues ?? [])
-    .map((a) => String(a).replace(/[,\s]/g, ""))
-    .flatMap((a) => Array.from(a.matchAll(/\d+(?:\.\d+)?/g)).map((m) => m[0]));
-  if (anchors.length === 0) return false;
-  return anchors.every((a) => spoken.has(a) || spoken.has(a.split(".")[0]));
+  const anchors = item.anchorValues ?? [];
+  return anchors.length > 0 && anchors.every((anchor) => {
+    const claims = numericMentions(String(anchor));
+    return claims.length > 0 && claims.every((claim) => spoken.has(claim.key));
+  });
 }
 
 /** Every numeral rendered anywhere in a factual insert must be reviewed. */
-function numericPlanValues(item: InsertPlanItem): number[] {
+export function numericPlanValues(item: InsertPlanItem): number[] {
   const values: number[] = [];
   const collect = (value: unknown): void => {
     if (typeof value === "number" && Number.isFinite(value)) {
@@ -357,13 +232,19 @@ function numericPlanValues(item: InsertPlanItem): number[] {
       return;
     }
     if (typeof value === "string") {
-      for (const match of value.replace(/[,_\s](?=\d)/g, "").matchAll(/\d+(?:\.\d+)?/g)) values.push(Number(match[0]));
+      for (const claim of numericMentions(value).filter((claim) => claim.digit)) {
+        // The manifest consumes numeric plot values, not coefficient fragments.
+        // An unsupported literal must fail its finite-number check, not vanish.
+        values.push(claim.plotValue === null ? Number.NaN : claim.plotValue);
+      }
     }
   };
   collect(item.title);
   collect(item.value);
   collect(item.label);
-  for (const value of item.anchorValues ?? []) collect(value);
+  for (const value of item.anchorValues ?? []) {
+    for (const claim of numericMentions(String(value))) values.push(claim.plotValue === null ? Number.NaN : claim.plotValue);
+  }
   for (const value of item.series ?? []) collect(value);
   for (const label of item.xLabels ?? []) collect(label);
   for (const bar of item.bars ?? []) {
@@ -423,7 +304,7 @@ export const visualInserts: Block = {
     const strictDataStory = hasSourceAttributedDataStoryParams(ctx.params);
     const numericCandidates = timings
       .map((t, i) => ({ i, text: t.text }))
-      .filter((c) => /\d/.test(c.text));
+      .filter((c) => numericMentions(c.text).length > 0);
     const candidates = strictDataStory
       ? numericCandidates.filter((candidate) => hasNamedSourceAttribution(candidate.text))
       : numericCandidates;
@@ -545,6 +426,9 @@ export const visualInserts: Block = {
       plan = Array.isArray(raw.inserts) ? raw.inserts : [];
       ctx.log(`visual_inserts: director planned ${plan.length} insert(s) across ${candidates.length} numeric sentence(s)`);
     } catch (e) {
+      // Preserve paid-outcome uncertainty for checkpointing/classification.
+      // An empty successful data layer would hide the purchase from recovery.
+      if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === 'unknown') throw e;
       // Loud, and named as a failure: this is the module's core output not
       // happening, not a channel that warranted no inserts.
       ctx.log(`visual_inserts: FAILED — director produced no usable plan, video will have NO data layer: ${e instanceof Error ? e.message : e}`);
