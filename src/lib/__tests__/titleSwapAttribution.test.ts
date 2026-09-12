@@ -60,15 +60,15 @@ function main(): void {
     "past the settle window on the current title it is admissible");
   assert.ok(DEFAULT_SWAP_POLICY.settleHours >= 48, "the settle window must outlast the subscriber surge");
 
-  // Outcome scoring uses impressions SINCE the swap, not lifetime. Using the
-  // lifetime figure would declare a verdict the moment a swap was applied.
+  // Historic outcome records are sequential CTR edits, not native concurrent
+  // YouTube tests. They are quarantined rather than entering the learning loop.
   const justSwapped = entry({
     ctr: 5,
     thumbnailImpressions: 10_400,
     titleSwap: { from: "A Live Title", to: "The Other One", baselineCtr: 2, baselineImpressions: 10_000, swappedAt: NOW - HOUR },
   });
-  assert.equal(judgePriorSwaps([justSwapped]), 0, "400 impressions since the swap is not a verdict");
-  assert.equal(justSwapped.titleSwap?.outcome, undefined);
+  assert.equal(judgePriorSwaps([justSwapped]), 1);
+  assert.equal(justSwapped.titleSwap?.outcome, "not_experiment");
 
   const settled = entry({
     ctr: 5,
@@ -76,7 +76,7 @@ function main(): void {
     titleSwap: { from: "A Live Title", to: "The Other One", baselineCtr: 2, baselineImpressions: 10_000, swappedAt: NOW - 30 * 24 * HOUR },
   });
   assert.equal(judgePriorSwaps([settled]), 1);
-  assert.equal(settled.titleSwap?.outcome, "alternate_won");
+  assert.equal(settled.titleSwap?.outcome, "not_experiment");
 
   // An already-scored swap is not re-scored.
   assert.equal(judgePriorSwaps([settled]), 0, "a judged swap must stay judged");

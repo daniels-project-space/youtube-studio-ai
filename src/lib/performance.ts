@@ -39,7 +39,14 @@ export interface PerfEntry {
     baselineCtr: number;
     baselineImpressions: number;
     swappedAt: number;
-    outcome?: "alternate_won" | "original_won" | "inconclusive";
+    /**
+     * Legacy entries were sequential title edits, not YouTube's concurrent
+     * native A/B tests. They must never become positive training examples for
+     * the package selector. A future native ingestion may set `native_ab` once
+     * it carries YouTube's own watch-time-share verdict and test receipt.
+     */
+    method?: "legacy_sequential" | "native_ab";
+    outcome?: "alternate_won" | "original_won" | "inconclusive" | "not_experiment";
     outcomeDetail?: string;
     outcomeAt?: number;
   };

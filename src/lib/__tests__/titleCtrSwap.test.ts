@@ -12,6 +12,7 @@ import {
   channelMedianCtr,
   judgeSwapOutcome,
   planTitleSwaps,
+  rejectSequentialTitleSwap,
   type TitleCandidateStats,
 } from "@/lib/titleCtrSwap";
 
@@ -96,6 +97,11 @@ function main(): void {
     judgeSwapOutcome({ videoId: "v", baselineCtr: 2, postSwapCtr: 9, postSwapImpressions: 100 }).verdict,
     "inconclusive", "a huge delta on no impressions is still nothing");
   assert.equal(DEFAULT_SWAP_POLICY.minImpressions, 2_000);
+  assert.equal(
+    rejectSequentialTitleSwap("v").verdict,
+    "not_experiment",
+    "a sequential CTR edit must never be presented as a native YouTube experiment",
+  );
 
   console.log("TITLE CTR SWAP PASS");
 }

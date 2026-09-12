@@ -23,10 +23,12 @@
  *      whose click-through flatters the title. Judging inside that window
  *      measures the audience, not the title.
  *
- * A swap is a test, not a correction: the alternate has never been seen by an
- * audience either. So a swap is recorded with the baseline it must beat, and
- * `judgeSwapOutcome` decides afterwards whether it earned its place — otherwise
- * the loop would keep replacing titles without ever learning which won.
+ * A sequential title edit is NOT a YouTube experiment. YouTube's native title
+ * and thumbnail test is concurrent and selects a winner by watch-time share,
+ * whereas this ledger only has a point-in-time CTR observation. This module
+ * therefore prepares evidence-backed *native-test proposals* only. It must not
+ * write `videos.update` and must not teach the title generator that a
+ * sequential CTR change proved a winner.
  */
 
 /**
@@ -192,7 +194,7 @@ export function planTitleSwaps(
 
 export interface SwapOutcome {
   videoId: string;
-  verdict: "alternate_won" | "original_won" | "inconclusive";
+  verdict: "alternate_won" | "original_won" | "inconclusive" | "not_experiment";
   detail: string;
 }
 
@@ -230,4 +232,18 @@ export function judgeSwapOutcome(args: {
   return delta > 0
     ? { videoId: args.videoId, verdict: "alternate_won", detail: `+${delta.toFixed(2)}pp CTR after the swap` }
     : { videoId: args.videoId, verdict: "original_won", detail: `${delta.toFixed(2)}pp CTR after the swap` };
+}
+
+/**
+ * Seal a historic sequential swap as non-experimental before it can be used by
+ * a learning loop. This is intentionally separate from `judgeSwapOutcome`:
+ * that helper remains useful for a future native-test ingestion that supplies
+ * compatible, per-variant observations, while old CTR snapshots never do.
+ */
+export function rejectSequentialTitleSwap(videoId: string): SwapOutcome {
+  return {
+    videoId,
+    verdict: "not_experiment",
+    detail: "Sequential title edits are not a concurrent native YouTube A/B test; no watch-time-share winner can be learned.",
+  };
 }

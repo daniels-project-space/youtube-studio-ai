@@ -1,31 +1,24 @@
 /**
- * `title-ctr-swap` — the publish-side half of the title loop.
+ * `title-ctr-swap` — native-test proposal half of the title loop.
  *
  * Metacraft has always produced a runner-up title, judged it, stored it in
  * `titleAlternate` and then never used it. This finds published videos whose
- * click-through trails their own channel and puts the runner-up live, so the
- * second title the studio already paid for gets tested instead of discarded.
+ * click-through trails their own channel and prepares the runner-up for a
+ * native YouTube Studio test. It never renames a video itself: a sequential
+ * rename is not a concurrent test and our ledger does not contain YouTube's
+ * watch-time-share verdict.
  *
- * WHY THIS IS ALLOWED TO WRITE WHERE seoReoptimize IS NOT.
- * The sibling task seoReoptimize is hard-blocked by an attribution admission:
- * the performance ledger had "no immutable package version, raw impressions,
- * freshness boundary, or fully post-package observation". That containment is
- * correct and this does not route around it — it satisfies it. Raw impressions
- * now flow from YouTube Analytics through the ingestion into the ledger;
- * `titleSetAt` records when the live title went up; and admitTitleObservation
- * refuses any video whose measurement is not wholly after that point. A swap
- * also knows its exact package on both sides, because it writes the title
- * itself. Where the data is missing the answer is "hold", never a proxy.
+ * WHY THIS DOES NOT WRITE WHERE seoReoptimize IS NOT.
+ * Raw impressions and a freshness boundary are useful for identifying a
+ * candidate worth testing. They do NOT turn two different time windows into a
+ * controlled A/B test. YouTube's native test is concurrent and selects by
+ * watch-time share, neither of which is represented in this ledger. The task
+ * consequently emits an inspectable proposal for the owner to start in desktop
+ * YouTube Studio and refuses to call `videos.update`.
  *
- * THREE SEPARATE PERMISSIONS, all required before a single title changes:
- *   1. the studio automation gate for insights
- *   2. an explicit `approvedForMetadataChanges` from the caller — the scheduled
- *      run never passes it, so a cron can propose but cannot rename
- *   3. per-channel YouTube write scopes, checked through requireYouTubeConnector
- *
- * Each run also judges the swaps it made previously, because a loop that keeps
- * changing titles without ever scoring the change is not learning, it is
- * churning.
+ * The owner can still make an intentional manual metadata edit in YouTube
+ * Studio, but this worker will not mislabel that edit as an experiment. Native
+ * test-result ingestion remains a separate unfinished connector surface.
  */
 import { schedules, task } from "@trigger.dev/sdk";
 
@@ -36,12 +29,9 @@ import { STUDIO_AUTOMATION_GATES, studioAutomationGate } from "@/lib/automationG
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { channelPrefix } from "@/lib/storage";
 import { loadLedger, saveLedger, type PerfEntry } from "@/lib/performance";
-import { updateVideoMetadata } from "@/lib/youtube";
-import { requireYouTubeConnector } from "@/lib/youtubeConnector";
-import { YOUTUBE_WRITE_SCOPES } from "@/lib/publishingPolicy";
 import {
-  judgeSwapOutcome,
   planTitleSwaps,
+  rejectSequentialTitleSwap,
   type SwapDecision,
   type TitleCandidateStats,
 } from "@/lib/titleCtrSwap";
@@ -64,20 +54,16 @@ function candidate(entry: PerfEntry): TitleCandidateStats {
   };
 }
 
-/** Score the swaps made on a previous run, so the loop actually learns. */
+/**
+ * Historic swaps were sequential CTR edits. Quarantine them explicitly rather
+ * than quietly declaring an alternate won; no native test outcome was stored.
+ */
 export function judgePriorSwaps(ledger: PerfEntry[], log: Logger = () => {}): number {
   let judged = 0;
   for (const entry of ledger) {
     const swap = entry.titleSwap;
     if (!swap || swap.outcome) continue;
-    const outcome = judgeSwapOutcome({
-      videoId: entry.videoId,
-      baselineCtr: swap.baselineCtr,
-      postSwapCtr: entry.ctr ?? null,
-      // Impressions accrued since the swap, not lifetime.
-      postSwapImpressions: (entry.thumbnailImpressions ?? 0) - swap.baselineImpressions,
-    });
-    if (outcome.verdict === "inconclusive") continue;
+    const outcome = rejectSequentialTitleSwap(entry.videoId);
     swap.outcome = outcome.verdict;
     swap.outcomeDetail = outcome.detail;
     swap.outcomeAt = Date.now();
@@ -124,52 +110,15 @@ export async function runTitleCtrSwap(
     const swaps = decisions.filter((d) => d.action === "swap").slice(0, MAX_PER_CHANNEL);
     for (const decision of swaps) proposed.push(decision);
 
-    if (swaps.length && !approvedForMetadataChanges) {
-      // Proposals are useful on their own — this is what the scheduled run
-      // produces, so the owner can see what it WOULD do before arming it.
+    if (swaps.length) {
       for (const swap of swaps) {
-        log(`title-swap PROPOSED (not applied) ${channel.name} ${swap.videoId}: "${swap.from}" -> "${swap.to}" (${swap.reason})`);
+        log(
+          `title-native-test PROPOSED ${channel.name} ${swap.videoId}: "${swap.from}" vs "${swap.to}" ` +
+          `(${swap.reason}). Start a title-only native A/B test in desktop YouTube Studio; no sequential API rename was made.`,
+        );
       }
-    } else if (swaps.length) {
-      let refreshToken: string;
-      try {
-        refreshToken = (
-          await requireYouTubeConnector(convex, {
-            channelId: channel._id,
-            ownerId,
-            requiredScopes: YOUTUBE_WRITE_SCOPES,
-          })
-        ).refreshToken;
-      } catch (error) {
-        log(`title-swap: ${channel.name} skipped — ${error instanceof Error ? error.message : String(error)}`);
-        continue;
-      }
-
-      for (const swap of swaps) {
-        const entry = ledger.find((e) => e.videoId === swap.videoId);
-        if (!entry) continue;
-        try {
-          await updateVideoMetadata({ refreshToken, videoId: swap.videoId, title: swap.to! });
-          // Record BEFORE anything else can fail: an applied swap that is not
-          // written down would be re-applied on the next run, and the baseline
-          // it must beat would be lost.
-          entry.titleSwap = {
-            from: swap.from!,
-            to: swap.to!,
-            baselineCtr: swap.baselineCtr!,
-            baselineImpressions: swap.baselineImpressions!,
-            swappedAt: now,
-          };
-          entry.title = swap.to!;
-          // The freshness boundary moves with the title. Without this the next
-          // run would judge the new title using impressions the old one earned.
-          entry.titleSetAt = now;
-          dirty = true;
-          applied += 1;
-          log(`title-swap APPLIED ${channel.name} ${swap.videoId}: "${swap.from}" -> "${swap.to}"`);
-        } catch (error) {
-          log(`title-swap: ${swap.videoId} failed (${error instanceof Error ? error.message : error})`);
-        }
+      if (approvedForMetadataChanges) {
+        log(`title-native-test: metadata-change approval does not authorize a sequential CTR edit as an experiment; nothing was renamed.`);
       }
     }
 
@@ -177,15 +126,15 @@ export async function runTitleCtrSwap(
   }
 
   log(
-    `title-swap: done — ${applied} applied, ${proposed.length} proposed across ${channels.length} channel(s)` +
-    (approvedForMetadataChanges ? "" : " (approval not given; nothing was renamed)"),
+    `title-native-test: done — ${applied} applied, ${proposed.length} proposed across ${channels.length} channel(s); ` +
+    `native watch-time tests must be started and resolved in YouTube Studio.`,
   );
   return {
     ok: true,
     applied,
     proposed,
     judged,
-    ...(approvedForMetadataChanges ? {} : { approvalRequired: true }),
+    approvalRequired: true,
   };
 }
 
@@ -208,7 +157,7 @@ export const titleCtrSwapSchedule = schedules.task({
   },
 });
 
-/** Manual run. Pass `approvedForMetadataChanges: true` to actually rename. */
+/** Manual run only prepares native-test proposals; it never renames a video. */
 export const titleCtrSwapTask = task({
   id: "title-ctr-swap-now",
   run: async (payload: { ownerId?: string; approvedForMetadataChanges?: boolean }) =>
