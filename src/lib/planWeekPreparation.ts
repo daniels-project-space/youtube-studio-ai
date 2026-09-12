@@ -59,6 +59,24 @@ export interface PlanWeekPreparationPointer {
   manifestSha256: string;
 }
 
+/**
+ * R2 paths are part of the weekly item's identity, not presentation data.
+ * Keep every dynamic segment a single safe path component so a malformed
+ * owner/channel/item value cannot escape its canonical namespace or create a
+ * second spelling of the same destination.
+ */
+function pathSegment(value: string, label: string): string {
+  const segment = requiredText(value, label);
+  if (
+    segment === "." ||
+    segment === ".." ||
+    !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/.test(segment)
+  ) {
+    throw new Error(`plan-week preparation ${label} must be one safe path segment`);
+  }
+  return segment;
+}
+
 function requiredText(value: unknown, label: string): string {
   if (typeof value !== "string" || !value.trim()) {
     throw new Error(`plan-week preparation ${label} is invalid`);
@@ -89,11 +107,19 @@ export function planWeekPreparationKey(args: {
   batchId: string;
   itemId: string;
 }): string {
-  const clean = (value: string, label: string) =>
-    requiredText(value, label).replace(/^\/+|\/+$/g, "");
-  return `owner/${clean(args.ownerId, "owner id")}/channel/${clean(args.channelSlug, "channel slug")}` +
-    `/plan-batches/${clean(args.batchId, "batch id")}/items/${clean(args.itemId, "item id")}` +
+  return `owner/${pathSegment(args.ownerId, "owner id")}/channel/${pathSegment(args.channelSlug, "channel slug")}` +
+    `/plan-batches/${pathSegment(args.batchId, "batch id")}/items/${pathSegment(args.itemId, "item id")}` +
     "/preparation/inputs.json";
+}
+
+/** Canonical future thumbnail destination for every weekly plan item. */
+export function planWeekThumbnailKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  itemId: string;
+}): string {
+  return `owner/${pathSegment(args.ownerId, "owner id")}/channel/${pathSegment(args.channelSlug, "channel slug")}` +
+    `/plan/${pathSegment(args.itemId, "item id")}.jpg`;
 }
 
 export function planWeekPreparationManifestSha256(manifest: PlanWeekPreparationManifest): string {

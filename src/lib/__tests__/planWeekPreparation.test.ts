@@ -5,6 +5,7 @@ import {
   PLAN_WEEK_PREPARATION_VERSION,
   planWeekPreparationKey,
   planWeekPreparationManifestSha256,
+  planWeekThumbnailKey,
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { PLAN_WEEK_CONTRACT_VERSION } from "@/lib/planWeekContract";
@@ -63,6 +64,28 @@ const pointer = {
   manifestKey: planWeekPreparationKey(manifest),
   manifestSha256: planWeekPreparationManifestSha256(manifest),
 };
+
+assert.equal(
+  planWeekThumbnailKey({ ownerId, channelSlug, itemId }),
+  `owner/${ownerId}/channel/${channelSlug}/plan/${itemId}.jpg`,
+  "thumbnail destinations use the same canonical owner/channel/item namespace",
+);
+for (const malformed of [
+  { ownerId: "owner/other", channelSlug, itemId },
+  { ownerId, channelSlug: "history\\..\\other", itemId },
+  { ownerId, channelSlug, itemId: "../foreign-item" },
+]) {
+  assert.throws(
+    () => planWeekThumbnailKey(malformed),
+    /safe path segment/,
+    "path separators cannot create a cross-channel weekly destination",
+  );
+}
+assert.throws(
+  () => planWeekPreparationKey({ ownerId, channelSlug: "../foreign-channel", batchId, itemId }),
+  /safe path segment/,
+  "preparation manifests reject traversal-like channel namespaces",
+);
 
 assert.equal(pointer.manifestSha256.length, 64);
 assert.equal(

@@ -59,6 +59,7 @@ import {
   PLAN_WEEK_PREPARATION_VERSION,
   planWeekPreparationKey,
   planWeekPreparationManifestSha256,
+  planWeekThumbnailKey,
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import {
@@ -644,7 +645,11 @@ export const planWeekAheadTask = task({
     const failures: string[] = [];
     for (let index = 0; index < batchItems.length; index++) {
       const item = batchItems[index];
-      const thumbnailKey = planThumbnailKey(ownerId, channel.slug, item._id);
+      const thumbnailKey = planWeekThumbnailKey({
+        ownerId,
+        channelSlug: channel.slug,
+        itemId: String(item._id),
+      });
       const thumbnailSource = thumbnailSourceByItemId.get(String(item._id));
       if (!thumbnailSource) abortTask("plan-week-ahead: item is missing its frozen thumbnail source");
       if (isDeferredRenderedFrameSource(thumbnailSource)) {
@@ -956,10 +961,6 @@ function retryableFailure(error: unknown): boolean {
   return /timeout|network|429|500|502|503|504|temporar|overload|rate limit|not configured|missing/i.test(message);
 }
 
-function planThumbnailKey(ownerId: string, slug: string, itemId: string): string {
-  return `${channelPrefix(ownerId, slug)}plan/${itemId}.jpg`;
-}
-
 type PlanWeekPreparationChannel = {
   name: string;
   slug: string;
@@ -1020,7 +1021,11 @@ function buildPlanWeekPreparationManifest(args: {
   const description = args.item.description?.trim() || "Editorial description unavailable";
   const sceneSeed = args.item.sceneSeed?.trim() ||
     `A physical cause-and-effect scene that communicates ${args.item.topic.trim()} through people, objects, and action.`;
-  const thumbnailKey = planThumbnailKey(args.ownerId, channel.slug, args.item._id);
+  const thumbnailKey = planWeekThumbnailKey({
+    ownerId: args.ownerId,
+    channelSlug: channel.slug,
+    itemId: args.item._id,
+  });
   const thumbnailSource = planWeekThumbnailSourceForChannel({
     family: channel.family,
     contentLane: channel.contentLane,
@@ -1774,7 +1779,11 @@ async function genThumb(o: {
   if (!providerReceipt) {
     throw new Error("plan thumbnail render completed without its durable provider receipt");
   }
-  const key = planThumbnailKey(o.ownerId, o.slug, o.id);
+  const key = planWeekThumbnailKey({
+    ownerId: o.ownerId,
+    channelSlug: o.slug,
+    itemId: o.id,
+  });
   const artifactBytes = readFileSync(outJpg);
   if (!artifactBytes.length || artifactBytes.length > 30 * 1024 * 1024) {
     throw new Error("plan thumbnail artifact is outside the 1B..30MiB contract");

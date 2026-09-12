@@ -18,6 +18,7 @@ import {
   assertPlanWeekPreparationManifestBinding,
   assertPlanWeekPreparationPointer,
   PLAN_WEEK_PREPARATION_VERSION,
+  planWeekThumbnailKey,
 } from "../src/lib/planWeekPreparation";
 import {
   isDeferredRenderedFrameSource,
@@ -1328,9 +1329,11 @@ export const recordPlanItemPreparation = mutation({
     if (item.generationProviderStartedAt !== undefined) {
       throw new Error("plan preparation must be frozen before thumbnail provider work starts");
     }
-    const cleanKeyPart = (value: string) => value.replace(/^\/+|\/+$/g, "");
-    const thumbnailKey = `owner/${cleanKeyPart(args.ownerId)}/channel/${cleanKeyPart(batch.channelSlug)}` +
-      `/plan/${String(item._id)}.jpg`;
+    const thumbnailKey = planWeekThumbnailKey({
+      ownerId: args.ownerId,
+      channelSlug: batch.channelSlug,
+      itemId: String(item._id),
+    });
     const manifest = assertPlanWeekPreparationManifestBinding({
       manifest: args.manifest,
       pointer: {
@@ -1417,9 +1420,11 @@ export const completeDeferredFramePlanItem = mutation({
         (batch.status === "failed" && !batch.retryable)) {
       throw new Error("plan batch is terminal before deferred rendered-frame admission");
     }
-    const cleanKeyPart = (value: string) => value.replace(/^\/+|\/+$/g, "");
-    const expectedThumbnailKey =
-      `owner/${cleanKeyPart(args.ownerId)}/channel/${cleanKeyPart(batch.channelSlug)}/plan/${args.itemId}.jpg`;
+    const expectedThumbnailKey = planWeekThumbnailKey({
+      ownerId: args.ownerId,
+      channelSlug: batch.channelSlug,
+      itemId: String(args.itemId),
+    });
     const thumbnailKey = args.thumbnailKey.trim();
     if (thumbnailKey !== expectedThumbnailKey) {
       throw new Error("deferred rendered-frame thumbnail key does not match its admitted artifact path");
@@ -1634,9 +1639,11 @@ export const completePlanItem = mutation({
     ) {
       throw new Error("plan item cannot be ready without a frozen weekly preparation packet");
     }
-    const cleanKeyPart = (value: string) => value.replace(/^\/+|\/+$/g, "");
-    const expectedThumbnailKey =
-      `owner/${cleanKeyPart(args.ownerId)}/channel/${cleanKeyPart(batch.channelSlug)}/plan/${args.itemId}.jpg`;
+    const expectedThumbnailKey = planWeekThumbnailKey({
+      ownerId: args.ownerId,
+      channelSlug: batch.channelSlug,
+      itemId: String(args.itemId),
+    });
     if (thumbnailKey !== expectedThumbnailKey) {
       throw new Error("plan item thumbnail key does not match its admitted artifact path");
     }
