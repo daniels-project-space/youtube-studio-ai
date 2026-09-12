@@ -1,0 +1,147 @@
+{
+  "purpose": "Real planner and block on synthetic reviewed evidence; not source truth or channel qualification",
+  "calls": 1,
+  "transport": [
+    {
+      "request": {
+        "model": "google/gemini-3.7-flash",
+        "messages": [
+          {
+            "role": "user",
+            "content": "You are the channel's MOTION-GRAPHICS DIRECTOR for a YouTube video: \"\".\nThese narration sentences speak numbers (sentenceIdx: text):\n0: According to the Example Statistics Office, output moved from 2% to 4% over 5 years.\n1: According to the Example Statistics Office, there were 77 records.\n2: According to the Example Statistics Office, participation was 9%.\n\nPlan AT MOST 1 on-screen data inserts that make the strongest spoken numbers VISUAL. STRATEGY: place inserts at the moments of maximal persuasion — the thesis-proof number, the comparison that decides the argument, the payoff figure — never at passing mentions. Fewer great inserts beat many weak ones; if the script is data-light, plan fewer or none.\nRELEVANCY WINDOW: for each insert also return endSentenceIdx — the LAST sentence still discussing that data (same as sentenceIdx if one sentence; at most sentenceIdx+4). The visual HOLDS on screen for that whole span so the viewer can actually read it while it is being talked about.\nAvailable kinds:\n\"big_stat\": select one reviewed metric/y/series valueId. The module supplies its exact display and label; do not supply value or label.\n\"line_chart\": select at least two same-unit reviewed y/series valueIds in reviewed order. Do not supply series or xLabels. Optional xValueIds requires TWO reviewed x endpoints or one reviewed x value per point. A duration is not a pair of endpoints: with fewer than two x values, OMIT xValueIds entirely and use a supported title for time context.\n\"bar_compare\": select 2-4 same-unit reviewed metric/y/series valueIds that have category labels. The module supplies the bars, labels and exact displays. Do not supply bars.\n\"annotated_line\": the same reviewed-ID contract as line_chart, plus events [{idx,label}] only where that selected point has an exact reviewed label. Never invent an event or rewrite its label.\n\n\nREVIEWED FACTUAL VISUAL MANIFESTS — return evidenceVisualId and evidenceBindings {anchorId,valueIds,xValueIds?}. Select reviewed IDs, not rewritten numbers. The module copies displays, units, categories and attribution directly. For big_stat select one metric; bars select 2-4 labeled metrics; lines select >=2 y/series values in reviewed order, all with the same unit. Optional xValueIds select reviewed x-role endpoints or every point. Omit value/label/series/bars/xLabels: these are derived, and contradictory copies are rejected. Do not interpolate a factual series. All selected values must belong to the selected spoken anchor.\n- visual-fixture (chart, data_insert)\n  attribution: Example Statistics Office\n  anchor anchor-output: According to the Example Statistics Office, output moved from 2% to 4% over 5 years.\n  anchor anchor-other: According to the Example Statistics Office, participation was 9%.\n  value value-before: 2% (percent; series; anchor anchor-output; source source-fixture; label Before)\n  value value-after: 4% (percent; series; anchor anchor-output; source source-fixture; label After)\n  value value-years: 5 years (years; x; anchor anchor-output; source source-fixture)\n  value value-other: 9% (percent; series; anchor anchor-other; source source-fixture)HARD RULES:\n- anchorValues: list the EXACT numbers from the chosen sentence that the insert visualizes. You may NOT use numbers that are not spoken in that sentence (inserts are fact-checked against the script).\n- title: <=8 words, no clickbait.\n- One insert per sentence; spread them across the video.\nReturn STRICT JSON {\"inserts\":[{\"sentenceIdx\":number,\"endSentenceIdx\":number,\"kind\":string,\"title\":string,\"value\"?:string,\"label\"?:string,\"series\"?:number[],\"xLabels\"?:string[],\"bars\"?:[{\"label\":string,\"value\":number,\"display\"?:string}],\"anchorValues\":number[]|string[],\"evidenceVisualId\"?:string,\"evidenceBindings\"?:{\"anchorId\":string,\"valueIds\":string[],\"xValueIds\"?:string[]}}]}."
+          }
+        ],
+        "max_tokens": 2500,
+        "temperature": 0.4,
+        "response_format": {
+          "type": "json_object"
+        },
+        "provider": {
+          "only": [
+            "google-ai-studio",
+            "google-vertex"
+          ],
+          "allow_fallbacks": true,
+          "require_parameters": true,
+          "data_collection": "deny"
+        }
+      },
+      "status": 200,
+      "response": {
+        "id": "gen-1789213254-XkQVHSK3YhbYCbyrL4Cy",
+        "object": "chat.completion",
+        "created": 1789213254,
+        "model": "google/gemini-3.7-flash",
+        "provider": "Google AI Studio",
+        "system_fingerprint": null,
+        "service_tier": "default",
+        "choices": [
+          {
+            "index": 0,
+            "logprobs": null,
+            "finish_reason": "stop",
+            "native_finish_reason": "STOP",
+            "message": {
+              "role": "assistant",
+              "content": "{\n  \"inserts\": [\n    {\n      \"sentenceIdx\": 0,\n      \"endSentenceIdx\": 0,\n      \"kind\": \"line_chart\",\n      \"title\": \"Output Over 5 Years\",\n      \"anchorValues\": [\"2%\", \"4%\"],\n      \"evidenceVisualId\": \"visual-fixture\",\n      \"evidenceBindings\": {\n        \"anchorId\": \"anchor-output\",\n        \"valueIds\": [\"value-before\", \"value-after\"]\n      }\n    }\n  ]\n}",
+              "refusal": null,
+              "reasoning": "**Developing Data Entry Strategy**\n\nI'm now formulating a plan for on-screen data entry, keyed to the script and any visual references. I'm focusing on efficiently capturing the change from 2% to 4% over five years, alongside the total of 77 records. I'm prioritizing accuracy and a smooth workflow.\n\n\n**Analyzing Charting Possibilities**\n\nI'm now determining how to visually represent the data. The \"output moved from 2% to 4% over 5 years\" sentence suggests a line chart or bar comparison would be suitable. I am considering the \"Before\" and \"After\" labels as series values to use within those potential chart types. I'll need to figure out which chart format displays this data most effectively.\n\n\n**Refining Chart Specification**\n\nI'm now honing the chart definition, and decided to omit `xValueIds` since the data represents a duration, not specific endpoints. I'm focusing on either a line chart or a bar comparison, using \"Before\" and \"After\" as labels for the series. I'm selecting `anchorValues` from the source sentence to ensure accuracy: [\"2%\", \"4%\"]. I'm considering which chart type is most appropriate.\n\n\n",
+              "reasoning_details": [
+                {
+                  "type": "reasoning.text",
+                  "text": "**Developing Data Entry Strategy**\n\nI'm now formulating a plan for on-screen data entry, keyed to the script and any visual references. I'm focusing on efficiently capturing the change from 2% to 4% over five years, alongside the total of 77 records. I'm prioritizing accuracy and a smooth workflow.\n\n\n**Analyzing Charting Possibilities**\n\nI'm now determining how to visually represent the data. The \"output moved from 2% to 4% over 5 years\" sentence suggests a line chart or bar comparison would be suitable. I am considering the \"Before\" and \"After\" labels as series values to use within those potential chart types. I'll need to figure out which chart format displays this data most effectively.\n\n\n**Refining Chart Specification**\n\nI'm now honing the chart definition, and decided to omit `xValueIds` since the data represents a duration, not specific endpoints. I'm focusing on either a line chart or a bar comparison, using \"Before\" and \"After\" as labels for the series. I'm selecting `anchorValues` from the source sentence to ensure accuracy: [\"2%\", \"4%\"]. I'm considering which chart type is most appropriate.\n\n\n",
+                  "format": "google-gemini-v1",
+                  "index": 0
+                }
+              ]
+            }
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 911,
+          "completion_tokens": 997,
+          "total_tokens": 1908,
+          "cost": 0.004422,
+          "is_byok": false,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0,
+            "audio_tokens": 0,
+            "video_tokens": 0
+          },
+          "cost_details": {
+            "upstream_inference_cost": 0.004422,
+            "upstream_inference_prompt_cost": 0.00068325,
+            "upstream_inference_completions_cost": 0.00373875
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 924,
+            "image_tokens": 0,
+            "audio_tokens": 0
+          }
+        }
+      },
+      "elapsedMs": 3701
+    }
+  ],
+  "renderInputs": [
+    {
+      "kind": "line_chart",
+      "title": "Output Over 5 Years",
+      "series": [
+        2,
+        4
+      ],
+      "seriesDisplays": [
+        "2%",
+        "4%"
+      ],
+      "seriesUnit": "percent",
+      "sourceAttribution": "Example Statistics Office",
+      "palette": [
+        "#13252d",
+        "#58c9b0",
+        "#eef5f4"
+      ],
+      "accent": "#58c9b0",
+      "outPath": "/tmp/insert-binding-planner-separated-20260912/insert_0.webm",
+      "durationSec": 13,
+      "width": 1920,
+      "height": 1080
+    }
+  ],
+  "logs": [
+    "openrouter: google/gemini-3.7-flash returned text",
+    "visual_inserts: director planned 1 insert(s) across 3 numeric sentence(s)",
+    "visual_inserts: line_chart \"Output Over 5 Years\" @ 1.0s (13s)",
+    "visual_inserts: 1 insert(s) planned+rendered from 3 numeric sentences"
+  ],
+  "usage": {
+    "calls": 1,
+    "cacheHits": 0,
+    "inputTokens": 911,
+    "outputTokens": 73,
+    "reasoningTokens": 924,
+    "cachedInputTokens": 0,
+    "totalTokens": 1908,
+    "costUsd": 0.004422,
+    "unpricedCalls": 0,
+    "groups": [
+      {
+        "provider": "openrouter",
+        "model": "gemini-3.7-flash",
+        "kind": "text",
+        "calls": 1,
+        "cacheHits": 0,
+        "inputTokens": 911,
+        "outputTokens": 73,
+        "reasoningTokens": 924,
+        "cachedInputTokens": 0,
+        "totalTokens": 1908,
+        "costUsd": 0.004422,
+        "unpricedCalls": 0,
+        "unpricedReasons": []
+      }
+    ]
+  }
+}

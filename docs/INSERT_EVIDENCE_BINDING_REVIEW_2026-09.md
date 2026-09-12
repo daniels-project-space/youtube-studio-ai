@@ -1,0 +1,37 @@
+# Data inserts — preserving reviewed meaning through rendering
+
+12 September 2026. Backlog item 61 remains partial. No thumbnail, model, owner-lock or publishing policy change.
+
+## Root cause and measured counterexamples
+
+The existing reviewed visual manifest already owns value IDs, source IDs, narration anchors, roles, units, displays and labels. The insert caller reduced all of that to numeric membership. Six explicit corruptions pass that old check: an x-axis duration presented as a percentage, percent presented as currency, a relabeled metric, swapped bar categories, bar displays detached from geometry, and reversed line values.
+
+The strict handoff now asks the existing director to select those IDs. `bindDataInsertEvidence` validates anchor/timing, source coverage, role, shared units, labels and observation order, then projects the reviewed values into renderer arguments. It consumes the existing manifest; it is not a second ledger or review authority. Contradictory optional copies are rejected, not silently corrected. This removes redundant numeric transcription from the planner's job, not a measured fleet-wide cost saving.
+
+The actual caller carries reviewed attribution to all factual graphics and exact endpoint displays/units to the line renderer. Ordinary inserts retain their current identity, numeric gates and rendering. A duration cannot masquerade as two x-axis endpoints. Factual planning no longer receives the ordinary path's interpolated-curve instructions.
+
+## Research and visual direction
+
+The [ONS chart-text guidance](https://service-manual.ons.gov.uk/data-visualisation/guidance/chart-text) recommends clear units and source credits without overloaded text. The [ONS chart-elements guidance](https://service-manual.ons.gov.uk/data-visualisation/build-specifications/chart-elements) favors labels connected to data. Here this means approved source credit and exact endpoint values, preserving the channel palette and animation. This is not a completed chart-design overhaul.
+
+## Validation and honest failure
+
+- **44 actual-block cases** exercise real ledger/manifest review, director handoff, insert gates, render arguments, storage namespace and overlay return. External planner/renderer/storage boundaries are controlled. Six old numeric-only false passes are demonstrated before the new block refuses them. Malformed fields/entries/titles, source/anchor identity, mixed units, duplicate/reversed IDs, annotations and paired irregular x observations are covered. Additional direct probes preserve mW versus MW and reject inverted intervals.
+- **39 ordinary numeric/citation cases** remain in the retained-source pipeline test, including six exact Investory sentences and controlled corruptions. These do not replace the missing historic 19/19 and 181/181 director corpus.
+- **39 independent literal-citation cases** cover short acronyms, token boundaries, numeric organization names, punctuation and formatted years. A helper found three further false passes: `1000 Genomes Project` matching a different numbered organization, internal `the` removal, and unprefixed `Source Global` losing its first word. Actual `sourceSpoken` integration is tested separately.
+- **First live planner pilot failed:** one OpenRouter call cost $0.00498825. It selected one duration as an x-axis endpoint array; the strict module refused it before render/storage. No result was manually repaired. This exposed contradictory ordinary-vs-reviewed planning instructions.
+- **Second live pilot after separating instructions:** one OpenRouter call cost $0.004422 and produced one admitted line insert, `Output Over 5 Years`, through the actual block. Total reported provider cost: **$0.00941025**. Model, temperature and 2,500-token ceiling are unchanged. The source packet is synthetic, not real-world source verification or broad planner reliability evidence.
+- An independent second code review reproduced malformed titles reaching storage, year/currency title laundering and unpaired/equally spaced years. These led to positive-interval/top-level guards, exact numeric display checks with case-sensitive scientific symbols, and an optional fingerprinted `xValueId` on reviewed observations. The evaluator checks that each link resolves to an x-role value from the same source and narration anchor. The actual caller now derives numeric x coordinates from those links; a 2021 observation in a 2020–2030 span appears at 10%, not 50%. The original admitted live response still passes unchanged.
+- CLDR full natural-language unit names may retain title casing (`5 Years` versus `5 years`); scientific symbols are not globally case-folded (`mW` versus `MW`). Currency prefixes, doubled percent signs and added magnitude suffixes cannot hide behind a masked reviewed numeral. This is exact-display preservation, not proof of arbitrary surrounding prose.
+- Three completed 1920×1080/13.008-second native clips have been inspected so far: controlled line and bars, and the admitted live-planner line. Nine alpha-composited samples per clip cover entry, hold and exit. Their exact values, source credit and palette are visible. Stat and irregular-axis encodes remain in progress. The live clip's generated receipt inherited the diagnostic script's old generic “controlled planner” wording; the retained live response/arguments and this report identify its actual provenance. No output was manually corrected.
+- The earlier full regression runs were superseded during independent review and explicitly terminated, not counted as passing. A new frozen release run is active (`/tmp/insert-binding-readiness-release-20260912.log`); build/audit/lint use the corresponding `*-release-20260912.log` paths. No production deployment of this batch is claimed.
+
+## Remaining work
+
+Ordinary free-narration unit/source semantics remain open: the non-strict numeric gate can still confuse a percentage with a different unit whose number is present. Exact numeric-title display matching is not full causal or surrounding-prose entailment. Multi-series alignment, point-selection completeness and cross-surface use of the new coordinate links need further work. Long annotated labels still meet the renderer's pre-existing 26-character truncation; that has not been qualified as preserving every reviewed annotation. Literal citation matching cannot prove that a source made a claim; acronym/pronoun ambiguity and multi-source year association remain open. Required layers need explicit failure/repair semantics when every candidate is refused. Full channel compositing, portrait/small-screen legibility, real-source calibration, identity-specific design and autonomous source-first channel creation remain unqualified.
+
+No safety gate, paid-outcome uncertainty handling or review requirement was bypassed to make the pilot pass.
+
+## Checkpoint, not release
+
+The final focused tests and TypeScript pass. The final production build has completed; structural audits have no regressions so far. Graphify was refreshed after the source changes (22,304 nodes / 57,624 edges, AST only). Native stat/irregular-axis encodes and the frozen full regression/assembly gate are still running. Preserve those specific processes and completed media; do not rerender or restart them merely because a polling call yields no output. Do not push this checkpoint to main or claim a live improvement until the remaining checks and exact production verification are complete.

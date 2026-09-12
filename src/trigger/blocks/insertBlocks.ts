@@ -23,10 +23,10 @@ import { assertDataStorySourceLedger } from "@/engine/dataStorySourceLedger";
 import {
   assertEvidenceVisualManifestCollection,
   evidenceVisualManifestAllowsNumbers,
-  evidenceVisualManifestBindsNarration,
   evidenceVisualManifestPrompt,
   type EvidenceVisualManifest,
 } from "@/engine/evidenceVisualManifest";
+import { bindDataInsertEvidence, type DataInsertEvidenceBindings, type BoundDataInsertPresentation } from "@/engine/dataInsertEvidence";
 import { join } from "node:path";
 import { claudeJson, hasAnthropicKey, retryOnUnusableOutput } from "@/lib/anthropic";
 import { makeRunTempDir, readBytes } from "@/lib/files";
@@ -35,6 +35,7 @@ import { renderDataInsert } from "@/lib/remotionRender";
 import { boundedInteger } from "@/engine/boundedNumber";
 import { studioPostproductionRecipeProjectionFromUnknown } from "@/engine/studioAssetLibrary";
 import { numericMentions } from "@/lib/numericClaims";
+import { sourceCitationOccurs } from "@/lib/sourceCitation";
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 
 const KINDS = ["big_stat", "line_chart", "bar_compare", "annotated_line", "lower_third"] as const;
@@ -57,6 +58,7 @@ export interface InsertPlanItem {
   anchorValues?: (number | string)[];
   /** Required for factual chart data: selects a reviewed value/source manifest. */
   evidenceVisualId?: string;
+  evidenceBindings?: DataInsertEvidenceBindings;
 }
 
 /**
@@ -66,14 +68,7 @@ export interface InsertPlanItem {
  * appear in the sentence.
  */
 export function sourceSpoken(citation: string, sentence: string): boolean {
-  const s = sentence.toLowerCase();
-  const words = citation
-    .toLowerCase()
-    .replace(/^source:?\s*/i, "")
-    .split(/[^a-z0-9&]+/)
-    .filter((w) => w.length > 3 && !/^(19|20)\d\d$/.test(w));
-  if (words.length === 0) return false;
-  return words.every((w) => s.includes(w));
+  return sourceCitationOccurs(citation, sentence);
 }
 
 /**
@@ -367,23 +362,31 @@ export const visualInserts: Block = {
     const accent = palette.length >= 2 ? palette[palette.length - 2] : undefined;
     const factualManifestDocs = strictDataStory
       ? (evidenceVisualManifests.length
-        ? `\nREVIEWED FACTUAL VISUAL MANIFESTS — use only one of these for a chart/bar/line and return its evidenceVisualId. Every rendered number, unit-bearing point, and numeric label must be copied from that manifest; do not interpolate a series.\n${evidenceVisualManifests.map(evidenceVisualManifestPrompt).join("\n")}`
+        ? `\nREVIEWED FACTUAL VISUAL MANIFESTS — return evidenceVisualId and evidenceBindings {anchorId,valueIds,xValueIds?}. Select reviewed IDs, not rewritten numbers. The module copies displays, units, categories and attribution directly. For big_stat select one metric; bars select 2-4 labeled metrics; lines select >=2 y/series values in reviewed order, all with the same unit. Optional xValueIds select reviewed x-role endpoints or every point. Omit value/label/series/bars/xLabels: these are derived, and contradictory copies are rejected. Do not interpolate a factual series. All selected values must belong to the selected spoken anchor.\n${evidenceVisualManifests.map(evidenceVisualManifestPrompt).join("\n")}`
         : "\nNO REVIEWED FACTUAL VISUAL MANIFESTS are available. You may plan only lower_third source badges; do not plan charts, bars, lines, or big-stat graphics.")
       : "";
 
     // ---- Insert Director: plan which numbers become which visual ----
     const kindDocs = [
       enabled.includes("big_stat")
-        ? `"big_stat": one hero number counting up. Fields: value (the display string EXACTLY as meaningful, e.g. "$534,000" or "87%"), label (<=8 words).`
+        ? (strictDataStory
+          ? `"big_stat": select one reviewed metric/y/series valueId. The module supplies its exact display and label; do not supply value or label.`
+          : `"big_stat": one hero number counting up. Fields: value (the display string EXACTLY as meaningful, e.g. "$534,000" or "87%"), label (<=8 words).`)
         : "",
       enabled.includes("line_chart")
-        ? `"line_chart": an animated curve between TWO SPOKEN anchor values (growth/decline over time). Fields: series (8-16 numbers, a faithful smooth shape from the first spoken anchor to the last — compounding curves bow upward), xLabels ([startLabel, endLabel], e.g. ["2016","2026"]), title.`
+        ? (strictDataStory
+          ? `"line_chart": select at least two same-unit reviewed y/series valueIds in reviewed order. Do not supply series or xLabels. The module derives x coordinates from each value's reviewed x link. Optional xValueIds must match those linked endpoints or every point; without reviewed links OMIT xValueIds entirely. A duration is not a pair of endpoints. Numeric title phrases must retain the exact reviewed displays; do not rewrite their units.`
+          : `"line_chart": an animated curve between TWO SPOKEN anchor values (growth/decline over time). Fields: series (8-16 numbers, a faithful smooth shape from the first spoken anchor to the last — compounding curves bow upward), xLabels ([startLabel, endLabel], e.g. ["2016","2026"]), title.`)
         : "",
       enabled.includes("bar_compare")
-        ? `"bar_compare": 2-4 labeled bars comparing SPOKEN quantities. Fields: bars [{label, value, display?}].`
+        ? (strictDataStory
+          ? `"bar_compare": select 2-4 same-unit reviewed metric/y/series valueIds that have category labels. The module supplies the bars, labels and exact displays. Do not supply bars.`
+          : `"bar_compare": 2-4 labeled bars comparing SPOKEN quantities. Fields: bars [{label, value, display?}].`)
         : "",
       enabled.includes("annotated_line")
-        ? `"annotated_line": a line_chart with up to 4 labeled EVENT markers (crashes, policy moments) — only for sentences narrating a historical arc. Fields: series, xLabels, title, events [{idx (index into series), label (<=4 words)}]. Event labels must reference things the sentence actually says.`
+        ? (strictDataStory
+          ? `"annotated_line": the same reviewed-ID contract as line_chart, plus events [{idx,label}] only where that selected point has an exact reviewed label. Never invent an event or rewrite its label.`
+          : `"annotated_line": a line_chart with up to 4 labeled EVENT markers (crashes, policy moments) — only for sentences narrating a historical arc. Fields: series, xLabels, title, events [{idx (index into series), label (<=4 words)}]. Event labels must reference things the sentence actually says.`)
         : "",
       enabled.includes("lower_third")
         ? `"lower_third": a small SOURCE-CITATION badge (no chart) shown while a stat is attributed. ONLY when the sentence NAMES the source ("according to the Federal Reserve…"). Fields: value = the citation line exactly as spoken-ish, e.g. "Federal Reserve, 2023"; title = "Source". The named institution MUST appear verbatim in the sentence.`
@@ -414,7 +417,7 @@ export const visualInserts: Block = {
           `- One insert per sentence; spread them across the video.\n` +
           `Return STRICT JSON {"inserts":[{"sentenceIdx":number,"endSentenceIdx":number,"kind":string,"title":string,"value"?:string,` +
           `"label"?:string,"series"?:number[],"xLabels"?:string[],"bars"?:[{"label":string,"value":number,"display"?:string}],` +
-          `"anchorValues":number[]|string[],"evidenceVisualId"?:string}]}.`,
+          `"anchorValues":number[]|string[],"evidenceVisualId"?:string,"evidenceBindings"?:{"anchorId":string,"valueIds":string[],"xValueIds"?:string[]}}]}.`,
         // Reasoning route: the ceiling must cover the thinking AND the list.
         // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
         // ranking failed at 1500 and passed at 2500. See
@@ -441,7 +444,12 @@ export const visualInserts: Block = {
     // unspokenRenderedField.
     const narrationText = timings.map((timing) => timing.text).join(" ");
     const valid: InsertPlanItem[] = [];
-    for (const it of plan) {
+    const boundPresentations = new Map<InsertPlanItem, BoundDataInsertPresentation>();
+    for (let it of plan) {
+      if (!it || typeof it !== "object" || !Number.isInteger(it.sentenceIdx) || (it.title !== undefined && typeof it.title !== "string")) {
+        ctx.log("visual_inserts: DROPPED malformed entry — sentenceIdx must be an integer and title must be text");
+        continue;
+      }
       const t = timings[it.sentenceIdx];
       if (!t) continue;
       if (!enabled.includes(it.kind)) continue;
@@ -465,10 +473,13 @@ export const visualInserts: Block = {
           ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — factual data visual has no reviewed chart manifest`);
           continue;
         }
-        if (!evidenceVisualManifestBindsNarration(evidenceManifest, t.text)) {
-          ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — selected manifest is not bound to this narration anchor`);
+        const bound = bindDataInsertEvidence(evidenceManifest, it, t);
+        if (!bound.ok) {
+          ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — ${bound.issue}`);
           continue;
         }
+        it = { ...it, ...bound.presentation };
+        boundPresentations.set(it, bound.presentation);
         if (!evidenceVisualManifestAllowsNumbers(evidenceManifest, numericPlanValues(it))) {
           ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — rendered numbers are not all present in the reviewed manifest`);
           continue;
@@ -585,6 +596,10 @@ export const visualInserts: Block = {
           xLabels: it.xLabels,
           bars: it.bars,
           events: it.events,
+          seriesDisplays: boundPresentations.get(it)?.seriesDisplays,
+          seriesX: boundPresentations.get(it)?.seriesX,
+          seriesUnit: boundPresentations.get(it)?.seriesUnit,
+          sourceAttribution: boundPresentations.get(it)?.sourceAttribution,
           palette,
           accent,
           presentation: studioMotionGraphicsRecipe.dataInsertPreset ?? undefined,

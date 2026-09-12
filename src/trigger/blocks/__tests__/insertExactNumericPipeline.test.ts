@@ -36,7 +36,7 @@ async function main() {
     plan = [{ sentenceIdx: 0, kind: 'big_stat', ...item } as InsertPlanItem];
     const logs: string[] = [];
     const result = await visualInserts.run({ ownerId: 'fixture-owner', runId: 'fixture-run', channelId: 'fixture-channel',
-      keyPrefix: 'fixture/insert-exact/', params: { insertTypes: ['big_stat', 'line_chart', 'bar_compare'], maxInserts: 1, minGapSec: 0 },
+      keyPrefix: 'fixture/insert-exact/', params: { insertTypes: ['big_stat', 'line_chart', 'bar_compare', 'lower_third'], maxInserts: 1, minGapSec: 0 },
       store: { sentenceTimings: [{ text: sentence, start: 0, end: 12 }], topic: 'Retained numeric evidence', niche: 'educational', palette: ['#13252d', '#58c9b0', '#eef5f4'] },
       log: (message: string) => logs.push(message),
     } as never);
@@ -88,6 +88,14 @@ async function main() {
   await run('There were one hundred records.', { kind: 'line_chart', series: [50, 900], anchorValues: [100] }, false);
   await run('Output grew from two to five units over five years.', { kind: 'line_chart', series: [2, 3, 5], anchorValues: [2, 5], xLabels: ['Year 0', 'Year 5'] }, true);
   await run('The two changes were minus two and five percent.', { kind: 'bar_compare', bars: [{ label: 'Before', value: -2, display: '-2%' }, { label: 'After', value: 5, display: '5%' }], anchorValues: [-2, 5] }, true);
+  for (const [citation, sentence, expected] of [
+    ['IMF', 'According to the IMF, output rose by two percent.', true],
+    ['UN', 'According to the U.N., output rose by two percent.', true],
+    ['G7', 'According to the G7, output rose by two percent.', true],
+    ['World Bank', 'The world of bankers reported two percent.', false],
+    ['IMF, 2023', 'According to the IMF in 2023, output rose by two percent.', true],
+    ['IMF, 2023', 'According to the IMF in 2024, output rose by two percent.', false],
+  ] as const) await run(sentence, { kind: 'lower_third', value: citation, title: 'Source' }, expected);
   const { OpenRouterGenerationOutcomeUnknownError } = await import('../../../lib/openRouter');
   const { classifyExecutionError } = await import('../../../engine/executionErrors');
   plannerError = new OpenRouterGenerationOutcomeUnknownError('HTTP 503 after paid dispatch', { status: 503 });
@@ -99,7 +107,7 @@ async function main() {
   assert.equal(prompts.length, 1);
   assert.equal(rendered.length, 0);
   assert.equal(stored.length, 0);
-  assert.equal(numericCases, 33);
-  console.log(`INSERT EXACT NUMERIC PIPELINE PASS — ${numericCases} real-block numeric cases plus ambiguous-paid-outcome preservation; retained spoken-source rows, value/anchor mutations, sign, magnitude aliases, zero policy, namespace and timing`);
+  assert.equal(numericCases, 39);
+  console.log(`INSERT EXACT NUMERIC PIPELINE PASS — ${numericCases} real-block numeric/citation cases plus ambiguous-paid-outcome preservation; retained spoken-source rows, value/anchor mutations, sign, magnitude aliases, zero policy, namespace and timing`);
 }
 main().finally(() => { loader._load = original; }).catch((error) => { console.error(error); process.exitCode = 1; });

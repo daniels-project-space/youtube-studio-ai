@@ -31,6 +31,12 @@ export type DataInsertProps = {
   label?: string;
   /** line_chart: the series to draw (2-32 points). */
   series?: number[];
+  /** Exact reviewed point displays; never reconstructed from geometry. */
+  seriesDisplays?: string[];
+  /** Reviewed x coordinates paired with every series point. */
+  seriesX?: number[];
+  seriesUnit?: string;
+  sourceAttribution?: string;
   /** line_chart: x-axis end labels, e.g. ["2016", "2026"]. */
   xLabels?: string[];
   /** bar_compare: 2-4 bars. display defaults to the raw value. */
@@ -72,6 +78,10 @@ export const DataInsert: React.FC<DataInsertProps> = ({
   value,
   label,
   series,
+  seriesDisplays,
+  seriesX,
+  seriesUnit,
+  sourceAttribution,
   xLabels,
   bars,
   events,
@@ -177,7 +187,10 @@ export const DataInsert: React.FC<DataInsertProps> = ({
       const min = Math.min(...pts);
       const max = Math.max(...pts);
       const span = max - min || 1;
-      const px = (i: number) => (i / (pts.length - 1)) * W;
+      const hasX = seriesX?.length === pts.length && seriesX.every(Number.isFinite) && seriesX[seriesX.length - 1] !== seriesX[0];
+      const px = (i: number) => hasX
+        ? ((seriesX![i] - seriesX![0]) / (seriesX![seriesX!.length - 1] - seriesX![0])) * W
+        : (i / (pts.length - 1)) * W;
       const py = (v: number) => H - ((v - min) / span) * (H - 24) - 12;
       const dAttr = pts.map((v, i) => `${i === 0 ? "M" : "L"} ${px(i).toFixed(1)} ${py(v).toFixed(1)}`).join(" ");
       // Draw-on via dash interpolation; generous length upper bound.
@@ -186,6 +199,13 @@ export const DataInsert: React.FC<DataInsertProps> = ({
       const endIdx = Math.max(0, Math.min(pts.length - 1, Math.round(dataT * (pts.length - 1))));
       body = (
         <div>
+          {seriesDisplays?.length === pts.length ? (
+            <div style={{ display: "flex", justifyContent: "space-between", gap: 24, width: W, marginBottom: 18, color: INK, fontSize: Math.round(width * 0.018), fontWeight: 600 }}>
+              <span>{seriesDisplays[0]}</span>
+              <span style={{ fontSize: Math.round(width * 0.014), fontWeight: 400 }}>{seriesUnit}</span>
+              <span>{seriesDisplays[seriesDisplays.length - 1]}</span>
+            </div>
+          ) : null}
           <svg width={W} height={H} style={{ overflow: "visible" }}>
             {/* baseline + axis */}
             <line x1={0} y1={H} x2={W} y2={H} stroke={INK} strokeOpacity={0.35} strokeWidth={2} />
@@ -312,6 +332,11 @@ export const DataInsert: React.FC<DataInsertProps> = ({
             </div>
           ) : null}
           {body}
+          {sourceAttribution ? (
+            <div style={{ maxWidth: W, margin: "24px auto 0", color: INK, fontSize: Math.round(width * 0.014), lineHeight: 1.4, textAlign: "center", overflowWrap: "anywhere" }}>
+              {sourceAttribution}
+            </div>
+          ) : null}
         </div>
       </AbsoluteFill>
     </AbsoluteFill>

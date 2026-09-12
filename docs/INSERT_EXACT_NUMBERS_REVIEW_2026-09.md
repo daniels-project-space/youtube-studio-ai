@@ -48,6 +48,8 @@ The first full suite passed 681/682 tests and exposed a real disk-cache accounti
 
 Proof manifest: `test-fixtures/insert-exact-numbers/evidence.json`. Artifact hashes bind the physical renders to the reviewed files. The three clips and composite sheets are retained under its `media/` directory, excluded from Vercel inputs by the existing `test-fixtures/` rule. The manifest paths are repository-relative. These are diagnostic evidence, not production channel exports or an automated vision-service certificate; unlike the missing old `/tmp` corpus, their bytes survive this workstation's temporary files.
 
+**Backend release verified:** the same CI `34690403868` completed successfully. Deployment job `103546057152` confirms canonical `astute-camel-689` ready at **11:25:38 UTC** and Trigger **20260912.22** deployed at **11:27:36 UTC** on 12 September. This closes the preceding runtime verification, not the broader module goal. The [new reviewed-meaning handoff](INSERT_EVIDENCE_BINDING_REVIEW_2026-09.md) is a separate change still being validated.
+
 ## Still open for item 61
 
 Recover or transparently rebuild and freeze the real director calibration; compare legitimate and adversarial output in both directions. Extend malformed plan/field validation, exact citation matching (including short names), source/unit/claim association, reviewed-manifest precision beyond its existing numeric ABI, chart-point evidence, planner candidate coverage, identity-specific visual design and complete final-channel compositing. Known malformed director output can still yield a visibly logged empty optional data layer; required-layer semantics need their own repair. No whole-module completion is inferred.

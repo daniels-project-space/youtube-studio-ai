@@ -1,0 +1,122 @@
+{
+  "purpose": "Real planner and block on synthetic reviewed evidence; not source truth or channel qualification",
+  "calls": 1,
+  "transport": [
+    {
+      "request": {
+        "model": "google/gemini-3.7-flash",
+        "messages": [
+          {
+            "role": "user",
+            "content": "You are the channel's MOTION-GRAPHICS DIRECTOR for a YouTube video: \"\".\nThese narration sentences speak numbers (sentenceIdx: text):\n0: According to the Example Statistics Office, output moved from 2% to 4% over 5 years.\n1: According to the Example Statistics Office, there were 77 records.\n2: According to the Example Statistics Office, participation was 9%.\n\nPlan AT MOST 1 on-screen data inserts that make the strongest spoken numbers VISUAL. STRATEGY: place inserts at the moments of maximal persuasion — the thesis-proof number, the comparison that decides the argument, the payoff figure — never at passing mentions. Fewer great inserts beat many weak ones; if the script is data-light, plan fewer or none.\nRELEVANCY WINDOW: for each insert also return endSentenceIdx — the LAST sentence still discussing that data (same as sentenceIdx if one sentence; at most sentenceIdx+4). The visual HOLDS on screen for that whole span so the viewer can actually read it while it is being talked about.\nAvailable kinds:\n\"big_stat\": one hero number counting up. Fields: value (the display string EXACTLY as meaningful, e.g. \"$534,000\" or \"87%\"), label (<=8 words).\n\"line_chart\": an animated curve between TWO SPOKEN anchor values (growth/decline over time). Fields: series (8-16 numbers, a faithful smooth shape from the first spoken anchor to the last — compounding curves bow upward), xLabels ([startLabel, endLabel], e.g. [\"2016\",\"2026\"]), title.\n\"bar_compare\": 2-4 labeled bars comparing SPOKEN quantities. Fields: bars [{label, value, display?}].\n\"annotated_line\": a line_chart with up to 4 labeled EVENT markers (crashes, policy moments) — only for sentences narrating a historical arc. Fields: series, xLabels, title, events [{idx (index into series), label (<=4 words)}]. Event labels must reference things the sentence actually says.\n\n\nREVIEWED FACTUAL VISUAL MANIFESTS — return evidenceVisualId and evidenceBindings {anchorId,valueIds,xValueIds?}. Select reviewed IDs, not rewritten numbers. The module copies displays, units, categories and attribution directly. For big_stat select one metric; bars select 2-4 labeled metrics; lines select >=2 y/series values in reviewed order, all with the same unit. Optional xValueIds select reviewed x-role endpoints or every point. Omit value/label/series/bars/xLabels: these are derived, and contradictory copies are rejected. Do not interpolate a factual series. All selected values must belong to the selected spoken anchor.\n- visual-fixture (chart, data_insert)\n  attribution: Example Statistics Office\n  anchor anchor-output: According to the Example Statistics Office, output moved from 2% to 4% over 5 years.\n  anchor anchor-other: According to the Example Statistics Office, participation was 9%.\n  value value-before: 2% (percent; series; anchor anchor-output; source source-fixture; label Before)\n  value value-after: 4% (percent; series; anchor anchor-output; source source-fixture; label After)\n  value value-years: 5 years (years; x; anchor anchor-output; source source-fixture)\n  value value-other: 9% (percent; series; anchor anchor-other; source source-fixture)HARD RULES:\n- anchorValues: list the EXACT numbers from the chosen sentence that the insert visualizes. You may NOT use numbers that are not spoken in that sentence (inserts are fact-checked against the script).\n- title: <=8 words, no clickbait.\n- One insert per sentence; spread them across the video.\nReturn STRICT JSON {\"inserts\":[{\"sentenceIdx\":number,\"endSentenceIdx\":number,\"kind\":string,\"title\":string,\"value\"?:string,\"label\"?:string,\"series\"?:number[],\"xLabels\"?:string[],\"bars\"?:[{\"label\":string,\"value\":number,\"display\"?:string}],\"anchorValues\":number[]|string[],\"evidenceVisualId\"?:string,\"evidenceBindings\"?:{\"anchorId\":string,\"valueIds\":string[],\"xValueIds\"?:string[]}}]}."
+          }
+        ],
+        "max_tokens": 2500,
+        "temperature": 0.4,
+        "response_format": {
+          "type": "json_object"
+        },
+        "provider": {
+          "only": [
+            "google-ai-studio",
+            "google-vertex"
+          ],
+          "allow_fallbacks": true,
+          "require_parameters": true,
+          "data_collection": "deny"
+        }
+      },
+      "status": 200,
+      "response": {
+        "id": "gen-1789213145-PH9c7RjoXGTUelYmTliP",
+        "object": "chat.completion",
+        "created": 1789213145,
+        "model": "google/gemini-3.7-flash",
+        "provider": "Google AI Studio",
+        "system_fingerprint": null,
+        "service_tier": "default",
+        "choices": [
+          {
+            "index": 0,
+            "logprobs": null,
+            "finish_reason": "stop",
+            "native_finish_reason": "STOP",
+            "message": {
+              "role": "assistant",
+              "content": "{\n  \"inserts\": [\n    {\n      \"sentenceIdx\": 0,\n      \"endSentenceIdx\": 0,\n      \"kind\": \"line_chart\",\n      \"title\": \"Output Growth Over 5 Years\",\n      \"anchorValues\": [\"2%\", \"4%\", \"5 years\"],\n      \"evidenceVisualId\": \"visual-fixture\",\n      \"evidenceBindings\": {\n        \"anchorId\": \"anchor-output\",\n        \"valueIds\": [\"value-before\", \"value-after\"],\n        \"xValueIds\": [\"value-years\"]\n      }\n    }\n  ]\n}",
+              "refusal": null,
+              "reasoning": "**Analyzing Data Points**\n\nI'm focusing on the need for a maximum of one data insertion. I've parsed \"output moved from 2% to 4% over 5 years,\" which appears to be a good candidate for this single insert. Also, sentence \"there were 77 records\" seems like an acceptable candidate. I'm exploring how to frame this data point effectively within the script's constraints, while keeping the other sentence for further analysis.\n\n\n**Revising Chart Options**\n\nI'm now determining the best chart type. I'm considering a \"line_chart\" or \"bar_compare\" to visualize the data, but I'm unsure if I can use a line chart with two valueIds. I need to be sure the manifest adheres to the constraints, especially the ones concerning value IDs and x-values. I'm making sure all selected values connect to the selected spoken anchor.\n\n\n**Confirming Chart Selection**\n\nI've decided a \"line_chart\" is appropriate, as it clearly represents growth over time. I'm confirming value IDs \"value-before\" and \"value-after\" work for the \"lines\" requirement. I'm setting the title \"Output Growth Over 5 Years\". The spoken anchor values are [\"2%\", \"4%\"] as well, so the manifest appears to align with this, so the chart can be provided now.\n\n\n",
+              "reasoning_details": [
+                {
+                  "type": "reasoning.text",
+                  "text": "**Analyzing Data Points**\n\nI'm focusing on the need for a maximum of one data insertion. I've parsed \"output moved from 2% to 4% over 5 years,\" which appears to be a good candidate for this single insert. Also, sentence \"there were 77 records\" seems like an acceptable candidate. I'm exploring how to frame this data point effectively within the script's constraints, while keeping the other sentence for further analysis.\n\n\n**Revising Chart Options**\n\nI'm now determining the best chart type. I'm considering a \"line_chart\" or \"bar_compare\" to visualize the data, but I'm unsure if I can use a line chart with two valueIds. I need to be sure the manifest adheres to the constraints, especially the ones concerning value IDs and x-values. I'm making sure all selected values connect to the selected spoken anchor.\n\n\n**Confirming Chart Selection**\n\nI've decided a \"line_chart\" is appropriate, as it clearly represents growth over time. I'm confirming value IDs \"value-before\" and \"value-after\" work for the \"lines\" requirement. I'm setting the title \"Output Growth Over 5 Years\". The spoken anchor values are [\"2%\", \"4%\"] as well, so the manifest appears to align with this, so the chart can be provided now.\n\n\n",
+                  "format": "google-gemini-v1",
+                  "index": 0
+                }
+              ]
+            }
+          }
+        ],
+        "usage": {
+          "prompt_tokens": 936,
+          "completion_tokens": 1143,
+          "total_tokens": 2079,
+          "cost": 0.00498825,
+          "is_byok": false,
+          "prompt_tokens_details": {
+            "cached_tokens": 0,
+            "cache_write_tokens": 0,
+            "audio_tokens": 0,
+            "video_tokens": 0
+          },
+          "cost_details": {
+            "upstream_inference_cost": 0.00498825,
+            "upstream_inference_prompt_cost": 0.000702,
+            "upstream_inference_completions_cost": 0.00428625
+          },
+          "completion_tokens_details": {
+            "reasoning_tokens": 1054,
+            "image_tokens": 0,
+            "audio_tokens": 0
+          }
+        }
+      },
+      "elapsedMs": 3855
+    }
+  ],
+  "renderInputs": [],
+  "logs": [
+    "openrouter: google/gemini-3.7-flash returned text",
+    "visual_inserts: director planned 1 insert(s) across 3 numeric sentence(s)",
+    "visual_inserts: DROPPED line_chart@0 — missing or malformed evidenceBindings",
+    "visual_inserts: 0 insert(s) planned+rendered from 3 numeric sentences"
+  ],
+  "usage": {
+    "calls": 1,
+    "cacheHits": 0,
+    "inputTokens": 936,
+    "outputTokens": 89,
+    "reasoningTokens": 1054,
+    "cachedInputTokens": 0,
+    "totalTokens": 2079,
+    "costUsd": 0.00498825,
+    "unpricedCalls": 0,
+    "groups": [
+      {
+        "provider": "openrouter",
+        "model": "gemini-3.7-flash",
+        "kind": "text",
+        "calls": 1,
+        "cacheHits": 0,
+        "inputTokens": 936,
+        "outputTokens": 89,
+        "reasoningTokens": 1054,
+        "cachedInputTokens": 0,
+        "totalTokens": 2079,
+        "costUsd": 0.00498825,
+        "unpricedCalls": 0,
+        "unpricedReasons": []
+      }
+    ]
+  }
+}

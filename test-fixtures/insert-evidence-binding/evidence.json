@@ -1,0 +1,78 @@
+{
+  "scope": "Synthetic source packet, actual module arguments and native Remotion VP8/alpha renders. Live-planner-line uses the unchanged accepted OpenRouter plan. Not a real-channel or automated QA-service qualification.",
+  "dimensions": [
+    1920,
+    1080
+  ],
+  "previewBackground": "#33424d diagnostic alpha composite",
+  "framesReviewed": 27,
+  "review": "Independent inspection of all 9 samples in each retained contact sheet: entry/hold/exit, settled figures, source credit, palette and bounds. Coordinate-specific rendering is a separate pending proof.",
+  "artifacts": [
+    {
+      "name": "controlled-line",
+      "file": "test-fixtures/insert-evidence-binding/media/controlled-line.webm",
+      "sheet": "test-fixtures/insert-evidence-binding/media/controlled-line-frames.png",
+      "sha256": "5eca14480530f4db693c46b065211fa726d62fe4b5d5e6d3deb5174d6d59d11c",
+      "durationSec": 13.008,
+      "sampleSeconds": [
+        0,
+        0.5,
+        1,
+        1.6,
+        2.3,
+        6.5,
+        11.966666666666667,
+        12.633333333333333,
+        12.966666666666667
+      ],
+      "verdict": "pass for this diagnostic visual scope",
+      "findings": []
+    },
+    {
+      "name": "controlled-bars",
+      "file": "test-fixtures/insert-evidence-binding/media/controlled-bars.webm",
+      "sheet": "test-fixtures/insert-evidence-binding/media/controlled-bars-frames.png",
+      "sha256": "1639096303aae61217106c3bd5ef4b1ec3c8c289471fc3a3584fafef1eb263ba",
+      "durationSec": 13.008,
+      "sampleSeconds": [
+        0,
+        0.5,
+        1,
+        1.6,
+        2.3,
+        6.5,
+        11.966666666666667,
+        12.633333333333333,
+        12.966666666666667
+      ],
+      "verdict": "pass for this diagnostic visual scope",
+      "findings": []
+    },
+    {
+      "name": "live-planner-line",
+      "file": "test-fixtures/insert-evidence-binding/media/live-planner-line.webm",
+      "sheet": "test-fixtures/insert-evidence-binding/media/live-planner-line-frames.png",
+      "sha256": "25772ceb874f57999fdb0f78ca9534d2fff3bf6317ece8b541a9661ae88e4d5f",
+      "durationSec": 13.008,
+      "sampleSeconds": [
+        0,
+        0.5,
+        1,
+        1.6,
+        2.3,
+        6.5,
+        11.966666666666667,
+        12.633333333333333,
+        12.966666666666667
+      ],
+      "verdict": "pass for this diagnostic visual scope",
+      "findings": []
+    }
+  ],
+  "pending": [
+    "controlled stat encode and review",
+    "linked irregular-x encode and review",
+    "final frozen release gates",
+    "production verification"
+  ]
+}

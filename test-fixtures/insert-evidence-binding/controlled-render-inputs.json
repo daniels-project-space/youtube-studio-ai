@@ -1,0 +1,69 @@
+[
+  {
+    "kind": "line_chart",
+    "title": "Output comparison",
+    "series": [
+      2,
+      4
+    ],
+    "seriesDisplays": [
+      "2%",
+      "4%"
+    ],
+    "seriesUnit": "percent",
+    "sourceAttribution": "Example Statistics Office",
+    "palette": [
+      "#13252d",
+      "#58c9b0",
+      "#eef5f4"
+    ],
+    "accent": "#58c9b0",
+    "outPath": "/tmp/insert-evidence-seam/insert_0.webm",
+    "durationSec": 13,
+    "width": 1920,
+    "height": 1080
+  },
+  {
+    "kind": "bar_compare",
+    "title": "Output comparison",
+    "bars": [
+      {
+        "label": "Before",
+        "value": 2,
+        "display": "2%"
+      },
+      {
+        "label": "After",
+        "value": 4,
+        "display": "4%"
+      }
+    ],
+    "sourceAttribution": "Example Statistics Office",
+    "palette": [
+      "#13252d",
+      "#58c9b0",
+      "#eef5f4"
+    ],
+    "accent": "#58c9b0",
+    "outPath": "/tmp/insert-evidence-seam/insert_0.webm",
+    "durationSec": 13,
+    "width": 1920,
+    "height": 1080
+  },
+  {
+    "kind": "big_stat",
+    "value": "4%",
+    "label": "After",
+    "sourceAttribution": "Example Statistics Office",
+    "palette": [
+      "#13252d",
+      "#58c9b0",
+      "#eef5f4"
+    ],
+    "accent": "#58c9b0",
+    "outPath": "/tmp/insert-evidence-seam/insert_0.webm",
+    "durationSec": 13,
+    "width": 1920,
+    "height": 1080
+  }
+]

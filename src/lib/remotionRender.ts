@@ -210,6 +210,10 @@ export async function renderDataInsert(args: {
   value?: string;
   label?: string;
   series?: number[];
+  seriesDisplays?: string[];
+  seriesX?: number[];
+  seriesUnit?: string;
+  sourceAttribution?: string;
   xLabels?: string[];
   bars?: { label: string; value: number; display?: string }[];
   events?: { idx: number; label: string }[];
@@ -235,6 +239,10 @@ export async function renderDataInsert(args: {
     value: args.value,
     label: args.label,
     series: args.series,
+    seriesDisplays: args.seriesDisplays,
+    seriesX: args.seriesX,
+    seriesUnit: args.seriesUnit,
+    sourceAttribution: args.sourceAttribution,
     xLabels: args.xLabels,
     bars: args.bars,
     events: args.events,

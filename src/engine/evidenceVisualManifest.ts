@@ -64,6 +64,8 @@ export const EvidenceVisualValueSchema = z.object({
   /** Exact human-readable form that must occur in the approved spoken anchor. */
   display: text(96),
   label: text(160).optional(),
+  /** Reviewed observation pairing; never inferred from the order of two arrays. */
+  xValueId: identifier.optional(),
 }).strict();
 export type EvidenceVisualValue = z.infer<typeof EvidenceVisualValueSchema>;
 
@@ -126,6 +128,7 @@ export type EvidenceVisualIssueCode =
   | "missing_required_attribution"
   | "attribution_source_mismatch"
   | "chart_shape_invalid"
+  | "chart_coordinate_mismatch"
   | "geo_shape_invalid"
   | "scene_target_missing"
   | "scene_target_mismatch"
@@ -222,6 +225,13 @@ export function evaluateEvidenceVisualManifest(
     }
     if (!containsVerbatim(anchor.spokenText, visualValue.display)) {
       issues.push({ code: "value_not_spoken", message: `value ${visualValue.id} display is absent from its narration anchor` });
+    }
+    if (visualValue.xValueId) {
+      const x = manifest.values.find((candidate) => candidate.id === visualValue.xValueId);
+      if (!["series", "y"].includes(visualValue.role) || !x || x.role !== "x" ||
+          x.sourceId !== visualValue.sourceId || x.narrationAnchorId !== visualValue.narrationAnchorId) {
+        issues.push({ code: "chart_coordinate_mismatch", message: `value ${visualValue.id} has no matching reviewed x observation` });
+      }
     }
   }
 
@@ -326,7 +336,7 @@ export function evidenceVisualManifestPrompt(manifest: EvidenceVisualManifest): 
     `- ${manifest.id} (${manifest.visualKind}, ${manifest.surface})`,
     `  attribution: ${manifest.attribution.visibleText}`,
     ...manifest.narrationAnchors.map((anchor) => `  anchor ${anchor.id}: ${anchor.spokenText}`),
-    ...manifest.values.map((item) => `  value ${item.id}: ${item.display} (${item.unit}; ${item.role})`),
+    ...manifest.values.map((item) => `  value ${item.id}: ${item.display} (${item.unit}; ${item.role}; anchor ${item.narrationAnchorId}; source ${item.sourceId}${item.label ? `; label ${item.label}` : ""}${item.xValueId ? `; x ${item.xValueId}` : ""})`),
   ].join("\n");
 }
 

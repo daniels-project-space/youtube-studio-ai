@@ -1,0 +1,26 @@
+[
+  {
+    "kind": "line_chart",
+    "title": "Output Over 5 Years",
+    "series": [
+      2,
+      4
+    ],
+    "seriesDisplays": [
+      "2%",
+      "4%"
+    ],
+    "seriesUnit": "percent",
+    "sourceAttribution": "Example Statistics Office",
+    "palette": [
+      "#13252d",
+      "#58c9b0",
+      "#eef5f4"
+    ],
+    "accent": "#58c9b0",
+    "outPath": "/tmp/insert-binding-planner-separated-20260912/insert_0.webm",
+    "durationSec": 13,
+    "width": 1920,
+    "height": 1080
+  }
+]

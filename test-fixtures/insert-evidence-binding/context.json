@@ -1,0 +1,175 @@
+{
+  "ownerId": "fixture-owner",
+  "runId": "fixture-binding",
+  "channelId": "fixture-channel",
+  "keyPrefix": "fixture/evidence/",
+  "params": {
+    "insertTypes": [
+      "big_stat",
+      "bar_compare",
+      "line_chart",
+      "annotated_line"
+    ],
+    "maxInserts": 1,
+    "minGapSec": 0,
+    "dataStoryContract": "source-attributed-data-story/v1",
+    "requireNamedSource": true,
+    "requireSpokenNumericAnchor": true
+  },
+  "store": {
+    "sentenceTimings": [
+      {
+        "text": "According to the Example Statistics Office, output moved from 2% to 4% over 5 years.",
+        "start": 0,
+        "end": 12
+      },
+      {
+        "text": "According to the Example Statistics Office, there were 77 records.",
+        "start": 12,
+        "end": 20
+      },
+      {
+        "text": "According to the Example Statistics Office, participation was 9%.",
+        "start": 20,
+        "end": 30
+      }
+    ],
+    "dataStorySourceLedger": {
+      "version": "data-story-source-ledger/v1",
+      "topic": "Synthetic contract test",
+      "sources": [
+        {
+          "id": "source-fixture",
+          "name": "Example Statistics Office",
+          "url": "https://example.org/statistics",
+          "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ],
+      "claims": [
+        {
+          "id": "output",
+          "sourceId": "source-fixture",
+          "numericAnchor": "2%",
+          "context": "Output comparison"
+        },
+        {
+          "id": "records",
+          "sourceId": "source-fixture",
+          "numericAnchor": "77",
+          "context": "Record count"
+        },
+        {
+          "id": "participation",
+          "sourceId": "source-fixture",
+          "numericAnchor": "9%",
+          "context": "Participation rate"
+        }
+      ],
+      "review": {
+        "decision": "approved",
+        "reviewerId": "test-reviewer",
+        "reviewId": "test-ledger",
+        "reviewedAt": "2026-09-12T11:39:03.212Z",
+        "reviewedLedgerFingerprint": "31335d842e7c2909b0a9a7a74248d92f872f231023c1a480750cc2b6113769ae"
+      }
+    },
+    "evidenceVisualManifests": [
+      {
+        "version": "evidence-visual-manifest/v1",
+        "id": "visual-fixture",
+        "visualKind": "chart",
+        "surface": "data_insert",
+        "sources": [
+          {
+            "id": "source-fixture",
+            "name": "Example Statistics Office",
+            "url": "https://example.org/statistics",
+            "snapshotSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+          }
+        ],
+        "narrationAnchors": [
+          {
+            "id": "anchor-output",
+            "sentenceId": "sentence-output",
+            "spokenText": "According to the Example Statistics Office, output moved from 2% to 4% over 5 years.",
+            "startSec": 0,
+            "endSec": 12,
+            "requiredAttribution": "Example Statistics Office",
+            "sourceIds": [
+              "source-fixture"
+            ]
+          },
+          {
+            "id": "anchor-other",
+            "sentenceId": "sentence-other",
+            "spokenText": "According to the Example Statistics Office, participation was 9%.",
+            "startSec": 20,
+            "endSec": 30,
+            "requiredAttribution": "Example Statistics Office",
+            "sourceIds": [
+              "source-fixture"
+            ]
+          }
+        ],
+        "values": [
+          {
+            "id": "value-before",
+            "role": "series",
+            "value": 2,
+            "display": "2%",
+            "unit": "percent",
+            "label": "Before",
+            "sourceId": "source-fixture",
+            "narrationAnchorId": "anchor-output"
+          },
+          {
+            "id": "value-after",
+            "role": "series",
+            "value": 4,
+            "display": "4%",
+            "unit": "percent",
+            "label": "After",
+            "sourceId": "source-fixture",
+            "narrationAnchorId": "anchor-output"
+          },
+          {
+            "id": "value-years",
+            "role": "x",
+            "value": 5,
+            "display": "5 years",
+            "unit": "years",
+            "sourceId": "source-fixture",
+            "narrationAnchorId": "anchor-output"
+          },
+          {
+            "id": "value-other",
+            "role": "series",
+            "value": 9,
+            "display": "9%",
+            "unit": "percent",
+            "sourceId": "source-fixture",
+            "narrationAnchorId": "anchor-other"
+          }
+        ],
+        "attribution": {
+          "visibleText": "Example Statistics Office",
+          "sourceIds": [
+            "source-fixture"
+          ]
+        },
+        "review": {
+          "decision": "approved",
+          "reviewerId": "test-reviewer",
+          "reviewId": "test-visual",
+          "reviewedAt": "2026-09-12T11:39:03.221Z",
+          "reviewedManifestFingerprint": "fa8ea2a818db120d5dca4b165f09d738c2995501895fbb5cbf8d9d95e44f98b3"
+        }
+      }
+    ],
+    "palette": [
+      "#13252d",
+      "#58c9b0",
+      "#eef5f4"
+    ]
+  }
+}
