@@ -102,10 +102,22 @@ export function RecentVideos({
           <h2 id="recent-renders-title">Recent renders</h2>
         </div>
         <div className={styles.controls} aria-label="Carousel controls">
-          <button type="button" onClick={() => move(-1)} aria-label="Previous renders" disabled={!scrollable.previous}>
+          <button
+            type="button"
+            onClick={() => move(-1)}
+            aria-label="Previous renders"
+            disabled={!scrollable.previous}
+            title={scrollable.previous ? "Show previous renders" : "Already at the first saved render"}
+          >
             ‹
           </button>
-          <button type="button" onClick={() => move(1)} aria-label="Next renders" disabled={!scrollable.next}>
+          <button
+            type="button"
+            onClick={() => move(1)}
+            aria-label="Next renders"
+            disabled={!scrollable.next}
+            title={scrollable.next ? "Show more recent renders" : "Already at the latest saved render"}
+          >
             ›
           </button>
         </div>

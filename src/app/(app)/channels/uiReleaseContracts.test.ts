@@ -297,6 +297,8 @@ assert.match(auditScript, /studio-ui-seventh-pass-audit\/v4/);
 assert.match(auditScript, /const actionableIssues = controls\.flatMap/);
 assert.match(auditScript, /link-without-destination/);
 assert.match(auditScript, /button-without-label/);
+assert.match(auditScript, /disabled-without-reason/);
+assert.match(auditScript, /disabledReason/);
 assert.match(auditScript, /record\.inventory\?\.actionableIssues\?\.length/);
 assert.match(auditScript, /const blockingFixedIframes = record\.inventory\?\.iframes\?\.filter/);
 assert.match(auditScript, /frame\.position === "fixed"/);

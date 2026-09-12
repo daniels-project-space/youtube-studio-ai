@@ -1813,7 +1813,12 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
         </div>
 
         <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center" }}>
-          <button onClick={save} disabled={busy || !dirty} style={{ ...btn, opacity: busy || !dirty ? 0.5 : 1 }}>
+          <button
+            onClick={save}
+            disabled={busy || !dirty}
+            title={busy ? "Saving channel settings" : dirty ? "Save the changed channel settings" : "No channel settings changes to save"}
+            style={{ ...btn, opacity: busy || !dirty ? 0.5 : 1 }}
+          >
             {busy ? "Saving…" : "Save changes"}
           </button>
           <button onClick={regenerate} disabled={busy || !niche.trim()} style={{

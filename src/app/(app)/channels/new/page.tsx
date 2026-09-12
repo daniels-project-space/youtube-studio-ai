@@ -2041,19 +2041,42 @@ export default function NewChannelWizard() {
 
       {/* nav */}
       <div className={styles.navBar}>
-        <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} style={{ ...btnGhost, opacity: step === 0 ? 0.4 : 1 }}>Back</button>
+        <button
+          onClick={() => setStep((s) => Math.max(0, s - 1))}
+          disabled={step === 0}
+          title={step === 0 ? "Already at the first setup step" : "Return to the previous setup step"}
+          style={{ ...btnGhost, opacity: step === 0 ? 0.4 : 1 }}
+        >Back</button>
         <span>{STEP_META[step]?.label} · {step + 1} of {STEP_META.length}</span>
         {step < 3
-          ? <button onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext} style={{ ...btnPrimary, opacity: canNext ? 1 : 0.5 }}>Next</button>
+          ? <button
+              onClick={() => canNext && setStep((s) => s + 1)}
+              disabled={!canNext}
+              title={canNext ? "Continue to the next setup step" : "Complete the required choices above to continue"}
+              style={{ ...btnPrimary, opacity: canNext ? 1 : 0.5 }}
+            >Next</button>
           : operationsAccess !== "owner"
             ? operationsAccess === "checking"
-              ? <button disabled style={{ ...btnPrimary, opacity: 0.5 }}>Checking owner…</button>
+              ? <button disabled title="Checking owner access before saving" style={{ ...btnPrimary, opacity: 0.5 }}>Checking owner…</button>
               : <a href="/api/operations/authorize" style={btnPrimary}>Verify owner to save</a>
             : supervisedAdmission
-            ? supervisedAdmission.reviewHref
-              ? <Link href={supervisedAdmission.reviewHref} style={btnPrimary}>Open private review desk</Link>
-              : <button disabled style={{ ...btnPrimary, opacity: 0.5 }}>Private review package required</button>
-            : <button onClick={() => void create(Date.now())} disabled={automaticCreateDisabled} style={{ ...btnPrimary, opacity: automaticCreateDisabled ? 0.5 : 1 }}>{pipelinePreview.status === "loading" ? "Resolving route…" : approveSetupSpend ? "Build channel" : "Save channel plan"}</button>}
+              ? supervisedAdmission.reviewHref
+                ? <Link href={supervisedAdmission.reviewHref} style={btnPrimary}>Open private review desk</Link>
+              : <button disabled title="A private review package is required before this action" style={{ ...btnPrimary, opacity: 0.5 }}>Private review package required</button>
+            : <button
+                onClick={() => void create(Date.now())}
+                disabled={automaticCreateDisabled}
+                title={automaticCreateDisabled
+                  ? pipelinePreview.status === "loading"
+                    ? "Wait for the exact pipeline route to finish resolving"
+                    : !programBrief
+                      ? "Complete the channel identity and format choices first"
+                      : !exactAutomaticPreviewReady
+                        ? "The exact production route is not ready yet"
+                        : "Approve external publishing before enabling this action"
+                  : approveSetupSpend ? "Build the channel and start its private quality-control render" : "Save this channel plan without provider spend"}
+                style={{ ...btnPrimary, opacity: automaticCreateDisabled ? 0.5 : 1 }}
+              >{pipelinePreview.status === "loading" ? "Resolving route…" : approveSetupSpend ? "Build channel" : "Save channel plan"}</button>}
       </div>
     </main>
   );

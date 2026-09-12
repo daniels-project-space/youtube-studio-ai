@@ -81,6 +81,9 @@ async function pageInventory(page) {
           tag: element.tagName.toLowerCase(),
           label: text(effectiveTarget) || element.getAttribute("aria-label") || element.getAttribute("placeholder") || "",
           href: element.tagName === "A" ? element.getAttribute("href") : null,
+          title: element.getAttribute("title") || "",
+          ariaDescribedBy: element.getAttribute("aria-describedby") || "",
+          disabledReason: element.getAttribute("data-disabled-reason") || element.getAttribute("title") || "",
           width: Math.round(box.width),
           height: Math.round(box.height),
           effectiveTarget: effectiveTarget === element ? element.tagName.toLowerCase() : effectiveTarget.tagName.toLowerCase(),
@@ -95,6 +98,9 @@ async function pageInventory(page) {
       }
       if (control.tag === "button" && !control.label) {
         return [{ kind: "button-without-label", label: "" }];
+      }
+      if (control.tag === "button" && control.disabled && !control.disabledReason) {
+        return [{ kind: "disabled-without-reason", label: control.label }];
       }
       return [];
     });

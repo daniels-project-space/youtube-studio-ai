@@ -197,6 +197,7 @@ export function LivePipeline({
                   className={styles.stageToggle}
                   onClick={() => setExpanded((current) => current === node.block ? null : node.block)}
                   disabled={!hasDetail}
+                  title={hasDetail ? `Inspect ${blockLabel(node.block)} receipt` : "No receipt details recorded for this stage yet"}
                   aria-expanded={hasDetail ? open : undefined}
                 >
                   <span className={styles.stageTrack} aria-hidden="true">
