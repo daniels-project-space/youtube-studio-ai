@@ -51,6 +51,7 @@
 .catalogHead p { margin: 0; color: var(--asset-muted); font-size: .85rem; line-height: 1.5; }
 .kind { display: block; color: var(--asset-violet); font-size: .75rem; font-weight: 600; line-height: 1.4; }
 .grid { display: grid; grid-template-columns: repeat(auto-fit,minmax(min(100%,22rem),1fr)); align-items: start; gap: 14px; min-width: 0; }
+.catalogGrid { grid-template-columns: repeat(auto-fit,minmax(min(100%,17.5rem),1fr)); gap: 12px; }
 .card { position: relative; display: grid; align-self: start; min-width: 0; align-content: start; gap: 14px; padding: 16px 18px; border: 1px solid #3d344a; border-radius: 16px; background: linear-gradient(140deg,rgba(36,29,49,.8),rgba(14,16,26,.94)); container: asset-card / inline-size; }
 .cardSummary { display: grid; gap: 10px; min-width: 0; cursor: pointer; list-style: none; }
 .cardSummary::-webkit-details-marker { display: none; }

@@ -134,6 +134,8 @@ async function main(): Promise<void> {
   assert.match(api, /activePlanningFamilies/);
   assert.doesNotMatch(styles, /\.orbitField/);
   assert.match(styles, /\.metricRail/);
+  assert.match(styles, /\.catalogGrid/,
+    "read-only catalog entries must have their own dense summary grid");
   assert.match(styles, /min-height: 44px/);
   assert.match(styles, /prefers-reduced-motion: reduce/);
   console.log("studio assets UI contracts passed");

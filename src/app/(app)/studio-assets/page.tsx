@@ -716,7 +716,7 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
           </div>
           <p>Unavailable assets show their missing requirements.</p>
         </div>
-        <div className={styles.grid}>
+        <div className={`${styles.grid} ${styles.catalogGrid}`}>
           {curatedLtxCatalog.map((candidate) => (
             <details className={styles.card} key={candidate.id}>
               <summary className={styles.cardSummary}>
@@ -759,7 +759,7 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
           </div>
           <p>Profiles bind visual plans and continuity checks.</p>
         </div>
-        <div className={styles.grid}>
+        <div className={`${styles.grid} ${styles.catalogGrid}`}>
           {visualTreatmentCatalog.map((treatment) => (
             <details className={styles.card} key={treatment.key}>
               <summary className={styles.cardSummary}>
