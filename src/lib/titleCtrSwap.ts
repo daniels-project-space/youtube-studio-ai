@@ -117,9 +117,10 @@ export const DEFAULT_SWAP_POLICY: SwapPolicy = {
   medianRatio: 0.85,
 };
 
-export interface SwapDecision {
+/** A candidate for a desktop Studio native title test; never an API rename. */
+export interface NativeTitleTestProposal {
   videoId: string;
-  action: "swap" | "hold";
+  action: "propose_native_test" | "hold";
   reason: string;
   from?: string;
   to?: string;
@@ -140,19 +141,21 @@ export function channelMedianCtr(videos: TitleCandidateStats[]): number | null {
 }
 
 /**
- * Which videos should have their title swapped for the stored alternate.
+ * Which videos deserve a native Studio title-test proposal for the stored
+ * alternate. This function must never express a sequential metadata rewrite
+ * as an available action.
  *
  * Every rejection carries its reason. A loop that silently declines to act is
  * indistinguishable from one that is broken, which is how the original
  * `titleAlternate` field went unread for so long without anyone noticing.
  */
-export function planTitleSwaps(
+export function planNativeTitleTestProposals(
   videos: TitleCandidateStats[],
   now: number,
   policy: SwapPolicy = DEFAULT_SWAP_POLICY,
-): SwapDecision[] {
+): NativeTitleTestProposal[] {
   const median = channelMedianCtr(videos);
-  return videos.map((video): SwapDecision => {
+  return videos.map((video): NativeTitleTestProposal => {
     const base = { videoId: video.videoId, channelMedianCtr: median ?? undefined };
     if (video.swappedAt) {
       return { ...base, action: "hold", reason: "already swapped once; a second swap would confound the test" };
@@ -182,7 +185,7 @@ export function planTitleSwaps(
     }
     return {
       ...base,
-      action: "swap",
+      action: "propose_native_test",
       reason: `CTR ${video.ctr!.toFixed(1)}% is below ${(median * policy.medianRatio).toFixed(1)}% (median ${median.toFixed(1)}%) over ${video.thumbnailImpressions} impressions`,
       from: video.title,
       to: video.titleAlternate.trim(),
@@ -192,55 +195,71 @@ export function planTitleSwaps(
   });
 }
 
-export interface SwapOutcome {
+export interface NativeTitleTestOutcome {
   videoId: string;
   verdict: "alternate_won" | "original_won" | "inconclusive" | "not_experiment";
   detail: string;
 }
 
 /**
- * Did the swap earn its place?
+ * Admit a result copied from YouTube's native title/thumbnail experiment.
  *
- * Without this the loop would keep swapping and never learn. `inconclusive` is
- * a real answer: a small difference over a modest sample is not a result, and
- * calling it one is how a feedback loop starts amplifying noise.
+ * Ordinary Analytics API snapshots have a single video-level CTR and cannot
+ * establish an A/B winner. A native result needs a durable platform receipt,
+ * both variant watch-time-share values, and a verdict consistent with those
+ * values. There is deliberately no integration caller yet; this fails closed
+ * until an actual Studio-result ingestion surface exists.
  */
-export function judgeSwapOutcome(args: {
+export function admitNativeTitleTestOutcome(args: {
   videoId: string;
-  baselineCtr: number;
-  postSwapCtr: number | null;
-  postSwapImpressions: number | null;
-  policy?: SwapPolicy;
-}): SwapOutcome {
-  const policy = args.policy ?? DEFAULT_SWAP_POLICY;
-  if (typeof args.postSwapCtr !== "number" || (args.postSwapImpressions ?? 0) < policy.minImpressions) {
+  platformReceiptId?: string | null;
+  originalWatchTimeShare?: number | null;
+  alternateWatchTimeShare?: number | null;
+  platformVerdict?: "alternate_won" | "original_won" | "inconclusive" | null;
+}): NativeTitleTestOutcome {
+  const original = args.originalWatchTimeShare;
+  const alternate = args.alternateWatchTimeShare;
+  const platformVerdict = args.platformVerdict;
+  if (
+    !args.platformReceiptId?.trim() ||
+    !Number.isFinite(original) ||
+    !Number.isFinite(alternate) ||
+    original! < 0 || original! > 1 || alternate! < 0 || alternate! > 1 ||
+    !platformVerdict
+  ) {
     return {
       videoId: args.videoId,
-      verdict: "inconclusive",
-      detail: `only ${args.postSwapImpressions ?? 0} impressions since the swap`,
+      verdict: "not_experiment",
+      detail: "native test requires a platform receipt, two finite watch-time-share values, and its recorded verdict",
     };
   }
-  const delta = args.postSwapCtr - args.baselineCtr;
-  // A tenth of a percentage point is within the drift of any week's traffic mix.
-  if (Math.abs(delta) < 0.3) {
+  const expected = alternate! > original!
+    ? "alternate_won"
+    : original! > alternate!
+      ? "original_won"
+      : "inconclusive";
+  if (platformVerdict !== expected) {
     return {
       videoId: args.videoId,
-      verdict: "inconclusive",
-      detail: `${delta >= 0 ? "+" : ""}${delta.toFixed(2)}pp is inside normal drift`,
+      verdict: "not_experiment",
+      detail: `platform verdict ${platformVerdict} conflicts with watch-time-share evidence (${original!.toFixed(4)} original, ${alternate!.toFixed(4)} alternate)`,
     };
   }
-  return delta > 0
-    ? { videoId: args.videoId, verdict: "alternate_won", detail: `+${delta.toFixed(2)}pp CTR after the swap` }
-    : { videoId: args.videoId, verdict: "original_won", detail: `${delta.toFixed(2)}pp CTR after the swap` };
+  return {
+    videoId: args.videoId,
+    verdict: platformVerdict,
+    detail: `native receipt ${args.platformReceiptId.trim()} admits ${platformVerdict} from watch-time share (${original!.toFixed(4)} original, ${alternate!.toFixed(4)} alternate)`,
+  };
 }
 
 /**
  * Seal a historic sequential swap as non-experimental before it can be used by
- * a learning loop. This is intentionally separate from `judgeSwapOutcome`:
- * that helper remains useful for a future native-test ingestion that supplies
- * compatible, per-variant observations, while old CTR snapshots never do.
+ * a learning loop. This is intentionally separate from
+ * `admitNativeTitleTestOutcome`: that helper requires a future native-test
+ * ingestion to supply compatible, per-variant watch-time-share evidence,
+ * while old CTR snapshots never do.
  */
-export function rejectSequentialTitleSwap(videoId: string): SwapOutcome {
+export function rejectSequentialTitleSwap(videoId: string): NativeTitleTestOutcome {
   return {
     videoId,
     verdict: "not_experiment",

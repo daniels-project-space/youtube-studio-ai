@@ -21,6 +21,7 @@ The prior worker called `videos.update` to replace a weak-CTR title with one sto
 3. Existing historical swap receipts are sealed as `not_experiment` with a reason rather than labeled `alternate_won` or `original_won`. No historical sequential result can train the package selector.
 4. The performance-ledger type now records the distinction between `legacy_sequential` and a future `native_ab` receipt. A native result must include the platform verdict and per-variant watch-time evidence before it can affect title learning.
 5. The legacy `contentExperiments` table is now stamped `single_variant_observation` for an ordinary published package. The learning refresh records that as creative context only and refuses to attach ordinary Analytics snapshots to a future `youtube_native_ab` row.
+6. The proposal type itself now says `propose_native_test`, not `swap`; the old CTR-delta verdict helper is replaced by an uncalled fail-closed native-result admission that requires a platform receipt and two consistent watch-time-share values. This does not create an ingestion connector.
 
 ## Verification
 
@@ -28,6 +29,7 @@ The prior worker called `videos.update` to replace a weak-CTR title with one sto
 - `pnpm exec tsx src/lib/__tests__/titleSwapAttribution.test.ts` — passed.
 - `pnpm exec tsx src/lib/__tests__/contentExperimentMeasurement.test.ts` — passed.
 - `pnpm exec tsx src/lib/__tests__/contentExperimentMeasurementWiring.test.ts` — passed.
+- `pnpm exec tsx src/lib/__tests__/titleNativeTestProposalWiring.test.ts` — passed.
 - `pnpm exec tsc --noEmit --pretty false` — passed.
 
 ## Still deliberately open

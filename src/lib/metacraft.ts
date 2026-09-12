@@ -784,7 +784,7 @@ export interface CraftedMetadata {
   title: string;
   description: string;
   tags: string[];
-  /** Runner-up title — stored for the CTR-swap learning loop. */
+  /** Runner-up title — a future native-test candidate, never an auto-swap instruction. */
   titleAlternate: string;
   /** Comment-seeding question for the upload block to pin. */
   pinnedComment: string;
@@ -1120,18 +1120,16 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             title: survivors[ranking.idx].title,
           })));
           best = ranked[0].idx!;
-          // The runner-up is the CTR swap's only experiment. It is deliberately
-          // drawn from the SAME >=7 gate as the winner — swapping in a title the
-          // judge rejected would trade a measured problem for an unmeasured one.
+          // The runner-up is eligible only as a future native-test candidate.
+          // It is deliberately drawn from the SAME >=7 gate as the winner — a
+          // Studio comparison must not introduce a title the judge rejected.
           // But when only one candidate clears, there is no alternate at all and
-          // the swap loop simply cannot run for that video. Measured across four
-          // real channels that was 2 of 4, so say it rather than leaving the
-          // downstream loop looking broken.
+          // no native test can be proposed for that video.
           runner = distinctRanked[1]?.idx ?? -1;
           if (runner < 0) {
             a.log?.(
               `metacraft: only ${distinctRanked.length} distinct candidate cleared the judge's bar — no alternate title, ` +
-              `so the CTR swap has nothing to test for this video`,
+              `so no native title test can be proposed for this video`,
             );
           }
           score = ranked[0].clickScore ?? null;

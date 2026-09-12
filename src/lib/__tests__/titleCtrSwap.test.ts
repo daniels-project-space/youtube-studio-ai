@@ -1,17 +1,15 @@
 /**
- * The swap loop decides to rename PUBLISHED videos, so its rule has to be right
- * before anything is wired to the YouTube API. These cases are the ones where a
- * naive implementation does damage: acting on noise, acting during the
- * subscriber surge, judging against an absolute threshold instead of the
- * channel, and calling drift a result.
+ * The native-test proposal loop identifies published videos worth comparing in
+ * desktop YouTube Studio. These cases prevent it from acting on noise or
+ * mistaking an ordinary sequential CTR delta for a test verdict.
  */
 import assert from "node:assert/strict";
 
 import {
   DEFAULT_SWAP_POLICY,
+  admitNativeTitleTestOutcome,
   channelMedianCtr,
-  judgeSwapOutcome,
-  planTitleSwaps,
+  planNativeTitleTestProposals,
   rejectSequentialTitleSwap,
   type TitleCandidateStats,
 } from "@/lib/titleCtrSwap";
@@ -42,7 +40,7 @@ function healthyChannel(): TitleCandidateStats[] {
 }
 
 function decision(videos: TitleCandidateStats[], id: string) {
-  return planTitleSwaps(videos, NOW).find((d) => d.videoId === id)!;
+  return planNativeTitleTestProposals(videos, NOW).find((d) => d.videoId === id)!;
 }
 
 function main(): void {
@@ -52,7 +50,7 @@ function main(): void {
   // The case the loop exists for.
   const laggard = video({ videoId: "slow", ctr: 2.0 });
   const d = decision([...healthyChannel(), laggard], "slow");
-  assert.equal(d.action, "swap", d.reason);
+  assert.equal(d.action, "propose_native_test", d.reason);
   assert.equal(d.to, "The Runner Up Nobody Ever Used");
   assert.equal(d.baselineCtr, 2.0, "the number the alternate must beat is recorded");
 
@@ -76,26 +74,45 @@ function main(): void {
   assert.equal(decision([...lowChannel, video({ videoId: "slow", ctr: 2.0 })], "slow").action, "hold",
     "an absolute threshold would punish a whole channel for its niche");
 
-  // Never twice, and never without something to swap to.
+  // Never propose twice, and never without a distinct alternate.
   assert.equal(decision([...healthyChannel(), video({ videoId: "slow", ctr: 2.0, swappedAt: NOW - HOUR })], "slow").action, "hold");
   assert.equal(decision([...healthyChannel(), video({ videoId: "slow", ctr: 2.0, titleAlternate: "" })], "slow").action, "hold");
   assert.equal(
     decision([...healthyChannel(), video({ videoId: "slow", ctr: 2.0, titleAlternate: "The Original Title That Went Out" })], "slow").action,
-    "hold", "swapping a title for itself is not a test");
+    "hold", "a title cannot be compared against itself");
 
   // Every hold explains itself; a silent decline is how the unread
   // titleAlternate field went unnoticed for so long.
-  for (const held of planTitleSwaps(healthyChannel(), NOW)) {
+  for (const held of planNativeTitleTestProposals(healthyChannel(), NOW)) {
     assert.ok(held.reason.length > 10, `hold without a reason: ${JSON.stringify(held)}`);
   }
 
-  // Outcome judging: drift is not a result.
-  assert.equal(judgeSwapOutcome({ videoId: "v", baselineCtr: 2, postSwapCtr: 2.1, postSwapImpressions: 10_000 }).verdict, "inconclusive");
-  assert.equal(judgeSwapOutcome({ videoId: "v", baselineCtr: 2, postSwapCtr: 3.4, postSwapImpressions: 10_000 }).verdict, "alternate_won");
-  assert.equal(judgeSwapOutcome({ videoId: "v", baselineCtr: 2, postSwapCtr: 1.2, postSwapImpressions: 10_000 }).verdict, "original_won");
+  // A normal analytics snapshot cannot masquerade as a native result.
   assert.equal(
-    judgeSwapOutcome({ videoId: "v", baselineCtr: 2, postSwapCtr: 9, postSwapImpressions: 100 }).verdict,
-    "inconclusive", "a huge delta on no impressions is still nothing");
+    admitNativeTitleTestOutcome({ videoId: "v" }).verdict,
+    "not_experiment",
+  );
+  assert.equal(
+    admitNativeTitleTestOutcome({
+      videoId: "v",
+      platformReceiptId: "studio-test-123",
+      originalWatchTimeShare: 0.44,
+      alternateWatchTimeShare: 0.56,
+      platformVerdict: "alternate_won",
+    }).verdict,
+    "alternate_won",
+  );
+  assert.equal(
+    admitNativeTitleTestOutcome({
+      videoId: "v",
+      platformReceiptId: "studio-test-123",
+      originalWatchTimeShare: 0.56,
+      alternateWatchTimeShare: 0.44,
+      platformVerdict: "alternate_won",
+    }).verdict,
+    "not_experiment",
+    "a fabricated verdict must conflict with its own watch-time evidence",
+  );
   assert.equal(DEFAULT_SWAP_POLICY.minImpressions, 2_000);
   assert.equal(
     rejectSequentialTitleSwap("v").verdict,

@@ -30,16 +30,16 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import { channelPrefix } from "@/lib/storage";
 import { loadLedger, saveLedger, type PerfEntry } from "@/lib/performance";
 import {
-  planTitleSwaps,
+  planNativeTitleTestProposals,
   rejectSequentialTitleSwap,
-  type SwapDecision,
+  type NativeTitleTestProposal,
   type TitleCandidateStats,
 } from "@/lib/titleCtrSwap";
 
 type Logger = (m: string) => void;
 
-/** How many titles may change on one channel in a single run. */
-const MAX_PER_CHANNEL = 2;
+/** Bound owner-facing native-test proposals per channel in one run. */
+const MAX_PROPOSALS_PER_CHANNEL = 2;
 
 function candidate(entry: PerfEntry): TitleCandidateStats {
   return {
@@ -80,7 +80,7 @@ export async function runTitleCtrSwap(
 ): Promise<{
   ok: boolean;
   applied: number;
-  proposed: SwapDecision[];
+  proposed: NativeTitleTestProposal[];
   judged: number;
   approvalRequired?: boolean;
 }> {
@@ -93,7 +93,7 @@ export async function runTitleCtrSwap(
     _id: Id<"channels">; slug: string; name: string;
   }>;
 
-  const proposed: SwapDecision[] = [];
+  const proposed: NativeTitleTestProposal[] = [];
   let applied = 0;
   let judged = 0;
   const now = Date.now();
@@ -106,15 +106,17 @@ export async function runTitleCtrSwap(
     let dirty = judgePriorSwaps(ledger, log) > 0;
     judged += dirty ? 1 : 0;
 
-    const decisions = planTitleSwaps(ledger.map(candidate), now);
-    const swaps = decisions.filter((d) => d.action === "swap").slice(0, MAX_PER_CHANNEL);
-    for (const decision of swaps) proposed.push(decision);
+    const decisions = planNativeTitleTestProposals(ledger.map(candidate), now);
+    const proposals = decisions
+      .filter((decision) => decision.action === "propose_native_test")
+      .slice(0, MAX_PROPOSALS_PER_CHANNEL);
+    for (const decision of proposals) proposed.push(decision);
 
-    if (swaps.length) {
-      for (const swap of swaps) {
+    if (proposals.length) {
+      for (const proposal of proposals) {
         log(
-          `title-native-test PROPOSED ${channel.name} ${swap.videoId}: "${swap.from}" vs "${swap.to}" ` +
-          `(${swap.reason}). Start a title-only native A/B test in desktop YouTube Studio; no sequential API rename was made.`,
+          `title-native-test PROPOSED ${channel.name} ${proposal.videoId}: "${proposal.from}" vs "${proposal.to}" ` +
+          `(${proposal.reason}). Start a title-only native A/B test in desktop YouTube Studio; no sequential API rename was made.`,
         );
       }
       if (approvedForMetadataChanges) {
