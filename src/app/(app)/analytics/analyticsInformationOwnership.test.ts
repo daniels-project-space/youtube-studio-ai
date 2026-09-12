@@ -9,6 +9,11 @@ assert.match(page, /api\.analytics\.overview/);
 assert.match(page, /api\.analytics\.channelSummary/);
 assert.match(page, /api\.analytics\.refreshStatus/);
 assert.match(page, /api\.analytics\.channelTrend/);
+assert.match(page, /Portfolio analytics/,
+  "the all-channel dashboard should identify the operator's portfolio, not spend a hero on generic copy");
+assert.match(page, /Observed reach, committed spend, and released inventory/);
+assert.doesNotMatch(page, /observationState/,
+  "the hero must not repeat the separate, actionable connection-health panel");
 assert.match(page, /<QualityLearningPanel/);
 assert.match(page, /<CompetitorsSection ownerId=\{ownerId\} selected=\{selected\}/);
 assert.match(page, /ANALYTICS_FLEET_PAGE_SIZE/);

@@ -12,6 +12,8 @@ const query = readFileSync(join(root, "convex/analytics.ts"), "utf8");
 assert.match(page, /useQuery\(api\.analytics\.refreshStatus, \{ ownerId \}\)/);
 assert.match(page, /Data health/);
 assert.match(page, /Refresh status and access scope/);
+assert.doesNotMatch(css, /\.observationState/,
+  "connection status belongs to the dedicated health panel, not a duplicate hero treatment");
 assert.match(page, /analyticsRefreshHealth\(row\)/);
 assert.match(page, /analyticsRefreshFleetHealth\(rows\)/);
 assert.match(page, /Fleet refresh ledger/);

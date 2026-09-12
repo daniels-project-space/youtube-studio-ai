@@ -1,13 +1,13 @@
 .dashboard {
   display: grid;
-  gap: clamp(1.35rem, 2.4vw, 2.25rem);
+  gap: clamp(1.05rem, 2vw, 1.65rem);
   padding-bottom: 2.5rem;
 }
 
 .learningHero {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(340px, 0.82fr) minmax(500px, 1.18fr);
+  grid-template-columns: minmax(250px, 0.58fr) minmax(500px, 1.42fr);
   overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: 18px;
@@ -40,8 +40,8 @@
   display: grid;
   align-content: center;
   min-width: 0;
-  padding: clamp(1.5rem, 3.5vw, 3rem);
-  padding-right: 1rem;
+  padding: clamp(1.1rem, 2.2vw, 1.65rem);
+  padding-right: 0.9rem;
 }
 
 .eyebrow,
@@ -53,34 +53,23 @@
 }
 
 .heroLead h1 {
-  max-width: 14ch;
-  margin: 0.55rem 0 0.72rem;
+  max-width: 12ch;
+  margin: 0.48rem 0 0.52rem;
   font-family: var(--font-display);
-  font-size: clamp(2.2rem, 3.7vw, 3.9rem);
+  font-size: clamp(1.9rem, 2.7vw, 2.75rem);
   font-weight: 520;
-  letter-spacing: -0.055em;
-  line-height: 0.98;
+  letter-spacing: -0.045em;
+  line-height: 1;
 }
 
 .heroLead > p {
-  max-width: 57ch;
+  max-width: 35ch;
   margin: 0;
   color: var(--color-muted);
-  font-size: 0.8rem;
-  line-height: 1.65;
+  font-size: 0.76rem;
+  line-height: 1.45;
 }
 
-.observationState {
-  display: grid;
-  grid-template-columns: 34px minmax(0, 1fr);
-  gap: 0.72rem;
-  align-items: center;
-  margin-top: 1.2rem;
-  border-top: 1px solid var(--color-border);
-  padding-top: 0.9rem;
-}
-
-.observationState > span,
 .healthGlyph {
   position: relative;
   display: grid;
@@ -91,7 +80,6 @@
   border-radius: 50%;
 }
 
-.observationState > span::before,
 .healthGlyph::before {
   position: absolute;
   inset: 6px;
@@ -101,7 +89,6 @@
   opacity: 0.2;
 }
 
-.observationState > span i,
 .healthGlyph i {
   width: 6px;
   height: 6px;
@@ -111,24 +98,15 @@
   animation: observePulse 2.5s ease-in-out infinite;
 }
 
-.observationState[data-tone="danger"] > span,
-.observationState[data-tone="warning"] > span { border-color: rgba(245, 158, 11, 0.4); }
-.observationState[data-tone="danger"] > span i,
-.observationState[data-tone="warning"] > span i { background: var(--color-amber); box-shadow: 0 0 16px rgba(245, 158, 11, 0.7); }
-.observationState > div { display: grid; min-width: 0; gap: 0.14rem; }
-.observationState small { color: var(--color-secondary); font: 0.54rem var(--font-mono); letter-spacing: 0.1em; text-transform: uppercase; }
-.observationState strong { overflow: hidden; font-size: 0.74rem; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
-.observationState em { color: var(--color-faint); font-size: 0.61rem; font-style: normal; }
-
 .efficiencyField {
   min-width: 0;
   align-self: center;
-  margin: clamp(1.2rem, 3vw, 2.5rem);
+  margin: clamp(0.8rem, 1.6vw, 1.2rem);
   margin-left: 0;
   border: 1px solid var(--color-border);
   border-radius: 15px;
   background: linear-gradient(145deg,rgba(255,255,255,.05),transparent 35%),rgba(6,11,20,.68);
-  padding: 0.85rem 0.9rem 0.68rem;
+  padding: 0.68rem 0.75rem 0.56rem;
   backdrop-filter: blur(18px);
 }
 
@@ -142,7 +120,7 @@
 .efficiencyField figcaption span { color: var(--color-muted); font: 0.6rem var(--font-mono); letter-spacing: 0.11em; text-transform: uppercase; }
 .efficiencyField figcaption small { color: var(--color-faint); font-size: 0.56rem; }
 .fieldPlot { position: relative; }
-.efficiencyField svg { display: block; width: 100%; height: auto; min-height: 225px; color: var(--color-fg); overflow: visible; }
+.efficiencyField svg { display: block; width: 100%; height: auto; min-height: 195px; color: var(--color-fg); overflow: visible; }
 .fieldAxis { stroke: rgba(243, 240, 232, 0.14); stroke-width: 1; }
 .fieldLabel,
 .fieldNodeLabel,
@@ -391,7 +369,7 @@
 
 @media (max-width: 1120px) {
   .learningHero { grid-template-columns: 1fr; }
-  .heroLead { padding-right: clamp(1.5rem, 3.5vw, 3rem); }
+  .heroLead { padding-right: clamp(1.1rem, 2.2vw, 1.65rem); }
   .heroLead h1 { max-width: 16ch; }
   .efficiencyField { margin: 0 clamp(1.5rem, 3.5vw, 3rem) clamp(1.5rem, 3.5vw, 3rem); }
   .sectionHeading { grid-template-columns: minmax(240px, 0.8fr) minmax(260px, 1.2fr); }
@@ -404,7 +382,7 @@
 @media (max-width: 760px) {
   .learningHero { margin-inline: -0.2rem; border-radius: 15px; }
   .heroLead { padding: 1.2rem 0.95rem; }
-  .heroLead h1 { font-size: clamp(2.15rem, 10vw, 3.1rem); }
+  .heroLead h1 { font-size: clamp(1.9rem, 8vw, 2.6rem); }
   .efficiencyField { margin: 0 0.7rem 1rem; padding-inline: 0.55rem; }
   .efficiencyField svg { min-height: 190px; }
   .fieldLegend { align-items: flex-start; flex-direction: column; gap: 0.3rem; }
@@ -430,7 +408,7 @@
 }
 
 @media (max-width: 430px) {
-  .heroLead h1 { font-size: 2.45rem; }
+  .heroLead h1 { font-size: 2.2rem; }
   .heroMetric { gap: 0.52rem; padding-inline: 0.72rem; }
   .heroMetric > span { display: none; }
   .heroMetric strong { font-size: 1.45rem; }
@@ -456,7 +434,6 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .observationState > span i,
   .healthGlyph i { animation: none; }
   .fieldNode,
   .fieldNodeAction,

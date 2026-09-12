@@ -157,7 +157,6 @@ export default function AnalyticsPage() {
         totalCost={overview?.totalCost ?? 0}
         videoCount={overview?.videoCount ?? 0}
         channelCount={overview?.channelCount ?? 0}
-        refreshRows={refreshStatus ?? []}
       />
 
       {loading ? (
@@ -206,7 +205,6 @@ function AnalyticsHero({
   totalCost,
   videoCount,
   channelCount,
-  refreshRows,
 }: {
   loading: boolean;
   selected: SummaryRow | null;
@@ -216,7 +214,6 @@ function AnalyticsHero({
   totalCost: number;
   videoCount: number;
   channelCount: number;
-  refreshRows: RefreshStatusRow[];
 }) {
   const scoped = selected ?? {
     subscriberCount: totalSubscribers,
@@ -224,39 +221,12 @@ function AnalyticsHero({
     costTotal: totalCost,
     videoCount,
   };
-  const observations = refreshRows.map((row) => analyticsRefreshHealth(row));
-  const current = observations.filter((health) => health.state === "current").length;
-  const refreshing = observations.filter((health) => health.state === "refreshing").length;
-  const intervention = observations.filter((health) => [
-    "manual_reconciliation_required",
-    "reconnect_required",
-    "stale",
-  ].includes(health.state)).length;
-  const fleet = refreshRows.length ? analyticsRefreshFleetHealth(refreshRows) : null;
-
   return (
     <section className={styles.learningHero} aria-busy={loading}>
       <div className={styles.heroLead}>
         <span className={styles.eyebrow}>YouTube analytics</span>
-        <h1>{selected ? selected.name : "Channel performance"}</h1>
-        <div className={styles.observationState} data-tone={fleet?.tone ?? "quiet"}>
-          <span aria-hidden="true"><i /></span>
-          <div>
-            <small>{selected ? "Channel status" : "Data status"}</small>
-            <strong>
-              {loading
-                ? "Loading YouTube data…"
-                : selected
-                  ? "Channel selected"
-                  : fleet?.label ?? "No refresh ledger yet"}
-            </strong>
-            <em>
-              {loading
-                ? ""
-                : `${current} current · ${refreshing} refreshing · ${intervention} need intervention`}
-            </em>
-          </div>
-        </div>
+        <h1>{selected ? selected.name : "Portfolio analytics"}</h1>
+        <p>Observed reach, committed spend, and released inventory.</p>
       </div>
 
       <FleetEfficiencyField rows={rows} selectedChannelId={selected?.channelId ?? null} />
