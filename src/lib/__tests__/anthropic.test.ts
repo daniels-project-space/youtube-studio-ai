@@ -7,6 +7,11 @@ import {
   hasAnthropicKey,
   scriptProModel,
 } from "@/lib/anthropic";
+import {
+  creativeTextJson,
+  creativeTextJsonPro,
+  hasCreativeTextKey,
+} from "@/lib/creativeText";
 import { OPENROUTER_MODELS, OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 import { createModelUsageScope } from "@/lib/modelUsage";
 import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
@@ -45,6 +50,9 @@ async function main(): Promise<void> {
       }), { status: 200, headers: { "content-type": "application/json" } });
     };
 
+    assert.equal(claudeJson, creativeTextJson, "legacy JSON helper is a direct compatibility alias");
+    assert.equal(claudeJsonPro, creativeTextJsonPro, "legacy pro helper is a direct compatibility alias");
+    assert.equal(hasAnthropicKey, hasCreativeTextKey, "legacy key check has no independent provider state");
     assert.equal(hasAnthropicKey(), true, "compatibility guard admits only the OpenRouter route");
     assert.deepEqual(await claudeJson<{ answer: number }>({ prompt: "return JSON", system: "strict" }), { answer: 42 });
     assert.deepEqual(await claudeJsonPro<{ answer: number }>({ prompt: "return JSON" }), { answer: 42 });
