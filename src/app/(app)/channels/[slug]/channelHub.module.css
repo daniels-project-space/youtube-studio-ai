@@ -461,6 +461,7 @@
 .weekState span { color: var(--color-amber); font: 700 0.53rem/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; }
 .weekState[data-ready="true"] span { color: var(--color-ok); }
 .weekState small { color: var(--color-faint); font: 0.51rem/1 var(--font-mono); }
+.weekPrepState[data-frozen="true"] { color: var(--color-ok); }
 .weekRemove { display: grid; width: 26px; height: 26px; place-items: center; border: 1px solid transparent; border-radius: 50%; color: var(--color-faint); background: transparent; cursor: pointer; font-size: 0.95rem; }
 .weekRemove:hover { border-color: color-mix(in srgb,var(--color-failed) 35%,var(--color-border)); color: var(--color-failed); }
 .weekDetails { grid-column: 2 / -1; width: 100%; cursor: default; border-top: 1px solid var(--color-border); }
@@ -470,11 +471,13 @@
 .weekDetails[open] summary::after { content: "−"; }
 .weekDetails summary small { color: var(--color-faint); font: 500 0.52rem/1 var(--font-mono); letter-spacing: 0; text-transform: none; }
 .weekDetailBody { display: grid; grid-template-columns: minmax(0,1fr) auto; gap: 0.8rem; padding: 0.15rem 0 0.68rem; }
-.weekDetailGrid { display: grid; grid-template-columns: minmax(0,1.8fr) repeat(2,minmax(90px,0.55fr)); border: 1px solid var(--color-border); }
+.weekDetailGrid { display: grid; grid-template-columns: minmax(0,1.55fr) repeat(3,minmax(88px,0.55fr)); border: 1px solid var(--color-border); }
 .weekDetailGrid > div { display: grid; min-width: 0; gap: 0.2rem; padding: 0.56rem 0.62rem; border-right: 1px solid var(--color-border); }
 .weekDetailGrid > div:last-child { border-right: 0; }
 .weekDetailGrid small { color: var(--color-faint); font: 600 0.5rem/1 var(--font-mono); text-transform: uppercase; }
 .weekDetailGrid strong { color: var(--color-fg); font-size: 0.65rem; font-weight: 560; line-height: 1.42; }
+.weekDetailGrid time, .weekPrepDigest { color: var(--color-faint); font: 0.48rem/1.2 var(--font-mono); }
+.weekPrepDigest { overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
 .weekDetailActions { display: grid; min-width: 190px; align-content: center; justify-items: start; gap: 0.35rem; }
 .weekDetailActions a { display: inline-flex; min-height: 36px; align-items: center; padding: 0 0.7rem; border: 1px solid color-mix(in srgb,var(--color-blueprint) 45%,var(--color-border)); border-radius: 999px; color: var(--color-fg); background: color-mix(in srgb,var(--color-blueprint) 10%,transparent); font-size: 0.59rem; font-weight: 680; text-decoration: none; }
 .weekDetailActions span, .weekDetailActions p { max-width: 230px; margin: 0; color: var(--color-faint); font-size: 0.6rem; line-height: 1.4; }

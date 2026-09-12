@@ -2633,7 +2633,21 @@ type PlanRow = {
   scheduledRunId?: Id<"runs">;
   scheduledFailure?: string;
   generationError?: string;
+  preparationState?: string;
+  preparationVersion?: string;
+  preparationManifestSha256?: string;
+  preparationFrozenAt?: number;
 };
+
+function planPreparationLabel(item: Pick<PlanRow, "preparationState" | "preparationManifestSha256">): string {
+  if (item.preparationState === "inputs_frozen" && item.preparationManifestSha256) return "Inputs frozen";
+  if (item.preparationState) return "Preparing inputs";
+  return "Editorial only";
+}
+
+function planPreparationShortDigest(digest?: string): string | null {
+  return digest && digest.length >= 12 ? `${digest.slice(0, 10)}…` : null;
+}
 
 function WeekAheadTab({
   ownerId,
@@ -2772,6 +2786,9 @@ function WeekAheadTab({
               <div className={styles.weekState} data-ready={p.status === "ready"}>
                 <span>{p.status === "ready" ? "Ready" : "Building"}</span>
                 <small>{p.scheduledAt ? new Date(p.scheduledAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "Unpinned"}</small>
+                <small className={styles.weekPrepState} data-frozen={p.preparationState === "inputs_frozen" || undefined}>
+                  {p.preparationState === "inputs_frozen" ? "Inputs frozen" : "Prep pending"}
+                </small>
               </div>
               <button
                 type="button"
@@ -2793,6 +2810,20 @@ function WeekAheadTab({
                     <div><small>Brief</small><strong>{p.description || p.topic}</strong></div>
                     <div><small>Cover</small><strong>{p.thumbnailSource === "rendered_video_frame" ? "Final video frame" : p.thumbnailKey ? "Ready" : "Pending"}</strong></div>
                     <div><small>Production</small><strong>{p.scheduledRunId ? "Recorded" : p.status === "ready" ? "Queued" : "Not started"}</strong></div>
+                    <div>
+                      <small>Inputs</small>
+                      <strong>{planPreparationLabel(p)}</strong>
+                      {p.preparationManifestSha256 && (
+                        <code className={styles.weekPrepDigest} title={p.preparationManifestSha256}>
+                          packet {planPreparationShortDigest(p.preparationManifestSha256)}
+                        </code>
+                      )}
+                      {p.preparationFrozenAt && (
+                        <time dateTime={new Date(p.preparationFrozenAt).toISOString()}>
+                          {new Date(p.preparationFrozenAt).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
+                        </time>
+                      )}
+                    </div>
                   </div>
                   <div className={styles.weekDetailActions}>
                     {p.scheduledRunId ? (
