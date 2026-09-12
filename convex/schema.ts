@@ -2074,6 +2074,32 @@ export default defineSchema({
     .index("by_channel", ["channelId", "createdAt"])
     .index("by_channel_status", ["channelId", "status", "createdAt"]),
 
+  /** Durable parent receipt for a bounded owner/week multi-channel fan-out. */
+  planWeekBulkOrders: defineTable({
+    ownerId: v.string(),
+    requestKey: v.string(),
+    fingerprint: v.string(),
+    contractVersion: v.string(),
+    channelIds: v.array(v.id("channels")),
+    count: v.number(),
+    totalItems: v.number(),
+    reservedCostUsd: v.number(),
+    triggerRunId: v.string(),
+    status: v.string(), // admitted|dispatched
+    children: v.array(v.object({
+      channelId: v.id("channels"),
+      requestKey: v.string(),
+      count: v.number(),
+      status: v.union(v.literal("pending"), v.literal("queued")),
+      triggerRunId: v.optional(v.string()),
+    })),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_request", ["ownerId", "requestKey"])
+    .index("by_fingerprint", ["ownerId", "fingerprint"])
+    .index("by_owner", ["ownerId", "createdAt"]),
+
   /** Immutable per-phase usage ledger; batch totals are recomputed from rows. */
   planBatchUsage: defineTable({
     ownerId: v.string(),

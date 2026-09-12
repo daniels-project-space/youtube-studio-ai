@@ -33,6 +33,7 @@ import type * as narrativeSeriesState from "../narrativeSeriesState.js";
 import type * as novitaWorkerLeases from "../novitaWorkerLeases.js";
 import type * as outlierBank from "../outlierBank.js";
 import type * as ownerModuleLocks from "../ownerModuleLocks.js";
+import type * as planWeekBulkOrders from "../planWeekBulkOrders.js";
 import type * as planWeekRenderReceipts from "../planWeekRenderReceipts.js";
 import type * as productionRouteQualificationState from "../productionRouteQualificationState.js";
 import type * as publishContinuationState from "../publishContinuationState.js";
@@ -99,6 +100,7 @@ declare const fullApi: ApiFromModules<{
   novitaWorkerLeases: typeof novitaWorkerLeases;
   outlierBank: typeof outlierBank;
   ownerModuleLocks: typeof ownerModuleLocks;
+  planWeekBulkOrders: typeof planWeekBulkOrders;
   planWeekRenderReceipts: typeof planWeekRenderReceipts;
   productionRouteQualificationState: typeof productionRouteQualificationState;
   publishContinuationState: typeof publishContinuationState;

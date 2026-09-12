@@ -3,9 +3,17 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const source = readFileSync(resolve(process.cwd(), "src/trigger/planWeekBulk.ts"), "utf8");
+const receiptSource = readFileSync(resolve(process.cwd(), "convex/planWeekBulkOrders.ts"), "utf8");
 assert.match(source, /buildPlanWeekBulkOrder/);
 assert.match(source, /api\.channels\.listChannels/);
+assert.match(source, /api\.planWeekBulkOrders\.admit/);
+assert.match(source, /api\.planWeekBulkOrders\.markDispatched/);
 assert.match(source, /idempotencyKeys\.create/);
 assert.match(source, /tasks\.trigger\("plan-week-ahead"/);
 assert.match(source, /Promise\.all/);
+assert.match(receiptSource, /requireStudioServiceIdentity/);
+assert.match(receiptSource, /by_request/);
+assert.match(receiptSource, /by_fingerprint/);
+assert.match(receiptSource, /planWeekContractReservation/);
+assert.match(receiptSource, /request key was reused with different parameters/);
 console.log("plan-week bulk dispatch wiring passed");
