@@ -171,6 +171,54 @@ test("an exact Lo-Fi source-frame candidate hydrates identically in both handler
   assert.deepEqual(runCurrentThumbnailSource(detail), { assetKey: currentKey });
 });
 
+test("detail projects bounded timed shots and retained subtitle evidence", async () => {
+  const f = fixture();
+  f.rows.runStages.push({
+    _id: "story-spine",
+    _creationTime: 3,
+    runId: sourceRunId,
+    block: "story_spine",
+    outputs: {
+      shotList: Array.from({ length: 66 }, (_, index) => ({
+        id: `shot-${index + 1}`,
+        t0: index * 2,
+        t1: index * 2 + 2,
+        coveragePurpose: `Beat ${index + 1}`,
+        literalContent: "A bounded visual beat",
+        cameraMove: "slow push",
+        shotScale: "medium",
+        prompt: "This large prompt is intentionally not surfaced in the compact detail projection.",
+      })),
+    },
+  });
+  f.rows.assets.push({
+    _id: "captions",
+    _creationTime: 5,
+    ownerId,
+    channelId,
+    runId: sourceRunId,
+    kind: "captions",
+    r2Key: "owner/owner-test/channel/test/runs/source-run/captions.srt",
+    meta: { cues: 66 },
+  });
+  const detail = await f.detail() as unknown as {
+    shotList: Array<{ id: string; t0: number; t1: number; coveragePurpose: string | null }>;
+    shotListCount: number;
+    shotListTruncated: boolean;
+    subtitleSaved: boolean;
+    subtitleCueCount: number | null;
+  };
+  assert.equal(detail.shotListCount, 66);
+  assert.equal(detail.shotList.length, 64, "the UI projection never ships the full prompt-heavy shot list");
+  assert.equal(detail.shotListTruncated, true);
+  assert.deepEqual(detail.shotList[0], {
+    id: "shot-1", t0: 0, t1: 2, coveragePurpose: "Beat 1",
+    literalContent: "A bounded visual beat", cameraMove: "slow push", shotScale: "medium",
+  });
+  assert.equal(detail.subtitleSaved, true);
+  assert.equal(detail.subtitleCueCount, 66);
+});
+
 test("the viewer detail query still enforces run ownership", async () => {
   const f = fixture();
   f.rows.runs[0]!.ownerId = "another-owner";
