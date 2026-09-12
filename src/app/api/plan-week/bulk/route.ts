@@ -21,14 +21,24 @@ function convexClient(): StudioConvexHttpClient {
 export async function GET(request: Request) {
   try {
     const actor = await requireStudioActor(request);
-    const fingerprint = new URL(request.url).searchParams.get("fingerprint")?.trim().toLowerCase() ?? "";
-    if (!/^[a-f0-9]{64}$/.test(fingerprint)) {
+    const params = new URL(request.url).searchParams;
+    const fingerprint = params.get("fingerprint")?.trim().toLowerCase() ?? "";
+    const requestKey = params.get("requestKey")?.trim() ?? "";
+    if (!fingerprint && (!requestKey || requestKey.length > 160)) {
+      return NextResponse.json({ ok: false, error: "fingerprint or requestKey is required" }, { status: 400 });
+    }
+    if (fingerprint && !/^[a-f0-9]{64}$/.test(fingerprint)) {
       return NextResponse.json({ ok: false, error: "fingerprint must be a 64-character SHA-256" }, { status: 400 });
     }
-    const row = await convexClient().query(api.planWeekBulkOrders.getByFingerprint, {
-      ownerId: actor.ownerId,
-      fingerprint,
-    });
+    const row = fingerprint
+      ? await convexClient().query(api.planWeekBulkOrders.getByFingerprint, {
+          ownerId: actor.ownerId,
+          fingerprint,
+        })
+      : await convexClient().query(api.planWeekBulkOrders.getByRequestKey, {
+          ownerId: actor.ownerId,
+          requestKey,
+        });
     if (!row) return NextResponse.json({ ok: false, error: "bulk order not found" }, { status: 404 });
     const progress = row.children.reduce<Record<string, number>>((counts, child) => {
       counts[child.status] = (counts[child.status] ?? 0) + 1;

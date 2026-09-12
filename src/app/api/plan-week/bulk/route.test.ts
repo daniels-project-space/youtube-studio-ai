@@ -6,6 +6,7 @@ const source = readFileSync(resolve(process.cwd(), "src/app/api/plan-week/bulk/r
 assert.match(source, /export async function GET/);
 assert.match(source, /requireStudioActor\(request\)/);
 assert.match(source, /api\.planWeekBulkOrders\.getByFingerprint/);
+assert.match(source, /api\.planWeekBulkOrders\.getByRequestKey/);
 assert.match(source, /Cache-Control.*private, no-store/);
 assert.match(source, /bulk order not found/);
 assert.match(source, /fingerprint: order\.fingerprint/);

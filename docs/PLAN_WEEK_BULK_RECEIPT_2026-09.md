@@ -30,6 +30,12 @@ queue request, polls the owner-scoped status route, and exposes a real
 completed/total bar plus per-channel status and failure text. It does not add
 another sidebar desk or make a provider call from the browser.
 
+The same disclosure performs one owner-scoped `requestKey` recovery read on
+mount. Returning to Schedule after navigation therefore rehydrates the
+durable receipt and resumes fingerprint polling; a terminal idempotent order
+is shown as complete/needs attention instead of offering a misleading second
+run.
+
 Focused order, UI wiring, typecheck, lint, visual audit, production build, all
 675 direct readiness tests, and the real assembly smoke passed for the
 follow-up slice. No provider or paid render was invoked by this change.

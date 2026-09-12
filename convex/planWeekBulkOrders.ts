@@ -251,4 +251,17 @@ export const getByFingerprint = query({
   },
 });
 
+/** Rehydrate the one deterministic owner/week order after a page reload. */
+export const getByRequestKey = query({
+  args: { ownerId: v.string(), requestKey: v.string() },
+  handler: async (ctx, args) => {
+    const requestKey = args.requestKey.trim();
+    if (!requestKey || requestKey.length > 160) return null;
+    const row = await ctx.db.query("planWeekBulkOrders")
+      .withIndex("by_request", (q) => q.eq("ownerId", args.ownerId).eq("requestKey", requestKey))
+      .unique();
+    return row ?? null;
+  },
+});
+
 export const planWeekBulkOrderGuardsForTests = { assertAdmission };

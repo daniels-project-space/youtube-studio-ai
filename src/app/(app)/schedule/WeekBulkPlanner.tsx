@@ -96,6 +96,36 @@ export function WeekBulkPlanner({
     [channels],
   );
 
+  // A durable order should remain visible after navigation or a browser
+  // refresh. This is a single owner-scoped read by the deterministic week key;
+  // once it returns a fingerprint, the normal live receipt poll takes over.
+  useEffect(() => {
+    if (!canEdit || fingerprint) return;
+    const controller = new AbortController();
+    const recover = async () => {
+      try {
+        const response = await fetch(`/api/plan-week/bulk?requestKey=${encodeURIComponent(requestKey)}`, {
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        if (response.status === 404) return;
+        const body = await readJson(response) as BulkReceipt | BulkError;
+        if (!response.ok || body.ok !== true) {
+          throw new Error(errorMessage(body, "Could not restore planner progress."));
+        }
+        setReceipt(body);
+        setFingerprint(body.fingerprint);
+        setOpen(true);
+      } catch (reason) {
+        if (!controller.signal.aborted) setError(reason instanceof Error ? reason.message : "Could not restore planner progress.");
+      }
+    };
+    void recover();
+    return () => controller.abort();
+  }, [canEdit, fingerprint, requestKey]);
+
   useEffect(() => {
     if (!fingerprint || terminal) return;
     const controller = new AbortController();
@@ -199,8 +229,8 @@ export function WeekBulkPlanner({
             <strong>{receipt ? `${completed}/${total} channels complete` : "Prepare the next seven days"}</strong>
             <span>{receipt ? `${receipt.totalItems} planned items · ${receipt.reservedCostUsd.toFixed(2)} USD reserved` : `Idempotent key ${requestKey}`}</span>
           </div>
-          <button className={styles.bulkAction} type="button" onClick={() => void queueWeek()} disabled={busy || Boolean(fingerprint && !terminal)}>
-            {!canEdit ? "Verify owner" : busy ? "Queueing…" : fingerprint && !terminal ? "In progress" : terminal ? "Run again" : "Queue week"}
+          <button className={styles.bulkAction} type="button" onClick={() => void queueWeek()} disabled={busy || Boolean(fingerprint)}>
+            {!canEdit ? "Verify owner" : busy ? "Queueing…" : fingerprint && receipt?.status === "failed" ? "Review failure" : terminal ? "Complete" : "Queue week"}
           </button>
         </div>
 

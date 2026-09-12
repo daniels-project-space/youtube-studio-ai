@@ -53,6 +53,10 @@ assert.match(bulkPlanner, /fetch\("\/api\/plan-week\/bulk"/,
   "the batch planner must use the real bulk planning route");
 assert.match(bulkPlanner, /api\/plan-week\/bulk\?fingerprint=/,
   "the batch planner must poll the persisted receipt rather than inventing progress");
+assert.match(bulkPlanner, /api\/plan-week\/bulk\?requestKey=/,
+  "the batch planner must rehydrate a durable week receipt after navigation");
+assert.match(bulkPlanner, /disabled=\{busy \|\| Boolean\(fingerprint\)\}/,
+  "an idempotent terminal order must not promise a duplicate rerun");
 assert.match(bulkPlanner, /credentials: "same-origin"/,
   "bulk planning must preserve the authenticated owner session");
 assert.match(bulkPlanner, /onRequestOwner/,
