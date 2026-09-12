@@ -13,6 +13,9 @@ import assert from "node:assert/strict";
 import {
   NARRATION_BASE_WORDS_PER_SEC,
   NARRATION_RATE_TOLERANCE,
+  NARRATION_SPEED_MAX,
+  NARRATION_SPEED_MIN,
+  assertNarrationSpeed,
   evaluateNarrationRate,
 } from "@/lib/narrationPerformance";
 
@@ -68,6 +71,11 @@ function main(): void {
     Math.abs(boundary.intendedWordsPerSec - NARRATION_BASE_WORDS_PER_SEC) < 1e-9,
     "speed 1 must mean the base rate exactly",
   );
+
+  assert.equal(assertNarrationSpeed(NARRATION_SPEED_MIN), NARRATION_SPEED_MIN);
+  assert.equal(assertNarrationSpeed(NARRATION_SPEED_MAX), NARRATION_SPEED_MAX);
+  assert.throws(() => assertNarrationSpeed(NARRATION_SPEED_MIN - 0.01), /must be a finite/u);
+  assert.throws(() => assertNarrationSpeed("1"), /must be a finite/u);
 
   console.log("NARRATION RATE PASS");
 }

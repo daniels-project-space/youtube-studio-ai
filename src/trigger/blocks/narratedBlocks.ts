@@ -169,6 +169,7 @@ import {
 import { narrationPhysics } from "@/lib/voicecraft";
 import {
   assertNarrationPerformanceEvidence,
+  assertNarrationSpeed,
   assertNarrationTimingMeasurementIntegrity,
   evaluateNarrationRate,
   planNarrationCadence,
@@ -1260,7 +1261,14 @@ export const narrationTts: Block = {
         : /measured|deliberate|contemplative|documentary/.test(pacingText) ? 0.96
         : /fast|energetic|punchy|rapid|urgent/.test(pacingText) ? 1.05
         : 0;
-    const speed = Number(ctx.params["ttsSpeed"] ?? 0) || dnaSpeed || physics.speed;
+    const explicitSpeed = ctx.params["ttsSpeed"];
+    if (explicitSpeed !== undefined && (typeof explicitSpeed !== "number" || !Number.isFinite(explicitSpeed))) {
+      throw new Error("narration_tts: ttsSpeed must be a finite number");
+    }
+    const speed = assertNarrationSpeed(
+      explicitSpeed === undefined ? (dnaSpeed || physics.speed) : explicitSpeed,
+      "narration_tts: ttsSpeed",
+    );
     if (speed !== 1)
       ctx.log(
         `narration_tts: speaking rate x${speed} (${ctx.params["ttsSpeed"] ? "param" : dnaSpeed ? "Style DNA pacing" : `physics:${physics.archetype}`})`,
@@ -1368,6 +1376,14 @@ export const narrationTts: Block = {
       readinessStatus: ctx.params["voiceReadinessStatus"],
       readinessReason: ctx.params["voiceReadinessReason"],
     });
+    const assertFinalDeliveryRate = (evidence: { wordCount: number; durationSec: number }) => {
+      const rate = evaluateNarrationRate({ wordCount: evidence.wordCount, durationSec: evidence.durationSec, speed });
+      ctx.log(`narration_tts: delivery rate ${rate.ok ? "OK" : "OFF-PACE"} — ${rate.detail}`);
+      if (quality === "production" && !rate.ok) {
+        throw new Error(`narration_tts: final delivery rate failed the channel pace contract — ${rate.detail}`);
+      }
+      return rate;
+    };
     const tmp = await makeRunTempDir(ctx.runId);
     if (quality === "production" && gateEnabled) {
       // Keep the casting decision, then prove this *actual* cold-open take has a
@@ -1526,22 +1542,7 @@ export const narrationTts: Block = {
       ctx.log(
         `narration_tts: local final evidence PASSED (${narrationPerformanceEvidence.durationSec.toFixed(1)}s | ${narrationPerformanceEvidence.wordsPerSec.toFixed(2)} words/s | ${narrationPerformanceEvidence.integratedLufs.toFixed(1)} LUFS)`,
       );
-      // DELIVERY RATE against the channel's own intended pace. Inter-sentence
-      // pauses are already held to 0.08s, but the rate of speech inside them
-      // had only a 0.3x-2.5x sanity band — which passed the same pipeline
-      // delivering 98 and 158 wpm on scripts whose reference takes ran 125-136.
-      // Reported rather than fatal: nothing has measured production rates yet,
-      // so failing renders on first deploy would break channels currently
-      // sitting at the edge. Promoting this to a throw is one line once the
-      // logs show where real episodes actually land.
-      {
-        const rate = evaluateNarrationRate({
-          wordCount: narrationPerformanceEvidence.wordCount,
-          durationSec: narrationPerformanceEvidence.durationSec,
-          speed,
-        });
-        ctx.log(`narration_tts: delivery rate ${rate.ok ? "OK" : "OFF-PACE"} — ${rate.detail}`);
-      }
+      assertFinalDeliveryRate(narrationPerformanceEvidence);
       const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
       await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
       await recordAsset(ctx, "narration", narrationKey, { durationSec, chapters: chap, mode: "chapter" });
@@ -1659,16 +1660,9 @@ export const narrationTts: Block = {
     ctx.log(
       `narration_tts: local final evidence PASSED (${narrationPerformanceEvidence.durationSec.toFixed(1)}s | ${narrationPerformanceEvidence.wordsPerSec.toFixed(2)} words/s | ${narrationPerformanceEvidence.integratedLufs.toFixed(1)} LUFS)`,
     );
-    // Same delivery-rate report as the other narration path; both routes reach
-    // production, so checking only one would leave half the episodes unmeasured.
-    {
-      const rate = evaluateNarrationRate({
-        wordCount: narrationPerformanceEvidence.wordCount,
-        durationSec: narrationPerformanceEvidence.durationSec,
-        speed,
-      });
-      ctx.log(`narration_tts: delivery rate ${rate.ok ? "OK" : "OFF-PACE"} — ${rate.detail}`);
-    }
+    // Both chapter and sentence routes must enforce the same measured channel
+    // pace before the master can enter the visual/render portion of the run.
+    assertFinalDeliveryRate(narrationPerformanceEvidence);
 
     const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
     await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });

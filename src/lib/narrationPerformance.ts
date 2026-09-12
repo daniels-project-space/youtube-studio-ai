@@ -108,6 +108,19 @@ export type NarrationPausePurpose = "turn" | "reveal" | "question" | "release" |
  */
 export const NARRATION_BASE_WORDS_PER_SEC = 2.15;
 export const NARRATION_RATE_TOLERANCE = 0.15;
+// This is the exact control range exposed by the narration module and used by
+// every current channel physics profile. A value outside it would make the
+// script word-budget, provider instruction, and measured delivery target
+// disagree about what the channel asked for.
+export const NARRATION_SPEED_MIN = 0.85;
+export const NARRATION_SPEED_MAX = 1.15;
+
+export function assertNarrationSpeed(value: unknown, label = "narration speed"): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < NARRATION_SPEED_MIN || value > NARRATION_SPEED_MAX) {
+    throw new Error(`${label} must be a finite ${NARRATION_SPEED_MIN}-${NARRATION_SPEED_MAX} multiplier`);
+  }
+  return value;
+}
 
 export interface NarrationRateVerdict {
   ok: boolean;
