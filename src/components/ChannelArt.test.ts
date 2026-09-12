@@ -16,7 +16,7 @@ loader._load = function (...args: unknown[]) {
 };
 
 try {
-  const { ChannelBanner, orderedAssetKeys } = require("./ChannelArt") as typeof import("./ChannelArt");
+  const { ChannelBanner, fallbackPaletteFor, orderedAssetKeys } = require("./ChannelArt") as typeof import("./ChannelArt");
 
   assert.deepEqual(
     orderedAssetKeys([null, "", " identity.png ", "latest.jpg", " identity.png ", undefined]),
@@ -40,6 +40,22 @@ try {
     createElement(ChannelBanner, { name: "Rainy Neon Lofi", aspectRatio: "16 / 9" }),
   );
   assert.match(nameOnlyBanner, /data-motif="lofi"/, "channel name still identifies a banner when niche metadata is descriptive");
+
+  assert.deepEqual(
+    fallbackPaletteFor({ name: "Inked Histories", niche: "history" }),
+    ["#2a1d1b", "#654034", "#d0a46b"],
+    "artwork-free history channels get a sepia book palette",
+  );
+  assert.deepEqual(
+    fallbackPaletteFor({ name: "Seaside Ghibli Lofi", niche: "lofi" }),
+    ["#10293d", "#236681", "#e0a56f"],
+    "an explicit seaside identity takes precedence over the broad lofi niche",
+  );
+  assert.notDeepEqual(
+    fallbackPaletteFor({ name: "Gratitude Springs" }),
+    fallbackPaletteFor({ name: "Investory", niche: "finance" }),
+    "unarted channels remain visually distinguishable by identity",
+  );
 } finally {
   loader._load = originalLoad;
 }

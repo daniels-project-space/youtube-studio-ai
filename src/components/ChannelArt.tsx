@@ -3,17 +3,57 @@
 import { useCallback, useState } from "react";
 import { invalidateAssetUrl, useAssetUrlState } from "@/lib/asset-url";
 import { NicheMotionGlyph } from "@/components/NicheMotionGlyph";
+import { channelMotionMotifFor, type ChannelMotionMotif } from "@/lib/channelMotion";
 
 /**
  * Channel avatar / banner. Presigns the R2 art key via /api/asset-url; while it
  * loads (or if the channel has no art yet) it falls back to a tasteful gradient
  * derived from the channel's palette — never a broken image, never empty.
  */
-function paletteGradient(palette?: string[]): string {
-  const cols =
-    palette && palette.length >= 2
-      ? palette.slice(0, 3)
-      : ["#2a2a3a", "#3a2a44", "#22343a"];
+const MOTIF_FALLBACK_PALETTES: Readonly<Record<ChannelMotionMotif, readonly [string, string, string]>> = {
+  lofi: ["#102337", "#1d5670", "#78b9b1"],
+  lesson: ["#241b35", "#4b3768", "#c48770"],
+  ledger: ["#101d32", "#2e4b69", "#c4a45e"],
+  circuit: ["#0c2630", "#155d67", "#72d2b1"],
+  heart: ["#341725", "#813b5d", "#e99b9d"],
+  steam: ["#2e2119", "#744728", "#e5ad5f"],
+  compass: ["#172033", "#394864", "#c5ad70"],
+  clapper: ["#201729", "#5b2844", "#e27866"],
+  mind: ["#1a1937", "#463b79", "#9d9be8"],
+  casefile: ["#17191f", "#41424b", "#be8e50"],
+  book: ["#2a1d1b", "#654034", "#d0a46b"],
+  pen: ["#29201e", "#68433d", "#d58a6d"],
+  summit: ["#16232f", "#3d5860", "#dd9a5c"],
+  health: ["#102b31", "#28706f", "#a4d6bd"],
+  business: ["#161d35", "#344a78", "#b9a1e8"],
+  lotus: ["#101d32", "#285576", "#79b7dd"],
+  seaside: ["#10293d", "#236681", "#e0a56f"],
+};
+
+/**
+ * Keep an artwork-free channel recognizable while its real R2 asset loads.
+ * The palette is derived from the same named motif as the glyph, so a
+ * fallback cannot quietly turn every channel into the same purple tile.
+ */
+export function fallbackPaletteFor(input: {
+  palette?: string[];
+  name?: string | null;
+  niche?: string | null;
+}): readonly string[] {
+  if (input.palette && input.palette.length >= 2) {
+    const cols = input.palette.slice(0, 3);
+    return cols;
+  }
+  return MOTIF_FALLBACK_PALETTES[channelMotionMotifFor({ niche: input.niche, channelName: input.name })]
+    ?? MOTIF_FALLBACK_PALETTES.lesson;
+}
+
+function paletteGradient(input: {
+  palette?: string[];
+  name?: string | null;
+  niche?: string | null;
+}): string {
+  const cols = fallbackPaletteFor(input);
   return `linear-gradient(135deg, ${cols.join(", ")})`;
 }
 
@@ -73,7 +113,7 @@ export function ChannelAvatar({
         borderRadius: radius,
         flexShrink: 0,
         overflow: "hidden",
-        background: paletteGradient(palette),
+        background: paletteGradient({ palette, name, niche }),
         border: "1px solid var(--color-border)",
         display: "grid",
         placeItems: "center",
@@ -144,7 +184,7 @@ export function ChannelBanner({
         aspectRatio,
         borderRadius: 16,
         overflow: "hidden",
-        background: paletteGradient(palette),
+        background: paletteGradient({ palette, name, niche }),
         border: "1px solid var(--color-border)",
       }}
     >
