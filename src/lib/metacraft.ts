@@ -416,22 +416,19 @@ function contentTitleTokens(value: string): Set<string> {
 }
 
 /**
- * Remove only obvious paraphrase duplicates from a candidate slate. Exact
- * dedupe alone lets seven frames collapse into the same headline with minor
- * word-order changes; an aggressive embedding call would add cost and can
- * erase legitimate format variants. This lexical guard requires at least
- * three content terms and a very high overlap, so genuinely different hooks
- * (searchable vs curiosity vs verdict) remain available to the judge.
+ * Recognize filler-only variants after semantic admission. A bag-of-words
+ * overlap cannot distinguish changed numbers, negation, conditions or reversed
+ * actor/action relationships. Preserve those instead of pretending overlap is
+ * entailment. Richer paraphrase detection needs its own calibrated oracle.
  */
 export function areNearDuplicateTitles(a: string, b: string): boolean {
-  const left = contentTitleTokens(a);
-  const right = contentTitleTokens(b);
-  if (left.size < 3 || right.size < 3) return false;
-  const intersection = [...left].filter((word) => right.has(word)).length;
-  const union = new Set([...left, ...right]).size;
-  const jaccard = intersection / Math.max(1, union);
-  const containment = intersection / Math.min(left.size, right.size);
-  return jaccard >= 0.8 || containment >= 0.92;
+  const tokens = (value: string) => value.normalize("NFKC").toLowerCase()
+    .replace(/’/g, "'")
+    .replace(/^(?:how|why)\s+/u, "")
+    .replace(/\b(?:actually|really)\b/gu, "")
+    .match(/[\p{L}\p{N}]+(?:['.,][\p{L}\p{N}]+)*|[-%<>=+−]/gu) ?? [];
+  const left = tokens(a), right = tokens(b);
+  return left.length >= 3 && left.length === right.length && left.every((token, index) => token === right[index]);
 }
 
 export function dedupeTitleCandidates<T extends { title: string }>(candidates: T[]): T[] {
@@ -1054,11 +1051,10 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       seenTitles.add(key);
       return true;
     });
-    const uniqueRawCandidates = dedupeTitleCandidates(exactUnique);
-    if (uniqueRawCandidates.length < exactUnique.length) {
-      a.log?.(`metacraft: removed ${exactUnique.length - uniqueRawCandidates.length} paraphrase-duplicate title candidate(s)`);
-    }
-    const candidates = uniqueRawCandidates
+    // Do not let an earlier provisional title suppress its valid revision.
+    // Even a lint-passing title can fail semantic review: compare alternatives
+    // only after that review, never before the judge can see their differences.
+    const candidates = exactUnique
       .map((c) => ({
         ...c,
         lint: lintTitle(c.title, {
@@ -1150,6 +1146,10 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           return (survivors[y.idx!]?.quality.score ?? 0) - (survivors[x.idx!]?.quality.score ?? 0);
         });
         if (ranked.length) {
+          const distinctRanked = dedupeTitleCandidates(ranked.map((ranking) => ({
+            ...ranking,
+            title: survivors[ranking.idx].title,
+          })));
           best = ranked[0].idx!;
           // The runner-up is the CTR swap's only experiment. It is deliberately
           // drawn from the SAME >=7 gate as the winner — swapping in a title the
@@ -1158,10 +1158,10 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           // the swap loop simply cannot run for that video. Measured across four
           // real channels that was 2 of 4, so say it rather than leaving the
           // downstream loop looking broken.
-          runner = ranked[1]?.idx ?? -1;
+          runner = distinctRanked[1]?.idx ?? -1;
           if (runner < 0) {
             a.log?.(
-              `metacraft: only ${ranked.length} candidate cleared the judge's bar — no alternate title, ` +
+              `metacraft: only ${distinctRanked.length} distinct candidate cleared the judge's bar — no alternate title, ` +
               `so the CTR swap has nothing to test for this video`,
             );
           }

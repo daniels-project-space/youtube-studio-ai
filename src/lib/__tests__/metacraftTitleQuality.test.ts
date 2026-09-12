@@ -121,8 +121,8 @@ assert.ok(concrete.score > setup.score, "generic setup must lose the local impac
 
 assert.equal(
   areNearDuplicateTitles("Chernobyl Failed One Safety Test", "Chernobyl One Safety Test Failed"),
-  true,
-  "word-order paraphrases should not consume separate candidate slots",
+  false,
+  "a lexical guard cannot safely infer equivalence after a changed word order",
 );
 assert.equal(
   areNearDuplicateTitles("Chernobyl Failed One Safety Test", "Why Chernobyl's Warning Changed Everything"),
@@ -131,7 +131,7 @@ assert.equal(
 );
 const slate = dedupeTitleCandidates([
   { frame: "direct", title: "Chernobyl Failed One Safety Test" },
-  { frame: "contrarian", title: "Chernobyl One Safety Test Failed" },
+  { frame: "filler", title: "How Chernobyl Actually Failed One Safety Test" },
   { frame: "curiosity", title: "Why Chernobyl's Warning Changed Everything" },
 ]);
 assert.deepEqual(slate.map((candidate) => candidate.frame), ["direct", "curiosity"]);
@@ -144,7 +144,6 @@ assert.match(
 );
 assert.match(source, /FORMAT PROFILE/, "the generator must receive the resolved format profile");
 assert.match(source, /titleProfile\.targetMinChars/, "the judge must see the same profile envelope as the generator");
-assert.match(source, /dedupeTitleCandidates\(exactUnique\)/, "paraphrase-only candidate slates must be reduced before judging");
 assert.match(source, /opening: \[a\.coldOpen, a\.hookLoop\]/, "metacraft must apply the independent opening promise floor before judging");
 
 console.log("METACRAFT TITLE QUALITY PASS");

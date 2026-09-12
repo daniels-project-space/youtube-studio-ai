@@ -65,12 +65,16 @@ The first complete-source critic challenge rejected the first three but admitted
 
 Evidence is retained in `test-fixtures/title-source-comparison/results.json`: actual decisions, complete model usage, both challenges and SHA-256 bindings to raw local transport records. The eight original source packets and their hashes remain unchanged. Reproduction tools: `scripts/title-source-comparison.ts` and `scripts/title-source-judge-challenge.ts`; these are explicit paid operator experiments, never automatic CI purchases.
 
+### Web release verification
+
+Commit `13698350ee75a42f7eed0020a73f8de1baba3d08` was pushed to main. The Vercel provider API confirms `dpl_8sWdEh4rGQ8spggKCvmM89s8zvBD`, target `production`, state `READY`, with `youtube-studio-ai.vercel.app` in its alias list and that exact commit SHA. A fresh production-alias health response returns the same SHA. [Cloud CI 34686534856](https://github.com/daniels-project-space/youtube-studio-ai/actions/runs/34686534856) subsequently completed successfully: **678 direct tests**, actual 31.02-second hermetic assembly, unchanged audit gates, and production Convex deployment. Trigger version **20260912.19** deployed at 09:58:09 UTC; the runtime job completed successfully at 09:58:12 UTC. These are terminal release observations, not proof that the entire title/module rework is finished.
+
 ## Still open
 
 - Creative sharpness and humanity: history still sometimes favors technical mechanism headlines over the human story; some variants use unnecessary “How”/“Actually” filler.
 - Independent/owner-calibrated quality judging, repeated blind trials and positional-bias measurement; no causal watch-time or CTR claim.
 - Every remaining format, especially non-narrated music, Shorts, unfamiliar channels and multilingual titles.
-- Exact numerical/alias entailment and over-restrictive first-beat number checks; lexical deduplication before lint can still hide a better near-duplicate.
+- Exact numerical/alias entailment and over-restrictive first-beat number checks. The lexical deduplication defect identified in this pass is addressed separately in `TITLE_CANDIDATE_ADMISSION_REVIEW_2026-09.md`; broader semantic-diversity calibration remains open.
 - External factual evidence: narration support is not factual verification. The retained finance narration contains unverified study/statistical assertions; this change does not qualify them for publication.
 - Consolidation of description/comment calls and complete cost admission/recovery accounting for long inputs. Full context costs more; removing it is not an acceptable cost optimization.
 - Earlier thumbnail, UI, fleet, healer, retention and module backlog work remains active.
