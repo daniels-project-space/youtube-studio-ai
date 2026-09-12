@@ -9,7 +9,7 @@ import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 export const runtime = "nodejs";
 
 const musicAuditionApi = (api as unknown as {
-  readonly musicAuditionCheckpoints: { readonly getReviewForRun: never };
+  readonly musicAuditionCheckpoints: { readonly getReviewForRun: never; readonly reject: never };
 }).musicAuditionCheckpoints;
 
 function client(): StudioConvexHttpClient {
@@ -47,6 +47,24 @@ export async function GET(request: Request) {
   } catch (error) {
     const message = error instanceof Error ? error.message : "Music audition review failed";
     const status = error instanceof StudioAuthError ? error.status : /runId|required|ownership|checkpoint|audition/i.test(message) ? 422 : 500;
+    return NextResponse.json({ ok: false, error: message }, { status });
+  }
+}
+
+export async function POST(request: Request) {
+  try {
+    const actor = await requireStudioActor(request);
+    const body = await request.json() as Record<string, unknown>;
+    if (body.action !== "reject" || typeof body.checkpointId !== "string" || !body.checkpointId.trim() || Object.keys(body).some((key) => key !== "action" && key !== "checkpointId")) {
+      throw new Error("music audition accepts only reject and checkpointId");
+    }
+    const result = await client().mutation(musicAuditionApi.reject, {
+      ownerId: actor.ownerId, checkpointId: body.checkpointId, reviewerId: actor.ownerId, now: Date.now(),
+    } as never);
+    return NextResponse.json({ ok: true, result }, { headers: { "Cache-Control": "no-store" } });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Music audition rejection failed";
+    const status = error instanceof StudioAuthError ? error.status : /accepts|checkpoint|audition|rejection/i.test(message) ? 422 : 500;
     return NextResponse.json({ ok: false, error: message }, { status });
   }
 }
