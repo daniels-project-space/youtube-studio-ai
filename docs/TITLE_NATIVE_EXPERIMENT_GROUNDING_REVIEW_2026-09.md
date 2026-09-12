@@ -20,11 +20,14 @@ The prior worker called `videos.update` to replace a weak-CTR title with one sto
 2. The Trigger worker no longer imports or calls the YouTube metadata-update path. Even its explicitly approved manual invocation emits an auditable proposal and explains that approval cannot turn a sequential CTR edit into a native experiment.
 3. Existing historical swap receipts are sealed as `not_experiment` with a reason rather than labeled `alternate_won` or `original_won`. No historical sequential result can train the package selector.
 4. The performance-ledger type now records the distinction between `legacy_sequential` and a future `native_ab` receipt. A native result must include the platform verdict and per-variant watch-time evidence before it can affect title learning.
+5. The legacy `contentExperiments` table is now stamped `single_variant_observation` for an ordinary published package. The learning refresh records that as creative context only and refuses to attach ordinary Analytics snapshots to a future `youtube_native_ab` row.
 
 ## Verification
 
 - `pnpm exec tsx src/lib/__tests__/titleCtrSwap.test.ts` — passed.
 - `pnpm exec tsx src/lib/__tests__/titleSwapAttribution.test.ts` — passed.
+- `pnpm exec tsx src/lib/__tests__/contentExperimentMeasurement.test.ts` — passed.
+- `pnpm exec tsx src/lib/__tests__/contentExperimentMeasurementWiring.test.ts` — passed.
 - `pnpm exec tsc --noEmit --pretty false` — passed.
 
 ## Still deliberately open

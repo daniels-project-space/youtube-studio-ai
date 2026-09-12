@@ -320,6 +320,9 @@ export const createOrGet = mutation({
       thumbnailVariant: args.thumbnailArtifactKey,
       hookVariant,
       visualVariant,
+      // One published package has no concurrently served comparator. Its
+      // analytics are useful creative context, never an experiment verdict.
+      measurementKind: "single_variant_observation",
       status: "assigned",
       createdAt: args.createdAt,
     });

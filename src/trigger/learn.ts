@@ -353,7 +353,7 @@ function ledgerContainsBatch(
     });
 }
 
-async function recordExperimentOutcomes(args: {
+async function recordCreativeAssignmentObservations(args: {
   convex: ConvexHttpClient;
   ownerId: string;
   batch: LearningAnalyticsBatch;
@@ -378,7 +378,7 @@ async function recordExperimentOutcomes(args: {
         youtubeVideoId: item.youtubeVideoId,
       });
       if (experiment) {
-        await convex.mutation(api.learningGovernance.recordExperimentOutcome, {
+        await convex.mutation(api.learningGovernance.recordCreativeAssignmentObservation, {
           secret: internalSecret,
           ownerId,
           experimentId: experiment._id,
@@ -398,7 +398,7 @@ async function recordExperimentOutcomes(args: {
     } catch (error) {
       // This is a local governance projection of an already-durable ingestion;
       // it never authorizes another Analytics call or ledger write.
-      log(`learning-refresh: experiment outcome failed for ${item.youtubeVideoId}: ${error instanceof Error ? error.message : String(error)}`);
+      log(`learning-refresh: creative-assignment observation failed for ${item.youtubeVideoId}: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 }
@@ -754,7 +754,7 @@ async function processLearningBatch(args: {
           log(`learning-refresh: ${String(channelId)} ledger completion was quarantined (${completion.action ?? "unknown"})`);
           return { recordsWritten: 0, ledgerSaved: false };
         }
-        await recordExperimentOutcomes({ convex, ownerId, batch: active, internalSecret, log });
+        await recordCreativeAssignmentObservations({ convex, ownerId, batch: active, internalSecret, log });
         return {
           recordsWritten: active.items.filter((item) => item.requestStatus === "fetched").length,
           ledgerSaved: true,
@@ -825,7 +825,7 @@ async function processLearningBatch(args: {
         log(`learning-refresh: ${String(channelId)} ledger completion was quarantined (${completion.action ?? "unknown"})`);
         return { recordsWritten: 0, ledgerSaved: false };
       }
-      await recordExperimentOutcomes({ convex, ownerId, batch: active, internalSecret, log });
+      await recordCreativeAssignmentObservations({ convex, ownerId, batch: active, internalSecret, log });
       return { recordsWritten: (preparation.items ?? []).length, ledgerSaved: true };
     } catch (error) {
       // The R2 write succeeded, but its Convex completion response may not

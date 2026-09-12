@@ -2644,8 +2644,11 @@ export default defineSchema({
     .index("by_owner_channel", ["ownerId", "channelId"])
     .index("by_channel", ["channelId"]),
 
-  // Versioned creative assignment and its observed outcome. This keeps title,
-  // thumbnail, hook, and visual decisions joined to the exact published video.
+  // Versioned creative assignment and its observed outcome. This legacy table
+  // name predates the distinction below: an ordinary one-package video is a
+  // single-variant observation, NOT an A/B experiment. Only a future native
+  // YouTube title/thumbnail receipt may set youtube_native_ab and resolve a
+  // watch-time-share winner.
   contentExperiments: defineTable({
     ownerId: v.string(),
     channelId: v.id("channels"),
@@ -2661,6 +2664,10 @@ export default defineSchema({
     thumbnailVariant: v.optional(v.string()),
     hookVariant: v.optional(v.string()),
     visualVariant: v.optional(v.string()),
+    measurementKind: v.optional(v.union(
+      v.literal("single_variant_observation"),
+      v.literal("youtube_native_ab"),
+    )),
     status: v.union(v.literal("assigned"), v.literal("observed"), v.literal("closed")),
     outcome: v.optional(v.any()),
     outcomeIngestionId: v.optional(v.id("analyticsIngestions")),

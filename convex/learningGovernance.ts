@@ -1,5 +1,6 @@
 import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
+import { admitOrdinaryCreativeObservation } from "../src/lib/contentExperimentMeasurement";
 import type { Id } from "./_generated/dataModel";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
 import { patchChannelRespectingLock } from "./channelLock";
@@ -1160,7 +1161,13 @@ export const reject = mutation({
   },
 });
 
-export const recordExperimentOutcome = mutation({
+/**
+ * Store ordinary performance against the exact assigned package. The historic
+ * table is named contentExperiments, but this mutation intentionally cannot
+ * resolve a native A/B result: that requires a separate receipt carrying
+ * YouTube's variant-level watch-time-share verdict.
+ */
+export const recordCreativeAssignmentObservation = mutation({
   args: {
     secret: v.string(),
     ownerId: v.string(),
@@ -1177,7 +1184,7 @@ export const recordExperimentOutcome = mutation({
       ctx.db.get(args.ingestionId),
     ]);
     if (!experiment || experiment.ownerId !== args.ownerId) {
-      throw new Error("learningGovernance.recordOutcome: experiment owner mismatch");
+      throw new Error("learningGovernance.recordCreativeAssignmentObservation: experiment owner mismatch");
     }
     if (
       !ingestion ||
@@ -1186,13 +1193,17 @@ export const recordExperimentOutcome = mutation({
       ingestion.connectorVersion !== experiment.connectorVersion ||
       ingestion.channelId !== experiment.channelId
     ) {
-      throw new Error("learningGovernance.recordOutcome: ingestion provenance mismatch");
+      throw new Error("learningGovernance.recordCreativeAssignmentObservation: ingestion provenance mismatch");
     }
     if (
       experiment.youtubeVideoId &&
       experiment.youtubeVideoId !== args.youtubeVideoId
     ) {
-      throw new Error("learningGovernance.recordOutcome: video identity mismatch");
+      throw new Error("learningGovernance.recordCreativeAssignmentObservation: video identity mismatch");
+    }
+    const admission = admitOrdinaryCreativeObservation(experiment.measurementKind);
+    if (!admission.pass) {
+      throw new Error(`learningGovernance.recordCreativeAssignmentObservation: ${admission.reason}`);
     }
     await ctx.db.patch(experiment._id, {
       youtubeVideoId: args.youtubeVideoId,
