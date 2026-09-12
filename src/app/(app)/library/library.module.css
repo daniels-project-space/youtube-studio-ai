@@ -1,5 +1,21 @@
 .library { display: grid; grid-template-columns: minmax(0, 1fr); min-width: 0; gap: .9rem; }
 
+/* The vault is a browsing surface, not a second channel-detail page. Keep its
+   compact treatment scoped to this route so richer channel cards are unchanged. */
+:global(.video-grid[data-density="library"]) {
+  grid-template-columns: repeat(auto-fill, minmax(min(178px, 100%), 1fr));
+  gap: .56rem;
+}
+:global(.video-card[data-density="library"] .video-card-body) { gap: .24rem; padding: .48rem .54rem .52rem; }
+:global(.video-card[data-density="library"] .video-card-body h3) { font-size: .76rem; line-height: 1.28; -webkit-line-clamp: 2; }
+:global(.video-card[data-density="library"] .video-card-meta) { gap: .34rem; font-size: .61rem; }
+:global(.video-card[data-density="library"] .video-card-evidence) { min-height: 17px; justify-content: space-between; gap: .3rem; }
+:global(.video-card[data-density="library"] .video-card-thumbnail-label) { font-size: .55rem; }
+:global(.video-card[data-density="library"] .release-evidence-badge) { font-size: .54rem; }
+:global(.video-card[data-density="library"] .video-card-footer) { min-height: 32px; padding: .3rem .48rem; }
+:global(.video-card[data-density="library"] .video-card-footer > span) { display: none; }
+:global(.video-card[data-density="library"] .video-card-library-action) { min-height: 24px; margin-left: auto; padding: .25rem .42rem; }
+
 .libraryDashboard {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

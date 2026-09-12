@@ -94,12 +94,12 @@ function StudioSessionGate({ state }: { state: "loading" | "unavailable" }) {
       <section className={styles.card}>
         <span className={styles.status} data-state={state}>
           <span className={styles.statusDot} aria-hidden="true" />
-          {loading ? "Connecting to production" : "Production connection unavailable"}
+          {loading ? "Connecting live data" : "Live data unavailable"}
         </span>
         <p className={styles.message}>
           {loading
             ? "Opening your workspace…"
-            : "Live data is unavailable. Rendering and publishing remain paused until it reconnects."}
+            : "Nothing starts until the connection returns."}
         </p>
         {!loading ? (
           <button
@@ -107,7 +107,7 @@ function StudioSessionGate({ state }: { state: "loading" | "unavailable" }) {
             onClick={() => window.location.reload()}
             className={`studio-action studio-action-primary ${styles.retry}`}
           >
-            Retry live data
+            Retry
           </button>
         ) : null}
       </section>

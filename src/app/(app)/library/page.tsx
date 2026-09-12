@@ -232,6 +232,7 @@ export default function LibraryPage() {
           </header>
           <VideoGrid
             videos={page.visible}
+            density="library"
             onOpen={openLightbox}
             libraryAction={operationsAccess === "owner" ? {
               label: collection === "active" ? "Archive" : "Restore",

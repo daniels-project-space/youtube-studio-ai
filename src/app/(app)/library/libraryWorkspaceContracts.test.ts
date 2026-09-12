@@ -10,6 +10,8 @@ const paging = readFileSync(join(root, "src/app/(app)/library/libraryPaging.ts")
 assert.match(page, /const page = pageLibraryGroup\(filtered, visibleLimit\)/);
 assert.match(page, /<section className=\{styles\.vault\}/);
 assert.match(page, /<VideoGrid\s+videos=\{page\.visible\}/);
+assert.match(page, /density="library"/,
+  "the vault must use its compact, space-efficient review treatment rather than channel-detail cards");
 assert.match(page, /<LibraryMetric label="Visible"/);
 assert.match(page, /<LibraryMetric label="Channels"/);
 assert.match(page, /<LibraryMetric label="Unverified"/);
@@ -30,6 +32,7 @@ assert.match(page, /role="alert"/);
 assert.match(css, /\.libraryDashboard/);
 assert.match(css, /\.libraryMetrics/);
 assert.match(css, /\.vault \{/);
+assert.match(css, /\.video-grid\[data-density="library"\]/);
 assert.doesNotMatch(css, /\.latestRail\s*\{/);
 assert.match(css, /\.changeToast\[data-tone="error"\]/);
 assert.doesNotMatch(css, /\.channelHeader \{/);

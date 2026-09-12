@@ -32,6 +32,7 @@ export function VideoCard({
   onOpen,
   libraryAction,
   priority = false,
+  compact = false,
 }: {
   video: VideoRow;
   onOpen?: (video: VideoRow) => void;
@@ -41,6 +42,8 @@ export function VideoCard({
     onAction: () => void;
   };
   priority?: boolean;
+  /** A concise vault card keeps the video identity and controls without a second metadata rail. */
+  compact?: boolean;
 }) {
   const content = (
     <>
@@ -80,7 +83,7 @@ export function VideoCard({
           <time>{fmtDateTime(video.createdAt)}</time>
         </div>
         <div className="video-card-evidence">
-          <span className="video-card-evidence-label">Master evidence</span>
+          {compact ? null : <span className="video-card-evidence-label">Master evidence</span>}
           <span className="video-card-thumbnail-label" data-tone={video.thumbnailPresentation ?? "retained_source"}>
             {thumbnailLabel(video)}
           </span>
@@ -91,7 +94,7 @@ export function VideoCard({
   );
 
   return (
-    <article className="glass video-card" data-library-state={video.libraryState ?? "active"} data-thumbnail-presentation={video.thumbnailPresentation ?? "retained_source"}>
+    <article className="glass video-card" data-library-state={video.libraryState ?? "active"} data-thumbnail-presentation={video.thumbnailPresentation ?? "retained_source"} data-density={compact ? "library" : "regular"}>
       {onOpen ? (
         <button
           type="button"
