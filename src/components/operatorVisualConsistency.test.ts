@@ -121,7 +121,8 @@ assert.doesNotMatch(globalCss, /JARVIS|jarvis/i,
 
 // Live work is a receipt-backed workbench: it groups real stages into phases,
 // retains per-stage inspection, and does not suggest an invented render stream.
-assert.match(livePipeline, /Run route monitor/);
+assert.match(livePipeline, /<strong>Pipeline<\/strong>/,
+  "the live workbench should lead with its practical purpose rather than a decorative route-monitor label");
 assert.match(livePipeline, /summarizeLivePipelinePhases/);
 assert.match(livePipeline, /<StageRow inputs=\{stage\.inputs\} outputs=\{stage\.outputs\} error=\{stage\.error\}/);
 assert.match(livePipeline, /data-status=\{status\}/);

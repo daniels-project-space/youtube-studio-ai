@@ -14,6 +14,10 @@ assert.match(pipeline, /Using the saved legacy plan/);
 assert.match(pipeline, /role="progressbar"/);
 assert.match(pipeline, /aria-valuenow={receiptPercent}/);
 assert.match(pipeline, /role="status"[\s\S]*aria-live="polite"/);
+assert.match(pipeline, /selectedPhase \?\? \(!inspectionDismissed && blockedNode/,
+  "an active stage is already shown in the live strip; only a blocked phase should auto-open its receipt shelf");
+assert.match(pipeline, /const \[inspectionDismissed, setInspectionDismissed\]/,
+  "an operator must be able to collapse an automatically opened blocked-phase shelf");
 
 assert.match(runDetail, /api\.runs\.getRunPresentation/);
 assert.match(runDetail, /run\.pipeline\?\.entries\.length/);

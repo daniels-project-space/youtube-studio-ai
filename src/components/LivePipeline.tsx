@@ -57,6 +57,7 @@ export function LivePipeline({
 }) {
   const [expanded, setExpanded] = useState<string | null>(null);
   const [selectedPhase, setSelectedPhase] = useState<LivePipelinePhase | null>(null);
+  const [inspectionDismissed, setInspectionDismissed] = useState(false);
   const complete = nodes.filter((node) => ["ok", "skipped"].includes(nodeStatus(node))).length;
   const failed = nodes.filter((node) => nodeStatus(node) === "failed").length;
   const active = nodes.find((node) => nodeStatus(node) === "running");
@@ -65,12 +66,12 @@ export function LivePipeline({
   const receiptPercent = nodes.length ? Math.round((complete / nodes.length) * 100) : 0;
   const recordedCost = nodes.reduce((sum, node) => sum + (node.stage?.cost ?? 0), 0);
   const blockedNode = nodes.find((node) => nodeStatus(node) === "failed");
-  const defaultInspectionPhase = blockedNode
+  // A current stage is already visible in the live strip. Opening its whole
+  // phase by default made every active run a long wall of receipts. Failures
+  // remain opened automatically because their recorded evidence is actionable.
+  const inspectionPhase = selectedPhase ?? (!inspectionDismissed && blockedNode
     ? livePipelinePhaseForBlock(blockedNode.block)
-    : active
-      ? livePipelinePhaseForBlock(active.block)
-      : null;
-  const inspectionPhase = selectedPhase ?? defaultInspectionPhase;
+    : null);
   const inspectionNodes = inspectionPhase
     ? nodes.filter((node) => livePipelinePhaseForBlock(node.block) === inspectionPhase)
     : [];
@@ -81,10 +82,10 @@ export function LivePipeline({
         <div className={styles.summaryLead}>
           <span className={styles.summarySignal} aria-hidden="true" />
           <span>
-            <strong>Run route monitor</strong>
+            <strong>Pipeline</strong>
             <small>
               {active
-                ? `Working in ${LIVE_PIPELINE_PHASE_LABEL[livePipelinePhaseForBlock(active.block)].toLowerCase()} · ${blockLabel(active.block)}`
+                ? `${LIVE_PIPELINE_PHASE_LABEL[livePipelinePhaseForBlock(active.block)]} is active`
                 : failed
                   ? "A recorded stage needs attention before release can continue"
                   : complete === nodes.length
@@ -139,16 +140,16 @@ export function LivePipeline({
         >
           <span className={styles.activeGlyph} aria-hidden="true"><i /><i /><i /></span>
           <div>
-            <small>Now running</small>
+            <small>Active stage</small>
             <strong>{blockLabel(active.block)}</strong>
-            <span>{LIVE_PIPELINE_PHASE_LABEL[livePipelinePhaseForBlock(active.block)]} · {active.block}</span>
+            <span>{LIVE_PIPELINE_PHASE_LABEL[livePipelinePhaseForBlock(active.block)]}</span>
           </div>
           {active.stage?.startedAt && <Elapsed from={active.stage.startedAt} />}
         </section>
       )}
 
       <div className={styles.phaseStrip} aria-label="Production phase progress">
-        {phaseSummaries.map((summary, index) => (
+        {phaseSummaries.map((summary) => (
           <button
             type="button"
             className={styles.phase}
@@ -157,9 +158,16 @@ export function LivePipeline({
             key={summary.phase}
             title={describeLivePipelinePhase(summary)}
             aria-pressed={inspectionPhase === summary.phase}
-            onClick={() => setSelectedPhase((current) => current === summary.phase ? null : summary.phase)}
+            onClick={() => {
+              if (inspectionPhase === summary.phase) {
+                setSelectedPhase(null);
+                setInspectionDismissed(true);
+                return;
+              }
+              setSelectedPhase(summary.phase);
+              setInspectionDismissed(false);
+            }}
           >
-            <span className={styles.phaseOrder}>{String(index + 1).padStart(2, "0")}</span>
             <div className={styles.phaseTopline}>
               <span className={styles.phaseDot} aria-hidden="true" />
               <span className={styles.phaseName}>{summary.label}</span>
