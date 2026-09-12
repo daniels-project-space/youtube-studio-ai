@@ -1,28 +1,17 @@
 --- scripts/mc_page_render.py
 +++ scripts/mc_page_render.py
-@@ -263,16 +263,11 @@
- nP = max(1, math.ceil(N / PER_PAGE)); base = max(1, math.ceil(N / nP))
- PAGES = [build_page(panels[s:s + base]) for s in range(0, N, base)]
- 
+@@ -266,4 +266,2 @@
 -# The opening is an actual story hook, never an empty page of panel borders.
 -# `castMotionComic` has already made panel_0 mandatory before this local
 -# renderer is called.  Surface that approved art during the preroll, then keep
 -# the first camera beat on it instead of pretending to draw a blank template.
 +# The opening uses the same actual hand/mask reveal as the later panels.
 +# Start on its art region and draw during the existing narration preroll.
- opening_pane = PAGES[0]["panes"][0] if PAGES and PAGES[0]["panes"] else None
- if opening_pane is None:
-     raise RuntimeError("motionComic opening panel art is missing; refusing empty template opening")
+@@ -273,3 +270,0 @@
 -ox, oy, ow, oh = opening_pane["box"]
 -PAGES[0]["world"][PAGES[0]["PY"] + oy:PAGES[0]["PY"] + oy + oh, PAGES[0]["PX"] + ox:PAGES[0]["PX"] + ox + ow] = opening_pane["art"]
 -opening_pane["intro_visible"] = True
- 
- 
- # ---------------- camera (per page) ----------------
-@@ -311,6 +306,19 @@
-     return crop.resize((OW, OH), Image.BILINEAR, box=sub)
- 
- 
+@@ -313,0 +309,13 @@
 +def reveal_panel(pg, pane, progress):
 +    if pane is None or progress <= 0:
 +        return None, None
@@ -36,42 +25,23 @@
 +    return (pg["PX"] + x + pane["traj"][k, 0], pg["PY"] + y + pane["traj"][k, 1]), pane
 +
 +
- def page_turn(Pold, Pnew, q):
-     """Old page pivots at the left spine and foreshortens to the left, revealing
-     the fresh page beneath; a cast shadow + bright fold edge sell the turn."""
-@@ -352,7 +360,7 @@
- with open(os.path.join(RUN_DIR, "motion_comic_review_timeline.json"), "w") as review_out:
-     json.dump({"version": "motion-comic-review/v1", "bubbles": review_bubbles}, review_out)
- 
+@@ -355 +363 @@
 -est_from = frame_top(PAGES[0]); est_from = [est_from[0], est_from[1], est_from[2] * 1.12]
 +est_from = frame_box(PAGES[0], 0); est_from = [est_from[0], est_from[1], est_from[2] * 1.06]
- BR = lambda c, tt: (c[0] + 2.4 * math.sin(tt * 0.42 + 1.3), c[1] + 1.9 * math.sin(tt * 0.34 + 0.4), c[2])
- 
- ff = subprocess.Popen(
-@@ -367,25 +375,26 @@
-             seg = s; break
-     kind, pi, li, st, en = seg
-     if kind == "est":
+@@ -370,2 +378,4 @@
 -        pg = PAGES[0]; cam = lerp(est_from, frame_top(pg), smoothstep((t - st) / max(0.1, en - st)))
 -        frame = render_page_frame(pg, list(BR(cam, t)), None, None, t)
 +        pg = PAGES[0]; cam = lerp(est_from, frame_box(pg, 0), smoothstep((t - st) / max(0.1, en - st)))
 +        progress = (t - st + 1.0 / FPS) / max(1.0 / FPS, en - st)
 +        hand_pt, active = reveal_panel(pg, opening_pane, progress)
 +        frame = render_page_frame(pg, list(BR(cam, t)), hand_pt, active, t)
-     elif kind == "panel":
-         pg = PAGES[pi]; panel = pg["panels"][li]; pane = pg["panes"][li]; local = t - st; hand_pt = None; active = None
-         f_to = frame_box(pg, li)
-         if local < MOVE:
-             f_from = frame_box(pg, li - 1) if li > 0 and pg["panes"][li - 1] else frame_top(pg)
+@@ -376,0 +387,2 @@
 +            if pi == 0 and li == 0 and EST > 0:
 +                f_from = f_to
-             cam = lerp(f_from, f_to, smoothstep(local / MOVE))
-         else:
-             hf = min(1.0, (local - MOVE) / max(0.1, panel["dur"] - MOVE))
-             cam = [f_to[0], f_to[1] - 0.012 * f_to[2] * hf, f_to[2] * (1 - 0.045 * hf)]
+@@ -381 +393 @@
 -        if pane is not None and not (pi == 0 and li == 0 and pane.get("intro_visible")):
 +        if pane is not None:
-             draw_span = max(0.45, (panel["dur"] - MOVE - HOLD) * DRAW_FRAC); prog = (local - MOVE) / draw_span
+@@ -383,6 +395,3 @@
 -            if prog > 0:
 -                prog = min(prog, 1.0); x, y, w, h = pane["box"]; mask = pane["order2d"] <= prog
 -                pg["world"][pg["PY"] + y:pg["PY"] + y + h, pg["PX"] + x:pg["PX"] + x + w][mask] = pane["art"][mask]
@@ -81,6 +51,3 @@
 +            if pi == 0 and li == 0 and EST > 0:
 +                prog = 1.0
 +            hand_pt, active = reveal_panel(pg, pane, prog)
-         frame = render_page_frame(pg, list(BR(cam, t)), hand_pt, active, t)
-     elif kind == "turn":
-         q = smoothstep((t - st) / max(0.1, en - st))

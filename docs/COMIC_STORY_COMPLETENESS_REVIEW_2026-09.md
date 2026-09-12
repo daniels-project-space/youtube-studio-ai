@@ -1,6 +1,6 @@
 # Comic story completeness — 12 September 2026
 
-Status: **implemented next-batch candidate, not yet released**. This closes two reproduced omission boundaries inside the current comic engine; it does not claim the page-generation/character-reference/hand-reveal rework is complete.
+Status: **committed at `e5f94ab`; frozen local release gate passed; exact production deployment still pending**. This closes two reproduced omission boundaries inside the current comic engine; it does not claim the page-generation/character-reference/hand-reveal rework is complete.
 
 Reviewed runtime freeze: `src/lib/motionComic.ts` SHA256 `3eab4e712c4b7abcded4dad4fe0e4e9fdb335ea45a025f99e18707e0ea06db82`. The final 58-case run reproduces every retained case result in `after.json`; the final eight valid handoffs remain identical to the original baseline. No production release claim is attached to this local hash.
 
@@ -56,6 +56,8 @@ Focused checks passed: new completeness test, changed-file ESLint, Motion Comic 
 Independent final review also passed 12 additional actual cast/block → real remote-cost-wrapper → task-policy probes, covering response-body failures, tiny audio, HTTP 500, exhausted bounded 429 attempts and both terminal fallback-art branches. The final reviewed runtime SHA-256 is `3eab4e712c4b7abcded4dad4fe0e4e9fdb335ea45a025f99e18707e0ea06db82`; permanent regression SHA-256 is `a14d4b427f44a5de41ab1b3c2463cda6bf52332a89358e72603d38465d2cebc3`. No blocker or weakened gate was found in this narrow final review.
 
 The first local full sweep was explicitly stopped (exit 143) when review exposed the swallowed terminal art-recovery error; it is not passing release evidence. The corrected frozen sweep is `/tmp/comic-completeness-readiness-final-20260912.log`; build/typecheck/lint/audit/proof use the corresponding `*-final-20260912.log` paths. Exact terminal results and deployment remain the parent's next verification gate.
+
+The corrected frozen command subsequently completed with **exit 0: all 685 direct production-readiness tests passed**, followed by actual hermetic assembly: **31.021995 seconds, 17,164.6 KiB, four segments, zero warnings**. This general assembly check does not pretend to be a new comic-quality render. Typecheck, production build, full lint (zero errors; 29 existing warnings), unchanged-bound structural audits and the defect-proof gate all completed successfully. The code graph was updated using AST extraction only (22,356 nodes / 53,815 edges), and stays excluded from deployment along with retained test fixtures. The source and permanent-test hashes above were rechecked after completion. No provider/model/resolution/precision changes or paid render requests were introduced.
 
 Separately, the [native opening A/B experiment](../test-fixtures/comic-opening-reveal/README.md) retains two actual 1080p clips and 40 inspected samples. It confirms the prepainted opening and tests a shared hand-mask reveal without production changes. The candidate still needs framing/clearance and full narrated/multipage qualification; it is not part of this runtime release.
 
