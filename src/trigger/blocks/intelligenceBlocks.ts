@@ -69,6 +69,7 @@ import {
   type TitleProfileId,
 } from "@/lib/metacraft";
 import { hasAnthropicKey } from "@/lib/anthropic";
+import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 import { hasVisionKey } from "@/lib/vision";
 import {
   renderCandidate,
@@ -444,17 +445,22 @@ export const metadataOptimized: Block = {
     // Script context grounds the SEO in the ACTUAL video (narrated archetypes).
     let scriptExcerpt = "";
     const nt = ctx.store["narrationText"];
-    if (typeof nt === "string" && nt.length > 0) {
-      scriptExcerpt = nt.slice(0, 800);
+    const scriptNarration = (ctx.store["script"] as { narrationText?: unknown } | undefined)?.narrationText;
+    const narrationText = typeof nt === "string" && nt.trim()
+      ? nt
+      : typeof scriptNarration === "string" && scriptNarration.trim() ? scriptNarration : undefined;
+    if (narrationText) {
+      scriptExcerpt = narrationText.slice(0, 800);
     } else {
       const sc = ctx.store["script"] as { sections?: { heading?: string }[] } | undefined;
       if (sc?.sections?.length) {
         scriptExcerpt = sc.sections.map((s) => s.heading).filter(Boolean).join("; ").slice(0, 800);
       }
     }
+    const titleScriptExcerpt = scriptExcerpt;
     if (serializedEpisodePrompt) {
-      // Keep serial continuity in the same bounded script-grounding channel
-      // used by both the judged provider path and the deterministic no-provider path.
+      // Preserve the thumbnail descriptor's bounded context. The title engine
+      // receives complete narration and separate planning context below.
       scriptExcerpt = `${serializedEpisodePrompt}\n\n${scriptExcerpt}`.trim().slice(0, 1_400);
     }
 
@@ -536,7 +542,9 @@ export const metadataOptimized: Block = {
         niche,
         persona,
         language,
-        scriptExcerpt,
+        narrationText,
+        scriptExcerpt: titleScriptExcerpt,
+        episodeContext: serializedEpisodePrompt || undefined,
         coldOpen: scriptDoc?.hook ?? undefined,
         hookLoop: scriptDoc?.hookLoop ?? undefined,
         quote: (ctx.store["script"] as { closingLine?: string } | undefined)?.closingLine ?? undefined,
@@ -577,7 +585,7 @@ export const metadataOptimized: Block = {
         tags,
         channelName,
         nicheIntel,
-        grounding: [topic, scriptExcerpt, scriptDoc?.hook, scriptDoc?.hookLoop, (ctx.store["script"] as { closingLine?: string } | undefined)?.closingLine]
+        grounding: [topic, narrationText ?? titleScriptExcerpt, scriptDoc?.hook, scriptDoc?.hookLoop, (ctx.store["script"] as { closingLine?: string } | undefined)?.closingLine]
           .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
           .join("\n"),
         opening: [scriptDoc?.hook, scriptDoc?.hookLoop]
@@ -616,6 +624,9 @@ export const metadataOptimized: Block = {
       ctx.log(
         `metadata: METACRAFT TITLE GATE FAILED — no unjudged fallback will be persisted (${detail})`,
       );
+      // Preserve explicit no-replay metadata. Wrapping a paid ambiguous 503 in
+      // a plain Error lets the engine mistake it for a safe transient failure.
+      if (e instanceof OpenRouterGenerationOutcomeUnknownError) throw e;
       throw new Error(`metadata: title gate failed; no unjudged fallback: ${detail}`, { cause: e });
     }
 

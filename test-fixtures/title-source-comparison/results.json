@@ -1,0 +1,2728 @@
+{
+  "version": "title-source-comparison/v1",
+  "baselineCommit": "d88654b",
+  "model": "google/gemini-3.7-flash",
+  "purpose": "Current-identity experiment on frozen retained source, not historical replay or audience performance",
+  "runs": [
+    {
+      "arm": "before",
+      "rawEvidence": "/tmp/title-source-before-20260912/evidence.json",
+      "sha256": "66d99b1034c3db18f74542ba9e04b1f9efb8fcb113c08acf7d30bb9f6bf49146",
+      "calls": 16,
+      "costUsd": 0.070809,
+      "results": [
+        {
+          "channel": "Inked Histories",
+          "runId": "js76ghf4s44b4w5d97cs2f49bd89znxa",
+          "sourceChars": 2915,
+          "title": "Why Unearthing Buried Battlefield Relics Instantly Destroys Them",
+          "titleAlternate": "How a Civil War Sword Survived a Century in Dirt",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "Why Unearthing Buried Battlefield Relics Instantly Destroys Them",
+            "titleAlternate": "How a Civil War Sword Survived a Century in Dirt",
+            "clickScore": 8.9,
+            "directness": 8.5,
+            "winnerIndex": 4,
+            "alternateIndex": 0,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "script_excerpt",
+              "providedChars": 800,
+              "totalChars": null
+            },
+            "candidates": [
+              {
+                "frame": "topic-bet",
+                "title": "How a Civil War Sword Survived a Century in Dirt"
+              },
+              {
+                "frame": "curiosity_gap",
+                "title": "Why Toxic Mud Preserves Buried Battlefield Relics Intact"
+              },
+              {
+                "frame": "contrarian",
+                "title": "Why Burying Battlefield Relics Actually Prevents Total Rust"
+              },
+              {
+                "frame": "mechanism",
+                "title": "How Oxygen-Depleted Soil Preserves Buried Battlefield Relics"
+              },
+              {
+                "frame": "stakes_warning",
+                "title": "Why Unearthing Buried Battlefield Relics Instantly Destroys Them"
+              },
+              {
+                "frame": "search_intent",
+                "title": "Why Buried Battlefield Relics Survive Under Mud for Decades"
+              },
+              {
+                "frame": "direct_verdict",
+                "title": "Anoxic Mud Turns Buried Battlefield Relics into Time Capsules"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.7,
+                "direct": 8.6,
+                "identityFit": 8.8,
+                "grounding": "supported",
+                "reason": "Anchoring the science to a tangible artifact like a Civil War sword creates an immediate, highly clickable narrative promise."
+              },
+              {
+                "idx": 1,
+                "clickScore": 7.4,
+                "direct": 7.8,
+                "identityFit": 7.5,
+                "grounding": "supported",
+                "reason": "Sensationalizes anoxic soil chemistry as 'toxic mud', which adds intrigue but slightly misrepresents the preservation mechanism."
+              },
+              {
+                "idx": 2,
+                "clickScore": 7.9,
+                "direct": 8.1,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Strong contrarian premise on how burial inhibits oxidation, directly addressing the core mechanism."
+              },
+              {
+                "idx": 3,
+                "clickScore": 6.8,
+                "direct": 8.3,
+                "identityFit": 7.2,
+                "grounding": "supported",
+                "reason": "Accurately explains anoxic soil mechanics but reads like an academic abstract rather than a clickable YouTube title."
+              },
+              {
+                "idx": 4,
+                "clickScore": 8.9,
+                "direct": 8.5,
+                "identityFit": 8.7,
+                "grounding": "supported",
+                "reason": "Frames the preservation mechanism through the high-stakes consequence of sudden oxygen exposure upon unearthing."
+              },
+              {
+                "idx": 5,
+                "clickScore": 7.3,
+                "direct": 8,
+                "identityFit": 7.7,
+                "grounding": "supported",
+                "reason": "Clear search-intent framing, though slightly generic compared to higher-stakes or object-specific angles."
+              },
+              {
+                "idx": 6,
+                "clickScore": 7,
+                "direct": 7.6,
+                "identityFit": 7.4,
+                "grounding": "supported",
+                "reason": "Accurate mechanism with 'anoxic mud', but the phrasing is slightly passive and formal for the competitive feed."
+              }
+            ],
+            "fingerprint": "5b0550453bf30b787c6cd58c967b0df0a110d542040b472b23af313e881b24a0"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 1771,
+            "outputTokens": 1174,
+            "reasoningTokens": 3641,
+            "cachedInputTokens": 0,
+            "totalTokens": 6586,
+            "costUsd": 0.0193845,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 1771,
+                "outputTokens": 1174,
+                "reasoningTokens": 3641,
+                "cachedInputTokens": 0,
+                "totalTokens": 6586,
+                "costUsd": 0.0193845,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 16286
+        },
+        {
+          "channel": "Chalk & Compound",
+          "runId": "js705md1etr1kr0mpbpvpqaz8x89znvt",
+          "sourceChars": 2592,
+          "title": "A Higher Tax Bracket Never Reduces Your Take-Home Pay",
+          "titleAlternate": "",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "A Higher Tax Bracket Never Reduces Your Take-Home Pay",
+            "titleAlternate": "",
+            "clickScore": 8.7,
+            "directness": 8.9,
+            "winnerIndex": 1,
+            "alternateIndex": null,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "script_excerpt",
+              "providedChars": 800,
+              "totalChars": null
+            },
+            "candidates": [
+              {
+                "frame": "curiosity_gap",
+                "title": "The Hidden Architecture Behind How Governments Tax Income"
+              },
+              {
+                "frame": "direct_verdict",
+                "title": "A Higher Tax Bracket Never Reduces Your Take-Home Pay"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 1,
+                "clickScore": 8.7,
+                "direct": 8.9,
+                "identityFit": 8.6,
+                "grounding": "supported",
+                "reason": "Directly tackles the foundational mechanic of marginal tax brackets by debunking the most widespread taxation myth with clear value."
+              },
+              {
+                "idx": 0,
+                "clickScore": 6.8,
+                "direct": 6.4,
+                "identityFit": 7.3,
+                "grounding": "supported",
+                "reason": "Accurately represents the conceptual structure of taxation, but 'Hidden Architecture' adds unnecessary abstract atmosphere compared to high-performing feed titles."
+              }
+            ],
+            "fingerprint": "ccaaa9cc11528d71cc5e5094f73bcdd7614bdd342f85d5b26d8b333367b41ba0"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 1588,
+            "outputTokens": 789,
+            "reasoningTokens": 3258,
+            "cachedInputTokens": 0,
+            "totalTokens": 5635,
+            "costUsd": 0.01636725,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 1588,
+                "outputTokens": 789,
+                "reasoningTokens": 3258,
+                "cachedInputTokens": 0,
+                "totalTokens": 5635,
+                "costUsd": 0.01636725,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 14063
+        },
+        {
+          "channel": "Gratitude Springs",
+          "runId": "js72d9gty4nrqqq7wevv0m0hyd89xgk9",
+          "sourceChars": 2894,
+          "title": "Day 4 Gratitude Sleep Meditation for Deep Rest",
+          "titleAlternate": "Gratitude for People Beside You Restores Sleep",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "Day 4 Gratitude Sleep Meditation for Deep Rest",
+            "titleAlternate": "Gratitude for People Beside You Restores Sleep",
+            "clickScore": 8.6,
+            "directness": 9,
+            "winnerIndex": 0,
+            "alternateIndex": 6,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "script_excerpt",
+              "providedChars": 1556,
+              "totalChars": null
+            },
+            "candidates": [
+              {
+                "frame": "specific_number",
+                "title": "Day 4 Gratitude Sleep Meditation for Deep Rest"
+              },
+              {
+                "frame": "curiosity_gap",
+                "title": "The Healing Warmth of People Who Let You Be"
+              },
+              {
+                "frame": "contrarian",
+                "title": "Release Daily Demands to Embrace Quiet Companions"
+              },
+              {
+                "frame": "mechanism",
+                "title": "Trading Daily Interactions for Quiet Acceptance"
+              },
+              {
+                "frame": "stakes_warning",
+                "title": "Holding onto Daily Demands Keeps the Mind Awake"
+              },
+              {
+                "frame": "search_intent",
+                "title": "Gratitude Meditation for Sleep and Gentle Rest"
+              },
+              {
+                "frame": "direct_verdict",
+                "title": "Gratitude for People Beside You Restores Sleep"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.6,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Directly identifies Day 4 of the gratitude series and explicitly delivers the sleep meditation rest promise."
+              },
+              {
+                "idx": 1,
+                "clickScore": 6.5,
+                "direct": 6,
+                "identityFit": 7,
+                "grounding": "supported",
+                "reason": "Captures the warmth of close companions from the script but lacks clear searchability and meditation format markers."
+              },
+              {
+                "idx": 2,
+                "clickScore": 7,
+                "direct": 7,
+                "identityFit": 7.2,
+                "grounding": "supported",
+                "reason": "Reflects releasing demands for quiet companions, though slightly abstract for sleep search discovery."
+              },
+              {
+                "idx": 3,
+                "clickScore": 5.8,
+                "direct": 5.5,
+                "identityFit": 6,
+                "grounding": "supported",
+                "reason": "Too conceptual and lacks immediate clarity for a bedtime relaxation audience."
+              },
+              {
+                "idx": 4,
+                "clickScore": 5.2,
+                "direct": 6,
+                "identityFit": 5,
+                "grounding": "supported",
+                "reason": "Stakes warning register feels overly tense and counterproductive for a gentle bedtime music loop."
+              },
+              {
+                "idx": 5,
+                "clickScore": 8.2,
+                "direct": 8.5,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Strong search intent match for bedtime gratitude meditation, though omits the specific day 4 topic focus."
+              },
+              {
+                "idx": 6,
+                "clickScore": 8.8,
+                "direct": 9,
+                "identityFit": 8.5,
+                "grounding": "supported",
+                "reason": "Directly hits the specific topic of gratitude for people beside you while maintaining a clear sleep benefit."
+              }
+            ],
+            "fingerprint": "3f94459a502e75726d7941b3d1841e4fee1dd53cb6e7f6a1ee1d958d12ebdb01"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 1580,
+            "outputTokens": 989,
+            "reasoningTokens": 3633,
+            "cachedInputTokens": 0,
+            "totalTokens": 6202,
+            "costUsd": 0.0185175,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 1580,
+                "outputTokens": 989,
+                "reasoningTokens": 3633,
+                "cachedInputTokens": 0,
+                "totalTokens": 6202,
+                "costUsd": 0.0185175,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 14858
+        },
+        {
+          "channel": "Investory",
+          "runId": "js72sy9xyvxtptvtbbg2z8aegs88ez4t",
+          "sourceChars": 10040,
+          "title": "How to Build Substantial Wealth with Little Money",
+          "titleAlternate": "Why Small Portfolios Beat Big Starting Capital",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "How to Build Substantial Wealth with Little Money",
+            "titleAlternate": "Why Small Portfolios Beat Big Starting Capital",
+            "clickScore": 9.4,
+            "directness": 9.5,
+            "winnerIndex": 2,
+            "alternateIndex": 0,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "script_excerpt",
+              "providedChars": 973,
+              "totalChars": null
+            },
+            "candidates": [
+              {
+                "frame": "curiosity_gap",
+                "title": "Why Small Portfolios Beat Big Starting Capital"
+              },
+              {
+                "frame": "contrarian",
+                "title": "Why Large Starting Capital Is a Financial Illusion"
+              },
+              {
+                "frame": "search_intent",
+                "title": "How to Build Substantial Wealth with Little Money"
+              },
+              {
+                "frame": "direct_verdict",
+                "title": "Why Starting Small Outperforms Big Capital"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.4,
+                "direct": 8.8,
+                "identityFit": 8.5,
+                "grounding": "supported",
+                "reason": "Directly links to the thesis that starting small can outperform large capital expectations, matching the cold open's core counter-narrative."
+              },
+              {
+                "idx": 1,
+                "clickScore": 7.4,
+                "direct": 7.5,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Directly borrows phrasing from the cold open's 'elegant illusion' line, but leans slightly too abstract for casual search feed discovery."
+              },
+              {
+                "idx": 2,
+                "clickScore": 9.4,
+                "direct": 9.5,
+                "identityFit": 9.5,
+                "grounding": "supported",
+                "reason": "Perfect search-intent match for the core topic and promises exactly what the cold open sets out to reveal without fluff."
+              },
+              {
+                "idx": 3,
+                "clickScore": 8.1,
+                "direct": 8.7,
+                "identityFit": 8.2,
+                "grounding": "supported",
+                "reason": "Supported by the premise that small beginnings hold silent momentum against big capital, though slightly less search-actionable than candidate 2."
+              }
+            ],
+            "fingerprint": "49c13754c562b9b5bda131ed02c3448cd21e42d7120b1d52fda149e977148e79"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 1868,
+            "outputTokens": 897,
+            "reasoningTokens": 3140,
+            "cachedInputTokens": 0,
+            "totalTokens": 5905,
+            "costUsd": 0.01653975,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 1868,
+                "outputTokens": 897,
+                "reasoningTokens": 3140,
+                "cachedInputTokens": 0,
+                "totalTokens": 5905,
+                "costUsd": 0.01653975,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 12409
+        }
+      ]
+    },
+    {
+      "arm": "after",
+      "rawEvidence": "/tmp/title-source-after-20260912/evidence.json",
+      "sha256": "4af7f2de5ce5b682babbaf02f33786ec7bbc68ef07d58f7dc6954ceabce5f17d",
+      "calls": 16,
+      "costUsd": 0.09134925,
+      "results": [
+        {
+          "channel": "Inked Histories",
+          "runId": "js76ghf4s44b4w5d97cs2f49bd89znxa",
+          "sourceChars": 2915,
+          "title": "How Oxygen-Free Blue Clay Preserved Fragile WW1 Trench Relics",
+          "titleAlternate": "Why Destructive Trench Mud Kept WW1 Relics Intact Instead of Rotting",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "How Oxygen-Free Blue Clay Preserved Fragile WW1 Trench Relics",
+            "titleAlternate": "Why Destructive Trench Mud Kept WW1 Relics Intact Instead of Rotting",
+            "clickScore": 9,
+            "directness": 9,
+            "winnerIndex": 3,
+            "alternateIndex": 2,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "full_narration",
+              "providedChars": 2915,
+              "totalChars": 2915
+            },
+            "candidates": [
+              {
+                "frame": "topic-bet",
+                "title": "How a Civil War Sword Survived a Century in Dirt"
+              },
+              {
+                "frame": "curiosity_gap",
+                "title": "The Secret Trench Layer That Kept WW1 Paper Intact for Decades"
+              },
+              {
+                "frame": "contrarian",
+                "title": "Why Destructive Trench Mud Kept WW1 Relics Intact Instead of Rotting"
+              },
+              {
+                "frame": "mechanism",
+                "title": "How Oxygen-Free Blue Clay Preserved Fragile WW1 Trench Relics"
+              },
+              {
+                "frame": "stakes_warning",
+                "title": "Why Fresh Air Destroys Preserved WW1 Relics the Moment They Surface"
+              },
+              {
+                "frame": "direct_verdict",
+                "title": "Suffocating Blue Clay Froze Battlefield Decay for a Full Century"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 2,
+                "direct": 5,
+                "identityFit": 2,
+                "grounding": "contradicted",
+                "reason": "The source is explicitly set in World War I northern France covering a leather satchel and paper letter, not a Civil War sword."
+              },
+              {
+                "idx": 1,
+                "clickScore": 7,
+                "direct": 7,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Accurately references the trench clay layer that preserved fragile paper relics from WW1."
+              },
+              {
+                "idx": 2,
+                "clickScore": 8,
+                "direct": 8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Supported by the narration's core paradox that trench mud acted as an anaerobic protector rather than a destroyer."
+              },
+              {
+                "idx": 3,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Directly and accurately names the exact preservation mechanism (oxygen-free blue clay) and the WW1 trench relics described in the text."
+              },
+              {
+                "idx": 4,
+                "clickScore": 8,
+                "direct": 8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Fully supported by the source details on rapid oxidation and bacterial decay upon atmospheric exposure."
+              },
+              {
+                "idx": 5,
+                "clickScore": 6,
+                "direct": 7,
+                "identityFit": 7,
+                "grounding": "supported",
+                "reason": "Supported by the source narrative, though phrased more like a literary sentence than a searchable YouTube hook."
+              }
+            ],
+            "fingerprint": "9c56c4b611a63ff8f9c04fdfd03bbec543a3b29d9e84a2f5a08eb3dc6ee4f608"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 4791,
+            "outputTokens": 1155,
+            "reasoningTokens": 3409,
+            "cachedInputTokens": 0,
+            "totalTokens": 9355,
+            "costUsd": 0.020708249999999997,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 4791,
+                "outputTokens": 1155,
+                "reasoningTokens": 3409,
+                "cachedInputTokens": 0,
+                "totalTokens": 9355,
+                "costUsd": 0.020708249999999997,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 15367
+        },
+        {
+          "channel": "Chalk & Compound",
+          "runId": "js705md1etr1kr0mpbpvpqaz8x89znvt",
+          "sourceChars": 2592,
+          "title": "How Governments Use Taxes to Pool Resources",
+          "titleAlternate": "How Taxes Work to Fund Public Infrastructure",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "How Governments Use Taxes to Pool Resources",
+            "titleAlternate": "How Taxes Work to Fund Public Infrastructure",
+            "clickScore": 8.7,
+            "directness": 8.8,
+            "winnerIndex": 1,
+            "alternateIndex": 3,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "full_narration",
+              "providedChars": 2592,
+              "totalChars": 2592
+            },
+            "candidates": [
+              {
+                "frame": "curiosity_gap",
+                "title": "Why Taxes Are Used to Control Your Behavior"
+              },
+              {
+                "frame": "mechanism",
+                "title": "How Governments Use Taxes to Pool Resources"
+              },
+              {
+                "frame": "stakes_warning",
+                "title": "How Excessive Tax Rates Cause Deadweight Loss"
+              },
+              {
+                "frame": "search_intent",
+                "title": "How Taxes Work to Fund Public Infrastructure"
+              },
+              {
+                "frame": "direct_verdict",
+                "title": "Taxation Is Ultimately a Basic Social Contract"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 6.8,
+                "direct": 8,
+                "identityFit": 5.2,
+                "grounding": "supported",
+                "reason": "Supported by the discussion on excise taxes steering behavior, but the phrasing leans alarmist, clashing with the channel's calm educational persona."
+              },
+              {
+                "idx": 1,
+                "clickScore": 8.7,
+                "direct": 8.8,
+                "identityFit": 9.2,
+                "grounding": "supported",
+                "reason": "Accurately captures the primary conceptual mechanism of taxation explained right at the start of the narration in clear, searchable language."
+              },
+              {
+                "idx": 2,
+                "clickScore": 6.4,
+                "direct": 7,
+                "identityFit": 7.4,
+                "grounding": "supported",
+                "reason": "Supported by the narration's mention of deadweight loss, but isolates a single downside rather than framing the broader conceptual framework."
+              },
+              {
+                "idx": 3,
+                "clickScore": 8.2,
+                "direct": 8.4,
+                "identityFit": 8.6,
+                "grounding": "supported",
+                "reason": "Supported by the source discussing roads, public goods, and services, offering a clear, accessible educational framing."
+              },
+              {
+                "idx": 4,
+                "clickScore": 6.1,
+                "direct": 6.5,
+                "identityFit": 7,
+                "grounding": "supported",
+                "reason": "Supported by the closing lines about the social contract, but reads more like an abstract essay title than an engaging YouTube video title."
+              }
+            ],
+            "fingerprint": "10cf12bf09d28af0b50deb1958413c4c30242b97a018e6189ea8f67149cc3c25"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 4279,
+            "outputTokens": 1002,
+            "reasoningTokens": 4241,
+            "cachedInputTokens": 0,
+            "totalTokens": 9522,
+            "costUsd": 0.022870500000000002,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 4279,
+                "outputTokens": 1002,
+                "reasoningTokens": 4241,
+                "cachedInputTokens": 0,
+                "totalTokens": 9522,
+                "costUsd": 0.022870500000000002,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 16181
+        },
+        {
+          "channel": "Gratitude Springs",
+          "runId": "js72d9gty4nrqqq7wevv0m0hyd89xgk9",
+          "sourceChars": 2894,
+          "title": "Gratitude Meditation for Sleep and Emotional Relief",
+          "titleAlternate": "True Rest Arrives When Expectations Fade",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "Gratitude Meditation for Sleep and Emotional Relief",
+            "titleAlternate": "True Rest Arrives When Expectations Fade",
+            "clickScore": 9,
+            "directness": 9,
+            "winnerIndex": 4,
+            "alternateIndex": 5,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "full_narration",
+              "providedChars": 2894,
+              "totalChars": 2894
+            },
+            "candidates": [
+              {
+                "frame": "specific_number",
+                "title": "Day 4 Gratitude Meditation to Release Friction"
+              },
+              {
+                "frame": "curiosity_gap",
+                "title": "The Healing Comfort of Those Who Walk Beside You"
+              },
+              {
+                "frame": "mechanism",
+                "title": "How Quiet Acceptance Releases Muscle Tension"
+              },
+              {
+                "frame": "stakes_warning",
+                "title": "Carrying Today's Interactions Prevents Deep Rest"
+              },
+              {
+                "frame": "search_intent",
+                "title": "Gratitude Meditation for Sleep and Emotional Relief"
+              },
+              {
+                "frame": "direct_verdict",
+                "title": "True Rest Arrives When Expectations Fade"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 7,
+                "direct": 8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Accurately references day four of the practice and releasing the friction of daily interactions mentioned in the script."
+              },
+              {
+                "idx": 1,
+                "clickScore": 8,
+                "direct": 7,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Directly supported by the narration's recurring theme and closing reflection on the comforting presence of those who walk beside you."
+              },
+              {
+                "idx": 2,
+                "clickScore": 5,
+                "direct": 8,
+                "identityFit": 5,
+                "grounding": "supported",
+                "reason": "Supported by the guide connecting quiet acceptance to physical tension release in the neck and jaw, though the educational phrasing conflicts with the ambient sleep format."
+              },
+              {
+                "idx": 3,
+                "clickScore": 4,
+                "direct": 7,
+                "identityFit": 4,
+                "grounding": "supported",
+                "reason": "Supported by the text's contrast between carrying interactions and finding rest, but the negative warning framing opposes the gentle ambient channel voice."
+              },
+              {
+                "idx": 4,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Explicitly aligns with the meditation's stated purpose of trading stress for deep sleep and profound emotional relief."
+              },
+              {
+                "idx": 5,
+                "clickScore": 8,
+                "direct": 8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Drawn almost verbatim from the closing narration reflecting that true rest arrives when expectations are released."
+              }
+            ],
+            "fingerprint": "3fc3b1b7161508c8875eaa3ead4cbb1ac88514dee327a03af5b6937cd8620849"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 5120,
+            "outputTokens": 1176,
+            "reasoningTokens": 3849,
+            "cachedInputTokens": 0,
+            "totalTokens": 10145,
+            "costUsd": 0.022683750000000003,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 5120,
+                "outputTokens": 1176,
+                "reasoningTokens": 3849,
+                "cachedInputTokens": 0,
+                "totalTokens": 10145,
+                "costUsd": 0.022683750000000003,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 15755
+        },
+        {
+          "channel": "Investory",
+          "runId": "js72sy9xyvxtptvtbbg2z8aegs88ez4t",
+          "sourceChars": 10040,
+          "title": "How to Build Wealth with Little Money",
+          "titleAlternate": "Why Big Starting Capital Is an Illusion",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "How to Build Wealth with Little Money",
+            "titleAlternate": "Why Big Starting Capital Is an Illusion",
+            "clickScore": 9,
+            "directness": 9,
+            "winnerIndex": 2,
+            "alternateIndex": 0,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "full_narration",
+              "providedChars": 10040,
+              "totalChars": 10040
+            },
+            "candidates": [
+              {
+                "frame": "contrarian",
+                "title": "Why Big Starting Capital Is an Illusion"
+              },
+              {
+                "frame": "mechanism",
+                "title": "How Compound Interest Actually Builds Wealth"
+              },
+              {
+                "frame": "search_intent",
+                "title": "How to Build Wealth with Little Money"
+              },
+              {
+                "frame": "direct_verdict",
+                "title": "Why Consistency Always Beats Starting Capital"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8,
+                "direct": 8,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Directly supported by the cold open calling the need for large starting capital 'the financial industry's most elegant illusion' and the 'Capital Delusion' concept."
+              },
+              {
+                "idx": 1,
+                "clickScore": 7,
+                "direct": 8,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Supported by the source's breakdown of compounding math and how growth builds upon itself over time, though slightly generic."
+              },
+              {
+                "idx": 2,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Supported by the entire script's premise that small, regular contributions build substantial wealth over time."
+              },
+              {
+                "idx": 3,
+                "clickScore": 8,
+                "direct": 8,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Supported by the Schwab comparison showing weekly contributions outperforming delayed lump-sum capital injections."
+              }
+            ],
+            "fingerprint": "81ab1de1f7ed3d2f20f747b01c8d405d700db4827300c26c19db949ae09cdc9a"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 11094,
+            "outputTokens": 969,
+            "reasoningTokens": 3502,
+            "cachedInputTokens": 0,
+            "totalTokens": 15565,
+            "costUsd": 0.025086749999999998,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 11094,
+                "outputTokens": 969,
+                "reasoningTokens": 3502,
+                "cachedInputTokens": 0,
+                "totalTokens": 15565,
+                "costUsd": 0.025086749999999998,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 14028
+        }
+      ]
+    },
+    {
+      "arm": "angles",
+      "rawEvidence": "/tmp/title-source-angles-20260912/evidence.json",
+      "sha256": "dde7fc45a1d7d1419d9755aa7bb177a890264ba1271b1488072d01202bb8cf83",
+      "calls": 16,
+      "costUsd": 0.08794724999999998,
+      "results": [
+        {
+          "channel": "Inked Histories",
+          "runId": "js76ghf4s44b4w5d97cs2f49bd89znxa",
+          "sourceChars": 2915,
+          "title": "How Anaerobic Clay Kept WWI Trench Relics Intact",
+          "titleAlternate": "Why WWI Battlefield Mud Stopped Organic Decay",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "How Anaerobic Clay Kept WWI Trench Relics Intact",
+            "titleAlternate": "Why WWI Battlefield Mud Stopped Organic Decay",
+            "clickScore": 9,
+            "directness": 9,
+            "winnerIndex": 4,
+            "alternateIndex": 2,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "full_narration",
+              "providedChars": 2915,
+              "totalChars": 2915
+            },
+            "candidates": [
+              {
+                "frame": "topic-bet",
+                "title": "How a Civil War Sword Survived a Century in Dirt"
+              },
+              {
+                "frame": "Preservation mechanism",
+                "title": "Why Deep Trench Clay Halts Battlefield Decay"
+              },
+              {
+                "frame": "Decay prevention mechanism",
+                "title": "Why WWI Battlefield Mud Stopped Organic Decay"
+              },
+              {
+                "frame": "Post-excavation vulnerability",
+                "title": "Why Oxygen Destroys Excavated War Relics So Fast"
+              },
+              {
+                "frame": "Anaerobic preservation",
+                "title": "How Anaerobic Clay Kept WWI Trench Relics Intact"
+              },
+              {
+                "frame": "Material survival science",
+                "title": "How WWI Clay Kept Fragile Paper Perfectly Dry"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 2,
+                "direct": 5,
+                "identityFit": 2,
+                "grounding": "contradicted",
+                "reason": "The source explicitly takes place in World War I northern France focusing on a leather satchel and paper letter, not an American Civil War sword."
+              },
+              {
+                "idx": 1,
+                "clickScore": 7,
+                "direct": 8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Accurately reflects the narration's core explanation of trench clay creating an anaerobic barrier that halted decay."
+              },
+              {
+                "idx": 2,
+                "clickScore": 8.5,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Directly summarizes the scientific mechanism of oxygen-starved mud preserving organic matter from World War I."
+              },
+              {
+                "idx": 3,
+                "clickScore": 7.5,
+                "direct": 8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Supported by the narration detailing how sudden atmospheric exposure and oxygen rapidly degrade unearthed artifacts."
+              },
+              {
+                "idx": 4,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Directly matches both the scientific focus ('anaerobic clay') and the historical narrative ('WWI Trench Relics') in an ideal searchable length."
+              },
+              {
+                "idx": 5,
+                "clickScore": 8,
+                "direct": 8.5,
+                "identityFit": 8.5,
+                "grounding": "supported",
+                "reason": "Supported by the specific revelation of the dry paper letter surviving inside the sealed clay micro-environment."
+              }
+            ],
+            "fingerprint": "8f7c3c7341b8637bc77a92451aea4c9c59aba0d8c355180a727b828c2f14ec5e"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 4931,
+            "outputTokens": 1173,
+            "reasoningTokens": 3198,
+            "cachedInputTokens": 0,
+            "totalTokens": 9302,
+            "costUsd": 0.0200895,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 4931,
+                "outputTokens": 1173,
+                "reasoningTokens": 3198,
+                "cachedInputTokens": 0,
+                "totalTokens": 9302,
+                "costUsd": 0.0200895,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 13469
+        },
+        {
+          "channel": "Chalk & Compound",
+          "runId": "js705md1etr1kr0mpbpvpqaz8x89znvt",
+          "sourceChars": 2592,
+          "title": "Why We Pay Taxes and Where the Money Goes",
+          "titleAlternate": "How the Modern Tax System Actually Works",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "Why We Pay Taxes and Where the Money Goes",
+            "titleAlternate": "How the Modern Tax System Actually Works",
+            "clickScore": 9,
+            "directness": 9,
+            "winnerIndex": 1,
+            "alternateIndex": 0,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "full_narration",
+              "providedChars": 2592,
+              "totalChars": 2592
+            },
+            "candidates": [
+              {
+                "frame": "searchable mechanism",
+                "title": "How the Modern Tax System Actually Works"
+              },
+              {
+                "frame": "resource allocation",
+                "title": "Why We Pay Taxes and Where the Money Goes"
+              },
+              {
+                "frame": "tax categories comparison",
+                "title": "Income vs Sales vs Property Taxes Explained"
+              },
+              {
+                "frame": "behavioral incentives",
+                "title": "How Governments Use Taxes to Change Behavior"
+              },
+              {
+                "frame": "economic tradeoff",
+                "title": "Why High Taxes Cause Economic Friction"
+              },
+              {
+                "frame": "wealth distribution",
+                "title": "How Taxes Fund Society and Balance Wealth"
+              },
+              {
+                "frame": "social contract",
+                "title": "How Taxation Works as a Social Contract"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Fully supported as an overarching explainer of the modern tax structure, matching the teacher-advisor persona perfectly."
+              },
+              {
+                "idx": 1,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Accurately frames the narration's core breakdown of why society pools resources and how those funds are allocated."
+              },
+              {
+                "idx": 2,
+                "clickScore": 8,
+                "direct": 8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Supported by the specific comparisons between income, consumption/sales, and property taxes, though narrower than the full scope."
+              },
+              {
+                "idx": 3,
+                "clickScore": 6,
+                "direct": 7,
+                "identityFit": 7,
+                "grounding": "supported",
+                "reason": "Supported by the section on sin taxes and tax breaks, but captures only a small supporting detail rather than the full concept."
+              },
+              {
+                "idx": 4,
+                "clickScore": 5,
+                "direct": 7,
+                "identityFit": 6,
+                "grounding": "supported",
+                "reason": "Supported by the mention of deadweight loss and friction, but too narrow and slightly overly pessimistic for an overview."
+              },
+              {
+                "idx": 5,
+                "clickScore": 7,
+                "direct": 8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Supported by the discussion of public goods and wealth redistribution, but reads slightly academic and dry."
+              },
+              {
+                "idx": 6,
+                "clickScore": 6,
+                "direct": 7,
+                "identityFit": 7,
+                "grounding": "supported",
+                "reason": "Supported by the video's conclusion, though 'social contract' phrasing leans overly theoretical for a general finance audience."
+              }
+            ],
+            "fingerprint": "5b482faaaaba42644966d7ce0d797917983a8d2d257040d417cc0a9f13a19b68"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 4464,
+            "outputTokens": 1051,
+            "reasoningTokens": 3647,
+            "cachedInputTokens": 0,
+            "totalTokens": 9162,
+            "costUsd": 0.0209655,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 4464,
+                "outputTokens": 1051,
+                "reasoningTokens": 3647,
+                "cachedInputTokens": 0,
+                "totalTokens": 9162,
+                "costUsd": 0.0209655,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 15770
+        },
+        {
+          "channel": "Gratitude Springs",
+          "runId": "js72d9gty4nrqqq7wevv0m0hyd89xgk9",
+          "sourceChars": 2894,
+          "title": "Sleep Gratitude for the People Who Walk Beside You",
+          "titleAlternate": "Gratitude for Loved Ones | Calm Sleep Meditation",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "Sleep Gratitude for the People Who Walk Beside You",
+            "titleAlternate": "Gratitude for Loved Ones | Calm Sleep Meditation",
+            "clickScore": 9,
+            "directness": 9,
+            "winnerIndex": 5,
+            "alternateIndex": 0,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "full_narration",
+              "providedChars": 2894,
+              "totalChars": 2894
+            },
+            "candidates": [
+              {
+                "frame": "Searchable companion focus",
+                "title": "Gratitude for Loved Ones | Calm Sleep Meditation"
+              },
+              {
+                "frame": "Releasing social exhaustion",
+                "title": "Release Social Exhaustion | Deep Sleep Gratitude"
+              },
+              {
+                "frame": "Series installment",
+                "title": "Day 4 Gratitude Meditation | The People Beside You"
+              },
+              {
+                "frame": "Emotional acceptance outcome",
+                "title": "Quiet Acceptance Gratitude Meditation for Sleep"
+              },
+              {
+                "frame": "Releasing expectations",
+                "title": "Release Daily Friction | Bedtime Gratitude Meditation"
+              },
+              {
+                "frame": "Core companion support",
+                "title": "Sleep Gratitude for the People Who Walk Beside You"
+              },
+              {
+                "frame": "Restful healing",
+                "title": "Healing Sleep Meditation | Gratitude for Companions"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8,
+                "direct": 7,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Accurately represents the narration's core focus on loved ones with clean, searchable sleep keywords suited to the music_loop profile."
+              },
+              {
+                "idx": 1,
+                "clickScore": 8,
+                "direct": 8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Accurately captures the narration's theme of shedding the exhaustion of social expectations before sleep."
+              },
+              {
+                "idx": 2,
+                "clickScore": 6,
+                "direct": 6,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Directly matches the series episode topic, but leading with 'Day 4' reduces click appeal for non-subscribers in general browse."
+              },
+              {
+                "idx": 3,
+                "clickScore": 7,
+                "direct": 8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Directly supported by the narration's emphasis on quiet acceptance, though slightly abstract compared to focusing on companions."
+              },
+              {
+                "idx": 4,
+                "clickScore": 7,
+                "direct": 7,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Reflects the opening guidance on setting down daily friction, delivering a clear bedtime promise."
+              },
+              {
+                "idx": 5,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Flawlessly supported by the text's central metaphor of steadfast companions, framed as a single, emotionally resonant phrase without clunky pipes."
+              },
+              {
+                "idx": 6,
+                "clickScore": 7,
+                "direct": 7,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Supported by the text's companion focus, though 'Companions' feels slightly formal for ambient sleep titles."
+              }
+            ],
+            "fingerprint": "1e2b4b8898b25a48876a42c3b60c447524b039ab86c8e092d17e653d2bd92eff"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 5305,
+            "outputTokens": 1193,
+            "reasoningTokens": 3393,
+            "cachedInputTokens": 0,
+            "totalTokens": 9891,
+            "costUsd": 0.02117625,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 5305,
+                "outputTokens": 1193,
+                "reasoningTokens": 3393,
+                "cachedInputTokens": 0,
+                "totalTokens": 9891,
+                "costUsd": 0.02117625,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 15769
+        },
+        {
+          "channel": "Investory",
+          "runId": "js72sy9xyvxtptvtbbg2z8aegs88ez4t",
+          "sourceChars": 10040,
+          "title": "How Small Investments Actually Build Real Wealth",
+          "titleAlternate": "How Consistent Investing Builds Substantial Wealth",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "How Small Investments Actually Build Real Wealth",
+            "titleAlternate": "How Consistent Investing Builds Substantial Wealth",
+            "clickScore": 9,
+            "directness": 9,
+            "winnerIndex": 0,
+            "alternateIndex": 2,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "full_narration",
+              "providedChars": 10040,
+              "totalChars": 10040
+            },
+            "candidates": [
+              {
+                "frame": "core compounding mechanism",
+                "title": "How Small Investments Actually Build Real Wealth"
+              },
+              {
+                "frame": "dismantling starting capital myth",
+                "title": "Why Starting With Little Money Works in Investing"
+              },
+              {
+                "frame": "psychological habit and consistency",
+                "title": "How Consistent Investing Builds Substantial Wealth"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 9.2,
+                "grounding": "supported",
+                "reason": "Directly supported by the narration's core thesis dismantling the capital delusion and explaining how small contributions compound into substantial wealth."
+              },
+              {
+                "idx": 1,
+                "clickScore": 7.4,
+                "direct": 7.8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Supported by the source, but the concluding phrasing 'Works in Investing' is slightly awkward and lacks the clear aspirational clarity of the channel."
+              },
+              {
+                "idx": 2,
+                "clickScore": 8.4,
+                "direct": 9,
+                "identityFit": 8.8,
+                "grounding": "supported",
+                "reason": "Fully supported by the script's focus on consistency and dollar-cost averaging over sporadic lump sums."
+              }
+            ],
+            "fingerprint": "4205a72101107c9db887d591c969eff7e54e684afd96b97f5083511f59ba9543"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 11248,
+            "outputTokens": 931,
+            "reasoningTokens": 3677,
+            "cachedInputTokens": 0,
+            "totalTokens": 15856,
+            "costUsd": 0.025715999999999996,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 11248,
+                "outputTokens": 931,
+                "reasoningTokens": 3677,
+                "cachedInputTokens": 0,
+                "totalTokens": 15856,
+                "costUsd": 0.025715999999999996,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 14472
+        }
+      ]
+    },
+    {
+      "arm": "qualified",
+      "rawEvidence": "/tmp/title-source-qualified-20260912/evidence.json",
+      "sha256": "69e2b26c49fd47747c0f2e5be1119243862f1c167aafb24186c4363cea0e1bcd",
+      "calls": 16,
+      "costUsd": 0.08860950000000001,
+      "results": [
+        {
+          "channel": "Inked Histories",
+          "runId": "js76ghf4s44b4w5d97cs2f49bd89znxa",
+          "sourceChars": 2915,
+          "title": "How WW1 Trench Mud Kept a Fallen Soldier's Letter Intact",
+          "titleAlternate": "How Battlefield Mud Preserved WW1 Relics for a Century",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "How WW1 Trench Mud Kept a Fallen Soldier's Letter Intact",
+            "titleAlternate": "How Battlefield Mud Preserved WW1 Relics for a Century",
+            "clickScore": 9,
+            "directness": 9,
+            "winnerIndex": 5,
+            "alternateIndex": 3,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "full_narration",
+              "providedChars": 2915,
+              "totalChars": 2915
+            },
+            "candidates": [
+              {
+                "frame": "topic-bet",
+                "title": "How a Civil War Sword Survived a Century in Dirt"
+              },
+              {
+                "frame": "preservation mechanism",
+                "title": "How Anaerobic Trench Clay Preserves Battlefield Relics"
+              },
+              {
+                "frame": "unexpected survival",
+                "title": "Why WW1 Trench Mud Kept Fragile Paper Intact"
+              },
+              {
+                "frame": "searchable discovery",
+                "title": "How Battlefield Mud Preserved WW1 Relics for a Century"
+              },
+              {
+                "frame": "chemical vulnerability",
+                "title": "Why Oxygen Destroys Unearthed WW1 Battlefield Relics"
+              },
+              {
+                "frame": "human stake",
+                "title": "How WW1 Trench Mud Kept a Fallen Soldier's Letter Intact"
+              },
+              {
+                "frame": "decay prevention",
+                "title": "Why WW1 Trench Clay Stops Relics From Decaying"
+              },
+              {
+                "frame": "soil chemistry",
+                "title": "How Anaerobic Soil Preserved Century-Old Battlefield Relics"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 2,
+                "direct": 4,
+                "identityFit": 2,
+                "grounding": "contradicted",
+                "reason": "The source details a First World War excavation in northern France involving a leather satchel and paper letter, not an American Civil War sword."
+              },
+              {
+                "idx": 1,
+                "clickScore": 6,
+                "direct": 8,
+                "identityFit": 7,
+                "grounding": "supported",
+                "reason": "The narration explicitly details how oxygen-depleted blue clay created an anaerobic barrier halting bacterial decay of battlefield artifacts."
+              },
+              {
+                "idx": 2,
+                "clickScore": 8,
+                "direct": 9,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Supported by the source, which explains how dense clay created a sealed micro-environment preserving fragile, yellowed paper with legible ink."
+              },
+              {
+                "idx": 3,
+                "clickScore": 8,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Supported by the narrative explaining how WW1 trench mud sealed away and protected 1917 battlefield artifacts for over a hundred years."
+              },
+              {
+                "idx": 4,
+                "clickScore": 7,
+                "direct": 8,
+                "identityFit": 7,
+                "grounding": "supported",
+                "reason": "Directly supported by the segment explaining how sudden atmospheric oxygen awakens dormant microbes that rapidly destroy newly excavated artifacts."
+              },
+              {
+                "idx": 5,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Supported by the discovery of the fallen soldier's intact letter preserved inside the mud-encased satchel, perfectly blending the science with the channel's human-story focus."
+              },
+              {
+                "idx": 6,
+                "clickScore": 7,
+                "direct": 8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Supported by the source narrative showing how the dense trench clay halted the natural cycle of organic decay."
+              },
+              {
+                "idx": 7,
+                "clickScore": 7,
+                "direct": 8,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Supported by the text describing how the anaerobic subsoil preserved century-old Great War artifacts in a suspended state."
+              }
+            ],
+            "fingerprint": "e937decc82447befc747c8fc1d8b86405fcb6287466c18bfe1938890c969ebb5"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 5062,
+            "outputTokens": 1317,
+            "reasoningTokens": 3379,
+            "cachedInputTokens": 0,
+            "totalTokens": 9758,
+            "costUsd": 0.0214065,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 5062,
+                "outputTokens": 1317,
+                "reasoningTokens": 3379,
+                "cachedInputTokens": 0,
+                "totalTokens": 9758,
+                "costUsd": 0.0214065,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 15586
+        },
+        {
+          "channel": "Chalk & Compound",
+          "runId": "js705md1etr1kr0mpbpvpqaz8x89znvt",
+          "sourceChars": 2592,
+          "title": "How Taxes Actually Work Across an Economy",
+          "titleAlternate": "Why We Pay Taxes and the Social Contract",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "How Taxes Actually Work Across an Economy",
+            "titleAlternate": "Why We Pay Taxes and the Social Contract",
+            "clickScore": 8.9,
+            "directness": 9.2,
+            "winnerIndex": 0,
+            "alternateIndex": 1,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "full_narration",
+              "providedChars": 2592,
+              "totalChars": 2592
+            },
+            "candidates": [
+              {
+                "frame": "Foundational economic mechanism",
+                "title": "How Taxes Actually Work Across an Economy"
+              },
+              {
+                "frame": "Social contract foundation",
+                "title": "Why We Pay Taxes and the Social Contract"
+              },
+              {
+                "frame": "Structural comparison of pillars",
+                "title": "Income vs Consumption vs Property Taxes Explained"
+              },
+              {
+                "frame": "Economic friction and limits",
+                "title": "How Taxes Create Economic Friction and Deadweight Loss"
+              },
+              {
+                "frame": "Behavioral steering and incentives",
+                "title": "How Governments Use Taxes to Steer Behavior"
+              },
+              {
+                "frame": "Public goods and shared funding",
+                "title": "How Taxes Fund Public Goods and Shared Resources"
+              },
+              {
+                "frame": "Redistribution and safety nets",
+                "title": "How Tax Systems Balance Wealth Redistribution"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.9,
+                "direct": 9.2,
+                "identityFit": 9.3,
+                "grounding": "supported",
+                "reason": "Directly supported by the comprehensive breakdown of public funding, tax pillars, redistribution, and economic impacts across an economy."
+              },
+              {
+                "idx": 1,
+                "clickScore": 8.4,
+                "direct": 8.8,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Supported by the source's framing of taxation as resource pooling and an explicit social contract between government and citizens."
+              },
+              {
+                "idx": 2,
+                "clickScore": 8.2,
+                "direct": 9.1,
+                "identityFit": 8.8,
+                "grounding": "supported",
+                "reason": "Supported by the detailed comparative sections covering income tax, consumption tax, and property tax mechanics."
+              },
+              {
+                "idx": 3,
+                "clickScore": 7.2,
+                "direct": 8.5,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Supported by the specific passage explaining how excessive taxation introduces economic friction and deadweight loss."
+              },
+              {
+                "idx": 4,
+                "clickScore": 7.8,
+                "direct": 8.7,
+                "identityFit": 8.4,
+                "grounding": "supported",
+                "reason": "Supported by the discussion of excise sin taxes and tax breaks used by governments to steer public behavior."
+              },
+              {
+                "idx": 5,
+                "clickScore": 7.6,
+                "direct": 8.6,
+                "identityFit": 8.5,
+                "grounding": "supported",
+                "reason": "Supported by the explanation of pooling income to provide collective infrastructure and public goods."
+              },
+              {
+                "idx": 6,
+                "clickScore": 7.4,
+                "direct": 8.5,
+                "identityFit": 8.2,
+                "grounding": "supported",
+                "reason": "Supported by the text detailing how tax systems redistribute wealth through social safety nets and public services."
+              }
+            ],
+            "fingerprint": "674af41be2119f4225b4e58958d2674bee79a92e9e43a540f8564865103e07b2"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 4570,
+            "outputTokens": 1109,
+            "reasoningTokens": 3930,
+            "cachedInputTokens": 0,
+            "totalTokens": 9609,
+            "costUsd": 0.02232375,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 4570,
+                "outputTokens": 1109,
+                "reasoningTokens": 3930,
+                "cachedInputTokens": 0,
+                "totalTokens": 9609,
+                "costUsd": 0.02232375,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 16108
+        },
+        {
+          "channel": "Gratitude Springs",
+          "runId": "js72d9gty4nrqqq7wevv0m0hyd89xgk9",
+          "sourceChars": 2894,
+          "title": "Gratitude for the People Beside You | Sleep Meditation",
+          "titleAlternate": "Sleep Gratitude Meditation for Social Exhaustion",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "Gratitude for the People Beside You | Sleep Meditation",
+            "titleAlternate": "Sleep Gratitude Meditation for Social Exhaustion",
+            "clickScore": 8.9,
+            "directness": 9.3,
+            "winnerIndex": 2,
+            "alternateIndex": 4,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "full_narration",
+              "providedChars": 2894,
+              "totalChars": 2894
+            },
+            "candidates": [
+              {
+                "frame": "Searchable sleep focus",
+                "title": "Gratitude Meditation for Deep Sleep and Companions"
+              },
+              {
+                "frame": "Emotional relief",
+                "title": "Gratitude Sleep Meditation to Release Daily Friction"
+              },
+              {
+                "frame": "Focus on loved ones",
+                "title": "Gratitude for the People Beside You | Sleep Meditation"
+              },
+              {
+                "frame": "Series practice",
+                "title": "Day 4 Gratitude Meditation for Quiet Acceptance"
+              },
+              {
+                "frame": "Releasing social exhaustion",
+                "title": "Sleep Gratitude Meditation for Social Exhaustion"
+              },
+              {
+                "frame": "Bedtime connection",
+                "title": "Calm Gratitude Meditation for Loved Ones & Sleep"
+              },
+              {
+                "frame": "Peaceful rest",
+                "title": "Gratitude Meditation to Let Go and Sleep Deeply"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 6.8,
+                "direct": 7.5,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Supported by narration focusing on releasing daily stress into deep sleep through gratitude for closest companions, though 'Companions' is slightly formal phrasing for ambient sleep."
+              },
+              {
+                "idx": 1,
+                "clickScore": 7.8,
+                "direct": 8.5,
+                "identityFit": 8.8,
+                "grounding": "supported",
+                "reason": "Directly supported by the narration's prompt to release the friction of a hundred hurried interactions and let expectations dissolve."
+              },
+              {
+                "idx": 2,
+                "clickScore": 8.9,
+                "direct": 9.3,
+                "identityFit": 9.4,
+                "grounding": "supported",
+                "reason": "Directly supported by the core theme and narration ('draw close the warmth of the people beside you') and clearly communicates topic and format."
+              },
+              {
+                "idx": 3,
+                "clickScore": 6.2,
+                "direct": 7,
+                "identityFit": 7.5,
+                "grounding": "supported",
+                "reason": "Supported by the source mentioning day four and breathing in quiet acceptance, but leading with series numbering lowers stand-alone search discovery appeal."
+              },
+              {
+                "idx": 4,
+                "clickScore": 8.5,
+                "direct": 8.8,
+                "identityFit": 8.7,
+                "grounding": "supported",
+                "reason": "Supported by the text's focus on trading the exhaustion of pleasing the world and hurried interactions for peace, tapping into a strong search intent."
+              },
+              {
+                "idx": 5,
+                "clickScore": 7.5,
+                "direct": 8.2,
+                "identityFit": 8.6,
+                "grounding": "supported",
+                "reason": "Supported by the meditation's guidance to focus on someone who loves you and sink into sleep, offering a warm and calming promise."
+              },
+              {
+                "idx": 6,
+                "clickScore": 7,
+                "direct": 8,
+                "identityFit": 8.2,
+                "grounding": "supported",
+                "reason": "Supported by the closing lines on letting go of expectations to sleep deeply, though it overlooks the specific episode theme of interpersonal gratitude."
+              }
+            ],
+            "fingerprint": "2d0fea599659f0da249c689e1f0e1fe1a5b715a14db7a74f058b37ef92ae08d9"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 5395,
+            "outputTokens": 1241,
+            "reasoningTokens": 3103,
+            "cachedInputTokens": 0,
+            "totalTokens": 9739,
+            "costUsd": 0.02033625,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 5395,
+                "outputTokens": 1241,
+                "reasoningTokens": 3103,
+                "cachedInputTokens": 0,
+                "totalTokens": 9739,
+                "costUsd": 0.02033625,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 14518
+        },
+        {
+          "channel": "Investory",
+          "runId": "js72sy9xyvxtptvtbbg2z8aegs88ez4t",
+          "sourceChars": 10040,
+          "title": "Why Starting with Little Beats Waiting for Capital",
+          "titleAlternate": "How Small Investments Build Substantial Wealth",
+          "titleDecision": {
+            "version": "title-decision/v2",
+            "judged": true,
+            "title": "Why Starting with Little Beats Waiting for Capital",
+            "titleAlternate": "How Small Investments Build Substantial Wealth",
+            "clickScore": 8.9,
+            "directness": 9.2,
+            "winnerIndex": 1,
+            "alternateIndex": 0,
+            "attempts": 1,
+            "sourceCoverage": {
+              "kind": "full_narration",
+              "providedChars": 10040,
+              "totalChars": 10040
+            },
+            "candidates": [
+              {
+                "frame": "Core financial mechanism",
+                "title": "How Small Investments Build Substantial Wealth"
+              },
+              {
+                "frame": "Capital myth reversal",
+                "title": "Why Starting with Little Beats Waiting for Capital"
+              }
+            ],
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.4,
+                "direct": 9,
+                "identityFit": 9.3,
+                "grounding": "supported",
+                "reason": "Directly supported by the script's core explanation of how small regular contributions compound over time into significant wealth."
+              },
+              {
+                "idx": 1,
+                "clickScore": 8.9,
+                "direct": 9.2,
+                "identityFit": 9.1,
+                "grounding": "supported",
+                "reason": "Directly supported by the script's comparison showing consistent small investors outperform those who wait to invest lump sums."
+              }
+            ],
+            "fingerprint": "05629a0f6b6032f90253dcc43a07bc4b556548d70464dcfb02a248b985cccac3"
+          },
+          "usage": {
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 11319,
+            "outputTokens": 827,
+            "reasoningTokens": 3454,
+            "cachedInputTokens": 0,
+            "totalTokens": 15600,
+            "costUsd": 0.024543,
+            "unpricedCalls": 0,
+            "groups": [
+              {
+                "provider": "openrouter",
+                "model": "gemini-3.7-flash",
+                "kind": "text",
+                "calls": 4,
+                "cacheHits": 0,
+                "inputTokens": 11319,
+                "outputTokens": 827,
+                "reasoningTokens": 3454,
+                "cachedInputTokens": 0,
+                "totalTokens": 15600,
+                "costUsd": 0.024543,
+                "unpricedCalls": 0,
+                "unpricedReasons": []
+              }
+            ]
+          },
+          "elapsedMs": 14355
+        }
+      ]
+    }
+  ],
+  "challenges": [
+    {
+      "rawEvidence": "/tmp/title-source-challenge-20260912.json",
+      "sha256": "91da37ad7bad4f8f77936b27aa4c84a055cfe88053de7b0a725693b1797563f9",
+      "usage": {
+        "calls": 4,
+        "cacheHits": 0,
+        "inputTokens": 7024,
+        "outputTokens": 1295,
+        "reasoningTokens": 2203,
+        "cachedInputTokens": 0,
+        "totalTokens": 10522,
+        "costUsd": 0.0183855,
+        "unpricedCalls": 0,
+        "groups": [
+          {
+            "provider": "openrouter",
+            "model": "gemini-3.7-flash",
+            "kind": "text",
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 7024,
+            "outputTokens": 1295,
+            "reasoningTokens": 2203,
+            "cachedInputTokens": 0,
+            "totalTokens": 10522,
+            "costUsd": 0.0183855,
+            "unpricedCalls": 0,
+            "unpricedReasons": []
+          }
+        ]
+      },
+      "evidence": [
+        {
+          "channel": "Inked Histories",
+          "titles": [
+            "Why Unearthing Buried Battlefield Relics Instantly Destroys Them",
+            "How Anaerobic Clay Kept WWI Trench Relics Intact",
+            "Why WWI Battlefield Mud Stopped Organic Decay",
+            "How a Civil War Sword Survived a Century in Dirt"
+          ],
+          "response": {
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 7,
+                "direct": 8,
+                "identityFit": 7,
+                "grounding": "supported",
+                "reason": "Supported by the narration's emphasis on rapid microbial breakdown and oxidation upon exposure, though slightly overstating the speed ('instantly') compared to the text's focus on the stabilization process."
+              },
+              {
+                "idx": 1,
+                "clickScore": 8,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Directly supported by the text, which details how dense, oxygen-deprived clay sealed off bacterial decay to preserve WWI trench artifacts like leather and paper."
+              },
+              {
+                "idx": 2,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Fully supported by the source, encapsulating the core scientific mechanism of the blue clay halting organic decomposition in Great War trenches in a clear, high-intent format."
+              },
+              {
+                "idx": 3,
+                "clickScore": 1,
+                "direct": 6,
+                "identityFit": 2,
+                "grounding": "contradicted",
+                "reason": "Contradicted by the text; the source focuses on a World War I excavation in northern France featuring a leather satchel and paper letter, not a Civil War sword."
+              }
+            ],
+            "winner": 2,
+            "runnerUp": 1
+          },
+          "admission": {
+            "pass": true,
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 7,
+                "direct": 8,
+                "identityFit": 7,
+                "grounding": "supported",
+                "reason": "Supported by the narration's emphasis on rapid microbial breakdown and oxidation upon exposure, though slightly overstating the speed ('instantly') compared to the text's focus on the stabilization process."
+              },
+              {
+                "idx": 1,
+                "clickScore": 8,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Directly supported by the text, which details how dense, oxygen-deprived clay sealed off bacterial decay to preserve WWI trench artifacts like leather and paper."
+              },
+              {
+                "idx": 2,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Fully supported by the source, encapsulating the core scientific mechanism of the blue clay halting organic decomposition in Great War trenches in a clear, high-intent format."
+              },
+              {
+                "idx": 3,
+                "clickScore": 1,
+                "direct": 6,
+                "identityFit": 2,
+                "grounding": "contradicted",
+                "reason": "Contradicted by the text; the source focuses on a World War I excavation in northern France featuring a leather satchel and paper letter, not a Civil War sword."
+              }
+            ],
+            "issues": []
+          }
+        },
+        {
+          "channel": "Chalk & Compound",
+          "titles": [
+            "How the Modern Tax System Actually Works",
+            "A Higher Tax Bracket Never Reduces Your Take-Home Pay",
+            "Why We Pay Taxes and Where the Money Goes"
+          ],
+          "response": {
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.5,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Accurately reflects the narration's breakdown of income, consumption, property, and behavioral taxes without sensationalism."
+              },
+              {
+                "idx": 1,
+                "clickScore": 4,
+                "direct": 7,
+                "identityFit": 5,
+                "grounding": "insufficient",
+                "reason": "The script briefly notes progressive rates, but never addresses the specific mechanics or misconception of marginal tax brackets reducing total take-home pay."
+              },
+              {
+                "idx": 2,
+                "clickScore": 9,
+                "direct": 9.5,
+                "identityFit": 9.5,
+                "grounding": "supported",
+                "reason": "Directly supported by the video's dual focus on the social pooling of wealth (why we pay) and funding public goods like roads, schools, and social safety nets (where it goes)."
+              }
+            ],
+            "winner": 2,
+            "runnerUp": 0
+          },
+          "admission": {
+            "pass": true,
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.5,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Accurately reflects the narration's breakdown of income, consumption, property, and behavioral taxes without sensationalism."
+              },
+              {
+                "idx": 1,
+                "clickScore": 4,
+                "direct": 7,
+                "identityFit": 5,
+                "grounding": "insufficient",
+                "reason": "The script briefly notes progressive rates, but never addresses the specific mechanics or misconception of marginal tax brackets reducing total take-home pay."
+              },
+              {
+                "idx": 2,
+                "clickScore": 9,
+                "direct": 9.5,
+                "identityFit": 9.5,
+                "grounding": "supported",
+                "reason": "Directly supported by the video's dual focus on the social pooling of wealth (why we pay) and funding public goods like roads, schools, and social safety nets (where it goes)."
+              }
+            ],
+            "issues": []
+          }
+        },
+        {
+          "channel": "Gratitude Springs",
+          "titles": [
+            "Sleep Gratitude for the People Who Walk Beside You",
+            "Gratitude for Loved Ones | Calm Sleep Meditation",
+            "Gratitude for People Beside You Restores Sleep",
+            "Day 4 Gratitude Sleep Meditation for Deep Rest"
+          ],
+          "response": {
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.8,
+                "direct": 8.5,
+                "identityFit": 9.2,
+                "grounding": "supported",
+                "reason": "Directly supported by the narration's core theme and quotes ('those who walk beside you'), offering an evocative yet clear promise that fits the ambient sleep meditation format."
+              },
+              {
+                "idx": 1,
+                "clickScore": 8.2,
+                "direct": 7.8,
+                "identityFit": 8.8,
+                "grounding": "supported",
+                "reason": "Accurately represents the content focusing on companions/loved ones and sleep, functioning well for ambient searchable discovery despite a standard two-part structure."
+              },
+              {
+                "idx": 2,
+                "clickScore": 6.8,
+                "direct": 7.5,
+                "identityFit": 6.9,
+                "grounding": "supported",
+                "reason": "Supported by the source, but the phrasing 'Restores Sleep' sounds slightly clinical and awkward for a gentle ambient sleep meditation channel."
+              },
+              {
+                "idx": 3,
+                "clickScore": 6,
+                "direct": 7,
+                "identityFit": 7.2,
+                "grounding": "supported",
+                "reason": "Supported regarding Day 4, but omits the specific emotional focus of the episode (gratitude for companions), making it generic."
+              }
+            ],
+            "winner": 0,
+            "runnerUp": 1
+          },
+          "admission": {
+            "pass": true,
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.8,
+                "direct": 8.5,
+                "identityFit": 9.2,
+                "grounding": "supported",
+                "reason": "Directly supported by the narration's core theme and quotes ('those who walk beside you'), offering an evocative yet clear promise that fits the ambient sleep meditation format."
+              },
+              {
+                "idx": 1,
+                "clickScore": 8.2,
+                "direct": 7.8,
+                "identityFit": 8.8,
+                "grounding": "supported",
+                "reason": "Accurately represents the content focusing on companions/loved ones and sleep, functioning well for ambient searchable discovery despite a standard two-part structure."
+              },
+              {
+                "idx": 2,
+                "clickScore": 6.8,
+                "direct": 7.5,
+                "identityFit": 6.9,
+                "grounding": "supported",
+                "reason": "Supported by the source, but the phrasing 'Restores Sleep' sounds slightly clinical and awkward for a gentle ambient sleep meditation channel."
+              },
+              {
+                "idx": 3,
+                "clickScore": 6,
+                "direct": 7,
+                "identityFit": 7.2,
+                "grounding": "supported",
+                "reason": "Supported regarding Day 4, but omits the specific emotional focus of the episode (gratitude for companions), making it generic."
+              }
+            ],
+            "issues": []
+          }
+        },
+        {
+          "channel": "Investory",
+          "titles": [
+            "How Small Investments Actually Build Real Wealth",
+            "How to Build Substantial Wealth with Little Money",
+            "Why Small Portfolios Beat Big Starting Capital",
+            "How Consistent Investing Builds Substantial Wealth"
+          ],
+          "response": {
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.7,
+                "direct": 8.5,
+                "identityFit": 9.2,
+                "grounding": "supported",
+                "reason": "Directly reflects the core message that small, consistent investments compound into real wealth, following the channel's 'How... Actually Works' style formula cleanly."
+              },
+              {
+                "idx": 1,
+                "clickScore": 7.8,
+                "direct": 8,
+                "identityFit": 7.5,
+                "grounding": "supported",
+                "reason": "Accurate to the text regarding starting with little money, but 'How to Build Substantial Wealth with Little Money' sounds slightly more like generic how-to advice rather than the channel's teacher-advisor educational format."
+              },
+              {
+                "idx": 2,
+                "clickScore": 6.8,
+                "direct": 7.5,
+                "identityFit": 7,
+                "grounding": "insufficient",
+                "reason": "The source discusses regular small contributions beating sporadic lump sums, not small portfolios categorically beating large starting capital portfolios."
+              },
+              {
+                "idx": 3,
+                "clickScore": 8.1,
+                "direct": 8.8,
+                "identityFit": 8.6,
+                "grounding": "supported",
+                "reason": "Accurately captures the primary thesis on continuous contributions and compounding over time, fitting the tone well though slightly more standard."
+              }
+            ],
+            "winner": 0,
+            "runnerUp": 3
+          },
+          "admission": {
+            "pass": true,
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.7,
+                "direct": 8.5,
+                "identityFit": 9.2,
+                "grounding": "supported",
+                "reason": "Directly reflects the core message that small, consistent investments compound into real wealth, following the channel's 'How... Actually Works' style formula cleanly."
+              },
+              {
+                "idx": 1,
+                "clickScore": 7.8,
+                "direct": 8,
+                "identityFit": 7.5,
+                "grounding": "supported",
+                "reason": "Accurate to the text regarding starting with little money, but 'How to Build Substantial Wealth with Little Money' sounds slightly more like generic how-to advice rather than the channel's teacher-advisor educational format."
+              },
+              {
+                "idx": 2,
+                "clickScore": 6.8,
+                "direct": 7.5,
+                "identityFit": 7,
+                "grounding": "insufficient",
+                "reason": "The source discusses regular small contributions beating sporadic lump sums, not small portfolios categorically beating large starting capital portfolios."
+              },
+              {
+                "idx": 3,
+                "clickScore": 8.1,
+                "direct": 8.8,
+                "identityFit": 8.6,
+                "grounding": "supported",
+                "reason": "Accurately captures the primary thesis on continuous contributions and compounding over time, fitting the tone well though slightly more standard."
+              }
+            ],
+            "issues": []
+          }
+        }
+      ]
+    },
+    {
+      "rawEvidence": "/tmp/title-source-qualified-challenge-20260912.json",
+      "sha256": "9ee281b29f338573c733b09d50c646746d507a2f3ae34176373eb9ad128a84b3",
+      "usage": {
+        "calls": 4,
+        "cacheHits": 0,
+        "inputTokens": 7392,
+        "outputTokens": 1272,
+        "reasoningTokens": 3343,
+        "cachedInputTokens": 0,
+        "totalTokens": 12007,
+        "costUsd": 0.022850250000000003,
+        "unpricedCalls": 0,
+        "groups": [
+          {
+            "provider": "openrouter",
+            "model": "gemini-3.7-flash",
+            "kind": "text",
+            "calls": 4,
+            "cacheHits": 0,
+            "inputTokens": 7392,
+            "outputTokens": 1272,
+            "reasoningTokens": 3343,
+            "cachedInputTokens": 0,
+            "totalTokens": 12007,
+            "costUsd": 0.022850250000000003,
+            "unpricedCalls": 0,
+            "unpricedReasons": []
+          }
+        ]
+      },
+      "evidence": [
+        {
+          "channel": "Inked Histories",
+          "titles": [
+            "Why Unearthing Buried Battlefield Relics Instantly Destroys Them",
+            "How a Civil War Sword Survived a Century in Dirt",
+            "How WW1 Trench Mud Kept a Fallen Soldier's Letter Intact",
+            "How Battlefield Mud Preserved WW1 Relics for a Century"
+          ],
+          "response": {
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 5,
+                "direct": 8,
+                "identityFit": 6,
+                "grounding": "contradicted",
+                "reason": "The source notes that exposure threatens relics and causes rapid disintegration without stabilization, but stabilization gel actively prevents destruction; claiming unearthing 'instantly destroys them' is an unsupported absolute."
+              },
+              {
+                "idx": 1,
+                "clickScore": 2,
+                "direct": 7,
+                "identityFit": 3,
+                "grounding": "contradicted",
+                "reason": "The narration takes place on a 1917 World War I battlefield in France focusing on a leather satchel and letter, not an American Civil War sword."
+              },
+              {
+                "idx": 2,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Directly supported by the narration detailing how dense, anaerobic WW1 trench clay sealed an officer's satchel and preserved a fallen soldier's letter perfectly dry."
+              },
+              {
+                "idx": 3,
+                "clickScore": 8,
+                "direct": 9,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Fully supported by the narration explaining how oxygen-starved trench mud preserved Great War relics across a hundred years."
+              }
+            ],
+            "winner": 2,
+            "runnerUp": 3
+          },
+          "admission": {
+            "pass": true,
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 5,
+                "direct": 8,
+                "identityFit": 6,
+                "grounding": "contradicted",
+                "reason": "The source notes that exposure threatens relics and causes rapid disintegration without stabilization, but stabilization gel actively prevents destruction; claiming unearthing 'instantly destroys them' is an unsupported absolute."
+              },
+              {
+                "idx": 1,
+                "clickScore": 2,
+                "direct": 7,
+                "identityFit": 3,
+                "grounding": "contradicted",
+                "reason": "The narration takes place on a 1917 World War I battlefield in France focusing on a leather satchel and letter, not an American Civil War sword."
+              },
+              {
+                "idx": 2,
+                "clickScore": 9,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Directly supported by the narration detailing how dense, anaerobic WW1 trench clay sealed an officer's satchel and preserved a fallen soldier's letter perfectly dry."
+              },
+              {
+                "idx": 3,
+                "clickScore": 8,
+                "direct": 9,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Fully supported by the narration explaining how oxygen-starved trench mud preserved Great War relics across a hundred years."
+              }
+            ],
+            "issues": []
+          }
+        },
+        {
+          "channel": "Chalk & Compound",
+          "titles": [
+            "How Taxes Actually Work Across an Economy",
+            "Why We Pay Taxes and the Social Contract",
+            "A Higher Tax Bracket Never Reduces Your Take-Home Pay"
+          ],
+          "response": {
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.5,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Warranted by the narration's comprehensive overview of how taxes function across society, covering income, consumption, property, incentives, and economic friction."
+              },
+              {
+                "idx": 1,
+                "clickScore": 7.5,
+                "direct": 8.5,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Warranted by the narration opening on why society pools resources and concluding explicitly on taxation as a fundamental social contract."
+              },
+              {
+                "idx": 2,
+                "clickScore": 4,
+                "direct": 8,
+                "identityFit": 6,
+                "grounding": "insufficient",
+                "reason": "Although progressive taxation is briefly noted, the narration never mentions or explains marginal bracket mechanics regarding net take-home pay."
+              }
+            ],
+            "winner": 0,
+            "runnerUp": 1
+          },
+          "admission": {
+            "pass": true,
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.5,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Warranted by the narration's comprehensive overview of how taxes function across society, covering income, consumption, property, incentives, and economic friction."
+              },
+              {
+                "idx": 1,
+                "clickScore": 7.5,
+                "direct": 8.5,
+                "identityFit": 8,
+                "grounding": "supported",
+                "reason": "Warranted by the narration opening on why society pools resources and concluding explicitly on taxation as a fundamental social contract."
+              },
+              {
+                "idx": 2,
+                "clickScore": 4,
+                "direct": 8,
+                "identityFit": 6,
+                "grounding": "insufficient",
+                "reason": "Although progressive taxation is briefly noted, the narration never mentions or explains marginal bracket mechanics regarding net take-home pay."
+              }
+            ],
+            "issues": []
+          }
+        },
+        {
+          "channel": "Gratitude Springs",
+          "titles": [
+            "Gratitude for the People Beside You | Sleep Meditation",
+            "Sleep Gratitude Meditation for Social Exhaustion",
+            "Gratitude for People Beside You Restores Sleep",
+            "Day 4 Gratitude Sleep Meditation for Deep Rest"
+          ],
+          "response": {
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.8,
+                "direct": 9,
+                "identityFit": 9.5,
+                "grounding": "supported",
+                "reason": "Directly supported by the narration's core instruction to draw close gratitude for 'the people beside you' to enter sleep."
+              },
+              {
+                "idx": 1,
+                "clickScore": 9.3,
+                "direct": 9.4,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Supported by the source explicitly targeting the 'friction of a hundred hurried interactions' and 'exhaustion of pleasing the world' as the state being relieved."
+              },
+              {
+                "idx": 2,
+                "clickScore": 5.8,
+                "direct": 6.8,
+                "identityFit": 6,
+                "grounding": "insufficient",
+                "reason": "Phrased as a definitive functional claim ('Restores Sleep') rather than the guided meditative relaxation process established in the script."
+              },
+              {
+                "idx": 3,
+                "clickScore": 7.4,
+                "direct": 8,
+                "identityFit": 8.5,
+                "grounding": "supported",
+                "reason": "Supported by the explicit mention of 'day four of our practice' guiding the listener into deep sleep, though it omits the distinctive relationship theme."
+              }
+            ],
+            "winner": 1,
+            "runnerUp": 0
+          },
+          "admission": {
+            "pass": true,
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8.8,
+                "direct": 9,
+                "identityFit": 9.5,
+                "grounding": "supported",
+                "reason": "Directly supported by the narration's core instruction to draw close gratitude for 'the people beside you' to enter sleep."
+              },
+              {
+                "idx": 1,
+                "clickScore": 9.3,
+                "direct": 9.4,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Supported by the source explicitly targeting the 'friction of a hundred hurried interactions' and 'exhaustion of pleasing the world' as the state being relieved."
+              },
+              {
+                "idx": 2,
+                "clickScore": 5.8,
+                "direct": 6.8,
+                "identityFit": 6,
+                "grounding": "insufficient",
+                "reason": "Phrased as a definitive functional claim ('Restores Sleep') rather than the guided meditative relaxation process established in the script."
+              },
+              {
+                "idx": 3,
+                "clickScore": 7.4,
+                "direct": 8,
+                "identityFit": 8.5,
+                "grounding": "supported",
+                "reason": "Supported by the explicit mention of 'day four of our practice' guiding the listener into deep sleep, though it omits the distinctive relationship theme."
+              }
+            ],
+            "issues": []
+          }
+        },
+        {
+          "channel": "Investory",
+          "titles": [
+            "How to Build Substantial Wealth with Little Money",
+            "Why Starting with Little Beats Waiting for Capital",
+            "How Small Investments Build Substantial Wealth",
+            "Why Small Portfolios Beat Big Starting Capital"
+          ],
+          "response": {
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8,
+                "direct": 8.5,
+                "identityFit": 8.5,
+                "grounding": "supported",
+                "reason": "Supported by the source narration detailing how consistent, small inputs compounded over time accumulate into substantial wealth."
+              },
+              {
+                "idx": 1,
+                "clickScore": 8.8,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Directly supported by the comparison between starting early with small amounts versus delaying investing while waiting to accumulate a lump sum."
+              },
+              {
+                "idx": 2,
+                "clickScore": 9.2,
+                "direct": 9.5,
+                "identityFit": 9.5,
+                "grounding": "supported",
+                "reason": "Directly supported by the script's core thesis that small, regular contributions build substantial wealth through compounding and time in the market."
+              },
+              {
+                "idx": 3,
+                "clickScore": 6,
+                "direct": 6.5,
+                "identityFit": 6.5,
+                "grounding": "insufficient",
+                "reason": "The text explains that investing small amounts consistently beats waiting to invest sporadic large sums, not that having a small portfolio intrinsically beats starting with large capital."
+              }
+            ],
+            "winner": 2,
+            "runnerUp": 1
+          },
+          "admission": {
+            "pass": true,
+            "rankings": [
+              {
+                "idx": 0,
+                "clickScore": 8,
+                "direct": 8.5,
+                "identityFit": 8.5,
+                "grounding": "supported",
+                "reason": "Supported by the source narration detailing how consistent, small inputs compounded over time accumulate into substantial wealth."
+              },
+              {
+                "idx": 1,
+                "clickScore": 8.8,
+                "direct": 9,
+                "identityFit": 9,
+                "grounding": "supported",
+                "reason": "Directly supported by the comparison between starting early with small amounts versus delaying investing while waiting to accumulate a lump sum."
+              },
+              {
+                "idx": 2,
+                "clickScore": 9.2,
+                "direct": 9.5,
+                "identityFit": 9.5,
+                "grounding": "supported",
+                "reason": "Directly supported by the script's core thesis that small, regular contributions build substantial wealth through compounding and time in the market."
+              },
+              {
+                "idx": 3,
+                "clickScore": 6,
+                "direct": 6.5,
+                "identityFit": 6.5,
+                "grounding": "insufficient",
+                "reason": "The text explains that investing small amounts consistently beats waiting to invest sporadic large sums, not that having a small portfolio intrinsically beats starting with large capital."
+              }
+            ],
+            "issues": []
+          }
+        }
+      ]
+    }
+  ]
+}

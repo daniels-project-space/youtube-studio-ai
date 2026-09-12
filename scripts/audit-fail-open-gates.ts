@@ -82,6 +82,22 @@ interface Finding {
   detail: string;
 }
 
+// Read actual string/template nodes, not quote-delimited substrings of source.
+// A short literal such as "unknown" used to shift the regex onto executable
+// text, hiding a later explicit FAILED message and inventing a silent fallback.
+function diagnosticStrings(node: ts.Node): string[] {
+  const values: string[] = [];
+  const visit = (child: ts.Node): void => {
+    if (ts.isStringLiteral(child) || ts.isNoSubstitutionTemplateLiteral(child)) values.push(child.text);
+    else if (ts.isTemplateExpression(child)) {
+      values.push(child.head.text + child.templateSpans.map((span) => span.literal.text).join(""));
+    }
+    child.forEachChild(visit);
+  };
+  visit(node);
+  return values;
+}
+
 function main(): void {
   const findings: Finding[] = [];
   let catches = 0;
@@ -119,7 +135,7 @@ function main(): void {
           .replace(/\/\*[\s\S]*?\*\//g, "")
           .replace(/(^|[^:])\/\/.*$/gm, "$1");
         const returnsBenign = /return\s*\{[^}]*\b(false|""|\[\])/.test(guardBody);
-        const guardLogs = Array.from(guardBody.matchAll(/["'`]([^"'`]{8,600})["'`]/g)).map((m) => m[1]);
+        const guardLogs = diagnosticStrings(node.thenStatement);
         const guardNamed = guardLogs.some((l) =>
           /DID NOT RUN|FAILED|NOT quality-gated|never|errored|UNAVAILABLE|gets no |gets none/.test(l),
         );
@@ -156,7 +172,7 @@ function main(): void {
           // full ran past the cap and the catch was reported as having "no log
           // at all" — the audit flagged code it had itself just been fixed to
           // approve of. Capture the whole literal and judge on its text.
-          const logs = Array.from(body.matchAll(/["'`]([^"'`]{8,600})["'`]/g)).map((m) => m[1]);
+          const logs = diagnosticStrings(node.block);
           // A fail-open is fine when the fallback IDENTIFIES ITSELF — either the
           // log names what did not run, or the returned value carries a marker a
           // consumer can branch on. geoCinema returns verdict: "heuristic
