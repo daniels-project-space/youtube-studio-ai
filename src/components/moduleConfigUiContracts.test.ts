@@ -7,6 +7,8 @@ const section = readFileSync(join(root, "src/components/ModuleConfigSection.tsx"
 const panel = readFileSync(join(root, "src/components/ModuleConfigPanel.tsx"), "utf8");
 const css = readFileSync(join(root, "src/components/ModuleConfigSection.module.css"), "utf8");
 
+assert.match(section, /const cardKey = `\$\{m\.blockId\}:\$\{JSON\.stringify\(canonicalValue\)\}`/u, "module cards must remount when canonical config changes while preserving optimistic edits during a pending save");
+assert.match(section, /key=\{cardKey\}/u);
 assert.match(section, /open=\{open\}/u);
 assert.match(section, /openBlockId[\s\S]*setOpenBlockId/u, "the rack must coordinate one open stage instead of stacking panels");
 assert.match(section, /useState<string \| null \| undefined>\(\(\) => channelId \? null : undefined\)/u, "runtime settings start collapsed while onboarding keeps the first decision visible");

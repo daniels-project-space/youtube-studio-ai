@@ -357,26 +357,34 @@ export function ModuleConfigSection({
           lockedAt={channelLockedAt}
         />
       )}
-      {mods.map((m, index) => (
-        <ModuleCard
-          key={m.blockId}
-          blockId={m.blockId}
-          title={m.card.title}
-          stage={m.card.stage}
-          does={m.card.does}
-          capabilities={m.surface.capabilities}
-          surface={m.surface}
-          value={current[m.blockId] ?? {}}
-          onChange={channelId ? undefined : handleControlled}
-          channelId={channelId}
-          ownerId={channelId ? ownerId : undefined}
-          lock={moduleLocks?.[m.blockId]}
-          channelLocked={channelLocked}
-          index={index}
-          open={visibleOpenBlockId === m.blockId}
-          onOpenChange={(nextOpen) => setOpenBlockId(nextOpen ? m.blockId : null)}
-        />
-      ))}
+      {mods.map((m, index) => {
+        const canonicalValue = current[m.blockId] ?? {};
+        // Re-mount only when the canonical parent value changes. This keeps a
+        // card's optimistic setting alive while a Convex mutation is pending,
+        // but drops stale local state after a route/family switch or an
+        // external operator update.
+        const cardKey = `${m.blockId}:${JSON.stringify(canonicalValue)}`;
+        return (
+          <ModuleCard
+            key={cardKey}
+            blockId={m.blockId}
+            title={m.card.title}
+            stage={m.card.stage}
+            does={m.card.does}
+            capabilities={m.surface.capabilities}
+            surface={m.surface}
+            value={canonicalValue}
+            onChange={channelId ? undefined : handleControlled}
+            channelId={channelId}
+            ownerId={channelId ? ownerId : undefined}
+            lock={moduleLocks?.[m.blockId]}
+            channelLocked={channelLocked}
+            index={index}
+            open={visibleOpenBlockId === m.blockId}
+            onOpenChange={(nextOpen) => setOpenBlockId(nextOpen ? m.blockId : null)}
+          />
+        );
+      })}
       {lockAudits && lockAudits.length > 0 && (
         <details className={styles.lockAudit}>
           <summary>Recent lock activity</summary>
