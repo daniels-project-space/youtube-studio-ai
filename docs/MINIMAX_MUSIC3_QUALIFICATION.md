@@ -27,9 +27,10 @@ The production `music` block persists that plan before provider submission. Mana
 
 ## Worker and integrity contract
 
-`src/lib/minimaxMusic3.ts` sends one deterministic, idempotency-keyed `minimax-music3-worker/v1` POST. The client accepts a result only when the receipt binds:
+`src/lib/minimaxMusic3.ts` sends one deterministic, idempotency-keyed `minimax-music3-worker/v2` POST. The client accepts a result only when the receipt binds:
 
 - the exact program, caption, lyrics control, seed, duration, CFG, top-k, model, model revision, and runtime revision;
+- the complete qualified high-VRAM graph: `minimax_music3_dit_fp16.safetensors`, the pinned MiniMax text encoder and VAE, CFG 1.7, top-k 50, 30-step Euler/simple sampling at denoise 1, and **full VAE decode** (`tiled: false`);
 - two distinct RTX 4090 GPU identities, spot capacity, persistent storage, checkpointing, idle shutdown, and internally consistent actual cost;
 - the durable credential-free HTTPS output URL plus its SHA-256, byte length, sample rate, channel count, bit depth, codec, and container;
 - the exact reviewed qualification receipt hash and required license/safeguard attestations.
@@ -40,7 +41,7 @@ The client downloads the WAV, parses its RIFF chunks, and verifies every integri
 
 The global worker benchmark is not permission to declare every new score good. Every generated track now remains `awaiting-human-audition` until the review workflow writes a durable `music-program-quality/v1` receipt. At `upload_draft`, MiniMax releases fail closed unless that receipt both passes the current channel program's complete section-by-section, dynamics, artifact, and real-human-audition checks **and** binds byte-for-byte to the exact native worker WAV. A receipt from another episode, another channel, or a mastered MP3 cannot be reused.
 
-This addresses an active ComfyUI MiniMax Music 3 report of audio that degrades a few seconds into a nominally successful render. Qualification must include targeted listening at the affected early window and at every sealed section boundary; a green worker job or a global qualification hash is never treated as evidence that a specific take is release-ready. The official Comfy workflow also notes that tiled VAE decode can introduce seams, so a qualified high-VRAM production graph must retain its chosen decode mode and audition it as part of the immutable worker qualification.
+This addresses an active ComfyUI MiniMax Music 3 report of audio that degrades a few seconds into a nominally successful render. Qualification must include targeted listening at the affected early window and at every sealed section boundary; a green worker job or a global qualification hash is never treated as evidence that a specific take is release-ready. The official Comfy workflow also notes that tiled VAE decode can introduce seams. The v2 contract therefore rejects a worker receipt unless it proves the non-tiled full-VAE decode graph; it cannot silently use a low-VRAM/tiling workaround and still call the take qualified.
 
 Production mastering applies one measured constant gain. It does not compress, limit, normalize sections independently, or hide a source whose peak headroom cannot reach the sealed LUFS target.
 

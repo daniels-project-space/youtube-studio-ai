@@ -1966,8 +1966,11 @@ export const music: Block = {
         const result = await generateMiniMaxMusic3({
           program: channelMusicProgram,
           seed: Number(ctx.params.seed ?? 4_242),
-          cfgScale: Number(ctx.params.cfgScale ?? 7),
-          topK: Number(ctx.params.topK ?? 50),
+          // The worker accepts only the benchmarked full-precision profile.
+          // Preserve an explicit override as an intentional, fail-closed
+          // benchmark request instead of silently clamping it into a release.
+          cfgScale: ctx.params.cfgScale === undefined ? undefined : Number(ctx.params.cfgScale),
+          topK: ctx.params.topK === undefined ? undefined : Number(ctx.params.topK),
           maxCostUsd: Number(ctx.params.maxCostUsd ?? 5),
         });
         minimaxReceipt = result.receipt;

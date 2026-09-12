@@ -12,6 +12,7 @@ import {
   MINIMAX_MUSIC3_COMFYUI_REVISION,
   MINIMAX_MUSIC3_MODEL,
   MINIMAX_MUSIC3_MODEL_REVISION,
+  MINIMAX_MUSIC3_RENDER_PROFILE,
   MINIMAX_MUSIC3_SAMPLE_RATE_HZ,
   MINIMAX_MUSIC3_UI_ATTRIBUTION,
   MINIMAX_MUSIC3_WORKER_CONTRACT,
@@ -92,6 +93,7 @@ async function main(): Promise<void> {
       assert.equal(request.runtimeRepository, MINIMAX_MUSIC3_COMFYUI_REPOSITORY);
       assert.equal(request.runtimeRevision, MINIMAX_MUSIC3_COMFYUI_REVISION);
       assert.match(String(request.caption), /^### Global Metadata/mu);
+      assert.deepEqual(request.renderProfile, MINIMAX_MUSIC3_RENDER_PROFILE);
       const runtime = {
         provider: "novita",
         gpuModel: "RTX 4090",
@@ -122,6 +124,7 @@ async function main(): Promise<void> {
         durationSec: request.durationSec,
         cfgScale: request.cfgScale,
         topK: request.topK,
+        renderProfile: request.renderProfile,
         output: {
           url: "https://music-output.example/job-001.wav",
           contentSha256: sha256(audio),
@@ -162,6 +165,8 @@ async function main(): Promise<void> {
   assert.equal(result.receipt.runtime.costUsd, 0.03);
   assert.equal(acceptedReceipt?.jobId, "music-job-001");
   assert.equal(postCount, 1);
+  assert.equal(result.receipt.cfgScale, 1.7, "the qualified conditioning CFG must replace the old arbitrary default");
+  assert.equal(result.receipt.topK, 50);
   assert.equal(
     assertPinnedMiniMaxMusic3Receipt(result.receipt, program).programFingerprint,
     program.fingerprint,
@@ -174,6 +179,22 @@ async function main(): Promise<void> {
     }, program),
     /generatedContentDisclosureEnabled is not attested/,
     "a runtime receipt cannot release a package whose disclosure control is off",
+  );
+  assert.throws(
+    () => assertPinnedMiniMaxMusic3Receipt({
+      ...result.receipt,
+      renderProfile: {
+        ...result.receipt.renderProfile,
+        decoder: { ...result.receipt.renderProfile.decoder, tiled: true },
+      },
+    }, program),
+    /full-VAE decode path/u,
+    "a tiled decode may conserve VRAM but must never masquerade as the qualified high-VRAM graph",
+  );
+  await assert.rejects(
+    () => generateMiniMaxMusic3({ program, cfgScale: 7 }),
+    /requires the qualified conditioning CFG 1\.7/u,
+    "legacy arbitrary CFG overrides must not bypass the official qualified profile",
   );
 
   process.env.MINIMAX_MUSIC3_UI_ATTRIBUTION_ENABLED = "0";

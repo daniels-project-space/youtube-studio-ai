@@ -6,7 +6,10 @@ import {
 } from "@/engine/channelMusicProgram";
 import { canonicalJson } from "@/lib/canonicalJson";
 
-export const MINIMAX_MUSIC3_WORKER_CONTRACT = "minimax-music3-worker/v1" as const;
+// v2 deliberately seals the complete official high-VRAM graph rather than
+// merely naming ComfyUI. A worker that silently swaps in the low-VRAM UNet or
+// tiled VAE decode can return a perfectly valid WAV with audible seams.
+export const MINIMAX_MUSIC3_WORKER_CONTRACT = "minimax-music3-worker/v2" as const;
 export const MINIMAX_MUSIC3_MODEL = "MiniMaxAI/MiniMax-Music3" as const;
 export const MINIMAX_MUSIC3_MODEL_REVISION = "fbdf52fbaaca799592917417eb05f1899f1255ec" as const;
 export const MINIMAX_MUSIC3_COMFYUI_REPOSITORY = "comfyanonymous/ComfyUI" as const;
@@ -15,6 +18,27 @@ export const MINIMAX_MUSIC3_SAMPLE_RATE_HZ = 32_000 as const;
 export const MINIMAX_MUSIC3_CHANNELS = 2 as const;
 export const MINIMAX_MUSIC3_BITS_PER_SAMPLE = 16 as const;
 export const MINIMAX_MUSIC3_UI_ATTRIBUTION = "MiniMax-Music3" as const;
+export const MINIMAX_MUSIC3_RENDER_PROFILE = {
+  id: "official-fp16-full-vae/v1",
+  unet: "minimax_music3_dit_fp16.safetensors",
+  textEncoder: "minimax_music3_text_encoder_pruned_int8_convrot.safetensors",
+  vae: "minimax_music3_dav.safetensors",
+  conditioning: {
+    cfgScale: 1.7,
+    topK: 50,
+  },
+  sampler: {
+    steps: 30,
+    cfgScale: 1.7,
+    name: "euler",
+    scheduler: "simple",
+    denoise: 1,
+  },
+  decoder: {
+    mode: "full_vae",
+    tiled: false,
+  },
+} as const;
 
 const SHA256 = /^[a-f0-9]{64}$/u;
 const OUTPUT_DOWNLOAD_LIMIT_BYTES = 50_000_000;
@@ -50,6 +74,7 @@ export interface MiniMaxMusic3Receipt {
   durationSec: number;
   cfgScale: number;
   topK: number;
+  renderProfile: typeof MINIMAX_MUSIC3_RENDER_PROFILE;
   output: {
     url: string;
     contentSha256: string;
@@ -178,6 +203,34 @@ function finiteNumber(value: unknown, label: string, minimum: number, maximum: n
   return value;
 }
 
+function validateRenderProfile(value: unknown, cfgScale: number, topK: number): void {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("MiniMax-Music3 receipt render profile is missing");
+  }
+  const profile = value as Record<string, unknown>;
+  const conditioning = profile.conditioning as Record<string, unknown> | undefined;
+  const sampler = profile.sampler as Record<string, unknown> | undefined;
+  const decoder = profile.decoder as Record<string, unknown> | undefined;
+  exactString(profile.id, MINIMAX_MUSIC3_RENDER_PROFILE.id, "render-profile id");
+  exactString(profile.unet, MINIMAX_MUSIC3_RENDER_PROFILE.unet, "render-profile UNet");
+  exactString(profile.textEncoder, MINIMAX_MUSIC3_RENDER_PROFILE.textEncoder, "render-profile text encoder");
+  exactString(profile.vae, MINIMAX_MUSIC3_RENDER_PROFILE.vae, "render-profile VAE");
+  if (
+    conditioning?.cfgScale !== cfgScale ||
+    conditioning.topK !== topK ||
+    sampler?.steps !== MINIMAX_MUSIC3_RENDER_PROFILE.sampler.steps ||
+    sampler.cfgScale !== cfgScale ||
+    sampler.name !== MINIMAX_MUSIC3_RENDER_PROFILE.sampler.name ||
+    sampler.scheduler !== MINIMAX_MUSIC3_RENDER_PROFILE.sampler.scheduler ||
+    sampler.denoise !== MINIMAX_MUSIC3_RENDER_PROFILE.sampler.denoise
+  ) {
+    throw new Error("MiniMax-Music3 receipt render profile controls do not match the qualified graph");
+  }
+  if (decoder?.mode !== "full_vae" || decoder.tiled !== false) {
+    throw new Error("MiniMax-Music3 receipt did not attest the qualified full-VAE decode path");
+  }
+}
+
 function durableOutputUrl(value: unknown): string {
   let url: URL;
   try {
@@ -262,6 +315,7 @@ function validateReceipt(args: {
   if (value.seed !== args.seed || value.durationSec !== args.program.generation.durationSec || value.cfgScale !== args.cfgScale || value.topK !== args.topK) {
     throw new Error("MiniMax-Music3 receipt generation controls do not match the request");
   }
+  validateRenderProfile(value.renderProfile, args.cfgScale, args.topK);
   const output = value.output as Record<string, unknown> | undefined;
   if (!output) throw new Error("MiniMax-Music3 output receipt is missing");
   const outputUrl = durableOutputUrl(output.url);
@@ -422,8 +476,18 @@ export async function generateMiniMaxMusic3(args: {
     throw new MiniMaxMusic3Error("MiniMax-Music3 generation requires a program that explicitly selects MiniMax-Music3");
   }
   const seed = Number.isSafeInteger(args.seed) && Number(args.seed) >= 0 ? Number(args.seed) : 4_242;
-  const cfgScale = Math.max(1, Math.min(20, args.cfgScale ?? 7));
-  const topK = Math.max(1, Math.min(1_000, Math.floor(args.topK ?? 50)));
+  const cfgScale = MINIMAX_MUSIC3_RENDER_PROFILE.conditioning.cfgScale;
+  const topK = MINIMAX_MUSIC3_RENDER_PROFILE.conditioning.topK;
+  if (args.cfgScale !== undefined && args.cfgScale !== cfgScale) {
+    throw new MiniMaxMusic3Error(
+      `MiniMax-Music3 requires the qualified conditioning CFG ${cfgScale}; rerun a benchmark before changing it`,
+    );
+  }
+  if (args.topK !== undefined && args.topK !== topK) {
+    throw new MiniMaxMusic3Error(
+      `MiniMax-Music3 requires the qualified conditioning top-k ${topK}; rerun a benchmark before changing it`,
+    );
+  }
   const maxCostUsd = Math.min(10, args.maxCostUsd ?? 5);
   if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0) {
     throw new MiniMaxMusic3Error("MiniMax-Music3 requires a positive per-request cost ceiling");
@@ -446,6 +510,7 @@ export async function generateMiniMaxMusic3(args: {
     durationSec: program.generation.durationSec,
     cfgScale,
     topK,
+    renderProfile: MINIMAX_MUSIC3_RENDER_PROFILE,
     output: {
       sampleRateHz: MINIMAX_MUSIC3_SAMPLE_RATE_HZ,
       channels: MINIMAX_MUSIC3_CHANNELS,

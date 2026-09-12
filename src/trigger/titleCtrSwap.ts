@@ -94,7 +94,7 @@ export async function runTitleCtrSwap(
   }>;
 
   const proposed: NativeTitleTestProposal[] = [];
-  let applied = 0;
+  const applied = 0;
   let judged = 0;
   const now = Date.now();
 
@@ -103,7 +103,7 @@ export async function runTitleCtrSwap(
     const ledger = await loadLedger(prefix);
     if (!ledger.length) continue;
 
-    let dirty = judgePriorSwaps(ledger, log) > 0;
+    const dirty = judgePriorSwaps(ledger, log) > 0;
     judged += dirty ? 1 : 0;
 
     const decisions = planNativeTitleTestProposals(ledger.map(candidate), now);
