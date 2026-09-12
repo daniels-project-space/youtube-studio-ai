@@ -1024,6 +1024,39 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     maxCostUsd: 0,
     qualityRequired: true,
   }),
+  // This source-only chess lane deliberately enters the existing paid TTS
+  // adapter rather than a test-only voice path. It remains unadvertised until
+  // its real TTS/QA/recovery qualification is complete.
+  chess_replay_source: contract(["chess.replay_source_verified", "chess.narration_plan_bound"], {
+    requiredConsumes: ["chessReplaySource"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
+    qualityRequired: true,
+  }),
+  chess_script: contract(["chess.legal_move_transcript"], {
+    requiredConsumes: ["chessNarrationPlan"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
+    qualityRequired: true,
+  }),
+  chess_script_integrity: contract(["chess.source_transcript_integrity"], {
+    requiredConsumes: ["chessNarrationPlan", "script", "narrationText"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
+    qualityRequired: true,
+  }),
+  chess_narration_timing: contract(["chess.measured_voice_cues"], {
+    requiredConsumes: ["chessNarrationPlan", "sentenceTimings", "narrationDurationSec"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
+    qualityRequired: true,
+  }),
+  chess_episode_graph: contract(["chess.native_board_manifest"], {
+    requiredConsumes: ["chessReplay", "chessNarrationPlan", "chessNarrationTiming", "topic"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
+    qualityRequired: true,
+  }),
   visual_matter: contract(["visuals.visual_matter_planned", "visuals.visual_lock"], {
     requiredConsumes: ["topic", "narrativeBeats", "continuityLedger", "shotList", "dpVisualSpecs", "studioAssetRecipeProjection"],
     optionalConsumes: ["channelName", "styleDNA", "visualBrief"],

@@ -38,6 +38,7 @@ import { sourceBoundStorySpineBlocks } from "@/trigger/blocks/sourceBoundStorySp
 import { editorialEvidencePacketBlocks } from "@/trigger/blocks/editorialEvidencePacketBlocks";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 import { sceneCompilerBlocks } from "@/trigger/blocks/sceneCompilerBlocks";
+import { chessReplayBlocks } from "@/trigger/blocks/chessReplayBlocks";
 import { syntheticScenarioBlocks } from "@/trigger/blocks/syntheticScenarioBlocks";
 import { emitBundle } from "@/trigger/blocks/bundleBlocks";
 
@@ -103,6 +104,10 @@ export function registerAllBlocks(): void {
   for (const b of cinematicCaseSequenceBlocks) register(b);
   // Local Scene Manifest → 16:9 master renderer; owns pixels, never story.
   for (const b of sceneCompilerBlocks) register(b);
+  // Source-only legal chess replay → shared narration TTS → measured cue →
+  // native board manifest. It is registered as a typed executable capability,
+  // not advertised by channel creation until independent qualification passes.
+  for (const b of chessReplayBlocks) register(b);
   // Explicitly fictional scenario admission + opening disclosure. The scene
   // compiler consumes the resulting profile to render town, decision, and POV
   // grammars without representing them as a real simulation.

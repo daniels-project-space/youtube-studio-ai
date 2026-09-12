@@ -156,6 +156,11 @@ export const MODULE_SALES_PITCHES: Readonly<Record<string, ModuleSalesPitch>> = 
     promise: "Cut vertical quiz pilots safely.",
     bullets: ["Private release only", "Exact portrait proof"],
   },
+  "chess-replay-private-review": {
+    title: "Chess Replay Review",
+    promise: "Turn a supplied game into a timed board story.",
+    bullets: ["Every move stays exact", "Private review only"],
+  },
   thumbnail: {
     title: "Thumbnail Engine",
     promise: "Win the click before the video starts.",

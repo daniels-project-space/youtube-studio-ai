@@ -202,6 +202,11 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
     executableIds: ["quiz_short_release"],
     note: "Registered post-QA private-release block only. It remains catalog-owned for registry integrity and controlled pipeline validation, but no owner-facing intake admits it and it is not a standalone creator route, automatic resolver target, render path, spend path, or publication path.",
   },
+  "chess-replay-private-review": {
+    kind: "registered-private-release",
+    executableIds: ["chess_replay_source", "chess_script", "chess_script_integrity", "chess_narration_timing", "chess_episode_graph"],
+    note: "Registered source-bound private-review capability only. It remains catalog-owned for ABI integrity and controlled pipeline validation, but has no channel-creator route, Golden promotion, automatic discovery, provider qualification, render dispatch or publishing authority.",
+  },
   "novita-render-farm": { kind: "pipeline-module", executableIds: ["novita_render_images", "novita_render_video"] },
   "imagecraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/imagecraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production image rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_images block) instead — same Z-Image family, different implementation and gate set." },
   "videocraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/videocraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production video rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_video block) instead — same LTX family, different implementation and gate set." },

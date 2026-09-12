@@ -177,7 +177,7 @@ const SHORTS_PROOFS: TextProof[] = [
 /* ============================ categories ============================= */
 
 const CATEGORY: Record<string, string> = {
-  "channel-planner": "Pre-production", "topic-intel": "Pre-production", "show-bible": "Pre-production", script: "Pre-production", guard: "Pre-production",
+  "channel-planner": "Pre-production", "topic-intel": "Pre-production", "show-bible": "Pre-production", script: "Pre-production", guard: "Pre-production", "chess-replay-private-review": "Pre-production",
   loreshort: "Video Engines", lofi: "Video Engines", quiz: "Video Engines", cinematic: "Video Engines", documotion: "Video Engines", "speech-tv": "Video Engines", whiteboard: "Video Engines", comic: "Video Engines", shorts: "Video Engines", "videocraft-novita": "Video Engines",
   thumbnail: "Visual", "package-opening-proof": "Visual", visuals: "Visual", "studio-assets": "Visual", motioncraft: "Visual", inserts: "Visual", "imagecraft-novita": "Visual",
   narration: "Audio",

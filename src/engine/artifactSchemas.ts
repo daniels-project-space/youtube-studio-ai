@@ -31,6 +31,8 @@ import {
 import { ShortRetentionManifestSchema, ShortSceneQaSchema } from "./documentaryCollageShort";
 import { VisualMatterManifestSchema, VisualMatterReferenceAssetSchema } from "./visualMatter";
 import { EpisodeGraphSchema, SceneManifestSchema } from "./episodeGraph";
+import { ChessNarrationPlanShape, ChessNarrationTimingShape } from "./chessNarration";
+import { ChessReplaySchema, ChessReplaySourceSchema } from "./chessReplay";
 import { LearningContractSchema } from "./learningContract";
 import {
   SyntheticScenarioContractSchema,
@@ -174,8 +176,13 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   tags: { type: "PublicationTags", schema: stringList },
   script: { type: "TimedScriptDraft", schema: z.record(z.string(), jsonValue) },
   narrationText: { type: "NarrationText", schema: nonEmpty },
+  scriptApproved: { type: "ScriptApproval", schema: z.literal(true) },
   sentenceTimings: { type: "TimedSentence[]", schema: z.array(timedSentence) },
   narrationDurationSec: { type: "DurationSeconds", schema: z.number().finite().positive() },
+  chessReplaySource: { type: "ChessReplaySource", schema: ChessReplaySourceSchema, persist: "reference" },
+  chessReplay: { type: "ChessReplay", schema: ChessReplaySchema, persist: "reference" },
+  chessNarrationPlan: { type: "ChessNarrationPlan", schema: ChessNarrationPlanShape, persist: "reference" },
+  chessNarrationTiming: { type: "ChessNarrationTiming", schema: ChessNarrationTimingShape, persist: "reference" },
   narrationPerformanceEvidence: {
     type: "NarrationPerformanceEvidence",
     schema: z.object({
