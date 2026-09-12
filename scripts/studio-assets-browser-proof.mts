@@ -133,7 +133,12 @@ try {
         await page.goto(base, { waitUntil: "domcontentloaded" }); await page.getByRole("heading", { name: "Studio assets", exact: true }).waitFor();
         await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, font); await page.evaluate(() => document.fonts.ready);
         if (["checking","loading"].includes(state)) await page.waitForFunction(() => document.querySelector("[aria-busy=true]"));
-        else if (["viewer","unavailable"].includes(state)) await page.getByRole("link", { name: "Verify with YouTube" }).waitFor();
+        else if (["viewer","unavailable"].includes(state)) {
+          // The catalog is intentionally useful before owner elevation. The
+          // old proof waited for an OwnerOnlyNotice link that the page no
+          // longer renders; assert the actual read-only boundary instead.
+          await page.getByText("Read-only catalog", { exact: true }).waitFor();
+        }
         else if (state === "error") await page.getByRole("alert").waitFor();
         else await page.waitForFunction(() => !document.querySelector("[aria-busy=true]"));
         const summary = page.getByRole("list", { name: "Registry summary" });
@@ -142,7 +147,13 @@ try {
           const text = await page.locator("main").innerText();
           check(!/\b00\b|\bUnattested\b|No approved Studio assets yet|No .* records are available/.test(text), `${name}/${state}: unloaded data presented as an empty inventory or unverified runtime`);
         }
-        if (["viewer","checking","unavailable"].includes(state)) check(requests.length === 0, `${name}/${state}: private inventory request sent without owner access`);
+        if (["viewer","checking","unavailable"].includes(state)) {
+          // Viewer mode still loads the public catalog. The server decides the
+          // projection; the browser must not attempt a private inventory or
+          // any mutating request before elevation.
+          check(requests.length > 0 && requests.every(req => req.method === "GET" && req.url === "/api/studio-assets"),
+            `${name}/${state}: viewer should request only the read-only catalog`);
+        }
         if (state === "ready") {
           const summaryText = await summary.count() ? await summary.innerText() : "";
           check(/Ready to reuse\s*3/.test(summaryText), `${name}: ready count must exclude revoked assets`);
