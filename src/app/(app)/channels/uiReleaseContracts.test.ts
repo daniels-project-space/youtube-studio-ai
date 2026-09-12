@@ -241,6 +241,16 @@ assert.match(channels, /channel-live-state/);
 assert.match(channels, /title=\{operatingState\.detail\}/);
 assert.match(channels, /channel-card-readiness/);
 assert.match(channels, /<progress[\s\S]*setup readiness/);
+assert.match(
+  globalCss,
+  /@container \(max-width: 205px\)[\s\S]*?\.channel-card-actions \{ grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\); gap: \.28rem; \}/,
+  "198px fleet tiles must keep Controls and Open on one compact action row rather than adding a second tall row",
+);
+assert.match(
+  globalCss,
+  /\.channel-card-manage \.channel-card-readiness \{ min-width: 36px; gap: \.18rem; \}/,
+  "the compact action row must retain the live setup-readiness signal",
+);
 assert.match(channels, /const identityArtwork = c\.identity\?\.bannerKey/);
 assert.match(channels, /const previewArtwork = identityArtwork \?\? latestArtwork \?\? planArtwork/);
 assert.match(channels, /const previewLabel = identityArtwork\s*\? null/);

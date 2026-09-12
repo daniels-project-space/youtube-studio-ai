@@ -2199,6 +2199,16 @@
   .channel-card-title { grid-column: 3; grid-row: 1; align-self: end; }
   .channel-live-state { grid-column: 3; grid-row: 2; width: 100%; min-width: 0; padding: .22rem .3rem; }
   .channel-live-state strong { font-size: .58rem; }
+  /* Keep the two real card actions side-by-side. At 198px the old auto-fit
+   * minimum forced Controls and Open into two full rows, making fleet cards
+   * taller than their operating information. Readiness stays visible as the
+   * compact bar rather than becoming another label or a hidden disclosure. */
+  .channel-card-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .28rem; }
+  .channel-card-actions a,
+  .channel-card-manage { min-height: 36px; padding: .28rem .3rem; font-size: .66rem; }
+  .channel-card-manage { gap: .24rem; justify-content: flex-start; }
+  .channel-card-manage .channel-card-readiness { min-width: 36px; gap: .18rem; }
+  .channel-card-readiness small { font-size: .48rem; }
 }
 
 .channel-card-operating-row {
