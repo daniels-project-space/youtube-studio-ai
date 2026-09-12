@@ -37,6 +37,7 @@ import { resolveVoiceDoctrine } from "@/engine/golden";
 import { createPublicEvidenceCache, normalizeEvidenceKey } from "@/lib/publicEvidenceCache";
 import { titleDecisionFingerprint } from "@/lib/titleDecisionFingerprint";
 import { unmatchedTitleNumbers } from "@/lib/numericClaims";
+import { normalizeTitleForPublication } from "@/lib/titlePublicationNormalization";
 
 export function hasMetacraft(): boolean {
   return hasAnthropicKey();
@@ -1004,7 +1005,14 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       // being written first.
       ...warmStartCandidates(a.warmStartTitle, a.betTitle),
       ...(gen.candidates ?? []).map((c) => ({ frame: String(c.frame ?? "unknown"), title: String(c.title ?? "").trim() })),
-    ].filter((c) => c.title);
+    ]
+      .map((candidate) => ({
+        ...candidate,
+        // Normalize before the candidate enters lint/ranking. A later
+        // publication-only mutation would make the saved decision stale.
+        title: normalizeTitleForPublication(candidate.title, a.channelName),
+      }))
+      .filter((c) => c.title);
     const seenTitles = new Set<string>();
     const exactUnique = rawCandidates.filter((c) => {
       const key = c.title.toLowerCase().replace(/\s+/g, " ").trim();

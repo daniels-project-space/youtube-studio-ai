@@ -28,14 +28,22 @@ let packageFailureAttempts = 0;
 let judgeAttempts = 0;
 let pinnedCalls = 0;
 let installed = false;
+let generatedTitle = CRAFTED;
 
-function install(preferred: string, malformedAttempts = 0, packageFailures = 0, judgeFailures = 0): void {
+function install(
+  preferred: string,
+  malformedAttempts = 0,
+  packageFailures = 0,
+  judgeFailures = 0,
+  generated = CRAFTED,
+): void {
   preferredTitle = preferred;
   malformedJudgeAttempts = malformedAttempts;
   judgeFailureAttempts = judgeFailures;
   packageFailureAttempts = packageFailures;
   judgeAttempts = 0;
   pinnedCalls = 0;
+  generatedTitle = generated;
   if (installed) return;
   installed = true;
   const load = (Module as unknown as { _load: (...a: unknown[]) => unknown })._load;
@@ -74,7 +82,7 @@ function install(preferred: string, malformedAttempts = 0, packageFailures = 0, 
           const winner = rankings.reduce((a, b) => (b.clickScore > a.clickScore ? b : a), rankings[0]);
           return { rankings, winner: winner.idx, runnerUp: rankings.find((r) => r.idx !== winner.idx)?.idx ?? 0 };
         }
-        return { candidates: [{ frame: "direct_verdict", title: CRAFTED }] };
+        return { candidates: [{ frame: "direct_verdict", title: generatedTitle }] };
       },
     };
   } as never;
@@ -106,6 +114,22 @@ async function main(): Promise<void> {
   const replaced = await craft(WEAK_PLANNED);
   assert.equal(replaced.title, CRAFTED, "a weaker planned title must lose to the judged winner");
   assert.notEqual(replaced.title, WEAK_PLANNED, "the old `plannedTitle || title` behaviour must be gone");
+
+  // Title cleanup belongs before lint/ranking. Otherwise the decision receipt
+  // and runner-up would describe the branded candidate while publication used
+  // a silently changed string.
+  install(CRAFTED, 0, 0, 0, `Inked Histories: ${CRAFTED}`);
+  const normalizedBeforeJudge = await craft("");
+  assert.equal(normalizedBeforeJudge.title, CRAFTED);
+  assert.equal(normalizedBeforeJudge.titleDecision.title, CRAFTED);
+  assert.equal(
+    readTitleReview({
+      title: normalizedBeforeJudge.title,
+      titleDecision: normalizedBeforeJudge.titleDecision,
+    })?.state,
+    "recorded",
+    "the browser-visible receipt must describe the exact published title",
+  );
 
   // No plan at all is the unscheduled path and must be unaffected.
   install(CRAFTED);

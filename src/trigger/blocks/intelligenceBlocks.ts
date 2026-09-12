@@ -68,6 +68,7 @@ import {
   resolveTitleProfile,
   type TitleProfileId,
 } from "@/lib/metacraft";
+import { normalizeTitleForPublication } from "@/lib/titlePublicationNormalization";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 import { hasVisionKey } from "@/lib/vision";
@@ -280,16 +281,7 @@ export function finishMetadata(
   },
 ): { title: string; description: string; tags: string[] } {
   let { title, description, tags } = o;
-  if (o.channelName && o.channelName !== "this channel") {
-    const esc = o.channelName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    title = title
-      .replace(new RegExp(`\\s*[|\\-–—:•]\\s*${esc}\\s*$`, "i"), "")
-      .replace(new RegExp(`^\\s*${esc}\\s*[|\\-–—:•]\\s*`, "i"), "")
-      .replace(new RegExp(`\\b${esc}\\b`, "gi"), "")
-      .replace(/\s{2,}/g, " ")
-      .replace(/\s*[|\-–—:•]\s*$/, "")
-      .trim();
-  }
+  title = normalizeTitleForPublication(title, o.channelName);
   if (o.grounding?.trim()) {
     const normalizedLint = lintTitle(title, {
       grounding: o.grounding,
