@@ -974,7 +974,12 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
         <Row label="Budget / run (USD)" hint="Cost cap per render; over-budget is flagged">
           <div style={{ display: "flex", gap: "0.5rem" }}>
             <input type="number" min="0" step="0.5" value={budget} onChange={(e) => setBudget(e.target.value)} style={ctlInput} />
-            <button onClick={saveBudget} disabled={busy || budget === String(channel.budget)} style={ctlBtn}>Save</button>
+            <button
+              onClick={saveBudget}
+              disabled={busy || budget === String(channel.budget)}
+              title={busy ? "Saving the render budget" : budget === String(channel.budget) ? "No budget change to save" : "Save the render budget"}
+              style={ctlBtn}
+            >Save</button>
           </div>
         </Row>
         <Row label="Generation cadence" hint="Tenant-local day and time for eligible automatic runs">
@@ -1034,7 +1039,12 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
           <div style={{ display: "flex", gap: "1rem", alignItems: "center", fontSize: "0.78rem" }}>
             <label className="channel-check-control"><input type="checkbox" checked={madeForKids} onChange={(e) => setMadeForKids(e.target.checked)} /> Made for kids</label>
             <label className="channel-check-control"><input type="checkbox" checked={scheduleEnabled} onChange={(e) => setScheduleEnabled(e.target.checked)} /> Scheduler enabled</label>
-            <button onClick={saveSchedule} disabled={busy} style={ctlBtn}>Save scheduler</button>
+            <button
+              onClick={saveSchedule}
+              disabled={busy}
+              title={busy ? "Saving scheduler settings" : "Save scheduler settings"}
+              style={ctlBtn}
+            >Save scheduler</button>
           </div>
         </Row>
         {message && (
