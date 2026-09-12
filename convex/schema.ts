@@ -933,6 +933,14 @@ export default defineSchema({
     factualReviewResumeQueueDeadlineAt: v.optional(v.number()),
     factualReviewResumeTriggerRunId: v.optional(v.string()),
     factualReviewResumeLastError: v.optional(v.string()),
+    // Mirrors the immutable Music3 native-WAV audition receipt. This is kept
+    // separate from factual review: music approval must not carry source-story
+    // authority or overwrite a sealed music-stage reuse receipt.
+    musicAuditionCheckpointId: v.optional(v.id("musicAuditionCheckpoints")),
+    musicAuditionCheckpointFingerprint: v.optional(v.string()),
+    musicAuditionState: v.optional(v.union(
+      v.literal("awaiting"), v.literal("approved"), v.literal("rejected"), v.literal("blocked"),
+    )),
     // Owner-selected, immutable source-data-story packs use a dedicated
     // initial-dispatch outbox. This is intentionally distinct from ordinary
     // cadence: no scheduled plan may carry factual claims or replace this
@@ -2919,6 +2927,23 @@ export default defineSchema({
     .index("by_run", ["runId"])
     .index("by_owner_decision", ["ownerId", "decision"])
     .index("by_owner_created", ["ownerId", "createdAt"]),
+
+  // Immutable owner-audition identity for a MiniMax Music3 native WAV. The
+  // human decision/continuation is added separately; this row only records
+  // the exact audio whose later quality receipt may be admitted.
+  musicAuditionCheckpoints: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    checkpoint: v.any(),
+    checkpointFingerprint: v.string(),
+    decision: v.union(v.literal("awaiting"), v.literal("approved"), v.literal("rejected"), v.literal("blocked")),
+    createdAt: v.number(),
+    blockedAt: v.optional(v.number()),
+    blockedReason: v.optional(v.string()),
+  })
+    .index("by_run", ["runId"])
+    .index("by_owner_decision", ["ownerId", "decision"]),
 
   // A reusable, immutable owner-scoped factual-evidence handoff. This is
   // deliberately not a pipeline input by itself: it persists a fresh

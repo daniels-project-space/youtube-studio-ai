@@ -184,6 +184,7 @@ import {
 import { resolveOwnerReviewedLtxRuntime } from "@/lib/reviewedLtxRuntimeStateRuntime";
 import type { ThirdPartyStockEvidenceReference } from "@/lib/thirdPartyStockEvidence";
 import { payloadSeedInputs } from "@/lib/payloadSeedInputs";
+import { createMusicAuditionCheckpoint } from "@/engine/musicAuditionCheckpoint";
 
 const MAX_SELF_HEALS = 2;
 const FACTUAL_REVIEW_FROZEN_BLOCK_IDS = new Set([
@@ -204,6 +205,10 @@ const factualReviewCheckpointsApi = (api as unknown as {
     readonly blockResume: never;
   };
 }).factualReviewCheckpoints;
+
+const musicAuditionCheckpointsApi = (api as unknown as {
+  readonly musicAuditionCheckpoints: { readonly createAwaiting: never };
+}).musicAuditionCheckpoints;
 
 // This read-only bridge intentionally does not add a writer, endpoint, or
 // automatic benchmark dispatch. The worker only reloads a current immutable
@@ -1168,6 +1173,7 @@ export const runPipelineTask = task({
     );
     let scheduledPlan: ScheduledPlanRunPayload | undefined;
     let requiresFactualReviewCheckpoint = false;
+    let requiresMusicAuditionCheckpoint = false;
     let observedCostTotal = Number(durableRun.costTotal ?? 0);
     let narrativeSeriesAdmission: NarrativeSeriesRunAdmission | undefined;
     let frozenModuleConfig: Record<string, Record<string, unknown>> | undefined;
@@ -1991,6 +1997,12 @@ export const runPipelineTask = task({
       assertPipelineInvocationCompilation(invocation, compilation);
       entries = invocation.entries;
       seedStore = { ...invocation.seedStore };
+      // MiniMax's per-track receipt is deliberately owner-auditioned. Its
+      // provider is frozen in the invocation, so this boundary cannot be
+      // enabled later by mutable channel configuration.
+      requiresMusicAuditionCheckpoint = entries.some((entry) =>
+        entry.block === "music" && entry.params?.provider === "minimax_music3",
+      );
       const paramsByBlock = snapshotParamsByBlock(entries);
       log(
         `Production compile ${compilation.policyId}@${compilation.policyVersion} ${compilation.fingerprint}: ` +
@@ -2069,9 +2081,11 @@ export const runPipelineTask = task({
         // New source-data materialization only: persist the deterministic
         // Story Spine/Episode Graph handoff and deliberately return to the
         // owner before any stock, generated visual, or render block starts.
-        ...(requiresFactualReviewCheckpoint && !payload.factualReviewResume
+        ...(!payload.factualReviewResume && requiresFactualReviewCheckpoint
           ? { stopAfterBlockId: "episode_graph" }
-          : {}),
+          : requiresMusicAuditionCheckpoint
+            ? { stopAfterBlockId: "music" }
+            : {}),
         defaultRetries: invocation.defaultRetries,
         rehydrate: (
           block: string,
@@ -2202,15 +2216,33 @@ export const runPipelineTask = task({
       observedCostTotal = result.costTotal;
 
       if (result.status === "awaiting_review") {
-        if (
-          !requiresFactualReviewCheckpoint ||
-          payload.factualReviewResume !== undefined ||
-          result.stoppedAfterBlockId !== "episode_graph"
-        ) {
+        const isFactualBoundary = requiresFactualReviewCheckpoint &&
+          payload.factualReviewResume === undefined && result.stoppedAfterBlockId === "episode_graph";
+        const isMusicBoundary = requiresMusicAuditionCheckpoint && result.stoppedAfterBlockId === "music";
+        if (!isFactualBoundary && !isMusicBoundary) {
           // Do not reinterpret an unexpected runner boundary as a success or
           // feed it into self-heal. It has not reached a visual provider, and
           // must be investigated rather than silently admitted.
           throw new Error("unexpected factual-review runner boundary");
+        }
+        if (isMusicBoundary) {
+          const programKey = typeof result.store.channelMusicProgramKey === "string" ? result.store.channelMusicProgramKey : "";
+          const runtimeKey = typeof result.store.musicRuntimeReceiptKey === "string" ? result.store.musicRuntimeReceiptKey : "";
+          const nativeWavKey = typeof result.store.musicNativeWavKey === "string" ? result.store.musicNativeWavKey : "";
+          if (!programKey || !runtimeKey || !nativeWavKey) throw new Error("MiniMax music boundary is missing durable program/runtime/native-WAV outputs");
+          const [programBytes, runtimeBytes] = await Promise.all([getObjectBytes(programKey), getObjectBytes(runtimeKey)]);
+          const checkpoint = createMusicAuditionCheckpoint({
+            ownerId, channelId: payload.channelId, runId: payload.runId, invocationSha256,
+            channelMusicProgramKey: programKey, musicRuntimeReceiptKey: runtimeKey, musicNativeWavKey: nativeWavKey,
+            program: JSON.parse(Buffer.from(programBytes).toString("utf8")),
+            runtimeReceipt: JSON.parse(Buffer.from(runtimeBytes).toString("utf8")),
+          });
+          await logSink.flush();
+          const created = await convex.mutation(musicAuditionCheckpointsApi.createAwaiting, {
+            ownerId, channelId: payload.channelId as Id<"channels">, runId: payload.runId as Id<"runs">,
+            ...executionLease, invocationSha256, checkpoint, now: Date.now(),
+          } as never) as unknown as { kind: "awaiting"; checkpointId: Id<"musicAuditionCheckpoints">; checkpointFingerprint: string };
+          return { ok: true, awaitingMusicAudition: true, runId: payload.runId, ...created, costTotal: result.costTotal, invocationSha256 };
         }
         log("factual review checkpoint: Story Spine and Episode Graph retained; awaiting owner decision before visual work");
         // Stage/artifact writes are fenced by the current execution lease, so
