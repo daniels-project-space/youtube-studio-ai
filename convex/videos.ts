@@ -217,6 +217,77 @@ export const getRunMediaPresentation = query({
   },
 });
 
+/**
+ * Small title-only history projection for the metadata module.
+ *
+ * `listVideos` is intentionally rich: it resolves masters, thumbnails and
+ * playback state for the Library. Title generation needs none of that. Keeping
+ * this read owner- and channel-scoped avoids paying those joins merely to stop
+ * a new episode from reusing an already released or queued title.
+ */
+export const listRecentChannelTitles = query({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    limit: v.optional(v.number()),
+    excludePlanItemId: v.optional(v.id("contentPlan")),
+  },
+  handler: async (ctx, args) => {
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel || channel.ownerId !== args.ownerId) return [];
+    const limit = Math.min(32, Math.max(1, Math.floor(args.limit ?? 16)));
+    const seen = new Set<string>();
+    const titles: string[] = [];
+    const add = (value: unknown) => {
+      if (typeof value !== "string") return;
+      const title = value.trim();
+      if (!title) return;
+      const key = title.normalize("NFKC").toLowerCase().replace(/\s+/g, " ");
+      if (seen.has(key)) return;
+      seen.add(key);
+      titles.push(title);
+    };
+
+    // Upcoming rows are already authored titles, so include them before a
+    // model proposes another episode. Used rows are represented by their run
+    // receipt below and must not crowd out a current queue item.
+    const [readyPlans, generatingPlans] = await Promise.all([
+      ctx.db
+        .query("contentPlan")
+        .withIndex("by_channel_status_order", (q) => q.eq("channelId", args.channelId).eq("status", "ready"))
+        .order("desc")
+        .take(limit),
+      ctx.db
+        .query("contentPlan")
+        .withIndex("by_channel_status_order", (q) => q.eq("channelId", args.channelId).eq("status", "generating"))
+        .order("desc")
+        .take(limit),
+    ]);
+    for (const item of [...readyPlans, ...generatingPlans].sort((left, right) => right.order - left.order)) {
+      if (item._id === args.excludePlanItemId) continue;
+      add(item.title);
+    }
+
+    // Scan a bounded multiple because historic/failed runs often have no
+    // accepted metadata title. This remains title-only; no asset, master or
+    // thumbnail joins are permitted on this hot path.
+    const maxRunScan = limit * 4;
+    let scanned = 0;
+    const runs = ctx.db
+      .query("runs")
+      .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
+      .order("desc");
+    for await (const run of runs) {
+      if (titles.length >= limit || scanned >= maxRunScan) break;
+      scanned++;
+      if (run.ownerId !== args.ownerId || run.status === "failed") continue;
+      const metadata = await metadataOutputs(ctx, run._id);
+      add(metadata.title);
+    }
+    return titles.slice(0, limit);
+  },
+});
+
 export const listVideos = query({
   args: {
     ownerId: v.string(),

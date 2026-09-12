@@ -60,8 +60,8 @@ async function main() {
   let output: Record<string, unknown> | undefined;
   let error: unknown;
   try { output = await run({ narrationText: full }); } catch (caught) { error = caught; }
-  assert.ok(prompts[0]?.includes(JSON.stringify(full)), 'Generator lost exact full narration at the production caller');
   assert.ifError(error);
+  assert.ok(prompts[0]?.includes(JSON.stringify(full)), 'Generator lost exact full narration at the production caller');
   assert.equal(output?.title, candidate, 'Late-source claim must survive the actual lint and finishing path');
   const contexts = prompts.map(contextFrom);
   assert.equal(contexts.length, 4);

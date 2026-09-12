@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { getRunMediaPresentation, getVideoDetail, listVideos } from "../../../convex/videos";
+import { getRunMediaPresentation, getVideoDetail, listRecentChannelTitles, listVideos } from "../../../convex/videos";
 import { listForRun } from "../../../convex/assets";
 import {
   partitionRunThumbnailAssets,
@@ -52,6 +52,11 @@ function fixture(music = false) {
     ],
     runStages: [{ _id: "metadata", _creationTime: 1, runId: sourceRunId, block: "metadata", outputs: { title: "Taxes decoded" } }],
     runArtifacts: [],
+    contentPlan: [
+      { _id: "queued-self", _creationTime: 4, ownerId, channelId, order: 4, title: "The Current Scheduled Episode", status: "ready" },
+      { _id: "queued-next", _creationTime: 3, ownerId, channelId, order: 3, title: "The Next Mountain Episode", status: "ready" },
+      { _id: "used-plan", _creationTime: 2, ownerId, channelId, order: 2, title: "Taxes decoded", status: "used" },
+    ],
   };
   const db = {
     async get(id: string) { return Object.values(rows).flat().find((r) => r._id === id) ?? null; },
@@ -75,6 +80,7 @@ function fixture(music = false) {
         },
         order(value: string) { direction = value; return query; },
         async collect() { return read(); },
+        async take(limit: number) { return read().slice(0, limit); },
         async first() { return read(true)[0] ?? null; },
         async *[Symbol.asyncIterator]() { yield* read(); },
       };
@@ -88,8 +94,14 @@ function fixture(music = false) {
   const media = () => invoke<RunMediaPresentation>(getRunMediaPresentation, { runId: sourceRunId });
   const oldAssets = () => invoke<RunMediaAsset[]>(listForRun, { runId: sourceRunId });
   const library = () => invoke<Array<RunCurrentThumbnail & { _id: string }>>(listVideos, { ownerId, limit: 10 });
+  const titleHistory = (excludePlanItemId?: string) => invoke<string[]>(listRecentChannelTitles, {
+    ownerId,
+    channelId,
+    limit: 16,
+    ...(excludePlanItemId ? { excludePlanItemId } : {}),
+  });
   const originalAssets = () => rows.assets.filter((a) => a.runId === sourceRunId) as RunMediaAsset[];
-  return { rows, reads, detail, media, oldAssets, library, originalAssets };
+  return { rows, reads, detail, media, oldAssets, library, titleHistory, originalAssets };
 }
 
 function thumbnailFields(detail: RunCurrentThumbnail) {
@@ -115,6 +127,25 @@ test("viewer-facing detail and Library handlers choose the same current candidat
   assert.deepEqual(projection.media.map((a) => a._id), ["video"]);
   assert.deepEqual(projection.historicalThumbnails.map((a) => a.r2Key), [oldKey]);
   assert.deepEqual(f.rows.assets, original, "presentation must not relabel or mutate retained artifacts");
+});
+
+test("title history is a bounded channel-only projection and excludes the active scheduled item", async () => {
+  const f = fixture();
+  assert.deepEqual(
+    await f.titleHistory("queued-self"),
+    ["The Next Mountain Episode", "Taxes decoded"],
+  );
+  assert.ok(
+    f.reads.some((read) => read.table === "contentPlan" && read.index === "by_channel_status_order"),
+    "history uses the channel/status/order index for queued titles",
+  );
+  assert.ok(
+    f.reads.every((read) => read.table !== "assets" && read.table !== "runArtifacts"),
+    "title novelty never loads video assets or release evidence",
+  );
+  f.rows.channels[0]!.ownerId = "another-owner";
+  await assert.rejects(() => f.titleHistory(), /Studio resource access denied/,
+    "cross-owner title history is rejected before the handler can disclose it");
 });
 
 test("pending hydration cannot expose the original image as the current preview", () => {
