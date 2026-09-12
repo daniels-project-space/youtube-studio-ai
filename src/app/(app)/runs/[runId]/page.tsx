@@ -231,6 +231,14 @@ export default function RunDetailPage({
 
       <ArtifactRetentionStrip retention={artifactRetention} legacy={planSource === "legacy"} />
 
+      <RunPackageShelf
+        runId={run._id}
+        runStatus={run.status}
+        stages={stages}
+        assets={assets}
+        currentThumbnail={currentThumbnail}
+      />
+
       {(run.status === "awaiting_factual_review" || run.status === "factual_review_blocked") && (
         <FactualReviewPanel runId={String(run._id)} />
       )}
@@ -370,5 +378,125 @@ function Field({
         {value}
       </div>
     </div>
+  );
+}
+
+type PackageStage = {
+  block: string;
+  status: string;
+  outputs?: unknown;
+};
+
+type PackageAsset = {
+  kind: string;
+};
+
+type PackageState = "ready" | "working" | "blocked" | "waiting";
+
+/**
+ * A compact, lazy package index for the schedule → run handoff. It makes the
+ * promised episode deliverables visible before an operator opens the much
+ * heavier media and stage workbenches, while keeping the full script/SEO read
+ * on demand. Every state is derived from persisted stage receipts or assets.
+ */
+function RunPackageShelf({
+  runId,
+  runStatus,
+  stages,
+  assets,
+  currentThumbnail,
+}: {
+  runId: Id<"runs">;
+  runStatus: string;
+  stages: readonly PackageStage[] | undefined;
+  assets: readonly PackageAsset[] | undefined;
+  currentThumbnail: { thumbnailKey?: string | null; videoKey?: string | null } | null | undefined;
+}) {
+  const [open, setOpen] = useState(false);
+  const detail = useQuery(api.videos.getVideoDetail, open ? { runId } : "skip") as {
+    title?: string;
+    description?: string | null;
+    tags?: string[];
+    script?: string | null;
+    titleAlternate?: string | null;
+  } | null | undefined;
+
+  // Deliberately use exact block ids here. A QA receipt such as `qa_visual`
+  // must not masquerade as a visual producer, and a generic substring match
+  // would make unavailable package parts look ready on legacy runs.
+  const stage = (...blocks: string[]) => stages?.find((item) => blocks.includes(item.block));
+  const state = (candidate: PackageStage | undefined, fallback = false): PackageState => {
+    if (candidate?.status === "failed") return "blocked";
+    if (fallback) return "ready";
+    if (!candidate) return "waiting";
+    if (["ok", "skipped", "complete"].includes(candidate.status)) return "ready";
+    return "working";
+  };
+  const label = (value: PackageState) =>
+    value === "ready" ? "Ready" : value === "working" ? "Working" : value === "blocked" ? "Blocked" : "Waiting";
+
+  const scriptStage = stage("script_gen", "whiteboard_scribe", "motion_comic");
+  const shotStage = stage("scene_planner", "shot_list", "storyboard");
+  const visualStage = stage("keyframes", "loop_clips", "stock_footage", "visual_gen", "image_gen");
+  const seoStage = stage("metadata", "quiz_metadata");
+  const narrationStage = stage("narration_tts", "tts", "voice");
+  const subtitleStage = stage("subtitles", "captions", "caption");
+  const exportStage = stage("assemble", "timeline_assemble", "upload_draft");
+  const hasVideo = Boolean(assets?.some((asset) => asset.kind === "video") || currentThumbnail?.videoKey);
+  const hasThumbnail = Boolean(assets?.some((asset) => asset.kind === "thumbnail") || currentThumbnail?.thumbnailKey);
+
+  const items: Array<{ key: string; title: string; detail: string; state: PackageState }> = [
+    { key: "script", title: "Script", detail: scriptStage ? blockLabel(scriptStage.block) : "Not attached", state: state(scriptStage) },
+    { key: "shots", title: "Shot list", detail: shotStage ? blockLabel(shotStage.block) : "No shot receipt", state: state(shotStage) },
+    { key: "visuals", title: "Visuals", detail: visualStage ? blockLabel(visualStage.block) : "No visual receipt", state: state(visualStage) },
+    { key: "seo", title: "SEO", detail: seoStage ? "Title + metadata" : "Metadata pending", state: state(seoStage) },
+    { key: "narration", title: "Narration", detail: narrationStage ? blockLabel(narrationStage.block) : "Not configured", state: state(narrationStage) },
+    { key: "subtitles", title: "Subtitles", detail: subtitleStage ? blockLabel(subtitleStage.block) : "Not configured", state: state(subtitleStage) },
+    { key: "thumbnail", title: "Thumbnail", detail: hasThumbnail ? "Current package" : "Not saved", state: hasThumbnail ? "ready" : "waiting" },
+    { key: "export", title: "Export", detail: hasVideo ? "Master media" : exportStage ? blockLabel(exportStage.block) : runStatus === "failed" ? "No master" : "Awaiting render", state: state(exportStage, hasVideo) },
+  ];
+
+  return (
+    <section className={styles.packageShelf} aria-labelledby="episode-package-title">
+      <button
+        type="button"
+        className={styles.packageHeader}
+        aria-expanded={open}
+        aria-controls="episode-package-body"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className={styles.packageHeading}>
+          <span className={styles.packageEyebrow}>Episode package</span>
+          <strong id="episode-package-title">Plan outputs at a glance</strong>
+          <small>Open the exact script and SEO only when needed.</small>
+        </span>
+        <span className={styles.packageToggle}>{open ? "Close" : "Inspect"}</span>
+      </button>
+      <div className={styles.packageGrid} aria-label="Episode output availability">
+        {items.map((item) => (
+          <div className={styles.packageItem} data-state={item.state} key={item.key}>
+            <span className={styles.packageDot} aria-hidden="true" />
+            <span className={styles.packageItemCopy}><strong>{item.title}</strong><small>{item.detail}</small></span>
+            <em>{label(item.state)}</em>
+          </div>
+        ))}
+      </div>
+      {open && (
+        <div className={styles.packageBody} id="episode-package-body">
+          {detail === undefined ? (
+            <span className={styles.packageLoading} role="status">Loading saved package…</span>
+          ) : detail === null ? (
+            <span className={styles.packageLoading}>No metadata receipt is saved for this run yet.</span>
+          ) : (
+            <div className={styles.packageDetailGrid}>
+              <div><small>Title</small><strong>{detail.title || "Untitled"}</strong>{detail.titleAlternate && <span>Alt: {detail.titleAlternate}</span>}</div>
+              <div><small>SEO</small><span>{detail.tags?.length ? `${detail.tags.length} tags · description saved` : detail.description ? "Description saved" : "No SEO body yet"}</span></div>
+              <div className={styles.packageScript}><small>Script / narration text</small><p>{detail.script || "No narration text saved yet; inspect the stage receipts for the live failure or pending state."}</p></div>
+            </div>
+          )}
+          <a className={styles.packageMediaLink} href="#recorded-work">Open retained visuals and exports ↓</a>
+        </div>
+      )}
+    </section>
   );
 }

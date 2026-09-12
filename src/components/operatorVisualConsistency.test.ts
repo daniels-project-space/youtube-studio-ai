@@ -148,7 +148,13 @@ assert.match(runDetail, /data-run-status=\{run\.status\}/);
 assert.match(runDetail, /publishedOpen && <div className=\{styles\.publishedFrame\}/);
 assert.match(runDetail, /onToggle=\{\(event\) => setPublishedOpen\(event\.currentTarget\.open\)\}/);
 assert.match(runDetail, /ReleaseEvidenceBadge status=\{run\.releaseEvidenceStatus\} compact/);
+assert.match(runDetail, /RunPackageShelf/);
+assert.match(runDetail, /api\.videos\.getVideoDetail/);
+assert.match(runDetail, /Episode package/);
+assert.match(runDetail, /Open retained visuals and exports/);
 assert.match(runDetailCss, /grid-template-columns: repeat\(6,\s*minmax\(0,\s*1fr\)\)/);
+assert.match(runDetailCss, /\.packageShelf/);
+assert.match(runDetailCss, /\.packageItem\[data-state="ready"\]/);
 assert.match(runDetailCss, /@media \(max-width: 540px\)/);
 
 // The terminal is a reviewable persisted record, not a decorative code box:
