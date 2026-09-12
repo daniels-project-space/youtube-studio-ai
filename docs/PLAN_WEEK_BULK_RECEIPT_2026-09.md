@@ -11,6 +11,9 @@ receipt in `planWeekBulkOrders`.
   after every parallel dispatch returns. A retry with the same fingerprint must
   replay the same parent and child identities rather than minting a second
   order.
+- `GET /api/plan-week/bulk?fingerprint=…` returns the owner-scoped receipt and
+  its child handoff statuses with `private, no-store` caching, so schedule or
+  overview surfaces can poll progress without re-enqueueing anything.
 - The receipt is an admission/dispatch handoff, not a claim that provider work
   completed. Per-channel `plan-week-ahead` still owns its own budget, provider,
   artifact, and recovery gates. A later slice must add child terminal updates,
