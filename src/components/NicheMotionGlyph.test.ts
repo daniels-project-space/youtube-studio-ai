@@ -20,6 +20,8 @@ assert.equal(channelMotionMotifFor({ channelName: "Gratitude Springs" }), "lotus
 assert.equal(channelMotionMotifFor({ channelName: "Seaside Ghibli Lofi" }), "seaside");
 assert.equal(channelMotionMotifFor({ channelName: "Neon Rain LoFi" }), "lofi");
 assert.match(glyph, /channelMotionMotifFor/);
+assert.match(glyph, /explicitMotif/);
+assert.match(glyph, /motif\?: ChannelMotionMotif/);
 assert.match(channelCreator, /<NicheMotionGlyph niche=\{n\.key\}/);
 assert.match(channelArt, /niche \? \(/);
 assert.match(channelArt, /<NicheMotionGlyph niche=\{niche\} channelName=\{name\}/);

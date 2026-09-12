@@ -1,5 +1,5 @@
 import styles from "./NicheMotionGlyph.module.css";
-import { channelMotionMotifFor } from "@/lib/channelMotion";
+import { channelMotionMotifFor, type ChannelMotionMotif } from "@/lib/channelMotion";
 
 /** The Studio's reusable, topic-specific symbolic language. */
 export { channelMotionMotifFor, type ChannelMotionMotif } from "@/lib/channelMotion";
@@ -7,13 +7,16 @@ export { channelMotionMotifFor, type ChannelMotionMotif } from "@/lib/channelMot
 export function NicheMotionGlyph({
   niche,
   channelName,
+  motif: explicitMotif,
   className,
 }: {
   niche?: string | null;
   channelName?: string | null;
+  /** Optional explicit motif for non-channel surfaces such as module cards. */
+  motif?: ChannelMotionMotif;
   className?: string;
 }) {
-  const motif = channelMotionMotifFor({ niche, channelName });
+  const motif = explicitMotif ?? channelMotionMotifFor({ niche, channelName });
   return (
     <svg
       viewBox="0 0 32 32"

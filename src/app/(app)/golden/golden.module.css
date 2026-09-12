@@ -268,6 +268,7 @@
 .moduleSummary:hover { background: rgba(227,168,54,0.028); }
 .moduleVisual { position: relative; display: grid; grid-row: 1 / 3; width: 82px; height: 108px; overflow: hidden; place-items: center; border: 1px solid color-mix(in srgb,var(--module-accent) 34%,#302d34); border-radius: 11px; color: var(--module-accent); background: radial-gradient(circle at 50% 34%,color-mix(in srgb,var(--module-accent) 22%,transparent),rgba(9,9,12,.94) 68%); box-shadow: inset 0 0 24px rgba(0,0,0,.22); font: 560 1.55rem/1 var(--font-display,Georgia,serif); }
 .moduleVisual img { width: 100%; height: 100%; object-fit: cover; }
+.moduleGlyph { width: 58px; height: 58px; }
 .moduleVisual > span { transition: color 180ms ease, transform 180ms ease; }
 .moduleCard:hover .moduleVisual > span { color: #fff1c4; transform: scale(1.08); }
 .moduleVisual small { position: absolute; right: 4px; bottom: 4px; padding: 3px 4px; border-radius: 4px; color: #f0b38f; background: rgba(16,8,5,.88); font: 700 0.42rem/1 var(--font-mono,ui-monospace,monospace); letter-spacing: .05em; text-transform: uppercase; }

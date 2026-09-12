@@ -19,6 +19,7 @@ import {
   type GoldenProofMediaSuccessorRequirement,
 } from "@/engine/goldenProofMedia";
 import { ProductionRouteQualificationCard } from "@/components/ProductionRouteQualificationCard";
+import { NicheMotionGlyph, type ChannelMotionMotif } from "@/components/NicheMotionGlyph";
 import { GoldenImages } from "./GoldenImages";
 import { moduleSalesPitch } from "./moduleSalesPitches";
 import styles from "./golden.module.css";
@@ -266,20 +267,32 @@ function moduleEvidenceLabel(moduleKey: string): string {
   return "Contract & gates";
 }
 
-function moduleGlyph(moduleKey: string): string {
-  if (/research|evidence|source/.test(moduleKey)) return "⌕";
-  if (/positioning|bible|context/.test(moduleKey)) return "◫";
-  if (/seo|metadata|topic/.test(moduleKey)) return "◎";
-  if (/voice|narration|speech|music|lofi/.test(moduleKey)) return "∿";
-  if (/avatar|banner|thumbnail|image|visual/.test(moduleKey)) return "◇";
-  if (/pipeline|graph|sequence|assemble/.test(moduleKey)) return "⌁";
-  if (/probe|readiness|safety|guard|verify|proof|release/.test(moduleKey)) return "✓";
-  if (/script|story|documentary/.test(moduleKey)) return "¶";
-  if (/planner|plan/.test(moduleKey)) return "▦";
-  if (/render|video|scene|motion|comic|whiteboard|short/.test(moduleKey)) return "▶";
-  if (/asset|layer|insert|caption|overlay/.test(moduleKey)) return "▧";
-  if (/ship|upload/.test(moduleKey)) return "↑";
-  return "G";
+const MODULE_MOTIFS: Readonly<Record<string, ChannelMotionMotif>> = {
+  "channel-planner": "compass",
+  "topic-intel": "compass",
+  "show-bible": "book",
+  script: "pen",
+  guard: "health",
+  verify: "health",
+  "editorial-evidence-packet": "casefile",
+  "source-bound-story-spine": "book",
+  metadata: "ledger",
+  narration: "mind",
+  lofi: "lofi",
+  "package-opening-proof": "clapper",
+  assemble: "clapper",
+  "final-master-story-coverage": "casefile",
+  ship: "summit",
+};
+
+function moduleMotionMotif(moduleKey: string): ChannelMotionMotif {
+  if (MODULE_MOTIFS[moduleKey]) return MODULE_MOTIFS[moduleKey];
+  if (/voice|speech/.test(moduleKey)) return "mind";
+  if (/research|evidence|source/.test(moduleKey)) return "casefile";
+  if (/image|visual|thumbnail/.test(moduleKey)) return "lesson";
+  if (/pipeline|graph|sequence|render|video|scene|motion|comic|whiteboard|short/.test(moduleKey)) return "clapper";
+  if (/asset|layer|insert|caption|overlay/.test(moduleKey)) return "lesson";
+  return "lesson";
 }
 
 function catalogStatusRank(status: GoldenModule["status"]): number {
@@ -633,7 +646,7 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
             // eslint-disable-next-line @next/next/no-img-element -- manifest-resolved card cover
             <img src={cover.src} alt="" loading="lazy" />
           ) : (
-            <span aria-hidden="true">{moduleGlyph(m.key)}</span>
+            <NicheMotionGlyph motif={moduleMotionMotif(m.key)} className={styles.moduleGlyph} />
           )}
           {cover?.status === "context" ? <small>Context</small> : null}
         </span>

@@ -28,6 +28,7 @@ const logConsole = read("src/components/LogConsole.tsx");
 const logConsoleCss = read("src/components/LogConsole.module.css");
 const releaseEvidenceBadge = read("src/components/ReleaseEvidenceBadge.tsx");
 const golden = read("src/app/(app)/golden/page.tsx");
+const goldenCss = read("src/app/(app)/golden/golden.module.css");
 
 // A shared header is the visual anchor for the main operator pages. Its action
 // state must be structural, not a page-specific style hack.
@@ -160,6 +161,11 @@ assert.match(runDetailCss, /grid-template-columns: repeat\(6,\s*minmax\(0,\s*1fr
 assert.match(runDetailCss, /\.packageShelf/);
 assert.match(runDetailCss, /\.packageArtifacts/);
 assert.match(runDetailCss, /\.packageShotList/);
+assert.match(golden, /NicheMotionGlyph, type ChannelMotionMotif/);
+assert.match(golden, /MODULE_MOTIFS/);
+assert.match(golden, /moduleMotionMotif/);
+assert.match(golden, /className=\{styles\.moduleGlyph\}/);
+assert.match(goldenCss, /\.moduleGlyph/);
 assert.match(runDetailCss, /\.packageItem\[data-state="ready"\]/);
 assert.match(runDetailCss, /@media \(max-width: 540px\)/);
 
