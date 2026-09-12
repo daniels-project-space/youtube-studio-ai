@@ -15,6 +15,7 @@ process.env.OPENROUTER_API_KEY = "test-key-for-selection-logic";
 import assert from "node:assert/strict";
 import Module from "node:module";
 import { readTitleReview } from "@/lib/titleReviewPresentation";
+import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 
 const GOOD_PLANNED = "Desmond Doss Saved 75 Men Without Touching a Weapon";
 const WEAK_PLANNED = "Understanding The Historical Events At Hacksaw Ridge";
@@ -25,6 +26,7 @@ let preferredTitle = CRAFTED;
 let malformedJudgeAttempts = 0;
 let judgeFailureAttempts = 0;
 let packageFailureAttempts = 0;
+let packageOutcomeUnknown = false;
 let judgeAttempts = 0;
 let pinnedCalls = 0;
 let installed = false;
@@ -36,11 +38,13 @@ function install(
   packageFailures = 0,
   judgeFailures = 0,
   generated = CRAFTED,
+  packageUnknown = false,
 ): void {
   preferredTitle = preferred;
   malformedJudgeAttempts = malformedAttempts;
   judgeFailureAttempts = judgeFailures;
   packageFailureAttempts = packageFailures;
+  packageOutcomeUnknown = packageUnknown;
   judgeAttempts = 0;
   pinnedCalls = 0;
   generatedTitle = generated;
@@ -61,6 +65,9 @@ function install(
           return { comment: "What would you have done?" };
         }
         if (prompt.includes("description + tags")) {
+          if (packageOutcomeUnknown) {
+            throw new OpenRouterGenerationOutcomeUnknownError("package transport ended after dispatch", { status: 503 });
+          }
           if (packageFailureAttempts-- > 0) throw new Error("package temporarily unavailable");
           return { description: "A description long enough to pass.", tagsCsv: "a,b,c,d,e,f" };
         }
@@ -151,6 +158,17 @@ async function main(): Promise<void> {
   assert.equal(packageRecovered.title, CRAFTED);
   assert.equal(packageRecovered.packageFallback, true, "the package degradation must be explicit");
   assert.match(packageRecovered.description, /Hacksaw Ridge/, "fallback description must retain the selected title");
+
+  // Known package failures may use the deterministic fallback, but an
+  // ambiguous post-dispatch provider outcome must remain visible to the
+  // execution ledger. Treating it as a harmless fallback would let a healer
+  // replay potentially billed work without an honest receipt.
+  install(CRAFTED, 0, 0, 0, CRAFTED, true);
+  await assert.rejects(
+    () => craft(""),
+    (error: unknown) => error instanceof OpenRouterGenerationOutcomeUnknownError && error.outcome === "unknown",
+    "ambiguous package work must propagate instead of silently becoming a deterministic package",
+  );
 
   // A provider/transport exception is also not a score. Both bounded attempts
   // must fail closed instead of returning the first lint survivor as judged.

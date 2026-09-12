@@ -1261,6 +1261,13 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
         tags = String(pkg.tagsCsv ?? "").split(",").map((t) => t.trim()).filter(Boolean);
         if (!description || tags.length < 5) throw new Error("winner package came back empty");
       } catch (e) {
+        // A completed-but-unusable package response is safe to replace with the
+        // deterministic package below: we know the provider work is over and
+        // cannot use its output. A transport outcome that is still unknown is
+        // different. Silently substituting here makes a later healer retry
+        // look harmless even though it may buy the same package twice. Preserve
+        // the provider's ambiguity for the execution ledger/recovery policy.
+        if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
         // The title decision is already complete. Do not throw it away and
         // re-enter legacy title selection; retain it with a truthful package
         // fallback that downstream finishing can still clamp and persist.
