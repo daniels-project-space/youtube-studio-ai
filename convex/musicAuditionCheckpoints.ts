@@ -1,6 +1,6 @@
 import { v } from "convex/values";
 
-import { mutation, requireStudioServiceIdentity } from "./studioFunctions";
+import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { MusicAuditionCheckpointSchema } from "../src/engine/musicAuditionCheckpoint";
 import { assertRunExecutionWriteFence } from "../src/lib/runLease";
 
@@ -74,5 +74,42 @@ export const createAwaiting = mutation({
       heartbeatAt: now, error: undefined, ...clearExecutionLeasePatch(),
     });
     return { kind: "awaiting", checkpointId, checkpointFingerprint: checkpoint.checkpointFingerprint, reused: false };
+  },
+});
+
+/** Server-only review projection. It never returns a storage locator directly. */
+export const getReviewForRun = query({
+  args: { ownerId: v.string(), runId: v.id("runs") },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "music audition review read");
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerId !== args.ownerId) throw new Error("music audition run not found");
+    const rows = await ctx.db.query("musicAuditionCheckpoints").withIndex("by_run", q => q.eq("runId", args.runId)).take(2);
+    if (rows.length > 1) throw new Error("music audition run has more than one immutable checkpoint");
+    const row = rows[0];
+    if (!row) return null;
+    const checkpoint = MusicAuditionCheckpointSchema.parse(row.checkpoint);
+    if (
+      row.ownerId !== args.ownerId || row.channelId !== run.channelId ||
+      run.musicAuditionCheckpointId !== row._id ||
+      run.musicAuditionCheckpointFingerprint !== checkpoint.checkpointFingerprint ||
+      checkpoint.ownerId !== args.ownerId || checkpoint.runId !== String(args.runId)
+    ) throw new Error("music audition checkpoint integrity mismatch");
+    return {
+      checkpoint: {
+        id: row._id, decision: row.decision, createdAt: row.createdAt,
+        blockedAt: row.blockedAt, blockedReason: row.blockedReason,
+      },
+      review: {
+        // The route converts this server-derived key to a short-lived URL and
+        // strips it before returning to the browser.
+        nativeWavKey: checkpoint.musicNativeWavKey,
+        durationSec: checkpoint.nativeOutput.durationSec,
+        sampleRateHz: checkpoint.nativeOutput.sampleRateHz,
+        channels: checkpoint.nativeOutput.channels,
+        programFingerprint: checkpoint.programFingerprint,
+      },
+    };
   },
 });
