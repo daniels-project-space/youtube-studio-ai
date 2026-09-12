@@ -1,10 +1,16 @@
 import { z } from "zod";
 import { assertChessReplay, type ChessReplay, type ChessReplayEvent } from "./chessReplay";
+import {
+  assertChessNarrationPlan,
+  assertChessNarrationTiming,
+} from "./chessNarration";
 
 /** A board can point only at a verified replay event, never supply its own pieces. */
 export const ChessBoardSceneSchema = z.object({
   version: z.literal("chess-board-scene/v1"),
   replayFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  narrationPlanFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+  narrationSegmentId: z.string().regex(/^chess-narration-ply-[1-9]\d*$/),
   eventId: z.string().regex(/^ply-[1-9]\d*$/),
   orientation: z.enum(["white", "black"]),
   theme: z.enum(["walnut", "midnight"]),
@@ -23,6 +29,7 @@ export function chessSceneEvent(binding: ChessBoardScene, replay: ChessReplay): 
 interface TimedChessScene {
   t0: number;
   t1: number;
+  text: string;
   sourceRefs: string[];
   camera: { move: string };
   transition: string;
@@ -39,6 +46,8 @@ interface TimedChessScene {
 export function assertChessSceneSequence(
   scenes: readonly TimedChessScene[],
   rawReplay: unknown,
+  rawNarrationPlan?: unknown,
+  rawNarrationTiming?: unknown,
 ): ChessReplay | undefined {
   const hasChess = scenes.some((scene) => scene.visualState.chessBoard !== undefined);
   if (rawReplay === undefined) {
@@ -46,6 +55,14 @@ export function assertChessSceneSequence(
     return undefined;
   }
   const replay = assertChessReplay(rawReplay);
+  if (rawNarrationPlan === undefined || rawNarrationTiming === undefined) {
+    throw new Error("chess scene: source-bound narration plan and measured cue timing are required");
+  }
+  const narrationPlan = assertChessNarrationPlan(rawNarrationPlan);
+  const narrationTiming = assertChessNarrationTiming(rawNarrationTiming, narrationPlan);
+  if (narrationPlan.replayFingerprint !== replay.fingerprint || narrationTiming.replayFingerprint !== replay.fingerprint) {
+    throw new Error("chess scene: narration timing does not belong to the immutable legal replay");
+  }
   if (scenes.length !== replay.events.length) {
     throw new Error("chess scene: every source ply must have exactly one timed scene");
   }
@@ -54,7 +71,17 @@ export function assertChessSceneSequence(
   for (const [index, scene] of ordered.entries()) {
     const binding = ChessBoardSceneSchema.parse(scene.visualState.chessBoard);
     const event = chessSceneEvent(binding, replay);
+    const narration = narrationTiming.segments[index]!;
     if (event.id !== replay.events[index].id) throw new Error("chess scene: skipped, duplicated or reordered ply");
+    if (binding.narrationPlanFingerprint !== narrationPlan.fingerprint || binding.narrationSegmentId !== narration.id) {
+      throw new Error("chess scene: board event is not bound to its exact source narration segment");
+    }
+    if (scene.text.trim() !== narration.text) {
+      throw new Error("chess scene: on-screen scene text differs from the source-bound spoken move");
+    }
+    if (Math.abs(scene.t0 - narration.start) > 1e-6 || Math.abs(scene.t1 - narration.end) > 1e-6) {
+      throw new Error("chess scene: board timing differs from the measured spoken move cue");
+    }
     if (!scene.sourceRefs.includes(replay.source.id)) throw new Error("chess scene: missing original game source");
     if (scene.t1 - scene.t0 < 1.2 - 1e-6) throw new Error("chess scene: less than 1.2 seconds to read the move");
     if (scene.camera.move !== "static" || scene.transition !== "cut") {
@@ -68,6 +95,9 @@ export function assertChessSceneSequence(
     const currentIdentity = `${binding.orientation}:${binding.theme}`;
     if (identity !== undefined && currentIdentity !== identity) throw new Error("chess scene: board identity changes between moves");
     identity = currentIdentity;
+  }
+  if (Math.abs(ordered.at(-1)!.t1 - narrationTiming.narrationDurationSec) > 0.5) {
+    throw new Error("chess scene: final board scene does not reach the measured narration end");
   }
   return replay;
 }

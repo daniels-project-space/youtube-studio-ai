@@ -1,5 +1,6 @@
 /** Self-authored diagnostic positions, not narration/audio or channel qualification. */
 import { buildChessReplay, type ChessReplaySource } from "@/engine/chessReplay";
+import { bindChessNarrationTiming, buildChessNarrationPlan } from "@/engine/chessNarration";
 import { buildEpisodeGraph, compileSceneManifest } from "@/engine/episodeGraph";
 import type { ChessBoardScene } from "@/engine/chessScene";
 
@@ -45,22 +46,39 @@ export function chessDiagnosticGraph(
   theme: ChessBoardScene["theme"] = "walnut",
 ) {
   const replay = buildChessReplay(source);
+  const chessNarrationPlan = buildChessNarrationPlan(replay);
+  // Fixture cue timings model a measured voice take. They exercise the same
+  // source-bound timing contract without pretending this diagnostic is a TTS
+  // qualification or an external channel render.
+  const chessNarrationTiming = bindChessNarrationTiming({
+    narrationPlan: chessNarrationPlan,
+    sentenceTimings: chessNarrationPlan.segments.map((segment, index) => ({
+      text: segment.text,
+      start: index * 2,
+      end: (index + 1) * 2,
+    })),
+    narrationDurationSec: replay.events.length * 2,
+  });
   return buildEpisodeGraph({
     seriesId: "series-chess-diagnostic", episodeId: "episode-chess-diagnostic",
     topic: source.label, audience: "general", durationSec: replay.events.length * 2,
     chessReplay: replay,
+    chessNarrationPlan,
+    chessNarrationTiming,
     characterIds: [], settingIds: [], characters: [], settings: [],
     sources: [{ id: source.id, kind: "primary", label: source.label, locator: source.locator }],
     beats: replay.events.map((event, index) => ({
       id: `beat-ply-${event.ply}`, kind: index === 0 ? "opening" : "observation",
       t0: index * 2, t1: (index + 1) * 2,
-      scenePurpose: `Display source move ${event.san}`, text: `Source move: ${event.san}`,
+      scenePurpose: `Display source move ${event.san}`, text: chessNarrationPlan.segments[index]!.text,
       sourceRefs: [source.id], characterIds: [],
       camera: { framing: "wide", move: "static" }, transition: "cut",
       // Synthetic timing IDs for this visual-only fixture, not an upstream TTS receipt.
       storySpineBeatIds: [`beat-ply-${event.ply}`], storySpineSentenceIds: [`sentence-ply-${event.ply}`],
       visualState: { action: `${event.from} to ${event.to}`, props: [], chessBoard: {
         version: "chess-board-scene/v1", replayFingerprint: replay.fingerprint,
+        narrationPlanFingerprint: chessNarrationPlan.fingerprint,
+        narrationSegmentId: chessNarrationPlan.segments[index]!.id,
         eventId: event.id, orientation, theme,
       } },
     })),

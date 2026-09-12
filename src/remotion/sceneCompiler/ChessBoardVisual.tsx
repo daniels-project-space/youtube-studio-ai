@@ -47,14 +47,18 @@ function Piece({ type, color }: { type: keyof typeof PIECE_NAMES; color: "w" | "
   </g>;
 }
 
-export function ChessBoardVisual({ event, binding, localSeconds }: {
+export function ChessBoardVisual({ event, binding, localSeconds, durationSec }: {
   event: ChessReplayEvent;
   binding: ChessBoardScene;
   localSeconds: number;
+  durationSec: number;
 }) {
-  // Hold the exact old position, make one readable move, then hold its result.
-  // Pure frame time makes random seeking, retry and parallel rendering agree.
-  const linear = Math.max(0, Math.min(1, (localSeconds - 0.2) / 0.4));
+  // The board spends the whole source-bound spoken cue on this legal move. It
+  // never uses a fixed global 0.2–0.6s window: move onset and settle scale
+  // only with the measured narration interval assigned to this scene.
+  const cueDuration = Math.max(1.2, durationSec);
+  const cueProgress = Math.max(0, Math.min(1, localSeconds / cueDuration));
+  const linear = Math.max(0, Math.min(1, (cueProgress - 0.18) / 0.44));
   const progress = linear * linear * (3 - 2 * linear);
   const settled = progress === 1;
   const pieces = chessBoardFrame(event, progress, binding.orientation);

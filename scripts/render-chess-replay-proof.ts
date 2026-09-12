@@ -9,7 +9,7 @@ async function main() {
 const outputDir = resolve(process.argv[2] ?? "/tmp/chess-replay-proof-20260912");
 await mkdir(outputDir, { recursive: true });
 const sourceHashes = Object.fromEntries(await Promise.all([
-  "src/engine/chessReplay.ts", "src/engine/chessScene.ts", "src/engine/episodeGraph.ts",
+  "src/engine/chessReplay.ts", "src/engine/chessNarration.ts", "src/engine/chessScene.ts", "src/engine/episodeGraph.ts",
   "src/remotion/sceneCompiler/ChessBoardVisual.tsx", "src/remotion/sceneCompiler/SceneCompiler.tsx",
   "src/lib/sceneCompilerRender.ts", "test-fixtures/chess-replay/fixture.ts", "package.json",
 ].map(async (file) => [file, createHash("sha256").update(await readFile(file)).digest("hex")])));

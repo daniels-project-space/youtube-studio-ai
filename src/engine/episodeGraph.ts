@@ -8,6 +8,7 @@ import { z } from "zod";
 
 import { StorySpineSchema, type StorySpine } from "./storySpine";
 import { ChessReplaySchema } from "./chessReplay";
+import { ChessNarrationPlanShape, ChessNarrationTimingShape } from "./chessNarration";
 import { ChessBoardSceneSchema, assertChessSceneSequence } from "./chessScene";
 import {
   SyntheticScenarioProfileSchema,
@@ -170,6 +171,8 @@ export type CausalEdge = z.infer<typeof CausalEdgeSchema>;
 export const EpisodeGraphSchema = z.object({
   version: z.literal(EPISODE_GRAPH_VERSION),
   chessReplay: ChessReplaySchema.optional(),
+  chessNarrationPlan: ChessNarrationPlanShape.optional(),
+  chessNarrationTiming: ChessNarrationTimingShape.optional(),
   seriesId: stableId("series"),
   episodeId: stableId("episode"),
   topic: nonEmptyText(300),
@@ -213,6 +216,8 @@ export type DeterministicScene = z.infer<typeof DeterministicSceneSchema>;
 export const SceneManifestSchema = z.object({
   version: z.literal(SCENE_MANIFEST_VERSION),
   chessReplay: ChessReplaySchema.optional(),
+  chessNarrationPlan: ChessNarrationPlanShape.optional(),
+  chessNarrationTiming: ChessNarrationTimingShape.optional(),
   durationSec: z.number().finite().positive(),
   scenes: z.array(DeterministicSceneSchema).min(2),
   fingerprint: z.string().regex(/^[a-f0-9]{64}$/),
@@ -386,7 +391,7 @@ function assertChildSafeGraph(graph: EpisodeGraph): void {
  */
 export function assertEpisodeGraph(value: unknown): EpisodeGraph {
   const graph = EpisodeGraphSchema.parse(value);
-  assertChessSceneSequence(graph.beats, graph.chessReplay);
+  assertChessSceneSequence(graph.beats, graph.chessReplay, graph.chessNarrationPlan, graph.chessNarrationTiming);
   uniqueIds(graph.sources, "episode sources");
   uniqueIds(graph.characters, "episode characters");
   uniqueIds(graph.settings, "episode settings");
@@ -502,7 +507,7 @@ export function episodeGraphFingerprint(value: unknown): string {
 /** Validates the renderer handoff independently of the graph builder. */
 export function assertSceneManifest(value: unknown): SceneManifest {
   const manifest = SceneManifestSchema.parse(value);
-  assertChessSceneSequence(manifest.scenes, manifest.chessReplay);
+  assertChessSceneSequence(manifest.scenes, manifest.chessReplay, manifest.chessNarrationPlan, manifest.chessNarrationTiming);
   uniqueIds(manifest.scenes, "scene manifest scenes");
   const beatIds = new Set<string>();
   for (const scene of manifest.scenes) {
@@ -573,6 +578,8 @@ export function compileSceneManifest(value: unknown, storySpine?: StorySpine): S
   return assertSceneManifest({
     version: SCENE_MANIFEST_VERSION,
     ...(graph.chessReplay ? { chessReplay: graph.chessReplay } : {}),
+    ...(graph.chessNarrationPlan ? { chessNarrationPlan: graph.chessNarrationPlan } : {}),
+    ...(graph.chessNarrationTiming ? { chessNarrationTiming: graph.chessNarrationTiming } : {}),
     durationSec: graph.durationSec,
     scenes,
     fingerprint: episodeGraphFingerprint(graph),

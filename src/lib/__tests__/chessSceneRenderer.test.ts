@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { buildChessReplay } from "@/engine/chessReplay";
+import { bindChessNarrationTiming } from "@/engine/chessNarration";
 import { assertEpisodeGraph, assertSceneManifest, assertSceneManifestMatchesEpisodeGraph, compileSceneManifest } from "@/engine/episodeGraph";
 import { ChessBoardVisual, chessBoardFrame, chessSquarePosition } from "@/remotion/sceneCompiler/ChessBoardVisual";
 import { sceneKindFor } from "@/remotion/sceneCompiler/SceneCompiler";
@@ -13,6 +14,15 @@ const manifest = compileSceneManifest(graph);
 const minimumDwell = structuredClone(manifest);
 minimumDwell.durationSec = minimumDwell.scenes.length * 1.2;
 minimumDwell.scenes.forEach((scene, i) => { scene.t0 = i * 1.2; scene.t1 = (i + 1) * 1.2; });
+minimumDwell.chessNarrationTiming!.segments.forEach((segment, i) => { segment.start = i * 1.2; segment.end = (i + 1) * 1.2; });
+minimumDwell.chessNarrationTiming!.narrationDurationSec = minimumDwell.durationSec;
+// The fixture's receipt remains cryptographically sealed: rebuild it through
+// the source-bound binder rather than hand-waving away its new timing hash.
+minimumDwell.chessNarrationTiming = bindChessNarrationTiming({
+  narrationPlan: minimumDwell.chessNarrationPlan,
+  sentenceTimings: minimumDwell.chessNarrationTiming!.segments.map(({ text, start, end }) => ({ text, start, end })),
+  narrationDurationSec: minimumDwell.durationSec,
+});
 assert.doesNotThrow(() => assertSceneManifest(minimumDwell), "nominal minimum dwell must not fail on floating-point subtraction");
 assert.equal(sceneKindFor(manifest.scenes[0]), "chess");
 assert.equal(manifest.chessReplay?.fingerprint, graph.chessReplay?.fingerprint);
@@ -49,13 +59,13 @@ for (const orientation of ["white", "black"] as const) {
   assert.equal(chessBoardFrame(promotion, 0, orientation).find((piece) => piece.square === "a7")?.type, "p");
   assert.equal(chessBoardFrame(promotion, 1, orientation).find((piece) => piece.square === "a8")?.type, "n");
   const markup = renderToStaticMarkup(createElement(ChessBoardVisual, {
-    event: promotion, binding: { ...manifest.scenes[0].visualState.chessBoard!, orientation }, localSeconds: 1,
+    event: promotion, binding: { ...manifest.scenes[0].visualState.chessBoard!, orientation }, localSeconds: 2, durationSec: 2,
   }));
   assert.match(markup, /MOVE 7</, "move label must use the source position's fullmove number, not replay array index");
   assert.match(markup, /Promoted to knight/);
   const blackMarkup = renderToStaticMarkup(createElement(ChessBoardVisual, {
     event: buildChessReplay(promotionSource).events[1],
-    binding: { ...manifest.scenes[0].visualState.chessBoard!, orientation }, localSeconds: 1,
+    binding: { ...manifest.scenes[0].visualState.chessBoard!, orientation }, localSeconds: 1, durationSec: 2,
   }));
   assert.match(blackMarkup, /BLACK · MOVE 7</);
 }

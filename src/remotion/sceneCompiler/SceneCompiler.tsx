@@ -730,7 +730,12 @@ function SceneLayer({
     if (!scene.chessBoard || !scene.chessEvent) throw new Error("Chess renderer cannot invent an unbound board");
     return <AbsoluteFill style={{ background: "radial-gradient(ellipse at 16% 45%, #20372f 0%, #111d1e 50%, #0c1518 100%)", opacity }}>
       <div style={{ position: "absolute", inset: "5% 5.5%" }}>
-        <ChessBoardVisual event={scene.chessEvent} binding={scene.chessBoard} localSeconds={Math.max(0, frame / fps - scene.t0)} />
+        <ChessBoardVisual
+          event={scene.chessEvent}
+          binding={scene.chessBoard}
+          localSeconds={Math.max(0, frame / fps - scene.t0)}
+          durationSec={scene.t1 - scene.t0}
+        />
       </div>
     </AbsoluteFill>;
   }
@@ -784,7 +789,12 @@ export const SceneCompiler: FC<SceneCompilerProps> = ({ manifest }) => {
     const hasChess = manifest?.chessReplay !== undefined || manifest?.scenes.some((scene) => scene.visualState?.chessBoard !== undefined);
     const admitted = hasChess ? assertSceneManifest(manifest) : manifest;
     const sourceScenes = admitted?.scenes ?? [];
-    const replay = assertChessSceneSequence(sourceScenes, admitted?.chessReplay);
+    const replay = assertChessSceneSequence(
+      sourceScenes,
+      admitted?.chessReplay,
+      admitted?.chessNarrationPlan,
+      admitted?.chessNarrationTiming,
+    );
     return sourceScenes
       .map((scene) => normalizeScene(scene, manifest?.audience ?? "general", replay))
       .sort((left, right) => left.t0 - right.t0 || left.id.localeCompare(right.id));
