@@ -1,7 +1,7 @@
 /**
  * HOOKCRAFT — the hook + opening engine (the script module's path to golden,
  * same shape as the banana thumbnail engine): one rich brief → candidate cold
- * opens on the configured non-Google creative model → deterministic craft lint → LLM judge gate →
+ * opens on the pinned OpenRouter creative-text model → deterministic craft lint → LLM judge gate →
  * one feedback retry → loud failure. The hook is ALWAYS specifically about the
  * topic — generic could-open-any-video lines are structurally rejected.
  *
@@ -10,18 +10,23 @@
  * clicked promise) → explicit payoff promise by ~15s (52% vs 44% retention at
  * 1min) → stakes + open loop by 30s; the steepest drop is seconds 10-20.
  *
- * Standalone: identity in → judged cold open out. Deps: explicit non-Google
+ * Standalone: identity in → judged cold open out. Deps: the approved OpenRouter
  * creative-text provider only. Factual verification remains a separate source
  * admission concern; this module never fabricates it.
  *
  *   const open = await craftHook({ topic, channelName, niche, ... });
  *   // open.hook (≤7s), open.opening (~20-30s), open.coldOpen (both)
  */
-import { claudeJson, claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
+import {
+  creativeTextJson,
+  creativeTextJsonPro,
+  hasCreativeTextKey,
+  OpenRouterGenerationOutcomeUnknownError,
+} from "@/lib/creativeText";
 import { resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 
 export function hasHookcraft(): boolean {
-  return hasAnthropicKey();
+  return hasCreativeTextKey();
 }
 
 /**
@@ -550,7 +555,7 @@ function registerClause(a: HookCraftArgs): string {
  * could-open-any-video hook).
  */
 export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
-  if (!hasAnthropicKey()) throw new Error("hookcraft: OPENROUTER_API_KEY missing — no permitted creative-text provider is configured");
+  if (!hasCreativeTextKey()) throw new Error("hookcraft: OPENROUTER_API_KEY missing — no permitted creative-text provider is configured");
   const skipConcreteness = a.style === "meditation";
   const deviceList = Object.entries(HOOK_DEVICES)
     .filter(([k]) => (a.style === "meditation" ? k === "you_stakes" || k === "cold_open_scene" || k === "myth_snap" : true))
@@ -568,7 +573,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
     // PROMPT ORDER = COST: the static doctrine (device list, retention arc,
     // hard rules — ~1.5k tokens) leads; topic/register/fixNote trail, so
     // provider prompt caching can reuse the stable doctrine on later attempts.
-    const gen = await claudeJsonPro<{ candidates?: { device?: string; hook?: string; opening?: string; loop?: string }[] }>({
+    const gen = await creativeTextJsonPro<{ candidates?: { device?: string; hook?: string; opening?: string; loop?: string }[] }>({
       prompt: [
         `You are the cold-open director. Write the spoken COLD OPEN for a YouTube video.`,
         `FIRST, silently analyze the topic: its core tension, its single most surprising VERIFIED fact, the ` +
@@ -658,7 +663,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
       let judgeRan = true;
       let best: number | undefined;
       try {
-        const j = await claudeJson<{ verdicts?: HookVerdict[]; best?: number }>({
+        const j = await creativeTextJson<{ verdicts?: HookVerdict[]; best?: number }>({
           prompt: [
             `You are a brutal YouTube retention judge. Topic: "${a.topic}".`,
             a.sourceGrounding?.trim() ?? "",
@@ -685,6 +690,11 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         verdicts = admission.verdicts;
         best = typeof j.best === "number" && j.best >= 0 && j.best < survivors.length ? j.best : undefined;
       } catch (e) {
+        // Unlike an ordinary known judge failure, a post-dispatch outcome with
+        // unknown provider work cannot safely become a lint-only cold open.
+        // A later healer could replay potentially billed work and hide the
+        // missing quality receipt. Preserve that state for execution recovery.
+        if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
         // FAIL-OPEN, DELIBERATELY AND LOUDLY — see isEmptyVerdict above.
         //
         // "lint-only pass" undersold this badly. With no verdicts every
