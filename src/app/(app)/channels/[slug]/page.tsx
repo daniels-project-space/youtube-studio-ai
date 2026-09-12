@@ -2639,8 +2639,15 @@ type PlanRow = {
   preparationFrozenAt?: number;
 };
 
-function planPreparationLabel(item: Pick<PlanRow, "preparationState" | "preparationManifestSha256">): string {
-  if (item.preparationState === "inputs_frozen" && item.preparationManifestSha256) return "Inputs frozen";
+function hasFrozenPlanInputs(item: Pick<PlanRow, "preparationState" | "preparationManifestSha256" | "preparationFrozenAt">): boolean {
+  return item.preparationState === "inputs_frozen" &&
+    Boolean(item.preparationManifestSha256) &&
+    Number.isSafeInteger(item.preparationFrozenAt) &&
+    (item.preparationFrozenAt ?? 0) > 0;
+}
+
+function planPreparationLabel(item: Pick<PlanRow, "preparationState" | "preparationManifestSha256" | "preparationFrozenAt">): string {
+  if (hasFrozenPlanInputs(item)) return "Inputs frozen";
   if (item.preparationState) return "Preparing inputs";
   return "Editorial only";
 }
@@ -2786,8 +2793,8 @@ function WeekAheadTab({
               <div className={styles.weekState} data-ready={p.status === "ready"}>
                 <span>{p.status === "ready" ? "Ready" : "Building"}</span>
                 <small>{p.scheduledAt ? new Date(p.scheduledAt).toLocaleDateString(undefined, { month: "short", day: "numeric" }) : "Unpinned"}</small>
-                <small className={styles.weekPrepState} data-frozen={p.preparationState === "inputs_frozen" || undefined}>
-                  {p.preparationState === "inputs_frozen" ? "Inputs frozen" : "Prep pending"}
+                <small className={styles.weekPrepState} data-frozen={hasFrozenPlanInputs(p) || undefined}>
+                  {hasFrozenPlanInputs(p) ? "Inputs frozen" : "Prep pending"}
                 </small>
               </div>
               <button

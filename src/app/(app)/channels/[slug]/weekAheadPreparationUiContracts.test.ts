@@ -7,6 +7,8 @@ async function main(): Promise<void> {
 
   assert.match(page, /preparationManifestSha256\?: string/);
   assert.match(page, /function planPreparationLabel/);
+  assert.match(page, /function hasFrozenPlanInputs/);
+  assert.match(page, /Number\.isSafeInteger\(item\.preparationFrozenAt\)/);
   assert.match(page, /Inputs frozen/);
   assert.match(page, /className=\{styles\.weekPrepState\}/);
   assert.match(page, /className=\{styles\.weekPrepDigest\}/);
