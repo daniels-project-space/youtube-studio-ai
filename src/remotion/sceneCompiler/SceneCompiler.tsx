@@ -1,4 +1,4 @@
-import type { CSSProperties, FC } from "react";
+import { useMemo, type CSSProperties, type FC } from "react";
 import {
   AbsoluteFill,
   Easing,
@@ -6,7 +6,10 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import type { SceneManifest } from "@/engine/episodeGraph";
+import { assertSceneManifest, type SceneManifest } from "@/engine/episodeGraph";
+import type { ChessReplay, ChessReplayEvent } from "@/engine/chessReplay";
+import { assertChessSceneSequence, ChessBoardSceneSchema, chessSceneEvent, type ChessBoardScene } from "@/engine/chessScene";
+import { ChessBoardVisual } from "./ChessBoardVisual";
 import type {
   SyntheticScenarioProfile,
   SyntheticScenarioVisualKind,
@@ -23,7 +26,7 @@ import {
 export const SCENE_COMPILER_FPS = 30;
 export const SCENE_COMPILER_COMPOSITION_ID = "SceneManifest";
 
-const SCENE_KINDS = ["map", "chart", "diagram", "panel", "puppet", "screen"] as const;
+const SCENE_KINDS = ["map", "chart", "diagram", "panel", "puppet", "screen", "chess"] as const;
 
 export type SceneCompilerKind = (typeof SCENE_KINDS)[number];
 
@@ -44,6 +47,8 @@ interface Palette {
 }
 
 interface NormalizedScene {
+  chessBoard?: ChessBoardScene;
+  chessEvent?: ChessReplayEvent;
   id: string;
   t0: number;
   t1: number;
@@ -169,6 +174,7 @@ function sceneRecord(scene: SceneManifest["scenes"][number]): Record<string, unk
 export function sceneKindFor(scene: SceneManifest["scenes"][number]): SceneCompilerKind {
   const raw = sceneRecord(scene);
   const visualState = asRecord(raw.visualState);
+  if (visualState.chessBoard !== undefined) return "chess";
   const factualIntent = EvidenceVisualIntentSchema.safeParse(visualState.evidenceVisualIntent);
   if (factualIntent.success) return factualIntent.data === "factual_chart" ? "chart" : "map";
   const explicit = asText(raw.kind)?.toLowerCase();
@@ -211,9 +217,12 @@ export function sceneLabelFor(scene: SceneManifest["scenes"][number]): string {
 function normalizeScene(
   source: SceneManifest["scenes"][number],
   audience: "general" | "children" = "general",
+  chessReplay?: ChessReplay,
 ): NormalizedScene {
   const raw = sceneRecord(source);
   const visualState = asRecord(raw.visualState);
+  const chessBoard = visualState.chessBoard === undefined ? undefined : ChessBoardSceneSchema.parse(visualState.chessBoard);
+  if (chessBoard && !chessReplay) throw new Error("Chess renderer requires the original verified replay");
   const factualIntent = EvidenceVisualIntentSchema.safeParse(visualState.evidenceVisualIntent);
   const factualManifest = EvidenceVisualManifestSchema.safeParse(visualState.evidenceVisualManifest);
   // Keep the complete manifest ID in the seed. A display-safe truncation here would
@@ -244,6 +253,7 @@ function normalizeScene(
       : (["static", "push", "pan-left", "pan-right"] as const)[hash(id) % 4]!;
 
   return {
+    ...(chessBoard && chessReplay ? { chessBoard, chessEvent: chessSceneEvent(chessBoard, chessReplay) } : {}),
     id,
     t0,
     t1,
@@ -716,6 +726,14 @@ function SceneLayer({
 }) {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
+  if (scene.kind === "chess") {
+    if (!scene.chessBoard || !scene.chessEvent) throw new Error("Chess renderer cannot invent an unbound board");
+    return <AbsoluteFill style={{ background: "radial-gradient(ellipse at 16% 45%, #20372f 0%, #111d1e 50%, #0c1518 100%)", opacity }}>
+      <div style={{ position: "absolute", inset: "5% 5.5%" }}>
+        <ChessBoardVisual event={scene.chessEvent} binding={scene.chessBoard} localSeconds={Math.max(0, frame / fps - scene.t0)} />
+      </div>
+    </AbsoluteFill>;
+  }
   // A stable setting keeps its palette across every beat. The old scene-ID
   // seed made the same garden or room jump colour at every cut.
   const palette = paletteFor(scene.settingId ?? scene.id);
@@ -760,9 +778,17 @@ function activeSceneIndex(scenes: readonly NormalizedScene[], second: number): n
 export const SceneCompiler: FC<SceneCompilerProps> = ({ manifest }) => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const scenes = (manifest?.scenes ?? [])
-    .map((scene) => normalizeScene(scene, manifest?.audience ?? "general"))
-    .sort((left, right) => left.t0 - right.t0 || left.id.localeCompare(right.id));
+  const scenes = useMemo(() => {
+    // The raw Remotion props are another entry point: enforce the same full
+    // timeline gate there, not just when a caller used the server wrapper.
+    const hasChess = manifest?.chessReplay !== undefined || manifest?.scenes.some((scene) => scene.visualState?.chessBoard !== undefined);
+    const admitted = hasChess ? assertSceneManifest(manifest) : manifest;
+    const sourceScenes = admitted?.scenes ?? [];
+    const replay = assertChessSceneSequence(sourceScenes, admitted?.chessReplay);
+    return sourceScenes
+      .map((scene) => normalizeScene(scene, manifest?.audience ?? "general", replay))
+      .sort((left, right) => left.t0 - right.t0 || left.id.localeCompare(right.id));
+  }, [manifest]);
 
   if (scenes.length === 0) {
     return <AbsoluteFill style={{ background: "#101827" }} />;

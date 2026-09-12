@@ -1,0 +1,142 @@
+{
+  "scope": "visual-only diagnostic, synthetic timing; not narrated channel qualification",
+  "elapsedSec": 17.42358635099999,
+  "videoPath": "/tmp/chess-replay-final-proof-20260912/promotion.mp4",
+  "manifest": {
+    "version": "scene-manifest/v1",
+    "chessReplay": {
+      "version": "chess-replay/v1",
+      "source": {
+        "id": "source-promotion-diagnostic",
+        "label": "Underpromotion",
+        "locator": "fixture://chess-replay/promotion-v1",
+        "rightsNote": "Self-authored rule-test move sequence; no external commentary or artwork.",
+        "pgn": "[SetUp \"1\"]\n[FEN \"4k2r/P7/8/8/8/8/8/4K3 w - - 0 7\"]\n\n7. a8=N Kf7 *",
+        "expectedPlyCount": 2,
+        "expectedFinalFen": "N6r/5k2/8/8/8/8/8/4K3 w - - 1 8"
+      },
+      "sourceHash": "0bdf75a9c4de1ded2c2513057b259e77a1c7f1f21b2f95ec90422eed66113503",
+      "fingerprint": "1e82fb968054b6f42ec3084e716647091004d9836147fb3d6d8e74484a3334ca",
+      "initialFen": "4k2r/P7/8/8/8/8/8/4K3 w - - 0 7",
+      "finalFen": "N6r/5k2/8/8/8/8/8/4K3 w - - 1 8",
+      "events": [
+        {
+          "id": "ply-1",
+          "ply": 1,
+          "san": "a8=N",
+          "beforeFen": "4k2r/P7/8/8/8/8/8/4K3 w - - 0 7",
+          "afterFen": "N3k2r/8/8/8/8/8/8/4K3 b - - 0 7",
+          "from": "a7",
+          "to": "a8",
+          "piece": "p",
+          "color": "w",
+          "promotion": "n",
+          "check": false,
+          "checkmate": false
+        },
+        {
+          "id": "ply-2",
+          "ply": 2,
+          "san": "Kf7",
+          "beforeFen": "N3k2r/8/8/8/8/8/8/4K3 b - - 0 7",
+          "afterFen": "N6r/5k2/8/8/8/8/8/4K3 w - - 1 8",
+          "from": "e8",
+          "to": "f7",
+          "piece": "k",
+          "color": "b",
+          "check": false,
+          "checkmate": false
+        }
+      ]
+    },
+    "durationSec": 4,
+    "scenes": [
+      {
+        "id": "scene-ply-1",
+        "beatId": "beat-ply-1",
+        "t0": 0,
+        "t1": 2,
+        "kind": "opening",
+        "label": "Display source move a8=N",
+        "characterIds": [],
+        "camera": {
+          "framing": "wide",
+          "move": "static"
+        },
+        "visualState": {
+          "action": "a7 to a8",
+          "chessBoard": {
+            "version": "chess-board-scene/v1",
+            "replayFingerprint": "1e82fb968054b6f42ec3084e716647091004d9836147fb3d6d8e74484a3334ca",
+            "eventId": "ply-1",
+            "orientation": "black",
+            "theme": "walnut"
+          },
+          "props": []
+        },
+        "text": "Source move: a8=N",
+        "causalInputBeatIds": [],
+        "sourceRefs": [
+          "source-promotion-diagnostic"
+        ],
+        "transition": "cut",
+        "narrationSentenceIds": [
+          "sentence-ply-1"
+        ]
+      },
+      {
+        "id": "scene-ply-2",
+        "beatId": "beat-ply-2",
+        "t0": 2,
+        "t1": 4,
+        "kind": "observation",
+        "label": "Display source move Kf7",
+        "characterIds": [],
+        "camera": {
+          "framing": "wide",
+          "move": "static"
+        },
+        "visualState": {
+          "action": "e8 to f7",
+          "chessBoard": {
+            "version": "chess-board-scene/v1",
+            "replayFingerprint": "1e82fb968054b6f42ec3084e716647091004d9836147fb3d6d8e74484a3334ca",
+            "eventId": "ply-2",
+            "orientation": "black",
+            "theme": "walnut"
+          },
+          "props": []
+        },
+        "text": "Source move: Kf7",
+        "causalInputBeatIds": [
+          "beat-ply-1"
+        ],
+        "sourceRefs": [
+          "source-promotion-diagnostic"
+        ],
+        "transition": "cut",
+        "narrationSentenceIds": [
+          "sentence-ply-2"
+        ]
+      }
+    ],
+    "fingerprint": "402d9d64b5b506b6ab69461e51fac7ddf11832d20b7d323b6c5c5d3e57f0b6c8",
+    "topic": "Underpromotion",
+    "audience": "general",
+    "seriesId": "series-chess-diagnostic",
+    "episodeId": "episode-chess-diagnostic",
+    "renderer": "deterministic-scene/v1",
+    "externalProviderCalls": 0
+  },
+  "sourceHashes": {
+    "src/engine/chessReplay.ts": "913a4dc465d63ceb81126d5ffbca6079bb453c7c71a5fb3b52764ae7e84c3a25",
+    "src/engine/chessScene.ts": "97ae9401baadc573c16e9ff9f757f51b0a85c77ed93a0e606bb4d69760571de0",
+    "src/engine/episodeGraph.ts": "fb9d5f0a78f4e3156442a9ae3fbeb03081e6540c8f8eb41e0d4f68c10625ef08",
+    "src/remotion/sceneCompiler/ChessBoardVisual.tsx": "7e5f4a6e541c161f6f70ce84e5e787923d1e8a48dec752a4f1979f3f91c0a951",
+    "src/remotion/sceneCompiler/SceneCompiler.tsx": "309bb2f171676f6f893c55a5eb370200ca91ed4a99024ee0763182606cfa45d7",
+    "src/lib/sceneCompilerRender.ts": "f3f697f1a61cef6cf8e04765b2f2ac3edb949164524b687586f9c178f433cbb2",
+    "test-fixtures/chess-replay/fixture.ts": "86281bef23dae3339fe5152a821b14f1831e6e53254094eece8b20328f89fa96",
+    "package.json": "3ac284f2e0990a43f04a512714dea982b8c9658d837bff937368bf5b5d7bd6ad"
+  },
+  "videoSha256": "658377036bf24ea48a5a0818c2614759c0e861e1ec7a15b62b5a2af2018d5ee7"
+}

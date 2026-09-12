@@ -1,0 +1,33 @@
+{
+  "scope": "all decoded video frames and timestamps, not narration or complete channel qualification",
+  "comparisons": [
+    {
+      "name": "opening-white",
+      "previous": "/tmp/chess-replay-proof-20260912/opening-white.mp4",
+      "final": "/tmp/chess-replay-final-proof-20260912/opening-white.mp4",
+      "frames": 360,
+      "allDecodedFramesAndTimesEqual": true
+    },
+    {
+      "name": "castling-black",
+      "previous": "/tmp/chess-replay-proof-20260912/castling-black.mp4",
+      "final": "/tmp/chess-replay-final-proof-20260912/castling-black.mp4",
+      "frames": 120,
+      "allDecodedFramesAndTimesEqual": true
+    },
+    {
+      "name": "en-passant",
+      "previous": "/tmp/chess-replay-special-proof-20260912/en-passant.mp4",
+      "final": "/tmp/chess-replay-final-proof-20260912/en-passant.mp4",
+      "frames": 120,
+      "allDecodedFramesAndTimesEqual": true
+    },
+    {
+      "name": "promotion",
+      "previous": "/tmp/chess-replay-special-proof-20260912/promotion.mp4",
+      "final": "/tmp/chess-replay-final-proof-20260912/promotion.mp4",
+      "frames": 120,
+      "allDecodedFramesAndTimesEqual": true
+    }
+  ]
+}

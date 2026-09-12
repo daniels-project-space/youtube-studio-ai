@@ -1,5 +1,5 @@
 import path from "node:path";
-import type { SceneManifest } from "@/engine/episodeGraph";
+import { assertSceneManifest, type SceneManifest } from "@/engine/episodeGraph";
 import {
   SCENE_COMPILER_COMPOSITION_ID,
   type SceneCompilerProps,
@@ -32,6 +32,13 @@ export async function getSceneCompilerServeUrl(): Promise<string> {
       const { bundle } = await import("@remotion/bundler");
       return bundle({
         entryPoint: path.join(process.cwd(), "src/remotion/sceneCompiler/index.ts"),
+        webpackOverride: (config) => ({
+          ...config,
+          resolve: {
+            ...config.resolve,
+            alias: { ...config.resolve?.alias, "@": path.join(process.cwd(), "src") },
+          },
+        }),
       });
     })();
   }
@@ -47,13 +54,13 @@ export async function renderSceneManifest(args: RenderSceneManifestArgs): Promis
   const height = args.height ?? 1080;
   assertSixteenByNine(width, height);
   if (!args.outPath.trim()) throw new Error("Scene compiler render requires an output path.");
-  if (!args.manifest.scenes.length) throw new Error("Scene compiler render requires at least one scene.");
+  const manifest = assertSceneManifest(args.manifest);
 
   const { selectComposition, renderMedia, ensureBrowser } = await import("@remotion/renderer");
   await ensureBrowser();
   const serveUrl = await getSceneCompilerServeUrl();
   const inputProps = {
-    manifest: args.manifest,
+    manifest,
     width,
     height,
   } satisfies SceneCompilerProps;
@@ -62,7 +69,7 @@ export async function renderSceneManifest(args: RenderSceneManifestArgs): Promis
     id: SCENE_COMPILER_COMPOSITION_ID,
     inputProps,
   });
-  const metadata = sceneManifestMetadata(args.manifest, width, height);
+  const metadata = sceneManifestMetadata(manifest, width, height);
   let lastPct = -10;
 
   await renderMedia({

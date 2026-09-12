@@ -51,6 +51,7 @@
     "@trigger.dev/core": "4.5.9",
     "@trigger.dev/sdk": "4.5.9",
     "ai": "^6.0.194",
+    "chess.js": "1.4.0",
     "convex": "1.43.0",
     "jose": "^6.2.3",
     "next": "16.3.4",

@@ -1,0 +1,141 @@
+{
+  "scope": "visual-only diagnostic, synthetic timing; not narrated channel qualification",
+  "elapsedSec": 19.425890028999987,
+  "videoPath": "/tmp/chess-replay-final-proof-20260912/castling-black.mp4",
+  "manifest": {
+    "version": "scene-manifest/v1",
+    "chessReplay": {
+      "version": "chess-replay/v1",
+      "source": {
+        "id": "source-castling-diagnostic",
+        "label": "Both castling directions",
+        "locator": "fixture://chess-replay/castling-v1",
+        "rightsNote": "Self-authored rule-test move sequence; no external commentary or artwork.",
+        "pgn": "[SetUp \"1\"]\n[FEN \"r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1\"]\n\n1. O-O O-O-O *",
+        "expectedPlyCount": 2,
+        "expectedFinalFen": "2kr3r/8/8/8/8/8/8/R4RK1 w - - 2 2"
+      },
+      "sourceHash": "466db267c8a619aa72297688ea0fe1d7b1fa7c1230ab7a75bfebbabbb1b52fb1",
+      "fingerprint": "6b9332ff7633306920e7e384d2aabee7b5e01e56f7022650245fde7cf9fd48d5",
+      "initialFen": "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+      "finalFen": "2kr3r/8/8/8/8/8/8/R4RK1 w - - 2 2",
+      "events": [
+        {
+          "id": "ply-1",
+          "ply": 1,
+          "san": "O-O",
+          "beforeFen": "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1",
+          "afterFen": "r3k2r/8/8/8/8/8/8/R4RK1 b kq - 1 1",
+          "from": "e1",
+          "to": "g1",
+          "piece": "k",
+          "color": "w",
+          "check": false,
+          "checkmate": false
+        },
+        {
+          "id": "ply-2",
+          "ply": 2,
+          "san": "O-O-O",
+          "beforeFen": "r3k2r/8/8/8/8/8/8/R4RK1 b kq - 1 1",
+          "afterFen": "2kr3r/8/8/8/8/8/8/R4RK1 w - - 2 2",
+          "from": "e8",
+          "to": "c8",
+          "piece": "k",
+          "color": "b",
+          "check": false,
+          "checkmate": false
+        }
+      ]
+    },
+    "durationSec": 4,
+    "scenes": [
+      {
+        "id": "scene-ply-1",
+        "beatId": "beat-ply-1",
+        "t0": 0,
+        "t1": 2,
+        "kind": "opening",
+        "label": "Display source move O-O",
+        "characterIds": [],
+        "camera": {
+          "framing": "wide",
+          "move": "static"
+        },
+        "visualState": {
+          "action": "e1 to g1",
+          "chessBoard": {
+            "version": "chess-board-scene/v1",
+            "replayFingerprint": "6b9332ff7633306920e7e384d2aabee7b5e01e56f7022650245fde7cf9fd48d5",
+            "eventId": "ply-1",
+            "orientation": "black",
+            "theme": "midnight"
+          },
+          "props": []
+        },
+        "text": "Source move: O-O",
+        "causalInputBeatIds": [],
+        "sourceRefs": [
+          "source-castling-diagnostic"
+        ],
+        "transition": "cut",
+        "narrationSentenceIds": [
+          "sentence-ply-1"
+        ]
+      },
+      {
+        "id": "scene-ply-2",
+        "beatId": "beat-ply-2",
+        "t0": 2,
+        "t1": 4,
+        "kind": "observation",
+        "label": "Display source move O-O-O",
+        "characterIds": [],
+        "camera": {
+          "framing": "wide",
+          "move": "static"
+        },
+        "visualState": {
+          "action": "e8 to c8",
+          "chessBoard": {
+            "version": "chess-board-scene/v1",
+            "replayFingerprint": "6b9332ff7633306920e7e384d2aabee7b5e01e56f7022650245fde7cf9fd48d5",
+            "eventId": "ply-2",
+            "orientation": "black",
+            "theme": "midnight"
+          },
+          "props": []
+        },
+        "text": "Source move: O-O-O",
+        "causalInputBeatIds": [
+          "beat-ply-1"
+        ],
+        "sourceRefs": [
+          "source-castling-diagnostic"
+        ],
+        "transition": "cut",
+        "narrationSentenceIds": [
+          "sentence-ply-2"
+        ]
+      }
+    ],
+    "fingerprint": "b972f24eda57af5895e8b54eb952aad4c788492a7bead4d6f4ffdaf906235e59",
+    "topic": "Both castling directions",
+    "audience": "general",
+    "seriesId": "series-chess-diagnostic",
+    "episodeId": "episode-chess-diagnostic",
+    "renderer": "deterministic-scene/v1",
+    "externalProviderCalls": 0
+  },
+  "sourceHashes": {
+    "src/engine/chessReplay.ts": "913a4dc465d63ceb81126d5ffbca6079bb453c7c71a5fb3b52764ae7e84c3a25",
+    "src/engine/chessScene.ts": "97ae9401baadc573c16e9ff9f757f51b0a85c77ed93a0e606bb4d69760571de0",
+    "src/engine/episodeGraph.ts": "fb9d5f0a78f4e3156442a9ae3fbeb03081e6540c8f8eb41e0d4f68c10625ef08",
+    "src/remotion/sceneCompiler/ChessBoardVisual.tsx": "7e5f4a6e541c161f6f70ce84e5e787923d1e8a48dec752a4f1979f3f91c0a951",
+    "src/remotion/sceneCompiler/SceneCompiler.tsx": "309bb2f171676f6f893c55a5eb370200ca91ed4a99024ee0763182606cfa45d7",
+    "src/lib/sceneCompilerRender.ts": "f3f697f1a61cef6cf8e04765b2f2ac3edb949164524b687586f9c178f433cbb2",
+    "test-fixtures/chess-replay/fixture.ts": "86281bef23dae3339fe5152a821b14f1831e6e53254094eece8b20328f89fa96",
+    "package.json": "3ac284f2e0990a43f04a512714dea982b8c9658d837bff937368bf5b5d7bd6ad"
+  },
+  "videoSha256": "9f52533c73f62415ccbdf9d2e5da4f630f6df42ed3e662bf0359d1b2a1ff6402"
+}
