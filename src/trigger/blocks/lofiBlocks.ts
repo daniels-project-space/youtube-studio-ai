@@ -1779,6 +1779,7 @@ export const music: Block = {
     "channelMusicProgramKey",
     "channelMusicProgramFingerprint",
     "musicRuntimeReceiptKey",
+    "musicNativeWavKey",
     "musicQualityReviewStatus",
   ],
   paid: true,
@@ -1952,6 +1953,11 @@ export const music: Block = {
     let minimaxLocalPath: string | undefined;
     let minimaxReceipt: MiniMaxMusic3Receipt | undefined;
     let musicRuntimeReceiptKey: string | undefined;
+    // The worker receipt is bound to the native WAV, not the subsequently
+    // mastered/loop-folded MP3. Retain those exact verified bytes before any
+    // transformation so an owner audition and its later quality receipt can
+    // never silently approve the derivative in place of the worker output.
+    let musicNativeWavKey: string | undefined;
 
     try {
     const generateWith = async (prov: MusicProvider): Promise<void> => {
@@ -1976,6 +1982,23 @@ export const music: Block = {
         minimaxReceipt = result.receipt;
         billedAttestedCostUsd = result.receipt.runtime.costUsd;
         minimaxLocalPath = await writeBytes(join(tmp, "minimax-music3.wav"), result.audio);
+        musicNativeWavKey =
+          `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-native-${result.receipt.output.contentSha256}.wav`;
+        await putObject(musicNativeWavKey, result.audio, { contentType: "audio/wav" });
+        await recordAsset(ctx, "minimax_music3_native_wav", musicNativeWavKey, {
+          requestKey: result.receipt.requestKey,
+          jobId: result.receipt.jobId,
+          contentSha256: result.receipt.output.contentSha256,
+          byteLength: result.receipt.output.byteLength,
+          durationSec: result.receipt.durationSec,
+          sampleRateHz: result.receipt.output.sampleRateHz,
+          channels: result.receipt.output.channels,
+          codec: result.receipt.output.codec,
+          programFingerprint: channelMusicProgram.fingerprint,
+          // This is a retained review artifact. It is deliberately distinct
+          // from the mastered MP3, which has its own asset row below.
+          reviewBinding: "native-worker-wav",
+        });
         musicRuntimeReceiptKey =
           `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-runtime-${result.receipt.requestKey}.json`;
         await putObject(
@@ -2141,6 +2164,7 @@ export const music: Block = {
       channelMusicProgramKey,
       channelMusicProgramFingerprint: channelMusicProgram.fingerprint,
       musicRuntimeReceiptKey,
+      musicNativeWavKey,
       // An operational worker qualification is not an audition of this track.
       // The owner/review flow adds musicQualityReceiptKey after section review;
       // upload_draft rejects a MiniMax release until that proof is present.

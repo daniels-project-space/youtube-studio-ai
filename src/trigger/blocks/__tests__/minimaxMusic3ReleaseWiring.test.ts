@@ -26,9 +26,29 @@ assert.match(
   /Music generated with MiniMax-Music3\. This video contains AI-generated audio\./u,
 );
 assert.match(
+  lofi,
+  /musicNativeWavKey\s*=\s*`\$\{ctx\.keyPrefix\}runs\/\$\{ctx\.runId\}\/audio\/minimax-music3-native-\$\{result\.receipt\.output\.contentSha256\}\.wav`/u,
+  "the retained owner-audition source must be content-addressed by the already verified native WAV digest",
+);
+assert.match(
+  lofi,
+  /await putObject\(musicNativeWavKey, result\.audio, \{ contentType: "audio\/wav" \}\)/u,
+  "the exact verified worker WAV must be durably retained before mastering changes it",
+);
+assert.match(
+  lofi,
+  /recordAsset\(ctx, "minimax_music3_native_wav", musicNativeWavKey,[\s\S]*?reviewBinding: "native-worker-wav"/u,
+  "the immutable native audit asset must be explicitly distinguished from the mastered MP3",
+);
+assert.match(
+  lofi,
+  /musicRuntimeReceiptKey,[\s\S]*?musicNativeWavKey,[\s\S]*?musicQualityReviewStatus/u,
+  "the durable stage handoff must expose the native WAV locator to the later owner-review checkpoint",
+);
+assert.match(
   panel,
   /aria-label="MiniMax-Music3 attribution and generation disclosure"[\s\S]*Music generated with MiniMax-Music3/u,
   "the selected provider must display prominent in-product attribution and disclosure",
 );
 
-console.log("MINIMAX MUSIC3 RELEASE WIRING PASS: UI attribution and full/Short package disclosure are receipt-gated");
+console.log("MINIMAX MUSIC3 RELEASE WIRING PASS: disclosure is receipt-gated and the exact native WAV is retained for owner audition");
