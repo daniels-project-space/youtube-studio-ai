@@ -17,6 +17,7 @@ import {
 } from "@/components/LivePipeline";
 import { LogConsole } from "@/components/LogConsole";
 import { FactualReviewPanel } from "@/components/FactualReviewPanel";
+import { MusicAuditionPanel } from "@/components/MusicAuditionPanel";
 import {
   RunMediaWorkbench,
   type RunMediaAsset,
@@ -242,6 +243,7 @@ export default function RunDetailPage({
       {(run.status === "awaiting_factual_review" || run.status === "factual_review_blocked") && (
         <FactualReviewPanel runId={String(run._id)} />
       )}
+      {run.status === "awaiting_music_audition" && <MusicAuditionPanel runId={String(run._id)} />}
 
       <div id="recorded-work" className={styles.anchorTarget}>
         <RunMediaWorkbench
