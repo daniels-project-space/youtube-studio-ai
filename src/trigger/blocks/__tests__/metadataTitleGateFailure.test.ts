@@ -19,11 +19,11 @@ try {
     ...rest: unknown[]
   ) {
     const resolved = originalLoad.call(this, request, ...rest) as Record<string, unknown>;
-    if (!request.includes("anthropic")) return resolved;
+    if (!request.includes("creativeText")) return resolved;
     return {
       ...resolved,
-      hasAnthropicKey: () => true,
-      claudeJson: async () => {
+      hasCreativeTextKey: () => true,
+      creativeTextJson: async () => {
         throw new Error("title judge unavailable in integration fixture");
       },
     };

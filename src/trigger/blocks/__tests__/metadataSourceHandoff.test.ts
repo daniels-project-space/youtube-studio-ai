@@ -14,8 +14,8 @@ loader._load = function(request, ...rest) {
   const resolved = originalLoad.call(this, request, ...rest) as Record<string, unknown>;
   if (request.endsWith('/performance')) return { ...resolved, loadPerformanceContext: async () => '' };
   if (request.endsWith('/convexHttpClient')) return { ...resolved, convex: () => ({ query: async () => ({ estimatedViews: 0, source: 'fixture' }) }) };
-  if (!request.endsWith('/anthropic')) return resolved;
-  return { ...resolved, hasAnthropicKey: () => true, claudeJson: async ({ prompt }: { prompt: string }) => {
+  if (!request.endsWith('/creativeText')) return resolved;
+  return { ...resolved, hasCreativeTextKey: () => true, creativeTextJson: async ({ prompt }: { prompt: string }) => {
     prompts.push(prompt);
     if (prompt.includes('pinned comment')) return { comment: 'Which part matters to you?' };
     if (prompt.includes('description + tags')) return { description: 'A source-bound description.', tagsCsv: 'history,water,engineering,aqueduct,rome' };

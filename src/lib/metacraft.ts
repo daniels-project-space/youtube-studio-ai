@@ -30,7 +30,7 @@
  * youtubeData.ts (API key OR the vault's OAuth refresh token) and degrades
  * loudly when the niche databank already supplies the feed.
  */
-import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { creativeTextJson, hasCreativeTextKey } from "@/lib/creativeText";
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 import { searchVideoIds, fetchVideoDetails, hasYouTubeDataAccess } from "@/lib/youtubeData";
 import { resolveVoiceDoctrine } from "@/engine/golden";
@@ -40,7 +40,7 @@ import { unmatchedTitleNumbers } from "@/lib/numericClaims";
 import { normalizeTitleForPublication } from "@/lib/titlePublicationNormalization";
 
 export function hasMetacraft(): boolean {
-  return hasAnthropicKey();
+  return hasCreativeTextKey();
 }
 
 /**
@@ -864,7 +864,7 @@ function deterministicMetadataPackage(title: string, topic: string, niche?: stri
 }
 
 export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> {
-  if (!hasAnthropicKey()) throw new Error("metacraft: OPENROUTER_API_KEY missing — cannot craft real metadata");
+  if (!hasCreativeTextKey()) throw new Error("metacraft: OPENROUTER_API_KEY missing — cannot craft real metadata");
   const t0 = Date.now();
   const doctrine = resolveVoiceDoctrine(a.niche);
   const clickbait = resolveClickbaitLevel(a.clickbaitLevel, doctrine?.voice);
@@ -932,7 +932,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
   // There is no safe universal floor to hoist this to — how much the model
   // reasons depends on the prompt, and simpler prompts clear 700 comfortably.
   // What makes the class survivable is the logging below, not the number.
-  const makePinnedComment = (): Promise<string> => claudeJson<{ comment?: string }>({
+  const makePinnedComment = (): Promise<string> => creativeTextJson<{ comment?: string }>({
     prompt:
       `Write ONE pinned comment (≤200 chars) for a video about "${a.topic}"${a.niche ? ` (${a.niche})` : ""}: a ` +
       `SPECIFIC, genuinely curious question that seeds discussion about the video's core tension — never generic ` +
@@ -957,7 +957,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
     // package generation starts only after the independent request is judged.
     let gen: { candidates?: { frame?: string; title?: string }[] };
     try {
-      gen = await claudeJson<typeof gen>({
+      gen = await creativeTextJson<typeof gen>({
         prompt: [
           `Write SEVEN distinct YouTube TITLE candidates for a video about "${a.topic}" on "${a.channelName ?? "this channel"}".`,
           videoContext,
@@ -1052,7 +1052,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       let judged = false;
       let titleDecision: TitleDecisionReceipt | null = null;
       try {
-        const j = await claudeJson<{
+        const j = await creativeTextJson<{
           rankings?: {
             idx?: number;
             clickScore?: number;
@@ -1189,7 +1189,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       let tags: string[] = [];
       let packageFallback = false;
       try {
-        const pkg = await claudeJson<{ description?: string; tagsCsv?: string }>({
+        const pkg = await creativeTextJson<{ description?: string; tagsCsv?: string }>({
           prompt: [
             `Write the YouTube description + tags for this video.`,
             videoContext,

@@ -18,8 +18,8 @@ const loader = Module as unknown as { _load: (request: string, ...rest: unknown[
 const originalLoad = loader._load;
 loader._load = function (request, ...rest) {
   const resolved = originalLoad.call(this, request, ...rest) as Record<string, unknown>;
-  if (!request.endsWith('/anthropic')) return resolved;
-  return { ...resolved, hasAnthropicKey: () => true, claudeJson: async ({ prompt }: { prompt: string }) => {
+  if (!request.endsWith('/creativeText')) return resolved;
+  return { ...resolved, hasCreativeTextKey: () => true, creativeTextJson: async ({ prompt }: { prompt: string }) => {
     if (prompt.includes('pinned comment')) return { comment: 'Which detail stood out?' };
     if (prompt.includes('description + tags')) return { description: 'Fixture package.', tagsCsv: 'a,b,c,d,e' };
     if (prompt.startsWith('You are a YouTube CTR strategist')) {

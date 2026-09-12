@@ -69,7 +69,7 @@ import {
   type TitleProfileId,
 } from "@/lib/metacraft";
 import { normalizeTitleForPublication } from "@/lib/titlePublicationNormalization";
-import { hasAnthropicKey } from "@/lib/anthropic";
+import { hasCreativeTextKey } from "@/lib/creativeText";
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 import { hasVisionKey } from "@/lib/vision";
 import {
@@ -479,7 +479,7 @@ export const metadataOptimized: Block = {
     };
 
     // Degrade only when the permitted non-Google text provider is unavailable.
-    if (!hasAnthropicKey()) {
+    if (!hasCreativeTextKey()) {
       const title = deterministicTitleFallback(topic, titleProfile);
       const description = `${topic}.\n\n${persona || channelName}.`;
       const tags = [topic.toLowerCase(), niche].filter(Boolean) as string[];

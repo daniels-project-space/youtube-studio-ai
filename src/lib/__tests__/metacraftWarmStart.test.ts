@@ -51,11 +51,11 @@ function install(
     this: unknown, request: string, ...rest: unknown[]
   ) {
     const resolved = load.call(this, request, ...rest) as Record<string, unknown>;
-    if (!request.includes("anthropic")) return resolved;
+    if (!request.includes("creativeText")) return resolved;
     return {
       ...resolved,
-      hasAnthropicKey: () => true,
-      claudeJson: async ({ prompt }: { prompt: string }) => {
+      hasCreativeTextKey: () => true,
+      creativeTextJson: async ({ prompt }: { prompt: string }) => {
         if (prompt.includes("pinned comment")) {
           pinnedCalls += 1;
           return { comment: "What would you have done?" };
