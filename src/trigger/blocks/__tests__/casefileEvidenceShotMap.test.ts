@@ -17,7 +17,9 @@ import {
 } from "@/engine/sourceFirstAdmission";
 import { casefileEvidenceShotMapBlocks } from "../casefileEvidenceShotMapBlocks";
 
-const NOW = new Date("2026-08-14T12:00:00.000Z");
+// The actual block deliberately uses the real clock. Relative synthetic review
+// ages keep its positive case fresh without weakening production freshness.
+const NOW = new Date();
 
 const sourcePacket: CasefileSourcePacket = {
   version: CASEFILE_SOURCE_PACKET_VERSION,
@@ -309,7 +311,7 @@ async function main(): Promise<void> {
   assert.deepEqual(admitted.receipt.visualSafetyPolicy, { noGore: true, noUnsupportedRecreation: true });
 
   const logs: string[] = [];
-  const patch = await casefileEvidenceShotMapBlocks[0].run({
+  const context = {
     ownerId: "owner-test",
     runId: "run-casefile-evidence-shot-map",
     channelId: "channel-test",
@@ -323,8 +325,9 @@ async function main(): Promise<void> {
       shotList,
     },
     budgetUsd: 0,
-    log: (message) => logs.push(message),
-  });
+    log: (message: string) => logs.push(message),
+  };
+  const patch = await casefileEvidenceShotMapBlocks[0].run(context);
   assert.equal(
     (patch.casefileEvidenceShotMapAdmission as { release: string }).release,
     "private_human_editorial_review_only",
@@ -364,6 +367,14 @@ async function main(): Promise<void> {
     NOW.getTime() - 31 * 24 * 60 * 60 * 1_000,
   ).toISOString();
   assertBlocked(staleMapApproval, /editorial_review_stale:.*Remediation:/);
+  await assert.rejects(() => casefileEvidenceShotMapBlocks[0].run({
+    ...context, store: { ...context.store, casefileEvidenceShotMapInput: staleMapApproval },
+  }), /editorial_review_stale:/, "actual block must still reject an expired human review");
+  const futureMapApproval = approvedMap();
+  futureMapApproval.editorialReview.reviewedAt = new Date(NOW.getTime() + 24 * 60 * 60 * 1_000).toISOString();
+  await assert.rejects(() => casefileEvidenceShotMapBlocks[0].run({
+    ...context, store: { ...context.store, casefileEvidenceShotMapInput: futureMapApproval },
+  }), /editorial_review_stale:/, "actual block must still reject future-dated review evidence");
 
   const sourceReviewMismatch = approvedMap();
   sourceReviewMismatch.editorialReview.reviewedSourcePacketFingerprint = "f".repeat(64);

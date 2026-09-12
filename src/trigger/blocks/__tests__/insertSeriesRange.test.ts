@@ -20,6 +20,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { depthAt } from "./insertPlanGateDepth";
 
 import { seriesWithinSpokenRange, type InsertPlanItem } from "../insertBlocks";
 
@@ -39,17 +40,6 @@ const chart = (over: Partial<InsertPlanItem>): InsertPlanItem => ({
  * the actual question: a gate inside `if (strictDataStory) {` is one level
  * deeper than the loop body, and that is the placement bug being guarded.
  */
-function depthAt(source: string, index: number): number {
-  const from = source.indexOf("for (const it of plan) {");
-  assert.ok(from > 0 && index > from, "index must fall inside the plan loop");
-  let depth = 0;
-  for (let i = from + "for (const it of plan) {".length; i < index; i++) {
-    if (source[i] === "{") depth++;
-    else if (source[i] === "}") depth--;
-  }
-  return depth;
-}
-
 function main(): void {
   // ---- behaviour ---------------------------------------------------------
   // A curve that stays between its spoken anchors is presentation, not a claim.

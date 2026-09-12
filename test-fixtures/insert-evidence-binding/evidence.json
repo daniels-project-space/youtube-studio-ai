@@ -5,8 +5,8 @@
     1080
   ],
   "previewBackground": "#33424d diagnostic alpha composite",
-  "framesReviewed": 27,
-  "review": "Independent inspection of all 9 samples in each retained contact sheet: entry/hold/exit, settled figures, source credit, palette and bounds. Coordinate-specific rendering is a separate pending proof.",
+  "framesReviewed": 55,
+  "review": "All 9 samples in each of five native contact sheets inspected for entry/hold/exit, settled figures, source credit, palette and bounds. The irregular-axis clip shows the 2021 observation at 10% of its 2020–2030 span, not ordinal spacing. Ten further frames inspect the actual finishing compositor over light and dark backgrounds; four decoded samples outside the two windows match the source exactly.",
   "artifacts": [
     {
       "name": "controlled-line",
@@ -67,11 +67,39 @@
       ],
       "verdict": "pass for this diagnostic visual scope",
       "findings": []
+    },
+    {
+      "name": "irregular-axis",
+      "file": "test-fixtures/insert-evidence-binding/media/irregular-axis.webm",
+      "sheet": "test-fixtures/insert-evidence-binding/media/irregular-axis-frames.png",
+      "sha256": "352f078e5f1fe52f74ad3a47fc09e6ae169d4e5bb8514e907d0e50bb82d89355",
+      "durationSec": 13.008,
+      "sampleSeconds": [0, 0.5, 1, 1.6, 2.3, 6.5, 11.966666666666667, 12.633333333333333, 12.966666666666667],
+      "verdict": "pass for this diagnostic visual scope",
+      "findings": []
+    },
+    {
+      "name": "controlled-stat",
+      "file": "test-fixtures/insert-evidence-binding/media/controlled-stat.webm",
+      "sheet": "test-fixtures/insert-evidence-binding/media/controlled-stat-frames.png",
+      "sha256": "9c556a7ce9d443835e5355935fa9e78c866da29dabfe164b2091c394d7403209",
+      "durationSec": 13.008,
+      "sampleSeconds": [0, 0.5, 1, 1.6, 2.3, 6.5, 11.966666666666667, 12.633333333333333, 12.966666666666667],
+      "verdict": "pass for this diagnostic visual scope",
+      "findings": []
+    },
+    {
+      "name": "finishing-contrast",
+      "file": "test-fixtures/insert-evidence-binding/media/finishing-contrast.mp4",
+      "sheet": "test-fixtures/insert-evidence-binding/media/finishing-contrast-frames.png",
+      "sha256": "99c38b7efb16b064f0391da64ea6f23437e19190a34044317a840dde515aca99",
+      "durationSec": 32,
+      "sampleSeconds": [0, 1.5, 4, 13, 15, 16, 17.5, 20, 29, 31],
+      "verdict": "pass for production finishing function over diagnostic backgrounds; not a full-channel qualification",
+      "findings": []
     }
   ],
   "pending": [
-    "controlled stat encode and review",
-    "linked irregular-x encode and review",
     "final frozen release gates",
     "production verification"
   ]

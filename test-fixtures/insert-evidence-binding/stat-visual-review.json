@@ -1,0 +1,40 @@
+{
+  "verdict": "pass",
+  "scope": "Single big_stat native-render diagnostic; not a completed channel video or publishing approval",
+  "reviewMethod": "Independent Codex vision inspection of all nine final-video samples on the generated contact sheet",
+  "sourceRevision": "688e9ba",
+  "framesReviewed": 9,
+  "sampleSeconds": [0, 0.5, 1, 1.6, 2.3, 6.5, 11.966666666666667, 12.633333333333333, 12.966666666666667],
+  "coverage": {
+    "startSec": 0,
+    "endSec": 12.966666666666667,
+    "maxGapSec": 5.466666666666667
+  },
+  "observations": [
+    "Frame zero is intentionally transparent before entry.",
+    "The entry counts through 0%, 1% and 3%; the settled display is exactly 4% by 2.3 seconds.",
+    "The After label and Example Statistics Office attribution remain centered, separated and unclipped during the hold.",
+    "The reviewed 4% value remains unchanged through the hold and fade-out.",
+    "The diagnostic background remains visible through transparency; the final sample fades toward it without an opaque black rectangle."
+  ],
+  "findings": [],
+  "repairCycles": 0,
+  "executionAttempts": 2,
+  "retryReason": "Earlier native process terminated with exit 143; its truncated 124-frame artifact is not accepted proof.",
+  "completedSession": 67332,
+  "exitCode": 0,
+  "artifactPath": "/tmp/insert-binding-stat-retry-render-20260912/big_stat.webm",
+  "contactSheetPath": "/tmp/insert-binding-stat-retry-render-20260912/big_stat-frames.png",
+  "artifactSha256": "9c556a7ce9d443835e5355935fa9e78c866da29dabfe164b2091c394d7403209",
+  "artifactBytes": 615459,
+  "videoFrames": 390,
+  "videoFrameRate": "30/1",
+  "containerDurationSec": 13.008,
+  "dimensions": [1920, 1080],
+  "alphaMode": 1,
+  "providerCalls": 0,
+  "qualityChanges": false,
+  "originalPngCopy": "/tmp/insert-binding-stat-original-frames-20260912",
+  "originalPngCount": 390,
+  "originalPngCopyVerification": "All 390 PNG SHA-256 hashes match the untouched source directory."
+}

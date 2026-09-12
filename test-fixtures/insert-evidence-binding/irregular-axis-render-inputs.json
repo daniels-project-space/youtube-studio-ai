@@ -1,0 +1,38 @@
+[
+  {
+    "kind": "line_chart",
+    "title": "Output comparison",
+    "series": [
+      2,
+      3,
+      4
+    ],
+    "xLabels": [
+      "2020",
+      "2021",
+      "2030"
+    ],
+    "seriesDisplays": [
+      "2%",
+      "3%",
+      "4%"
+    ],
+    "seriesX": [
+      2020,
+      2021,
+      2030
+    ],
+    "seriesUnit": "percent",
+    "sourceAttribution": "Example Statistics Office",
+    "palette": [
+      "#13252d",
+      "#58c9b0",
+      "#eef5f4"
+    ],
+    "accent": "#58c9b0",
+    "outPath": "/tmp/insert-evidence-seam/insert_0.webm",
+    "durationSec": 13,
+    "width": 1920,
+    "height": 1080
+  }
+]

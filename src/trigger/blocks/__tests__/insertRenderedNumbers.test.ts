@@ -21,6 +21,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { depthAt } from "./insertPlanGateDepth";
 
 import { unspokenRenderedField, type InsertPlanItem } from "../insertBlocks";
 
@@ -48,18 +49,19 @@ const rejected = (i: Partial<InsertPlanItem>, sentence: string): string | undefi
  * the actual question: a gate inside `if (strictDataStory) {` is one level
  * deeper than the loop body, and that is the placement bug being guarded.
  */
-function depthAt(source: string, index: number): number {
-  const from = source.indexOf("for (const it of plan) {");
-  assert.ok(from > 0 && index > from, "index must fall inside the plan loop");
-  let depth = 0;
-  for (let i = from + "for (const it of plan) {".length; i < index; i++) {
-    if (source[i] === "{") depth++;
-    else if (source[i] === "}") depth--;
-  }
-  return depth;
-}
-
 function main(): void {
+  for (const declaration of ["const", "let"]) {
+    const prefix = `for (${declaration} it of plan) { /* braces { } are not scope */ `;
+    const direct = `${prefix}if (!anchorsSpoken(it, t.text)) continue; }`;
+    assert.equal(depthAt(direct, direct.indexOf("if (!anchorsSpoken")), 0);
+    for (const wrapper of ["if (strictDataStory) {", "if (strictDataStory)"]) {
+      const nested = `${prefix}${wrapper} if (!anchorsSpoken(it, t.text)) continue; ${wrapper.endsWith("{") ? "}" : ""} }`;
+      assert.ok(depthAt(nested, nested.indexOf("if (!anchorsSpoken")) > 0, "conditional gates must remain rejected, even without braces");
+    }
+    const decoy = `${prefix}const text = 'if (!anchorsSpoken(it, t.text))'; }`;
+    assert.throws(() => depthAt(decoy, decoy.indexOf("if (!anchorsSpoken")), /gate statement/);
+  }
+  assert.throws(() => depthAt("if (!anchorsSpoken(it, t.text)) {}", 0), /plan loop/);
   // ---- the hole this closes -----------------------------------------------
   // Truthful anchors, invented hero number. This is the exact shape that used
   // to pass: anchorsSpoken saw "534000" in the sentence and approved, while the

@@ -1,0 +1,67 @@
+{
+  "scope": "Actual production finishing function, reviewed native insert and synthetic contrasting backgrounds. Not a whole-channel, narration or R2 recovery qualification.",
+  "artifact": "test-fixtures/insert-evidence-binding/media/irregular-axis.webm",
+  "inputSha256": "352f078e5f1fe52f74ad3a47fc09e6ae169d4e5bb8514e907d0e50bb82d89355",
+  "out": "/tmp/insert-binding-composite-PJOG5f/composite.mp4",
+  "sheet": "/tmp/insert-binding-composite-PJOG5f/composite-frames.png",
+  "probe": {
+    "programs": [],
+    "streams": [
+      {
+        "codec_name": "h264",
+        "width": 1920,
+        "height": 1080,
+        "nb_read_frames": "960"
+      }
+    ],
+    "format": {
+      "duration": "32.000000"
+    }
+  },
+  "comparisons": [
+    {
+      "frame": 0,
+      "differingBytes": 0,
+      "shouldContainInsert": false
+    },
+    {
+      "frame": 120,
+      "differingBytes": 6219747,
+      "shouldContainInsert": true
+    },
+    {
+      "frame": 450,
+      "differingBytes": 0,
+      "shouldContainInsert": false
+    },
+    {
+      "frame": 480,
+      "differingBytes": 0,
+      "shouldContainInsert": false
+    },
+    {
+      "frame": 600,
+      "differingBytes": 6220242,
+      "shouldContainInsert": true
+    },
+    {
+      "frame": 930,
+      "differingBytes": 0,
+      "shouldContainInsert": false
+    }
+  ],
+  "sampleSeconds": [
+    0,
+    1.5,
+    4,
+    13,
+    15,
+    16,
+    17.5,
+    20,
+    29,
+    31
+  ],
+  "sha256": "99c38b7efb16b064f0391da64ea6f23437e19190a34044317a840dde515aca99",
+  "visualVerdict": "pending independent frame inspection"
+}
