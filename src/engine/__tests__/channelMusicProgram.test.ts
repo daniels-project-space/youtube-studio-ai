@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  assertMusicProgramQualityReceipt,
   ChannelMusicProgramSchema,
   createChannelMusicProgram,
   createMusicProgramQualityReceipt,
@@ -100,6 +101,19 @@ const receiptInput = {
 };
 const quality = createMusicProgramQualityReceipt({ program: lofi, ...receiptInput });
 assert.equal(quality.programFingerprint, lofi.fingerprint);
+assert.equal(
+  assertMusicProgramQualityReceipt({ program: lofi, receipt: quality }).fingerprint,
+  quality.fingerprint,
+  "durable release admission must reapply the sealed program's quality thresholds",
+);
+assert.throws(
+  () => assertMusicProgramQualityReceipt({
+    program: history,
+    receipt: quality,
+  }),
+  /different channel music program/u,
+  "a passing music receipt cannot be borrowed by another channel or episode",
+);
 
 assert.throws(
   () => createMusicProgramQualityReceipt({

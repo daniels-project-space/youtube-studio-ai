@@ -16,6 +16,8 @@ Official references:
 - https://github.com/MiniMax-AI/MiniMax-Music3
 - https://huggingface.co/MiniMaxAI/MiniMax-Music3
 - https://github.com/comfyanonymous/ComfyUI/commit/efd4e951a00e85bd92e79f1d685427912b0dad5e
+- https://github.com/Comfy-Org/ComfyUI/issues/15671 (active decode-degradation report; qualification must test the concrete worker graph)
+- https://github.com/Comfy-Org/workflow_templates/blob/main/templates/audio_minimax_music_3.json (official template guidance on tiled-decoder seam risk)
 
 ## What is sealed before spend
 
@@ -36,7 +38,9 @@ The client downloads the WAV, parses its RIFF chunks, and verifies every integri
 
 ## Quality and mastering
 
-The global worker benchmark is not permission to declare every new score good. Every generated track remains `pending_private_draft_review` until the private validation video is heard. `music-program-quality/v1` requires complete section-by-section review, real human audition, emotional and arrangement depth, non-generic judgment, loudness range, crest factor, true peak, clipping, flat-top, silence, DC, and artifact evidence.
+The global worker benchmark is not permission to declare every new score good. Every generated track now remains `awaiting-human-audition` until the review workflow writes a durable `music-program-quality/v1` receipt. At `upload_draft`, MiniMax releases fail closed unless that receipt both passes the current channel program's complete section-by-section, dynamics, artifact, and real-human-audition checks **and** binds byte-for-byte to the exact native worker WAV. A receipt from another episode, another channel, or a mastered MP3 cannot be reused.
+
+This addresses an active ComfyUI MiniMax Music 3 report of audio that degrades a few seconds into a nominally successful render. Qualification must include targeted listening at the affected early window and at every sealed section boundary; a green worker job or a global qualification hash is never treated as evidence that a specific take is release-ready. The official Comfy workflow also notes that tiled VAE decode can introduce seams, so a qualified high-VRAM production graph must retain its chosen decode mode and audition it as part of the immutable worker qualification.
 
 Production mastering applies one measured constant gain. It does not compress, limit, normalize sections independently, or hide a source whose peak headroom cannot reach the sealed LUFS target.
 

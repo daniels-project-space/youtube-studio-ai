@@ -56,6 +56,7 @@ import {
   type OriginalMusicProgramPlan,
 } from "@/engine/originalMusicProgram";
 import {
+  assertMusicProgramQualityReceipt,
   createChannelMusicProgram,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
@@ -659,6 +660,52 @@ async function appendMusicGenerationDisclosure(
     `from runtime receipt ${admitted.requestKey.slice(0, 12)}`,
   );
   return `${description.trim()}\n\n${MINIMAX_MUSIC3_DESCRIPTION_DISCLOSURE}`;
+}
+
+/**
+ * A worker qualification proves the installed graph is eligible to render; it
+ * does not prove this song is free of the documented MiniMax/Comfy decode
+ * degradation or has musical depth. The review workflow supplies this durable
+ * receipt after actual section-by-section audition — never fabricated here.
+ */
+async function assertMiniMaxMusicQualityForPublish(ctx: StageContext): Promise<void> {
+  if (ctx.store["musicProvider"] !== "minimax_music3") return;
+  const programKey = str(ctx, "channelMusicProgramKey");
+  const runtimeReceiptKey = str(ctx, "musicRuntimeReceiptKey");
+  const qualityReceiptKey = str(ctx, "musicQualityReceiptKey");
+  const [programBytes, runtimeBytes, qualityBytes] = await Promise.all([
+    getObjectBytes(programKey),
+    getObjectBytes(runtimeReceiptKey),
+    getObjectBytes(qualityReceiptKey),
+  ]);
+  let program: unknown;
+  let runtimeReceipt: unknown;
+  let qualityReceipt: unknown;
+  try {
+    program = JSON.parse(Buffer.from(programBytes).toString("utf8"));
+    runtimeReceipt = JSON.parse(Buffer.from(runtimeBytes).toString("utf8"));
+    qualityReceipt = JSON.parse(Buffer.from(qualityBytes).toString("utf8"));
+  } catch (error) {
+    throw new Error(
+      `MiniMax-Music3 per-track quality evidence is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const runtime = assertPinnedMiniMaxMusic3Receipt(runtimeReceipt, program);
+  const quality = assertMusicProgramQualityReceipt({ program, receipt: qualityReceipt });
+  if (
+    quality.output.contentSha256 !== runtime.output.contentSha256 ||
+    quality.output.byteLength !== runtime.output.byteLength ||
+    Math.abs(quality.output.durationSec - runtime.durationSec) > Math.max(0.1, runtime.durationSec * 0.001) ||
+    quality.output.sampleRate !== runtime.output.sampleRateHz ||
+    quality.output.channels !== runtime.output.channels ||
+    quality.output.codec !== runtime.output.codec
+  ) {
+    throw new Error("MiniMax-Music3 quality receipt is not bound to the exact native worker WAV");
+  }
+  ctx.log(
+    `upload_draft: admitted human-auditioned per-track music receipt ${quality.fingerprint.slice(0, 12)} ` +
+    `for MiniMax request ${runtime.requestKey.slice(0, 12)}`,
+  );
 }
 
 /* --------------------------- 1. topic_select ---------------------------- */
@@ -1732,6 +1779,7 @@ export const music: Block = {
     "channelMusicProgramKey",
     "channelMusicProgramFingerprint",
     "musicRuntimeReceiptKey",
+    "musicQualityReviewStatus",
   ],
   paid: true,
   run: async (ctx) => {
@@ -1751,6 +1799,7 @@ export const music: Block = {
         musicKey: reuseMusicKey,
         musicProvider: "reuse",
         musicUrl: reuseUrl,
+        musicQualityReviewStatus: "not-required-reused-master",
         [COST_PATCH_KEY]: 0,
       };
     }
@@ -2089,6 +2138,12 @@ export const music: Block = {
       channelMusicProgramKey,
       channelMusicProgramFingerprint: channelMusicProgram.fingerprint,
       musicRuntimeReceiptKey,
+      // An operational worker qualification is not an audition of this track.
+      // The owner/review flow adds musicQualityReceiptKey after section review;
+      // upload_draft rejects a MiniMax release until that proof is present.
+      musicQualityReviewStatus: usedProvider === "minimax_music3"
+        ? "awaiting-human-audition"
+        : "not-required-provider-route",
       // Keep spend from successful generations made before provider failover;
       // resetting the selected provider's tracks must not erase paid work.
       [COST_PATCH_KEY]: PRICE.musicTrackUsd * billedGenerations + billedAttestedCostUsd,
@@ -3118,6 +3173,7 @@ export const uploadDraft: Block = {
         `upload_draft: final quality evidence did not clear its hard gates — ${quality.data.release.blockers.join("; ")}`,
       );
     }
+    await assertMiniMaxMusicQualityForPublish(ctx);
     const lane = resolveContentLane({ stored: ctx.store["contentLane"], pipeline: [] });
     if (
       quality.data.episode.lane.key !== lane.key ||

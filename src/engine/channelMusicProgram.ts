@@ -466,3 +466,26 @@ export function createMusicProgramQualityReceipt(input: {
     fingerprint: musicQualityReceiptFingerprint(body),
   }));
 }
+
+/**
+ * Re-admit a durable quality receipt at a later boundary. Parsing proves only
+ * shape and fingerprint; this also reapplies the program-specific thresholds
+ * so an older or hand-authored receipt cannot bypass the current quality bar.
+ */
+export function assertMusicProgramQualityReceipt(input: {
+  readonly program: unknown;
+  readonly receipt: unknown;
+}): MusicProgramQualityReceipt {
+  const program = ChannelMusicProgramSchema.parse(input.program);
+  const receipt = MusicProgramQualityReceiptSchema.parse(input.receipt);
+  if (receipt.programFingerprint !== program.fingerprint) {
+    throw new Error("music quality receipt belongs to a different channel music program");
+  }
+  return createMusicProgramQualityReceipt({
+    program,
+    output: receipt.output,
+    measurements: receipt.measurements,
+    sectionReviews: receipt.sectionReviews,
+    audition: receipt.audition,
+  });
+}
