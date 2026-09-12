@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 
 import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
-import { createMusicAuditionCheckpoint, MusicAuditionCheckpointSchema } from "@/engine/musicAuditionCheckpoint";
+import {
+  createMusicAuditionApproval,
+  createMusicAuditionCheckpoint,
+  MusicAuditionApprovalSchema,
+  MusicAuditionCheckpointSchema,
+} from "@/engine/musicAuditionCheckpoint";
 
 const program = createChannelMusicProgram({
   channelId: "channel-a",
@@ -46,4 +51,16 @@ assert.throws(() => createMusicAuditionCheckpoint({
     output: runtimeOutput,
   },
 }), /different channel music program/);
-console.log("MUSIC AUDITION CHECKPOINT PASS — owner/run/native-WAV identity is immutable and content-bound");
+const approval = createMusicAuditionApproval({
+  version: "music-audition-approval/v1",
+  checkpointFingerprint: checkpoint.checkpointFingerprint,
+  qualityReceiptFingerprint: "e".repeat(64),
+  reviewerId: "owner-a",
+  approvedAt: 1_700_000_000_000,
+});
+assert.equal(MusicAuditionApprovalSchema.parse(approval).approvalFingerprint, approval.approvalFingerprint);
+assert.throws(
+  () => MusicAuditionApprovalSchema.parse({ ...approval, qualityReceiptFingerprint: "f".repeat(64) }),
+  /approval fingerprint is invalid/,
+);
+console.log("MUSIC AUDITION CHECKPOINT PASS — owner/run/native-WAV and approval receipt identities are immutable and content-bound");

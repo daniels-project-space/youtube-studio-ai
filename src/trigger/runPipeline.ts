@@ -2081,7 +2081,7 @@ export const runPipelineTask = task({
         // New source-data materialization only: persist the deterministic
         // Story Spine/Episode Graph handoff and deliberately return to the
         // owner before any stock, generated visual, or render block starts.
-        ...(!payload.factualReviewResume && requiresFactualReviewCheckpoint
+        ...(requiresFactualReviewCheckpoint && !payload.factualReviewResume
           ? { stopAfterBlockId: "episode_graph" }
           : requiresMusicAuditionCheckpoint
             ? { stopAfterBlockId: "music" }

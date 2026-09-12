@@ -941,6 +941,12 @@ export default defineSchema({
     musicAuditionState: v.optional(v.union(
       v.literal("awaiting"), v.literal("approved"), v.literal("rejected"), v.literal("blocked"),
     )),
+    // Server-created receipt identity for the exact retained native WAV. This
+    // stays separate from the completed music stage so a human decision cannot
+    // rewrite a sealed stage reuse receipt.
+    musicAuditionQualityReceiptKey: v.optional(v.string()),
+    musicAuditionQualityReceiptFingerprint: v.optional(v.string()),
+    musicAuditionApprovalFingerprint: v.optional(v.string()),
     // Owner-selected, immutable source-data-story packs use a dedicated
     // initial-dispatch outbox. This is intentionally distinct from ordinary
     // cadence: no scheduled plan may carry factual claims or replace this
@@ -2939,6 +2945,14 @@ export default defineSchema({
     checkpointFingerprint: v.string(),
     decision: v.union(v.literal("awaiting"), v.literal("approved"), v.literal("rejected"), v.literal("blocked")),
     createdAt: v.number(),
+    // An approved decision is useful only when it names the immutable quality
+    // receipt that was generated server-side from this exact native WAV.
+    reviewerId: v.optional(v.string()),
+    approvedAt: v.optional(v.number()),
+    rejectedAt: v.optional(v.number()),
+    qualityReceiptKey: v.optional(v.string()),
+    qualityReceiptFingerprint: v.optional(v.string()),
+    approvalFingerprint: v.optional(v.string()),
     blockedAt: v.optional(v.number()),
     blockedReason: v.optional(v.string()),
   })

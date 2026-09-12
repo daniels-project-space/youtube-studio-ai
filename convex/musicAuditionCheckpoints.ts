@@ -1,7 +1,10 @@
 import { v } from "convex/values";
 
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
-import { MusicAuditionCheckpointSchema } from "../src/engine/musicAuditionCheckpoint";
+import {
+  createMusicAuditionApproval,
+  MusicAuditionCheckpointSchema,
+} from "../src/engine/musicAuditionCheckpoint";
 import { assertRunExecutionWriteFence } from "../src/lib/runLease";
 
 function clearExecutionLeasePatch() {
@@ -99,6 +102,7 @@ export const getReviewForRun = query({
     return {
       checkpoint: {
         id: row._id, decision: row.decision, createdAt: row.createdAt,
+        reviewerId: row.reviewerId, approvedAt: row.approvedAt, rejectedAt: row.rejectedAt,
         blockedAt: row.blockedAt, blockedReason: row.blockedReason,
       },
       review: {
@@ -109,8 +113,76 @@ export const getReviewForRun = query({
         sampleRateHz: checkpoint.nativeOutput.sampleRateHz,
         channels: checkpoint.nativeOutput.channels,
         programFingerprint: checkpoint.programFingerprint,
+        // These stay in the service-to-service response only. The Next route
+        // reloads them to build the receipt and strips every locator before
+        // replying to the browser.
+        channelMusicProgramKey: checkpoint.channelMusicProgramKey,
+        musicRuntimeReceiptKey: checkpoint.musicRuntimeReceiptKey,
+        checkpointFingerprint: checkpoint.checkpointFingerprint,
+        // Complete checkpoint is service-only; the Next route parses it before
+        // it creates a receipt and never serializes this into browser state.
+        immutableCheckpoint: checkpoint,
       },
     };
+  },
+});
+
+/**
+ * Admit an already-stored, server-built quality receipt. This mutation never
+ * accepts a program, output digest, measurements, or storage object from a
+ * browser; the route derives those from the immutable checkpoint first.
+ */
+export const approve = mutation({
+  args: {
+    ownerId: v.string(), checkpointId: v.id("musicAuditionCheckpoints"), reviewerId: v.string(),
+    qualityReceiptKey: v.string(), qualityReceiptFingerprint: v.string(), now: v.optional(v.number()),
+  },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "music audition approval");
+    const now = args.now ?? Date.now();
+    if (!Number.isSafeInteger(now) || now < 0 || !args.reviewerId.trim()) throw new Error("music audition approval is invalid");
+    if (!/^[a-f0-9]{64}$/.test(args.qualityReceiptFingerprint)) throw new Error("music audition quality receipt fingerprint is invalid");
+    const row = await ctx.db.get(args.checkpointId);
+    if (!row || row.ownerId !== args.ownerId) throw new Error("music audition checkpoint not found");
+    const run = await ctx.db.get(row.runId);
+    if (!run || run.ownerId !== args.ownerId || run.channelId !== row.channelId) throw new Error("music audition run ownership mismatch");
+    const checkpoint = MusicAuditionCheckpointSchema.parse(row.checkpoint);
+    const expectedKey = `owner/${args.ownerId}/runs/${String(row.runId)}/audio/music-quality-${args.qualityReceiptFingerprint}.json`;
+    if (args.qualityReceiptKey !== expectedKey || args.qualityReceiptKey.includes("..")) {
+      throw new Error("music audition quality receipt key is outside the exact owner/run namespace");
+    }
+    if (row.decision === "approved") {
+      if (
+        row.qualityReceiptKey !== expectedKey ||
+        row.qualityReceiptFingerprint !== args.qualityReceiptFingerprint ||
+        row.reviewerId !== args.reviewerId
+      ) throw new Error("music audition approval replay does not match the immutable decision");
+      return { kind: "approved", reused: true, approvalFingerprint: row.approvalFingerprint };
+    }
+    if (row.decision !== "awaiting" || run.status !== "awaiting_music_audition") {
+      throw new Error("music audition checkpoint is no longer awaiting owner approval");
+    }
+    const approval = createMusicAuditionApproval({
+      version: "music-audition-approval/v1",
+      checkpointFingerprint: checkpoint.checkpointFingerprint,
+      qualityReceiptFingerprint: args.qualityReceiptFingerprint,
+      reviewerId: args.reviewerId,
+      approvedAt: now,
+    });
+    await ctx.db.patch(row._id, {
+      decision: "approved", reviewerId: args.reviewerId, approvedAt: now,
+      qualityReceiptKey: expectedKey, qualityReceiptFingerprint: args.qualityReceiptFingerprint,
+      approvalFingerprint: approval.approvalFingerprint,
+    });
+    await ctx.db.patch(run._id, {
+      musicAuditionState: "approved",
+      musicAuditionQualityReceiptKey: expectedKey,
+      musicAuditionQualityReceiptFingerprint: args.qualityReceiptFingerprint,
+      musicAuditionApprovalFingerprint: approval.approvalFingerprint,
+      heartbeatAt: now, error: undefined, ...clearExecutionLeasePatch(),
+    });
+    return { kind: "approved", reused: false, approvalFingerprint: approval.approvalFingerprint };
   },
 });
 
@@ -132,7 +204,10 @@ export const reject = mutation({
       throw new Error("music audition checkpoint is no longer awaiting rejection");
     }
     const reason = "music audition rejected by the owner; create a fresh immutable track before assembly";
-    await ctx.db.patch(row._id, { decision: "rejected", blockedAt: now, blockedReason: reason });
+    await ctx.db.patch(row._id, {
+      decision: "rejected", reviewerId: args.reviewerId, rejectedAt: now,
+      blockedAt: now, blockedReason: reason,
+    });
     await ctx.db.patch(run._id, {
       status: "music_audition_rejected", musicAuditionState: "rejected", error: reason,
       finishedAt: now, heartbeatAt: now, ...clearExecutionLeasePatch(),

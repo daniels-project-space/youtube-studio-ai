@@ -65,6 +65,43 @@ export const MusicAuditionCheckpointSchema = MusicAuditionCheckpointBodySchema.e
 
 export type MusicAuditionCheckpoint = z.infer<typeof MusicAuditionCheckpointSchema>;
 
+export const MUSIC_AUDITION_APPROVAL_VERSION = "music-audition-approval/v1" as const;
+
+const MusicAuditionApprovalBodySchema = z.object({
+  version: z.literal(MUSIC_AUDITION_APPROVAL_VERSION),
+  checkpointFingerprint: FingerprintSchema,
+  qualityReceiptFingerprint: FingerprintSchema,
+  reviewerId: text(320),
+  approvedAt: z.number().int().nonnegative(),
+}).strict();
+
+type MusicAuditionApprovalBody = z.infer<typeof MusicAuditionApprovalBodySchema>;
+
+export const MusicAuditionApprovalSchema = MusicAuditionApprovalBodySchema.extend({
+  approvalFingerprint: FingerprintSchema,
+}).strict().superRefine((value, issue) => {
+  const { approvalFingerprint, ...body } = value;
+  if (approvalFingerprint !== sha256Hex(canonicalJson(body))) {
+    issue.addIssue({ code: z.ZodIssueCode.custom, message: "music audition approval fingerprint is invalid" });
+  }
+});
+
+export type MusicAuditionApproval = z.infer<typeof MusicAuditionApprovalSchema>;
+
+/**
+ * The approval receipt deliberately binds only immutable identities created
+ * server-side: the selected checkpoint, the stored quality receipt, and the
+ * authenticated reviewer. Browser requests never get to nominate an output,
+ * program, storage key, or approval fingerprint.
+ */
+export function createMusicAuditionApproval(input: MusicAuditionApprovalBody): MusicAuditionApproval {
+  const body = MusicAuditionApprovalBodySchema.parse(input);
+  return Object.freeze(MusicAuditionApprovalSchema.parse({
+    ...body,
+    approvalFingerprint: sha256Hex(canonicalJson(body)),
+  }));
+}
+
 export function createMusicAuditionCheckpoint(input: Omit<MusicAuditionCheckpointBody, "version" | "programFingerprint" | "nativeOutput"> & {
   readonly program: unknown;
   readonly runtimeReceipt: unknown;
