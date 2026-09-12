@@ -19,6 +19,7 @@ import {
 } from "./ChannelScheduleEditor";
 import { DayByDaySchedule } from "./DayByDaySchedule";
 import { ScheduleQueue } from "./ScheduleQueue";
+import { WeekBulkPlanner } from "./WeekBulkPlanner";
 import {
   CHANNEL_COLORS,
   buildCalendarModel,
@@ -296,6 +297,15 @@ export default function SchedulePage() {
           {notice.text}
           <button type="button" onClick={() => setNotice(null)} aria-label="Dismiss message">×</button>
         </div>
+      )}
+
+      {!loading && (
+        <WeekBulkPlanner
+          channels={visibleChannels}
+          week={today}
+          canEdit={operationsAccess === "owner"}
+          onRequestOwner={requestOperationsAccess}
+        />
       )}
 
       {publishedHistory?.truncated && (

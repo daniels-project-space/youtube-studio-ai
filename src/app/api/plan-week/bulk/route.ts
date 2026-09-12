@@ -126,6 +126,7 @@ export async function POST(request: Request) {
     return NextResponse.json({
       ok: true,
       state: "queued",
+      fingerprint: order.fingerprint,
       orderFingerprint: order.fingerprint,
       channelCount: order.channels.length,
       totalItems: order.totalItems,

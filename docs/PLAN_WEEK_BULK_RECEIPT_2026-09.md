@@ -24,6 +24,12 @@ receipt in `planWeekBulkOrders`.
   later slice must add durable Salad work-order claims and aggregate cost
   reconciliation before the weekly fleet is considered complete.
 
-Focused order and wiring tests, typecheck, lint, and production build passed
-for commit `71753b4` and the follow-up receipt-status slice. No provider
-or paid render was invoked by this change.
+The existing Schedule surface now renders this receipt through a compact
+"Batch-plan this week" disclosure. It sends one authenticated, idempotent
+queue request, polls the owner-scoped status route, and exposes a real
+completed/total bar plus per-channel status and failure text. It does not add
+another sidebar desk or make a provider call from the browser.
+
+Focused order, UI wiring, typecheck, lint, visual audit, production build, all
+675 direct readiness tests, and the real assembly smoke passed for the
+follow-up slice. No provider or paid render was invoked by this change.

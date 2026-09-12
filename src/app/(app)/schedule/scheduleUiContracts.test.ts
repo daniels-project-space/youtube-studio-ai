@@ -6,6 +6,7 @@ const here = fileURLToPath(new URL(".", import.meta.url));
 const page = readFileSync(`${here}/page.tsx`, "utf8");
 const board = readFileSync(`${here}/DayByDaySchedule.tsx`, "utf8");
 const styles = readFileSync(`${here}/schedule.module.css`, "utf8");
+const bulkPlanner = readFileSync(`${here}/WeekBulkPlanner.tsx`, "utf8");
 
 assert.match(page, /Array\.from\(\{ length: 14 \}/,
   "the release signal must be derived from fourteen real calendar days");
@@ -46,5 +47,15 @@ assert.match(cadence, /onRequestOwner/);
 assert.match(cadence, /Verify owner to save/);
 assert.doesNotMatch(page, /<PageHeader/,
   "Schedule must keep its own release-clock composition instead of the generic page header");
+assert.match(page, /<WeekBulkPlanner/,
+  "the weekly batch planner must be available from the existing schedule surface");
+assert.match(bulkPlanner, /fetch\("\/api\/plan-week\/bulk"/,
+  "the batch planner must use the real bulk planning route");
+assert.match(bulkPlanner, /api\/plan-week\/bulk\?fingerprint=/,
+  "the batch planner must poll the persisted receipt rather than inventing progress");
+assert.match(bulkPlanner, /credentials: "same-origin"/,
+  "bulk planning must preserve the authenticated owner session");
+assert.match(bulkPlanner, /onRequestOwner/,
+  "paid weekly planning must preserve the shared owner boundary");
 
 console.log("schedule UI contracts passed");

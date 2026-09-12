@@ -385,6 +385,62 @@ a.nextRelease:focus-visible { border-radius: 8px; outline: 2px solid var(--color
   font-size: 0.77rem;
 }
 
+.bulkPlanner {
+  margin: 0 0 1.15rem;
+  overflow: hidden;
+  border-radius: 13px;
+  background:
+    linear-gradient(110deg, rgba(115, 221, 255, 0.055), rgba(167, 139, 250, 0.035) 58%, rgba(255, 94, 42, 0.035)),
+    rgba(9, 13, 24, 0.66);
+}
+
+.bulkSummary {
+  display: flex;
+  min-height: 54px;
+  align-items: center;
+  gap: 0.62rem;
+  cursor: pointer;
+  list-style: none;
+  padding: 0.62rem 0.78rem;
+}
+
+.bulkSummary::-webkit-details-marker { display: none; }
+.bulkSummary::after { margin-left: 0.12rem; color: var(--color-accent); content: "+"; font-size: 0.9rem; }
+.bulkPlanner[open] .bulkSummary::after { content: "−"; }
+.bulkSignal { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: var(--color-secondary); box-shadow: 0 0 12px rgba(115, 221, 255, 0.48); }
+.bulkSummary > span:nth-child(2) { display: grid; min-width: 0; gap: 0.14rem; }
+.bulkSummary strong { font-size: 0.76rem; font-weight: 650; }
+.bulkSummary small { overflow: hidden; color: var(--color-faint); font-size: 0.61rem; text-overflow: ellipsis; white-space: nowrap; }
+.bulkSummaryStatus { margin-left: auto; border: 1px solid var(--color-border); border-radius: 999px; color: var(--color-muted); font: 0.58rem var(--font-mono); padding: 0.18rem 0.42rem; text-transform: uppercase; }
+.bulkSummaryStatus[data-status="running"] { border-color: rgba(59, 130, 246, 0.34); color: #9bc2ff; }
+.bulkSummaryStatus[data-status="succeeded"] { border-color: rgba(34, 197, 94, 0.34); color: #9fe8b8; }
+.bulkSummaryStatus[data-status="failed"] { border-color: rgba(239, 68, 68, 0.36); color: #f7aaaa; }
+
+.bulkBody { display: grid; gap: 0.72rem; border-top: 1px solid var(--color-border); padding: 0.8rem; }
+.bulkControls { display: grid; grid-template-columns: 136px minmax(0, 1fr) auto; gap: 0.7rem; align-items: end; }
+.bulkControls label { display: grid; gap: 0.28rem; color: var(--color-faint); font-size: 0.61rem; }
+.bulkControls select { min-height: 36px; border: 1px solid var(--color-border-strong); border-radius: 8px; background: rgba(10, 10, 11, 0.72); color: var(--color-fg); font: inherit; font-size: 0.76rem; padding: 0 0.56rem; }
+.bulkControls select:focus { border-color: var(--color-accent); outline: none; box-shadow: 0 0 0 3px var(--color-accent-soft); }
+.bulkActionCopy { display: grid; min-width: 0; gap: 0.16rem; padding-bottom: 0.2rem; }
+.bulkActionCopy strong { overflow: hidden; font-size: 0.75rem; text-overflow: ellipsis; white-space: nowrap; }
+.bulkActionCopy span { overflow: hidden; color: var(--color-faint); font: 0.59rem var(--font-mono); text-overflow: ellipsis; white-space: nowrap; }
+.bulkAction { min-height: 36px; border: 1px solid rgba(212, 165, 116, 0.42); border-radius: 8px; background: var(--color-accent-soft); color: var(--color-accent); cursor: pointer; font-size: 0.68rem; font-weight: 650; padding: 0 0.72rem; white-space: nowrap; }
+.bulkAction:hover { border-color: var(--color-accent); }
+.bulkAction:disabled { cursor: wait; opacity: 0.58; }
+.bulkProgress { display: grid; gap: 0.45rem; }
+.bulkProgressTopline { display: flex; align-items: center; justify-content: space-between; color: var(--color-muted); font: 0.62rem var(--font-mono); text-transform: uppercase; }
+.bulkProgressTopline strong { color: var(--color-fg); font-weight: 600; }
+.bulkProgressTrack { height: 5px; overflow: hidden; border-radius: 99px; background: rgba(255, 255, 255, 0.08); }
+.bulkProgressTrack i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, var(--color-secondary), var(--color-accent)); transition: width 300ms ease; }
+.bulkChildren { display: flex; gap: 0.38rem; overflow-x: auto; padding-bottom: 0.1rem; scrollbar-width: thin; }
+.bulkChild { display: inline-flex; flex: 0 0 auto; align-items: center; gap: 0.28rem; border: 1px solid var(--color-border); border-radius: 999px; color: var(--color-muted); font-size: 0.61rem; padding: 0.2rem 0.42rem; }
+.bulkChild i { width: 5px; height: 5px; border-radius: 50%; background: var(--color-queued); }
+.bulkChild em { color: var(--color-faint); font-size: 0.53rem; font-style: normal; }
+.bulkChild[data-status="running"] i { background: var(--color-running); box-shadow: 0 0 8px rgba(59, 130, 246, 0.75); }
+.bulkChild[data-status="succeeded"] i { background: var(--color-ok); }
+.bulkChild[data-status="failed"] i { background: var(--color-failed); }
+.bulkError { color: #f7aaaa; font-size: 0.68rem; line-height: 1.35; }
+
 .calendarPanel {
   padding: 1rem;
   margin-bottom: 1.8rem;
