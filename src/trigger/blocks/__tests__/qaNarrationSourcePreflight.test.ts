@@ -21,6 +21,7 @@ import { contentLaneForFamily } from "@/engine/contentLane";
 import * as transcript from "@/lib/narrationTranscriptProof";
 import { classifyExecutionError } from "@/engine/executionErrors";
 import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
+import { stageReuseFixtures } from "@/engine/__tests__/fixtures/stageReuseFixtures";
 
 // A guarded real qaVisual caller. Orthogonal media/reviewer process transports are
 // fixtures; existing transcript validation, hashes, cue gate and audit are real.
@@ -177,10 +178,13 @@ async function cacheControl(block: Block, label: string) {
     visualPacing: measureVisualPacing({ videoPath: masterPath, durationSec: duration, policy: { mode: "exempt", sceneThreshold: 0.1, maxMarkerHoldSec: null, rationale: "Schema-only resume fixture" } }),
   });
   for (const [key, value] of Object.entries(cached)) validateArtifact(artifactContract(key), value);
-  const completed = [{ block: "qa_visual", outputs: cached, cost: 0.73 }], original = structuredClone(completed);
+  const pipeline = validatePipeline([{ block: "qa_visual", params }], Object.keys(store));
+  const completed = await stageReuseFixtures(pipeline, { ...scope, budgetUsd: 100, seedStore: store },
+    [{ block: "qa_visual", outputs: cached, cost: 0.73 }]);
+  const original = structuredClone(completed);
   const rows: Parameters<RunStageSink["upsert"]>[0][] = [], demands: unknown[] = [], persisted: string[] = [];
   const calls = { reviewerCalls, transcriptCalls, sourceDownloads, writes };
-  const result = await runPipeline(validatePipeline([{ block: "qa_visual", params }], Object.keys(store)), { ...scope, budgetUsd: 100, seedStore: store,
+  const result = await runPipeline(pipeline, { ...scope, budgetUsd: 100, seedStore: store,
     sink: { async getCompleted() { return completed; }, async upsert(row) { rows.push(row); }, async upsertArtifacts(row) { persisted.push(...row.artifacts.map((artifact) => artifact.artifact.producerModule)); } },
     rehydrate: (id, outputs, demand) => { demands.push({ id, keys: [...(demand?.neededOutputKeys ?? [])].sort() }); return rehydrateOutputsWithStorage(id, outputs, scope.runId, demand, {
       async getObjectToFile() { throw new Error("ordinary cached QA must not download source"); }, async headObjectMetadata() { throw new Error("ordinary cached QA must not HEAD source"); },
@@ -189,7 +193,7 @@ async function cacheControl(block: Block, label: string) {
   assert.equal(result.ok, true, result.error); assert.equal(result.costTotal, 0.73); assert.deepEqual(result.store.qaReport, cached.qaReport);
   assert.deepEqual(completed, original); assert.deepEqual({ reviewerCalls, transcriptCalls, sourceDownloads, writes }, calls);
   assert.deepEqual(demands, [{ id: "qa_visual", keys: [] }]);
-  assert.equal(persisted.length, Object.keys(cached).length); assert.ok(persisted.every((producer) => producer === "qa_visual")); assert.equal(rows[0]?.cost, undefined);
+  assert.equal(persisted.length, 0, "reuse preserves original QA artifact identities without re-stamping lineage"); assert.equal(rows[0]?.cost, undefined);
   results.push({ name: `ordinary-cache-${label}`, cost: result.costTotal, demands, sourceDownloads: 0, reviewerCalls: 0, retainedRows: true });
   assert.ok(rows.every((row) => typeof row.finishedAt === "number"));
   return { outputs: cached, cost: result.costTotal, demands, rows: rows.map(({ finishedAt: _clock, ...row }) => { void _clock; return row; }) };

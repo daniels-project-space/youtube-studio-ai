@@ -3,6 +3,7 @@ import { _clear, register } from "@/engine/registry";
 import { runPipeline } from "@/engine/runner";
 import type { Block, ResumeRehydrationRequest, RunStageSink } from "@/engine/types";
 import { validatePipeline } from "@/engine/validate";
+import { stageReuseFixtures } from "./fixtures/stageReuseFixtures";
 
 const base = {
   ownerId: "resume-demand-owner",
@@ -22,7 +23,11 @@ function sinkWithCompleted(
       writes.push({ block: args.block, status: args.status, error: args.error });
     },
     async getCompleted() {
-      return completed;
+      return stageReuseFixtures(
+        validatePipeline(completed.map(({ block }) => ({ block }))),
+        base,
+        completed,
+      );
     },
   };
 }

@@ -1,6 +1,7 @@
 import type { ImageUsageSummary } from "@/lib/imageUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
 import type { VisualArtifactAttempt } from "./visualArtifactAttemptLedger";
+import type { StageReuseReceipt } from "./stageReuseContract";
 
 /**
  * Core block-engine contract (MASTER-PLAN §D).
@@ -174,13 +175,14 @@ export interface RunStageSink {
     checkpointCostReceipts?: Array<{ id: string; costUsd: number }>;
     inputs?: unknown;
     outputs?: unknown;
+    reuseReceipt?: StageReuseReceipt;
     error?: string;
   }): Promise<void>;
   /**
    * Optional: return the persisted outputs of blocks that already completed "ok"
    * for this run, so a resumed run can skip them (no double-spend on paid blocks).
    */
-  getCompleted?(runId: string): Promise<Array<{ block: string; outputs: unknown; cost?: number }>>;
+  getCompleted?(runId: string): Promise<Array<{ block: string; outputs: unknown; cost?: number; reuseReceipt?: unknown }>>;
   /**
    * Optional full resume snapshot. Production sinks should implement this so a
    * worker retry can distinguish a fresh stage from paid work that was already
@@ -193,6 +195,7 @@ export interface RunStageSink {
       block: string;
       status: string;
       outputs?: unknown;
+      reuseReceipt?: unknown;
       cost?: number;
       costBeforeExecution?: number;
       checkpointCostReceipts?: Array<{ id: string; costUsd: number }>;

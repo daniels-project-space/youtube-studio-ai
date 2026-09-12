@@ -3,6 +3,7 @@ import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import { deriveReleaseEvidenceProjection } from "../src/lib/releaseEvidenceStatus";
 import { assertRunExecutionWriteFence, requiresRunExecutionWriteFence } from "../src/lib/runLease";
+import { StageReuseReceiptSchema } from "../src/engine/stageReuseContract";
 
 /**
  * Upsert a per-block stage row for a run. Keyed by (runId, block) so the
@@ -23,6 +24,7 @@ export const upsertRunStage = mutation({
     checkpointCostReceipts: v.optional(v.array(v.object({ id: v.string(), costUsd: v.number() }))),
     inputs: v.optional(v.any()),
     outputs: v.optional(v.any()),
+    reuseReceipt: v.optional(v.any()),
     error: v.optional(v.string()),
   },
   returns: v.id("runStages"),
@@ -43,6 +45,12 @@ export const upsertRunStage = mutation({
           args.checkpointCostReceipts.some((receipt) => !/^[a-f0-9]{64}$/.test(receipt.id) ||
             !Number.isFinite(receipt.costUsd) || receipt.costUsd < 0)) {
         throw new Error("run stage checkpoint cost receipts are invalid");
+      }
+    }
+    if (args.reuseReceipt !== undefined) {
+      StageReuseReceiptSchema.parse(args.reuseReceipt);
+      if (args.status !== "ok" || args.outputs === undefined) {
+        throw new Error("stage reuse receipt requires its successful output write");
       }
     }
     if ((args.leaseOwner === undefined) !== (args.executionLeaseToken === undefined)) {
@@ -94,6 +102,8 @@ export const upsertRunStage = mutation({
       if (checkpointCostReceipts !== undefined) patch.checkpointCostReceipts = checkpointCostReceipts;
       if (args.inputs !== undefined) patch.inputs = args.inputs;
       if (args.outputs !== undefined) patch.outputs = args.outputs;
+      if (args.reuseReceipt !== undefined) patch.reuseReceipt = args.reuseReceipt;
+      else if (args.outputs !== undefined || args.status === "running") patch.reuseReceipt = undefined;
       if (args.error !== undefined) patch.error = args.error;
       // A stage transitioning to OK clears any stale failure/supersede text —
       // rows used to show "superseded by self-heal…" alongside status ok.
@@ -114,6 +124,7 @@ export const upsertRunStage = mutation({
         checkpointCostReceipts,
         inputs: args.inputs,
         outputs: args.outputs,
+        reuseReceipt: args.reuseReceipt,
         error: args.error,
       });
     }
@@ -183,8 +194,9 @@ export const listRunStages = query({
       .collect();
     if (!args.slim) return rows;
     return rows.map((r) => {
-      const { inputs: _inputs, outputs, ...rest } = r;
+      const { inputs: _inputs, reuseReceipt: _reuseReceipt, outputs, ...rest } = r;
       void _inputs;
+      void _reuseReceipt;
       return {
         ...rest,
         ...(outputs !== undefined ? { outputs: slimValue(outputs) } : {}),

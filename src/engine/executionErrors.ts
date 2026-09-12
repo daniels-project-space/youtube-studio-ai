@@ -143,7 +143,7 @@ function result(
 
 /**
  * Classify an execution failure. The precedence is deliberate:
- * explicit retryability -> explicit status -> error code -> deterministic
+ * reconciliation hold -> explicit retryability -> explicit status -> error code -> deterministic
  * runtime/provider signatures -> transient transport signatures -> unknown.
  */
 export function classifyExecutionError(error: unknown): ExecutionErrorClassification {
@@ -167,6 +167,13 @@ export function classifyExecutionError(error: unknown): ExecutionErrorClassifica
       ? "block" as const
       : undefined;
   const shared = { status, code, retryAfterMs, ...(retryScope ? { retryScope } : {}) };
+
+  // Existing paid-stage source-read errors can explicitly authorize a bounded
+  // storage-only retry. Do not turn that protocol into a fresh compute retry
+  // or disable it; only the new cache-identity hold is unconditionally terminal.
+  if (/STAGE_REUSE_RECONCILIATION_REQUIRED/.test(message)) {
+    return result("deterministic", message, "saved execution requires explicit reconciliation", shared);
+  }
 
   if (typeof metadata.retryable === "boolean") {
     return result(

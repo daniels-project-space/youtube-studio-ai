@@ -1228,6 +1228,7 @@ export default defineSchema({
     cost: v.number(),
     costBeforeExecution: v.optional(v.number()),
     checkpointCostReceipts: v.optional(v.array(v.object({ id: v.string(), costUsd: v.number() }))),
+    reuseReceipt: v.optional(v.any()),
     remoteChildCostAttempts: v.optional(v.array(v.object({
       dispatchKey: v.string(), taskRunId: v.string(), attemptNumber: v.number(),
       status: v.union(v.literal("started"), v.literal("succeeded"), v.literal("failed")),

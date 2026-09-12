@@ -44,9 +44,17 @@ import {
   REVIEWED_LTX_RUNTIME_SEED_KEY,
 } from "@/engine/reviewedLtxRuntimeTarget";
 import { resolveOwnerReviewedLtxRuntime } from "@/lib/reviewedLtxRuntimeStateRuntime";
-import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
 import { RENDER_CHILD_HEARTBEAT_RENEW_INTERVAL_MS } from "@/lib/renderChildLease";
 import { executeRemoteCostTrackedBlock } from "@/trigger/remoteChildCostTransport";
+import {
+  assertRestoredStageOutputs,
+  assertStageReuseReceipt,
+  stageInvocationHash,
+  stageReuseHash,
+  assertDeferredInputsExecutable,
+  assertStageInvocationUnchanged,
+} from "@/engine/stageReuse";
+import { STAGE_REUSE_RECONCILIATION_MARKER, type StageReuseOutputIdentity } from "@/engine/stageReuseContract";
 
 export interface RenderBlockInput {
   runId: string;
@@ -274,6 +282,22 @@ export async function executeRenderBlock(
   // Rebuild the store this block reads: channel seeds + every completed
   // upstream block's outputs, rehydrated from R2 to local files on THIS worker.
   const store: Record<string, unknown> = { ...frozenInvocation.seedStore };
+  const artifactIdentities: Record<string, StageReuseOutputIdentity> = {};
+  const artifactRefs: Record<string, ArtifactRef> = Object.fromEntries(
+    Object.entries(store).map(([key, value]) => {
+      const contract = artifactContract(key);
+      const payloadHash = stageReuseHash(value);
+      return [key, {
+        artifactId: `${payload.runId}:seed:${key}:${payloadHash.slice(0, 16)}`,
+        key,
+        type: contract.type,
+        schemaVersion: contract.version,
+        producerModule: "$seed",
+        producerVersion: "1.0.0",
+        payloadHash,
+      } satisfies ArtifactRef];
+    }),
+  );
   const executionLease = {
     leaseOwner: payload.leaseOwner,
     executionLeaseToken: payload.executionLeaseToken,
@@ -283,36 +307,14 @@ export async function executeRenderBlock(
   // One stage read supplies both reusable outputs and cumulative cost. A heal
   // supersedes an output, but the original provider charge remains spent.
   const persistedStages = await sink.getResumeState(payload.runId);
-  const completed = persistedStages.filter((row) => row.status === "ok" && row.outputs != null);
+  const completed = persistedStages.filter((row) => row.status === "ok");
   const completedByBlock = new Map(completed.map((row) => [row.block, row]));
-  const loadInputArtifactRefs = async (): Promise<Readonly<Record<string, ArtifactRef>>> => {
-    const artifactRows = await convex.query(api.runArtifacts.listForRun, {
-      secret: requireInternalQuerySecret(),
-      ownerId: payload.ownerId,
-      runId: payload.runId as Id<"runs">,
-    });
-    return Object.fromEntries(
-      (artifactRows as Array<{
-        artifactId: string;
-        key: string;
-        type: string;
-        schemaVersion: string;
-        producerModule: string;
-        producerVersion: string;
-        payloadHash: string;
-      }>)
-        .filter((row) => consumedKeys.has(row.key))
-        .map((row) => [row.key, {
-          artifactId: row.artifactId,
-          key: row.key,
-          type: row.type,
-          schemaVersion: row.schemaVersion,
-          producerModule: row.producerModule,
-          producerVersion: row.producerVersion,
-          payloadHash: row.payloadHash,
-        } satisfies ArtifactRef]),
-    ) as Record<string, ArtifactRef>;
-  };
+  // A healed run can contain multiple historical artifacts for the same key.
+  // Only identities selected by validated successful stage receipts belong to
+  // this reconstruction; a last-row-wins artifact query cannot prove that.
+  const loadInputArtifactRefs = async (): Promise<Readonly<Record<string, ArtifactRef>>> =>
+    Object.fromEntries(Object.entries(artifactRefs).filter(([key]) =>
+      consumedKeys.has(key) && ((store[key] !== undefined && store[key] !== null) || artifactIdentities[key]?.deferred)));
   let restored = 0;
   let fetched = 0;
   let skipped = 0;
@@ -323,14 +325,31 @@ export async function executeRenderBlock(
       throw new Error(`${taskLabel}: frozen route lost upstream entry ${upstreamIndex}`);
     }
     const row = completedByBlock.get(upstreamEntry.block);
-    if (!row) continue;
-    const outputs = { ...((row.outputs ?? {}) as Record<string, unknown>) };
-    // Every upstream value is merged verbatim, exactly as before — the store
-    // this block sees is unchanged. Filtering below decides only what we PAY
-    // R2 to download, so an input read but not declared still resolves (it
-    // just never needed a fetch: undeclared reads are plain values, never
-    // R2-backed local paths — asserted in rehydrateSubsetContract.test.ts).
-    Object.assign(store, outputs);
+    if (!row) throw new Error(`${STAGE_REUSE_RECONCILIATION_MARKER}: required upstream execution "${upstreamEntry.block}" is not complete`);
+    const upstreamManifest = frozenPipeline.resolved.manifests[upstreamIndex];
+    if (!upstreamManifest || upstreamManifest.id !== upstreamEntry.block) {
+      throw new Error(`${taskLabel}: frozen upstream manifest alignment is invalid`);
+    }
+    if (!row.outputs || typeof row.outputs !== "object" || Array.isArray(row.outputs)) {
+      throw new Error(`${STAGE_REUSE_RECONCILIATION_MARKER}: upstream "${row.block}" has invalid cached outputs`);
+    }
+    const outputs = structuredClone(row.outputs as Record<string, unknown>);
+    let reuseReceipt;
+    try {
+      reuseReceipt = assertStageReuseReceipt(row.reuseReceipt, stageInvocationHash({
+        ownerId: payload.ownerId,
+        channelId: payload.channelId,
+        runId: payload.runId,
+        keyPrefix: frozenInvocation.keyPrefix,
+        manifest: upstreamManifest,
+        params: upstreamEntry.params ?? {},
+        store,
+        inputRefs: artifactRefs,
+        inputIdentities: artifactIdentities,
+      }), outputs);
+    } catch (error) {
+      throw new Error(`${STAGE_REUSE_RECONCILIATION_MARKER}: upstream "${row.block}" cannot be reused: ${error instanceof Error ? error.message : error}`);
+    }
     restored++;
     // Only rehydrate artifacts this render block actually consumes. Pulling
     // every completed block's media onto a worker that will never open it was
@@ -347,6 +366,11 @@ export async function executeRenderBlock(
     const r = await rehydrateOutputs(row.block, outputs, payload.runId, {
       neededOutputKeys: consumedKeys,
     });
+    try {
+      assertRestoredStageOutputs(reuseReceipt, r.outputs);
+    } catch (error) {
+      throw new Error(`${STAGE_REUSE_RECONCILIATION_MARKER}: upstream "${row.block}" restoration changed its bound outputs: ${error instanceof Error ? error.message : error}`);
+    }
     if (!r.ok) {
       if (Object.keys(outputs).some((key) => requiredConsumedKeys.has(key))) {
         throw new Error(
@@ -357,6 +381,10 @@ export async function executeRenderBlock(
       logger.warn(`[${taskLabel}] block "${row.block}" consumed outputs not fully rehydratable — merging raw (render fails if it reads them)`);
     }
     Object.assign(store, r.outputs);
+    for (const ref of reuseReceipt.outputRefs) {
+      artifactRefs[ref.key] = ref;
+    }
+    for (const identity of reuseReceipt.outputIdentities) artifactIdentities[identity.key] = identity;
   }
   logger.info(
     `[${taskLabel}] store rebuilt from ${restored} upstream block(s); rehydrated ${fetched}, skipped ${skipped} not consumed by ${payload.blockId} → running ${payload.blockId}`,
@@ -367,6 +395,11 @@ export async function executeRenderBlock(
   // The helper immediately reserves this and every still-pending paid stage,
   // then exposes the same late-bound assertion to the block for its own
   // deterministic provider sub-plans.
+  try {
+    assertDeferredInputsExecutable(manifest, store, artifactIdentities);
+  } catch (error) {
+    throw new Error(`${STAGE_REUSE_RECONCILIATION_MARKER}: ${error instanceof Error ? error.message : error}`);
+  }
   const budgetAdmission = admitFrozenRemoteChildStage({
     resolved: frozenPipeline.resolved,
     blockId: frozenEntry.block,
@@ -417,6 +450,12 @@ export async function executeRenderBlock(
     await pendingPollLeaseRenewal;
   };
 
+  const executionIdentity = {
+    ownerId: payload.ownerId, runId: payload.runId, channelId: payload.channelId,
+    keyPrefix: frozenInvocation.keyPrefix, manifest, params: frozenEntry.params ?? {},
+    store, inputRefs: artifactRefs, inputIdentities: artifactIdentities,
+  };
+  const executionInputHash = stageInvocationHash(executionIdentity);
   const ctx: StageContext = {
     ownerId: payload.ownerId,
     runId: payload.runId,
@@ -425,6 +464,7 @@ export async function executeRenderBlock(
     keyPrefix: frozenInvocation.keyPrefix,
     params: frozenEntry.params ?? {},
     store,
+    artifactRefs: await loadInputArtifactRefs(),
     budgetUsd: frozenInvocation.budgetUsd,
     ...(budgetAdmission.stageBudgetUsd === undefined
       ? {}
@@ -469,6 +509,7 @@ export async function executeRenderBlock(
         finish: (result) => convex.mutation(api.remoteChildCosts.finish, { ...costIdentity, ...result }),
       },
     });
+    assertStageInvocationUnchanged(executionIdentity, executionInputHash);
     return { patch };
   } catch (error) {
     const taskError = taskErrorForRetryPolicy(error);

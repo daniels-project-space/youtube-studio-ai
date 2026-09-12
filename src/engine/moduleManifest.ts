@@ -40,6 +40,10 @@ export interface ModuleContractOverride {
   requiredConsumes?: string[];
   optionalConsumes?: string[];
   optionalProduces?: string[];
+  /** Audited modules reading only their own entry in a shared repair map. */
+  resumeInputProjections?: Record<string, "own_block_entry">;
+  /** Inputs this module independently loads and verifies from durable references. */
+  deferredConsumes?: string[];
   providerProfiles?: ProviderProfile[];
   sideEffects?: ModuleSideEffect[];
   certification?: ModuleCertification;
@@ -60,6 +64,8 @@ export interface ModuleManifest {
   optionalConsumes: Readonly<Record<string, ArtifactContract>>;
   produces: Readonly<Record<string, ArtifactContract>>;
   optionalProduces: Readonly<Record<string, ArtifactContract>>;
+  resumeInputProjections?: Readonly<Record<string, "own_block_entry">>;
+  deferredConsumes?: readonly string[];
   configSchema: z.ZodType<Record<string, unknown>>;
   providerProfiles: readonly ProviderProfile[];
   costAndLatency: {
@@ -121,6 +127,8 @@ export function manifestFromBlock(
     optionalConsumes: keyedContracts(optionalConsumes),
     produces: keyedContracts(requiredOutputKeys),
     optionalProduces: keyedContracts([...optionalOutputKeys]),
+    ...(override?.resumeInputProjections ? { resumeInputProjections: override.resumeInputProjections } : {}),
+    ...(override?.deferredConsumes ? { deferredConsumes: override.deferredConsumes } : {}),
     configSchema: z.record(z.string(), z.unknown()),
     providerProfiles: override?.providerProfiles ?? [],
     costAndLatency: {
@@ -185,6 +193,11 @@ export function configuredMaxCostUsd(
 export function assertExecutableManifest(manifest: ModuleManifest): void {
   if (manifest.id !== manifest.block.id) {
     throw new Error(`manifest id ${manifest.id} does not match block id ${manifest.block.id}`);
+  }
+  for (const key of [...Object.keys(manifest.resumeInputProjections ?? {}), ...(manifest.deferredConsumes ?? [])]) {
+    if (!(key in manifest.consumes) && !(key in manifest.optionalConsumes)) {
+      throw new Error(`manifest ${manifest.id} configures recovery for undeclared input ${key}`);
+    }
   }
   const overlap = Object.keys(manifest.optionalConsumes).filter((key) => key in manifest.consumes);
   if (overlap.length) {

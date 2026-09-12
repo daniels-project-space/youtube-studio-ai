@@ -311,7 +311,7 @@ export function planHeal(
   visualRepair: readonly VisualRepairSignal[] = [],
   channel?: HealChannelContext,
 ): HealPlan | null {
-  if (!failureMsg) return null;
+  if (!failureMsg || /(?:STAGE_REUSE|PAID_STAGE)_RECONCILIATION_REQUIRED/.test(failureMsg)) return null;
 
   const owners = new Set<string>();
   const labels: string[] = [];

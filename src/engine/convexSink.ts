@@ -34,16 +34,17 @@ export function makeConvexSink(
         checkpointCostReceipts: args.checkpointCostReceipts,
         inputs: args.inputs,
         outputs: args.outputs,
+        reuseReceipt: args.reuseReceipt,
         error: args.error,
       });
     },
     async getCompleted(runId) {
       const rows = (await client.query(api.runStages.listRunStages, {
         runId: runId as Id<"runs">,
-      })) as Array<{ block: string; status: string; outputs?: unknown; cost?: number }>;
+      })) as Array<{ block: string; status: string; outputs?: unknown; cost?: number; reuseReceipt?: unknown }>;
       return (rows ?? [])
         .filter((r) => r.status === "ok" && r.outputs != null)
-        .map((r) => ({ block: r.block, outputs: r.outputs, cost: r.cost }));
+        .map((r) => ({ block: r.block, outputs: r.outputs, cost: r.cost, reuseReceipt: r.reuseReceipt }));
     },
     async getResumeState(runId) {
       return (await client.query(api.runStages.listRunStages, {
@@ -52,6 +53,7 @@ export function makeConvexSink(
         block: string;
         status: string;
         outputs?: unknown;
+        reuseReceipt?: unknown;
         cost?: number;
         costBeforeExecution?: number;
         checkpointCostReceipts?: Array<{ id: string; costUsd: number }>;

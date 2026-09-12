@@ -23,7 +23,6 @@ import {
 } from "./types";
 import type { ResolvedPipeline } from "./validate";
 import type { VisualRepairSignal } from "./healer";
-import { createHash } from "node:crypto";
 import { artifactContract, validateArtifact } from "./artifactSchemas";
 import {
   classifyExecutionError,
@@ -35,6 +34,8 @@ import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage"
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
 import { createCheckpointCostScope, incrementalObservedFailureCostUsd, type CheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
+import { assertDeferredInputsExecutable, assertRestoredStageOutputs, assertStageInvocationUnchanged, assertStageReuseReceipt, sealStageReuseReceipt, stageInvocationHash, stageReuseHash } from "./stageReuse";
+import { STAGE_REUSE_RECONCILIATION_MARKER, type StageReuseReceipt, type StageReuseOutputIdentity } from "./stageReuseContract";
 
 export interface RunPipelineOptions {
   ownerId: string;
@@ -301,7 +302,7 @@ function stableJson(value: unknown): string {
 }
 
 function hashPayload(value: unknown): string {
-  return createHash("sha256").update(stableJson(value)).digest("hex");
+  return stageReuseHash(value);
 }
 
 function artifactSummary(value: unknown): string {
@@ -428,6 +429,7 @@ export async function runPipeline(
   const log = opts.log ?? (() => {});
   const store: Record<string, unknown> = { ...(opts.seedStore ?? {}) };
   const artifactRefs: Record<string, ArtifactRef> = {};
+  const artifactIdentities: Record<string, StageReuseOutputIdentity> = {};
   for (const [key, value] of Object.entries(store)) {
     const contract = artifactContract(key);
     const payloadHash = hashPayload(value);
@@ -486,6 +488,8 @@ export async function runPipeline(
   // could silently blow the channel budget), and (b) runs.costTotal reports
   // the cumulative truth.
   const completedMap: Record<string, Record<string, unknown>> = {};
+  const completedReceipts: Record<string, unknown> = {};
+  const acceptedReceipts = new Map<string, StageReuseReceipt>();
   const priorStageMap = new Map<
     string,
     { status: string; cost?: number; costBeforeExecution?: number; checkpointCostReceipts?: CheckpointCostReceipt[]; startedAt?: number; error?: string }
@@ -502,6 +506,7 @@ export async function runPipeline(
         block: string;
         status: string;
         outputs?: unknown;
+        reuseReceipt?: unknown;
         cost?: number;
         costBeforeExecution?: number;
         checkpointCostReceipts?: CheckpointCostReceipt[];
@@ -536,6 +541,7 @@ export async function runPipeline(
         if (row.status !== "ok") continue;
         if (row.outputs && typeof row.outputs === "object") {
           completedMap[row.block] = row.outputs as Record<string, unknown>;
+          completedReceipts[row.block] = row.reuseReceipt;
         }
       }
       const n = Object.keys(completedMap).length;
@@ -614,19 +620,21 @@ export async function runPipeline(
     for (const { index, keys } of sources.reverse()) {
       const source = resolved.blocks[index]!;
       const sourceOutputs = completedMap[source.id]!;
+      const receipt = acceptedReceipts.get(source.id);
+      if (!receipt) throw new Error(`${STAGE_REUSE_RECONCILIATION_MARKER}: fallback source "${source.id}" has no validated execution receipt`);
       // Preserve any path already materialised during this invocation. The
       // restore boundary receives the complete source patch for its durable
       // HEAD fence, but only the demanded keys are allowed to update the store.
-      const candidate = { ...sourceOutputs };
+      const candidate = structuredClone(sourceOutputs);
       for (const key of keys) {
-        if (key in store) candidate[key] = store[key];
+        if (key in store) candidate[key] = structuredClone(store[key]);
         const base = key.replace(/(LocalPath|Url|Path)$/, "");
         const siblingKeys = [
           ...(base === key ? [] : [`${base}Key`]),
           ...(key.endsWith("Clips") ? [`${key.replace(/Clips$/, "")}Keys`] : []),
         ];
         for (const sibling of siblingKeys) {
-          if (sibling in store) candidate[sibling] = store[sibling];
+          if (sibling in store) candidate[sibling] = structuredClone(store[sibling]);
         }
       }
       const restored = await opts.rehydrate(source.id, candidate, {
@@ -640,6 +648,7 @@ export async function runPipeline(
         );
       }
       const outputs = migrateCachedOutputsForResume(source.id, restored.outputs);
+      assertRestoredStageOutputs(receipt, restored.outputs);
       for (const key of keys) {
         if (key in outputs) store[key] = outputs[key];
       }
@@ -651,7 +660,7 @@ export async function runPipeline(
     patch: Record<string, unknown>,
     inputRefs: Readonly<Record<string, ArtifactRef>>,
     optionalFallbacks: Set<string>,
-  ): Promise<void> => {
+  ): Promise<ArtifactRef[]> => {
     const inputArtifactIds = [...new Set(Object.values(inputRefs).map((ref) => ref.artifactId))].sort();
     const sortedFallbacks = [...optionalFallbacks].sort();
 
@@ -689,7 +698,7 @@ export async function runPipeline(
       };
       produced.push({ key, artifact, value, contract });
     }
-    if (produced.length === 0) return;
+    if (produced.length === 0) return [];
 
     if (opts.sink.upsertArtifacts) {
       // One timestamp for the block: these artifacts are written by a single
@@ -719,6 +728,7 @@ export async function runPipeline(
     // a throw above means NO artifact of this block was persisted and none
     // should be offered as lineage to a downstream block.
     for (const { key, artifact } of produced) artifactRefs[key] = artifact;
+    return produced.map(({ artifact }) => artifact);
   };
 
   /**
@@ -747,6 +757,33 @@ export async function runPipeline(
     }
     const params = opts.paramsByBlock?.[block.id] ?? resolved.entries[blockIndex]?.params ?? {};
     const priorStage = priorStageMap.get(block.id);
+    const refuseUnverifiedReuse = async (reason: string) => {
+      const message = `${STAGE_REUSE_RECONCILIATION_MARKER}: block "${block.id}": ${reason}. ` +
+        "Saved work and spend are retained; reconcile or explicitly supersede this execution before retrying.";
+      await opts.sink.upsert({ ownerId: opts.ownerId, runId: opts.runId, block: block.id,
+        status: "failed", finishedAt: Date.now(), error: message });
+      stages.push({ block: block.id, status: "failed" });
+      log(message);
+      return { status: "failed" as const, cost: 0, error: message };
+    };
+    if (priorStage?.status === "failed" && priorStage.error?.includes(STAGE_REUSE_RECONCILIATION_MARKER)) {
+      return await refuseUnverifiedReuse("previous cache identity failure has not been reconciled");
+    }
+    const allowedInputs = new Set([
+      ...Object.keys(manifest.consumes), ...Object.keys(manifest.optionalConsumes),
+    ]);
+    const inputRefs = Object.fromEntries(
+      Object.entries(artifactRefs).filter(([key]) => allowedInputs.has(key)),
+    );
+    let invocationHash: string;
+    try {
+      invocationHash = stageInvocationHash({
+        ownerId: opts.ownerId, runId: opts.runId, channelId: opts.channelId, keyPrefix: opts.keyPrefix,
+        manifest, params, store, inputRefs, inputIdentities: artifactIdentities,
+      });
+    } catch (error) {
+      return await refuseUnverifiedReuse(error instanceof Error ? error.message : "invalid input identity");
+    }
     const isRemoteExecution = opts.remoteBlocks?.has(block.id) === true && Boolean(opts.runRemoteBlock);
     const costBaseline = executionCostBaseline(
       priorStage,
@@ -826,6 +863,19 @@ export async function runPipeline(
     // A confirmed-missing artifact may be regenerated only for an unpaid block;
     // completed paid work always requires explicit reconciliation/supersession.
     const cached = completedMap[block.id];
+    if (priorStage?.status === "ok" && (!cached || Array.isArray(cached))) {
+      return await refuseUnverifiedReuse("completed stage is missing its persisted output record");
+    }
+    let reuseReceipt: StageReuseReceipt | undefined;
+    if (cached) {
+      try {
+        reuseReceipt = assertStageReuseReceipt(completedReceipts[block.id], invocationHash, cached);
+      } catch (error) {
+        return await refuseUnverifiedReuse(completedReceipts[block.id] === undefined
+          ? "legacy completed stage has no input-bound reuse receipt"
+          : error instanceof Error ? error.message : "invalid cached execution receipt");
+      }
+    }
     let cachedFallbackToLocalRun = false;
     if (cached && !opts.rehydrate) {
       if (manifest.costAndLatency.paid) {
@@ -835,22 +885,24 @@ export async function runPipeline(
       cachedFallbackToLocalRun = true;
     } else if (cached && opts.rehydrate) {
       try {
-        const restored = await opts.rehydrate(block.id, { ...cached }, {
+        const restored = await opts.rehydrate(block.id, structuredClone(cached), {
           neededOutputKeys: localConsumerKeysAfter(blockIndex),
         });
         const outputs = migrateCachedOutputsForResume(block.id, restored.outputs);
         const { ok } = restored;
         if (ok) {
+          try {
+            assertRestoredStageOutputs(reuseReceipt!, restored.outputs);
+          } catch (error) {
+            return await refuseUnverifiedReuse(error instanceof Error ? error.message : "restored content changed");
+          }
           delete outputs[COST_PATCH_KEY];
           assertProduced(manifest, outputs);
-          const allowedInputs = new Set([
-            ...Object.keys(manifest.consumes),
-            ...Object.keys(manifest.optionalConsumes),
-          ]);
-          const inputRefs = Object.fromEntries(
-            Object.entries(artifactRefs).filter(([key]) => allowedInputs.has(key)),
-          );
-          await persistProducedArtifacts(manifest, outputs, inputRefs, new Set());
+          for (const ref of reuseReceipt!.outputRefs) {
+            artifactRefs[ref.key] = ref;
+          }
+          for (const identity of reuseReceipt!.outputIdentities) artifactIdentities[identity.key] = identity;
+          acceptedReceipts.set(block.id, reuseReceipt!);
           Object.assign(store, outputs);
           // NOTE: cost intentionally OMITTED — the upsert mutation skips
           // undefined fields, so the block's ORIGINAL recorded spend survives
@@ -862,7 +914,8 @@ export async function runPipeline(
             block: block.id,
             status: "ok",
             finishedAt: Date.now(),
-            outputs,
+            // Keep the original durable row and receipt. Rewriting worker
+            // paths would make the next retry look like changed content.
           });
           stages.push({ block: block.id, status: "ok" });
           log(`block resumed (cached, no re-spend): ${block.id}`);
@@ -880,6 +933,12 @@ export async function runPipeline(
         log(`block ${block.id}: rehydrate infrastructure failed — refusing paid re-run: ${e instanceof Error ? e.message : e}`);
         throw e;
       }
+    }
+
+    try {
+      assertDeferredInputsExecutable(manifest, store, artifactIdentities);
+    } catch (error) {
+      return await refuseUnverifiedReuse(error instanceof Error ? error.message : "unmaterialized execution input");
     }
 
     // Reserve only for work that will actually execute. Restored stages already
@@ -983,13 +1042,6 @@ export async function runPipeline(
     });
 
     const optionalFallbacks = new Set<string>();
-    const allowedInputs = new Set([
-      ...Object.keys(manifest.consumes),
-      ...Object.keys(manifest.optionalConsumes),
-    ]);
-    const inputRefs = Object.fromEntries(
-      Object.entries(artifactRefs).filter(([key]) => allowedInputs.has(key)),
-    );
     const checkpointVisualArtifactAttempts: NonNullable<
       StageContext["checkpointVisualArtifactAttempts"]
     > = async (attempts) => {
@@ -1184,8 +1236,12 @@ export async function runPipeline(
           `$${configuredEnvelope.toFixed(4)} configured envelope`,
         );
       }
+      assertStageInvocationUnchanged({
+        ownerId: opts.ownerId, runId: opts.runId, channelId: opts.channelId, keyPrefix: opts.keyPrefix,
+        manifest, params, store, inputRefs, inputIdentities: artifactIdentities,
+      }, invocationHash);
       assertProduced(manifest, patch);
-      await persistProducedArtifacts(manifest, patch, inputRefs, optionalFallbacks);
+      const producedRefs = await persistProducedArtifacts(manifest, patch, inputRefs, optionalFallbacks);
       Object.assign(store, patch);
 
       // Publish-grade receipts can be intentionally complete enough for R2
@@ -1193,6 +1249,7 @@ export async function runPipeline(
       // durable stage summary after artifact persistence; the full in-memory
       // patch remains available to immediate downstream blocks in this run.
       const persistedStageOutputs = block.persistStageOutputs?.(patch) ?? patch;
+      const executionReceipt = sealStageReuseReceipt(invocationHash, persistedStageOutputs, producedRefs, patch);
 
       await opts.sink.upsert({
         ownerId: opts.ownerId,
@@ -1203,7 +1260,9 @@ export async function runPipeline(
         cost: Math.max(costBaseline.priorCost, costBaseline.carriedCost + checkpointAdjustedCost),
         ...(!isRemoteExecution && checkpointCosts.receipts.length ? { checkpointCostReceipts: checkpointCosts.receipts } : {}),
         outputs: persistedStageOutputs,
+        reuseReceipt: executionReceipt,
       });
+      for (const identity of executionReceipt.outputIdentities) artifactIdentities[identity.key] = identity;
       stages.push({ block: block.id, status: "ok" });
       log(`block ok: ${block.id}`, { produced: block.produces, costUsd: cost });
       return { status: "ok", cost };

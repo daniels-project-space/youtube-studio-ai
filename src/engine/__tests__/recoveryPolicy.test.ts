@@ -14,6 +14,8 @@ import type { Block, RunStageSink } from "@/engine/types";
 import { validatePipeline } from "@/engine/validate";
 import { rehydrateOutputs } from "@/lib/rehydrate";
 import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
+import { STAGE_REUSE_RECONCILIATION_MARKER } from "@/engine/stageReuseContract";
+import { stageReuseFixtures } from "./fixtures/stageReuseFixtures";
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERTION FAILED: ${message}`);
@@ -23,14 +25,19 @@ function assert(condition: unknown, message: string): asserts condition {
 function sinkWithCompleted(
   completed: Array<{
     block: string;
-    outputs: unknown;
+    outputs: Record<string, unknown>;
     cost?: number;
   }> = [],
 ): RunStageSink {
   return {
     async upsert() {},
     async getCompleted() {
-      return completed;
+      if (completed.length === 0) return [];
+      return stageReuseFixtures(
+        validatePipeline(completed.map(({ block }) => ({ block }))),
+        base,
+        completed,
+      );
     },
   };
 }
@@ -303,11 +310,11 @@ async function classificationAndRetryPolicy(): Promise<void> {
           missingArtifactWrites.push({ status: args.status, error: args.error });
         },
         async getCompleted() {
-          return [{
+          return stageReuseFixtures(validatePipeline([{ block: missingArtifactBlock.id }]), base, [{
             block: missingArtifactBlock.id,
             outputs: { recoveryResult: "paid-but-artifact-missing" },
             cost: 0.42,
-          }];
+          }]);
         },
       },
       rehydrate: async (_block, outputs) => ({ ok: false, outputs }),
@@ -639,15 +646,19 @@ async function legacyThumbnailResumeFailsClosedWithoutRespend(): Promise<void> {
     },
   );
 
-  assert(resumed.ok, "legacy thumbnail outputs migrate during resume");
+  assert(!resumed.ok, "legacy thumbnail outputs without original execution provenance are held for reconciliation");
   assert(paidThumbnailCalls === 0, "legacy thumbnail resume never re-spends");
   assert(
-    resumed.store["thumbnailPublishable"] === false,
-    "missing legacy publishability evidence is derived fail-closed",
+    resumed.error?.includes(STAGE_REUSE_RECONCILIATION_MARKER),
+    "missing legacy receipt keeps an explicit terminal reconciliation marker",
   );
   assert(
-    persistedOutputs?.["thumbnailPublishable"] === false,
-    "the migrated publishability flag is persisted for future resumes",
+    resumed.store["thumbnailPublishable"] !== true && resumed.store["thumbnailKey"] === undefined,
+    "unproven legacy thumbnail is not admitted or made publishable",
+  );
+  assert(
+    persistedOutputs === undefined,
+    "no fresh success row or fabricated provenance is written over the legacy output",
   );
   assert(
     Math.abs(resumed.costTotal - 0.05321) < 0.000001,

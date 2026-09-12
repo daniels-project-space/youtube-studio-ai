@@ -436,6 +436,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   upload_draft: contract(
     ["publish.connector_bound", "publish.resumable", "publish.synthetic_disclosed", "publish.private_first"],
     {
+      deferredConsumes: ["finalMasterReleaseCertificate"],
       optionalConsumes: [
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
@@ -451,6 +452,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   ),
   notify: contract(["notify.operator"], { sideEffects: ["external_message"] }),
   cleanup: contract(["storage.scoped_cleanup"], {
+    deferredConsumes: ["finalMasterReleaseCertificate"],
     // Shorts are optional, but a successfully uploaded derivative carries a
     // separate release certificate that cleanup must retain with its proof.
     optionalConsumes: [
@@ -466,6 +468,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     "publish.resumable",
     "publish.synthetic_disclosed",
   ], {
+    deferredConsumes: ["finalMasterReleaseCertificate"],
     // The derivative is created from a passing, certificate-bound parent, but
     // it earns its own final-master certificate after the 9:16 crop/caption
     // transform. These contextual inputs make the post-transform reviewer
@@ -652,6 +655,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     qualityRequired: true,
   }),
   stock_footage: contract(["visuals.sourced"], {
+    resumeInputProjections: { healHints: "own_block_entry" },
     optionalConsumes: [
       "reuseFootageKeys", "reuseThirdPartyStockEvidence", "narrationDurationSec", "narrationText", "cutSheet", "styleDNA", "healHints",
       "visualBrief", "signatureClips", "niche", "channelProgramRoute", "syntheticScenario", "scenarioVisualTreatment", "studioReusableMediaPlan",
@@ -670,6 +674,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: ["topic", "niche", "styleDNA", "palette", "introSec", "quoteOverlays", "chapterPlan", "dataStorySourceLedger", "evidenceVisualManifests", "studioMotionGraphicsRecipeProjection"],
   }),
   timeline_assemble: contract(["master.assembled"], {
+    resumeInputProjections: { healHints: "own_block_entry", healClasses: "own_block_entry" },
     requiredConsumes: ["footageClips", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
     optionalConsumes: [
       // Read at run time and never declared: the runner's Proxy refuses an

@@ -33,13 +33,15 @@ async function stopsAfterPersistedEpisodeGraphAndResumesTts(): Promise<void> {
   registerTestBlock({
     id: "narration_tts",
     consumes: [],
-    produces: ["reviewNarration", "reviewNarrationLocalPath"],
+    produces: ["reviewNarration", "reviewNarrationLocalPath", "reviewNarrationKey"],
     paid: true,
     run: async () => {
       narrationRuns += 1;
       return {
-        reviewNarration: "must-not-replay-paid-tts",
-        reviewNarrationLocalPath: "/tmp/must-not-render.mp3",
+        reviewNarration: "rehydrated narration",
+        reviewNarrationLocalPath: "/first-worker/narration.mp3",
+        reviewNarrationKey: "owners/factual-review/narration.mp3",
+        __costUsd: 0.42,
       };
     },
   });
@@ -63,21 +65,26 @@ async function stopsAfterPersistedEpisodeGraphAndResumesTts(): Promise<void> {
     },
   });
 
+  const completed: Array<{ block: string; outputs: unknown; cost?: number; reuseReceipt?: unknown }> = [];
   const sink: RunStageSink = {
     async upsert(args) {
       writes.push({ block: args.block, status: args.status, outputs: args.outputs });
+      if (args.status === "ok" && args.outputs) completed.push({
+        block: args.block, outputs: structuredClone(args.outputs), cost: args.cost, reuseReceipt: args.reuseReceipt,
+      });
     },
     async getCompleted() {
-      return [{
-        block: "narration_tts",
-        cost: 0.42,
-        outputs: {
-          reviewNarration: "stale worker-local narration path",
-          reviewNarrationLocalPath: "/missing/narration.mp3",
-        },
-      }];
+      return structuredClone(completed);
     },
   };
+  // Produce the receipt through the real runner; the synthetic narration block
+  // above has no provider. Only the subsequent resume is counted below.
+  const initial = await runPipeline(validatePipeline([{ block: "narration_tts" }]), {
+    ...base, sink, resume: false,
+  });
+  assert.equal(initial.ok, true, initial.error);
+  narrationRuns = 0;
+  writes.length = 0;
 
   const result = await runPipeline(
     validatePipeline([
@@ -96,7 +103,7 @@ async function stopsAfterPersistedEpisodeGraphAndResumesTts(): Promise<void> {
           ok: true,
           outputs:
             block === "narration_tts"
-              ? { ...outputs, reviewNarration: "rehydrated narration" }
+              ? { ...outputs, reviewNarrationLocalPath: "/second-worker/narration.mp3" }
               : outputs,
         };
       },
