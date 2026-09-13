@@ -45,7 +45,7 @@ async function main() {
       attestation: {
         source: string;
         profileIdentity: string | null;
-        exactLtx25Rtx4090X2: boolean;
+        exactMiniMaxH3Rtx5090: boolean;
       };
       controlPlane: Record<string, unknown>;
     };
@@ -56,16 +56,18 @@ async function main() {
     assert.deepEqual(health.attestation, {
       source: "studio-static",
       profileIdentity: null,
-      exactLtx25Rtx4090X2: false,
+      exactMiniMaxH3Rtx5090: false,
     });
     assert.deepEqual(health.controlPlane, {
       provider: "novita",
-      execution: "trigger-cloud-only",
-      gpuSku: "RTX 4090",
+      execution: "minimax-h3-on-demand-trigger-only",
+      gpuSku: "RTX 5090",
       gpuCountPerWorker: 1,
-      concurrencyCeiling: 8,
+      concurrencyCeiling: 1,
       manualLaunch: "disabled",
       billingClosure: "provider deletion verification required",
+      runtimeId: "minimax-h3-turbo8-5090-v1",
+      profile: "official-turbo8-native-768p",
     });
 
     const disabledGet = await GET(request());
@@ -84,10 +86,10 @@ async function main() {
 
     const source = readFileSync(new URL("./route.ts", import.meta.url), "utf8");
     assert.match(source, /await requireStudioActor\(request\);[\s\S]*searchParams\.get\("health"\) === "1"/);
-    assert.match(source, /execution: "trigger-cloud-only"/);
-    assert.match(source, /gpuSku: NOVITA_REQUIRED_GPU_SKU/);
+    assert.match(source, /execution: "minimax-h3-on-demand-trigger-only"/);
+    assert.match(source, /gpuSku: "RTX 5090"/);
     assert.match(source, /source: "studio-static"/);
-    assert.match(source, /exactLtx25Rtx4090X2: false/);
+    assert.match(source, /exactMiniMaxH3Rtx5090: false/);
     assert.doesNotMatch(source, /NOVITA_RENDER_FARM_(API|TOKEN)/);
     assert.doesNotMatch(source, /bootstrapSecrets|getNovitaRenderStatus|launchImages|fetch\s*\(/);
   } finally {

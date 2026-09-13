@@ -46,8 +46,16 @@ export function assertMiniMaxH3WeeklyBatchArgs(value: unknown): MiniMaxH3WeeklyB
   const jobs = payload.jobs as MiniMaxH3WeeklyBatchArgs["jobs"];
   for (const [index, job] of jobs.entries()) {
     if (!job || typeof job !== "object" || Array.isArray(job) || !job.output || typeof job.output !== "object" ||
-        typeof job.output.r2Key !== "string" || !job.output.r2Key.startsWith("owner/")) {
+        typeof job.output.r2Key !== "string" || !job.output.r2Key.startsWith("owner/") ||
+        job.output.r2Key.length <= "owner/".length || job.output.r2Key.includes("\\") ||
+        /(?:^|\/)\.\.?($|\/)/u.test(job.output.r2Key)) {
       throw new Error(`weekly MiniMax H3 job ${index + 1} has an invalid owner-scoped output key`);
+    }
+    if (!job.firstFrame || typeof job.firstFrame !== "object" || Array.isArray(job.firstFrame) ||
+        typeof job.firstFrame.r2Key !== "string" || !job.firstFrame.r2Key.startsWith("owner/") ||
+        job.firstFrame.r2Key.length <= "owner/".length || job.firstFrame.r2Key.includes("\\") ||
+        /(?:^|\/)\.\.?($|\/)/u.test(job.firstFrame.r2Key)) {
+      throw new Error(`weekly MiniMax H3 job ${index + 1} has an invalid owner-scoped first-frame key`);
     }
   }
   return { orderKey: safeIdentifier(payload.orderKey, "order key"), receiptKey: scopedReceiptKey(payload.receiptKey), jobs };

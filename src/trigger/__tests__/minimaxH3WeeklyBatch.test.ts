@@ -14,4 +14,5 @@ const valid = {
 assert.equal(assertMiniMaxH3WeeklyBatchArgs(valid).orderKey, valid.orderKey);
 assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, receiptKey: "../receipt.json" }), /receipt key/);
 assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, jobs: [{ ...valid.jobs[0], output: { r2Key: "other/path.mp4" } }] }), /owner-scoped/);
+assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, jobs: [{ ...valid.jobs[0], firstFrame: { ...valid.jobs[0].firstFrame, r2Key: "owner/../frame.png" } }] }), /first-frame/);
 console.log("weekly MiniMax H3 batch task contracts passed");

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { NOVITA_HARD_GPU_LIMIT, NOVITA_REQUIRED_GPU_SKU } from "@/lib/novitaFleet";
+import { MINIMAX_H3_PROFILE, MINIMAX_H3_RUNTIME_ID } from "@/lib/minimaxH3";
 import { requireStudioActor } from "@/lib/operatorSession";
 
 /**
@@ -11,12 +11,14 @@ export const runtime = "nodejs";
 
 const DIRECT_CONTROL_PLANE = {
   provider: "novita",
-  execution: "trigger-cloud-only",
-  gpuSku: NOVITA_REQUIRED_GPU_SKU,
+  execution: "minimax-h3-on-demand-trigger-only",
+  gpuSku: "RTX 5090",
   gpuCountPerWorker: 1,
-  concurrencyCeiling: NOVITA_HARD_GPU_LIMIT,
+  concurrencyCeiling: 1,
   manualLaunch: "disabled",
   billingClosure: "provider deletion verification required",
+  runtimeId: MINIMAX_H3_RUNTIME_ID,
+  profile: MINIMAX_H3_PROFILE.id,
 } as const;
 
 /**
@@ -30,25 +32,25 @@ function unattestedStudioHealth() {
     ok: true,
     ready: false,
     checkedAt: new Date().toISOString(),
-    architecturalGpuCeiling: NOVITA_HARD_GPU_LIMIT,
+    architecturalGpuCeiling: 1,
     verifiedGpuQuota: null,
     effectiveGpuLimit: null,
     activeGpuCount: null,
     blockers: [
       "direct_trigger_attestation_unavailable_from_studio_route",
-      "ltx_2_5_rtx_4090_x2_profile_not_benchmarked",
+      "minimax_h3_rtx_5090_on_demand_worker_not_benchmarked",
     ],
     attestation: {
       source: "studio-static" as const,
       profileIdentity: null,
-      exactLtx25Rtx4090X2: false,
+      exactMiniMaxH3Rtx5090: false,
     },
     contract: null,
     models: null,
     storage: null,
     controls: null,
     controlPlane: DIRECT_CONTROL_PLANE,
-    note: "Studio does not hold provider credentials. Trigger verifies the exact LTX 2.5 RTX 4090 x2 profile immediately before any paid worker is created.",
+    note: "Studio does not hold provider credentials. The on-demand Trigger task verifies the exact MiniMax H3 R2 pack and Novita receipt immediately before accepting a paid clip.",
   };
 }
 
