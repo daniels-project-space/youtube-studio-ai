@@ -84,8 +84,15 @@ export function H3RenderConsole() {
   const [jobsJson, setJobsJson] = useState(weeklyExample);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [tracking, setTracking] = useState<H3Tracking | null>(() => loadStoredTracking());
+  const [tracking, setTracking] = useState<H3Tracking | null>(null);
   const [status, setStatus] = useState<H3Status | null>(null);
+
+  useEffect(() => {
+    const stored = loadStoredTracking();
+    if (!stored) return;
+    const frame = window.setTimeout(() => setTracking(stored), 0);
+    return () => window.clearTimeout(frame);
+  }, []);
 
   useEffect(() => {
     try {
