@@ -3,6 +3,7 @@ import { getObjectBytes, presignDownload, presignUpload } from "@/lib/storage";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import {
   saladCloudClientFromVault,
+  SALAD_BULK_MAX_GPUS,
   SALAD_BULK_PRIORITY,
   SALAD_HIGH_FALLBACK_PRIORITY,
   selectSaladGpu,
@@ -70,6 +71,8 @@ export interface MiniMaxH3SaladCapacityClient {
     available_gpu_medium?: number;
     available_gpu_high?: number;
   }>;
+  /** Optional account-level lease check; production Salad clients provide it. */
+  getOccupiedGpuSlots?: () => Promise<number>;
 }
 
 /**
@@ -140,6 +143,25 @@ export async function assertMiniMaxH3SaladCapacity(
     ? rawAvailableGpuCount
     : 0;
   const requiredGpuCount = Math.min(MAX_H3_PARALLEL_SALAD_JOBS, jobCount);
+  if (client.getOccupiedGpuSlots) {
+    let occupiedGpuSlots: number;
+    try {
+      occupiedGpuSlots = await client.getOccupiedGpuSlots();
+    } catch (error) {
+      throw new MiniMaxH3Error(
+        `weekly MiniMax H3 Salad account capacity check failed before dispatch: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    if (!Number.isSafeInteger(occupiedGpuSlots) || occupiedGpuSlots < 0 || occupiedGpuSlots > SALAD_BULK_MAX_GPUS) {
+      throw new MiniMaxH3Error("weekly MiniMax H3 Salad account capacity returned an invalid occupied-slot count");
+    }
+    if (occupiedGpuSlots + requiredGpuCount > SALAD_BULK_MAX_GPUS) {
+      throw new MiniMaxH3Error(
+        `weekly MiniMax H3 Salad account capacity is occupied (${occupiedGpuSlots}/${SALAD_BULK_MAX_GPUS} slots); ` +
+        `the requested wave needs ${requiredGpuCount} additional desktop RTX 5090 slots`,
+      );
+    }
+  }
   if (mediumGpu && availableMediumGpuCount >= requiredGpuCount) {
     return {
       requiredGpuCount,

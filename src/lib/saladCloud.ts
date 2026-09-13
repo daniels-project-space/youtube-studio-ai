@@ -302,6 +302,14 @@ export class SaladCloudClient {
   async listContainerInstances(name: string): Promise<SaladContainerInstance[]> {
     return (await this.request("list instances", "GET", `${this.groupPath(name)}/instances`, z.object({ instances: z.array(instanceSchema) }))).instances;
   }
+  /** Read-only global lease view used before a paid bulk wave. */
+  async getOccupiedGpuSlots(): Promise<number> {
+    const groups = await this.listContainerGroups();
+    const instances = new Map(await Promise.all(
+      groups.map(async (group) => [group.name, await this.listContainerInstances(group.name)] as const),
+    ));
+    return saladOccupiedGpuSlots(groups, instances);
+  }
   getQuotas() {
     return this.request("get quotas", "GET", `${this.orgPath()}/quotas`, z.object({
       container_groups_quotas: z.object({ container_replicas_quota: count, container_replicas_used: count }),

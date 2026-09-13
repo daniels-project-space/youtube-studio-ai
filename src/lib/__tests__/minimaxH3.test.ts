@@ -61,6 +61,13 @@ async function test() {
       return { available_gpu_medium: 3 };
     },
   };
+  await assert.rejects(
+    () => assertMiniMaxH3SaladCapacity(2, {
+      client: { ...capacityClient, getOccupiedGpuSlots: async () => 2 },
+    }),
+    /account capacity is occupied/,
+    "market availability must not over-commit the shared three-GPU Salad lease",
+  );
   assert.deepEqual(
     await assertMiniMaxH3SaladCapacity(4, { client: capacityClient }),
     { requiredGpuCount: 3, availableGpuCount: 3, gpuClassId: classes[0]!.id, capacityMode: "medium" },
