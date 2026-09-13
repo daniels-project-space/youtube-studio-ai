@@ -88,6 +88,17 @@ async function test() {
     await assertMiniMaxH3SaladCapacity(2, {
       client: {
         ...capacityClient,
+        getGpuAvailability: async () => ({ available_gpu_medium: 1, available_gpu_high: 2 }),
+      },
+      allowHighPriorityFallback: true,
+    }),
+    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high" },
+    "high fallback must also unlock a wave when medium exists but has too few exact-class slots",
+  );
+  assert.deepEqual(
+    await assertMiniMaxH3SaladCapacity(2, {
+      client: {
+        ...capacityClient,
         getGpuAvailability: async () => ({ available_gpu_medium: 0, available_gpu_high: 2 }),
         getOccupiedGpuSlots: async () => 1,
       },
