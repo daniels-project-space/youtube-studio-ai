@@ -1277,11 +1277,15 @@ export default function NewChannelWizard() {
 
             {proofRunning && <section className={styles.proofWindow}>
               <div className={styles.proofCopy}>
-                <small>Private quality-control render</small>
-                <strong>Testing the channel as a real production route</strong>
-                <p>The private test traces defects to their source stage.</p>
+                <small>Private proof · live</small>
+                <strong>Validating the production route</strong>
+                <p>One bounded render is checked before this channel is admitted.</p>
               </div>
-              <div className={styles.proofVisual} aria-label="Private proof render status visualization"><span>status signal · no preview frames yet</span></div>
+              <div className={styles.proofVisual} aria-label="Private proof render status visualization">
+                <span className={styles.proofOrbit} aria-hidden="true"><i /><i /><i /></span>
+                <strong>Render in progress</strong>
+                <small>{activeStage?.attempts ? `Attempt ${activeStage.attempts}` : "Receipt pending"}</small>
+              </div>
             </section>}
 
             {stageRows.length ? <div className={styles.stageList}>

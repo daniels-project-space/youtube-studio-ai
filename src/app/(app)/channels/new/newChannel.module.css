@@ -241,15 +241,20 @@
 .proofCopy small { color: var(--creator-tone); font: 700 .48rem/1 var(--font-mono); letter-spacing: .09em; text-transform: uppercase; }
 .proofCopy strong { font-family: var(--font-display); font-size: 1.05rem; font-weight: 560; }
 .proofCopy p { margin: 0; color: var(--color-faint); font-size: .62rem; line-height: 1.45; }
-.proofVisual { position: relative; min-height: 110px; overflow: hidden; border: 1px solid var(--color-border); background: #050806; }
-.proofVisual::before { position: absolute; inset: 0; content: ""; background: repeating-linear-gradient(0deg,transparent 0 12px,color-mix(in srgb,var(--creator-tone) 7%,transparent) 13px); }
-.proofVisual::after { position: absolute; top: 0; bottom: 0; width: 38%; content: ""; background: linear-gradient(90deg,transparent,color-mix(in srgb,var(--creator-tone) 18%,transparent),transparent); animation: proof-sweep 2s linear infinite; }
-.proofVisual span { position: absolute; right: .55rem; bottom: .5rem; color: var(--color-faint); font: 700 .44rem/1 var(--font-mono); text-transform: uppercase; }
+.proofVisual { display: grid; min-height: 110px; align-content: center; justify-items: center; gap: .42rem; overflow: hidden; border: 1px solid var(--color-border); background: radial-gradient(circle at 50% 42%,color-mix(in srgb,var(--creator-tone) 13%,transparent),transparent 58%),#050806; text-align: center; }
+.proofVisual strong { color: var(--color-fg); font-size: .7rem; font-weight: 650; }
+.proofVisual small { color: var(--color-faint); font: 600 .5rem/1 var(--font-mono); letter-spacing: .05em; text-transform: uppercase; }
+.proofOrbit { position: relative; display: grid; width: 45px; height: 45px; place-items: center; border: 1px solid color-mix(in srgb,var(--creator-tone) 55%,var(--color-border)); border-radius: 50%; box-shadow: 0 0 0 7px color-mix(in srgb,var(--creator-tone) 5%,transparent); animation: proof-orbit 2.4s linear infinite; }
+.proofOrbit::before { width: 7px; height: 7px; content: ""; border-radius: 50%; background: var(--creator-tone); box-shadow: 0 0 16px color-mix(in srgb,var(--creator-tone) 80%,transparent); }
+.proofOrbit i { position: absolute; width: 5px; height: 5px; border-radius: 50%; background: var(--color-secondary); }
+.proofOrbit i:nth-child(1) { top: 3px; left: 8px; }
+.proofOrbit i:nth-child(2) { right: 2px; bottom: 11px; background: var(--color-accent); }
+.proofOrbit i:nth-child(3) { bottom: 4px; left: 13px; }
 
 @keyframes build-bars { to { height: 100%; opacity: .42; } }
 @keyframes build-scan { from { transform: translateX(-100%); } to { transform: translateX(315%); } }
 @keyframes stage-orbit { 50% { border-color: var(--color-secondary); transform: rotate(180deg); } }
-@keyframes proof-sweep { from { left: -40%; } to { left: 105%; } }
+@keyframes proof-orbit { to { transform: rotate(360deg); } }
 
 @media (max-width: 980px) {
   .hero { grid-template-columns: minmax(0,1fr) 210px; }
@@ -305,5 +310,5 @@
 
 @media (prefers-reduced-motion: reduce) {
   .nicheCard, .buildTrack i, .durationPicker button { transition: none; }
-  .buildSignal i, .buildTrack[data-indeterminate="true"] i, .stageRow[data-state="running"] .stageIndex, .proofVisual::after { animation: none; }
+  .buildSignal i, .buildTrack[data-indeterminate="true"] i, .stageRow[data-state="running"] .stageIndex, .proofOrbit { animation: none; }
 }
