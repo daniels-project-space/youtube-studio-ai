@@ -130,19 +130,11 @@ export async function assertMiniMaxH3SaladCapacity(
     ...MINIMAX_H3_SALAD_RESOURCES,
     gpu_classes: [gpu.id],
   };
-  let availability;
-  try {
-    availability = await client.getGpuAvailability(resources, [...MINIMAX_H3_SALAD_COUNTRY_CODES]);
-  } catch (error) {
-    throw new MiniMaxH3Error(
-      `weekly MiniMax H3 Salad capacity check failed before dispatch: ${error instanceof Error ? error.message : String(error)}`,
-    );
-  }
-  const rawAvailableGpuCount = availability.available_gpu_medium;
-  const availableMediumGpuCount = typeof rawAvailableGpuCount === "number" && Number.isSafeInteger(rawAvailableGpuCount)
-    ? rawAvailableGpuCount
-    : 0;
   const requiredGpuCount = Math.min(MAX_H3_PARALLEL_SALAD_JOBS, jobCount);
+  // Check the account-wide lease before asking the market for another
+  // availability estimate.  The market endpoint cannot see our in-flight
+  // groups, so querying it first only adds latency when the shared three-GPU
+  // cap is already occupied.
   if (client.getOccupiedGpuSlots) {
     let occupiedGpuSlots: number;
     try {
@@ -162,6 +154,18 @@ export async function assertMiniMaxH3SaladCapacity(
       );
     }
   }
+  let availability;
+  try {
+    availability = await client.getGpuAvailability(resources, [...MINIMAX_H3_SALAD_COUNTRY_CODES]);
+  } catch (error) {
+    throw new MiniMaxH3Error(
+      `weekly MiniMax H3 Salad capacity check failed before dispatch: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const rawAvailableGpuCount = availability.available_gpu_medium;
+  const availableMediumGpuCount = typeof rawAvailableGpuCount === "number" && Number.isSafeInteger(rawAvailableGpuCount)
+    ? rawAvailableGpuCount
+    : 0;
   if (mediumGpu && availableMediumGpuCount >= requiredGpuCount) {
     return {
       requiredGpuCount,

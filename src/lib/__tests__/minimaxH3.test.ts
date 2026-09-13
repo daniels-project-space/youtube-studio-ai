@@ -54,9 +54,11 @@ async function test() {
     ],
   }];
   let capacityRequest: { gpu_classes: string[]; memory: number; storage_amount: number } | undefined;
+  let availabilityCalls = 0;
   const capacityClient: MiniMaxH3SaladCapacityClient = {
     listGpuClasses: async () => classes,
     getGpuAvailability: async (resources) => {
+      availabilityCalls += 1;
       capacityRequest = resources;
       return { available_gpu_medium: 3 };
     },
@@ -68,6 +70,7 @@ async function test() {
     /account capacity is occupied/,
     "market availability must not over-commit the shared three-GPU Salad lease",
   );
+  assert.equal(availabilityCalls, 0, "an occupied account lease must short-circuit the market query");
   assert.deepEqual(
     await assertMiniMaxH3SaladCapacity(4, { client: capacityClient }),
     { requiredGpuCount: 3, availableGpuCount: 3, gpuClassId: classes[0]!.id, capacityMode: "medium" },
