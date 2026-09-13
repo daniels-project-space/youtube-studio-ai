@@ -9,7 +9,12 @@ import { sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, presignDownload, putObject } from "@/lib/storage";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { ChannelMusicProgramSchema, createMusicProgramQualityReceipt } from "@/engine/channelMusicProgram";
-import { createMusicAuditionApproval, MusicAuditionCheckpointSchema } from "@/engine/musicAuditionCheckpoint";
+import {
+  assertMusicAuditionNativeBytes,
+  createMusicAuditionApproval,
+  MusicAuditionCheckpointSchema,
+} from "@/engine/musicAuditionCheckpoint";
+import { assertPinnedMiniMaxMusic3Receipt } from "@/lib/minimaxMusic3";
 
 export const runtime = "nodejs";
 
@@ -127,16 +132,34 @@ export async function POST(request: Request) {
       if (checkpoint.ownerId !== actor.ownerId || checkpoint.runId !== submission.runId) {
         throw new Error("music audition approval ownership/run mismatch");
       }
+      assertOwnedKey(actor.ownerId, checkpoint.musicNativeWavKey, "music audition native WAV");
       assertOwnedKey(actor.ownerId, result.review.channelMusicProgramKey, "music audition program");
       assertOwnedKey(actor.ownerId, result.review.musicRuntimeReceiptKey, "music audition runtime receipt");
-      const [programBytes, runtimeBytes] = await Promise.all([
-        getObjectBytes(result.review.channelMusicProgramKey), getObjectBytes(result.review.musicRuntimeReceiptKey),
+      const [programBytes, runtimeBytes, nativeWavBytes] = await Promise.all([
+        getObjectBytes(result.review.channelMusicProgramKey),
+        getObjectBytes(result.review.musicRuntimeReceiptKey),
+        getObjectBytes(checkpoint.musicNativeWavKey),
       ]);
       const program = ChannelMusicProgramSchema.parse(JSON.parse(Buffer.from(programBytes).toString("utf8")));
       const runtime = JSON.parse(Buffer.from(runtimeBytes).toString("utf8")) as Record<string, unknown>;
-      if (program.fingerprint !== checkpoint.programFingerprint || runtime.programFingerprint !== program.fingerprint) {
+      if (program.fingerprint !== checkpoint.programFingerprint) {
         throw new Error("music audition frozen program/runtime identity mismatch");
       }
+      const admittedRuntime = assertPinnedMiniMaxMusic3Receipt(runtime, program);
+      if (
+        admittedRuntime.programFingerprint !== checkpoint.programFingerprint ||
+        admittedRuntime.output.contentSha256 !== checkpoint.nativeOutput.contentSha256 ||
+        admittedRuntime.output.byteLength !== checkpoint.nativeOutput.byteLength ||
+        admittedRuntime.durationSec !== checkpoint.nativeOutput.durationSec ||
+        admittedRuntime.output.sampleRateHz !== checkpoint.nativeOutput.sampleRateHz ||
+        admittedRuntime.output.channels !== checkpoint.nativeOutput.channels ||
+        admittedRuntime.output.codec !== checkpoint.nativeOutput.codec
+      ) {
+        throw new Error("music audition frozen program/runtime identity mismatch");
+      }
+      // Never let an owner review approve a missing, overwritten, or different
+      // object merely because its R2 key and worker metadata look plausible.
+      assertMusicAuditionNativeBytes({ expected: checkpoint.nativeOutput, bytes: nativeWavBytes });
       const reviewReceiptFingerprint = sha256Hex(canonicalJson({
         version: "music-audition-human-review/v1", checkpointFingerprint: checkpoint.checkpointFingerprint,
         reviewerId: actor.ownerId, measurements: submission.measurements, sectionReviews: submission.sectionReviews,

@@ -2,11 +2,28 @@ import assert from "node:assert/strict";
 
 import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
 import {
+  assertMusicAuditionNativeBytes,
   createMusicAuditionApproval,
   createMusicAuditionCheckpoint,
   MusicAuditionApprovalSchema,
   MusicAuditionCheckpointSchema,
 } from "@/engine/musicAuditionCheckpoint";
+import { sha256BytesHex } from "@/lib/sha256";
+
+const retainedWavBytes = new TextEncoder().encode("RIFF-native-music3-wav-fixture".repeat(3));
+const retainedWavIntegrity = {
+  contentSha256: sha256BytesHex(retainedWavBytes),
+  byteLength: retainedWavBytes.byteLength,
+};
+assert.deepEqual(
+  assertMusicAuditionNativeBytes({ expected: retainedWavIntegrity, bytes: retainedWavBytes }),
+  retainedWavIntegrity,
+);
+assert.throws(
+  () => assertMusicAuditionNativeBytes({ expected: retainedWavIntegrity, bytes: new Uint8Array([...retainedWavBytes, 0]) }),
+  /retained native Music3 WAV does not match/u,
+  "approval/release boundaries must reject a retained object with one changed byte",
+);
 
 const program = createChannelMusicProgram({
   channelId: "channel-a",

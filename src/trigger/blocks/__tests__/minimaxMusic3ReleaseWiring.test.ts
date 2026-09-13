@@ -46,6 +46,11 @@ assert.match(
   "the durable stage handoff must expose the native WAV locator to the later owner-review checkpoint",
 );
 assert.match(
+  lofi,
+  /expectedNativeWavKey[\s\S]*?assertMusicAuditionNativeBytes\([\s\S]*?getObjectBytes\(nativeWavKey\)/u,
+  "upload must re-read the exact content-addressed retained WAV, not trust only a stored worker receipt",
+);
+assert.match(
   panel,
   /aria-label="MiniMax-Music3 attribution and generation disclosure"[\s\S]*Music generated with MiniMax-Music3/u,
   "the selected provider must display prominent in-product attribution and disclosure",

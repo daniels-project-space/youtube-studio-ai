@@ -60,6 +60,7 @@ import {
   createChannelMusicProgram,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
+import { assertMusicAuditionNativeBytes } from "@/engine/musicAuditionCheckpoint";
 import { EpisodeGraphSchema } from "@/engine/episodeGraph";
 import { StorySpineSchema } from "@/engine/storySpine";
 import {
@@ -702,8 +703,18 @@ async function assertMiniMaxMusicQualityForPublish(ctx: StageContext): Promise<v
   ) {
     throw new Error("MiniMax-Music3 quality receipt is not bound to the exact native worker WAV");
   }
+  const nativeWavKey = str(ctx, "musicNativeWavKey");
+  const expectedNativeWavKey =
+    `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-native-${runtime.output.contentSha256}.wav`;
+  if (nativeWavKey !== expectedNativeWavKey) {
+    throw new Error("MiniMax-Music3 native WAV key is not bound to this run and immutable worker output");
+  }
+  assertMusicAuditionNativeBytes({
+    expected: runtime.output,
+    bytes: await getObjectBytes(nativeWavKey),
+  });
   ctx.log(
-    `upload_draft: admitted human-auditioned per-track music receipt ${quality.fingerprint.slice(0, 12)} ` +
+    `upload_draft: admitted human-auditioned and byte-verified per-track music receipt ${quality.fingerprint.slice(0, 12)} ` +
     `for MiniMax request ${runtime.requestKey.slice(0, 12)}`,
   );
 }

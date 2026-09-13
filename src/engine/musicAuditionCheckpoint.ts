@@ -2,12 +2,41 @@ import { z } from "zod";
 
 import { ChannelMusicProgramSchema } from "@/engine/channelMusicProgram";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { sha256Hex } from "@/lib/sha256";
+import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 
 export const MUSIC_AUDITION_CHECKPOINT_VERSION = "music-audition-checkpoint/v1" as const;
 
 const FingerprintSchema = z.string().regex(/^[a-f0-9]{64}$/u);
 const text = (maximum: number) => z.string().trim().min(1).max(maximum);
+const NativeOutputIntegritySchema = z.object({
+  contentSha256: FingerprintSchema,
+  byteLength: z.number().int().min(44).max(50_000_000),
+}).strict();
+
+/**
+ * A content-addressed key and a worker receipt alone do not prove that R2
+ * still holds the exact WAV the owner heard. Recheck the actual retained bytes
+ * at every authority boundary that turns a review into an approval/release.
+ * This deliberately verifies only byte identity: auditory/editorial judgement
+ * remains the owner review represented by the separate quality receipt.
+ */
+export function assertMusicAuditionNativeBytes(input: {
+  readonly expected: unknown;
+  readonly bytes: Uint8Array;
+}): Readonly<{ contentSha256: string; byteLength: number }> {
+  const expected = NativeOutputIntegritySchema.parse(input.expected);
+  const actual = {
+    contentSha256: sha256BytesHex(input.bytes),
+    byteLength: input.bytes.byteLength,
+  };
+  if (actual.contentSha256 !== expected.contentSha256 || actual.byteLength !== expected.byteLength) {
+    throw new Error(
+      `retained native Music3 WAV does not match its immutable receipt (expected ${expected.contentSha256.slice(0, 12)}/${expected.byteLength}, ` +
+      `got ${actual.contentSha256.slice(0, 12)}/${actual.byteLength})`,
+    );
+  }
+  return Object.freeze(actual);
+}
 
 /**
  * Immutable identity for the future owner audition boundary. It intentionally
