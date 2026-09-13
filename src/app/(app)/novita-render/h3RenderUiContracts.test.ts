@@ -20,6 +20,7 @@ assert.match(page, /URLSearchParams\(window\.location\.search\)/,
 assert.match(page, /requestedMode === "weekly"/);
 assert.match(page, /requestedMode === "on-demand"/);
 assert.match(page, /validationIssues/, "invalid sealed jobs must expose actionable feedback before dispatch");
+assert.match(page, /Request packet invalid/, "a corrupt frozen weekly packet must be visible in progress");
 assert.match(page, /window\.confirm/);
 assert.match(route, /provider:\s*"salad"/);
 assert.match(onDemand, /provider:\s*"novita"/);
