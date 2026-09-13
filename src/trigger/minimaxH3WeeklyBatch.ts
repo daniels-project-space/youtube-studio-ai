@@ -570,13 +570,20 @@ export const minimaxH3WeeklyBatchTask = task({
       requestKeys,
       jobs: payload.jobs,
     });
-    await assertMiniMaxH3SaladCapacity(payload.jobs.length);
+    const capacity = await assertMiniMaxH3SaladCapacity(payload.jobs.length, {
+      // Medium remains the first choice. High is the explicit, costlier
+      // capacity escape hatch Daniel authorized: set the variable to "0" to
+      // disable it for a deployment, but never let request JSON select it.
+      allowHighPriorityFallback: process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
+    });
     if (payload.preparedFootage) {
       // Preflight every input before the first worker request; a later bad
       // frame must never leave a partially paid weekly order.
       await preflightPreparedFrames(payload.jobs, payload.preparedFootage);
     }
-    const result = await renderMiniMaxH3WeeklyBatch(payload.jobs);
+    const result = await renderMiniMaxH3WeeklyBatch(payload.jobs, {
+      saladCapacityMode: capacity.capacityMode,
+    });
     const receipt = createMiniMaxH3WeeklyReceipt(payload.orderKey, result);
     // A batch receipt is create-only. If a controller loses its response after
     // rendering, it must read/reconcile this immutable proof rather than issue

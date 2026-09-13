@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import {
   SALAD_API_BASE, SaladCloudClient, SaladCloudError, buildSaladContainerGroup,
-  isSaladGroupStopped, saladOccupiedGpuSlots, selectSaladGpu, type SaladGpuClass,
+  isSaladGroupStopped, saladOccupiedGpuSlots, selectSaladGpu, selectSaladGpuAtPriority, type SaladGpuClass,
 } from "../saladCloud";
 
 const classes: SaladGpuClass[] = [
@@ -30,6 +30,10 @@ function providerGroup(status = "stopped", running = 0) {
 
 async function main() {
   assert.equal(selectSaladGpu(classes, "RTX 5090").id, classes[1].id);
+  const highClasses = classes.map((gpu) => gpu.name === "RTX 5090 (32 GB)"
+    ? { ...gpu, prices: [...gpu.prices, { price: "0.58", priority: "high" as const }] }
+    : gpu);
+  assert.equal(selectSaladGpuAtPriority(highClasses, "RTX 5090", "high").priority, "high");
   assert.throws(() => selectSaladGpu([classes[2]], "RTX 5090"), /exact/);
   assert.throws(() => selectSaladGpu([...classes, classes[0]], "RTX 3090"), /exact/);
   assert.equal(request.autostart_policy, false);

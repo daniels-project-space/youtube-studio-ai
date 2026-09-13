@@ -4,8 +4,11 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 /** Public API fields verified against Salad's current schema and live discovery. */
 export const SALAD_API_BASE = "https://api.salad.com/api/public";
 export const SALAD_BULK_PRIORITY = "medium" as const;
+/** Explicit, costlier fallback when the medium tier has no matching slots. */
+export const SALAD_HIGH_FALLBACK_PRIORITY = "high" as const;
 export const SALAD_BULK_MAX_GPUS = 3;
 export type SaladGpuModel = "RTX 3090" | "RTX 5090";
+export type SaladBulkPriority = typeof SALAD_BULK_PRIORITY | typeof SALAD_HIGH_FALLBACK_PRIORITY;
 
 const resourceName = z.string().regex(/^[a-z][a-z0-9-]{0,61}[a-z0-9]$/);
 const gpuId = z.string().uuid();
@@ -27,7 +30,7 @@ export interface SaladGpuSelection {
   model: SaladGpuModel;
   name: string;
   priceUsdPerHour: number;
-  priority: typeof SALAD_BULK_PRIORITY;
+  priority: SaladBulkPriority;
 }
 
 const resourceSchema = z.object({
@@ -113,18 +116,24 @@ const createSchema = z.object({
 }).strict();
 export type SaladCreateContainerGroup = z.infer<typeof createSchema>;
 
-export function selectSaladGpu(classes: readonly SaladGpuClass[], model: SaladGpuModel): SaladGpuSelection {
+export function selectSaladGpuAtPriority(
+  classes: readonly SaladGpuClass[], model: SaladGpuModel, requestedPriority: SaladBulkPriority,
+): SaladGpuSelection {
   const exactName = model === "RTX 3090" ? "RTX 3090 (24 GB)" : "RTX 5090 (32 GB)";
   const matches = classes.filter((gpu) => gpu.name === exactName);
   if (matches.length !== 1) throw new Error(`Salad discovery must return one exact ${model} desktop GPU class`);
   const gpu = matches[0];
   gpuId.parse(gpu.id);
-  const prices = gpu.prices.filter((row) => row.priority === SALAD_BULK_PRIORITY);
+  const prices = gpu.prices.filter((row) => row.priority === requestedPriority);
   const priceUsdPerHour = Number(prices[0]?.price);
   if (prices.length !== 1 || !Number.isFinite(priceUsdPerHour) || priceUsdPerHour <= 0) {
-    throw new Error("Salad medium priority price is absent or invalid");
+    throw new Error(`Salad ${requestedPriority} priority price is absent or invalid`);
   }
-  return { id: gpu.id, name: gpu.name, model, priceUsdPerHour, priority: SALAD_BULK_PRIORITY };
+  return { id: gpu.id, name: gpu.name, model, priceUsdPerHour, priority: requestedPriority };
+}
+
+export function selectSaladGpu(classes: readonly SaladGpuClass[], model: SaladGpuModel): SaladGpuSelection {
+  return selectSaladGpuAtPriority(classes, model, SALAD_BULK_PRIORITY);
 }
 
 /** Capacity remains reserved during allocation and stopping, until the provider confirms zero. */

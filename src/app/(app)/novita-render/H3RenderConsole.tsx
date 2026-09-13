@@ -221,7 +221,7 @@ export function H3RenderConsole() {
 
   const provider = mode === "weekly" ? "Salad" : "Novita";
   const routeNote = mode === "weekly"
-    ? "Weekly slate · medium priority · up to 3 RTX 5090 workers"
+    ? "Weekly slate · medium first · high fallback · up to 3 RTX 5090 workers"
     : "One repair or preview clip · Novita spot GPU · no automatic retry";
   const progressPercent = !status ? 0 : status.state === "complete" ? 100 : status.state === "reconciliation_required" ? 92 : /EXECUTING|RUNNING|IN_PROGRESS/i.test(status.triggerStatus) ? 58 : 16;
 

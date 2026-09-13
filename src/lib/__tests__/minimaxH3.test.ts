@@ -3,6 +3,7 @@ import {
   assertMiniMaxH3R2ModelManifest,
   assertMiniMaxH3SaladCapacity,
   MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_SALAD_CAPACITY_MODE,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
   MiniMaxH3Error,
@@ -33,20 +34,23 @@ assert.notEqual(
   miniMaxH3RequestKey(request("novita", "on-demand")),
   "weekly and on-demand routes must have distinct idempotency identities",
 );
-function responseFor(input: ReturnType<typeof request>) {
+function responseFor(input: ReturnType<typeof request>, capacityMode: "medium" | "high" | "spot" = input.provider === "salad" ? "medium" : "spot") {
   return new Response(JSON.stringify({ receipt: {
     schema: "minimax-h3-worker/v1", requestKey: "", jobId: "job-1", execution: input.execution,
     profile: MINIMAX_H3_PROFILE, promptSha256: "", seed: input.seed, firstFrame: input.firstFrame,
     output: { r2Key: input.output.r2Key, contentSha256: sha256BytesHex(output), byteLength: output.byteLength, contentType: "video/mp4" },
     runtime: { provider: input.provider, gpuModel: "RTX 5090", runtimeId: MINIMAX_H3_RUNTIME_ID,
-      modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256, capacityMode: input.provider === "salad" ? "medium" : "spot", costUsd: 0.2 },
+      modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256, capacityMode, costUsd: 0.2 },
   } }), { status: 200, headers: { "content-type": "application/json" } });
 }
 async function test() {
   const classes = [{
     id: "851399fb-7329-4195-a042-d6514b28cf33",
     name: "RTX 5090 (32 GB)",
-    prices: [{ price: "0.417", priority: "medium" as const }],
+    prices: [
+      { price: "0.417", priority: "medium" as const },
+      { price: "0.58", priority: "high" as const },
+    ],
   }];
   let capacityRequest: { gpu_classes: string[]; memory: number; storage_amount: number } | undefined;
   const capacityClient: MiniMaxH3SaladCapacityClient = {
@@ -58,7 +62,7 @@ async function test() {
   };
   assert.deepEqual(
     await assertMiniMaxH3SaladCapacity(4, { client: capacityClient }),
-    { requiredGpuCount: 3, availableGpuCount: 3, gpuClassId: classes[0]!.id },
+    { requiredGpuCount: 3, availableGpuCount: 3, gpuClassId: classes[0]!.id, capacityMode: "medium" },
   );
   assert.deepEqual(capacityRequest, {
     cpu: 8, gpu_classes: [classes[0]!.id], memory: 131_072, storage_amount: 100 * 1024 ** 3,
@@ -68,6 +72,28 @@ async function test() {
       client: { ...capacityClient, getGpuAvailability: async () => ({ available_gpu_medium: 1 }) },
     }),
     /capacity is insufficient/,
+  );
+  assert.deepEqual(
+    await assertMiniMaxH3SaladCapacity(2, {
+      client: {
+        ...capacityClient,
+        getGpuAvailability: async () => ({ available_gpu_medium: 0, available_gpu_high: 2 }),
+      },
+      allowHighPriorityFallback: true,
+    }),
+    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high" },
+    "high fallback must be admitted only when medium is unavailable and high has enough exact-class slots",
+  );
+  assert.deepEqual(
+    await assertMiniMaxH3SaladCapacity(1, {
+      client: {
+        listGpuClasses: async () => [{ ...classes[0]!, prices: [{ price: "0.58", priority: "high" as const }] }],
+        getGpuAvailability: async () => ({ available_gpu_medium: 1, available_gpu_high: 1 }),
+      },
+      allowHighPriorityFallback: true,
+    }),
+    { requiredGpuCount: 1, availableGpuCount: 1, gpuClassId: classes[0]!.id, capacityMode: "high" },
+    "a missing medium price must not silently dispatch medium; explicit high fallback may still proceed",
   );
   configure("salad"); configure("novita");
   const salad = request("salad", "weekly-batch");
@@ -92,6 +118,25 @@ async function test() {
   assert.equal(seen?.output_key, salad.output.r2Key);
   assert.equal(seen?.output_put_url, "https://r2.example/write");
   assert.equal(seen?.execution, "weekly-batch");
+  assert.equal(seen?.capacity_mode, MINIMAX_H3_SALAD_CAPACITY_MODE);
+
+  const high = await renderMiniMaxH3(salad, {
+    saladCapacityMode: "high",
+    presignRead: async () => "https://r2.example/read",
+    presignWrite: async () => "https://r2.example/write",
+    readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
+    assertModelManifest: async () => {},
+    fetch: async (_url, init) => {
+      seen = JSON.parse(String(init?.body));
+      const reply = responseFor(salad, "high");
+      const body = await reply.json() as { receipt: Record<string, unknown> };
+      body.receipt.requestKey = String(seen?.request_key);
+      body.receipt.promptSha256 = sha256Hex(salad.prompt);
+      return new Response(JSON.stringify(body), { status: 200, headers: { "content-type": "application/json" } });
+    },
+  });
+  assert.equal(high.receipt.runtime.capacityMode, "high");
+  assert.equal(seen?.capacity_mode, "high");
 
   await assert.rejects(
     () => renderMiniMaxH3(salad, {

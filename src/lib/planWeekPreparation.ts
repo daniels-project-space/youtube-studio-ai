@@ -28,6 +28,7 @@ import {
   type MiniMaxH3Provider,
   type MiniMaxH3Execution,
 } from "@/lib/minimaxH3";
+import { SALAD_HIGH_FALLBACK_PRIORITY } from "@/lib/saladCloud";
 
 /**
  * The provider-free first stage of weekly batch preparation.  It is deliberately
@@ -995,7 +996,9 @@ export function assertPlanWeekPreparedFootageBinding(args: {
         receiptRuntime.gpuModel !== "RTX 5090" ||
         receiptRuntime.runtimeId !== MINIMAX_H3_RUNTIME_ID ||
         receiptRuntime.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256 ||
-        receiptRuntime.capacityMode !== "medium" && receiptRuntime.capacityMode !== "spot" ||
+        (renderer.provider === "salad"
+          ? receiptRuntime.capacityMode !== "medium" && receiptRuntime.capacityMode !== SALAD_HIGH_FALLBACK_PRIORITY
+          : receiptRuntime.capacityMode !== "spot") ||
         canonicalJson(receipt.profile) !== canonicalJson(MINIMAX_H3_PROFILE)
       ) {
         throw new Error("prepared footage H3 receipt binding mismatch");

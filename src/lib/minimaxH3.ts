@@ -3,7 +3,10 @@ import { getObjectBytes, presignDownload, presignUpload } from "@/lib/storage";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import {
   saladCloudClientFromVault,
+  SALAD_BULK_PRIORITY,
+  SALAD_HIGH_FALLBACK_PRIORITY,
   selectSaladGpu,
+  selectSaladGpuAtPriority,
   type SaladGpuClass,
   type SaladResources,
 } from "@/lib/saladCloud";
@@ -21,6 +24,13 @@ export const MINIMAX_H3_MODEL = "Comfy-Org/MiniMax-H3" as const;
 export const MINIMAX_H3_MODEL_REVISION = "4cc1d817b6184899b41293954329f576cb5ae86b" as const;
 export const MINIMAX_H3_RUNTIME_ID = "minimax-h3-turbo8-5090-v1" as const;
 export const MINIMAX_H3_MANIFEST_SHA256 = "eca7ade81afd2edd4b912275a8657b9504cab71ca7e538aed7ce12f27acc90c9" as const;
+/**
+ * Salad has no hard reservation API.  Medium is therefore part of the H3
+ * wire contract, not just a scheduler hint: admission checks this tier,
+ * dispatch declares it, and the worker receipt must attest it.
+ */
+export const MINIMAX_H3_SALAD_CAPACITY_MODE = SALAD_BULK_PRIORITY;
+export const MINIMAX_H3_NOVITA_CAPACITY_MODE = "spot" as const;
 export const MINIMAX_H3_PROFILE = Object.freeze({
   id: "official-turbo8-native-768p",
   width: 1344,
@@ -58,6 +68,7 @@ export interface MiniMaxH3SaladCapacityClient {
   listGpuClasses(): Promise<SaladGpuClass[]>;
   getGpuAvailability(resources: SaladResources, countryCodes?: string[]): Promise<{
     available_gpu_medium?: number;
+    available_gpu_high?: number;
   }>;
 }
 
@@ -65,18 +76,26 @@ export interface MiniMaxH3SaladCapacityClient {
  * Read-only Salad admission for the weekly lane. The worker URL alone is not
  * evidence that the requested desktop 5090 capacity exists; discover the
  * exact class and current medium-priority slots before the first paid call.
+ * A high-priority fallback may be used only when the medium tier cannot
+ * satisfy the whole wave; the weekly task can disable that costlier escape
+ * hatch with MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK=0.
  */
 export async function assertMiniMaxH3SaladCapacity(
   jobCount: number,
-  options: { client?: MiniMaxH3SaladCapacityClient } = {},
-): Promise<{ requiredGpuCount: number; availableGpuCount: number; gpuClassId: string }> {
+  options: { client?: MiniMaxH3SaladCapacityClient; allowHighPriorityFallback?: boolean } = {},
+): Promise<{
+  requiredGpuCount: number;
+  availableGpuCount: number;
+  gpuClassId: string;
+  capacityMode: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY;
+}> {
   if (!Number.isSafeInteger(jobCount) || jobCount < 1 || jobCount > MAX_H3_JOBS_PER_BATCH) {
     throw new MiniMaxH3Error(`weekly MiniMax H3 capacity check requires 1..${MAX_H3_JOBS_PER_BATCH} jobs`);
   }
   const client = options.client ?? await saladCloudClientFromVault();
-  let gpu: ReturnType<typeof selectSaladGpu>;
+  let classes: SaladGpuClass[];
   try {
-    gpu = selectSaladGpu(await client.listGpuClasses(), "RTX 5090");
+    classes = await client.listGpuClasses();
   } catch (error) {
     throw new MiniMaxH3Error(
       `weekly MiniMax H3 Salad capacity check could not admit the exact desktop RTX 5090 class: ${error instanceof Error ? error.message : String(error)}`,
@@ -86,6 +105,24 @@ export async function assertMiniMaxH3SaladCapacity(
       0,
     );
   }
+  let mediumGpu: ReturnType<typeof selectSaladGpu> | undefined;
+  try { mediumGpu = selectSaladGpu(classes, "RTX 5090"); } catch {
+    // A tier can be absent from discovery while another tier is available.
+    // Keep the high fallback useful in that case, but never silently upgrade
+    // the default medium route.
+  }
+  let highGpu: ReturnType<typeof selectSaladGpuAtPriority> | undefined;
+  if (!mediumGpu && options.allowHighPriorityFallback) {
+    try { highGpu = selectSaladGpuAtPriority(classes, "RTX 5090", SALAD_HIGH_FALLBACK_PRIORITY); } catch (error) {
+      throw new MiniMaxH3Error(
+        `weekly MiniMax H3 Salad capacity check could not admit a priced exact desktop RTX 5090 class: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  if (!mediumGpu && !highGpu) {
+    throw new MiniMaxH3Error("weekly MiniMax H3 Salad capacity check could not admit an exact desktop RTX 5090 at medium priority");
+  }
+  const gpu = mediumGpu ?? highGpu!;
   const resources: SaladResources = {
     ...MINIMAX_H3_SALAD_RESOURCES,
     gpu_classes: [gpu.id],
@@ -99,16 +136,50 @@ export async function assertMiniMaxH3SaladCapacity(
     );
   }
   const rawAvailableGpuCount = availability.available_gpu_medium;
-  const availableGpuCount = typeof rawAvailableGpuCount === "number" && Number.isSafeInteger(rawAvailableGpuCount)
+  const availableMediumGpuCount = typeof rawAvailableGpuCount === "number" && Number.isSafeInteger(rawAvailableGpuCount)
     ? rawAvailableGpuCount
     : 0;
   const requiredGpuCount = Math.min(MAX_H3_PARALLEL_SALAD_JOBS, jobCount);
-  if (availableGpuCount < requiredGpuCount) {
+  if (mediumGpu && availableMediumGpuCount >= requiredGpuCount) {
+    return {
+      requiredGpuCount,
+      availableGpuCount: availableMediumGpuCount,
+      gpuClassId: gpu.id,
+      capacityMode: MINIMAX_H3_SALAD_CAPACITY_MODE,
+    };
+  }
+  const rawAvailableHighGpuCount = availability.available_gpu_high;
+  const availableHighGpuCount = typeof rawAvailableHighGpuCount === "number" && Number.isSafeInteger(rawAvailableHighGpuCount)
+    ? rawAvailableHighGpuCount
+    : 0;
+  if (options.allowHighPriorityFallback && availableHighGpuCount >= requiredGpuCount) {
+    // Re-discover the same exact desktop class at the selected tier. A high
+    // availability estimate without a valid high-tier price is not spend
+    // admission evidence.
+    if (!highGpu) {
+      try {
+        highGpu = selectSaladGpuAtPriority(classes, "RTX 5090", SALAD_HIGH_FALLBACK_PRIORITY);
+      } catch (error) {
+        throw new MiniMaxH3Error(
+          `weekly MiniMax H3 Salad high-priority capacity is not priced for the exact desktop RTX 5090 class: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return {
+      requiredGpuCount,
+      availableGpuCount: availableHighGpuCount,
+      gpuClassId: highGpu.id,
+      capacityMode: SALAD_HIGH_FALLBACK_PRIORITY,
+    };
+  }
+  if (!mediumGpu || availableMediumGpuCount < requiredGpuCount) {
     throw new MiniMaxH3Error(
-      `weekly MiniMax H3 Salad capacity is insufficient for the requested wave (${availableGpuCount}/${requiredGpuCount} medium desktop RTX 5090 slots)`,
+      options.allowHighPriorityFallback
+        ? `weekly MiniMax H3 Salad capacity is insufficient for the requested wave (${availableMediumGpuCount} medium, ${availableHighGpuCount} high, ${requiredGpuCount} desktop RTX 5090 slots)`
+        : `weekly MiniMax H3 Salad medium capacity is insufficient for the requested wave (${availableMediumGpuCount}/${requiredGpuCount} desktop RTX 5090 slots); high-priority fallback is disabled`,
     );
   }
-  return { requiredGpuCount, availableGpuCount, gpuClassId: gpu.id };
+  throw new MiniMaxH3Error("weekly MiniMax H3 Salad capacity admission failed");
 }
 
 export interface MiniMaxH3RenderRequest {
@@ -132,7 +203,7 @@ export interface MiniMaxH3RuntimeReceipt {
   gpuModel: "RTX 5090";
   runtimeId: typeof MINIMAX_H3_RUNTIME_ID;
   modelManifestSha256: typeof MINIMAX_H3_MANIFEST_SHA256;
-  capacityMode: "medium" | "spot";
+  capacityMode: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY | typeof MINIMAX_H3_NOVITA_CAPACITY_MODE;
   costUsd: number;
 }
 
@@ -301,6 +372,7 @@ function normaliseRequest(input: MiniMaxH3RenderRequest): MiniMaxH3RenderRequest
 function receiptFrom(value: unknown, expected: {
   request: MiniMaxH3RenderRequest;
   requestKey: string;
+  expectedCapacityMode: MiniMaxH3RuntimeReceipt["capacityMode"];
 }): MiniMaxH3Receipt {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new MiniMaxH3Error("MiniMax H3 worker receipt is missing", expected.requestKey);
   const raw = value as Record<string, unknown>;
@@ -320,8 +392,7 @@ function receiptFrom(value: unknown, expected: {
     output?.r2Key !== expected.request.output.r2Key || output?.contentType !== "video/mp4" ||
     runtime?.provider !== expected.request.provider || runtime.gpuModel !== "RTX 5090" ||
     runtime.runtimeId !== MINIMAX_H3_RUNTIME_ID || runtime.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256 ||
-    (runtime.capacityMode !== "medium" && runtime.capacityMode !== "spot") ||
-    (expected.request.provider === "salad" && runtime.capacityMode !== "medium")
+    runtime.capacityMode !== expected.expectedCapacityMode
   ) {
     throw new MiniMaxH3Error("MiniMax H3 worker receipt does not bind the sealed request/profile/runtime", expected.requestKey);
   }
@@ -349,7 +420,7 @@ function receiptFrom(value: unknown, expected: {
       gpuModel: "RTX 5090",
       runtimeId: MINIMAX_H3_RUNTIME_ID,
       modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
-      capacityMode: runtime.capacityMode as "medium" | "spot",
+      capacityMode: runtime.capacityMode as MiniMaxH3RuntimeReceipt["capacityMode"],
       costUsd,
     },
   };
@@ -385,6 +456,8 @@ export async function renderMiniMaxH3(
     readModelManifest?: (key: string, bucket?: string) => Promise<Uint8Array>;
     /** Test seam; production callers never supply this and always verify R2. */
     assertModelManifest?: () => Promise<void>;
+    /** Selected by read-only Salad admission; medium is always the default. */
+    saladCapacityMode?: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY;
   } = {},
 ): Promise<MiniMaxH3RenderedVideo> {
   const request = normaliseRequest(input);
@@ -436,6 +509,13 @@ export async function renderMiniMaxH3(
         output_key: request.output.r2Key,
         output_put_url: outputPutUrl,
         execution: request.execution,
+        // The custom Salad worker must not infer a tier from defaults.  This
+        // explicit field is checked against the admitted capacity selection
+        // and the runtime receipt below. The request key remains compatible
+        // with existing weekly packets; the receipt binds the actual tier.
+        capacity_mode: request.provider === "salad"
+          ? options.saladCapacityMode ?? MINIMAX_H3_SALAD_CAPACITY_MODE
+          : MINIMAX_H3_NOVITA_CAPACITY_MODE,
         profile: MINIMAX_H3_PROFILE,
         max_cost_usd: request.maxCostUsd,
       }),
@@ -455,7 +535,10 @@ export async function renderMiniMaxH3(
   try { body = await response.json() as { receipt?: unknown }; } catch (error) {
     throw new MiniMaxH3Error("MiniMax H3 worker returned malformed JSON", requestKey, response.status, false, 0, { cause: error });
   }
-  const receipt = receiptFrom(body.receipt, { request, requestKey });
+  const expectedCapacityMode = request.provider === "salad"
+    ? options.saladCapacityMode ?? MINIMAX_H3_SALAD_CAPACITY_MODE
+    : MINIMAX_H3_NOVITA_CAPACITY_MODE;
+  const receipt = receiptFrom(body.receipt, { request, requestKey, expectedCapacityMode });
   let outputBytes: Uint8Array;
   try { outputBytes = await readObject(receipt.output.r2Key); } catch (error) {
     throw new MiniMaxH3Error(`MiniMax H3 accepted output cannot be re-read from R2 for request ${requestKey}`, requestKey, response.status, false, receipt.runtime.costUsd, { cause: error });
