@@ -29,6 +29,21 @@ function assertInternalSecret(secret: string): void {
   }
 }
 
+/** Store only the bounded title-only slate emitted by the receipt reader. */
+function normalizeTitleAlternates(values: readonly string[] | undefined): string[] {
+  const result: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values ?? []) {
+    const title = value.trim().replace(/\s+/g, " ");
+    const identity = title.toLocaleLowerCase();
+    if (!title || title.length > 1_000 || seen.has(identity)) continue;
+    seen.add(identity);
+    result.push(title);
+    if (result.length === 2) break;
+  }
+  return result;
+}
+
 const learningItemValidator = v.object({
   runId: v.id("runs"),
   youtubeVideoId: v.string(),
@@ -59,6 +74,7 @@ type LearningItem = {
   thumbnailImpressions?: number;
   title?: string;
   titleAlternate?: string;
+  titleAlternates?: string[];
   topic?: string;
   thumbnailStrategy?: string;
 };
@@ -926,6 +942,7 @@ export const recordLearningItemFetched = mutation({
     thumbnailImpressions: v.optional(v.number()),
     title: v.string(),
     titleAlternate: v.optional(v.string()),
+    titleAlternates: v.optional(v.array(v.string())),
     topic: v.string(),
     thumbnailStrategy: v.optional(v.string()),
     now: v.number(),
@@ -991,6 +1008,7 @@ export const recordLearningItemFetched = mutation({
     ) {
       throw new Error("learning analytics response lacks its exact consumed dispatch capability");
     }
+    const titleAlternates = normalizeTitleAlternates(args.titleAlternates);
     const items = [...batch.items];
     items[index] = {
       ...item,
@@ -1003,6 +1021,7 @@ export const recordLearningItemFetched = mutation({
       ...(args.thumbnailImpressions === undefined ? {} : { thumbnailImpressions: args.thumbnailImpressions }),
       title: args.title.slice(0, 1_000),
       ...(args.titleAlternate ? { titleAlternate: args.titleAlternate.slice(0, 1_000) } : {}),
+      ...(titleAlternates.length ? { titleAlternates } : {}),
       topic: args.topic.slice(0, 1_000),
       ...(args.thumbnailStrategy ? { thumbnailStrategy: args.thumbnailStrategy.slice(0, 1_000) } : {}),
     };
@@ -1215,6 +1234,7 @@ export const prepareLearningLedgerWrite = mutation({
       thumbnailImpressions: item.thumbnailImpressions,
       title: item.title,
       titleAlternate: item.titleAlternate,
+      titleAlternates: item.titleAlternates,
       topic: item.topic,
       thumbnailStrategy: item.thumbnailStrategy,
       metricDefinitionVersion,

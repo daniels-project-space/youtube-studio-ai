@@ -27,6 +27,11 @@ export interface PerfEntry {
   /** Metacraft's runner-up, kept so a swap has something to swap TO. */
   titleAlternate?: string;
   /**
+   * Up to two receipt-derived candidates for a title-only native Studio test.
+   * They are proposals, never results or thumbnail pairings.
+   */
+  titleAlternates?: string[];
+  /**
    * When the CURRENT title went live. Publish time is the default; a rewrite
    * moves it. Observations before this point describe a different title and
    * must not be attributed to the one now showing.

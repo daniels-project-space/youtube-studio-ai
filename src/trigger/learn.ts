@@ -29,6 +29,7 @@ import {
   type YouTubeConnectorCredential,
 } from "@/lib/youtubeConnector";
 import { loadLedger, saveLedger, loadPerformanceContext, type PerfEntry } from "@/lib/performance";
+import { nativeTitleTestAlternates } from "@/lib/titleReviewPresentation";
 import {
   hasYouTubeAnalyticsReportScopes,
   YOUTUBE_ANALYTICS_SCOPE,
@@ -289,6 +290,7 @@ type LearningAnalyticsItem = {
   thumbnailImpressions?: number;
   title?: string;
   titleAlternate?: string;
+  titleAlternates?: string[];
   topic?: string;
   thumbnailStrategy?: string;
 };
@@ -310,17 +312,20 @@ type LearningAnalyticsBatch = {
 async function runAttributes(
   convex: ConvexHttpClient,
   runId: Id<"runs">,
-): Promise<{ title: string; topic: string; thumbnailStrategy?: string; titleAlternate?: string }> {
+): Promise<{ title: string; topic: string; thumbnailStrategy?: string; titleAlternate?: string; titleAlternates?: string[] }> {
   try {
     const stages = (await convex.query(api.runStages.listRunStages, {
       runId,
     })) as Array<{ block: string; outputs?: Record<string, unknown> }>;
+    const metadata = stages.find((stage) => stage.block === "metadata")?.outputs;
+    const titleAlternates = nativeTitleTestAlternates(metadata);
     return {
-      title: (stages.find((stage) => stage.block === "metadata")?.outputs?.title as string) ?? "",
-      // Metacraft's judged runner-up. Carried into the ledger so the CTR swap
-      // has something to swap TO; without it the alternate is generated on
-      // every video and then thrown away, which is what used to happen.
-      titleAlternate: (stages.find((stage) => stage.block === "metadata")?.outputs?.titleAlternate as string) || undefined,
+      title: (metadata?.title as string) ?? "",
+      // Only a fingerprint-consistent, source-supported recorded receipt may
+      // make it into a native test. A loose stage output is presentation data,
+      // not evidence.
+      ...(titleAlternates[0] ? { titleAlternate: titleAlternates[0] } : {}),
+      ...(titleAlternates.length ? { titleAlternates } : {}),
       topic: (stages.find((stage) => stage.block === "topic_select")?.outputs?.topic as string) ?? "",
       thumbnailStrategy: (stages.find((stage) => stage.block === "thumbnail_gen")?.outputs as { strategy?: string })?.strategy,
     };
@@ -349,7 +354,8 @@ function ledgerContainsBatch(
         entry.views === item.views &&
         entry.avgViewPct === item.avgViewPct &&
         entry.ctr === item.ctr &&
-        entry.engagedViews === item.engagedViews;
+        entry.engagedViews === item.engagedViews &&
+        JSON.stringify(entry.titleAlternates ?? []) === JSON.stringify(item.titleAlternates ?? []);
     });
 }
 
@@ -650,6 +656,7 @@ async function processLearningBatch(args: {
           : { thumbnailImpressions: analytics.thumbnailImpressions }),
         title: attributes.title,
         ...(attributes.titleAlternate ? { titleAlternate: attributes.titleAlternate } : {}),
+        ...(attributes.titleAlternates?.length ? { titleAlternates: attributes.titleAlternates } : {}),
         topic: attributes.topic,
         ...(attributes.thumbnailStrategy ? { thumbnailStrategy: attributes.thumbnailStrategy } : {}),
         now: Date.now(),
@@ -788,6 +795,7 @@ async function processLearningBatch(args: {
           ? {}
           : { thumbnailImpressions: item.thumbnailImpressions }),
         ...(item.titleAlternate ? { titleAlternate: item.titleAlternate } : {}),
+        ...(item.titleAlternates?.length ? { titleAlternates: item.titleAlternates } : {}),
         updatedAt: Date.now(),
         connectorId: String(active.connectorId),
         connectorVersion: active.connectorVersion,

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readTitleReview } from "../titleReviewPresentation";
+import { nativeTitleTestAlternates, readTitleReview } from "../titleReviewPresentation";
 import { titleDecisionFingerprint } from "../titleDecisionFingerprint";
 
 const title = "47 Engineers Died in the Bridge Collapse";
@@ -9,12 +9,14 @@ function outputs() {
     clickScore: 9, directness: 8, winnerIndex: 1, alternateIndex: 2, attempts: 1,
     sourceCoverage: { kind: "full_narration", providedChars: 8400, totalChars: 8400 },
     candidates: [{ title: "47 Engineers Survived the Bridge Collapse" }, { title },
-      { title: "The Design Error Behind the Bridge Collapse" }],
+      { title: "The Design Error Behind the Bridge Collapse" },
+      { title: "Why the Bridge Failed Before It Opened" }],
     // Deliberately not in candidate order: pairing by array position is wrong.
     rankings: [
       { idx: 2, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "The script explains the design failure." },
       { idx: 0, clickScore: 10, direct: 10, identityFit: 9, grounding: "contradicted", reason: "The narration says no engineers survived." },
       { idx: 1, clickScore: 9, direct: 8, identityFit: 9, grounding: "supported", reason: "The source states that 47 engineers died." },
+      { idx: 3, clickScore: 8, direct: 9, identityFit: 9, grounding: "supported", reason: "The narration identifies a pre-opening design failure." },
     ],
   };
   return { title, titleDecision: { ...titleDecision, fingerprint: titleDecisionFingerprint(titleDecision) } };
@@ -36,15 +38,22 @@ assert.equal(review.selected.reason, input.titleDecision.rankings[2].reason);
 assert.equal(review.options[0].grounding, "contradicted");
 assert.equal(review.options[0].selected, false, "the highest click score is not necessarily the selected title");
 assert.equal(review.options[2].alternate, true);
+assert.deepEqual(
+  nativeTitleTestAlternates(input),
+  ["The Design Error Behind the Bridge Collapse", "Why the Bridge Failed Before It Opened"],
+  "the selected runner-up stays first; unsupported candidates do not enter the slate",
+);
 assert.deepEqual(input, before, "presentation never rewrites the decision or input arrays");
 const legacy = outputs() as { title: string; titleDecision: Record<string, unknown> };
 legacy.titleDecision.version = "title-decision/v1";
 delete legacy.titleDecision.fingerprint;
 assert.ok(readTitleReview(legacy)?.state === "recorded", "persisted v1 reviews remain readable after v2 sealing");
+assert.deepEqual(nativeTitleTestAlternates(legacy), [], "unsealed v1 reviews never become new native-test candidates");
 for (const value of [null, undefined, [], false, "legacy", {}, { title }, { titleDecision: undefined }]) {
   assert.equal(readTitleReview(value), null, "legacy outputs must not acquire invented review evidence");
 }
 assert.equal(readTitleReview({ ...outputs(), title: "Changed after the review" })?.state, "title_changed");
+assert.deepEqual(nativeTitleTestAlternates({ ...outputs(), title: "Changed after the review" }), []);
 assert.equal(readTitleReview({ titleDecision: outputs().titleDecision })?.state, "title_changed");
 for (const kind of ["script_excerpt", "topic_only"]) {
   const out = outputs();
@@ -59,6 +68,14 @@ const changedVerdict = outputs(); changedVerdict.titleDecision.rankings[2].groun
 const recordedVerdict = readTitleReview(changedVerdict);
 assert.ok(recordedVerdict && recordedVerdict.state === "recorded");
 assert.equal(recordedVerdict.selected.grounding, "insufficient", "show the recorded model verdict, never upgrade it to proof");
+const weakCandidate = outputs();
+weakCandidate.titleDecision.rankings[3].clickScore = 6;
+resign(weakCandidate);
+assert.deepEqual(nativeTitleTestAlternates(weakCandidate), ["The Design Error Behind the Bridge Collapse"]);
+const duplicateCandidate = outputs();
+duplicateCandidate.titleDecision.candidates[3].title = "  THE DESIGN ERROR BEHIND THE BRIDGE COLLAPSE ";
+resign(duplicateCandidate);
+assert.deepEqual(nativeTitleTestAlternates(duplicateCandidate), ["The Design Error Behind the Bridge Collapse"]);
 
 const mutations: Array<(out: ReturnType<typeof outputs>) => void> = [
   (o) => { o.titleDecision.version = "future-version"; },

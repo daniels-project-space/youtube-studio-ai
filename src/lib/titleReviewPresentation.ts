@@ -27,6 +27,9 @@ export type TitleReviewPresentation =
       attempts: number;
     };
 
+/** YouTube can compare at most three title/thumbnail variants in one native test. */
+export const MAX_NATIVE_TITLE_TEST_ALTERNATES = 2;
+
 function record(value: unknown): Record<string, unknown> | null {
   return value !== null && typeof value === "object" && !Array.isArray(value)
     ? value as Record<string, unknown> : null;
@@ -92,4 +95,48 @@ export function readTitleReview(outputs: unknown): TitleReviewPresentation | nul
       (options.find((option) => option.alternate)?.title ?? "") !== receipt.titleAlternate) return unavailable;
   return { state: out.title === selected.title ? "recorded" : "title_changed",
     selected, options, source, attempts: receipt.attempts as number };
+}
+
+/**
+ * Select up to two title-only alternates from an intact, recorded decision.
+ * Presentation may show any saved verdict; native-test candidates are stricter:
+ * they must be source-supported and clear every recorded judge dimension.
+ * Altered, malformed, unjudged, or title-drifted receipts produce no values.
+ */
+export function nativeTitleTestAlternates(outputs: unknown): string[] {
+  const out = record(outputs);
+  const receipt = out ? record(out["titleDecision"]) : null;
+  // v1 predates content fingerprints. Keep its existing browser presentation
+  // readable, but never promote it into a new native-test slate.
+  if (receipt?.version !== "title-decision/v2") return [];
+  const review = readTitleReview(outputs);
+  if (!review || review.state !== "recorded") return [];
+
+  const key = (value: string) => value.trim().replace(/\s+/g, " ").toLocaleLowerCase();
+  const live = key(review.selected.title);
+  const qualified = review.options.filter((option) =>
+    !option.selected && option.grounding === "supported" &&
+    option.pull >= 7 && option.clarity >= 7 && option.identity >= 7 &&
+    key(option.title) !== live,
+  );
+  const alternate = qualified.filter((option) => option.alternate);
+  const remaining = qualified
+    .filter((option) => !option.alternate)
+    .sort((left, right) => {
+      const leftFloor = Math.min(left.pull, left.clarity, left.identity);
+      const rightFloor = Math.min(right.pull, right.clarity, right.identity);
+      const leftTotal = left.pull + left.clarity + left.identity;
+      const rightTotal = right.pull + right.clarity + right.identity;
+      return rightFloor - leftFloor || rightTotal - leftTotal || left.title.localeCompare(right.title);
+    });
+  const seen = new Set([live]);
+  return [...alternate, ...remaining]
+    .map((option) => option.title.trim().replace(/\s+/g, " "))
+    .filter((title) => {
+      const normalized = key(title);
+      if (seen.has(normalized)) return false;
+      seen.add(normalized);
+      return true;
+    })
+    .slice(0, MAX_NATIVE_TITLE_TEST_ALTERNATES);
 }

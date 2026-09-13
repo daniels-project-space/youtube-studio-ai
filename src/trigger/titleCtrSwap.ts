@@ -46,6 +46,7 @@ function candidate(entry: PerfEntry): TitleCandidateStats {
     videoId: entry.videoId,
     title: entry.title,
     titleAlternate: entry.titleAlternate,
+    titleAlternates: entry.titleAlternates,
     thumbnailImpressions: entry.thumbnailImpressions,
     ctr: entry.ctr,
     publishedAt: entry.publishedAt,
@@ -115,7 +116,7 @@ export async function runTitleCtrSwap(
     if (proposals.length) {
       for (const proposal of proposals) {
         log(
-          `title-native-test PROPOSED ${channel.name} ${proposal.videoId}: "${proposal.from}" vs "${proposal.to}" ` +
+          `title-native-test PROPOSED ${channel.name} ${proposal.videoId}: ${proposal.titleVariants?.map((title) => `"${title}"`).join(" / ") ?? `"${proposal.from}" vs "${proposal.to}"`} ` +
           `(${proposal.reason}). Start a title-only native A/B test in desktop YouTube Studio; no sequential API rename was made.`,
         );
       }

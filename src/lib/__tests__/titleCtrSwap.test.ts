@@ -10,6 +10,7 @@ import {
   admitNativeTitleTestOutcome,
   channelMedianCtr,
   planNativeTitleTestProposals,
+  nativeTitleTestVariants,
   rejectSequentialTitleSwap,
   type TitleCandidateStats,
 } from "@/lib/titleCtrSwap";
@@ -52,12 +53,30 @@ function main(): void {
   const d = decision([...healthyChannel(), laggard], "slow");
   assert.equal(d.action, "propose_native_test", d.reason);
   assert.equal(d.to, "The Runner Up Nobody Ever Used");
+  assert.deepEqual(d.titleVariants, ["The Original Title That Went Out", "The Runner Up Nobody Ever Used"]);
   assert.equal(d.baselineCtr, 2.0, "the number the alternate must beat is recorded");
 
   // Noise floor: the same weak CTR on a handful of impressions is not evidence.
   assert.equal(
     decision([...healthyChannel(), video({ videoId: "slow", ctr: 2.0, thumbnailImpressions: 300 })], "slow").action,
     "hold",
+  );
+  const threeWay = video({
+    videoId: "three-way",
+    ctr: 2,
+    titleAlternates: ["Second Judged Candidate", "Third Judged Candidate", "Ignored Fourth Candidate"],
+  });
+  const threeWayDecision = decision([...healthyChannel(), threeWay], "three-way");
+  assert.equal(threeWayDecision.action, "propose_native_test");
+  assert.deepEqual(threeWayDecision.titleVariants, [
+    "The Original Title That Went Out",
+    "The Runner Up Nobody Ever Used",
+    "Second Judged Candidate",
+  ], "the native slate is bounded to three total title-only variants");
+  assert.deepEqual(
+    nativeTitleTestVariants(video({ titleAlternates: [" the original title that went out ", " the runner up nobody ever used ", "A New Candidate"] })),
+    ["The Original Title That Went Out", "The Runner Up Nobody Ever Used", "A New Candidate"],
+    "case/spacing duplicates cannot create a false variant",
   );
 
   // Settling period: a fresh upload's CTR is its subscribers, not its title.

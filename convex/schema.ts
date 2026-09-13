@@ -2657,6 +2657,7 @@ export default defineSchema({
         thumbnailImpressions: v.optional(v.number()),
         title: v.optional(v.string()),
         titleAlternate: v.optional(v.string()),
+        titleAlternates: v.optional(v.array(v.string())),
         topic: v.optional(v.string()),
         thumbnailStrategy: v.optional(v.string()),
       })),

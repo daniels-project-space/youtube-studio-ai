@@ -92,6 +92,8 @@ export interface TitleCandidateStats {
   title: string;
   /** The runner-up metacraft already produced. No alternate, no test. */
   titleAlternate?: string | null;
+  /** Additional receipt-derived title-only candidates, ordered after the runner-up. */
+  titleAlternates?: readonly string[] | null;
   /** Raw denominator behind `ctr`. Absent means the decision cannot be made. */
   thumbnailImpressions?: number | null;
   ctr?: number | null;
@@ -124,10 +126,37 @@ export interface NativeTitleTestProposal {
   reason: string;
   from?: string;
   to?: string;
+  /** Current live title plus up to two receipt-derived alternates. */
+  titleVariants?: string[];
   /** The number the alternate has to beat for the swap to have been worth it. */
   baselineCtr?: number;
   baselineImpressions?: number;
   channelMedianCtr?: number;
+}
+
+export const MAX_NATIVE_TITLE_TEST_VARIANTS = 3;
+
+/**
+ * Build the exact bounded title-only slate for desktop Studio. The legacy
+ * runner stays first for compatibility; newer verified candidates fill the
+ * remaining slot. No thumbnail pair or platform outcome is inferred here.
+ */
+export function nativeTitleTestVariants(video: TitleCandidateStats): string[] {
+  const normalize = (value: string) => value.trim().replace(/\s+/g, " ");
+  const identity = (value: string) => normalize(value).toLocaleLowerCase();
+  const live = normalize(video.title);
+  if (!live) return [];
+  const seen = new Set([identity(live)]);
+  const variants = [live];
+  for (const raw of [video.titleAlternate, ...(video.titleAlternates ?? [])]) {
+    if (typeof raw !== "string") continue;
+    const title = normalize(raw);
+    if (!title || title.length > 100 || seen.has(identity(title))) continue;
+    seen.add(identity(title));
+    variants.push(title);
+    if (variants.length === MAX_NATIVE_TITLE_TEST_VARIANTS) break;
+  }
+  return variants;
 }
 
 export function channelMedianCtr(videos: TitleCandidateStats[]): number | null {
@@ -160,11 +189,9 @@ export function planNativeTitleTestProposals(
     if (video.swappedAt) {
       return { ...base, action: "hold", reason: "already swapped once; a second swap would confound the test" };
     }
-    if (!video.titleAlternate?.trim()) {
-      return { ...base, action: "hold", reason: "no stored alternate to swap to" };
-    }
-    if (video.titleAlternate.trim() === video.title.trim()) {
-      return { ...base, action: "hold", reason: "alternate is identical to the live title" };
+    const titleVariants = nativeTitleTestVariants(video);
+    if (titleVariants.length < 2) {
+      return { ...base, action: "hold", reason: "no distinct, stored judged alternate for a native title test" };
     }
     // Everything about impressions, freshness and post-package observation is
     // decided in one place, so this rule and the containment seoReoptimize
@@ -186,9 +213,10 @@ export function planNativeTitleTestProposals(
     return {
       ...base,
       action: "propose_native_test",
-      reason: `CTR ${video.ctr!.toFixed(1)}% is below ${(median * policy.medianRatio).toFixed(1)}% (median ${median.toFixed(1)}%) over ${video.thumbnailImpressions} impressions`,
+      reason: `CTR ${video.ctr!.toFixed(1)}% is below ${(median * policy.medianRatio).toFixed(1)}% (median ${median.toFixed(1)}%) over ${video.thumbnailImpressions} impressions; prepare ${titleVariants.length} title-only variants`,
       from: video.title,
-      to: video.titleAlternate.trim(),
+      to: titleVariants[1],
+      titleVariants,
       baselineCtr: video.ctr!,
       baselineImpressions: video.thumbnailImpressions!,
     };
