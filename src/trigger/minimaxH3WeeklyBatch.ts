@@ -8,6 +8,8 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
   miniMaxH3RequestKey,
   renderMiniMaxH3WeeklyBatch,
+  type MiniMaxH3Receipt,
+  type MiniMaxH3RenderedVideo,
   type MiniMaxH3RenderRequest,
 } from "@/lib/minimaxH3";
 import { getObjectBytes, putObject } from "@/lib/storage";
@@ -97,9 +99,33 @@ type PersistedWeeklyReceipt = {
   orderKey: string;
   requestKeys: string[];
   outputs: Array<{ r2Key: string; contentSha256: string; byteLength: number; costUsd: number }>;
+  /** Full validated worker receipts; optional for backward-compatible v1 summaries. */
+  providerReceipts?: MiniMaxH3Receipt[];
   totalCostUsd: number;
   createdAt: number;
 };
+
+/** Build the immutable weekly receipt without dropping per-shot provenance. */
+export function createMiniMaxH3WeeklyReceipt(
+  orderKey: string,
+  result: readonly MiniMaxH3RenderedVideo[],
+): PersistedWeeklyReceipt {
+  const outputs = result.map((item) => ({
+    r2Key: item.receipt.output.r2Key,
+    contentSha256: item.receipt.output.contentSha256,
+    byteLength: item.receipt.output.byteLength,
+    costUsd: item.receipt.runtime.costUsd,
+  }));
+  return {
+    schema: "minimax-h3-weekly-batch/v1",
+    orderKey,
+    requestKeys: result.map((item) => item.requestKey),
+    outputs,
+    providerReceipts: result.map((item) => item.receipt),
+    totalCostUsd: Number(outputs.reduce((sum, item) => sum + item.costUsd, 0).toFixed(6)),
+    createdAt: Date.now(),
+  };
+}
 
 /** Reconciles a prior batch receipt and every retained R2 output. */
 async function readPersistedReceipt(
@@ -136,6 +162,22 @@ async function readPersistedReceipt(
     !Number.isSafeInteger(parsed.createdAt) || parsed.createdAt <= 0
   ) {
     throw new Error("weekly MiniMax H3 receipt exists but is bound to a different request");
+  }
+  if (parsed.providerReceipts !== undefined && (
+    !Array.isArray(parsed.providerReceipts) ||
+    parsed.providerReceipts.length !== expected.requestKeys.length ||
+    parsed.providerReceipts.some((receipt, index) => {
+      const output = receipt?.output;
+      const stored = parsed.outputs[index];
+      return receipt?.schema !== "minimax-h3-worker/v1" ||
+        receipt.requestKey !== expected.requestKeys[index] ||
+        output?.r2Key !== stored?.r2Key ||
+        output?.contentSha256 !== stored?.contentSha256 ||
+        Number(output?.byteLength) !== stored?.byteLength ||
+        receipt.runtime?.costUsd !== stored?.costUsd;
+    })
+  )) {
+    throw new Error("weekly MiniMax H3 receipt provider provenance is invalid");
   }
   for (const output of parsed.outputs) {
     const actual = await getObjectBytes(output.r2Key);
@@ -176,19 +218,7 @@ export const minimaxH3WeeklyBatchTask = task({
     });
     if (prior) return { receiptKey: payload.receiptKey, ...prior, reconciled: true as const };
     const result = await renderMiniMaxH3WeeklyBatch(payload.jobs);
-    const receipt = {
-      schema: "minimax-h3-weekly-batch/v1",
-      orderKey: payload.orderKey,
-      requestKeys: result.map((item) => item.requestKey),
-      outputs: result.map((item) => ({
-        r2Key: item.receipt.output.r2Key,
-        contentSha256: item.receipt.output.contentSha256,
-        byteLength: item.receipt.output.byteLength,
-        costUsd: item.receipt.runtime.costUsd,
-      })),
-      totalCostUsd: Number(result.reduce((sum, item) => sum + item.receipt.runtime.costUsd, 0).toFixed(6)),
-      createdAt: Date.now(),
-    };
+    const receipt = createMiniMaxH3WeeklyReceipt(payload.orderKey, result);
     // A batch receipt is create-only. If a controller loses its response after
     // rendering, it must read/reconcile this immutable proof rather than issue
     // a second paid order with a new receipt spelling.

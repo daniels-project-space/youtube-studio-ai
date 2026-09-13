@@ -1,5 +1,7 @@
 import assert from "node:assert/strict";
 import { assertMiniMaxH3WeeklyBatchArgs } from "@/trigger/minimaxH3WeeklyBatch";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 const valid = {
   orderKey: "week-20260913-owner-a",
@@ -18,4 +20,9 @@ assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, jobs: [{ ...valid
 assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, jobs: [{ ...valid.jobs[0], prompt: "" }] }), /job 1 is invalid.*prompt/);
 assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, jobs: [{ ...valid.jobs[0], firstFrame: { ...valid.jobs[0].firstFrame, sha256: "bad" } }] }), /job 1 is invalid.*digest/);
 assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, jobs: [valid.jobs[0], valid.jobs[0]] }), /duplicate (request identity|output key)/);
+assert.match(
+  readFileSync(resolve(process.cwd(), "src/trigger/minimaxH3WeeklyBatch.ts"), "utf8"),
+  /providerReceipts: result\.map\(\(item\) => item\.receipt\)/,
+  "weekly receipt must retain full per-shot H3 provenance for prepared-footage reconciliation",
+);
 console.log("weekly MiniMax H3 batch task contracts passed");
