@@ -3,12 +3,16 @@ import assert from "node:assert/strict";
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
   assertPlanWeekPreparationManifestBinding,
+  assertPlanWeekPreparedNarrationBinding,
   assertPlanWeekPreparedScriptBinding,
   PLAN_WEEK_PREPARATION_VERSION,
+  PLAN_WEEK_PREPARED_NARRATION_VERSION,
   PLAN_WEEK_PREPARED_SCRIPT_VERSION,
   planWeekPreparationPrompt,
   planWeekPreparationKey,
   planWeekPreparationManifestSha256,
+  planWeekPreparedNarrationAudioKey,
+  planWeekPreparedNarrationKey,
   planWeekPreparedScriptKey,
   planWeekThumbnailKey,
   type PlanWeekPreparationManifest,
@@ -80,6 +84,16 @@ assert.equal(
   planWeekPreparedScriptKey({ ownerId, channelSlug, batchId, itemId }),
   `owner/${ownerId}/channel/${channelSlug}/plan-batches/${batchId}/items/${itemId}/preparation/prepared/script.json`,
   "prepared scripts share the same canonical owner/channel/batch/item namespace",
+);
+assert.equal(
+  planWeekPreparedNarrationKey({ ownerId, channelSlug, batchId, itemId }),
+  `owner/${ownerId}/channel/${channelSlug}/plan-batches/${batchId}/items/${itemId}/preparation/prepared/narration.json`,
+  "prepared narration receipts share the canonical weekly item namespace",
+);
+assert.equal(
+  planWeekPreparedNarrationAudioKey({ ownerId, channelSlug, batchId, itemId }),
+  `owner/${ownerId}/channel/${channelSlug}/plan-batches/${batchId}/items/${itemId}/preparation/prepared/narration.mp3`,
+  "prepared narration audio cannot point to an arbitrary R2 destination",
 );
 for (const malformed of [
   { ownerId: "owner/other", channelSlug, itemId },
@@ -171,6 +185,68 @@ assert.throws(
   }),
   /binding mismatch/,
   "a receipt cannot name a different script than the one it carries",
+);
+const preparedNarration = {
+  version: PLAN_WEEK_PREPARED_NARRATION_VERSION,
+  manifestSha256: pointer.manifestSha256,
+  ownerId,
+  channelId,
+  batchId,
+  itemId,
+  requestKey,
+  topic: manifest.plan.topic,
+  scriptSha256: preparedScript.scriptSha256,
+  narrationKey: planWeekPreparedNarrationAudioKey({ ownerId, channelSlug, batchId, itemId }),
+  audioSha256: "c".repeat(64),
+  audioByteLength: 4_096,
+  narrationDurationSec: 12,
+  narrationTranscriptText: "The old lock was never meant to open. One missing pin changed the kingdom.",
+  narrationTranscriptSha256: "",
+  narrationPerformanceEvidence: {
+    version: "narration-performance-evidence/v1" as const,
+    source: "local_ffmpeg" as const,
+    durationSec: 12,
+    wordCount: 18,
+    wordsPerSec: 1.5,
+    integratedLufs: -18,
+    windowMeanDb: -15,
+  },
+  sentenceTimings: [
+    { text: "The old lock was never meant to open.", start: 0, end: 5 },
+    { text: "One missing pin changed the kingdom.", start: 5.5, end: 11.8 },
+  ],
+  chapterPlan: [{ kind: "footage" as const, durSec: 12 }],
+  createdAt: Date.now() - 300,
+};
+preparedNarration.narrationTranscriptSha256 = sha256Hex(preparedNarration.narrationTranscriptText);
+assert.equal(
+  assertPlanWeekPreparedNarrationBinding({ prepared: preparedNarration, manifest }).narrationKey,
+  preparedNarration.narrationKey,
+  "a prepared narration binds an exact script, measured receipt, timing map, and canonical retained audio key",
+);
+assert.throws(
+  () => assertPlanWeekPreparedNarrationBinding({
+    prepared: { ...preparedNarration, narrationKey: "owner/foreign/narration.mp3" },
+    manifest,
+  }),
+  /binding mismatch/,
+  "a prepared narration may not redirect scheduled execution to another episode's audio",
+);
+assert.throws(
+  () => assertPlanWeekPreparedNarrationBinding({
+    prepared: { ...preparedNarration, sentenceTimings: [{ text: "late", start: 0, end: 13 }] },
+    manifest,
+  }),
+  /sentence timings are invalid/,
+  "a timing map cannot overrun the retained narration it claims to describe",
+);
+assert.throws(
+  () => assertPlanWeekPreparedNarrationBinding({
+    prepared: { ...preparedNarration, narrationTranscriptSha256: "d".repeat(64) },
+    manifest,
+  }),
+  /transcript does not match/,
+  "a sidecar cannot swap the text that its measured audio receipt claims to narrate",
 );
 assert.equal(
   planWeekPreparationPrompt(manifest, "narration"),

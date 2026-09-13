@@ -12,7 +12,10 @@ import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { checkpointCostReceiptId, observeCheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { planWeekPreparationPrompt } from "@/lib/planWeekPreparation";
+import {
+  planWeekPreparationPrompt,
+  type PlanWeekPreparedNarration,
+} from "@/lib/planWeekPreparation";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -1269,19 +1272,6 @@ export const narrationTts: Block = {
       billableTtsCharacters += characters;
     };
     try {
-    if (ttsProvider === "elevenlabs") {
-      if (!process.env.ELEVENLABS_API_KEY) throw new Error("narration_tts: ELEVENLABS_API_KEY missing");
-    } else if (ttsProvider === "qwen3") {
-      const readiness = qwenTtsReadiness();
-      if (!hasQwenTtsConfig()) {
-        throw new Error(`narration_tts: Qwen3 worker is not configured (${readiness.blockers.join("; ")})`);
-      }
-      if (quality === "production" && !hasQualifiedQwenTts()) {
-        throw new Error(`narration_tts: Qwen3 production qualification is not current (${readiness.blockers.join("; ")})`);
-      }
-    } else if (!hasFishKey()) {
-      throw new Error("narration_tts: FISH_AUDIO_API_KEY missing (vault service 'fish-audio')");
-    }
     const voiceId =
       opt(ctx, "voiceId") ?? (ctx.params["voiceId"] as string | undefined);
     const niche = opt(ctx, "niche");
@@ -1468,6 +1458,95 @@ export const narrationTts: Block = {
       }
       return rate;
     };
+    // The weekly runner admits this receipt against the immutable preparation
+    // packet before it enters the store. Recheck the script and actual bytes
+    // at the paid-stage boundary: a missing, changed, or foreign artifact is a
+    // loud failure, never permission to buy a replacement TTS take.
+    const preparedNarration = ctx.store["preparedNarration"] as PlanWeekPreparedNarration | undefined;
+    if (preparedNarration !== undefined) {
+      if (!preparedNarration || typeof preparedNarration !== "object") {
+        throw new Error("narration_tts: prepared weekly narration is invalid");
+      }
+      const scriptSha256 = createHash("sha256").update(canonicalJson(ctx.store["script"])).digest("hex");
+      if (preparedNarration.scriptSha256 !== scriptSha256) {
+        throw new Error("narration_tts: prepared weekly narration does not match the admitted script");
+      }
+      if (
+        createHash("sha256").update(preparedNarration.narrationTranscriptText).digest("hex") !==
+        preparedNarration.narrationTranscriptSha256
+      ) {
+        throw new Error("narration_tts: prepared weekly narration transcript does not match its immutable receipt");
+      }
+      const narrationBytes = await getObjectBytes(preparedNarration.narrationKey);
+      const audioSha256 = createHash("sha256").update(narrationBytes).digest("hex");
+      if (
+        narrationBytes.byteLength !== preparedNarration.audioByteLength ||
+        audioSha256 !== preparedNarration.audioSha256
+      ) {
+        throw new Error("narration_tts: prepared weekly narration bytes do not match their immutable receipt");
+      }
+      const local = join(await makeRunTempDir(ctx.runId), "prepared_weekly_narration.mp3");
+      await writeBytes(local, narrationBytes);
+      const measuredDurationSec = (await probe(local)).durationSec;
+      if (Math.abs(measuredDurationSec - preparedNarration.narrationDurationSec) > 0.05) {
+        throw new Error("narration_tts: prepared weekly narration duration does not match its immutable receipt");
+      }
+      const narrationPerformanceEvidence = assertNarrationPerformanceEvidence(
+        preparedNarration.narrationPerformanceEvidence,
+      );
+      assertFinalDeliveryRate(narrationPerformanceEvidence);
+      const qwenEvidence = narrationPerformanceEvidence.qwenProviderEvidence;
+      if (qwenEvidence) {
+        if (
+          ttsProvider !== "qwen3" ||
+          qwenEvidence.speaker !== qwenSpeaker ||
+          qwenEvidence.language !== qwenLanguage
+        ) {
+          throw new Error("narration_tts: prepared Qwen3 narration does not match the frozen voice configuration");
+        }
+        assertQwenNarrationSourceBinding({
+          evidence: qwenEvidence,
+          narrationKey: preparedNarration.narrationKey,
+          sourceAudio: narrationBytes,
+          transcript: preparedNarration.narrationTranscriptText,
+          durationSec: preparedNarration.narrationDurationSec,
+        });
+      } else if (ttsProvider === "qwen3") {
+        throw new Error("narration_tts: prepared Qwen3 narration is missing its provider source evidence");
+      }
+      await recordAsset(ctx, "narration", preparedNarration.narrationKey, {
+        durationSec: preparedNarration.narrationDurationSec,
+        source: "prepared-weekly-narration",
+        byteLength: narrationBytes.byteLength,
+      });
+      ctx.log(
+        `narration_tts: consumed prepared weekly narration ` +
+        `(${preparedNarration.narrationDurationSec.toFixed(1)}s; no text-to-speech spend)`,
+      );
+      return {
+        narrationKey: preparedNarration.narrationKey,
+        narrationDurationSec: preparedNarration.narrationDurationSec,
+        narrationLocalPath: local,
+        narrationTranscriptText: preparedNarration.narrationTranscriptText,
+        narrationPerformanceEvidence,
+        sentenceTimings: structuredClone(preparedNarration.sentenceTimings),
+        chapterPlan: structuredClone(preparedNarration.chapterPlan),
+        [COST_PATCH_KEY]: 0,
+      };
+    }
+    if (ttsProvider === "elevenlabs") {
+      if (!process.env.ELEVENLABS_API_KEY) throw new Error("narration_tts: ELEVENLABS_API_KEY missing");
+    } else if (ttsProvider === "qwen3") {
+      const readiness = qwenTtsReadiness();
+      if (!hasQwenTtsConfig()) {
+        throw new Error(`narration_tts: Qwen3 worker is not configured (${readiness.blockers.join("; ")})`);
+      }
+      if (quality === "production" && !hasQualifiedQwenTts()) {
+        throw new Error(`narration_tts: Qwen3 production qualification is not current (${readiness.blockers.join("; ")})`);
+      }
+    } else if (!hasFishKey()) {
+      throw new Error("narration_tts: FISH_AUDIO_API_KEY missing (vault service 'fish-audio')");
+    }
     const tmp = await makeRunTempDir(ctx.runId);
     if (quality === "production" && gateEnabled) {
       // Keep the casting decision, then prove this *actual* cold-open take has a

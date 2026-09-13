@@ -4,6 +4,10 @@ import {
   type PlanWeekThumbnailSource,
 } from "@/lib/planWeekThumbnailSource";
 import type { CraftedHook } from "@/lib/hookcraft";
+import {
+  assertNarrationPerformanceEvidence,
+  type NarrationPerformanceEvidence,
+} from "@/lib/narrationPerformance";
 import type { Script } from "@/lib/scriptGen";
 import { sha256Hex } from "@/lib/sha256";
 
@@ -81,6 +85,31 @@ export interface PlanWeekPreparedScript {
   topic: string;
   script: Script;
   scriptSha256: string;
+  createdAt: number;
+}
+
+export const PLAN_WEEK_PREPARED_NARRATION_VERSION = "plan-week-prepared-narration/v1" as const;
+
+export interface PlanWeekPreparedNarration {
+  version: typeof PLAN_WEEK_PREPARED_NARRATION_VERSION;
+  manifestSha256: string;
+  ownerId: string;
+  channelId: string;
+  batchId: string;
+  itemId: string;
+  requestKey: string;
+  topic: string;
+  /** Canonical normalized Script digest, not merely an equivalent topic. */
+  scriptSha256: string;
+  narrationKey: string;
+  audioSha256: string;
+  audioByteLength: number;
+  narrationDurationSec: number;
+  narrationTranscriptText: string;
+  narrationTranscriptSha256: string;
+  narrationPerformanceEvidence: NarrationPerformanceEvidence;
+  sentenceTimings: Array<{ text: string; start: number; end: number }>;
+  chapterPlan: Array<{ kind: "footage" | "card"; durSec: number; heading?: string }>;
   createdAt: number;
 }
 
@@ -163,6 +192,25 @@ export function planWeekPreparedScriptKey(args: {
   itemId: string;
 }): string {
   return `${planWeekPreparationPrefix(args)}/prepared/script.json`;
+}
+
+/** Immutable receipt and audio locations for a weekly prepared narration. */
+export function planWeekPreparedNarrationKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+}): string {
+  return `${planWeekPreparationPrefix(args)}/prepared/narration.json`;
+}
+
+export function planWeekPreparedNarrationAudioKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+}): string {
+  return `${planWeekPreparationPrefix(args)}/prepared/narration.mp3`;
 }
 
 function planWeekPreparationPrefix(args: {
@@ -384,6 +432,161 @@ export function assertPlanWeekPreparedScriptBinding(args: {
     normalized.scriptSha256 !== sha256Hex(canonicalJson(normalized.script))
   ) {
     throw new Error("plan-week prepared script binding mismatch");
+  }
+  return normalized;
+}
+
+function normalizedPreparedNarrationTimings(value: unknown, durationSec: number) {
+  if (!Array.isArray(value) || !value.length || value.length > 20_000) {
+    throw new Error("plan-week prepared narration sentence timings are invalid");
+  }
+  let priorEnd = 0;
+  return value.map((raw, index) => {
+    const timing = requiredRecord(raw, `prepared narration sentence ${index + 1}`);
+    const text = requiredText(timing.text, `prepared narration sentence ${index + 1} text`);
+    const start = timing.start;
+    const end = timing.end;
+    if (
+      text.length > 20_000 ||
+      typeof start !== "number" || !Number.isFinite(start) || start < 0 ||
+      typeof end !== "number" || !Number.isFinite(end) || end <= start ||
+      end > durationSec + 0.25 ||
+      start < priorEnd - 0.08
+    ) {
+      throw new Error("plan-week prepared narration sentence timings are invalid");
+    }
+    priorEnd = end;
+    return { text, start, end };
+  });
+}
+
+function normalizedPreparedNarrationChapterPlan(value: unknown, durationSec: number) {
+  if (!Array.isArray(value) || value.length > 2_000) {
+    throw new Error("plan-week prepared narration chapter plan is invalid");
+  }
+  let total = 0;
+  return value.map((raw, index) => {
+    const window = requiredRecord(raw, `prepared narration chapter window ${index + 1}`);
+    const kind = window.kind;
+    const durSec = window.durSec;
+    if (
+      (kind !== "footage" && kind !== "card") ||
+      typeof durSec !== "number" || !Number.isFinite(durSec) || durSec <= 0 || durSec > durationSec
+    ) {
+      throw new Error("plan-week prepared narration chapter plan is invalid");
+    }
+    const heading = window.heading === undefined
+      ? undefined
+      : requiredText(window.heading, `prepared narration chapter window ${index + 1} heading`);
+    if ((kind === "card" && !heading) || (heading && heading.length > 1_000)) {
+      throw new Error("plan-week prepared narration chapter plan is invalid");
+    }
+    total += durSec;
+    if (total > durationSec + 0.5) {
+      throw new Error("plan-week prepared narration chapter plan exceeds narration duration");
+    }
+    return { kind, durSec, ...(heading ? { heading } : {}) };
+  }) as PlanWeekPreparedNarration["chapterPlan"];
+}
+
+/**
+ * Validates a durable narration sidecar before it may reach the paid TTS
+ * block. The audio bytes are re-hashed by narration_tts immediately before
+ * use; this contract binds the frozen episode, script, delivery evidence and
+ * canonical audio destination without trusting a key alone.
+ */
+export function assertPlanWeekPreparedNarrationBinding(args: {
+  prepared: unknown;
+  manifest: PlanWeekPreparationManifest;
+}): PlanWeekPreparedNarration {
+  const prepared = requiredRecord(args.prepared, "prepared narration receipt");
+  if (prepared.version !== PLAN_WEEK_PREPARED_NARRATION_VERSION) {
+    throw new Error("plan-week prepared narration version is unsupported");
+  }
+  const manifestSha256 = requiredText(prepared.manifestSha256, "prepared narration manifest digest").toLowerCase();
+  const scriptSha256 = requiredText(prepared.scriptSha256, "prepared narration script digest").toLowerCase();
+  const audioSha256 = requiredText(prepared.audioSha256, "prepared narration audio digest").toLowerCase();
+  const narrationTranscriptSha256 = requiredText(
+    prepared.narrationTranscriptSha256,
+    "prepared narration transcript digest",
+  ).toLowerCase();
+  const audioByteLength = typeof prepared.audioByteLength === "number"
+    ? prepared.audioByteLength
+    : Number.NaN;
+  const narrationDurationSec = typeof prepared.narrationDurationSec === "number"
+    ? prepared.narrationDurationSec
+    : Number.NaN;
+  const createdAt = typeof prepared.createdAt === "number" ? prepared.createdAt : Number.NaN;
+  if (
+    !/^[a-f0-9]{64}$/.test(manifestSha256) ||
+    !/^[a-f0-9]{64}$/.test(scriptSha256) ||
+    !/^[a-f0-9]{64}$/.test(audioSha256) ||
+    !/^[a-f0-9]{64}$/.test(narrationTranscriptSha256) ||
+    !Number.isSafeInteger(audioByteLength) || audioByteLength < 1_000 || audioByteLength > 100_000_000 ||
+    !Number.isFinite(narrationDurationSec) || narrationDurationSec < 1.5 || narrationDurationSec > 86_400 ||
+    !Number.isSafeInteger(createdAt) || createdAt <= 0
+  ) {
+    throw new Error("plan-week prepared narration receipt is invalid");
+  }
+  const narrationKey = requiredText(prepared.narrationKey, "prepared narration key");
+  const narrationTranscriptText = requiredText(prepared.narrationTranscriptText, "prepared narration transcript");
+  if (narrationTranscriptText.length > 250_000) {
+    throw new Error("plan-week prepared narration transcript is too long");
+  }
+  if (narrationTranscriptSha256 !== sha256Hex(narrationTranscriptText)) {
+    throw new Error("plan-week prepared narration transcript does not match its immutable receipt");
+  }
+  const narrationPerformanceEvidence = assertNarrationPerformanceEvidence(prepared.narrationPerformanceEvidence);
+  if (Math.abs(narrationPerformanceEvidence.durationSec - narrationDurationSec) > 0.001) {
+    throw new Error("plan-week prepared narration duration does not bind its performance evidence");
+  }
+  const scope = {
+    ownerId: args.manifest.ownerId,
+    channelSlug: args.manifest.channelSlug,
+    batchId: args.manifest.batchId,
+    itemId: args.manifest.itemId,
+  };
+  const sentenceTimings = normalizedPreparedNarrationTimings(prepared.sentenceTimings, narrationDurationSec);
+  const chapterPlan = normalizedPreparedNarrationChapterPlan(prepared.chapterPlan, narrationDurationSec);
+  const normalized: PlanWeekPreparedNarration = {
+    version: PLAN_WEEK_PREPARED_NARRATION_VERSION,
+    manifestSha256,
+    ownerId: requiredText(prepared.ownerId, "prepared narration owner id"),
+    channelId: requiredText(prepared.channelId, "prepared narration channel id"),
+    batchId: requiredText(prepared.batchId, "prepared narration batch id"),
+    itemId: requiredText(prepared.itemId, "prepared narration item id"),
+    requestKey: requiredText(prepared.requestKey, "prepared narration request key"),
+    topic: requiredText(prepared.topic, "prepared narration topic"),
+    scriptSha256,
+    narrationKey,
+    audioSha256,
+    audioByteLength,
+    narrationDurationSec,
+    narrationTranscriptText,
+    narrationTranscriptSha256,
+    narrationPerformanceEvidence,
+    sentenceTimings,
+    chapterPlan,
+    createdAt,
+  };
+  const qwenSource = normalized.narrationPerformanceEvidence.qwenProviderEvidence?.source;
+  if (
+    normalized.manifestSha256 !== planWeekPreparationManifestSha256(args.manifest) ||
+    normalized.ownerId !== args.manifest.ownerId ||
+    normalized.channelId !== args.manifest.channelId ||
+    normalized.batchId !== args.manifest.batchId ||
+    normalized.itemId !== args.manifest.itemId ||
+    normalized.requestKey !== args.manifest.requestKey ||
+    normalized.topic !== args.manifest.plan.topic ||
+    normalized.narrationKey !== planWeekPreparedNarrationAudioKey(scope) ||
+    (qwenSource !== undefined && (
+      qwenSource.narrationKey !== normalized.narrationKey ||
+      qwenSource.sha256 !== normalized.audioSha256 ||
+      qwenSource.byteLength !== normalized.audioByteLength ||
+      Math.abs(qwenSource.durationSec - normalized.narrationDurationSec) > 0.001
+    ))
+  ) {
+    throw new Error("plan-week prepared narration binding mismatch");
   }
   return normalized;
 }
