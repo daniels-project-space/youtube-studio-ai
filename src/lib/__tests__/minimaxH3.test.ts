@@ -107,6 +107,22 @@ async function test() {
     { requiredGpuCount: 1, availableGpuCount: 1, gpuClassId: classes[0]!.id, capacityMode: "high" },
     "a missing medium price must not silently dispatch medium; explicit high fallback may still proceed",
   );
+  let leaseReads = 0;
+  await assert.rejects(
+    () => assertMiniMaxH3SaladCapacity(2, {
+      client: {
+        ...capacityClient,
+        getOccupiedGpuSlots: async () => {
+          leaseReads += 1;
+          return leaseReads === 1 ? 0 : 2;
+        },
+      },
+      allowHighPriorityFallback: true,
+    }),
+    /account capacity is occupied/,
+    "a concurrent lease acquired after the market snapshot must block both medium and high dispatch",
+  );
+  assert.equal(leaseReads, 2, "capacity admission must re-read the shared lease after market availability");
   configure("salad"); configure("novita");
   const salad = request("salad", "weekly-batch");
   let seen: Record<string, unknown> | undefined;

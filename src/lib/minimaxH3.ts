@@ -131,11 +131,8 @@ export async function assertMiniMaxH3SaladCapacity(
     gpu_classes: [gpu.id],
   };
   const requiredGpuCount = Math.min(MAX_H3_PARALLEL_SALAD_JOBS, jobCount);
-  // Check the account-wide lease before asking the market for another
-  // availability estimate.  The market endpoint cannot see our in-flight
-  // groups, so querying it first only adds latency when the shared three-GPU
-  // cap is already occupied.
-  if (client.getOccupiedGpuSlots) {
+  const assertLeaseRoom = async (): Promise<void> => {
+    if (!client.getOccupiedGpuSlots) return;
     let occupiedGpuSlots: number;
     try {
       occupiedGpuSlots = await client.getOccupiedGpuSlots();
@@ -153,7 +150,12 @@ export async function assertMiniMaxH3SaladCapacity(
         `the requested wave needs ${requiredGpuCount} additional desktop RTX 5090 slots`,
       );
     }
-  }
+  };
+  // Check the account-wide lease before asking the market for another
+  // availability estimate.  The market endpoint cannot see our in-flight
+  // groups, so querying it first only adds latency when the shared three-GPU
+  // cap is already occupied.
+  await assertLeaseRoom();
   let availability;
   try {
     availability = await client.getGpuAvailability(resources, [...MINIMAX_H3_SALAD_COUNTRY_CODES]);
@@ -166,6 +168,10 @@ export async function assertMiniMaxH3SaladCapacity(
   const availableMediumGpuCount = typeof rawAvailableGpuCount === "number" && Number.isSafeInteger(rawAvailableGpuCount)
     ? rawAvailableGpuCount
     : 0;
+  // The market snapshot is not a reservation. Re-read our account lease after
+  // it so a concurrent order cannot consume the remaining shared slots while
+  // this request is deciding whether to dispatch medium or high.
+  await assertLeaseRoom();
   if (mediumGpu && availableMediumGpuCount >= requiredGpuCount) {
     return {
       requiredGpuCount,
