@@ -16,6 +16,7 @@ import {
   type PersistedNovitaRenderJob,
 } from "@/lib/novitaRenderPolling";
 import styles from "./novita-render.module.css";
+import { H3RenderConsole } from "./H3RenderConsole";
 
 const CAMERA_MOVES = [
   "static", "dolly_push", "dolly_pull", "crane_up", "crane_down",
@@ -230,7 +231,7 @@ function hasExactLtx25X2Attestation(
     && ltx.rtx4090ProfileBenchmarked === true;
 }
 
-export default function NovitaRenderPage() {
+export function LegacyNovitaRenderPage() {
   const operationsAccess = useOperationsAccess();
   const [shots, setShots] = useState<ShotRow[]>([newShot(1)]);
   const [style, setStyle] = useState("");
@@ -771,6 +772,11 @@ export default function NovitaRenderPage() {
       </section>
     </main>
   );
+}
+
+/** The visible render desk is now the sealed MiniMax H3 control plane. */
+export default function NovitaRenderPage() {
+  return <H3RenderConsole />;
 }
 
 function RenderFleetHero({
