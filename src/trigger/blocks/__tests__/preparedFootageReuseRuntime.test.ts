@@ -157,6 +157,10 @@ async function main(): Promise<void> {
   const result = await genFootage.run(context as never) as Record<string, unknown>;
   assert.deepEqual(result.footageKeys, clipKeys, "the actual block must preserve the immutable prepared clip order");
   assert.equal(result.__costUsd, 0, "a fully verified prepared footage result must not report a Novita charge");
+  assert.deepEqual(result.footageRenderer, {
+    kind: "novita-ltx",
+    styleId: "cinematic_heist_noir",
+  }, "legacy prepared footage must retain its explicit renderer identity");
   assert.equal(providerCalls, 0, "the success path must not invoke the paid renderer");
   assert.equal(storageReads, 4, "the actual block must re-read every retained clip before reuse");
   assert.equal(written.length, 4, "every verified retained clip must be rehydrated for assembly");

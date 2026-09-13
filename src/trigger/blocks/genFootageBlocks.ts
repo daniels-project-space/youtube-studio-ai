@@ -66,6 +66,13 @@ import type { VisualArtifactReviewRejection } from "@/engine/visualArtifactRevie
 import { COST_PATCH_KEY } from "@/engine/types";
 import type { PlanWeekPreparedFootage } from "@/lib/planWeekPreparation";
 import { sha256BytesHex } from "@/lib/sha256";
+import {
+  MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_PROFILE,
+  MINIMAX_H3_RUNTIME_ID,
+  type MiniMaxH3Execution,
+  type MiniMaxH3Provider,
+} from "@/lib/minimaxH3";
 
 function stableVisualAttemptToken(value: string): string {
   const token = value
@@ -209,6 +216,11 @@ export interface ResolvedGeneratedFootageScenePlan {
   /** Binds the rendered clip order to the reviewed cinematic sequence. */
   sequenceFingerprint?: string;
 }
+
+/** Explicit renderer identity for consumers during the H3/LTX migration. */
+export type GeneratedFootageRenderer =
+  | { kind: "minimax-h3"; provider: MiniMaxH3Provider; execution: MiniMaxH3Execution; runtimeId: typeof MINIMAX_H3_RUNTIME_ID; profileId: typeof MINIMAX_H3_PROFILE.id; modelManifestSha256: typeof MINIMAX_H3_MANIFEST_SHA256 }
+  | { kind: "novita-ltx"; styleId: string };
 
 /** Prompts that ask for baked-in lettering fight the engine's own no-text clause. */
 const TEXT_IN_IMAGE =
@@ -647,6 +659,7 @@ export const genFootage: Block = {
     "footageKeys",
     "generatedFootageSceneManifest",
     "footageOnScreenTextCues",
+    "footageRenderer",
     "ltxStyleId",
     "ltxStyleSelection",
   ],
@@ -760,6 +773,14 @@ export const genFootage: Block = {
             sceneId: scene.id,
             durationSec: scene.durationSec,
           }))),
+          footageRenderer: {
+            kind: "minimax-h3" as const,
+            provider: preparedFootage.renderer.provider,
+            execution: preparedFootage.renderer.execution,
+            runtimeId: MINIMAX_H3_RUNTIME_ID,
+            profileId: MINIMAX_H3_PROFILE.id,
+            modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
+          },
           // This field is a visual-treatment style ABI used by downstream
           // editor code; the explicit renderer identity lives on the receipt.
           ltxStyleId: ltxStyleSelection.styleId,
@@ -841,6 +862,7 @@ export const genFootage: Block = {
         footageKeys: preparedFootage.clips.map((clip) => clip.r2Key),
         generatedFootageSceneManifest: preparedManifest,
         footageOnScreenTextCues: preparedFootageTextCues,
+        footageRenderer: { kind: "novita-ltx", styleId: ltxStyleSelection.styleId },
         ltxStyleId: ltxStyleSelection.styleId,
         ltxStyleSelection,
         [COST_PATCH_KEY]: 0,
@@ -1407,6 +1429,7 @@ export const genFootage: Block = {
         footageKeys,
         generatedFootageSceneManifest,
         footageOnScreenTextCues: footageTextCues,
+        footageRenderer: { kind: "novita-ltx", styleId: ltxStyleSelection.styleId },
         ltxStyleId: ltxStyleSelection.styleId,
         ltxStyleSelection,
         [COST_PATCH_KEY]: rendered.costUsd,

@@ -9,8 +9,8 @@ const contracts = readFileSync(join(root, "engine", "moduleContracts.ts"), "utf8
 
 assert.match(
   generatedFootage,
-  /produces:\s*\[\s*"footageClips",\s*"footageKeys",\s*"generatedFootageSceneManifest",\s*"footageOnScreenTextCues",\s*"ltxStyleId",\s*"ltxStyleSelection",\s*\]/,
-  "generated footage must publish deterministic-overlay OCR obligations and the sealed LTX style receipt separately from raw clips",
+  /produces:\s*\[\s*"footageClips",\s*"footageKeys",\s*"generatedFootageSceneManifest",\s*"footageOnScreenTextCues",\s*"footageRenderer",\s*"ltxStyleId",\s*"ltxStyleSelection",\s*\]/,
+  "generated footage must publish renderer identity and deterministic-overlay OCR obligations separately from raw clips",
 );
 assert.match(
   generatedFootage,

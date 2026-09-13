@@ -12,6 +12,8 @@ const visionGate = footage.indexOf("if (hasCinematicSequence && !hasNonGoogleVis
 assert.ok(prepared >= 0, "gen_footage must recognize runner-admitted prepared footage");
 assert.ok(footage.includes('preparedFootage.renderer?.kind === "minimax-h3"'),
   "prepared H3 footage must have an explicit renderer branch");
+assert.ok(footage.includes('footageRenderer: {\n            kind: "minimax-h3"'),
+  "prepared H3 footage must publish explicit renderer identity to downstream consumers");
 assert.ok(visionGate > prepared, "verified prepared footage must be reusable before a new vision/provider route is required");
 for (const required of [
   "preparedManifest.source !== plan.source",
