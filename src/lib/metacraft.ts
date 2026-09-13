@@ -763,7 +763,11 @@ export interface MetaCraftArgs {
   hookLoop?: string;
   /** THE QUOTE (Script.closingLine) — becomes the description's hook line. */
   quote?: string;
-  /** Real top titles (niche databank). Omitted → metacraft researches live. */
+  /**
+   * Real top titles (niche databank). Omitted means Metacraft may research
+   * live; an explicit empty array is an authoritative upstream no-results
+   * outcome and must not spend a duplicate YouTube search.
+   */
   competitorTitles?: { title: string; views: number }[];
   powerWords?: string[];
   titleFormula?: string;
@@ -905,11 +909,19 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
   const seed = a.topic.split(/[—:-]/)[0].trim().split(/\s+/).slice(0, 5).join(" ").toLowerCase();
 
   // EVIDENCE — concurrently: real queries + real competitors.
+  // `[]` and `undefined` carry different evidence: the former means the
+  // upstream competitor pass completed with no usable rows; the latter means
+  // this standalone caller has not supplied that pass. Re-querying on an
+  // explicit empty result wastes YouTube quota and creates a second,
+  // potentially inconsistent evidence snapshot for the same title decision.
+  const hasProvidedCompetitorEvidence = a.competitorTitles !== undefined;
   const [suggests, fetched] = await Promise.all([
     youtubeSuggest(seed),
-    a.competitorTitles?.length ? Promise.resolve<{ title: string; views: number }[]>([]) : fetchCompetitorTitles(seed, a.log),
+    hasProvidedCompetitorEvidence
+      ? Promise.resolve<{ title: string; views: number }[]>([])
+      : fetchCompetitorTitles(seed, a.log),
   ]);
-  const feed = (a.competitorTitles?.length ? a.competitorTitles : fetched).slice(0, 10);
+  const feed = (hasProvidedCompetitorEvidence ? a.competitorTitles ?? [] : fetched).slice(0, 10);
   const feedAvgLen = feed.length ? Math.round(feed.reduce((n, f) => n + f.title.length, 0) / feed.length) : 0;
   a.log?.(
     `metacraft: evidence in ${((Date.now() - t0) / 1000).toFixed(1)}s — ${suggests.length} queries, ` +
