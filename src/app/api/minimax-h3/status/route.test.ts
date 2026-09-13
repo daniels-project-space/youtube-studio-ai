@@ -10,6 +10,8 @@ assert.match(source, /runs\.retrieve\(runId\)/);
 assert.match(source, /getObjectBytes\(receiptKey\)/);
 assert.match(source, /miniMaxH3WeeklyRequestPacketKey/);
 assert.match(source, /requestPacketState/);
+assert.match(source, /capacityMode/);
+assert.match(source, /provider capacity provenance is malformed/);
 assert.match(source, /minimax-h3-weekly-request\/v1/);
 assert.match(source, /reconciliation_required/);
 assert.match(source, /Cache-Control.*private, no-store/);

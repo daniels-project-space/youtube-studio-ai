@@ -29,6 +29,7 @@ type ReceiptSummary = {
   requestCount: number;
   completedCount: number;
   totalCostUsd: number;
+  capacityMode?: "medium" | "high" | "mixed" | "spot";
 };
 
 type RequestPacketState = "frozen" | "missing" | "invalid" | "not-applicable";
@@ -73,11 +74,29 @@ function summarizeReceipt(value: unknown, ownerId: string): ReceiptSummary {
           !isOwnerScopedR2Key(output, ownerId))) {
       throw new Error("H3 weekly receipt is malformed");
     }
+    let capacityMode: ReceiptSummary["capacityMode"];
+    if (receipt.providerReceipts !== undefined) {
+      if (!Array.isArray(receipt.providerReceipts) || receipt.providerReceipts.length !== outputs.length) {
+        throw new Error("H3 weekly receipt provider provenance is malformed");
+      }
+      const modes = receipt.providerReceipts.map((providerReceipt) => {
+        if (!providerReceipt || typeof providerReceipt !== "object" || Array.isArray(providerReceipt)) return null;
+        const runtime = (providerReceipt as Record<string, unknown>).runtime;
+        if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) return null;
+        const mode = (runtime as Record<string, unknown>).capacityMode;
+        return mode === "medium" || mode === "high" ? mode : null;
+      });
+      if (modes.some((mode): mode is null => mode === null)) {
+        throw new Error("H3 weekly receipt provider capacity provenance is malformed");
+      }
+      capacityMode = new Set(modes).size === 1 ? modes[0]! : "mixed";
+    }
     return {
       kind: "weekly",
       requestCount: requestKeys.length,
       completedCount: outputs.length,
       totalCostUsd,
+      ...(capacityMode ? { capacityMode } : {}),
     };
   }
   if (receipt.schema === "minimax-h3-on-demand/v1") {
@@ -95,6 +114,7 @@ function summarizeReceipt(value: unknown, ownerId: string): ReceiptSummary {
       requestCount: 1,
       completedCount: 1,
       totalCostUsd: Number((output as Record<string, unknown>).costUsd),
+      capacityMode: "spot",
     };
   }
   throw new Error("H3 receipt schema is unsupported");

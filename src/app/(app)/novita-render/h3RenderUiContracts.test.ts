@@ -13,6 +13,8 @@ assert.match(page, /On demand/);
 assert.match(page, /Novita/);
 assert.match(page, /api\/minimax-h3\/\$\{mode\}/);
 assert.match(page, /api\/minimax-h3\/status/);
+assert.match(page, /data-capacity-mode=\{status\.receipt\.capacityMode\}/,
+  "the render desk surfaces the admitted Salad tier from the durable receipt");
 assert.match(page, /localStorage/);
 assert.match(page, /H3_TRACKING_STORAGE_KEY/);
 assert.match(page, /URLSearchParams\(window\.location\.search\)/,

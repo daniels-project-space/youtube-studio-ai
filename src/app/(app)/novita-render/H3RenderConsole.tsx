@@ -11,7 +11,13 @@ type H3Status = {
   triggerStatus: string;
   state: "pending" | "complete" | "reconciliation_required";
   requestPacketState: "frozen" | "missing" | "invalid" | "not-applicable";
-  receipt: { kind: "weekly" | "on-demand"; requestCount: number; completedCount: number; totalCostUsd: number } | null;
+  receipt: {
+    kind: "weekly" | "on-demand";
+    requestCount: number;
+    completedCount: number;
+    totalCostUsd: number;
+    capacityMode?: "medium" | "high" | "mixed" | "spot";
+  } | null;
 };
 
 const H3_TRACKING_STORAGE_KEY = "youtube-studio-ai:h3-render:tracking:v1";
@@ -259,7 +265,7 @@ export function H3RenderConsole() {
         <section className={styles.progressCard} aria-live="polite" aria-label="H3 render progress">
           <div className={styles.progressHeader}><div><span className={styles.eyebrow}>Live progress · {tracking?.provider ?? provider}</span><strong>{status?.triggerStatus ?? "Queued"}</strong></div><b>{progressPercent}%</b></div>
           <div className={styles.progressTrack}><i style={{ width: `${progressPercent}%` }} /></div>
-          <div className={styles.progressMeta}><span>{tracking?.runId ?? ""}</span>{status?.receipt ? <span>{status.receipt.completedCount}/{status.receipt.requestCount} outputs · ${status.receipt.totalCostUsd.toFixed(4)}</span> : <span>Waiting for Trigger and R2 receipt</span>}{status?.requestPacketState === "frozen" && <span>Inputs frozen</span>}{status?.requestPacketState === "missing" && <span className={styles.warn}>Request packet missing</span>}{status?.requestPacketState === "invalid" && <span className={styles.warn}>Request packet invalid</span>}<button type="button" className={styles.clearButton} onClick={clearTracking}>Clear tracking</button></div>
+          <div className={styles.progressMeta}><span>{tracking?.runId ?? ""}</span>{status?.receipt ? <span>{status.receipt.completedCount}/{status.receipt.requestCount} outputs · ${status.receipt.totalCostUsd.toFixed(4)}</span> : <span>Waiting for Trigger and R2 receipt</span>}{status?.receipt?.capacityMode && <span data-capacity-mode={status.receipt.capacityMode}>Tier {status.receipt.capacityMode === "high" ? "high fallback" : status.receipt.capacityMode}</span>}{status?.requestPacketState === "frozen" && <span>Inputs frozen</span>}{status?.requestPacketState === "missing" && <span className={styles.warn}>Request packet missing</span>}{status?.requestPacketState === "invalid" && <span className={styles.warn}>Request packet invalid</span>}<button type="button" className={styles.clearButton} onClick={clearTracking}>Clear tracking</button></div>
           {status?.state === "reconciliation_required" && <strong className={styles.warn}>Provider run ended without a durable receipt. Reconcile before retrying.</strong>}
           {error && <strong className={styles.error}>{error}</strong>}
         </section>
