@@ -30,7 +30,13 @@ type ReceiptSummary = {
   totalCostUsd: number;
 };
 
-function summarizeReceipt(value: unknown): ReceiptSummary {
+function isOwnerScopedR2Key(value: unknown, ownerId: string): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const r2Key = (value as Record<string, unknown>).r2Key;
+  return typeof r2Key === "string" && r2Key.startsWith(`owner/${ownerId}/`);
+}
+
+function summarizeReceipt(value: unknown, ownerId: string): ReceiptSummary {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("H3 receipt is malformed");
   }
@@ -41,7 +47,8 @@ function summarizeReceipt(value: unknown): ReceiptSummary {
     const totalCostUsd = receipt.totalCostUsd;
     if (!Array.isArray(outputs) || !Array.isArray(requestKeys) || outputs.length !== requestKeys.length ||
         outputs.length < 1 || outputs.length > 60 || typeof totalCostUsd !== "number" ||
-        !Number.isFinite(totalCostUsd) || totalCostUsd < 0) {
+        !Number.isFinite(totalCostUsd) || totalCostUsd < 0 || outputs.some((output) =>
+          !isOwnerScopedR2Key(output, ownerId))) {
       throw new Error("H3 weekly receipt is malformed");
     }
     return {
@@ -55,7 +62,7 @@ function summarizeReceipt(value: unknown): ReceiptSummary {
     const output = receipt.output;
     if (!output || typeof output !== "object" || Array.isArray(output) ||
         typeof receipt.requestKey !== "string" || !receipt.requestKey ||
-        typeof (output as Record<string, unknown>).r2Key !== "string" ||
+        !isOwnerScopedR2Key(output, ownerId) ||
         typeof (output as Record<string, unknown>).costUsd !== "number" ||
         !Number.isFinite((output as Record<string, unknown>).costUsd) ||
         Number((output as Record<string, unknown>).costUsd) < 0) {
@@ -94,7 +101,7 @@ export async function GET(request: Request) {
     let receiptState: "pending" | "complete" | "reconciliation_required" = "pending";
     try {
       const bytes = await getObjectBytes(receiptKey);
-      receipt = summarizeReceipt(JSON.parse(new TextDecoder().decode(bytes)));
+      receipt = summarizeReceipt(JSON.parse(new TextDecoder().decode(bytes)), actor.ownerId);
       receiptState = "complete";
     } catch (error) {
       if (!notFound(error)) {
