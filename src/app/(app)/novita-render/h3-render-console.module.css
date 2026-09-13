@@ -34,3 +34,4 @@
 .error { color: #ff9b9b; font-size: .72rem; }
 .locked { min-height: 240px; align-content: center; justify-items: start; }
 @media (max-width: 640px) { .hero { display: grid; align-items: start; } .routeBadge { min-width: 0; } .fieldGrid, .modeTabs { grid-template-columns: 1fr; } .formFooter, .progressHeader { align-items: start; flex-direction: column; } }
+@media (prefers-reduced-motion: reduce) { .progressTrack i { transition: none; } }

@@ -1,37 +1,22 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
 
-const here = fileURLToPath(new URL(".", import.meta.url));
-const page = readFileSync(`${here}/page.tsx`, "utf8");
-const styles = readFileSync(`${here}/novita-render.module.css`, "utf8");
+const here = new URL(".", import.meta.url);
+const page = readFileSync(new URL("./page.tsx", here), "utf8");
+const consoleSource = readFileSync(new URL("./H3RenderConsole.tsx", here), "utf8");
+const styles = readFileSync(new URL("./h3-render-console.module.css", here), "utf8");
 
-assert.match(page, /GPU rendering/i);
-assert.match(page, /Inspect · confirm spend · render/);
-assert.match(page, /function RenderFleetHero/);
-assert.match(page, /function AdmissionTrace/);
-assert.match(page, /function RenderProgressTheatre/);
-assert.match(page, /Live render progress/);
-assert.match(page, /status: status\.status/);
-assert.match(page, /outputs: status\.n_outputs/);
-assert.match(page, /total: status\.n_jobs/);
-assert.match(page, /progress\?\.jobId/);
-assert.match(page, /function LockedRenderConsole/);
-assert.match(page, /Fleet capacity, jobs, and prompts remain unloaded/);
-assert.match(page, /Nothing launches without your confirmation\./);
-assert.match(page, /window\.confirm\(/);
-assert.doesNotMatch(page, /<PageHeader/);
-assert.doesNotMatch(page, /<OwnerOnlyNotice/);
-assert.doesNotMatch(page, /style=\{\{(?! width:)/,
-  "only the live progress meter may keep a dynamic inline width");
+assert.match(page, /H3RenderConsole/);
+assert.doesNotMatch(page, /LegacyNovita|RenderFleetHero|renderNovita/i);
+assert.match(consoleSource, /Weekly batch/);
+assert.match(consoleSource, /Salad · 1–60 approved shots/);
+assert.match(consoleSource, /On demand/);
+assert.match(consoleSource, /Novita · one approved shot/);
+assert.match(consoleSource, /window\.confirm\(/);
+assert.match(consoleSource, /\/api\/minimax-h3\/\$\{mode\}/);
+assert.match(consoleSource, /mode === "weekly" \? "salad" : "novita"/);
+assert.match(consoleSource, /\/api\/minimax-h3\/status/);
+assert.match(consoleSource, /localStorage/);
+assert.match(styles, /prefers-reduced-motion/);
 
-assert.match(styles, /\.fleetField/);
-assert.match(styles, /\.progressStages/);
-assert.match(styles, /\.outputSlots/);
-assert.match(styles, /\.workstation/);
-assert.match(styles, /\.launchDock/);
-assert.match(styles, /@keyframes statusPulse/);
-assert.match(styles, /prefers-reduced-motion: reduce/);
-assert.match(styles, /@media \(max-width: 540px\)/);
-
-console.log("Novita render UI contracts passed");
+console.log("Novita render UI contracts passed: H3 Salad weekly and Novita on-demand lanes");

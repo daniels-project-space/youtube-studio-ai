@@ -40,10 +40,13 @@ assert.doesNotMatch(library, /<OwnerOnlyNotice/,
   "thumbnail evidence, candidate refresh and automatic sync status stay visible without an owner-login wall");
 
 const novitaDesk = read("../app/(app)/novita-render/page.tsx");
-assert.match(novitaDesk, /const operationsAccess = useOperationsAccess\(\)/);
-assert.match(novitaDesk, /if \(operationsAccess !== "owner"\) \{/);
-assert.match(novitaDesk, /<LockedRenderConsole access=\{operationsAccess\}/);
-assert.match(novitaDesk, /Fleet capacity, jobs, and prompts remain unloaded/);
+assert.match(novitaDesk, /<H3RenderConsole \/>/,
+  "the render desk must have one authoritative H3 control plane");
+const h3Desk = read("../app/(app)/novita-render/H3RenderConsole.tsx");
+assert.match(h3Desk, /const access = useOperationsAccess\(\)/);
+assert.match(h3Desk, /if \(access !== "owner"\) return <LockedConsole access=\{access\} onRequestOwner=\{requestOwner\} \/>/,
+  "paid H3 lanes must remain behind the shared owner gate");
+assert.match(h3Desk, /Owner access is required to submit a paid Salad or Novita job/);
 
 const casefile = read("../app/(app)/casefile/page.tsx");
 assert.match(casefile, /const operationsAccess = useOperationsAccess\(\)/);
@@ -92,12 +95,6 @@ for (const path of [
   assert.match(page, /window\.setTimeout\(\(\) =>/);
   assert.match(page, /window\.clearTimeout\(timer\)/);
 }
-
-const novita = read("../app/(app)/novita-render/page.tsx");
-assert.ok(
-  (novita.match(/if \(operationsAccess !== "owner"\) return;/g) ?? []).length >= 2,
-  "both Novita mount effects must wait for owner access",
-);
 
 const settings = read("../app/(app)/settings/page.tsx");
 assert.match(settings, /const operationsAccess = useOperationsAccess\(\)/);
