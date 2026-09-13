@@ -3,10 +3,12 @@ import assert from "node:assert/strict";
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
   assertPlanWeekPreparationManifestBinding,
+  assertPlanWeekPreparedFootageBinding,
   assertPlanWeekPreparedMusicBinding,
   assertPlanWeekPreparedNarrationBinding,
   assertPlanWeekPreparedScriptBinding,
   PLAN_WEEK_PREPARATION_VERSION,
+  PLAN_WEEK_PREPARED_FOOTAGE_VERSION,
   PLAN_WEEK_PREPARED_MUSIC_VERSION,
   PLAN_WEEK_PREPARED_NARRATION_VERSION,
   PLAN_WEEK_PREPARED_SCRIPT_VERSION,
@@ -16,6 +18,8 @@ import {
   planWeekPreparedNarrationAudioKey,
   planWeekPreparedNarrationKey,
   planWeekPreparedMusicAudioKey,
+  planWeekPreparedFootageClipKey,
+  planWeekPreparedFootageKey,
   planWeekPreparedMusicKey,
   planWeekPreparedMusicNativeWavKey,
   planWeekPreparedMusicQualityReceiptKey,
@@ -112,6 +116,11 @@ assert.equal(
   planWeekPreparedMusicAudioKey({ ownerId, channelSlug, batchId, itemId }),
   `owner/${ownerId}/channel/${channelSlug}/plan-batches/${batchId}/items/${itemId}/preparation/prepared/music.mp3`,
   "prepared music masters cannot point at arbitrary R2 destinations",
+);
+assert.equal(
+  planWeekPreparedFootageKey({ ownerId, channelSlug, batchId, itemId }),
+  `owner/${ownerId}/channel/${channelSlug}/plan-batches/${batchId}/items/${itemId}/preparation/prepared/footage.json`,
+  "prepared footage receipts share the canonical weekly item namespace",
 );
 for (const malformed of [
   { ownerId: "owner/other", channelSlug, itemId },
@@ -315,6 +324,40 @@ assert.throws(
   }),
   /MiniMax music receipt is invalid/,
   "a MiniMax weekly master cannot bypass its native-WAV, runtime, and human-audition evidence",
+);
+const preparedFootageClipKey = planWeekPreparedFootageClipKey({ ownerId, channelSlug, batchId, itemId, index: 0 });
+const preparedFootage = {
+  version: PLAN_WEEK_PREPARED_FOOTAGE_VERSION,
+  manifestSha256: pointer.manifestSha256,
+  ownerId,
+  channelId,
+  batchId,
+  itemId,
+  requestKey,
+  topic: manifest.plan.topic,
+  generatedFootageSceneManifest: {
+    version: "generated-footage-scene-manifest/v1" as const,
+    source: "story_spine" as const,
+    exactOrder: true as const,
+    durationSec: 5,
+    items: [{ sceneId: "shot-1", clipKey: preparedFootageClipKey }],
+  },
+  clips: [{ r2Key: preparedFootageClipKey, sha256: "1".repeat(64), byteLength: 8_192, durationSec: 5 }],
+  ltxStyleId: "cinematic-documentary",
+  createdAt: Date.now() - 100,
+};
+assert.equal(
+  assertPlanWeekPreparedFootageBinding({ prepared: preparedFootage, manifest }).clips[0]?.r2Key,
+  preparedFootageClipKey,
+  "prepared footage binds every ordered rendered clip to the retained generated-footage manifest",
+);
+assert.throws(
+  () => assertPlanWeekPreparedFootageBinding({
+    prepared: { ...preparedFootage, clips: [{ ...preparedFootage.clips[0], r2Key: "owner/foreign/clip.mp4" }] },
+    manifest,
+  }),
+  /clip binding mismatch/,
+  "a prepared footage receipt cannot substitute a foreign or reordered clip object",
 );
 assert.equal(
   planWeekPreparationPrompt(manifest, "narration"),

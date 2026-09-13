@@ -14,6 +14,10 @@ import {
   ChannelMusicProgramSchema,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
+import {
+  GeneratedFootageSceneManifestSchema,
+  type GeneratedFootageSceneManifest,
+} from "@/engine/generatedFootageManifest";
 
 /**
  * The provider-free first stage of weekly batch preparation.  It is deliberately
@@ -145,6 +149,33 @@ export interface PlanWeekPreparedMusic {
     runtimeReceiptKey: string;
     qualityReceiptKey: string;
   };
+  createdAt: number;
+}
+
+export const PLAN_WEEK_PREPARED_FOOTAGE_VERSION = "plan-week-prepared-footage/v1" as const;
+
+/**
+ * The prepared visual result keeps the renderer's ordered manifest and every
+ * clip's byte identity. A bare list of R2 keys is not enough: cinematic
+ * source-proof/review records and the scene order are release inputs too.
+ */
+export interface PlanWeekPreparedFootage {
+  version: typeof PLAN_WEEK_PREPARED_FOOTAGE_VERSION;
+  manifestSha256: string;
+  ownerId: string;
+  channelId: string;
+  batchId: string;
+  itemId: string;
+  requestKey: string;
+  topic: string;
+  generatedFootageSceneManifest: GeneratedFootageSceneManifest;
+  clips: Array<{
+    r2Key: string;
+    sha256: string;
+    byteLength: number;
+    durationSec: number;
+  }>;
+  ltxStyleId: string;
   createdAt: number;
 }
 
@@ -291,6 +322,28 @@ export function planWeekPreparedMusicQualityReceiptKey(args: {
   itemId: string;
 }): string {
   return `${planWeekPreparationPrefix(args)}/prepared/music-quality.json`;
+}
+
+export function planWeekPreparedFootageKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+}): string {
+  return `${planWeekPreparationPrefix(args)}/prepared/footage.json`;
+}
+
+export function planWeekPreparedFootageClipKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+  index: number;
+}): string {
+  if (!Number.isSafeInteger(args.index) || args.index < 0 || args.index >= 2_000) {
+    throw new Error("plan-week preparation footage clip index is invalid");
+  }
+  return `${planWeekPreparationPrefix(args)}/prepared/footage/clip-${String(args.index + 1).padStart(4, "0")}.mp4`;
 }
 
 function planWeekPreparationPrefix(args: {
@@ -757,6 +810,84 @@ export function assertPlanWeekPreparedMusicBinding(args: {
     ))
   ) {
     throw new Error("plan-week prepared music binding mismatch");
+  }
+  return normalized;
+}
+
+/**
+ * Admission for a completed weekly LTX/source-proof footage order. Actual
+ * execution must still read and hash every clip immediately before it skips
+ * Novita; this boundary rejects cross-episode manifests and alternate object
+ * paths before the result can enter an invocation snapshot.
+ */
+export function assertPlanWeekPreparedFootageBinding(args: {
+  prepared: unknown;
+  manifest: PlanWeekPreparationManifest;
+}): PlanWeekPreparedFootage {
+  const prepared = requiredRecord(args.prepared, "prepared footage receipt");
+  if (prepared.version !== PLAN_WEEK_PREPARED_FOOTAGE_VERSION) {
+    throw new Error("plan-week prepared footage version is unsupported");
+  }
+  const manifestSha256 = requiredText(prepared.manifestSha256, "prepared footage manifest digest").toLowerCase();
+  const createdAt = typeof prepared.createdAt === "number" ? prepared.createdAt : Number.NaN;
+  if (!/^[a-f0-9]{64}$/.test(manifestSha256) || !Number.isSafeInteger(createdAt) || createdAt <= 0) {
+    throw new Error("plan-week prepared footage receipt is invalid");
+  }
+  const generatedFootageSceneManifest = GeneratedFootageSceneManifestSchema.parse(
+    prepared.generatedFootageSceneManifest,
+  );
+  if (!Array.isArray(prepared.clips) || prepared.clips.length !== generatedFootageSceneManifest.items.length) {
+    throw new Error("plan-week prepared footage clips do not match the ordered scene manifest");
+  }
+  const scope = {
+    ownerId: args.manifest.ownerId,
+    channelSlug: args.manifest.channelSlug,
+    batchId: args.manifest.batchId,
+    itemId: args.manifest.itemId,
+  };
+  const clips = prepared.clips.map((raw, index) => {
+    const clip = requiredRecord(raw, `prepared footage clip ${index + 1}`);
+    const r2Key = requiredText(clip.r2Key, `prepared footage clip ${index + 1} key`);
+    const sha256 = requiredText(clip.sha256, `prepared footage clip ${index + 1} digest`).toLowerCase();
+    const byteLength = typeof clip.byteLength === "number" ? clip.byteLength : Number.NaN;
+    const durationSec = typeof clip.durationSec === "number" ? clip.durationSec : Number.NaN;
+    if (
+      r2Key !== planWeekPreparedFootageClipKey({ ...scope, index }) ||
+      generatedFootageSceneManifest.items[index]?.clipKey !== r2Key ||
+      !/^[a-f0-9]{64}$/.test(sha256) ||
+      !Number.isSafeInteger(byteLength) || byteLength < 1_024 || byteLength > 5_000_000_000 ||
+      !Number.isFinite(durationSec) || durationSec <= 0 || durationSec > 3_600
+    ) {
+      throw new Error("plan-week prepared footage clip binding mismatch");
+    }
+    return { r2Key, sha256, byteLength, durationSec };
+  });
+  const ltxStyleId = requiredText(prepared.ltxStyleId, "prepared footage LTX style id");
+  if (ltxStyleId.length > 160) throw new Error("plan-week prepared footage LTX style id is invalid");
+  const normalized: PlanWeekPreparedFootage = {
+    version: PLAN_WEEK_PREPARED_FOOTAGE_VERSION,
+    manifestSha256,
+    ownerId: requiredText(prepared.ownerId, "prepared footage owner id"),
+    channelId: requiredText(prepared.channelId, "prepared footage channel id"),
+    batchId: requiredText(prepared.batchId, "prepared footage batch id"),
+    itemId: requiredText(prepared.itemId, "prepared footage item id"),
+    requestKey: requiredText(prepared.requestKey, "prepared footage request key"),
+    topic: requiredText(prepared.topic, "prepared footage topic"),
+    generatedFootageSceneManifest,
+    clips,
+    ltxStyleId,
+    createdAt,
+  };
+  if (
+    normalized.manifestSha256 !== planWeekPreparationManifestSha256(args.manifest) ||
+    normalized.ownerId !== args.manifest.ownerId ||
+    normalized.channelId !== args.manifest.channelId ||
+    normalized.batchId !== args.manifest.batchId ||
+    normalized.itemId !== args.manifest.itemId ||
+    normalized.requestKey !== args.manifest.requestKey ||
+    normalized.topic !== args.manifest.plan.topic
+  ) {
+    throw new Error("plan-week prepared footage binding mismatch");
   }
   return normalized;
 }
