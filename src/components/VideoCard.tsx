@@ -87,7 +87,7 @@ export function VideoCard({
           <span className="video-card-thumbnail-label" data-tone={video.thumbnailPresentation ?? "retained_source"}>
             {thumbnailLabel(video)}
           </span>
-          <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} wrap />
+          <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} wrap compact={compact} />
         </div>
       </div>
     </>
