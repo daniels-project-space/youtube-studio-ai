@@ -13,8 +13,9 @@ export async function GET(): Promise<NextResponse> {
       ok: true,
       service: "youtube-studio-ai",
       revision:
-        process.env.VERCEL_GIT_COMMIT_SHA ??
-        process.env.RELEASE_SHA ??
+        process.env.VERCEL_GIT_COMMIT_SHA?.trim() ||
+        process.env.RELEASE_SHA?.trim() ||
+        process.env.VERCEL_DEPLOYMENT_ID?.trim() ||
         "development",
     },
     {
