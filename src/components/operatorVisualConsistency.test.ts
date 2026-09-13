@@ -58,10 +58,14 @@ assert.match(runsCss, /grid-template-columns: repeat\(6,\s*minmax\(0,\s*1fr\)\)/
 assert.match(runsCss, /@media \(max-width: 820px\)/);
 
 // The Library’s count derives from its actual filtered rows, never an invented
-// activity metric, and the toolbar keeps explicit labels for every control.
+// activity metric. The everyday controls stay compact while date filtering is
+// an accessible, explicit disclosure rather than a permanently empty row.
 assert.match(library, /resultCount=\{filtered\.length\}/);
 assert.match(libraryFilters, /aria-label="Library filters"/);
 assert.match(libraryFilters, /<strong>\{resultCount\}<\/strong>/);
+assert.match(libraryFilters, /<details className=\{styles\.moreFilters\}/);
+assert.match(libraryFilters, /More filters/);
+assert.match(libraryFilters, /Reset/);
 for (const id of ["library-search", "library-channel", "library-status", "library-sort", "library-from", "library-to"]) {
   assert.match(libraryFilters, new RegExp(`htmlFor="${id}"`));
   assert.match(libraryFilters, new RegExp(`id="${id}"`));

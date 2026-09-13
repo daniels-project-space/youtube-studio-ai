@@ -36,10 +36,22 @@ export function LibraryFilters({
     key: K,
     value: LibraryFilterState[K],
   ) => onChange({ ...state, [key]: value });
+  const hasAdvancedFilter = Boolean(state.from || state.to);
+  const hasAnyFilter = Boolean(
+    state.channelSlug || state.status !== "all" || state.sort !== "date" ||
+    state.search.trim() || hasAdvancedFilter,
+  );
+  const clearFilters = () => onChange({
+    channelSlug: null,
+    status: "all",
+    sort: "date",
+    search: "",
+    from: "",
+    to: "",
+  });
 
   return (
     <div className={`glass ${styles.toolbar}`} aria-label="Library filters">
-      {/* Search */}
       <div className={`${styles.field} ${styles.search}`}>
         <label htmlFor="library-search" className={styles.label}>Search title</label>
         <input
@@ -99,27 +111,39 @@ export function LibraryFilters({
         </select>
       </div>
 
-      {/* Date range */}
-      <div className={styles.field}>
-        <label htmlFor="library-from" className={styles.label}>From</label>
-        <input
-          id="library-from"
-          type="date"
-          value={state.from}
-          onChange={(e) => set("from", e.target.value)}
-          className={styles.input}
-        />
-      </div>
-      <div className={styles.field}>
-        <label htmlFor="library-to" className={styles.label}>To</label>
-        <input
-          id="library-to"
-          type="date"
-          value={state.to}
-          onChange={(e) => set("to", e.target.value)}
-          className={styles.input}
-        />
-      </div>
+      <details className={styles.moreFilters} data-active={hasAdvancedFilter || undefined}>
+        <summary>
+          <span>More filters</span>
+          {hasAdvancedFilter ? <b>1</b> : null}
+        </summary>
+        <div className={styles.advancedPanel}>
+          <div className={styles.advancedField}>
+            <label htmlFor="library-from" className={styles.advancedLabel}>From date</label>
+            <input
+              id="library-from"
+              type="date"
+              value={state.from}
+              onChange={(e) => set("from", e.target.value)}
+              className={styles.input}
+            />
+          </div>
+          <div className={styles.advancedField}>
+            <label htmlFor="library-to" className={styles.advancedLabel}>To date</label>
+            <input
+              id="library-to"
+              type="date"
+              value={state.to}
+              onChange={(e) => set("to", e.target.value)}
+              className={styles.input}
+            />
+          </div>
+        </div>
+      </details>
+      {hasAnyFilter ? (
+        <button type="button" className={styles.clearButton} onClick={clearFilters}>
+          Reset
+        </button>
+      ) : null}
       {resultCount !== undefined ? (
         <div className={styles.resultCount} aria-live="polite">
           <strong>{resultCount}</strong>
