@@ -1141,6 +1141,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "cinematicCreativeLocks",
       "cinematicEditDecisionList",
       "cinematicFinalMasterQaAdmission",
+      "preparedFootage",
                               // Present only on a route-owned serialized program. The planner verifies
       // its route/run/topic binding before it can influence a native comic
       // storyboard; ordinary self-contained stories remain independent.

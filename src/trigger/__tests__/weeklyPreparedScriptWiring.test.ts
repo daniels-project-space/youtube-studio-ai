@@ -13,6 +13,9 @@ const narrationSeed = source.indexOf("preparedNarration: structuredClone(weeklyP
 const musicKey = source.indexOf("const preparedMusicKey = planWeekPreparedMusicKey(weeklyPreparation);");
 const musicBinding = source.indexOf("weeklyPreparedMusic = assertPlanWeekPreparedMusicBinding({");
 const musicSeed = source.indexOf("preparedMusic: structuredClone(weeklyPreparedMusic)");
+const footageKey = source.indexOf("const preparedFootageKey = planWeekPreparedFootageKey(weeklyPreparation);");
+const footageBinding = source.indexOf("weeklyPreparedFootage = assertPlanWeekPreparedFootageBinding({");
+const footageSeed = source.indexOf("preparedFootage: structuredClone(weeklyPreparedFootage)");
 const preparedAuditionBypass = source.indexOf('const preparedWeeklyMusic = seedStore["preparedMusic"];');
 
 assert.ok(manifestVerification >= 0, "weekly preparation must still be verified before any sidecar is considered");
@@ -25,6 +28,9 @@ assert.ok(narrationSeed > narrationBinding, "only an admitted narration receipt 
 assert.ok(musicKey > narrationBinding, "the music receipt must derive from the same verified weekly packet");
 assert.ok(musicBinding > musicKey, "prepared music must be scope-bound before it reaches the paid music stage");
 assert.ok(musicSeed > musicBinding, "only an admitted music receipt may seed the paid music stage");
+assert.ok(footageKey > musicBinding, "the footage receipt must derive from the same verified weekly packet");
+assert.ok(footageBinding > footageKey, "prepared footage must be scope-bound before it reaches gen_footage");
+assert.ok(footageSeed > footageBinding, "only admitted prepared footage may enter the frozen invocation");
 assert.ok(preparedAuditionBypass > musicSeed, "a prepared music receipt must avoid a duplicate MiniMax owner-audition checkpoint");
 assert.match(
   source,
@@ -40,6 +46,11 @@ assert.match(
   source,
   /prepared music is unavailable or invalid/u,
   "an existing unreadable prepared music receipt must fail closed instead of buying a replacement track",
+);
+assert.match(
+  source,
+  /prepared footage is unavailable or invalid/u,
+  "an existing unreadable prepared footage receipt must fail closed instead of buying replacement visuals",
 );
 
 console.log("weekly prepared-media runner wiring passed");

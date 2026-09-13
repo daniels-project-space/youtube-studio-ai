@@ -84,13 +84,16 @@ import {
 } from "@/lib/scheduledPlanRuntime";
 import {
   assertPlanWeekPreparationManifestBinding,
+  assertPlanWeekPreparedFootageBinding,
   assertPlanWeekPreparedMusicBinding,
   assertPlanWeekPreparedNarrationBinding,
   assertPlanWeekPreparedScriptBinding,
+  planWeekPreparedFootageKey,
   planWeekPreparedMusicKey,
   planWeekPreparedNarrationKey,
   planWeekPreparedScriptKey,
   type PlanWeekPreparationManifest,
+  type PlanWeekPreparedFootage,
   type PlanWeekPreparedMusic,
   type PlanWeekPreparedNarration,
   type PlanWeekPreparedScript,
@@ -1219,6 +1222,7 @@ export const runPipelineTask = task({
     let weeklyPreparedScript: PlanWeekPreparedScript | undefined;
     let weeklyPreparedNarration: PlanWeekPreparedNarration | undefined;
     let weeklyPreparedMusic: PlanWeekPreparedMusic | undefined;
+    let weeklyPreparedFootage: PlanWeekPreparedFootage | undefined;
 
     try {
       // A selected narrative horizon is a route-owned serial planner. It must
@@ -1355,6 +1359,27 @@ export const runPipelineTask = task({
               manifest: weeklyPreparation,
             });
           }
+          const preparedFootageKey = planWeekPreparedFootageKey(weeklyPreparation);
+          let rawPreparedFootage: unknown | undefined;
+          try {
+            rawPreparedFootage = JSON.parse(new TextDecoder().decode(
+              await getObjectBytes(preparedFootageKey),
+            ));
+          } catch (error) {
+            const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+            const name = (error as { name?: string }).name;
+            if (status !== 404 && name !== "NoSuchKey" && name !== "NotFound") {
+              throw new Error(
+                `scheduled plan prepared footage is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+          if (rawPreparedFootage !== undefined) {
+            weeklyPreparedFootage = assertPlanWeekPreparedFootageBinding({
+              prepared: rawPreparedFootage,
+              manifest: weeklyPreparation,
+            });
+          }
           if (durableInvocation === undefined) {
             entries = structuredClone(weeklyPreparation.execution.pipeline) as PipelineEntry[];
             frozenModuleConfig = structuredClone(weeklyPreparation.execution.moduleConfig);
@@ -1364,7 +1389,8 @@ export const runPipelineTask = task({
               `(frozen ${new Date(weeklyPreparation.frozenAt).toISOString()}; ` +
               `${weeklyPreparedScript ? "prepared script admitted" : "script pending"}; ` +
               `${weeklyPreparedNarration ? "prepared narration admitted" : "narration pending"}; ` +
-              `${weeklyPreparedMusic ? "prepared music admitted" : "music pending"})`,
+              `${weeklyPreparedMusic ? "prepared music admitted" : "music pending"}; ` +
+              `${weeklyPreparedFootage ? "prepared footage admitted" : "footage pending"})`,
           );
         }
         log(
@@ -1857,6 +1883,9 @@ export const runPipelineTask = task({
                     ? { musicQualityReceiptKey: weeklyPreparedMusic.minimax.qualityReceiptKey }
                     : {}),
                 }
+              : {}),
+            ...(typeof weeklyPreparedFootage !== "undefined" && weeklyPreparedFootage
+              ? { preparedFootage: structuredClone(weeklyPreparedFootage) }
               : {}),
           };
         }

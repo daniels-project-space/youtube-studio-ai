@@ -17,8 +17,9 @@ import {
   makeRunTempDir,
   downloadTo,
   readBytes,
+  writeBytes,
 } from "@/lib/files";
-import { putObject } from "@/lib/storage";
+import { getObjectBytes, putObject } from "@/lib/storage";
 import {
   renderNovitaGeneratedScenes,
   type NovitaClipReviewCheckpoint,
@@ -26,6 +27,7 @@ import {
 } from "@/lib/novitaMedia";
 import { applyNameCardOverlay } from "@/lib/ffmpeg";
 import { kenBurns, applyHyperframesOverlayClip } from "@/lib/ffmpeg";
+import { probe } from "@/lib/ffmpeg";
 import { searchWikimediaImage } from "@/lib/wikimedia";
 import { renderOverlay, selectAutomaticEvidenceOverlayShots, type OverlayTemplateId } from "@/lib/hyperframesOverlay";
 import { footageOnScreenTextCues } from "@/lib/footageOnScreenTextCues";
@@ -62,6 +64,8 @@ import type {
 } from "@/engine/sourceProofMedia";
 import type { VisualArtifactReviewRejection } from "@/engine/visualArtifactReviewOutcome";
 import { COST_PATCH_KEY } from "@/engine/types";
+import type { PlanWeekPreparedFootage } from "@/lib/planWeekPreparation";
+import { sha256BytesHex } from "@/lib/sha256";
 
 function stableVisualAttemptToken(value: string): string {
   const token = value
@@ -687,14 +691,6 @@ export const genFootage: Block = {
       24,
     );
     const hasCinematicSequence = ctx.store["cinematicGeneratedScenePlan"] !== undefined;
-    // Cinematic keyframe, take, and cut gates are independent visual evidence,
-    // not an optional after-spend review. Fail before the first Novita request
-    // when no eligible non-Google reviewer can attest the sequence.
-    if (hasCinematicSequence && !hasNonGoogleVisionKey()) {
-      throw new Error(
-        "gen_footage: admitted cinematic_case_sequence requires OPENROUTER_API_KEY for independent non-Google visual gates before Novita rendering",
-      );
-    }
     const maxClips = hasCinematicSequence
       ? cinematicSceneLimit(ctx.params["maxCinematicClips"])
       : genericMaxClips;
@@ -711,6 +707,104 @@ export const genFootage: Block = {
       avoid,
     });
     const scenes = plan.scenes;
+    // A week-ahead footage receipt is a fully reviewed ordered render result,
+    // not the language-sibling reuse shortcut. Verify it against the exact
+    // current frozen scene plan and actual retained bytes before any visual
+    // provider/reviewer work is allowed to start.
+    const preparedFootage = ctx.store["preparedFootage"] as PlanWeekPreparedFootage | undefined;
+    if (preparedFootage !== undefined) {
+      if (!preparedFootage || typeof preparedFootage !== "object") {
+        throw new Error("gen_footage: prepared weekly footage is invalid");
+      }
+      const preparedManifest = preparedFootage.generatedFootageSceneManifest;
+      const expectedDurationSec = plan.source === "cinematic_case_sequence"
+        ? (scenes.at(-1)?.t1 ?? 0)
+        : scenes.reduce((total, scene) => total + scene.durationSec, 0);
+      if (
+        preparedFootage.ltxStyleId !== ltxStyleSelection.styleId ||
+        preparedManifest.source !== plan.source ||
+        preparedManifest.sequenceFingerprint !== plan.sequenceFingerprint ||
+        preparedManifest.items.length !== scenes.length ||
+        Math.abs(preparedManifest.durationSec - expectedDurationSec) > 0.05 ||
+        preparedManifest.items.some((item, index) => {
+          const scene = scenes[index];
+          return !scene || item.sceneId !== scene.id ||
+            (scene.t0 !== undefined && item.t0 !== scene.t0) ||
+            (scene.t1 !== undefined && item.t1 !== scene.t1) ||
+            (scene.continuitySeed !== undefined && item.continuitySeed !== scene.continuitySeed);
+        })
+      ) {
+        throw new Error("gen_footage: prepared weekly footage does not match the frozen scene plan or LTX treatment");
+      }
+      const preparedTmp = await makeRunTempDir(`${ctx.runId}-prepared-footage`);
+      const footageClips = await pool(preparedFootage.clips, 4, async (clip, index) => {
+        const scene = scenes[index];
+        const expectedSceneDurationSec = plan.source === "cinematic_case_sequence"
+          ? ((scene?.t1 ?? 0) - (scene?.t0 ?? 0))
+          : scene?.durationSec;
+        if (
+          typeof expectedSceneDurationSec !== "number" ||
+          !Number.isFinite(expectedSceneDurationSec) ||
+          expectedSceneDurationSec <= 0 ||
+          Math.abs(clip.durationSec - expectedSceneDurationSec) > 0.08
+        ) {
+          throw new Error(`gen_footage: prepared weekly clip ${index + 1} timing does not match the frozen scene plan`);
+        }
+        const bytes = await getObjectBytes(clip.r2Key);
+        if (bytes.byteLength !== clip.byteLength || sha256BytesHex(bytes) !== clip.sha256) {
+          throw new Error(`gen_footage: prepared weekly clip ${index + 1} bytes do not match its immutable receipt`);
+        }
+        const local = await writeBytes(join(preparedTmp, `clip_${index + 1}.mp4`), bytes);
+        const measured = await probe(local);
+        const measuredDurationSec = measured.durationSec;
+        if (
+          !Number.isFinite(measuredDurationSec) ||
+          measuredDurationSec <= 0 ||
+          !measured.hasVideo ||
+          Math.abs(measuredDurationSec - clip.durationSec) > 0.08
+        ) {
+          throw new Error(`gen_footage: prepared weekly clip ${index + 1} video duration does not match its immutable receipt`);
+        }
+        return local;
+      });
+      const preparedFootageTextCues = footageOnScreenTextCues(
+        scenes.map((scene) => ({
+          sceneId: scene.id,
+          durationSec: scene.durationSec,
+          ...(scene.nameCardText ? { nameCardText: scene.nameCardText } : {}),
+          ...(scene.evidenceOverlay
+            ? {
+                evidenceOverlay: {
+                  text: [scene.evidenceOverlay.primary, scene.evidenceOverlay.secondary].filter(Boolean).join(" "),
+                  durationSec: Math.max(1.2, Math.min(2.2, scene.durationSec - 0.3)),
+                },
+              }
+            : {}),
+        })),
+      );
+      ctx.log(
+        `gen_footage: consumed ${footageClips.length} prepared weekly clips ` +
+        "after scene-manifest, hash, and duration verification (no Novita spend)",
+      );
+      return {
+        footageClips,
+        footageKeys: preparedFootage.clips.map((clip) => clip.r2Key),
+        generatedFootageSceneManifest: preparedManifest,
+        footageOnScreenTextCues: preparedFootageTextCues,
+        ltxStyleId: ltxStyleSelection.styleId,
+        ltxStyleSelection,
+        [COST_PATCH_KEY]: 0,
+      };
+    }
+    // Cinematic keyframe, take, and cut gates are independent visual evidence,
+    // not an optional after-spend review. The prepared branch above carries
+    // its already admitted records; only a fresh Novita render needs a new
+    // reviewer credential.
+    if (hasCinematicSequence && !hasNonGoogleVisionKey()) {
+      throw new Error(
+        "gen_footage: admitted cinematic_case_sequence requires OPENROUTER_API_KEY for independent non-Google visual gates before Novita rendering",
+      );
+    }
     // The existing runArtifacts checkpoint is intentionally record-only. It
     // captures the exact independently reviewed Casefile candidate before a
     // bounded replacement render, without becoming a release or retry input.
