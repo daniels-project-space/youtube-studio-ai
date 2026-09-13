@@ -9,6 +9,7 @@ import {
   MINIMAX_H3_MANIFEST_SHA256,
   MINIMAX_H3_RUNTIME_ID,
   MINIMAX_H3_PROFILE,
+  assertMiniMaxH3SaladCapacity,
   miniMaxH3RequestKey,
   renderMiniMaxH3WeeklyBatch,
   type MiniMaxH3Receipt,
@@ -460,11 +461,6 @@ export const minimaxH3WeeklyBatchTask = task({
     const preparedManifest = payload.preparedFootage
       ? await readPreparedFootageManifest(payload.preparedFootage)
       : undefined;
-    if (payload.preparedFootage) {
-      // Preflight every input before the first worker request; a later bad
-      // frame must never leave a partially paid weekly order.
-      await preflightPreparedFrames(payload.jobs, payload.preparedFootage);
-    }
     const requestKeys = payload.jobs.map((job) => miniMaxH3RequestKey({
       ...job,
       provider: "salad",
@@ -491,6 +487,16 @@ export const minimaxH3WeeklyBatchTask = task({
         ...(preparedFootageKey ? { preparedFootageKey } : {}),
         reconciled: true as const,
       };
+    }
+    // Salad capacity is a separate, read-only admission. A reachable worker
+    // URL must not be mistaken for three currently available desktop 5090s.
+    // This runs only for a new paid order; receipt reconciliation remains
+    // available even if capacity changes after the original dispatch.
+    await assertMiniMaxH3SaladCapacity(payload.jobs.length);
+    if (payload.preparedFootage) {
+      // Preflight every input before the first worker request; a later bad
+      // frame must never leave a partially paid weekly order.
+      await preflightPreparedFrames(payload.jobs, payload.preparedFootage);
     }
     const result = await renderMiniMaxH3WeeklyBatch(payload.jobs);
     const receipt = createMiniMaxH3WeeklyReceipt(payload.orderKey, result);

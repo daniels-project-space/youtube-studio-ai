@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
 import {
   assertMiniMaxH3R2ModelManifest,
+  assertMiniMaxH3SaladCapacity,
   MINIMAX_H3_MANIFEST_SHA256,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
   MiniMaxH3Error,
+  type MiniMaxH3SaladCapacityClient,
   miniMaxH3RequestKey,
   renderMiniMaxH3,
   renderMiniMaxH3WeeklyBatch,
@@ -41,6 +43,32 @@ function responseFor(input: ReturnType<typeof request>) {
   } }), { status: 200, headers: { "content-type": "application/json" } });
 }
 async function test() {
+  const classes = [{
+    id: "851399fb-7329-4195-a042-d6514b28cf33",
+    name: "RTX 5090 (32 GB)",
+    prices: [{ price: "0.417", priority: "medium" as const }],
+  }];
+  let capacityRequest: { gpu_classes: string[]; memory: number; storage_amount: number } | undefined;
+  const capacityClient: MiniMaxH3SaladCapacityClient = {
+    listGpuClasses: async () => classes,
+    getGpuAvailability: async (resources) => {
+      capacityRequest = resources;
+      return { available_gpu_medium: 3 };
+    },
+  };
+  assert.deepEqual(
+    await assertMiniMaxH3SaladCapacity(4, { client: capacityClient }),
+    { requiredGpuCount: 3, availableGpuCount: 3, gpuClassId: classes[0]!.id },
+  );
+  assert.deepEqual(capacityRequest, {
+    cpu: 8, gpu_classes: [classes[0]!.id], memory: 131_072, storage_amount: 100 * 1024 ** 3,
+  });
+  await assert.rejects(
+    () => assertMiniMaxH3SaladCapacity(2, {
+      client: { ...capacityClient, getGpuAvailability: async () => ({ available_gpu_medium: 1 }) },
+    }),
+    /capacity is insufficient/,
+  );
   configure("salad"); configure("novita");
   const salad = request("salad", "weekly-batch");
   let seen: Record<string, unknown> | undefined;

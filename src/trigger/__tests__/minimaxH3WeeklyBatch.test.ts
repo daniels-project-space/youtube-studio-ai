@@ -55,4 +55,9 @@ assert.match(
   /providerReceipts: result\.map\(\(item\) => item\.receipt\)/,
   "weekly receipt must retain full per-shot H3 provenance for prepared-footage reconciliation",
 );
+assert.match(
+  readFileSync(resolve(process.cwd(), "src/trigger/minimaxH3WeeklyBatch.ts"), "utf8"),
+  /assertMiniMaxH3SaladCapacity\(payload\.jobs\.length\)/,
+  "weekly paid dispatch must be gated by a current Salad capacity admission",
+);
 console.log("weekly MiniMax H3 batch task contracts passed");

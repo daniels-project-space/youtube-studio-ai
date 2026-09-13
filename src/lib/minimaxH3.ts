@@ -1,6 +1,12 @@
 import { canonicalJson } from "@/lib/canonicalJson";
 import { getObjectBytes, presignDownload, presignUpload } from "@/lib/storage";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
+import {
+  saladCloudClientFromVault,
+  selectSaladGpu,
+  type SaladGpuClass,
+  type SaladResources,
+} from "@/lib/saladCloud";
 
 /**
  * The shared, R2-native contract for the actual MiniMax H3 worker packs.
@@ -32,6 +38,70 @@ const MAX_H3_JOBS_PER_BATCH = 60;
 const MAX_H3_PARALLEL_SALAD_JOBS = 3;
 const MINIMAX_H3_MODEL_BUCKET = "salad-render-infra";
 const MINIMAX_H3_MODEL_MANIFEST_KEY = `${MINIMAX_H3_RUNTIME_ID}/immutable-manifest.json`;
+const MINIMAX_H3_SALAD_COUNTRY_CODES = ["cn"] as const;
+
+const MINIMAX_H3_SALAD_RESOURCES: Omit<SaladResources, "gpu_classes"> = Object.freeze({
+  cpu: 8,
+  memory: 131_072,
+  storage_amount: 100 * 1024 ** 3,
+});
+
+export interface MiniMaxH3SaladCapacityClient {
+  listGpuClasses(): Promise<SaladGpuClass[]>;
+  getGpuAvailability(resources: SaladResources, countryCodes?: string[]): Promise<{
+    available_gpu_medium?: number;
+  }>;
+}
+
+/**
+ * Read-only Salad admission for the weekly lane. The worker URL alone is not
+ * evidence that the requested desktop 5090 capacity exists; discover the
+ * exact class and current medium-priority slots before the first paid call.
+ */
+export async function assertMiniMaxH3SaladCapacity(
+  jobCount: number,
+  options: { client?: MiniMaxH3SaladCapacityClient } = {},
+): Promise<{ requiredGpuCount: number; availableGpuCount: number; gpuClassId: string }> {
+  if (!Number.isSafeInteger(jobCount) || jobCount < 1 || jobCount > MAX_H3_JOBS_PER_BATCH) {
+    throw new MiniMaxH3Error(`weekly MiniMax H3 capacity check requires 1..${MAX_H3_JOBS_PER_BATCH} jobs`);
+  }
+  const client = options.client ?? await saladCloudClientFromVault();
+  let gpu: ReturnType<typeof selectSaladGpu>;
+  try {
+    gpu = selectSaladGpu(await client.listGpuClasses(), "RTX 5090");
+  } catch (error) {
+    throw new MiniMaxH3Error(
+      `weekly MiniMax H3 Salad capacity check could not admit the exact desktop RTX 5090 class: ${error instanceof Error ? error.message : String(error)}`,
+      undefined,
+      undefined,
+      false,
+      0,
+    );
+  }
+  const resources: SaladResources = {
+    ...MINIMAX_H3_SALAD_RESOURCES,
+    gpu_classes: [gpu.id],
+  };
+  let availability;
+  try {
+    availability = await client.getGpuAvailability(resources, [...MINIMAX_H3_SALAD_COUNTRY_CODES]);
+  } catch (error) {
+    throw new MiniMaxH3Error(
+      `weekly MiniMax H3 Salad capacity check failed before dispatch: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  const rawAvailableGpuCount = availability.available_gpu_medium;
+  const availableGpuCount = typeof rawAvailableGpuCount === "number" && Number.isSafeInteger(rawAvailableGpuCount)
+    ? rawAvailableGpuCount
+    : 0;
+  const requiredGpuCount = Math.min(MAX_H3_PARALLEL_SALAD_JOBS, jobCount);
+  if (availableGpuCount < requiredGpuCount) {
+    throw new MiniMaxH3Error(
+      `weekly MiniMax H3 Salad capacity is insufficient for the requested wave (${availableGpuCount}/${requiredGpuCount} medium desktop RTX 5090 slots)`,
+    );
+  }
+  return { requiredGpuCount, availableGpuCount, gpuClassId: gpu.id };
+}
 
 export interface MiniMaxH3RenderRequest {
   provider: MiniMaxH3Provider;
