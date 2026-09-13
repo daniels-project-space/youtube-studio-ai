@@ -784,7 +784,7 @@ export const genFootage: Block = {
             (scene.continuitySeed !== undefined && item.continuitySeed !== scene.continuitySeed);
         })
       ) {
-        throw new Error("gen_footage: prepared weekly footage does not match the frozen scene plan or LTX treatment");
+        throw new Error("gen_footage: prepared weekly footage does not match the frozen scene plan or renderer");
       }
       const preparedTmp = await makeRunTempDir(`${ctx.runId}-prepared-footage`);
       const footageClips = await pool(preparedFootage.clips, 4, async (clip, index) => {

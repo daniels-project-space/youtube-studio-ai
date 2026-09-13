@@ -32,7 +32,7 @@ import {
 /**
  * The provider-free first stage of weekly batch preparation.  It is deliberately
  * not called a render: it freezes the exact editorial and channel inputs that
- * later script, shot-list, ERNIE and LTX work must consume.
+ * later script, shot-list, ERNIE and H3 visual work must consume.
  */
 export const PLAN_WEEK_PREPARATION_VERSION = "plan-week-preparation/inputs-v1" as const;
 
@@ -863,7 +863,7 @@ export function assertPlanWeekPreparedMusicBinding(args: {
 }
 
 /**
- * Admission for a completed weekly LTX/source-proof footage order. Actual
+ * Admission for a completed weekly visual/source-proof footage order. Actual
  * execution must still read and hash every clip immediately before it skips
  * Novita; this boundary rejects cross-episode manifests and alternate object
  * paths before the result can enter an invocation snapshot.

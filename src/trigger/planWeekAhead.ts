@@ -667,7 +667,7 @@ async function runPlanWeekAhead(
 
     // Freeze every non-secret editorial and runtime input before the first
     // thumbnail provider claim. This keeps the weekly queue honest: it is
-    // prepared input, not a promise that a later LTX/ERNIE render already ran.
+    // prepared input, not a promise that a later H3/ERNIE render already ran.
     // A Lo-Fi item freezes an explicit final-render-frame requirement instead
     // of paying for or showing generic planner artwork.
     const thumbnailSourceByItemId = new Map<string, PlanWeekThumbnailSource>();
