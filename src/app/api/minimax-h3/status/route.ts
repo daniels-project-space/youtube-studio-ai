@@ -33,15 +33,23 @@ type ReceiptSummary = {
 
 type RequestPacketState = "frozen" | "missing" | "invalid" | "not-applicable";
 
-function validWeeklyRequestPacket(value: unknown): boolean {
+function validWeeklyRequestPacket(
+  value: unknown,
+  expected?: { orderKey: string; requestKeys: readonly string[] },
+): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const packet = value as Record<string, unknown>;
-  return packet.schema === "minimax-h3-weekly-request/v1" &&
+  const requestKeys = packet.requestKeys;
+  const structurallyValid = packet.schema === "minimax-h3-weekly-request/v1" &&
     typeof packet.orderKey === "string" && packet.orderKey.length > 0 &&
-    Array.isArray(packet.requestKeys) && packet.requestKeys.length >= 1 && packet.requestKeys.length <= 60 &&
-    packet.requestKeys.every((key) => typeof key === "string" && key.length > 0) &&
-    Array.isArray(packet.jobs) && packet.jobs.length === packet.requestKeys.length &&
+    Array.isArray(requestKeys) && requestKeys.length >= 1 && requestKeys.length <= 60 &&
+    requestKeys.every((key) => typeof key === "string" && key.length > 0) &&
+    Array.isArray(packet.jobs) && packet.jobs.length === requestKeys.length &&
     Number.isSafeInteger(packet.createdAt) && Number(packet.createdAt) > 0;
+  if (!structurallyValid || !expected) return structurallyValid;
+  return packet.orderKey === expected.orderKey &&
+    requestKeys.length === expected.requestKeys.length &&
+    requestKeys.every((key, index) => key === expected.requestKeys[index]);
 }
 
 function isOwnerScopedR2Key(value: unknown, ownerId: string): boolean {
@@ -116,12 +124,21 @@ export async function GET(request: Request) {
     let receiptState: "pending" | "complete" | "reconciliation_required" = "pending";
     try {
       const bytes = await getObjectBytes(receiptKey);
-      receipt = summarizeReceipt(JSON.parse(new TextDecoder().decode(bytes)), actor.ownerId);
+      const receiptBody = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
+      receipt = summarizeReceipt(receiptBody, actor.ownerId);
       receiptState = "complete";
       if (receipt.kind === "weekly") {
         try {
           const packet = JSON.parse(new TextDecoder().decode(await getObjectBytes(miniMaxH3WeeklyRequestPacketKey(receiptKey))));
-          requestPacketState = validWeeklyRequestPacket(packet) ? "frozen" : "invalid";
+          const rawReceipt = receiptBody as Record<string, unknown>;
+          const expectedOrderKey = typeof rawReceipt.orderKey === "string" ? rawReceipt.orderKey : "";
+          const expectedRequestKeys = Array.isArray(rawReceipt.requestKeys)
+            ? rawReceipt.requestKeys.filter((key): key is string => typeof key === "string")
+            : [];
+          requestPacketState = validWeeklyRequestPacket(packet, {
+            orderKey: expectedOrderKey,
+            requestKeys: expectedRequestKeys,
+          }) ? "frozen" : "invalid";
         } catch (packetError) {
           if (!notFound(packetError)) requestPacketState = "invalid";
           else requestPacketState = "missing";
