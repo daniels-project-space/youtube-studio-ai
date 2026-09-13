@@ -6,12 +6,13 @@
 import { task } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
+  miniMaxH3RequestKey,
   renderMiniMaxH3,
   type MiniMaxH3RenderRequest,
 } from "@/lib/minimaxH3";
-import { putObject } from "@/lib/storage";
+import { getObjectBytes, putObject } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { sha256Hex } from "@/lib/sha256";
+import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 
 export interface MiniMaxH3OnDemandArgs {
   /** Stable owner/run identity used for task idempotency and reconciliation. */
@@ -79,6 +80,59 @@ export function assertMiniMaxH3OnDemandArgs(value: unknown): MiniMaxH3OnDemandAr
   };
 }
 
+function objectNotFound(error: unknown): boolean {
+  const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
+  return candidate?.name === "NoSuchKey" || candidate?.name === "NotFound" ||
+    candidate?.$metadata?.httpStatusCode === 404;
+}
+
+type PersistedOnDemandReceipt = {
+  schema: "minimax-h3-on-demand/v1";
+  orderKey: string;
+  requestKey: string;
+  output: { r2Key: string; contentSha256: string; byteLength: number; costUsd: number };
+  providerReceipt: unknown;
+  createdAt: number;
+};
+
+/** Reconciles a prior create-only receipt and its actual R2 bytes. */
+async function readPersistedReceipt(
+  key: string,
+  expected: { orderKey: string; requestKey: string; outputKey: string },
+): Promise<PersistedOnDemandReceipt | null> {
+  let bytes: Uint8Array;
+  try {
+    bytes = await getObjectBytes(key);
+  } catch (error) {
+    if (objectNotFound(error)) return null;
+    throw error;
+  }
+  let parsed: PersistedOnDemandReceipt;
+  try {
+    parsed = JSON.parse(Buffer.from(bytes).toString("utf8")) as PersistedOnDemandReceipt;
+  } catch {
+    throw new Error("on-demand MiniMax H3 receipt exists but is not valid JSON");
+  }
+  if (
+    parsed?.schema !== "minimax-h3-on-demand/v1" ||
+    parsed.orderKey !== expected.orderKey ||
+    parsed.requestKey !== expected.requestKey ||
+    parsed.output?.r2Key !== expected.outputKey ||
+    !/^[a-f0-9]{64}$/.test(parsed.output?.contentSha256 ?? "") ||
+    !Number.isSafeInteger(parsed.output?.byteLength) || parsed.output.byteLength < 1_024 ||
+    !Number.isFinite(parsed.output?.costUsd) || parsed.output.costUsd < 0 ||
+    !Number.isSafeInteger(parsed.createdAt) || parsed.createdAt <= 0 ||
+    parsed.providerReceipt === undefined
+  ) {
+    throw new Error("on-demand MiniMax H3 receipt exists but is bound to a different request");
+  }
+  const output = await getObjectBytes(parsed.output.r2Key);
+  if (output.byteLength !== parsed.output.byteLength || sha256BytesHex(output) !== parsed.output.contentSha256) {
+    throw new Error("on-demand MiniMax H3 persisted receipt does not match its R2 output");
+  }
+  return parsed;
+}
+
 export const minimaxH3OnDemandTask = task({
   id: "minimax-h3-on-demand",
   // A transport failure after submission is an unknown outcome. The caller
@@ -94,10 +148,20 @@ export const minimaxH3OnDemandTask = task({
         "MINIMAX_H3_NOVITA_WORKER_URL", "MINIMAX_H3_NOVITA_WORKER_TOKEN",
       ],
     });
-    const result = await renderMiniMaxH3({
+    const request = {
       ...payload.request,
-      provider: "novita",
-      execution: "on-demand",
+      provider: "novita" as const,
+      execution: "on-demand" as const,
+    };
+    const requestKey = miniMaxH3RequestKey(request);
+    const prior = await readPersistedReceipt(payload.receiptKey, {
+      orderKey: payload.orderKey,
+      requestKey,
+      outputKey: request.output.r2Key,
+    });
+    if (prior) return { receiptKey: payload.receiptKey, ...prior, reconciled: true as const };
+    const result = await renderMiniMaxH3({
+      ...request,
     });
     const receipt = {
       schema: "minimax-h3-on-demand/v1",
@@ -115,14 +179,26 @@ export const minimaxH3OnDemandTask = task({
     const body = canonicalJson(receipt);
     // This is create-only. A lost response is reconciled from the exact
     // receipt/request key; it can never overwrite a different paid result.
-    await putObject(payload.receiptKey, body, {
-      contentType: "application/json",
-      metadata: {
-        "h3-on-demand-receipt": "v1",
-        "h3-on-demand-sha256": sha256Hex(body),
-      },
-      ifNoneMatch: "*",
-    });
+    try {
+      await putObject(payload.receiptKey, body, {
+        contentType: "application/json",
+        metadata: {
+          "h3-on-demand-receipt": "v1",
+          "h3-on-demand-sha256": sha256Hex(body),
+        },
+        ifNoneMatch: "*",
+      });
+    } catch (error) {
+      const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+      if (status !== 409 && status !== 412) throw error;
+      const winner = await readPersistedReceipt(payload.receiptKey, {
+        orderKey: payload.orderKey,
+        requestKey,
+        outputKey: request.output.r2Key,
+      });
+      if (!winner) throw error;
+      return { receiptKey: payload.receiptKey, ...winner, reconciled: true as const };
+    }
     return { receiptKey: payload.receiptKey, ...receipt };
   },
 });

@@ -6,12 +6,13 @@
 import { task } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
+  miniMaxH3RequestKey,
   renderMiniMaxH3WeeklyBatch,
   type MiniMaxH3RenderRequest,
 } from "@/lib/minimaxH3";
-import { putObject } from "@/lib/storage";
+import { getObjectBytes, putObject } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { sha256Hex } from "@/lib/sha256";
+import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 
 export interface MiniMaxH3WeeklyBatchArgs {
   /** Stable owner/week work-order identity; used as the task idempotency seed. */
@@ -61,6 +62,66 @@ export function assertMiniMaxH3WeeklyBatchArgs(value: unknown): MiniMaxH3WeeklyB
   return { orderKey: safeIdentifier(payload.orderKey, "order key"), receiptKey: scopedReceiptKey(payload.receiptKey), jobs };
 }
 
+function objectNotFound(error: unknown): boolean {
+  const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
+  return candidate?.name === "NoSuchKey" || candidate?.name === "NotFound" ||
+    candidate?.$metadata?.httpStatusCode === 404;
+}
+
+type PersistedWeeklyReceipt = {
+  schema: "minimax-h3-weekly-batch/v1";
+  orderKey: string;
+  requestKeys: string[];
+  outputs: Array<{ r2Key: string; contentSha256: string; byteLength: number; costUsd: number }>;
+  totalCostUsd: number;
+  createdAt: number;
+};
+
+/** Reconciles a prior batch receipt and every retained R2 output. */
+async function readPersistedReceipt(
+  key: string,
+  expected: { orderKey: string; requestKeys: readonly string[]; outputKeys: readonly string[] },
+): Promise<PersistedWeeklyReceipt | null> {
+  let bytes: Uint8Array;
+  try {
+    bytes = await getObjectBytes(key);
+  } catch (error) {
+    if (objectNotFound(error)) return null;
+    throw error;
+  }
+  let parsed: PersistedWeeklyReceipt;
+  try {
+    parsed = JSON.parse(Buffer.from(bytes).toString("utf8")) as PersistedWeeklyReceipt;
+  } catch {
+    throw new Error("weekly MiniMax H3 receipt exists but is not valid JSON");
+  }
+  if (
+    parsed?.schema !== "minimax-h3-weekly-batch/v1" ||
+    parsed.orderKey !== expected.orderKey ||
+    !Array.isArray(parsed.requestKeys) ||
+    parsed.requestKeys.length !== expected.requestKeys.length ||
+    parsed.requestKeys.some((requestKey, index) => requestKey !== expected.requestKeys[index]) ||
+    !Array.isArray(parsed.outputs) ||
+    parsed.outputs.length !== expected.outputKeys.length ||
+    parsed.outputs.some((output, index) =>
+      output?.r2Key !== expected.outputKeys[index] ||
+      !/^[a-f0-9]{64}$/.test(output?.contentSha256 ?? "") ||
+      !Number.isSafeInteger(output?.byteLength) || output.byteLength < 1_024 ||
+      !Number.isFinite(output?.costUsd) || output.costUsd < 0),
+    !Number.isFinite(parsed.totalCostUsd) || parsed.totalCostUsd < 0 ||
+    !Number.isSafeInteger(parsed.createdAt) || parsed.createdAt <= 0
+  ) {
+    throw new Error("weekly MiniMax H3 receipt exists but is bound to a different request");
+  }
+  for (const output of parsed.outputs) {
+    const actual = await getObjectBytes(output.r2Key);
+    if (actual.byteLength !== output.byteLength || sha256BytesHex(actual) !== output.contentSha256) {
+      throw new Error("weekly MiniMax H3 persisted receipt does not match an R2 output");
+    }
+  }
+  return parsed;
+}
+
 export const minimaxH3WeeklyBatchTask = task({
   id: "minimax-h3-weekly-batch",
   // H3 workers hydrate and can run up to sixty five-second clips over three
@@ -78,6 +139,18 @@ export const minimaxH3WeeklyBatchTask = task({
         "MINIMAX_H3_SALAD_WORKER_URL", "MINIMAX_H3_SALAD_WORKER_TOKEN",
       ],
     });
+    const requestKeys = payload.jobs.map((job) => miniMaxH3RequestKey({
+      ...job,
+      provider: "salad",
+      execution: "weekly-batch",
+    }));
+    const outputKeys = payload.jobs.map((job) => job.output.r2Key);
+    const prior = await readPersistedReceipt(payload.receiptKey, {
+      orderKey: payload.orderKey,
+      requestKeys,
+      outputKeys,
+    });
+    if (prior) return { receiptKey: payload.receiptKey, ...prior, reconciled: true as const };
     const result = await renderMiniMaxH3WeeklyBatch(payload.jobs);
     const receipt = {
       schema: "minimax-h3-weekly-batch/v1",
@@ -95,11 +168,20 @@ export const minimaxH3WeeklyBatchTask = task({
     // A batch receipt is create-only. If a controller loses its response after
     // rendering, it must read/reconcile this immutable proof rather than issue
     // a second paid order with a new receipt spelling.
-    await putObject(payload.receiptKey, canonicalJson(receipt), {
-      contentType: "application/json",
-      metadata: { "h3-batch-receipt": "v1", "h3-batch-sha256": sha256Hex(canonicalJson(receipt)) },
-      ifNoneMatch: "*",
-    });
+    const body = canonicalJson(receipt);
+    try {
+      await putObject(payload.receiptKey, body, {
+        contentType: "application/json",
+        metadata: { "h3-batch-receipt": "v1", "h3-batch-sha256": sha256Hex(body) },
+        ifNoneMatch: "*",
+      });
+    } catch (error) {
+      const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+      if (status !== 409 && status !== 412) throw error;
+      const winner = await readPersistedReceipt(payload.receiptKey, { orderKey: payload.orderKey, requestKeys, outputKeys });
+      if (!winner) throw error;
+      return { receiptKey: payload.receiptKey, ...winner, reconciled: true as const };
+    }
     return { receiptKey: payload.receiptKey, ...receipt };
   },
 });

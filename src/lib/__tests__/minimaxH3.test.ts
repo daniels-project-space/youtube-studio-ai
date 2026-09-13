@@ -5,6 +5,7 @@ import {
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
   MiniMaxH3Error,
+  miniMaxH3RequestKey,
   renderMiniMaxH3,
   renderMiniMaxH3WeeklyBatch,
 } from "@/lib/minimaxH3";
@@ -23,6 +24,11 @@ function request(provider: "salad" | "novita", execution: "weekly-batch" | "on-d
   return { provider, execution, prompt: "A precise continuous cinematic action with no text.", seed: 42,
     firstFrame: { r2Key: "owner/o/channel/c/frame.png", sha256: "b".repeat(64) }, output: { r2Key: output }, maxCostUsd: 0.4 } as const;
 }
+assert.notEqual(
+  miniMaxH3RequestKey(request("salad", "weekly-batch")),
+  miniMaxH3RequestKey(request("novita", "on-demand")),
+  "weekly and on-demand routes must have distinct idempotency identities",
+);
 const output = new Uint8Array(1_024).fill(7);
 function responseFor(input: ReturnType<typeof request>) {
   return new Response(JSON.stringify({ receipt: {

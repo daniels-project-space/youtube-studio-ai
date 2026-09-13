@@ -277,6 +277,26 @@ function receiptFrom(value: unknown, expected: {
   };
 }
 
+/**
+ * Computes the exact idempotency identity without contacting either provider.
+ * Trigger controllers use this to reconcile an existing create-only receipt
+ * before they consider another paid dispatch.
+ */
+export function miniMaxH3RequestKey(input: MiniMaxH3RenderRequest): string {
+  const request = normaliseRequest(input);
+  return sha256Hex(canonicalJson({
+    schema: MINIMAX_H3_WORKER_CONTRACT,
+    provider: request.provider,
+    execution: request.execution,
+    prompt: request.prompt,
+    seed: request.seed,
+    firstFrame: request.firstFrame,
+    output: request.output,
+    profile: MINIMAX_H3_PROFILE,
+    maxCostUsd: request.maxCostUsd,
+  }));
+}
+
 export async function renderMiniMaxH3(
   input: MiniMaxH3RenderRequest,
   options: {
@@ -294,17 +314,7 @@ export async function renderMiniMaxH3(
   if (!readiness.admitted) throw new MiniMaxH3Error(`MiniMax H3 ${request.provider} route is not admitted: ${readiness.blockers.join("; ")}`);
   await (options.assertModelManifest ?? (() => assertMiniMaxH3R2ModelManifest(options.readModelManifest)))();
   const route = routeEnvironment(request.provider);
-  const requestKey = sha256Hex(canonicalJson({
-    schema: MINIMAX_H3_WORKER_CONTRACT,
-    provider: request.provider,
-    execution: request.execution,
-    prompt: request.prompt,
-    seed: request.seed,
-    firstFrame: request.firstFrame,
-    output: request.output,
-    profile: MINIMAX_H3_PROFILE,
-    maxCostUsd: request.maxCostUsd,
-  }));
+  const requestKey = miniMaxH3RequestKey(request);
   const [firstFrameUrl, outputPutUrl] = await Promise.all([
     (options.presignRead ?? presignDownload)(request.firstFrame.r2Key, { expiresIn: 3_600 }),
     (options.presignWrite ?? presignUpload)(request.output.r2Key, { expiresIn: 3_600, contentType: "video/mp4" }),
