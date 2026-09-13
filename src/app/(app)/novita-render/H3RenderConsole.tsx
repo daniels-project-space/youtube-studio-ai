@@ -88,10 +88,20 @@ export function H3RenderConsole() {
   const [status, setStatus] = useState<H3Status | null>(null);
 
   useEffect(() => {
+    const requestedMode = new URLSearchParams(window.location.search).get("mode");
+    let modeFrame: number | undefined;
+    if (requestedMode === "weekly" || requestedMode === "on-demand") {
+      modeFrame = window.setTimeout(() => {
+        setMode(requestedMode);
+        setJobsJson(requestedMode === "weekly" ? weeklyExample : onDemandExample);
+      }, 0);
+    }
     const stored = loadStoredTracking();
-    if (!stored) return;
-    const frame = window.setTimeout(() => setTracking(stored), 0);
-    return () => window.clearTimeout(frame);
+    const trackingFrame = stored ? window.setTimeout(() => setTracking(stored), 0) : undefined;
+    return () => {
+      if (modeFrame !== undefined) window.clearTimeout(modeFrame);
+      if (trackingFrame !== undefined) window.clearTimeout(trackingFrame);
+    };
   }, []);
 
   useEffect(() => {

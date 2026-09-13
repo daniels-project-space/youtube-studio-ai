@@ -229,6 +229,7 @@ export function WeekBulkPlanner({
             <strong>{receipt ? `${completed}/${total} channels complete` : "Prepare the next seven days"}</strong>
             <span>{receipt ? `${receipt.totalItems} planned items · ${receipt.reservedCostUsd.toFixed(2)} USD reserved` : `Idempotent key ${requestKey}`}</span>
           </div>
+          <a className={styles.bulkH3Link} href="/novita-render?mode=weekly">H3 batch desk</a>
           <button className={styles.bulkAction} type="button" onClick={() => void queueWeek()} disabled={busy || Boolean(fingerprint)}>
             {!canEdit ? "Verify owner" : busy ? "Queueing…" : fingerprint && receipt?.status === "failed" ? "Review failure" : terminal ? "Complete" : "Queue week"}
           </button>
