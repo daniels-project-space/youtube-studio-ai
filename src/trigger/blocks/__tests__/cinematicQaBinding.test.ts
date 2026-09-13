@@ -59,7 +59,7 @@ assert.match(
 );
 assert.match(
   timelineSource,
-  /ctx\.store\["footageRenderer"\][\s\S]*MiniMax H3 footageRenderer identity is incomplete/,
+  /ctx\.store\["footageRenderer"\][\s\S]*renderer\.provider === "salad"\)[\s\S]*MINIMAX_H3_MANIFEST_SHA256/,
   "timeline assembly must validate the explicit renderer identity when a generated footage handoff provides one",
 );
 assert.match(

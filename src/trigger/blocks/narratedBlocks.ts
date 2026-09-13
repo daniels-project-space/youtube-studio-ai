@@ -81,6 +81,11 @@ import {
 import { casefileNarrativeGroundingPrompt } from "@/engine/casefileNarrativeGrounding";
 import { getLtxStyle } from "@/engine/ltxStylePresets";
 import {
+  MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_PROFILE,
+  MINIMAX_H3_RUNTIME_ID,
+} from "@/lib/minimaxH3";
+import {
   channelCritiqueBrief,
   produceAndCritique,
   type ChannelCritiqueContext,
@@ -3278,11 +3283,12 @@ export const timelineAssemble: Block = {
             if (
               (renderer.provider !== "salad" && renderer.provider !== "novita") ||
               (renderer.execution !== "weekly-batch" && renderer.execution !== "on-demand") ||
-              typeof renderer.runtimeId !== "string" ||
-              typeof renderer.profileId !== "string" ||
-              typeof renderer.modelManifestSha256 !== "string"
+              (renderer.provider === "salad") !== (renderer.execution === "weekly-batch") ||
+              renderer.runtimeId !== MINIMAX_H3_RUNTIME_ID ||
+              renderer.profileId !== MINIMAX_H3_PROFILE.id ||
+              renderer.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256
             ) {
-              throw new Error("timeline_assemble: MiniMax H3 footageRenderer identity is incomplete");
+              throw new Error("timeline_assemble: MiniMax H3 footageRenderer identity is not the admitted runtime");
             }
             return { kind: "minimax-h3" as const };
           }
