@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useState } from "react";
 import { blockLabel } from "@/lib/blocks";
 import { Elapsed } from "./Elapsed";
 import { StageBadge } from "./StageBadge";
@@ -61,9 +61,9 @@ export function LivePipeline({
   const complete = nodes.filter((node) => ["ok", "skipped"].includes(nodeStatus(node))).length;
   const failed = nodes.filter((node) => nodeStatus(node) === "failed").length;
   const active = nodes.find((node) => nodeStatus(node) === "running");
+  const activeStartedAt = active?.stage?.startedAt;
   const phaseSummaries = summarizeLivePipelinePhases(nodes);
   const overallState = failed > 0 ? "blocked" : active ? "active" : complete === nodes.length ? "complete" : "queued";
-  const receiptPercent = nodes.length ? Math.round((complete / nodes.length) * 100) : 0;
   const recordedCost = nodes.reduce((sum, node) => sum + (node.stage?.cost ?? 0), 0);
   const blockedNode = nodes.find((node) => nodeStatus(node) === "failed");
   // A current stage is already visible in the live strip. Opening its whole
@@ -81,11 +81,11 @@ export function LivePipeline({
       <header className={styles.summary}>
         <div className={styles.summaryLead}>
           <span className={styles.summarySignal} aria-hidden="true" />
-          <span>
+          <div className={styles.summaryCopy} aria-live="polite" aria-atomic="true">
             <strong>Pipeline</strong>
             <small>
               {active
-                ? `${LIVE_PIPELINE_PHASE_LABEL[livePipelinePhaseForBlock(active.block)]} is active`
+                ? `${blockLabel(active.block)} · ${LIVE_PIPELINE_PHASE_LABEL[livePipelinePhaseForBlock(active.block)]} active`
                 : failed
                   ? "A recorded stage needs attention before release can continue"
                   : complete === nodes.length
@@ -94,7 +94,12 @@ export function LivePipeline({
                       ? "Waiting for the next stage"
                       : "Using the saved legacy plan"}
             </small>
-          </span>
+          </div>
+          {activeStartedAt ? (
+            <span className={styles.summaryElapsed} title="Elapsed time for the active persisted stage">
+              <Elapsed from={activeStartedAt} />
+            </span>
+          ) : null}
         </div>
         <div className={styles.summaryMetrics} aria-label="Production progress">
           <span>
@@ -117,36 +122,6 @@ export function LivePipeline({
           )}
         </div>
       </header>
-
-      <div
-        className={styles.receiptMeter}
-        style={{ "--pipeline-receipts": `${receiptPercent}%` } as CSSProperties}
-        role="progressbar"
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-valuenow={receiptPercent}
-        aria-label={`${receiptPercent}% of planned stages complete`}
-      >
-        <i /><span>{receiptPercent}% complete</span>
-      </div>
-
-      {active && (
-        <section
-          className={styles.activeStage}
-          role="status"
-          aria-live="polite"
-          aria-atomic="true"
-          aria-label="Current persisted stage"
-        >
-          <span className={styles.activeGlyph} aria-hidden="true"><i /><i /><i /></span>
-          <div>
-            <small>Active stage</small>
-            <strong>{blockLabel(active.block)}</strong>
-            <span>{LIVE_PIPELINE_PHASE_LABEL[livePipelinePhaseForBlock(active.block)]}</span>
-          </div>
-          {active.stage?.startedAt && <Elapsed from={active.stage.startedAt} />}
-        </section>
-      )}
 
       <div className={styles.phaseStrip} aria-label="Production phase progress">
         {phaseSummaries.map((summary) => (

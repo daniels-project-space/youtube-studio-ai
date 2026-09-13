@@ -130,7 +130,8 @@ assert.match(livePipeline, /<strong>Pipeline<\/strong>/,
 assert.match(livePipeline, /summarizeLivePipelinePhases/);
 assert.match(livePipeline, /<StageRow inputs=\{stage\.inputs\} outputs=\{stage\.outputs\} error=\{stage\.error\}/);
 assert.match(livePipeline, /data-status=\{status\}/);
-assert.match(livePipeline, /receiptPercent/);
+assert.match(livePipeline, /blockLabel\(active\.block\)/);
+assert.match(livePipeline, /summaryElapsed/);
 assert.match(livePipeline, /persisted stage receipts/);
 assert.match(livePipeline, /const \[selectedPhase, setSelectedPhase\]/);
 assert.match(livePipeline, /Phase receipts/);
@@ -138,7 +139,8 @@ assert.match(livePipeline, /aria-pressed=\{inspectionPhase === summary\.phase\}/
 assert.match(livePipeline, /Select a phase to inspect its recorded stage receipts\./);
 assert.doesNotMatch(livePipeline, /render stream/i);
 assert.match(livePipelineCss, /\.phaseStrip/);
-assert.match(livePipelineCss, /\.receiptMeter/);
+assert.doesNotMatch(livePipelineCss, /\.receiptMeter/);
+assert.doesNotMatch(livePipelineCss, /\.activeStage/);
 assert.match(livePipelineCss, /prefers-reduced-motion/);
 assert.match(livePipelineCss, /\.stageToggle/);
 assert.match(livePipelineCss, /@media \(max-width: 520px\)/);

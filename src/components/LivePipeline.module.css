@@ -25,30 +25,16 @@
 .root[data-state="active"] .summarySignal { background: var(--color-running); }
 .root[data-state="complete"] .summarySignal { background: var(--color-ok); }
 .root[data-state="blocked"] .summarySignal { background: var(--color-failed); }
-.summaryLead span:last-child { display: grid; gap: 0.16rem; min-width: 0; }
+.summaryCopy { display: grid; min-width: 0; gap: 0.16rem; }
 .summaryLead strong { font-size: 0.96rem; font-weight: 700; }
-.summaryLead small { overflow: hidden; color: var(--color-muted); font-size: 0.72rem; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.summaryCopy small { overflow: hidden; color: var(--color-muted); font-size: 0.72rem; line-height: 1.3; text-overflow: ellipsis; white-space: nowrap; }
+.summaryElapsed { flex: 0 0 auto; padding-left: .58rem; border-left: 1px solid var(--color-border); color: var(--color-faint); font: 650 .68rem/1 var(--font-mono); white-space: nowrap; }
 
 .summaryMetrics { display: flex; flex-wrap: wrap; align-items: center; gap: 0.65rem; flex: 0 0 auto; }
 .summaryMetrics > span { display: grid; gap: 0.04rem; min-width: 2.8rem; text-align: right; }
 .summaryMetrics strong { font-family: var(--font-mono); font-size: 0.82rem; color: var(--color-fg); }
 .summaryMetrics small { color: var(--color-faint); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.055em; }
 .blockedMetric strong, .blockedMetric small { color: var(--color-failed); }
-
-.receiptMeter { --pipeline-receipts: 0%; position: relative; height: 5px; overflow: hidden; border-radius: 999px; background: rgba(243,240,232,0.04); }
-.receiptMeter > i { position: absolute; inset: 0 auto 0 0; width: var(--pipeline-receipts); background: linear-gradient(90deg,color-mix(in srgb,var(--color-blueprint) 30%,transparent),color-mix(in srgb,var(--color-secondary) 30%,transparent)); transition: width 220ms ease; }
-.receiptMeter > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-
-.activeStage { display: grid; grid-template-columns: auto minmax(0,1fr) auto; align-items: center; gap: 0.52rem; min-height: 46px; padding: 0.42rem 0.58rem; border: 1px solid color-mix(in srgb,var(--color-running) 42%,var(--color-border)); border-radius: 8px; background: linear-gradient(90deg,color-mix(in srgb,var(--color-running) 7%,transparent),transparent 70%); color: var(--color-muted); font: 650 0.7rem/1 var(--font-mono); }
-.activeGlyph { display: flex; width: 24px; height: 24px; align-items: center; justify-content: center; gap: 3px; border: 1px solid color-mix(in srgb,var(--color-running) 36%,var(--color-border)); border-radius: 50%; }
-.activeGlyph i { width: 2px; height: 7px; border-radius: 2px; background: var(--color-running); }
-.activeGlyph i:nth-child(2) { height: 12px; }
-.activeGlyph i:nth-child(3) { height: 5px; }
-.activeStage > div { display: grid; min-width: 0; gap: 0.16rem; }
-.activeStage small { color: var(--color-running); font: 700 0.52rem/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
-.activeStage strong, .activeStage > div > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.activeStage strong { color: var(--color-fg); font-size: 0.94rem; font-weight: 650; }
-.activeStage > div > span { color: var(--color-faint); font-size: 0.6rem; text-transform: uppercase; }
 
 .phaseStrip { display: grid; grid-template-columns: repeat(auto-fit, minmax(102px, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--color-border); border-radius: 9px; background: var(--color-border); }
 .phase { position: relative; min-width: 0; display: grid; gap: 0.15rem; min-height: 51px; padding: 0.38rem 0.48rem; overflow: hidden; border: 0; color: inherit; background: var(--color-surface); font: inherit; text-align: left; cursor: pointer; transition: background 160ms ease, box-shadow 160ms ease; }
@@ -103,7 +89,8 @@
 
 @media (max-width: 520px) {
   .summary { padding: 0.72rem; }
-  .summaryLead small { white-space: normal; }
+  .summaryCopy small { white-space: normal; }
+  .summaryElapsed { padding-left: .45rem; }
   .summaryMetrics { gap: 0.62rem; }
   .summaryMetrics > span { min-width: 0; }
   .phase { min-height: 51px; }
@@ -112,5 +99,5 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .phase, .stageCard, .chevron, .receiptMeter > i { transition: none; }
+  .phase, .stageCard, .chevron { transition: none; }
 }
