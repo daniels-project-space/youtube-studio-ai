@@ -683,6 +683,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "entityClips", "introCardPath", "introApplied", "introCardKey", "introSec", "healHints", "healClasses", "sentenceTimings", "cutSheet",
       "chapterPlan", "channelAvatarKey", "script", "channelName", "quoteOverlays", "insertOverlays",
       "cinematicGeneratedScenePlan", "cinematicEditDecisionList", "generatedFootageSceneManifest",
+      // Explicit renderer provenance lets assembly keep native MiniMax H3
+      // footage out of the legacy LTX film-finish branch.
+      "footageRenderer",
       "extraOverlays", "musicKey",
       // No styleDNA: colorGrade/palette are consumed at GENERATION time
       // (novita_render, gen_footage, lofi keyframes) and baked into the prompts.

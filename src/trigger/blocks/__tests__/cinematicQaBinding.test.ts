@@ -59,6 +59,16 @@ assert.match(
 );
 assert.match(
   timelineSource,
+  /ctx\.store\["footageRenderer"\][\s\S]*MiniMax H3 footageRenderer identity is incomplete/,
+  "timeline assembly must validate the explicit renderer identity when a generated footage handoff provides one",
+);
+assert.match(
+  timelineSource,
+  /cinematicFootageManifest && footageRenderer\?\.kind !== "minimax-h3"/,
+  "native MiniMax H3 footage must not receive the legacy LTX film finish",
+);
+assert.match(
+  timelineSource,
   /cinematicFootageManifest\.items\.entries\(\)[\s\S]*assembleAuthoredBody\([\s\S]*segDurationsSec: cinematicFootageManifest\.items\.map\(\(item\) => item\.t1 - item\.t0\)/,
   "the exact final-master concat must consume the reviewed clip order and timing windows",
 );

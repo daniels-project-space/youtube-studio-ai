@@ -3262,6 +3262,35 @@ export const timelineAssemble: Block = {
     const cinematicPlanRaw = ctx.store["cinematicGeneratedScenePlan"];
     const cinematicEditRaw = ctx.store["cinematicEditDecisionList"];
     const generatedFootageRaw = ctx.store["generatedFootageSceneManifest"];
+    // Renderer identity is an explicit ABI from gen_footage. Keep it optional
+    // for historical runs, but never infer H3/LTX from a generic scene
+    // manifest: doing so would apply the old LTX film finish to native H3
+    // footage and make renderer migrations visually inconsistent.
+    const footageRendererRaw = ctx.store["footageRenderer"];
+    const footageRenderer = footageRendererRaw === undefined
+      ? undefined
+      : (() => {
+          if (!footageRendererRaw || typeof footageRendererRaw !== "object") {
+            throw new Error("timeline_assemble: footageRenderer identity is invalid");
+          }
+          const renderer = footageRendererRaw as Record<string, unknown>;
+          if (renderer.kind === "minimax-h3") {
+            if (
+              (renderer.provider !== "salad" && renderer.provider !== "novita") ||
+              (renderer.execution !== "weekly-batch" && renderer.execution !== "on-demand") ||
+              typeof renderer.runtimeId !== "string" ||
+              typeof renderer.profileId !== "string" ||
+              typeof renderer.modelManifestSha256 !== "string"
+            ) {
+              throw new Error("timeline_assemble: MiniMax H3 footageRenderer identity is incomplete");
+            }
+            return { kind: "minimax-h3" as const };
+          }
+          if (renderer.kind === "novita-ltx" && typeof renderer.styleId === "string" && renderer.styleId.trim()) {
+            return { kind: "novita-ltx" as const };
+          }
+          throw new Error("timeline_assemble: unknown footageRenderer identity");
+        })();
     const cinematicManifestSignaled = Boolean(
       generatedFootageRaw &&
       typeof generatedFootageRaw === "object" &&
@@ -3795,12 +3824,15 @@ export const timelineAssemble: Block = {
     // see src/engine/ltxStylePresets.ts). Non-cinematic bodies (stock,
     // entity, chapter, authored) are untouched — this never forces a look
     // onto footage that wasn't part of the cinematic render.
-    const cinematicFilmLook = cinematicFootageManifest
+    const cinematicFilmLook = cinematicFootageManifest && footageRenderer?.kind !== "minimax-h3"
       ? (() => {
           const ltxStyle = getLtxStyle(ctx.store["ltxStyleId"] as string | undefined);
           return { grain: ltxStyle.grain, vignette: ltxStyle.vignette };
         })()
       : undefined;
+    if (cinematicFootageManifest && footageRenderer?.kind === "minimax-h3") {
+      ctx.log("timeline_assemble: native MiniMax H3 renderer identity preserved; LTX film finish skipped");
+    }
     const out = join(tmp, "video.mp4");
     await composeWithIntro({
       introCardPath: introCardPath || undefined,
