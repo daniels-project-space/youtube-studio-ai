@@ -1355,12 +1355,6 @@ export default function NewChannelWizard() {
         <div className={styles.heroCopy}>
           <span className={styles.eyebrow}>New channel</span>
           <h1>Create a channel</h1>
-          <p>Pick a market. Choose a proven route.</p>
-          <div className={styles.heroFacts}>
-            <span><i />Private first</span>
-            <span><i />One bounded QC proof</span>
-            <span><i />Recoverable by design</span>
-          </div>
         </div>
         <div
           className={styles.heroGlyph}

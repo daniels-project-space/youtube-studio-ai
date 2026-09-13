@@ -6,7 +6,7 @@
   grid-template-columns: minmax(0,1fr) 190px;
   align-items: center;
   gap: 1.25rem;
-  min-height: 154px;
+  min-height: 132px;
   margin-bottom: .75rem;
   padding: 1rem 1.1rem;
   overflow: hidden;
@@ -22,13 +22,10 @@
   -webkit-backdrop-filter: blur(18px) saturate(130%);
 }
 .hero::before { position: absolute; top: -1px; left: 1rem; width: 4.6rem; height: 1px; content: ""; background: var(--creator-tone); }
-.heroCopy { position: relative; z-index: 1; display: grid; max-width: 56rem; gap: .38rem; }
+.heroCopy { position: relative; z-index: 1; display: grid; max-width: 56rem; gap: .32rem; }
 .eyebrow { color: var(--creator-tone); font: 700 .55rem/1 var(--font-mono); letter-spacing: .12em; text-transform: uppercase; }
 .hero h1 { margin: 0; font-family: var(--font-display); font-size: clamp(2rem,4.2vw,3rem); font-weight: 560; letter-spacing: -.057em; line-height: .95; }
 .hero p { max-width: 48rem; margin: .15rem 0 0; color: var(--color-muted); font-size: .77rem; line-height: 1.55; }
-.heroFacts { display: none; }
-.heroFacts span { display: inline-flex; align-items: center; gap: .36rem; color: var(--color-faint); font: 650 .55rem/1 var(--font-mono); letter-spacing: .04em; text-transform: uppercase; }
-.heroFacts i { width: 5px; height: 5px; border-radius: 50%; background: var(--color-secondary); box-shadow: 0 0 0 4px color-mix(in srgb,var(--color-secondary) 10%,transparent); }
 .heroGlyph { position: relative; width: 180px; height: 112px; justify-self: end; opacity: .88; }
 .heroGlyph::before, .heroGlyph::after { position: absolute; border: 1px solid var(--color-border); border-radius: 50%; content: ""; }
 .heroGlyph::before { inset: 0 34px; border-color: color-mix(in srgb,var(--color-blueprint) 25%,transparent); }

@@ -341,8 +341,9 @@ export function minimaxH3Readiness(provider: MiniMaxH3Provider): MiniMaxH3Readin
   if (process.env[`${prefix}_QUALIFIED`] !== "1") blockers.push(`${prefix}_QUALIFIED is not enabled`);
   const receipt = process.env[`${prefix}_QUALIFICATION_RECEIPT_SHA256`]?.trim().toLowerCase() ?? "";
   if (!SHA256.test(receipt)) blockers.push(`${prefix}_QUALIFICATION_RECEIPT_SHA256 is missing or invalid`);
-  // Weekly dispatch is intentionally Salad-only and retains the medium-priority
-  // requirement from the independently checked fleet contract.
+  // Weekly dispatch is intentionally Salad-only. Medium is the default tier;
+  // a separately admitted high-priority escape hatch is selected by the
+  // weekly controller only when medium cannot fit the current wave.
   if (provider === "salad" && process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY !== "1") {
     blockers.push("MINIMAX_H3_SALAD_MEDIUM_PRIORITY is not enabled");
   }

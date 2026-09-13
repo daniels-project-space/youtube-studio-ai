@@ -516,7 +516,8 @@ async function materializePreparedFootage(
 export const minimaxH3WeeklyBatchTask = task({
   id: "minimax-h3-weekly-batch",
   // H3 workers hydrate and can run up to sixty five-second clips over three
-  // 5090 replicas. Trigger retries are disabled: a transport failure after a
+  // 5090 replicas. Medium is preferred, with a bounded high-priority fallback
+  // selected during admission. Trigger retries are disabled: a transport failure after a
   // provider submission is explicitly reconciled by request key, never replayed.
   maxDuration: 3_600,
   retry: { maxAttempts: 1 },
