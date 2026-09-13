@@ -5,6 +5,15 @@ output/
 motion-graphics/
 graphify-out/
 test-fixtures/
+# The production typecheck includes source-level diagnostic tests that import
+# this tiny fixture module. Keep the fixture code available to Vercel without
+# uploading the retained MP4/JSON diagnostic media.
+!test-fixtures/
+!test-fixtures/chess-replay/
+!test-fixtures/chess-replay/fixture.ts
+test-fixtures/chess-replay/*.mp4
+test-fixtures/chess-replay/*.json
+test-fixtures/chess-replay/README.md
 .serena/
 .agents/
 .codex/
