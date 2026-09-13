@@ -79,6 +79,7 @@ const passingTemporalDynamism = {
   verdict: "pass" as const,
   maxFreezeFraction: 0.04,
   maxStaticHoldSec: 0.12,
+  maxOpeningFrozenHoldSec: 0.12,
   maxFrozenHoldSec: 0,
   openingFrozenHoldSec: 0,
   frozenIntervals: [],

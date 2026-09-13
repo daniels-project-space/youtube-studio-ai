@@ -1855,10 +1855,14 @@ export const qaShots: Block = {
                 );
               }
               if (temporalDynamism.verdict === "fail") {
-                failure =
-                  `qa_shots FAILED ${shot.id}: frozen visual hold ${temporalDynamism.maxFrozenHoldSec.toFixed(3)}s ` +
-                  `exceeds ${temporalDynamism.maxStaticHoldSec.toFixed(3)}s ` +
-                  `(opening hold ${temporalDynamism.openingFrozenHoldSec.toFixed(3)}s)`;
+                const openingFreezeExceeded = temporalDynamism.openingFrozenHoldSec >
+                  temporalDynamism.maxOpeningFrozenHoldSec + 0.05;
+                failure = openingFreezeExceeded
+                  ? `qa_shots FAILED ${shot.id}: opening frozen hold ${temporalDynamism.openingFrozenHoldSec.toFixed(3)}s ` +
+                    `exceeds immediate-motion limit ${temporalDynamism.maxOpeningFrozenHoldSec.toFixed(3)}s`
+                  : `qa_shots FAILED ${shot.id}: frozen visual hold ${temporalDynamism.maxFrozenHoldSec.toFixed(3)}s ` +
+                    `exceeds ${temporalDynamism.maxStaticHoldSec.toFixed(3)}s ` +
+                    `(opening hold ${temporalDynamism.openingFrozenHoldSec.toFixed(3)}s)`;
                 repairNotes = [
                   temporalDynamism.openingFrozenHoldSec > 0
                     ? `The take is frozen for ${temporalDynamism.openingFrozenHoldSec.toFixed(2)} seconds from its opening frame. Motion and camera action must begin immediately.`

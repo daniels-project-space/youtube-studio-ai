@@ -170,6 +170,10 @@ function authoredShotMapping(): void {
         maxFreezeFraction: 0.04,
         maxStaticHoldSec:
           (shotRenderManifest.items[index]!.t1 - shotRenderManifest.items[index]!.t0) * 0.04,
+        maxOpeningFrozenHoldSec: Math.min(
+          (shotRenderManifest.items[index]!.t1 - shotRenderManifest.items[index]!.t0) * 0.04,
+          0.25,
+        ),
         maxFrozenHoldSec: 0,
         openingFrozenHoldSec: 0,
         frozenIntervals: [],

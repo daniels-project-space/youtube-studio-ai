@@ -62,6 +62,7 @@ async function main(): Promise<void> {
   const work = await mkdtemp(join(tmpdir(), "ysa-ltx-shot-temporal-qa-"));
   try {
     const frozenOpening = join(work, "frozen-opening.mp4");
+    const briefFrozenOpening = join(work, "brief-frozen-opening.mp4");
     const continuousMotion = join(work, "continuous-motion.mp4");
     render(frozenOpening, [
       "-f", "lavfi", "-i", "color=c=0x5b2533:s=320x192:r=25:d=2",
@@ -71,6 +72,12 @@ async function main(): Promise<void> {
     ]);
     render(continuousMotion, [
       "-f", "lavfi", "-i", "testsrc2=s=320x192:r=25:d=6",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p",
+    ]);
+    render(briefFrozenOpening, [
+      "-f", "lavfi", "-i", "color=c=0x5b2533:s=320x192:r=25:d=0.5",
+      "-f", "lavfi", "-i", "testsrc2=s=320x192:r=25:d=5.5",
+      "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0",
       "-c:v", "libx264", "-pix_fmt", "yuv420p",
     ]);
 
@@ -92,6 +99,28 @@ async function main(): Promise<void> {
       /Invalid literal value|expected.*pass|Array must contain exactly 0 element/i,
       "a failed temporal receipt cannot be serialized as accepted shot QA",
     );
+
+    const briefOpeningEvidence = measureLtxShotTemporalQa({
+      videoPath: briefFrozenOpening,
+      durationSec: 6,
+      fps: profile.video.fps,
+      // The general 0.6s budget would allow this half-second hold. The LTX
+      // opening rule must still reject it because the authored action has not
+      // begun at the first visible beat.
+      maxFreezeFraction: 0.1,
+    });
+    assert(
+      Math.abs(briefOpeningEvidence.maxStaticHoldSec - 0.6) < 0.000_001,
+      "the fixture must retain its intentionally permissive whole-shot budget",
+    );
+    assert.equal(briefOpeningEvidence.maxOpeningFrozenHoldSec, 0.25);
+    assert(
+      briefOpeningEvidence.maxFrozenHoldSec <= briefOpeningEvidence.maxStaticHoldSec + 0.05,
+      "the fixture must be under the ordinary whole-shot freeze allowance",
+    );
+    assert.equal(briefOpeningEvidence.verdict, "fail", "a brief LTX frozen opening must fail the independent immediate-motion gate");
+    assert(briefOpeningEvidence.openingFrozenHoldSec >= 0.45);
+    assert(briefOpeningEvidence.violatingIntervals.some((interval) => interval.startSec < 0.1));
 
     const movingEvidence = measureLtxShotTemporalQa({
       videoPath: continuousMotion,

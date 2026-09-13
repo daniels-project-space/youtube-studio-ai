@@ -6,6 +6,17 @@ import {
 } from "@/lib/temporalDynamism";
 
 export const LTX_SHOT_TEMPORAL_QA_CONTRACT = "ltx-shot-temporal-qa/v1" as const;
+/**
+ * LTX's image-conditioned first frames can otherwise look plausible while
+ * remaining motionless for the first decoded beat.  This is deliberately
+ * independent from the allowance for a later, authored static hold.
+ *
+ * The detector samples at 4fps, so one decoded 250ms interval is the smallest
+ * reliable opening-motion allowance. The additional 50ms boundary grace
+ * rejects a measurable half-second hold without confusing decoder cadence
+ * with an actual frozen opening.
+ */
+export const LTX_IMMEDIATE_MOTION_MAX_FROZEN_HOLD_SEC = 0.25;
 
 export interface LtxShotTemporalQaEvidence {
   contract: typeof LTX_SHOT_TEMPORAL_QA_CONTRACT;
@@ -13,6 +24,7 @@ export interface LtxShotTemporalQaEvidence {
   verdict: "pass" | "fail" | "unavailable";
   maxFreezeFraction: number;
   maxStaticHoldSec: number;
+  maxOpeningFrozenHoldSec: number;
   maxFrozenHoldSec: number;
   /** A freeze beginning on the first decoded frame, with one-frame tolerance. */
   openingFrozenHoldSec: number;
@@ -66,16 +78,35 @@ export function measureLtxShotTemporalQa(args: {
   if (measured.verdict === "not_required") {
     throw new Error("LTX shot temporal QA cannot disable motion evidence");
   }
+  const maxOpeningFrozenHoldSec = Math.min(
+    maxStaticHoldSec,
+    LTX_IMMEDIATE_MOTION_MAX_FROZEN_HOLD_SEC,
+  );
+  const actualOpeningFrozenHoldSec = openingFrozenHoldSec(measured, args.fps);
+  const openingFreezeInterval = measured.evaluatedIntervals.find(
+    (interval) => interval.startSec <= 1 / args.fps + 0.05,
+  );
+  const openingViolation = actualOpeningFrozenHoldSec > maxOpeningFrozenHoldSec + 0.05;
+  const violatingIntervals = openingViolation && openingFreezeInterval
+    && !measured.violatingIntervals.some((interval) =>
+      Math.abs(interval.startSec - openingFreezeInterval.startSec) < 0.001
+      && Math.abs(interval.endSec - openingFreezeInterval.endSec) < 0.001,
+    )
+    ? [...measured.violatingIntervals, openingFreezeInterval]
+    : measured.violatingIntervals;
   return {
     contract: LTX_SHOT_TEMPORAL_QA_CONTRACT,
     source: measured.source,
-    verdict: measured.verdict,
+    verdict: measured.verdict === "unavailable"
+      ? "unavailable"
+      : violatingIntervals.length ? "fail" : "pass",
     maxFreezeFraction: args.maxFreezeFraction,
     maxStaticHoldSec,
+    maxOpeningFrozenHoldSec,
     maxFrozenHoldSec: measured.maxFrozenHoldSec,
-    openingFrozenHoldSec: openingFrozenHoldSec(measured, args.fps),
+    openingFrozenHoldSec: actualOpeningFrozenHoldSec,
     frozenIntervals: measured.frozenIntervals,
-    violatingIntervals: measured.violatingIntervals,
+    violatingIntervals,
     ...(measured.detail ? { detail: measured.detail } : {}),
   };
 }

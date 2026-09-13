@@ -149,6 +149,7 @@ export const LtxShotTemporalQaEvidenceSchema = z.object({
   verdict: z.literal("pass"),
   maxFreezeFraction: z.number().positive().max(0.2),
   maxStaticHoldSec: z.number().positive(),
+  maxOpeningFrozenHoldSec: z.number().positive(),
   maxFrozenHoldSec: z.number().finite().nonnegative(),
   openingFrozenHoldSec: z.number().finite().nonnegative(),
   frozenIntervals: z.array(TemporalDynamismIntervalSchema),
@@ -172,6 +173,20 @@ export const LtxShotTemporalQaEvidenceSchema = z.object({
       code: z.ZodIssueCode.custom,
       path: ["openingFrozenHoldSec"],
       message: "accepted LTX opening hold cannot exceed the measured maximum hold",
+    });
+  }
+  if (evidence.maxOpeningFrozenHoldSec > evidence.maxStaticHoldSec + graceSec) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["maxOpeningFrozenHoldSec"],
+      message: "accepted LTX opening limit cannot exceed its whole-shot static-hold limit",
+    });
+  }
+  if (evidence.openingFrozenHoldSec > evidence.maxOpeningFrozenHoldSec + graceSec) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ["openingFrozenHoldSec"],
+      message: "accepted LTX temporal evidence exceeds its immediate-motion opening limit",
     });
   }
   if (evidence.maxFrozenHoldSec > evidence.maxStaticHoldSec + graceSec) {
