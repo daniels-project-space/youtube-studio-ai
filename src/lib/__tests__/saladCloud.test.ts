@@ -43,6 +43,19 @@ async function main() {
   assert.equal(request.restart_policy, "never");
   assert.equal(request.networking?.auth, true);
   assert.equal(request.readiness_probe.http.path, "/healthz");
+  const highRequest = buildSaladContainerGroup({
+    name: "studio-h3-high-001", image,
+    gpu: selectSaladGpuAtPriority(highClasses, "RTX 5090", "high"),
+    priority: "high", replicas: 1, cpu: 8, memoryMb: 131072, storageBytes: 100 * 1024 ** 3,
+    countryCodes: ["cn"],
+  });
+  assert.equal(highRequest.container.priority, "high");
+  assert.deepEqual(highRequest.country_codes, ["cn"]);
+  assert.throws(() => buildSaladContainerGroup({
+    name: "priority-mismatch", image,
+    gpu: selectSaladGpu(classes, "RTX 3090"), priority: "high",
+    replicas: 1, cpu: 4, memoryMb: 8192, storageBytes: 1024 ** 3,
+  }), /does not match/);
   assert.throws(() => buildSaladContainerGroup({
     name: "test-group", image: "image:latest", gpu: selectSaladGpu(classes, "RTX 3090"),
     replicas: 1, cpu: 4, memoryMb: 8192, storageBytes: 1024 ** 3,

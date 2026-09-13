@@ -14,6 +14,9 @@ const resourceName = z.string().regex(/^[a-z][a-z0-9-]{0,61}[a-z0-9]$/);
 const gpuId = z.string().uuid();
 const count = z.number().int().nonnegative();
 const priority = z.enum(["high", "medium", "low", "batch"]);
+/** Priorities permitted for a paid bulk worker group. Medium is the default;
+ * high is reserved for an explicit, already-admitted capacity fallback. */
+const bulkPriority = z.enum(["medium", "high"]);
 const imageDigest = z.string().max(1024).regex(
   /^[a-z0-9][a-z0-9.-]*(?::[0-9]+)?\/[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$/,
 );
@@ -99,7 +102,7 @@ const createSchema = z.object({
   restart_policy: z.literal("never"),
   container: z.object({
     image: imageDigest,
-    priority: z.literal(SALAD_BULK_PRIORITY),
+    priority: bulkPriority,
     image_caching: z.literal(true),
     resources: resourceSchema,
     command: z.array(z.string()).optional(),
@@ -175,9 +178,14 @@ export function buildSaladContainerGroup(input: {
   queueName?: string;
   queuePath?: string;
   countryCodes?: string[];
+  /** Medium by default; high must be selected by the capacity admission path. */
+  priority?: SaladBulkPriority;
 }): SaladCreateContainerGroup {
   const port = input.port ?? 8080;
-  if (input.gpu.priority !== SALAD_BULK_PRIORITY) throw new Error("Salad bulk work requires medium priority");
+  const priority = input.priority ?? SALAD_BULK_PRIORITY;
+  if (input.gpu.priority !== priority) {
+    throw new Error(`Salad worker GPU selection priority ${input.gpu.priority} does not match requested ${priority}`);
+  }
   if (input.queueName && !input.queuePath) throw new Error("Salad queue workers require their implemented HTTP path");
   // Prevent accidental distribution of provider/account credentials to interruptible workers.
   for (const key of Object.keys(input.environmentVariables ?? {})) {
@@ -192,7 +200,7 @@ export function buildSaladContainerGroup(input: {
     restart_policy: "never",
     container: {
       image: input.image,
-      priority: SALAD_BULK_PRIORITY,
+      priority,
       image_caching: true,
       resources: {
         cpu: input.cpu, memory: input.memoryMb, storage_amount: input.storageBytes,
