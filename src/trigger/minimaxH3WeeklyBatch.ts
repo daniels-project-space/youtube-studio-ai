@@ -45,6 +45,8 @@ export function assertMiniMaxH3WeeklyBatchArgs(value: unknown): MiniMaxH3WeeklyB
     throw new Error("weekly MiniMax H3 payload must contain 1..60 jobs");
   }
   const jobs = payload.jobs as MiniMaxH3WeeklyBatchArgs["jobs"];
+  const requestKeys = new Set<string>();
+  const outputKeys = new Set<string>();
   for (const [index, job] of jobs.entries()) {
     if (!job || typeof job !== "object" || Array.isArray(job) || !job.output || typeof job.output !== "object" ||
         typeof job.output.r2Key !== "string" || !job.output.r2Key.startsWith("owner/") ||
@@ -58,6 +60,28 @@ export function assertMiniMaxH3WeeklyBatchArgs(value: unknown): MiniMaxH3WeeklyB
         /(?:^|\/)\.\.?($|\/)/u.test(job.firstFrame.r2Key)) {
       throw new Error(`weekly MiniMax H3 job ${index + 1} has an invalid owner-scoped first-frame key`);
     }
+    // Run the complete provider-free request normalizer at the task boundary,
+    // before vault hydration or any paid worker call. This catches malformed
+    // prompt/seed/hash/cost fields that the path checks above cannot see.
+    let requestKey: string;
+    try {
+      requestKey = miniMaxH3RequestKey({
+        ...job,
+        provider: "salad",
+        execution: "weekly-batch",
+      });
+    } catch (error) {
+      throw new Error(`weekly MiniMax H3 job ${index + 1} is invalid: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (requestKeys.has(requestKey)) {
+      throw new Error(`weekly MiniMax H3 batch has duplicate request identity at job ${index + 1}`);
+    }
+    requestKeys.add(requestKey);
+    const outputKey = job.output.r2Key;
+    if (outputKeys.has(outputKey)) {
+      throw new Error(`weekly MiniMax H3 batch has duplicate output key at job ${index + 1}`);
+    }
+    outputKeys.add(outputKey);
   }
   return { orderKey: safeIdentifier(payload.orderKey, "order key"), receiptKey: scopedReceiptKey(payload.receiptKey), jobs };
 }

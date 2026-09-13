@@ -69,6 +69,18 @@ export function assertMiniMaxH3OnDemandArgs(value: unknown): MiniMaxH3OnDemandAr
   }
   ownerScopedKey((firstFrame as Record<string, unknown>).r2Key, "first-frame key");
   ownerScopedKey((output as Record<string, unknown>).r2Key, "output key");
+  // Normalize the full sealed request before vault hydration or Trigger
+  // dispatch. The on-demand route must reject malformed model inputs without
+  // creating a paid task that can only fail later in the worker.
+  try {
+    miniMaxH3RequestKey({
+      ...(payload.request as MiniMaxH3OnDemandArgs["request"]),
+      provider: "novita",
+      execution: "on-demand",
+    });
+  } catch (error) {
+    throw new Error(`on-demand MiniMax H3 request is invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
   return {
     orderKey: safeIdentifier(payload.orderKey, "order key"),
     receiptKey: (() => {

@@ -36,4 +36,18 @@ assert.throws(
   }),
   /output key.*owner-scoped/,
 );
+assert.throws(
+  () => assertMiniMaxH3OnDemandArgs({
+    ...valid,
+    request: { ...valid.request, prompt: "" },
+  }),
+  /request is invalid.*prompt/,
+);
+assert.throws(
+  () => assertMiniMaxH3OnDemandArgs({
+    ...valid,
+    request: { ...valid.request, firstFrame: { ...valid.request.firstFrame, sha256: "bad" } },
+  }),
+  /request is invalid.*digest/,
+);
 console.log("on-demand MiniMax H3 task contracts passed");
