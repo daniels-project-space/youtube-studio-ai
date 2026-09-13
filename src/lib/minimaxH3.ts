@@ -315,6 +315,29 @@ export async function renderMiniMaxH3(
   await (options.assertModelManifest ?? (() => assertMiniMaxH3R2ModelManifest(options.readModelManifest)))();
   const route = routeEnvironment(request.provider);
   const requestKey = miniMaxH3RequestKey(request);
+  const readObject = options.readObject ?? getObjectBytes;
+  let firstFrameBytes: Uint8Array;
+  try {
+    // A caller-supplied digest is not evidence by itself. Re-read the exact
+    // R2 input before presigning or contacting the paid worker so a stale or
+    // misbound frame fails closed without provider spend.
+    firstFrameBytes = await readObject(request.firstFrame.r2Key);
+  } catch (error) {
+    throw new MiniMaxH3Error(
+      `MiniMax H3 first-frame input cannot be read from R2 for request ${requestKey}`,
+      requestKey,
+      undefined,
+      false,
+      0,
+      { cause: error },
+    );
+  }
+  if (sha256BytesHex(firstFrameBytes) !== request.firstFrame.sha256) {
+    throw new MiniMaxH3Error(
+      `MiniMax H3 first-frame input digest does not match the sealed request ${requestKey}`,
+      requestKey,
+    );
+  }
   const [firstFrameUrl, outputPutUrl] = await Promise.all([
     (options.presignRead ?? presignDownload)(request.firstFrame.r2Key, { expiresIn: 3_600 }),
     (options.presignWrite ?? presignUpload)(request.output.r2Key, { expiresIn: 3_600, contentType: "video/mp4" }),
@@ -356,7 +379,7 @@ export async function renderMiniMaxH3(
   }
   const receipt = receiptFrom(body.receipt, { request, requestKey });
   let outputBytes: Uint8Array;
-  try { outputBytes = await (options.readObject ?? getObjectBytes)(receipt.output.r2Key); } catch (error) {
+  try { outputBytes = await readObject(receipt.output.r2Key); } catch (error) {
     throw new MiniMaxH3Error(`MiniMax H3 accepted output cannot be re-read from R2 for request ${requestKey}`, requestKey, response.status, false, receipt.runtime.costUsd, { cause: error });
   }
   if (outputBytes.byteLength !== receipt.output.byteLength || sha256BytesHex(outputBytes) !== receipt.output.contentSha256) {

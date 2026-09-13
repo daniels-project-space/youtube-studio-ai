@@ -20,16 +20,17 @@ function configure(provider: "salad" | "novita") {
   process.env[`${prefix}_QUALIFICATION_RECEIPT_SHA256`] = "a".repeat(64);
   if (provider === "salad") process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY = "1";
 }
+const output = new Uint8Array(1_024).fill(7);
+const firstFrame = new Uint8Array(1_024).fill(8);
 function request(provider: "salad" | "novita", execution: "weekly-batch" | "on-demand", output = "owner/o/channel/c/clip.mp4") {
   return { provider, execution, prompt: "A precise continuous cinematic action with no text.", seed: 42,
-    firstFrame: { r2Key: "owner/o/channel/c/frame.png", sha256: "b".repeat(64) }, output: { r2Key: output }, maxCostUsd: 0.4 } as const;
+    firstFrame: { r2Key: "owner/o/channel/c/frame.png", sha256: sha256BytesHex(firstFrame) }, output: { r2Key: output }, maxCostUsd: 0.4 } as const;
 }
 assert.notEqual(
   miniMaxH3RequestKey(request("salad", "weekly-batch")),
   miniMaxH3RequestKey(request("novita", "on-demand")),
   "weekly and on-demand routes must have distinct idempotency identities",
 );
-const output = new Uint8Array(1_024).fill(7);
 function responseFor(input: ReturnType<typeof request>) {
   return new Response(JSON.stringify({ receipt: {
     schema: "minimax-h3-worker/v1", requestKey: "", jobId: "job-1", execution: input.execution,
@@ -46,7 +47,7 @@ async function test() {
   const rendered = await renderMiniMaxH3(salad, {
     presignRead: async () => "https://r2.example/read",
     presignWrite: async () => "https://r2.example/write",
-    readObject: async () => output,
+    readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
     assertModelManifest: async () => {},
     fetch: async (_url, init) => {
       seen = JSON.parse(String(init?.body));
@@ -63,6 +64,16 @@ async function test() {
   assert.equal(seen?.output_key, salad.output.r2Key);
   assert.equal(seen?.output_put_url, "https://r2.example/write");
   assert.equal(seen?.execution, "weekly-batch");
+
+  await assert.rejects(
+    () => renderMiniMaxH3(salad, {
+      readObject: async () => output,
+      assertModelManifest: async () => {},
+      fetch: async () => { throw new Error("provider must not be contacted"); },
+    }),
+    /first-frame input digest does not match/,
+    "a stale first-frame digest must fail before the paid worker call",
+  );
 
   await assert.rejects(
     () => assertMiniMaxH3R2ModelManifest(async () => new Uint8Array([1])),
@@ -85,7 +96,7 @@ async function test() {
   const batched = await renderMiniMaxH3WeeklyBatch(jobs, {
     presignRead: async () => "https://r2.example/read",
     presignWrite: async () => "https://r2.example/write",
-    readObject: async () => output,
+    readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
     assertModelManifest: async () => {},
     fetch: async (_url, init) => {
       active += 1;
