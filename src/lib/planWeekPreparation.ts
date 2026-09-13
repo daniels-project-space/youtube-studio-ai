@@ -10,6 +10,10 @@ import {
 } from "@/lib/narrationPerformance";
 import type { Script } from "@/lib/scriptGen";
 import { sha256Hex } from "@/lib/sha256";
+import {
+  ChannelMusicProgramSchema,
+  type ChannelMusicProgram,
+} from "@/engine/channelMusicProgram";
 
 /**
  * The provider-free first stage of weekly batch preparation.  It is deliberately
@@ -113,6 +117,37 @@ export interface PlanWeekPreparedNarration {
   createdAt: number;
 }
 
+export const PLAN_WEEK_PREPARED_MUSIC_VERSION = "plan-week-prepared-music/v1" as const;
+
+/**
+ * A week-ahead music receipt is not the language-sibling `reuseMusicKey`
+ * shortcut. It binds the exact scheduled episode, sealed sound program,
+ * retained master bytes, and—where required—the MiniMax release evidence.
+ */
+export interface PlanWeekPreparedMusic {
+  version: typeof PLAN_WEEK_PREPARED_MUSIC_VERSION;
+  manifestSha256: string;
+  ownerId: string;
+  channelId: string;
+  batchId: string;
+  itemId: string;
+  requestKey: string;
+  topic: string;
+  musicKey: string;
+  audioSha256: string;
+  audioByteLength: number;
+  musicDurationSec: number;
+  provider: "mureka" | "suno" | "minimax_music3";
+  musicProgram: ChannelMusicProgram;
+  /** Required only for MiniMax Music 3, and always scoped to this weekly item. */
+  minimax?: {
+    nativeWavKey: string;
+    runtimeReceiptKey: string;
+    qualityReceiptKey: string;
+  };
+  createdAt: number;
+}
+
 export type PlanWeekPreparationPromptKey = keyof PlanWeekPreparationManifest["prompts"];
 
 /**
@@ -211,6 +246,51 @@ export function planWeekPreparedNarrationAudioKey(args: {
   itemId: string;
 }): string {
   return `${planWeekPreparationPrefix(args)}/prepared/narration.mp3`;
+}
+
+export function planWeekPreparedMusicKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+}): string {
+  return `${planWeekPreparationPrefix(args)}/prepared/music.json`;
+}
+
+export function planWeekPreparedMusicAudioKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+}): string {
+  return `${planWeekPreparationPrefix(args)}/prepared/music.mp3`;
+}
+
+export function planWeekPreparedMusicNativeWavKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+}): string {
+  return `${planWeekPreparationPrefix(args)}/prepared/music-native.wav`;
+}
+
+export function planWeekPreparedMusicRuntimeReceiptKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+}): string {
+  return `${planWeekPreparationPrefix(args)}/prepared/music-runtime.json`;
+}
+
+export function planWeekPreparedMusicQualityReceiptKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+}): string {
+  return `${planWeekPreparationPrefix(args)}/prepared/music-quality.json`;
 }
 
 function planWeekPreparationPrefix(args: {
@@ -587,6 +667,96 @@ export function assertPlanWeekPreparedNarrationBinding(args: {
     ))
   ) {
     throw new Error("plan-week prepared narration binding mismatch");
+  }
+  return normalized;
+}
+
+/**
+ * Admit the receipt before it can seed the paid music stage. The stage itself
+ * re-reads and hashes every retained object immediately before reuse; this
+ * boundary makes sure no foreign episode or arbitrary R2 location can reach
+ * that later check in the first place.
+ */
+export function assertPlanWeekPreparedMusicBinding(args: {
+  prepared: unknown;
+  manifest: PlanWeekPreparationManifest;
+}): PlanWeekPreparedMusic {
+  const prepared = requiredRecord(args.prepared, "prepared music receipt");
+  if (prepared.version !== PLAN_WEEK_PREPARED_MUSIC_VERSION) {
+    throw new Error("plan-week prepared music version is unsupported");
+  }
+  const manifestSha256 = requiredText(prepared.manifestSha256, "prepared music manifest digest").toLowerCase();
+  const audioSha256 = requiredText(prepared.audioSha256, "prepared music audio digest").toLowerCase();
+  const audioByteLength = typeof prepared.audioByteLength === "number" ? prepared.audioByteLength : Number.NaN;
+  const musicDurationSec = typeof prepared.musicDurationSec === "number" ? prepared.musicDurationSec : Number.NaN;
+  const createdAt = typeof prepared.createdAt === "number" ? prepared.createdAt : Number.NaN;
+  const provider = prepared.provider;
+  if (
+    !/^[a-f0-9]{64}$/.test(manifestSha256) ||
+    !/^[a-f0-9]{64}$/.test(audioSha256) ||
+    !Number.isSafeInteger(audioByteLength) || audioByteLength < 1_000 || audioByteLength > 250_000_000 ||
+    !Number.isFinite(musicDurationSec) || musicDurationSec < 1.5 || musicDurationSec > 86_400 ||
+    !Number.isSafeInteger(createdAt) || createdAt <= 0 ||
+    (provider !== "mureka" && provider !== "suno" && provider !== "minimax_music3")
+  ) {
+    throw new Error("plan-week prepared music receipt is invalid");
+  }
+  const scope = {
+    ownerId: args.manifest.ownerId,
+    channelSlug: args.manifest.channelSlug,
+    batchId: args.manifest.batchId,
+    itemId: args.manifest.itemId,
+  };
+  const musicProgram = ChannelMusicProgramSchema.parse(prepared.musicProgram);
+  const minimaxRaw = prepared.minimax;
+  let minimax: PlanWeekPreparedMusic["minimax"];
+  if (provider === "minimax_music3") {
+    const record = requiredRecord(minimaxRaw, "prepared MiniMax music receipt");
+    minimax = {
+      nativeWavKey: requiredText(record.nativeWavKey, "prepared MiniMax native WAV key"),
+      runtimeReceiptKey: requiredText(record.runtimeReceiptKey, "prepared MiniMax runtime receipt key"),
+      qualityReceiptKey: requiredText(record.qualityReceiptKey, "prepared MiniMax quality receipt key"),
+    };
+  } else if (minimaxRaw !== undefined) {
+    throw new Error("plan-week prepared non-MiniMax music may not carry MiniMax evidence");
+  }
+  const normalized: PlanWeekPreparedMusic = {
+    version: PLAN_WEEK_PREPARED_MUSIC_VERSION,
+    manifestSha256,
+    ownerId: requiredText(prepared.ownerId, "prepared music owner id"),
+    channelId: requiredText(prepared.channelId, "prepared music channel id"),
+    batchId: requiredText(prepared.batchId, "prepared music batch id"),
+    itemId: requiredText(prepared.itemId, "prepared music item id"),
+    requestKey: requiredText(prepared.requestKey, "prepared music request key"),
+    topic: requiredText(prepared.topic, "prepared music topic"),
+    musicKey: requiredText(prepared.musicKey, "prepared music key"),
+    audioSha256,
+    audioByteLength,
+    musicDurationSec,
+    provider,
+    musicProgram,
+    ...(minimax ? { minimax } : {}),
+    createdAt,
+  };
+  if (
+    normalized.manifestSha256 !== planWeekPreparationManifestSha256(args.manifest) ||
+    normalized.ownerId !== args.manifest.ownerId ||
+    normalized.channelId !== args.manifest.channelId ||
+    normalized.batchId !== args.manifest.batchId ||
+    normalized.itemId !== args.manifest.itemId ||
+    normalized.requestKey !== args.manifest.requestKey ||
+    normalized.topic !== args.manifest.plan.topic ||
+    normalized.musicKey !== planWeekPreparedMusicAudioKey(scope) ||
+    normalized.musicProgram.channelId !== args.manifest.channelId ||
+    normalized.musicProgram.topic !== args.manifest.plan.topic ||
+    (normalized.provider === "minimax_music3" && (
+      normalized.musicProgram.generation.providerPreference !== "minimax_music3" ||
+      normalized.minimax?.nativeWavKey !== planWeekPreparedMusicNativeWavKey(scope) ||
+      normalized.minimax.runtimeReceiptKey !== planWeekPreparedMusicRuntimeReceiptKey(scope) ||
+      normalized.minimax.qualityReceiptKey !== planWeekPreparedMusicQualityReceiptKey(scope)
+    ))
+  ) {
+    throw new Error("plan-week prepared music binding mismatch");
   }
   return normalized;
 }

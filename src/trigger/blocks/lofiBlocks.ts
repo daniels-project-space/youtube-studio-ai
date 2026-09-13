@@ -60,6 +60,7 @@ import {
   createChannelMusicProgram,
   type ChannelMusicProgram,
 } from "@/engine/channelMusicProgram";
+import type { PlanWeekPreparedMusic } from "@/lib/planWeekPreparation";
 import { assertMusicAuditionNativeBytes } from "@/engine/musicAuditionCheckpoint";
 import { EpisodeGraphSchema } from "@/engine/episodeGraph";
 import { StorySpineSchema } from "@/engine/storySpine";
@@ -188,7 +189,7 @@ import {
 } from "@/lib/files";
 import { putObject, putObjectFromFile, getObjectBytes, getObjectIntegrity, headObjectMetadata, publicUrl } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { sha256Hex } from "@/lib/sha256";
+import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { join } from "node:path";
 import { access, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
@@ -1934,6 +1935,130 @@ export const music: Block = {
       `music: sealed channel sound program ${channelMusicProgram.fingerprint.slice(0, 12)} ` +
       `(${channelMusicProgram.role}, ${channelMusicProgram.generation.sections.length} authored sections) before spend`,
     );
+    // Week-ahead preparation is a distinct, receipt-backed reuse route. Do
+    // not feed it through reuseMusicKey: that shortcut only proves a language
+    // sibling named an object. This verifies the master and the exact sealed
+    // program before any provider credential is consulted or generation can
+    // begin. A stale program, altered byte, or absent MiniMax audit record is
+    // terminal rather than permission to replace the planned track.
+    const preparedMusic = ctx.store["preparedMusic"] as PlanWeekPreparedMusic | undefined;
+    if (preparedMusic !== undefined) {
+      if (!preparedMusic || typeof preparedMusic !== "object") {
+        throw new Error("music: prepared weekly music is invalid");
+      }
+      if (preparedMusic.musicProgram.fingerprint !== channelMusicProgram.fingerprint) {
+        throw new Error("music: prepared weekly music does not match the frozen channel sound program");
+      }
+      const masterBytes = await getObjectBytes(preparedMusic.musicKey);
+      if (
+        masterBytes.byteLength !== preparedMusic.audioByteLength ||
+        sha256BytesHex(masterBytes) !== preparedMusic.audioSha256
+      ) {
+        throw new Error("music: prepared weekly master bytes do not match their immutable receipt");
+      }
+      const preparedMasterPath = await writeBytes(
+        join(await makeRunTempDir(ctx.runId), "prepared_weekly_music.mp3"),
+        masterBytes,
+      );
+      const measuredDurationSec = (await probe(preparedMasterPath)).durationSec;
+      if (
+        !Number.isFinite(measuredDurationSec) ||
+        measuredDurationSec <= 0 ||
+        Math.abs(measuredDurationSec - preparedMusic.musicDurationSec) > 0.05
+      ) {
+        throw new Error("music: prepared weekly master duration does not match its immutable receipt");
+      }
+
+      let musicRuntimeReceiptKey: string | undefined;
+      let musicNativeWavKey: string | undefined;
+      if (preparedMusic.provider === "minimax_music3") {
+        const minimax = preparedMusic.minimax;
+        if (!minimax) {
+          throw new Error("music: prepared MiniMax weekly music is missing its release evidence");
+        }
+        if (ctx.store["musicQualityReceiptKey"] !== minimax.qualityReceiptKey) {
+          throw new Error("music: prepared MiniMax quality receipt is not bound to the scheduled invocation");
+        }
+        const [nativeWavBytes, runtimeReceiptBytes, qualityReceiptBytes] = await Promise.all([
+          getObjectBytes(minimax.nativeWavKey),
+          getObjectBytes(minimax.runtimeReceiptKey),
+          getObjectBytes(minimax.qualityReceiptKey),
+        ]);
+        let runtimeReceipt: unknown;
+        let qualityReceipt: unknown;
+        try {
+          runtimeReceipt = JSON.parse(Buffer.from(runtimeReceiptBytes).toString("utf8"));
+          qualityReceipt = JSON.parse(Buffer.from(qualityReceiptBytes).toString("utf8"));
+        } catch (error) {
+          throw new Error(
+            `music: prepared MiniMax evidence is not valid JSON: ${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        const runtime = assertPinnedMiniMaxMusic3Receipt(runtimeReceipt, channelMusicProgram);
+        const quality = assertMusicProgramQualityReceipt({ program: channelMusicProgram, receipt: qualityReceipt });
+        if (
+          quality.output.contentSha256 !== runtime.output.contentSha256 ||
+          quality.output.byteLength !== runtime.output.byteLength ||
+          Math.abs(quality.output.durationSec - runtime.durationSec) > Math.max(0.1, runtime.durationSec * 0.001) ||
+          quality.output.sampleRate !== runtime.output.sampleRateHz ||
+          quality.output.channels !== runtime.output.channels ||
+          quality.output.codec !== runtime.output.codec
+        ) {
+          throw new Error("music: prepared MiniMax quality receipt is not bound to the exact native worker WAV");
+        }
+        assertMusicAuditionNativeBytes({ expected: runtime.output, bytes: nativeWavBytes });
+        musicNativeWavKey =
+          `${ctx.keyPrefix}runs/${ctx.runId}/audio/minimax-music3-native-${runtime.output.contentSha256}.wav`;
+        await putObject(musicNativeWavKey, nativeWavBytes, { contentType: "audio/wav" });
+        await recordAsset(ctx, "minimax_music3_native_wav", musicNativeWavKey, {
+          source: "prepared-weekly-music",
+          sourceKey: minimax.nativeWavKey,
+          requestKey: runtime.requestKey,
+          contentSha256: runtime.output.contentSha256,
+          byteLength: runtime.output.byteLength,
+          durationSec: runtime.durationSec,
+          programFingerprint: channelMusicProgram.fingerprint,
+          qualityReceiptKey: minimax.qualityReceiptKey,
+          reviewBinding: "native-worker-wav",
+        });
+        musicRuntimeReceiptKey = minimax.runtimeReceiptKey;
+      }
+      let musicUrl: string;
+      try {
+        musicUrl = publicUrl(preparedMusic.musicKey);
+      } catch {
+        musicUrl = `r2://${preparedMusic.musicKey}`;
+      }
+      await recordAsset(ctx, "music", preparedMusic.musicKey, {
+        provider: preparedMusic.provider,
+        source: "prepared-weekly-music",
+        byteLength: masterBytes.byteLength,
+        durationSec: preparedMusic.musicDurationSec,
+        channelMusicProgramFingerprint: channelMusicProgram.fingerprint,
+        channelMusicProgramKey,
+        runtimeReceiptKey: musicRuntimeReceiptKey,
+        trackHumanAuditionStatus: preparedMusic.provider === "minimax_music3"
+          ? "passed-prepared-weekly-review"
+          : "not-required-provider-route",
+      });
+      ctx.log(
+        `music: consumed prepared weekly ${preparedMusic.provider} master ` +
+        `(${preparedMusic.musicDurationSec.toFixed(1)}s; no music-generation spend)`,
+      );
+      return {
+        musicKey: preparedMusic.musicKey,
+        musicProvider: preparedMusic.provider,
+        musicUrl,
+        channelMusicProgramKey,
+        channelMusicProgramFingerprint: channelMusicProgram.fingerprint,
+        musicRuntimeReceiptKey,
+        musicNativeWavKey,
+        musicQualityReviewStatus: preparedMusic.provider === "minimax_music3"
+          ? "passed-prepared-weekly-audition"
+          : "not-required-provider-route",
+        [COST_PATCH_KEY]: 0,
+      };
+    }
     const providerPrompt = provider === "minimax_music3"
       ? channelMusicProgram.generation.structuredCaption
       : [

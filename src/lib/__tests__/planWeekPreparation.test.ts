@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
   assertPlanWeekPreparationManifestBinding,
+  assertPlanWeekPreparedMusicBinding,
   assertPlanWeekPreparedNarrationBinding,
   assertPlanWeekPreparedScriptBinding,
   PLAN_WEEK_PREPARATION_VERSION,
+  PLAN_WEEK_PREPARED_MUSIC_VERSION,
   PLAN_WEEK_PREPARED_NARRATION_VERSION,
   PLAN_WEEK_PREPARED_SCRIPT_VERSION,
   planWeekPreparationPrompt,
@@ -13,12 +15,18 @@ import {
   planWeekPreparationManifestSha256,
   planWeekPreparedNarrationAudioKey,
   planWeekPreparedNarrationKey,
+  planWeekPreparedMusicAudioKey,
+  planWeekPreparedMusicKey,
+  planWeekPreparedMusicNativeWavKey,
+  planWeekPreparedMusicQualityReceiptKey,
+  planWeekPreparedMusicRuntimeReceiptKey,
   planWeekPreparedScriptKey,
   planWeekThumbnailKey,
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { PLAN_WEEK_CONTRACT_VERSION } from "@/lib/planWeekContract";
 import { sha256Hex } from "@/lib/sha256";
+import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
 import {
   claimPlanItem,
   completeDeferredFramePlanItem,
@@ -94,6 +102,16 @@ assert.equal(
   planWeekPreparedNarrationAudioKey({ ownerId, channelSlug, batchId, itemId }),
   `owner/${ownerId}/channel/${channelSlug}/plan-batches/${batchId}/items/${itemId}/preparation/prepared/narration.mp3`,
   "prepared narration audio cannot point to an arbitrary R2 destination",
+);
+assert.equal(
+  planWeekPreparedMusicKey({ ownerId, channelSlug, batchId, itemId }),
+  `owner/${ownerId}/channel/${channelSlug}/plan-batches/${batchId}/items/${itemId}/preparation/prepared/music.json`,
+  "prepared music receipts share the canonical weekly item namespace",
+);
+assert.equal(
+  planWeekPreparedMusicAudioKey({ ownerId, channelSlug, batchId, itemId }),
+  `owner/${ownerId}/channel/${channelSlug}/plan-batches/${batchId}/items/${itemId}/preparation/prepared/music.mp3`,
+  "prepared music masters cannot point at arbitrary R2 destinations",
 );
 for (const malformed of [
   { ownerId: "owner/other", channelSlug, itemId },
@@ -247,6 +265,56 @@ assert.throws(
   }),
   /transcript does not match/,
   "a sidecar cannot swap the text that its measured audio receipt claims to narrate",
+);
+const preparedMusic = {
+  version: PLAN_WEEK_PREPARED_MUSIC_VERSION,
+  manifestSha256: pointer.manifestSha256,
+  ownerId,
+  channelId,
+  batchId,
+  itemId,
+  requestKey,
+  topic: manifest.plan.topic,
+  musicKey: planWeekPreparedMusicAudioKey({ ownerId, channelSlug, batchId, itemId }),
+  audioSha256: "e".repeat(64),
+  audioByteLength: 8_192,
+  musicDurationSec: 120,
+  provider: "minimax_music3" as const,
+  musicProgram: createChannelMusicProgram({
+    channelId,
+    channelIdentityFingerprint: "f".repeat(64),
+    family: "history",
+    contentLaneKey: "documentary",
+    topic: manifest.plan.topic,
+    providerPreference: "minimax_music3",
+  }),
+  minimax: {
+    nativeWavKey: planWeekPreparedMusicNativeWavKey({ ownerId, channelSlug, batchId, itemId }),
+    runtimeReceiptKey: planWeekPreparedMusicRuntimeReceiptKey({ ownerId, channelSlug, batchId, itemId }),
+    qualityReceiptKey: planWeekPreparedMusicQualityReceiptKey({ ownerId, channelSlug, batchId, itemId }),
+  },
+  createdAt: Date.now() - 200,
+};
+assert.equal(
+  assertPlanWeekPreparedMusicBinding({ prepared: preparedMusic, manifest }).musicProgram.fingerprint,
+  preparedMusic.musicProgram.fingerprint,
+  "a prepared MiniMax master binds the frozen episode, sealed music program, and all required audit artifacts",
+);
+assert.throws(
+  () => assertPlanWeekPreparedMusicBinding({
+    prepared: { ...preparedMusic, musicKey: "owner/foreign/music.mp3" },
+    manifest,
+  }),
+  /binding mismatch/,
+  "a prepared weekly master may not redirect scheduled execution to another channel object",
+);
+assert.throws(
+  () => assertPlanWeekPreparedMusicBinding({
+    prepared: { ...preparedMusic, minimax: undefined },
+    manifest,
+  }),
+  /MiniMax music receipt is invalid/,
+  "a MiniMax weekly master cannot bypass its native-WAV, runtime, and human-audition evidence",
 );
 assert.equal(
   planWeekPreparationPrompt(manifest, "narration"),

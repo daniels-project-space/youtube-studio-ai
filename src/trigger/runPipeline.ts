@@ -84,11 +84,14 @@ import {
 } from "@/lib/scheduledPlanRuntime";
 import {
   assertPlanWeekPreparationManifestBinding,
+  assertPlanWeekPreparedMusicBinding,
   assertPlanWeekPreparedNarrationBinding,
   assertPlanWeekPreparedScriptBinding,
+  planWeekPreparedMusicKey,
   planWeekPreparedNarrationKey,
   planWeekPreparedScriptKey,
   type PlanWeekPreparationManifest,
+  type PlanWeekPreparedMusic,
   type PlanWeekPreparedNarration,
   type PlanWeekPreparedScript,
 } from "@/lib/planWeekPreparation";
@@ -1215,6 +1218,7 @@ export const runPipelineTask = task({
     let weeklyPreparation: PlanWeekPreparationManifest | undefined;
     let weeklyPreparedScript: PlanWeekPreparedScript | undefined;
     let weeklyPreparedNarration: PlanWeekPreparedNarration | undefined;
+    let weeklyPreparedMusic: PlanWeekPreparedMusic | undefined;
 
     try {
       // A selected narrative horizon is a route-owned serial planner. It must
@@ -1330,6 +1334,27 @@ export const runPipelineTask = task({
               manifest: weeklyPreparation,
             });
           }
+          const preparedMusicKey = planWeekPreparedMusicKey(weeklyPreparation);
+          let rawPreparedMusic: unknown | undefined;
+          try {
+            rawPreparedMusic = JSON.parse(new TextDecoder().decode(
+              await getObjectBytes(preparedMusicKey),
+            ));
+          } catch (error) {
+            const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+            const name = (error as { name?: string }).name;
+            if (status !== 404 && name !== "NoSuchKey" && name !== "NotFound") {
+              throw new Error(
+                `scheduled plan prepared music is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+          if (rawPreparedMusic !== undefined) {
+            weeklyPreparedMusic = assertPlanWeekPreparedMusicBinding({
+              prepared: rawPreparedMusic,
+              manifest: weeklyPreparation,
+            });
+          }
           if (durableInvocation === undefined) {
             entries = structuredClone(weeklyPreparation.execution.pipeline) as PipelineEntry[];
             frozenModuleConfig = structuredClone(weeklyPreparation.execution.moduleConfig);
@@ -1338,7 +1363,8 @@ export const runPipelineTask = task({
             `scheduled plan preparation verified: ${scheduledPlan.preparation.manifestSha256.slice(0, 12)} ` +
               `(frozen ${new Date(weeklyPreparation.frozenAt).toISOString()}; ` +
               `${weeklyPreparedScript ? "prepared script admitted" : "script pending"}; ` +
-              `${weeklyPreparedNarration ? "prepared narration admitted" : "narration pending"})`,
+              `${weeklyPreparedNarration ? "prepared narration admitted" : "narration pending"}; ` +
+              `${weeklyPreparedMusic ? "prepared music admitted" : "music pending"})`,
           );
         }
         log(
@@ -1824,6 +1850,14 @@ export const runPipelineTask = task({
             ...(typeof weeklyPreparedNarration !== "undefined" && weeklyPreparedNarration
               ? { preparedNarration: structuredClone(weeklyPreparedNarration) }
               : {}),
+            ...(typeof weeklyPreparedMusic !== "undefined" && weeklyPreparedMusic
+              ? {
+                  preparedMusic: structuredClone(weeklyPreparedMusic),
+                  ...(weeklyPreparedMusic.minimax
+                    ? { musicQualityReceiptKey: weeklyPreparedMusic.minimax.qualityReceiptKey }
+                    : {}),
+                }
+              : {}),
           };
         }
         if (payload.reuse) {
@@ -2088,11 +2122,15 @@ export const runPipelineTask = task({
       assertPipelineInvocationCompilation(invocation, compilation);
       entries = invocation.entries;
       seedStore = { ...invocation.seedStore };
-      // MiniMax's per-track receipt is deliberately owner-auditioned. Its
-      // provider is frozen in the invocation, so this boundary cannot be
-      // enabled later by mutable channel configuration.
+      // A newly generated MiniMax track stops for its owner audition. An
+      // admitted week-ahead receipt has already bound that exact human review
+      // (or identifies a non-MiniMax provider) and must continue from its
+      // retained master rather than creating a second, run-local review gate.
+      // The music block revalidates its bytes/program/receipts before use.
+      const preparedWeeklyMusic = seedStore["preparedMusic"];
       requiresMusicAuditionCheckpoint = entries.some((entry) =>
-        entry.block === "music" && entry.params?.provider === "minimax_music3",
+        entry.block === "music" && entry.params?.provider === "minimax_music3" &&
+        preparedWeeklyMusic === undefined,
       );
       const paramsByBlock = snapshotParamsByBlock(entries);
       log(

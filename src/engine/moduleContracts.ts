@@ -411,7 +411,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: [
       // Read at run time and never declared: the runner's Proxy refuses an
       // undeclared read, so this threw the moment its branch ran.
-      "channelProgramRoute","reuseMusicKey", "musicBrief", "styleDNA", "channelName", "studioAudioRecipeProjection", "musicProgramPlan"],
+      "channelProgramRoute","reuseMusicKey", "preparedMusic", "musicQualityReceiptKey", "musicBrief", "styleDNA", "channelName", "studioAudioRecipeProjection", "musicProgramPlan"],
     providerProfiles: [managed, minimaxMusic3],
     maxCostUsd: 10,
     // Reserve both the requested generation count and one alternate-provider
