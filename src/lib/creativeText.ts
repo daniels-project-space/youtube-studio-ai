@@ -100,7 +100,12 @@ export async function retryOnUnusableOutput<T>(
   }
 }
 
-/** Named selector retained for script callers while the route remains pinned. */
-export function scriptProModel(): string {
+/** Named selector for long-form script work on the approved creative-text route. */
+export function scriptCreativeTextModel(): string {
   return configuredModel("pro");
+}
+
+/** @deprecated Use scriptCreativeTextModel; retained for unmigrated callers. */
+export function scriptProModel(): string {
+  return scriptCreativeTextModel();
 }

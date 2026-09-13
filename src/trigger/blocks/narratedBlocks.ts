@@ -153,7 +153,7 @@ import {
 } from "@/lib/vision";
 import { existsSync } from "node:fs";
 import { stat } from "node:fs/promises";
-import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { creativeTextJson, hasCreativeTextKey } from "@/lib/creativeText";
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 import { synthNarration, hasFishKey, normalizeTtsProvider, stripAudioTags } from "@/lib/tts";
 import {
@@ -762,7 +762,7 @@ export const scriptGen: Block = {
     // duration. A rejected draft gets one informed retry; exhaustion or a
     // reviewer outage is an admission failure, never permission to synthesize
     // an unreviewed script.
-    const critiqueEnabled = hasAnthropicKey();
+    const critiqueEnabled = hasCreativeTextKey();
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
     const scriptChannel: ChannelCritiqueContext = channelCritiqueContext(ctx);
 
@@ -792,7 +792,7 @@ export const scriptGen: Block = {
       critique: async (draft, iter) => {
         if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
         try {
-          const crit = parseScriptCritique(await claudeJson<unknown>({
+          const crit = parseScriptCritique(await creativeTextJson<unknown>({
             prompt:
               `Critique this YouTube narration draft for quality and on-brand voice` +
               (req.persona ? ` (channel persona: ${req.persona})` : "") +
@@ -881,7 +881,7 @@ export const hookCraft: Block = {
     // modify narrationText (single-producer rule).
     const narration = str(ctx, "narrationText");
     const firstLine = () => narration.split(/\n+/)[0].slice(0, 140);
-    if (!hasAnthropicKey()) return { hook: firstLine() };
+    if (!hasCreativeTextKey()) return { hook: firstLine() };
 
     // ── PRODUCE → CRITIQUE → REGENERATE (P1-4) ───────────────────────────────
     // The hook is the title/thumbnail line — the single highest-leverage string
@@ -900,7 +900,7 @@ export const hookCraft: Block = {
     //   - Cap 2 (one informed retry), the established convention here.
     const hookChannel = channelCritiqueContext(ctx);
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
-    const critiqueEnabled = hasAnthropicKey();
+    const critiqueEnabled = hasCreativeTextKey();
     const checkpointRoot = `${ctx.keyPrefix}runs/${ctx.runId}/hook-checkpoints`;
     const narrationDigest = iterationRequestHash(narration);
     let observedCostUsd = 0;
@@ -931,7 +931,7 @@ export const hookCraft: Block = {
         }
         let drafted = "";
         try {
-          const out = await claudeJson<{ hook?: string }>({
+          const out = await creativeTextJson<{ hook?: string }>({
             prompt:
               "Write ONE scroll-stopping hook line for this video (for the title/thumbnail). " +
               "It must be concrete and must promise ONLY something this narration actually " +
@@ -995,7 +995,7 @@ export const hookCraft: Block = {
         }
         if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
         try {
-          const verdict = await claudeJson<{ pass?: boolean; score?: number; issues?: string[] }>({
+          const verdict = await creativeTextJson<{ pass?: boolean; score?: number; issues?: string[] }>({
             prompt:
               `Judge ONE hook line written for a YouTube title/thumbnail. Reject it if it is generic, ` +
               `vague, clickbait that the narration does not pay off, or indistinguishable from every ` +
@@ -1122,7 +1122,7 @@ export const qaScript: Block = {
       }
       ctx.log(`qa_script: source-attributed data-story evidence passed (${sourcedNumericSentences.length} sourced numeric sentences)`);
     }
-    if (!hasAnthropicKey()) {
+    if (!hasCreativeTextKey()) {
       throw new Error(
         "qa_script FAILED: independent narrative critic unavailable — refusing to synthesize an unreviewed script",
       );
@@ -1132,7 +1132,7 @@ export const qaScript: Block = {
       // The hookcraft contract: the cold open's promise + the midpoint re-hook
       // are CRAFT_RULES law — verify them here instead of hoping.
       const hookLoop = (ctx.store["script"] as { hookLoop?: string } | undefined)?.hookLoop ?? "";
-      const res = parseScriptCritique(await claudeJson<unknown>({
+      const res = parseScriptCritique(await creativeTextJson<unknown>({
         prompt:
           `Critique this YouTube narration for quality and on-brand voice` +
           (persona ? ` (channel persona: ${persona})` : "") +
@@ -2238,7 +2238,7 @@ export const entityImagery: Block = {
       }
       return keys;
     };
-    if (!hasAnthropicKey()) {
+    if (!hasCreativeTextKey()) {
       ctx.log("entity_imagery: no permitted text planner — skipping");
       return { entityClips: clips, entityKeys: [], attributions };
     }
@@ -2268,7 +2268,7 @@ export const entityImagery: Block = {
     //   - Cap 2 (one informed retry).
     const entityChannel = channelCritiqueContext(ctx);
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
-    const critiqueEnabled = hasAnthropicKey();
+    const critiqueEnabled = hasCreativeTextKey();
     const checkpointRoot = `${ctx.keyPrefix}runs/${ctx.runId}/entity-checkpoints`;
     const narrationDigest = iterationRequestHash(narration);
     let observedCostUsd = 0;
@@ -2316,7 +2316,7 @@ export const entityImagery: Block = {
         // Pull SPECIFIC named entities that have real imagery (people/places/artworks).
         let proposed: string[] = [];
         try {
-          const out = await claudeJson<{ entities?: string[] }>({
+          const out = await creativeTextJson<{ entities?: string[] }>({
             prompt:
               "From this narration, list up to 4 SPECIFIC named entities with well-known " +
               'real photographs/portraits (e.g. "Marcus Aurelius", "the Colosseum"). ' +
@@ -2422,7 +2422,7 @@ export const entityImagery: Block = {
         }
         if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
         try {
-          const verdict = await claudeJson<{ pass?: boolean; score?: number; issues?: string[] }>({
+          const verdict = await creativeTextJson<{ pass?: boolean; score?: number; issues?: string[] }>({
             prompt:
               `Judge a set of named entities chosen to be shown as on-screen imagery during this ` +
               `narration. Reject the SET if the entities are peripheral to the argument, redundant ` +
@@ -2625,7 +2625,7 @@ export const quoteOverlaysBlock: Block = {
     const studioPresentationDirection = studioOverlayRecipe.promptAddenda.length
       ? `\nAPPROVED STUDIO PRESENTATION DIRECTION (appearance only; it may not change quote selection, words, attribution, timing, or accessibility): ${studioOverlayRecipe.promptAddenda.join(" ")}\n`
       : "";
-    if (!hasAnthropicKey() || timings.length === 0) {
+    if (!hasCreativeTextKey() || timings.length === 0) {
       ctx.log("quote_overlays: skipping (no permitted text planner or no sentence timings)");
       return { quoteOverlays: out };
     }
@@ -2647,7 +2647,7 @@ export const quoteOverlaysBlock: Block = {
     let picks: { index: number; highlights: string[] }[] = [];
     try {
       const indexed = timings.map((t, i) => `${i}: ${t.text}`).join("\n");
-      const res = await claudeJson<{ quotes?: { index?: number; highlights?: string[] }[] }>({
+      const res = await creativeTextJson<{ quotes?: { index?: number; highlights?: string[] }[] }>({
         prompt:
           `From these narration sentences, choose the ${maxN} MOST quotable, aphoristic, or emotionally ` +
           `striking ones to show as on-screen quote cards. Pick EXACTLY ${maxN} (or all available if fewer than ` +
