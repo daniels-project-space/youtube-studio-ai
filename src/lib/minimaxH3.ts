@@ -332,7 +332,10 @@ function routeEnvironment(provider: MiniMaxH3Provider): { url: string; token: st
   return { url: url.toString(), token };
 }
 
-export function minimaxH3Readiness(provider: MiniMaxH3Provider): MiniMaxH3Readiness {
+export function minimaxH3Readiness(
+  provider: MiniMaxH3Provider,
+  options: { saladCapacityMode?: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY } = {},
+): MiniMaxH3Readiness {
   const blockers: string[] = [];
   try { routeEnvironment(provider); } catch (error) {
     blockers.push(error instanceof Error ? error.message : String(error));
@@ -343,9 +346,18 @@ export function minimaxH3Readiness(provider: MiniMaxH3Provider): MiniMaxH3Readin
   if (!SHA256.test(receipt)) blockers.push(`${prefix}_QUALIFICATION_RECEIPT_SHA256 is missing or invalid`);
   // Weekly dispatch is intentionally Salad-only. Medium is the default tier;
   // a separately admitted high-priority escape hatch is selected by the
-  // weekly controller only when medium cannot fit the current wave.
-  if (provider === "salad" && process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY !== "1") {
-    blockers.push("MINIMAX_H3_SALAD_MEDIUM_PRIORITY is not enabled");
+  // weekly controller only when medium cannot fit the current wave. Once the
+  // controller has admitted that explicit high fallback, do not re-block the
+  // paid request merely because the medium feature flag is off.
+  if (provider === "salad") {
+    const capacityMode = options.saladCapacityMode ?? MINIMAX_H3_SALAD_CAPACITY_MODE;
+    const mediumEnabled = process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY === "1";
+    const highEnabled = process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0";
+    if (capacityMode === SALAD_HIGH_FALLBACK_PRIORITY) {
+      if (!highEnabled) blockers.push("MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK is disabled");
+    } else if (!mediumEnabled) {
+      blockers.push("MINIMAX_H3_SALAD_MEDIUM_PRIORITY is not enabled");
+    }
   }
   return { configured: blockers.every((item) => !item.includes("WORKER_")), admitted: blockers.length === 0, blockers };
 }
@@ -462,7 +474,11 @@ export async function renderMiniMaxH3(
   } = {},
 ): Promise<MiniMaxH3RenderedVideo> {
   const request = normaliseRequest(input);
-  const readiness = minimaxH3Readiness(request.provider);
+  const readiness = minimaxH3Readiness(request.provider, {
+    ...(request.provider === "salad" && options.saladCapacityMode
+      ? { saladCapacityMode: options.saladCapacityMode }
+      : {}),
+  });
   if (!readiness.admitted) throw new MiniMaxH3Error(`MiniMax H3 ${request.provider} route is not admitted: ${readiness.blockers.join("; ")}`);
   await (options.assertModelManifest ?? (() => assertMiniMaxH3R2ModelManifest(options.readModelManifest)))();
   const route = routeEnvironment(request.provider);

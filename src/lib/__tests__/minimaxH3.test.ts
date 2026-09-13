@@ -7,6 +7,7 @@ import {
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
   MiniMaxH3Error,
+  minimaxH3Readiness,
   type MiniMaxH3SaladCapacityClient,
   miniMaxH3RequestKey,
   renderMiniMaxH3,
@@ -120,6 +121,11 @@ async function test() {
   assert.equal(seen?.execution, "weekly-batch");
   assert.equal(seen?.capacity_mode, MINIMAX_H3_SALAD_CAPACITY_MODE);
 
+  // The selected high fallback must still dispatch when the medium flag is
+  // absent; this exercises the actual paid-route readiness seam, not only
+  // the pure readiness projection.
+  delete process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY;
+  process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK = "1";
   const high = await renderMiniMaxH3(salad, {
     saladCapacityMode: "high",
     presignRead: async () => "https://r2.example/read",
@@ -137,6 +143,16 @@ async function test() {
   });
   assert.equal(high.receipt.runtime.capacityMode, "high");
   assert.equal(seen?.capacity_mode, "high");
+
+  // A capacity admission may deliberately choose high when medium is
+  // unavailable. Readiness must honour that selected tier instead of
+  // re-blocking the paid request on the medium-only feature flag.
+  configure("salad");
+  delete process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY;
+  process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK = "1";
+  assert.equal(minimaxH3Readiness("salad", { saladCapacityMode: "high" }).admitted, true);
+  assert.equal(minimaxH3Readiness("salad", { saladCapacityMode: "medium" }).admitted, false);
+  process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY = "1";
 
   await assert.rejects(
     () => renderMiniMaxH3(salad, {
