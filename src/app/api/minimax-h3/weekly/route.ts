@@ -27,7 +27,11 @@ export async function POST(request: Request) {
     }
     const payload = assertMiniMaxH3WeeklyBatchArgs(body);
     if (!ownedBy(actor.ownerId, payload.receiptKey) || payload.jobs.some((job) =>
-      !ownedBy(actor.ownerId, job.firstFrame.r2Key) || !ownedBy(actor.ownerId, job.output.r2Key))) {
+      !ownedBy(actor.ownerId, job.firstFrame.r2Key) || !ownedBy(actor.ownerId, job.output.r2Key)) ||
+      (payload.preparedFootage !== undefined && (
+        payload.preparedFootage.ownerId !== actor.ownerId ||
+        !ownedBy(actor.ownerId, payload.preparedFootage.manifestKey)
+      ))) {
       return NextResponse.json({ ok: false, error: "all H3 paths must be inside the signed-in owner namespace" }, { status: 403 });
     }
     if (!process.env.TRIGGER_SECRET_KEY) {

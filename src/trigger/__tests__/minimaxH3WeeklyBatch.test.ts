@@ -20,6 +20,36 @@ assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, jobs: [{ ...valid
 assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, jobs: [{ ...valid.jobs[0], prompt: "" }] }), /job 1 is invalid.*prompt/);
 assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, jobs: [{ ...valid.jobs[0], firstFrame: { ...valid.jobs[0].firstFrame, sha256: "bad" } }] }), /job 1 is invalid.*digest/);
 assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, jobs: [valid.jobs[0], valid.jobs[0]] }), /duplicate (request identity|output key)/);
+const prepared = assertMiniMaxH3WeeklyBatchArgs({
+  ...valid,
+  jobs: [{
+    ...valid.jobs[0],
+    firstFrame: {
+      ...valid.jobs[0].firstFrame,
+      r2Key: "owner/a/channel/frozen-history/plan-batches/batch-1/items/item-1/preparation/h3/first-frame-0001.png",
+    },
+    output: {
+      r2Key: "owner/a/channel/frozen-history/plan-batches/batch-1/items/item-1/preparation/footage/clip-0001.mp4",
+    },
+  }],
+  preparedFootage: {
+    ownerId: "a",
+    channelSlug: "frozen-history",
+    batchId: "batch-1",
+    itemId: "item-1",
+    manifestKey: "owner/a/channel/frozen-history/plan-batches/batch-1/items/item-1/preparation/inputs.json",
+    manifestSha256: "c".repeat(64),
+    sceneIds: ["shot-1"],
+  },
+});
+assert.equal(prepared.preparedFootage?.sceneIds[0], "shot-1");
+assert.throws(
+  () => assertMiniMaxH3WeeklyBatchArgs({
+    ...valid,
+    preparedFootage: { ...prepared.preparedFootage!, manifestKey: "owner/a/other/manifest.json" },
+  }),
+  /manifest key is not canonical/,
+);
 assert.match(
   readFileSync(resolve(process.cwd(), "src/trigger/minimaxH3WeeklyBatch.ts"), "utf8"),
   /providerReceipts: result\.map\(\(item\) => item\.receipt\)/,

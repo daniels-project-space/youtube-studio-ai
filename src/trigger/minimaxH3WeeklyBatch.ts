@@ -6,6 +6,9 @@
 import { task } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
+  MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_RUNTIME_ID,
+  MINIMAX_H3_PROFILE,
   miniMaxH3RequestKey,
   renderMiniMaxH3WeeklyBatch,
   type MiniMaxH3Receipt,
@@ -15,6 +18,17 @@ import {
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
+import {
+  assertPlanWeekPreparedFootageBinding,
+  normalizePlanWeekPreparationManifest,
+  planWeekPreparedFootageClipKey,
+  planWeekPreparedFootageKey,
+  planWeekPreparedH3FirstFrameKey,
+  planWeekPreparationKey,
+  planWeekPreparationManifestSha256,
+  type PlanWeekPreparedFootage,
+  type PlanWeekPreparationManifest,
+} from "@/lib/planWeekPreparation";
 
 export interface MiniMaxH3WeeklyBatchArgs {
   /** Stable owner/week work-order identity; used as the task idempotency seed. */
@@ -22,6 +36,16 @@ export interface MiniMaxH3WeeklyBatchArgs {
   /** A scoped receipt path, outside the individual video output paths. */
   receiptKey: string;
   jobs: Array<Omit<MiniMaxH3RenderRequest, "provider" | "execution">>;
+  /** Optional reviewed weekly packet to materialize as a reusable footage sidecar. */
+  preparedFootage?: {
+    ownerId: string;
+    channelSlug: string;
+    batchId: string;
+    itemId: string;
+    manifestKey: string;
+    manifestSha256: string;
+    sceneIds: string[];
+  };
 }
 
 function safeIdentifier(value: unknown, label: string): string {
@@ -37,6 +61,49 @@ function scopedReceiptKey(value: unknown): string {
     throw new Error("weekly MiniMax H3 receipt key is invalid");
   }
   return value;
+}
+
+function safePathPart(value: unknown, label: string): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/.test(value)) {
+    throw new Error(`weekly MiniMax H3 ${label} is invalid`);
+  }
+  return value;
+}
+
+function digest(value: unknown, label: string): string {
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value.trim().toLowerCase())) {
+    throw new Error(`weekly MiniMax H3 ${label} is invalid`);
+  }
+  return value.trim().toLowerCase();
+}
+
+function preparedFootageBinding(value: unknown, jobs: readonly unknown[]): MiniMaxH3WeeklyBatchArgs["preparedFootage"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("weekly MiniMax H3 prepared-footage binding is invalid");
+  }
+  const raw = value as Record<string, unknown>;
+  const sceneIds = raw.sceneIds;
+  if (!Array.isArray(sceneIds) || sceneIds.length !== jobs.length || sceneIds.length < 1 || sceneIds.length > 60) {
+    throw new Error("weekly MiniMax H3 prepared-footage scene ids must match the job count");
+  }
+  const normalizedSceneIds = sceneIds.map((sceneId, index) => {
+    if (typeof sceneId !== "string" || !sceneId.trim() || sceneId.trim().length > 160) {
+      throw new Error(`weekly MiniMax H3 prepared-footage scene ${index + 1} is invalid`);
+    }
+    return sceneId.trim();
+  });
+  if (new Set(normalizedSceneIds).size !== normalizedSceneIds.length) {
+    throw new Error("weekly MiniMax H3 prepared-footage scene ids must be unique");
+  }
+  return {
+    ownerId: safePathPart(raw.ownerId, "prepared-footage owner id"),
+    channelSlug: safePathPart(raw.channelSlug, "prepared-footage channel slug"),
+    batchId: safePathPart(raw.batchId, "prepared-footage batch id"),
+    itemId: safePathPart(raw.itemId, "prepared-footage item id"),
+    manifestKey: scopedReceiptKey(raw.manifestKey),
+    manifestSha256: digest(raw.manifestSha256, "prepared-footage manifest digest"),
+    sceneIds: normalizedSceneIds,
+  };
 }
 
 /** Validates task input before vault hydration or a provider request. */
@@ -85,7 +152,26 @@ export function assertMiniMaxH3WeeklyBatchArgs(value: unknown): MiniMaxH3WeeklyB
     }
     outputKeys.add(outputKey);
   }
-  return { orderKey: safeIdentifier(payload.orderKey, "order key"), receiptKey: scopedReceiptKey(payload.receiptKey), jobs };
+  const preparedFootage = payload.preparedFootage === undefined
+    ? undefined
+    : preparedFootageBinding(payload.preparedFootage, jobs);
+  if (preparedFootage) {
+    const expectedManifestKey = planWeekPreparationKey({
+      ownerId: preparedFootage.ownerId,
+      channelSlug: preparedFootage.channelSlug,
+      batchId: preparedFootage.batchId,
+      itemId: preparedFootage.itemId,
+    });
+    if (preparedFootage.manifestKey !== expectedManifestKey) {
+      throw new Error("weekly MiniMax H3 prepared-footage manifest key is not canonical");
+    }
+  }
+  return {
+    orderKey: safeIdentifier(payload.orderKey, "order key"),
+    receiptKey: scopedReceiptKey(payload.receiptKey),
+    jobs,
+    ...(preparedFootage ? { preparedFootage } : {}),
+  };
 }
 
 function objectNotFound(error: unknown): boolean {
@@ -188,6 +274,172 @@ async function readPersistedReceipt(
   return parsed;
 }
 
+type PreparedFootageScope = NonNullable<MiniMaxH3WeeklyBatchArgs["preparedFootage"]>;
+
+/**
+ * Verify the frozen packet and every first-frame object before any H3 job is
+ * submitted. This all-or-nothing preflight prevents a late bad frame from
+ * leaving a partially paid weekly order.
+ */
+async function readPreparedFootageManifest(
+  binding: PreparedFootageScope,
+): Promise<PlanWeekPreparationManifest> {
+  const bytes = await getObjectBytes(binding.manifestKey);
+  if (sha256BytesHex(bytes) !== binding.manifestSha256) {
+    throw new Error("weekly MiniMax H3 prepared-footage manifest digest does not match R2");
+  }
+  let raw: unknown;
+  try {
+    raw = JSON.parse(new TextDecoder().decode(bytes));
+  } catch (error) {
+    throw new Error(`weekly MiniMax H3 prepared-footage manifest is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const manifest = normalizePlanWeekPreparationManifest(raw);
+  if (
+    planWeekPreparationManifestSha256(manifest) !== binding.manifestSha256 ||
+    manifest.ownerId !== binding.ownerId ||
+    manifest.channelSlug !== binding.channelSlug ||
+    manifest.batchId !== binding.batchId ||
+    manifest.itemId !== binding.itemId
+  ) {
+    throw new Error("weekly MiniMax H3 prepared-footage manifest scope does not match the request");
+  }
+  return manifest;
+}
+
+async function preflightPreparedFrames(
+  jobs: readonly MiniMaxH3WeeklyBatchArgs["jobs"][number][],
+  binding: PreparedFootageScope,
+): Promise<void> {
+  await Promise.all(jobs.map(async (job, index) => {
+    const expectedKey = planWeekPreparedH3FirstFrameKey({
+      ownerId: binding.ownerId,
+      channelSlug: binding.channelSlug,
+      batchId: binding.batchId,
+      itemId: binding.itemId,
+      index,
+    });
+    if (job.firstFrame.r2Key !== expectedKey) {
+      throw new Error(`weekly MiniMax H3 prepared-footage first-frame ${index + 1} key is not canonical`);
+    }
+    const expectedOutputKey = planWeekPreparedFootageClipKey({ ...binding, index });
+    if (job.output.r2Key !== expectedOutputKey) {
+      throw new Error(`weekly MiniMax H3 prepared-footage output ${index + 1} key is not canonical`);
+    }
+    const bytes = await getObjectBytes(job.firstFrame.r2Key);
+    if (sha256BytesHex(bytes) !== job.firstFrame.sha256) {
+      throw new Error(`weekly MiniMax H3 prepared-footage first-frame ${index + 1} digest does not match R2`);
+    }
+  }));
+}
+
+export function buildPreparedFootageSidecar(args: {
+  manifest: PlanWeekPreparationManifest;
+  binding: PreparedFootageScope;
+  jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
+  result: readonly MiniMaxH3RenderedVideo[];
+}): PlanWeekPreparedFootage {
+  const nativeDurationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+  const clips = args.result.map((item, index) => ({
+    r2Key: planWeekPreparedFootageClipKey({ ...args.binding, index }),
+    sha256: item.receipt.output.contentSha256,
+    byteLength: item.receipt.output.byteLength,
+    durationSec: nativeDurationSec,
+  }));
+  const generatedFootageSceneManifest = {
+    version: "generated-footage-scene-manifest/v1" as const,
+    source: "story_spine" as const,
+    exactOrder: true as const,
+    durationSec: nativeDurationSec * args.jobs.length,
+    items: args.jobs.map((job, index) => ({
+      sceneId: args.binding.sceneIds[index]!,
+      clipKey: clips[index]!.r2Key,
+      t0: nativeDurationSec * index,
+      t1: nativeDurationSec * (index + 1),
+    })),
+  };
+  const prepared: PlanWeekPreparedFootage = {
+    version: "plan-week-prepared-footage/v1",
+    manifestSha256: args.binding.manifestSha256,
+    ownerId: args.binding.ownerId,
+    channelId: args.manifest.channelId,
+    batchId: args.binding.batchId,
+    itemId: args.binding.itemId,
+    requestKey: args.manifest.requestKey,
+    topic: args.manifest.plan.topic,
+    generatedFootageSceneManifest,
+    clips,
+    renderer: {
+      kind: "minimax-h3",
+      provider: "salad",
+      execution: "weekly-batch",
+      runtimeId: MINIMAX_H3_RUNTIME_ID,
+      profileId: MINIMAX_H3_PROFILE.id,
+      modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
+    },
+    h3Jobs: args.jobs.map((job, index) => ({
+      sceneId: args.binding.sceneIds[index]!,
+      prompt: job.prompt,
+      seed: job.seed,
+      firstFrame: job.firstFrame,
+      output: { r2Key: clips[index]!.r2Key },
+      maxCostUsd: job.maxCostUsd,
+      requestKey: miniMaxH3RequestKey({ ...job, provider: "salad", execution: "weekly-batch" }),
+    })),
+    h3Receipts: args.result.map((item) => item.receipt),
+    createdAt: Date.now(),
+  };
+  return assertPlanWeekPreparedFootageBinding({ prepared, manifest: args.manifest });
+}
+
+async function persistPreparedFootageSidecar(
+  sidecarKey: string,
+  prepared: PlanWeekPreparedFootage,
+): Promise<void> {
+  const body = canonicalJson(prepared);
+  try {
+    await putObject(sidecarKey, body, {
+      contentType: "application/json",
+      ifNoneMatch: "*",
+      metadata: { "plan-week-prepared-footage": prepared.version, sha256: sha256Hex(body) },
+    });
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    if (status !== 409 && status !== 412) throw error;
+  }
+  const persisted = await getObjectBytes(sidecarKey);
+  if (sha256BytesHex(persisted) !== sha256Hex(body)) {
+    throw new Error("weekly MiniMax H3 prepared-footage sidecar changed after create-only write");
+  }
+}
+
+function renderedResultsFromPersistedReceipt(
+  receipt: PersistedWeeklyReceipt,
+): MiniMaxH3RenderedVideo[] {
+  if (!receipt.providerReceipts || receipt.providerReceipts.length !== receipt.requestKeys.length) {
+    throw new Error("weekly MiniMax H3 receipt lacks full provider provenance for prepared-footage materialization");
+  }
+  return receipt.providerReceipts.map((providerReceipt, index) => ({
+    requestKey: receipt.requestKeys[index]!,
+    receipt: providerReceipt,
+    // The sidecar binds the immutable receipt and R2 bytes; the bytes are
+    // re-read by the scheduled consumer immediately before assembly.
+    outputBytes: new Uint8Array(0),
+  }));
+}
+
+async function materializePreparedFootage(
+  binding: PreparedFootageScope,
+  manifest: PlanWeekPreparationManifest,
+  jobs: MiniMaxH3WeeklyBatchArgs["jobs"],
+  result: readonly MiniMaxH3RenderedVideo[],
+): Promise<string> {
+  const prepared = buildPreparedFootageSidecar({ manifest, binding, jobs, result });
+  const sidecarKey = planWeekPreparedFootageKey(binding);
+  await persistPreparedFootageSidecar(sidecarKey, prepared);
+  return sidecarKey;
+}
+
 export const minimaxH3WeeklyBatchTask = task({
   id: "minimax-h3-weekly-batch",
   // H3 workers hydrate and can run up to sixty five-second clips over three
@@ -205,6 +457,14 @@ export const minimaxH3WeeklyBatchTask = task({
         "MINIMAX_H3_SALAD_WORKER_URL", "MINIMAX_H3_SALAD_WORKER_TOKEN",
       ],
     });
+    const preparedManifest = payload.preparedFootage
+      ? await readPreparedFootageManifest(payload.preparedFootage)
+      : undefined;
+    if (payload.preparedFootage) {
+      // Preflight every input before the first worker request; a later bad
+      // frame must never leave a partially paid weekly order.
+      await preflightPreparedFrames(payload.jobs, payload.preparedFootage);
+    }
     const requestKeys = payload.jobs.map((job) => miniMaxH3RequestKey({
       ...job,
       provider: "salad",
@@ -216,7 +476,22 @@ export const minimaxH3WeeklyBatchTask = task({
       requestKeys,
       outputKeys,
     });
-    if (prior) return { receiptKey: payload.receiptKey, ...prior, reconciled: true as const };
+    if (prior) {
+      const preparedFootageKey = payload.preparedFootage
+        ? await materializePreparedFootage(
+            payload.preparedFootage,
+            preparedManifest!,
+            payload.jobs,
+            renderedResultsFromPersistedReceipt(prior),
+          )
+        : undefined;
+      return {
+        receiptKey: payload.receiptKey,
+        ...prior,
+        ...(preparedFootageKey ? { preparedFootageKey } : {}),
+        reconciled: true as const,
+      };
+    }
     const result = await renderMiniMaxH3WeeklyBatch(payload.jobs);
     const receipt = createMiniMaxH3WeeklyReceipt(payload.orderKey, result);
     // A batch receipt is create-only. If a controller loses its response after
@@ -234,8 +509,28 @@ export const minimaxH3WeeklyBatchTask = task({
       if (status !== 409 && status !== 412) throw error;
       const winner = await readPersistedReceipt(payload.receiptKey, { orderKey: payload.orderKey, requestKeys, outputKeys });
       if (!winner) throw error;
-      return { receiptKey: payload.receiptKey, ...winner, reconciled: true as const };
+      const preparedFootageKey = payload.preparedFootage
+        ? await materializePreparedFootage(
+            payload.preparedFootage,
+            preparedManifest!,
+            payload.jobs,
+            renderedResultsFromPersistedReceipt(winner),
+          )
+        : undefined;
+      return {
+        receiptKey: payload.receiptKey,
+        ...winner,
+        ...(preparedFootageKey ? { preparedFootageKey } : {}),
+        reconciled: true as const,
+      };
     }
-    return { receiptKey: payload.receiptKey, ...receipt };
+    const preparedFootageKey = payload.preparedFootage
+      ? await materializePreparedFootage(payload.preparedFootage, preparedManifest!, payload.jobs, result)
+      : undefined;
+    return {
+      receiptKey: payload.receiptKey,
+      ...receipt,
+      ...(preparedFootageKey ? { preparedFootageKey } : {}),
+    };
   },
 });

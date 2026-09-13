@@ -44,7 +44,10 @@ import {
 } from "@/engine/sourceProofMedia";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 
-const NOW = new Date("2026-08-14T12:00:00.000Z");
+// Review admission is intentionally time-bounded. Keep the valid fixture
+// relative to the execution clock so the suite does not expire every month;
+// the explicit 31-day stale-review case below still covers the failure path.
+const NOW = new Date();
 
 const sourcePacket: CasefileSourcePacket = {
   version: CASEFILE_SOURCE_PACKET_VERSION,

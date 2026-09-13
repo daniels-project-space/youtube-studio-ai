@@ -34,7 +34,9 @@ import {
 import { createSourceBoundStorySpineHandoff } from "@/engine/sourceBoundStorySpine";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 
-const NOW = new Date("2026-08-14T12:00:00.000Z");
+// Keep valid review evidence relative to the execution clock. The dedicated
+// stale-review assertions below retain their explicit age boundary.
+const NOW = new Date();
 
 // Same fixture shape already proven valid against the real structural gate in
 // cinematicCaseSequence.test.ts — only the editorialReview production path

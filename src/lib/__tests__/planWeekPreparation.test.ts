@@ -37,6 +37,7 @@ import {
   MINIMAX_H3_RUNTIME_ID,
   miniMaxH3RequestKey,
 } from "@/lib/minimaxH3";
+import { buildPreparedFootageSidecar } from "@/trigger/minimaxH3WeeklyBatch";
 import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
 import {
   claimPlanItem,
@@ -271,6 +272,34 @@ assert.equal(
   assertPlanWeekPreparedFootageBinding({ prepared: h3Prepared, manifest }).renderer?.kind,
   "minimax-h3",
   "prepared H3 footage binds an explicit renderer instead of masquerading as an LTX receipt",
+);
+const producerSidecar = buildPreparedFootageSidecar({
+  manifest,
+  binding: {
+    ownerId,
+    channelSlug,
+    batchId,
+    itemId,
+    manifestKey: pointer.manifestKey,
+    manifestSha256: pointer.manifestSha256,
+    sceneIds: ["shot-1"],
+  },
+  jobs: [h3Job],
+  result: [{
+    requestKey: h3Job.requestKey,
+    receipt: h3Prepared.h3Receipts[0],
+    outputBytes: new Uint8Array(0),
+  }],
+});
+assert.equal(
+  producerSidecar.generatedFootageSceneManifest.items[0]?.clipKey,
+  h3ClipKey,
+  "the weekly Salad producer must emit the canonical prepared-footage clip destination",
+);
+assert.equal(
+  producerSidecar.h3Receipts?.[0]?.requestKey,
+  h3Job.requestKey,
+  "the weekly prepared-footage sidecar must retain the exact H3 provider receipt",
 );
 assert.throws(
   () => assertPlanWeekPreparedFootageBinding({
