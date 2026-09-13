@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 import { idempotencyKeys, tasks } from "@trigger.dev/sdk";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
-import { miniMaxH3RequestKey } from "@/lib/minimaxH3";
+import {
+  MINIMAX_H3_PROFILE,
+  MINIMAX_H3_RUNTIME_ID,
+  miniMaxH3RequestKey,
+} from "@/lib/minimaxH3";
 import { assertMiniMaxH3WeeklyBatchArgs } from "@/trigger/minimaxH3WeeklyBatch";
 
 export const runtime = "nodejs";
@@ -47,6 +51,8 @@ export async function POST(request: Request) {
       state: "queued",
       provider: "salad",
       execution: "weekly-batch",
+      runtimeId: MINIMAX_H3_RUNTIME_ID,
+      profile: MINIMAX_H3_PROFILE,
       jobCount: payload.jobs.length,
       requestKeys,
       triggerRunId: handle.id,

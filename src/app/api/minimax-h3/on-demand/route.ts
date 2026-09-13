@@ -4,7 +4,11 @@ import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import {
   assertMiniMaxH3OnDemandArgs,
 } from "@/trigger/minimaxH3OnDemand";
-import { miniMaxH3RequestKey } from "@/lib/minimaxH3";
+import {
+  MINIMAX_H3_PROFILE,
+  MINIMAX_H3_RUNTIME_ID,
+  miniMaxH3RequestKey,
+} from "@/lib/minimaxH3";
 
 export const runtime = "nodejs";
 
@@ -50,6 +54,8 @@ export async function POST(request: Request) {
       state: "queued",
       provider: "novita",
       execution: "on-demand",
+      runtimeId: MINIMAX_H3_RUNTIME_ID,
+      profile: MINIMAX_H3_PROFILE,
       requestKey,
       triggerRunId: handle.id,
     }, { status: 202, headers: { "Cache-Control": "private, no-store" } });
