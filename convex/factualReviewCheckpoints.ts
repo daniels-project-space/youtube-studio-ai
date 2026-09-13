@@ -14,7 +14,7 @@ import {
   type FactualReviewSourceAuthority,
 } from "../src/engine/factualReviewCheckpoint";
 import { canonicalJson } from "../src/lib/canonicalJson";
-import { assertPlanWeekPreparationPointer } from "../src/lib/planWeekPreparation";
+import { assertPlanWeekPreparationPointer } from "../src/lib/planWeekPreparationContract";
 import { assertRunExecutionWriteFence, RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
 import { sha256Hex } from "../src/lib/sha256";
 import { runCostFloor } from "./runCostAccounting";

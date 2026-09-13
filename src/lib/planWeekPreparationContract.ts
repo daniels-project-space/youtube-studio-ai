@@ -1,0 +1,204 @@
+/**
+ * Convex-safe contract for the immutable week-ahead preparation packet.
+ *
+ * Keep this boundary free of provider adapters, ffmpeg, R2 clients, and Node
+ * APIs. Convex queries/mutations only need to validate the pointer and its
+ * binding; the worker-facing implementation remains in planWeekPreparation.ts.
+ */
+import { canonicalJson } from "@/lib/canonicalJson";
+import {
+  assertPlanWeekThumbnailSource,
+  type PlanWeekThumbnailSource,
+} from "@/lib/planWeekThumbnailSource";
+import { sha256Hex } from "@/lib/sha256";
+
+export const PLAN_WEEK_PREPARATION_VERSION = "plan-week-preparation/inputs-v1" as const;
+
+export interface PlanWeekPreparationManifest {
+  version: typeof PLAN_WEEK_PREPARATION_VERSION;
+  ownerId: string;
+  channelId: string;
+  batchId: string;
+  itemId: string;
+  itemKey: string;
+  requestKey: string;
+  channelSlug: string;
+  frozenAt: number;
+  plan: {
+    topic: string;
+    title: string;
+    description: string;
+    sceneSeed: string;
+    thumbnailKey: string;
+    thumbnailSource: PlanWeekThumbnailSource;
+  };
+  execution: {
+    pipeline: unknown[];
+    moduleConfig: Record<string, Record<string, unknown>>;
+    seedStore: Record<string, unknown>;
+  };
+  prompts: {
+    script: string;
+    narration: string;
+    shotlist: string;
+    visual: string;
+  };
+}
+
+export interface PlanWeekPreparationPointer {
+  version: typeof PLAN_WEEK_PREPARATION_VERSION;
+  manifestKey: string;
+  manifestSha256: string;
+}
+
+function requiredText(value: unknown, label: string): string {
+  if (typeof value !== "string" || !value.trim()) {
+    throw new Error(`plan-week preparation ${label} is invalid`);
+  }
+  return value.trim();
+}
+
+function requiredRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`plan-week preparation ${label} is invalid`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function pathSegment(value: string, label: string): string {
+  const segment = requiredText(value, label);
+  if (segment === "." || segment === ".." || !/^[A-Za-z0-9][A-Za-z0-9._:-]*$/u.test(segment)) {
+    throw new Error(`plan-week preparation ${label} must be one safe path segment`);
+  }
+  return segment;
+}
+
+function preparationPrefix(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+}): string {
+  return `owner/${pathSegment(args.ownerId, "owner id")}/channel/${pathSegment(args.channelSlug, "channel slug")}` +
+    `/plan-batches/${pathSegment(args.batchId, "batch id")}/items/${pathSegment(args.itemId, "item id")}/preparation`;
+}
+
+export function planWeekPreparationKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+}): string {
+  return `${preparationPrefix(args)}/inputs.json`;
+}
+
+export function planWeekThumbnailKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  itemId: string;
+}): string {
+  return `owner/${pathSegment(args.ownerId, "owner id")}/channel/${pathSegment(args.channelSlug, "channel slug")}` +
+    `/plan/${pathSegment(args.itemId, "item id")}.jpg`;
+}
+
+export function planWeekPreparationManifestSha256(manifest: PlanWeekPreparationManifest): string {
+  return sha256Hex(canonicalJson(manifest));
+}
+
+export function normalizePlanWeekPreparationManifest(value: unknown): PlanWeekPreparationManifest {
+  const manifest = requiredRecord(value, "manifest");
+  if (manifest.version !== PLAN_WEEK_PREPARATION_VERSION) throw new Error("plan-week preparation manifest version is unsupported");
+  const frozenAt = manifest.frozenAt;
+  if (typeof frozenAt !== "number" || !Number.isSafeInteger(frozenAt) || frozenAt <= 0) {
+    throw new Error("plan-week preparation frozen timestamp is invalid");
+  }
+  const plan = requiredRecord(manifest.plan, "plan");
+  const execution = requiredRecord(manifest.execution, "execution");
+  const prompts = requiredRecord(manifest.prompts, "prompts");
+  if (!Array.isArray(execution.pipeline)) throw new Error("plan-week preparation pipeline is invalid");
+  const moduleConfig = requiredRecord(execution.moduleConfig, "module config") as Record<string, Record<string, unknown>>;
+  for (const [blockId, config] of Object.entries(moduleConfig)) {
+    requiredText(blockId, "module config block");
+    requiredRecord(config, `module config for ${blockId}`);
+  }
+  const normalized: PlanWeekPreparationManifest = {
+    version: PLAN_WEEK_PREPARATION_VERSION,
+    ownerId: requiredText(manifest.ownerId, "owner id"),
+    channelId: requiredText(manifest.channelId, "channel id"),
+    batchId: requiredText(manifest.batchId, "batch id"),
+    itemId: requiredText(manifest.itemId, "item id"),
+    itemKey: requiredText(manifest.itemKey, "item key"),
+    requestKey: requiredText(manifest.requestKey, "request key"),
+    channelSlug: requiredText(manifest.channelSlug, "channel slug"),
+    frozenAt,
+    plan: {
+      topic: requiredText(plan.topic, "plan topic"),
+      title: requiredText(plan.title, "plan title"),
+      description: requiredText(plan.description, "plan description"),
+      sceneSeed: requiredText(plan.sceneSeed, "scene seed"),
+      thumbnailKey: requiredText(plan.thumbnailKey, "thumbnail key"),
+      thumbnailSource: assertPlanWeekThumbnailSource(plan.thumbnailSource ?? "planner_artwork"),
+    },
+    execution: {
+      pipeline: execution.pipeline,
+      moduleConfig,
+      seedStore: requiredRecord(execution.seedStore, "seed store"),
+    },
+    prompts: {
+      script: requiredText(prompts.script, "script prompt"),
+      narration: requiredText(prompts.narration, "narration prompt"),
+      shotlist: requiredText(prompts.shotlist, "shot-list prompt"),
+      visual: requiredText(prompts.visual, "visual prompt"),
+    },
+  };
+  try {
+    JSON.stringify(normalized);
+  } catch (error) {
+    throw new Error(
+      `plan-week preparation manifest is not JSON-safe: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  return normalized;
+}
+
+export function assertPlanWeekPreparationPointer(value: unknown): PlanWeekPreparationPointer {
+  const pointer = requiredRecord(value, "pointer");
+  if (pointer.version !== PLAN_WEEK_PREPARATION_VERSION) throw new Error("plan-week preparation pointer version is unsupported");
+  const manifestSha256 = requiredText(pointer.manifestSha256, "manifest digest").toLowerCase();
+  if (!/^[a-f0-9]{64}$/u.test(manifestSha256)) throw new Error("plan-week preparation manifest digest is invalid");
+  return {
+    version: PLAN_WEEK_PREPARATION_VERSION,
+    manifestKey: requiredText(pointer.manifestKey, "manifest key"),
+    manifestSha256,
+  };
+}
+
+export function assertPlanWeekPreparationManifestBinding(args: {
+  manifest: unknown;
+  pointer: unknown;
+  ownerId: string;
+  channelId: string;
+  batchId: string;
+  itemId: string;
+  itemKey: string;
+  requestKey: string;
+  channelSlug: string;
+  topic: string;
+  title: string;
+  thumbnailKey: string;
+  thumbnailSource?: PlanWeekThumbnailSource;
+}): PlanWeekPreparationManifest {
+  const manifest = normalizePlanWeekPreparationManifest(args.manifest);
+  const pointer = assertPlanWeekPreparationPointer(args.pointer);
+  if (
+    pointer.manifestKey !== planWeekPreparationKey(args) ||
+    pointer.manifestSha256 !== planWeekPreparationManifestSha256(manifest) ||
+    manifest.ownerId !== args.ownerId || manifest.channelId !== args.channelId ||
+    manifest.batchId !== args.batchId || manifest.itemId !== args.itemId ||
+    manifest.itemKey !== args.itemKey || manifest.requestKey !== args.requestKey ||
+    manifest.channelSlug !== args.channelSlug || manifest.plan.topic !== args.topic ||
+    manifest.plan.title !== args.title || manifest.plan.thumbnailKey !== args.thumbnailKey ||
+    manifest.plan.thumbnailSource !== (args.thumbnailSource ?? "planner_artwork")
+  ) throw new Error("plan-week preparation manifest binding mismatch");
+  return manifest;
+}

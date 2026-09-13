@@ -16,7 +16,7 @@ import {
   assertScheduledPlanPayloadMatches,
   normalizeScheduledPlanPayload,
 } from "../src/lib/scheduledPlanRuntime";
-import { assertPlanWeekPreparationPointer } from "../src/lib/planWeekPreparation";
+import { assertPlanWeekPreparationPointer } from "../src/lib/planWeekPreparationContract";
 import {
   assertChannelInceptionProbeEnvelopeStructure,
   type ChannelInceptionProbeAttemptCheckpoint,

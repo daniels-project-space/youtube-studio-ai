@@ -19,7 +19,7 @@ import {
   assertPlanWeekPreparationPointer,
   PLAN_WEEK_PREPARATION_VERSION,
   planWeekThumbnailKey,
-} from "../src/lib/planWeekPreparation";
+} from "../src/lib/planWeekPreparationContract";
 import {
   isDeferredRenderedFrameSource,
   type PlanWeekThumbnailSource,

@@ -2,7 +2,7 @@ import { SCHEDULED_UPLOAD_MIN_LEAD_MS } from "./publishTiming";
 import {
   assertPlanWeekPreparationPointer,
   type PlanWeekPreparationPointer,
-} from "./planWeekPreparation";
+} from "./planWeekPreparationContract";
 import {
   assertPlanWeekThumbnailSource,
   type PlanWeekThumbnailSource,

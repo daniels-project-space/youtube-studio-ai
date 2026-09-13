@@ -2,7 +2,7 @@ import {
   normalizeScheduledPlanPayload,
   type ScheduledPlanRunPayload,
 } from "@/lib/scheduledPlanRuntime";
-import { assertPlanWeekPreparationPointer } from "@/lib/planWeekPreparation";
+import { assertPlanWeekPreparationPointer } from "@/lib/planWeekPreparationContract";
 import {
   normalizePipelineInvocationSnapshot,
   type PipelineInvocationSnapshot,
