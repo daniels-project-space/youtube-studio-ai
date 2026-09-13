@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 const source = readFileSync(resolve(process.cwd(), "src/app/api/minimax-h3/status/route.ts"), "utf8");
+const projection = readFileSync(resolve(process.cwd(), "src/lib/minimaxH3Status.ts"), "utf8");
 assert.match(source, /requireStudioActor/);
 assert.match(source, /ownerReceiptKey/);
 assert.match(source, /startsWith\(`owner\/\$\{ownerId\}\/`\)/);
@@ -10,8 +11,8 @@ assert.match(source, /runs\.retrieve\(runId\)/);
 assert.match(source, /getObjectBytes\(receiptKey\)/);
 assert.match(source, /miniMaxH3WeeklyRequestPacketKey/);
 assert.match(source, /requestPacketState/);
-assert.match(source, /capacityMode/);
-assert.match(source, /provider capacity provenance is malformed/);
+assert.match(projection, /capacityMode/);
+assert.match(projection, /provider capacity provenance is malformed/);
 assert.match(source, /minimax-h3-weekly-request\/v1/);
 assert.match(source, /reconciliation_required/);
 assert.match(source, /Cache-Control.*private, no-store/);
