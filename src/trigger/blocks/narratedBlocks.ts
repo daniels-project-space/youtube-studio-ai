@@ -724,6 +724,7 @@ export const scriptGen: Block = {
       // styleGrammar deliberately not passed — see ScriptRequest in scriptGen.ts.
       niche: opt(ctx, "niche"),
       style: ctx.params["style"] as string | undefined,
+      qualityProfile: ctx.params["qualityProfile"] === "draft" ? ("draft" as const) : ("production" as const),
       language: ctx.params["language"] as string | undefined,
       maxSeconds: ctx.params["maxSeconds"] as number | undefined,
       endWithSummary: ctx.params["endWithSummary"] as boolean | undefined,

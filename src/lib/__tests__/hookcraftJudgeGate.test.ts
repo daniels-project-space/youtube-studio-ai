@@ -15,10 +15,9 @@
  * honest. That is the first fifteen seconds of the video, the single highest-
  * leverage retention surface, passing on a fabricated perfect score.
  *
- * The gate still fails open: the candidates have cleared a real deterministic
- * lint, and refusing to produce a cold open would fail the whole video. What
- * this pins is that the two cases are now distinguishable — `judged` travels
- * with the verdict, and the failure names itself in the log.
+ * Production now fails closed after its bounded retry: local lint cannot prove
+ * retention, voice match, or honesty. Only an explicit draft preview may
+ * retain an unjudged candidate for inspection, marked `judged: false`.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -47,7 +46,13 @@ function main(): void {
   assert.equal(isEmptyVerdict({ honest: false }), false, "an honesty finding alone is still a verdict");
   assert.equal(isEmptyVerdict({ punch: 0 }), false, "a zero is a score, not an absence");
 
-  // ---- the marker must reach the caller -----------------------------------
+  // ---- production cannot ship an unjudged cold open -----------------------
+  assert.match(CODE, /hookQualityProfile\(a\)/, "the engine must resolve an explicit production/draft profile");
+  assert.match(CODE, /quality === "production"/, "a known judge failure must take the production refusal path");
+  assert.match(CODE, /production refuses/, "production refusal must name its missing judge evidence");
+  assert.match(CODE, /lint-only cold open\(s\)/, "production refusal must identify the unscored candidate class");
+
+  // ---- draft marker must reach the caller ---------------------------------
   assert.match(
     CODE,
     /judged: judgeRan && !isEmptyVerdict\(v\)/,
@@ -61,7 +66,7 @@ function main(): void {
   // Both halves matter: the judge call failing, AND this candidate having no
   // verdict even though the call succeeded.
   assert.match(CODE, /let judgeRan = true;/, "the judge-ran flag must default to true and be cleared on failure");
-  assert.match(CODE, /judgeRan = false;/, "a judge failure must clear it");
+  assert.match(CODE, /judgeRan = false;/, "an explicit draft judge failure must clear it");
 
   // ---- the failure must name itself ---------------------------------------
   assert.match(
@@ -71,17 +76,17 @@ function main(): void {
   );
   assert.match(
     SOURCE,
-    /the cold open was NOT scored/,
-    "the log must say what was skipped, not merely that something was skipped",
+    /draft preview retains a lint-only cold open/,
+    "the draft log must say it is diagnostic rather than a passed production gate",
   );
   assert.ok(
     !/judge unreachable \(\$\{e instanceof Error \? e\.message : e\}\) — lint-only pass/.test(CODE),
-    "'lint-only pass' made a fabricated perfect score read as a routine downgrade",
+    "'lint-only pass' must not make an unscored hook read as a routine production downgrade",
   );
 
   // ---- the gate itself is unchanged ---------------------------------------
-  // This was a visibility fix. If it had also moved the threshold, hooks would
-  // silently start passing or failing for unrelated reasons.
+  // This availability repair must not weaken or secretly adjust the existing
+  // judge threshold.
   assert.match(
     CODE,
     /\(v\.punch \?\? 10\) >= GATE &&/,
@@ -89,7 +94,7 @@ function main(): void {
   );
   assert.match(CODE, /v\.honest !== false/, "the honesty rule must be untouched too");
 
-  console.log("HOOKCRAFT JUDGE GATE PASS — an unjudged cold open cannot pass as a perfect one");
+  console.log("HOOKCRAFT JUDGE GATE PASS — production refuses an unjudged cold open; draft remains explicit");
 }
 
 main();

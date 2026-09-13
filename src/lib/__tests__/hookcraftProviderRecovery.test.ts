@@ -1,7 +1,8 @@
 /**
- * Hookcraft is independently runnable. Its judge may degrade to a visible
- * lint-only result after a known failure, but it must not hide a provider
- * response whose billing/completion state is ambiguous.
+ * Hookcraft is independently runnable. Production refuses a known unavailable
+ * judge after its bounded retry; an explicit draft preview may retain a
+ * visibly lint-only result. Neither path may hide an ambiguous provider
+ * response whose billing/completion state is unknown.
  */
 process.env.OPENROUTER_API_KEY = "test-key-for-hookcraft-provider-recovery";
 
@@ -51,19 +52,27 @@ async function main(): Promise<void> {
       log: () => {},
     };
 
-    const knownFailure = await craftHook(args);
-    assert.equal(knownFailure.verdict.judged, false, "a known judge failure may remain a truthful lint-only result");
-    assert.equal(judgeCalls, 1, "the known failure must not buy an automatic judge replay");
+    await assert.rejects(
+      () => craftHook(args),
+      /both attempts failed the gate.*hook judge unavailable/,
+      "production must refuse a cold open whose retention judge never returned a valid verdict",
+    );
+    assert.equal(judgeCalls, 2, "production retries the complete cold-open slate exactly once");
+    assert.equal(generatorCalls, 2, "each bounded production attempt creates a fresh candidate slate");
+
+    const draftFailure = await craftHook({ ...args, qualityProfile: "draft" });
+    assert.equal(draftFailure.verdict.judged, false, "an explicit draft may retain a truthful lint-only preview");
+    assert.equal(judgeCalls, 3, "the explicit draft preview makes one judge attempt, not a hidden retry");
 
     judgeMode = "unknown";
     await assert.rejects(
-      () => craftHook(args),
+      () => craftHook({ ...args, qualityProfile: "draft" }),
       (error: unknown) => error instanceof OpenRouterGenerationOutcomeUnknownError && error.outcome === "unknown",
       "an ambiguous judge outcome must propagate to execution recovery instead of becoming lint-only success",
     );
-    assert.equal(judgeCalls, 2, "the ambiguous judge outcome must not be automatically replayed");
-    assert.equal(generatorCalls, 2, "each independently requested hook reaches exactly one generation call");
-    console.log("HOOKCRAFT PROVIDER RECOVERY PASS — known and ambiguous judge failures remain distinct");
+    assert.equal(judgeCalls, 4, "the ambiguous judge outcome must not be automatically replayed");
+    assert.equal(generatorCalls, 4, "each requested hook reaches exactly one generation call per attempt");
+    console.log("HOOKCRAFT PROVIDER RECOVERY PASS — production refusal, draft diagnostics, and ambiguity remain distinct");
   } finally {
     (Module as unknown as { _load: typeof originalLoad })._load = originalLoad;
   }

@@ -6,7 +6,7 @@
  */
 import { creativeTextJson, hasCreativeTextKey, scriptCreativeTextModel } from "@/lib/creativeText";
 import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
-import { craftHook, type CraftedHook } from "@/lib/hookcraft";
+import { craftHook, type CraftedHook, type HookCraftArgs } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
 import type { ChannelProgramRouteRunSeed } from "@/engine/channelProgramRoute";
 
@@ -122,6 +122,8 @@ export interface ScriptRequest {
   niche?: string;
   /** Archetype tone: essay | crime | shorts | meditation | generic. */
   style?: string;
+  /** Passed to Hookcraft; absent defaults conservatively to production. */
+  qualityProfile?: HookCraftArgs["qualityProfile"];
   /** Spoken language (BCP-47-ish: en | es | de | …). Default English. */
   language?: string;
   /** Target spoken length; drives word budget (~2.5 words/sec). */
@@ -937,6 +939,7 @@ export async function synthScript(
     language: req.language,
     voiceTags: req.voiceTags,
     sourceGrounding: req.sourceGrounding,
+    qualityProfile: req.qualityProfile,
     log: (m) => log(m),
   });
 

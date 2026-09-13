@@ -567,7 +567,8 @@ export function completePipelineForPolicy(
     if (
       entry.block !== "originality_gate" &&
       entry.block !== "compliance_check" &&
-      entry.block !== "topic_select"
+      entry.block !== "topic_select" &&
+      entry.block !== "script_gen"
     ) continue;
     entry.params = { ...(entry.params ?? {}), qualityProfile: guardQualityProfile };
   }

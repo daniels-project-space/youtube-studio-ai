@@ -24,6 +24,7 @@ import {
   OpenRouterGenerationOutcomeUnknownError,
 } from "@/lib/creativeText";
 import { resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
+import { qualityProfile, type QualityProfile } from "@/engine/qualityPolicy";
 
 export function hasHookcraft(): boolean {
   return hasCreativeTextKey();
@@ -463,10 +464,20 @@ export interface HookCraftArgs {
   voiceTags?: boolean;
   /** Immutable source constraints supplied by an admitted evidence module. */
   sourceGrounding?: string;
+  /**
+   * Production requires an actual retention-judge verdict. Only an explicit
+   * draft preview may retain a visibly unjudged lint-only cold open.
+   */
+  qualityProfile?: QualityProfile;
   log?: (msg: string) => void;
 }
 
 const GATE = 7;
+
+function hookQualityProfile(args: HookCraftArgs): QualityProfile {
+  // A direct or legacy caller must not accidentally obtain draft semantics.
+  return qualityProfile(args.qualityProfile);
+}
 
 /** Channels that invent in-world facts by design skip grounding. */
 function isFictionRegister(niche?: string, style?: string): boolean {
@@ -556,6 +567,7 @@ function registerClause(a: HookCraftArgs): string {
  */
 export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
   if (!hasCreativeTextKey()) throw new Error("hookcraft: OPENROUTER_API_KEY missing — no permitted creative-text provider is configured");
+  const quality = hookQualityProfile(a);
   const skipConcreteness = a.style === "meditation";
   const deviceList = Object.entries(HOOK_DEVICES)
     .filter(([k]) => (a.style === "meditation" ? k === "you_stakes" || k === "cold_open_scene" || k === "myth_snap" : true))
@@ -695,18 +707,26 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         // A later healer could replay potentially billed work and hide the
         // missing quality receipt. Preserve that state for execution recovery.
         if (e instanceof OpenRouterGenerationOutcomeUnknownError && e.outcome === "unknown") throw e;
-        // FAIL-OPEN, DELIBERATELY AND LOUDLY — see isEmptyVerdict above.
-        //
-        // "lint-only pass" undersold this badly. With no verdicts every
-        // candidate is scored as `{}`, and passes() reads each missing axis as
-        // 10, so the cold-open gate admits everything as if the judge had given
-        // it full marks. The candidates HAVE cleared a real deterministic lint,
-        // and refusing to produce a cold open at all would fail the whole
-        // video, so it still fails open — but not quietly.
+        const detail = e instanceof Error ? e.message : String(e);
+        if (quality === "production") {
+          // The cold open is the highest-leverage retention surface and feeds
+          // the script, title promise and visual plan. Local lint catches only
+          // structural defects; it cannot replace a retention/voice/honesty
+          // verdict. Regenerate once, then fail this production stage honestly.
+          lastIssues.push(`hook judge unavailable: ${detail.slice(0, 160)}`);
+          fixNote = "THE RETENTION JUDGE DID NOT RETURN A VALID VERDICT. Regenerate every candidate with valid JSON; do not ship an unscored cold open.";
+          a.log?.(
+            `hookcraft: JUDGE FAILED (${detail}) — production refuses ${survivors.length} ` +
+            `lint-only cold open(s); punch/specificity/curiosity/voiceMatch/promise were never scored`,
+          );
+          continue;
+        }
+        // An explicit draft preview may expose a structurally valid cold open
+        // for operator inspection, but carries `judged: false` all the way out.
         judgeRan = false;
         a.log?.(
-          `hookcraft: JUDGE FAILED (${e instanceof Error ? e.message : e}) — the cold open was NOT scored ` +
-          `on punch/specificity/curiosity/voiceMatch/promise; every candidate now passes the gate on lint alone`,
+          `hookcraft: JUDGE FAILED (${detail}) — draft preview retains a lint-only cold open; it was NOT scored ` +
+          `on punch/specificity/curiosity/voiceMatch/promise`,
         );
       }
 
