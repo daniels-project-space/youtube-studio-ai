@@ -8,6 +8,8 @@ const worker = readFileSync(resolve(root, "src/trigger/titleCtrSwap.ts"), "utf8"
 
 assert.match(proposal, /action: "propose_native_test" \| "hold"/);
 assert.match(proposal, /admitNativeTitleTestOutcome/);
+assert.match(proposal, /NativeTitleTestVariantObservation/);
+assert.match(proposal, /exact 2–3 title slate/);
 assert.match(proposal, /watch-time-share evidence/);
 assert.doesNotMatch(proposal, /function judgeSwapOutcome/);
 assert.match(worker, /planNativeTitleTestProposals/);

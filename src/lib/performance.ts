@@ -51,7 +51,7 @@ export interface PerfEntry {
      * it carries YouTube's own watch-time-share verdict and test receipt.
      */
     method?: "legacy_sequential" | "native_ab";
-    outcome?: "alternate_won" | "original_won" | "inconclusive" | "not_experiment";
+    outcome?: "variant_won" | "alternate_won" | "original_won" | "inconclusive" | "not_experiment";
     outcomeDetail?: string;
     outcomeAt?: number;
   };

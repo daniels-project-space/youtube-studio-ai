@@ -225,8 +225,35 @@ export function planNativeTitleTestProposals(
 
 export interface NativeTitleTestOutcome {
   videoId: string;
-  verdict: "alternate_won" | "original_won" | "inconclusive" | "not_experiment";
+  verdict: "variant_won" | "alternate_won" | "original_won" | "inconclusive" | "not_experiment";
   detail: string;
+  /** Index in the immutable proposal slate; never inferred from CTR. */
+  winnerIndex?: number;
+  winnerTitle?: string;
+}
+
+export type NativeTitleTestVariantObservation = {
+  title: string;
+  watchTimeShare: number;
+};
+
+type NativePlatformVerdict = "variant_won" | "inconclusive";
+
+function normalizeNativeTitleVariants(
+  values: readonly NativeTitleTestVariantObservation[] | null | undefined,
+): NativeTitleTestVariantObservation[] | null {
+  if (!Array.isArray(values) || values.length < 2 || values.length > MAX_NATIVE_TITLE_TEST_VARIANTS) return null;
+  const seen = new Set<string>();
+  const normalized: NativeTitleTestVariantObservation[] = [];
+  for (const value of values) {
+    if (!value || typeof value.title !== "string" || !Number.isFinite(value.watchTimeShare)) return null;
+    const title = value.title.trim().replace(/\s+/g, " ");
+    const identity = title.toLocaleLowerCase();
+    if (!title || title.length > 100 || seen.has(identity) || value.watchTimeShare < 0 || value.watchTimeShare > 1) return null;
+    seen.add(identity);
+    normalized.push({ title, watchTimeShare: value.watchTimeShare });
+  }
+  return normalized;
 }
 
 /**
@@ -234,17 +261,72 @@ export interface NativeTitleTestOutcome {
  *
  * Ordinary Analytics API snapshots have a single video-level CTR and cannot
  * establish an A/B winner. A native result needs a durable platform receipt,
- * both variant watch-time-share values, and a verdict consistent with those
- * values. There is deliberately no integration caller yet; this fails closed
- * until an actual Studio-result ingestion surface exists.
+ * two or three exact title variants, their watch-time-share values, and the
+ * platform's recorded verdict. There is deliberately no integration caller
+ * yet; this fails closed until an actual Studio-result ingestion surface exists.
  */
 export function admitNativeTitleTestOutcome(args: {
   videoId: string;
   platformReceiptId?: string | null;
+  /** Preferred exact input: the immutable 2–3 title proposal slate. */
+  variants?: readonly NativeTitleTestVariantObservation[] | null;
+  platformOutcome?: NativePlatformVerdict | null;
+  platformWinnerTitle?: string | null;
+  /** Legacy two-variant compatibility input. */
   originalWatchTimeShare?: number | null;
   alternateWatchTimeShare?: number | null;
   platformVerdict?: "alternate_won" | "original_won" | "inconclusive" | null;
 }): NativeTitleTestOutcome {
+  const variants = normalizeNativeTitleVariants(args.variants);
+  if (args.variants !== undefined && args.variants !== null) {
+    if (!args.platformReceiptId?.trim() || !variants || !args.platformOutcome) {
+      return {
+        videoId: args.videoId,
+        verdict: "not_experiment",
+        detail: "native test requires a platform receipt, an exact 2–3 title slate, finite watch-time shares, and its recorded verdict",
+      };
+    }
+    if (args.platformOutcome === "inconclusive") {
+      if (args.platformWinnerTitle?.trim()) {
+        return {
+          videoId: args.videoId,
+          verdict: "not_experiment",
+          detail: "an inconclusive platform result cannot name a winner",
+        };
+      }
+      return {
+        videoId: args.videoId,
+        verdict: "inconclusive",
+        detail: `native receipt ${args.platformReceiptId.trim()} records an inconclusive result across ${variants.length} title variants`,
+      };
+    }
+    const winner = args.platformWinnerTitle?.trim().replace(/\s+/g, " ");
+    const winnerIndex = winner
+      ? variants.findIndex((variant) => variant.title.toLocaleLowerCase() === winner.toLocaleLowerCase())
+      : -1;
+    if (winnerIndex < 0) {
+      return {
+        videoId: args.videoId,
+        verdict: "not_experiment",
+        detail: "a winning native result must name one title from the exact proposal slate",
+      };
+    }
+    const winnerShare = variants[winnerIndex]!.watchTimeShare;
+    if (variants.some((variant, index) => index !== winnerIndex && variant.watchTimeShare >= winnerShare)) {
+      return {
+        videoId: args.videoId,
+        verdict: "not_experiment",
+        detail: "the named platform winner does not have a strictly higher recorded watch-time share",
+      };
+    }
+    return {
+      videoId: args.videoId,
+      verdict: winnerIndex === 0 ? "original_won" : winnerIndex === 1 ? "alternate_won" : "variant_won",
+      winnerIndex,
+      winnerTitle: variants[winnerIndex]!.title,
+      detail: `native receipt ${args.platformReceiptId.trim()} admits winner ${winnerIndex + 1}/${variants.length} from recorded watch-time share`,
+    };
+  }
   const original = args.originalWatchTimeShare;
   const alternate = args.alternateWatchTimeShare;
   const platformVerdict = args.platformVerdict;

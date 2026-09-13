@@ -132,6 +132,63 @@ function main(): void {
     "not_experiment",
     "a fabricated verdict must conflict with its own watch-time evidence",
   );
+  const threeVariantWinner = admitNativeTitleTestOutcome({
+    videoId: "three",
+    platformReceiptId: "studio-test-three-123",
+    variants: [
+      { title: "The Original Title That Went Out", watchTimeShare: 0.28 },
+      { title: "The Runner Up Nobody Ever Used", watchTimeShare: 0.31 },
+      { title: "The Third Judged Title", watchTimeShare: 0.41 },
+    ],
+    platformOutcome: "variant_won",
+    platformWinnerTitle: "The Third Judged Title",
+  });
+  assert.equal(threeVariantWinner.verdict, "variant_won");
+  assert.equal(threeVariantWinner.winnerIndex, 2);
+  assert.equal(threeVariantWinner.winnerTitle, "The Third Judged Title");
+  assert.equal(
+    admitNativeTitleTestOutcome({
+      videoId: "forged-three",
+      platformReceiptId: "studio-test-three-123",
+      variants: [
+        { title: "The Original Title That Went Out", watchTimeShare: 0.4 },
+        { title: "The Runner Up Nobody Ever Used", watchTimeShare: 0.35 },
+        { title: "The Third Judged Title", watchTimeShare: 0.25 },
+      ],
+      platformOutcome: "variant_won",
+      platformWinnerTitle: "The Third Judged Title",
+    }).verdict,
+    "not_experiment",
+    "the recorded platform winner must agree with the supplied per-variant watch-time evidence",
+  );
+  assert.equal(
+    admitNativeTitleTestOutcome({
+      videoId: "wrong-slate",
+      platformReceiptId: "studio-test-three-123",
+      variants: [
+        { title: "The Original Title That Went Out", watchTimeShare: 0.5 },
+        { title: "The Original Title That Went Out", watchTimeShare: 0.5 },
+      ],
+      platformOutcome: "inconclusive",
+    }).verdict,
+    "not_experiment",
+    "duplicate titles cannot produce a false native-test slate",
+  );
+  assert.equal(
+    admitNativeTitleTestOutcome({
+      videoId: "inconclusive",
+      platformReceiptId: "studio-test-three-123",
+      variants: [
+        { title: "The Original Title That Went Out", watchTimeShare: 0.4 },
+        { title: "The Runner Up Nobody Ever Used", watchTimeShare: 0.35 },
+        { title: "The Third Judged Title", watchTimeShare: 0.25 },
+      ],
+      platformOutcome: "inconclusive",
+      platformWinnerTitle: "The Original Title That Went Out",
+    }).verdict,
+    "not_experiment",
+    "an inconclusive platform result must not smuggle in a winner",
+  );
   assert.equal(DEFAULT_SWAP_POLICY.minImpressions, 2_000);
   assert.equal(
     rejectSequentialTitleSwap("v").verdict,

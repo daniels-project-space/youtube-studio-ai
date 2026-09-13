@@ -22,6 +22,7 @@ The prior worker called `videos.update` to replace a weak-CTR title with one sto
 4. The performance-ledger type now records the distinction between `legacy_sequential` and a future `native_ab` receipt. A native result must include the platform verdict and per-variant watch-time evidence before it can affect title learning.
 5. The legacy `contentExperiments` table is now stamped `single_variant_observation` for an ordinary published package. The learning refresh records that as creative context only and refuses to attach ordinary Analytics snapshots to a future `youtube_native_ab` row.
 6. The proposal type itself now says `propose_native_test`, not `swap`; the old CTR-delta verdict helper is replaced by an uncalled fail-closed native-result admission that requires a platform receipt and two consistent watch-time-share values. This does not create an ingestion connector.
+7. **Three-variant contract repair (13 September):** the admission contract now accepts an exact, de-duplicated two- or three-title slate. It requires the platform's named winner, checks that title belongs to that slate and has strictly greater supplied watch-time share, and records its exact index. A third winner is represented as `variant_won`; legacy two-title evidence retains `original_won`/`alternate_won` for compatibility. It still does not invent a platform receipt, dispatch a test, or provide an ingestion connector.
 
 ## Verification
 
