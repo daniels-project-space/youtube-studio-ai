@@ -43,9 +43,13 @@ function hasOwnerPath(value: unknown): value is string {
   return typeof value === "string" && /^owner\/[A-Za-z0-9][A-Za-z0-9._:/-]*$/u.test(value) && !value.includes("..") && !value.includes("\\");
 }
 
-function contractPreview(value: unknown, mode: Mode): { valid: boolean; count: number } {
+function contractPreview(value: unknown, mode: Mode): { valid: boolean; count: number; issues: string[] } {
   const entries = mode === "weekly" ? (Array.isArray(value) ? value : []) : [value];
-  if (entries.length < 1 || entries.length > (mode === "weekly" ? 60 : 1)) return { valid: false, count: entries.length };
+  const issues: string[] = [];
+  const maxEntries = mode === "weekly" ? 60 : 1;
+  if (entries.length < 1) issues.push(mode === "weekly" ? "Add at least one approved job." : "Add one approved job.");
+  if (entries.length > maxEntries) issues.push(`This lane accepts at most ${maxEntries} job${maxEntries === 1 ? "" : "s"}.`);
+  if (mode === "weekly" && !Array.isArray(value)) issues.push("Weekly batch input must be a JSON array.");
   const valid = entries.every((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
     const row = entry as Record<string, unknown>;
@@ -57,7 +61,10 @@ function contractPreview(value: unknown, mode: Mode): { valid: boolean; count: n
       typeof (frame as Record<string, unknown>).sha256 === "string" && /^[a-f0-9]{64}$/u.test((frame as Record<string, unknown>).sha256 as string) &&
       !!output && typeof output === "object" && !Array.isArray(output) && hasOwnerPath((output as Record<string, unknown>).r2Key);
   });
-  return { valid, count: entries.length };
+  if (!valid && entries.length > 0 && issues.length === 0) {
+    issues.push("Every job needs a prompt, integer seed, SHA-256 first-frame digest, owner-scoped frame/output keys, and a positive cost ceiling.");
+  }
+  return { valid: valid && issues.length === 0, count: entries.length, issues };
 }
 
 function loadStoredTracking(): H3Tracking | null {
@@ -118,7 +125,7 @@ export function H3RenderConsole() {
       const parsed: unknown = JSON.parse(jobsJson);
       return contractPreview(parsed, mode);
     } catch {
-      return { valid: false, count: 0 };
+      return { valid: false, count: 0, issues: ["Job JSON is not valid."] };
     }
   }, [jobsJson, mode]);
 
@@ -240,9 +247,10 @@ export function H3RenderConsole() {
         </div>
         <label className={styles.jobsField}><span>{mode === "weekly" ? "Approved jobs JSON array" : "Approved job JSON"}</span><textarea value={jobsJson} onChange={(event) => setJobsJson(event.target.value)} rows={12} spellCheck={false} /></label>
         <div className={styles.formFooter}>
-          <span data-valid={parsedPreview.valid}>{parsedPreview.valid ? `${parsedPreview.count} sealed job${parsedPreview.count === 1 ? "" : "s"} ready` : "Complete the sealed job contract"}</span>
+          <span data-valid={parsedPreview.valid}>{parsedPreview.valid ? `${parsedPreview.count} sealed job${parsedPreview.count === 1 ? "" : "s"} ready` : (parsedPreview.issues[0] ?? "Complete the sealed job contract")}</span>
           <button type="button" onClick={() => void dispatch()} disabled={busy || !parsedPreview.valid}>{busy ? "Queuing…" : `Queue ${provider} render`}</button>
         </div>
+        {!parsedPreview.valid && parsedPreview.issues.length > 1 && <ul className={styles.validationIssues}>{parsedPreview.issues.slice(1, 3).map((issue) => <li key={issue}>{issue}</li>)}</ul>}
         <small className={styles.contractHint}>The server rechecks the H3 model manifest, first-frame bytes, owner namespace, cost ceiling, and create-only receipt before any provider call.</small>
       </section>
 
