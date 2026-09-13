@@ -30,6 +30,23 @@ type ReceiptSummary = {
   totalCostUsd: number;
 };
 
+type RequestPacketState = "frozen" | "missing" | "invalid" | "not-applicable";
+
+function weeklyRequestPacketKey(receiptKey: string): string {
+  return receiptKey.slice(0, -".json".length) + ".request.json";
+}
+
+function validWeeklyRequestPacket(value: unknown): boolean {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const packet = value as Record<string, unknown>;
+  return packet.schema === "minimax-h3-weekly-request/v1" &&
+    typeof packet.orderKey === "string" && packet.orderKey.length > 0 &&
+    Array.isArray(packet.requestKeys) && packet.requestKeys.length >= 1 && packet.requestKeys.length <= 60 &&
+    packet.requestKeys.every((key) => typeof key === "string" && key.length > 0) &&
+    Array.isArray(packet.jobs) && packet.jobs.length === packet.requestKeys.length &&
+    Number.isSafeInteger(packet.createdAt) && Number(packet.createdAt) > 0;
+}
+
 function isOwnerScopedR2Key(value: unknown, ownerId: string): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const r2Key = (value as Record<string, unknown>).r2Key;
@@ -98,14 +115,32 @@ export async function GET(request: Request) {
 
     const run = await runs.retrieve(runId);
     let receipt: ReceiptSummary | undefined;
+    let requestPacketState: RequestPacketState = "not-applicable";
     let receiptState: "pending" | "complete" | "reconciliation_required" = "pending";
     try {
       const bytes = await getObjectBytes(receiptKey);
       receipt = summarizeReceipt(JSON.parse(new TextDecoder().decode(bytes)), actor.ownerId);
       receiptState = "complete";
+      if (receipt.kind === "weekly") {
+        try {
+          const packet = JSON.parse(new TextDecoder().decode(await getObjectBytes(weeklyRequestPacketKey(receiptKey))));
+          requestPacketState = validWeeklyRequestPacket(packet) ? "frozen" : "invalid";
+        } catch (packetError) {
+          if (!notFound(packetError)) requestPacketState = "invalid";
+          else requestPacketState = "missing";
+        }
+      }
     } catch (error) {
       if (!notFound(error)) {
         return NextResponse.json({ ok: false, error: "H3 receipt is malformed or unavailable" }, { status: 409 });
+      }
+      // A weekly request packet is intentionally visible before its receipt;
+      // an on-demand run has no sibling packet and remains not-applicable.
+      try {
+        const packet = JSON.parse(new TextDecoder().decode(await getObjectBytes(weeklyRequestPacketKey(receiptKey))));
+        requestPacketState = validWeeklyRequestPacket(packet) ? "frozen" : "invalid";
+      } catch (packetError) {
+        if (!notFound(packetError)) requestPacketState = "invalid";
       }
       if (["COMPLETED", "FAILED", "CANCELED"].includes(String(run.status).toUpperCase())) {
         receiptState = "reconciliation_required";
@@ -116,6 +151,7 @@ export async function GET(request: Request) {
       runId,
       triggerStatus: run.status,
       state: receiptState,
+      requestPacketState,
       receipt: receipt ?? null,
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
