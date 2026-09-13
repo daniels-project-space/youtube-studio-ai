@@ -21,6 +21,7 @@ assert.match(weekly, /runtimeId: MINIMAX_H3_RUNTIME_ID/);
 assert.match(weekly, /profile: MINIMAX_H3_PROFILE/);
 assert.match(weekly, /tasks\.trigger\("minimax-h3-weekly-batch"/);
 assert.match(weekly, /all H3 paths must be inside the signed-in owner namespace/);
+assert.match(weekly, /preparedFootage\.ownerId !== actor\.ownerId/);
 assert.doesNotMatch(weekly, /bootstrapSecrets|MINIMAX_H3_SALAD_WORKER_TOKEN|fetch\s*\(/);
 
 console.log("MiniMax H3 HTTP dispatch route contracts passed");
