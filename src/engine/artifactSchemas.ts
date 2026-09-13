@@ -92,6 +92,7 @@ import {
   FinalMasterReleaseCertificateSchema,
 } from "@/lib/finalMasterReleaseCertificate";
 import { ThirdPartyStockEvidenceReferenceSchema } from "@/lib/thirdPartyStockEvidence";
+import { assertQwenNarrationSourceEvidence } from "@/lib/qwenTts";
 
 /**
  * A versioned runtime contract for one value crossing a module boundary.
@@ -193,6 +194,17 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
       wordsPerSec: z.number().finite().positive(),
       integratedLufs: z.number().finite().min(-36).max(-6),
       windowMeanDb: z.number().finite().min(-48).max(-3),
+      qwenProviderEvidence: z.unknown().optional().superRefine((value, context) => {
+        if (value === undefined) return;
+        try {
+          assertQwenNarrationSourceEvidence(value);
+        } catch (error) {
+          context.addIssue({
+            code: z.ZodIssueCode.custom,
+            message: error instanceof Error ? error.message : "invalid Qwen3 narration source evidence",
+          });
+        }
+      }),
     }),
   },
   videoDurationSec: { type: "DurationSeconds", schema: z.number().finite().positive() },

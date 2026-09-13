@@ -94,6 +94,51 @@ export interface QwenTtsReceipt {
   runtime: QwenTtsRuntimeReceipt;
 }
 
+/**
+ * A final narration MP3 is a new artifact: sentence takes are concatenated,
+ * gaps are inserted and an optional voice filter is applied.  Individual Qwen
+ * receipts therefore cannot, on their own, prove which retained source the
+ * editor received.  This receipt seals the exact checked source bytes to each
+ * validated take and to the assembly recipe that made the source.
+ */
+export const QWEN3_TTS_NARRATION_SOURCE_EVIDENCE_VERSION = "qwen3-tts-narration-source/v1" as const;
+
+export interface QwenNarrationSourceChunk {
+  ordinal: number;
+  textSha256: string;
+  audioSha256: string;
+  byteLength: number;
+  receipt: QwenTtsReceipt;
+}
+
+export interface QwenNarrationSourceEvidence {
+  schema: typeof QWEN3_TTS_NARRATION_SOURCE_EVIDENCE_VERSION;
+  provider: "qwen3";
+  model: typeof QWEN3_TTS_MODEL;
+  revision: typeof QWEN3_TTS_MODEL_REVISION;
+  speaker: QwenTtsSpeaker;
+  language: QwenTtsLanguage;
+  requestCount: number;
+  sourceRequestCount: number;
+  preflightRequestCount: number;
+  sourceCostUsd: number;
+  totalCostUsd: number;
+  receiptSha256: string;
+  source: {
+    narrationKey: string;
+    sha256: string;
+    byteLength: number;
+    durationSec: number;
+    transcriptSha256: string;
+    assembly: "concat_audio_with_gaps/v1";
+    gapPlanSha256: string;
+    mode: "sentence" | "chapter";
+    voiceFx: string | null;
+  };
+  sourceChunks: QwenNarrationSourceChunk[];
+  preflightReceipts: QwenTtsReceipt[];
+}
+
 interface QwenTtsWorkerResponse {
   receipt: QwenTtsReceipt;
   audioBase64: string;
@@ -158,6 +203,184 @@ export class QwenTtsError extends Error {
 
 function sha256(value: string | Uint8Array): string {
   return createHash("sha256").update(value).digest("hex");
+}
+
+function isSha256(value: unknown): value is string {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+function finiteReceiptNumber(value: unknown, label: string, min: number, max: number): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < min || value > max) {
+    throw new Error(`Qwen3 narration source evidence has invalid ${label}`);
+  }
+  return value;
+}
+
+function assertNarrationSourceReceipt(value: unknown, label: string): QwenTtsReceipt {
+  if (!isPinnedQwenTtsReceipt(value)) {
+    throw new Error(`Qwen3 narration source evidence ${label} is not a pinned Qwen receipt`);
+  }
+  return value;
+}
+
+/**
+ * Validate a durable, final-source proof without replaying a billable worker
+ * request. The caller must separately hash the retained object and pass its
+ * observed bytes to `assertQwenNarrationSourceBinding` below.
+ */
+export function assertQwenNarrationSourceEvidence(value: unknown): QwenNarrationSourceEvidence {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("Qwen3 narration source evidence is missing or malformed");
+  }
+  const raw = value as Record<string, unknown>;
+  if (raw.schema !== QWEN3_TTS_NARRATION_SOURCE_EVIDENCE_VERSION || raw.provider !== "qwen3") {
+    throw new Error("Qwen3 narration source evidence has an unsupported schema or provider");
+  }
+  if (raw.model !== QWEN3_TTS_MODEL || raw.revision !== QWEN3_TTS_MODEL_REVISION) {
+    throw new Error("Qwen3 narration source evidence does not use the pinned model revision");
+  }
+  if (!(QWEN3_TTS_SPEAKERS as readonly unknown[]).includes(raw.speaker) ||
+    !(QWEN3_TTS_LANGUAGES as readonly unknown[]).includes(raw.language)) {
+    throw new Error("Qwen3 narration source evidence has an unsupported speaker or language");
+  }
+  const source = raw.source;
+  if (!source || typeof source !== "object" || Array.isArray(source)) {
+    throw new Error("Qwen3 narration source evidence is missing final-source details");
+  }
+  const sourceRaw = source as Record<string, unknown>;
+  if (typeof sourceRaw.narrationKey !== "string" || !sourceRaw.narrationKey.trim() ||
+    !isSha256(sourceRaw.sha256) || !isSha256(sourceRaw.transcriptSha256) ||
+    sourceRaw.assembly !== "concat_audio_with_gaps/v1" || !isSha256(sourceRaw.gapPlanSha256) ||
+    (sourceRaw.mode !== "sentence" && sourceRaw.mode !== "chapter") ||
+    !(typeof sourceRaw.voiceFx === "string" || sourceRaw.voiceFx === null)) {
+    throw new Error("Qwen3 narration source evidence has malformed final-source metadata");
+  }
+  const sourceByteLength = finiteReceiptNumber(sourceRaw.byteLength, "final-source byte length", 1_000, 100_000_000);
+  const sourceDurationSec = finiteReceiptNumber(sourceRaw.durationSec, "final-source duration", 1.5, 86_400);
+  const sourceChunksRaw = raw.sourceChunks;
+  if (!Array.isArray(sourceChunksRaw) || sourceChunksRaw.length < 1 || sourceChunksRaw.length > 2_000) {
+    throw new Error("Qwen3 narration source evidence must contain 1–2000 ordered source chunks");
+  }
+  const sourceChunks = sourceChunksRaw.map((chunk, index): QwenNarrationSourceChunk => {
+    if (!chunk || typeof chunk !== "object" || Array.isArray(chunk)) {
+      throw new Error(`Qwen3 narration source evidence chunk ${index + 1} is malformed`);
+    }
+    const item = chunk as Record<string, unknown>;
+    if (item.ordinal !== index || !isSha256(item.textSha256) || !isSha256(item.audioSha256)) {
+      throw new Error(`Qwen3 narration source evidence chunk ${index + 1} has an invalid identity`);
+    }
+    const receipt = assertNarrationSourceReceipt(item.receipt, `chunk ${index + 1}`);
+    if (receipt.model !== raw.model || receipt.revision !== raw.revision || receipt.speaker !== raw.speaker ||
+      receipt.language !== raw.language || receipt.textSha256 !== item.textSha256 || receipt.audioSha256 !== item.audioSha256) {
+      throw new Error(`Qwen3 narration source evidence chunk ${index + 1} does not bind its receipt`);
+    }
+    return {
+      ordinal: index,
+      textSha256: item.textSha256,
+      audioSha256: item.audioSha256,
+      byteLength: finiteReceiptNumber(item.byteLength, `chunk ${index + 1} byte length`, 1_000, 36_000_000),
+      receipt,
+    };
+  });
+  const preflightRaw = raw.preflightReceipts;
+  if (!Array.isArray(preflightRaw) || preflightRaw.length > 8) {
+    throw new Error("Qwen3 narration source evidence has invalid preflight receipts");
+  }
+  const preflightReceipts = preflightRaw.map((receipt, index) => {
+    const accepted = assertNarrationSourceReceipt(receipt, `preflight ${index + 1}`);
+    if (accepted.model !== raw.model || accepted.revision !== raw.revision || accepted.speaker !== raw.speaker || accepted.language !== raw.language) {
+      throw new Error(`Qwen3 narration source evidence preflight ${index + 1} does not match the source provider`);
+    }
+    return accepted;
+  });
+  const requestCount = sourceChunks.length + preflightReceipts.length;
+  if (raw.requestCount !== requestCount || raw.sourceRequestCount !== sourceChunks.length || raw.preflightRequestCount !== preflightReceipts.length) {
+    throw new Error("Qwen3 narration source evidence request counts do not bind its receipts");
+  }
+  const sourceCostUsd = sourceChunks.reduce((sum, chunk) => sum + chunk.receipt.runtime.costUsd, 0);
+  const totalCostUsd = sourceCostUsd + preflightReceipts.reduce((sum, receipt) => sum + receipt.runtime.costUsd, 0);
+  const recordedSourceCostUsd = finiteReceiptNumber(raw.sourceCostUsd, "source cost", 0.000001, 2_000);
+  const recordedTotalCostUsd = finiteReceiptNumber(raw.totalCostUsd, "total cost", 0.000001, 2_000);
+  if (Math.abs(recordedSourceCostUsd - sourceCostUsd) > 0.000001 || Math.abs(recordedTotalCostUsd - totalCostUsd) > 0.000001) {
+    throw new Error("Qwen3 narration source evidence costs do not bind its receipts");
+  }
+  const receiptSha256 = sha256(canonicalJson({
+    sourceChunks: sourceChunks.map(({ receipt }) => receipt),
+    preflightReceipts,
+  }));
+  if (raw.receiptSha256 !== receiptSha256) {
+    throw new Error("Qwen3 narration source evidence receipt digest does not bind its receipts");
+  }
+  return {
+    schema: QWEN3_TTS_NARRATION_SOURCE_EVIDENCE_VERSION,
+    provider: "qwen3",
+    model: QWEN3_TTS_MODEL,
+    revision: QWEN3_TTS_MODEL_REVISION,
+    speaker: raw.speaker as QwenTtsSpeaker,
+    language: raw.language as QwenTtsLanguage,
+    requestCount,
+    sourceRequestCount: sourceChunks.length,
+    preflightRequestCount: preflightReceipts.length,
+    sourceCostUsd: recordedSourceCostUsd,
+    totalCostUsd: recordedTotalCostUsd,
+    receiptSha256,
+    source: {
+      narrationKey: sourceRaw.narrationKey,
+      sha256: sourceRaw.sha256,
+      byteLength: sourceByteLength,
+      durationSec: sourceDurationSec,
+      transcriptSha256: sourceRaw.transcriptSha256,
+      assembly: "concat_audio_with_gaps/v1",
+      gapPlanSha256: sourceRaw.gapPlanSha256,
+      mode: sourceRaw.mode,
+      voiceFx: sourceRaw.voiceFx,
+    },
+    sourceChunks,
+    preflightReceipts,
+  };
+}
+
+export function createQwenNarrationSourceEvidence(args: Omit<QwenNarrationSourceEvidence, "schema" | "provider" | "model" | "revision" | "requestCount" | "sourceRequestCount" | "preflightRequestCount" | "sourceCostUsd" | "totalCostUsd" | "receiptSha256">): QwenNarrationSourceEvidence {
+  const sourceCostUsd = args.sourceChunks.reduce((sum, chunk) => sum + chunk.receipt.runtime.costUsd, 0);
+  const totalCostUsd = sourceCostUsd + args.preflightReceipts.reduce((sum, receipt) => sum + receipt.runtime.costUsd, 0);
+  const receiptSha256 = sha256(canonicalJson({
+    sourceChunks: args.sourceChunks.map(({ receipt }) => receipt),
+    preflightReceipts: args.preflightReceipts,
+  }));
+  return assertQwenNarrationSourceEvidence({
+    schema: QWEN3_TTS_NARRATION_SOURCE_EVIDENCE_VERSION,
+    provider: "qwen3",
+    model: QWEN3_TTS_MODEL,
+    revision: QWEN3_TTS_MODEL_REVISION,
+    speaker: args.speaker,
+    language: args.language,
+    requestCount: args.sourceChunks.length + args.preflightReceipts.length,
+    sourceRequestCount: args.sourceChunks.length,
+    preflightRequestCount: args.preflightReceipts.length,
+    sourceCostUsd,
+    totalCostUsd,
+    receiptSha256,
+    source: args.source,
+    sourceChunks: args.sourceChunks,
+    preflightReceipts: args.preflightReceipts,
+  });
+}
+
+/** Verify the actual retained narration object, not only the worker's old claim. */
+export function assertQwenNarrationSourceBinding(args: {
+  evidence: unknown;
+  narrationKey: string;
+  sourceAudio: Uint8Array;
+  transcript: string;
+  durationSec: number;
+}): QwenNarrationSourceEvidence {
+  const evidence = assertQwenNarrationSourceEvidence(args.evidence);
+  if (evidence.source.narrationKey !== args.narrationKey || evidence.source.sha256 !== sha256(args.sourceAudio) ||
+    evidence.source.byteLength !== args.sourceAudio.byteLength || evidence.source.transcriptSha256 !== sha256(args.transcript) ||
+    Math.abs(evidence.source.durationSec - args.durationSec) > 0.001) {
+    throw new Error("Qwen3 narration source evidence does not bind the retained final narration object");
+  }
+  return evidence;
 }
 
 function exactString(value: unknown, expected: string, label: string): string {

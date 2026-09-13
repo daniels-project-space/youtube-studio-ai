@@ -159,12 +159,15 @@ import { synthNarration, hasFishKey, normalizeTtsProvider, stripAudioTags } from
 import {
   hasQwenTtsConfig,
   hasQualifiedQwenTts,
+  assertQwenNarrationSourceBinding,
+  createQwenNarrationSourceEvidence,
   qwenTtsReadiness,
-  QWEN3_TTS_MODEL,
-  QWEN3_TTS_MODEL_REVISION,
   QWEN3_TTS_SPEAKERS,
   resolveQwenTtsLanguage,
+  type QwenNarrationSourceChunk,
+  type QwenTtsLanguage,
   type QwenTtsReceipt,
+  type QwenTtsSpeaker,
 } from "@/lib/qwenTts";
 import { narrationPhysics } from "@/lib/voicecraft";
 import {
@@ -1292,8 +1295,11 @@ export const narrationTts: Block = {
           .join(". "))
       : undefined;
     const qwenReceipts: QwenTtsReceipt[] = [];
+    const qwenReceiptByAudioSha = new Map<string, QwenTtsReceipt>();
+    const qwenPreflightReceipts: QwenTtsReceipt[] = [];
     const onQwenReceipt = (receipt: QwenTtsReceipt) => {
       qwenReceipts.push(receipt);
+      qwenReceiptByAudioSha.set(receipt.audioSha256, receipt);
       qwenObservedCostUsd += receipt.runtime.costUsd;
     };
 
@@ -1307,10 +1313,10 @@ export const narrationTts: Block = {
       : ttsProvider === "qwen3"
         ? qwenSpeaker
         : voiceId;
-    const synthSelectedNarration = (
+    const synthSelectedNarration = async (
       value: string,
       stitch?: Parameters<typeof synthNarration>[0]["stitch"],
-    ) => {
+    ): Promise<{ bytes: Uint8Array; qwenReceipt?: QwenTtsReceipt }> => {
       // A BUDGET GATE MUST FAIL CLOSED. `Math.max(0, NaN - spent)` is NaN and
       // `NaN < 0.02` is false, so a malformed stageBudgetUsd did not shrink the
       // envelope — it DELETED the check, and Qwen synthesis proceeded with no
@@ -1327,7 +1333,7 @@ export const narrationTts: Block = {
       if (ttsProvider === "qwen3" && qwenRemainingCostUsd < 0.02) {
         throw new Error("narration_tts: Qwen3 stage budget has no remaining provider envelope");
       }
-      return synthNarration({
+      const bytes = await synthNarration({
       text: value,
       voiceId: selectedVoiceId,
       niche,
@@ -1344,26 +1350,56 @@ export const narrationTts: Block = {
       onQwenReceipt,
       onBillableCharacters,
       });
+      if (ttsProvider !== "qwen3") return { bytes };
+      const audioSha256 = createHash("sha256").update(bytes).digest("hex");
+      const qwenReceipt = qwenReceiptByAudioSha.get(audioSha256);
+      if (!qwenReceipt || qwenReceipt.audioSha256 !== audioSha256) {
+        throw new Error("narration_tts: accepted Qwen3 audio has no matching validated worker receipt");
+      }
+      return { bytes, qwenReceipt };
     };
-    const bindQwenProviderEvidence = <T extends object>(evidence: T): T & {
-      providerEvidence?: Record<string, unknown>;
-    } => ttsProvider === "qwen3"
-      ? {
-          ...evidence,
-          providerEvidence: {
-            schema: "qwen3-tts-narration-batch/v1",
-            provider: "qwen3",
-            model: QWEN3_TTS_MODEL,
-            revision: QWEN3_TTS_MODEL_REVISION,
-            speaker: qwenSpeaker,
-            language: qwenLanguage,
-            requestCount: qwenReceipts.length,
-            totalCostUsd: qwenObservedCostUsd,
-            receiptSha256: createHash("sha256").update(canonicalJson(qwenReceipts)).digest("hex"),
-            receipts: qwenReceipts,
+    const bindQwenProviderEvidence = <T extends {
+      durationSec: number;
+    }>(args: {
+      evidence: T;
+      narrationKey: string;
+      narrationBytes: Uint8Array;
+      narrationTranscriptText: string;
+      sourceChunks: QwenNarrationSourceChunk[];
+      gaps: number[];
+      mode: "sentence" | "chapter";
+    }): T => {
+      if (ttsProvider !== "qwen3") return args.evidence;
+      const sourceRequestCount = args.sourceChunks.length;
+      if (!sourceRequestCount || qwenReceipts.length !== sourceRequestCount + qwenPreflightReceipts.length) {
+        throw new Error("narration_tts: Qwen3 receipt set does not exactly cover final source and preflight requests");
+      }
+      const sourceCostUsd = args.sourceChunks.reduce((sum, chunk) => sum + chunk.receipt.runtime.costUsd, 0);
+      const expectedCostUsd = sourceCostUsd + qwenPreflightReceipts.reduce((sum, receipt) => sum + receipt.runtime.costUsd, 0);
+      if (Math.abs(expectedCostUsd - qwenObservedCostUsd) > 0.000001) {
+        throw new Error("narration_tts: Qwen3 observed provider cost does not bind the sealed receipt set");
+      }
+      return {
+        ...args.evidence,
+        qwenProviderEvidence: createQwenNarrationSourceEvidence({
+          speaker: qwenSpeaker as QwenTtsSpeaker,
+          language: qwenLanguage as QwenTtsLanguage,
+          source: {
+            narrationKey: args.narrationKey,
+            sha256: createHash("sha256").update(args.narrationBytes).digest("hex"),
+            byteLength: args.narrationBytes.byteLength,
+            durationSec: args.evidence.durationSec,
+            transcriptSha256: createHash("sha256").update(args.narrationTranscriptText).digest("hex"),
+            assembly: "concat_audio_with_gaps/v1",
+            gapPlanSha256: createHash("sha256").update(canonicalJson(args.gaps)).digest("hex"),
+            mode: args.mode,
+            voiceFx: voiceFx?.trim() || null,
           },
-        }
-      : evidence;
+          sourceChunks: args.sourceChunks,
+          preflightReceipts: qwenPreflightReceipts,
+        }),
+      };
+    };
     assertVoiceGatePreconditions({
       profile: quality,
       gateEnabled,
@@ -1394,8 +1430,9 @@ export const narrationTts: Block = {
         throw new Error("narration_tts: production cold-open probe is empty");
       }
       const coldOpenPath = join(tmp, "cold_open_local_evidence.mp3");
-      const coldOpenBytes = await synthSelectedNarration(coldOpenText);
-      await writeBytes(coldOpenPath, coldOpenBytes);
+      const coldOpen = await synthSelectedNarration(coldOpenText);
+      if (coldOpen.qwenReceipt) qwenPreflightReceipts.push(coldOpen.qwenReceipt);
+      await writeBytes(coldOpenPath, coldOpen.bytes);
       const evidence = await preflightNarrationPerformance({
         audioPath: coldOpenPath,
         text: coldOpenText,
@@ -1481,7 +1518,8 @@ export const narrationTts: Block = {
               nextText: i < items.length - 1 ? speakOf(items[i + 1]) : undefined,
             }
           : undefined;
-        const bytes = await synthSelectedNarration(speak, stitch);
+        const synthesized = await synthSelectedNarration(speak, stitch);
+        const bytes = synthesized.bytes;
         const p = join(tmp, `utt_${i}.mp3`);
         await writeBytes(p, bytes);
         let dur = 0;
@@ -1492,7 +1530,7 @@ export const narrationTts: Block = {
         if (dur > Math.max(12, wcnt * 1.3)) {
           throw new Error(`narration_tts: runaway take (${dur.toFixed(0)}s for ${wcnt} words) — v3 blowout`);
         }
-        return { p, dur };
+        return { p, dur, qwenReceipt: synthesized.qwenReceipt };
       });
       assertNarrationTimingMeasurementIntegrity({
         sentenceCount: items.length,
@@ -1545,7 +1583,36 @@ export const narrationTts: Block = {
       );
       assertFinalDeliveryRate(narrationPerformanceEvidence);
       const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
-      await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
+      const narrationBytes = await readBytes(local);
+      const qwenSourceChunks: QwenNarrationSourceChunk[] = ttsProvider === "qwen3"
+        ? await Promise.all(synthed.map(async (part, ordinal) => {
+            if (!part.qwenReceipt) {
+              throw new Error(`narration_tts: chapter source chunk ${ordinal + 1} is missing its Qwen3 receipt`);
+            }
+            const bytes = await readBytes(part.p);
+            const audioSha256 = createHash("sha256").update(bytes).digest("hex");
+            if (audioSha256 !== part.qwenReceipt.audioSha256) {
+              throw new Error(`narration_tts: chapter source chunk ${ordinal + 1} no longer matches its Qwen3 receipt`);
+            }
+            return {
+              ordinal,
+              textSha256: part.qwenReceipt.textSha256,
+              audioSha256,
+              byteLength: bytes.byteLength,
+              receipt: part.qwenReceipt,
+            };
+          }))
+        : [];
+      const sealedNarrationPerformanceEvidence = bindQwenProviderEvidence({
+        evidence: narrationPerformanceEvidence,
+        narrationKey,
+        narrationBytes,
+        narrationTranscriptText,
+        sourceChunks: qwenSourceChunks,
+        gaps,
+        mode: "chapter",
+      });
+      await putObject(narrationKey, narrationBytes, { contentType: "audio/mpeg" });
       await recordAsset(ctx, "narration", narrationKey, { durationSec, chapters: chap, mode: "chapter" });
       ctx.log(`narration_tts ok (chapter mode): ${durationSec.toFixed(0)}s, ${chap} chapters, ${sentenceTimings.length} sentences`);
       return {
@@ -1556,7 +1623,7 @@ export const narrationTts: Block = {
         // are deliberately absent from the display-only narrationText.  Final
         // QA must compare against this exact source, not a nearby script.
         narrationTranscriptText,
-        narrationPerformanceEvidence: bindQwenProviderEvidence(narrationPerformanceEvidence),
+        narrationPerformanceEvidence: sealedNarrationPerformanceEvidence,
         sentenceTimings,
         chapterPlan,
         [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0, qwenObservedCostUsd),
@@ -1592,7 +1659,8 @@ export const narrationTts: Block = {
             nextText: i < sentences.length - 1 ? sentences[i + 1] : undefined,
           }
         : undefined;
-      const bytes = await synthSelectedNarration(s, stitch);
+      const synthesized = await synthSelectedNarration(s, stitch);
+      const bytes = synthesized.bytes;
       const p = join(tmp, `sent_${i}.mp3`);
       await writeBytes(p, bytes);
       let dur = 0;
@@ -1602,7 +1670,7 @@ export const narrationTts: Block = {
       if (dur > Math.max(12, wcnt2 * 1.3)) {
         throw new Error(`narration_tts: runaway take (${dur.toFixed(0)}s for ${wcnt2} words) — v3 blowout`);
       }
-      return { p, dur };
+      return { p, dur, qwenReceipt: synthesized.qwenReceipt };
     });
     // Do not build an edit timeline around several estimated sentence lengths.
     // The final master can only reconcile a small, bounded probe miss; beyond
@@ -1666,7 +1734,36 @@ export const narrationTts: Block = {
     assertFinalDeliveryRate(narrationPerformanceEvidence);
 
     const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
-    await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
+    const narrationBytes = await readBytes(local);
+    const qwenSourceChunks: QwenNarrationSourceChunk[] = ttsProvider === "qwen3"
+      ? await Promise.all(parts.map(async (part, ordinal) => {
+          if (!part.qwenReceipt) {
+            throw new Error(`narration_tts: sentence source chunk ${ordinal + 1} is missing its Qwen3 receipt`);
+          }
+          const bytes = await readBytes(part.p);
+          const audioSha256 = createHash("sha256").update(bytes).digest("hex");
+          if (audioSha256 !== part.qwenReceipt.audioSha256) {
+            throw new Error(`narration_tts: sentence source chunk ${ordinal + 1} no longer matches its Qwen3 receipt`);
+          }
+          return {
+            ordinal,
+            textSha256: part.qwenReceipt.textSha256,
+            audioSha256,
+            byteLength: bytes.byteLength,
+            receipt: part.qwenReceipt,
+          };
+        }))
+      : [];
+    const sealedNarrationPerformanceEvidence = bindQwenProviderEvidence({
+      evidence: narrationPerformanceEvidence,
+      narrationKey,
+      narrationBytes,
+      narrationTranscriptText: text,
+      sourceChunks: qwenSourceChunks,
+      gaps,
+      mode: "sentence",
+    });
+    await putObject(narrationKey, narrationBytes, { contentType: "audio/mpeg" });
     await recordAsset(ctx, "narration", narrationKey, {
       durationSec,
       sentences: sentences.length,
@@ -1678,7 +1775,7 @@ export const narrationTts: Block = {
       narrationDurationSec: durationSec,
       narrationLocalPath: local,
       narrationTranscriptText: text,
-      narrationPerformanceEvidence: bindQwenProviderEvidence(narrationPerformanceEvidence),
+      narrationPerformanceEvidence: sealedNarrationPerformanceEvidence,
       sentenceTimings,
       // Declared in `produces`, so it must ALWAYS be returned — an empty plan
       // means "no chapter cards". (chapterCards:false channels hit the engine's
@@ -4912,6 +5009,42 @@ export const qaVisual: Block = {
               `qa_visual: narration transcript WER ${proof.assessment.wordErrorRate.toFixed(3)}, recall ${proof.assessment.lexicalRecall.toFixed(3)} ` +
               `(${proof.assessment.passed ? "passed" : "failed"})`,
             );
+            // Qwen verifies each returned sentence at synthesis time, but the
+            // published source is a newly assembled MP3. Re-read the durable
+            // object here and bind it to the typed source receipt before any
+            // final-master review can treat the narration as trustworthy.
+            if (narrationPerformance?.qwenProviderEvidence) {
+              if (!narrationKey) {
+                critical.push("Qwen3 narration source evidence cannot bind a missing narrationKey");
+              } else {
+                try {
+                  const retainedBytes = await getObjectBytes(narrationKey);
+                  const retainedSha256 = createHash("sha256").update(retainedBytes).digest("hex");
+                  if (retainedSha256 !== sourceSha256) {
+                    throw new Error("retained narration object differs from the locally transcript-proven source");
+                  }
+                  const qwenEvidence = assertQwenNarrationSourceBinding({
+                    evidence: narrationPerformance.qwenProviderEvidence,
+                    narrationKey,
+                    sourceAudio: retainedBytes,
+                    transcript: expectedNarrationText,
+                    durationSec: narrationPerformance.durationSec,
+                  });
+                  narrationPerformanceEvidence.push(
+                    `qwenNarrationSource=${qwenEvidence.source.sha256.slice(0, 16)}`,
+                    `qwenSourceRequests=${qwenEvidence.sourceRequestCount}`,
+                    `qwenPreflightRequests=${qwenEvidence.preflightRequestCount}`,
+                    `qwenReceipt=${qwenEvidence.receiptSha256.slice(0, 16)}`,
+                  );
+                  ctx.log(
+                    `qa_visual: Qwen3 retained narration source PASSED (${qwenEvidence.sourceRequestCount} source takes, ` +
+                    `${qwenEvidence.preflightRequestCount} preflight take${qwenEvidence.preflightRequestCount === 1 ? "" : "s"})`,
+                  );
+                } catch (error) {
+                  critical.push(`Qwen3 narration source evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+                }
+              }
+            }
             try {
               narrationCueTiming = assertNarrationCueTimingEvidence({
                 sentenceTimings: ctx.store["sentenceTimings"],
