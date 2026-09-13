@@ -60,6 +60,21 @@ function contractPreview(value: unknown, mode: Mode): { valid: boolean; count: n
   return { valid, count: entries.length };
 }
 
+function loadStoredTracking(): H3Tracking | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.localStorage.getItem(H3_TRACKING_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as Partial<H3Tracking>;
+    return typeof parsed.runId === "string" && typeof parsed.receiptKey === "string" &&
+      (parsed.provider === "salad" || parsed.provider === "novita")
+      ? { runId: parsed.runId, receiptKey: parsed.receiptKey, provider: parsed.provider }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function H3RenderConsole() {
   const access = useOperationsAccess();
   const requestOwner = useRequestOperationsAccess();
@@ -69,22 +84,8 @@ export function H3RenderConsole() {
   const [jobsJson, setJobsJson] = useState(weeklyExample);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [tracking, setTracking] = useState<H3Tracking | null>(null);
+  const [tracking, setTracking] = useState<H3Tracking | null>(() => loadStoredTracking());
   const [status, setStatus] = useState<H3Status | null>(null);
-
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem(H3_TRACKING_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<H3Tracking>;
-      if (typeof parsed.runId === "string" && typeof parsed.receiptKey === "string" &&
-          (parsed.provider === "salad" || parsed.provider === "novita")) {
-        setTracking({ runId: parsed.runId, receiptKey: parsed.receiptKey, provider: parsed.provider });
-      }
-    } catch {
-      // Browser storage is optional; the server-side receipt remains canonical.
-    }
-  }, []);
 
   useEffect(() => {
     try {
