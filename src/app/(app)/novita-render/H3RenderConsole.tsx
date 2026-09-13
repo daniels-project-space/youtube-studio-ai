@@ -13,6 +13,9 @@ type H3Status = {
   receipt: { kind: "weekly" | "on-demand"; requestCount: number; completedCount: number; totalCostUsd: number } | null;
 };
 
+const H3_TRACKING_STORAGE_KEY = "youtube-studio-ai:h3-render:tracking:v1";
+type H3Tracking = { runId: string; receiptKey: string; provider: "salad" | "novita" };
+
 const weeklyExample = JSON.stringify([
   {
     prompt: "Approved shot prompt",
@@ -66,8 +69,31 @@ export function H3RenderConsole() {
   const [jobsJson, setJobsJson] = useState(weeklyExample);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [tracking, setTracking] = useState<{ runId: string; receiptKey: string; provider: "salad" | "novita" } | null>(null);
+  const [tracking, setTracking] = useState<H3Tracking | null>(null);
   const [status, setStatus] = useState<H3Status | null>(null);
+
+  useEffect(() => {
+    try {
+      const raw = window.localStorage.getItem(H3_TRACKING_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as Partial<H3Tracking>;
+      if (typeof parsed.runId === "string" && typeof parsed.receiptKey === "string" &&
+          (parsed.provider === "salad" || parsed.provider === "novita")) {
+        setTracking({ runId: parsed.runId, receiptKey: parsed.receiptKey, provider: parsed.provider });
+      }
+    } catch {
+      // Browser storage is optional; the server-side receipt remains canonical.
+    }
+  }, []);
+
+  useEffect(() => {
+    try {
+      if (tracking) window.localStorage.setItem(H3_TRACKING_STORAGE_KEY, JSON.stringify(tracking));
+      else window.localStorage.removeItem(H3_TRACKING_STORAGE_KEY);
+    } catch {
+      // A storage-denied browser can still track the active run in memory.
+    }
+  }, [tracking]);
 
   const parsedPreview = useMemo(() => {
     try {
@@ -111,6 +137,12 @@ export function H3RenderConsole() {
   function changeMode(next: Mode) {
     setMode(next);
     setJobsJson(next === "weekly" ? weeklyExample : onDemandExample);
+    setStatus(null);
+    setError("");
+  }
+
+  function clearTracking() {
+    setTracking(null);
     setStatus(null);
     setError("");
   }
@@ -200,7 +232,7 @@ export function H3RenderConsole() {
         <section className={styles.progressCard} aria-live="polite" aria-label="H3 render progress">
           <div className={styles.progressHeader}><div><span className={styles.eyebrow}>Live progress · {tracking?.provider ?? provider}</span><strong>{status?.triggerStatus ?? "Queued"}</strong></div><b>{progressPercent}%</b></div>
           <div className={styles.progressTrack}><i style={{ width: `${progressPercent}%` }} /></div>
-          <div className={styles.progressMeta}><span>{tracking?.runId ?? ""}</span>{status?.receipt ? <span>{status.receipt.completedCount}/{status.receipt.requestCount} outputs · ${status.receipt.totalCostUsd.toFixed(4)}</span> : <span>Waiting for Trigger and R2 receipt</span>}</div>
+          <div className={styles.progressMeta}><span>{tracking?.runId ?? ""}</span>{status?.receipt ? <span>{status.receipt.completedCount}/{status.receipt.requestCount} outputs · ${status.receipt.totalCostUsd.toFixed(4)}</span> : <span>Waiting for Trigger and R2 receipt</span>}<button type="button" className={styles.clearButton} onClick={clearTracking}>Clear tracking</button></div>
           {status?.state === "reconciliation_required" && <strong className={styles.warn}>Provider run ended without a durable receipt. Reconcile before retrying.</strong>}
           {error && <strong className={styles.error}>{error}</strong>}
         </section>

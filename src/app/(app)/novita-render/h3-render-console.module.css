@@ -29,6 +29,7 @@
 .progressTrack { height: 8px; overflow: hidden; border-radius: 999px; background: rgba(255,255,255,.08); }
 .progressTrack i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #ff7d65, #8ce5ff); transition: width .35s ease; }
 .progressMeta { flex-wrap: wrap; }
+.clearButton { border: 0; background: transparent; color: var(--color-faint); font: inherit; font-size: .62rem; text-decoration: underline; cursor: pointer; }
 .warn { color: #ffc16e; font-size: .72rem; }
 .error { color: #ff9b9b; font-size: .72rem; }
 .locked { min-height: 240px; align-content: center; justify-items: start; }
