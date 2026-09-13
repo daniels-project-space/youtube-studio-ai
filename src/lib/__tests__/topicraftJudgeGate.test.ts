@@ -18,11 +18,10 @@
  *      log string inside topicraft itself. An ungated slate and a judged slate
  *      were identical to every consumer.
  *
- * It still fails open, deliberately: the bets have cleared a real deterministic
- * lint (cited evidence fuzzy-verified against the actual signals, banned words,
- * stale years, dedupe, title lint), and failing closed means a channel plans no
- * videos at all. What changed is that it can no longer be mistaken for a judged
- * slate — the result carries `ungated`, and both layers say so out loud.
+ * Production now fails closed after its bounded retry because the lint cannot
+ * prove demand, freshness, fit, or packageability. An explicitly draft-only
+ * preview may keep an `ungated` slate for inspection, never as a runnable
+ * plan.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -50,39 +49,43 @@ async function main(): Promise<void> {
       `quality gate is skipped more often than it runs.`,
   );
 
-  // ---- the fail-open must be marked, not silent ---------------------------
+  // ---- production cannot ship an unjudged slate ---------------------------
   assert.match(
     topicraft,
-    /ungatedByJudgeFailure = true;/,
-    "a judge failure must set the flag that marks the slate as unjudged",
-  );
-  assert.match(
-    topicraft,
-    /ungated: true/,
-    "the flag must reach the returned result, not just a local variable",
+    /topicQualityProfile\(a\)/,
+    "the actual engine must resolve an explicit production/draft policy profile",
   );
   assert.match(
     topicraft,
-    /JUDGE FAILED/,
-    "a skipped quality gate must be logged as a failure, not as a 'lint-only pass'",
-  );
-  // Both exit paths return a slate, so both must carry the flag.
-  assert.equal(
-    (topicraft.match(/\.\.\.\(ungatedByJudgeFailure \? \{ ungated: true \} : \{\}\)/g) ?? []).length,
-    2,
-    "both return paths must carry the ungated flag — one unmarked exit is the whole bug again",
+    /quality === "production"/,
+    "an unavailable Topicraft judge must follow the production refusal path",
   );
   assert.match(
-    code("src/lib/topicOptimizer.ts"),
-    /optimizeTopics: this slate was NOT quality-gated/,
-    "the caller must also surface an unjudged slate; a flag nobody reads is not a signal",
+    topicraft,
+    /production refuses/,
+    "production refusal must name its refusal rather than imply a passing gate",
+  );
+  assert.match(
+    topicraft,
+    /lint-only bet\(s\)/,
+    "production refusal must identify the unscored candidate class",
+  );
+  assert.match(
+    topicraft,
+    /draft preview retains/,
+    "only an explicit draft preview may retain the visible ungraded diagnostic",
+  );
+  assert.match(
+    topicraft,
+    /LINT-ONLY bet\(s\) with NO demand\/freshness\/fit\/packageability score/,
+    "the retained draft diagnostic must make its missing quality evidence explicit",
   );
 
   // ---- the judge gets one deliberate retry --------------------------------
   assert.match(
     topicraft,
     /retryOnUnusableOutput\(/,
-    "the judge must retry once on an unusable response before falling open",
+    "the judge must retry once on an unusable response before the next bounded slate attempt",
   );
 
   // ---- and that retry helper behaves -------------------------------------

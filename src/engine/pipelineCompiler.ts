@@ -564,7 +564,11 @@ export function completePipelineForPolicy(
   // smuggle a `qualityProfile: "draft"` override into a safety gate.
   const guardQualityProfile = generationProfileId === "draft" ? "draft" : "production";
   for (const entry of entries) {
-    if (entry.block !== "originality_gate" && entry.block !== "compliance_check") continue;
+    if (
+      entry.block !== "originality_gate" &&
+      entry.block !== "compliance_check" &&
+      entry.block !== "topic_select"
+    ) continue;
     entry.params = { ...(entry.params ?? {}), qualityProfile: guardQualityProfile };
   }
   return { entries, inserted, retired: [...new Set(retired)] };

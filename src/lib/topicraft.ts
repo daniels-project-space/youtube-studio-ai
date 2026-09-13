@@ -59,6 +59,7 @@ import { fetchNicheOutliers, type OutlierVideo } from "@/lib/outliers";
 import { fetchRedditTrends, type TrendSignal } from "@/lib/trends";
 import { embedText, cosine, hasEmbedKey } from "@/lib/embeddings";
 import { resolveVoiceDoctrine } from "@/engine/golden";
+import { qualityProfile, type QualityProfile } from "@/engine/qualityPolicy";
 
 // The complete topic-intel surface, re-exported for standalone consumers.
 export { fetchNicheOutliers, type OutlierVideo } from "@/lib/outliers";
@@ -192,6 +193,11 @@ export interface CraftTopicsArgs {
   clickbaitLevel?: number;
   /** Optional format envelope shared with metadata finishing; omitted derives from niche. */
   titleProfile?: TitleProfileId;
+  /**
+   * Production requires a completed demand/fit/packageability judgement. Only
+   * an explicitly draft preview may retain a visibly ungraded lint-only slate.
+   */
+  qualityProfile?: QualityProfile;
   /** Disable paid embedding fan-out when the caller supplies its own deterministic near-duplicate gate. */
   providerSemanticDedupe?: boolean;
   /** Durable fence invoked once, immediately before Topicraft enters a paid provider. */
@@ -205,13 +211,17 @@ export interface CraftedTopics {
   bench: TopicBet[];
   evidence: TopicEvidence;
   /**
-   * True when the judge could not be reached and bets were admitted on the
-   * deterministic lint alone — NOT scored on demand/freshness/fit/
-   * packageability. A caller must be able to tell an unjudged slate from a
-   * judged one; the per-bet `scores` field is optional, so its absence was
-   * indistinguishable from a bet that simply was not ranked.
+   * Present only for an explicit draft diagnostic when the judge is unavailable;
+   * production never returns an unjudged slate.
    */
   ungated?: boolean;
+}
+
+function topicQualityProfile(args: CraftTopicsArgs): QualityProfile {
+  // A standalone or legacy caller must not silently obtain draft semantics.
+  // Production is the conservative default; the designer/compiler explicitly
+  // supplies draft only for a non-runnable preview.
+  return qualityProfile(args.qualityProfile);
 }
 
 /* ------------------------------ helpers -------------------------------- */
@@ -576,6 +586,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
   const count = Math.max(1, a.count);
   const want = count + 4;
   const doctrine = resolveVoiceDoctrine(a.niche);
+  const quality = topicQualityProfile(a);
   const titleProfileId = resolveTitleProfile(a.titleProfile, {
     family: a.family,
     contentLane: a.contentLane,
@@ -785,23 +796,27 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
           scores: { demand: r.demand, freshness: r.freshness, fit: r.fit, packageability: r.packageability },
         }));
       } catch (e) {
-        // FAIL-OPEN, DELIBERATELY AND LOUDLY.
-        //
-        // This used to read "lint-only pass", which undersold it: when the
-        // judge is unreachable every lint-passing bet is admitted exactly as if
-        // it had scored >=7 on demand, freshness, fit and packageability. At the
-        // old 1500-token ceiling that happened on roughly two slates in three,
-        // and `scores` is read nowhere downstream, so an ungated slate was
-        // indistinguishable from a judged one everywhere it mattered.
-        //
-        // It still fails open rather than closed: the bets have cleared a real
-        // deterministic lint (cited evidence fuzzy-verified against the actual
-        // signals, banned words, stale years, dedupe, title lint), and a hard
-        // failure here means a channel plans no videos at all. But it must be
-        // impossible to mistake for a judged slate.
+        const detail = e instanceof Error ? e.message : String(e);
+        if (quality === "production") {
+          // A Topicraft bet becomes the title, hook, thumbnail promise and
+          // script seed. Deterministic lint validates structure and cited text,
+          // not demand, freshness, fit or packageability; production cannot
+          // relabel its absence as a passed quality judgement. Let the bounded
+          // next-slate repair run once, then fail the planning stage honestly.
+          lastIssues.push(`topic judge unavailable: ${detail.slice(0, 160)}`);
+          fixNote = "THE TOPIC JUDGE DID NOT RETURN A VALID RANKING. Regenerate the complete slate with valid JSON; do not ship unscored bets.";
+          log(
+            `topicraft: JUDGE FAILED (${detail}) — production refuses ${survivors.length} ` +
+            `lint-only bet(s); demand/freshness/fit/packageability were never scored.`,
+          );
+          continue;
+        }
+        // Draft previews may still expose a structurally valid, visibly
+        // ungraded slate so an operator can inspect the candidate concepts
+        // without confusing that diagnostic surface for a runnable plan.
         ungatedByJudgeFailure = true;
         log(
-          `topicraft: JUDGE FAILED (${e instanceof Error ? e.message : e}) — admitting ${survivors.length} ` +
+          `topicraft: JUDGE FAILED (${detail}) — draft preview retains ${survivors.length} ` +
           `LINT-ONLY bet(s) with NO demand/freshness/fit/packageability score. This slate is not quality-gated.`,
         );
         gated = survivors;

@@ -30,7 +30,7 @@ const TIER_CARRYING_BLOCKS = [
 ] as const;
 
 /** Guard quality follows the selected generation tier but is not a renderer setting. */
-const PROFILE_BOUND_GUARD_BLOCKS = ["originality_gate", "compliance_check"] as const;
+const PROFILE_BOUND_GUARD_BLOCKS = ["originality_gate", "compliance_check", "topic_select"] as const;
 
 const ALL_FAMILIES = Object.keys(FAMILIES) as FamilyKey[];
 

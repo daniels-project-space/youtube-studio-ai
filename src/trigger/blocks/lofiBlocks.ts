@@ -1140,6 +1140,7 @@ export const topicSelect: Block = {
       competitorTitles,
       outliers,
       programDirective,
+      qualityProfile: ctx.params["qualityProfile"] === "draft" ? "draft" : "production",
       log: ctx.log,
     });
     const bet = crafted.bets[0];
