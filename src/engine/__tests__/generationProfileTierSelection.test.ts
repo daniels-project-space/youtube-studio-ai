@@ -5,7 +5,8 @@
  * but every design-time call site used to hardcode the literal "production", so
  * draft and hero were unreachable from channel configuration. `DesignOptions
  * .generationProfile` (and the matching `completePipelineForPolicy` option) make
- * the tier selectable.
+ * the tier selectable. The same policy profile is stamped onto guard gates so
+ * a draft preview cannot claim a production safety review.
  *
  * The load-bearing property is that this is PURE PLUMBING: no channel sets the
  * new field today, and an absent field must reproduce the previous hardcoded
@@ -28,6 +29,9 @@ const TIER_CARRYING_BLOCKS = [
   "story_spine",
 ] as const;
 
+/** Guard quality follows the selected generation tier but is not a renderer setting. */
+const PROFILE_BOUND_GUARD_BLOCKS = ["originality_gate", "compliance_check"] as const;
+
 const ALL_FAMILIES = Object.keys(FAMILIES) as FamilyKey[];
 
 function tierParams(pipeline: readonly PipelineEntry[]): [string, unknown][] {
@@ -36,12 +40,15 @@ function tierParams(pipeline: readonly PipelineEntry[]): [string, unknown][] {
     .map((entry) => [entry.block, entry.params?.["generationProfile"]]);
 }
 
-/** The pipeline with every tier value blanked — everything the tier must NOT affect. */
+/** The pipeline with tier-bound values blanked — everything the tier must NOT affect. */
 function withoutTiers(pipeline: readonly PipelineEntry[]): unknown {
   return pipeline.map((entry) => {
-    if (!(TIER_CARRYING_BLOCKS as readonly string[]).includes(entry.block)) return entry;
+    const isRendererTier = (TIER_CARRYING_BLOCKS as readonly string[]).includes(entry.block);
+    const isGuardProfile = (PROFILE_BOUND_GUARD_BLOCKS as readonly string[]).includes(entry.block);
+    if (!isRendererTier && !isGuardProfile) return entry;
     const params = { ...(entry.params ?? {}) };
-    if ("generationProfile" in params) params.generationProfile = "<tier>";
+    if (isRendererTier && "generationProfile" in params) params.generationProfile = "<tier>";
+    if (isGuardProfile && "qualityProfile" in params) params.qualityProfile = "<guard-tier>";
     return { block: entry.block, params };
   });
 }

@@ -16,8 +16,13 @@
  * claim beyond the retained lexical corpus it actually measured.
  */
 import type { Block, StageContext } from "@/engine/types";
+import { qualityProfile, type QualityProfile } from "@/engine/qualityPolicy";
 import { putObject, getObjectBytes } from "@/lib/storage";
-import { claudeJson, hasAnthropicKey, retryOnUnusableOutput } from "@/lib/anthropic";
+import {
+  creativeTextJson,
+  hasCreativeTextKey,
+  OpenRouterGenerationOutcomeUnknownError,
+} from "@/lib/creativeText";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -199,18 +204,113 @@ function str(ctx: StageContext, key: string): string {
 }
 
 /**
+ * Only the policy compiler can label a run production. Raw historical/direct
+ * entries with no explicit profile remain draft diagnostics, never a false
+ * claim that an unconfigured local probe received a production safety review.
+ */
+function complianceQualityProfile(ctx: StageContext): QualityProfile {
+  return ctx.params["qualityProfile"] === undefined
+    ? "draft"
+    : qualityProfile(ctx.params["qualityProfile"]);
+}
+
+class ComplianceVerdictSchemaError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ComplianceVerdictSchemaError";
+  }
+}
+
+function assertSpokenLineVerdict(value: unknown): { violation: boolean; category: string; reason: string } {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ComplianceVerdictSchemaError("spoken-line safety classifier returned a non-object verdict");
+  }
+  const row = value as Record<string, unknown>;
+  if (typeof row["violation"] !== "boolean") {
+    throw new ComplianceVerdictSchemaError("spoken-line safety classifier returned an invalid violation flag");
+  }
+  if (typeof row["category"] !== "string" || typeof row["reason"] !== "string") {
+    throw new ComplianceVerdictSchemaError("spoken-line safety classifier returned an incomplete verdict");
+  }
+  return { violation: row["violation"], category: row["category"], reason: row["reason"] };
+}
+
+function assertTopicClassifierVerdict(value: unknown): {
+  sensitive: boolean;
+  depictsRealPeopleRealistically: boolean;
+  reason: string;
+} {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new ComplianceVerdictSchemaError("topic compliance classifier returned a non-object verdict");
+  }
+  const row = value as Record<string, unknown>;
+  if (
+    typeof row["sensitive"] !== "boolean" ||
+    typeof row["depictsRealPeopleRealistically"] !== "boolean" ||
+    typeof row["reason"] !== "string"
+  ) {
+    throw new ComplianceVerdictSchemaError("topic compliance classifier returned an incomplete verdict");
+  }
+  return {
+    sensitive: row["sensitive"],
+    depictsRealPeopleRealistically: row["depictsRealPeopleRealistically"],
+    reason: row["reason"],
+  };
+}
+
+/**
+ * One deliberate retry covers either a completed-but-unparseable OpenRouter
+ * response or a JSON-shaped response that violates the safety schema. An
+ * ambiguous post-dispatch outcome remains non-replayable: a second request
+ * could buy the same judgement twice without a provider receipt to reconcile.
+ */
+async function retryValidatedComplianceVerdict<T>(args: {
+  call: () => Promise<unknown>;
+  parse: (value: unknown) => T;
+  onRetry: (reason: string) => void;
+}): Promise<T> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return args.parse(await args.call());
+    } catch (error) {
+      if (error instanceof OpenRouterGenerationOutcomeUnknownError && error.outcome === "unknown") {
+        throw error;
+      }
+      const deliberatelyRetryable =
+        error instanceof ComplianceVerdictSchemaError ||
+        (error instanceof OpenRouterGenerationOutcomeUnknownError && error.outcome === "consumed_unusable");
+      if (!deliberatelyRetryable || attempt === 1) throw error;
+      args.onRetry(error.message);
+    }
+  }
+  throw new Error("compliance verdict retry loop exhausted unexpectedly");
+}
+
+/**
  * SPOKEN-LINE compliance — the pre-engine compliance_check only sees the TOPIC;
  * the actual narration/dialogue the self-scripting engines write (comic, sleep,
  * whiteboard) was never policy-scanned. A benign topic ("Spartacus's revolt")
  * can still yield lines that glorify violence, give real-world harm instructions,
  * or otherwise risk advertiser-hostility/demonetization. This scans the words
- * that will actually be SPOKEN and hard-fails clear violations. Degrades to a
- * pass without a model key (the topic-level gate already ran).
+ * that will actually be SPOKEN and hard-fails clear violations. A compiled
+ * production route also fails closed if the required classifier cannot run;
+ * only an explicitly draft diagnostic may retain the unavailable-state log.
  */
-async function scanSpokenLines(text: string, log: (m: string) => void): Promise<void> {
-  if (!hasAnthropicKey()) return;
+async function scanSpokenLines(
+  text: string,
+  profile: QualityProfile,
+  log: (m: string) => void,
+): Promise<void> {
+  if (!hasCreativeTextKey()) {
+    if (profile === "production") {
+      throw new Error("originality_gate FAILED: production spoken-line safety scan requires the configured OpenRouter creative-text provider");
+    }
+    log("originality_gate: SPOKEN-LINE SAFETY SCAN DID NOT RUN — draft diagnostic has no configured OpenRouter provider");
+    return;
+  }
   try {
-    const out = await retryOnUnusableOutput(() => claudeJson<{ violation?: boolean; category?: string; reason?: string }>({
+    const out = await retryValidatedComplianceVerdict({
+      call: () => creativeTextJson<unknown>({
       prompt:
         `You are a YouTube advertiser-safety reviewer reading the SPOKEN NARRATION of a faceless video. ` +
         `Flag ONLY clear policy violations in the words themselves: glorification/encouragement of violence or ` +
@@ -230,13 +330,17 @@ async function scanSpokenLines(text: string, log: (m: string) => void): Promise<
       //   clearly violating narration  @200 -> 0/2, the call threw both times
       //                                @800 and @1500 -> 2/2 violation=true
       //
-      // and a thrown call lands in the catch below, which logs "skipped
-      // (non-fatal)" and lets the video through. The scan worked whenever there
-      // was nothing to find and failed whenever there was.
+      // Before the production-profile repair, a thrown call landed in a
+      // diagnostic-only catch and let the video through. The scan therefore
+      // worked whenever there was nothing to find and failed whenever there
+      // was; production now rejects that unavailable state.
       maxTokens: 1500,
       temperature: 0.1,
-    }), () => log("originality_gate: safety scan returned unusable text — re-scanning once"));
-    if (out.violation === true) {
+      }),
+      parse: assertSpokenLineVerdict,
+      onRetry: (reason) => log(`originality_gate: safety scan returned unusable or malformed verdict — re-scanning once (${reason})`),
+    });
+    if (out.violation) {
       throw new Error(
         `spoken-line compliance FAILED: ${out.category || "policy"} — ${out.reason || "the narration violates advertiser-safety policy"} (refusing to auto-publish)`,
       );
@@ -245,9 +349,13 @@ async function scanSpokenLines(text: string, log: (m: string) => void): Promise<
   } catch (e) {
     // A thrown compliance failure must propagate; a model/parse error must not.
     if (e instanceof Error && e.message.startsWith("spoken-line compliance FAILED")) throw e;
-    // Still non-fatal — a provider outage must not block every publish — but it
-    // is a SAFETY SCAN THAT DID NOT RUN, not a routine skip, and the log has to
-    // say which of those it is.
+    if (profile === "production") {
+      throw new Error(
+        `originality_gate FAILED: production spoken-line safety scan is unavailable — refusing an unscanned narration (${e instanceof Error ? e.message : e})`,
+      );
+    }
+    // Draft diagnostics retain their explicit unavailable state, rather than
+    // borrowing a production safety claim from a provider call that did not run.
     log(`originality_gate: SPOKEN-LINE SAFETY SCAN DID NOT RUN — this narration was never checked for advertiser-safety violations: ${e instanceof Error ? e.message : e}`);
   }
 }
@@ -347,7 +455,7 @@ export const originalityGate: Block = {
   run: async (ctx) => {
     const text = str(ctx, "narrationText");
     // Policy-scan the ACTUAL spoken lines (the pre-engine gate saw only the topic).
-    await scanSpokenLines(text, (m) => ctx.log(m));
+    await scanSpokenLines(text, complianceQualityProfile(ctx), (m) => ctx.log(m));
     return runLocalScriptSelfDedup(ctx);
   },
 };
@@ -359,28 +467,29 @@ export const complianceCheck: Block = {
   run: async (ctx) => {
     const topic = str(ctx, "topic");
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
-    if (!hasAnthropicKey()) {
+    const profile = complianceQualityProfile(ctx);
+    if (!hasCreativeTextKey()) {
       // The SAME failure as the catch below — the classifier did not run — and it
       // was silent here while that one is loud. Both flags default to false, so
       // the hard gate (sensitive && synthRealistic) cannot fire and no synthetic
       // -content disclosure is noted; a reader of the run log has to be able to
       // tell that from a genuine "nothing to declare".
-      ctx.log(
+      const reason =
         "compliance_check: CLASSIFIER DID NOT RUN — no model credential; sensitive-topic and " +
-          "synthetic-depiction flags stay false by default, so neither the manual-review gate " +
-          "nor the disclosure note can fire",
-      );
+        "synthetic-depiction flags stay false by default, so neither the manual-review gate " +
+        "nor the disclosure note can fire";
+      if (profile === "production") {
+        throw new Error(`compliance_check FAILED: production topic classifier requires the configured OpenRouter creative-text provider (${reason})`);
+      }
+      ctx.log(reason);
       return { disclosureRequired: false, sensitiveTopic: false, complianceNote: "" };
     }
     let sensitive = false;
     let synthRealistic = false;
     let reason = "";
     try {
-      const out = await retryOnUnusableOutput(() => claudeJson<{
-        sensitive?: boolean;
-        depictsRealPeopleRealistically?: boolean;
-        reason?: string;
-      }>({
+      const out = await retryValidatedComplianceVerdict({
+        call: () => creativeTextJson<unknown>({
         prompt:
           `Classify a faceless, AI-generated YouTube video about "${topic}"${niche ? ` (${niche})` : ""}. ` +
           `It uses an AI voiceover, stock/generative B-roll, and real public-domain photos of historical figures.\n` +
@@ -394,11 +503,19 @@ export const complianceCheck: Block = {
         // one has to justify itself in `reason`.
         maxTokens: 1500,
         temperature: 0.1,
-      }), () => ctx.log("compliance_check: classifier returned unusable text — re-classifying once"));
-      sensitive = out.sensitive === true;
-      synthRealistic = out.depictsRealPeopleRealistically === true;
-      reason = out.reason ?? "";
+        }),
+        parse: assertTopicClassifierVerdict,
+        onRetry: (reason) => ctx.log(`compliance_check: classifier returned unusable or malformed verdict — re-classifying once (${reason})`),
+      });
+      sensitive = out.sensitive;
+      synthRealistic = out.depictsRealPeopleRealistically;
+      reason = out.reason;
     } catch (e) {
+      if (profile === "production") {
+        throw new Error(
+          `compliance_check FAILED: production topic classifier is unavailable — refusing an unscanned topic (${e instanceof Error ? e.message : e})`,
+        );
+      }
       ctx.log(`compliance_check: CLASSIFIER DID NOT RUN — sensitive-topic and synthetic-depiction flags stay false by default, so neither the manual-review gate nor the disclosure note can fire: ${e instanceof Error ? e.message : e}`);
     }
 

@@ -27,9 +27,9 @@
  * means the hard gate (sensitive && synthRealistic) cannot fire and no
  * synthetic-content disclosure note is produced.
  *
- * Both still fail OPEN — a provider outage must not block every publish — but a
- * safety scan that did not run must say so in those words, not as a routine
- * skip. That is what this test pins, alongside the measured ceiling.
+ * Explicitly draft diagnostics may retain their unavailable-state log, but the
+ * compiled production profile now fails closed. This test pins the measured
+ * ceiling and the unmistakable unavailable-state wording.
  */
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
@@ -56,12 +56,13 @@ function main(): void {
       `A safety gate must not be cheapest exactly when it should fire.`,
   );
 
-  // Both scans get one deliberate retry before giving up. Safety is worth a
-  // second billed call.
+  // Both scans get one deliberate retry before giving up, including a
+  // JSON-shaped response that fails the required verdict schema. Safety is
+  // worth one accountable second billed call, not an unbounded replay.
   assert.equal(
-    (CODE.match(/retryOnUnusableOutput\(/g) ?? []).length,
+    (CODE.match(/retryValidatedComplianceVerdict\(/g) ?? []).length,
     2,
-    "both compliance scans must retry once on an unusable response",
+    "both compliance scans must retry once on an unusable or malformed response",
   );
 
   // A scan that did not run must be reported as that, not as a routine skip.

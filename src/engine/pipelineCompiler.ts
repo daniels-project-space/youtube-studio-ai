@@ -553,6 +553,20 @@ export function completePipelineForPolicy(
     }
     inserted.push(moduleId);
   }
+
+  // Guard gates are part of the production contract, not an advisory provider
+  // call which an old pipeline may quietly skip. Do this after capability
+  // completion: legacy flows can acquire compliance_check above, and it must
+  // receive the same profile on the first upgrade (not only on a second pass).
+  // This single normalisation boundary is crossed by fresh design,
+  // persisted-channel upgrade, and Trigger invocation before the run is
+  // frozen. A draft probe remains explicit; a production/hero route cannot
+  // smuggle a `qualityProfile: "draft"` override into a safety gate.
+  const guardQualityProfile = generationProfileId === "draft" ? "draft" : "production";
+  for (const entry of entries) {
+    if (entry.block !== "originality_gate" && entry.block !== "compliance_check") continue;
+    entry.params = { ...(entry.params ?? {}), qualityProfile: guardQualityProfile };
+  }
   return { entries, inserted, retired: [...new Set(retired)] };
 }
 
