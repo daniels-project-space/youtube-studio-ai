@@ -46,6 +46,14 @@ const MINIMAX_H3_SALAD_RESOURCES: Omit<SaladResources, "gpu_classes"> = Object.f
   storage_amount: 100 * 1024 ** 3,
 });
 
+/** Canonical sibling for a weekly H3 receipt's pre-spend request packet. */
+export function miniMaxH3WeeklyRequestPacketKey(receiptKey: string): string {
+  if (typeof receiptKey !== "string" || !receiptKey.endsWith(".json")) {
+    throw new MiniMaxH3Error("weekly MiniMax H3 receipt key must end in .json");
+  }
+  return receiptKey.slice(0, -".json".length) + ".request.json";
+}
+
 export interface MiniMaxH3SaladCapacityClient {
   listGpuClasses(): Promise<SaladGpuClass[]>;
   getGpuAvailability(resources: SaladResources, countryCodes?: string[]): Promise<{

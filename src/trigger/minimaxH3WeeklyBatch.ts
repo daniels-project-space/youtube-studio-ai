@@ -10,6 +10,7 @@ import {
   MINIMAX_H3_RUNTIME_ID,
   MINIMAX_H3_PROFILE,
   assertMiniMaxH3SaladCapacity,
+  miniMaxH3WeeklyRequestPacketKey,
   miniMaxH3RequestKey,
   renderMiniMaxH3WeeklyBatch,
   type MiniMaxH3Receipt,
@@ -199,12 +200,6 @@ export type PersistedWeeklyRequestPacket = {
   jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
   createdAt: number;
 };
-
-/** Stable companion object that freezes the exact pre-spend weekly order. */
-export function miniMaxH3WeeklyRequestPacketKey(receiptKey: string): string {
-  if (!receiptKey.endsWith(".json")) throw new Error("weekly MiniMax H3 receipt key must end in .json");
-  return receiptKey.slice(0, -".json".length) + ".request.json";
-}
 
 export function createMiniMaxH3WeeklyRequestPacket(args: {
   orderKey: string;

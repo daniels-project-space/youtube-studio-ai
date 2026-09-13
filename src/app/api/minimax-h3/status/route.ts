@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { runs } from "@trigger.dev/sdk";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { getObjectBytes } from "@/lib/storage";
+import { miniMaxH3WeeklyRequestPacketKey } from "@/lib/minimaxH3";
 
 export const runtime = "nodejs";
 
@@ -31,10 +32,6 @@ type ReceiptSummary = {
 };
 
 type RequestPacketState = "frozen" | "missing" | "invalid" | "not-applicable";
-
-function weeklyRequestPacketKey(receiptKey: string): string {
-  return receiptKey.slice(0, -".json".length) + ".request.json";
-}
 
 function validWeeklyRequestPacket(value: unknown): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
@@ -123,7 +120,7 @@ export async function GET(request: Request) {
       receiptState = "complete";
       if (receipt.kind === "weekly") {
         try {
-          const packet = JSON.parse(new TextDecoder().decode(await getObjectBytes(weeklyRequestPacketKey(receiptKey))));
+          const packet = JSON.parse(new TextDecoder().decode(await getObjectBytes(miniMaxH3WeeklyRequestPacketKey(receiptKey))));
           requestPacketState = validWeeklyRequestPacket(packet) ? "frozen" : "invalid";
         } catch (packetError) {
           if (!notFound(packetError)) requestPacketState = "invalid";
@@ -137,7 +134,7 @@ export async function GET(request: Request) {
       // A weekly request packet is intentionally visible before its receipt;
       // an on-demand run has no sibling packet and remains not-applicable.
       try {
-        const packet = JSON.parse(new TextDecoder().decode(await getObjectBytes(weeklyRequestPacketKey(receiptKey))));
+        const packet = JSON.parse(new TextDecoder().decode(await getObjectBytes(miniMaxH3WeeklyRequestPacketKey(receiptKey))));
         requestPacketState = validWeeklyRequestPacket(packet) ? "frozen" : "invalid";
       } catch (packetError) {
         if (!notFound(packetError)) requestPacketState = "invalid";

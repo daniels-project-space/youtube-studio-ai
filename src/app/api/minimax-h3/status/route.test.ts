@@ -8,7 +8,7 @@ assert.match(source, /ownerReceiptKey/);
 assert.match(source, /startsWith\(`owner\/\$\{ownerId\}\/`\)/);
 assert.match(source, /runs\.retrieve\(runId\)/);
 assert.match(source, /getObjectBytes\(receiptKey\)/);
-assert.match(source, /weeklyRequestPacketKey/);
+assert.match(source, /miniMaxH3WeeklyRequestPacketKey/);
 assert.match(source, /requestPacketState/);
 assert.match(source, /minimax-h3-weekly-request\/v1/);
 assert.match(source, /reconciliation_required/);

@@ -2,8 +2,8 @@ import assert from "node:assert/strict";
 import {
   assertMiniMaxH3WeeklyBatchArgs,
   createMiniMaxH3WeeklyRequestPacket,
-  miniMaxH3WeeklyRequestPacketKey,
 } from "@/trigger/minimaxH3WeeklyBatch";
+import { miniMaxH3WeeklyRequestPacketKey } from "@/lib/minimaxH3";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
