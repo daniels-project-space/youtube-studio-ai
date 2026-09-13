@@ -29,6 +29,11 @@ assert.match(page, /setVisibleLimit\(LIBRARY_PAGE_SIZE\)/,
 assert.match(page, /catch \(error\)[\s\S]*setChangeError/,
   "archive and restore failures must become visible operator errors");
 assert.match(page, /role="alert"/);
+assert.match(page, /LIBRARY_LOADING_TIMEOUT_MS = 8_000/,
+  "an unavailable Convex read must leave the skeleton and explain the reconnect action");
+assert.match(page, /loading && loadingTimedOut \? \(/,
+  "the Library must have a bounded unavailable state instead of an indefinite skeleton");
+assert.match(page, /Refresh to reconnect to saved masters\./);
 assert.match(css, /\.libraryDashboard/);
 assert.match(css, /\.libraryMetrics/);
 assert.match(css, /\.vault \{/);

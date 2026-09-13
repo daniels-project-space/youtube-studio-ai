@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
@@ -30,6 +30,7 @@ import styles from "./library.module.css";
 type LightboxTarget = { index: number };
 type CollectionMode = "active" | "archived";
 type LibrarySummary = { activeCount: number; archivedCount: number; totalCount: number };
+const LIBRARY_LOADING_TIMEOUT_MS = 8_000;
 export default function LibraryPage() {
   const ownerId = useOwnerId();
   const { selectedSlug } = useSelectedChannel();
@@ -58,6 +59,7 @@ export default function LibraryPage() {
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
   const [recentChange, setRecentChange] = useState<{ video: VideoRow; state: CollectionMode } | null>(null);
   const [changeError, setChangeError] = useState<string | null>(null);
+  const [loadingTimedOut, setLoadingTimedOut] = useState(false);
   // ERNIE was kept only as sealed comparison evidence. The Library always
   // projects the retained source or a run-bound current candidate; it must
   // never promote a frozen experimental batch as the visible replacement.
@@ -105,6 +107,16 @@ export default function LibraryPage() {
   };
 
   const loading = libraryVideos === undefined || channels === undefined || summary === undefined;
+  useEffect(() => {
+    if (!loading) {
+      const reset = window.setTimeout(() => setLoadingTimedOut(false), 0);
+      return () => window.clearTimeout(reset);
+    }
+    const timer = window.setTimeout(() => {
+      setLoadingTimedOut(true);
+    }, LIBRARY_LOADING_TIMEOUT_MS);
+    return () => window.clearTimeout(timer);
+  }, [loading]);
   const activeCount = summary?.activeCount ?? 0;
   const archivedCount = summary?.archivedCount ?? 0;
 
@@ -211,8 +223,14 @@ export default function LibraryPage() {
         />
       )}
 
-      {loading ? (
+      {loading && !loadingTimedOut ? (
         <SkeletonList rows={4} />
+      ) : loading && loadingTimedOut ? (
+        <EmptyState
+          title="Library data unavailable"
+          description="Refresh to reconnect to saved masters."
+          icon={<IconLibrary width={24} height={24} />}
+        />
       ) : filtered.length === 0 ? (
         <EmptyState
           title={collection === "active" ? "No active masters" : "Archive is empty"}
