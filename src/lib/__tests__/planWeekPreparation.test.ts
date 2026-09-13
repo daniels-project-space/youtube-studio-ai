@@ -1,15 +1,20 @@
 import assert from "node:assert/strict";
 
+import { canonicalJson } from "@/lib/canonicalJson";
 import {
   assertPlanWeekPreparationManifestBinding,
+  assertPlanWeekPreparedScriptBinding,
   PLAN_WEEK_PREPARATION_VERSION,
+  PLAN_WEEK_PREPARED_SCRIPT_VERSION,
   planWeekPreparationPrompt,
   planWeekPreparationKey,
   planWeekPreparationManifestSha256,
+  planWeekPreparedScriptKey,
   planWeekThumbnailKey,
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
 import { PLAN_WEEK_CONTRACT_VERSION } from "@/lib/planWeekContract";
+import { sha256Hex } from "@/lib/sha256";
 import {
   claimPlanItem,
   completeDeferredFramePlanItem,
@@ -71,6 +76,11 @@ assert.equal(
   `owner/${ownerId}/channel/${channelSlug}/plan/${itemId}.jpg`,
   "thumbnail destinations use the same canonical owner/channel/item namespace",
 );
+assert.equal(
+  planWeekPreparedScriptKey({ ownerId, channelSlug, batchId, itemId }),
+  `owner/${ownerId}/channel/${channelSlug}/plan-batches/${batchId}/items/${itemId}/preparation/prepared/script.json`,
+  "prepared scripts share the same canonical owner/channel/batch/item namespace",
+);
 for (const malformed of [
   { ownerId: "owner/other", channelSlug, itemId },
   { ownerId, channelSlug: "history\\..\\other", itemId },
@@ -89,6 +99,79 @@ assert.throws(
 );
 
 assert.equal(pointer.manifestSha256.length, 64);
+const preparedScript = {
+  version: PLAN_WEEK_PREPARED_SCRIPT_VERSION,
+  manifestSha256: pointer.manifestSha256,
+  ownerId,
+  channelId,
+  batchId,
+  itemId,
+  requestKey,
+  topic: manifest.plan.topic,
+  script: {
+    hook: "The old lock was never meant to open.",
+    sections: [{ heading: "The mechanism", narration: "One missing pin changed the kingdom.", role: "outro" as const }],
+    narrationText: "The old lock was never meant to open. One missing pin changed the kingdom.",
+    estDurationSec: 14,
+    programRouteFingerprint: "a".repeat(64),
+    crafted: {
+      hook: "The old lock was never meant to open.",
+      opening: "One missing pin changed the kingdom.",
+      coldOpen: "The old lock was never meant to open. One missing pin changed the kingdom.",
+      device: "wrong_way",
+      loop: "Reveal why the missing pin changed the kingdom.",
+      verdict: {
+        punch: 9,
+        specificity: 9,
+        curiosity: 9,
+        voiceMatch: 9,
+        promise: 9,
+        honest: true,
+        judged: true,
+        factCheck: "verified" as const,
+        lint: {
+          pass: true,
+          firstSentenceWords: 9,
+          estHookSeconds: 4,
+          hookSentences: 1,
+          openingWords: 8,
+          bannedHits: [],
+          issues: [],
+        },
+      },
+    },
+  },
+  scriptSha256: "",
+  createdAt: Date.now() - 500,
+};
+preparedScript.scriptSha256 = sha256Hex(canonicalJson(preparedScript.script));
+const admittedPreparedScript = assertPlanWeekPreparedScriptBinding({ prepared: preparedScript, manifest });
+assert.equal(
+  admittedPreparedScript.script.narrationText,
+  preparedScript.script.narrationText,
+  "a prepared script is bound to its exact frozen weekly item before scheduled execution can reuse it",
+);
+assert.equal(
+  admittedPreparedScript.script.crafted?.verdict.factCheck,
+  "verified",
+  "the exact judged hook receipt survives weekly preparation rather than invalidating a normal script_gen result",
+);
+assert.throws(
+  () => assertPlanWeekPreparedScriptBinding({
+    prepared: { ...preparedScript, topic: "A foreign episode" },
+    manifest,
+  }),
+  /binding mismatch/,
+  "a prepared script cannot cross from one weekly episode topic into another",
+);
+assert.throws(
+  () => assertPlanWeekPreparedScriptBinding({
+    prepared: { ...preparedScript, scriptSha256: "b".repeat(64) },
+    manifest,
+  }),
+  /binding mismatch/,
+  "a receipt cannot name a different script than the one it carries",
+);
 assert.equal(
   planWeekPreparationPrompt(manifest, "narration"),
   manifest.prompts.narration,

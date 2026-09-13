@@ -84,7 +84,10 @@ import {
 } from "@/lib/scheduledPlanRuntime";
 import {
   assertPlanWeekPreparationManifestBinding,
+  assertPlanWeekPreparedScriptBinding,
+  planWeekPreparedScriptKey,
   type PlanWeekPreparationManifest,
+  type PlanWeekPreparedScript,
 } from "@/lib/planWeekPreparation";
 import {
   assertFreshPipelineInvocationRouteAdmission,
@@ -1207,6 +1210,7 @@ export const runPipelineTask = task({
     let narrativeSeriesAdmission: NarrativeSeriesRunAdmission | undefined;
     let frozenModuleConfig: Record<string, Record<string, unknown>> | undefined;
     let weeklyPreparation: PlanWeekPreparationManifest | undefined;
+    let weeklyPreparedScript: PlanWeekPreparedScript | undefined;
 
     try {
       // A selected narrative horizon is a route-owned serial planner. It must
@@ -1280,13 +1284,35 @@ export const runPipelineTask = task({
             thumbnailKey: scheduledPlan.thumbnailKey,
             thumbnailSource: scheduledPlan.thumbnailSource,
           });
+          const preparedScriptKey = planWeekPreparedScriptKey(weeklyPreparation);
+          let rawPreparedScript: unknown | undefined;
+          try {
+            rawPreparedScript = JSON.parse(new TextDecoder().decode(
+              await getObjectBytes(preparedScriptKey),
+            ));
+          } catch (error) {
+            const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+            const name = (error as { name?: string }).name;
+            if (status !== 404 && name !== "NoSuchKey" && name !== "NotFound") {
+              throw new Error(
+                `scheduled plan prepared script is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+          if (rawPreparedScript !== undefined) {
+            weeklyPreparedScript = assertPlanWeekPreparedScriptBinding({
+              prepared: rawPreparedScript,
+              manifest: weeklyPreparation,
+            });
+          }
           if (durableInvocation === undefined) {
             entries = structuredClone(weeklyPreparation.execution.pipeline) as PipelineEntry[];
             frozenModuleConfig = structuredClone(weeklyPreparation.execution.moduleConfig);
           }
           log(
             `scheduled plan preparation verified: ${scheduledPlan.preparation.manifestSha256.slice(0, 12)} ` +
-              `(frozen ${new Date(weeklyPreparation.frozenAt).toISOString()})`,
+              `(frozen ${new Date(weeklyPreparation.frozenAt).toISOString()}; ` +
+              `${weeklyPreparedScript ? "prepared script admitted" : "script pending"})`,
           );
         }
         log(
@@ -1762,6 +1788,13 @@ export const runPipelineTask = task({
               ...scheduledPlan.preparation,
               prompts: structuredClone(weeklyPreparation.prompts),
             },
+            // `typeof` intentionally keeps this seed-selection fragment
+            // standalone-testable: real execution always declares the local
+            // receipt above, while the compiler's isolated caller audit
+            // extracts this block without its surrounding declarations.
+            ...(typeof weeklyPreparedScript !== "undefined" && weeklyPreparedScript
+              ? { preparedScript: structuredClone(weeklyPreparedScript.script) }
+              : {}),
           };
         }
         if (payload.reuse) {

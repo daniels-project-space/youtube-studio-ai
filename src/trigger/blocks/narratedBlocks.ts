@@ -686,6 +686,43 @@ export const scriptGen: Block = {
       ctx.store["planWeekPreparation"],
       "script",
     );
+    // A week-ahead script sidecar is admitted by runPipeline against the
+    // immutable plan manifest before it reaches this store. Unlike a
+    // render-group sibling, it is already authored for THIS episode and must
+    // be used verbatim—translation or a new creative-text call would both
+    // destroy the point of preparing it ahead of the scheduled render.
+    const preparedScript = ctx.store["preparedScript"] as Script | undefined;
+    if (preparedScript !== undefined) {
+      if (
+        !preparedScript || typeof preparedScript !== "object" ||
+        !Array.isArray(preparedScript.sections) ||
+        typeof preparedScript.hook !== "string" ||
+        typeof preparedScript.narrationText !== "string" ||
+        typeof preparedScript.estDurationSec !== "number"
+      ) {
+        throw new Error("script_gen: prepared weekly script is invalid");
+      }
+      if (programRoute && preparedScript.programRouteFingerprint !== programRoute.routeFingerprint) {
+        throw new Error("script_gen: prepared weekly script does not match the frozen channel program route");
+      }
+      if (!programRoute && preparedScript.programRouteFingerprint !== undefined) {
+        throw new Error("script_gen: route-bound prepared weekly script cannot run without its frozen program route");
+      }
+      if (
+        serializedEpisodeContext &&
+        preparedScript.serializedProgramEpisodeContextFingerprint !== serializedEpisodeContext.fingerprint
+      ) {
+        throw new Error("script_gen: prepared weekly script does not match the immutable serialized episode context");
+      }
+      if (
+        !serializedEpisodeContext &&
+        preparedScript.serializedProgramEpisodeContextFingerprint !== undefined
+      ) {
+        throw new Error("script_gen: serialized-episode-bound prepared weekly script cannot run without its immutable context");
+      }
+      ctx.log(`script_gen: consumed prepared weekly script (${preparedScript.sections.length} sections; no text-generation spend)`);
+      return { script: preparedScript, narrationText: preparedScript.narrationText };
+    }
     // RENDER-GROUP REUSE: a language sibling translates the base script instead of
     // regenerating it (reuses the base's structure + research; only words change).
     const reuseScript = ctx.store["reuseScript"] as Script | undefined;

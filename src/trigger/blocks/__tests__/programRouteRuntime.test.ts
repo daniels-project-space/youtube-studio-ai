@@ -382,6 +382,40 @@ async function reusedScriptsRetainTheirRouteBinding(): Promise<void> {
   );
 }
 
+async function preparedWeeklyScriptsSkipCreativeTextGeneration(): Promise<void> {
+  const preparedScript = {
+    hook: "The archive was designed to stay shut.",
+    sections: [{ heading: "The hinge", narration: "One overlooked hinge changed the whole record." }],
+    narrationText: "The archive was designed to stay shut. One overlooked hinge changed the whole record.",
+    estDurationSec: 12,
+    programRouteFingerprint: narratedSeed.routeFingerprint,
+  };
+  const result = await scriptGen(stageContext({
+    // Deliberately no creative-text key/provider stub: the admitted sidecar
+    // must return verbatim rather than fall through to generation or the
+    // render-group translation path.
+    params: { language: "es" },
+    store: {
+      channelProgramRoute: narratedSeed,
+      topic: "How one hinge rewrote the archive",
+      preparedScript,
+    },
+  }));
+  assert.equal(result.script, preparedScript, "the prepared weekly script is retained verbatim");
+  assert.equal(result.narrationText, preparedScript.narrationText);
+  await assert.rejects(
+    scriptGen(stageContext({
+      store: {
+        channelProgramRoute: narratedSeed,
+        topic: "How one hinge rewrote the archive",
+        preparedScript: { ...preparedScript, programRouteFingerprint: "b".repeat(64) },
+      },
+    })),
+    /prepared weekly script does not match the frozen channel program route/,
+    "a prepared weekly script cannot cross into a different program route",
+  );
+}
+
 async function documentaryScriptsUseOnlyTheReviewedEpisodePlan(): Promise<void> {
   const documentaryBrief = brief({
     family: "documentary_collage_short",
@@ -477,6 +511,20 @@ async function serializedReuseRequiresTheExactEpisodeReceipt(): Promise<void> {
     ...reuseScript,
     serializedProgramEpisodeContextFingerprint: serializedNarratedContext.fingerprint,
   };
+  const prepared = await scriptGen(stageContext({
+    params: { language: "es" },
+    store: {
+      channelProgramRoute: serializedNarratedSeed,
+      topic: serializedNarratedTopic,
+      serializedProgramEpisodeContext: serializedNarratedContext,
+      preparedScript: exactReuse,
+    },
+  }));
+  assert.equal(
+    prepared.script,
+    exactReuse,
+    "a week-ahead script with the exact serialized episode receipt remains verbatim rather than translating or regenerating",
+  );
   const reused = await scriptGen(stageContext({
     params: { language: "en" },
     store: {
@@ -684,6 +732,7 @@ async function main(): Promise<void> {
   await topicFastPathsStayInsideTheSealedRoute();
   serializedBusyIsRetryableWithoutProviderFallback();
   await reusedScriptsRetainTheirRouteBinding();
+  await preparedWeeklyScriptsSkipCreativeTextGeneration();
   await documentaryScriptsUseOnlyTheReviewedEpisodePlan();
   await serializedReuseRequiresTheExactEpisodeReceipt();
   await quizBlocksUseTheRouteOwnedProfile();
