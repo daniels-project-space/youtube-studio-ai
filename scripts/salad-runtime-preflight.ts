@@ -3,7 +3,15 @@ import { createHash } from "node:crypto";
 import { loadEnvConfig } from "@next/env";
 import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/client-s3";
 import { bootstrapSecrets } from "../src/lib/bootstrap";
-import { saladCloudClientFromVault, saladOccupiedGpuSlots, selectSaladGpu, type SaladGpuModel } from "../src/lib/saladCloud";
+import {
+  SALAD_HIGH_FALLBACK_PRIORITY,
+  saladCloudClientFromVault,
+  saladOccupiedGpuSlots,
+  selectSaladGpu,
+  selectSaladGpuAtPriority,
+  type SaladBulkPriority,
+  type SaladGpuModel,
+} from "../src/lib/saladCloud";
 
 const bucket = "salad-render-infra";
 const specs = [
@@ -43,7 +51,27 @@ async function main() {
   for (const spec of specs) {
     const blockers = [...spec.qualifications];
     const key = `${spec.prefix}/immutable-manifest.json`;
-    const gpu = selectSaladGpu(gpuClasses, spec.gpu);
+    // Keep the read-only probe aligned with the paid H3 route: medium is the
+    // normal tier, while high is considered only when medium cannot admit the
+    // exact class. Other routes stay medium-only so the preflight never hides
+    // a cost/priority policy change.
+    let gpu: ReturnType<typeof selectSaladGpu> | null = null;
+    let selectedPriority: SaladBulkPriority | null = null;
+    try {
+      gpu = selectSaladGpu(gpuClasses, spec.gpu);
+      selectedPriority = gpu.priority;
+    } catch {
+      if (spec.route === "minimax-h3-turbo8-5090") {
+        try {
+          gpu = selectSaladGpuAtPriority(gpuClasses, spec.gpu, SALAD_HIGH_FALLBACK_PRIORITY);
+          selectedPriority = gpu.priority;
+        } catch {
+          blockers.push("exact_priced_gpu_class_unavailable_at_medium_or_high");
+        }
+      } else {
+        blockers.push("exact_medium_priority_gpu_class_unavailable");
+      }
+    }
     let manifestVerified = false;
     let modelFiles = 0;
     let modelBytes = 0;
@@ -73,16 +101,27 @@ async function main() {
     const imagePinned = !!image && /^[a-z0-9][a-z0-9./_-]+@sha256:[a-f0-9]{64}$/.test(image);
     if (!imagePinned) blockers.push("digest_pinned_worker_image_not_configured");
     else blockers.push("worker_registry_digest_and_runtime_receipt_not_verified");
-    const availability = await salad.getGpuAvailability({
-      cpu: spec.cpu, memory: spec.memoryMb, storage_amount: spec.storageGiB * 1024 ** 3, gpu_classes: [gpu.id],
-    }, spec.countryCodes);
+    const availability = gpu
+      ? await salad.getGpuAvailability({
+        cpu: spec.cpu, memory: spec.memoryMb, storage_amount: spec.storageGiB * 1024 ** 3, gpu_classes: [gpu.id],
+      }, spec.countryCodes)
+      : { available_gpu_medium: 0, available_gpu_high: 0 };
     const availableMediumGpus = availability.available_gpu_medium ?? 0;
     const availableHighGpus = availability.available_gpu_high ?? 0;
-    if (availableMediumGpus < 1) {
-      blockers.push(spec.route === "minimax-h3-turbo8-5090" && availableHighGpus >= 1
-        ? "exact_medium_priority_gpu_capacity_unavailable_high_fallback_available"
-        : "exact_medium_priority_gpu_capacity_unavailable");
+    if (availableMediumGpus < 1 && selectedPriority === "medium" && spec.route === "minimax-h3-turbo8-5090" && availableHighGpus >= 1) {
+      // Capacity, not just pricing, determines the effective route. The
+      // worker performs the same promotion before dispatching a paid job.
+      try {
+        gpu = selectSaladGpuAtPriority(gpuClasses, spec.gpu, SALAD_HIGH_FALLBACK_PRIORITY);
+        selectedPriority = gpu.priority;
+      } catch {
+        blockers.push("exact_high_priority_gpu_price_unavailable_for_fallback");
+      }
     }
+    if (availableMediumGpus < 1 && selectedPriority !== "high") {
+      blockers.push("exact_medium_priority_gpu_capacity_unavailable");
+    }
+    if (selectedPriority === "high" && availableHighGpus < 1) blockers.push("exact_high_priority_gpu_capacity_unavailable");
     if (occupiedGpuSlots >= 3) blockers.push("global_three_gpu_capacity_full");
     if (quotas.container_groups_quotas.container_replicas_quota <= quotas.container_groups_quotas.container_replicas_used) blockers.push("salad_organization_replica_quota_full");
     reports.push({ route: spec.route, readyForPaidDispatch: false, modelInventory: {
@@ -91,7 +130,8 @@ async function main() {
     }, imagePinned, gpu, resources: { cpu: spec.cpu, memoryMb: spec.memoryMb, storageGiB: spec.storageGiB, countryCodes: spec.countryCodes },
     availableMediumGpus: availability.available_gpu_medium ?? null,
     availableHighGpus: availability.available_gpu_high ?? null,
-    highPriorityFallback: spec.route === "minimax-h3-turbo8-5090" && availableHighGpus >= 1,
+    selectedPriority,
+    highPriorityFallback: selectedPriority === "high" && availableHighGpus >= 1,
     blockers });
   }
   reports.push({ route: "qwen3-tts-3090", readyForPaidDispatch: false,
