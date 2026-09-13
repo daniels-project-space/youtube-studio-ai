@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { assertMiniMaxH3WeeklyBatchArgs } from "@/trigger/minimaxH3WeeklyBatch";
+import {
+  assertMiniMaxH3WeeklyBatchArgs,
+  createMiniMaxH3WeeklyRequestPacket,
+  miniMaxH3WeeklyRequestPacketKey,
+} from "@/trigger/minimaxH3WeeklyBatch";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
@@ -14,6 +18,16 @@ const valid = {
   }],
 };
 assert.equal(assertMiniMaxH3WeeklyBatchArgs(valid).orderKey, valid.orderKey);
+assert.equal(
+  miniMaxH3WeeklyRequestPacketKey(valid.receiptKey),
+  "owner/a/plan-batches/week-20260913/h3/receipt.request.json",
+  "the pre-spend packet must have a deterministic sibling key",
+);
+assert.deepEqual(
+  createMiniMaxH3WeeklyRequestPacket({ ...valid, requestKeys: ["request-1"], createdAt: 1234 }),
+  { schema: "minimax-h3-weekly-request/v1", orderKey: valid.orderKey, requestKeys: ["request-1"], jobs: valid.jobs, createdAt: 1234 },
+  "the frozen packet must retain the exact ordered jobs and request identities",
+);
 assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, receiptKey: "../receipt.json" }), /receipt key/);
 assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, jobs: [{ ...valid.jobs[0], output: { r2Key: "other/path.mp4" } }] }), /owner-scoped/);
 assert.throws(() => assertMiniMaxH3WeeklyBatchArgs({ ...valid, jobs: [{ ...valid.jobs[0], firstFrame: { ...valid.jobs[0].firstFrame, r2Key: "owner/../frame.png" } }] }), /first-frame/);

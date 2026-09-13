@@ -192,6 +192,83 @@ type PersistedWeeklyReceipt = {
   createdAt: number;
 };
 
+export type PersistedWeeklyRequestPacket = {
+  schema: "minimax-h3-weekly-request/v1";
+  orderKey: string;
+  requestKeys: string[];
+  jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
+  createdAt: number;
+};
+
+/** Stable companion object that freezes the exact pre-spend weekly order. */
+export function miniMaxH3WeeklyRequestPacketKey(receiptKey: string): string {
+  if (!receiptKey.endsWith(".json")) throw new Error("weekly MiniMax H3 receipt key must end in .json");
+  return receiptKey.slice(0, -".json".length) + ".request.json";
+}
+
+export function createMiniMaxH3WeeklyRequestPacket(args: {
+  orderKey: string;
+  requestKeys: readonly string[];
+  jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
+  createdAt?: number;
+}): PersistedWeeklyRequestPacket {
+  const createdAt = args.createdAt ?? Date.now();
+  if (!Number.isSafeInteger(createdAt) || createdAt <= 0) throw new Error("weekly MiniMax H3 request packet timestamp is invalid");
+  return {
+    schema: "minimax-h3-weekly-request/v1",
+    orderKey: args.orderKey,
+    requestKeys: [...args.requestKeys],
+    jobs: structuredClone(args.jobs),
+    createdAt,
+  };
+}
+
+function sameWeeklyRequestPacket(
+  packet: PersistedWeeklyRequestPacket,
+  expected: { orderKey: string; requestKeys: readonly string[]; jobs: MiniMaxH3WeeklyBatchArgs["jobs"] },
+): boolean {
+  return packet.schema === "minimax-h3-weekly-request/v1" &&
+    packet.orderKey === expected.orderKey &&
+    canonicalJson(packet.requestKeys) === canonicalJson(expected.requestKeys) &&
+    canonicalJson(packet.jobs) === canonicalJson(expected.jobs) &&
+    Number.isSafeInteger(packet.createdAt) && packet.createdAt > 0;
+}
+
+/** Persist and re-read the request packet; never overwrite a competing order. */
+async function persistWeeklyRequestPacket(args: {
+  receiptKey: string;
+  orderKey: string;
+  requestKeys: readonly string[];
+  jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
+}): Promise<string> {
+  const key = miniMaxH3WeeklyRequestPacketKey(args.receiptKey);
+  const body = canonicalJson(createMiniMaxH3WeeklyRequestPacket({
+    orderKey: args.orderKey,
+    requestKeys: args.requestKeys,
+    jobs: args.jobs,
+  }));
+  try {
+    await putObject(key, body, {
+      contentType: "application/json",
+      metadata: { "h3-weekly-request": "v1", "h3-weekly-request-sha256": sha256Hex(body) },
+      ifNoneMatch: "*",
+    });
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    if (status !== 409 && status !== 412) throw error;
+  }
+  let persisted: PersistedWeeklyRequestPacket;
+  try {
+    persisted = JSON.parse(Buffer.from(await getObjectBytes(key)).toString("utf8")) as PersistedWeeklyRequestPacket;
+  } catch (error) {
+    throw new Error(`weekly MiniMax H3 request packet is unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!sameWeeklyRequestPacket(persisted, args)) {
+    throw new Error("weekly MiniMax H3 request packet is bound to a different order");
+  }
+  return key;
+}
+
 /** Build the immutable weekly receipt without dropping per-shot provenance. */
 export function createMiniMaxH3WeeklyReceipt(
   orderKey: string,
@@ -492,6 +569,12 @@ export const minimaxH3WeeklyBatchTask = task({
     // URL must not be mistaken for three currently available desktop 5090s.
     // This runs only for a new paid order; receipt reconciliation remains
     // available even if capacity changes after the original dispatch.
+    const requestPacketKey = await persistWeeklyRequestPacket({
+      receiptKey: payload.receiptKey,
+      orderKey: payload.orderKey,
+      requestKeys,
+      jobs: payload.jobs,
+    });
     await assertMiniMaxH3SaladCapacity(payload.jobs.length);
     if (payload.preparedFootage) {
       // Preflight every input before the first worker request; a later bad
@@ -536,6 +619,7 @@ export const minimaxH3WeeklyBatchTask = task({
     return {
       receiptKey: payload.receiptKey,
       ...receipt,
+      requestPacketKey,
       ...(preparedFootageKey ? { preparedFootageKey } : {}),
     };
   },
