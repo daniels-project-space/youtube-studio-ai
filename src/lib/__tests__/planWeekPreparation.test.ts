@@ -19,6 +19,7 @@ import {
   planWeekPreparedNarrationKey,
   planWeekPreparedMusicAudioKey,
   planWeekPreparedFootageClipKey,
+  planWeekPreparedH3FirstFrameKey,
   planWeekPreparedFootageKey,
   planWeekPreparedMusicKey,
   planWeekPreparedMusicNativeWavKey,
@@ -30,6 +31,12 @@ import {
 } from "@/lib/planWeekPreparation";
 import { PLAN_WEEK_CONTRACT_VERSION } from "@/lib/planWeekContract";
 import { sha256Hex } from "@/lib/sha256";
+import {
+  MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_PROFILE,
+  MINIMAX_H3_RUNTIME_ID,
+  miniMaxH3RequestKey,
+} from "@/lib/minimaxH3";
 import { createChannelMusicProgram } from "@/engine/channelMusicProgram";
 import {
   claimPlanItem,
@@ -191,6 +198,87 @@ assert.equal(
   admittedPreparedScript.script.narrationText,
   preparedScript.script.narrationText,
   "a prepared script is bound to its exact frozen weekly item before scheduled execution can reuse it",
+);
+const h3NativeDurationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+const h3ClipKey = planWeekPreparedFootageClipKey({ ownerId, channelSlug, batchId, itemId, index: 0 });
+const h3FirstFrameKey = planWeekPreparedH3FirstFrameKey({ ownerId, channelSlug, batchId, itemId, index: 0 });
+const h3Job = {
+  sceneId: "shot-1",
+  prompt: "A quiet archival room, dust in a shaft of light, no text.",
+  seed: 812,
+  firstFrame: { r2Key: h3FirstFrameKey, sha256: "2".repeat(64) },
+  output: { r2Key: h3ClipKey },
+  maxCostUsd: 0.4,
+  requestKey: "",
+};
+h3Job.requestKey = miniMaxH3RequestKey({
+  provider: "salad",
+  execution: "weekly-batch",
+  prompt: h3Job.prompt,
+  seed: h3Job.seed,
+  firstFrame: h3Job.firstFrame,
+  output: h3Job.output,
+  maxCostUsd: h3Job.maxCostUsd,
+});
+const h3Prepared = {
+  version: PLAN_WEEK_PREPARED_FOOTAGE_VERSION,
+  manifestSha256: pointer.manifestSha256,
+  ownerId,
+  channelId,
+  batchId,
+  itemId,
+  requestKey,
+  topic: manifest.plan.topic,
+  generatedFootageSceneManifest: {
+    version: "generated-footage-scene-manifest/v1" as const,
+    source: "story_spine" as const,
+    exactOrder: true as const,
+    durationSec: h3NativeDurationSec,
+    items: [{ sceneId: "shot-1", clipKey: h3ClipKey }],
+  },
+  clips: [{ r2Key: h3ClipKey, sha256: "3".repeat(64), byteLength: 8_192, durationSec: h3NativeDurationSec }],
+  renderer: {
+    kind: "minimax-h3" as const,
+    provider: "salad" as const,
+    execution: "weekly-batch" as const,
+    runtimeId: MINIMAX_H3_RUNTIME_ID,
+    profileId: MINIMAX_H3_PROFILE.id,
+    modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
+  },
+  h3Jobs: [h3Job],
+  h3Receipts: [{
+    schema: "minimax-h3-worker/v1" as const,
+    requestKey: h3Job.requestKey,
+    jobId: "h3-job-1",
+    execution: "weekly-batch" as const,
+    profile: MINIMAX_H3_PROFILE,
+    promptSha256: sha256Hex(h3Job.prompt),
+    seed: h3Job.seed,
+    firstFrame: h3Job.firstFrame,
+    output: { r2Key: h3ClipKey, contentSha256: "3".repeat(64), byteLength: 8_192, contentType: "video/mp4" as const },
+    runtime: {
+      provider: "salad" as const,
+      gpuModel: "RTX 5090" as const,
+      runtimeId: MINIMAX_H3_RUNTIME_ID,
+      modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
+      capacityMode: "medium" as const,
+      costUsd: 0.25,
+    },
+  }],
+  createdAt: Date.now() - 50,
+};
+assert.equal(
+  assertPlanWeekPreparedFootageBinding({ prepared: h3Prepared, manifest }).renderer?.kind,
+  "minimax-h3",
+  "prepared H3 footage binds an explicit renderer instead of masquerading as an LTX receipt",
+);
+assert.throws(
+  () => assertPlanWeekPreparedFootageBinding({
+    prepared: { ...h3Prepared, clips: [{ ...h3Prepared.clips[0], durationSec: 5 }] },
+    manifest,
+  }),
+  /native H3|duration|H3 clip/i,
+  "an H3 prepared receipt rejects a non-native clip duration before reuse",
 );
 assert.equal(
   admittedPreparedScript.script.crafted?.verdict.factCheck,

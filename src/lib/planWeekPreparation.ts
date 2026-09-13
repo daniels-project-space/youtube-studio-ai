@@ -18,6 +18,16 @@ import {
   GeneratedFootageSceneManifestSchema,
   type GeneratedFootageSceneManifest,
 } from "@/engine/generatedFootageManifest";
+import {
+  MINIMAX_H3_WORKER_CONTRACT,
+  MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_PROFILE,
+  MINIMAX_H3_RUNTIME_ID,
+  miniMaxH3RequestKey,
+  type MiniMaxH3Receipt,
+  type MiniMaxH3Provider,
+  type MiniMaxH3Execution,
+} from "@/lib/minimaxH3";
 
 /**
  * The provider-free first stage of weekly batch preparation.  It is deliberately
@@ -175,7 +185,31 @@ export interface PlanWeekPreparedFootage {
     byteLength: number;
     durationSec: number;
   }>;
-  ltxStyleId: string;
+  /** Legacy field retained only for v1 LTX receipts; H3 receipts omit it. */
+  ltxStyleId?: string;
+  /** Explicit renderer identity prevents an H3 receipt being mistaken for LTX. */
+  renderer?:
+    | { kind: "ltx"; styleId: string }
+    | {
+        kind: "minimax-h3";
+        provider: MiniMaxH3Provider;
+        execution: MiniMaxH3Execution;
+        runtimeId: typeof MINIMAX_H3_RUNTIME_ID;
+        profileId: typeof MINIMAX_H3_PROFILE.id;
+        modelManifestSha256: typeof MINIMAX_H3_MANIFEST_SHA256;
+      };
+  /** H3's exact first-frame/input identity for each ordered scene. */
+  h3Jobs?: Array<{
+    sceneId: string;
+    prompt: string;
+    seed: number;
+    firstFrame: { r2Key: string; sha256: string };
+    output: { r2Key: string };
+    maxCostUsd: number;
+    requestKey: string;
+  }>;
+  /** Worker receipts bind runtime, output bytes, and actual cost per scene. */
+  h3Receipts?: MiniMaxH3Receipt[];
   createdAt: number;
 }
 
@@ -344,6 +378,20 @@ export function planWeekPreparedFootageClipKey(args: {
     throw new Error("plan-week preparation footage clip index is invalid");
   }
   return `${planWeekPreparationPrefix(args)}/prepared/footage/clip-${String(args.index + 1).padStart(4, "0")}.mp4`;
+}
+
+/** Canonical H3 first-frame input for a prepared weekly footage item. */
+export function planWeekPreparedH3FirstFrameKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+  index: number;
+}): string {
+  if (!Number.isSafeInteger(args.index) || args.index < 0 || args.index >= 2_000) {
+    throw new Error("plan-week preparation H3 first-frame index is invalid");
+  }
+  return `${planWeekPreparationPrefix(args)}/prepared/h3/first-frame-${String(args.index + 1).padStart(4, "0")}.png`;
 }
 
 function planWeekPreparationPrefix(args: {
@@ -862,8 +910,98 @@ export function assertPlanWeekPreparedFootageBinding(args: {
     }
     return { r2Key, sha256, byteLength, durationSec };
   });
-  const ltxStyleId = requiredText(prepared.ltxStyleId, "prepared footage LTX style id");
-  if (ltxStyleId.length > 160) throw new Error("plan-week prepared footage LTX style id is invalid");
+  const rawRenderer = prepared.renderer;
+  let renderer: PlanWeekPreparedFootage["renderer"];
+  let ltxStyleId: string | undefined;
+  if (rawRenderer === undefined) {
+    ltxStyleId = requiredText(prepared.ltxStyleId, "prepared footage LTX style id");
+    if (ltxStyleId.length > 160) throw new Error("plan-week prepared footage LTX style id is invalid");
+    renderer = { kind: "ltx", styleId: ltxStyleId };
+  } else {
+    const rendererRecord = requiredRecord(rawRenderer, "prepared footage renderer");
+    if (rendererRecord.kind !== "minimax-h3") {
+      throw new Error("prepared footage renderer must be the explicit minimax-h3 contract");
+    }
+    if (
+      rendererRecord.provider !== "salad" && rendererRecord.provider !== "novita" ||
+      rendererRecord.execution !== "weekly-batch" && rendererRecord.execution !== "on-demand" ||
+      (rendererRecord.provider === "salad") !== (rendererRecord.execution === "weekly-batch") ||
+      rendererRecord.runtimeId !== MINIMAX_H3_RUNTIME_ID ||
+      rendererRecord.profileId !== MINIMAX_H3_PROFILE.id ||
+      rendererRecord.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256
+    ) {
+      throw new Error("prepared footage H3 renderer binding is invalid");
+    }
+    renderer = {
+      kind: "minimax-h3",
+      provider: rendererRecord.provider as MiniMaxH3Provider,
+      execution: rendererRecord.execution as MiniMaxH3Execution,
+      runtimeId: MINIMAX_H3_RUNTIME_ID,
+      profileId: MINIMAX_H3_PROFILE.id,
+      modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
+    };
+    const rawJobs = prepared.h3Jobs;
+    const rawReceipts = prepared.h3Receipts;
+    if (!Array.isArray(rawJobs) || rawJobs.length !== clips.length || !Array.isArray(rawReceipts) || rawReceipts.length !== clips.length) {
+      throw new Error("prepared footage H3 jobs and receipts must match the ordered clip count");
+    }
+    const nativeDurationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+    for (let index = 0; index < clips.length; index++) {
+      const clip = clips[index]!;
+      if (Math.abs(clip.durationSec - nativeDurationSec) > 0.08) {
+        throw new Error("prepared footage H3 clip duration must match the native H3 profile");
+      }
+      const item = generatedFootageSceneManifest.items[index];
+      const job = requiredRecord(rawJobs[index], `prepared H3 job ${index + 1}`);
+      const firstFrame = requiredRecord(job.firstFrame, `prepared H3 job ${index + 1} first frame`);
+      const output = requiredRecord(job.output, `prepared H3 job ${index + 1} output`);
+      const prompt = requiredText(job.prompt, `prepared H3 job ${index + 1} prompt`);
+      const seed = Number(job.seed);
+      const maxCostUsd = Number(job.maxCostUsd);
+      const firstFrameKey = requiredText(firstFrame.r2Key, `prepared H3 job ${index + 1} first-frame key`);
+      const firstFrameSha256 = requiredText(firstFrame.sha256, `prepared H3 job ${index + 1} first-frame digest`).toLowerCase();
+      const outputKey = requiredText(output.r2Key, `prepared H3 job ${index + 1} output key`);
+      const requestKey = requiredText(job.requestKey, `prepared H3 job ${index + 1} request key`);
+      if (
+        !item || job.sceneId !== item.sceneId ||
+        firstFrameKey !== planWeekPreparedH3FirstFrameKey({ ...scope, index }) ||
+        !/^[a-f0-9]{64}$/.test(firstFrameSha256) ||
+        outputKey !== clip.r2Key ||
+        !Number.isInteger(seed) || seed < 0 || seed > 2_147_483_647 ||
+        !Number.isFinite(maxCostUsd) || maxCostUsd < 0 || maxCostUsd > 100 ||
+        requestKey !== miniMaxH3RequestKey({
+          provider: renderer.provider,
+          execution: renderer.execution,
+          prompt,
+          seed,
+          firstFrame: { r2Key: firstFrameKey, sha256: firstFrameSha256 },
+          output: { r2Key: outputKey },
+          maxCostUsd,
+        })
+      ) {
+        throw new Error("prepared footage H3 job binding mismatch");
+      }
+      const receipt = requiredRecord(rawReceipts[index], `prepared H3 receipt ${index + 1}`);
+      const receiptOutput = requiredRecord(receipt.output, `prepared H3 receipt ${index + 1} output`);
+      const receiptRuntime = requiredRecord(receipt.runtime, `prepared H3 receipt ${index + 1} runtime`);
+      if (
+        receipt.schema !== MINIMAX_H3_WORKER_CONTRACT ||
+        receipt.requestKey !== requestKey ||
+        receipt.execution !== renderer.execution ||
+        receiptOutput.r2Key !== outputKey ||
+        receiptOutput.contentSha256 !== clip.sha256 ||
+        Number(receiptOutput.byteLength) !== clip.byteLength ||
+        receiptRuntime.provider !== renderer.provider ||
+        receiptRuntime.gpuModel !== "RTX 5090" ||
+        receiptRuntime.runtimeId !== MINIMAX_H3_RUNTIME_ID ||
+        receiptRuntime.modelManifestSha256 !== MINIMAX_H3_MANIFEST_SHA256 ||
+        receiptRuntime.capacityMode !== "medium" && receiptRuntime.capacityMode !== "spot" ||
+        canonicalJson(receipt.profile) !== canonicalJson(MINIMAX_H3_PROFILE)
+      ) {
+        throw new Error("prepared footage H3 receipt binding mismatch");
+      }
+    }
+  }
   const normalized: PlanWeekPreparedFootage = {
     version: PLAN_WEEK_PREPARED_FOOTAGE_VERSION,
     manifestSha256,
@@ -875,7 +1013,10 @@ export function assertPlanWeekPreparedFootageBinding(args: {
     topic: requiredText(prepared.topic, "prepared footage topic"),
     generatedFootageSceneManifest,
     clips,
-    ltxStyleId,
+    ...(ltxStyleId ? { ltxStyleId } : {}),
+    ...(renderer ? { renderer } : {}),
+    ...(Array.isArray(prepared.h3Jobs) ? { h3Jobs: prepared.h3Jobs as PlanWeekPreparedFootage["h3Jobs"] } : {}),
+    ...(Array.isArray(prepared.h3Receipts) ? { h3Receipts: prepared.h3Receipts as MiniMaxH3Receipt[] } : {}),
     createdAt,
   };
   if (

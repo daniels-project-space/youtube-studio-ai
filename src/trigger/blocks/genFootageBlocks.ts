@@ -673,7 +673,7 @@ export const genFootage: Block = {
       } | null | undefined,
     });
     ctx.log(
-      `gen_footage: LTX treatment ${ltxStyleSelection.styleId} (${ltxStyleSelection.source})` +
+      `gen_footage: visual treatment ${ltxStyleSelection.styleId} (${ltxStyleSelection.source})` +
       (ltxStyleSelection.matchedSignals.length
         ? ` from ${ltxStyleSelection.matchedSignals.length} sealed channel-identity signal(s)`
         : ""),
@@ -717,6 +717,56 @@ export const genFootage: Block = {
         throw new Error("gen_footage: prepared weekly footage is invalid");
       }
       const preparedManifest = preparedFootage.generatedFootageSceneManifest;
+      if (preparedFootage.renderer?.kind === "minimax-h3") {
+        const nativeDurationSec = 124 / 24;
+        const timingMatches = scenes.length === preparedFootage.clips.length && scenes.every((scene, index) => {
+          const clip = preparedFootage.clips[index];
+          const authoredDuration = plan.source === "cinematic_case_sequence"
+            ? ((scene.t1 ?? 0) - (scene.t0 ?? 0))
+            : scene.durationSec;
+          return Boolean(clip) && Math.abs(authoredDuration - nativeDurationSec) <= 0.08 &&
+            Math.abs(clip.durationSec - nativeDurationSec) <= 0.08;
+        });
+        if (
+          !timingMatches ||
+          preparedManifest.source !== plan.source ||
+          preparedManifest.sequenceFingerprint !== plan.sequenceFingerprint ||
+          preparedManifest.items.length !== scenes.length
+        ) {
+          throw new Error("gen_footage: prepared H3 footage does not match the native 5.17s scene plan");
+        }
+        const preparedTmp = await makeRunTempDir(`${ctx.runId}-prepared-h3-footage`);
+        const footageClips = await pool(preparedFootage.clips, 4, async (clip, index) => {
+          const bytes = await getObjectBytes(clip.r2Key);
+          if (bytes.byteLength !== clip.byteLength || sha256BytesHex(bytes) !== clip.sha256) {
+            throw new Error(`gen_footage: prepared H3 clip ${index + 1} bytes do not match its immutable receipt`);
+          }
+          const local = await writeBytes(join(preparedTmp, `clip_${index + 1}.mp4`), bytes);
+          const measured = await probe(local);
+          if (!measured.hasVideo || !Number.isFinite(measured.durationSec) || Math.abs(measured.durationSec - nativeDurationSec) > 0.08) {
+            throw new Error(`gen_footage: prepared H3 clip ${index + 1} failed native duration verification`);
+          }
+          return local;
+        });
+        ctx.log(
+          `gen_footage: consumed ${footageClips.length} prepared MiniMax H3 clip(s) ` +
+          "after receipt, hash, and native-duration verification (no provider spend)",
+        );
+        return {
+          footageClips,
+          footageKeys: preparedFootage.clips.map((clip) => clip.r2Key),
+          generatedFootageSceneManifest: preparedManifest,
+          footageOnScreenTextCues: footageOnScreenTextCues(scenes.map((scene) => ({
+            sceneId: scene.id,
+            durationSec: scene.durationSec,
+          }))),
+          // This field is a visual-treatment style ABI used by downstream
+          // editor code; the explicit renderer identity lives on the receipt.
+          ltxStyleId: ltxStyleSelection.styleId,
+          ltxStyleSelection,
+          [COST_PATCH_KEY]: 0,
+        };
+      }
       const expectedDurationSec = plan.source === "cinematic_case_sequence"
         ? (scenes.at(-1)?.t1 ?? 0)
         : scenes.reduce((total, scene) => total + scene.durationSec, 0);

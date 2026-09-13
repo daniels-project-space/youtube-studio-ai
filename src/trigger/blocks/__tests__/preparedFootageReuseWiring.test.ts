@@ -10,6 +10,8 @@ const prepared = footage.indexOf('const preparedFootage = ctx.store["preparedFoo
 const visionGate = footage.indexOf("if (hasCinematicSequence && !hasNonGoogleVisionKey())");
 
 assert.ok(prepared >= 0, "gen_footage must recognize runner-admitted prepared footage");
+assert.ok(footage.includes('preparedFootage.renderer?.kind === "minimax-h3"'),
+  "prepared H3 footage must have an explicit renderer branch");
 assert.ok(visionGate > prepared, "verified prepared footage must be reusable before a new vision/provider route is required");
 for (const required of [
   "preparedManifest.source !== plan.source",
@@ -21,6 +23,8 @@ for (const required of [
   "prepared weekly clip ${index + 1} video duration",
   "generatedFootageSceneManifest: preparedManifest",
   "no Novita spend",
+  "native 5.17s scene plan",
+  "prepared MiniMax H3 clip(s)",
 ] as const) {
   assert.ok(footage.includes(required), `prepared footage must retain ${required}`);
 }
