@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { checkpointCostReceiptId, observeCheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { planWeekPreparationPrompt } from "@/lib/planWeekPreparation";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -681,12 +682,10 @@ export const scriptGen: Block = {
         ? syntheticScenarioWritingDirective(assertSyntheticScenarioContract(ctx.store["syntheticScenario"]))
         : undefined,
     ].filter((value): value is string => Boolean(value)).join("\n\n") || undefined;
-    const weeklyPreparation = ctx.store["planWeekPreparation"];
-    const weeklyPreparationBrief = weeklyPreparation && typeof weeklyPreparation === "object" &&
-      !Array.isArray(weeklyPreparation) &&
-      typeof (weeklyPreparation as { prompts?: { script?: unknown } }).prompts?.script === "string"
-      ? (weeklyPreparation as { prompts: { script: string } }).prompts.script
-      : undefined;
+    const weeklyPreparationBrief = planWeekPreparationPrompt(
+      ctx.store["planWeekPreparation"],
+      "script",
+    );
     // RENDER-GROUP REUSE: a language sibling translates the base script instead of
     // regenerating it (reuses the base's structure + research; only words change).
     const reuseScript = ctx.store["reuseScript"] as Script | undefined;
@@ -1289,11 +1288,22 @@ export const narrationTts: Block = {
       throw new Error(`narration_tts: Qwen3 requires one pinned CustomVoice speaker (${QWEN3_TTS_SPEAKERS.join(", ")})`);
     }
     const qwenLanguage = resolveQwenTtsLanguage(ctx.params["language"] ?? ctx.params["locale"]);
+    const weeklyNarrationBrief = planWeekPreparationPrompt(
+      ctx.store["planWeekPreparation"],
+      "narration",
+    );
+    // A weekly run is a frozen editorial contract. Apply its delivery note to
+    // the Qwen request unless the frozen module configuration deliberately
+    // supplies a more specific instruction. This keeps the batch packet from
+    // becoming documentation-only while preserving the explicit channel knob.
     const qwenInstruction = ttsProvider === "qwen3"
-      ? String(ctx.params["qwenInstruction"] ?? [dnaPacing?.delivery, dnaPacing?.pacing, physics.archetype]
+      ? String(ctx.params["qwenInstruction"] ?? [weeklyNarrationBrief, dnaPacing?.delivery, dnaPacing?.pacing, physics.archetype]
           .filter(Boolean)
           .join(". "))
       : undefined;
+    if (ttsProvider === "qwen3" && weeklyNarrationBrief) {
+      ctx.log("narration_tts: applied frozen weekly narration brief to the Qwen request");
+    }
     const qwenReceipts: QwenTtsReceipt[] = [];
     const qwenReceiptByAudioSha = new Map<string, QwenTtsReceipt>();
     const qwenPreflightReceipts: QwenTtsReceipt[] = [];

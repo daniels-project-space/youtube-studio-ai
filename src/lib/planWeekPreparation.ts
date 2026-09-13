@@ -59,6 +59,26 @@ export interface PlanWeekPreparationPointer {
   manifestSha256: string;
 }
 
+export type PlanWeekPreparationPromptKey = keyof PlanWeekPreparationManifest["prompts"];
+
+/**
+ * Reads one prompt from the fully verified weekly packet that `runPipeline`
+ * places in the invocation snapshot. A pointer-only scheduled-plan seed does
+ * not contain prompts and is intentionally treated as absent; an object that
+ * claims to be a packet but has a malformed prompt is a hard failure rather
+ * than an invitation for a paid module to improvise a new brief.
+ */
+export function planWeekPreparationPrompt(
+  value: unknown,
+  key: PlanWeekPreparationPromptKey,
+): string | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const prompts = (value as Record<string, unknown>).prompts;
+  if (prompts === undefined) return undefined;
+  const record = requiredRecord(prompts, "prompt packet");
+  return requiredText(record[key], `${key} prompt`);
+}
+
 /**
  * R2 paths are part of the weekly item's identity, not presentation data.
  * Keep every dynamic segment a single safe path component so a malformed

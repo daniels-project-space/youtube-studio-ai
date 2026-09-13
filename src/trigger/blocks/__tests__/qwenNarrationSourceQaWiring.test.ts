@@ -33,4 +33,14 @@ assert.match(
   /qwenNarrationSource=/u,
   "the final quality evidence must retain a compact Qwen source provenance marker",
 );
+assert.match(
+  narration,
+  /planWeekPreparationPrompt\([\s\S]*?"narration"/u,
+  "a qualified weekly run must read its frozen narration brief rather than regenerate one at synthesis time",
+);
+assert.match(
+  narration,
+  /\[weeklyNarrationBrief, dnaPacing\?\.delivery, dnaPacing\?\.pacing, physics\.archetype\]/u,
+  "the frozen weekly brief must be a Qwen delivery input ahead of mutable style fallbacks",
+);
 console.log("Qwen narration final-source QA wiring PASS");

@@ -603,7 +603,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   narration_tts: contract(["narration.timed"], {
     optionalConsumes: [
-      "styleDNA", "musicBrief", "script", "voiceId", "niche",
+      "styleDNA", "musicBrief", "script", "voiceId", "niche", "planWeekPreparation",
       // Grounds the cold-open take judge in this channel's own voice standard.
           ],
     providerProfiles: [managed],

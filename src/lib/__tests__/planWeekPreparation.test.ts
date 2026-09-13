@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   assertPlanWeekPreparationManifestBinding,
   PLAN_WEEK_PREPARATION_VERSION,
+  planWeekPreparationPrompt,
   planWeekPreparationKey,
   planWeekPreparationManifestSha256,
   planWeekThumbnailKey,
@@ -88,6 +89,21 @@ assert.throws(
 );
 
 assert.equal(pointer.manifestSha256.length, 64);
+assert.equal(
+  planWeekPreparationPrompt(manifest, "narration"),
+  manifest.prompts.narration,
+  "a frozen narration brief is readable by the corresponding execution module",
+);
+assert.equal(
+  planWeekPreparationPrompt(pointer, "narration"),
+  undefined,
+  "the pointer-only scheduled seed cannot impersonate a verified preparation packet",
+);
+assert.throws(
+  () => planWeekPreparationPrompt({ prompts: { narration: "" } }, "narration"),
+  /narration prompt is invalid/,
+  "a malformed frozen brief fails closed before a paid narration request",
+);
 assert.equal(
   assertPlanWeekPreparationManifestBinding({
     manifest,
