@@ -23,7 +23,7 @@ import {
   requireYouTubeConnector,
 } from "@/lib/youtubeConnector";
 import { YOUTUBE_ANALYTICS_SCOPE } from "@/lib/publishingPolicy";
-import { claudeJson } from "@/lib/anthropic";
+import { creativeTextJson } from "@/lib/creativeText";
 import { ShortRetentionManifestSchema } from "@/engine/documentaryCollageShort";
 import {
   describePackageOpeningRetentionAttribution,
@@ -173,7 +173,7 @@ export const retentionAnalystTask = task({
     const openingAttribution = describePackageOpeningRetentionAttribution(packageOpeningAttribution);
 
     // 5. Showrunner distills learnings → playbook rules.
-    const analysis = await claudeJson<{
+    const analysis = await creativeTextJson<{
       diagnosis?: string;
       learnings?: { rule: string; evidence: string; confidence: "high" | "medium" | "low" }[];
     }>({

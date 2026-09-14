@@ -29,6 +29,10 @@ assert.doesNotMatch(
   /deviceIdx|devices\[deviceIdx % devices\.length\]/,
   "run IDs must never choose the opening device used for a retention conclusion",
 );
+assert.match(source, /from ["']@\/lib\/creativeText["']/,
+  "retention analysis must use the canonical OpenRouter creative-text boundary");
+assert.doesNotMatch(source, /@\/lib\/anthropic|claudeJson/,
+  "retention analysis must not retain the deprecated Claude-labelled alias");
 assert.match(
   source,
   /packageOpeningAttribution,[\s\S]*?openingRetention,[\s\S]*?retentionLearnings/,
