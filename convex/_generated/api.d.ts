@@ -50,6 +50,7 @@ import type * as runCostAccounting from "../runCostAccounting.js";
 import type * as runLogs from "../runLogs.js";
 import type * as runStages from "../runStages.js";
 import type * as runs from "../runs.js";
+import type * as saladFleetReservations from "../saladFleetReservations.js";
 import type * as scriptSelfDedupLeases from "../scriptSelfDedupLeases.js";
 import type * as seo from "../seo.js";
 import type * as serializedProgramEpisodes from "../serializedProgramEpisodes.js";
@@ -119,6 +120,7 @@ declare const fullApi: ApiFromModules<{
   runLogs: typeof runLogs;
   runStages: typeof runStages;
   runs: typeof runs;
+  saladFleetReservations: typeof saladFleetReservations;
   scriptSelfDedupLeases: typeof scriptSelfDedupLeases;
   seo: typeof seo;
   serializedProgramEpisodes: typeof serializedProgramEpisodes;

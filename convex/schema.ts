@@ -2145,6 +2145,25 @@ export default defineSchema({
     .index("by_fingerprint", ["ownerId", "fingerprint"])
     .index("by_owner", ["ownerId", "createdAt"]),
 
+  /** Organization-wide logical Salad slot fence for weekly provider dispatch. */
+  saladFleetReservations: defineTable({
+    version: v.string(),
+    reservationKey: v.string(),
+    ownerId: v.string(),
+    orderKey: v.string(),
+    requestedGpuCount: v.number(),
+    priority: v.union(v.literal("medium"), v.literal("high")),
+    leaseToken: v.string(),
+    state: v.union(v.literal("held"), v.literal("released")),
+    expiresAt: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    releasedAt: v.optional(v.number()),
+    releaseReason: v.optional(v.string()),
+  })
+    .index("by_reservation_key", ["reservationKey"])
+    .index("by_state_expires", ["state", "expiresAt"]),
+
   /** Immutable per-phase usage ledger; batch totals are recomputed from rows. */
   planBatchUsage: defineTable({
     ownerId: v.string(),

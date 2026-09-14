@@ -25,7 +25,11 @@ export async function POST(request: Request) {
     } catch {
       return NextResponse.json({ ok: false, error: "invalid JSON body" }, { status: 400 });
     }
-    const payload = assertMiniMaxH3WeeklyBatchArgs(body);
+    const parsedPayload = assertMiniMaxH3WeeklyBatchArgs(body);
+    // The browser cannot choose a fleet identity. Bind the task to the
+    // authenticated owner before Trigger receives it, enabling the durable
+    // organization-wide Salad slot fence.
+    const payload = { ...parsedPayload, ownerId: actor.ownerId };
     if (!ownedBy(actor.ownerId, payload.receiptKey) || payload.jobs.some((job) =>
       !ownedBy(actor.ownerId, job.firstFrame.r2Key) || !ownedBy(actor.ownerId, job.output.r2Key)) ||
       (payload.preparedFootage !== undefined && (

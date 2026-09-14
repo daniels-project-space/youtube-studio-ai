@@ -20,6 +20,9 @@ import {
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
+import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
+import { api } from "../../convex/_generated/api";
+import { saladFleetReservationIdentity } from "@/lib/saladFleetReservation";
 import {
   assertPlanWeekPreparedFootageBinding,
   normalizePlanWeekPreparationManifest,
@@ -33,6 +36,8 @@ import {
 } from "@/lib/planWeekPreparation";
 
 export interface MiniMaxH3WeeklyBatchArgs {
+  /** Injected by the authenticated weekly API; required for fleet fencing. */
+  ownerId?: string;
   /** Stable owner/week work-order identity; used as the task idempotency seed. */
   orderKey: string;
   /** A scoped receipt path, outside the individual video output paths. */
@@ -112,6 +117,9 @@ function preparedFootageBinding(value: unknown, jobs: readonly unknown[]): MiniM
 export function assertMiniMaxH3WeeklyBatchArgs(value: unknown): MiniMaxH3WeeklyBatchArgs {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("weekly MiniMax H3 payload is invalid");
   const payload = value as Record<string, unknown>;
+  if (payload.ownerId !== undefined && (typeof payload.ownerId !== "string" || !payload.ownerId.trim() || payload.ownerId.length > 160)) {
+    throw new Error("weekly MiniMax H3 owner id is invalid");
+  }
   if (!Array.isArray(payload.jobs) || payload.jobs.length < 1 || payload.jobs.length > 60) {
     throw new Error("weekly MiniMax H3 payload must contain 1..60 jobs");
   }
@@ -169,6 +177,7 @@ export function assertMiniMaxH3WeeklyBatchArgs(value: unknown): MiniMaxH3WeeklyB
     }
   }
   return {
+    ...(payload.ownerId === undefined ? {} : { ownerId: payload.ownerId.trim() }),
     orderKey: safeIdentifier(payload.orderKey, "order key"),
     receiptKey: scopedReceiptKey(payload.receiptKey),
     jobs,
@@ -561,69 +570,125 @@ export const minimaxH3WeeklyBatchTask = task({
         reconciled: true as const,
       };
     }
-    // Salad capacity is a separate, read-only admission. A reachable worker
-    // URL must not be mistaken for three currently available desktop 5090s.
-    // This runs only for a new paid order; receipt reconciliation remains
-    // available even if capacity changes after the original dispatch.
+    // Salad capacity is a separate admission. The durable fleet fence is
+    // acquired first so concurrent weekly orders cannot all pass the same
+    // eventually-consistent market snapshot and allocate three GPUs each.
     const requestPacketKey = await persistWeeklyRequestPacket({
       receiptKey: payload.receiptKey,
       orderKey: payload.orderKey,
       requestKeys,
       jobs: payload.jobs,
     });
-    const capacity = await assertMiniMaxH3SaladCapacity(payload.jobs.length, {
-      // Medium remains the first choice. High is the explicit, costlier
-      // capacity escape hatch Daniel authorized: set the variable to "0" to
-      // disable it for a deployment, but never let request JSON select it.
-      allowHighPriorityFallback: process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
-    });
-    if (payload.preparedFootage) {
-      // Preflight every input before the first worker request; a later bad
-      // frame must never leave a partially paid weekly order.
-      await preflightPreparedFrames(payload.jobs, payload.preparedFootage);
-    }
-    const result = await renderMiniMaxH3WeeklyBatch(payload.jobs, {
-      saladCapacityMode: capacity.capacityMode,
-    });
-    const receipt = createMiniMaxH3WeeklyReceipt(payload.orderKey, result);
+    // The Convex reservation table is released independently from the web
+    // deploy. Keep this seam disabled until both Convex schema and Trigger
+    // production are promoted together; otherwise an older live Trigger task
+    // could receive a payload that names a function absent from its schema.
+    const fleetReservationEnabled = process.env.SALAD_FLEET_RESERVATION_ENABLED === "1";
+    const reservationIdentity = payload.ownerId && fleetReservationEnabled
+      ? saladFleetReservationIdentity({
+          ownerId: payload.ownerId,
+          orderKey: payload.orderKey,
+          requestKeys,
+          requestedGpuCount: Math.min(3, payload.jobs.length),
+          priority: "medium",
+        })
+      : undefined;
+    const fleetConvex = payload.ownerId && fleetReservationEnabled
+      ? (() => {
+          const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
+          if (!url) throw new Error("weekly MiniMax H3 fleet reservation requires NEXT_PUBLIC_CONVEX_URL");
+          return new StudioConvexHttpClient(url);
+        })()
+      : undefined;
+    const fleetLeaseToken = payload.ownerId && fleetReservationEnabled ? crypto.randomUUID() : undefined;
+    const fleetReservation = reservationIdentity && fleetConvex && fleetLeaseToken
+      ? await fleetConvex.mutation(api.saladFleetReservations.acquire, {
+          reservationKey: reservationIdentity.reservationKey,
+          reservationOwnerId: reservationIdentity.ownerId,
+          orderKey: reservationIdentity.orderKey,
+          requestedGpuCount: reservationIdentity.requestedGpuCount,
+          priority: reservationIdentity.priority,
+          leaseToken: fleetLeaseToken,
+          now: Date.now(),
+        })
+      : undefined;
+    let providerStarted = false;
+    const releaseFleetReservation = async (reason: string): Promise<void> => {
+      if (!fleetConvex || !reservationIdentity || !fleetReservation) return;
+      try {
+        await fleetConvex.mutation(api.saladFleetReservations.release, {
+          reservationKey: reservationIdentity.reservationKey,
+          leaseToken: fleetReservation.leaseToken,
+          now: Date.now(),
+          reason,
+        });
+      } catch (error) {
+        // Receipt durability still prevents duplicate spend; a temporary
+        // release outage is bounded by the two-hour reservation lease.
+        console.error("[minimax-h3-weekly-batch] fleet reservation release deferred", error);
+      }
+    };
+    try {
+      const capacity = await assertMiniMaxH3SaladCapacity(payload.jobs.length, {
+        // Medium remains the first choice. High is the explicit, costlier
+        // capacity escape hatch Daniel authorized: set the variable to "0" to
+        // disable it for a deployment, but never let request JSON select it.
+        allowHighPriorityFallback: process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
+      });
+      if (payload.preparedFootage) {
+        // Preflight every input before the first worker request; a later bad
+        // frame must never leave a partially paid weekly order.
+        await preflightPreparedFrames(payload.jobs, payload.preparedFootage);
+      }
+      providerStarted = true;
+      const result = await renderMiniMaxH3WeeklyBatch(payload.jobs, {
+        saladCapacityMode: capacity.capacityMode,
+      });
+      const receipt = createMiniMaxH3WeeklyReceipt(payload.orderKey, result);
     // A batch receipt is create-only. If a controller loses its response after
     // rendering, it must read/reconcile this immutable proof rather than issue
     // a second paid order with a new receipt spelling.
     const body = canonicalJson(receipt);
-    try {
-      await putObject(payload.receiptKey, body, {
-        contentType: "application/json",
-        metadata: { "h3-batch-receipt": "v1", "h3-batch-sha256": sha256Hex(body) },
-        ifNoneMatch: "*",
-      });
-    } catch (error) {
-      const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
-      if (status !== 409 && status !== 412) throw error;
-      const winner = await readPersistedReceipt(payload.receiptKey, { orderKey: payload.orderKey, requestKeys, outputKeys });
-      if (!winner) throw error;
+      try {
+        await putObject(payload.receiptKey, body, {
+          contentType: "application/json",
+          metadata: { "h3-batch-receipt": "v1", "h3-batch-sha256": sha256Hex(body) },
+          ifNoneMatch: "*",
+        });
+      } catch (error) {
+        const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+        if (status !== 409 && status !== 412) throw error;
+        const winner = await readPersistedReceipt(payload.receiptKey, { orderKey: payload.orderKey, requestKeys, outputKeys });
+        if (!winner) throw error;
+        await releaseFleetReservation("receipt-reconciled");
+        const preparedFootageKey = payload.preparedFootage
+          ? await materializePreparedFootage(
+              payload.preparedFootage,
+              preparedManifest!,
+              payload.jobs,
+              renderedResultsFromPersistedReceipt(winner),
+            )
+          : undefined;
+        return {
+          receiptKey: payload.receiptKey,
+          ...winner,
+          ...(preparedFootageKey ? { preparedFootageKey } : {}),
+          reconciled: true as const,
+        };
+      }
+      await releaseFleetReservation("receipt-stored");
       const preparedFootageKey = payload.preparedFootage
-        ? await materializePreparedFootage(
-            payload.preparedFootage,
-            preparedManifest!,
-            payload.jobs,
-            renderedResultsFromPersistedReceipt(winner),
-          )
+        ? await materializePreparedFootage(payload.preparedFootage, preparedManifest!, payload.jobs, result)
         : undefined;
       return {
         receiptKey: payload.receiptKey,
-        ...winner,
+        ...receipt,
+        requestPacketKey,
         ...(preparedFootageKey ? { preparedFootageKey } : {}),
-        reconciled: true as const,
       };
+    } catch (error) {
+      if (!providerStarted) await releaseFleetReservation("pre-provider-failure");
+      throw error;
     }
-    const preparedFootageKey = payload.preparedFootage
-      ? await materializePreparedFootage(payload.preparedFootage, preparedManifest!, payload.jobs, result)
-      : undefined;
-    return {
-      receiptKey: payload.receiptKey,
-      ...receipt,
-      requestPacketKey,
-      ...(preparedFootageKey ? { preparedFootageKey } : {}),
-    };
   },
 });
