@@ -155,10 +155,12 @@ try {
       } else {
         const toolbox = nav.locator(".studio-toolbox");
         if (await toolbox.getAttribute("open") === null) await toolbox.locator("summary").click();
-        for (const label of ["Studio", "Channels", "Production", "Schedule", "Library", "Golden modules", "Settings"]) {
+        for (const label of ["Studio", "Channels", "Production", "Schedule", "Library", "Settings"]) {
           const link = nav.getByRole("link", { name: label, exact: true }); await link.focus();
           assert.equal(await link.evaluate(el => { const r = el.getBoundingClientRect(); return el.contains(document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2)); }), true);
         }
+        assert.equal(await nav.getByRole("link", { name: "Golden modules", exact: true }).count(), 0,
+          "Golden catalog is reached from the Studio overview, not the daily rail");
         await nav.getByRole("link", { name: "Library", exact: true }).click(); await page.waitForURL(url => url.pathname === "/library"); visited.push("/library");
       }
       evidence.visited = visited;

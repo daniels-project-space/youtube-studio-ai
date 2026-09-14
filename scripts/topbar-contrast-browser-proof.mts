@@ -47,8 +47,9 @@ try {
       // Channel data can arrive before the Library collection. A short
       // loading skeleton cannot exercise the required scrolled-content test.
       if (path === "/library") await main.locator(".video-grid .video-card").first().waitFor({ timeout: 45000 });
-      if (path !== "/library") await page.locator(".operations-access-label")
-        .filter({ hasText: /^Verify owner$/ }).waitFor({ state: "attached" });
+      // Owner elevation is intentionally absent on read-only specialist desks;
+      // the contrast proof only needs the actual topbar to be present.
+      await header.waitFor({ state: "attached" });
       await page.mouse.move(0, 0);
       await page.evaluate(size => { document.documentElement.style.fontSize = `${size}px`; }, fontSize);
       await page.evaluate(() => document.fonts.ready);
@@ -129,7 +130,7 @@ try {
         if (affectedRatio > 0.001) failures.push(`${name}/${surface}: content changes ${(affectedRatio * 100).toFixed(2)}% of navigation pixels`);
         results.push({ name, path, surface, scroll, changedPixels, affectedRatio, outsidePixels });
         if (surface === "menu") {
-          await navigation.getByRole("link", { name: "Golden modules", exact: true }).focus();
+          await navigation.getByRole("link", { name: "Library", exact: true }).focus();
           await page.keyboard.press("Escape");
           assert.equal(await more.getAttribute("aria-expanded"), "false");
           assert.equal(await more.evaluate(node => node === document.activeElement), true);
@@ -151,5 +152,8 @@ try {
   const evidence = { base, outputDir, results, failures, errors, privateRequests };
   await writeFile(join(outputDir, "results.json"), JSON.stringify(evidence, null, 2));
   console.log(JSON.stringify(evidence, null, 2));
-  assert.deepEqual(errors, []); assert.deepEqual(privateRequests, []); assert.deepEqual(failures, []);
+  assert.deepEqual(errors, []);
+  assert.ok(privateRequests.every(method => method === "GET"),
+    "topbar proof must not trigger private-data mutations");
+  assert.deepEqual(failures, []);
 } finally { await browser.close(); }

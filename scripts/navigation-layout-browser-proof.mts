@@ -58,7 +58,7 @@ try {
         // A scrolled rail may clip offscreen links. Focusing each must reveal an unobscured target.
         const toolbox = nav.locator(".studio-toolbox");
         if (await toolbox.getAttribute("open") === null) await toolbox.locator("summary").click();
-        for (const label of ["Studio", "Channels", "Production", "Schedule", "Library", "Golden modules", "Settings"]) {
+        for (const label of ["Studio", "Channels", "Production", "Schedule", "Library", "Settings"]) {
           const link = nav.getByRole("link", { name: label, exact: true });
           await link.focus();
           assert.equal(await link.evaluate((node) => {
@@ -66,6 +66,8 @@ try {
             return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2));
           }), true, `${label}: keyboard focus reveals the actual clickable target`);
         }
+        assert.equal(await nav.getByRole("link", { name: "Golden modules", exact: true }).count(), 0,
+          "Golden catalog is reached from the Studio overview, not the daily rail");
       }
       if (width <= 860) {
         const more = nav.getByRole("button", { name: "More", exact: true });
