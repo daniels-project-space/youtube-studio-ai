@@ -3,7 +3,7 @@
  * pipeline into THIS channel's pipeline.
  *
  * The split that has held up everywhere in this codebase: the AGENT DECIDES,
- * CODE EXECUTES. The architect (Claude) reads the channel's identity — Style
+ * CODE EXECUTES. The architect (OpenRouter Gemini Flash) reads the channel's identity — Style
  * DNA, Show Bible, quality bar, grounding state, provider availability — and
  * chooses WHAT to add/remove/tune from a TYPED TOOLBOX it is shown explicitly.
  * The executor then applies each decision deterministically: placement anchors,
@@ -318,9 +318,9 @@ const CORE_BLOCKS = new Set([
 
 // params travel as a JSON-ENCODED STRING: free-form records get stripped by
 // structured-output layers (the first dry-run produced 12 perfect decisions
-// whose z.record params all arrived empty), and a typed flat superset trips
-// Anthropic's 24-optional-param grammar limit. A JSON string survives both;
-// the executor parses + validates it against the toolbox anyway.
+// whose z.record params all arrived empty). A JSON string keeps the contract
+// compact across the OpenRouter structured-output boundary; the executor
+// parses + validates it against the toolbox anyway.
 const decisionSchema = z.object({
   action: z.enum(["add", "remove", "set_params"]),
   block: z.string(),

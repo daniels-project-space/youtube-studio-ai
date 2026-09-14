@@ -28,8 +28,8 @@ export const architectPipelineTask = task({
   maxDuration: 600,
   run: async (payload: { channelId: string; dryRun?: boolean }) => {
     const log = (m: string, x?: Record<string, unknown>) => console.log(`[architect] ${m}`, x ?? "");
-    // The architect is a non-Google creative-text route. Its own provider
-    // boundary reports a missing Anthropic capability if one is unavailable.
+    // The architect is the approved non-Google creative-text route. Its own
+    // boundary enforces the pinned OpenRouter Gemini Flash capability.
     await bootstrapSecrets(log);
 
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
