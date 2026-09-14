@@ -9,6 +9,7 @@ const assetUrl = readFileSync(`${here}/../asset-url/route.ts`, "utf8");
 assert.match(source, /MAX_INLINE_IMAGE_BYTES/);
 assert.match(source, /getObjectBytes/);
 assert.match(source, /isR2CredentialFailure/);
+assert.match(source, /sniffContentType/);
 assert.match(source, /status: 503/);
 assert.match(source, /Retry-After/);
 assert.match(source, /Cross-Origin-Resource-Policy.*same-origin/);

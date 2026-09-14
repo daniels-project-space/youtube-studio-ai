@@ -15,6 +15,17 @@ function contentType(key: string): string | undefined {
   return undefined;
 }
 
+function sniffContentType(bytes: Uint8Array): string | undefined {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47 &&
+    bytes[4] === 0x0d && bytes[5] === 0x0a && bytes[6] === 0x1a && bytes[7] === 0x0a) return "image/png";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 6 && bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46 &&
+    bytes[3] === 0x38 && (bytes[4] === 0x37 || bytes[4] === 0x39) && bytes[5] === 0x61) return "image/gif";
+  if (bytes.length >= 12 && bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+    bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return "image/webp";
+  return undefined;
+}
+
 function isOwnedKey(key: string): boolean {
   const ownerPrefix = `owner/${OWNER_ID}/`;
   return key.startsWith(ownerPrefix) && !key.includes("..") && !key.includes("\\") && key.length <= 1_024;
@@ -38,7 +49,10 @@ export async function GET(request: Request) {
     return new NextResponse(Buffer.from(bytes), {
       status: 200,
       headers: {
-        "Content-Type": mimeType,
+        // A few retained assets have a legacy extension that does not match
+        // their encoded bytes (for example JPEG data in a .png key). Prefer
+        // the signature so nosniff-capable browsers still render them.
+        "Content-Type": sniffContentType(bytes) ?? mimeType,
         "Content-Length": String(bytes.byteLength),
         "Cache-Control": "private, max-age=600",
         "X-Content-Type-Options": "nosniff",
