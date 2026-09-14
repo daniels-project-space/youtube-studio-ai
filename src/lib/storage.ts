@@ -68,6 +68,8 @@ export interface PresignOptions {
   /** URL lifetime in seconds (default 1 hour). */
   expiresIn?: number;
   contentType?: string;
+  /** Response MIME override for browser downloads (never used on PUTs). */
+  responseContentType?: string;
   /** Metadata signed into a scoped upload URL (never bucket credentials). */
   metadata?: Record<string, string>;
 }
@@ -102,6 +104,7 @@ export async function presignDownload(
   const command = new GetObjectCommand({
     Bucket: getBucket(opts.bucket),
     Key: key,
+    ...(opts.responseContentType ? { ResponseContentType: opts.responseContentType } : {}),
   });
   return getSignedUrl(getR2Client(), command, {
     expiresIn: opts.expiresIn ?? 3600,

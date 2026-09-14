@@ -18,6 +18,19 @@ import { OWNER_ID } from "@/lib/config";
  */
 export const runtime = "nodejs";
 
+function responseContentType(key: string): string | undefined {
+  const extension = key.toLowerCase().split(".").pop();
+  if (extension === "png") return "image/png";
+  if (extension === "jpg" || extension === "jpeg") return "image/jpeg";
+  if (extension === "webp") return "image/webp";
+  if (extension === "gif") return "image/gif";
+  if (extension === "mp4") return "video/mp4";
+  if (extension === "webm") return "video/webm";
+  if (extension === "mp3") return "audio/mpeg";
+  if (extension === "wav") return "audio/wav";
+  return undefined;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const key = searchParams.get("key");
@@ -40,7 +53,11 @@ export async function GET(request: Request) {
   }
 
   try {
-    const url = await presignDownload(key, { expiresIn: 3600 });
+    const mimeType = responseContentType(key);
+    const url = await presignDownload(key, {
+      expiresIn: 3600,
+      ...(mimeType ? { responseContentType: mimeType } : {}),
+    });
     return NextResponse.json(
       { url },
       // The signed URL itself is short-lived; allow the browser to reuse it
