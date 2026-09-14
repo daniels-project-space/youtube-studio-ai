@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { OWNER_ID } from "@/lib/config";
-import { getObjectBytes, headObjectMetadata } from "@/lib/storage";
+import { getObjectBytes } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -28,10 +28,9 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "forbidden image key" }, { status: 403 });
   }
   try {
-    const metadata = await headObjectMetadata(key);
-    if (!metadata || metadata.contentLength === undefined || metadata.contentLength > MAX_INLINE_IMAGE_BYTES) {
-      return NextResponse.json({ error: "image unavailable" }, { status: 404 });
-    }
+    // R2 deployments do not consistently expose a usable HEAD response. Read
+    // the already owner-scoped image directly and enforce the hard byte cap
+    // before returning it; this avoids turning valid artwork into a false 404.
     const bytes = await getObjectBytes(key, undefined, { timeoutMs: 15_000 });
     if (bytes.byteLength > MAX_INLINE_IMAGE_BYTES) {
       return NextResponse.json({ error: "image too large" }, { status: 413 });
