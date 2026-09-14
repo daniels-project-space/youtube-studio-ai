@@ -16,9 +16,11 @@ assert.ok(musicStart >= 0 && assembleStart > musicStart, "music block must remai
 const loopBlock = source.slice(loopStart, upscaleStart);
 const musicBlock = source.slice(musicStart, assembleStart);
 
-assert.match(loopBlock, /videoJobs: scaling\.sourceSegmentCount/, "both 15-second workers must be reserved before spend");
+assert.match(loopBlock, /minimaxH3Readiness\("novita"\)/, "H3 readiness must be checked before motion spend");
+assert.match(loopBlock, /totalNativeClips = scaling\.sourceSegmentCount \* nativeClipsPerSegment/, "native H3 work must be budgeted before spend");
 assert.match(loopBlock, /for \(let index = 0; index < scaling\.sourceSegmentCount; index\+\+\)/, "the source must render both sealed segments");
-assert.match(loopBlock, /endImageKey: f1Key/, "each segment must return to the exact accepted still");
+assert.match(loopBlock, /firstFrame: \{ r2Key: f1Key, sha256: firstFrameSha256 \}/, "each H3 take must bind to the exact accepted still");
+assert.match(loopBlock, /await composeVideoSequenceUnit\(/, "native H3 takes must form each exact-duration half");
 assert.match(loopBlock, /await composeLoopSourceUnit\(/, "the two segments must form one exact-duration source unit");
 assert.match(loopBlock, /measureVideoBoundaryDiff\([\s\S]*?measureLoopSeamDiff\(/, "internal and wraparound seams must both be measured");
 assert.match(loopBlock, /worstSeamDiff > scaling\.seamMaximumDiff/, "a visible source seam must fail before upscale");

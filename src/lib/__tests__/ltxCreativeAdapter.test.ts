@@ -291,10 +291,9 @@ assert.deepEqual(resolveLtxCreativeAdapters({
 }), new Map());
 
 async function main(): Promise<void> {
-  // The adapter contract is only useful if every direct I2V caller can carry
-  // the exact typed selection to the sealed worker. This locks the shared
-  // Novita media seam, generic I2V wrapper, Story Spine renderer, and ambient
-  // LTX loop together.
+  // The adapter contract is only useful if every remaining direct LTX caller
+  // can carry the exact typed selection to the sealed worker. Lo-Fi motion is
+  // intentionally H3-native now and must not retain an LTX adapter seam.
   const root = process.cwd();
   const [media, i2v, lofi, storySpineRenderer, directRenderer] = await Promise.all([
     readFile(join(root, "src/lib/novitaMedia.ts"), "utf8"),
@@ -307,8 +306,8 @@ async function main(): Promise<void> {
   assert.match(media, /creativeAdapter: args\.creativeAdapter/);
   assert.match(i2v, /creativeAdapter\?: LtxCreativeAdapterInput/);
   assert.match(i2v, /creativeAdapter: req\.creativeAdapter/);
-  assert.match(lofi, /LtxCreativeAdapterInputSchema\.optional\(\)\.parse/);
-  assert.match(lofi, /creativeAdapter,/);
+  assert.match(lofi, /minimaxH3Readiness\("novita"\)/);
+  assert.doesNotMatch(lofi, /renderNovitaI2V/);
   assert.match(storySpineRenderer, /LtxCreativeAdapterInputSchema\.optional\(\)\.parse\(ctx\.params\["creativeAdapter"\]\)/);
   assert.match(storySpineRenderer, /\.\.\.\(creativeAdapter \? \{ creativeAdapter \} : \{\}\)/);
   assert.match(directRenderer, /creativeAdapterStack:/);

@@ -392,6 +392,78 @@ export async function composeLoopSourceUnit(args: {
   return args.outPath;
 }
 
+/**
+ * Join a bounded sequence of video clips into one exact-duration unit.
+ *
+ * The H3 worker emits a fixed native frame count, so callers that need a
+ * longer contract (for example a 15-second lofi half) must compose several
+ * independently loop-sealed native clips.  This helper keeps that duration
+ * normalization and geometry validation in one deterministic place instead
+ * of letting each pipeline invent its own ffmpeg invocation.
+ */
+export async function composeVideoSequenceUnit(args: {
+  clipPaths: readonly string[];
+  outPath: string;
+  totalSeconds: number;
+  fps?: number;
+  preset?: string;
+  timeoutMs?: number;
+}): Promise<string> {
+  if (!args.clipPaths.length || args.clipPaths.length > 24) {
+    throw new FfmpegError("video sequence requires between 1 and 24 clips");
+  }
+  if (!Number.isFinite(args.totalSeconds) || args.totalSeconds <= 0) {
+    throw new FfmpegError("video sequence duration must be positive and finite");
+  }
+  const fps = Math.max(1, Math.round(args.fps ?? 25));
+  const media = await Promise.all(args.clipPaths.map((path) => probe(path)));
+  const first = media[0]!;
+  for (const [index, item] of media.entries()) {
+    if (!Number.isFinite(item.durationSec) || item.durationSec < 0.2) {
+      throw new FfmpegError(`video sequence clip ${index + 1} has no usable video duration`);
+    }
+    if (!item.width || !item.height) {
+      throw new FfmpegError(`video sequence clip ${index + 1} has no measurable frame geometry`);
+    }
+    if (item.width !== first.width || item.height !== first.height) {
+      throw new FfmpegError(
+        `video sequence clips must share exact geometry (${first.width}x${first.height} vs ${item.width}x${item.height})`,
+      );
+    }
+  }
+  const clipSeconds = args.totalSeconds / args.clipPaths.length;
+  const filters = media.map((item, index) => {
+    const factor = clipSeconds / item.durationSec;
+    return `[${index}:v]setpts=${factor.toFixed(9)}*PTS,fps=${fps},format=yuv420p[v${index}]`;
+  });
+  filters.push(`${media.map((_, index) => `[v${index}]`).join("")}concat=n=${media.length}:v=1:a=0[outv]`);
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      ...args.clipPaths.flatMap((path) => ["-i", path]),
+      "-filter_complex", filters.join(";"),
+      "-map", "[outv]",
+      "-t", args.totalSeconds.toFixed(3),
+      "-r", String(fps),
+      "-c:v", "libx264",
+      "-preset", args.preset ?? "medium",
+      "-crf", "18",
+      "-pix_fmt", "yuv420p",
+      "-an",
+      args.outPath,
+    ],
+    args.timeoutMs ?? 900_000,
+  );
+  const output = await probe(args.outPath);
+  if (Math.abs(output.durationSec - args.totalSeconds) > Math.max(0.08, 2 / fps)) {
+    throw new FfmpegError(
+      `video sequence duration ${output.durationSec.toFixed(3)}s does not match ${args.totalSeconds.toFixed(3)}s contract`,
+    );
+  }
+  return args.outPath;
+}
+
 /** Compare the frames immediately around one internal video join. */
 export async function measureVideoBoundaryDiff(
   inputPath: string,

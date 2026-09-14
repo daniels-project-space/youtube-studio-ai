@@ -121,24 +121,19 @@ async function stalledR2ObjectBodyIsBounded(): Promise<void> {
 
 async function directNovitaCallersUseOnlyTheOptInDeadline(): Promise<void> {
   assert.equal(DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS, 300_000,
-    "five minutes protects the 1920×1088 still and short 1280×704 LTX output without task-cap stalls");
+    "five minutes protects the 1920×1088 still and direct Novita transfers without task-cap stalls");
   const lofi = await readFile(join(process.cwd(), "src/trigger/blocks/lofiBlocks.ts"), "utf8");
   const keyframeDelivery = lofi.indexOf("const local = await downloadTo(rendered.url");
-  const clipDelivery = lofi.indexOf("const local = await downloadTo(clip.url", keyframeDelivery + 1);
-  assert.ok(keyframeDelivery >= 0 && clipDelivery > keyframeDelivery);
+  assert.ok(keyframeDelivery >= 0);
   assert.match(
     lofi.slice(keyframeDelivery, keyframeDelivery + 260),
     /timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS/,
     "the post-receipt Novita still delivery opts in without changing global downloads",
   );
-  assert.match(
-    lofi.slice(clipDelivery, clipDelivery + 220),
-    /timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS/,
-    "the post-receipt Novita clip delivery opts in without changing global downloads",
-  );
+  assert.match(lofi, /renderMiniMaxH3\(/, "Lo-Fi motion is delivered from the H3 receipt bytes, not a second URL download");
+  assert.doesNotMatch(lofi, /downloadTo\(clip\.url/, "the Lo-Fi H3 path must not retain the legacy clip URL transfer");
   for (const relative of [
     "src/lib/novitaMedia.ts",
-    "src/trigger/blocks/loreShortBlocks.ts",
     "src/trigger/blocks/genFootageBlocks.ts",
     "src/engine/forge/runtime.ts",
   ]) {

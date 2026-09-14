@@ -6,6 +6,7 @@ import { join } from "node:path";
 
 import {
   composeLoopSourceUnit,
+  composeVideoSequenceUnit,
   measureLoopSeamDiff,
   measureVideoBoundaryDiff,
   probe,
@@ -49,6 +50,17 @@ async function main(): Promise<void> {
   assert.ok(
     await measureLoopSeamDiff(accepted, workDir) < 0.01,
     "matching anchored segments must pass the wraparound measurement",
+  );
+
+  const sequence = await composeVideoSequenceUnit({
+    clipPaths: [anchorA, anchorB, anchorA],
+    outPath: join(workDir, "sequence.mp4"),
+    totalSeconds: 3,
+    fps: 25,
+  });
+  assert.ok(
+    Math.abs((await probe(sequence)).durationSec - 3) <= 0.08,
+    "a native H3 sequence must be retimed to its exact source-half duration",
   );
 
   const rejected = await composeLoopSourceUnit({

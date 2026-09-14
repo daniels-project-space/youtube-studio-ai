@@ -17,8 +17,8 @@
  *   upload_draft  → youtubeVideoId watchUrl youtubePrivacy
  *   notify        → notified
  *
- * The Kling prompt CONSTITUTION (src/engine/prompt/constitution.ts) is appended
- * to every i2v call via composeKlingPrompt; FLUX stills via composeFluxPrompt.
+ * The shared motion prompt constitution (src/engine/prompt/constitution.ts) is
+ * applied to every H3 motion take via composeKlingPrompt; stills use Flux.
  * The REAL upscale (Topaz on the loop UNIT) lives in the upscale block; the
  * Remotion intro card (LofiIntroV2) is overlaid by intro_card.
  *
@@ -104,8 +104,8 @@ import {
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { renderNovitaI2V, renderNovitaImage } from "@/lib/novitaMedia";
-import { LtxCreativeAdapterInputSchema } from "@/lib/ltxCreativeAdapter";
+import { renderNovitaImage } from "@/lib/novitaMedia";
+import { minimaxH3Readiness, MINIMAX_H3_PROFILE, renderMiniMaxH3 } from "@/lib/minimaxH3";
 import {
   generateMureka,
   generateSuno,
@@ -122,7 +122,7 @@ import {
 } from "@/lib/minimaxMusic3";
 import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { notifyDraftReady } from "@/lib/telegram";
-import { seamlessLoopUnit, composeLoopSourceUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, measureVideoBoundaryDiff, measureAudio, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudioTransparentGain, type CaptionCue } from "@/lib/ffmpeg";
+import { seamlessLoopUnit, composeLoopSourceUnit, composeVideoSequenceUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, measureVideoBoundaryDiff, measureAudio, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudioTransparentGain, type CaptionCue } from "@/lib/ffmpeg";
 import { channelVisualReviewProfile, reviewRender, type VisualReviewResult } from "@/lib/visualReview";
 import {
   proveOnScreenText,
@@ -1512,8 +1512,8 @@ export const loopClips: Block = {
   paid: true,
   run: async (ctx) => {
     // A music-loop episode owns one nominal 30-second source unit: two distinct
-    // 15-second LTX FLF2V segments sharing the same independently reviewed
-    // first/end still. The final 1–8 hour master repeats only this unit.
+    // 15-second H3-composed segments sharing the same independently reviewed
+    // first still. The final 1–8 hour master repeats only this unit.
     const scaling = familyTimeScalingContract("music_loop");
     if (scaling.method !== "stream_loop") {
       throw new Error("loop_clips: music-loop family has no stream-loop scaling contract");
@@ -1532,10 +1532,8 @@ export const loopClips: Block = {
       );
     }
     const f1Key = str(ctx, "f1Key");
-    // The source track is sealed before visual generation. Distilled I2V does
-    // not accept an audio-conditioning input, so do not imply that it does;
-    // retaining this verified dependency is what lets the separate LTX 2.5
-    // A2V benchmark consume the exact mastered source without re-generation.
+    // The source track is sealed before visual generation. H3 does not accept
+    // audio-conditioning input, so music remains a separate mastered asset.
     const musicKey = typeof ctx.store["musicKey"] === "string" ? ctx.store["musicKey"].trim() : "";
     const routeBoundMusicProgram = musicProgramForCurrentRoute(ctx, str(ctx, "topic"));
     if (routeBoundMusicProgram && !musicKey) {
@@ -1544,18 +1542,9 @@ export const loopClips: Block = {
     const style = styleGrammar(ctx);
     const vs = visualStyle(ctx);
     const scene = scenesFromStore(ctx)[0];
-    // PARAM SPLIT: flf's safety-net fade used to read the SHARED `crossfadeSec`
-    // (pipeline: 2.5s — tuned for the plain-crossfade mode where the blend IS
-    // the loop mechanism), double-exposing 2.5s of every loop into a visible
-    // ghost over a seam that FLF2V had already closed. flf gets its OWN small
-    // param, hard-capped: anything longer than ~0.6s reads as a double exposure.
+    // Keep the seam blend deliberately short: anything longer than ~0.6s reads
+    // as a double exposure in an ambient loop.
     const flfCrossfadeSec = Math.min(0.6, Math.max(0, Number(ctx.params.flfCrossfadeSec ?? 0.4)));
-    // This optional adapter travels through the same sealed direct-worker path
-    // as cinematic I2V: base/revision, benchmark, strength and trigger tokens
-    // are validated there before a GPU job starts. Do not flatten it into text.
-    const creativeAdapter = LtxCreativeAdapterInputSchema.optional().parse(
-      ctx.params["ltxCreativeAdapter"],
-    );
 
     // Prefer the independently reviewed scene-director motion over the template, and
     // push hard for a LOCKED camera + NON-directional ambient motion so the loop
@@ -1573,15 +1562,25 @@ export const loopClips: Block = {
       extraNegative: "zoom, push in, dolly, camera move, scale change, framing change, pan, tilt",
     });
 
-    ctx.log(`loop_clips: Novita LTX-2.5 distilled ${segmentCount}×${segmentSeconds}s (loop=${loopMode}${musicKey ? `; sealed music=${musicKey.slice(-32)}` : "; legacy no-audio path"}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
+    const h3Readiness = minimaxH3Readiness("novita");
+    if (!h3Readiness.admitted) {
+      throw new Error(`loop_clips: MiniMax H3 Novita route is not admitted: ${h3Readiness.blockers.join("; ")}`);
+    }
+    // H3 emits a fixed native 124-frame clip. Build each 15-second half from
+    // the smallest number of native clips, sealing each take back to the
+    // reviewed still before joining them. No legacy motion fallback is allowed.
+    const nativeSeconds = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+    const nativeClipsPerSegment = Math.max(1, Math.ceil(segmentSeconds / nativeSeconds));
+    const totalNativeClips = scaling.sourceSegmentCount * nativeClipsPerSegment;
     const stageBudgetUsd = requireNovitaStageBudget(ctx.stageBudgetUsd, "loop_clips");
-    const envelope = novitaCostEnvelope({
-      label: "loop_clips",
-      videoJobs: scaling.sourceSegmentCount,
-      maxCostUsd: stageBudgetUsd,
-    });
+    const perNativeClipBudgetUsd = stageBudgetUsd / totalNativeClips;
+    if (!Number.isFinite(perNativeClipBudgetUsd) || perNativeClipBudgetUsd <= 0) {
+      throw new Error("loop_clips: MiniMax H3 native clip budget is invalid");
+    }
+    ctx.log(`loop_clips: MiniMax H3 Novita on-demand ${segmentCount}×${segmentSeconds}s (${totalNativeClips} native takes; loop=${loopMode}${musicKey ? `; sealed music=${musicKey.slice(-32)}` : "; legacy no-audio path"}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
     const tmp = await makeRunTempDir(ctx.runId);
-    const clips: Awaited<ReturnType<typeof renderNovitaI2V>>[] = [];
+    const firstFrameSha256 = sha256BytesHex(await getObjectBytes(f1Key));
+    const clips: Awaited<ReturnType<typeof renderMiniMaxH3>>[] = [];
     const segmentPaths: string[] = [];
     let observedClipCostUsd = 0;
     try {
@@ -1591,41 +1590,35 @@ export const loopClips: Block = {
           sha256Hex(`${ctx.runId}:lofi-loop-segment:${ordinal}`).slice(0, 8),
           16,
         ) % 2_147_483_647;
-        const clip = await renderNovitaI2V({
-          prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/lofi-loop`,
-          id: `loop-segment-${ordinal}`,
-          prompt: `${fwd.prompt}\nSource segment ${ordinal} of ${segmentCount}: preserve the exact subject, composition, lighting, and motion language while varying only tiny ambient micro-motion.`,
-          negativePrompt: fwd.negativePrompt,
-          imageKey: f1Key,
-          // Both segments begin and end at the same accepted still. This binds
-          // A→B and B→A continuity to real worker inputs, not prompt wording.
-          endImageKey: f1Key,
-          durationSec: segmentSeconds,
-          seed,
-          profileId: "production",
-          ...(typeof ctx.params["ltxStyleId"] === "string" ? { styleId: ctx.params["ltxStyleId"] } : {}),
-          creativeAdapter,
-          maxCostUsd: envelope.videoMaxCostUsd / scaling.sourceSegmentCount,
-          lifecycle: {
-            ownerId: ctx.ownerId,
-            channelId: ctx.channelId,
-            runId: ctx.runId,
-            blockId: "loop_clips",
-          },
-        });
-        if (!clip.url) throw new Error(`loop_clips: Novita segment ${ordinal} produced no URL`);
-        clips.push(clip);
-        observedClipCostUsd += clip.costUsd;
-        const local = await downloadTo(clip.url, join(tmp, `clip-${ordinal}.mp4`), {
-          timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
-        });
-        // Each FLF2V take already closes on the accepted still. A separately
-        // capped 0.4s blend only absorbs encoder/model endpoint noise.
-        segmentPaths.push(await seamlessLoopUnit(
-          local,
-          join(tmp, `segment-${ordinal}.mp4`),
-          { crossfadeSec: flfCrossfadeSec },
-        ));
+        const nativePaths: string[] = [];
+        for (let nativeIndex = 0; nativeIndex < nativeClipsPerSegment; nativeIndex++) {
+          const nativeOrdinal = nativeIndex + 1;
+          const clip = await renderMiniMaxH3({
+            provider: "novita",
+            execution: "on-demand",
+            prompt: `${fwd.prompt}\nLofi source half ${ordinal} of ${segmentCount}, native motion take ${nativeOrdinal} of ${nativeClipsPerSegment}: preserve the exact accepted still, subject, composition, lighting, and channel identity; vary only tiny ambient micro-motion.`,
+            seed: (seed + nativeIndex) % 2_147_483_647,
+            firstFrame: { r2Key: f1Key, sha256: firstFrameSha256 },
+            output: {
+              r2Key: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/lofi-loop/h3-${ordinal}-${nativeOrdinal}.mp4`,
+            },
+            maxCostUsd: perNativeClipBudgetUsd,
+          });
+          clips.push(clip);
+          observedClipCostUsd += clip.receipt.runtime.costUsd;
+          const local = await writeBytes(join(tmp, `clip-${ordinal}-${nativeOrdinal}.mp4`), clip.outputBytes);
+          nativePaths.push(await seamlessLoopUnit(
+            local,
+            join(tmp, `sealed-${ordinal}-${nativeOrdinal}.mp4`),
+            { crossfadeSec: flfCrossfadeSec },
+          ));
+        }
+        segmentPaths.push(await composeVideoSequenceUnit({
+          clipPaths: nativePaths,
+          outPath: join(tmp, `segment-${ordinal}.mp4`),
+          totalSeconds: segmentSeconds,
+          fps: 25,
+        }));
       }
     } catch (error) {
       const source = error instanceof Error ? error : new Error(String(error));
@@ -1679,8 +1672,11 @@ export const loopClips: Block = {
     const loopRawKey = `${ctx.keyPrefix}runs/${ctx.runId}/loopraw.mp4`;
     await putObject(loopRawKey, await readBytes(loopRaw), { contentType: "video/mp4" });
     await recordAsset(ctx, "clip", loopRawKey, {
-      jobIds: clips.map((clip) => clip.jobId),
-      models: clips.map((clip) => clip.model),
+      jobIds: clips.map((clip) => clip.receipt.jobId),
+      models: clips.map((clip) => clip.receipt.runtime.runtimeId),
+      provider: "minimax-h3-novita-on-demand",
+      profile: MINIMAX_H3_PROFILE.id,
+      nativeClipsPerSegment,
       sourceSegmentCount: scaling.sourceSegmentCount,
       sourceSegmentSeconds: scaling.sourceSegmentSeconds,
       sourceUnitSeconds: scaling.sourceUnitSeconds,
@@ -1713,8 +1709,8 @@ export const upscale: Block = {
   ],
   paid: false,
   run: async (ctx) => {
-    // The generative pixels already came from the attested Novita LTX-2.5
-    // distilled two-stage latent x2 pipeline and its pinned spatial upscaler. This finishing
+    // The generative pixels already came from the attested MiniMax H3 Novita
+    // route. This finishing
     // stage performs only deterministic local Lanczos scaling on the short loop
     // unit; no Replicate/Topaz provider or hidden fallback can re-render it.
     const targetResolution = (ctx.params.targetResolution as string) ?? "4k";
@@ -1765,7 +1761,7 @@ export const upscale: Block = {
       upscaled,
       resolution,
       targetFps,
-      sourceRender: "novita-ltx-distilled-two-stage-x2",
+      sourceRender: "minimax-h3-novita-on-demand-native-sequence",
       finish: "local-lanczos",
     });
 
