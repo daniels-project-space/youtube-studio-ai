@@ -28,6 +28,18 @@
 .capacityNotice { color: var(--color-faint); font-size: .68rem; line-height: 1.35; }
 .capacityNotice[data-state="admitted"] { color: #9fe8b8; }
 .capacityNotice[data-state="held"] { color: #ffc16e; }
+.fleetSummary { display: grid; gap: .55rem; padding: .7rem .8rem; border: 1px solid rgba(140,229,255,.2); border-radius: 11px; background: rgba(18,32,48,.36); }
+.fleetHeader { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: .4rem .8rem; }
+.fleetHeader strong { color: #dcefff; font-size: .78rem; }
+.fleetHeader span { color: var(--color-faint); font: .62rem var(--font-mono); }
+.fleetLanes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .45rem; }
+.fleetLane { display: grid; gap: .2rem; min-width: 0; padding: .55rem .6rem; border: 1px solid var(--color-border); border-radius: 8px; background: rgba(4,8,15,.46); }
+.fleetLane > span { display: grid; gap: .12rem; min-width: 0; }
+.fleetLane strong { overflow: hidden; color: var(--color-fg); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
+.fleetLane span small, .fleetLane > small { color: var(--color-faint); font: .56rem var(--font-mono); }
+.fleetLane b { color: #9fe8b8; font: 700 .56rem var(--font-mono); letter-spacing: .06em; }
+.fleetLane[data-state="high"] b { color: #ffc16e; }
+.fleetLane[data-state="held"] b { color: #ff9b9b; }
 .contractHint { color: var(--color-faint); font-size: .65rem; }
 .validationIssues { display: grid; gap: .2rem; margin: -.35rem 0 0; padding-left: 1.1rem; color: #ffc16e; font-size: .65rem; line-height: 1.35; }
 .progressHeader strong { display: block; margin-top: .2rem; font-size: .9rem; }
@@ -39,5 +51,5 @@
 .warn { color: #ffc16e; font-size: .72rem; }
 .error { color: #ff9b9b; font-size: .72rem; }
 .locked { min-height: 240px; align-content: center; justify-items: start; }
-@media (max-width: 640px) { .hero { display: grid; align-items: start; } .routeBadge { min-width: 0; } .fieldGrid, .modeTabs { grid-template-columns: 1fr; } .formFooter, .progressHeader { align-items: start; flex-direction: column; } }
+@media (max-width: 640px) { .hero { display: grid; align-items: start; } .routeBadge { min-width: 0; } .fieldGrid, .modeTabs, .fleetLanes { grid-template-columns: 1fr; } .formFooter, .progressHeader { align-items: start; flex-direction: column; } }
 @media (prefers-reduced-motion: reduce) { .progressTrack i { transition: none; } }
