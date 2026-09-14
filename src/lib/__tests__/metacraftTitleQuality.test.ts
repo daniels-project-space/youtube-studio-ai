@@ -17,6 +17,12 @@ const repeated = titleQualitySignal("Chernobyl Chernobyl Safety Test", grounding
 assert.ok(repeated.repeatedTerms > 0, "repeated content words must be measurable");
 assert.ok(repeated.score < concrete.score, "repeated wording must lower the local quality signal");
 
+const actionLed = titleQualitySignal("Chernobyl Warning Failed", grounding);
+const padded = titleQualitySignal("What Really Happened And Why It Matters In The End", grounding);
+assert.ok(actionLed.impactTerms >= 2, "grounded action/stake terms must be measurable");
+assert.ok(actionLed.impactTerms > padded.impactTerms, "action-led wording must beat padded framing on impact density");
+assert.ok(actionLed.score > padded.score, "impact density should improve only the local quality tie-break");
+
 // Format profiles keep the title engine from forcing the same envelope onto a
 // short or music loop. The hard bounds remain generous, while the target band
 // supplies a measurable, local tie-break signal with no extra model call.

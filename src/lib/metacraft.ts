@@ -367,6 +367,8 @@ export interface TitleQualitySignal {
   frontLoadedTerms: number;
   /** Whether the title sits inside the format profile's preferred envelope. */
   inTargetBand: boolean;
+  /** Grounded action/stake terms that create a concrete reason to click. */
+  impactTerms: number;
   repeatedTerms: number;
 }
 
@@ -374,6 +376,17 @@ const QUALITY_STOPWORDS = new Set([
   ...TITLE_STOPWORDS,
   "about", "because", "could", "does", "doesnt", "gets", "just", "more", "most", "really", "still",
   "than", "then", "there", "turns", "very", "well", "would",
+]);
+
+// A small, deliberately conservative vocabulary for the local tie-breaker.
+// These are not a hype allow-list and never make an unsupported title pass;
+// they simply distinguish an active, consequential phrase from padded
+// framing when the provider judge gives both candidates the same score.
+const IMPACT_TERMS = new Set([
+  "break", "broke", "broken", "build", "built", "change", "changed", "collapse", "cost", "crack",
+  "cut", "die", "died", "disappear", "expose", "fail", "failed", "find", "found", "force", "hide",
+  "hidden", "kill", "killed", "lose", "lost", "missing", "pay", "reveal", "revealed", "risk", "save",
+  "shift", "shut", "steal", "stolen", "survive", "survived", "turn", "turned", "vanish", "warning",
 ]);
 
 function titleTokens(value: string): string[] {
@@ -465,6 +478,9 @@ export function titleQualitySignal(
     if (!QUALITY_STOPWORDS.has(token)) counts.set(token, (counts.get(token) ?? 0) + 1);
   }
   const repeatedTerms = [...counts.values()].filter((count) => count > 1).length;
+  const impactTerms = new Set(
+    tokens.filter((word) => IMPACT_TERMS.has(word) && groundingTerms.has(word)),
+  ).size;
 
   let score = 40;
   const inTargetBand = length >= profile.targetMinChars && length <= profile.targetMaxChars &&
@@ -476,6 +492,10 @@ export function titleQualitySignal(
   else if (words >= Math.max(3, profile.targetMinWords - 1) && words <= profile.targetMaxWords + 2) score += 4;
   score += Math.min(earlySpecifics, 3) * 7;
   score += Math.min(frontLoadedTerms, 2) * 5;
+  // Impact is a tie-break quality cue only. Requiring the term to occur in the
+  // supplied grounding keeps this from rewarding generic drama or smuggling a
+  // promise past the deterministic lint/judge.
+  score += Math.min(impactTerms, 2) * 4;
   if (earlyTokens.length > 0 && groundingTerms.has(earlyTokens[0])) score += 5;
   const opening = earlyTokens.slice(0, 3);
   if (opening.length >= 2 && !opening.some((word) => groundingTerms.has(word))) score -= 8;
@@ -490,6 +510,7 @@ export function titleQualitySignal(
     earlySpecifics,
     frontLoadedTerms,
     inTargetBand,
+    impactTerms,
     repeatedTerms,
   };
 }
@@ -1028,7 +1049,9 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             `the point — no scene-setting fragments, no atmospheric prefixes, no two-part colon constructions ` +
             `(a short established format prefix like "Mission log:" is fine). Front-load the primary keyword and ` +
             `any payoff number inside the first 50 chars. Make the first 3-5 words reveal the subject or stake; ` +
-            `use concrete language that suits the format, then stop. Avoid abstract labels, keyword piles, ` +
+            `use concrete language that suits the format, prefer one active verb or consequence when the source supports it, then stop. ` +
+            `Maximize impact per word: remove throat-clearing, duplicate context, and adjectives that do not change the promise. ` +
+            `Avoid abstract labels, keyword piles, ` +
             `stacked adjectives, and repeated words. ONE honest claim — every number and name MUST appear in the ` +
             `cold open/script. No channel name, no filler starts` +
             `${allowHype ? "" : ", no hype-bait"}.${lang}`,
