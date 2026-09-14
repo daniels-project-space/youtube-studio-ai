@@ -18,6 +18,8 @@ assert.match(page, /data-capacity-mode=\{status\.receipt\.capacityMode\}/,
 assert.match(page, /api\/minimax-h3\/capacity\?jobCount=/,
   "the render desk offers a read-only pre-dispatch Salad capacity check");
 assert.match(page, /Check Salad capacity/);
+assert.match(page, /status\.state === "held"/);
+assert.match(page, /Held before spend/);
 assert.match(page, /Fleet snapshot/);
 assert.match(page, /api\/salad\/capacity/);
 assert.match(page, /jobCount=\$\{requestedJobs\}/);

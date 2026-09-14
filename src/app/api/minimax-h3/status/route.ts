@@ -3,7 +3,11 @@ import { runs } from "@trigger.dev/sdk";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { getObjectBytes } from "@/lib/storage";
 import { miniMaxH3WeeklyRequestPacketKey } from "@/lib/minimaxH3";
-import { summarizeMiniMaxH3Receipt, type MiniMaxH3ReceiptSummary } from "@/lib/minimaxH3Status";
+import {
+  isMiniMaxH3CapacityHoldError,
+  summarizeMiniMaxH3Receipt,
+  type MiniMaxH3ReceiptSummary,
+} from "@/lib/minimaxH3Status";
 
 export const runtime = "nodejs";
 
@@ -67,7 +71,8 @@ export async function GET(request: Request) {
     const run = await runs.retrieve(runId);
     let receipt: MiniMaxH3ReceiptSummary | undefined;
     let requestPacketState: RequestPacketState = "not-applicable";
-    let receiptState: "pending" | "complete" | "reconciliation_required" = "pending";
+    let receiptState: "pending" | "held" | "complete" | "reconciliation_required" = "pending";
+    let paidRequestStarted: boolean | undefined;
     try {
       const bytes = await getObjectBytes(receiptKey);
       const receiptBody = JSON.parse(new TextDecoder().decode(bytes)) as unknown;
@@ -103,7 +108,12 @@ export async function GET(request: Request) {
         if (!notFound(packetError)) requestPacketState = "invalid";
       }
       if (["COMPLETED", "FAILED", "CANCELED"].includes(String(run.status).toUpperCase())) {
-        receiptState = "reconciliation_required";
+        if (requestPacketState === "frozen" && isMiniMaxH3CapacityHoldError(run.error)) {
+          receiptState = "held";
+          paidRequestStarted = false;
+        } else {
+          receiptState = "reconciliation_required";
+        }
       }
     }
     return NextResponse.json({
@@ -113,6 +123,7 @@ export async function GET(request: Request) {
       state: receiptState,
       requestPacketState,
       receipt: receipt ?? null,
+      ...(paidRequestStarted === undefined ? {} : { paidRequestStarted }),
     }, { headers: { "Cache-Control": "private, no-store" } });
   } catch (error) {
     if (error instanceof StudioAuthError) {

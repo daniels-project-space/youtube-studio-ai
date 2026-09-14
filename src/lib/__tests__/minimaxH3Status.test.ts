@@ -1,5 +1,18 @@
 import assert from "node:assert/strict";
-import { summarizeMiniMaxH3Receipt } from "@/lib/minimaxH3Status";
+import { isMiniMaxH3CapacityHoldError, summarizeMiniMaxH3Receipt } from "@/lib/minimaxH3Status";
+
+for (const message of [
+  "weekly MiniMax H3 Salad capacity check could not admit an exact desktop RTX 5090 class",
+  "weekly MiniMax H3 Salad capacity is insufficient for the requested wave",
+  "weekly MiniMax H3 Salad capacity check failed before dispatch",
+  "weekly MiniMax H3 Salad account capacity check failed before dispatch",
+  "weekly MiniMax H3 Salad account capacity is occupied (2/3 slots)",
+]) assert.equal(isMiniMaxH3CapacityHoldError(message), true, `capacity hold should match: ${message}`);
+for (const message of [
+  "weekly MiniMax H3 Salad worker returned an ambiguous provider error",
+  "MiniMax H3 Salad capacity is insufficient", // missing the weekly task prefix
+  "weekly MiniMax H3 Salad provider request failed after dispatch",
+]) assert.equal(isMiniMaxH3CapacityHoldError(message), false, `non-admission error should not match: ${message}`);
 
 const output = (name: string, costUsd = 0.2) => ({
   r2Key: `owner/daniel/channels/h3/${name}.mp4`,

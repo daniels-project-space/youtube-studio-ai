@@ -8,6 +8,16 @@ export type MiniMaxH3ReceiptSummary = {
   capacityMode?: "medium" | "high" | "mixed" | "spot";
 };
 
+/**
+ * A weekly task checks all capacity before setting its provider-start marker.
+ * Keep this classifier narrow: only those explicit admission/account-capacity
+ * failures may be shown as held; every other terminal run needs reconciliation.
+ */
+export function isMiniMaxH3CapacityHoldError(value: unknown): boolean {
+  return typeof value === "string" &&
+    /weekly MiniMax H3 Salad (?:account )?capacity (?:check )?(?:could not admit|is insufficient|failed|is occupied)/i.test(value);
+}
+
 function isOwnerScopedR2Key(value: unknown, ownerId: string): boolean {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const r2Key = (value as Record<string, unknown>).r2Key;
