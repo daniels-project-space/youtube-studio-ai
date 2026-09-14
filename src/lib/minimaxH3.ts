@@ -110,7 +110,9 @@ export async function assertMiniMaxH3SaladCapacity(
   // allowing production callers to make admission agree with the paid-route
   // readiness fence. A disabled medium tier is unavailable, even if Salad's
   // market snapshot happens to report medium slots.
-  const mediumPriorityEnabled = options.mediumPriorityEnabled ?? true;
+  const policy = saladPriorityPolicyFromEnv();
+  const mediumPriorityEnabled = options.mediumPriorityEnabled ?? policy.mediumEnabled;
+  const allowHighPriorityFallback = options.allowHighPriorityFallback ?? policy.highFallbackEnabled;
   let classes: SaladGpuClass[];
   try {
     classes = await client.listGpuClasses();
@@ -130,7 +132,7 @@ export async function assertMiniMaxH3SaladCapacity(
     // the default medium route.
   }
   let highGpu: ReturnType<typeof selectSaladGpuAtPriority> | undefined;
-  if ((options.preferHighPriority || !mediumPriorityEnabled || !mediumGpu) && options.allowHighPriorityFallback) {
+  if ((options.preferHighPriority || !mediumPriorityEnabled || !mediumGpu) && allowHighPriorityFallback) {
     try { highGpu = selectSaladGpuAtPriority(classes, "RTX 5090", SALAD_HIGH_FALLBACK_PRIORITY); } catch (error) {
       throw new MiniMaxH3Error(
         `weekly MiniMax H3 Salad capacity check could not admit a priced exact desktop RTX 5090 class: ${error instanceof Error ? error.message : String(error)}`,
@@ -192,7 +194,7 @@ export async function assertMiniMaxH3SaladCapacity(
     ? rawAvailableHighGpuCount
     : 0;
   if (options.preferHighPriority) {
-    if (!options.allowHighPriorityFallback) {
+    if (!allowHighPriorityFallback) {
       throw new MiniMaxH3Error("weekly MiniMax H3 high-priority replay is disabled");
     }
     if (availableHighGpuCount < requiredGpuCount) {
@@ -226,7 +228,7 @@ export async function assertMiniMaxH3SaladCapacity(
       fallbackUsed: false,
     };
   }
-  if (options.allowHighPriorityFallback && availableHighGpuCount >= requiredGpuCount) {
+  if (allowHighPriorityFallback && availableHighGpuCount >= requiredGpuCount) {
     // Re-discover the same exact desktop class at the selected tier. A high
     // availability estimate without a valid high-tier price is not spend
     // admission evidence.
@@ -249,7 +251,7 @@ export async function assertMiniMaxH3SaladCapacity(
   }
   if (!mediumPriorityEnabled || !mediumGpu || availableMediumGpuCount < requiredGpuCount) {
     throw new MiniMaxH3Error(
-      options.allowHighPriorityFallback
+      allowHighPriorityFallback
         ? `weekly MiniMax H3 Salad capacity is insufficient for the requested wave (${availableMediumGpuCount} medium, ${availableHighGpuCount} high, ${requiredGpuCount} desktop RTX 5090 slots)`
         : `weekly MiniMax H3 Salad medium capacity is insufficient for the requested wave (${availableMediumGpuCount}/${requiredGpuCount} desktop RTX 5090 slots); high-priority fallback is disabled`,
     );

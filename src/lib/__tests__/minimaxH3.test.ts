@@ -107,6 +107,33 @@ async function test() {
     { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high", fallbackUsed: true },
     "high fallback must be admitted when medium is unavailable, high has enough exact-class slots, and the shared lease has room",
   );
+  // Omitted options inherit the deployment policy rather than silently
+  // disabling the costlier escape hatch for an unwrapped caller.
+  process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY = "0";
+  process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK = "1";
+  assert.equal(
+    (await assertMiniMaxH3SaladCapacity(2, {
+      client: {
+        ...capacityClient,
+        getGpuAvailability: async () => ({ available_gpu_medium: 0, available_gpu_high: 2 }),
+      },
+    })).capacityMode,
+    "high",
+    "direct H3 admission must inherit the enabled high fallback policy",
+  );
+  process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK = "0";
+  await assert.rejects(
+    () => assertMiniMaxH3SaladCapacity(2, {
+      client: {
+        ...capacityClient,
+        getGpuAvailability: async () => ({ available_gpu_medium: 0, available_gpu_high: 2 }),
+      },
+    }),
+    /high-priority fallback is disabled|capacity is insufficient|exact desktop RTX 5090/,
+    "direct H3 admission must honor an explicitly disabled high fallback",
+  );
+  process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY = "1";
+  process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK = "1";
   assert.deepEqual(
     await assertMiniMaxH3SaladCapacity(1, {
       client: {
