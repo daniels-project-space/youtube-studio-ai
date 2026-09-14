@@ -39,6 +39,13 @@ At `2026-09-14T07:19:24Z`, the latest vault-backed probe again observed
 RTX 5090 class remained priced at medium `$0.417/hr` and high, but neither
 tier could unlock a wave, so the route stayed held and made no paid request.
 
+At `2026-09-14T08:07:15Z`, a fresh vault-backed read-only probe observed the
+same exact H3 result: `0 medium / 0 high`, `0/3` occupied, and `0/10` replicas.
+The 3090 comparison lanes had supply (`117` medium ERNIE, `20` medium Music3),
+but those lanes are not valid substitutes for the sealed H3 5090 runtime. The
+controller therefore remained held; no GPU mutation or inference request was
+made.
+
 ## Runtime behavior
 
 `assertMiniMaxH3SaladCapacity()` checks the exact desktop class, account-wide
