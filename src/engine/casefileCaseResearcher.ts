@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-import { hasAnthropicKey, claudeJsonPro } from "@/lib/anthropic";
+import { hasCreativeTextKey, creativeTextJsonPro } from "@/lib/creativeText";
 import { searchWeb, type WebSearchResult } from "@/lib/webSearch";
 
 import {
@@ -576,7 +576,7 @@ async function semanticIssues(
   }));
   if (!expected.length) return []; // surfaced separately by the structural check
 
-  if (!hasAnthropicKey()) {
+  if (!hasCreativeTextKey()) {
     return ["semantic verification unavailable: OPENROUTER_API_KEY is not configured"];
   }
 
@@ -599,7 +599,7 @@ async function semanticIssues(
 
   let raw: unknown;
   try {
-    raw = await claudeJsonPro<unknown>({
+    raw = await creativeTextJsonPro<unknown>({
       system:
         "You are a skeptical fact-checking screener for a true-crime documentary research desk. " +
         "You cannot browse the internet and cannot confirm any fact independently. Judge only whether " +

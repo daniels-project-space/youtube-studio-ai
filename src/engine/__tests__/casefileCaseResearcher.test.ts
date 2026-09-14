@@ -1,10 +1,16 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   CASEFILE_CASE_RESEARCHER_MIN_CONFIDENCE,
   evaluateCasefileCaseResearchContent,
   researchCase,
 } from "@/engine/casefileCaseResearcher";
+
+const researcherSource = readFileSync(join(process.cwd(), "src/engine/casefileCaseResearcher.ts"), "utf8");
+assert.match(researcherSource, /from ["']@\/lib\/creativeText["']/);
+assert.doesNotMatch(researcherSource, /@\/lib\/anthropic|claudeJsonPro|hasAnthropicKey/);
 import { __setSearchWebImplementationForTests, type WebSearchResult } from "@/lib/webSearch";
 
 const NOW = new Date("2026-08-18T12:00:00.000Z");
