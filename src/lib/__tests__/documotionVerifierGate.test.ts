@@ -17,6 +17,12 @@ import { join } from "node:path";
 // threshold in documotion.ts breaks this test.
 
 const documotionSource = readFileSync(join(process.cwd(), "src/lib/documotion.ts"), "utf8");
+assert.match(documotionSource, /from ["']@\/lib\/creativeText["']/,
+  "DocuMotion must use the canonical creative-text boundary directly");
+assert.doesNotMatch(documotionSource, /from ["']@\/lib\/anthropic["']/,
+  "DocuMotion must not route planning or label review through the deprecated Anthropic alias");
+assert.doesNotMatch(documotionSource, /\b(?:claudeJson|claudeJsonPro|hasAnthropicKey)\b/,
+  "DocuMotion must not retain deprecated provider helper names");
 
 const startMarker =
   "const scores = [v.typeCraft, v.cutoutCraft, v.composition, v.legibility, v.styleMatch, v.cohesion];";

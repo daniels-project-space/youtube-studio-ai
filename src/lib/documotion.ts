@@ -36,7 +36,7 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { join } from "node:path";
-import { claudeJson, claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
+import { creativeTextJson, creativeTextJsonPro, hasCreativeTextKey } from "@/lib/creativeText";
 import { parseJsonLoose } from "@/lib/gemini";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
@@ -100,7 +100,7 @@ export function hasDocumotion(options: { requiresPlanning?: boolean } = {}): boo
   // optional planner needs the pinned OpenRouter text route, while generated
   // pixels are always caller-injected. The production block asks with
   // requiresPlanning:false because it already carries a locked strategy plan.
-  return options.requiresPlanning === false || hasAnthropicKey();
+  return options.requiresPlanning === false || hasCreativeTextKey();
 }
 
 /* --------------------------------------------------------------- helpers -- */
@@ -781,7 +781,7 @@ export async function planDocu(args: {
   let feedback = "";
   let lastProblems: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
-    const rawPlan = await claudeJsonPro<unknown>({ prompt: base + feedback, maxTokens: 9000, temperature: 0.6, log });
+    const rawPlan = await creativeTextJsonPro<unknown>({ prompt: base + feedback, maxTokens: 9000, temperature: 0.6, log });
     let plan: DocuPlan;
     try {
       plan = normalizeDocuPlan(rawPlan);
@@ -823,7 +823,7 @@ async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Pr
   const hasText = items.some((it) => it.title || it.kicker || it.circleLabel || it.labels.length);
   if (!hasText) return "not_needed";
   try {
-    const res = await claudeJson<{ fixes?: { i: number; title?: string; kicker?: string; circleLabel?: string; labels?: string[] }[] }>({
+    const res = await creativeTextJson<{ fixes?: { i: number; title?: string; kicker?: string; circleLabel?: string; labels?: string[] }[] }>({
       prompt:
         `You are the typography editor of a premium ${style.label} documentary. Below is the on-screen TEXT for each ` +
         `shot with its voiceover. A title/label is a DRAMATIC card — it must name the SIGNIFICANCE or stakes, never a ` +
@@ -882,7 +882,7 @@ export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, top
     .join("\n");
   try {
     const geoShots = plan.shots.map((s, i) => ({ s, i })).filter((x) => x.s.kind === "geo_map");
-    const res = await claudeJsonPro<{
+    const res = await creativeTextJsonPro<{
       shots?: { i: number; assets?: { id: string; brief?: string; source?: "generate" | "archival"; query?: string }[]; title?: string; kicker?: string; circleLabel?: string; labels?: { text: string; sub?: string }[]; annotations?: string[]; cues?: string[]; geoContext?: { label: string; side: "top" | "bottom" | "left" | "right" }[] }[];
     }>({
       prompt:
