@@ -50,7 +50,32 @@ export const acquire = mutation({
       if (existing.state === "held" && existing.expiresAt > args.now) {
         return { reservationId: existing._id, leaseToken: existing.leaseToken, priority: existing.priority, reused: true, expiresAt: existing.expiresAt };
       }
-      if (existing.state === "released") throw new Error("Salad fleet reservation was already released");
+      if (existing.state === "released") {
+        // A capacity hold is released before any provider request starts. The
+        // retry endpoint deliberately reuses the frozen order/request keys,
+        // so that no-spend retries must be able to reacquire this same logical
+        // fence. A receipt-backed release is never reusable: it proves the
+        // order already reached a durable terminal state.
+        if (existing.releaseReason !== "pre-provider-failure") {
+          throw new Error("Salad fleet reservation was already released");
+        }
+        await ctx.db.patch(existing._id, {
+          state: "held",
+          leaseToken: args.leaseToken,
+          expiresAt: args.now + SALAD_FLEET_RESERVATION_LEASE_MS,
+          priority: existing.priority === "high" ? "high" : args.priority,
+          updatedAt: args.now,
+          releasedAt: undefined,
+          releaseReason: undefined,
+        });
+        return {
+          reservationId: existing._id,
+          leaseToken: args.leaseToken,
+          priority: existing.priority === "high" ? "high" as const : args.priority,
+          reused: false,
+          expiresAt: args.now + SALAD_FLEET_RESERVATION_LEASE_MS,
+        };
+      }
       // A bounded worker task cannot outlive this two-hour fence. Reclaiming an
       // expired row is safe and preserves one durable row per idempotency key.
       await ctx.db.patch(existing._id, {

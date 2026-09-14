@@ -37,5 +37,9 @@ assert.match(convexSource, /export const upgradePriority = mutation/);
 assert.match(convexSource, /priority: v\.literal\("high"\)/);
 assert.match(convexSource, /row\.leaseToken !== args\.leaseToken/);
 assert.match(convexSource, /row\.priority !== "medium"/);
+assert.match(convexSource, /existing\.releaseReason !== "pre-provider-failure"/,
+  "only a no-spend pre-provider release may be reacquired by a frozen retry");
+assert.match(convexSource, /state: "held"[\s\S]*leaseToken: args\.leaseToken/,
+  "a no-spend retry must renew the same logical fence with a fresh lease token");
 
 console.log("Salad fleet reservation contract tests passed");
