@@ -7,12 +7,12 @@
  * sub-module was never built (index.ts: "director/dp/composer/critic to follow").
  *
  * Config resolver + directives mirror editor.ts/director.ts exactly. `planCoverage()`
- * is the script/scene-aware shot planner (Gemini Pro), producing cinecraft `ShotSpec`s
+ * is the script/scene-aware shot planner (the approved OpenRouter creative route), producing cinecraft `ShotSpec`s
  * (no new shot type) that the visual stage (gen_footage) renders.
  */
 import { moduleParams, type ChannelProfile } from "@/engine/channelProfile";
 import { resolveKnobs, knobDefaults, type KnobValue } from "@/engine/customization";
-import { geminiJsonPro, hasGeminiKey } from "@/lib/gemini";
+import { creativeTextJsonPro, hasCreativeTextKey } from "@/lib/creativeText";
 import type { ShotSpec } from "@/lib/cinecraft";
 import { CINEMATOGRAPHER_SURFACE } from "@/lib/crew/cinematographerManifest";
 
@@ -163,10 +163,10 @@ export interface PlanCoverageArgs {
  * brain. Reuses cinecraft's `ShotSpec`. Understands each beat's context and gives it
  * varied coverage: wide/medium/close + inserts + reaction/antagonist cuts + subject
  * variety, with a motivated camera move, lens and lighting per the DP config. Throws if
- * no Gemini key (no silent thin fallback — mirrors synthScript/buildShotScript).
+ * no approved creative-text key (no silent thin fallback — mirrors synthScript/buildShotScript).
  */
 export async function planCoverage(args: PlanCoverageArgs): Promise<ShotSpec[]> {
-  if (!hasGeminiKey()) throw new Error("cinematographer.planCoverage: GEMINI_API_KEY missing (no fallback)");
+  if (!hasCreativeTextKey()) throw new Error("cinematographer.planCoverage: OPENROUTER_API_KEY missing (no fallback)");
   const cfg = args.cfg ?? defaultCinematographerConfig();
   const dir = args.directives ?? cinematographerDirectives(cfg);
   const sections = (args.script.sections ?? []).filter((s) => (s.heading || s.narration));
@@ -176,7 +176,7 @@ export async function planCoverage(args: PlanCoverageArgs): Promise<ShotSpec[]> 
   const chars = (args.subjects ?? []).filter((s) => (s.kind ?? "character") !== "location");
   const places = (args.subjects ?? []).filter((s) => s.kind === "location");
 
-  const out = await geminiJsonPro<{ shots?: ShotSpec[] }>({
+  const out = await creativeTextJsonPro<{ shots?: ShotSpec[] }>({
     prompt: [
       `You are the CINEMATOGRAPHER (director of photography) of a ${args.look?.style ?? "cinematic"} ${args.niche ?? "documentary"} reconstruction${args.period ? ` (${args.period})` : ""}.`,
       `COVERAGE DOCTRINE: ${dir.rubric}`,

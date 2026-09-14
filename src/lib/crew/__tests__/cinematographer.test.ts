@@ -5,6 +5,8 @@
  * planCoverage (LLM) is exercised in the e2e smoke, not here.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { buildChannelProfile, type ChannelProfile } from "@/engine/channelProfile";
 import { configurableModules, moduleSurface } from "@/engine/moduleRegistry";
 import { resolveKnobs } from "@/engine/customization";
@@ -74,11 +76,23 @@ function surfaceAndRegistry(): void {
   console.log("SURFACE/REGISTRY PASS: presets valid + registered + illegal throws");
 }
 
+function providerBoundary(): void {
+  const source = readFileSync(join(process.cwd(), "src/lib/crew/cinematographer.ts"), "utf8");
+  const manifest = readFileSync(join(process.cwd(), "src/lib/crew/cinematographerManifest.ts"), "utf8");
+  assert.match(source, /creativeTextJsonPro/);
+  assert.match(source, /hasCreativeTextKey/);
+  assert.doesNotMatch(source, /@\/lib\/gemini|geminiJsonPro|hasGeminiKey/);
+  assert.match(manifest, /OPENROUTER_API_KEY/);
+  assert.doesNotMatch(manifest, /GEMINI_API_KEY/);
+  console.log("ROUTE PASS: DP shot planning uses the approved OpenRouter creative-text boundary");
+}
+
 function main(): void {
   configResolves();
   defaultsResolve();
   directivesEncodeCoverage();
   surfaceAndRegistry();
+  providerBoundary();
   console.log("\nALL CINEMATOGRAPHER TESTS PASSED");
 }
 

@@ -39,7 +39,7 @@ export const CINEMATOGRAPHER_MODULE = {
   produces: { kind: "shot_plan", file: "n/a", returns: "CinematographerConfig + DpDirectives + planCoverage(script) → ShotSpec[]" },
   requires: { channelProfile: "ChannelProfile — supplies DP preset + overrides (moduleConfig['dp_brief'])" },
   optional: { script: "the video's Script (hook + sections) — planCoverage plans coverage from it" },
-  needs: { secrets: ["GEMINI_API_KEY"], tools: [], note: "Config/directives are pure; planCoverage calls Gemini Pro to author the shot list." },
+  needs: { secrets: ["OPENROUTER_API_KEY"], tools: [], note: "Config/directives are pure; planCoverage calls the approved OpenRouter creative route to author the shot list." },
   customization: CINEMATOGRAPHER_SURFACE,
   rules: [
     "DP OWNS COVERAGE: shot-size mix + inserts + reactions + camera grammar — NOT host-only push-ins.",
