@@ -46,7 +46,12 @@
  */
 import type { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
-import { claudeJson, claudeJsonPro, hasAnthropicKey, retryOnUnusableOutput } from "@/lib/anthropic";
+import {
+  creativeTextJson,
+  creativeTextJsonPro,
+  hasCreativeTextKey,
+  retryOnUnusableOutput,
+} from "@/lib/creativeText";
 import {
   youtubeSuggest,
   lintTitle,
@@ -67,7 +72,7 @@ export { fetchRedditTrends, type TrendSignal } from "@/lib/trends";
 export { youtubeSuggest } from "@/lib/metacraft";
 
 export function hasTopicraft(): boolean {
-  return hasAnthropicKey();
+  return hasCreativeTextKey();
 }
 
 export type BetType = "hero" | "hub" | "help";
@@ -580,7 +585,7 @@ async function semanticDedupe(
 /* ------------------------------- engine -------------------------------- */
 
 export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
-  if (!hasAnthropicKey()) throw new Error("topicraft: OPENROUTER_API_KEY missing — cannot craft real topics without a fallback");
+  if (!hasCreativeTextKey()) throw new Error("topicraft: OPENROUTER_API_KEY missing — cannot craft real topics without a fallback");
   const log = a.log ?? (() => {});
   const t0 = Date.now();
   const count = Math.max(1, a.count);
@@ -663,7 +668,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
     let gen: { bets?: Partial<TopicBet>[] };
     await markProviderSpendStarted();
     try {
-      gen = await claudeJsonPro<typeof gen>({
+      gen = await creativeTextJsonPro<typeof gen>({
         prompt: [
           dateAnchor,
           `You are the topic STRATEGIST for the YouTube channel "${a.channelName ?? "this channel"}" placing ${want} content BETS.`,
@@ -757,7 +762,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
     if (survivors.length > 0) {
       let gated: TopicBet[] = [];
       try {
-        const j = await retryOnUnusableOutput(() => claudeJson<{ rankings?: { idx?: number; demand?: number; freshness?: number; fit?: number; packageability?: number }[] }>({
+        const j = await retryOnUnusableOutput(() => creativeTextJson<{ rankings?: { idx?: number; demand?: number; freshness?: number; fit?: number; packageability?: number }[] }>({
           prompt: [
             `You are a YouTube growth strategist auditing topic BETS for "${a.channelName ?? "this channel"}" (${a.niche ?? "general"}).`,
             `TITLE ENVELOPE: ${titleProfile.id} (${titleProfile.targetMinChars}-${titleProfile.targetMaxChars} target chars, hard ${titleProfile.hardMinChars}-${titleProfile.hardMaxChars}). ` +

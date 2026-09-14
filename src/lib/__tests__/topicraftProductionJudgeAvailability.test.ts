@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { craftTopics, type TopicBet } from "@/lib/topicraft";
 
 const candidate: TopicBet = {
@@ -12,6 +14,14 @@ const candidate: TopicBet = {
 };
 
 async function main(): Promise<void> {
+  const topicraftSource = readFileSync(join(process.cwd(), "src/lib/topicraft.ts"), "utf8");
+  assert.match(topicraftSource, /from ["']@\/lib\/creativeText["']/,
+    "Topicraft must use the canonical creative-text boundary directly");
+  assert.doesNotMatch(topicraftSource, /from ["']@\/lib\/anthropic["']/,
+    "Topicraft must not route production generation through the deprecated Anthropic alias");
+  assert.doesNotMatch(topicraftSource, /\b(?:claudeJson|claudeJsonPro|hasAnthropicKey)\b/,
+    "Topicraft must not retain deprecated provider helper names");
+
   const previousKey = process.env.OPENROUTER_API_KEY;
   const originalFetch = globalThis.fetch;
   let generationCalls = 0;
