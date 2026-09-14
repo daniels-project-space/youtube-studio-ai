@@ -91,6 +91,8 @@ export async function assertMiniMaxH3SaladCapacity(
   availableGpuCount: number;
   gpuClassId: string;
   capacityMode: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY;
+  /** True only when medium could not admit the wave and high was selected. */
+  fallbackUsed: boolean;
 }> {
   if (!Number.isSafeInteger(jobCount) || jobCount < 1 || jobCount > MAX_H3_JOBS_PER_BATCH) {
     throw new MiniMaxH3Error(`weekly MiniMax H3 capacity check requires 1..${MAX_H3_JOBS_PER_BATCH} jobs`);
@@ -178,6 +180,7 @@ export async function assertMiniMaxH3SaladCapacity(
       availableGpuCount: availableMediumGpuCount,
       gpuClassId: gpu.id,
       capacityMode: MINIMAX_H3_SALAD_CAPACITY_MODE,
+      fallbackUsed: false,
     };
   }
   const rawAvailableHighGpuCount = availability.available_gpu_high;
@@ -202,6 +205,7 @@ export async function assertMiniMaxH3SaladCapacity(
       availableGpuCount: availableHighGpuCount,
       gpuClassId: highGpu.id,
       capacityMode: SALAD_HIGH_FALLBACK_PRIORITY,
+      fallbackUsed: true,
     };
   }
   if (!mediumGpu || availableMediumGpuCount < requiredGpuCount) {

@@ -21,7 +21,7 @@ type H3Status = {
 };
 
 type H3Capacity =
-  | { state: "admitted"; capacity: { requiredGpuCount: number; availableGpuCount: number; capacityMode: "medium" | "high" } }
+  | { state: "admitted"; capacity: { requiredGpuCount: number; availableGpuCount: number; capacityMode: "medium" | "high"; fallbackUsed: boolean } }
   | { state: "held"; reason: string; paidRequestStarted: false }
   | { state: "unavailable"; reason: string };
 
@@ -288,7 +288,9 @@ export function H3RenderConsole() {
           <button type="button" className={styles.secondaryButton} onClick={() => void checkCapacity()} disabled={capacityBusy || !parsedPreview.valid}>{capacityBusy ? "Checking Salad…" : "Check Salad capacity"}</button>
           {capacity && <span className={styles.capacityNotice} data-state={capacity.state} role="status">
             {capacity.state === "admitted"
-              ? `Admits ${capacity.capacity.requiredGpuCount} worker${capacity.capacity.requiredGpuCount === 1 ? "" : "s"} at ${capacity.capacity.capacityMode} priority.`
+              ? capacity.capacity.fallbackUsed
+                ? `Admits ${capacity.capacity.requiredGpuCount} worker${capacity.capacity.requiredGpuCount === 1 ? "" : "s"} at high priority fallback (medium unavailable).`
+                : `Admits ${capacity.capacity.requiredGpuCount} worker${capacity.capacity.requiredGpuCount === 1 ? "" : "s"} at medium priority.`
               : capacity.state === "held"
                 ? `Held before spend · ${capacity.reason}`
                 : `Capacity check unavailable · ${capacity.reason}`}

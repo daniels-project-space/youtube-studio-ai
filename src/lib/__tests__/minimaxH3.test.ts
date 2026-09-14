@@ -73,7 +73,7 @@ async function test() {
   assert.equal(availabilityCalls, 0, "an occupied account lease must short-circuit the market query");
   assert.deepEqual(
     await assertMiniMaxH3SaladCapacity(4, { client: capacityClient }),
-    { requiredGpuCount: 3, availableGpuCount: 3, gpuClassId: classes[0]!.id, capacityMode: "medium" },
+    { requiredGpuCount: 3, availableGpuCount: 3, gpuClassId: classes[0]!.id, capacityMode: "medium", fallbackUsed: false },
   );
   assert.deepEqual(capacityRequest, {
     cpu: 8, gpu_classes: [classes[0]!.id], memory: 131_072, storage_amount: 100 * 1024 ** 3,
@@ -92,7 +92,7 @@ async function test() {
       },
       allowHighPriorityFallback: true,
     }),
-    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high" },
+    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high", fallbackUsed: true },
     "high fallback must also unlock a wave when medium exists but has too few exact-class slots",
   );
   assert.deepEqual(
@@ -104,7 +104,7 @@ async function test() {
       },
       allowHighPriorityFallback: true,
     }),
-    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high" },
+    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high", fallbackUsed: true },
     "high fallback must be admitted when medium is unavailable, high has enough exact-class slots, and the shared lease has room",
   );
   assert.deepEqual(
@@ -115,7 +115,7 @@ async function test() {
       },
       allowHighPriorityFallback: true,
     }),
-    { requiredGpuCount: 1, availableGpuCount: 1, gpuClassId: classes[0]!.id, capacityMode: "high" },
+    { requiredGpuCount: 1, availableGpuCount: 1, gpuClassId: classes[0]!.id, capacityMode: "high", fallbackUsed: true },
     "a missing medium price must not silently dispatch medium; explicit high fallback may still proceed",
   );
   let leaseReads = 0;
