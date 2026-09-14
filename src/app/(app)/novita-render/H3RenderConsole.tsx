@@ -18,6 +18,7 @@ type H3Status = {
     totalCostUsd: number;
     capacityMode?: "medium" | "high" | "mixed" | "spot";
   } | null;
+  paidRequestStarted?: boolean;
 };
 
 type H3Capacity =
@@ -121,6 +122,7 @@ export function H3RenderConsole() {
   const [receiptKey, setReceiptKey] = useState("");
   const [jobsJson, setJobsJson] = useState(weeklyExample);
   const [busy, setBusy] = useState(false);
+  const [retryBusy, setRetryBusy] = useState(false);
   const [error, setError] = useState("");
   const [tracking, setTracking] = useState<H3Tracking | null>(null);
   const [status, setStatus] = useState<H3Status | null>(null);
@@ -291,6 +293,29 @@ export function H3RenderConsole() {
     }
   }
 
+  async function retryHeld() {
+    if (!tracking || !status || status.state !== "held" || tracking.provider !== "salad") return;
+    setRetryBusy(true);
+    setError("");
+    try {
+      const response = await fetch("/api/minimax-h3/retry", {
+        method: "POST",
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { Accept: "application/json", "Content-Type": "application/json" },
+        body: JSON.stringify({ runId: tracking.runId, receiptKey: tracking.receiptKey }),
+      });
+      const payload = await response.json().catch(() => null) as { ok?: boolean; triggerRunId?: string; error?: string } | null;
+      if (!response.ok || payload?.ok !== true || !payload.triggerRunId) throw new Error(errorMessage(payload, "Capacity-held batch could not be re-queued."));
+      setTracking({ runId: payload.triggerRunId, receiptKey: tracking.receiptKey, provider: "salad" });
+      setStatus(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Capacity-held batch could not be re-queued.");
+    } finally {
+      setRetryBusy(false);
+    }
+  }
+
   if (access !== "owner") return <LockedConsole access={access} onRequestOwner={requestOwner} />;
 
   const provider = mode === "weekly" ? "Salad" : "Novita";
@@ -357,7 +382,7 @@ export function H3RenderConsole() {
           <div className={styles.progressHeader}><div><span className={styles.eyebrow}>Live progress · {tracking?.provider ?? provider}</span><strong>{status?.triggerStatus ?? "Queued"}</strong></div><b>{progressPercent}%</b></div>
           <div className={styles.progressTrack}><i style={{ width: `${progressPercent}%` }} /></div>
           <div className={styles.progressMeta}><span>{tracking?.runId ?? ""}</span>{status?.receipt ? <span>{status.receipt.completedCount}/{status.receipt.requestCount} outputs · ${status.receipt.totalCostUsd.toFixed(4)}</span> : <span>Waiting for Trigger and R2 receipt</span>}{status?.receipt?.capacityMode && <span data-capacity-mode={status.receipt.capacityMode}>Tier {status.receipt.capacityMode === "high" ? "high fallback" : status.receipt.capacityMode}</span>}{status?.requestPacketState === "frozen" && <span>Inputs frozen</span>}{status?.requestPacketState === "missing" && <span className={styles.warn}>Request packet missing</span>}{status?.requestPacketState === "invalid" && <span className={styles.warn}>Request packet invalid</span>}<button type="button" className={styles.clearButton} onClick={clearTracking}>Clear tracking</button></div>
-          {status?.state === "held" && <strong className={styles.warn}>Held before spend: Salad capacity was unavailable. The frozen batch can be checked again when capacity returns.</strong>}
+          {status?.state === "held" && <div className={styles.holdAction}><strong className={styles.warn}>Held before spend: Salad capacity was unavailable. The frozen batch can be checked again when capacity returns.</strong><button type="button" className={styles.secondaryButton} onClick={() => void retryHeld()} disabled={retryBusy}>{retryBusy ? "Rechecking capacity…" : "Check again"}</button></div>}
           {status?.state === "reconciliation_required" && <strong className={styles.warn}>Provider run ended without a durable receipt. Reconcile before retrying.</strong>}
           {error && <strong className={styles.error}>{error}</strong>}
         </section>
