@@ -123,6 +123,85 @@ export interface PreflightInput {
   hasKey?: (name: string) => boolean;
 }
 
+const PROMPT_PARAM_KEY = /^(?:system|user|positive|negative|image|motion|text|generation)Prompt$|^instructions?$/i;
+const PROMPT_SHAPED_PARAM_KEY = /prompt/i;
+const PROVIDER_SELECTOR_KEY = /^(model|modelId|provider|providerId|route|engine)$/i;
+const MAX_PARAMETER_STRING_LENGTH = 120_000;
+
+/**
+ * Validate the JSON-shaped knobs that a paid module will hand to a provider.
+ *
+ * Provider adapters should still validate their own domain-specific request,
+ * but they must never be the first place we discover an empty prompt,
+ * non-finite numeric knob, or an empty model/provider selector: by then a
+ * remote child may already have been created. This walk is deliberately
+ * narrow and deterministic, and does not rewrite or default operator input.
+ */
+function assertPaidParamsSafe(
+  blockId: string,
+  value: unknown,
+  path = "params",
+  seen = new Set<object>(),
+  nodes = { count: 0 },
+): void {
+  nodes.count++;
+  if (nodes.count > 20_000) {
+    throw new PreflightError(`paid block "${blockId}" parameters are too deeply nested`);
+  }
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) {
+      throw new PreflightError(`paid block "${blockId}" has non-finite parameter at ${path}`);
+    }
+    return;
+  }
+  if (value === null || typeof value === "boolean" || typeof value === "undefined") return;
+  if (typeof value === "string") {
+    if (value.length > MAX_PARAMETER_STRING_LENGTH) {
+      throw new PreflightError(
+        `paid block "${blockId}" parameter at ${path} exceeds ${MAX_PARAMETER_STRING_LENGTH} characters`,
+      );
+    }
+    return;
+  }
+  if (typeof value !== "object") {
+    throw new PreflightError(`paid block "${blockId}" has unsupported parameter type at ${path}`);
+  }
+  if (seen.has(value)) {
+    throw new PreflightError(`paid block "${blockId}" parameters contain a circular value at ${path}`);
+  }
+  seen.add(value);
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => assertPaidParamsSafe(blockId, entry, `${path}[${index}]`, seen, nodes));
+    seen.delete(value);
+    return;
+  }
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    const childPath = `${path}.${key}`;
+    if (PROMPT_PARAM_KEY.test(key)) {
+      if (typeof entry !== "string" || entry.trim().length === 0) {
+        throw new PreflightError(
+          `paid block "${blockId}" requires a non-empty string at ${childPath}`,
+        );
+      }
+    } else if (PROMPT_SHAPED_PARAM_KEY.test(key) && entry !== undefined && entry !== null && typeof entry !== "string") {
+      // Generic `prompt` knobs are allowed to be omitted/empty because some
+      // modules intentionally synthesize a default from upstream style DNA;
+      // when supplied, however, they must still be text rather than an object
+      // that a provider adapter would stringify unpredictably.
+      throw new PreflightError(`paid block "${blockId}" requires a string at ${childPath}`);
+    }
+    if (PROVIDER_SELECTOR_KEY.test(key)) {
+      if (typeof entry !== "string" || entry.trim().length === 0) {
+        throw new PreflightError(
+          `paid block "${blockId}" requires a non-empty provider/model selector at ${childPath}`,
+        );
+      }
+    }
+    assertPaidParamsSafe(blockId, entry, childPath, seen, nodes);
+  }
+  seen.delete(value);
+}
+
 /**
  * Preflight a resolved pipeline before execution. Fails loud if a paid block
  * exists without a budget, or if any required key is missing.
@@ -147,8 +226,10 @@ export function preflight(
   // A paid module without a finite envelope is therefore not executable.
   const reservedMaxCostUsd = paidIndexes.reduce((total, index) => {
     const manifest = resolved.manifests[index];
+    const params = resolved.entries[index].params ?? {};
+    assertPaidParamsSafe(manifest.id, params);
     try {
-      return total + configuredMaxCostUsd(manifest, resolved.entries[index].params ?? {}, {
+      return total + configuredMaxCostUsd(manifest, params, {
         entries: resolved.entries,
         index,
       });

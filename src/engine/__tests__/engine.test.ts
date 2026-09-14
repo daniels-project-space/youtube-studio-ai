@@ -14,7 +14,7 @@
  */
 import assert from "node:assert/strict";
 import { _resetBlocks, registerAllBlocks } from "@/engine/blocks";
-import { register } from "@/engine/registry";
+import { register, registerManifest } from "@/engine/registry";
 import { echoSeed, echoSink } from "@/trigger/blocks/echoBlocks";
 import {
   validatePipeline,
@@ -24,7 +24,7 @@ import {
 } from "@/engine/validate";
 import { runPipeline } from "@/engine/runner";
 import { allManifests } from "@/engine/registry";
-import { configuredMaxCostUsd } from "@/engine/moduleManifest";
+import { configuredMaxCostUsd, manifestFromBlock } from "@/engine/moduleManifest";
 import { COST_PATCH_KEY, type Block, type RunStageSink } from "@/engine/types";
 
 interface Recorded {
@@ -161,6 +161,42 @@ async function preflightCostReservation(): Promise<void> {
   console.log(`PREFLIGHT RESERVATION PASS: ${paid.id} reserves $${maximum.toFixed(2)}`);
 }
 
+function preflightParameterIntegrity(): void {
+  _resetBlocks();
+  const paid: Block = {
+    id: "paid_parameter_probe",
+    consumes: [],
+    produces: ["result"],
+    paid: true,
+    run: async () => ({ result: "ok", [COST_PATCH_KEY]: 0.01 }),
+  };
+  registerManifest(manifestFromBlock(paid, { capabilities: [], maxCostUsd: 0.1 }));
+  const expectBlocked = (params: Record<string, unknown>, pattern: RegExp): void => {
+    const resolved = validatePipeline([{ block: paid.id, params }]);
+    assert.throws(
+      () => preflight(resolved, { budgetUsd: 1 }),
+      (error: unknown) => error instanceof PreflightError && pattern.test(error.message),
+    );
+  };
+
+  expectBlocked({ motionPrompt: "   " }, /non-empty string.*motionPrompt/);
+  expectBlocked({ prompt: { text: "unexpected object" } }, /requires a string.*prompt/);
+  expectBlocked({ temperature: Number.NaN }, /non-finite parameter.*temperature/);
+  expectBlocked({ provider: "" }, /provider\/model selector.*provider/);
+  const circular: Record<string, unknown> = {};
+  circular.self = circular;
+  expectBlocked(circular, /circular value/);
+  assert.doesNotThrow(() => preflight(
+    validatePipeline([{ block: paid.id, params: { prompt: "" } }]),
+    { budgetUsd: 1 },
+  ), "an intentionally omitted generic prompt may still use the module default");
+  assert.doesNotThrow(() => preflight(
+    validatePipeline([{ block: paid.id, params: { motionPrompt: "slow camera drift", provider: "novita" } }]),
+    { budgetUsd: 1 },
+  ));
+  console.log("PREFLIGHT PARAMETER INTEGRITY PASS: malformed paid prompts/selectors/numbers fail before dispatch");
+}
+
 /**
  * Cost wiring: a paid block that reports __costUsd must (a) have that cost
  * recorded on its runStage, (b) roll up into RunResult.costTotal, and (c) when
@@ -284,6 +320,7 @@ async function main(): Promise<void> {
   await negativeValidation();
   await negativeSilentFallback();
   await preflightCostReservation();
+  preflightParameterIntegrity();
   await costAndBudget();
   await artifactBatching();
   console.log("\nALL ENGINE TESTS PASSED");
