@@ -61,6 +61,12 @@ export function isR2AuthFailure(error: unknown): boolean {
     .includes(String(candidate?.name ?? ""));
 }
 
+/** Missing R2 configuration is recoverable from the vault for this process. */
+export function isR2CredentialFailure(error: unknown): boolean {
+  if (isR2AuthFailure(error)) return true;
+  return error instanceof Error && /Missing required R2 environment variable/u.test(error.message);
+}
+
 async function refreshR2CredentialsFromVault(): Promise<boolean> {
   if (credentialRefresh) return credentialRefresh;
   credentialRefresh = (async () => {
@@ -428,7 +434,7 @@ export async function getObjectBytes(
   try {
     return await read();
   } catch (error) {
-    if (!isR2AuthFailure(error) || !(await refreshR2CredentialsFromVault())) throw error;
+    if (!isR2CredentialFailure(error) || !(await refreshR2CredentialsFromVault())) throw error;
     return await read();
   }
 }

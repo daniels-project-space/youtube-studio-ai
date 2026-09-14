@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { OWNER_ID } from "@/lib/config";
-import { getObjectBytes, isR2AuthFailure } from "@/lib/storage";
+import { getObjectBytes, isR2CredentialFailure } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -46,7 +46,7 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
-    if (isR2AuthFailure(error)) {
+    if (isR2CredentialFailure(error)) {
       return NextResponse.json(
         { error: "private media storage is unavailable" },
         { status: 503, headers: { "Cache-Control": "private, no-store", "Retry-After": "60" } },
