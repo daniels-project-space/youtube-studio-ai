@@ -5,7 +5,7 @@
   "packageManager": "pnpm@11.5.1",
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "NEXT_PUBLIC_CONVEX_URL=${NEXT_PUBLIC_CONVEX_URL:-https://astute-camel-689.convex.cloud} next build",
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
