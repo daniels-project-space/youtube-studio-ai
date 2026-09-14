@@ -635,6 +635,18 @@ export const minimaxH3WeeklyBatchTask = task({
         // disable it for a deployment, but never let request JSON select it.
         allowHighPriorityFallback: process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
       });
+      if (capacity.fallbackUsed && fleetConvex && reservationIdentity && fleetReservation) {
+        // The fence is acquired before the market snapshot to prevent two
+        // weekly orders from both passing eventually-consistent capacity
+        // checks.  Keep its persisted tier honest when the admitted route has
+        // to use the explicit high-priority escape hatch.
+        await fleetConvex.mutation(api.saladFleetReservations.upgradePriority, {
+          reservationKey: reservationIdentity.reservationKey,
+          leaseToken: fleetReservation.leaseToken,
+          now: Date.now(),
+          priority: "high",
+        });
+      }
       if (payload.preparedFootage) {
         // Preflight every input before the first worker request; a later bad
         // frame must never leave a partially paid weekly order.

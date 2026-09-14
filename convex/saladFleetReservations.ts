@@ -110,6 +110,40 @@ export const release = mutation({
   },
 });
 
+/**
+ * Upgrade an already-held logical fence after market admission selects the
+ * explicit high-priority escape hatch.  Admission is intentionally performed
+ * after acquire to close the check-then-dispatch race; this small transaction
+ * keeps the durable diagnostic in sync without allowing a caller to downgrade
+ * or mutate someone else's lease.
+ */
+export const upgradePriority = mutation({
+  args: {
+    reservationKey,
+    leaseToken: v.string(),
+    now: v.number(),
+    priority: v.literal("high"),
+  },
+  handler: async (ctx, args) => {
+    safeTimestamp(args.now);
+    if (!args.leaseToken.trim() || args.leaseToken.length > 160) {
+      throw new Error("Salad fleet reservation lease token is invalid");
+    }
+    const row = await ctx.db.query("saladFleetReservations")
+      .withIndex("by_reservation_key", (q) => q.eq("reservationKey", args.reservationKey))
+      .unique();
+    if (!row) throw new Error("Salad fleet reservation not found");
+    if (row.leaseToken !== args.leaseToken) throw new Error("Salad fleet reservation lease token mismatch");
+    if (row.state !== "held" || row.expiresAt <= args.now) {
+      throw new Error("Salad fleet reservation is not an active held lease");
+    }
+    if (row.priority === "high") return { reused: true, priority: "high" as const };
+    if (row.priority !== "medium") throw new Error("Salad fleet reservation priority cannot be upgraded");
+    await ctx.db.patch(row._id, { priority: "high", updatedAt: args.now });
+    return { reused: false, priority: "high" as const };
+  },
+});
+
 /** Service-only diagnostic used by the render desk; it never exposes tokens. */
 export const listActive = query({
   args: { now: v.number() },
