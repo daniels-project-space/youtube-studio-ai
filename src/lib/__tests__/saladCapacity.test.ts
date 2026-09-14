@@ -52,6 +52,25 @@ assert.ok(mediumDisabled.lanes.every((lane) => lane.recommendedPriority === "hig
 assert.ok(mediumDisabled.lanes.every((lane) => lane.fallbackUsed),
   "a disabled medium tier must be marked as an explicit high fallback");
 
+const highOnlyPrice = await readSaladCapacitySnapshot({
+  listGpuClasses: async () => classes.map((gpu) => gpu.name === "RTX 5090 (32 GB)"
+    ? { ...gpu, prices: [{ price: "0.60", priority: "high" as const }] }
+    : gpu),
+  listContainerGroups: async () => [],
+  listContainerInstances: async () => [],
+  getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 10, container_replicas_used: 2 } }),
+  getGpuAvailability: async (resources) => resources.gpu_classes[0] === classes[1]!.id
+    ? { available_gpu_medium: 0, available_gpu_high: 3 }
+    : { available_gpu_medium: 3, available_gpu_high: 3 },
+}, { requiredWorkers: 2, allowHighPriorityFallback: true });
+const highOnlyH3 = highOnlyPrice.lanes.find((lane) => lane.id === "h3")!;
+assert.equal(highOnlyH3.recommendedPriority, "high",
+  "a priced high tier must unlock the H3 wave when Salad has no medium price");
+assert.equal(highOnlyH3.fallbackUsed, true);
+assert.equal(highOnlyH3.mediumPriceUsdPerHour, null);
+assert.equal(highOnlyH3.highPriceUsdPerHour, 0.6);
+assert.equal(highOnlyH3.selectedPriceUsdPerHour, 0.6);
+
 const fallbackDisabled = await readSaladCapacitySnapshot({
   listGpuClasses: async () => classes,
   listContainerGroups: async () => [],
