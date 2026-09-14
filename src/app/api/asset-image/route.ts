@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { OWNER_ID } from "@/lib/config";
-import { getObjectBytes } from "@/lib/storage";
+import { getObjectBytes, isR2AuthFailure } from "@/lib/storage";
 
 export const runtime = "nodejs";
 
@@ -45,7 +45,13 @@ export async function GET(request: Request) {
         "Cross-Origin-Resource-Policy": "same-origin",
       },
     });
-  } catch {
+  } catch (error) {
+    if (isR2AuthFailure(error)) {
+      return NextResponse.json(
+        { error: "private media storage is unavailable" },
+        { status: 503, headers: { "Cache-Control": "private, no-store", "Retry-After": "60" } },
+      );
+    }
     return NextResponse.json({ error: "image unavailable" }, { status: 404 });
   }
 }

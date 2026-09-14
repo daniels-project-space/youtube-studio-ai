@@ -44,6 +44,52 @@ function resolveEndpoint(): string {
 }
 
 let cachedClient: S3Client | null = null;
+let credentialRefresh: Promise<boolean> | null = null;
+
+/**
+ * R2 credentials are normally hydrated before a route reaches storage. A
+ * revoked Vercel value can nevertheless stay in the process and produce a
+ * misleading stream of 401s. On that specific failure, make one best-effort
+ * vault refresh and rebuild the client; never retry missing objects or generic
+ * provider errors, and never log the credential values.
+ */
+export function isR2AuthFailure(error: unknown): boolean {
+  const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
+  const status = candidate?.$metadata?.httpStatusCode;
+  if (status === 401 || status === 403) return true;
+  return ["Unauthorized", "AccessDenied", "InvalidAccessKeyId", "SignatureDoesNotMatch", "ExpiredToken"]
+    .includes(String(candidate?.name ?? ""));
+}
+
+async function refreshR2CredentialsFromVault(): Promise<boolean> {
+  if (credentialRefresh) return credentialRefresh;
+  credentialRefresh = (async () => {
+    try {
+      const { listByService } = await import("@/lib/vault");
+      const secrets = await listByService("cloudflare");
+      const keys = ["R2_ACCOUNT_ID", "R2_BUCKET", "R2_ENDPOINT", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"] as const;
+      let changed = false;
+      for (const key of keys) {
+        const value = secrets[key]?.trim();
+        if (!value || process.env[key] === value) continue;
+        process.env[key] = value;
+        changed = true;
+      }
+      if (changed) {
+        cachedClient?.destroy();
+        cachedClient = null;
+      }
+      return changed;
+    } catch {
+      // Vault is an optional recovery path. The original provider error is
+      // preserved when it is unavailable or does not contain R2 credentials.
+      return false;
+    } finally {
+      credentialRefresh = null;
+    }
+  })();
+  return credentialRefresh;
+}
 
 /** Lazily construct (and cache) the R2-backed S3 client. */
 export function getR2Client(): S3Client {
@@ -324,59 +370,67 @@ export async function getObjectBytes(
   bucket?: string,
   options: { timeoutMs?: number } = {},
 ): Promise<Uint8Array> {
-  const command = new GetObjectCommand({
-    Bucket: getBucket(bucket),
-    Key: key,
-  });
-  const timeoutMs = options.timeoutMs;
-  const signal =
-    typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
-      ? AbortSignal.timeout(Math.floor(timeoutMs))
-      : undefined;
-  const res = await getR2Client().send(command, signal ? { abortSignal: signal } : undefined);
-  if (!res.Body) {
-    throw new Error(`R2 object has no body: ${key}`);
-  }
-  // @aws-sdk v3 streams expose transformToByteArray in Node + browser builds.
-  const body = res.Body as {
-    transformToByteArray: () => Promise<Uint8Array>;
-    destroy?: (error?: Error) => void;
-    cancel?: (reason?: unknown) => Promise<void> | void;
-  };
-  if (!signal) return await body.transformToByteArray();
-
-  return await new Promise<Uint8Array>((resolve, reject) => {
-    const cancel = () => {
-      const reason = signal.reason instanceof Error ? signal.reason : new Error("R2 object download timed out");
-      try {
-        body.destroy?.(reason);
-      } catch {
-        // The deadline still releases the local waiter for non-Node streams.
-      }
-      try {
-        void Promise.resolve(body.cancel?.(reason)).catch(() => undefined);
-      } catch {
-        // The request signal is already aborted; cancellation is best effort.
-      }
-      reject(reason);
-    };
-    const cleanup = () => signal.removeEventListener("abort", cancel);
-    if (signal.aborted) {
-      cancel();
-      return;
+  const read = async (): Promise<Uint8Array> => {
+    const command = new GetObjectCommand({
+      Bucket: getBucket(bucket),
+      Key: key,
+    });
+    const timeoutMs = options.timeoutMs;
+    const signal =
+      typeof timeoutMs === "number" && Number.isFinite(timeoutMs) && timeoutMs > 0
+        ? AbortSignal.timeout(Math.floor(timeoutMs))
+        : undefined;
+    const res = await getR2Client().send(command, signal ? { abortSignal: signal } : undefined);
+    if (!res.Body) {
+      throw new Error(`R2 object has no body: ${key}`);
     }
-    signal.addEventListener("abort", cancel, { once: true });
-    void body.transformToByteArray().then(
-      (bytes) => {
-        cleanup();
-        resolve(bytes);
-      },
-      (error) => {
-        cleanup();
-        reject(error);
-      },
-    );
-  });
+    // @aws-sdk v3 streams expose transformToByteArray in Node + browser builds.
+    const body = res.Body as {
+      transformToByteArray: () => Promise<Uint8Array>;
+      destroy?: (error?: Error) => void;
+      cancel?: (reason?: unknown) => Promise<void> | void;
+    };
+    if (!signal) return await body.transformToByteArray();
+
+    return await new Promise<Uint8Array>((resolve, reject) => {
+      const cancel = () => {
+        const reason = signal.reason instanceof Error ? signal.reason : new Error("R2 object download timed out");
+        try {
+          body.destroy?.(reason);
+        } catch {
+          // The deadline still releases the local waiter for non-Node streams.
+        }
+        try {
+          void Promise.resolve(body.cancel?.(reason)).catch(() => undefined);
+        } catch {
+          // The request signal is already aborted; cancellation is best effort.
+        }
+        reject(reason);
+      };
+      const cleanup = () => signal.removeEventListener("abort", cancel);
+      if (signal.aborted) {
+        cancel();
+        return;
+      }
+      signal.addEventListener("abort", cancel, { once: true });
+      void body.transformToByteArray().then(
+        (bytes) => {
+          cleanup();
+          resolve(bytes);
+        },
+        (error) => {
+          cleanup();
+          reject(error);
+        },
+      );
+    });
+  };
+  try {
+    return await read();
+  } catch (error) {
+    if (!isR2AuthFailure(error) || !(await refreshR2CredentialsFromVault())) throw error;
+    return await read();
+  }
 }
 
 /**
