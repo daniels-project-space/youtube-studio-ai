@@ -64,5 +64,7 @@ const doctorSource = readFileSync(
 assert.match(doctorSource, /listRunHistorySince\(convex, ch\._id, Date\.now\(\) - 60 \* DAY\)/);
 assert.doesNotMatch(doctorSource, /run stuck 'running' >3h/);
 assert.doesNotMatch(doctorSource, /reaper: flipped stuck run/);
+assert.match(doctorSource, /from ["']@\/lib\/creativeText["']/);
+assert.doesNotMatch(doctorSource, /@\/lib\/anthropic|claudeJson/);
 
 console.log("BOUNDED CONVEX READ TESTS PASS");

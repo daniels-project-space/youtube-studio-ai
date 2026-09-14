@@ -7,7 +7,7 @@
  *  - heal activity (superseded stages) → which defects keep recurring,
  *  - published videos past the 7-day metric lag → queues retention-analyst,
  *  - the architects' missingCapabilities → the standing build queue.
- * A diagnosis (Claude) turns it into a prioritized action list; the report is
+ * An OpenRouter diagnosis turns it into a prioritized action list; the report is
  * persisted to R2 and summarized to Telegram. The Doctor PROPOSES — risky
  * changes stay operator decisions; the only thing it auto-fires is analysis.
  */
@@ -16,7 +16,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
-import { claudeJson } from "@/lib/anthropic";
+import { creativeTextJson } from "@/lib/creativeText";
 import { putObject } from "@/lib/storage";
 import { sendMessage } from "@/lib/telegram";
 import {
@@ -408,7 +408,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
         if (!myId) continue;
         if ((await getVideoPrivacy(pc.videoId, refreshToken)) !== "public") continue;
         if (await hasChannelComment(pc.videoId, myId, refreshToken)) continue;
-          const q = await claudeJson<{ comment?: string }>({
+          const q = await creativeTextJson<{ comment?: string }>({
             // Writing an engaging comment is a creative single-field call, and
             // the floor for those is measured at 1200 — not the ~100 a trivial
             // one needs. See scripts/measure-single-field-ceiling.ts.
@@ -444,7 +444,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
   let diagnosis: { summary?: string; actions?: { priority?: string; kind?: string; detail?: string }[] } = {};
   if (failures.length || healed.length || missingCaps.size || trendLines.length || groundingGapChannels.length) {
     try {
-      diagnosis = await claudeJson({
+      diagnosis = await creativeTextJson({
         // Reasoning route: the ceiling must cover the thinking AND the list.
         // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
         // ranking failed at 1500 and passed at 2500. See
