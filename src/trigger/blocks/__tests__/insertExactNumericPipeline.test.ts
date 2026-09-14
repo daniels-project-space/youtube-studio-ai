@@ -14,8 +14,8 @@ const loader = Module as unknown as { _load: (request: string, ...rest: unknown[
 const original = loader._load;
 loader._load = function(request, ...rest) {
   const resolved = original.call(this, request, ...rest) as Record<string, unknown>;
-  if (request.endsWith('/anthropic')) return { ...resolved, hasAnthropicKey: () => true,
-    claudeJson: async ({ prompt }: { prompt: string }) => { prompts.push(prompt); if (plannerError) throw plannerError; return { inserts: plan }; } };
+  if (request.endsWith('/creativeText')) return { ...resolved, hasCreativeTextKey: () => true,
+    creativeTextJson: async ({ prompt }: { prompt: string }) => { prompts.push(prompt); if (plannerError) throw plannerError; return { inserts: plan }; } };
   if (request.endsWith('/remotionRender')) return { ...resolved,
     renderDataInsert: async (args: Record<string, unknown>) => { rendered.push(args); return args.outPath; } };
   if (request.endsWith('/files')) return { ...resolved, makeRunTempDir: async () => '/tmp/insert-exact-seam', readBytes: async () => Buffer.from('controlled-render-seam') };

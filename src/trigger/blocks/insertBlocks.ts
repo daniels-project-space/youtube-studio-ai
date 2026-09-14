@@ -28,7 +28,7 @@ import {
 } from "@/engine/evidenceVisualManifest";
 import { bindDataInsertEvidence, type DataInsertEvidenceBindings, type BoundDataInsertPresentation } from "@/engine/dataInsertEvidence";
 import { join } from "node:path";
-import { claudeJson, hasAnthropicKey, retryOnUnusableOutput } from "@/lib/anthropic";
+import { creativeTextJson, hasCreativeTextKey, retryOnUnusableOutput } from "@/lib/creativeText";
 import { makeRunTempDir, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { renderDataInsert } from "@/lib/remotionRender";
@@ -309,7 +309,7 @@ export const visualInserts: Block = {
         : "visual_inserts: narration speaks no numbers — nothing to visualize");
       return { insertOverlays: [] };
     }
-    // A named source in the prose is not enough. Before Claude can select a
+    // A named source in the prose is not enough. Before the planner can select a
     // chart, prove every source/number pairing against the reviewed ledger.
     // This is intentionally fail-closed: a source-attributed data story must
     // never silently degrade into an unreviewed data visual.
@@ -330,7 +330,7 @@ export const visualInserts: Block = {
     const evidenceVisualById = new Map(evidenceVisualManifests.map((manifest) => [manifest.id, manifest]));
     // Keep evidence eligibility ahead of the planner/provider boundary. A
     // missing permitted planner is a no-op, never a fallback to Gemini.
-    if (!hasAnthropicKey()) {
+    if (!hasCreativeTextKey()) {
       ctx.log("visual_inserts: no permitted planner key — skipping");
       return { insertOverlays: [] };
     }
@@ -395,7 +395,7 @@ export const visualInserts: Block = {
 
     let plan: InsertPlanItem[] = [];
     try {
-      const raw = await planWithRetryOnUnusableOutput(() => claudeJson<{ inserts?: InsertPlanItem[] }>({
+      const raw = await planWithRetryOnUnusableOutput(() => creativeTextJson<{ inserts?: InsertPlanItem[] }>({
         prompt:
           `You are the channel's MOTION-GRAPHICS DIRECTOR for a ${niche || "YouTube"} video: "${topic}".\n` +
           `These narration sentences speak numbers (sentenceIdx: text):\n` +

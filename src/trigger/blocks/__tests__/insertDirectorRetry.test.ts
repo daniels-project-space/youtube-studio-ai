@@ -17,9 +17,19 @@
  * planning call. Every genuinely unknown outcome must still propagate.
  */
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 import { planWithRetryOnUnusableOutput } from "../insertBlocks";
+
+const insertSource = readFileSync(join(process.cwd(), "src/trigger/blocks/insertBlocks.ts"), "utf8");
+assert.match(insertSource, /from ["']@\/lib\/creativeText["']/,
+  "Insert Director must use the canonical creative-text boundary directly");
+assert.doesNotMatch(insertSource, /from ["']@\/lib\/anthropic["']/,
+  "Insert Director must not route planning through the deprecated Anthropic alias");
+assert.doesNotMatch(insertSource, /\b(?:claudeJson|hasAnthropicKey)\b/,
+  "Insert Director must not retain deprecated provider helper names");
 
 function unusable(): OpenRouterGenerationOutcomeUnknownError {
   return new OpenRouterGenerationOutcomeUnknownError(

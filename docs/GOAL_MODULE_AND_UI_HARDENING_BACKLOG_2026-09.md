@@ -394,6 +394,7 @@ Added from the owner's follow-up on 2026-09-08. These items extend all earlier w
   **Creative-foundation route cleanup (14 September):** capability and format advisors plus automatic show-bible/style-DNA foundations now import `creativeText` directly, with canonical key guards and no legacy Anthropic alias. Their advisory fallbacks and no-Gemini channel-inception behavior are unchanged; source regressions protect the boundary.
   **Footage/documentary route cleanup (14 September):** Footagecraft query generation and DocuMotion planning, label review, and visual-direction calls now import `creativeText` directly. Their visual gates, attested image-generator boundary, deterministic fallbacks, and durable paid-stage receipts remain unchanged; focused source and behavior fixtures cover the migration.
   **Forge route cleanup (14 September):** Module Forge authoring and its runtime `llm_json` interpreter now use the canonical creative-text boundary, so architect-authored modules no longer depend on a disabled Gemini/legacy alias at execution. The declarative schema, cost ceiling, primitive allowlist, and runtime admission gates are unchanged.
+  **Insert route cleanup (14 September):** the production visual-inserts director and its bounded unusable-output retry now use `creativeText` directly. Spoken-number, source-ledger, evidence-manifest, timing, and storage integrity contracts remain unchanged; fixture mocks now exercise the real boundary.
 
 ### I. Later owner additions — page-level efficiency and new capabilities
 

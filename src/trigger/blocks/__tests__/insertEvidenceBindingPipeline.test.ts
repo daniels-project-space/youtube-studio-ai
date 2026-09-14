@@ -40,7 +40,7 @@ const loader = Module as unknown as { _load: (request: string, ...rest: unknown[
 const original = loader._load;
 loader._load = function(request, ...rest) {
   const actual = original.call(this, request, ...rest) as Record<string, unknown>;
-  if (request.endsWith('/anthropic')) return { ...actual, hasAnthropicKey: () => true, claudeJson: async ({ prompt }: { prompt: string }) => { prompts.push(prompt); return { inserts: [plan] }; } };
+  if (request.endsWith('/creativeText')) return { ...actual, hasCreativeTextKey: () => true, creativeTextJson: async ({ prompt }: { prompt: string }) => { prompts.push(prompt); return { inserts: [plan] }; } };
   if (request.endsWith('/remotionRender')) return { ...actual, renderDataInsert: async (args: Record<string, unknown>) => { rendered.push(args); return args.outPath; } };
   if (request.endsWith('/files')) return { ...actual, makeRunTempDir: async () => '/tmp/insert-evidence-seam', readBytes: async () => Buffer.from('test-render') };
   if (request.endsWith('/storage')) return { ...actual, putObject: async (key: string) => { stored.push(key); } };
