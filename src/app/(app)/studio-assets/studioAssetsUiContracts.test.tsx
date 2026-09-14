@@ -21,6 +21,8 @@ async function main(): Promise<void> {
   assert.match(source, /publicMode/,
     "viewer mode must expose the public-safe catalog without private inventory");
   assert.match(source, /Refresh catalog/);
+  assert.match(source, /data-disabled-reason=\{loading \? "Registry refresh is already in progress"/,
+    "the disabled refresh state must explain why it cannot be activated");
   assert.match(source, /publicMode \? \[/,
     "viewer mode must keep private inventory tabs out of the way");
   assert.match(source, /summary=\{registryReady && !publicMode \? summary : null\}/,

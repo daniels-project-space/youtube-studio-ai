@@ -261,7 +261,7 @@ function AssetHero({
         <h1>Studio assets</h1>
         <p>Reusable media, recipes, and visual treatments.</p>
       </div>
-      <button type="button" className={styles.refresh} disabled={loading} onClick={onRefresh}>
+      <button type="button" className={styles.refresh} disabled={loading} title={loading ? "Registry refresh is already in progress" : undefined} data-disabled-reason={loading ? "Registry refresh is already in progress" : undefined} onClick={onRefresh}>
         {loading ? "Refreshing…" : access === "owner" ? "Refresh registry" : "Refresh catalog"}
       </button>
       {summary ? <ul className={styles.metricRail} aria-label="Registry summary">
