@@ -38,6 +38,20 @@ assert.equal(h3.mediumPriceUsdPerHour, 0.4);
 assert.equal(h3.highPriceUsdPerHour, 0.6);
 assert.equal(h3.selectedPriceUsdPerHour, 0.6);
 
+const mediumDisabled = await readSaladCapacitySnapshot({
+  listGpuClasses: async () => classes,
+  listContainerGroups: async () => [],
+  listContainerInstances: async () => [],
+  getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 10, container_replicas_used: 2 } }),
+  getGpuAvailability: async (resources) => resources.gpu_classes[0] === classes[1]!.id
+    ? { available_gpu_medium: 3, available_gpu_high: 3 }
+    : { available_gpu_medium: 3, available_gpu_high: 3 },
+}, { mediumPriorityEnabled: false, allowHighPriorityFallback: true });
+assert.ok(mediumDisabled.lanes.every((lane) => lane.recommendedPriority === "high"),
+  "the fleet snapshot must escalate when medium is disabled, even if medium slots are visible");
+assert.ok(mediumDisabled.lanes.every((lane) => lane.fallbackUsed),
+  "a disabled medium tier must be marked as an explicit high fallback");
+
 const fallbackDisabled = await readSaladCapacitySnapshot({
   listGpuClasses: async () => classes,
   listContainerGroups: async () => [],

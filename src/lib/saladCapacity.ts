@@ -70,6 +70,8 @@ export interface SaladCapacitySnapshotOptions {
   requiredWorkers?: number;
   /** Keep the read-only recommendation aligned with the paid dispatcher flag. */
   allowHighPriorityFallback?: boolean;
+  /** Whether the deployment has explicitly enabled the medium tier. */
+  mediumPriorityEnabled?: boolean;
 }
 
 type CapacityClient = Pick<SaladCloudClient, "listGpuClasses" | "listContainerGroups" | "listContainerInstances" | "getQuotas" | "getGpuAvailability">;
@@ -89,6 +91,11 @@ export async function readSaladCapacitySnapshot(
 ): Promise<SaladCapacitySnapshot> {
   const requiredWorkers = options.requiredWorkers ?? 1;
   const allowHighPriorityFallback = options.allowHighPriorityFallback ?? true;
+  // The fleet panel is an admission preview, not an independent policy. Keep
+  // its recommendation consistent with the paid H3 readiness fence: a
+  // disabled medium tier must be treated as unavailable even if Salad reports
+  // market slots for it.
+  const mediumPriorityEnabled = options.mediumPriorityEnabled ?? true;
   if (!Number.isSafeInteger(requiredWorkers) || requiredWorkers < 1 || requiredWorkers > SALAD_BULK_MAX_GPUS) {
     throw new Error(`Salad capacity snapshot requires 1..${SALAD_BULK_MAX_GPUS} workers`);
   }
@@ -145,13 +152,15 @@ export async function readSaladCapacitySnapshot(
     }
     const mediumAvailable = safeCount(availability.available_gpu_medium);
     const highAvailable = safeCount(availability.available_gpu_high);
-    const recommendedPriority: SaladBulkPriority | null = mediumAvailable >= requiredWorkers
+    const recommendedPriority: SaladBulkPriority | null = mediumPriorityEnabled && mediumAvailable >= requiredWorkers
       ? "medium"
       : allowHighPriorityFallback && highAvailable >= requiredWorkers && highClass
         ? SALAD_HIGH_FALLBACK_PRIORITY
         : null;
     if (!recommendedPriority) {
-      if (!allowHighPriorityFallback && highAvailable >= requiredWorkers && highClass) {
+      if (!mediumPriorityEnabled && !allowHighPriorityFallback) {
+        blockers.push("medium_priority_disabled");
+      } else if (!allowHighPriorityFallback && highAvailable >= requiredWorkers && highClass) {
         blockers.push("high_priority_fallback_disabled");
       } else {
         blockers.push("no_current_capacity");
