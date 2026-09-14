@@ -24,7 +24,7 @@
  *      ranked spares) until the body length is covered, deduped within the
  *      video AND across past videos via the caller's ledger.
  *
- * Deps: GEMINI_API_KEY (queries + gate) + ≥1 footage provider key. Pure of R2/
+ * Deps: OPENROUTER_API_KEY (queries + gate) + ≥1 footage provider key. Pure of R2/
  * Convex — the caller owns persistence (ledger ids in, picked ids out).
  *
  *   import { buildFootageQueries, castFootage, hasFootagecraft } from "@/lib/footagecraft";
@@ -38,7 +38,7 @@ import { join } from "node:path";
 import { downloadTo } from "@/lib/files";
 import { grabFrame } from "@/lib/ffmpeg";
 import { parseJsonLoose } from "@/lib/gemini";
-import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { creativeTextJson, hasCreativeTextKey } from "@/lib/creativeText";
 import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { footageDoctrineFor, type FootageDoctrine } from "@/engine/golden";
 import {
@@ -57,11 +57,11 @@ export { footageDoctrineFor, FOOTAGE_DOCTRINE, type FootageDoctrine } from "@/en
 /**
  * Zero callers today. Kept, corrected rather than deleted, because it is the
  * honest capability answer for this module and the WRONG answer is what it used
- * to give: `hasGeminiKey() && ...` is unconditionally false, so anything that
+ * to give: a retired Gemini guard was unconditionally false, so anything that
  * had gated on it would have silently disabled stock footage entirely.
  */
 export function hasFootagecraft(): boolean {
-  return hasAnthropicKey() && hasAnyFootageProvider();
+  return hasCreativeTextKey() && hasAnyFootageProvider();
 }
 
 /** Strict relevance floor (clearly on-theme, not loosely related). */
@@ -221,16 +221,16 @@ export function shuffle<T>(a: T[]): T[] {
  * that live inside the channel's locked visual world and never touch its
  * avoid-list.
  *
- * This ran on Gemini and stopped running at all. hasGeminiKey() is hard-wired
- * to false ("Generic Gemini is intentionally unavailable"), so the whole branch
+ * This ran on a retired Gemini guard and stopped running at all. That guard was
+ * hard-wired to false ("Generic Gemini is intentionally unavailable"), so the whole branch
  * was dead and this returned only `extra` — which the stock_footage caller fills
  * with the topic, the niche, and the script's SECTION HEADINGS. A heading is
  * prose, not a 2-4 word filmable search term, so the queries degraded to
  * something stock search handles badly, while this comment still said Gemini was
  * turning them into concrete terms.
  *
- * Now on claudeJson, the same OpenRouter route every other text call in the
- * repo uses. The DP brief's own queries still LEAD at the call site; this fills
+ * The query call now uses the canonical creative-text boundary. The DP brief's
+ * own queries still LEAD at the call site; this fills
  * the rest.
  */
 export async function buildFootageQueries(
@@ -240,7 +240,7 @@ export async function buildFootageQueries(
   log: (message: string) => void = () => {},
 ): Promise<string[]> {
   let queries: string[] = [];
-  if (hasAnthropicKey()) {
+  if (hasCreativeTextKey()) {
     const nicheBit = brief.niche ? ` (${brief.niche})` : "";
     const narr = brief.narrationExcerpt ? `\n\nNarration excerpt:\n"${brief.narrationExcerpt.slice(0, 900)}"\n\n` : " ";
     const repairClause = footageRepairDirective(brief, "query");
@@ -283,7 +283,7 @@ export async function buildFootageQueries(
       `visual world AND its movement above. Vary scenes so no two look alike. Avoid abstract words and filler. ` +
       `Return STRICT JSON {"queries":string[]}.`;
     try {
-      const out = await claudeJson<{ queries?: string[] }>({
+      const out = await creativeTextJson<{ queries?: string[] }>({
         prompt: brief.natureMode ? naturePrompt : defaultPrompt,
         // A LIST contract on the reasoning route: the ceiling covers the
         // thinking AND the list, and the measured list floor is 2000. The old

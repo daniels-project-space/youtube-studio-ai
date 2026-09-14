@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   footageCandidateIsEligible,
@@ -14,6 +16,14 @@ const repairBrief: FootageBrief = {
     "[visual-review @13.0s] reveal_failure; observed: the payoff is absent; expected: the sprout consequence visibly lands",
   ],
 };
+
+const footagecraftSource = readFileSync(join(process.cwd(), "src/lib/footagecraft.ts"), "utf8");
+assert.match(footagecraftSource, /from ["']@\/lib\/creativeText["']/,
+  "Footagecraft must use the canonical creative-text boundary directly");
+assert.doesNotMatch(footagecraftSource, /from ["']@\/lib\/anthropic["']/,
+  "Footagecraft must not route query generation through the deprecated Anthropic alias");
+assert.doesNotMatch(footagecraftSource, /\b(?:claudeJson|hasAnthropicKey)\b/,
+  "Footagecraft must not retain deprecated provider helper names");
 
 for (const phase of ["query", "gate"] as const) {
   const directive = footageRepairDirective(repairBrief, phase);
