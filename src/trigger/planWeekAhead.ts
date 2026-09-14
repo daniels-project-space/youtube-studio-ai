@@ -32,7 +32,7 @@ import {
   selectGoldenThumbnailPattern,
   type ThumbnailPlaybook,
 } from "@/lib/thumbnailLab";
-import { hasAnthropicKey } from "@/lib/anthropic";
+import { hasCreativeTextKey } from "@/lib/creativeText";
 import { hasVisionKey } from "@/lib/vision";
 import { assertThumbnailGate } from "@/engine/qualityPolicy";
 import {
@@ -471,7 +471,7 @@ async function runPlanWeekAhead(
 
     let itemIds = admitted.itemIds as Id<"contentPlan">[] | undefined;
     if (admitted.topicState !== "complete") {
-      if ((!usesDocumentarySourceSeason && !hasAnthropicKey()) || !hasFalNanoBananaProThumbnail()) {
+      if ((!usesDocumentarySourceSeason && !hasCreativeTextKey()) || !hasFalNanoBananaProThumbnail()) {
         const modelScope = createModelUsageScope();
         const imageScope = createImageUsageScope();
         const checkpoint = buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot());
@@ -482,7 +482,7 @@ async function runPlanWeekAhead(
           imageUsage: checkpoint.imageUsage, costUsd: checkpoint.costUsd,
           accountingComplete: checkpoint.accountingComplete,
         });
-        const error = !usesDocumentarySourceSeason && !hasAnthropicKey()
+        const error = !usesDocumentarySourceSeason && !hasCreativeTextKey()
           ? "plan-week-ahead: OpenRouter topic provider is not configured"
           : "plan-week-ahead: Fal Nano Banana Pro thumbnail provider is not configured";
         await convex.mutation(api.contentPlan.failPlanTopics, {
@@ -1748,7 +1748,7 @@ async function genThumb(o: {
   if (!o.providerReceipt && !hasFalNanoBananaProThumbnail()) {
     throw new Error("plan thumbnail Fal Nano Banana Pro provider is not configured");
   }
-  if (!hasAnthropicKey()) {
+  if (!hasCreativeTextKey()) {
     throw new Error("plan thumbnail Golden pattern instantiation provider is not configured");
   }
   if (!hasVisionKey()) {

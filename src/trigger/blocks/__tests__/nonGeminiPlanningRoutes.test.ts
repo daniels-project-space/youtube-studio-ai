@@ -34,7 +34,8 @@ assert.match(topicSelect, /hasCreativeTextKey/, "topic_select must require the p
 assert.match(metadata, /hasCreativeTextKey/, "metadata must use the permitted text planner");
 assert.match(inserts, /hasCreativeTextKey/, "visual inserts must use the permitted text planner");
 assert.match(inserts, /assertDataStorySourceLedger/, "strict data stories must bind visual inserts to the reviewed source ledger");
-assert.match(weekAhead, /hasAnthropicKey/, "week-ahead planning must use the permitted text planner");
+assert.match(weekAhead, /hasCreativeTextKey/, "week-ahead planning must use the permitted text planner");
+assert.doesNotMatch(weekAhead, /@\/lib\/anthropic|\bhasAnthropicKey\b|\bclaudeJson\b/, "week-ahead must not retain the deprecated provider alias");
 assert.match(narrated, /creativeTextJson/, "narrated quality enhancements must use the permitted text planner");
 assert.match(compliance, /creativeTextJson/, "compliance review must use the permitted text planner");
 assert.match(metacraft, /creativeTextJson/, "metadata package must use the permitted text planner");

@@ -399,6 +399,7 @@ Added from the owner's follow-up on 2026-09-08. These items extend all earlier w
   **Whiteboard route cleanup (14 September):** WhiteboardSync storyboard admission and renderer-only planning guards now use `creativeText` directly, with cache/recovery fixtures updated to exercise the canonical boundary. The hand-drawn reveal, timing, Python preflight, Fish/ElevenLabs selection, and attested Novita art gates are unchanged.
   **Agent route cleanup (14 September):** Mastra’s REST recovery path now uses `creativeText` directly as well, preserving the named-agent contract, structured schema validation, model-usage accounting, and refusal to silently substitute providers.
   **Lo-Fi route cleanup (14 September):** Lo-Fi topic-selection and narration/planning availability guards now use the canonical creative-text key, while native MiniMax Music3, exact loop-source, thumbnail, and visual-gate routes remain unchanged.
+  **Week-ahead route cleanup (14 September):** weekly topic admission and Golden thumbnail pattern-instantiation guards now use `creativeText` directly. Documentary-source exceptions, Fal Nano Banana Pro thumbnail admission, checkpoint recovery, usage accounting, and batch idempotency remain unchanged; route tests now reject the deprecated alias.
 
 ### I. Later owner additions — page-level efficiency and new capabilities
 
