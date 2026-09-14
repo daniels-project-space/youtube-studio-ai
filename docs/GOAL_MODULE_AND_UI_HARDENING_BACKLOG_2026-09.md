@@ -397,6 +397,7 @@ Added from the owner's follow-up on 2026-09-08. These items extend all earlier w
   **Insert route cleanup (14 September):** the production visual-inserts director and its bounded unusable-output retry now use `creativeText` directly. Spoken-number, source-ledger, evidence-manifest, timing, and storage integrity contracts remain unchanged; fixture mocks now exercise the real boundary.
   **Motion-comic route cleanup (14 September):** the standalone storyboard capability guard now uses the canonical creative-text key, matching its Mastra/OpenRouter planner and keeping the ElevenLabs/Nova image and deterministic reveal contracts unchanged.
   **Whiteboard route cleanup (14 September):** WhiteboardSync storyboard admission and renderer-only planning guards now use `creativeText` directly, with cache/recovery fixtures updated to exercise the canonical boundary. The hand-drawn reveal, timing, Python preflight, Fish/ElevenLabs selection, and attested Novita art gates are unchanged.
+  **Agent route cleanup (14 September):** Mastra’s REST recovery path now uses `creativeText` directly as well, preserving the named-agent contract, structured schema validation, model-usage accounting, and refusal to silently substitute providers.
 
 ### I. Later owner additions — page-level efficiency and new capabilities
 

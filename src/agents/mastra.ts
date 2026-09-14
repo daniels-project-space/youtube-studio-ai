@@ -19,7 +19,7 @@
  * image rather than being bundled.
  */
 import type { z } from "zod";
-import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { creativeTextJson, hasCreativeTextKey } from "@/lib/creativeText";
 import { openRouterModel } from "@/lib/openRouter";
 import {
   getOrCreateModelResponse,
@@ -422,12 +422,12 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
     // REST fallback uses the same declared non-Google provider. No hidden
     // provider substitution is allowed for creative text.
     const system = o.system ?? cfg?.instructions;
-    if (!hasAnthropicKey()) throw new Error(`agentJson(${o.role}): OPENROUTER_API_KEY is required`);
+    if (!hasCreativeTextKey()) throw new Error(`agentJson(${o.role}): OPENROUTER_API_KEY is required`);
     // Mirror the Mastra-available path's model tier here so a Mastra outage
     // degrades gracefully (fast roles -> "flash", higher-stakes roles ->
-    // "pro") instead of silently collapsing every role to claudeJson's
+    // "pro") instead of silently collapsing every role to the default
     // tier-less "flash" default.
-    const out = await claudeJson<T>({
+    const out = await creativeTextJson<T>({
       prompt: o.prompt,
       system,
       tier: cfg?.tier,
