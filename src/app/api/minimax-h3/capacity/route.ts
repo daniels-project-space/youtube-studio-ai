@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { assertMiniMaxH3SaladCapacity } from "@/lib/minimaxH3";
+import { saladPriorityPolicyFromEnv } from "@/lib/saladCloud";
 
 export const runtime = "nodejs";
 
@@ -18,9 +19,10 @@ export async function GET(request: Request) {
         { status: 400 },
       );
     }
+    const policy = saladPriorityPolicyFromEnv();
     const capacity = await assertMiniMaxH3SaladCapacity(jobCount, {
-      allowHighPriorityFallback: process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
-      mediumPriorityEnabled: process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY !== "0",
+      allowHighPriorityFallback: policy.highFallbackEnabled,
+      mediumPriorityEnabled: policy.mediumEnabled,
     });
     return NextResponse.json({
       ok: true,

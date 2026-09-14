@@ -10,6 +10,27 @@ export const SALAD_BULK_MAX_GPUS = 3;
 export type SaladGpuModel = "RTX 3090" | "RTX 5090";
 export type SaladBulkPriority = typeof SALAD_BULK_PRIORITY | typeof SALAD_HIGH_FALLBACK_PRIORITY;
 
+export interface SaladPriorityPolicy {
+  /** Medium is the cost-safe default and can be disabled for maintenance. */
+  mediumEnabled: boolean;
+  /** High is an explicit escape hatch, never a request-controlled override. */
+  highFallbackEnabled: boolean;
+}
+
+/**
+ * One source of truth for the paid Salad tier policy.  Capacity previews,
+ * Trigger admission, and replay readiness must all interpret missing flags
+ * identically; only the literal value "0" disables a tier.
+ */
+export function saladPriorityPolicyFromEnv(
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): SaladPriorityPolicy {
+  return {
+    mediumEnabled: env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY !== "0",
+    highFallbackEnabled: env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
+  };
+}
+
 const resourceName = z.string().regex(/^[a-z][a-z0-9-]{0,61}[a-z0-9]$/);
 const gpuId = z.string().uuid();
 const count = z.number().int().nonnegative();

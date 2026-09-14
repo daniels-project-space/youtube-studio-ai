@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import {
   SALAD_API_BASE, SaladCloudClient, SaladCloudError, buildSaladContainerGroup,
-  isSaladGroupStopped, saladOccupiedGpuSlots, selectSaladGpu, selectSaladGpuAtPriority, type SaladGpuClass,
+  isSaladGroupStopped, saladOccupiedGpuSlots, saladPriorityPolicyFromEnv,
+  selectSaladGpu, selectSaladGpuAtPriority, type SaladGpuClass,
 } from "../saladCloud";
 
 const classes: SaladGpuClass[] = [
@@ -11,6 +12,26 @@ const classes: SaladGpuClass[] = [
   { id: "83ef776e-ce34-4d89-8cf9-81898f1416fa", name: "RTX 5090 Laptop (24 GB)", prices: [{ price: "0.22", priority: "medium" }] },
 ];
 const image = `ghcr.io/daniels-project-space/salad-worker@sha256:${"a".repeat(64)}`;
+
+assert.deepEqual(saladPriorityPolicyFromEnv({}), {
+  mediumEnabled: true,
+  highFallbackEnabled: true,
+}, "missing Salad flags must preserve the medium-first policy and its explicit fallback");
+assert.deepEqual(saladPriorityPolicyFromEnv({
+  MINIMAX_H3_SALAD_MEDIUM_PRIORITY: "0",
+  MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK: "0",
+}), {
+  mediumEnabled: false,
+  highFallbackEnabled: false,
+}, "only an explicit zero disables a Salad tier");
+assert.deepEqual(saladPriorityPolicyFromEnv({
+  MINIMAX_H3_SALAD_MEDIUM_PRIORITY: "false",
+  MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK: "no",
+}), {
+  mediumEnabled: true,
+  highFallbackEnabled: true,
+}, "ambiguous flag values must not accidentally disable paid capacity");
+
 const request = buildSaladContainerGroup({
   name: "studio-batch-001", image, gpu: selectSaladGpu(classes, "RTX 3090"),
   replicas: 3, cpu: 8, memoryMb: 32768, storageBytes: 100 * 1024 ** 3,

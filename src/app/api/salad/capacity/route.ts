@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { readSaladCapacitySnapshot } from "@/lib/saladCapacity";
-import { SALAD_BULK_MAX_GPUS } from "@/lib/saladCloud";
+import { SALAD_BULK_MAX_GPUS, saladPriorityPolicyFromEnv } from "@/lib/saladCloud";
 
 export const runtime = "nodejs";
 
@@ -18,10 +18,11 @@ export async function GET(request: Request) {
     if (jobCount !== undefined && (!Number.isSafeInteger(jobCount) || jobCount < 1 || jobCount > 60)) {
       return NextResponse.json({ ok: false, error: "jobCount must be an integer from 1 to 60" }, { status: 400 });
     }
+    const policy = saladPriorityPolicyFromEnv();
     const snapshot = await readSaladCapacitySnapshot(undefined, {
       requiredWorkers: jobCount === undefined ? 1 : Math.min(SALAD_BULK_MAX_GPUS, jobCount),
-      allowHighPriorityFallback: process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
-      mediumPriorityEnabled: process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY !== "0",
+      allowHighPriorityFallback: policy.highFallbackEnabled,
+      mediumPriorityEnabled: policy.mediumEnabled,
     });
     return NextResponse.json({
       ok: true,

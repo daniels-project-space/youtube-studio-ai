@@ -23,6 +23,7 @@ import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import { saladFleetReservationIdentity } from "@/lib/saladFleetReservation";
+import { saladPriorityPolicyFromEnv } from "@/lib/saladCloud";
 import {
   assertPlanWeekPreparedFootageBinding,
   normalizePlanWeekPreparationManifest,
@@ -632,14 +633,15 @@ export const minimaxH3WeeklyBatchTask = task({
       }
     };
     try {
+      const policy = saladPriorityPolicyFromEnv();
       const capacity = await assertMiniMaxH3SaladCapacity(payload.jobs.length, {
         // Medium remains the first choice. High is the explicit, costlier
         // capacity escape hatch Daniel authorized: set the variable to "0" to
         // disable it for a deployment, but never let request JSON select it.
-        allowHighPriorityFallback: process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
+        allowHighPriorityFallback: policy.highFallbackEnabled,
         // Medium is the safe default; set to "0" only for an intentional
         // maintenance window. High remains a separate fallback gate.
-        mediumPriorityEnabled: process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY !== "0",
+        mediumPriorityEnabled: policy.mediumEnabled,
         ...(heldFleetPriority === "high" ? { preferHighPriority: true } : {}),
       });
       if (capacity.fallbackUsed && fleetConvex && reservationIdentity && fleetReservation) {
