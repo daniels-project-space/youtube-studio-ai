@@ -71,7 +71,7 @@ export async function reoptimize(
   // unconditionally ("Deliberately fail closed"), so this line is never reached.
   // hasGeminiKey() is separately hard-wired to false by policy, which made the
   // old message ("no Gemini key — skip") read like a missing configuration and
-  // an invitation to swap in claudeJson. It is not: the containment is the
+  // an invitation to swap in a creative-text provider. It is not: the containment is the
   // attribution requirement, not the provider, and src/lib/titleCtrSwap.ts says
   // of it "that containment is correct and this must not route around it".
   //

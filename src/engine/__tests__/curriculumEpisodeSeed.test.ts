@@ -11,7 +11,10 @@ import {
 import { contentLaneForFamily } from "@/engine/contentLane";
 import { curriculumEpisodeSeedBlocks } from "@/trigger/blocks/curriculumEpisodeSeedBlocks";
 
-const NOW = new Date("2026-08-16T12:00:00.000Z");
+// Keep the approval inside the admission window as the calendar advances.
+// The test exercises the contract, not a historical timestamp.
+const NOW = new Date();
+const REVIEWED_AT = new Date(NOW.getTime() - 24 * 60 * 60 * 1000).toISOString();
 const lane = contentLaneForFamily("children_learning");
 assert(lane);
 
@@ -57,7 +60,7 @@ const input: CurriculumEpisodeSeedInput = {
     id: "child-editor-review-seed-sort-001",
     decision: "approved",
     reviewerId: "child-editor-garden-desk",
-    reviewedAt: "2026-08-15T12:00:00.000Z",
+    reviewedAt: REVIEWED_AT,
     reviewedCurriculumEpisodeSeedFingerprint: "0".repeat(64),
     ageBandConfirmed: true,
     measurableObjectiveConfirmed: true,

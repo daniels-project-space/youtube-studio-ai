@@ -34,7 +34,7 @@ for (const engineFile of ["lib/motionComic.ts", "lib/whiteboardSync.ts"]) {
   );
   assert.match(
     engine,
-    /hasAnthropicKey\(\)/,
+    /hasCreativeTextKey\(\)/,
     `${engineFile}: readiness must require the non-Google planner rather than a thumbnail-only credential`,
   );
   assert.doesNotMatch(

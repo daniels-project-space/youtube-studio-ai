@@ -13,6 +13,6 @@ assert.match(script, /sourceGrounding\?: string/);
 assert.match(script, /req\.sourceGrounding/);
 assert.match(inserts, /assertDataStorySourceLedger\(/);
 assert.match(inserts, /ctx\.store\["dataStorySourceLedger"\]/);
-assert.match(inserts, /claudeJson/);
+assert.match(inserts, /creativeTextJson/);
 
 console.log("Data-story source-ledger script/QA/visual-insert binding tests passed");

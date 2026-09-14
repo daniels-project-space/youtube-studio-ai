@@ -38,7 +38,7 @@ export async function loadMotionComicDurationHarness() {
   const seams: Record<string, string> = {
     "node:child_process": `export const spawn=(...a)=>io.spawn(...a); export const execFile=(...a)=>io.execFile(...a);`,
     "@/agents/mastra": `export const agentJson=()=>{throw new Error('unexpected planner provider request')};`,
-    "@/lib/anthropic": `export const hasAnthropicKey=()=>true; export const claudeJsonPro=()=>{throw new Error('unexpected critic provider request')};`,
+    "@/lib/creativeText": `export const hasCreativeTextKey=()=>true; export const creativeTextJson=()=>{throw new Error('unexpected critic provider request')}; export const creativeTextJsonPro=()=>{throw new Error('unexpected critic provider request')};`,
     "@/lib/vision": `export const VISION_GATE_MAX_TOKENS=1000; export const visionLocal=()=>{throw new Error('unexpected vision request')};`,
     "@/lib/music": `export const generateMusic=()=>{throw new Error('unexpected music request')};`,
     "@/lib/pydeps": `export const preflightPythonRenderer=async()=>{};`,

@@ -19,7 +19,7 @@
  *
  * This file has NO model/framework dependency — produce/critique are supplied by
  * the chunk. That is the hybrid seam: today they call our REST helpers
- * (geminiJson/claudeJson); a later phase can back them with Mastra agents (and a
+ * (the legacy Gemini/creative-text helpers); a later phase can back them with Mastra agents (and a
  * Mastra workflow can wrap this loop) without changing any chunk.
  */
 
