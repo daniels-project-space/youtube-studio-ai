@@ -18,4 +18,10 @@ for (const relativePath of [
   assert.doesNotMatch(source, /accepting candidate .*deterministic checks alone/i);
 }
 
+const critic = readFileSync(join(root, "src/lib/storyboardCritic.ts"), "utf8");
+assert.match(critic, /from ["']@\/lib\/creativeText["']/,
+  "the shared storyboard critic must use the canonical OpenRouter creative-text boundary");
+assert.doesNotMatch(critic, /@\/lib\/anthropic|claudeJson|hasAnthropicKey/,
+  "the shared storyboard critic must not retain legacy Claude-labelled aliases");
+
 console.log("Shared storyboard critic wiring tests passed");
