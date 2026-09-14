@@ -131,7 +131,7 @@ const io = {
 const seams = {
   "node:child_process": "export const spawn=(...a)=>io.spawn(...a); export const execFile=(...a)=>io.execFile(...a); execFile[Symbol.for('nodejs.util.promisify.custom')]=(...a)=>new Promise((resolve,reject)=>io.execFile(...a,(error,stdout,stderr)=>error?reject(error):resolve({stdout,stderr})));",
   "@/agents/mastra": "export const agentJson=()=>io.forbidden('planner');",
-  "@/lib/anthropic": "export const hasAnthropicKey=()=>true; export const claudeJsonPro=()=>io.forbidden('critic');",
+  "@/lib/creativeText": "export const hasCreativeTextKey=()=>true; export const creativeTextJsonPro=()=>io.forbidden('critic');",
   "@/lib/vision": "export const VISION_GATE_MAX_TOKENS=1000; export const visionLocal=()=>io.forbidden('vision');",
   "@/lib/music": "export const generateMusic=()=>io.forbidden('music');",
   "@/lib/pydeps": "export const preflightPythonRenderer=async()=>{};",

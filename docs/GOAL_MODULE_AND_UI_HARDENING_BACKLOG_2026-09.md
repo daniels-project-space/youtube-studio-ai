@@ -395,6 +395,7 @@ Added from the owner's follow-up on 2026-09-08. These items extend all earlier w
   **Footage/documentary route cleanup (14 September):** Footagecraft query generation and DocuMotion planning, label review, and visual-direction calls now import `creativeText` directly. Their visual gates, attested image-generator boundary, deterministic fallbacks, and durable paid-stage receipts remain unchanged; focused source and behavior fixtures cover the migration.
   **Forge route cleanup (14 September):** Module Forge authoring and its runtime `llm_json` interpreter now use the canonical creative-text boundary, so architect-authored modules no longer depend on a disabled Gemini/legacy alias at execution. The declarative schema, cost ceiling, primitive allowlist, and runtime admission gates are unchanged.
   **Insert route cleanup (14 September):** the production visual-inserts director and its bounded unusable-output retry now use `creativeText` directly. Spoken-number, source-ledger, evidence-manifest, timing, and storage integrity contracts remain unchanged; fixture mocks now exercise the real boundary.
+  **Motion-comic route cleanup (14 September):** the standalone storyboard capability guard now uses the canonical creative-text key, matching its Mastra/OpenRouter planner and keeping the ElevenLabs/Nova image and deterministic reveal contracts unchanged.
 
 ### I. Later owner additions — page-level efficiency and new capabilities
 

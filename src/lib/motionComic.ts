@@ -39,7 +39,7 @@ import {
 import { agentJson } from "@/agents/mastra";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
-import { hasAnthropicKey } from "@/lib/anthropic";
+import { hasCreativeTextKey } from "@/lib/creativeText";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateMusic } from "@/lib/music";
 import { ffprobeDuration } from "@/lib/ffmpeg";
@@ -144,7 +144,7 @@ const TURN_SEC = 1.3;    // page-turn duration (must match turn in the renderer)
 export function hasMotionComic(options: { requiresStoryboard?: boolean } = {}): boolean {
   const requiresStoryboard = options.requiresStoryboard ?? true;
   return Boolean(
-    (!requiresStoryboard || hasAnthropicKey())
+    (!requiresStoryboard || hasCreativeTextKey())
     && process.env.ELEVENLABS_API_KEY
     && hasNovitaRenderFarmConfig(),
   );
@@ -1438,7 +1438,7 @@ export async function planMotionComicStoryboard(
   revisionNotes: readonly string[] = [],
 ): Promise<MotionComicStoryboard> {
   const nPanels = motionComicPanelCount(brief.panels);
-  if (!hasAnthropicKey()) throw new Error("motionComic: non-Google storyboard planner is unavailable");
+  if (!hasCreativeTextKey()) throw new Error("motionComic: creative-text storyboard planner is unavailable");
   const raw = await agentJson<RawPlan>({
     role: "producer",
     schema: motionComicStoryboardResponseSchema,
