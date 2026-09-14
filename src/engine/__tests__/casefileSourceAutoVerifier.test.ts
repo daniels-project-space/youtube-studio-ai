@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import {
   CASEFILE_SOURCE_AUTO_VERIFIER_MIN_CONFIDENCE,
@@ -6,6 +8,12 @@ import {
   autoVerifyCasefileSourcePacket,
   type CasefileSourcePacketContentInput,
 } from "@/engine/casefileSourceAutoVerifier";
+
+// The verifier must use the canonical OpenRouter creative-text boundary; the
+// old Claude-labelled compatibility export is not a separate provider.
+const verifierSource = readFileSync(join(process.cwd(), "src/engine/casefileSourceAutoVerifier.ts"), "utf8");
+assert.match(verifierSource, /from ["']@\/lib\/creativeText["']/);
+assert.doesNotMatch(verifierSource, /@\/lib\/anthropic|claudeJsonPro|hasAnthropicKey/);
 import { casefileFingerprint } from "@/engine/casefile";
 import {
   CASEFILE_SOURCE_PACKET_VERSION,

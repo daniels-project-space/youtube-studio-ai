@@ -1,4 +1,4 @@
-import { claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
+import { creativeTextJsonPro, hasCreativeTextKey } from "@/lib/creativeText";
 
 import { assertCasefilePacket, casefileFingerprint, type CasePacket } from "./casefile";
 import {
@@ -198,7 +198,7 @@ export async function autoVerifyCasefileSourcePacket(
   const reviewedPacketFingerprint = casefileFingerprint(casePacket);
   const reviewedSourcePacketFingerprint = casefileSourcePacketContentFingerprint(parsedContent);
 
-  if (!hasAnthropicKey()) {
+  if (!hasCreativeTextKey()) {
     throw new Error(
       "casefile source auto-verifier: no permitted provider is configured " +
         "(OPENROUTER_API_KEY); refusing to admit without review.",
@@ -213,7 +213,7 @@ export async function autoVerifyCasefileSourcePacket(
 
   let raw: unknown;
   try {
-    raw = await claudeJsonPro<unknown>({
+    raw = await creativeTextJsonPro<unknown>({
       system:
         "You are a skeptical citation-integrity screener for a true-crime documentary desk. " +
         "You cannot browse the internet and cannot confirm any URL is real. Judge only structural " +
