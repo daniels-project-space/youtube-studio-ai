@@ -227,11 +227,12 @@ assert.match(sidebar, />Workspace<\/span>/);
 assert.match(sidebar, /<strong>Tools<\/strong>/);
 assert.match(sidebar, /<strong>Draft mode<\/strong>/);
 // The rail keeps production primary and reduces Tools to cross-channel insight
-// surfaces. Specialist desks remain reachable from their relevant Golden card.
+// surfaces. The Golden catalog is an overview/card destination, not a rail item;
+// specialist desks remain reachable from their relevant Golden card.
 assert.match(sidebar, /href:\s*["']\/runs["']/);
-assert.match(sidebar, /href:\s*["']\/golden["']/);
+assert.doesNotMatch(sidebar, /href:\s*["']\/golden["']/);
 assert.match(sidebar, /const PRIMARY_NAV_ITEMS[\s\S]*href:\s*["']\/runs["']/);
-assert.match(sidebar, /const TOOLBOX_NAV_GROUPS[\s\S]*href:\s*["']\/golden["']/);
+assert.doesNotMatch(sidebar, /const TOOLBOX_NAV_GROUPS[\s\S]*href:\s*["']\/golden["']/);
 for (const route of ["seo", "editorial-evidence", "casefile", "studio-assets", "novita-render", "lofi", "loreshort"]) {
   assert.doesNotMatch(sidebar, new RegExp(`href:\\s*[\"']/${route}[\"']`));
   assert.match(golden, new RegExp(`href: \\"/${route}\\"`));

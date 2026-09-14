@@ -20,6 +20,7 @@ const schedule = read("src/app/(app)/schedule/DayByDaySchedule.tsx");
 const globalCss = read("src/app/globals.css");
 const mediaPreview = read("src/components/MediaPreview.tsx");
 const sidebar = read("src/components/Sidebar.tsx");
+const overview = read("src/app/(app)/page.tsx");
 const livePipeline = read("src/components/LivePipeline.tsx");
 const livePipelineCss = read("src/components/LivePipeline.module.css");
 const runDetail = read("src/app/(app)/runs/[runId]/page.tsx");
@@ -104,9 +105,11 @@ assert.match(globalCss, /\.video-card-media::after/);
 // Everyday work stays in the primary rail. The global toolbox exposes only
 // cross-channel insight surfaces; specialist desks live inside the relevant
 // expandable Golden module instead of competing with daily navigation.
-for (const route of ["/runs", "/schedule", "/library", "/analytics", "/golden"]) {
+for (const route of ["/runs", "/schedule", "/library", "/analytics"]) {
   assert.match(sidebar, new RegExp(`href: \\"${route.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}\\"`));
 }
+assert.doesNotMatch(sidebar, /href: \\"\/golden\\"/);
+assert.match(overview, /href="\/golden"/, "Golden modules remain reachable from the Studio overview");
 for (const route of ["/seo", "/editorial-evidence", "/casefile", "/studio-assets", "/novita-render", "/lofi", "/loreshort"]) {
   assert.doesNotMatch(sidebar, new RegExp(`href: \\"${route.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}\\"`));
   assert.match(golden, new RegExp(`href: \\"${route.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}\\"`));

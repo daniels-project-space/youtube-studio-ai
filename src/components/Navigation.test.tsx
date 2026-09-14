@@ -19,9 +19,10 @@ try {
   const { Sidebar } = require("./Sidebar") as typeof import("./Sidebar");
   const { NavItem } = require("./NavItem") as typeof import("./NavItem");
   const html = renderToStaticMarkup(createElement(Sidebar));
-  for (const href of ["/", "/channels", "/runs", "/schedule", "/library", "/analytics", "/golden", "/settings"]) {
+  for (const href of ["/", "/channels", "/runs", "/schedule", "/library", "/analytics", "/settings"]) {
     assert.match(html, new RegExp(`href="${href}"`), `${href} remains a real route`);
   }
+  assert.doesNotMatch(html, /href="\/golden"/, "the Golden catalog is not a sidebar destination");
   assert.match(html, /aria-label="Studio navigation"/);
   assert.match(html, /aria-expanded="false" aria-controls="studio-mobile-more-menu"/);
   assert.doesNotMatch(html, /id="studio-mobile-more-menu"/, "closed overflow menu is not mounted");

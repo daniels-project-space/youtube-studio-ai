@@ -12,7 +12,6 @@ import {
   IconSettings,
   IconSpark,
   IconCalendar,
-  IconGolden,
   IconToolbox,
 } from "./icons";
 import { StudioMark } from "./StudioMark";
@@ -30,7 +29,6 @@ const TOOLBOX_NAV_GROUPS = [
     label: "Insights",
     items: [
       { href: "/analytics", label: "Analytics", icon: <IconAnalytics /> },
-      { href: "/golden", label: "Golden modules", icon: <IconGolden /> },
     ],
   },
 ];

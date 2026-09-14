@@ -43,6 +43,7 @@ try {
   const render = () => renderToStaticMarkup(createElement(Page));
   let html = render();
   assert.doesNotMatch(html, /50-run spend|ON AIR|Master controls|Live route|>Published</);
+  assert.match(html, /href="\/golden"/, "the visual module catalog remains reachable from Studio");
   for (const run of runs) assert.ok(html.includes(`data-issue-key="failed:${run._id}"`), "same-channel failures must all be reachable");
   assert.equal((html.match(/data-issue-key=/g) ?? []).length, 8, "six failures and both active connectors");
   assert.ok(html.includes('Recorded views</small><strong>20</strong>'), "only operating-channel analytics");

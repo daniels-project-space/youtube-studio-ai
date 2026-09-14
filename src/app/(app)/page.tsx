@@ -169,6 +169,9 @@ export default function OverviewPage() {
             <Link href="/schedule" className="studio-action studio-action-secondary">
               <IconCalendar width={15} height={15} /> Schedule
             </Link>
+            <Link href="/golden" className="studio-action studio-action-secondary">
+              Modules <span aria-hidden="true">↗</span>
+            </Link>
             <Link href="/channels/new" className="studio-action">
               <IconSpark width={15} height={15} /> New channel
             </Link>
