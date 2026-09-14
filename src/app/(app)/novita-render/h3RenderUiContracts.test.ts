@@ -20,6 +20,7 @@ assert.match(page, /api\/minimax-h3\/capacity\?jobCount=/,
 assert.match(page, /Check Salad capacity/);
 assert.match(page, /Fleet snapshot/);
 assert.match(page, /api\/salad\/capacity/);
+assert.match(page, /jobCount=\$\{requestedJobs\}/);
 assert.match(page, /aria-label="Salad fleet snapshot"/);
 assert.match(page, /localStorage/);
 assert.match(page, /H3_TRACKING_STORAGE_KEY/);

@@ -35,6 +35,28 @@ assert.equal(h3.fallbackUsed, true);
 assert.equal(h3.mediumAvailable, 0);
 assert.equal(h3.highAvailable, 3);
 
+const threeWorkerWave = await readSaladCapacitySnapshot({
+  listGpuClasses: async () => classes,
+  listContainerGroups: async () => [],
+  listContainerInstances: async () => [],
+  getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 10, container_replicas_used: 2 } }),
+  getGpuAvailability: async (resources) => resources.gpu_classes[0] === classes[0]!.id
+    ? { available_gpu_medium: 2, available_gpu_high: 0 }
+    : { available_gpu_medium: 0, available_gpu_high: 3 },
+}, { requiredWorkers: 3 });
+const waveH3 = threeWorkerWave.lanes.find((lane) => lane.id === "h3")!;
+assert.equal(waveH3.requiredWorkers, 3);
+assert.equal(waveH3.recommendedPriority, "high", "high fallback must be evaluated against the full requested wave");
+assert.equal(threeWorkerWave.lanes.find((lane) => lane.id === "ernie-image")?.recommendedPriority, null,
+  "a medium 3090 count below the requested wave must not be reported as admitted");
+await assert.rejects(() => readSaladCapacitySnapshot({
+  listGpuClasses: async () => classes,
+  listContainerGroups: async () => [],
+  listContainerInstances: async () => [],
+  getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 10, container_replicas_used: 0 } }),
+  getGpuAvailability: async () => ({ available_gpu_medium: 1 }),
+}, { requiredWorkers: 4 }), /requires 1..3 workers/);
+
 const quotaHeld = await readSaladCapacitySnapshot({
   listGpuClasses: async () => classes,
   listContainerGroups: async () => [],

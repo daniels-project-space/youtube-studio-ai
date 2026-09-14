@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import { readSaladCapacitySnapshot } from "@/lib/saladCapacity";
+import { SALAD_BULK_MAX_GPUS } from "@/lib/saladCloud";
 
 export const runtime = "nodejs";
 
@@ -12,8 +13,20 @@ export const runtime = "nodejs";
 export async function GET(request: Request) {
   try {
     await requireStudioActor(request);
-    const snapshot = await readSaladCapacitySnapshot();
-    return NextResponse.json({ ok: true, provider: "salad", ...snapshot }, {
+    const rawJobCount = new URL(request.url).searchParams.get("jobCount");
+    const jobCount = rawJobCount === null ? undefined : Number(rawJobCount);
+    if (jobCount !== undefined && (!Number.isSafeInteger(jobCount) || jobCount < 1 || jobCount > 60)) {
+      return NextResponse.json({ ok: false, error: "jobCount must be an integer from 1 to 60" }, { status: 400 });
+    }
+    const snapshot = await readSaladCapacitySnapshot(undefined, {
+      requiredWorkers: jobCount === undefined ? 1 : Math.min(SALAD_BULK_MAX_GPUS, jobCount),
+    });
+    return NextResponse.json({
+      ok: true,
+      provider: "salad",
+      ...(jobCount === undefined ? {} : { jobCount }),
+      ...snapshot,
+    }, {
       headers: { "Cache-Control": "private, no-store" },
     });
   } catch (error) {

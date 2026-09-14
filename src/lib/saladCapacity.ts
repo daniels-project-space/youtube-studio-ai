@@ -60,6 +60,11 @@ export interface SaladCapacitySnapshot {
   lanes: SaladCapacityLaneSnapshot[];
 }
 
+export interface SaladCapacitySnapshotOptions {
+  /** Number of replicas the next wave needs; capped by the shared fleet limit. */
+  requiredWorkers?: number;
+}
+
 type CapacityClient = Pick<SaladCloudClient, "listGpuClasses" | "listContainerGroups" | "listContainerInstances" | "getQuotas" | "getGpuAvailability">;
 
 function safeCount(value: unknown): number {
@@ -71,7 +76,14 @@ function safeCount(value: unknown): number {
  * every production lane. Medium is always recommended first; high is only a
  * recommendation when medium has no capacity, matching the H3 dispatcher.
  */
-export async function readSaladCapacitySnapshot(client?: CapacityClient): Promise<SaladCapacitySnapshot> {
+export async function readSaladCapacitySnapshot(
+  client?: CapacityClient,
+  options: SaladCapacitySnapshotOptions = {},
+): Promise<SaladCapacitySnapshot> {
+  const requiredWorkers = options.requiredWorkers ?? 1;
+  if (!Number.isSafeInteger(requiredWorkers) || requiredWorkers < 1 || requiredWorkers > SALAD_BULK_MAX_GPUS) {
+    throw new Error(`Salad capacity snapshot requires 1..${SALAD_BULK_MAX_GPUS} workers`);
+  }
   const salad = client ?? await saladCloudClientFromVault();
   const [classes, groups, quotas] = await Promise.all([
     salad.listGpuClasses(),
@@ -122,9 +134,9 @@ export async function readSaladCapacitySnapshot(client?: CapacityClient): Promis
     }
     const mediumAvailable = safeCount(availability.available_gpu_medium);
     const highAvailable = safeCount(availability.available_gpu_high);
-    const recommendedPriority: SaladBulkPriority | null = mediumAvailable > 0
+    const recommendedPriority: SaladBulkPriority | null = mediumAvailable >= requiredWorkers
       ? "medium"
-      : highAvailable > 0 && highClass
+      : highAvailable >= requiredWorkers && highClass
         ? SALAD_HIGH_FALLBACK_PRIORITY
         : null;
     if (!recommendedPriority) blockers.push("no_current_capacity");
@@ -132,7 +144,7 @@ export async function readSaladCapacitySnapshot(client?: CapacityClient): Promis
       id: lane.id,
       label: lane.label,
       model: lane.model,
-      requiredWorkers: 1,
+      requiredWorkers,
       mediumAvailable,
       highAvailable,
       recommendedPriority,

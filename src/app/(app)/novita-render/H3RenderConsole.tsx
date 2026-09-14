@@ -27,6 +27,7 @@ type H3Capacity =
 
 type FleetSnapshot = {
   ok: true;
+  jobCount?: number;
   occupiedGpuSlots: number;
   globalGpuLimit: number;
   quota: { limit: number; used: number };
@@ -34,6 +35,7 @@ type FleetSnapshot = {
     id: string;
     label: string;
     model: string;
+    requiredWorkers: number;
     mediumAvailable: number;
     highAvailable: number;
     recommendedPriority: "medium" | "high" | null;
@@ -273,7 +275,8 @@ export function H3RenderConsole() {
     setFleetBusy(true);
     setFleet(null);
     try {
-      const response = await fetch("/api/salad/capacity", {
+      const requestedJobs = parsedPreview.valid ? parsedPreview.count : 1;
+      const response = await fetch(`/api/salad/capacity?jobCount=${requestedJobs}`, {
         cache: "no-store",
         credentials: "same-origin",
         headers: { Accept: "application/json" },
@@ -336,12 +339,12 @@ export function H3RenderConsole() {
           </span>}
         </div>}
         {fleet && <div className={styles.fleetSummary} role="status" aria-label="Salad fleet snapshot">
-          <div className={styles.fleetHeader}><strong>Salad fleet</strong><span>Lease {fleet.occupiedGpuSlots}/{fleet.globalGpuLimit} · quota {fleet.quota.used}/{fleet.quota.limit}</span></div>
+          <div className={styles.fleetHeader}><strong>Salad fleet{fleet.jobCount ? ` · ${fleet.jobCount}-job wave` : ""}</strong><span>Lease {fleet.occupiedGpuSlots}/{fleet.globalGpuLimit} · quota {fleet.quota.used}/{fleet.quota.limit}</span></div>
           <div className={styles.fleetLanes}>
             {fleet.lanes.map((lane) => <div key={lane.id} className={styles.fleetLane} data-state={lane.recommendedPriority ?? "held"}>
               <span><strong>{lane.label}</strong><small>{lane.model}</small></span>
               <b>{lane.recommendedPriority === "high" ? "HIGH FALLBACK" : lane.recommendedPriority?.toUpperCase() ?? "HELD"}</b>
-              <small>M {lane.mediumAvailable} · H {lane.highAvailable}</small>
+              <small>need {lane.requiredWorkers} · M {lane.mediumAvailable} · H {lane.highAvailable}</small>
             </div>)}
           </div>
         </div>}
