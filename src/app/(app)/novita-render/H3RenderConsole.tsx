@@ -39,6 +39,9 @@ type FleetSnapshot = {
     requiredWorkers: number;
     mediumAvailable: number;
     highAvailable: number;
+    mediumPriceUsdPerHour: number | null;
+    highPriceUsdPerHour: number | null;
+    selectedPriceUsdPerHour: number | null;
     recommendedPriority: "medium" | "high" | null;
     fallbackUsed: boolean;
     blockers: string[];
@@ -407,7 +410,10 @@ export function H3RenderConsole() {
             {fleet.lanes.map((lane) => <div key={lane.id} className={styles.fleetLane} data-state={lane.recommendedPriority ?? "held"}>
               <span><strong>{lane.label}</strong><small>{lane.model}</small></span>
               <b>{lane.recommendedPriority === "high" ? "HIGH FALLBACK" : lane.recommendedPriority?.toUpperCase() ?? "HELD"}</b>
-              <small>need {lane.requiredWorkers} · M {lane.mediumAvailable} · H {lane.highAvailable}</small>
+              <small>
+                need {lane.requiredWorkers} · M {lane.mediumAvailable} · H {lane.highAvailable}
+                {lane.selectedPriceUsdPerHour !== null ? ` · $${lane.selectedPriceUsdPerHour.toFixed(3)}/h` : ""}
+              </small>
             </div>)}
           </div>
         </div>}

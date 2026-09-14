@@ -34,6 +34,9 @@ assert.equal(h3.recommendedPriority, "high");
 assert.equal(h3.fallbackUsed, true);
 assert.equal(h3.mediumAvailable, 0);
 assert.equal(h3.highAvailable, 3);
+assert.equal(h3.mediumPriceUsdPerHour, 0.4);
+assert.equal(h3.highPriceUsdPerHour, 0.6);
+assert.equal(h3.selectedPriceUsdPerHour, 0.6);
 
 const threeWorkerWave = await readSaladCapacitySnapshot({
   listGpuClasses: async () => classes,

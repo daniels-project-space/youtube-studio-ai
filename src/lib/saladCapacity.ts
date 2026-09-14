@@ -46,6 +46,11 @@ export interface SaladCapacityLaneSnapshot {
   requiredWorkers: number;
   mediumAvailable: number;
   highAvailable: number;
+  /** Catalog prices for the exact class; null means that tier was not priced. */
+  mediumPriceUsdPerHour: number | null;
+  highPriceUsdPerHour: number | null;
+  /** The price of the tier the next wave would actually use. */
+  selectedPriceUsdPerHour: number | null;
   recommendedPriority: SaladBulkPriority | null;
   fallbackUsed: boolean;
   gpuClassId?: string;
@@ -119,6 +124,9 @@ export async function readSaladCapacitySnapshot(
         requiredWorkers: 1,
         mediumAvailable: 0,
         highAvailable: 0,
+        mediumPriceUsdPerHour: null,
+        highPriceUsdPerHour: null,
+        selectedPriceUsdPerHour: null,
         recommendedPriority: null,
         fallbackUsed: false,
         blockers,
@@ -147,6 +155,13 @@ export async function readSaladCapacitySnapshot(
       requiredWorkers,
       mediumAvailable,
       highAvailable,
+      mediumPriceUsdPerHour: mediumClass?.priceUsdPerHour ?? null,
+      highPriceUsdPerHour: highClass?.priceUsdPerHour ?? null,
+      selectedPriceUsdPerHour: recommendedPriority === "medium"
+        ? mediumClass?.priceUsdPerHour ?? null
+        : recommendedPriority === SALAD_HIGH_FALLBACK_PRIORITY
+          ? highClass?.priceUsdPerHour ?? null
+          : null,
       recommendedPriority,
       fallbackUsed: recommendedPriority === SALAD_HIGH_FALLBACK_PRIORITY,
       gpuClassId: selectedClass.id,
