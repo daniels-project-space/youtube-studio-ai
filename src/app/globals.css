@@ -2002,6 +2002,14 @@
 .channel-category-heading h2 { margin: 0; color: var(--color-fg); font-family: var(--font-display); font-size: 1.16rem; font-weight: 580; letter-spacing: -.03em; }
 .channel-category-heading span { min-width: 1.6rem; padding: .2rem .38rem; border: 1px solid var(--color-border); border-radius: 999px; color: var(--color-muted); font: 700 .64rem/1 var(--font-mono); text-align: center; }
 
+/* Dense desktop fleet: sparse categories share a row while larger categories
+ * retain the full width needed for their compact identity tiles. The card
+ * width remains unchanged, so this only removes empty vertical canvas. */
+@media (min-width: 1000px) {
+  .channel-category-list { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .channel-category:has(.channel-card:nth-child(4)) { grid-column: 1 / -1; }
+}
+
 .channel-card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 198px));

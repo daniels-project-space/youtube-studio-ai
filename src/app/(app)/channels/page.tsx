@@ -215,6 +215,8 @@ export default function ChannelsPage() {
             <section
               className="channel-category"
               key={group.key}
+              data-category={group.key}
+              data-channel-count={group.channels.length}
               aria-labelledby={openFolder === null ? `channel-category-${group.key}` : undefined}
               aria-label={openFolder ? group.label : undefined}
             >
