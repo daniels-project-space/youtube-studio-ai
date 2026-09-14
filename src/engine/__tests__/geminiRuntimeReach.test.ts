@@ -73,7 +73,7 @@ assert.ok(
 );
 assert.match(
   forge,
-  /const raw = await claudeJson</,
+  /const raw = await creativeTextJson</,
   "the forge's llm_json step must run on the permitted route",
 );
 

@@ -18,7 +18,7 @@ import {
 } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { parseJsonLoose } from "@/lib/gemini";
-import { claudeJson } from "@/lib/anthropic";
+import { creativeTextJson } from "@/lib/creativeText";
 import { PRICE } from "@/engine/pricing";
 import { assertPipelineVideoRuntimeReady } from "@/engine/runtimeCapability";
 import { generateI2V } from "@/lib/i2v";
@@ -156,7 +156,7 @@ async function runStep(
     // own JSON contract, reasoning on this route is billed out of max_tokens
     // before any answer exists, and the measured floor for a list contract is
     // 2000. A step may still raise it explicitly.
-    const raw = await claudeJson<Record<string, unknown>>({
+    const raw = await creativeTextJson<Record<string, unknown>>({
       prompt: interp(step.prompt, scope),
       maxTokens: step.maxTokens ?? 2500,
       temperature: 0.4,

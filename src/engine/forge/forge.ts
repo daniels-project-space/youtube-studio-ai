@@ -1,10 +1,10 @@
 /**
  * MODULE FORGE — the authoring agent. Given a missing capability + the
- * channel's identity, Claude writes a ForgedModuleSpec (declarative, over the
+ * channel's identity, the creative-text route writes a ForgedModuleSpec (declarative, over the
  * trusted primitives). The zod schema is the gate: an invalid spec never
  * exists. One retry with the validation errors fed back.
  */
-import { claudeJson } from "@/lib/anthropic";
+import { creativeTextJson } from "@/lib/creativeText";
 import { forgedModuleSchema, type ForgedModuleSpec } from "./spec";
 import type { StyleDNA } from "@/engine/creative/types";
 
@@ -48,7 +48,7 @@ export async function authorForgedModule(args: {
   let feedback = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const out = await claudeJson<{ specJson?: string }>({
+      const out = await creativeTextJson<{ specJson?: string }>({
         tier: "pro",
         maxTokens: 4000,
         temperature: 0.4,
