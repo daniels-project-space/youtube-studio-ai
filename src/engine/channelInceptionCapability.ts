@@ -187,10 +187,10 @@ const EXPLICIT_CHANNEL_INCEPTION_CAPABILITIES: Readonly<
     mode: "registered_non_gemini" as const,
     id: "cinematic-visual-control-channel-foundation/v1",
     provenance:
-      "metadata-only YouTube research, Claude positioning/Style DNA/Show Bible, receipt-bound Novita channel art and starter slate, and a route-sealed Studio Asset / Visual Matter control plan; the channel stays draft-only and its LTX video runtime remains independently benchmark-gated",
+      "metadata-only YouTube research, OpenRouter Gemini 3.7 Flash positioning/Style DNA/Show Bible, receipt-bound Novita channel art and starter slate, and a route-sealed Studio Asset / Visual Matter control plan; the channel stays draft-only and its H3 video runtime remains independently benchmark-gated",
     coveredStages: Object.freeze([
       "metadata-only-niche-research",
-      "claude-positioning-style-dna-show-bible",
+      "openrouter-gemini-3-7-flash-positioning-style-dna-show-bible",
       "receipt-bound-novita-channel-art-and-starter-slate",
       "route-sealed-studio-asset-and-visual-matter-controls",
       "immutable-artifact-persistence",

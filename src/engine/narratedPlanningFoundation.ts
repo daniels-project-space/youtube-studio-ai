@@ -1,8 +1,8 @@
 /**
- * Shared non-Gemini planning and creator-foundation contract for narrated
+ * Shared non-Google planning and creator-foundation contract for narrated
  * formats.  It is deliberately an admission description, not another text
- * generator: Topiccraft/Scriptcraft already own the executable Claude-only
- * route.  This layer makes the common route and each format's non-negotiable
+ * generator: Topiccraft/Scriptcraft already own the executable OpenRouter
+ * Gemini 3.7 Flash route.  This layer makes the common route and each format's non-negotiable
  * editorial shape inspectable before a family is admitted.
  */
 
@@ -60,7 +60,7 @@ const COMMON_REQUIRED_ENTRIES = Object.freeze([
   { block: "length_check" },
   { block: "captions" },
   { block: "metadata" },
-  // The one sealed Google exception is the receipt-bound thumbnail block.
+  // The one sealed Nano Banana exception is the receipt-bound thumbnail block.
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },
@@ -82,7 +82,7 @@ const COMMON_PUBLISHING_POLICY =
 
 const COMMON_INCEPTION_STAGES = Object.freeze([
   "metadata-only-niche-research",
-  "claude-positioning-style-dna-show-bible",
+  "openrouter-gemini-3-7-flash-positioning-style-dna-show-bible",
   "provider-metadata-voice-selection-and-local-cold-open",
   "novita-channel-art-and-non-google-vision-qa",
   "non-google-starter-topics-and-sealed-thumbnail-slate",
@@ -106,7 +106,7 @@ export const NON_GEMINI_NARRATED_FOUNDATIONS: Readonly<
     plannerId: "narrated-stock-claude-story-spine/v1",
     plannerBlock: "topic_select",
     provenance:
-      "non-Google Topiccraft research, Claude crew/script planning, local narration evidence, Story Spine assembly, and independent non-Google visual review; Gemini is sealed to thumbnail_gen only",
+      "non-Google Topiccraft research, OpenRouter Gemini 3.7 Flash crew/script planning, local narration evidence, Story Spine assembly, and independent non-Google visual review; Nano Banana is sealed to thumbnail_gen only",
     sourcePolicy: COMMON_SOURCE_POLICY,
     publishingPolicy: COMMON_PUBLISHING_POLICY,
     requiredEntries: COMMON_REQUIRED_ENTRIES,
@@ -114,7 +114,7 @@ export const NON_GEMINI_NARRATED_FOUNDATIONS: Readonly<
     inception: {
       id: "narrated-stock-claude-novita-inception/v1",
       provenance:
-        "metadata-only YouTube research, Claude positioning/Style DNA/Show Bible, deterministic ElevenLabs voice selection with local cold-open evidence, Novita channel art verified by non-Google vision, and a sealed thumbnail-only Gemini exception",
+        "metadata-only YouTube research, OpenRouter Gemini 3.7 Flash positioning/Style DNA/Show Bible, deterministic ElevenLabs voice selection with local cold-open evidence, Novita channel art verified by non-Google vision, and a sealed Nano Banana thumbnail route",
       coveredStages: COMMON_INCEPTION_STAGES,
     },
   }),
@@ -123,7 +123,7 @@ export const NON_GEMINI_NARRATED_FOUNDATIONS: Readonly<
     plannerId: "guided-ambient-claude-story-spine/v1",
     plannerBlock: "topic_select",
     provenance:
-      "non-Google Topiccraft research, Claude-guided original meditation writing, slow narration performance evidence, Story Spine assembly, and independent non-Google visual review; Gemini is sealed to thumbnail_gen only",
+      "non-Google Topiccraft research, OpenRouter Gemini 3.7 Flash-guided original meditation writing, slow narration performance evidence, Story Spine assembly, and independent non-Google visual review; Nano Banana is sealed to thumbnail_gen only",
     sourcePolicy:
       `${COMMON_SOURCE_POLICY} Guided ambient episodes are original practice/narration rather than an automatically source-claimed factual format.`,
     publishingPolicy: COMMON_PUBLISHING_POLICY,
@@ -136,7 +136,7 @@ export const NON_GEMINI_NARRATED_FOUNDATIONS: Readonly<
     inception: {
       id: "guided-ambient-claude-novita-inception/v1",
       provenance:
-        "metadata-only YouTube research, Claude positioning/Style DNA/Show Bible, deterministic voice selection with local cold-open evidence, Novita channel art verified by non-Google vision, and a sealed thumbnail-only Gemini exception",
+        "metadata-only YouTube research, OpenRouter Gemini 3.7 Flash positioning/Style DNA/Show Bible, deterministic voice selection with local cold-open evidence, Novita channel art verified by non-Google vision, and a sealed Nano Banana thumbnail route",
       coveredStages: COMMON_INCEPTION_STAGES,
     },
   }),
@@ -145,7 +145,7 @@ export const NON_GEMINI_NARRATED_FOUNDATIONS: Readonly<
     plannerId: "vertical-short-claude-story-spine/v1",
     plannerBlock: "topic_select",
     provenance:
-      "non-Google Topiccraft research, Claude hook/script/critic loop, portrait Story Spine assembly, independent non-Google visual review, and a sealed thumbnail-only Gemini exception",
+      "non-Google Topiccraft research, OpenRouter Gemini 3.7 Flash hook/script/critic loop, portrait Story Spine assembly, independent non-Google visual review, and a sealed Nano Banana thumbnail route",
     sourcePolicy:
       `${COMMON_SOURCE_POLICY} The admitted Short route is the original motivational/micro-lesson format; source-bound documentary claims remain a separate documentary-collage admission path.`,
     publishingPolicy: COMMON_PUBLISHING_POLICY,
@@ -163,7 +163,7 @@ export const NON_GEMINI_NARRATED_FOUNDATIONS: Readonly<
     inception: {
       id: "vertical-short-claude-novita-inception/v1",
       provenance:
-        "metadata-only YouTube research, Claude positioning/Style DNA/Show Bible, deterministic voice selection with local cold-open evidence, Novita channel art verified by non-Google vision, and a sealed thumbnail-only Gemini exception",
+        "metadata-only YouTube research, OpenRouter Gemini 3.7 Flash positioning/Style DNA/Show Bible, deterministic voice selection with local cold-open evidence, Novita channel art verified by non-Google vision, and a sealed Nano Banana thumbnail route",
       coveredStages: COMMON_INCEPTION_STAGES,
     },
   }),

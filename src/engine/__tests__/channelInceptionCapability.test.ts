@@ -28,14 +28,14 @@ if (narrated.mode === "registered_non_gemini") {
     narrated.coveredStages,
     [
       "metadata-only-niche-research",
-      "claude-positioning-style-dna-show-bible",
+      "openrouter-gemini-3-7-flash-positioning-style-dna-show-bible",
       "provider-metadata-voice-selection-and-local-cold-open",
       "novita-channel-art-and-non-google-vision-qa",
       "non-google-starter-topics-and-sealed-thumbnail-slate",
       "draft-only-publication-state",
     ],
   );
-  assert.match(narrated.provenance, /sealed thumbnail-only Gemini exception/);
+  assert.match(narrated.provenance, /sealed Nano Banana thumbnail route/);
 }
 
 for (const family of ["sleep", "shorts"] as const) {
@@ -46,7 +46,7 @@ for (const family of ["sleep", "shorts"] as const) {
       capability.coveredStages,
       [
         "metadata-only-niche-research",
-        "claude-positioning-style-dna-show-bible",
+        "openrouter-gemini-3-7-flash-positioning-style-dna-show-bible",
         "provider-metadata-voice-selection-and-local-cold-open",
         "novita-channel-art-and-non-google-vision-qa",
         "non-google-starter-topics-and-sealed-thumbnail-slate",
@@ -54,7 +54,7 @@ for (const family of ["sleep", "shorts"] as const) {
       ],
       `${family} must opt into every creator stage, not only the episode planner`,
     );
-    assert.match(capability.provenance, /sealed thumbnail-only Gemini exception/);
+    assert.match(capability.provenance, /sealed Nano Banana thumbnail route/);
   }
 }
 

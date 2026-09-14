@@ -36,7 +36,7 @@ for (const family of ["narrated_stock", "sleep", "shorts"] as const) {
   assert.equal(inception.mode, "registered_non_gemini");
   if (inception.mode === "registered_non_gemini") {
     assert.ok(inception.coveredStages.includes("draft-only-publication-state"));
-    assert.match(inception.provenance, /sealed thumbnail-only Gemini exception/);
+    assert.match(inception.provenance, /sealed Nano Banana thumbnail route/);
   }
 }
 

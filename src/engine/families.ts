@@ -733,7 +733,7 @@ function registeredCinematicPlanningCapability(): Extract<AutonomousPlanningCapa
     id: "cinematic-story-spine-visual-control-foundation/v1",
     plannerBlock: "story_spine",
     provenance:
-      "non-Google Topiccraft and Claude crew/script planning, local Story Spine causality, sealed Studio Asset and Visual Matter controls, direct Novita keyframe-to-video rendering, and independent final-master visual review; Gemini remains limited to the separately receipt-bound thumbnail block",
+      "non-Google Topiccraft and OpenRouter Gemini 3.7 Flash crew/script planning, local Story Spine causality, sealed Studio Asset and Visual Matter controls, direct Novita keyframe-to-video rendering, and independent final-master visual review; Nano Banana remains limited to the separately receipt-bound thumbnail block",
     requiredEntries: [
       { block: "competitor_research" },
       { block: "topic_select" },
@@ -818,7 +818,7 @@ export const FAMILY_AUTONOMOUS_PLANNING: Readonly<
     id: "illustrated-explainer-claude-local-scenario/v1",
     plannerBlock: "topic_select",
     provenance:
-      "metadata-only topic research, Claude crew/script planning, Fish Audio narration, Mureka music, local Episode Graph + Remotion/FFmpeg scene rendering, a sealed Nano Banana thumbnail, and non-Google visual review; fictional scenario profiles add a mandatory disclosure gate rather than a real-simulation claim",
+      "metadata-only topic research, OpenRouter Gemini 3.7 Flash crew/script planning, Fish Audio narration, Mureka music, local Episode Graph + Remotion/FFmpeg scene rendering, a sealed Nano Banana thumbnail, and non-Google visual review; fictional scenario profiles add a mandatory disclosure gate rather than a real-simulation claim",
     requiredEntries: [
       { block: "competitor_research" },
       { block: "topic_select" },
