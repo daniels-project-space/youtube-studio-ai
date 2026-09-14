@@ -68,6 +68,8 @@ export interface SaladCapacitySnapshot {
 export interface SaladCapacitySnapshotOptions {
   /** Number of replicas the next wave needs; capped by the shared fleet limit. */
   requiredWorkers?: number;
+  /** Keep the read-only recommendation aligned with the paid dispatcher flag. */
+  allowHighPriorityFallback?: boolean;
 }
 
 type CapacityClient = Pick<SaladCloudClient, "listGpuClasses" | "listContainerGroups" | "listContainerInstances" | "getQuotas" | "getGpuAvailability">;
@@ -86,6 +88,7 @@ export async function readSaladCapacitySnapshot(
   options: SaladCapacitySnapshotOptions = {},
 ): Promise<SaladCapacitySnapshot> {
   const requiredWorkers = options.requiredWorkers ?? 1;
+  const allowHighPriorityFallback = options.allowHighPriorityFallback ?? true;
   if (!Number.isSafeInteger(requiredWorkers) || requiredWorkers < 1 || requiredWorkers > SALAD_BULK_MAX_GPUS) {
     throw new Error(`Salad capacity snapshot requires 1..${SALAD_BULK_MAX_GPUS} workers`);
   }
@@ -144,10 +147,16 @@ export async function readSaladCapacitySnapshot(
     const highAvailable = safeCount(availability.available_gpu_high);
     const recommendedPriority: SaladBulkPriority | null = mediumAvailable >= requiredWorkers
       ? "medium"
-      : highAvailable >= requiredWorkers && highClass
+      : allowHighPriorityFallback && highAvailable >= requiredWorkers && highClass
         ? SALAD_HIGH_FALLBACK_PRIORITY
         : null;
-    if (!recommendedPriority) blockers.push("no_current_capacity");
+    if (!recommendedPriority) {
+      if (!allowHighPriorityFallback && highAvailable >= requiredWorkers && highClass) {
+        blockers.push("high_priority_fallback_disabled");
+      } else {
+        blockers.push("no_current_capacity");
+      }
+    }
     return {
       id: lane.id,
       label: lane.label,

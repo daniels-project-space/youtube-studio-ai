@@ -38,6 +38,20 @@ assert.equal(h3.mediumPriceUsdPerHour, 0.4);
 assert.equal(h3.highPriceUsdPerHour, 0.6);
 assert.equal(h3.selectedPriceUsdPerHour, 0.6);
 
+const fallbackDisabled = await readSaladCapacitySnapshot({
+  listGpuClasses: async () => classes,
+  listContainerGroups: async () => [],
+  listContainerInstances: async () => [],
+  getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 10, container_replicas_used: 2 } }),
+  getGpuAvailability: async (resources) => resources.gpu_classes[0] === classes[1]!.id
+    ? { available_gpu_medium: 0, available_gpu_high: 3 }
+    : { available_gpu_medium: 4, available_gpu_high: 6 },
+}, { allowHighPriorityFallback: false });
+const disabledH3 = fallbackDisabled.lanes.find((lane) => lane.id === "h3")!;
+assert.equal(disabledH3.recommendedPriority, null);
+assert.equal(disabledH3.fallbackUsed, false);
+assert.ok(disabledH3.blockers.includes("high_priority_fallback_disabled"));
+
 const threeWorkerWave = await readSaladCapacitySnapshot({
   listGpuClasses: async () => classes,
   listContainerGroups: async () => [],
