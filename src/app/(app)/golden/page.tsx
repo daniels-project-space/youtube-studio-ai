@@ -433,7 +433,7 @@ function GoldenTruthOverview({
       <div className={styles.truthBody}>
         <div className={styles.truthLead}>
           <strong>{promotionProofCount === 0 ? "No Golden promotions recorded" : `${promotionProofCount} promotion proof${promotionProofCount === 1 ? "" : "s"} recorded`}</strong>
-          <span>Reference media, executable bindings, and creator admission stay separate.</span>
+          <span>Proof, references, and admission are tracked separately.</span>
         </div>
 
         <div className={styles.truthMetrics}>
@@ -482,9 +482,7 @@ function GoldenMediaSuccessorQueue({ items }: { items: readonly GoldenProofMedia
         <span className={styles.queueToggle} aria-hidden="true">+</span>
       </summary>
       <div className={styles.successorBody}>
-        <p>
-          Retained context or quarantined samples need a repaired successor render before they can become Golden evidence. Archive bytes remain preserved; no existing upload is changed here.
-        </p>
+        <p>Legacy samples stay archived until a reviewed successor is ready.</p>
         <div className={styles.successorGrid}>
           {items.map((item) => (
             <article key={item.id} data-status={item.status}>
@@ -524,10 +522,7 @@ function MinimumVideoFoundationOverview() {
         <span className={styles.foundationToggle} aria-hidden="true">+</span>
       </summary>
       <div className={styles.foundationBody}>
-        <p>
-          A format can add its own craft—storyboard, references, animation, music,
-          evidence, or visual treatment—but it cannot omit this shared production core.
-        </p>
+        <p>Every format keeps this production core; its craft layers on top.</p>
         <ol>
           {MINIMUM_VIDEO_FOUNDATION_TEMPLATE.map((stage, index) => (
             <li key={stage.key}>
@@ -680,7 +675,7 @@ function ModuleCard({ module: m }: { module: GoldenModule }) {
             </span>
             <span className={styles.moduleProtectionCopy}>
               <strong>Owner protection</strong>
-              <small>Seal this module against AI edits</small>
+              <small>Locks AI edits until you unlock it</small>
             </span>
             {/* Every catalog module is lockable and starts unlocked; the key IS the lock id. */}
             <OwnerLockBadge kind="module" moduleId={m.key} label={m.title} size="md" />
