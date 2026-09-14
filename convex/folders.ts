@@ -26,7 +26,12 @@ export const create = mutation({
       .query("channelFolders")
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
       .collect();
-    if (existing.some((f) => f.name === name)) return null; // idempotent
+    // Folder membership is persisted by name for backwards compatibility.
+    // Treat case-only variants as the same room so a create followed by a
+    // filter cannot strand the operator on an empty, differently-cased view.
+    if (existing.some((f) => f.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0)) {
+      throw new Error("folder name already exists");
+    }
     return await ctx.db.insert("channelFolders", { ownerId: args.ownerId, name });
   },
 });
@@ -78,6 +83,14 @@ export const rename = mutation({
     if (!folder || folder.ownerId !== args.ownerId) return;
     const name = args.name.trim().slice(0, 40);
     if (!name) return;
+    const existing = await ctx.db
+      .query("channelFolders")
+      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+      .collect();
+    if (existing.some((candidate) => candidate._id !== folder._id
+      && candidate.name.localeCompare(name, undefined, { sensitivity: "accent" }) === 0)) {
+      throw new Error("folder name already exists");
+    }
     const channels = await ctx.db
       .query("channels")
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { remove, rename } from "../../../convex/folders";
+import { create, remove, rename } from "../../../convex/folders";
 
 async function invoke<T>(definition: unknown, context: unknown, args: unknown): Promise<T> {
   return await (definition as {
@@ -45,18 +45,22 @@ function folderContext() {
         delete: async (id: unknown) => {
           deleted.push(id);
         },
-        query: (table: string) => {
-          assert.equal(table, "channels");
-          return {
-            withIndex: () => ({ collect: async () => [lockedChannel] }),
-          };
-        },
+        query: (table: string) => ({
+          withIndex: () => ({ collect: async () => table === "channels" ? [lockedChannel] : [folder] }),
+        }),
       },
     },
   };
 }
 
 async function main() {
+  const duplicateFixture = folderContext();
+  await assert.rejects(
+    () => invoke(create, duplicateFixture.context, { ownerId: "owner_daniel", name: "history" }),
+    /folder name already exists/,
+    "room creation must reject case-colliding names instead of creating an unselectable duplicate",
+  );
+
   const renameFixture = folderContext();
   const renameResult = await invoke<{ lockedSkipped: number }>(rename, renameFixture.context, {
     ownerId: "owner_daniel",

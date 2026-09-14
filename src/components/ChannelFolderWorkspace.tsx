@@ -54,8 +54,10 @@ export function ChannelFolderWorkspace({
       setDraftName("");
       setCreateOpen(false);
       onSelect(name);
-    } catch {
-      setMessage("The folder could not be created. Owner editing may need to be enabled.");
+    } catch (error) {
+      setMessage(error instanceof Error && /already exists/i.test(error.message)
+        ? "A room with that name already exists."
+        : "The folder could not be created. Owner editing may need to be enabled.");
     } finally {
       setBusy(false);
     }
@@ -80,8 +82,10 @@ export function ChannelFolderWorkspace({
       }
       setEditingId(null);
       setRenameDraft("");
-    } catch {
-      setMessage("The folder could not be renamed.");
+    } catch (error) {
+      setMessage(error instanceof Error && /already exists/i.test(error.message)
+        ? "A room with that name already exists."
+        : "The folder could not be renamed.");
     } finally {
       setBusy(false);
     }
