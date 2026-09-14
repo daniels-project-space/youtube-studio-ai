@@ -30,9 +30,9 @@ for (const [name, implementation] of [
   );
 }
 
-assert.match(topicSelect, /hasAnthropicKey/, "topic_select must require the permitted text planner");
+assert.match(topicSelect, /hasCreativeTextKey/, "topic_select must require the permitted text planner");
 assert.match(metadata, /hasCreativeTextKey/, "metadata must use the permitted text planner");
-assert.match(inserts, /hasAnthropicKey/, "visual inserts must use the permitted text planner");
+assert.match(inserts, /hasCreativeTextKey/, "visual inserts must use the permitted text planner");
 assert.match(inserts, /assertDataStorySourceLedger/, "strict data stories must bind visual inserts to the reviewed source ledger");
 assert.match(weekAhead, /hasAnthropicKey/, "week-ahead planning must use the permitted text planner");
 assert.match(narrated, /creativeTextJson/, "narrated quality enhancements must use the permitted text planner");

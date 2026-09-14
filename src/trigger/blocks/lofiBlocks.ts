@@ -131,7 +131,7 @@ import {
 } from "@/lib/onScreenTextProof";
 import { hasAyrshareKey, crosspost as ayrCrosspost } from "@/lib/ayrshare";
 import { parseJsonLoose } from "@/lib/gemini";
-import { hasAnthropicKey } from "@/lib/anthropic";
+import { hasCreativeTextKey } from "@/lib/creativeText";
 import { hasNonGoogleVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { craftTopics, loadOutlierBank } from "@/lib/topicraft";
 import { produceAndCritique } from "@/engine/critiqueLoop";
@@ -879,7 +879,7 @@ export const topicSelect: Block = {
           runId: ctx.runId,
         },
         generate: async (episodeNumber) => {
-          if (!hasAnthropicKey()) {
+          if (!hasCreativeTextKey()) {
             throw new Error(
               "topic_select: serialized_program/v1 requires OPENROUTER_API_KEY; refusing a generic Part-N fallback",
             );
@@ -1024,7 +1024,7 @@ export const topicSelect: Block = {
         let newPlotBeatOut = "";
         let unresolvedThreadsOut: string[] = [];
         let entitiesOut: { name: string; role: string }[] = [];
-        if (hasAnthropicKey()) {
+        if (hasCreativeTextKey()) {
           try {
             const out = await agentJson({
               role: "producer",
@@ -1106,7 +1106,7 @@ export const topicSelect: Block = {
     // TOPICRAFT — the golden topic-intel engine: metadata-evidenced, judged
     // bets. No silent pool fallback: a missing permitted creative provider
     // fails loud (the recovery loop's job).
-    if (!hasAnthropicKey()) {
+    if (!hasCreativeTextKey()) {
       throw new Error("topic_select: OPENROUTER_API_KEY missing — refusing silent pool fallback");
     }
     const competitorRows = niche
