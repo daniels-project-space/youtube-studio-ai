@@ -21,7 +21,7 @@ export async function GET(request: Request) {
     const snapshot = await readSaladCapacitySnapshot(undefined, {
       requiredWorkers: jobCount === undefined ? 1 : Math.min(SALAD_BULK_MAX_GPUS, jobCount),
       allowHighPriorityFallback: process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
-      mediumPriorityEnabled: process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY === "1",
+      mediumPriorityEnabled: process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY !== "0",
     });
     return NextResponse.json({
       ok: true,

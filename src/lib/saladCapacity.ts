@@ -70,7 +70,7 @@ export interface SaladCapacitySnapshotOptions {
   requiredWorkers?: number;
   /** Keep the read-only recommendation aligned with the paid dispatcher flag. */
   allowHighPriorityFallback?: boolean;
-  /** Whether the deployment has explicitly enabled the medium tier. */
+  /** Whether the deployment allows the medium tier (defaults to true). */
   mediumPriorityEnabled?: boolean;
 }
 

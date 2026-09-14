@@ -222,7 +222,7 @@ async function test() {
   // unavailable. Readiness must honour that selected tier instead of
   // re-blocking the paid request on the medium-only feature flag.
   configure("salad");
-  delete process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY;
+  process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY = "0";
   process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK = "1";
   assert.equal(minimaxH3Readiness("salad", { saladCapacityMode: "high" }).admitted, true);
   assert.equal(minimaxH3Readiness("salad", { saladCapacityMode: "medium" }).admitted, false);
