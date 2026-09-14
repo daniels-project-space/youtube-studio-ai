@@ -67,6 +67,16 @@ function convexClient(): StudioConvexHttpClient {
   return new StudioConvexHttpClient(url);
 }
 
+async function thumbnailPreviewUrl(key: string): Promise<string> {
+  const extension = key.toLowerCase().split(".").pop();
+  if (["png", "jpg", "jpeg", "webp", "gif"].includes(extension ?? "")) {
+    // Keep image review same-origin. This avoids Chromium ORB and lets the
+    // delivery route correct legacy extension/MIME mismatches before decode.
+    return `/api/asset-image?key=${encodeURIComponent(key)}`;
+  }
+  return await presignDownload(key, { expiresIn: 300 });
+}
+
 async function reviewedErnieBatchPreview(input: {
   ownerId: string;
   inventory: Awaited<ReturnType<typeof listThumbnailRefreshInventory>>;
@@ -87,7 +97,7 @@ async function reviewedErnieBatchPreview(input: {
         channelName: source?.channelName ?? candidate.channelSlug,
         title: source?.title ?? `Video ${candidate.youtubeVideoId}`,
         youtubeVideoId: candidate.youtubeVideoId,
-        previewUrl: await presignDownload(candidate.ernieSceneKey, { expiresIn: 300 }),
+        previewUrl: await thumbnailPreviewUrl(candidate.ernieSceneKey),
       };
     })),
   };
@@ -128,7 +138,7 @@ export async function GET(request: Request) {
         {
           ok: true,
           preview: {
-            url: await presignDownload(key, { expiresIn: 300 }),
+            url: await thumbnailPreviewUrl(key),
           },
         },
         { headers: { "Cache-Control": "private, no-store" } },
