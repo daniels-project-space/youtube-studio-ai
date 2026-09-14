@@ -27,6 +27,13 @@ used. The exact RTX 5090 class and both prices were still present. This confirms
 that the high-priority escape hatch is wired but has no capacity to unlock at
 this observation; no paid request was attempted.
 
+At `2026-09-14T07:05:06Z`, a second vault-backed read-only probe observed the
+same H3 result (`0 medium / 0 high`, `0/3` occupied, `0/10` replicas). The
+3090 comparison lanes had capacity, but the exact H3 5090 lane did not; the
+controller therefore remained held and issued no paid request. This is the
+expected fail-closed behavior: high is selected only when it actually unlocks
+the complete wave, not merely because the medium tier is empty.
+
 ## Runtime behavior
 
 `assertMiniMaxH3SaladCapacity()` checks the exact desktop class, account-wide
