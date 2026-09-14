@@ -15,7 +15,7 @@
  */
 import { z } from "zod";
 import { agentJson } from "@/agents/mastra";
-import { hasAnthropicKey } from "@/lib/anthropic";
+import { hasCreativeTextKey } from "@/lib/creativeText";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import type { FamilyKey } from "@/engine/families";
 import {
@@ -288,7 +288,7 @@ function groundingContext(input: StyleDNAInput): { text: string; gaps: string[];
  */
 export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
   const log = input.log ?? (() => {});
-  if (!hasAnthropicKey()) {
+  if (!hasCreativeTextKey()) {
     log("styleDNA: no non-Google creative-model key — ungrounded skeleton (Doctor must heal before established)");
     return ungroundedDNA(input);
   }

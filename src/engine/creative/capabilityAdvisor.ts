@@ -1,4 +1,4 @@
-import { claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
+import { creativeTextJsonPro, hasCreativeTextKey } from "@/lib/creativeText";
 import type {
   CreativeCapabilityIntent,
   CreativeCapabilityKey,
@@ -141,7 +141,7 @@ export async function adviseCreativeCapabilitySelection(
   const eligible = offers.filter((offer) => offer.selectionMode === "explicit_opt_in");
   if (eligible.length === 0) return fallback("no explicit-opt-in capability is eligible for this channel");
 
-  if (!hasAnthropicKey()) return fallback("no permitted provider is configured");
+  if (!hasCreativeTextKey()) return fallback("no permitted provider is configured");
 
   const eligibleKeys = new Set<CreativeCapabilityKey>(eligible.map((offer) => offer.capability));
   const concept = context.intent.concept?.trim() || "(no concept text supplied)";
@@ -150,7 +150,7 @@ export async function adviseCreativeCapabilitySelection(
 
   let raw: unknown;
   try {
-    raw = await claudeJsonPro<unknown>({
+    raw = await creativeTextJsonPro<unknown>({
       system:
         "You are a creative-capability advisor for an AI YouTube channel pipeline. You may ONLY suggest a " +
         "capability from the ELIGIBLE_CAPABILITIES list below — every one of them is already an explicit, " +

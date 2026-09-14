@@ -1,4 +1,4 @@
-import { claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
+import { creativeTextJsonPro, hasCreativeTextKey } from "@/lib/creativeText";
 import type { FamilyKey } from "@/engine/families";
 import { FORMAT_RECIPES, type FormatSelectionInput, type RankedFormatCandidate } from "@/engine/creative/selectFormat";
 
@@ -24,7 +24,7 @@ import { FORMAT_RECIPES, type FormatSelectionInput, type RankedFormatCandidate }
  * throw, never block. It is advisory, not a gate: on ANY doubt it silently
  * reproduces today's exact deterministic behavior rather than surfacing an
  * error to the caller. Doubt includes:
- *   - no permitted provider configured (`hasAnthropicKey()` is false),
+ *   - no permitted provider configured (`hasCreativeTextKey()` is false),
  *   - fewer than two candidates to meaningfully advise between,
  *   - the provider call failing, timing out, or being unreachable,
  *   - a malformed or incomplete provider response,
@@ -217,7 +217,7 @@ export async function adviseFormatSelection(args: AdviseFormatSelectionArgs): Pr
 
   const poolFamilies = new Set<FamilyKey>(pool.map((candidate) => candidate.family));
 
-  if (!hasAnthropicKey()) return fallback("no permitted provider is configured");
+  if (!hasCreativeTextKey()) return fallback("no permitted provider is configured");
 
   const candidateContext = candidateContextLines(pool);
   const performanceContext = performanceContextLines(args.context);
@@ -225,7 +225,7 @@ export async function adviseFormatSelection(args: AdviseFormatSelectionArgs): Pr
 
   let raw: unknown;
   try {
-    raw = await claudeJsonPro<unknown>({
+    raw = await creativeTextJsonPro<unknown>({
       system:
         "You are a channel-format advisor helping tie-break among ALREADY-VALID production formats for an " +
         "AI YouTube channel pipeline. You are never inventing a new format and never overriding a deterministic " +

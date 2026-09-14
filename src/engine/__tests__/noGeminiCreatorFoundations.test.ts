@@ -16,7 +16,12 @@ for (const relativePath of [
     `${relativePath} is part of automatic channel inception and must remain Gemini-free`,
   );
   assert.match(
-    content, /hasAnthropicKey\(\)/, `${relativePath} must fail closed without its non-Google creative model`);
+    content, /hasCreativeTextKey\(\)/, `${relativePath} must fail closed without its canonical creative-text model`);
+  assert.doesNotMatch(
+    content,
+    /hasAnthropicKey|@\/lib\/anthropic/,
+    `${relativePath} must not route through the deprecated provider alias`,
+  );
 }
 
 console.log("no-Gemini creator foundations: ok");

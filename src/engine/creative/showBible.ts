@@ -6,7 +6,7 @@
  */
 import { z } from "zod";
 import { agentJson } from "@/agents/mastra";
-import { hasAnthropicKey } from "@/lib/anthropic";
+import { hasCreativeTextKey } from "@/lib/creativeText";
 import { FAMILY_CREW as FAMILY_CREW_RAW, type FamilyKey } from "@/engine/families";
 import {
   channelProgramBriefPositioningText,
@@ -87,7 +87,7 @@ function reconcileCrew(family: FamilyKey, proposed: string[]): VideoCrewRole[] {
 
 export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> {
   const log = input.log ?? (() => {});
-  if (!hasAnthropicKey()) {
+  if (!hasCreativeTextKey()) {
     log("showBible: no non-Google creative-model key — deterministic fallback");
     return fallbackBible(input);
   }
