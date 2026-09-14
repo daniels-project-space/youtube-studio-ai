@@ -138,7 +138,11 @@ export async function GET(request: NextRequest) {
     return completeOperationsOAuth(request, code, state);
   }
   if (oauthErr || !code || !state) {
-    return redirectAndClearNonce(`${BASE}/channels?yt=error`);
+    // Google uses access_denied when the operator closes or rejects consent.
+    // Keep that distinct from an exchange/configuration failure so the UI can
+    // offer a calm retry without claiming that an existing connector broke.
+    const outcome = oauthErr === "access_denied" ? "cancelled" : "error";
+    return redirectAndClearNonce(`${BASE}/channels?yt=${outcome}`);
   }
   try {
     await hydrateEnv("youtube");

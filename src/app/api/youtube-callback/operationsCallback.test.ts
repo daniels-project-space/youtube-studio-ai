@@ -29,7 +29,7 @@ async function main() {
   ));
   assert.equal(
     ordinaryError.headers.get("location"),
-    "https://youtube-studio-ai.vercel.app/channels?yt=error",
+    "https://youtube-studio-ai.vercel.app/channels?yt=cancelled",
   );
   console.log("Operations OAuth callback cancellation tests passed");
 }

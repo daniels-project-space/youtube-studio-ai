@@ -377,6 +377,8 @@ export default function ChannelHubPage({
         >
           {ytStatus === "connected"
             ? "✓ YouTube connected — the channel is linked and paused. Reapprove the destination and enable runs in Settings when ready."
+            : ytStatus === "cancelled"
+              ? "YouTube connection cancelled — no changes were made. Link to YouTube again whenever you’re ready."
             : ytStatus === "wrongchannel"
               ? `⚠ You linked "${ytGot ?? "another channel"}", but this app channel was created as a different YouTube channel. Switch to the correct channel on youtube.com and click Link again — the wrong one was rejected.`
               : `⚠ YouTube connect failed${ytGot ? ` (${ytGot})` : ""}. Try Link to YouTube again.`}
