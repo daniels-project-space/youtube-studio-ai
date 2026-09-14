@@ -25,10 +25,15 @@ assert.throws(() => saladFleetReservationIdentity({ ...input, ownerId: "../other
 assert.throws(() => saladFleetReservationExpiry(0), /timestamp/);
 
 const weeklySource = readFileSync(resolve(process.cwd(), "src/trigger/minimaxH3WeeklyBatch.ts"), "utf8");
+const convexSource = readFileSync(resolve(process.cwd(), "convex/saladFleetReservations.ts"), "utf8");
 assert.match(weeklySource, /api\.saladFleetReservations\.acquire/);
 assert.match(weeklySource, /api\.saladFleetReservations\.upgradePriority/);
 assert.match(weeklySource, /api\.saladFleetReservations\.release/);
 assert.match(weeklySource, /providerStarted = true/);
 assert.match(weeklySource, /pre-provider-failure/);
+assert.match(convexSource, /export const upgradePriority = mutation/);
+assert.match(convexSource, /priority: v\.literal\("high"\)/);
+assert.match(convexSource, /row\.leaseToken !== args\.leaseToken/);
+assert.match(convexSource, /row\.priority !== "medium"/);
 
 console.log("Salad fleet reservation contract tests passed");
