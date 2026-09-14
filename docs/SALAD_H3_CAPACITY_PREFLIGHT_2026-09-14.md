@@ -19,6 +19,14 @@ existing `cn` filter and with the read-only comparison queries for all, `us`,
 `ca`, `de`, `nl`, and `sg`. The batch must remain held; changing region,
 memory, or GPU class would violate the sealed H3 quality contract.
 
+## Fresh recheck
+
+At `2026-09-14T05:05:09Z`, the same vault-backed read-only probe again found
+`0 medium / 0 high` H3 slots, with `0/3` occupied slots and `0/10` replicas
+used. The exact RTX 5090 class and both prices were still present. This confirms
+that the high-priority escape hatch is wired but has no capacity to unlock at
+this observation; no paid request was attempted.
+
 ## Runtime behavior
 
 `assertMiniMaxH3SaladCapacity()` checks the exact desktop class, account-wide
