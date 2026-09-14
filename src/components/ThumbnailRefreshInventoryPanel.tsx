@@ -100,9 +100,13 @@ function compactFailureMessage(message?: string): string {
   const normalized = message?.replace(/\s+/g, " ").trim();
   if (!normalized) return "Update blocked — inspect the run for details.";
   if (/permission|forbidden|403|thumbnails\.set/i.test(normalized)) {
-    return "YouTube declined the thumbnail update; custom thumbnails may be unavailable.";
+    return "YouTube access lacks custom-thumbnail permission — reconnect this channel.";
   }
   return normalized.length > 180 ? `${normalized.slice(0, 177)}…` : normalized;
+}
+
+function needsYoutubeReconnect(message?: string): boolean {
+  return /permission|forbidden|403|thumbnails\.set/i.test(message ?? "");
 }
 
 function ThumbnailRefreshPreview({
@@ -547,12 +551,22 @@ export function ThumbnailRefreshInventoryPanel({
                     <span className={styles.replacementDone}>Active in Library</span>
                   ) : null}
                   {row.replacement?.status === "blocked" ? (
-                    <span
-                      className={styles.candidateFailed}
-                      title={row.replacement.error ?? "YouTube update blocked"}
-                    >
-                      {compactFailureMessage(row.replacement.error)}
-                    </span>
+                    <>
+                      <span
+                        className={styles.candidateFailed}
+                        title={row.replacement.error ?? "YouTube update blocked"}
+                      >
+                        {compactFailureMessage(row.replacement.error)}
+                      </span>
+                      {row.channelSlug && needsYoutubeReconnect(row.replacement.error) ? (
+                        <Link
+                          href={`/channels/${row.channelSlug}?tab=settings`}
+                          className={styles.action}
+                        >
+                          Reconnect YouTube
+                        </Link>
+                      ) : null}
+                    </>
                   ) : null}
                   {row.candidate?.status === "failed" ? (
                     <span
