@@ -22,6 +22,12 @@ assert.match(page, /status\.state === "held"/);
 assert.match(page, /Held before spend/);
 assert.match(page, /medium first, then high only if it unlocks this wave/,
   "a capacity hold explains the authorized medium-to-high retry policy");
+assert.match(page, /background recheck keeps the held desk useful/,
+  "capacity-held runs should keep observing without implicitly spending");
+assert.match(page, /window\.setTimeout\(poll, 60_000\)/,
+  "held capacity polling must be deliberately bounded rather than a busy loop");
+assert.match(page, /if \(body\.state === "admitted"\) return/,
+  "an admitted capacity result stops the no-spend observer until explicit retry");
 assert.match(page, /Fleet snapshot/);
 assert.match(page, /api\/salad\/capacity/);
 assert.match(page, /jobCount=\$\{requestedJobs\}/);

@@ -196,6 +196,44 @@ export function H3RenderConsole() {
     };
   }, [tracking]);
 
+  // A capacity-held Salad run is safe to observe again, but never safe to
+  // resubmit implicitly: admission may discover a costlier high-priority tier
+  // and paid retry still requires the operator's explicit action. A short
+  // background recheck keeps the held desk useful while avoiding a busy poll.
+  useEffect(() => {
+    if (
+      mode !== "weekly" || tracking?.provider !== "salad" ||
+      status?.state !== "held" || !parsedPreview.valid
+    ) return;
+    let cancelled = false;
+    let timer: number | undefined;
+    const poll = async () => {
+      try {
+        const response = await fetch(`/api/minimax-h3/capacity?jobCount=${parsedPreview.count}`, {
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+        });
+        const body = await response.json().catch(() => null) as H3Capacity | null;
+        if (!cancelled && response.ok && body && "state" in body) {
+          setCapacity(body);
+          // Once admission is visible, stop polling. The next paid attempt
+          // remains a deliberate click so a high-tier charge is never hidden.
+          if (body.state === "admitted") return;
+        }
+      } catch {
+        // The existing held state remains authoritative; a transient read
+        // failure must not turn into a retry or overwrite its explanation.
+      }
+      if (!cancelled) timer = window.setTimeout(poll, 60_000);
+    };
+    timer = window.setTimeout(poll, 15_000);
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) window.clearTimeout(timer);
+    };
+  }, [mode, parsedPreview.count, parsedPreview.valid, status?.state, tracking?.provider]);
+
   function changeMode(next: Mode) {
     setMode(next);
     setJobsJson(next === "weekly" ? weeklyExample : onDemandExample);
