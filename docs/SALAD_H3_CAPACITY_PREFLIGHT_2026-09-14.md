@@ -34,6 +34,11 @@ controller therefore remained held and issued no paid request. This is the
 expected fail-closed behavior: high is selected only when it actually unlocks
 the complete wave, not merely because the medium tier is empty.
 
+At `2026-09-14T07:19:24Z`, the latest vault-backed probe again observed
+`0 medium / 0 high` H3 slots, `0/3` occupied, and `0/10` replicas. The exact
+RTX 5090 class remained priced at medium `$0.417/hr` and high, but neither
+tier could unlock a wave, so the route stayed held and made no paid request.
+
 ## Runtime behavior
 
 `assertMiniMaxH3SaladCapacity()` checks the exact desktop class, account-wide
