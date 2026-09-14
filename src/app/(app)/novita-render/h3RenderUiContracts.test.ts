@@ -20,6 +20,8 @@ assert.match(page, /api\/minimax-h3\/capacity\?jobCount=/,
 assert.match(page, /Check Salad capacity/);
 assert.match(page, /status\.state === "held"/);
 assert.match(page, /Held before spend/);
+assert.match(page, /medium first, then high only if it unlocks this wave/,
+  "a capacity hold explains the authorized medium-to-high retry policy");
 assert.match(page, /Fleet snapshot/);
 assert.match(page, /api\/salad\/capacity/);
 assert.match(page, /jobCount=\$\{requestedJobs\}/);
