@@ -67,8 +67,25 @@ export interface HealPlan {
    * back to its most conservative repair.
    */
   healClasses: Record<string, HealClass[]>;
+  /** Compact operator-facing receipt; persisted by the durable run layer. */
+  decision: HealDecision;
   /** Structured, reviewer-grounded repair instructions for the next heal pass. */
   visualRepair?: VisualRepairSignal[];
+}
+
+/**
+ * The durable self-heal summary deliberately contains decisions, not logs.
+ * IDs are bounded block/artifact identifiers so this can be shown in a run
+ * card without shipping the full diagnostic stream to the browser.
+ */
+export interface HealDecision {
+  rootCause: string;
+  savedArtifacts: string[];
+  remainingWork: string[];
+  /** Filled by the caller from the frozen module envelopes. */
+  expectedIncrementalCostUsd?: number;
+  retryBoundary: "owner_and_downstream_closure";
+  nextAction: string;
 }
 
 /**
@@ -371,6 +388,9 @@ export function planHeal(
   }
 
   const rerunBlocks = downstreamClosure(owners, blocks);
+  const savedArtifacts = blocks
+    .filter((block) => block.paid && !rerunBlocks.includes(block.id))
+    .map((block) => block.id);
   const paidReruns = blocks
     .filter((b) => rerunBlocks.includes(b.id) && b.paid && !owners.has(b.id))
     .map((b) => b.id);
@@ -411,6 +431,13 @@ export function planHeal(
     reason: labels.join("; "),
     hints,
     healClasses,
+    decision: {
+      rootCause: labels.join("; ").slice(0, 1_000),
+      savedArtifacts,
+      remainingWork: rerunBlocks,
+      retryBoundary: "owner_and_downstream_closure",
+      nextAction: `supersede ${rerunBlocks.join(", ")} and resume from the stage cache`,
+    },
     ...(acceptedVisualRepair.length ? { visualRepair: acceptedVisualRepair } : {}),
   };
 }

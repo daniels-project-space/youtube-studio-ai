@@ -1021,6 +1021,18 @@ export default defineSchema({
     // a repair advances this atomically with superseding its requested stages
     // so a recovered orchestrator cannot accidentally reattach to h0 work.
     selfHealGeneration: v.optional(v.number()),
+    // Compact operator-facing decision for the latest self-heal. This keeps
+    // the cause/boundary/cost summary queryable without shipping run logs to
+    // the browser; arrays are bounded by the mutation contract.
+    selfHealDecision: v.optional(v.object({
+      generation: v.number(),
+      rootCause: v.string(),
+      savedArtifacts: v.array(v.string()),
+      remainingWork: v.array(v.string()),
+      expectedIncrementalCostUsd: v.number(),
+      retryBoundary: v.literal("owner_and_downstream_closure"),
+      nextAction: v.string(),
+    })),
     // Reaper-issued same-run recovery is deliberately bounded. Missing means
     // a pre-rollout row; the reaper treats it as zero and never backfills by
     // re-dispatching more than the cap.

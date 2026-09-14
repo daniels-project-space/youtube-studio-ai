@@ -1766,6 +1766,14 @@ export const advanceSelfHealGeneration = mutation({
     expectedGeneration: v.number(),
     rerunBlocks: v.array(v.string()),
     reason: v.string(),
+    decision: v.optional(v.object({
+      rootCause: v.string(),
+      savedArtifacts: v.array(v.string()),
+      remainingWork: v.array(v.string()),
+      expectedIncrementalCostUsd: v.number(),
+      retryBoundary: v.literal("owner_and_downstream_closure"),
+      nextAction: v.string(),
+    })),
   },
   returns: v.object({ generation: v.number() }),
   handler: async (ctx, args) => {
@@ -1780,6 +1788,7 @@ export const advanceSelfHealGeneration = mutation({
     }
     const rerunBlocks = [...new Set(args.rerunBlocks.map((block) => block.trim()))];
     const reason = args.reason.trim();
+    const decision = args.decision;
     if (
       rerunBlocks.length === 0 ||
       rerunBlocks.length > 100 ||
@@ -1788,6 +1797,29 @@ export const advanceSelfHealGeneration = mutation({
       reason.length > 1_000
     ) {
       throw new Error("self-heal stage request is invalid");
+    }
+    if (decision) {
+      const strings = [decision.rootCause, decision.nextAction];
+      if (
+        strings.some((value) => {
+          const normalized = value.trim();
+          return !normalized || normalized.length > 1_000;
+        }) ||
+        decision.savedArtifacts.length > 100 ||
+        decision.remainingWork.length > 100 ||
+        decision.savedArtifacts.some((value) => !value.trim() || value.trim().length > 200) ||
+        decision.remainingWork.some((value) => !value.trim() || value.trim().length > 200) ||
+        !Number.isFinite(decision.expectedIncrementalCostUsd) ||
+        decision.expectedIncrementalCostUsd < 0
+      ) {
+        throw new Error("self-heal decision is invalid");
+      }
+      if (
+        decision.remainingWork.length !== rerunBlocks.length ||
+        decision.remainingWork.some((block, index) => block.trim() !== rerunBlocks[index])
+      ) {
+        throw new Error("self-heal decision remaining work must match rerun blocks");
+      }
     }
     const run = await ctx.db.get(args.runId);
     if (!run) throw new Error(`run not found: ${args.runId}`);
@@ -1817,7 +1849,22 @@ export const advanceSelfHealGeneration = mutation({
 
     // Convex mutations are transactional: no observer can see h+1 unless all
     // requested stages are already superseded with the matching repair reason.
-    await ctx.db.patch(args.runId, { selfHealGeneration: nextGeneration });
+    await ctx.db.patch(args.runId, {
+      selfHealGeneration: nextGeneration,
+      ...(decision
+        ? {
+            selfHealDecision: {
+              generation: nextGeneration,
+              rootCause: decision.rootCause.trim(),
+              savedArtifacts: decision.savedArtifacts.map((value) => value.trim()),
+              remainingWork: decision.remainingWork.map((value) => value.trim()),
+              expectedIncrementalCostUsd: decision.expectedIncrementalCostUsd,
+              retryBoundary: decision.retryBoundary,
+              nextAction: decision.nextAction.trim(),
+            },
+          }
+        : {}),
+    });
     for (const block of rerunBlocks) {
       const existing = stagesByBlock.get(block);
       if (existing?.length) {

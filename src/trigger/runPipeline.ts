@@ -67,6 +67,7 @@ import { mergeRuntimeModuleConfig } from "@/engine/runtimeModuleConfig";
 import { renderBlockTask } from "@/trigger/render-block";
 import { renderBlockLightTask } from "@/trigger/render-block-light";
 import { planHeal } from "@/engine/healer";
+import { configuredMaxCostUsd } from "@/engine/moduleManifest";
 import { makeConvexSink } from "@/engine/convexSink";
 import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
 import { channelPrefix, getObjectBytes } from "@/lib/storage";
@@ -2520,6 +2521,30 @@ export const runPipelineTask = task({
           log("music audition fence: refusing self-heal that would replace the owner-approved native track; manual revision required");
           break;
         }
+        // The plan already fixes the retry boundary. Estimate only the
+        // frozen envelopes for paid blocks that the downstream closure will
+        // actually execute; this is an upper bound, never a provider call.
+        const expectedIncrementalCostUsd = plan.rerunBlocks.reduce((total, blockId) => {
+          const index = resolved.blocks.findIndex((block) => block.id === blockId);
+          const manifest = index >= 0 ? resolved.manifests[index] : undefined;
+          if (!manifest?.costAndLatency.paid) return total;
+          const entry = resolved.entries[index];
+          try {
+            return total + configuredMaxCostUsd(manifest, entry?.params ?? {}, {
+              entries: resolved.entries,
+              index,
+              store: result.store,
+            });
+          } catch {
+            // Preflight has already admitted the invocation. If a future
+            // manifest makes its envelope context-dependent, keep the repair
+            // explainable without turning diagnosis into a new failure.
+            return total;
+          }
+        }, 0);
+        plan.decision.expectedIncrementalCostUsd = Number.isFinite(expectedIncrementalCostUsd)
+          ? Number(expectedIncrementalCostUsd.toFixed(6))
+          : 0;
         const advanced = await convex.mutation(api.runs.advanceSelfHealGeneration, {
           ownerId,
           channelId: payload.channelId as Id<"channels">,
@@ -2528,6 +2553,14 @@ export const runPipelineTask = task({
           expectedGeneration: heals,
           rerunBlocks: plan.rerunBlocks,
           reason: plan.reason,
+          decision: {
+            rootCause: plan.decision.rootCause,
+            savedArtifacts: plan.decision.savedArtifacts,
+            remainingWork: plan.decision.remainingWork,
+            expectedIncrementalCostUsd: plan.decision.expectedIncrementalCostUsd,
+            retryBoundary: plan.decision.retryBoundary,
+            nextAction: plan.decision.nextAction,
+          },
         });
         heals = advanced.generation;
         log(

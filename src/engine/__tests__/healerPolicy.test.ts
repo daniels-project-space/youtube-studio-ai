@@ -21,6 +21,13 @@ function main(): void {
   const missingArtifact = planHeal("thumbnail missing from uploaded draft", blocks);
   assert.deepEqual(missingArtifact?.rerunBlocks, ["thumbnail_gen", "qa_visual"]);
   assert.match(missingArtifact?.reason ?? "", /restore checkpoint \+ persist/);
+  assert.deepEqual(missingArtifact?.decision, {
+    rootCause: "thumbnail artifact missing → restore checkpoint + persist",
+    savedArtifacts: [],
+    remainingWork: ["thumbnail_gen", "qa_visual"],
+    retryBoundary: "owner_and_downstream_closure",
+    nextAction: "supersede thumbnail_gen, qa_visual and resume from the stage cache",
+  });
 
   const comicBlocks: HealableBlock[] = [
     { id: "motion_comic", produces: ["videoLocalPath", "motionComicTimeline"], consumes: ["topic"], paid: true },

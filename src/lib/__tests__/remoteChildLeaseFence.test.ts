@@ -280,9 +280,26 @@ async function main() {
     expectedGeneration: 0,
     rerunBlocks: [base.blockId, "qa_visual", "timeline_assemble"],
     reason: "visual defect requires a replacement render",
+    decision: {
+      rootCause: "visual defect requires a replacement render",
+      savedArtifacts: ["narration_tts", "music"],
+      remainingWork: [base.blockId, "qa_visual", "timeline_assemble"],
+      expectedIncrementalCostUsd: 0.42,
+      retryBoundary: "owner_and_downstream_closure",
+      nextAction: "supersede render, qa_visual, timeline_assemble and resume from the stage cache",
+    },
   });
   assert.equal(h1.generation, 1);
   assert.equal(run.selfHealGeneration, 1);
+  assert.deepEqual(run.selfHealDecision, {
+    generation: 1,
+    rootCause: "visual defect requires a replacement render",
+    savedArtifacts: ["narration_tts", "music"],
+    remainingWork: [base.blockId, "qa_visual", "timeline_assemble"],
+    expectedIncrementalCostUsd: 0.42,
+    retryBoundary: "owner_and_downstream_closure",
+    nextAction: "supersede render, qa_visual, timeline_assemble and resume from the stage cache",
+  });
   for (const block of [base.blockId, "qa_visual", "timeline_assemble"]) {
     const stage = stages.find((candidate) => candidate.block === block);
     assert.equal(stage?.status, "superseded", `${block} must be invalidated with h1`);
