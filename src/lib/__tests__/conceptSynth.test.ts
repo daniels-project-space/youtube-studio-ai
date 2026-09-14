@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { synthChannelConcept } from "@/lib/conceptSynth";
+
+const conceptSource = readFileSync(join(process.cwd(), "src/lib/conceptSynth.ts"), "utf8");
+assert.match(conceptSource, /from ["']@\/lib\/creativeText["']/);
+assert.doesNotMatch(conceptSource, /@\/lib\/anthropic|claudeJson|hasAnthropicKey/);
 
 async function main(): Promise<void> {
   const previousOpenRouterKey = process.env.OPENROUTER_API_KEY;

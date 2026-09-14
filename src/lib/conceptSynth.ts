@@ -4,7 +4,7 @@
  * route. Output is validated and defaulted so the builder never persists a
  * malformed channel.
  */
-import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { creativeTextJson, hasCreativeTextKey } from "@/lib/creativeText";
 import { ARCHETYPE_KEYS, getArchetype } from "@/engine/archetypes";
 
 export interface ChannelConcept {
@@ -60,7 +60,7 @@ export async function synthChannelConcept(
   nicheContext: string | undefined,
   log: Logger = () => {},
 ): Promise<ChannelConcept> {
-  if (!hasAnthropicKey()) {
+  if (!hasCreativeTextKey()) {
     log("conceptSynth: no OpenRouter key — using deterministic fallback");
     return fallbackConcept(seed);
   }
@@ -92,7 +92,7 @@ export async function synthChannelConcept(
 
   let raw: Partial<ChannelConcept> & { palette?: unknown; topicPool?: unknown; bannedWords?: unknown };
   try {
-    raw = await claudeJson({ prompt, system, tier: "pro", maxTokens: 1500, temperature: 0.7 });
+    raw = await creativeTextJson({ prompt, system, tier: "pro", maxTokens: 1500, temperature: 0.7 });
   } catch (e) {
     log(`conceptSynth: LLM failed (${e instanceof Error ? e.message : e}) — fallback`);
     return fallbackConcept(seed);
