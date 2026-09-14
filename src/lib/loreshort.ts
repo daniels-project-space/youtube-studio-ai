@@ -59,7 +59,7 @@ export interface LoreShortCfg {
   subStyle?: string;
   voiceId?: string;
   narrationSpeed?: number; // TTS speaking-rate multiplier (<1 = slower/graver); default 0.96
-  model?: "ltx" | "wan" | "seedance";
+  model?: "h3" | "ltx" | "wan" | "seedance";
   frames?: number;
   seedanceRes?: "480p" | "720p" | "1080p";
   seedanceDur?: number;
@@ -108,7 +108,7 @@ export const LORESHORT_MODULE = {
     path: "'budget' | 'premium' — picks a LORESHORT_PATHS lane (default = premium defaults)",
     subStyle: "key of SUB_STYLES — 'cinematic' | 'watercolor_pencil' | add your own (default cinematic)",
     nScenes: "beats ≈ seconds/6 (default 9)", voiceId: "ElevenLabs voice id",
-    model: "'seedance' | 'ltx' | 'wan'", seedanceRes: "'480p'|'720p'|'1080p'",
+    model: "'h3' | 'seedance' | 'ltx' | 'wan'", seedanceRes: "'480p'|'720p'|'1080p'",
     upscale: "'realesrgan' | 'ffmpeg' | 'none'", upscaleRes: "'2k' | '4k'",
     introSec: "title-card seconds", pause: "breath between beats", dissolve: "crossfade seconds",
   },

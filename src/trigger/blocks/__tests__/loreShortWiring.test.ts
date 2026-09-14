@@ -143,20 +143,20 @@ async function blockUsesAttestedProvidersAndR2(): Promise<void> {
     "the pipeline block must never reach Replicate");
   assert.match(block, /createAttestedNovitaImageGenerator/,
     "stills must come from the attested Novita generator");
-  assert.match(block, /generateI2V/, "the camera move must come from the single attested i2v seam");
-  assert.match(block, /provider:\s*"novita-ltx"/,
-    "LoreCraft must explicitly select the mandatory Novita LTX route");
-  assert.match(block, /model:\s*"ltx-2\.5-distilled-x2"/,
-    "LoreCraft must pin the LTX-2.5 distilled renderer, never a generic video default");
-  assert.match(block, /aspectRatio:\s*"16:9"/,
-    "LoreCraft must render its cinematic master in the LTX production aspect ratio");
+  assert.match(block, /renderMiniMaxH3/, "the camera move must come from the attested MiniMax H3 seam");
+  assert.match(block, /provider:\s*"novita"/,
+    "LoreCraft must use the Novita on-demand H3 route");
+  assert.match(block, /execution:\s*"on-demand"/,
+    "LoreCraft must never put a regular short into the weekly Salad batch lane");
+  assert.match(block, /model:\s*"h3"/,
+    "LoreCraft must select the canonical H3 renderer");
   assert.doesNotMatch(code, /gemini|google/i,
     "the executable LoreCraft wrapper must never call a Google model");
-  assert.match(block, /hasNovitaRenderFarmConfig/, "the block must fail closed without the attested farm");
+  assert.match(block, /minimaxH3Readiness/, "the block must fail closed without the attested H3 route");
 
   // Cost must ACCUMULATE. A bare `=` would let a Trigger retry erase prior spend.
   assert.match(block, /imageCostUsd \+= receipt\.costUsd/, "image receipts must accumulate with +=");
-  assert.match(block, /clipCostUsd \+= clip\.costUsd/, "clip receipts must accumulate with +=");
+  assert.match(block, /clipCostUsd \+= clip\.receipt\.runtime\.costUsd/, "H3 clip receipts must accumulate with +=");
   assert.match(block, /ttsCharacters \+= characters/, "TTS characters must accumulate with +=");
   assert.match(block, /visionCalls \+= 1/, "the engine's motion-analysis calls must accumulate with +=");
   assert.doesNotMatch(block, /(?:imageCostUsd|clipCostUsd|ttsCharacters|visionCalls) = (?!0;)/,

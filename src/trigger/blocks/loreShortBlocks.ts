@@ -9,10 +9,10 @@
  *
  * WHAT THIS WRAPPER OWNS (the engine at src/lib/loreshort.ts owns none of it):
  *  - PROVIDERS. The engine's standalone defaults are FAL image art, Replicate
- *    (LTX/Seedance + Real-ESRGAN) and a hardcoded ElevenLabs voice — none attested,
+ *    (legacy image-to-video + Real-ESRGAN) and a hardcoded ElevenLabs voice — none attested,
  *    none budgeted. This block injects the attested Novita render farm for BOTH
  *    art (createAttestedNovitaImageGenerator, per-call signed receipts) and the
- *    i2v camera move (generateI2V → renderNovitaI2V), and accumulates every
+ *    H3 camera move (renderMiniMaxH3 on the Novita on-demand lane), and accumulates every
  *    receipt with `+=` so a retry can never overwrite prior spend.
  *  - UPSCALE. Real-ESRGAN is NOT used: the engine already has a free ffmpeg
  *    lanczos+unsharp 2K lane (LORESHORT_PATHS.budget), so this block runs at 2K
@@ -26,13 +26,14 @@
  *    costs a paid render and a replay never re-buys one.
  */
 import { fallbackVoiceKey } from "@/lib/tts";
+import { bootstrapSecrets } from "@/lib/bootstrap";
 import { createHash } from "node:crypto";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
-import { DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS, makeRunTempDir } from "@/lib/files";
+import { makeRunTempDir, readBytes } from "@/lib/files";
 import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
 import {
   craftLoreShort,
@@ -60,8 +61,8 @@ import {
   selfContainedStoryReceiptRequiredForRoute,
 } from "@/engine/selfContainedStoryReceipt";
 import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
-import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
-import { generateI2V } from "@/lib/i2v";
+import { minimaxH3Readiness, renderMiniMaxH3 } from "@/lib/minimaxH3";
+import { sha256BytesHex } from "@/lib/sha256";
 import { PRICE } from "@/engine/pricing";
 import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 import { fallbackNarratorPersona } from "@/lib/identitySpread";
@@ -400,8 +401,14 @@ export const loreShort: Block = {
             topic,
           }),
         };
-    if (!hasLoreShort({ requiresStoryboard: approvedStoryReceipt === undefined }) || !hasNovitaRenderFarmConfig()) {
-      throw new Error("lore_short: required lore and attested Novita LTX render capabilities are unavailable");
+    await bootstrapSecrets(ctx.log, {
+      services: ["cloudflare", "novita"],
+      required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "MINIMAX_H3_NOVITA_WORKER_URL", "MINIMAX_H3_NOVITA_WORKER_TOKEN"],
+    });
+    const h3Readiness = minimaxH3Readiness("novita");
+    if (!hasLoreShort({ requiresStoryboard: approvedStoryReceipt === undefined }) || !h3Readiness.admitted) {
+      const blockers = h3Readiness.blockers.join("; ");
+      throw new Error(`lore_short: required lore and attested MiniMax H3 capabilities are unavailable${blockers ? ` (${blockers})` : ""}`);
     }
 
     const visualBrief = getVisualBrief(ctx.store);
@@ -499,10 +506,10 @@ export const loreShort: Block = {
         narrator,
         nScenes,
         subStyle,
-        // BUDGET LANE, deliberately: LTX-class clips + the engine's FREE ffmpeg
+        // BUDGET LANE, deliberately: H3 clips + the engine's FREE ffmpeg
         // lanczos+unsharp 2K finish. Real-ESRGAN would add a paid upscale per
         // clip for a resolution nobody asked for.
-        model: "ltx",
+        model: "h3",
         frames: 145,
         upscale: "ffmpeg",
         upscaleRes: "2k",
@@ -517,39 +524,28 @@ export const loreShort: Block = {
         // nothing rather than re-charging for work it skipped.
         onVisionCall: () => { visionCalls += 1; },
         generateImage: (request) => generateImage(request),
-        // ATTESTED i2v. The still is staged in R2 first so the farm reads it by
-        // key (no public URL, no nginx) and every clip's signed cost lands in
-        // clipCostUsd with `+=` — a Trigger retry accumulates, never overwrites.
+        // ATTESTED MiniMax H3 on-demand render. The still is staged in R2 first
+        // so the Novita worker reads it by key (no public URL, no nginx), and
+        // every clip's signed cost lands in clipCostUsd with `+=` — a Trigger
+        // retry accumulates, never overwrites.
         generateClip: async (request: LoreClipRequest) => {
           const imageKey = `${prefix}/stills/${request.id}.jpg`;
           await putObjectFromFile(imageKey, request.imagePath, { contentType: "image/jpeg" });
-          const clip = await generateI2V({
-            prompt: request.prompt,
-            motionPrompt: request.motionPrompt,
-            cameraInstruction: request.cameraInstruction,
-            negativePrompt: request.negativePrompt,
-            imageKey,
-            durationSec: request.durationSec,
-            provider: "novita-ltx",
-            model: "ltx-2.5-distilled-x2",
-            aspectRatio: "16:9",
-            styleId: subStyle === "watercolor_pencil" ? "watercolor" : "cinematic_heist_noir",
+          const frameBytes = await readBytes(request.imagePath);
+          const seed = Number.parseInt(createHash("sha256").update(`${request.id}\0${request.prompt}`).digest("hex").slice(0, 8), 16) % 2_147_483_647;
+          const clip = await renderMiniMaxH3({
+            provider: "novita",
+            execution: "on-demand",
+            prompt: [request.prompt, `Motion: ${request.motionPrompt}`, `Camera: ${request.cameraInstruction}`, `Avoid: ${request.negativePrompt}`].join("\n\n"),
+            seed,
+            firstFrame: { r2Key: imageKey, sha256: sha256BytesHex(frameBytes) },
+            output: { r2Key: `${prefix}/h3/${request.id}.mp4` },
             maxCostUsd: PRICE.novitaVideoMaxUsd,
-            runId: ctx.runId,
-            keyPrefix: ctx.keyPrefix,
-            lifecycle: {
-              ownerId: ctx.ownerId,
-              channelId: ctx.channelId,
-              runId: ctx.runId,
-              blockId: "lore_short",
-            },
-            log: (m) => ctx.log(`lore-i2v: ${m}`),
           });
-          clipCostUsd += clip.costUsd;
+          clipCostUsd += clip.receipt.runtime.costUsd;
           clipCalls += 1;
-          return Buffer.from(await getObjectBytes(clip.key, undefined, {
-            timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
-          }));
+          ctx.log(`lore-h3: ${request.id} accepted (${clip.receipt.runtime.costUsd.toFixed(4)} USD)`);
+          return Buffer.from(clip.outputBytes);
         },
         synthLine: async (request) =>
           Buffer.from(
@@ -595,7 +591,7 @@ export const loreShort: Block = {
       width: result.width,
       height: result.height,
       imageProvider: "novita-z-image-turbo-local",
-      videoProvider: "novita-ltx-2.5-distilled-x2",
+      videoProvider: "minimax-h3-novita-on-demand",
     });
     ctx.log(`lore_short ✓ → ${videoKey} (${videoDurationSec}s, ${result.scenes.length} beats, ${result.width}x${result.height})`);
 
