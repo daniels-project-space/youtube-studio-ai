@@ -11,7 +11,7 @@
  * SCRIPT PLAYBOOK whose three opening devices rotate across videos.
  */
 import { parseJsonLoose } from "@/lib/gemini";
-import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { creativeTextJson, hasCreativeTextKey } from "@/lib/creativeText";
 import type { StyleDNA } from "@/engine/creative/types";
 import { hasVisionKey, visionLocal } from "@/lib/vision";
 import {
@@ -99,7 +99,7 @@ export function narrativePlaybookCapability(): { available: boolean; reason: str
       reason: "reference opening review DID NOT RUN: OPENROUTER_API_KEY is required",
     };
   }
-  if (!hasAnthropicKey()) {
+  if (!hasCreativeTextKey()) {
     return { available: false, reason: "OPENROUTER_API_KEY is required to distil the studied openings" };
   }
   const capture = referenceOpeningCapability();
@@ -133,7 +133,7 @@ export async function distillScriptPlaybook(args: {
   }
   if (decons.length === 0) throw new Error("scriptLab: could not deconstruct any reference video");
 
-  const play = await claudeJson<{
+  const play = await creativeTextJson<{
     hookRules?: string[];
     openingDevices?: { name?: string; when?: string; template?: string }[];
     retentionDevices?: string[];

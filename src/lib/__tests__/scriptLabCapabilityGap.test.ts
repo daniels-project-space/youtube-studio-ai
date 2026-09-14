@@ -15,6 +15,8 @@ const inception = readFileSync(join(process.cwd(), "src/trigger/designChannelInc
   .replace(/\/\*[\s\S]*?\*\//g, "").replace(/(^|[^:])\/\/.*$/gm, "$1");
 
 assert.doesNotMatch(source, /geminiAnalyzeYouTube|hasGeminiKey|GEMINI_API_KEY/);
+assert.match(source, /from ["']@\/lib\/creativeText["']/);
+assert.doesNotMatch(source, /@\/lib\/anthropic|claudeJson|hasAnthropicKey/);
 assert.match(source, /withReferenceOpeningEvidence\(/);
 assert.match(source, /visionLocal\(\{/);
 assert.match(source, /providers:\s*\["openrouter"\]/);
