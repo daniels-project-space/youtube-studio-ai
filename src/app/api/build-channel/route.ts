@@ -551,6 +551,16 @@ export async function POST(request: Request) {
       const approvedForPublish = design.approvedForPublish === true;
       const approvedForYoutubeCreation = design.autoYoutube === true;
       const approvedForProbe = design.runProbe === true;
+      // An automatic channel is not admitted on setup artifacts alone. The
+      // first real creation must include one bounded private proof render so
+      // the selected route, identity, and output QA are exercised together.
+      // Plan-only and supervised review intake remain explicitly no-spend.
+      if (approvedForSetupSpend && !reviewedDataStoryIntake && !approvedForProbe) {
+        return NextResponse.json(
+          { error: "automatic channel creation requires one bounded private validation render" },
+          { status: 400 },
+        );
+      }
       const minimumBudgetUsd = family.defaultRunBudgetUsd ?? 0.5;
       const maximumBudgetUsd = Math.max(100, minimumBudgetUsd);
       const perVideoBudgetUsd = Number(design.budget ?? family.defaultRunBudgetUsd ?? 5);

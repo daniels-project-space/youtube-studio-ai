@@ -1871,7 +1871,11 @@ export default function NewChannelWizard() {
                       checked={approveSetupSpend}
                       onChange={(e) => {
                         setApproveSetupSpend(e.target.checked);
-                        if (!e.target.checked) { setRunProbe(false); setAutoYoutube(false); }
+                        // Real execution always includes one bounded private
+                        // proof. Unchecking setup returns the request to
+                        // plan-only and clears every paid authority.
+                        setRunProbe(e.target.checked);
+                        if (!e.target.checked) setAutoYoutube(false);
                       }}
                     />
                     <span style={muted}>authorize up to ${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)} for research, identity, art and starter thumbnails</span>
@@ -1893,9 +1897,9 @@ export default function NewChannelWizard() {
                   </label>
                 </Row>
                 <Row label="Paid validation render">
-                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
-                    <input type="checkbox" disabled={!approveSetupSpend} checked={runProbe} onChange={(e) => setRunProbe(e.target.checked)} />
-                    <span style={muted}>run one bounded private proof · up to ${costAuthority.validationCapUsd.toFixed(2)} extra</span>
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: approveSetupSpend ? "default" : "not-allowed" }}>
+                    <input type="checkbox" disabled={!approveSetupSpend} checked={approveSetupSpend && runProbe} readOnly />
+                    <span style={muted}>required one bounded private proof · up to ${costAuthority.validationCapUsd.toFixed(2)} extra</span>
                   </label>
                 </Row>
                 <Row label="Production budget / video"><input type="number" min={fam?.defaultRunBudgetUsd ?? 0.5} max={Math.max(100, fam?.defaultRunBudgetUsd ?? 0.5)} step={0.5} value={budget} onChange={(e) => setBudget(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>USD{family === "documentary_collage_short" ? " · native master requires at least $30" : family === "cinematic" ? " · locked Novita chain requires at least $130" : ""}</span></Row>
