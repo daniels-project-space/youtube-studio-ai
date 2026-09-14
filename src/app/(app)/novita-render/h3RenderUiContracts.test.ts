@@ -28,6 +28,8 @@ assert.match(page, /window\.setTimeout\(poll, 60_000\)/,
   "held capacity polling must be deliberately bounded rather than a busy loop");
 assert.match(page, /if \(body\.state === "admitted"\) return/,
   "an admitted capacity result stops the no-spend observer until explicit retry");
+assert.match(page, /Retry with high priority/,
+  "an admitted high-tier fallback must make the explicit paid action unambiguous");
 assert.match(page, /Fleet snapshot/);
 assert.match(page, /api\/salad\/capacity/);
 assert.match(page, /jobCount=\$\{requestedJobs\}/);
