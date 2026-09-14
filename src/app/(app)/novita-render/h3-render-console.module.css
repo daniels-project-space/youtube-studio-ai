@@ -23,6 +23,11 @@
 .formFooter span[data-valid="true"] { color: #9fe8b8; }
 .formFooter button, .locked button { border: 0; border-radius: 9px; background: #ff7d65; color: #160b0b; font-weight: 700; padding: .65rem .85rem; cursor: pointer; }
 .formFooter button:disabled { cursor: not-allowed; opacity: .45; }
+.capacityTools { display: flex; align-items: center; gap: .7rem; flex-wrap: wrap; }
+.secondaryButton { border: 1px solid var(--color-border-strong) !important; background: transparent !important; color: var(--color-fg) !important; }
+.capacityNotice { color: var(--color-faint); font-size: .68rem; line-height: 1.35; }
+.capacityNotice[data-state="admitted"] { color: #9fe8b8; }
+.capacityNotice[data-state="held"] { color: #ffc16e; }
 .contractHint { color: var(--color-faint); font-size: .65rem; }
 .validationIssues { display: grid; gap: .2rem; margin: -.35rem 0 0; padding-left: 1.1rem; color: #ffc16e; font-size: .65rem; line-height: 1.35; }
 .progressHeader strong { display: block; margin-top: .2rem; font-size: .9rem; }

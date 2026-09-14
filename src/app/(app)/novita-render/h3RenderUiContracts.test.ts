@@ -15,6 +15,9 @@ assert.match(page, /api\/minimax-h3\/\$\{mode\}/);
 assert.match(page, /api\/minimax-h3\/status/);
 assert.match(page, /data-capacity-mode=\{status\.receipt\.capacityMode\}/,
   "the render desk surfaces the admitted Salad tier from the durable receipt");
+assert.match(page, /api\/minimax-h3\/capacity\?jobCount=/,
+  "the render desk offers a read-only pre-dispatch Salad capacity check");
+assert.match(page, /Check Salad capacity/);
 assert.match(page, /localStorage/);
 assert.match(page, /H3_TRACKING_STORAGE_KEY/);
 assert.match(page, /URLSearchParams\(window\.location\.search\)/,

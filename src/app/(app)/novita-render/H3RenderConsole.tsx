@@ -20,6 +20,11 @@ type H3Status = {
   } | null;
 };
 
+type H3Capacity =
+  | { state: "admitted"; capacity: { requiredGpuCount: number; availableGpuCount: number; capacityMode: "medium" | "high" } }
+  | { state: "held"; reason: string; paidRequestStarted: false }
+  | { state: "unavailable"; reason: string };
+
 const H3_TRACKING_STORAGE_KEY = "youtube-studio-ai:h3-render:tracking:v1";
 type H3Tracking = { runId: string; receiptKey: string; provider: "salad" | "novita" };
 
@@ -100,6 +105,8 @@ export function H3RenderConsole() {
   const [error, setError] = useState("");
   const [tracking, setTracking] = useState<H3Tracking | null>(null);
   const [status, setStatus] = useState<H3Status | null>(null);
+  const [capacity, setCapacity] = useState<H3Capacity | null>(null);
+  const [capacityBusy, setCapacityBusy] = useState(false);
 
   useEffect(() => {
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
@@ -177,6 +184,26 @@ export function H3RenderConsole() {
     setTracking(null);
     setStatus(null);
     setError("");
+  }
+
+  async function checkCapacity() {
+    if (mode !== "weekly" || !parsedPreview.valid) return;
+    setCapacityBusy(true);
+    setCapacity(null);
+    try {
+      const response = await fetch(`/api/minimax-h3/capacity?jobCount=${parsedPreview.count}`, {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      const body = await response.json().catch(() => null) as H3Capacity | { error?: string } | null;
+      if (!response.ok || !body || !("state" in body)) throw new Error(errorMessage(body, "Capacity check failed."));
+      setCapacity(body as H3Capacity);
+    } catch (reason) {
+      setCapacity({ state: "unavailable", reason: reason instanceof Error ? reason.message : "Capacity check failed." });
+    } finally {
+      setCapacityBusy(false);
+    }
   }
 
   async function dispatch() {
@@ -257,6 +284,16 @@ export function H3RenderConsole() {
           <span data-valid={parsedPreview.valid}>{parsedPreview.valid ? `${parsedPreview.count} sealed job${parsedPreview.count === 1 ? "" : "s"} ready` : (parsedPreview.issues[0] ?? "Complete the sealed job contract")}</span>
           <button type="button" onClick={() => void dispatch()} disabled={busy || !parsedPreview.valid}>{busy ? "Queuing…" : `Queue ${provider} render`}</button>
         </div>
+        {mode === "weekly" && <div className={styles.capacityTools}>
+          <button type="button" className={styles.secondaryButton} onClick={() => void checkCapacity()} disabled={capacityBusy || !parsedPreview.valid}>{capacityBusy ? "Checking Salad…" : "Check Salad capacity"}</button>
+          {capacity && <span className={styles.capacityNotice} data-state={capacity.state} role="status">
+            {capacity.state === "admitted"
+              ? `Admits ${capacity.capacity.requiredGpuCount} worker${capacity.capacity.requiredGpuCount === 1 ? "" : "s"} at ${capacity.capacity.capacityMode} priority.`
+              : capacity.state === "held"
+                ? `Held before spend · ${capacity.reason}`
+                : `Capacity check unavailable · ${capacity.reason}`}
+          </span>}
+        </div>}
         {!parsedPreview.valid && parsedPreview.issues.length > 1 && <ul className={styles.validationIssues}>{parsedPreview.issues.slice(1, 3).map((issue) => <li key={issue}>{issue}</li>)}</ul>}
         <small className={styles.contractHint}>The server rechecks the H3 model manifest, first-frame bytes, owner namespace, cost ceiling, and create-only receipt before any provider call.</small>
       </section>
