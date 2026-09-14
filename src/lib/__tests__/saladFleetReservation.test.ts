@@ -29,6 +29,8 @@ const convexSource = readFileSync(resolve(process.cwd(), "convex/saladFleetReser
 assert.match(weeklySource, /api\.saladFleetReservations\.acquire/);
 assert.match(weeklySource, /api\.saladFleetReservations\.upgradePriority/);
 assert.match(weeklySource, /api\.saladFleetReservations\.release/);
+assert.match(weeklySource, /SALAD_FLEET_RESERVATION_ENABLED !== "0"/,
+  "the organization-wide fleet fence must be enabled by default and only explicitly disabled");
 assert.match(weeklySource, /providerStarted = true/);
 assert.match(weeklySource, /pre-provider-failure/);
 assert.match(convexSource, /export const upgradePriority = mutation/);

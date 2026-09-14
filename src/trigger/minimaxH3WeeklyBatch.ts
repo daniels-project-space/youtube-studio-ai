@@ -579,11 +579,11 @@ export const minimaxH3WeeklyBatchTask = task({
       requestKeys,
       jobs: payload.jobs,
     });
-    // The Convex reservation table is released independently from the web
-    // deploy. Keep this seam disabled until both Convex schema and Trigger
-    // production are promoted together; otherwise an older live Trigger task
-    // could receive a payload that names a function absent from its schema.
-    const fleetReservationEnabled = process.env.SALAD_FLEET_RESERVATION_ENABLED === "1";
+    // The canonical Convex schema and Trigger task are promoted together by
+    // the production release gate, so the organization-wide fence is the safe
+    // default. Set this to "0" only for an intentional maintenance rollback;
+    // missing Convex configuration then fails closed before provider spend.
+    const fleetReservationEnabled = process.env.SALAD_FLEET_RESERVATION_ENABLED !== "0";
     const reservationIdentity = payload.ownerId && fleetReservationEnabled
       ? saladFleetReservationIdentity({
           ownerId: payload.ownerId,
