@@ -10,6 +10,9 @@ const eslintConfig = defineConfig([
     // Default ignores of eslint-config-next:
     ".next/**",
     ".trigger/**",
+    // Vercel's generated output contains bundled CommonJS launchers and minified
+    // assets; it is deployment output, not authored source to lint.
+    ".vercel/**",
     // Local agent worktrees are independent checkouts with their own generated
     // and vendored files. Linting them from this checkout duplicates the tree
     // and can fail this revision because of unrelated worktree state.
