@@ -24,7 +24,7 @@
  * far too readily; used as a veto it is useful, used as a promoter it would
  * dissolve the gate entirely.
  */
-import { claudeJson } from "@/lib/anthropic";
+import { creativeTextJson } from "@/lib/creativeText";
 import {
   STORY_INTEREST_DOCTRINE,
   type StoryInterestVerdict,
@@ -90,7 +90,7 @@ export async function judgeThumbnailStoryInterest(args: {
     `Return STRICT JSON {"score":0-100,"weakness":"the single biggest reason a viewer would scroll past",` +
     `"fix":"one concrete art-direction change that would raise it"}.`;
 
-  const ask: StoryJudgeCall = args.askJudge ?? ((judgePrompt, judgeSystem) => claudeJson<JudgeResponse>({
+  const ask: StoryJudgeCall = args.askJudge ?? ((judgePrompt, judgeSystem) => creativeTextJson<JudgeResponse>({
     // The "flash"/intelligence route was measured returning prose that fails
     // the JSON contract on every attempt, which made the judge a permanent
     // no-op. The creative route is the one the art director already uses for

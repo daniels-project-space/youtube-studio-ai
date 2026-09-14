@@ -28,7 +28,7 @@ import {
   VISION_GATE_MAX_TOKENS,
   type VisionTier,
 } from "@/lib/vision";
-import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { creativeTextJson, hasCreativeTextKey } from "@/lib/creativeText";
 import { imageToJpeg } from "@/lib/ffmpeg";
 import {
   buildThumbBrief,
@@ -719,8 +719,8 @@ export async function acquireReferences(args: {
   log?: Logger;
 }): Promise<AcquiredRef[]> {
   const log = args.log ?? (() => {});
-  if (!hasAnthropicKey()) throw new Error("thumbnailLab: OPENROUTER_API_KEY required");
-  const q = await claudeJson<{ queries?: string[] }>({
+  if (!hasCreativeTextKey()) throw new Error("thumbnailLab: OPENROUTER_API_KEY required");
+  const q = await creativeTextJson<{ queries?: string[] }>({
     // Reasoning route: the ceiling must cover the thinking AND the list.
     // Measured — a 5-item list failed at 500 and passed at 1000; an 8-item
     // ranking failed at 1500 and passed at 2500. See
@@ -874,11 +874,11 @@ export async function distillPlaybook(args: {
   const decon = parseJsonLoose<{ decon?: unknown[] }>(deconRaw).decon ?? [];
   log(`thumbnailLab: deconstructed ${decon.length} winning thumbnails`);
 
-  if (!hasAnthropicKey()) throw new Error("thumbnailLab: OPENROUTER_API_KEY required for playbook synthesis");
+  if (!hasCreativeTextKey()) throw new Error("thumbnailLab: OPENROUTER_API_KEY required for playbook synthesis");
   const palette = (args.dna?.thumbnail?.palette?.length ? args.dna.thumbnail.palette : args.dna?.palette) ?? [];
   const accent = palette.length >= 2 ? palette[palette.length - 2] : "#ffd400";
 
-  const play = await claudeJson<{
+  const play = await creativeTextJson<{
     energy?: string;
     visualLanguage?: VisualLanguage;
     rules?: string[];
@@ -1104,7 +1104,7 @@ export async function renderCandidate(args: {
   // idea is replaced before any image is paid for.
   let storyLift: readonly string[] = [];
   let storyLiftAxis: "hero" | "headline" | "both" | "none" = "both";
-  const instantiate = async () => claudeJson<{
+  const instantiate = async () => creativeTextJson<{
     heroProp?: string;
     background?: string;
     details?: string[];

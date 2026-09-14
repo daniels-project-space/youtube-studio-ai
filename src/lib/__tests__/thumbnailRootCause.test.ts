@@ -1031,6 +1031,16 @@ async function assertRealCallPaths(): Promise<void> {
     assert.doesNotMatch(source, /bananaUsesNativeTypography|bananaThumbnail\s*\(|allowText\s*:\s*true/,
       `${path} must never delegate thumbnail typography to an image provider`);
   }
+  const thumbnailLabSource = await readFile(join(process.cwd(), "src/lib/thumbnailLab.ts"), "utf8");
+  const thumbnailJudgeSource = await readFile(join(process.cwd(), "src/lib/thumbnailStoryJudge.ts"), "utf8");
+  for (const [name, source] of [["thumbnailLab", thumbnailLabSource], ["thumbnailStoryJudge", thumbnailJudgeSource]] as const) {
+    assert.match(source, /from ["']@\/lib\/creativeText["']/,
+      `${name} text planning must use the canonical creative-text boundary directly`);
+    assert.doesNotMatch(source, /from ["']@\/lib\/anthropic["']/,
+      `${name} must not route through the deprecated Anthropic alias`);
+    assert.doesNotMatch(source, /\b(?:claudeJson|claudeJsonPro|hasAnthropicKey)\b/,
+      `${name} must not retain deprecated provider helper names`);
+  }
   const production = await readFile(
     join(process.cwd(), "src/trigger/blocks/intelligenceBlocks.ts"),
     "utf8",
