@@ -37,6 +37,7 @@
 .fleetLane > span { display: grid; gap: .12rem; min-width: 0; }
 .fleetLane strong { overflow: hidden; color: var(--color-fg); font-size: .68rem; text-overflow: ellipsis; white-space: nowrap; }
 .fleetLane span small, .fleetLane > small { color: var(--color-faint); font: .56rem var(--font-mono); }
+.fleetLane .fleetBlocker { color: #ffc16e; line-height: 1.25; }
 .fleetLane b { color: #9fe8b8; font: 700 .56rem var(--font-mono); letter-spacing: .06em; }
 .fleetLane[data-state="high"] b { color: #ffc16e; }
 .fleetLane[data-state="held"] b { color: #ff9b9b; }

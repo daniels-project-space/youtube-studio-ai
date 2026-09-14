@@ -34,6 +34,10 @@ assert.match(page, /Fleet snapshot/);
 assert.match(page, /api\/salad\/capacity/);
 assert.match(page, /jobCount=\$\{requestedJobs\}/);
 assert.match(page, /aria-label="Salad fleet snapshot"/);
+assert.match(page, /fleetBlockerLabel/,
+  "held fleet lanes must expose an actionable capacity reason rather than only a status token");
+assert.match(page, /global_three_gpu_capacity_insufficient_for_wave/,
+  "the render desk must explain when an existing lease leaves too few slots for the requested wave");
 assert.match(page, /localStorage/);
 assert.match(page, /H3_TRACKING_STORAGE_KEY/);
 assert.match(page, /URLSearchParams\(window\.location\.search\)/,

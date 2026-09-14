@@ -74,6 +74,19 @@ function errorMessage(value: unknown, fallback: string): string {
   return fallback;
 }
 
+function fleetBlockerLabel(value: string): string {
+  const labels: Record<string, string> = {
+    global_three_gpu_capacity_full: "All 3 shared GPU slots are occupied",
+    global_three_gpu_capacity_insufficient_for_wave: "Existing leases leave too few slots for this wave",
+    salad_organization_replica_quota_full: "Salad replica quota is full",
+    salad_organization_replica_quota_insufficient_for_wave: "Replica quota cannot fit this wave",
+    no_current_capacity: "No current GPU capacity",
+    high_priority_fallback_disabled: "High-priority fallback is disabled",
+    medium_priority_disabled: "Medium priority is disabled",
+  };
+  return labels[value] ?? value.replaceAll("_", " ");
+}
+
 function hasOwnerPath(value: unknown): value is string {
   return typeof value === "string" && /^owner\/[A-Za-z0-9][A-Za-z0-9._:/-]*$/u.test(value) && !value.includes("..") && !value.includes("\\");
 }
@@ -414,6 +427,7 @@ export function H3RenderConsole() {
                 need {lane.requiredWorkers} · M {lane.mediumAvailable} · H {lane.highAvailable}
                 {lane.selectedPriceUsdPerHour !== null ? ` · $${lane.selectedPriceUsdPerHour.toFixed(3)}/h` : ""}
               </small>
+              {lane.blockers[0] && <small className={styles.fleetBlocker}>{fleetBlockerLabel(lane.blockers[0])}</small>}
             </div>)}
           </div>
         </div>}
