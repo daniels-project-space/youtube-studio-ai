@@ -14,7 +14,7 @@
  *              llm_json step was one, and the forge is reachable from
  *              runPipeline and designChannelInception — so every
  *              architect-authored module with an llm_json step failed at
- *              execution. Now on claudeJson.
+ *              execution. Now on the canonical creative-text route.
  * DocuMotion's former direct-Gemini planning/enrichment calls now use the same
  * pinned OpenRouter route as the rest of the creative-text system.
  *
@@ -95,7 +95,7 @@ assert.ok(
   !/\bgeminiJson\s*[<(]/.test(documotion) && !/\bgeminiJsonPro\s*[<(]/.test(documotion),
   "DocuMotion planning and text enrichment must not call the disabled direct Gemini runtime",
 );
-assert.match(documotion, /claudeJsonPro</, "DocuMotion planning must use the pinned OpenRouter creative route");
+assert.match(documotion, /creativeTextJsonPro</, "DocuMotion planning must use the pinned OpenRouter creative route");
 for (const marker of ["label QUALITY REVIEW UNAVAILABLE", "cinematographer pass skipped"]) {
   assert.ok(
     documotion.includes(marker),
