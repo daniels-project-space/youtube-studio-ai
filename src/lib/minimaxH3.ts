@@ -8,6 +8,7 @@ import {
   SALAD_HIGH_FALLBACK_PRIORITY,
   selectSaladGpu,
   selectSaladGpuAtPriority,
+  saladPriorityPolicyFromEnv,
   type SaladGpuClass,
   type SaladResources,
 } from "@/lib/saladCloud";
@@ -425,11 +426,10 @@ export function minimaxH3Readiness(
   // paid request merely because the medium feature flag is off.
   if (provider === "salad") {
     const capacityMode = options.saladCapacityMode ?? MINIMAX_H3_SALAD_CAPACITY_MODE;
-    const mediumEnabled = process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY !== "0";
-    const highEnabled = process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0";
+    const policy = saladPriorityPolicyFromEnv();
     if (capacityMode === SALAD_HIGH_FALLBACK_PRIORITY) {
-      if (!highEnabled) blockers.push("MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK is disabled");
-    } else if (!mediumEnabled) {
+      if (!policy.highFallbackEnabled) blockers.push("MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK is disabled");
+    } else if (!policy.mediumEnabled) {
       blockers.push("MINIMAX_H3_SALAD_MEDIUM_PRIORITY is disabled");
     }
   }
