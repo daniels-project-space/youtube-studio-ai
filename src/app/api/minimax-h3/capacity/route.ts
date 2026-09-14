@@ -20,6 +20,7 @@ export async function GET(request: Request) {
     }
     const capacity = await assertMiniMaxH3SaladCapacity(jobCount, {
       allowHighPriorityFallback: process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
+      mediumPriorityEnabled: process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY === "1",
     });
     return NextResponse.json({
       ok: true,

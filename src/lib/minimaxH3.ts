@@ -88,6 +88,8 @@ export async function assertMiniMaxH3SaladCapacity(
   options: {
     client?: MiniMaxH3SaladCapacityClient;
     allowHighPriorityFallback?: boolean;
+    /** Whether the deployment has explicitly enabled the medium tier. */
+    mediumPriorityEnabled?: boolean;
     /** Replays an order whose organization fence was already upgraded. */
     preferHighPriority?: boolean;
   } = {},
@@ -103,6 +105,11 @@ export async function assertMiniMaxH3SaladCapacity(
     throw new MiniMaxH3Error(`weekly MiniMax H3 capacity check requires 1..${MAX_H3_JOBS_PER_BATCH} jobs`);
   }
   const client = options.client ?? await saladCloudClientFromVault();
+  // Keep the pure helper backwards-compatible for qualification tests while
+  // allowing production callers to make admission agree with the paid-route
+  // readiness fence. A disabled medium tier is unavailable, even if Salad's
+  // market snapshot happens to report medium slots.
+  const mediumPriorityEnabled = options.mediumPriorityEnabled ?? true;
   let classes: SaladGpuClass[];
   try {
     classes = await client.listGpuClasses();
@@ -122,14 +129,14 @@ export async function assertMiniMaxH3SaladCapacity(
     // the default medium route.
   }
   let highGpu: ReturnType<typeof selectSaladGpuAtPriority> | undefined;
-  if ((options.preferHighPriority || !mediumGpu) && options.allowHighPriorityFallback) {
+  if ((options.preferHighPriority || !mediumPriorityEnabled || !mediumGpu) && options.allowHighPriorityFallback) {
     try { highGpu = selectSaladGpuAtPriority(classes, "RTX 5090", SALAD_HIGH_FALLBACK_PRIORITY); } catch (error) {
       throw new MiniMaxH3Error(
         `weekly MiniMax H3 Salad capacity check could not admit a priced exact desktop RTX 5090 class: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
   }
-  if (!mediumGpu && !highGpu) {
+  if ((!mediumPriorityEnabled || !mediumGpu) && !highGpu) {
     throw new MiniMaxH3Error("weekly MiniMax H3 Salad capacity check could not admit an exact desktop RTX 5090 at medium priority");
   }
   const gpu = mediumGpu ?? highGpu!;
@@ -209,7 +216,7 @@ export async function assertMiniMaxH3SaladCapacity(
       fallbackUsed: true,
     };
   }
-  if (mediumGpu && availableMediumGpuCount >= requiredGpuCount) {
+  if (mediumPriorityEnabled && mediumGpu && availableMediumGpuCount >= requiredGpuCount) {
     return {
       requiredGpuCount,
       availableGpuCount: availableMediumGpuCount,
@@ -239,7 +246,7 @@ export async function assertMiniMaxH3SaladCapacity(
       fallbackUsed: true,
     };
   }
-  if (!mediumGpu || availableMediumGpuCount < requiredGpuCount) {
+  if (!mediumPriorityEnabled || !mediumGpu || availableMediumGpuCount < requiredGpuCount) {
     throw new MiniMaxH3Error(
       options.allowHighPriorityFallback
         ? `weekly MiniMax H3 Salad capacity is insufficient for the requested wave (${availableMediumGpuCount} medium, ${availableHighGpuCount} high, ${requiredGpuCount} desktop RTX 5090 slots)`

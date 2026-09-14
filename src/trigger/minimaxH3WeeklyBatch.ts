@@ -637,6 +637,7 @@ export const minimaxH3WeeklyBatchTask = task({
         // capacity escape hatch Daniel authorized: set the variable to "0" to
         // disable it for a deployment, but never let request JSON select it.
         allowHighPriorityFallback: process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
+        mediumPriorityEnabled: process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY === "1",
         ...(heldFleetPriority === "high" ? { preferHighPriority: true } : {}),
       });
       if (capacity.fallbackUsed && fleetConvex && reservationIdentity && fleetReservation) {
