@@ -187,10 +187,16 @@ export async function readSaladCapacitySnapshot(
     };
   }));
   const fleetBlockers = [
-    ...(occupiedGpuSlots >= SALAD_BULK_MAX_GPUS ? ["global_three_gpu_capacity_full"] : []),
+    ...(occupiedGpuSlots >= SALAD_BULK_MAX_GPUS
+      ? ["global_three_gpu_capacity_full"]
+      : occupiedGpuSlots + requiredWorkers > SALAD_BULK_MAX_GPUS
+        ? ["global_three_gpu_capacity_insufficient_for_wave"]
+        : []),
     ...(safeCount(quota.container_replicas_quota) <= safeCount(quota.container_replicas_used)
       ? ["salad_organization_replica_quota_full"]
-      : []),
+      : safeCount(quota.container_replicas_used) + requiredWorkers > safeCount(quota.container_replicas_quota)
+        ? ["salad_organization_replica_quota_insufficient_for_wave"]
+        : []),
   ];
   const lanes = fleetBlockers.length
     ? observedLanes.map((lane) => ({

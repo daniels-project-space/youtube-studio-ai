@@ -117,6 +117,35 @@ const quotaHeld = await readSaladCapacitySnapshot({
 assert.ok(quotaHeld.lanes.every((lane) => lane.recommendedPriority === null));
 assert.ok(quotaHeld.lanes.every((lane) => lane.blockers.includes("salad_organization_replica_quota_full")));
 
+const waveHeldByExistingFleet = await readSaladCapacitySnapshot({
+  listGpuClasses: async () => classes,
+  listContainerGroups: async () => [{
+    id: "33333333-3333-4333-8333-333333333333",
+    name: "existing-h3-wave",
+    replicas: 2,
+    priority: "medium" as const,
+    pending_change: false,
+    container: { image: "registry.example/h3@sha256:" + "a".repeat(64), resources: { cpu: 8, memory: 131072, gpu_classes: [classes[1]!.id] } },
+    current_state: { status: "running", instance_status_counts: { allocating_count: 0, creating_count: 0, running_count: 2, stopping_count: 0 } },
+  }],
+  listContainerInstances: async () => [],
+  getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 10, container_replicas_used: 2 } }),
+  getGpuAvailability: async () => ({ available_gpu_medium: 4, available_gpu_high: 4 }),
+}, { requiredWorkers: 2 });
+assert.equal(waveHeldByExistingFleet.occupiedGpuSlots, 2);
+assert.ok(waveHeldByExistingFleet.lanes.every((lane) => lane.recommendedPriority === null));
+assert.ok(waveHeldByExistingFleet.lanes.every((lane) => lane.blockers.includes("global_three_gpu_capacity_insufficient_for_wave")));
+
+const waveHeldByQuota = await readSaladCapacitySnapshot({
+  listGpuClasses: async () => classes,
+  listContainerGroups: async () => [],
+  listContainerInstances: async () => [],
+  getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 3, container_replicas_used: 2 } }),
+  getGpuAvailability: async () => ({ available_gpu_medium: 4, available_gpu_high: 4 }),
+}, { requiredWorkers: 2 });
+assert.ok(waveHeldByQuota.lanes.every((lane) => lane.recommendedPriority === null));
+assert.ok(waveHeldByQuota.lanes.every((lane) => lane.blockers.includes("salad_organization_replica_quota_insufficient_for_wave")));
+
 console.log("Salad capacity snapshot contracts passed");
 }
 
