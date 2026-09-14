@@ -84,7 +84,7 @@ export async function readSaladCapacitySnapshot(client?: CapacityClient): Promis
   const occupiedGpuSlots = saladOccupiedGpuSlots(groups, instances);
   const quota = quotas.container_groups_quotas;
 
-  const lanes = await Promise.all(SALAD_CAPACITY_LANES.map(async (lane): Promise<SaladCapacityLaneSnapshot> => {
+  const observedLanes = await Promise.all(SALAD_CAPACITY_LANES.map(async (lane): Promise<SaladCapacityLaneSnapshot> => {
     const blockers: string[] = [];
     let mediumClass: ReturnType<typeof selectSaladGpuAtPriority> | undefined;
     try {
@@ -141,6 +141,20 @@ export async function readSaladCapacitySnapshot(client?: CapacityClient): Promis
       blockers,
     };
   }));
+  const fleetBlockers = [
+    ...(occupiedGpuSlots >= SALAD_BULK_MAX_GPUS ? ["global_three_gpu_capacity_full"] : []),
+    ...(safeCount(quota.container_replicas_quota) <= safeCount(quota.container_replicas_used)
+      ? ["salad_organization_replica_quota_full"]
+      : []),
+  ];
+  const lanes = fleetBlockers.length
+    ? observedLanes.map((lane) => ({
+      ...lane,
+      recommendedPriority: null,
+      fallbackUsed: false,
+      blockers: [...new Set([...lane.blockers, ...fleetBlockers])],
+    }))
+    : observedLanes;
   return {
     observedAt: Date.now(),
     occupiedGpuSlots,

@@ -35,6 +35,16 @@ assert.equal(h3.fallbackUsed, true);
 assert.equal(h3.mediumAvailable, 0);
 assert.equal(h3.highAvailable, 3);
 
+const quotaHeld = await readSaladCapacitySnapshot({
+  listGpuClasses: async () => classes,
+  listContainerGroups: async () => [],
+  listContainerInstances: async () => [],
+  getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 2, container_replicas_used: 2 } }),
+  getGpuAvailability: async () => ({ available_gpu_medium: 4, available_gpu_high: 4 }),
+});
+assert.ok(quotaHeld.lanes.every((lane) => lane.recommendedPriority === null));
+assert.ok(quotaHeld.lanes.every((lane) => lane.blockers.includes("salad_organization_replica_quota_full")));
+
 console.log("Salad capacity snapshot contracts passed");
 }
 
