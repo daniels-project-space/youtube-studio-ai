@@ -88,8 +88,11 @@ async function recordAsset(ctx: StageContext, kind: string, r2Key: string, meta?
   }
 }
 
-const LORE_STORY_CHECKPOINT_VERSION = "lore-short-story/v2";
-const LORE_STORY_OUTCOME_CHECKPOINT_VERSION = "lore-short-story-outcome/v1";
+// OpenRouter planner migration: invalidate checkpoints written by the retired
+// Claude-labelled planner so a resumed run cannot silently reuse an unbound
+// planning provenance record.
+const LORE_STORY_CHECKPOINT_VERSION = "lore-short-story/v3";
+const LORE_STORY_OUTCOME_CHECKPOINT_VERSION = "lore-short-story-outcome/v2";
 
 /**
  * The shared self-contained-story handoff needs the accepted planning proof,
@@ -98,8 +101,8 @@ const LORE_STORY_OUTCOME_CHECKPOINT_VERSION = "lore-short-story-outcome/v1";
  * Lore run persists the complete non-Google planner/critic outcome.
  */
 export const LORE_SHORT_STORYBOARD_PLANNER = Object.freeze({
-  id: "lore-short-claude-critic-plan/v1",
-  provenance: "bounded OpenRouter lore-beat planner plus a bounded creative-text storyboard critic; both settle before any image, voice, or LTX render admission",
+  id: "lore-short-openrouter-critic-plan/v2",
+  provenance: "bounded OpenRouter lore-beat planner plus a bounded creative-text storyboard critic; both settle before any image, voice, or attested video render admission",
 });
 
 export interface CritiquedLorePlan {
@@ -259,7 +262,7 @@ async function settleLorePlanWithCritique(
       const hard = loreStoryDefects(plan, brief.nScenes);
       const graded = await gradeLoreStory({ plan, topic: brief.topic, narrator: brief.narrator, channel });
       if (!graded) {
-        ctx.log(`lore_short: Claude story critic unavailable — candidate ${iter} remains blocked before paid rendering`);
+        ctx.log(`lore_short: OpenRouter story critic unavailable — candidate ${iter} remains blocked before paid rendering`);
         return unavailableStoryboardCriticVerdict(hard);
       }
       const issues = [...hard, ...graded.issues].slice(0, 8);

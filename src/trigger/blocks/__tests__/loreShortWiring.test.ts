@@ -199,7 +199,7 @@ async function blockUsesAttestedProvidersAndR2(): Promise<void> {
   // checkpoint, and a fail-closed outage gate before any paid rendering.
   assert.match(block, /produceAndCritique<LorePlan>/, "the story must be settled under the shared critique loop");
   assert.match(block, /Math\.min\(2, laneQuality\.maxCritiqueIters\)/, "iterations must be hard-capped");
-  assert.match(block, /Claude story critic unavailable/, "a critic outage must be explicit");
+  assert.match(block, /OpenRouter story critic unavailable/, "a critic outage must be explicit");
   assert.match(block, /unavailableStoryboardCriticVerdict\(/, "a critic outage must deny approval");
   assert.match(block, /assertStoryboardCritiqueApproved\(/, "paid rendering must be blocked without approval");
   assert.match(block, /loadStoryCheckpoint|putObject\(\s*checkpointKey/,
@@ -247,7 +247,7 @@ async function engineDefaultsSurviveForTheCli(): Promise<void> {
     "a supplied plan must first resolve through the sealed-story receipt boundary");
   assert.match(engine, /if \(approvedPlan\)/,
     "an accepted plan must short-circuit the story pass");
-  assert.match(engine, /claudeJsonPro/, "the lore story planner must use Claude, never Google text planning");
+  assert.match(engine, /creativeTextJsonPro/, "the lore story planner must use the canonical OpenRouter text route");
   assert.doesNotMatch(engineCode, /gemini|google|generateBananaImage/i,
     "LoreCraft itself must contain no Google planning, scene-art, or utility path");
   assert.match(engine, /providers:\s*\["openrouter"\]/,

@@ -2,8 +2,8 @@
  * LORESHORT — standalone lore micro-doc engine (GoT "Histories & Lore" style) with
  * GENUINE AI 3D camera moves, as a reusable module.
  *
- * Claude first-person narration + per-beat LAYERED-DEPTH scene prompts → explicitly
- * injected attested art → ElevenLabs PER-LINE TTS (for exact beat timing) → LTX image-to-video camera
+ * OpenRouter first-person narration + per-beat LAYERED-DEPTH scene prompts → explicitly
+ * injected attested art → ElevenLabs PER-LINE TTS (for exact beat timing) → the caller's attested video lane
  * moves (Replicate LTX-distilled / Wan 2.2) → optional Real-ESRGAN 2K upscale → ffmpeg
  * beat-cut edit (fit each shot to its narration line + breath, dissolve, title, grade).
  * Every stage caches to output/loreshort/<slug>/ → fully resumable.
@@ -21,7 +21,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { bootstrapSecrets } from "./bootstrap";
-import { claudeJsonPro, hasAnthropicKey } from "./anthropic";
+import { creativeTextJsonPro, hasCreativeTextKey } from "./creativeText";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "./vision";
 import { synthNarration } from "./tts";
 import { ffprobeDuration } from "./ffmpeg";
@@ -113,7 +113,7 @@ export const LORESHORT_MODULE = {
     introSec: "title-card seconds", pause: "breath between beats", dissolve: "crossfade seconds",
   },
   needs: { // environment
-    // Claude is required for self-planning; ElevenLabs and Replicate are used
+    // OpenRouter is required for self-planning; ElevenLabs and Replicate are used
     // only by the remaining default implementations. Image generation has no
     // default credential because callers must inject an attested route.
     secrets: ["OPENROUTER_API_KEY", "ELEVENLABS_API_KEY (default TTS only)", "REPLICATE_API_TOKEN (default i2v/upscale only)"],
@@ -180,15 +180,15 @@ export interface LorePlan {
 
 /**
  * Is the engine's own (non-injectable) story planner configured? LoreCraft uses
- * Claude for text planning; visual analysis is pinned to the non-Google
- * final-review boundary.
+ * the canonical OpenRouter creative-text route for planning; visual analysis is
+ * pinned to the non-Google final-review boundary.
  */
 export function hasLoreShort(options: { requiresStoryboard?: boolean } = {}): boolean {
-  // A sealed, externally settled story never reaches the Claude planner. Keep
+  // A sealed, externally settled story never reaches the OpenRouter planner. Keep
   // the historical default strict for direct/self-planning calls while letting
   // the Trigger adapter validate a receipt before it asks for an unused key.
   const requiresStoryboard = options.requiresStoryboard ?? true;
-  return !requiresStoryboard || hasAnthropicKey();
+  return !requiresStoryboard || hasCreativeTextKey();
 }
 
 /** What the story writer needs. Deliberately a subset of LoreShortCfg. */
@@ -204,7 +204,7 @@ export interface LoreStoryBrief {
  * bought (mirrors planWhiteboardStoryboard). `priorIssues` feeds a rejected
  * draft's defects back into the rewrite.
  *
- * This is one Claude text call per invocation and reaches NO image, TTS or
+ * This is one OpenRouter creative-text call per invocation and reaches NO image, TTS or
  * video provider — by construction an iteration here cannot spend render money.
  */
 export async function planLoreShortStory(
@@ -218,7 +218,7 @@ export async function planLoreShortStory(
     : "";
   let plan: LorePlan = {};
   for (let attempt = 0; attempt < 3; attempt++) {
-    plan = await claudeJsonPro<LorePlan>({
+    plan = await creativeTextJsonPro<LorePlan>({
       prompt:
         `Write a lore micro-documentary in the EXACT spirit of the Game of Thrones "Histories & Lore" featurettes: a single ` +
         `figure narrates history in FIRST PERSON — proud, intimate, epic, measured, never breathless, with DRAMATIC PACING ` +
@@ -231,7 +231,10 @@ export async function planLoreShortStory(
         `"camera" = ONE cinematic camera move that TRAVELS THROUGH THE DEPTH for this shot (e.g. "slow dolly push-in past the foreground toward X, revealing the depth", "crane up and back to unveil the vast Y behind", "track laterally past the foreground W as the background slides"). Vary the moves. ` +
         `The "scenes" array MUST contain EXACTLY ${brief.nScenes} complete objects — do not stop early, do not summarise. Keep each "visual" to ~40 words.` +
         fixes,
-      maxTokens: 28000, temperature: 0.75,
+      // creativeTextJsonPro clamps at the approved 16k ceiling. Ask for the
+      // actual ceiling so the planner does not advertise an unreachable budget
+      // and silently lose room to finish the requested beat array.
+      maxTokens: 16_000, temperature: 0.75,
     });
     if ((plan.scenes?.length ?? 0) >= brief.nScenes) break;
     log(`story attempt ${attempt + 1}: got ${plan?.scenes?.length || 0}/${brief.nScenes} beats, retrying`);
@@ -413,7 +416,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
   }
   const generateImage = deps.generateImage;
   // Only demand the secrets the remaining default implementations actually
-  // need. Art has no default by design. Claude remains required for the story
+  // need. Art has no default by design. OpenRouter remains required for the story
   // planner; visual analysis is explicitly limited to non-Google providers.
   const usesReplicate = !deps.generateClip || cfg.upscale === "realesrgan";
   await bootstrapSecrets(() => {}, {
