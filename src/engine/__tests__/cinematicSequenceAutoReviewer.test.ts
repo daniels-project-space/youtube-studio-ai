@@ -1,4 +1,10 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const reviewerSource = readFileSync(join(process.cwd(), "src/engine/cinematicSequenceAutoReviewer.ts"), "utf8");
+assert.match(reviewerSource, /from ["']@\/lib\/creativeText["']/);
+assert.doesNotMatch(reviewerSource, /@\/lib\/anthropic|claudeJsonPro|hasAnthropicKey/);
 
 import { RECONSTRUCTION_DISCLOSURE, casefileFingerprint } from "@/engine/casefile";
 import {

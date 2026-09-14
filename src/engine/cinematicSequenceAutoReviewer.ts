@@ -1,6 +1,6 @@
 import type { z } from "zod";
 
-import { claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
+import { creativeTextJsonPro, hasCreativeTextKey } from "@/lib/creativeText";
 
 import {
   CinematicCaseSequenceContentSchema,
@@ -241,7 +241,7 @@ export async function autoReviewCinematicCaseSequence(
     );
   }
 
-  if (!hasAnthropicKey()) {
+  if (!hasCreativeTextKey()) {
     throw new Error(
       "cinematic sequence auto-reviewer: no permitted provider is configured " +
         "(OPENROUTER_API_KEY); refusing to admit without review.",
@@ -254,7 +254,7 @@ export async function autoReviewCinematicCaseSequence(
 
   let raw: unknown;
   try {
-    raw = await claudeJsonPro<unknown>({
+    raw = await creativeTextJsonPro<unknown>({
       system:
         "You are a skeptical content-safety and continuity screener for a true-crime documentary desk. " +
         "You cannot see rendered pixels and cannot certify a future render will comply — you are judging only " +
