@@ -36,7 +36,7 @@ async function loadCaller(): Promise<typeof castWhiteboardSync> {
   const seams: Record<string, string> = {
     "node:child_process": `export const spawn=()=>{throw new Error(${JSON.stringify(RENDER_BOUNDARY)})};`,
     "@/agents/mastra": "export const agentJson=()=>{throw new Error('unexpected planner')}; export class MastraGenerationOutcomeUnknownError extends Error{}; export class MastraGenerationUnavailableError extends Error{};",
-    "@/lib/anthropic": "export const hasAnthropicKey=()=>true;",
+    "@/lib/creativeText": "export const hasCreativeTextKey=()=>true;",
     "@/lib/openRouter": "export class OpenRouterGenerationOutcomeUnknownError extends Error{};",
     "@/lib/tts": `export const fallbackVoiceKey=()=>"fixture"; export const synthNarration=async()=>{throw new Error(${JSON.stringify(TTS_BOUNDARY)})};`,
     "@/lib/pydeps": "export const preflightPythonRenderer=async()=>{};",

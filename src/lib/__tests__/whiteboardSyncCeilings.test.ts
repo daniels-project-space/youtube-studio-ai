@@ -1,4 +1,6 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   hasWhiteboardSync,
   WHITEBOARD_MAX_ART_IMAGES_PER_PANEL,
@@ -10,6 +12,14 @@ import {
   whiteboardStoryboardTokenCeiling,
   whiteboardTtsProviderCallCeiling,
 } from "@/lib/whiteboardSync";
+
+const whiteboardSource = readFileSync(join(process.cwd(), "src/lib/whiteboardSync.ts"), "utf8");
+assert.match(whiteboardSource, /from ["']@\/lib\/creativeText["']/,
+  "WhiteboardSync must use the canonical creative-text boundary directly");
+assert.doesNotMatch(whiteboardSource, /from ["']@\/lib\/anthropic["']/,
+  "WhiteboardSync must not route storyboard admission through the deprecated Anthropic alias");
+assert.doesNotMatch(whiteboardSource, /\bhasAnthropicKey\b/,
+  "WhiteboardSync must not retain the deprecated provider key helper");
 
 // P2-5 (GOLDEN_MODULE_AUDIT_2026-08.md): "whiteboard" was never test-run
 // directly. castWhiteboardSync's full orchestration needs a non-Google planner + Fish Audio

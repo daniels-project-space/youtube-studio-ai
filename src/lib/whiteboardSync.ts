@@ -54,7 +54,7 @@ import {
   MastraGenerationOutcomeUnknownError,
   MastraGenerationUnavailableError,
 } from "@/agents/mastra";
-import { hasAnthropicKey } from "@/lib/anthropic";
+import { hasCreativeTextKey } from "@/lib/creativeText";
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 import { synthNarration } from "@/lib/tts";
 import { preflightPythonRenderer } from "@/lib/pydeps";
@@ -560,7 +560,7 @@ export function hasWhiteboardSync(options: {
     ? Boolean(process.env.ELEVENLABS_API_KEY)
     : Boolean(process.env.FISH_AUDIO_API_KEY);
   return Boolean(
-    (!requiresStoryboard || hasAnthropicKey())
+    (!requiresStoryboard || hasCreativeTextKey())
     && hasSelectedTts,
   );
 }
@@ -924,7 +924,7 @@ export async function planWhiteboardStoryboard(
   log: Logger = () => {},
   revisionNotes: readonly string[] = [],
 ): Promise<WhiteboardStoryboard> {
-  if (!hasAnthropicKey()) throw new Error("whiteboardSync: non-Google storyboard planner is unavailable");
+  if (!hasCreativeTextKey()) throw new Error("whiteboardSync: creative-text storyboard planner is unavailable");
   return buildStoryboard(brief, log, revisionNotes);
 }
 
@@ -1044,7 +1044,7 @@ export async function castWhiteboardSync(args: {
   // arrived from a sealed receipt or a local approved-plan handoff. Requiring
   // a remote planner here would make renderer-only recovery depend on an
   // unrelated model even though `buildStoryboard` is never called.
-  if (!approvedPlan && !hasAnthropicKey()) {
+  if (!approvedPlan && !hasCreativeTextKey()) {
     throw new Error("whiteboardSync: non-Google storyboard planner is unavailable");
   }
   if (usesElevenLabsVoice ? !process.env.ELEVENLABS_API_KEY : !process.env.FISH_AUDIO_API_KEY) {

@@ -396,6 +396,7 @@ Added from the owner's follow-up on 2026-09-08. These items extend all earlier w
   **Forge route cleanup (14 September):** Module Forge authoring and its runtime `llm_json` interpreter now use the canonical creative-text boundary, so architect-authored modules no longer depend on a disabled Gemini/legacy alias at execution. The declarative schema, cost ceiling, primitive allowlist, and runtime admission gates are unchanged.
   **Insert route cleanup (14 September):** the production visual-inserts director and its bounded unusable-output retry now use `creativeText` directly. Spoken-number, source-ledger, evidence-manifest, timing, and storage integrity contracts remain unchanged; fixture mocks now exercise the real boundary.
   **Motion-comic route cleanup (14 September):** the standalone storyboard capability guard now uses the canonical creative-text key, matching its Mastra/OpenRouter planner and keeping the ElevenLabs/Nova image and deterministic reveal contracts unchanged.
+  **Whiteboard route cleanup (14 September):** WhiteboardSync storyboard admission and renderer-only planning guards now use `creativeText` directly, with cache/recovery fixtures updated to exercise the canonical boundary. The hand-drawn reveal, timing, Python preflight, Fish/ElevenLabs selection, and attested Novita art gates are unchanged.
 
 ### I. Later owner additions — page-level efficiency and new capabilities
 
