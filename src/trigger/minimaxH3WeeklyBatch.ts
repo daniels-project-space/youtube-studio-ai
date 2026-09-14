@@ -612,6 +612,9 @@ export const minimaxH3WeeklyBatchTask = task({
           now: Date.now(),
         })
       : undefined;
+    const heldFleetPriority = fleetReservation && typeof fleetReservation.priority === "string"
+      ? fleetReservation.priority
+      : undefined;
     let providerStarted = false;
     const releaseFleetReservation = async (reason: string): Promise<void> => {
       if (!fleetConvex || !reservationIdentity || !fleetReservation) return;
@@ -634,6 +637,7 @@ export const minimaxH3WeeklyBatchTask = task({
         // capacity escape hatch Daniel authorized: set the variable to "0" to
         // disable it for a deployment, but never let request JSON select it.
         allowHighPriorityFallback: process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK !== "0",
+        ...(heldFleetPriority === "high" ? { preferHighPriority: true } : {}),
       });
       if (capacity.fallbackUsed && fleetConvex && reservationIdentity && fleetReservation) {
         // The fence is acquired before the market snapshot to prevent two

@@ -130,6 +130,18 @@ async function test() {
     { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high", fallbackUsed: true },
     "when medium is absent from Salad discovery entirely, a priced exact high tier may unlock the wave",
   );
+  assert.deepEqual(
+    await assertMiniMaxH3SaladCapacity(2, {
+      client: {
+        ...capacityClient,
+        getGpuAvailability: async () => ({ available_gpu_medium: 3, available_gpu_high: 2 }),
+      },
+      allowHighPriorityFallback: true,
+      preferHighPriority: true,
+    }),
+    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high", fallbackUsed: true },
+    "a replay of an already-upgraded fleet lease must remain on high even if medium returns later",
+  );
   let leaseReads = 0;
   await assert.rejects(
     () => assertMiniMaxH3SaladCapacity(2, {

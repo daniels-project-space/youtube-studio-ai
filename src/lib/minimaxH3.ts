@@ -85,7 +85,12 @@ export interface MiniMaxH3SaladCapacityClient {
  */
 export async function assertMiniMaxH3SaladCapacity(
   jobCount: number,
-  options: { client?: MiniMaxH3SaladCapacityClient; allowHighPriorityFallback?: boolean } = {},
+  options: {
+    client?: MiniMaxH3SaladCapacityClient;
+    allowHighPriorityFallback?: boolean;
+    /** Replays an order whose organization fence was already upgraded. */
+    preferHighPriority?: boolean;
+  } = {},
 ): Promise<{
   requiredGpuCount: number;
   availableGpuCount: number;
@@ -117,7 +122,7 @@ export async function assertMiniMaxH3SaladCapacity(
     // the default medium route.
   }
   let highGpu: ReturnType<typeof selectSaladGpuAtPriority> | undefined;
-  if (!mediumGpu && options.allowHighPriorityFallback) {
+  if ((options.preferHighPriority || !mediumGpu) && options.allowHighPriorityFallback) {
     try { highGpu = selectSaladGpuAtPriority(classes, "RTX 5090", SALAD_HIGH_FALLBACK_PRIORITY); } catch (error) {
       throw new MiniMaxH3Error(
         `weekly MiniMax H3 Salad capacity check could not admit a priced exact desktop RTX 5090 class: ${error instanceof Error ? error.message : String(error)}`,
@@ -174,6 +179,36 @@ export async function assertMiniMaxH3SaladCapacity(
   // it so a concurrent order cannot consume the remaining shared slots while
   // this request is deciding whether to dispatch medium or high.
   await assertLeaseRoom();
+  const rawAvailableHighGpuCount = availability.available_gpu_high;
+  const availableHighGpuCount = typeof rawAvailableHighGpuCount === "number" && Number.isSafeInteger(rawAvailableHighGpuCount)
+    ? rawAvailableHighGpuCount
+    : 0;
+  if (options.preferHighPriority) {
+    if (!options.allowHighPriorityFallback) {
+      throw new MiniMaxH3Error("weekly MiniMax H3 high-priority replay is disabled");
+    }
+    if (availableHighGpuCount < requiredGpuCount) {
+      throw new MiniMaxH3Error(
+        `weekly MiniMax H3 high-priority replay cannot reacquire the held tier (${availableHighGpuCount}/${requiredGpuCount} exact desktop RTX 5090 slots)`,
+      );
+    }
+    if (!highGpu) {
+      try {
+        highGpu = selectSaladGpuAtPriority(classes, "RTX 5090", SALAD_HIGH_FALLBACK_PRIORITY);
+      } catch (error) {
+        throw new MiniMaxH3Error(
+          `weekly MiniMax H3 high-priority replay is not priced for the exact desktop RTX 5090 class: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+    }
+    return {
+      requiredGpuCount,
+      availableGpuCount: availableHighGpuCount,
+      gpuClassId: highGpu.id,
+      capacityMode: SALAD_HIGH_FALLBACK_PRIORITY,
+      fallbackUsed: true,
+    };
+  }
   if (mediumGpu && availableMediumGpuCount >= requiredGpuCount) {
     return {
       requiredGpuCount,
@@ -183,10 +218,6 @@ export async function assertMiniMaxH3SaladCapacity(
       fallbackUsed: false,
     };
   }
-  const rawAvailableHighGpuCount = availability.available_gpu_high;
-  const availableHighGpuCount = typeof rawAvailableHighGpuCount === "number" && Number.isSafeInteger(rawAvailableHighGpuCount)
-    ? rawAvailableHighGpuCount
-    : 0;
   if (options.allowHighPriorityFallback && availableHighGpuCount >= requiredGpuCount) {
     // Re-discover the same exact desktop class at the selected tier. A high
     // availability estimate without a valid high-tier price is not spend

@@ -43,11 +43,12 @@ export const acquire = mutation({
       .unique();
     if (existing) {
       if (existing.ownerId !== args.reservationOwnerId || existing.orderKey !== args.orderKey ||
-          existing.requestedGpuCount !== args.requestedGpuCount || existing.priority !== args.priority) {
+          existing.requestedGpuCount !== args.requestedGpuCount ||
+          (existing.priority !== args.priority && !(existing.priority === "high" && args.priority === "medium"))) {
         throw new Error("Salad fleet reservation key was reused with different parameters");
       }
       if (existing.state === "held" && existing.expiresAt > args.now) {
-        return { reservationId: existing._id, leaseToken: existing.leaseToken, reused: true, expiresAt: existing.expiresAt };
+        return { reservationId: existing._id, leaseToken: existing.leaseToken, priority: existing.priority, reused: true, expiresAt: existing.expiresAt };
       }
       if (existing.state === "released") throw new Error("Salad fleet reservation was already released");
       // A bounded worker task cannot outlive this two-hour fence. Reclaiming an
@@ -56,11 +57,12 @@ export const acquire = mutation({
         state: "held",
         leaseToken: args.leaseToken,
         expiresAt: args.now + SALAD_FLEET_RESERVATION_LEASE_MS,
+        priority: existing.priority === "high" ? "high" : args.priority,
         updatedAt: args.now,
         releasedAt: undefined,
         releaseReason: undefined,
       });
-      return { reservationId: existing._id, leaseToken: args.leaseToken, reused: false, expiresAt: args.now + SALAD_FLEET_RESERVATION_LEASE_MS };
+      return { reservationId: existing._id, leaseToken: args.leaseToken, priority: existing.priority === "high" ? "high" as const : args.priority, reused: false, expiresAt: args.now + SALAD_FLEET_RESERVATION_LEASE_MS };
     }
     const active = await ctx.db.query("saladFleetReservations")
       .withIndex("by_state_expires", (q) => q.eq("state", "held").gt("expiresAt", args.now))
@@ -83,7 +85,7 @@ export const acquire = mutation({
       createdAt: args.now,
       updatedAt: args.now,
     });
-    return { reservationId: id, leaseToken: args.leaseToken, reused: false, expiresAt };
+    return { reservationId: id, leaseToken: args.leaseToken, priority: args.priority, reused: false, expiresAt };
   },
 });
 
