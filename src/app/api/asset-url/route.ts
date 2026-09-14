@@ -31,6 +31,10 @@ function responseContentType(key: string): string | undefined {
   return undefined;
 }
 
+function isInlineImage(key: string): boolean {
+  return responseContentType(key)?.startsWith("image/") === true;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const key = searchParams.get("key");
@@ -53,6 +57,16 @@ export async function GET(request: Request) {
   }
 
   try {
+    // R2's direct endpoint can return an opaque/ambiguous response for image
+    // objects (Chromium then blocks it with ORB). Keep the browser-facing
+    // image path same-origin; the proxy below still enforces this exact owner
+    // namespace and never exposes bucket credentials.
+    if (isInlineImage(key)) {
+      return NextResponse.json(
+        { url: `/api/asset-image?key=${encodeURIComponent(key)}` },
+        { headers: { "Cache-Control": "private, max-age=600" } },
+      );
+    }
     const mimeType = responseContentType(key);
     const url = await presignDownload(key, {
       expiresIn: 3600,
