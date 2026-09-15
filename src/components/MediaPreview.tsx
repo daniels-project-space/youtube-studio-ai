@@ -148,9 +148,6 @@ export function MediaPreview({
     fetch(`${src}${src.includes("?") ? "&" : "?"}probe=1`, { signal: controller.signal, cache: "no-store" })
       .then((response) => {
         if (!response.ok) throw new Error("image source probe unavailable");
-        // The probe only establishes availability; do not retain a second
-        // copy of the image in JS memory before the real <img> loads it.
-        void response.body?.cancel();
         return response.json() as Promise<{ available?: unknown }>;
       })
       .then((result) => {
