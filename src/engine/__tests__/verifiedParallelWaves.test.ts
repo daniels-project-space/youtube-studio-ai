@@ -45,7 +45,7 @@ for (const group of VERIFIED_PARALLEL_GROUPS) {
   }
 }
 
-for (const key of ["shorts", "meditation"]) {
+for (const key of ["shorts", "meditation", "illustrated-explainer", "children-learning"]) {
   const pipeline = ARCHETYPES[key]?.pipeline ?? [];
   const musicIndex = pipeline.findIndex((entry) => entry.block === "music");
   const narrationIndex = pipeline.findIndex((entry) => entry.block === "narration_tts");

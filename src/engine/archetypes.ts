@@ -110,9 +110,6 @@ const ILLUSTRATED_EXPLAINER: PipelineEntry[] = [
   { block: "qa_script" },
   { block: "originality_gate" },
   { block: "compliance_check" },
-  { block: "narration_tts", params: { sentenceGapSec: 0.8, sentenceGapJitter: 0.15 } },
-  { block: "story_spine", params: { targetShotSec: 6 } },
-  { block: "episode_graph" },
   {
     block: "music",
     params: {
@@ -120,6 +117,9 @@ const ILLUSTRATED_EXPLAINER: PipelineEntry[] = [
       prompt: "original light instrumental underscore, clear and unobtrusive, no vocals, no sudden impacts",
     },
   },
+  { block: "narration_tts", params: { sentenceGapSec: 0.8, sentenceGapJitter: 0.15 } },
+  { block: "story_spine", params: { targetShotSec: 6 } },
+  { block: "episode_graph" },
   { block: "scene_compiler", params: { aspect: "16:9" } },
   { block: "length_check", params: { minSeconds: 60, maxSeconds: 900 } },
   { block: "captions" },
@@ -146,6 +146,13 @@ const CHILDREN_LEARNING: PipelineEntry[] = [
   { block: "qa_script" },
   { block: "originality_gate" },
   { block: "compliance_check" },
+  {
+    block: "music",
+    params: {
+      provider: "mureka",
+      prompt: "original gentle playful instrumental underscore, no lyrics, no sudden impacts, narration-first mix",
+    },
+  },
   { block: "narration_tts", params: { sentenceGapSec: 0.9, sentenceGapJitter: 0.1 } },
   { block: "story_spine", params: { targetShotSec: 6 } },
   { block: "episode_graph", params: { audience: "children" } },
@@ -154,13 +161,6 @@ const CHILDREN_LEARNING: PipelineEntry[] = [
   // It is a per-episode seed, never an automatic channel-creation shortcut.
   { block: "children_show_bible" },
   { block: "child_content_safety" },
-  {
-    block: "music",
-    params: {
-      provider: "mureka",
-      prompt: "original gentle playful instrumental underscore, no lyrics, no sudden impacts, narration-first mix",
-    },
-  },
   { block: "scene_compiler", params: { aspect: "16:9", audience: "children" } },
   { block: "length_check", params: { minSeconds: 60, maxSeconds: 360 } },
   { block: "captions" },
