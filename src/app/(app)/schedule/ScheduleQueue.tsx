@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useAssetUrl } from "@/lib/asset-url";
+import { MediaPreview } from "@/components/MediaPreview";
 import {
   civilDayKey,
   formatZonedScheduleTimestamp,
@@ -131,17 +131,29 @@ function PlanThumbnail({
   thumbnailSource?: "planner_artwork" | "rendered_video_frame";
   readiness: PlanReadiness | "published";
 }) {
-  const url = useAssetUrl(thumbnailKey);
+  if (thumbnailSource === "rendered_video_frame") {
+    return (
+      <div className={styles.planThumbnail} data-tone={readiness}>
+        <span aria-label={`${title} cover will use its final rendered video frame`}>Final frame</span>
+      </div>
+    );
+  }
+  if (thumbnailKey) {
+    return (
+      <MediaPreview
+        className={styles.planThumbnail}
+        assetKey={thumbnailKey}
+        alt={`${title} thumbnail`}
+        loadingLabel="Loading preview"
+        unavailableLabel="Asset unavailable"
+        dataTone={readiness}
+        priority={false}
+      />
+    );
+  }
   return (
     <div className={styles.planThumbnail} data-tone={readiness}>
-      {thumbnailSource === "rendered_video_frame" ? (
-        <span aria-label={`${title} cover will use its final rendered video frame`}>Final frame</span>
-      ) : url ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={url} alt={`${title} thumbnail`} loading="lazy" />
-      ) : (
-        <span>{readiness === "building" ? "Rendering" : readiness === "attention" ? "Asset needed" : "Queued"}</span>
-      )}
+      <span>{readiness === "building" ? "Rendering" : readiness === "attention" ? "Asset needed" : "Queued"}</span>
     </div>
   );
 }

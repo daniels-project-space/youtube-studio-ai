@@ -43,6 +43,10 @@ assert.match(styles, /prefers-reduced-motion: reduce/,
 const queue = readFileSync(`${here}/ScheduleQueue.tsx`, "utf8");
 assert.match(queue, /Verify owner to save date changes/,
   "exact-date controls must explain the owner boundary in place");
+assert.match(queue, /<MediaPreview/,
+  "queue thumbnails must use the shared private-media availability boundary");
+assert.doesNotMatch(queue, /useAssetUrl\(/,
+  "queue cards must not mount stale signed image URLs directly");
 const cadence = readFileSync(`${here}/ChannelScheduleEditor.tsx`, "utf8");
 assert.match(cadence, /onRequestOwner/);
 assert.match(cadence, /Verify owner to save/);
