@@ -36,9 +36,12 @@ try {
   const html = render();
   assert.ok(html.indexOf('data-media-type="video"') < html.indexOf('data-current-thumbnail='),
     "selected master comes first in reading and keyboard order");
-  assert.equal((html.match(/<video /g) ?? []).length, 1);
-  assert.match(html, /data-signed-video-state="ready"/);
-  assert.match(html, /aria-label="Video: final.mp4"/);
+  // SSR intentionally withholds the native player until its same-origin
+  // availability probe succeeds; mounting it earlier caused invalid-scheme
+  // requests for missing legacy masters. The hydrated browser proof covers
+  // the successful-player branch.
+  assert.equal((html.match(/<video /g) ?? []).length, 0);
+  assert.match(html, /Checking retained preview…/);
   assert.equal((html.match(/<audio /g) ?? []).length, 1);
   const file = html.match(/<article[^>]*data-media-type="file"[\s\S]*?<\/article>/)?.[0];
   assert.ok(file);
