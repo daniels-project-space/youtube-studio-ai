@@ -35,11 +35,12 @@ export async function GET(request: Request) {
       );
     }
     const policy = saladPriorityPolicyFromEnv();
-    const [salad, logicalLease] = await Promise.all([
-      saladCloudClientFromVault(),
-      convexClient().query(api.saladFleetReservations.listActive, { now: Date.now() }),
-    ]);
-    const logicalReservedGpuSlots = parseLogicalLeaseSlots(logicalLease.occupiedGpuSlots);
+    const salad = await saladCloudClientFromVault();
+    const convex = convexClient();
+    const readLogicalLeaseSlots = async (): Promise<number> => {
+      const logicalLease = await convex.query(api.saladFleetReservations.listActive, { now: Date.now() });
+      return parseLogicalLeaseSlots(logicalLease.occupiedGpuSlots);
+    };
     const capacity = await assertMiniMaxH3SaladCapacity(jobCount, {
       allowHighPriorityFallback: policy.highFallbackEnabled,
       mediumPriorityEnabled: policy.mediumEnabled,
@@ -49,7 +50,9 @@ export async function GET(request: Request) {
       client: {
         listGpuClasses: () => salad.listGpuClasses(),
         getGpuAvailability: (resources, countryCodes) => salad.getGpuAvailability(resources, countryCodes),
-        getOccupiedGpuSlots: async () => Math.max(await salad.getOccupiedGpuSlots(), logicalReservedGpuSlots),
+        // Re-read on every admission check. A lease acquired after the first
+        // market snapshot must still block the second check before dispatch.
+        getOccupiedGpuSlots: async () => Math.max(await salad.getOccupiedGpuSlots(), await readLogicalLeaseSlots()),
       },
     });
     return NextResponse.json({
