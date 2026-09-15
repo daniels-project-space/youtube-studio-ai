@@ -22,6 +22,7 @@ import {
 import { getObjectBytes, putObject } from "@/lib/storage";
 import {
   renderNovitaGeneratedScenes,
+  renderNovitaImage,
   type NovitaClipReviewCheckpoint,
   type NovitaKeyframeReviewCheckpoint,
 } from "@/lib/novitaMedia";
@@ -65,11 +66,15 @@ import type {
 import type { VisualArtifactReviewRejection } from "@/engine/visualArtifactReviewOutcome";
 import { COST_PATCH_KEY } from "@/engine/types";
 import type { PlanWeekPreparedFootage } from "@/lib/planWeekPreparation";
-import { sha256BytesHex } from "@/lib/sha256";
+import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import {
   MINIMAX_H3_MANIFEST_SHA256,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
+  assertMiniMaxH3R2ModelManifest,
+  buildMiniMaxH3SceneRequest,
+  minimaxH3Readiness,
+  renderMiniMaxH3,
   type MiniMaxH3Execution,
   type MiniMaxH3Provider,
 } from "@/lib/minimaxH3";
@@ -600,50 +605,82 @@ export async function generateSignatureClips(
     avoid,
   });
   const scenes = plan.scenes;
-  // Signature clips are still LTX I2V takes. Keep the same sealed creative-
-  // adapter route as the main generated-footage lane so a calibrated wardrobe
-  // or material look cannot disappear just because a channel uses a hybrid
-  // stock-plus-cinematic opening.
-  const signatureCreativeAdapter = LtxCreativeAdapterInputSchema.optional().parse(
-    ctx.params["ltxCreativeAdapter"],
-  );
-  ctx.log(`signature_clips: using ${plan.source} (${scenes.length} validated scene(s))`);
+  // Signature clips are now native MiniMax H3 on-demand takes. Check the
+  // route and immutable model pack before generating any conditioning still;
+  // otherwise a missing H3 worker could leave paid stills with no usable
+  // motion path behind them.
+  const h3Readiness = minimaxH3Readiness("novita");
+  if (!h3Readiness.admitted) {
+    throw new Error(`signature_clips: MiniMax H3 Novita route is not admitted: ${h3Readiness.blockers.join("; ")}`);
+  }
+  await assertMiniMaxH3R2ModelManifest();
+  ctx.log(`signature_clips: using ${plan.source} (${scenes.length} validated scene(s), MiniMax H3 on-demand)`);
   const stageBudgetUsd = requireNovitaStageBudget(ctx.stageBudgetUsd, "signature_clips");
-  const rendered = await renderNovitaGeneratedScenes({
-    prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/signature-clips`,
-    profileId: "production",
-    // Signature clips render through the same cinematic-only gen_footage
-    // path (see the styleId comment on the main render call above).
-    styleId: FAMILIES.cinematic.styleId,
-    maxCostUsd: stageBudgetUsd,
-    maxConcurrent: Math.min(8, Math.max(1, scenes.length)),
-    lifecycle: {
-      ownerId: ctx.ownerId,
-      channelId: ctx.channelId,
-      runId: ctx.runId,
-      blockId: "signature_clips",
-    },
-    scenes: scenes.map((scene, index) => ({
-      id: `signature-${index + 1}`,
-      imagePrompt: `${scene.still}. Absolutely NO text, NO words, NO letters.`,
-      motionPrompt: scene.motion,
-      ...(scene.negative ? { negativePrompt: scene.negative } : {}),
-      durationSec: 5,
-      cameraMove: scene.cameraMove,
-      shotScale: scene.shotScale,
-      lens: scene.lens,
-      ...(signatureCreativeAdapter ? { creativeAdapter: signatureCreativeAdapter } : {}),
-    })),
-  });
   const tmp = await makeRunTempDir(ctx.runId);
+  const prefix = `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/signature-clips`;
+  const lifecycle = {
+    ownerId: ctx.ownerId,
+    channelId: ctx.channelId,
+    runId: ctx.runId,
+    blockId: "signature_clips",
+  };
+  let observedCostUsd = 0;
   try {
-    const clips = await pool(rendered.scenes, 3, (scene, index) =>
-      downloadTo(scene.clipUrl, join(tmp, `sig_${index}.mp4`), {
-        timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
+    const clips: string[] = [];
+    const nativeDurationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+    for (const [index, scene] of scenes.entries()) {
+      const remainingBeforeStill = stageBudgetUsd - observedCostUsd;
+      if (!Number.isFinite(remainingBeforeStill) || remainingBeforeStill <= 0) {
+        throw new Error(`signature_clips: stage budget exhausted before scene ${index + 1}`);
+      }
+      const still = await renderNovitaImage({
+        prefix: `${prefix}/frames`,
+        id: `signature-${index + 1}`,
+        prompt: `${scene.still}. Absolutely NO text, NO words, NO letters, NO watermark.`,
+        ...(scene.negative ? { negativePrompt: scene.negative } : {}),
+        seed: scene.continuitySeed,
+        profileId: "production",
+        maxCostUsd: remainingBeforeStill,
+        lifecycle,
+      });
+      observedCostUsd += still.costUsd;
+      const firstFrameBytes = await getObjectBytes(still.key);
+      const firstFrameSha256 = sha256BytesHex(firstFrameBytes);
+      const remainingBeforeMotion = stageBudgetUsd - observedCostUsd;
+      if (!Number.isFinite(remainingBeforeMotion) || remainingBeforeMotion <= 0) {
+        throw new Error(`signature_clips: stage budget exhausted after conditioning still ${index + 1}`);
+      }
+      const seed = scene.continuitySeed ?? Number.parseInt(
+        sha256Hex(`${ctx.runId}:signature-h3:${index + 1}`).slice(0, 8),
+        16,
+      ) % 2_147_483_647;
+      const clip = await renderMiniMaxH3(buildMiniMaxH3SceneRequest({
+        provider: "novita",
+        execution: "on-demand",
+        prompt: `${scene.still}. Preserve the exact accepted signature still, recurring subject, setting, wardrobe, props, lighting, and channel identity.`,
+        motionPrompt: scene.motion,
+        cameraInstruction: `Use the authored ${scene.cameraMove} move with ${scene.shotScale} framing and ${scene.lens} lens; keep the motion physically coherent and free of scene changes.`,
+        ...(scene.negative ? { negativePrompt: scene.negative } : {}),
+        seed,
+        firstFrame: { r2Key: still.key, sha256: firstFrameSha256 },
+        output: { r2Key: `${prefix}/h3/clip-${String(index + 1).padStart(3, "0")}.mp4` },
+        maxCostUsd: remainingBeforeMotion,
       }));
-    return { clips, cost: rendered.costUsd };
+      observedCostUsd += clip.receipt.runtime.costUsd;
+      if (nativeDurationSec <= 0 || clip.outputBytes.byteLength < 1_024) {
+        throw new Error(`signature_clips: MiniMax H3 scene ${index + 1} returned an invalid native clip`);
+      }
+      const localClip = await writeBytes(join(tmp, `sig_${index}.mp4`), clip.outputBytes);
+      const measured = await probe(localClip);
+      if (!measured.hasVideo || !Number.isFinite(measured.durationSec) || Math.abs(measured.durationSec - nativeDurationSec) > 0.08) {
+        throw new Error(`signature_clips: MiniMax H3 scene ${index + 1} failed native duration/video verification`);
+      }
+      clips.push(localClip);
+      ctx.log(`signature_clips: scene ${index + 1}/${scenes.length} H3 take accepted`);
+    }
+    return { clips, cost: observedCostUsd };
   } catch (error) {
-    throw withAdditionalObservedCost(error, rendered.costUsd);
+    throw withAdditionalObservedCost(error, observedCostUsd);
   }
 }
 

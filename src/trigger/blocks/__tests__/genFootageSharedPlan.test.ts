@@ -197,8 +197,18 @@ assert.match(source, /LtxCreativeAdapterInputSchema\.optional\(\)\.parse/);
 assert.match(source, /creativeAdapter \? \{ creativeAdapter \} : \{\}/);
 assert.match(
   source,
-  /signatureCreativeAdapter \? \{ creativeAdapter: signatureCreativeAdapter \} : \{\}/,
-  "signature LTX clips must use the same sealed creative-adapter route as the main footage lane",
+  /signature_clips: MiniMax H3 Novita route is not admitted/,
+  "signature clips must fail closed before conditioning-image spend when H3 is unavailable",
+);
+assert.match(
+  source,
+  /firstFrame: \{ r2Key: still\.key, sha256: firstFrameSha256 \}/,
+  "signature H3 clips must bind motion to the exact R2 conditioning still",
+);
+assert.match(
+  source,
+  /output: \{ r2Key: `\$\{prefix\}\/h3\/clip-/,
+  "signature H3 clips must persist outputs under the run-scoped R2 namespace",
 );
 
 for (const gate of ["cinematicKeyframeGate.ts", "cinematicClipGate.ts", "cinematicTransitionGate.ts"]) {
