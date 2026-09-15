@@ -45,11 +45,11 @@ export async function GET(request: Request) {
     const ifRange = request.headers.get("if-range");
     if (ifRange) forwardedHeaders.set("If-Range", ifRange);
     // R2 can briefly return a stale 404 while a just-uploaded master becomes
-    // visible across its edge. Refresh the signature and retry once for that
-    // narrow transient class (and provider 5xx); missing objects still return
-    // a truthful 404 after the bounded retry.
+    // visible across its edge. Refresh the signature and use a short bounded
+    // retry window for that narrow transient class (and provider 5xx); missing
+    // objects still return a truthful 404 after the bounded retries.
     let upstream: Response | null = null;
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       const signedUrl = await presignDownload(key, {
         expiresIn: 300,
         responseContentType: mimeType,
@@ -59,7 +59,7 @@ export async function GET(request: Request) {
       // false 404 even though the same object and the initial range exist.
       // A streamed full response is a safe preview fallback: it preserves
       // the exact source frame and never buffers the master in this route.
-      if (attempt === 1 && upstream?.status === 404 && range) {
+      if (attempt > 0 && upstream?.status === 404 && range) {
         attemptHeaders.delete("Range");
         attemptHeaders.delete("If-Range");
       }
@@ -72,7 +72,7 @@ export async function GET(request: Request) {
       if (upstream.ok || (upstream.status >= 200 && upstream.status < 300)) break;
       const retryable = upstream.status === 404 || upstream.status >= 500;
       await upstream.body?.cancel().catch(() => {});
-      if (!retryable || attempt === 1) break;
+      if (!retryable || attempt === 2) break;
       // Match the image delivery boundary's short backoff. R2 edge replicas
       // can briefly disagree immediately after a master is written or
       // restored; give the fresh signature a moment before retrying without
