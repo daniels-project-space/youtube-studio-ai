@@ -192,7 +192,7 @@ export default function LibraryPage() {
         <dl className={styles.libraryMetrics} aria-label="Current library summary">
           <LibraryMetric label="Visible" value={loading ? "—" : String(filtered.length)} />
           <LibraryMetric label="Channels" value={loading ? "—" : String(matchingChannelCount)} />
-          <LibraryMetric label="Unverified" value={loading ? "—" : String(reviewCount)} tone={reviewCount ? "attention" : "ready"} />
+          <LibraryMetric label="Master review" value={loading ? "—" : String(reviewCount)} tone={reviewCount ? "attention" : "ready"} />
         </dl>
       </div>
 
