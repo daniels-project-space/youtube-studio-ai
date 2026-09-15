@@ -414,11 +414,24 @@ function assertProduced(manifest: ModuleManifest, patch: Record<string, unknown>
  * consumes (e.g. quote_overlays reads introSec; visual_inserts reads the quote
  * windows), so a general inferred-DAG scheduler would be unsound here.
  */
+/**
+ * Explicitly verified execution waves. Membership is intentionally curated:
+ * a block may only join a wave after its declared store reads/writes and
+ * external side effects have been reviewed. The runner still requires the
+ * members to be contiguous in the resolved pipeline, so this cannot reorder
+ * an arbitrary legacy pipeline or outrun an upstream dependency.
+ */
 const PARALLEL_GROUPS: string[][] = [
   ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec"],
   ["qa_script", "originality_gate", "compliance_check"],
-  ["stock_footage", "entity_imagery", "music", "intro_card"],
+  // Both stages are independent once script approval exists. Narration is
+  // consumed by footage/entity stages; music is not, so those visual stages
+  // remain in the later wave and cannot observe a partial result.
+  ["music", "narration_tts"],
+  ["stock_footage", "entity_imagery", "intro_card"],
 ];
+export const VERIFIED_PARALLEL_GROUPS: readonly (readonly string[])[] =
+  Object.freeze(PARALLEL_GROUPS.map((group) => Object.freeze([...group])));
 const GROUP_OF = new Map<string, number>();
 PARALLEL_GROUPS.forEach((g, i) => g.forEach((id) => GROUP_OF.set(id, i)));
 

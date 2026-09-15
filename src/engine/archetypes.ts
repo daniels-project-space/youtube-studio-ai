@@ -241,9 +241,6 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "hook_craft" },
       { block: "originality_gate" },
       { block: "compliance_check" },
-      { block: "narration_tts" },
-      { block: "stock_footage", params: { aspect: "9:16" } },
-      { block: "entity_imagery", params: { aspect: "9:16" } },
       {
         block: "music",
         params: {
@@ -251,6 +248,9 @@ export const ARCHETYPES: Record<string, Archetype> = {
           prompt: "energetic minimal underscore, light beat, no vocals",
         },
       },
+      { block: "narration_tts" },
+      { block: "stock_footage", params: { aspect: "9:16" } },
+      { block: "entity_imagery", params: { aspect: "9:16" } },
       { block: "intro_card", params: { introSec: 2, aspect: "9:16" } },
       { block: "timeline_assemble", params: { aspect: "9:16", captions: true, tailSec: 1 } },
       { block: "length_check", params: { maxSeconds: 60 } },
@@ -370,9 +370,6 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "script_gen", params: { style: "meditation" } },
       { block: "originality_gate" },
       { block: "compliance_check" },
-      { block: "narration_tts", params: { pace: "slow" } },
-      { block: "stock_footage" },
-      { block: "entity_imagery" },
       {
         block: "music",
         params: {
@@ -381,6 +378,9 @@ export const ARCHETYPES: Record<string, Archetype> = {
             "very calm ambient sleep music, soft pads, slow, peaceful, no drums, no vocals",
         },
       },
+      { block: "narration_tts", params: { pace: "slow" } },
+      { block: "stock_footage" },
+      { block: "entity_imagery" },
       { block: "intro_card", params: { introSec: 6 } },
       { block: "timeline_assemble", params: { tailSec: 4, fadeOutSec: 3 } },
       { block: "length_check" },
