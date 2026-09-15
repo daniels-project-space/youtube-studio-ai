@@ -1,5 +1,20 @@
 import assert from "node:assert/strict";
-import { readSaladCapacitySnapshot } from "@/lib/saladCapacity";
+import { readSaladCapacitySnapshot, saladFleetCapacityBlockers } from "@/lib/saladCapacity";
+
+assert.deepEqual(
+  saladFleetCapacityBlockers({ occupiedGpuSlots: 2, requiredWorkers: 2, quotaUsed: 10, quotaLimit: 10 }),
+  ["global_three_gpu_capacity_insufficient_for_wave", "salad_organization_replica_quota_full"],
+  "fleet blockers must describe both the shared GPU fence and quota when a wave cannot fit",
+);
+assert.deepEqual(
+  saladFleetCapacityBlockers({ occupiedGpuSlots: 0, requiredWorkers: 3, quotaUsed: 0, quotaLimit: 3 }),
+  [],
+  "a complete wave that fits both fleet and quota must not be held",
+);
+assert.throws(
+  () => saladFleetCapacityBlockers({ occupiedGpuSlots: 0, requiredWorkers: 0, quotaUsed: 0, quotaLimit: 3 }),
+  /invalid wave or quota counts/,
+);
 
 // Keep the fixture corpus deterministic even when a developer shell or CI
 // job intentionally disables a production tier. The explicit inheritance

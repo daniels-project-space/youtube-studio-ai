@@ -13,6 +13,7 @@ import {
   type SaladBulkPriority,
   type SaladGpuModel,
 } from "../src/lib/saladCloud";
+import { saladFleetCapacityBlockers } from "../src/lib/saladCapacity";
 
 const bucket = "salad-render-infra";
 const specs = [
@@ -48,6 +49,7 @@ async function main() {
   const [gpuClasses, groups, quotas] = await Promise.all([salad.listGpuClasses(), salad.listContainerGroups(), salad.getQuotas()]);
   const instances = new Map(await Promise.all(groups.map(async (group) => [group.name, await salad.listContainerInstances(group.name)] as const)));
   const occupiedGpuSlots = saladOccupiedGpuSlots(groups, instances);
+  const quota = quotas.container_groups_quotas;
   const reports: Array<Record<string, unknown>> = [];
   for (const spec of specs) {
     const blockers = [...spec.qualifications];
@@ -131,8 +133,19 @@ async function main() {
       blockers.push("exact_medium_priority_gpu_capacity_unavailable");
     }
     if (selectedPriority === "high" && availableHighGpus < 1) blockers.push("exact_high_priority_gpu_capacity_unavailable");
-    if (occupiedGpuSlots >= 3) blockers.push("global_three_gpu_capacity_full");
-    if (quotas.container_groups_quotas.container_replicas_quota <= quotas.container_groups_quotas.container_replicas_used) blockers.push("salad_organization_replica_quota_full");
+    const fleetBlockers = saladFleetCapacityBlockers({
+      occupiedGpuSlots,
+      requiredWorkers: 1,
+      quotaUsed: quota.container_replicas_used,
+      quotaLimit: quota.container_replicas_quota,
+    });
+    blockers.push(...fleetBlockers);
+    // A tier can be observed while the shared fence or account quota is full,
+    // but it is not an actionable recommendation until the whole wave fits.
+    if (fleetBlockers.length) {
+      selectedPriority = null;
+      gpu = null;
+    }
     reports.push({ route: spec.route, readyForPaidDispatch: false, modelInventory: {
       bucket, manifestKey: key, manifestSha256: spec.manifestSha256, manifestAndByteLengthsVerified: manifestVerified,
       modelFiles, modelBytes, note: "GPU worker must still verify every model file SHA-256 after hydration",
@@ -147,7 +160,7 @@ async function main() {
     blockers: ["qwen_tts_r2_pack_not_located", "qwen_tts_salad_worker_image_not_located", "existing_youtube_qwen_receipt_is_novita_4090_only"] });
   console.log(JSON.stringify({ observedAt: new Date().toISOString(), mode: "read-only", gpuMutations: 0,
     organization: salad.organization, project: salad.project, priority: "medium-first/high-fallback", globalGpuLimit: 3,
-    occupiedGpuSlots, providerQuota: quotas.container_groups_quotas, routes: reports }, null, 2));
+    occupiedGpuSlots, providerQuota: quota, routes: reports }, null, 2));
 }
 
 void main().catch(() => {
