@@ -18,6 +18,9 @@ const daySchedule = read("src/app/(app)/schedule/DayByDaySchedule.tsx");
 // accessible loading/error state; surfaces do not each invent a new fallback.
 assert.match(preview, /useAssetUrlState/);
 assert.match(preview, /selectMediaPreview/);
+assert.match(preview, /Range: "bytes=0-0"/,
+  "video previews probe availability before mounting a missing private source");
+assert.match(preview, /videoSourceReady/);
 assert.match(preview, /reviewedSrc/);
 assert.match(preview, /source: "reviewed"/);
 assert.match(preview, /data-preview-source=/);
