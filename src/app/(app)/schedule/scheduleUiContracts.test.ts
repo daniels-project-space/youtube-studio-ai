@@ -36,7 +36,7 @@ assert.match(board, /prioritizedPreviews < 3/,
   "the first scheduled artwork cards must load promptly without eager-loading the whole calendar");
 assert.match(board, /event\.type === "planned" \? event\.id : undefined/,
   "planned calendar cards must carry the exact plan item into the channel workspace");
-assert.match(board, /event\.thumbnailSource === "rendered_video_frame"/,
+assert.match(board, /event\.thumbnailSource === "rendered_video_frame" && !event\.thumbnailKey/,
   "Lo-Fi scheduled cards must show their final-frame state instead of requesting a generic planner image");
 assert.match(styles, /prefers-reduced-motion: reduce/,
   "schedule motion must expose a reduced-motion path");

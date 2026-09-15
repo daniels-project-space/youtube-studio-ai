@@ -99,7 +99,7 @@ function DayEventCard({ event, priority = false }: { event: CalendarEvent; prior
       )}
       style={{ borderLeftColor: event.color }}
     >
-      {event.thumbnailSource === "rendered_video_frame" ? (
+      {event.thumbnailSource === "rendered_video_frame" && !event.thumbnailKey ? (
         <div className={styles.dayEventFramePending} aria-label="Cover will use the final rendered video frame">
           <span>Final frame</span>
         </div>
