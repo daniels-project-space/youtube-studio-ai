@@ -53,9 +53,18 @@ export async function GET(request: Request) {
         expiresIn: 300,
         responseContentType: mimeType,
       });
+      const attemptHeaders = new Headers(forwardedHeaders);
+      // Some R2 edges intermittently answer a valid non-zero range with a
+      // false 404 even though the same object and the initial range exist.
+      // A streamed full response is a safe preview fallback: it preserves
+      // the exact source frame and never buffers the master in this route.
+      if (attempt === 1 && upstream?.status === 404 && range) {
+        attemptHeaders.delete("Range");
+        attemptHeaders.delete("If-Range");
+      }
       upstream = await fetch(signedUrl, {
         method: "GET",
-        headers: forwardedHeaders,
+        headers: attemptHeaders,
         redirect: "error",
         signal: AbortSignal.timeout(30_000),
       });

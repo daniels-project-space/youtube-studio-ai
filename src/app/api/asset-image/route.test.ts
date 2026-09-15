@@ -25,6 +25,9 @@ assert.match(videoRoute, /Range/);
 assert.match(videoRoute, /attempt < 2/,
   "video previews retry one transient edge miss with a fresh signature");
 assert.match(videoRoute, /upstream\.status === 404 \|\| upstream\.status >= 500/);
+assert.match(videoRoute, /attempt === 1 && upstream\?\.status === 404 && range/,
+  "a false non-zero-range miss falls back to streamed full-source playback");
+assert.match(videoRoute, /attemptHeaders\.delete\("Range"\)/);
 assert.match(videoRoute, /new NextResponse\(upstream\.body/);
 assert.match(videoRoute, /Cross-Origin-Resource-Policy.*same-origin/);
 assert.match(videoRoute, /owner\/\$\{OWNER_ID\}/);
