@@ -61,6 +61,28 @@ assert.equal(h3.mediumPriceUsdPerHour, 0.4);
 assert.equal(h3.highPriceUsdPerHour, 0.6);
 assert.equal(h3.selectedPriceUsdPerHour, 0.6);
 
+const h3MarketQueries: Array<string[] | undefined> = [];
+const globalH3Snapshot = await readSaladCapacitySnapshot({
+  listGpuClasses: async () => classes,
+  listContainerGroups: async () => [],
+  listContainerInstances: async () => [],
+  getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 10, container_replicas_used: 0 } }),
+  getGpuAvailability: async (resources, countryCodes) => {
+    if (resources.gpu_classes[0] === classes[1]!.id) {
+      h3MarketQueries.push(countryCodes);
+      return countryCodes ? { available_gpu_medium: 0, available_gpu_high: 0 } : { available_gpu_medium: 0, available_gpu_high: 2 };
+    }
+    return { available_gpu_medium: 4, available_gpu_high: 4 };
+  },
+}, { requiredWorkers: 2 });
+const globalH3 = globalH3Snapshot.lanes.find((lane) => lane.id === "h3")!;
+assert.equal(globalH3.recommendedPriority, "high",
+  "the fleet projection must expose high fallback when only the global H3 market can admit the wave");
+assert.equal(globalH3.highAvailable, 2);
+assert.equal(globalH3.fallbackUsed, true);
+assert.deepEqual(h3MarketQueries, [["cn"], undefined],
+  "the fleet projection must make at most one global read after a country-scoped H3 miss");
+
 const mediumDisabled = await readSaladCapacitySnapshot({
   listGpuClasses: async () => classes,
   listContainerGroups: async () => [],

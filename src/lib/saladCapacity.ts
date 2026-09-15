@@ -197,12 +197,47 @@ export async function readSaladCapacitySnapshot(
       };
     }
     let availability: { available_gpu_medium?: number; available_gpu_high?: number };
+    let preferredAvailability: { available_gpu_medium?: number; available_gpu_high?: number } | undefined;
     try {
       const resources: SaladResources = { ...lane.resources, gpu_classes: [selectedClass.id] };
-      availability = await salad.getGpuAvailability(resources, "countryCodes" in lane ? [...lane.countryCodes] : undefined);
+      preferredAvailability = await salad.getGpuAvailability(resources, "countryCodes" in lane ? [...lane.countryCodes] : undefined);
+      availability = preferredAvailability;
     } catch {
       blockers.push("availability_read_failed");
       availability = {};
+    }
+    // Salad's country-scoped count is a live-node estimate, not a reservation.
+    // Keep the preferred market first, then make one bounded global read when
+    // it cannot admit the complete wave. This mirrors H3 paid admission and
+    // prevents the fleet UI from disagreeing with the dispatch route when a
+    // matching 5090 is online outside the preferred locality.
+    if (preferredAvailability && "countryCodes" in lane) {
+      const preferredMedium = safeCount(preferredAvailability.available_gpu_medium);
+      const preferredHigh = safeCount(preferredAvailability.available_gpu_high);
+      const preferredCanAdmit = selectSaladCapacityPriority({
+        requiredWorkers,
+        mediumAvailable: preferredMedium,
+        highAvailable: preferredHigh,
+        mediumEligible: mediumPriorityEnabled && mediumClass !== undefined,
+        highEligible: highClass !== undefined,
+        allowHighPriorityFallback,
+      }) !== null;
+      if (!preferredCanAdmit) {
+        try {
+          const resources: SaladResources = { ...lane.resources, gpu_classes: [selectedClass.id] };
+          const globalAvailability = await salad.getGpuAvailability(resources);
+          const globalMedium = safeCount(globalAvailability.available_gpu_medium);
+          const globalHigh = safeCount(globalAvailability.available_gpu_high);
+          if (globalMedium > preferredMedium || globalHigh > preferredHigh) {
+            availability = globalAvailability;
+          }
+        } catch {
+          // The preferred snapshot remains valid evidence of the current
+          // locality. A failed optional global comparison must not fabricate
+          // capacity or turn a read-only dashboard into a hard error.
+          blockers.push("global_availability_read_failed");
+        }
+      }
     }
     const mediumAvailable = safeCount(availability.available_gpu_medium);
     const highAvailable = safeCount(availability.available_gpu_high);
