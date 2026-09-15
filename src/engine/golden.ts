@@ -767,7 +767,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     engine:
       "Loreshort — Gemini first-person lore script + attested Novita stills + per-line cast-voice TTS + attested Novita LTX image-to-video depth camera moves + FREE ffmpeg 2K finish",
     how:
-      "A single figure narrates history in FIRST PERSON (GoT \"Histories & Lore\" style): one Gemini-Pro call writes a paced " +
+      "A single figure narrates history in FIRST PERSON (GoT \"Histories & Lore\" style): one OpenRouter creative-text call writes a paced " +
       "narration arc plus per-beat layered-depth SCENE prompts; the attested Novita image lane paints each beat; ElevenLabs voices each line " +
       "separately so every shot is cut to its exact spoken length. A vision pass reads each painting and writes a motion brief " +
       "(subject + particles + a DEPTH camera move, scaled to honest intensity), which drives image-to-video into a GENUINE 3D " +
@@ -1232,10 +1232,10 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "image as a DIRECT reference, the prompt leads with the identity lock and names the distinctive features (never a " +
       "generic re-description — that's what made early renders \"four different people\"), a vision gate re-rolls drift, " +
       "then the admitted Novita keyframe/video chain animates the locked keyframe. Establishing + multi-subject shots supported; any style. Operator " +
-      "approves the hero before any Soul. Standalone src/lib/cinecraft.ts (480 L), visual-only (a pipeline adds audio + assembly). " +
+      "approves the identity pack before visual spend. Standalone src/lib/cinecraft.ts (480 L), visual-only (a pipeline adds audio + assembly). " +
       "cinecraft.ts ITSELF IS RETIRED, NOT PENDING (P1-10 resolved, superseded): its render path is hard-disabled at the source " +
-      "(hasCinecraft() returns a literal false, src/lib/cinecraft.ts:47-52) because designSubject/trainSoul/renderShot all drive the " +
-      "retired PAID Higgsfield CLI; that renderer must never be reopened. The file survives as a type/catalog surface only " +
+      "(hasCinecraft() returns a literal false, src/lib/cinecraft.ts:47-52) because designSubject/trainSoul/renderShot all belonged to a " +
+      "retired paid renderer; that path must never be reopened. The file survives as a type/catalog surface only " +
       "(ShotSpec, src/lib/crew/cinematographer.ts:16). The hero-anchor consistency LAW described above IS nevertheless enforced in " +
       "production, by an equivalent renderer-neutral module rather than by cinecraft: the `visual_matter` block " +
       "(src/engine/visualMatter.ts + src/trigger/blocks/visualMatterBlocks.ts) emits per-character `identityLock`, per-setting " +
@@ -1260,7 +1260,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "narration-first: it writes the voiceover as one coherent arc, then composes each beat from a CAPABILITY palette " +
       "(parallax portrait, a real rendered geo_map from OSM streets and buildings, 2.5D depth-parallax camera-through-photo " +
       "with rack focus, evidence board, object drop, a designed quote card). A style biases that mix, it never whitelists it, " +
-      "so new looks emerge from config. Every closing card is bespoke Nano Banana letterpress typography, not a web font. The " +
+      "so new looks emerge from config. Every closing card uses the engine's own crisp typography overlays, never text baked into an image. The " +
       "LAW: all text, the red string and the pins are ENGINE OVERLAYS, never baked into an image. A still-verifier renders one " +
       "frame per shot and a vision judge scores it, applying typed fixes until it passes. Standalone src/lib/documotion.ts, " +
       "visual-only (a pipeline wraps narration, music, thumbnail and title around the body).",
@@ -1272,30 +1272,11 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     stage: "layer",
     title: "Motion Graphics — Motioncraft",
     engine:
-      "Motioncraft — an LLM reads the script, decides which beats earn a motion graphic, picks the best free tool per beat, and renders each (MapLibre · Remotion · Nano Banana · p5.js)",
+      "Motioncraft — retired catalog reference; the active Insert module owns the admitted data-viz layer",
     how:
-      "A standalone motion layer for any narrated video. analyzeForMotion reads the whole script with the tool " +
-      "catalog and returns a short list of opportunities — it EARNS each graphic (3-6 per video, never one per line), " +
-      "routes every one to the best tool, and extracts the content. geo_map renders a real location from OSM streets " +
-      "in MapLibre with a gold target push-in; data_stats animates only the numbers the narration actually speaks, " +
-      "verbatim, in Remotion; hero_title renders a thumbnail-grade Nano Banana scene, lifts a depth-parallax cutout " +
-      "(Marigold + feathered alpha) and flies a camera through it in Remotion with a kinetic title overlaid — never " +
-      "baked in; generative paints a drifting intel-network background in p5.js. One tool contract (__ready / __dur / " +
-      "__frame / __settle) drives a single generic Playwright capture, so new tools plug in with zero rework. Clips are " +
-      "timed to each narration cue and per-clip failures stay isolated. Was standalone in src/lib/motioncraft.ts (246 L), visual-only. " +
-      "DELETED, NOT PENDING (P1-11 resolved by P2-7): src/lib/motioncraft.ts had zero pipeline importers (it was always \"catalog-only\" " +
-      "in goldenExecution.ts CATALOG_EXECUTION_BINDINGS) and was removed outright as confirmed-dead in commit 183ee6a. Of its four " +
-      "tools, only data_stats' verbatim-number animation has a real successor: it is DUPLICATED, not consumed, by the production " +
-      "Insert module (src/trigger/blocks/insertBlocks.ts:22,72,107, catalog key \"inserts\"), which is the one actually wired and " +
-      "gated. The other three demonstrated tools do NOT have a like-for-like successor and their own implementations are now gone " +
-      "outright with the file: geo_map's live MapLibre/OSM street-tile renderer, hero_title's Marigold depth-cutout + kinetic-title " +
-      "camera-through-photo treatment, and generative's p5.js drifting intel-network background are all permanently deleted code. " +
-      "(The wired documotion.ts module separately and independently built its OWN real-place map reveal (geo_map shot kind, pulling " +
-      "live OSM street data via src/lib/geoMap.ts) and its OWN single-image depth-cutout camera-through-photo move (depth_parallax " +
-      "shot kind) -- similar creative ideas achieving a similar effect, but distinct, independently-authored code, not motioncraft's; " +
-      "generative's p5.js procedural background technique has no equivalent anywhere else in the repo and is the one capability with " +
-      "nothing standing in for it at all.) The only surviving evidence of what all four looked like is the proof media at " +
-      "public/golden/motioncraft/{map,stats,hero,crew}.mp4.",
+      "This standalone motion layer was retired after proving it had no active pipeline importer. The production Insert module now owns " +
+      "the admitted verbatim-number/data-viz capability; the former geo, hero-title and procedural-background experiments remain only as " +
+      "historical proof media and cannot be selected by a new pipeline.",
     gates: ["the LLM earns each graphic (3-6 / video, never per line)", "best-tool routing per beat", "verbatim numbers only (stats)", "no text baked into the hero image — the title is a crisp overlay", "per-clip failure isolated"],
     status: "reference",
   },
