@@ -825,6 +825,9 @@ export interface MetaCraftArgs {
   clickbaitLevel?: number;
   /** Format-aware title envelope; omitted callers resolve to browse_long. */
   titleProfile?: TitleProfileId;
+  /** Optional family/lane context used when a standalone caller omits titleProfile. */
+  family?: string;
+  contentLane?: string;
   /** Bounded persisted titles from this channel, newest/queued first. */
   recentChannelTitles?: readonly string[];
   log?: (m: string) => void;
@@ -918,7 +921,16 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
   const t0 = Date.now();
   const doctrine = resolveVoiceDoctrine(a.niche);
   const clickbait = resolveClickbaitLevel(a.clickbaitLevel, doctrine?.voice);
-  const titleProfile = profileFor(a.titleProfile ?? "general");
+  // Standalone module callers must receive the same format-aware envelope as
+  // the production metadata block. The block usually supplies an explicit
+  // profile, but direct users only have channel context; falling back to the
+  // generic profile here silently reintroduced one universal title doctrine.
+  const resolvedTitleProfile = resolveTitleProfile(a.titleProfile, {
+    family: a.family,
+    contentLane: a.contentLane,
+    niche: a.niche,
+  });
+  const titleProfile = profileFor(resolvedTitleProfile);
   const recentChannelTitles = Array.from(new Map(
     (a.recentChannelTitles ?? [])
       .filter((title): title is string => typeof title === "string" && title.trim().length > 0)

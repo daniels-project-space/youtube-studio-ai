@@ -5,6 +5,7 @@ const loader = Module as unknown as { _load: (request: string, ...rest: unknown[
 const originalLoad = loader._load;
 const originalFetch = globalThis.fetch;
 const originalYouTubeKey = process.env.YOUTUBE_API_KEY;
+const creativePrompts: string[] = [];
 
 loader._load = function patchedLoad(request, ...rest) {
   const resolved = originalLoad.call(this, request, ...rest) as Record<string, unknown>;
@@ -13,6 +14,7 @@ loader._load = function patchedLoad(request, ...rest) {
     ...resolved,
     hasCreativeTextKey: () => true,
     creativeTextJson: async ({ prompt }: { prompt: string }) => {
+      creativePrompts.push(prompt);
       if (prompt.includes("pinned comment")) return { comment: "Which aqueduct detail surprised you?" };
       if (prompt.includes("description + tags")) return { description: "Roman aqueducts moved water across mountains.", tagsCsv: "roman,aqueduct,water,engineering,history" };
       if (prompt.startsWith("You are a YouTube CTR strategist")) {
@@ -46,6 +48,7 @@ async function main(): Promise<void> {
     const { craftMetadata } = await import("@/lib/metacraft");
     const result = await craftMetadata({
       topic: "Roman aqueduct engineering",
+      niche: "history",
       narrationText: "Roman aqueducts moved water across mountains using carefully graded channels.",
       competitorTitles: [],
     });
@@ -60,6 +63,10 @@ async function main(): Promise<void> {
       requestedUrls.filter((url) => url.startsWith("https://suggestqueries.google.com/")).length,
       1,
       "independent autocomplete evidence remains available",
+    );
+    assert.ok(
+      creativePrompts.some((prompt) => prompt.includes('FORMAT PROFILE "searchable_long"')),
+      "standalone metacraft callers must resolve a format profile from channel context",
     );
     console.log("METACRAFT EXPLICIT EMPTY FEED PASS — upstream no-results reuse avoids duplicate YouTube quota");
   } finally {
