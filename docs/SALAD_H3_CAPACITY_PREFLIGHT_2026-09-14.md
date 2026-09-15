@@ -59,3 +59,20 @@ called and the batch remains held for a later retry/reconciliation.
 This is capacity admission, not a reservation or a guarantee of future Salad
 supply. Native H3 output quality, worker-image digest, and durable worker
 deduplication remain separate qualification gates.
+
+## Operational follow-up — 15 September 2026
+
+The repository-side `salad-runtime-preflight` was run again after the H3
+caller migration. It could not authenticate to the shared vault, so it made no
+Salad API request and performed no GPU mutation or inference call. This run is
+not evidence of current provider availability and must not overwrite the last
+authenticated `0 medium / 0 high` observation above.
+
+The production route therefore remains fail-closed: it uses the durable
+organization-wide lease to prevent local check-then-dispatch races, then reads
+the exact 5090 class and current tier counts immediately before dispatch. If
+medium cannot fit the complete wave, the same exact class may be admitted at
+high only when high has a valid price and enough slots; otherwise the order is
+held for a later recheck. Salad's availability estimate is not treated as a
+provider reservation; a true supply increase still requires Salad capacity
+support or a later authenticated availability observation.
