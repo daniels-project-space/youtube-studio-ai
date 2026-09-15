@@ -16,5 +16,15 @@ assert.match(source, /Cross-Origin-Resource-Policy.*same-origin/);
 assert.match(source, /owner\/\$\{OWNER_ID\}/);
 assert.match(assetUrl, /api\/asset-image\?key=/,
   "image asset URLs must use the same-origin proxy to avoid R2 ORB failures");
+assert.match(assetUrl, /api\/asset-video\?key=/,
+  "video asset URLs must use the same-origin streaming proxy to avoid R2 ORB failures");
 
-console.log("same-origin private image proxy contracts passed");
+const videoRoute = readFileSync(`${here}/../asset-video/route.ts`, "utf8");
+assert.match(videoRoute, /presignDownload/);
+assert.match(videoRoute, /Range/);
+assert.match(videoRoute, /new NextResponse\(upstream\.body/);
+assert.match(videoRoute, /Cross-Origin-Resource-Policy.*same-origin/);
+assert.match(videoRoute, /owner\/\$\{OWNER_ID\}/);
+assert.match(videoRoute, /status: upstream\.status/);
+
+console.log("same-origin private image/video proxy contracts passed");

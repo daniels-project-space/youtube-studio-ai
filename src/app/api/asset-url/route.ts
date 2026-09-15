@@ -35,6 +35,11 @@ function isInlineImage(key: string): boolean {
   return responseContentType(key)?.startsWith("image/") === true;
 }
 
+function isInlineVideo(key: string): boolean {
+  const type = responseContentType(key);
+  return type === "video/mp4" || type === "video/webm";
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const key = searchParams.get("key");
@@ -64,6 +69,18 @@ export async function GET(request: Request) {
     if (isInlineImage(key)) {
       return NextResponse.json(
         { url: `/api/asset-image?key=${encodeURIComponent(key)}` },
+        { headers: { "Cache-Control": "private, max-age=600" } },
+      );
+    }
+    // Keep private video playback same-origin as well. R2's signed response
+    // can carry a restrictive cross-origin resource policy, which makes a
+    // browser-side <video> used for the truthful Lo-Fi 15-second fallback
+    // fail with ORB even though the object itself is valid. The proxy forwards
+    // byte ranges and streams the provider body; it never materialises a full
+    // master in the Next request.
+    if (isInlineVideo(key)) {
+      return NextResponse.json(
+        { url: `/api/asset-video?key=${encodeURIComponent(key)}` },
         { headers: { "Cache-Control": "private, max-age=600" } },
       );
     }
