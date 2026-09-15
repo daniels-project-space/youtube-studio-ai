@@ -9,6 +9,7 @@ import {
   isAcceptedChannelArtworkRun,
   summarizeChannelCardRuns,
 } from "@/lib/channelCardProjection";
+import { currentLibraryThumbnail } from "./videos";
 import {
   beginChannelInceptionLedger,
   checkpointChannelInceptionLedgerStage,
@@ -433,16 +434,30 @@ async function projectChannelCard(ctx: QueryCtx, channel: Doc<"channels">) {
   const acceptedRunIds = new Set(
     recentRuns.filter(isAcceptedChannelArtworkRun).map((run) => String(run._id)),
   );
-  const recentThumbnails = acceptedRunIds.size > 0
-    ? await ctx.db
+  // Channel tiles must use the same current-thumbnail projection as Library
+  // and run detail. Selecting the newest raw thumbnail here used to leave a
+  // tile on a legacy image after a refreshed candidate had already been
+  // accepted elsewhere. Resolve only the newest accepted run to keep this
+  // bounded while still applying Lo-Fi frame and Golden-candidate rules.
+  const latestAcceptedRun = recentRuns.find((run) => acceptedRunIds.has(String(run._id)));
+  let latestThumbnailKey: string | null = null;
+  if (latestAcceptedRun) {
+    const assets = await ctx.db
       .query("assets")
-      .withIndex("by_channel_kind", (q) => q.eq("channelId", channel._id).eq("kind", "thumbnail"))
-      .order("desc")
-      .take(60)
-    : [];
-  const latestThumbnailKey = recentThumbnails.find(
-    (asset) => asset.runId && acceptedRunIds.has(String(asset.runId)),
-  )?.r2Key ?? null;
+      .withIndex("by_run", (q) => q.eq("runId", latestAcceptedRun._id))
+      .collect();
+    const sourceThumbnail = assets.find((asset) => asset.kind === "thumbnail");
+    const sourceVideoKey = assets.find((asset) => asset.kind === "video")?.r2Key ?? null;
+    const current = await currentLibraryThumbnail(ctx, {
+      ownerId: channel.ownerId,
+      runId: latestAcceptedRun._id,
+      channelId: channel._id,
+      channel,
+      sourceThumbnail,
+      sourceVideoKey,
+    });
+    latestThumbnailKey = current.key;
+  }
   return {
     channelId: channel._id,
     channelSlug: channel.slug,
