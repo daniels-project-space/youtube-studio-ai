@@ -184,25 +184,46 @@ export async function assertMiniMaxH3SaladCapacity(
   // groups, so querying it first only adds latency when the shared three-GPU
   // cap is already occupied.
   await assertLeaseRoom();
-  let availability: Awaited<ReturnType<MiniMaxH3SaladCapacityClient["getGpuAvailability"]>>;
+  let availability: Awaited<ReturnType<MiniMaxH3SaladCapacityClient["getGpuAvailability"]>> = {};
   try {
-    availability = await client.getGpuAvailability(resources, [...MINIMAX_H3_SALAD_COUNTRY_CODES]);
-    const preferredMedium = typeof availability.available_gpu_medium === "number" &&
-      Number.isSafeInteger(availability.available_gpu_medium) ? availability.available_gpu_medium : 0;
-    const preferredHigh = typeof availability.available_gpu_high === "number" &&
-      Number.isSafeInteger(availability.available_gpu_high) ? availability.available_gpu_high : 0;
-    const preferredCanAdmit = (mediumPriorityEnabled && mediumGpu !== undefined && preferredMedium >= requiredGpuCount) ||
-      (allowHighPriorityFallback && preferredHigh >= requiredGpuCount);
-    if (!preferredCanAdmit && MINIMAX_H3_SALAD_GLOBAL_CAPACITY_FALLBACK) {
-      // Omitting country_codes asks Salad for the global market. It is only a
-      // fallback after the preferred locality cannot admit the complete wave;
-      // medium/high selection below still applies to the returned snapshot.
-      const global = await client.getGpuAvailability(resources);
-      const globalMedium = typeof global.available_gpu_medium === "number" &&
-        Number.isSafeInteger(global.available_gpu_medium) ? global.available_gpu_medium : 0;
-      const globalHigh = typeof global.available_gpu_high === "number" &&
-        Number.isSafeInteger(global.available_gpu_high) ? global.available_gpu_high : 0;
-      if (globalMedium > preferredMedium || globalHigh > preferredHigh) availability = global;
+    let preferred: Awaited<ReturnType<MiniMaxH3SaladCapacityClient["getGpuAvailability"]>> | undefined;
+    try {
+      preferred = await client.getGpuAvailability(resources, [...MINIMAX_H3_SALAD_COUNTRY_CODES]);
+    } catch (preferredError) {
+      // A transient locality read must not strand a wave when Salad's global
+      // read can still prove a complete high-priority fallback. This remains
+      // one bounded, read-only retry; if it fails, preserve the original
+      // failure context and never guess capacity.
+      if (!MINIMAX_H3_SALAD_GLOBAL_CAPACITY_FALLBACK) throw preferredError;
+      try {
+        availability = await client.getGpuAvailability(resources);
+      } catch (globalError) {
+        throw new MiniMaxH3Error(
+          `weekly MiniMax H3 Salad capacity check failed before dispatch (preferred and global reads): ` +
+            `${globalError instanceof Error ? globalError.message : String(globalError)}`,
+        );
+      }
+      preferred = undefined;
+    }
+    if (preferred !== undefined) {
+      const preferredMedium = typeof preferred.available_gpu_medium === "number" &&
+        Number.isSafeInteger(preferred.available_gpu_medium) ? preferred.available_gpu_medium : 0;
+      const preferredHigh = typeof preferred.available_gpu_high === "number" &&
+        Number.isSafeInteger(preferred.available_gpu_high) ? preferred.available_gpu_high : 0;
+      const preferredCanAdmit = (mediumPriorityEnabled && mediumGpu !== undefined && preferredMedium >= requiredGpuCount) ||
+        (allowHighPriorityFallback && preferredHigh >= requiredGpuCount);
+      availability = preferred;
+      if (!preferredCanAdmit && MINIMAX_H3_SALAD_GLOBAL_CAPACITY_FALLBACK) {
+        // Omitting country_codes asks Salad for the global market. It is only a
+        // fallback after the preferred locality cannot admit the complete wave;
+        // medium/high selection below still applies to the returned snapshot.
+        const global = await client.getGpuAvailability(resources);
+        const globalMedium = typeof global.available_gpu_medium === "number" &&
+          Number.isSafeInteger(global.available_gpu_medium) ? global.available_gpu_medium : 0;
+        const globalHigh = typeof global.available_gpu_high === "number" &&
+          Number.isSafeInteger(global.available_gpu_high) ? global.available_gpu_high : 0;
+        if (globalMedium > preferredMedium || globalHigh > preferredHigh) availability = global;
+      }
     }
   } catch (error) {
     throw new MiniMaxH3Error(

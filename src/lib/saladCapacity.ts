@@ -39,6 +39,11 @@ export const SALAD_CAPACITY_LANES = Object.freeze([
   },
 ] as const);
 
+// The country-scoped market read is preferred, but it is not the only safe
+// read-only evidence source. A single global retry keeps the fleet preview in
+// lockstep with H3 paid admission when the locality endpoint is unavailable.
+const SALAD_GLOBAL_CAPACITY_FALLBACK = true;
+
 export type SaladCapacityLaneId = (typeof SALAD_CAPACITY_LANES)[number]["id"];
 
 export interface SaladCapacityLaneSnapshot {
@@ -205,6 +210,14 @@ export async function readSaladCapacitySnapshot(
     } catch {
       blockers.push("availability_read_failed");
       availability = {};
+      if (SALAD_GLOBAL_CAPACITY_FALLBACK && "countryCodes" in lane) {
+        try {
+          const resources: SaladResources = { ...lane.resources, gpu_classes: [selectedClass.id] };
+          availability = await salad.getGpuAvailability(resources);
+        } catch {
+          blockers.push("global_availability_read_failed");
+        }
+      }
     }
     // Salad's country-scoped count is a live-node estimate, not a reservation.
     // Keep the preferred market first, then make one bounded global read when

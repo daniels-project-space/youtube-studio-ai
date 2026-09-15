@@ -83,6 +83,28 @@ assert.equal(globalH3.fallbackUsed, true);
 assert.deepEqual(h3MarketQueries, [["cn"], undefined],
   "the fleet projection must make at most one global read after a country-scoped H3 miss");
 
+const failedLocalityQueries: Array<string[] | undefined> = [];
+const failedLocalitySnapshot = await readSaladCapacitySnapshot({
+  listGpuClasses: async () => classes,
+  listContainerGroups: async () => [],
+  listContainerInstances: async () => [],
+  getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 10, container_replicas_used: 0 } }),
+  getGpuAvailability: async (resources, countryCodes) => {
+    if (resources.gpu_classes[0] === classes[1]!.id) {
+      failedLocalityQueries.push(countryCodes);
+      if (countryCodes) throw new Error("preferred locality unavailable");
+      return { available_gpu_medium: 0, available_gpu_high: 2 };
+    }
+    return { available_gpu_medium: 4, available_gpu_high: 4 };
+  },
+}, { requiredWorkers: 2 });
+const failedLocalityH3 = failedLocalitySnapshot.lanes.find((lane) => lane.id === "h3")!;
+assert.equal(failedLocalityH3.recommendedPriority, "high",
+  "a failed country read must still expose a proven global high fallback");
+assert.equal(failedLocalityH3.fallbackUsed, true);
+assert.deepEqual(failedLocalityQueries, [["cn"], undefined],
+  "fleet preview must bound preferred-read recovery to one global request");
+
 const mediumDisabled = await readSaladCapacitySnapshot({
   listGpuClasses: async () => classes,
   listContainerGroups: async () => [],

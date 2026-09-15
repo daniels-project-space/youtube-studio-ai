@@ -133,6 +133,23 @@ async function test() {
     "a country-scoped zero must retry the global market before holding an otherwise available high-tier wave",
   );
   assert.deepEqual(countryQueries, [["cn"], undefined], "global capacity retry must be bounded and omit the country filter");
+  const failedLocalityQueries: Array<string[] | undefined> = [];
+  assert.deepEqual(
+    await assertMiniMaxH3SaladCapacity(2, {
+      client: {
+        ...capacityClient,
+        getGpuAvailability: async (_resources, countryCodes) => {
+          failedLocalityQueries.push(countryCodes);
+          if (countryCodes) throw new Error("preferred Salad locality read unavailable");
+          return { available_gpu_medium: 0, available_gpu_high: 2 };
+        },
+      },
+      allowHighPriorityFallback: true,
+    }),
+    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, selectedPriceUsdPerHour: 0.58, capacityMode: "high", fallbackUsed: true },
+    "a failed preferred locality read may use one successful global read to unlock an admitted high-tier wave",
+  );
+  assert.deepEqual(failedLocalityQueries, [["cn"], undefined], "preferred-read recovery must remain one bounded global retry");
   assert.deepEqual(
     await assertMiniMaxH3SaladCapacity(2, {
       client: {
