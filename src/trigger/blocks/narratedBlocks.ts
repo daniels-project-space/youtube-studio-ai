@@ -3319,17 +3319,18 @@ export const timelineAssemble: Block = {
       : undefined;
     const cinematicFootageManifest = cinematicAssemblyHandoff?.manifest;
     // The generated-footage manifest is the only reliable signal that this
-    // body came from LTX rather than ordinary stock/entity sources. Preserve
-    // its in-world audio when available; cinematic Casefile is stricter and
-    // requires every admitted LTX take to carry the worker-attested stream.
-    const generatedLtxBodyAudio = Boolean(
+    // body came from a generated visual route rather than ordinary
+    // stock/entity sources. Native H3 clips may be video-only, so the
+    // cinematic H3 lane preserves available audio without inventing a hard
+    // LTX-only requirement; the legacy adapter keeps its stricter contract.
+    const generatedFootageBodyAudio = Boolean(
       generatedFootageRaw &&
       typeof generatedFootageRaw === "object" &&
       typeof (generatedFootageRaw as Record<string, unknown>)["source"] === "string",
     );
     const bodyAudioMode: "off" | "available" | "required" = cinematicFootageManifest
-      ? "required"
-      : generatedLtxBodyAudio
+      ? footageRenderer?.kind === "minimax-h3" ? "available" : "required"
+      : generatedFootageBodyAudio
         ? "available"
         : "off";
     const authoredManifest = ctx.store["shotRenderManifest"]
@@ -3667,6 +3668,7 @@ export const timelineAssemble: Block = {
         width: W,
         height: H,
         bodyAudioMode,
+        allowShortSourceRetime: footageRenderer?.kind === "minimax-h3",
       });
     } else if (authoredManifest) {
       const authoredPaths: string[] = [];

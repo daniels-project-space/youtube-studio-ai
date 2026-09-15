@@ -210,6 +210,21 @@ assert.match(
   /output: \{ r2Key: `\$\{prefix\}\/h3\/clip-/,
   "signature H3 clips must persist outputs under the run-scoped R2 namespace",
 );
+assert.match(
+  source,
+  /async function renderCinematicScenePlanWithH3\(/,
+  "source-bound Casefile scenes must have a native H3 adapter rather than an unqualified legacy motion branch",
+);
+assert.match(
+  source,
+  /plan\.source === "cinematic_case_sequence"\s*\n\s*\? await renderCinematicScenePlanWithH3/,
+  "Casefile generated scenes must dispatch through the H3 cinematic adapter",
+);
+assert.doesNotMatch(
+  source,
+  /plan\.source !== "cinematic_case_sequence" && generatedScenes\.length > 0/,
+  "the active generated-footage selector must not leave Casefile on the legacy LTX path",
+);
 
 for (const gate of ["cinematicKeyframeGate.ts", "cinematicClipGate.ts", "cinematicTransitionGate.ts"]) {
   const gateSource = readFileSync(new URL(`../../../lib/${gate}`, import.meta.url), "utf8");

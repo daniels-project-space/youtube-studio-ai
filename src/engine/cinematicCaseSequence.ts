@@ -181,7 +181,7 @@ const CinematicCoverageShotSchema = z
   .strict()
   .refine(
     (value) => value.t1 - value.t0 >= 3,
-    "cinematic coverage shot must be at least 3 seconds for the locked LTX render profile",
+    "cinematic coverage shot must be at least 3 seconds for the locked generated-video render profile",
   );
 export type CinematicCoverageShot = z.infer<typeof CinematicCoverageShotSchema>;
 
@@ -309,7 +309,7 @@ export const CinematicGeneratedSceneSchema = z
   .strict()
   .refine(
     (value) => value.t1 - value.t0 >= 3,
-    "generated cinematic scene must be at least 3 seconds for the locked LTX render profile",
+    "generated cinematic scene must be at least 3 seconds for the locked generated-video render profile",
   );
 export type CinematicGeneratedScene = z.infer<typeof CinematicGeneratedSceneSchema>;
 

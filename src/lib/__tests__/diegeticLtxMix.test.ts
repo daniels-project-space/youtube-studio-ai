@@ -46,6 +46,13 @@ async function makePhaseTake(path: string, polarity: 1 | -1): Promise<void> {
   ]);
 }
 
+async function makeH3LikeTake(path: string): Promise<void> {
+  await ffmpeg([
+    "-f", "lavfi", "-i", "testsrc2=size=160x90:rate=30:duration=2",
+    "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", path,
+  ]);
+}
+
 async function boundaryPeak(path: string, startSec: number): Promise<number> {
   const { stdout } = await execFile(
     "ffmpeg",
@@ -64,6 +71,8 @@ async function main(): Promise<void> {
     const takeA = join(dir, "ltx-a.mp4");
     const takeB = join(dir, "ltx-b.mp4");
     const videoOnlyTake = join(dir, "video-only.mp4");
+    const h3LikeTake = join(dir, "h3-like.mp4");
+    const h3RetimeBody = join(dir, "h3-retime-body.mp4");
     const body = join(dir, "body.mp4");
     const beatBody = join(dir, "beat-body.mp4");
     const structuredBody = join(dir, "structured-body.mp4");
@@ -75,6 +84,7 @@ async function main(): Promise<void> {
     const master = join(dir, "master.mp4");
     await makeTake(takeA, 440);
     await makeTake(takeB, 660);
+    await makeH3LikeTake(h3LikeTake);
     await makePhaseTake(seamA, 1);
     await makePhaseTake(seamB, -1);
     await ffmpeg([
@@ -94,6 +104,20 @@ async function main(): Promise<void> {
       /required diegetic audio missing/,
       "a video-only LTX take must fail before cinematic assembly",
     );
+
+    await assembleAuthoredBody({
+      clipPaths: [h3LikeTake],
+      segDurationsSec: [4],
+      outPath: h3RetimeBody,
+      tmpDir: dir,
+      width: 160,
+      height: 90,
+      fps: 30,
+      bodyAudioMode: "available",
+      allowShortSourceRetime: true,
+    });
+    const h3RetimeDuration = (await probe(h3RetimeBody)).durationSec;
+    assert.ok(Math.abs(h3RetimeDuration - 4) < 0.12, `H3 short source must retime to the authored 4s window, got ${h3RetimeDuration}`);
 
     await assembleAuthoredBody({
       clipPaths: [takeA, takeB],

@@ -849,8 +849,13 @@ export async function assembleAuthoredBody(args: {
   width?: number;
   height?: number;
   fps?: number;
-  /** Preserve LTX's in-world audio; `required` rejects a video-only take. */
+  /** Preserve generated-clip in-world audio; `required` rejects a video-only take. */
   bodyAudioMode?: "off" | "available" | "required";
+  /** Native MiniMax H3 clips are fixed at 124 frames; retime them to a
+   * longer authored window instead of freezing the final frame or rejecting
+   * a valid source-bound cut. Legacy LTX callers keep the strict short-source
+   * rejection by leaving this disabled. */
+  allowShortSourceRetime?: boolean;
   preset?: string;
 }): Promise<string> {
   if (args.clipPaths.length === 0 || args.clipPaths.length !== args.segDurationsSec.length) {
@@ -876,17 +881,25 @@ export async function assembleAuthoredBody(args: {
     if (bodyAudioMode === "required" && !media.hasAudio) {
       throw new FfmpegError(`assembleAuthoredBody: required diegetic audio missing from segment ${index}`);
     }
-    // LTX clips are quantized to 8n+1 frames, so their container duration can
-    // differ from the authored window by a few frames. Larger deficits are a
-    // provider contract violation; tiny deficits are held to the exact cut.
-    if (media.durationSec < authored - Math.max(0.2, 3 / fps)) {
+    // Generated clips can be quantized to a fixed frame profile, so their
+    // container duration can differ from the authored window by a few frames.
+    // Larger deficits are a provider contract violation unless the caller has
+    // explicitly opted into the H3 retime path; tiny deficits are held to the
+    // exact cut.
+    const shortSource = media.durationSec < authored - Math.max(0.2, 3 / fps);
+    if (shortSource && !args.allowShortSourceRetime) {
       throw new FfmpegError(
         `assembleAuthoredBody: segment ${index} is ${media.durationSec.toFixed(3)}s, shorter than authored ${authored.toFixed(3)}s`,
       );
     }
     const outputDur = authored + (index === args.clipPaths.length - 1 ? tailHold : 0);
-    const pad = Math.max(0, outputDur - media.durationSec);
+    const retimeFactor = shortSource && args.allowShortSourceRetime
+      ? authored / media.durationSec
+      : 1;
+    const retimedDuration = media.durationSec * retimeFactor;
+    const pad = Math.max(0, outputDur - retimedDuration);
     const vf =
+      `${retimeFactor === 1 ? "" : `setpts=${retimeFactor.toFixed(9)}*PTS,`}` +
       `scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
       `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps},` +
       `tpad=stop_mode=clone:stop_duration=${pad.toFixed(3)},` +
@@ -899,7 +912,7 @@ export async function assembleAuthoredBody(args: {
     );
     const sourceAudio = media.hasAudio
       ? "[0:a]"
-      : "anullsrc=channel_layout=stereo:sample_rate=44100";
+      : "anullsrc=channel_layout=stereo:sample_rate=44100,";
     // A 20ms boundary fade is short enough not to move a causal cut, but
     // prevents a phase/amplitude jump from producing a click in the master.
     const audioEdgeFadeSec = Math.min(0.02, outputDur / 4);

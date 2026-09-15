@@ -161,7 +161,7 @@ const cinematicCaseSequence: Block = {
       (rawInput as Record<string, unknown>)["editorialReview"] !== undefined;
     // A mechanics packet is optional so normal Casefile review work remains
     // runnable. Once a human attaches one to the signed sequence, however,
-    // this live LTX path resolves the fixed Casefile quality contract and
+    // this live H3 path resolves the fixed Casefile quality contract and
     // carries it through prompt construction, auto-review, and final-master QA.
     const rawReferenceMechanicsPacket = (rawInput as Record<string, unknown> | undefined)?.["referenceMechanicsPacket"];
     const referenceQuality = rawReferenceMechanicsPacket
