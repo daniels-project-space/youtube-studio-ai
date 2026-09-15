@@ -15,8 +15,11 @@ function convexClient(): StudioConvexHttpClient {
   return new StudioConvexHttpClient(url);
 }
 
-function safeLogicalLeaseSlots(value: unknown): number {
-  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 3 ? value : 0;
+function parseLogicalLeaseSlots(value: unknown): number {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= 3) return value;
+  // A malformed lease response must never be interpreted as an empty fleet;
+  // doing so could advertise paid 5090 capacity already owned by a live wave.
+  throw new Error("H3 capacity admission received invalid Convex fleet lease occupancy");
 }
 
 /** Read-only Salad admission for the weekly H3 render desk. */
@@ -36,7 +39,7 @@ export async function GET(request: Request) {
       saladCloudClientFromVault(),
       convexClient().query(api.saladFleetReservations.listActive, { now: Date.now() }),
     ]);
-    const logicalReservedGpuSlots = safeLogicalLeaseSlots(logicalLease.occupiedGpuSlots);
+    const logicalReservedGpuSlots = parseLogicalLeaseSlots(logicalLease.occupiedGpuSlots);
     const capacity = await assertMiniMaxH3SaladCapacity(jobCount, {
       allowHighPriorityFallback: policy.highFallbackEnabled,
       mediumPriorityEnabled: policy.mediumEnabled,

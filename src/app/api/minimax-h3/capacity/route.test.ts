@@ -12,6 +12,8 @@ assert.match(route, /api\.saladFleetReservations\.listActive/,
   "the owner capacity probe must observe the same logical fleet lease as weekly dispatch");
 assert.match(route, /Math\.max\(await salad\.getOccupiedGpuSlots\(\), logicalReservedGpuSlots\)/,
   "provider occupancy and logical leases must share one fail-closed occupied-slot fence");
+assert.match(route, /invalid Convex fleet lease occupancy/,
+  "malformed logical lease data must fail closed instead of looking like zero occupancy");
 assert.doesNotMatch(route, /process\.env\.MINIMAX_H3_SALAD_(?:HIGH_PRIORITY_FALLBACK|MEDIUM_PRIORITY)/,
   "H3 capacity admission must consume the shared Salad tier policy");
 assert.match(route, /paidRequestStarted: false/);
