@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
 import { useAssetUrlState } from "@/lib/asset-url";
 import {
   selectMediaPreview,
@@ -70,6 +70,7 @@ export function MediaPreview({
   const [reviewedFailedSrc, setReviewedFailedSrc] = useState<string | null>(null);
   const [r2FailedKey, setR2FailedKey] = useState<string | null>(null);
   const [videoStillFailedKey, setVideoStillFailedKey] = useState<string | null>(null);
+  const [videoProbe, setVideoProbe] = useState<{ src: string; state: "checking" | "ready" } | null>(null);
   const [fallbackFailedSrc, setFallbackFailedSrc] = useState<string | null>(null);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const showingReviewed = Boolean(reviewedSrc && reviewedFailedSrc !== reviewedSrc);
@@ -100,6 +101,40 @@ export function MediaPreview({
     ? { source: "reviewed" as const, src: reviewedSrc, state: "loading" as const }
     : fallbackSelection;
   const showingVideoStill = !showingReviewed && !assetKey && Boolean(videoStillKey) && selection.source === "r2";
+  // Probe the retained master with a quiet one-byte request before mounting a
+  // media element. A missing legacy object then becomes an honest unavailable
+  // state instead of a browser-console 404; valid sources still use the exact
+  // video element below to seek the 15-second frame.
+  useEffect(() => {
+    if (!showingVideoStill || !selection.src || !videoStillKey) {
+      setVideoProbe(null);
+      return;
+    }
+    const src = selection.src;
+    const controller = new AbortController();
+    let cancelled = false;
+    setVideoProbe({ src, state: "checking" });
+    fetch(src, {
+      headers: { Range: "bytes=0-0" },
+      signal: controller.signal,
+      cache: "no-store",
+    })
+      .then((response) => {
+        if (!response.ok && response.status !== 206) throw new Error("video source unavailable");
+        if (!cancelled) setVideoProbe({ src, state: "ready" });
+      })
+      .catch(() => {
+        if (!cancelled) setVideoStillFailedKey(videoStillKey);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [showingVideoStill, selection.src, videoStillKey]);
+  const videoSourceReady = showingVideoStill && Boolean(selection.src)
+    // Server-rendered previews keep their semantic media element; the client
+    // probe gates the actual browser request after hydration.
+    && (typeof window === "undefined" || (videoProbe?.src === selection.src && videoProbe.state === "ready"));
   const state = selection.src && loadedSrc === selection.src
     ? "ready"
     : selection.state;
@@ -143,7 +178,7 @@ export function MediaPreview({
           }}
         />
       )}
-      {selection.src && showingVideoStill && (
+      {selection.src && showingVideoStill && videoSourceReady && (
         <video
           className={joinClassNames(styles.image, imageClassName)}
           src={selection.src}
