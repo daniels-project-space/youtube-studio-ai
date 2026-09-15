@@ -60,6 +60,22 @@ This is capacity admission, not a reservation or a guarantee of future Salad
 supply. Native H3 output quality, worker-image digest, and durable worker
 deduplication remain separate qualification gates.
 
+## Locality fallback — 15 September 2026
+
+The admission check first asks for the configured preferred `cn` market. When
+that snapshot cannot admit the complete wave at either eligible tier, it makes
+one additional read-only request without `country_codes` and uses the global
+snapshot only when it reports more matching medium or high slots. This handles
+the provider's documented distinction between currently-online regional nodes
+and the wider network without turning a locality miss into an unbounded poll or
+silently changing the exact GPU/resource contract. Medium remains the first
+choice; high is selected only when the global or preferred snapshot has enough
+high-tier slots and a valid exact-class price.
+
+The global read is still an estimate, not a reservation. The durable account
+lease is checked before and after the market read, so an overlapping wave keeps
+the order held even when the provider snapshot looks healthy.
+
 ## Operational follow-up — 15 September 2026
 
 The repository-side `salad-runtime-preflight` was run again after the H3
