@@ -32,6 +32,8 @@ assert.match(page, /if \(body\.state === "admitted"\) return/,
   "an admitted capacity result stops the no-spend observer until explicit retry");
 assert.match(page, /Retry with high priority/,
   "an admitted high-tier fallback must make the explicit paid action unambiguous");
+assert.match(page, /selectedPriceUsdPerHour\.toFixed\(3\)/,
+  "the pre-spend admission result must show the hourly rate for the selected tier");
 assert.match(page, /Fleet snapshot/);
 assert.match(page, /api\/salad\/capacity/);
 assert.match(page, /jobCount=\$\{requestedJobs\}/);
