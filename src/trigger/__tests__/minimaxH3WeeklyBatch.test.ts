@@ -7,6 +7,8 @@ import { miniMaxH3WeeklyRequestPacketKey } from "@/lib/minimaxH3";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+const weeklySource = readFileSync(resolve(process.cwd(), "src/trigger/minimaxH3WeeklyBatch.ts"), "utf8");
+
 const valid = {
   orderKey: "week-20260913-owner-a",
   receiptKey: "owner/a/plan-batches/week-20260913/h3/receipt.json",
@@ -65,13 +67,19 @@ assert.throws(
   /manifest key is not canonical/,
 );
 assert.match(
-  readFileSync(resolve(process.cwd(), "src/trigger/minimaxH3WeeklyBatch.ts"), "utf8"),
+  weeklySource,
   /providerReceipts: result\.map\(\(item\) => item\.receipt\)/,
   "weekly receipt must retain full per-shot H3 provenance for prepared-footage reconciliation",
 );
 assert.match(
-  readFileSync(resolve(process.cwd(), "src/trigger/minimaxH3WeeklyBatch.ts"), "utf8"),
+  weeklySource,
   /assertMiniMaxH3SaladCapacity\(payload\.jobs\.length,\s*\{/,
   "weekly paid dispatch must be gated by a current Salad capacity admission",
 );
+const admissionIndex = weeklySource.indexOf("const capacity = await assertMiniMaxH3SaladCapacity");
+const upgradeIndex = weeklySource.indexOf("api.saladFleetReservations.upgradePriority");
+const providerStartIndex = weeklySource.indexOf("providerStarted = true;");
+assert(admissionIndex >= 0 && upgradeIndex > admissionIndex && providerStartIndex > upgradeIndex,
+  "high fallback must upgrade the durable Salad lease after admission and before any provider request");
+assert.match(weeklySource, /priority:\s*"high"/, "the high-priority lease upgrade must be explicit");
 console.log("weekly MiniMax H3 batch task contracts passed");
