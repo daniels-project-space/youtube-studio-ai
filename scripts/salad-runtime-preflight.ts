@@ -7,6 +7,7 @@ import {
   SALAD_HIGH_FALLBACK_PRIORITY,
   saladCloudClientFromVault,
   saladOccupiedGpuSlots,
+  selectSaladCapacityPriority,
   selectSaladGpu,
   selectSaladGpuAtPriority,
   type SaladBulkPriority,
@@ -55,23 +56,29 @@ async function main() {
     // normal tier, while high is considered only when medium cannot admit the
     // exact class. Other routes stay medium-only so the preflight never hides
     // a cost/priority policy change.
-    let gpu: ReturnType<typeof selectSaladGpu> | null = null;
+    let mediumGpu: ReturnType<typeof selectSaladGpu> | null = null;
+    let highGpu: ReturnType<typeof selectSaladGpuAtPriority> | null = null;
     let selectedPriority: SaladBulkPriority | null = null;
     try {
-      gpu = selectSaladGpu(gpuClasses, spec.gpu);
-      selectedPriority = gpu.priority;
+      mediumGpu = selectSaladGpu(gpuClasses, spec.gpu);
     } catch {
-      if (spec.route === "minimax-h3-turbo8-5090") {
-        try {
-          gpu = selectSaladGpuAtPriority(gpuClasses, spec.gpu, SALAD_HIGH_FALLBACK_PRIORITY);
-          selectedPriority = gpu.priority;
-        } catch {
-          blockers.push("exact_priced_gpu_class_unavailable_at_medium_or_high");
-        }
-      } else {
+      if (spec.route !== "minimax-h3-turbo8-5090") {
         blockers.push("exact_medium_priority_gpu_class_unavailable");
       }
     }
+    if (spec.route === "minimax-h3-turbo8-5090") {
+      try {
+        highGpu = selectSaladGpuAtPriority(gpuClasses, spec.gpu, SALAD_HIGH_FALLBACK_PRIORITY);
+      } catch {
+        if (!mediumGpu) blockers.push("exact_priced_gpu_class_unavailable_at_medium_or_high");
+        else blockers.push("exact_high_priority_gpu_class_or_price_unavailable");
+      }
+    }
+    selectedPriority = mediumGpu ? "medium" : highGpu ? "high" : null;
+    // Use the medium class for the first availability read when it exists;
+    // medium and high prices are tiers on the same exact desktop class. If
+    // medium is absent, the H3 lane can still observe its priced high class.
+    let gpu = mediumGpu ?? highGpu;
     let manifestVerified = false;
     let modelFiles = 0;
     let modelBytes = 0;
@@ -108,15 +115,17 @@ async function main() {
       : { available_gpu_medium: 0, available_gpu_high: 0 };
     const availableMediumGpus = availability.available_gpu_medium ?? 0;
     const availableHighGpus = availability.available_gpu_high ?? 0;
-    if (availableMediumGpus < 1 && selectedPriority === "medium" && spec.route === "minimax-h3-turbo8-5090" && availableHighGpus >= 1) {
-      // Capacity, not just pricing, determines the effective route. The
-      // worker performs the same promotion before dispatching a paid job.
-      try {
-        gpu = selectSaladGpuAtPriority(gpuClasses, spec.gpu, SALAD_HIGH_FALLBACK_PRIORITY);
-        selectedPriority = gpu.priority;
-      } catch {
-        blockers.push("exact_high_priority_gpu_price_unavailable_for_fallback");
-      }
+    const admittedPriority = selectSaladCapacityPriority({
+      requiredWorkers: 1,
+      mediumAvailable: availableMediumGpus,
+      highAvailable: availableHighGpus,
+      mediumEligible: mediumGpu !== null,
+      highEligible: spec.route === "minimax-h3-turbo8-5090" && highGpu !== null,
+      allowHighPriorityFallback: spec.route === "minimax-h3-turbo8-5090",
+    });
+    if (admittedPriority) {
+      selectedPriority = admittedPriority;
+      gpu = admittedPriority === SALAD_HIGH_FALLBACK_PRIORITY ? highGpu : mediumGpu;
     }
     if (availableMediumGpus < 1 && selectedPriority !== "high") {
       blockers.push("exact_medium_priority_gpu_capacity_unavailable");
