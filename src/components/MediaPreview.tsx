@@ -71,6 +71,7 @@ export function MediaPreview({
   const [r2FailedKey, setR2FailedKey] = useState<string | null>(null);
   const [videoStillFailedKey, setVideoStillFailedKey] = useState<string | null>(null);
   const [videoProbe, setVideoProbe] = useState<{ src: string; state: "checking" | "ready" } | null>(null);
+  const [imageProbe, setImageProbe] = useState<{ src: string; state: "ready" } | null>(null);
   const [fallbackFailedSrc, setFallbackFailedSrc] = useState<string | null>(null);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const showingReviewed = Boolean(reviewedSrc && reviewedFailedSrc !== reviewedSrc);
@@ -133,6 +134,31 @@ export function MediaPreview({
     // Server-rendered previews keep their semantic media element; the client
     // probe gates the actual browser request after hydration.
     && (typeof window === "undefined" || (videoProbe?.src === selection.src && videoProbe.state === "ready"));
+  const showingPrivateImage = !showingReviewed && Boolean(selection.src)
+    && selection.source === "r2" && !showingVideoStill;
+  useEffect(() => {
+    if (!showingPrivateImage || !selection.src || !assetKey) return;
+    const src = selection.src;
+    const controller = new AbortController();
+    let cancelled = false;
+    fetch(src, { signal: controller.signal, cache: "no-store" })
+      .then((response) => {
+        if (!response.ok) throw new Error("image source unavailable");
+        // The probe only establishes availability; do not retain a second
+        // copy of the image in JS memory before the real <img> loads it.
+        void response.body?.cancel();
+        if (!cancelled) setImageProbe({ src, state: "ready" });
+      })
+      .catch(() => {
+        if (!cancelled) setR2FailedKey(assetKey);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [showingPrivateImage, selection.src, assetKey]);
+  const imageSourceReady = !showingPrivateImage || typeof window === "undefined"
+    || imageProbe?.src === selection.src;
   const state = selection.src && loadedSrc === selection.src
     ? "ready"
     : selection.state;
@@ -151,7 +177,7 @@ export function MediaPreview({
       data-tone={dataTone}
       aria-busy={state === "loading" || undefined}
     >
-      {selection.src && !showingVideoStill && (
+      {selection.src && !showingVideoStill && imageSourceReady && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           className={joinClassNames(styles.image, imageClassName)}
