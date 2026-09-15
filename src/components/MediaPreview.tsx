@@ -120,16 +120,22 @@ export function MediaPreview({
     // probe validates the same path the native player will use without
     // transferring the master. A range-only probe can be a false positive
     // when an R2 edge serves the first byte but rejects the later seek.
-    fetch(`${src}${src.includes("?") ? "&" : "?"}probe=1`, {
-      signal: controller.signal,
-      cache: "no-store",
-    })
-      .then((response) => {
-        if (!response.ok) throw new Error("video source probe unavailable");
-        return response.json() as Promise<{ available?: unknown }>;
-      })
-      .then((result) => {
-        if (result.available !== true) throw new Error("video source unavailable");
+    const probe = async (): Promise<void> => {
+      const response = await fetch(`${src}${src.includes("?") ? "&" : "?"}probe=1`, {
+        signal: controller.signal,
+        cache: "no-store",
+      });
+      if (!response.ok) throw new Error("video source probe unavailable");
+      const result = await response.json() as { available?: unknown };
+      if (result.available !== true) throw new Error("video source unavailable");
+    };
+    // Require two independent successful probes. A stale edge can answer one
+    // probe positively immediately before a native range request receives a
+    // 404; the second read prevents mounting a source that is not stable yet.
+    probe()
+      .then(() => new Promise<void>((resolve) => setTimeout(resolve, 160)))
+      .then(() => probe())
+      .then(() => {
         if (!cancelled) setVideoProbe({ src, state: "ready" });
       })
       .catch(() => {
