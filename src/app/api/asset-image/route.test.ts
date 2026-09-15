@@ -39,5 +39,7 @@ assert.match(videoRoute, /Cross-Origin-Resource-Policy.*same-origin/);
 assert.match(videoRoute, /owner\/\$\{OWNER_ID\}/);
 assert.match(videoRoute, /status: upstream\.status/);
 assert.match(videoRoute, /probe[\s\S]*available: false/);
+assert.match(videoRoute, /probe && !range\) forwardedHeaders\.set\("Range", "bytes=0-1048575"\)/,
+  "video probes must exercise the same bounded range path as native playback");
 
 console.log("same-origin private image/video proxy contracts passed");

@@ -44,6 +44,11 @@ export async function GET(request: Request) {
     if (range) forwardedHeaders.set("Range", range);
     const ifRange = request.headers.get("if-range");
     if (ifRange) forwardedHeaders.set("If-Range", ifRange);
+    // A probe must validate the same byte-range delivery used by a native
+    // player. A full 200 response can look healthy even when the edge rejects
+    // the first media range, which would otherwise mount a doomed <video> and
+    // emit a browser-console 404. Keep the probe tiny and side-effect free.
+    if (probe && !range) forwardedHeaders.set("Range", "bytes=0-1048575");
     // R2 can briefly return a stale 404 while a just-uploaded master becomes
     // visible across its edge. Refresh the signature and use a short bounded
     // retry window for that narrow transient class (and provider 5xx); missing
