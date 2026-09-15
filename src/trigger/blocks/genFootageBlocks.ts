@@ -25,6 +25,7 @@ import {
   renderNovitaImage,
   type NovitaClipReviewCheckpoint,
   type NovitaKeyframeReviewCheckpoint,
+  type NovitaRenderedScene,
 } from "@/lib/novitaMedia";
 import { applyNameCardOverlay } from "@/lib/ffmpeg";
 import { kenBurns, applyHyperframesOverlayClip } from "@/lib/ffmpeg";
@@ -571,6 +572,110 @@ async function renderGeneratedScenePlanInBatches(args: {
   return { scenes: renderedScenes, costUsd: observedCostUsd };
 }
 
+/**
+ * Native H3 adapter for the non-Casefile generated-footage lanes. H3 consumes
+ * an actual R2 still rather than a prompt-only image-to-video request, so the
+ * still is rendered and digest-checked first, then passed to the H3 worker.
+ * The local clip map lets the existing compositor apply name cards/evidence
+ * without pretending that an H3 output is a legacy Novita URL.
+ */
+async function renderGeneratedScenePlanWithH3(args: {
+  prefix: string;
+  scenes: readonly PlannedScene[];
+  maxCostUsd: number;
+  lifecycle: NonNullable<NovitaRenderLifecycle>;
+}): Promise<{
+  scenes: NovitaRenderedScene[];
+  costUsd: number;
+  localClipPaths: Map<string, string>;
+}> {
+  const readiness = minimaxH3Readiness("novita");
+  if (!readiness.admitted) {
+    throw new Error(`gen_footage: MiniMax H3 Novita route is not admitted: ${readiness.blockers.join("; ")}`);
+  }
+  // This read is deliberately before the first still render. A missing or
+  // changed model pack must not leave paid conditioning images with no motion
+  // route available to consume them.
+  await assertMiniMaxH3R2ModelManifest();
+  const tmp = await makeRunTempDir(`${args.lifecycle.runId}-h3-generated-footage`);
+  const nativeDurationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+  const scenes: NovitaRenderedScene[] = [];
+  const localClipPaths = new Map<string, string>();
+  let observedCostUsd = 0;
+  try {
+    for (const [index, scene] of args.scenes.entries()) {
+      const remainingBeforeStill = args.maxCostUsd - observedCostUsd;
+      if (!Number.isFinite(remainingBeforeStill) || remainingBeforeStill <= 0) {
+        throw new Error(`gen_footage: H3 stage budget exhausted before scene ${index + 1}`);
+      }
+      const still = await renderNovitaImage({
+        prefix: `${args.prefix}/h3-frames`,
+        id: `scene-${index + 1}`,
+        prompt: `${scene.still}. Absolutely NO text, NO words, NO letters, NO watermark.`,
+        ...(scene.negative ? { negativePrompt: scene.negative } : {}),
+        seed: scene.continuitySeed,
+        profileId: "production",
+        maxCostUsd: remainingBeforeStill,
+        lifecycle: args.lifecycle,
+      });
+      observedCostUsd += still.costUsd;
+      const firstFrameBytes = await getObjectBytes(still.key);
+      const firstFrameSha256 = sha256BytesHex(firstFrameBytes);
+      const remainingBeforeMotion = args.maxCostUsd - observedCostUsd;
+      if (!Number.isFinite(remainingBeforeMotion) || remainingBeforeMotion <= 0) {
+        throw new Error(`gen_footage: H3 stage budget exhausted after scene ${index + 1} conditioning still`);
+      }
+      const seed = scene.continuitySeed ?? Number.parseInt(
+        sha256Hex(`${args.lifecycle.runId}:generated-h3:${scene.id}`).slice(0, 8),
+        16,
+      ) % 2_147_483_647;
+      const clip = await renderMiniMaxH3(buildMiniMaxH3SceneRequest({
+        provider: "novita",
+        execution: "on-demand",
+        prompt: `${scene.still}. Preserve the exact accepted first frame, recurring subject, setting, wardrobe, props, lighting, and channel identity.`,
+        motionPrompt: scene.motion,
+        cameraInstruction: `Use the authored ${scene.cameraMove} move with ${scene.shotScale} framing and ${scene.lens} lens; keep the action physically coherent and avoid a scene change.`,
+        ...(scene.negative ? { negativePrompt: scene.negative } : {}),
+        seed,
+        firstFrame: { r2Key: still.key, sha256: firstFrameSha256 },
+        output: { r2Key: `${args.prefix}/h3/clip-${String(index + 1).padStart(4, "0")}.mp4` },
+        maxCostUsd: remainingBeforeMotion,
+      }));
+      observedCostUsd += clip.receipt.runtime.costUsd;
+      if (clip.outputBytes.byteLength < 1_024) {
+        throw new Error(`gen_footage: H3 scene ${index + 1} returned an undersized clip`);
+      }
+      const localPath = await writeBytes(join(tmp, `clip_${index + 1}.mp4`), clip.outputBytes);
+      const measured = await probe(localPath);
+      if (!measured.hasVideo || !Number.isFinite(measured.durationSec) || Math.abs(measured.durationSec - nativeDurationSec) > 0.08) {
+        throw new Error(`gen_footage: H3 scene ${index + 1} failed native video/duration verification`);
+      }
+      localClipPaths.set(scene.id, localPath);
+      scenes.push({
+        id: scene.id,
+        imagePrompt: scene.still,
+        motionPrompt: scene.motion,
+        ...(scene.negative ? { negativePrompt: scene.negative } : {}),
+        durationSec: nativeDurationSec,
+        cameraMove: scene.cameraMove,
+        shotScale: scene.shotScale,
+        lens: scene.lens,
+        ...(scene.continuityIds?.length ? { continuityIds: scene.continuityIds } : {}),
+        ...(scene.expectedCastIds ? { expectedCastIds: scene.expectedCastIds } : {}),
+        ...(scene.forbidAdditionalPeople ? { forbidAdditionalPeople: true as const } : {}),
+        ...(scene.continuitySeed !== undefined ? { seed: scene.continuitySeed } : { seed }),
+        stillKey: still.key,
+        stillUrl: still.url,
+        clipKey: clip.receipt.output.r2Key,
+        clipUrl: localPath,
+      });
+    }
+  } catch (error) {
+    throw withAdditionalObservedCost(error, observedCostUsd);
+  }
+  return { scenes, costUsd: observedCostUsd, localClipPaths };
+}
+
 export function assertCentralNovitaSelection(value: unknown, label: string): void {
   if (value === undefined || value === "novita" || value === "novita-ltx") return;
   throw new Error(
@@ -1034,6 +1139,12 @@ export const genFootage: Block = {
       );
     }
     const ltxScenes = scenes.filter((scene) => scene.sourceProofMedia === undefined);
+    // Generic Story Spine/episode-graph footage now uses the native H3
+    // adapter. The reviewed Casefile lane remains on its legacy path until its
+    // LTX-specific terminal-frame and transition manifest is converted into
+    // the H3 receipt shape; it is never silently relabelled.
+    const useH3ForFreshGeneratedScenes = plan.source !== "cinematic_case_sequence" && ltxScenes.length > 0;
+    const h3LocalClipPaths = new Map<string, string>();
     if (plan.source === "cinematic_case_sequence") {
       for (const scene of ltxScenes) {
         if (!Array.isArray(scene.expectedCastIds) || scene.forbidAdditionalPeople !== true) {
@@ -1177,7 +1288,22 @@ export const genFootage: Block = {
         }
       : undefined;
     const rendered = ltxScenes.length > 0
-      ? await renderGeneratedScenePlanInBatches({
+      ? useH3ForFreshGeneratedScenes
+        ? await renderGeneratedScenePlanWithH3({
+          prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/generated-footage`,
+          maxCostUsd: stageBudgetUsd,
+          lifecycle: {
+            ownerId: ctx.ownerId,
+            channelId: ctx.channelId,
+            runId: ctx.runId,
+            blockId: "gen_footage",
+          },
+          scenes: ltxScenes,
+        }).then((result) => {
+          for (const [sceneId, localPath] of result.localClipPaths) h3LocalClipPaths.set(sceneId, localPath);
+          return result;
+        })
+        : await renderGeneratedScenePlanInBatches({
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/generated-footage`,
       maxCostUsd: stageBudgetUsd,
       maxConcurrent,
@@ -1263,6 +1389,7 @@ export const genFootage: Block = {
         // behavior unchanged).
         const realImageInsertQuery = plan.source === "story_spine" ? plannedScene.realImageInsertQuery : undefined;
         let rawPath: string;
+        const h3LocalPath = h3LocalClipPaths.get(plannedScene.id);
         if (realImageInsertQuery) {
           try {
             const image = await searchWikimediaImage(realImageInsertQuery);
@@ -1283,10 +1410,12 @@ export const genFootage: Block = {
             ctx.log(
               `gen_footage: real-image insert failed on scene ${index + 1} (${e instanceof Error ? e.message : e}) — using the generated clip instead`,
             );
-            rawPath = await downloadTo(scene.clipUrl, join(tmp, `gen_${index}.mp4`), {
+            rawPath = h3LocalPath ?? await downloadTo(scene.clipUrl, join(tmp, `gen_${index}.mp4`), {
               timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
             });
           }
+        } else if (h3LocalPath) {
+          rawPath = h3LocalPath;
         } else {
           rawPath = await downloadTo(scene.clipUrl, join(tmp, `gen_${index}.mp4`), {
             timeoutMs: DURABLE_RENDER_OUTPUT_DOWNLOAD_TIMEOUT_MS,
@@ -1458,15 +1587,25 @@ export const genFootage: Block = {
         return sourceProof?.receipt.clipKey ?? renderedScene!.clipKey;
       });
       ctx.log(
-        `gen_footage: ${ltxScenes.length} Novita Z-Image/LTX clip(s) + ${sourceProofBySceneId.size} approved source-proof clip(s), ` +
+        `gen_footage: ${ltxScenes.length} ${useH3ForFreshGeneratedScenes ? "MiniMax H3" : "Novita Z-Image/LTX"} clip(s) + ${sourceProofBySceneId.size} approved source-proof clip(s), ` +
         `provider receipt $${rendered.costUsd.toFixed(4)}`,
       );
+      const renderer: GeneratedFootageRenderer = useH3ForFreshGeneratedScenes
+        ? {
+            kind: "minimax-h3",
+            provider: "novita",
+            execution: "on-demand",
+            runtimeId: MINIMAX_H3_RUNTIME_ID,
+            profileId: MINIMAX_H3_PROFILE.id,
+            modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
+          }
+        : { kind: "novita-ltx", styleId: ltxStyleSelection.styleId };
       return {
         footageClips: clips,
         footageKeys,
         generatedFootageSceneManifest,
         footageOnScreenTextCues: footageTextCues,
-        footageRenderer: { kind: "novita-ltx", styleId: ltxStyleSelection.styleId },
+        footageRenderer: renderer,
         ltxStyleId: ltxStyleSelection.styleId,
         ltxStyleSelection,
         [COST_PATCH_KEY]: rendered.costUsd,
