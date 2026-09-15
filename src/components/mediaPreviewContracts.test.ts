@@ -19,10 +19,10 @@ const daySchedule = read("src/app/(app)/schedule/DayByDaySchedule.tsx");
 // accessible loading/error state; surfaces do not each invent a new fallback.
 assert.match(preview, /useAssetUrlState/);
 assert.match(preview, /selectMediaPreview/);
-assert.match(preview, /Range: "bytes=0-0"/,
-  "video previews probe availability before mounting a missing private source");
 assert.match(preview, /probe=1/,
   "preview probes use a non-error availability response");
+assert.match(preview, /full-object[\s\S]*probe validates the same path/,
+  "video probes validate the native full-object delivery path");
 assert.match(preview, /videoSourceReady/);
 assert.match(preview, /showingPrivateImage/,
   "private image previews probe availability before mounting stale keys");
@@ -49,7 +49,7 @@ assert.doesNotMatch(latestVideo, /i\.ytimg\.com|fallbackSource="youtube"/);
 assert.match(runWorkbench, /SafeRunVideoPreview/);
 assert.match(runWorkbench, /SafeRunImagePreview/);
 assert.match(runWorkbench, /searchParams\.set\("probe", "1"\)/);
-assert.match(runWorkbench, /Range: "bytes=0-0"/);
+assert.match(runWorkbench, /fetch\(parsed\.toString\(\), \{ cache: "no-store" \}\)/);
 assert.match(runWorkbench, /"about:blank"/);
 
 // The Studio's R2-only carousel filters to saved masters, so a missing

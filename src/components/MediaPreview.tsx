@@ -105,10 +105,10 @@ export function MediaPreview({
     ? { source: "reviewed" as const, src: reviewedSrc, state: "loading" as const }
     : fallbackSelection;
   const showingVideoStill = !showingReviewed && !assetKey && Boolean(videoStillKey) && selection.source === "r2";
-  // Probe the retained master with a quiet one-byte request before mounting a
-  // media element. A missing legacy object then becomes an honest unavailable
-  // state instead of a browser-console 404; valid sources still use the exact
-  // video element below to seek the 15-second frame.
+  // Probe the retained master through the quiet delivery endpoint before
+  // mounting a media element. A missing legacy object then becomes an honest
+  // unavailable state instead of a browser-console 404; valid sources still
+  // use the exact video element below to seek the 15-second frame.
   useEffect(() => {
     if (!showingVideoStill || !selection.src || !videoStillKey) {
       return;
@@ -116,8 +116,11 @@ export function MediaPreview({
     const src = selection.src;
     const controller = new AbortController();
     let cancelled = false;
+    // The proxy cancels the response body in probe mode, so a full-object
+    // probe validates the same path the native player will use without
+    // transferring the master. A range-only probe can be a false positive
+    // when an R2 edge serves the first byte but rejects the later seek.
     fetch(`${src}${src.includes("?") ? "&" : "?"}probe=1`, {
-      headers: { Range: "bytes=0-0" },
       signal: controller.signal,
       cache: "no-store",
     })

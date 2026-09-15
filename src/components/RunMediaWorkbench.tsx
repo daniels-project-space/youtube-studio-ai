@@ -410,10 +410,7 @@ function SafeRunVideoPreview({
     if (!isAssetVideoProxy) return () => { cancelled = true; };
     const parsed = new URL(src, window.location.origin);
     parsed.searchParams.set("probe", "1");
-    fetch(parsed.toString(), {
-      cache: "no-store",
-      headers: { Range: "bytes=0-0" },
-    })
+    fetch(parsed.toString(), { cache: "no-store" })
       .then(async (response) => {
         const result = await response.json() as { available?: unknown };
         if (!response.ok || result.available !== true) throw new Error("video preview unavailable");
