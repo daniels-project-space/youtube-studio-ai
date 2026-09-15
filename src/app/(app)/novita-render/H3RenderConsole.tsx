@@ -450,5 +450,5 @@ export function H3RenderConsole() {
 }
 
 function LockedConsole({ access, onRequestOwner }: { access: OperationsAccessState; onRequestOwner: () => void }) {
-  return <main className={styles.page}><section className={styles.locked}><span className={styles.eyebrow}>{access === "checking" ? "Checking access" : "Paid compute"}</span><h1>MiniMax H3 render lanes</h1><p>{access === "checking" ? "Reading this browser session." : "Owner access is required to submit a paid Salad or Novita job."}</p>{access !== "checking" && <button type="button" onClick={onRequestOwner}>Verify owner</button>}</section></main>;
+  return <main className={styles.page}><section className={styles.locked}><span className={styles.eyebrow}>{access === "checking" ? "Checking access" : "Paid compute"}</span><h1>MiniMax H3 render lanes</h1><p>{access === "checking" ? "Reading this browser session." : "Owner access is required to submit a paid Salad or Novita job."}</p><div className={styles.lockedRoutes} aria-label="Render route policy"><div><strong>Weekly batch</strong><span>Salad · medium first → high fallback</span></div><div><strong>On demand</strong><span>Novita · spot · one shot</span></div></div>{access !== "checking" && <button type="button" onClick={onRequestOwner}>Verify owner</button>}</section></main>;
 }

@@ -11,6 +11,8 @@ assert.match(page, /Weekly batch/);
 assert.match(page, /Salad/);
 assert.match(page, /On demand/);
 assert.match(page, /Novita/);
+assert.match(page, /aria-label="Render route policy"/);
+assert.match(page, /medium first → high fallback/);
 assert.match(page, /api\/minimax-h3\/\$\{mode\}/);
 assert.match(page, /api\/minimax-h3\/status/);
 assert.match(page, /data-capacity-mode=\{status\.receipt\.capacityMode\}/,

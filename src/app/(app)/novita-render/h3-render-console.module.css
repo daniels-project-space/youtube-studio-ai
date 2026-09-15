@@ -55,5 +55,10 @@
 .holdCopy small { color: var(--color-faint); font-size: .64rem; }
 .error { color: #ff9b9b; font-size: .72rem; }
 .locked { min-height: 240px; align-content: center; justify-items: start; }
+.lockedRoutes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); width: min(100%, 620px); gap: .5rem; margin-top: .15rem; }
+.lockedRoutes > div { display: grid; gap: .18rem; padding: .65rem .72rem; border: 1px solid var(--color-border); border-radius: 10px; background: rgba(5, 8, 15, .42); }
+.lockedRoutes strong { color: var(--color-fg); font-size: .72rem; }
+.lockedRoutes span { color: var(--color-faint); font: .6rem/1.35 var(--font-mono); }
 @media (max-width: 640px) { .hero { display: grid; align-items: start; } .routeBadge { min-width: 0; } .fieldGrid, .modeTabs, .fleetLanes { grid-template-columns: 1fr; } .formFooter, .progressHeader { align-items: start; flex-direction: column; } }
+@media (max-width: 640px) { .lockedRoutes { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .progressTrack i { transition: none; } }
