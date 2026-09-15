@@ -2898,7 +2898,7 @@ function WeekAheadTab({
               className={`${styles.weekRow} channel-week-row`}
             >
               <span className={styles.weekIndex}>{String(index + 1).padStart(2, "0")}</span>
-              {p.thumbnailSource === "rendered_video_frame" ? (
+              {p.thumbnailSource === "rendered_video_frame" && !p.thumbnailKey ? (
                 <div className={`${styles.deferredFrameThumb} channel-week-thumb`} aria-label="Cover will use the final rendered video frame">
                   <span>Final frame</span>
                   <small>after render</small>

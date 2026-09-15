@@ -55,6 +55,7 @@ import {
   orphanReadyRowsForMaintenance,
 } from "../src/lib/calendarMaintenance";
 import { completedPublishContinuationPatch } from "./publishContinuationState";
+import { currentLibraryThumbnailForRun } from "./videos";
 import { runCostFloor } from "./runCostAccounting";
 import {
   RUN_QUEUE_LEASE_MS,
@@ -82,6 +83,47 @@ const PROVEN_READY_BATCH_PAGE_LIMIT = {
   maxLimit: 12,
   label: "proven ready batch page limit",
 } as const;
+
+/**
+ * A scheduled run can outlive the plan-time thumbnail.  Resolve only those
+ * rows through the shared current-thumbnail projection; unscheduled editorial
+ * rows remain a cheap, immutable plan read.  The small cache avoids repeating
+ * a run/assets read when the same run is present in more than one bounded
+ * projection during a Convex invocation.
+ */
+function scheduledThumbnailProjector(ctx: QueryCtx, ownerId: string) {
+  const cache = new Map<string, Promise<Awaited<ReturnType<typeof currentLibraryThumbnailForRun>> | null>>();
+  return (scheduledRunId: Id<"runs"> | undefined, expectedChannelId?: Id<"channels">) => {
+    if (!scheduledRunId) return Promise.resolve(null);
+    const key = String(scheduledRunId);
+    const cached = cache.get(key);
+    if (cached) return cached;
+    const value = (async () => {
+      const run = await ctx.db.get(scheduledRunId);
+      if (!run || run.ownerId !== ownerId ||
+          (expectedChannelId && String(run.channelId) !== String(expectedChannelId))) return null;
+      return await currentLibraryThumbnailForRun(ctx, run);
+    })();
+    cache.set(key, value);
+    return value;
+  };
+}
+
+function applyScheduledThumbnail<T extends { thumbnailKey?: string; thumbnailSource?: PlanWeekThumbnailSource }>(
+  row: T,
+  current: Awaited<ReturnType<typeof currentLibraryThumbnailForRun>> | null,
+): T {
+  if (!current) return row;
+  if (current.presentation === "lofi_frame_pending") {
+    return { ...row, thumbnailKey: undefined, thumbnailSource: "rendered_video_frame" };
+  }
+  if (!current.key) return row;
+  return {
+    ...row,
+    thumbnailKey: current.key,
+    ...(current.presentation === "lofi_rendered_frame" ? { thumbnailSource: "rendered_video_frame" as const } : {}),
+  };
+}
 
 function cleanError(value: string): string {
   return value.trim().slice(0, 1_000) || "unknown planner failure";
@@ -562,12 +604,15 @@ export const listReadyPlanPreview = query({
   handler: async (ctx, args) => {
     const channel = await ctx.db.get(args.channelId);
     if (!channel || channel.ownerId !== args.ownerId) return [];
-    return await ctx.db
+    const rows = await ctx.db
       .query("contentPlan")
       .withIndex("by_channel_status_order", (q) =>
         q.eq("channelId", args.channelId).eq("status", "ready"),
       )
       .take(25);
+    const project = scheduledThumbnailProjector(ctx, args.ownerId);
+    return await Promise.all(rows.map(async (row) =>
+      applyScheduledThumbnail(row, await project(row.scheduledRunId, args.channelId))));
   },
 });
 
@@ -616,8 +661,15 @@ export const listPlanByOwner = query({
     };
 
     const out = [];
+    const project = scheduledThumbnailProjector(ctx, args.ownerId);
     for (const r of rows) {
       const ch = await getCh(r.channelId);
+      // The owner-wide calendar carries mixed channel IDs, so use a per-row
+      // projector cache keyed by run and validate the run's channel inside the
+      // helper.  This keeps scheduled cards on the same current-artwork path
+      // without adding a second subscription or broad asset query.
+      const current = await project(r.scheduledRunId, r.channelId);
+      const projected = applyScheduledThumbnail(r, current);
       out.push({
         _id: r._id,
         channelId: r.channelId,
@@ -629,8 +681,8 @@ export const listPlanByOwner = query({
         order: r.order,
         topic: r.topic,
         title: r.title,
-        thumbnailKey: r.thumbnailKey,
-        thumbnailSource: r.thumbnailSource,
+        thumbnailKey: projected.thumbnailKey,
+        thumbnailSource: projected.thumbnailSource,
         status: r.status,
         scheduledAt: r.scheduledAt,
         scheduledRunId: r.scheduledRunId,

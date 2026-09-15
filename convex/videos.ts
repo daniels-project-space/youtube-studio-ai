@@ -204,6 +204,26 @@ async function retainedRunMedia(ctx: QueryCtx, run: Doc<"runs">) {
 }
 
 /**
+ * Project the current packaging thumbnail for a scheduled run.  Plan rows are
+ * intentionally immutable editorial inputs, but a run may later receive a
+ * reviewed thumbnail successor (or the exact Lo-Fi source frame).  Channel
+ * schedule surfaces must read that same projection as Library and the run
+ * workbench instead of resurrecting the plan-time key.
+ */
+export async function currentLibraryThumbnailForRun(
+  ctx: QueryCtx,
+  run: Doc<"runs">,
+): Promise<Awaited<ReturnType<typeof currentLibraryThumbnail>>> {
+  const { currentThumbnail } = await retainedRunMedia(ctx, run);
+  return {
+    key: currentThumbnail.thumbnailKey,
+    ...(currentThumbnail.thumbnailPresentation
+      ? { presentation: currentThumbnail.thumbnailPresentation }
+      : {}),
+  };
+}
+
+/**
  * One reactive read for the run page's media and current packaging. Script
  * and SEO remain in the on-demand lightbox query, not every thumbnail view.
  */
