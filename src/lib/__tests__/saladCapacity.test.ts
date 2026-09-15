@@ -144,6 +144,32 @@ assert.equal(waveHeldByExistingFleet.occupiedGpuSlots, 2);
 assert.ok(waveHeldByExistingFleet.lanes.every((lane) => lane.recommendedPriority === null));
 assert.ok(waveHeldByExistingFleet.lanes.every((lane) => lane.blockers.includes("global_three_gpu_capacity_insufficient_for_wave")));
 
+const logicalLeaseHeld = await readSaladCapacitySnapshot({
+  listGpuClasses: async () => classes,
+  listContainerGroups: async () => [],
+  listContainerInstances: async () => [],
+  getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 3, container_replicas_used: 0 } }),
+  getGpuAvailability: async () => ({ available_gpu_medium: 3, available_gpu_high: 3 }),
+}, {
+  requiredWorkers: 2,
+  readLogicalOccupiedGpuSlots: async () => 2,
+});
+assert.equal(logicalLeaseHeld.occupiedGpuSlots, 2,
+  "fleet snapshots must include durable logical lease occupancy");
+assert.ok(logicalLeaseHeld.lanes.every((lane) => lane.recommendedPriority === null));
+assert.ok(logicalLeaseHeld.lanes.every((lane) => lane.blockers.includes("global_three_gpu_capacity_insufficient_for_wave")));
+await assert.rejects(
+  () => readSaladCapacitySnapshot({
+    listGpuClasses: async () => classes,
+    listContainerGroups: async () => [],
+    listContainerInstances: async () => [],
+    getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 3, container_replicas_used: 0 } }),
+    getGpuAvailability: async () => ({ available_gpu_medium: 3, available_gpu_high: 3 }),
+  }, { readLogicalOccupiedGpuSlots: async () => 99 }),
+  /invalid logical fleet lease occupancy/,
+  "malformed logical lease data must fail closed instead of looking like an empty fleet",
+);
+
 const waveHeldByQuota = await readSaladCapacitySnapshot({
   listGpuClasses: async () => classes,
   listContainerGroups: async () => [],

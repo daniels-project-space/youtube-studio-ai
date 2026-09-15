@@ -73,12 +73,26 @@ export interface SaladCapacitySnapshotOptions {
   allowHighPriorityFallback?: boolean;
   /** Whether the deployment allows the medium tier (defaults to true). */
   mediumPriorityEnabled?: boolean;
+  /**
+   * Optional durable logical-fleet lease reader. Provider group state is
+   * eventually consistent and cannot see a wave that has just acquired the
+   * shared Convex fence, so callers serving admission UI should supply this
+   * reader and merge both observations before advertising capacity.
+   */
+  readLogicalOccupiedGpuSlots?: () => Promise<number>;
 }
 
 type CapacityClient = Pick<SaladCloudClient, "listGpuClasses" | "listContainerGroups" | "listContainerInstances" | "getQuotas" | "getGpuAvailability">;
 
 function safeCount(value: unknown): number {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : 0;
+}
+
+function safeLogicalLeaseCount(value: unknown): number {
+  if (typeof value === "number" && Number.isSafeInteger(value) && value >= 0 && value <= SALAD_BULK_MAX_GPUS) {
+    return value;
+  }
+  throw new Error("Salad capacity received invalid logical fleet lease occupancy");
 }
 
 /**
@@ -106,15 +120,23 @@ export async function readSaladCapacitySnapshot(
     throw new Error(`Salad capacity snapshot requires 1..${SALAD_BULK_MAX_GPUS} workers`);
   }
   const salad = client ?? await saladCloudClientFromVault();
-  const [classes, groups, quotas] = await Promise.all([
+  const [classes, groups, quotas, logicalOccupiedGpuSlots] = await Promise.all([
     salad.listGpuClasses(),
     salad.listContainerGroups(),
     salad.getQuotas(),
+    options.readLogicalOccupiedGpuSlots
+      ? options.readLogicalOccupiedGpuSlots().then(safeLogicalLeaseCount)
+      : Promise.resolve(0),
   ]);
   const instances = new Map(await Promise.all(
     groups.map(async (group) => [group.name, await salad.listContainerInstances(group.name)] as const),
   ));
-  const occupiedGpuSlots = saladOccupiedGpuSlots(groups, instances);
+  const providerOccupiedGpuSlots = saladOccupiedGpuSlots(groups, instances);
+  // The provider view and durable logical leases describe the same shared
+  // fleet from different consistency domains. Taking the maximum avoids
+  // double-counting a lease that has already materialized as a provider group
+  // while still blocking a check that races a newly acquired lease.
+  const occupiedGpuSlots = Math.max(providerOccupiedGpuSlots, logicalOccupiedGpuSlots);
   const quota = quotas.container_groups_quotas;
 
   const observedLanes = await Promise.all(SALAD_CAPACITY_LANES.map(async (lane): Promise<SaladCapacityLaneSnapshot> => {
