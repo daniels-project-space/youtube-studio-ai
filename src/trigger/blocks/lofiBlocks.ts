@@ -105,7 +105,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { renderNovitaImage } from "@/lib/novitaMedia";
-import { minimaxH3Readiness, MINIMAX_H3_PROFILE, renderMiniMaxH3 } from "@/lib/minimaxH3";
+import { buildMiniMaxH3SceneRequest, minimaxH3Readiness, MINIMAX_H3_PROFILE, renderMiniMaxH3 } from "@/lib/minimaxH3";
 import {
   generateMureka,
   generateSuno,
@@ -1593,7 +1593,7 @@ export const loopClips: Block = {
         const nativePaths: string[] = [];
         for (let nativeIndex = 0; nativeIndex < nativeClipsPerSegment; nativeIndex++) {
           const nativeOrdinal = nativeIndex + 1;
-          const clip = await renderMiniMaxH3({
+          const clip = await renderMiniMaxH3(buildMiniMaxH3SceneRequest({
             provider: "novita",
             execution: "on-demand",
             prompt: `${fwd.prompt}\nLofi source half ${ordinal} of ${segmentCount}, native motion take ${nativeOrdinal} of ${nativeClipsPerSegment}: preserve the exact accepted still, subject, composition, lighting, and channel identity; vary only tiny ambient micro-motion.`,
@@ -1603,7 +1603,7 @@ export const loopClips: Block = {
               r2Key: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/lofi-loop/h3-${ordinal}-${nativeOrdinal}.mp4`,
             },
             maxCostUsd: perNativeClipBudgetUsd,
-          });
+          }));
           clips.push(clip);
           observedClipCostUsd += clip.receipt.runtime.costUsd;
           const local = await writeBytes(join(tmp, `clip-${ordinal}-${nativeOrdinal}.mp4`), clip.outputBytes);

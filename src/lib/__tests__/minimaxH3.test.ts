@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import {
+  buildMiniMaxH3SceneRequest,
   assertMiniMaxH3R2ModelManifest,
   assertMiniMaxH3SaladCapacity,
   MINIMAX_H3_MANIFEST_SHA256,
@@ -30,6 +31,27 @@ function request(provider: "salad" | "novita", execution: "weekly-batch" | "on-d
   return { provider, execution, prompt: "A precise continuous cinematic action with no text.", seed: 42,
     firstFrame: { r2Key: "owner/o/channel/c/frame.png", sha256: sha256BytesHex(firstFrame) }, output: { r2Key: output }, maxCostUsd: 0.4 } as const;
 }
+
+const builtSceneRequest = buildMiniMaxH3SceneRequest({
+  provider: "novita",
+  execution: "on-demand",
+  prompt: "A rainy station at night.",
+  motionPrompt: "A figure turns toward the platform lights.",
+  cameraInstruction: "slow lateral track",
+  negativePrompt: "text, logos",
+  seed: 42,
+  firstFrame: { r2Key: "owner/test/scene/frame.png", sha256: "a".repeat(64) },
+  output: { r2Key: "owner/test/scene/clip.mp4" },
+  maxCostUsd: 0.4,
+});
+assert.equal(
+  builtSceneRequest.prompt,
+  "A rainy station at night.\n\nMotion: A figure turns toward the platform lights.\n\nCamera: slow lateral track\n\nAvoid: text, logos",
+  "scene request builder must preserve canonical prompt section order",
+);
+assert.deepEqual(builtSceneRequest.firstFrame, { r2Key: "owner/test/scene/frame.png", sha256: "a".repeat(64) });
+assert.deepEqual(builtSceneRequest.output, { r2Key: "owner/test/scene/clip.mp4" });
+assert.equal(builtSceneRequest.maxCostUsd, 0.4);
 assert.notEqual(
   miniMaxH3RequestKey(request("salad", "weekly-batch")),
   miniMaxH3RequestKey(request("novita", "on-demand")),

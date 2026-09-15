@@ -61,7 +61,7 @@ import {
   selfContainedStoryReceiptRequiredForRoute,
 } from "@/engine/selfContainedStoryReceipt";
 import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
-import { minimaxH3Readiness, renderMiniMaxH3 } from "@/lib/minimaxH3";
+import { buildMiniMaxH3SceneRequest, minimaxH3Readiness, renderMiniMaxH3 } from "@/lib/minimaxH3";
 import { sha256BytesHex } from "@/lib/sha256";
 import { PRICE } from "@/engine/pricing";
 import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
@@ -533,15 +533,18 @@ export const loreShort: Block = {
           await putObjectFromFile(imageKey, request.imagePath, { contentType: "image/jpeg" });
           const frameBytes = await readBytes(request.imagePath);
           const seed = Number.parseInt(createHash("sha256").update(`${request.id}\0${request.prompt}`).digest("hex").slice(0, 8), 16) % 2_147_483_647;
-          const clip = await renderMiniMaxH3({
+          const clip = await renderMiniMaxH3(buildMiniMaxH3SceneRequest({
             provider: "novita",
             execution: "on-demand",
-            prompt: [request.prompt, `Motion: ${request.motionPrompt}`, `Camera: ${request.cameraInstruction}`, `Avoid: ${request.negativePrompt}`].join("\n\n"),
+            prompt: request.prompt,
+            motionPrompt: request.motionPrompt,
+            cameraInstruction: request.cameraInstruction,
+            negativePrompt: request.negativePrompt,
             seed,
             firstFrame: { r2Key: imageKey, sha256: sha256BytesHex(frameBytes) },
             output: { r2Key: `${prefix}/h3/${request.id}.mp4` },
             maxCostUsd: PRICE.novitaVideoMaxUsd,
-          });
+          }));
           clipCostUsd += clip.receipt.runtime.costUsd;
           clipCalls += 1;
           ctx.log(`lore-h3: ${request.id} accepted (${clip.receipt.runtime.costUsd.toFixed(4)} USD)`);

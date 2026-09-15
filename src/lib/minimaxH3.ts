@@ -294,6 +294,43 @@ export interface MiniMaxH3RenderRequest {
   maxCostUsd: number;
 }
 
+/**
+ * Build the canonical H3 scene request used by interactive callers.
+ * This pure boundary keeps prompt sections and sealed R2 bindings identical
+ * across modules; renderMiniMaxH3 remains the only paid dispatch seam.
+ */
+export function buildMiniMaxH3SceneRequest(input: {
+  provider: MiniMaxH3Provider;
+  execution: MiniMaxH3Execution;
+  prompt: string;
+  motionPrompt?: string;
+  cameraInstruction?: string;
+  negativePrompt?: string;
+  seed: number;
+  firstFrame: MiniMaxH3RenderRequest["firstFrame"];
+  output: MiniMaxH3RenderRequest["output"];
+  maxCostUsd: number;
+}): MiniMaxH3RenderRequest {
+  const prompt = [
+    input.prompt,
+    input.motionPrompt ? `Motion: ${input.motionPrompt}` : undefined,
+    input.cameraInstruction ? `Camera: ${input.cameraInstruction}` : undefined,
+    input.negativePrompt ? `Avoid: ${input.negativePrompt}` : undefined,
+  ]
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .map((part) => part.trim())
+    .join("\n\n");
+  return {
+    provider: input.provider,
+    execution: input.execution,
+    prompt,
+    seed: input.seed,
+    firstFrame: input.firstFrame,
+    output: input.output,
+    maxCostUsd: input.maxCostUsd,
+  };
+}
+
 export interface MiniMaxH3RuntimeReceipt {
   provider: MiniMaxH3Provider;
   gpuModel: "RTX 5090";
