@@ -82,6 +82,10 @@ const parsed = yaml.load(workflow);
 assert.deepEqual(parsed.on.push["paths-ignore"],["**.md","docs/**",".serena/**"],
   "the ignored-source exception must track the actual workflow trigger");
 const job = parsed.jobs["deploy-cloud-runtimes"];
+assert.deepEqual(parsed.jobs.typecheck.concurrency, {
+  group: "ci-typecheck-${{ github.event.pull_request.number || github.ref }}",
+  "cancel-in-progress": true,
+}, "stale readiness suites must be cancelled without cancelling cloud deploys");
 assert.deepEqual(job.concurrency,{group:"youtube-studio-cloud-runtimes",queue:"max","cancel-in-progress":false});
 const guardIndex = job.steps.findIndex(step=>step.id === "release_policy");
 assert.ok(guardIndex > 0);

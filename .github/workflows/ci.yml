@@ -16,6 +16,12 @@ concurrency:
 jobs:
   typecheck:
     runs-on: ubuntu-latest
+    # Only the newest validation for a branch/ref is useful. Cancel stale
+    # readiness suites before they consume another runner, while leaving the
+    # separate cloud-runtime deployment queue protected below.
+    concurrency:
+      group: ci-typecheck-${{ github.event.pull_request.number || github.ref }}
+      cancel-in-progress: true
     # Cold runners sometimes spend several minutes installing ffmpeg before
     # the complete production-readiness suite starts. Keep every gate intact
     # and allow the full suite enough time to finish instead of cancelling a
