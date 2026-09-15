@@ -19,6 +19,8 @@ import { api } from "../../../../convex/_generated/api";
 import { useOwnerId } from "@/lib/owner-context";
 import { LOCKABLE_MODULES } from "@/lib/ownerLockRegistry";
 import { OwnerLockBadge } from "@/components/OwnerLockBadge";
+import { NicheMotionGlyph } from "@/components/NicheMotionGlyph";
+import styles from "./locks.module.css";
 
 export default function LocksPage() {
   const ownerId = useOwnerId();
@@ -36,47 +38,100 @@ export default function LocksPage() {
     }),
     [lockedKeys],
   );
+  const groups = useMemo(() => {
+    const map = new Map<string, typeof ordered>();
+    for (const entity of ordered) {
+      const key = entity.description.split(" · ", 1)[0]?.trim() || "catalog";
+      const rows = map.get(key) ?? [];
+      rows.push(entity);
+      map.set(key, rows);
+    }
+    return [...map.entries()];
+  }, [ordered]);
 
   return (
-    <main style={{ padding: 28, maxWidth: 940 }}>
-      <h1 style={{ fontSize: 26, marginBottom: 6 }}>Owner locks</h1>
-      <p style={{ color: "#96a2b8", marginTop: 0, lineHeight: 1.6, maxWidth: 720 }}>
-        A locked module cannot be modified by any AI worker — Claude, Codex, or anything else driving
-        the editing tools. Everything starts unlocked. The workstation mirror applies read-only kernel
-        protection in every linked worktree, with a Claude pre-edit guard as an additional early warning.
-        Only an owner unlock here causes the mirror service to release those files. A module showing <strong>0 files</strong> is a catalog contract with no source
-        of its own yet: locking it records your intent but blocks no edits.
-      </p>
+    <main className={styles.page}>
+      <header className={styles.header}>
+        <div className={styles.headingCopy}>
+          <span className={styles.eyebrow}>Governance · protection</span>
+          <h1>Owner locks</h1>
+          <p>Freeze modules before they ship. Only your explicit unlock reopens them.</p>
+        </div>
+        <div className={styles.summary} aria-label="Lock summary">
+          <div><span>Sealed</span><strong>{lockedKeys.size}</strong></div>
+          <div><span>Available</span><strong>{Math.max(0, ordered.length - lockedKeys.size)}</strong></div>
+          <div><span>Coverage</span><strong>{ordered.filter((entity) => entity.paths.length > 0).length}</strong></div>
+        </div>
+      </header>
 
-      <div style={{ display: "grid", gap: 10, marginTop: 22 }}>
-        {ordered.map((entity) => {
+      <section className={styles.policy} aria-label="Lock policy">
+        <div className={styles.policyMark} aria-hidden="true"><NicheMotionGlyph motif="casefile" /></div>
+        <div><strong>Protected at the source</strong><span>Module locks cover every linked worktree. Channel locks remain separate and protect one channel’s configuration.</span></div>
+        <span className={styles.policyRule}>Owner action only</span>
+      </section>
+
+      <section className={styles.moduleSection} aria-labelledby="module-locks-title">
+        <div className={styles.sectionHeading}>
+          <div><span className={styles.eyebrow}>Module protection</span><h2 id="module-locks-title">Production building blocks</h2></div>
+          <span className={styles.sectionMeta}>{lockedKeys.size}/{ordered.length} sealed</span>
+        </div>
+        <div className={styles.groups}>
+        {groups.map(([group, entities], groupIndex) => {
+          const groupLocked = entities.filter((entity) => lockedKeys.has(entity.id)).length;
+          return <details className={styles.group} key={group} open={groupLocked > 0 || groupIndex === 0}>
+            <summary className={styles.groupSummary}>
+              <span className={styles.groupIndex}>{String(groupIndex + 1).padStart(2, "0")}</span>
+              <strong>{groupLabel(group)}</strong>
+              <span>{groupLocked}/{entities.length} sealed</span>
+              <i aria-hidden="true">+</i>
+            </summary>
+            <div className={styles.grid}>
+        {entities.map((entity) => {
           const locked = lockedKeys.has(entity.id);
           return (
             <div
               key={entity.id}
-              style={{
-                border: `1px solid ${locked ? "#43c98a66" : "#242b38"}`,
-                background: locked ? "#43c98a0f" : "#141821",
-                borderRadius: 12,
-                padding: "14px 16px",
-                display: "flex",
-                alignItems: "center",
-                gap: 14,
-              }}
+              className={styles.card}
+              data-locked={locked || undefined}
             >
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14 }}>{entity.label}</div>
-                <div style={{ color: "#96a2b8", fontSize: 12.5, marginTop: 3 }}>{entity.description}</div>
-                <div style={{ color: entity.paths.length ? "#6c7789" : "#a1791f", fontSize: 12, marginTop: 5 }}>
+              <div className={styles.cardMark} aria-hidden="true"><NicheMotionGlyph motif="casefile" /></div>
+              <div className={styles.cardCopy}>
+                <div className={styles.cardTitle}><strong>{entity.label}</strong><span data-state={locked ? "sealed" : "open"}>{locked ? "Sealed" : "Open"}</span></div>
+                <p>{entity.description}</p>
+                <small className={entity.paths.length ? undefined : styles.noCoverage}>
                   {entity.paths.length} protected file{entity.paths.length === 1 ? "" : "s"}
-                  {entity.paths.length === 0 ? " · no source to enforce against" : ""}
-                </div>
+                  {entity.paths.length === 0 ? " · catalog contract only" : " · source enforced"}
+                </small>
               </div>
               <OwnerLockBadge kind="module" moduleId={entity.id} label={entity.label} />
             </div>
           );
         })}
-      </div>
+            </div>
+          </details>;
+        })}
+        </div>
+      </section>
     </main>
   );
+}
+
+function groupLabel(value: string): string {
+  const labels: Record<string, string> = {
+    brief: "Brief & story",
+    build: "Build & assembly",
+    guard: "Quality gates",
+    intel: "Research & intel",
+    layer: "Presentation",
+    package: "Packaging",
+    post: "Post-production",
+    ship: "Release",
+    sound: "Sound",
+    verify: "Verification",
+    visual: "Visuals",
+    voice: "Voice",
+    write: "Writing",
+    catalog: "Catalog contracts",
+  };
+  return labels[value.toLowerCase()] ?? value;
 }
