@@ -531,9 +531,16 @@ export const listPlan = query({
         ),
       )
     ).flat();
-    return rows
+    const ownedRows = rows
       .filter((r) => r.ownerId === args.ownerId)
       .sort((a, b) => a.order - b.order);
+    // The detailed per-channel workspace must not resurrect the plan-time
+    // thumbnail after a scheduled run receives a reviewed successor (or an
+    // exact Lo-Fi rendered frame). Keep it on the same bounded projection as
+    // the header preview and owner-wide calendar.
+    const project = scheduledThumbnailProjector(ctx, args.ownerId);
+    return await Promise.all(ownedRows.map(async (row) =>
+      applyScheduledThumbnail(row, await project(row.scheduledRunId, args.channelId))));
   },
 });
 
