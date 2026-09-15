@@ -10,6 +10,7 @@ assert.match(page, /api\.ownerModuleLocks\.list/);
 assert.match(page, /OwnerLockBadge/);
 assert.match(page, /Protected at the source/);
 assert.match(page, /groupLabel/);
+assert.match(page, /function groupFor/);
 assert.match(page, /<details className=\{styles\.group\}/);
 assert.doesNotMatch(page, /Claude, Codex/);
 assert.doesNotMatch(page, /style=\{/);

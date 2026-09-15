@@ -41,7 +41,7 @@ export default function LocksPage() {
   const groups = useMemo(() => {
     const map = new Map<string, typeof ordered>();
     for (const entity of ordered) {
-      const key = entity.description.split(" · ", 1)[0]?.trim() || "catalog";
+      const key = groupFor(entity);
       const rows = map.get(key) ?? [];
       rows.push(entity);
       map.set(key, rows);
@@ -78,7 +78,7 @@ export default function LocksPage() {
         <div className={styles.groups}>
         {groups.map(([group, entities], groupIndex) => {
           const groupLocked = entities.filter((entity) => lockedKeys.has(entity.id)).length;
-          return <details className={styles.group} key={group} open={groupLocked > 0 || groupIndex === 0}>
+          return <details className={styles.group} key={group} open={groupLocked > 0}>
             <summary className={styles.groupSummary}>
               <span className={styles.groupIndex}>{String(groupIndex + 1).padStart(2, "0")}</span>
               <strong>{groupLabel(group)}</strong>
@@ -116,8 +116,25 @@ export default function LocksPage() {
   );
 }
 
+function groupFor(entity: (typeof LOCKABLE_MODULES)[number]): string {
+  const text = `${entity.id} ${entity.label} ${entity.description}`.toLowerCase();
+  if (/inception|channel setup|channel tile|positioning|show bible/.test(text)) return "setup";
+  if (/topic|research|intel|competitor|source packet|evidence packet/.test(text)) return "intel";
+  if (/script|hook|story|spine|episode|casefile|learning|children|curriculum|chess/.test(text)) return "brief";
+  if (/guard|qa|safety|originality|compliance|critic|artifact|shot gate|length|review receipt/.test(text)) return "guard";
+  if (/voice|narration|speech|tts|pronunciation/.test(text)) return "voice";
+  if (/music|score|sound|audio/.test(text)) return "sound";
+  if (/visual|image|video|scene|comic|whiteboard|lofi|lore|documotion|motion|cinecraft|render|footage|keyframe|upscale|stock/.test(text)) return "visual";
+  if (/caption|quote|overlay|presentation|insert/.test(text)) return "layer";
+  if (/assemble|build|edl|timeline/.test(text)) return "build";
+  if (/thumbnail|metadata|seo|package|title/.test(text)) return "package";
+  if (/upload|publish|ship|cleanup|release|crosspost|notify/.test(text)) return "ship";
+  return "catalog";
+}
+
 function groupLabel(value: string): string {
   const labels: Record<string, string> = {
+    setup: "Channel setup",
     brief: "Brief & story",
     build: "Build & assembly",
     guard: "Quality gates",
