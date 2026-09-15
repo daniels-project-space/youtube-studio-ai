@@ -144,13 +144,17 @@ export function RecentVideos({
                 <div className={styles.media}>
                   <MediaPreview
                     assetKey={video.thumbnailKey ?? undefined}
-                    // Recent cards stay lightweight: persisted thumbnails only.
-                    // The run workbench owns the explicit source-frame path.
-                    videoStillKey={undefined}
+                    // Lo-Fi may use its retained master until the verified
+                    // 15-second frame lands; all other recent cards remain
+                    // persisted-thumbnail-only.
+                    videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
                     alt=""
                     style={{ width: "100%", height: "100%" }}
                     unavailableLabel="Retained preview unavailable"
                     priority={index < 3}
+                    overlay={() => video.thumbnailPresentation === "lofi_rendered_frame" || video.thumbnailPresentation === "lofi_frame_pending"
+                      ? <span className="video-card-lofi-quality" aria-label="4K source-frame thumbnail">4K</span>
+                      : null}
                   />
                   <span className={styles.play} aria-hidden="true">▶</span>
                   {fmtDur(video.durationSec) ? (

@@ -60,12 +60,16 @@ export function LatestVideoWidget({
         <div className="latest-video-thumb" style={{ position: "relative", aspectRatio: "16 / 9", borderRadius: 10, overflow: "hidden" }}>
           <MediaPreview
             assetKey={v?.thumbnailKey ?? undefined}
-            // Use a persisted thumbnail only. Source-frame extraction belongs
-            // to the explicit run workbench, not the overview hero.
-            videoStillKey={undefined}
+            // Lo-Fi is the one overview exception: while its verified 15s
+            // frame is being persisted, show the retained master frame rather
+            // than a blank hero. Other channels remain persisted-thumbnail-only.
+            videoStillKey={v?.thumbnailPresentation === "lofi_frame_pending" ? v.videoKey : undefined}
             alt={v?.title ?? "latest video"}
             style={{ width: "100%", height: "100%" }}
             unavailableLabel="Retained preview unavailable"
+            overlay={() => v?.thumbnailPresentation === "lofi_rendered_frame" || v?.thumbnailPresentation === "lofi_frame_pending"
+              ? <span className="video-card-lofi-quality" aria-label="4K source-frame thumbnail">4K</span>
+              : null}
             priority
           />
           {v?.durationSec ? (

@@ -40,10 +40,11 @@ for (const source of [assetImg, videoCard, rail, daySchedule]) {
   assert.match(source, /MediaPreview/);
 }
 
-// The channel hero is an owner-side artifact view. A legacy upload without a
-// retained thumbnail must show a paused retained-master frame, never a stale
-// public YouTube hqdefault image.
-assert.match(latestVideo, /videoStillKey=\{undefined\}/);
+// The channel hero is an owner-side artifact view. A pending Lo-Fi upload
+// without its persisted 15-second frame uses a paused retained-master frame;
+// every other channel stays persisted-thumbnail-only.
+assert.match(latestVideo, /videoStillKey=\{v\?\.thumbnailPresentation === "lofi_frame_pending" \? v\.videoKey : undefined\}/);
+assert.match(latestVideo, /video-card-lofi-quality/, "the latest-video hero preserves the Lo-Fi 4K marker");
 assert.match(latestVideo, /priority\s*\/?>/);
 assert.doesNotMatch(latestVideo, /i\.ytimg\.com|fallbackSource="youtube"/);
 assert.match(runWorkbench, /SafeRunVideoPreview/);
@@ -52,9 +53,10 @@ assert.match(runWorkbench, /searchParams\.set\("probe", "1"\)/);
 assert.match(runWorkbench, /fetch\(parsed\.toString\(\), \{ cache: "no-store" \}\)/);
 assert.match(runWorkbench, /"about:blank"/);
 
-// The Studio's R2-only carousel filters to saved masters, so a missing
-// thumbnail can always use that exact master as its preview source.
-assert.match(recentVideos, /videoStillKey=\{undefined\}/);
+// The Studio's R2-only carousel filters to saved masters. A pending Lo-Fi
+// thumbnail can use that exact master as its temporary preview source.
+assert.match(recentVideos, /videoStillKey=\{video\.thumbnailPresentation === "lofi_frame_pending" \? video\.videoKey : undefined\}/);
+assert.match(recentVideos, /video-card-lofi-quality/, "the recent-render carousel preserves the Lo-Fi 4K marker");
 assert.match(recentVideos, /priority=\{index < 3\}/);
 assert.doesNotMatch(recentVideos, /i\.ytimg\.com|fallbackSource="youtube"/);
 
