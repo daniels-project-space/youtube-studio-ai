@@ -768,7 +768,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "Loreshort — Gemini first-person lore script + attested Novita stills + per-line cast-voice TTS + attested Novita LTX image-to-video depth camera moves + FREE ffmpeg 2K finish",
     how:
       "A single figure narrates history in FIRST PERSON (GoT \"Histories & Lore\" style): one Gemini-Pro call writes a paced " +
-      "narration arc plus per-beat layered-depth SCENE prompts; Nano Banana paints each beat; ElevenLabs voices each line " +
+      "narration arc plus per-beat layered-depth SCENE prompts; the attested Novita image lane paints each beat; ElevenLabs voices each line " +
       "separately so every shot is cut to its exact spoken length. A vision pass reads each painting and writes a motion brief " +
       "(subject + particles + a DEPTH camera move, scaled to honest intensity), which drives image-to-video into a GENUINE 3D " +
       "shot — real perspective and parallax, never a 2D pan. A title card plays before the " +
@@ -1222,16 +1222,16 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "cinematic",
     stage: "visual",
     title: "Cinematic — Cinecraft",
-    engine: "Cinecraft — generated character/location-consistent cinematic shots (Nano Banana hero-anchor + Higgsfield Soul + Seedance/Kling i2v)",
+    engine: "Cinecraft — generated character/location-consistent cinematic shots (Visual Matter identity anchors + attested Novita keyframes/video)",
     how:
       "The cinematic family GENERATES the screen instead of sourcing it — the Cipher / \"ago.\" true-crime / history look, " +
       "where the same people, places and objects recur across many reconstructed shots. extractSubjects pulls the story's " +
-      "essential characters + recurring locations + key objects; each is designed into a Nano Banana reference sheet and " +
+      "essential characters + recurring locations + key objects; each is designed into a sealed Visual Matter identity pack and " +
       "becomes the ONE canonical anchor. A director pass scripts each beat with real camera grammar (move, lens, mood, " +
       "transition) in the channel's CINEMATIC_DOCTRINE style. The consistency LAW: every keyframe is the subject's hero " +
       "image as a DIRECT reference, the prompt leads with the identity lock and names the distinctive features (never a " +
       "generic re-description — that's what made early renders \"four different people\"), a vision gate re-rolls drift, " +
-      "then Seedance/Kling animates the locked keyframe. Establishing + multi-subject shots supported; any style. Operator " +
+      "then the admitted Novita keyframe/video chain animates the locked keyframe. Establishing + multi-subject shots supported; any style. Operator " +
       "approves the hero before any Soul. Standalone src/lib/cinecraft.ts (480 L), visual-only (a pipeline adds audio + assembly). " +
       "cinecraft.ts ITSELF IS RETIRED, NOT PENDING (P1-10 resolved, superseded): its render path is hard-disabled at the source " +
       "(hasCinecraft() returns a literal false, src/lib/cinecraft.ts:47-52) because designSubject/trainSoul/renderShot all drive the " +
@@ -1253,7 +1253,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "documotion",
     stage: "visual",
     title: "Documentary — Documotion",
-    engine: "Documotion — themeable documentary-collage motion engine (Remotion + Banana stills & typography + real OSM geo, narration-first planner, vision still-verifier)",
+    engine: "Documotion — themeable documentary-collage motion engine (Remotion + attested image lane + real OSM geo, narration-first planner, vision still-verifier)",
     how:
       "The motion-graphics family for narrated documentary and true-crime: archival sepia collage, a detective evidence-board " +
       "with red string, a robbery-noir heist reconstruction — each a channel WORLD in one style registry. The planner is " +
