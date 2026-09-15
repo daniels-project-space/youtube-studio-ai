@@ -52,6 +52,14 @@ const MAX_H3_PARALLEL_SALAD_JOBS = 3;
 const MINIMAX_H3_MODEL_BUCKET = "salad-render-infra";
 const MINIMAX_H3_MODEL_MANIFEST_KEY = `${MINIMAX_H3_RUNTIME_ID}/immutable-manifest.json`;
 const MINIMAX_H3_SALAD_COUNTRY_CODES = ["cn"] as const;
+/**
+ * Salad's availability endpoint is a market snapshot, not a reservation. A
+ * country-scoped zero can therefore be a locality artifact rather than proof
+ * that the exact 5090 class is unavailable. Keep the preferred region first,
+ * then make one bounded global read-only query before holding the order.
+ * This never changes the worker's route or starts a provider request.
+ */
+const MINIMAX_H3_SALAD_GLOBAL_CAPACITY_FALLBACK = true;
 
 const MINIMAX_H3_SALAD_RESOURCES: Omit<SaladResources, "gpu_classes"> = Object.freeze({
   cpu: 8,
@@ -176,9 +184,26 @@ export async function assertMiniMaxH3SaladCapacity(
   // groups, so querying it first only adds latency when the shared three-GPU
   // cap is already occupied.
   await assertLeaseRoom();
-  let availability;
+  let availability: Awaited<ReturnType<MiniMaxH3SaladCapacityClient["getGpuAvailability"]>>;
   try {
     availability = await client.getGpuAvailability(resources, [...MINIMAX_H3_SALAD_COUNTRY_CODES]);
+    const preferredMedium = typeof availability.available_gpu_medium === "number" &&
+      Number.isSafeInteger(availability.available_gpu_medium) ? availability.available_gpu_medium : 0;
+    const preferredHigh = typeof availability.available_gpu_high === "number" &&
+      Number.isSafeInteger(availability.available_gpu_high) ? availability.available_gpu_high : 0;
+    const preferredCanAdmit = (mediumPriorityEnabled && mediumGpu !== undefined && preferredMedium >= requiredGpuCount) ||
+      (allowHighPriorityFallback && preferredHigh >= requiredGpuCount);
+    if (!preferredCanAdmit && MINIMAX_H3_SALAD_GLOBAL_CAPACITY_FALLBACK) {
+      // Omitting country_codes asks Salad for the global market. It is only a
+      // fallback after the preferred locality cannot admit the complete wave;
+      // medium/high selection below still applies to the returned snapshot.
+      const global = await client.getGpuAvailability(resources);
+      const globalMedium = typeof global.available_gpu_medium === "number" &&
+        Number.isSafeInteger(global.available_gpu_medium) ? global.available_gpu_medium : 0;
+      const globalHigh = typeof global.available_gpu_high === "number" &&
+        Number.isSafeInteger(global.available_gpu_high) ? global.available_gpu_high : 0;
+      if (globalMedium > preferredMedium || globalHigh > preferredHigh) availability = global;
+    }
   } catch (error) {
     throw new MiniMaxH3Error(
       `weekly MiniMax H3 Salad capacity check failed before dispatch: ${error instanceof Error ? error.message : String(error)}`,
