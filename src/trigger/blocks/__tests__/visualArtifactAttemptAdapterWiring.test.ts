@@ -57,7 +57,7 @@ async function main(): Promise<void> {
   const clipCheckpoint = between(
     casefile,
     "checkpointReview: async (event: NovitaClipReviewCheckpoint)",
-    "const rendered = ltxScenes.length > 0",
+    "const rendered = generatedScenes.length > 0",
   );
   for (const [label, checkpoint] of [
     ["keyframe", keyframeCheckpoint],
@@ -73,7 +73,7 @@ async function main(): Promise<void> {
   const sourceProofSetup = between(
     casefile,
     "const sourceProofBySceneId",
-    "const ltxScenes = scenes.filter",
+    "const generatedScenes = scenes.filter",
   );
   assert.doesNotMatch(
     sourceProofSetup,

@@ -5,9 +5,10 @@
  * `footageClips` contract → timeline_assemble just works), so the designer/
  * architect can SWAP stock for generation per channel identity.
  *
- * Per scene: a validated shared story plan → the centrally attested Novita
- * image-to-video profile. This legacy adapter never chooses or advertises a
- * concrete video model: central runtime admission owns that decision.
+ * Per scene: a validated shared story plan → the admitted image/video route.
+ * Fresh generic scenes use native MiniMax H3; the reviewed Casefile route
+ * remains on its isolated LTX adapter until its terminal-frame contract is
+ * converted. Central runtime admission owns the concrete model identity.
  */
 import type { Block } from "@/engine/types";
 import { boundedInteger, boundedNumber } from "@/engine/boundedNumber";
@@ -1138,15 +1139,15 @@ export const genFootage: Block = {
         },
       );
     }
-    const ltxScenes = scenes.filter((scene) => scene.sourceProofMedia === undefined);
+    const generatedScenes = scenes.filter((scene) => scene.sourceProofMedia === undefined);
     // Generic Story Spine/episode-graph footage now uses the native H3
     // adapter. The reviewed Casefile lane remains on its legacy path until its
     // LTX-specific terminal-frame and transition manifest is converted into
     // the H3 receipt shape; it is never silently relabelled.
-    const useH3ForFreshGeneratedScenes = plan.source !== "cinematic_case_sequence" && ltxScenes.length > 0;
+    const useH3ForFreshGeneratedScenes = plan.source !== "cinematic_case_sequence" && generatedScenes.length > 0;
     const h3LocalClipPaths = new Map<string, string>();
     if (plan.source === "cinematic_case_sequence") {
-      for (const scene of ltxScenes) {
+      for (const scene of generatedScenes) {
         if (!Array.isArray(scene.expectedCastIds) || scene.forbidAdditionalPeople !== true) {
           throw new Error(
             `gen_footage: cinematic scene ${scene.id} is missing its sealed no-extra-people contract; refusing any LTX render`,
@@ -1157,7 +1158,7 @@ export const genFootage: Block = {
 
     const requestedConcurrency = Number(ctx.params["maxConcurrent"] ?? 3);
     const maxConcurrent = Math.min(8, Math.max(1, Math.floor(requestedConcurrency)));
-    const stageBudgetUsd = ltxScenes.length > 0
+    const stageBudgetUsd = generatedScenes.length > 0
       ? requireNovitaStageBudget(ctx.stageBudgetUsd, "gen_footage")
       : 0;
     if (plan.source === "cinematic_case_sequence") {
@@ -1287,7 +1288,7 @@ export const genFootage: Block = {
           },
         }
       : undefined;
-    const rendered = ltxScenes.length > 0
+    const rendered = generatedScenes.length > 0
       ? useH3ForFreshGeneratedScenes
         ? await renderGeneratedScenePlanWithH3({
           prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/generated-footage`,
@@ -1298,7 +1299,7 @@ export const genFootage: Block = {
             runId: ctx.runId,
             blockId: "gen_footage",
           },
-          scenes: ltxScenes,
+          scenes: generatedScenes,
         }).then((result) => {
           for (const [sceneId, localPath] of result.localClipPaths) h3LocalClipPaths.set(sceneId, localPath);
           return result;
@@ -1319,7 +1320,7 @@ export const genFootage: Block = {
       // Style-DNA/Visual-Brief treatment is used. Ambiguous DNA stays on the
       // family's proven default rather than guessing an aesthetic mid-run.
       styleId: ltxStyleSelection.styleId,
-      scenes: ltxScenes.map((scene) => ({
+      scenes: generatedScenes.map((scene) => ({
         // Preserve the admitted id: timeline_assemble later verifies that the
         // R2 clip order still matches this exact cinematic cut plan.
         id: scene.id,
@@ -1351,8 +1352,8 @@ export const genFootage: Block = {
       })
       : { scenes: [] as Awaited<ReturnType<typeof renderNovitaGeneratedScenes>>["scenes"], costUsd: 0 };
     if (
-      rendered.scenes.length !== ltxScenes.length ||
-      rendered.scenes.some((scene, index) => scene.id !== ltxScenes[index]?.id)
+      rendered.scenes.length !== generatedScenes.length ||
+      rendered.scenes.some((scene, index) => scene.id !== generatedScenes[index]?.id)
     ) {
       throw new Error("gen_footage: Novita completion no longer matches the admitted non-source-proof scene order");
     }
@@ -1587,7 +1588,7 @@ export const genFootage: Block = {
         return sourceProof?.receipt.clipKey ?? renderedScene!.clipKey;
       });
       ctx.log(
-        `gen_footage: ${ltxScenes.length} ${useH3ForFreshGeneratedScenes ? "MiniMax H3" : "Novita Z-Image/LTX"} clip(s) + ${sourceProofBySceneId.size} approved source-proof clip(s), ` +
+        `gen_footage: ${generatedScenes.length} ${useH3ForFreshGeneratedScenes ? "MiniMax H3" : "Novita Z-Image/LTX"} clip(s) + ${sourceProofBySceneId.size} approved source-proof clip(s), ` +
         `provider receipt $${rendered.costUsd.toFixed(4)}`,
       );
       const renderer: GeneratedFootageRenderer = useH3ForFreshGeneratedScenes

@@ -379,16 +379,16 @@ assert.match(
 );
 assert.match(
   phase18Source,
-  /const ltxScenes = scenes\.filter\(\(scene\) => scene\.sourceProofMedia === undefined\);/,
+  /const generatedScenes = scenes\.filter\(\(scene\) => scene\.sourceProofMedia === undefined\);/,
   "approved cinematic source-proof scenes must be removed from the LTX render wave",
 );
 assert.match(
   phase18Source,
-  /scenes: ltxScenes\.map\(\(scene\) => \(/,
+  /scenes: generatedScenes\.map\(\(scene\) => \(/,
   "the Novita handoff must receive only non-source-proof scenes",
 );
 assert.ok(
-  phase18Source.indexOf("const sourceProofBySceneId") < phase18Source.indexOf("const rendered = ltxScenes.length > 0"),
+  phase18Source.indexOf("const sourceProofBySceneId") < phase18Source.indexOf("const rendered = generatedScenes.length > 0"),
   "approved source media must be resolved and hash-gated before any cinematic LTX render starts",
 );
 assert.match(
