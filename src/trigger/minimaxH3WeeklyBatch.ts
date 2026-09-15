@@ -23,7 +23,7 @@ import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import { saladFleetReservationIdentity } from "@/lib/saladFleetReservation";
-import { saladPriorityPolicyFromEnv } from "@/lib/saladCloud";
+import { saladPriorityPolicyFromEnv, SALAD_BULK_MAX_GPUS } from "@/lib/saladCloud";
 import {
   assertPlanWeekPreparedFootageBinding,
   normalizePlanWeekPreparationManifest,
@@ -590,7 +590,10 @@ export const minimaxH3WeeklyBatchTask = task({
           ownerId: payload.ownerId,
           orderKey: payload.orderKey,
           requestKeys,
-          requestedGpuCount: Math.min(3, payload.jobs.length),
+          // Keep the durable fence aligned with Salad's organization-wide
+          // three-GPU limit; do not let a second literal drift from the
+          // capacity admission contract.
+          requestedGpuCount: Math.min(SALAD_BULK_MAX_GPUS, payload.jobs.length),
           priority: "medium",
         })
       : undefined;
