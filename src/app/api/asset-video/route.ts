@@ -73,6 +73,11 @@ export async function GET(request: Request) {
       const retryable = upstream.status === 404 || upstream.status >= 500;
       await upstream.body?.cancel().catch(() => {});
       if (!retryable || attempt === 1) break;
+      // Match the image delivery boundary's short backoff. R2 edge replicas
+      // can briefly disagree immediately after a master is written or
+      // restored; give the fresh signature a moment before retrying without
+      // adding latency to successful reads.
+      await new Promise((resolve) => setTimeout(resolve, 120));
     }
     if (!upstream) throw new Error("video request did not produce a response");
     const responseHeaders = new Headers();
