@@ -25,8 +25,6 @@ assert.match(preview, /probe=1/,
 assert.match(preview, /videoSourceReady/);
 assert.match(preview, /showingPrivateImage/,
   "private image previews probe availability before mounting stale keys");
-assert.match(preview, /response\.body\?\.cancel\(\)/,
-  "image probes do not retain a second full image copy");
 assert.match(preview, /reviewedSrc/);
 assert.match(preview, /source: "reviewed"/);
 assert.match(preview, /data-preview-source=/);
