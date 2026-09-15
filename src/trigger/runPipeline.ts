@@ -86,15 +86,18 @@ import {
 import {
   assertPlanWeekPreparationManifestBinding,
   assertPlanWeekPreparedFootageBinding,
+  assertPlanWeekPreparedImagesBinding,
   assertPlanWeekPreparedMusicBinding,
   assertPlanWeekPreparedNarrationBinding,
   assertPlanWeekPreparedScriptBinding,
   planWeekPreparedFootageKey,
+  planWeekPreparedImagesKey,
   planWeekPreparedMusicKey,
   planWeekPreparedNarrationKey,
   planWeekPreparedScriptKey,
   type PlanWeekPreparationManifest,
   type PlanWeekPreparedFootage,
+  type PlanWeekPreparedImages,
   type PlanWeekPreparedMusic,
   type PlanWeekPreparedNarration,
   type PlanWeekPreparedScript,
@@ -1224,6 +1227,7 @@ export const runPipelineTask = task({
     let weeklyPreparedNarration: PlanWeekPreparedNarration | undefined;
     let weeklyPreparedMusic: PlanWeekPreparedMusic | undefined;
     let weeklyPreparedFootage: PlanWeekPreparedFootage | undefined;
+    let weeklyPreparedImages: PlanWeekPreparedImages | undefined;
 
     try {
       // A selected narrative horizon is a route-owned serial planner. It must
@@ -1381,6 +1385,27 @@ export const runPipelineTask = task({
               manifest: weeklyPreparation,
             });
           }
+          const preparedImagesKey = planWeekPreparedImagesKey(weeklyPreparation);
+          let rawPreparedImages: unknown | undefined;
+          try {
+            rawPreparedImages = JSON.parse(new TextDecoder().decode(
+              await getObjectBytes(preparedImagesKey),
+            ));
+          } catch (error) {
+            const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+            const name = (error as { name?: string }).name;
+            if (status !== 404 && name !== "NoSuchKey" && name !== "NotFound") {
+              throw new Error(
+                `scheduled plan prepared images are unavailable or invalid: ${error instanceof Error ? error.message : String(error)}`,
+              );
+            }
+          }
+          if (rawPreparedImages !== undefined) {
+            weeklyPreparedImages = assertPlanWeekPreparedImagesBinding({
+              prepared: rawPreparedImages,
+              manifest: weeklyPreparation,
+            });
+          }
           if (durableInvocation === undefined) {
             entries = structuredClone(weeklyPreparation.execution.pipeline) as PipelineEntry[];
             frozenModuleConfig = structuredClone(weeklyPreparation.execution.moduleConfig);
@@ -1391,7 +1416,8 @@ export const runPipelineTask = task({
               `${weeklyPreparedScript ? "prepared script admitted" : "script pending"}; ` +
               `${weeklyPreparedNarration ? "prepared narration admitted" : "narration pending"}; ` +
               `${weeklyPreparedMusic ? "prepared music admitted" : "music pending"}; ` +
-              `${weeklyPreparedFootage ? "prepared footage admitted" : "footage pending"})`,
+              `${weeklyPreparedFootage ? "prepared footage admitted" : "footage pending"}; ` +
+              `${weeklyPreparedImages ? "prepared images admitted" : "images pending"})`,
           );
         }
         log(
@@ -1887,6 +1913,9 @@ export const runPipelineTask = task({
               : {}),
             ...(typeof weeklyPreparedFootage !== "undefined" && weeklyPreparedFootage
               ? { preparedFootage: structuredClone(weeklyPreparedFootage) }
+              : {}),
+            ...(typeof weeklyPreparedImages !== "undefined" && weeklyPreparedImages
+              ? { preparedImages: structuredClone(weeklyPreparedImages) }
               : {}),
           };
         }

@@ -91,8 +91,9 @@ import {
 import { novitaCostEnvelope, type NovitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import { sha256ShotAnalysisSource } from "@/lib/shotAnalysis";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { sha256Hex } from "@/lib/sha256";
+import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes } from "@/lib/storage";
+import type { PlanWeekPreparedImages } from "@/lib/planWeekPreparation";
 import {
   createStoryboardAtlasRenderPlan,
   materializeStoryboardAtlasCrops,
@@ -1048,6 +1049,29 @@ function assertExactStillCandidates(shots: ShotPlan[], manifest: StillRenderMani
   }
 }
 
+/** Validate a prepared sidecar again at the paid-stage boundary. */
+async function assertPreparedImagesForShots(
+  shots: ShotPlan[],
+  prepared: PlanWeekPreparedImages,
+): Promise<StillRenderManifest> {
+  const manifest = StillRenderManifestSchema.parse(prepared.stillRenderManifest);
+  assertExactStillCandidates(shots, manifest);
+  if (prepared.items.length !== manifest.items.length) {
+    throw new Error("prepared image byte receipts do not match the still manifest");
+  }
+  for (const [index, item] of prepared.items.entries()) {
+    const manifestItem = manifest.items[index];
+    if (!manifestItem || item.shotId !== manifestItem.shotId || item.candidateIndex !== manifestItem.candidateIndex || item.stillKey !== manifestItem.stillKey) {
+      throw new Error("prepared image byte receipt order does not match the still manifest");
+    }
+    const bytes = await getObjectBytes(item.stillKey);
+    if (bytes.byteLength !== item.byteLength || sha256BytesHex(bytes) !== item.sha256) {
+      throw new Error(`prepared image ${item.stillKey} no longer matches its receipt`);
+    }
+  }
+  return manifest;
+}
+
 function assertExactShotManifest(shots: ShotPlan[], manifest: ShotRenderManifest): void {
   if (manifest.items.length !== shots.length) {
     throw new Error(`shot render manifest expected ${shots.length} item(s), received ${manifest.items.length}`);
@@ -1151,6 +1175,19 @@ export const novitaRenderImages: Block = {
     const { shots, specsByShot } = requireStoryInputs(ctx.store);
     const visualMatter = requireVisualMatter(ctx.store);
     const profile = profileForShots(shots, ctx.params["generationProfile"]);
+    const preparedImages = ctx.store["preparedImages"] as PlanWeekPreparedImages | undefined;
+    if (preparedImages) {
+      const manifest = await assertPreparedImagesForShots(shots, preparedImages);
+      if (manifest.generation.profileId !== profile.id) {
+        throw new Error("prepared image generation profile does not match the scheduled image stage");
+      }
+      ctx.log(`novita_render_images: reused ${manifest.items.length} prepared still candidate(s); no provider spend`);
+      return {
+        stillKeys: manifest.items.map((item) => item.stillKey),
+        stillRenderManifest: manifest,
+        [COST_PATCH_KEY]: 0,
+      };
+    }
     const renderShots: Shot[] = shots.map((shot) => {
       const spec = specsByShot.get(shot.id)!;
       const directive = visualMatterDirectiveForShot(visualMatter, shot.id);

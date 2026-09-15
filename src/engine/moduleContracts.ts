@@ -1198,7 +1198,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   novita_render_images: contract(["visuals.keyframes_generated", "render.profile_pinned", "render.spot_only"], {
     requiredConsumes: ["shotList", "dpVisualSpecs", "visualMatterManifest"],
-    optionalConsumes: ["visualBrief"],
+    optionalConsumes: ["visualBrief", "preparedImages"],
     providerProfiles: [{ id: "novita-zimage-production", provider: "novita", quality: "production", allowFallback: false }],
     // 50 hero shots × two candidates × the single-4090 two-hour hard bound.
     // This is a reservation ceiling, not an instruction to spend it; runtime

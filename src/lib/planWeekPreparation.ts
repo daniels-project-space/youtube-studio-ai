@@ -19,6 +19,10 @@ import {
   type GeneratedFootageSceneManifest,
 } from "@/engine/generatedFootageManifest";
 import {
+  StillRenderManifestSchema,
+  type StillRenderManifest,
+} from "@/engine/renderArtifacts";
+import {
   MINIMAX_H3_WORKER_CONTRACT,
   MINIMAX_H3_MANIFEST_SHA256,
   MINIMAX_H3_PROFILE,
@@ -214,6 +218,35 @@ export interface PlanWeekPreparedFootage {
   createdAt: number;
 }
 
+export const PLAN_WEEK_PREPARED_IMAGES_VERSION = "plan-week-prepared-images/v1" as const;
+
+/**
+ * Receipt-backed still candidates produced by the week-ahead image worker.
+ * The canonical StillRenderManifest remains the renderer-facing artifact;
+ * this sidecar adds byte identity and the exact weekly scope so a scheduled
+ * run can reuse pixels without silently regenerating them.
+ */
+export interface PlanWeekPreparedImages {
+  version: typeof PLAN_WEEK_PREPARED_IMAGES_VERSION;
+  manifestSha256: string;
+  ownerId: string;
+  channelId: string;
+  batchId: string;
+  itemId: string;
+  requestKey: string;
+  topic: string;
+  stillRenderManifest: StillRenderManifest;
+  stillRenderManifestSha256: string;
+  items: Array<{
+    shotId: string;
+    candidateIndex: number;
+    stillKey: string;
+    sha256: string;
+    byteLength: number;
+  }>;
+  createdAt: number;
+}
+
 export type PlanWeekPreparationPromptKey = keyof PlanWeekPreparationManifest["prompts"];
 
 /**
@@ -379,6 +412,29 @@ export function planWeekPreparedFootageClipKey(args: {
     throw new Error("plan-week preparation footage clip index is invalid");
   }
   return `${planWeekPreparationPrefix(args)}/prepared/footage/clip-${String(args.index + 1).padStart(4, "0")}.mp4`;
+}
+
+/** Canonical still candidate destination for a prepared weekly image item. */
+export function planWeekPreparedImageKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+  index: number;
+}): string {
+  if (!Number.isSafeInteger(args.index) || args.index < 0 || args.index >= 10_000) {
+    throw new Error("plan-week preparation image index is invalid");
+  }
+  return `${planWeekPreparationPrefix(args)}/prepared/images/still-${String(args.index + 1).padStart(5, "0")}.png`;
+}
+
+export function planWeekPreparedImagesKey(args: {
+  ownerId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+}): string {
+  return `${planWeekPreparationPrefix(args)}/prepared/images.json`;
 }
 
 /** Canonical H3 first-frame input for a prepared weekly footage item. */
@@ -1032,6 +1088,90 @@ export function assertPlanWeekPreparedFootageBinding(args: {
     normalized.topic !== args.manifest.plan.topic
   ) {
     throw new Error("plan-week prepared footage binding mismatch");
+  }
+  return normalized;
+}
+
+/**
+ * Admit a completed weekly still-image sidecar.  This is intentionally
+ * stricter than accepting a list of URLs: every candidate must line up with
+ * the canonical StillRenderManifest and with its deterministic preparation
+ * destination, while the runner re-reads and hashes the bytes immediately
+ * before bypassing the paid image stage.
+ */
+export function assertPlanWeekPreparedImagesBinding(args: {
+  prepared: unknown;
+  manifest: PlanWeekPreparationManifest;
+}): PlanWeekPreparedImages {
+  const prepared = requiredRecord(args.prepared, "prepared images receipt");
+  if (prepared.version !== PLAN_WEEK_PREPARED_IMAGES_VERSION) {
+    throw new Error("plan-week prepared images version is unsupported");
+  }
+  const manifestSha256 = requiredText(prepared.manifestSha256, "prepared images manifest digest").toLowerCase();
+  const stillRenderManifestSha256 = requiredText(prepared.stillRenderManifestSha256, "prepared images render-manifest digest").toLowerCase();
+  const createdAt = typeof prepared.createdAt === "number" ? prepared.createdAt : Number.NaN;
+  if (
+    !/^[a-f0-9]{64}$/.test(manifestSha256) ||
+    !/^[a-f0-9]{64}$/.test(stillRenderManifestSha256) ||
+    !Number.isSafeInteger(createdAt) || createdAt <= 0
+  ) {
+    throw new Error("plan-week prepared images receipt is invalid");
+  }
+  const stillRenderManifest = StillRenderManifestSchema.parse(prepared.stillRenderManifest);
+  if (sha256Hex(canonicalJson(stillRenderManifest)) !== stillRenderManifestSha256) {
+    throw new Error("plan-week prepared images render-manifest digest mismatch");
+  }
+  if (!Array.isArray(prepared.items) || prepared.items.length !== stillRenderManifest.items.length) {
+    throw new Error("plan-week prepared images do not match the ordered still manifest");
+  }
+  const scope = {
+    ownerId: args.manifest.ownerId,
+    channelSlug: args.manifest.channelSlug,
+    batchId: args.manifest.batchId,
+    itemId: args.manifest.itemId,
+  };
+  const items = prepared.items.map((raw, index) => {
+    const item = requiredRecord(raw, `prepared image ${index + 1}`);
+    const still = stillRenderManifest.items[index];
+    const shotId = requiredText(item.shotId, `prepared image ${index + 1} shot id`);
+    const candidateIndex = typeof item.candidateIndex === "number" ? item.candidateIndex : Number.NaN;
+    const stillKey = requiredText(item.stillKey, `prepared image ${index + 1} key`);
+    const sha256 = requiredText(item.sha256, `prepared image ${index + 1} digest`).toLowerCase();
+    const byteLength = typeof item.byteLength === "number" ? item.byteLength : Number.NaN;
+    if (
+      !still || shotId !== still.shotId || candidateIndex !== still.candidateIndex || stillKey !== still.stillKey ||
+      stillKey !== planWeekPreparedImageKey({ ...scope, index }) ||
+      !/^[a-f0-9]{64}$/.test(sha256) ||
+      !Number.isSafeInteger(byteLength) || byteLength < 256 || byteLength > 50 * 1024 * 1024
+    ) {
+      throw new Error("plan-week prepared image binding mismatch");
+    }
+    return { shotId, candidateIndex, stillKey, sha256, byteLength };
+  });
+  const normalized: PlanWeekPreparedImages = {
+    version: PLAN_WEEK_PREPARED_IMAGES_VERSION,
+    manifestSha256,
+    ownerId: requiredText(prepared.ownerId, "prepared images owner id"),
+    channelId: requiredText(prepared.channelId, "prepared images channel id"),
+    batchId: requiredText(prepared.batchId, "prepared images batch id"),
+    itemId: requiredText(prepared.itemId, "prepared images item id"),
+    requestKey: requiredText(prepared.requestKey, "prepared images request key"),
+    topic: requiredText(prepared.topic, "prepared images topic"),
+    stillRenderManifest,
+    stillRenderManifestSha256,
+    items,
+    createdAt,
+  };
+  if (
+    normalized.manifestSha256 !== planWeekPreparationManifestSha256(args.manifest) ||
+    normalized.ownerId !== args.manifest.ownerId ||
+    normalized.channelId !== args.manifest.channelId ||
+    normalized.batchId !== args.manifest.batchId ||
+    normalized.itemId !== args.manifest.itemId ||
+    normalized.requestKey !== args.manifest.requestKey ||
+    normalized.topic !== args.manifest.plan.topic
+  ) {
+    throw new Error("plan-week prepared images binding mismatch");
   }
   return normalized;
 }

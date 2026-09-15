@@ -16,6 +16,9 @@ const musicSeed = source.indexOf("preparedMusic: structuredClone(weeklyPreparedM
 const footageKey = source.indexOf("const preparedFootageKey = planWeekPreparedFootageKey(weeklyPreparation);");
 const footageBinding = source.indexOf("weeklyPreparedFootage = assertPlanWeekPreparedFootageBinding({");
 const footageSeed = source.indexOf("preparedFootage: structuredClone(weeklyPreparedFootage)");
+const imagesKey = source.indexOf("const preparedImagesKey = planWeekPreparedImagesKey(weeklyPreparation);");
+const imagesBinding = source.indexOf("weeklyPreparedImages = assertPlanWeekPreparedImagesBinding({");
+const imagesSeed = source.indexOf("preparedImages: structuredClone(weeklyPreparedImages)");
 const preparedAuditionBypass = source.indexOf('const preparedWeeklyMusic = seedStore["preparedMusic"];');
 
 assert.ok(manifestVerification >= 0, "weekly preparation must still be verified before any sidecar is considered");
@@ -31,6 +34,9 @@ assert.ok(musicSeed > musicBinding, "only an admitted music receipt may seed the
 assert.ok(footageKey > musicBinding, "the footage receipt must derive from the same verified weekly packet");
 assert.ok(footageBinding > footageKey, "prepared footage must be scope-bound before it reaches gen_footage");
 assert.ok(footageSeed > footageBinding, "only admitted prepared footage may enter the frozen invocation");
+assert.ok(imagesKey > footageBinding, "the image receipt must derive from the same verified weekly packet");
+assert.ok(imagesBinding > imagesKey, "prepared images must be scope-bound before they reach novita_render_images");
+assert.ok(imagesSeed > imagesBinding, "only admitted prepared images may enter the frozen invocation");
 assert.ok(preparedAuditionBypass > musicSeed, "a prepared music receipt must avoid a duplicate MiniMax owner-audition checkpoint");
 assert.match(
   source,
@@ -51,6 +57,11 @@ assert.match(
   source,
   /prepared footage is unavailable or invalid/u,
   "an existing unreadable prepared footage receipt must fail closed instead of buying replacement visuals",
+);
+assert.match(
+  source,
+  /prepared images are unavailable or invalid/u,
+  "an existing unreadable prepared image receipt must fail closed instead of buying replacement stills",
 );
 
 console.log("weekly prepared-media runner wiring passed");

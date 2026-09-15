@@ -4,11 +4,13 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import {
   assertPlanWeekPreparationManifestBinding,
   assertPlanWeekPreparedFootageBinding,
+  assertPlanWeekPreparedImagesBinding,
   assertPlanWeekPreparedMusicBinding,
   assertPlanWeekPreparedNarrationBinding,
   assertPlanWeekPreparedScriptBinding,
   PLAN_WEEK_PREPARATION_VERSION,
   PLAN_WEEK_PREPARED_FOOTAGE_VERSION,
+  PLAN_WEEK_PREPARED_IMAGES_VERSION,
   PLAN_WEEK_PREPARED_MUSIC_VERSION,
   PLAN_WEEK_PREPARED_NARRATION_VERSION,
   PLAN_WEEK_PREPARED_SCRIPT_VERSION,
@@ -21,6 +23,8 @@ import {
   planWeekPreparedFootageClipKey,
   planWeekPreparedH3FirstFrameKey,
   planWeekPreparedFootageKey,
+  planWeekPreparedImageKey,
+  planWeekPreparedImagesKey,
   planWeekPreparedMusicKey,
   planWeekPreparedMusicNativeWavKey,
   planWeekPreparedMusicQualityReceiptKey,
@@ -130,6 +134,16 @@ assert.equal(
   `owner/${ownerId}/channel/${channelSlug}/plan-batches/${batchId}/items/${itemId}/preparation/prepared/footage.json`,
   "prepared footage receipts share the canonical weekly item namespace",
 );
+assert.equal(
+  planWeekPreparedImagesKey({ ownerId, channelSlug, batchId, itemId }),
+  `owner/${ownerId}/channel/${channelSlug}/plan-batches/${batchId}/items/${itemId}/preparation/prepared/images.json`,
+  "prepared image receipts share the canonical weekly item namespace",
+);
+assert.equal(
+  planWeekPreparedImageKey({ ownerId, channelSlug, batchId, itemId, index: 0 }),
+  `owner/${ownerId}/channel/${channelSlug}/plan-batches/${batchId}/items/${itemId}/preparation/prepared/images/still-00001.png`,
+  "prepared image bytes use deterministic numbered destinations",
+);
 for (const malformed of [
   { ownerId: "owner/other", channelSlug, itemId },
   { ownerId, channelSlug: "history\\..\\other", itemId },
@@ -199,6 +213,58 @@ assert.equal(
   admittedPreparedScript.script.narrationText,
   preparedScript.script.narrationText,
   "a prepared script is bound to its exact frozen weekly item before scheduled execution can reuse it",
+);
+const preparedImageKey = planWeekPreparedImageKey({ ownerId, channelSlug, batchId, itemId, index: 0 });
+const preparedStillManifest = {
+  version: "1.0.0" as const,
+  generation: {
+    contractVersion: "1.0.0" as const,
+    profileId: "production" as const,
+    model: "Tongyi-MAI/Z-Image-Turbo",
+    revision: "f332072aa78be7aecdf3ee76d5c247082da564a6",
+    checkpoint: "Z-Image-Turbo",
+    precision: "bf16" as const,
+    width: 1920,
+    height: 1088,
+    steps: 9,
+    allowFallback: false as const,
+  },
+  items: [{ shotId: "shot-1", candidateIndex: 0, outputId: "prepared-shot-1", stillKey: preparedImageKey }],
+};
+const preparedImages = {
+  version: PLAN_WEEK_PREPARED_IMAGES_VERSION,
+  manifestSha256: pointer.manifestSha256,
+  ownerId,
+  channelId,
+  batchId,
+  itemId,
+  requestKey,
+  topic: manifest.plan.topic,
+  stillRenderManifest: preparedStillManifest,
+  stillRenderManifestSha256: sha256Hex(canonicalJson(preparedStillManifest)),
+  items: [{ shotId: "shot-1", candidateIndex: 0, stillKey: preparedImageKey, sha256: "4".repeat(64), byteLength: 4_096 }],
+  createdAt: Date.now() - 250,
+};
+assert.equal(
+  assertPlanWeekPreparedImagesBinding({ prepared: preparedImages, manifest }).items[0]?.stillKey,
+  preparedImageKey,
+  "prepared images bind ordered candidates, bytes, and the exact weekly item before reuse",
+);
+assert.throws(
+  () => assertPlanWeekPreparedImagesBinding({
+    prepared: { ...preparedImages, items: [{ ...preparedImages.items[0], stillKey: "owner/foreign/still.png" }] },
+    manifest,
+  }),
+  /binding mismatch/,
+  "a prepared image may not redirect scheduled execution outside its canonical preparation namespace",
+);
+assert.throws(
+  () => assertPlanWeekPreparedImagesBinding({
+    prepared: { ...preparedImages, stillRenderManifestSha256: "5".repeat(64) },
+    manifest,
+  }),
+  /digest mismatch/,
+  "a prepared image receipt cannot name a different still manifest",
 );
 const h3NativeDurationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
 const h3ClipKey = planWeekPreparedFootageClipKey({ ownerId, channelSlug, batchId, itemId, index: 0 });
