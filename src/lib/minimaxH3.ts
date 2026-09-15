@@ -98,6 +98,8 @@ export async function assertMiniMaxH3SaladCapacity(
   requiredGpuCount: number;
   availableGpuCount: number;
   gpuClassId: string;
+  /** Hourly price for the tier actually admitted (not an estimate for the other tier). */
+  selectedPriceUsdPerHour: number;
   capacityMode: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY;
   /** True only when medium could not admit the wave and high was selected. */
   fallbackUsed: boolean;
@@ -215,6 +217,7 @@ export async function assertMiniMaxH3SaladCapacity(
       requiredGpuCount,
       availableGpuCount: availableHighGpuCount,
       gpuClassId: highGpu.id,
+      selectedPriceUsdPerHour: highGpu.priceUsdPerHour,
       capacityMode: SALAD_HIGH_FALLBACK_PRIORITY,
       fallbackUsed: true,
     };
@@ -224,6 +227,7 @@ export async function assertMiniMaxH3SaladCapacity(
       requiredGpuCount,
       availableGpuCount: availableMediumGpuCount,
       gpuClassId: gpu.id,
+      selectedPriceUsdPerHour: mediumGpu.priceUsdPerHour,
       capacityMode: MINIMAX_H3_SALAD_CAPACITY_MODE,
       fallbackUsed: false,
     };
@@ -245,6 +249,7 @@ export async function assertMiniMaxH3SaladCapacity(
       requiredGpuCount,
       availableGpuCount: availableHighGpuCount,
       gpuClassId: highGpu.id,
+      selectedPriceUsdPerHour: highGpu.priceUsdPerHour,
       capacityMode: SALAD_HIGH_FALLBACK_PRIORITY,
       fallbackUsed: true,
     };

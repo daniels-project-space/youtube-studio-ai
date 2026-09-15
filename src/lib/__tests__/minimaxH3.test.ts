@@ -73,7 +73,7 @@ async function test() {
   assert.equal(availabilityCalls, 0, "an occupied account lease must short-circuit the market query");
   assert.deepEqual(
     await assertMiniMaxH3SaladCapacity(4, { client: capacityClient }),
-    { requiredGpuCount: 3, availableGpuCount: 3, gpuClassId: classes[0]!.id, capacityMode: "medium", fallbackUsed: false },
+    { requiredGpuCount: 3, availableGpuCount: 3, gpuClassId: classes[0]!.id, selectedPriceUsdPerHour: 0.417, capacityMode: "medium", fallbackUsed: false },
   );
   assert.deepEqual(capacityRequest, {
     cpu: 8, gpu_classes: [classes[0]!.id], memory: 131_072, storage_amount: 100 * 1024 ** 3,
@@ -92,7 +92,7 @@ async function test() {
       },
       allowHighPriorityFallback: true,
     }),
-    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high", fallbackUsed: true },
+    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, selectedPriceUsdPerHour: 0.58, capacityMode: "high", fallbackUsed: true },
     "high fallback must also unlock a wave when medium exists but has too few exact-class slots",
   );
   assert.deepEqual(
@@ -104,7 +104,7 @@ async function test() {
       },
       allowHighPriorityFallback: true,
     }),
-    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high", fallbackUsed: true },
+    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, selectedPriceUsdPerHour: 0.58, capacityMode: "high", fallbackUsed: true },
     "high fallback must be admitted when medium is unavailable, high has enough exact-class slots, and the shared lease has room",
   );
   // Omitted options inherit the deployment policy rather than silently
@@ -142,7 +142,7 @@ async function test() {
       },
       allowHighPriorityFallback: true,
     }),
-    { requiredGpuCount: 1, availableGpuCount: 1, gpuClassId: classes[0]!.id, capacityMode: "high", fallbackUsed: true },
+    { requiredGpuCount: 1, availableGpuCount: 1, gpuClassId: classes[0]!.id, selectedPriceUsdPerHour: 0.58, capacityMode: "high", fallbackUsed: true },
     "a missing medium price must not silently dispatch medium; explicit high fallback may still proceed",
   );
   assert.deepEqual(
@@ -154,7 +154,7 @@ async function test() {
       },
       allowHighPriorityFallback: true,
     }),
-    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high", fallbackUsed: true },
+    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, selectedPriceUsdPerHour: 0.58, capacityMode: "high", fallbackUsed: true },
     "when medium is absent from Salad discovery entirely, a priced exact high tier may unlock the wave",
   );
   assert.deepEqual(
@@ -166,7 +166,7 @@ async function test() {
       allowHighPriorityFallback: true,
       preferHighPriority: true,
     }),
-    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high", fallbackUsed: true },
+    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, selectedPriceUsdPerHour: 0.58, capacityMode: "high", fallbackUsed: true },
     "a replay of an already-upgraded fleet lease must remain on high even if medium returns later",
   );
   assert.deepEqual(
@@ -178,7 +178,7 @@ async function test() {
       mediumPriorityEnabled: false,
       allowHighPriorityFallback: true,
     }),
-    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, capacityMode: "high", fallbackUsed: true },
+    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, selectedPriceUsdPerHour: 0.58, capacityMode: "high", fallbackUsed: true },
     "a disabled medium deployment must not report medium admission when high can unlock the wave",
   );
   let leaseReads = 0;

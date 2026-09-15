@@ -22,7 +22,7 @@ type H3Status = {
 };
 
 type H3Capacity =
-  | { state: "admitted"; capacity: { requiredGpuCount: number; availableGpuCount: number; capacityMode: "medium" | "high"; fallbackUsed: boolean } }
+  | { state: "admitted"; capacity: { requiredGpuCount: number; availableGpuCount: number; selectedPriceUsdPerHour: number; capacityMode: "medium" | "high"; fallbackUsed: boolean } }
   | { state: "held"; reason: string; paidRequestStarted: false }
   | { state: "unavailable"; reason: string };
 
@@ -410,8 +410,8 @@ export function H3RenderConsole() {
           {capacity && <span className={styles.capacityNotice} data-state={capacity.state} role="status">
             {capacity.state === "admitted"
               ? capacity.capacity.fallbackUsed
-                ? `Admits ${capacity.capacity.requiredGpuCount} worker${capacity.capacity.requiredGpuCount === 1 ? "" : "s"} at high priority fallback (medium unavailable).`
-                : `Admits ${capacity.capacity.requiredGpuCount} worker${capacity.capacity.requiredGpuCount === 1 ? "" : "s"} at medium priority.`
+                ? `Admits ${capacity.capacity.requiredGpuCount} worker${capacity.capacity.requiredGpuCount === 1 ? "" : "s"} at high priority fallback (medium unavailable) · $${capacity.capacity.selectedPriceUsdPerHour.toFixed(3)}/GPU-h.`
+                : `Admits ${capacity.capacity.requiredGpuCount} worker${capacity.capacity.requiredGpuCount === 1 ? "" : "s"} at medium priority · $${capacity.capacity.selectedPriceUsdPerHour.toFixed(3)}/GPU-h.`
               : capacity.state === "held"
                 ? `Held before spend · ${capacity.reason}`
               : `Capacity check unavailable · ${capacity.reason}`}
