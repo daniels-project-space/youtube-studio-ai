@@ -144,10 +144,11 @@ export function RecentVideos({
                 <div className={styles.media}>
                   <MediaPreview
                     assetKey={video.thumbnailKey ?? undefined}
-                    // Lo-Fi may use its retained master until the verified
-                    // 15-second frame lands; all other recent cards remain
-                    // persisted-thumbnail-only.
+                    // A pending Lo-Fi frame remains visibly pending in the
+                    // overview; detailed run workbench views can stream the
+                    // retained master when an exact frame is needed.
                     videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
+                    allowVideoStill={false}
                     alt=""
                     style={{ width: "100%", height: "100%" }}
                     unavailableLabel="Retained preview unavailable"

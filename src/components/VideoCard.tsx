@@ -53,10 +53,11 @@ export function VideoCard({
         emptyClassName="video-card-placeholder"
         assetKey={video.thumbnailKey}
         reviewedSrc={video.reviewedThumbnailUrl}
-        // Lo-Fi is the one intentional source-frame exception: until its
-        // verified 15-second frame is persisted, use the retained master as a
-        // paused visual fallback. Every other list card stays persisted-only.
+        // Keep library tiles image-only. A pending Lo-Fi frame is shown as
+        // pending until its exact candidate is persisted; detailed workbench
+        // views retain the source-video frame affordance.
         videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
+        allowVideoStill={false}
         // A retained key is authoritative. If its signed preview fails, show
         // an honest unavailable state rather than silently swapping in an old
         // public YouTube image and making the Library look unrefreshed.

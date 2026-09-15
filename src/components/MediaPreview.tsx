@@ -43,6 +43,7 @@ export function MediaPreview({
   overlay,
   footer,
   priority = false,
+  allowVideoStill = true,
 }: {
   assetKey?: string | null;
   /** A paused 15-second frame from a saved final master; used only as a truthful Lo-Fi fallback. */
@@ -66,6 +67,12 @@ export function MediaPreview({
   footer?: (presentation: MediaPreviewPresentation) => ReactNode;
   /** Prioritize above-the-fold artwork while keeping the rest lazy. */
   priority?: boolean;
+  /**
+   * Card grids should not stream multi-hundred-megabyte masters just to paint
+   * a tile. Detailed workbench views keep this enabled for the exact frame;
+   * overview cards defer until a persisted thumbnail exists.
+   */
+  allowVideoStill?: boolean;
 }) {
   const [reviewedFailedSrc, setReviewedFailedSrc] = useState<string | null>(null);
   const [r2FailedKey, setR2FailedKey] = useState<string | null>(null);
@@ -78,10 +85,11 @@ export function MediaPreview({
   // true only after hydration, without a synchronous setState-in-effect.
   const hydrated = useSyncExternalStore(() => () => {}, () => true, () => false);
   const showingReviewed = Boolean(reviewedSrc && reviewedFailedSrc !== reviewedSrc);
+  const sourceVideoStillKey = allowVideoStill ? videoStillKey : undefined;
   // Resolve only the source we can actually display. Fallback hooks remain
   // mounted, but do not sign an unused master or an image hidden by a review.
   const signedAsset = useAssetUrlState(showingReviewed ? undefined : assetKey);
-  const signedVideoStill = useAssetUrlState(!showingReviewed && !assetKey ? videoStillKey : undefined);
+  const signedVideoStill = useAssetUrlState(!showingReviewed && !assetKey ? sourceVideoStillKey : undefined);
 
   const imageSelection = selectMediaPreview({
     assetKey,
@@ -93,24 +101,24 @@ export function MediaPreview({
     fallbackSource,
   });
   const videoStillSelection = selectMediaPreview({
-    assetKey: videoStillKey,
+    assetKey: sourceVideoStillKey,
     signedUrl: signedVideoStill.url,
     signedState: signedVideoStill.status,
-    r2ImageFailed: Boolean(videoStillKey && videoStillFailedKey === videoStillKey),
+    r2ImageFailed: Boolean(sourceVideoStillKey && videoStillFailedKey === sourceVideoStillKey),
     fallbackSrc: undefined,
     fallbackImageFailed: true,
   });
-  const fallbackSelection = assetKey ? imageSelection : videoStillKey ? videoStillSelection : imageSelection;
+  const fallbackSelection = assetKey ? imageSelection : sourceVideoStillKey ? videoStillSelection : imageSelection;
   const selection = showingReviewed && reviewedSrc
     ? { source: "reviewed" as const, src: reviewedSrc, state: "loading" as const }
     : fallbackSelection;
-  const showingVideoStill = !showingReviewed && !assetKey && Boolean(videoStillKey) && selection.source === "r2";
+  const showingVideoStill = !showingReviewed && !assetKey && Boolean(sourceVideoStillKey) && selection.source === "r2";
   // Probe the retained master through the quiet delivery endpoint before
   // mounting a media element. A missing legacy object then becomes an honest
   // unavailable state instead of a browser-console 404; valid sources still
   // use the exact video element below to seek the 15-second frame.
   useEffect(() => {
-    if (!showingVideoStill || !selection.src || !videoStillKey) {
+    if (!showingVideoStill || !selection.src || !sourceVideoStillKey) {
       return;
     }
     const src = selection.src;
@@ -139,13 +147,13 @@ export function MediaPreview({
         if (!cancelled) setVideoProbe({ src, state: "ready" });
       })
       .catch(() => {
-        if (!cancelled) setVideoStillFailedKey(videoStillKey);
+        if (!cancelled) setVideoStillFailedKey(sourceVideoStillKey);
       });
     return () => {
       cancelled = true;
       controller.abort();
     };
-  }, [showingVideoStill, selection.src, videoStillKey]);
+  }, [showingVideoStill, selection.src, sourceVideoStillKey]);
   const videoSourceReady = showingVideoStill && Boolean(selection.src)
     && hydrated && videoProbe?.src === selection.src && videoProbe.state === "ready";
   const showingPrivateImage = !showingReviewed && Boolean(selection.src)
@@ -241,7 +249,7 @@ export function MediaPreview({
             setLoadedSrc(selection.src);
           }}
           onError={() => {
-            if (videoStillKey) setVideoStillFailedKey(videoStillKey);
+            if (sourceVideoStillKey) setVideoStillFailedKey(sourceVideoStillKey);
           }}
         />
       )}

@@ -60,10 +60,13 @@ export function LatestVideoWidget({
         <div className="latest-video-thumb" style={{ position: "relative", aspectRatio: "16 / 9", borderRadius: 10, overflow: "hidden" }}>
           <MediaPreview
             assetKey={v?.thumbnailKey ?? undefined}
-            // Lo-Fi is the one overview exception: while its verified 15s
-            // frame is being persisted, show the retained master frame rather
-            // than a blank hero. Other channels remain persisted-thumbnail-only.
+            // Keep overview cards image-only: a pending Lo-Fi frame is shown as
+            // pending until its exact candidate is persisted, rather than
+            // streaming a large retained master into every overview card.
             videoStillKey={v?.thumbnailPresentation === "lofi_frame_pending" ? v.videoKey : undefined}
+            // Overview surfaces never stream a retained master; the exact
+            // frame is reserved for the detailed run workbench.
+            allowVideoStill={false}
             alt={v?.title ?? "latest video"}
             style={{ width: "100%", height: "100%" }}
             unavailableLabel="Retained preview unavailable"
