@@ -32,6 +32,7 @@ function isOwnedVideoKey(key: string): boolean {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const key = searchParams.get("key") ?? "";
+  const probe = searchParams.get("probe") === "1";
   const mimeType = contentType(key);
   if (!mimeType || !isOwnedVideoKey(key)) {
     return NextResponse.json({ error: "forbidden video key" }, { status: 403 });
@@ -92,13 +93,23 @@ export async function GET(request: Request) {
     responseHeaders.set("Cache-Control", "private, max-age=600");
     if (!upstream.ok && upstream.status !== 206) {
       await upstream.body?.cancel().catch(() => {});
+      if (probe) {
+        return NextResponse.json({ available: false }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
+      }
       return NextResponse.json({ error: "video unavailable" }, { status: upstream.status >= 500 ? 503 : 404 });
+    }
+    if (probe) {
+      await upstream.body?.cancel().catch(() => {});
+      return NextResponse.json({ available: true }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
     }
     return new NextResponse(upstream.body, {
       status: upstream.status,
       headers: responseHeaders,
     });
   } catch {
+    if (probe) {
+      return NextResponse.json({ available: false }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
+    }
     return NextResponse.json(
       { error: "video unavailable" },
       { status: 503, headers: { "Cache-Control": "private, no-store", "Retry-After": "60" } },

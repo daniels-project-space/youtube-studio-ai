@@ -11,6 +11,7 @@ assert.match(source, /getObjectBytes/);
 assert.match(source, /isR2CredentialFailure/);
 assert.match(source, /sniffContentType/);
 assert.match(source, /status: 503/);
+assert.match(source, /probe[\s\S]*available: false/);
 assert.match(source, /Retry-After/);
 assert.match(source, /Cross-Origin-Resource-Policy.*same-origin/);
 assert.match(source, /owner\/\$\{OWNER_ID\}/);
@@ -32,5 +33,6 @@ assert.match(videoRoute, /new NextResponse\(upstream\.body/);
 assert.match(videoRoute, /Cross-Origin-Resource-Policy.*same-origin/);
 assert.match(videoRoute, /owner\/\$\{OWNER_ID\}/);
 assert.match(videoRoute, /status: upstream\.status/);
+assert.match(videoRoute, /probe[\s\S]*available: false/);
 
 console.log("same-origin private image/video proxy contracts passed");

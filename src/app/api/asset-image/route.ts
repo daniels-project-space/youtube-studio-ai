@@ -33,7 +33,9 @@ function isOwnedKey(key: string): boolean {
 
 /** Same-origin image response for private R2 artwork; videos keep direct signed playback. */
 export async function GET(request: Request) {
-  const key = new URL(request.url).searchParams.get("key") ?? "";
+  const searchParams = new URL(request.url).searchParams;
+  const key = searchParams.get("key") ?? "";
+  const probe = searchParams.get("probe") === "1";
   const mimeType = contentType(key);
   if (!mimeType || !isOwnedKey(key)) {
     return NextResponse.json({ error: "forbidden image key" }, { status: 403 });
@@ -43,6 +45,9 @@ export async function GET(request: Request) {
     // the already owner-scoped image directly and enforce the hard byte cap
     // before returning it; this avoids turning valid artwork into a false 404.
     const bytes = await getObjectBytes(key, undefined, { timeoutMs: 15_000 });
+    if (probe) {
+      return NextResponse.json({ available: true }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
+    }
     if (bytes.byteLength > MAX_INLINE_IMAGE_BYTES) {
       return NextResponse.json({ error: "image too large" }, { status: 413 });
     }
@@ -60,6 +65,9 @@ export async function GET(request: Request) {
       },
     });
   } catch (error) {
+    if (probe) {
+      return NextResponse.json({ available: false }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
+    }
     if (isR2CredentialFailure(error)) {
       return NextResponse.json(
         { error: "private media storage is unavailable" },

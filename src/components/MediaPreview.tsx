@@ -113,13 +113,17 @@ export function MediaPreview({
     const src = selection.src;
     const controller = new AbortController();
     let cancelled = false;
-    fetch(src, {
+    fetch(`${src}${src.includes("?") ? "&" : "?"}probe=1`, {
       headers: { Range: "bytes=0-0" },
       signal: controller.signal,
       cache: "no-store",
     })
       .then((response) => {
-        if (!response.ok && response.status !== 206) throw new Error("video source unavailable");
+        if (!response.ok) throw new Error("video source probe unavailable");
+        return response.json() as Promise<{ available?: unknown }>;
+      })
+      .then((result) => {
+        if (result.available !== true) throw new Error("video source unavailable");
         if (!cancelled) setVideoProbe({ src, state: "ready" });
       })
       .catch(() => {
@@ -141,12 +145,16 @@ export function MediaPreview({
     const src = selection.src;
     const controller = new AbortController();
     let cancelled = false;
-    fetch(src, { signal: controller.signal, cache: "no-store" })
+    fetch(`${src}${src.includes("?") ? "&" : "?"}probe=1`, { signal: controller.signal, cache: "no-store" })
       .then((response) => {
-        if (!response.ok) throw new Error("image source unavailable");
+        if (!response.ok) throw new Error("image source probe unavailable");
         // The probe only establishes availability; do not retain a second
         // copy of the image in JS memory before the real <img> loads it.
         void response.body?.cancel();
+        return response.json() as Promise<{ available?: unknown }>;
+      })
+      .then((result) => {
+        if (result.available !== true) throw new Error("image source unavailable");
         if (!cancelled) setImageProbe({ src, state: "ready" });
       })
       .catch(() => {

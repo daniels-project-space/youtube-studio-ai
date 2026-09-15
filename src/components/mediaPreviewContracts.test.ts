@@ -20,6 +20,8 @@ assert.match(preview, /useAssetUrlState/);
 assert.match(preview, /selectMediaPreview/);
 assert.match(preview, /Range: "bytes=0-0"/,
   "video previews probe availability before mounting a missing private source");
+assert.match(preview, /probe=1/,
+  "preview probes use a non-error availability response");
 assert.match(preview, /videoSourceReady/);
 assert.match(preview, /showingPrivateImage/,
   "private image previews probe availability before mounting stale keys");
