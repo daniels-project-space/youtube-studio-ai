@@ -15,6 +15,7 @@ type RenderedVideo = {
   channelName: string;
   youtubeVideoId?: string;
   thumbnailKey?: string | null;
+  thumbnailPresentation?: "current_golden_candidate" | "lofi_rendered_frame" | "lofi_frame_pending";
   videoKey?: string | null;
   durationSec?: number;
   createdAt?: number;
@@ -143,7 +144,10 @@ export function RecentVideos({
                 <div className={styles.media}>
                   <MediaPreview
                     assetKey={video.thumbnailKey ?? undefined}
-                    videoStillKey={video.videoKey}
+                    // Only Lo-Fi rows may derive a thumbnail from the exact
+                    // retained master. Other channels must not mount a large
+                    // video fallback when their thumbnail is missing.
+                    videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
                     alt=""
                     style={{ width: "100%", height: "100%" }}
                     unavailableLabel="Retained preview unavailable"

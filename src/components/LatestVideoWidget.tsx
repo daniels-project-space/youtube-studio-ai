@@ -15,6 +15,7 @@ type VideoRow = {
   status: string;
   youtubeVideoId?: string;
   thumbnailKey?: string | null;
+  thumbnailPresentation?: "current_golden_candidate" | "lofi_rendered_frame" | "lofi_frame_pending";
   /** Retained final master. Used as a truthful still when a legacy row has no thumbnail asset. */
   videoKey?: string | null;
   durationSec?: number;
@@ -59,7 +60,10 @@ export function LatestVideoWidget({
         <div className="latest-video-thumb" style={{ position: "relative", aspectRatio: "16 / 9", borderRadius: 10, overflow: "hidden" }}>
           <MediaPreview
             assetKey={v?.thumbnailKey ?? undefined}
-            videoStillKey={v?.videoKey ?? undefined}
+            // The exact 15-second master frame is a Lo-Fi-only fallback;
+            // mounting arbitrary masters for other channels creates noisy
+            // requests when a legacy video object has expired.
+            videoStillKey={v?.thumbnailPresentation === "lofi_frame_pending" ? v.videoKey ?? undefined : undefined}
             alt={v?.title ?? "latest video"}
             style={{ width: "100%", height: "100%" }}
             unavailableLabel="Retained preview unavailable"
