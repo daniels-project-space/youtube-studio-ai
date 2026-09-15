@@ -7,6 +7,7 @@ import {
   type SaladResources,
   saladCloudClientFromVault,
   saladOccupiedGpuSlots,
+  selectSaladCapacityPriority,
   selectSaladGpuAtPriority,
   saladPriorityPolicyFromEnv,
 } from "@/lib/saladCloud";
@@ -180,11 +181,14 @@ export async function readSaladCapacitySnapshot(
     }
     const mediumAvailable = safeCount(availability.available_gpu_medium);
     const highAvailable = safeCount(availability.available_gpu_high);
-    const recommendedPriority: SaladBulkPriority | null = mediumPriorityEnabled && mediumAvailable >= requiredWorkers
-      ? "medium"
-      : allowHighPriorityFallback && highAvailable >= requiredWorkers && highClass
-        ? SALAD_HIGH_FALLBACK_PRIORITY
-        : null;
+    const recommendedPriority: SaladBulkPriority | null = selectSaladCapacityPriority({
+      requiredWorkers,
+      mediumAvailable,
+      highAvailable,
+      mediumEligible: mediumPriorityEnabled && mediumClass !== undefined,
+      highEligible: highClass !== undefined,
+      allowHighPriorityFallback,
+    });
     if (!recommendedPriority) {
       if (!mediumPriorityEnabled && !allowHighPriorityFallback) {
         blockers.push("medium_priority_disabled");

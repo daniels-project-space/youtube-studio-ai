@@ -8,6 +8,7 @@ import {
   SALAD_HIGH_FALLBACK_PRIORITY,
   selectSaladGpu,
   selectSaladGpuAtPriority,
+  selectSaladCapacityPriority,
   saladPriorityPolicyFromEnv,
   type SaladGpuClass,
   type SaladResources,
@@ -222,29 +223,42 @@ export async function assertMiniMaxH3SaladCapacity(
       fallbackUsed: true,
     };
   }
-  if (mediumPriorityEnabled && mediumGpu && availableMediumGpuCount >= requiredGpuCount) {
+  // Only resolve the high-tier price when the market snapshot can actually
+  // admit the complete wave. This keeps the normal medium path cheap while
+  // still making a valid high-capacity fallback available when medium is
+  // short.
+  if (!highGpu && allowHighPriorityFallback && availableHighGpuCount >= requiredGpuCount) {
+    try {
+      highGpu = selectSaladGpuAtPriority(classes, "RTX 5090", SALAD_HIGH_FALLBACK_PRIORITY);
+    } catch (error) {
+      throw new MiniMaxH3Error(
+        `weekly MiniMax H3 Salad high-priority capacity is not priced for the exact desktop RTX 5090 class: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+  const selectedPriority = selectSaladCapacityPriority({
+    requiredWorkers: requiredGpuCount,
+    mediumAvailable: availableMediumGpuCount,
+    highAvailable: availableHighGpuCount,
+    mediumEligible: mediumPriorityEnabled && mediumGpu !== undefined,
+    highEligible: highGpu !== undefined,
+    allowHighPriorityFallback,
+  });
+  if (selectedPriority === MINIMAX_H3_SALAD_CAPACITY_MODE) {
     return {
       requiredGpuCount,
       availableGpuCount: availableMediumGpuCount,
       gpuClassId: gpu.id,
-      selectedPriceUsdPerHour: mediumGpu.priceUsdPerHour,
+      selectedPriceUsdPerHour: mediumGpu!.priceUsdPerHour,
       capacityMode: MINIMAX_H3_SALAD_CAPACITY_MODE,
       fallbackUsed: false,
     };
   }
-  if (allowHighPriorityFallback && availableHighGpuCount >= requiredGpuCount) {
+  if (selectedPriority === SALAD_HIGH_FALLBACK_PRIORITY) {
     // Re-discover the same exact desktop class at the selected tier. A high
     // availability estimate without a valid high-tier price is not spend
     // admission evidence.
-    if (!highGpu) {
-      try {
-        highGpu = selectSaladGpuAtPriority(classes, "RTX 5090", SALAD_HIGH_FALLBACK_PRIORITY);
-      } catch (error) {
-        throw new MiniMaxH3Error(
-          `weekly MiniMax H3 Salad high-priority capacity is not priced for the exact desktop RTX 5090 class: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-    }
+    if (!highGpu) throw new MiniMaxH3Error("weekly MiniMax H3 Salad high-priority capacity is not priced for the exact desktop RTX 5090 class");
     return {
       requiredGpuCount,
       availableGpuCount: availableHighGpuCount,

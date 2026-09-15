@@ -3,7 +3,7 @@ import { createServer } from "node:http";
 import {
   SALAD_API_BASE, SaladCloudClient, SaladCloudError, buildSaladContainerGroup,
   isSaladGroupStopped, saladOccupiedGpuSlots, saladPriorityPolicyFromEnv,
-  selectSaladGpu, selectSaladGpuAtPriority, type SaladGpuClass,
+  selectSaladCapacityPriority, selectSaladGpu, selectSaladGpuAtPriority, type SaladGpuClass,
 } from "../saladCloud";
 
 const classes: SaladGpuClass[] = [
@@ -31,6 +31,22 @@ assert.deepEqual(saladPriorityPolicyFromEnv({
   mediumEnabled: true,
   highFallbackEnabled: true,
 }, "ambiguous flag values must not accidentally disable paid capacity");
+assert.equal(selectSaladCapacityPriority({
+  requiredWorkers: 3, mediumAvailable: 3, highAvailable: 9,
+  mediumEligible: true, highEligible: true, allowHighPriorityFallback: true,
+}), "medium", "medium must remain the cheapest default when it can admit the wave");
+assert.equal(selectSaladCapacityPriority({
+  requiredWorkers: 3, mediumAvailable: 1, highAvailable: 3,
+  mediumEligible: true, highEligible: true, allowHighPriorityFallback: true,
+}), "high", "high must unlock a complete wave when medium cannot");
+assert.equal(selectSaladCapacityPriority({
+  requiredWorkers: 3, mediumAvailable: 1, highAvailable: 3,
+  mediumEligible: true, highEligible: true, allowHighPriorityFallback: false,
+}), null, "disabled high fallback must fail closed");
+assert.throws(() => selectSaladCapacityPriority({
+  requiredWorkers: 0, mediumAvailable: 1, highAvailable: 1,
+  mediumEligible: true, highEligible: true, allowHighPriorityFallback: true,
+}), /invalid counts/);
 
 const request = buildSaladContainerGroup({
   name: "studio-batch-001", image, gpu: selectSaladGpu(classes, "RTX 3090"),

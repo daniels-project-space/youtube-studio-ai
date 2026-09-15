@@ -10,6 +10,34 @@ export const SALAD_BULK_MAX_GPUS = 3;
 export type SaladGpuModel = "RTX 3090" | "RTX 5090";
 export type SaladBulkPriority = typeof SALAD_BULK_PRIORITY | typeof SALAD_HIGH_FALLBACK_PRIORITY;
 
+/**
+ * Select the cheapest tier that can admit the complete requested wave.  This
+ * is deliberately pure so the paid dispatcher and read-only capacity views
+ * cannot evolve different medium/high fallback rules.
+ */
+export function selectSaladCapacityPriority(input: {
+  requiredWorkers: number;
+  mediumAvailable: number;
+  highAvailable: number;
+  mediumEligible: boolean;
+  highEligible: boolean;
+  allowHighPriorityFallback: boolean;
+}): SaladBulkPriority | null {
+  if (
+    !Number.isSafeInteger(input.requiredWorkers) || input.requiredWorkers < 1 ||
+    !Number.isSafeInteger(input.mediumAvailable) || input.mediumAvailable < 0 ||
+    !Number.isSafeInteger(input.highAvailable) || input.highAvailable < 0
+  ) {
+    throw new Error("Salad capacity tier selection received invalid counts");
+  }
+  if (input.mediumEligible && input.mediumAvailable >= input.requiredWorkers) return SALAD_BULK_PRIORITY;
+  if (
+    input.allowHighPriorityFallback && input.highEligible &&
+    input.highAvailable >= input.requiredWorkers
+  ) return SALAD_HIGH_FALLBACK_PRIORITY;
+  return null;
+}
+
 export interface SaladPriorityPolicy {
   /** Medium is the cost-safe default and can be disabled for maintenance. */
   mediumEnabled: boolean;
