@@ -119,9 +119,12 @@ function ThumbnailRefreshPreview({
   priority?: boolean;
 }) {
   const [storedUrl, setStoredUrl] = useState<string | null>(null);
-  const [storedPreviewFailed, setStoredPreviewFailed] = useState(false);
+  const [storedPreviewIdentity, setStoredPreviewIdentity] = useState<string | null>(null);
+  const [storedPreviewReady, setStoredPreviewReady] = useState(false);
+  const [storedPreviewFailed, setStoredPreviewFailed] = useState<string | null>(null);
   const previewPresent = candidate ? Boolean(row.candidate?.thumbnailPresent) : row.thumbnailPresent;
   const previewRunId = candidate ? row.candidate?.runId : row.runId;
+  const previewIdentity = `${candidate ? "candidate" : "source"}:${previewRunId ?? ""}:${previewPresent ? "present" : "missing"}`;
 
   useEffect(() => {
     let current = true;
@@ -138,25 +141,48 @@ function ThumbnailRefreshPreview({
         return payload.preview.url;
       })
       .then((url) => {
-        if (current) {
+        if (!current || !url) return;
+        // Thumbnail preview URLs are normally the owner-scoped asset-image
+        // proxy. Probe that route before mounting <img> so a missing or
+        // eventually-consistent R2 object cannot leak a browser 404/503 into
+        // the review surface. Non-proxy URLs remain compatible with older
+        // reviewed candidates and are loaded directly.
+        const parsed = new URL(url, window.location.origin);
+        if (parsed.pathname !== "/api/asset-image") {
           setStoredUrl(url);
+          setStoredPreviewIdentity(previewIdentity);
+          setStoredPreviewReady(true);
+          return;
         }
+        parsed.searchParams.set("probe", "1");
+        return fetch(parsed.toString(), { cache: "no-store" })
+          .then(async (probeResponse) => {
+            const probe = await probeResponse.json() as { available?: unknown };
+            if (!probeResponse.ok || probe.available !== true) throw new Error("thumbnail preview unavailable");
+            if (current) {
+              setStoredUrl(url);
+              setStoredPreviewIdentity(previewIdentity);
+              setStoredPreviewReady(true);
+            }
+          });
       })
       .catch(() => {
         // A failed retained-object preview is an honest unavailable state. Do
         // not request stale/dead public YouTube artwork as a visual fallback.
-        if (current) setStoredPreviewFailed(true);
+        if (current) setStoredPreviewFailed(previewIdentity);
       });
     return () => { current = false; };
-  }, [candidate, previewPresent, previewRunId]);
+  }, [candidate, previewIdentity, previewPresent, previewRunId]);
 
   // The queue is a retained-artifact review surface. Never request public
   // YouTube artwork here: it can be stale, dead, or a different thumbnail
   // generation while the owner-bound candidate is still being evaluated.
-  const src = storedUrl && !storedPreviewFailed ? storedUrl : null;
-  const source = storedUrl && !storedPreviewFailed
+  const previewReadyForRow = storedPreviewIdentity === previewIdentity;
+  const previewFailedForRow = storedPreviewFailed === previewIdentity;
+  const src = storedUrl && storedPreviewReady && previewReadyForRow && !previewFailedForRow ? storedUrl : null;
+  const source = storedUrl && storedPreviewReady && previewReadyForRow && !previewFailedForRow
       ? candidate ? "new Library thumbnail" : "previous thumbnail"
-    : previewPresent && !storedPreviewFailed
+    : previewPresent && !previewFailedForRow
       ? "loading retained preview"
       : "no image retained";
 
@@ -173,11 +199,11 @@ function ThumbnailRefreshPreview({
           loading={priority ? "eager" : "lazy"}
           fetchPriority={priority ? "high" : "auto"}
           decoding="async"
-          onError={() => setStoredPreviewFailed(true)}
+          onError={() => setStoredPreviewFailed(previewIdentity)}
         />
       ) : (
         <span className={styles.previewEmpty}>
-          {previewPresent && !storedPreviewFailed ? "Loading preview…" : "No preview retained"}
+          {previewPresent && !previewFailedForRow ? "Loading preview…" : "No preview retained"}
         </span>
       )}
       <span className={styles.previewSource}>{source}</span>
