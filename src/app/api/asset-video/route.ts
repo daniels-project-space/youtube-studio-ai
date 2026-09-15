@@ -81,7 +81,10 @@ export async function GET(request: Request) {
       // can briefly disagree immediately after a master is written or
       // restored; give the fresh signature a moment before retrying without
       // adding latency to successful reads.
-      await new Promise((resolve) => setTimeout(resolve, Math.min(1_000, 120 * 2 ** attempt)));
+      // AWS-style signatures have one-second timestamp precision. Waiting at
+      // least 1.1s ensures the next presign is a genuinely new URL instead of
+      // retrying the same edge cache key; later retries remain bounded.
+      await new Promise((resolve) => setTimeout(resolve, Math.min(2_000, 1_100 + 300 * attempt)));
     }
     if (!upstream) throw new Error("video request did not produce a response");
     const responseHeaders = new Headers();

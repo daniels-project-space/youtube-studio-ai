@@ -28,8 +28,8 @@ assert.match(videoRoute, /presignDownload/);
 assert.match(videoRoute, /Range/);
 assert.match(videoRoute, /maxAttempts = 5/,
   "video previews retry transient edge misses with a bounded five-attempt window");
-assert.match(videoRoute, /Math\.min\(1_000, 120 \* 2 \*\* attempt\)/,
-  "video preview retries use staged backoff for repeated R2 edge misses");
+assert.match(videoRoute, /Math\.min\(2_000, 1_100 \+ 300 \* attempt\)/,
+  "video preview retries cross a signing-second boundary before retrying R2");
 assert.match(videoRoute, /upstream\.status === 404 \|\| upstream\.status >= 500/);
 assert.match(videoRoute, /attempt >= 2 && upstream\?\.status === 404 && range/,
   "a false non-zero-range miss gets two exact-range retries before full-source playback");
