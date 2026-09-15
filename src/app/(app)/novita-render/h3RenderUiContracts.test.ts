@@ -19,6 +19,12 @@ assert.match(page, /data-capacity-mode=\{status\.receipt\.capacityMode\}/,
   "the render desk surfaces the admitted Salad tier from the durable receipt");
 assert.match(page, /api\/minimax-h3\/capacity\?jobCount=/,
   "the render desk offers a read-only pre-dispatch Salad capacity check");
+assert.match(page, /const checkCapacity = useCallback\(async \(\) =>/,
+  "capacity probing must be stable so the auto-probe cannot loop on every render");
+assert.match(page, /if \(access !== "owner" \|\| mode !== "weekly" \|\| !parsedPreview\.valid\) return;/,
+  "automatic capacity probing must remain owner-scoped and only run for valid weekly work");
+assert.match(page, /void checkCapacity\(\);/,
+  "a valid weekly slate must automatically discover medium or high fallback admission");
 assert.match(page, /Check Salad capacity/);
 assert.match(page, /status\.state === "held"/);
 assert.match(page, /Held before spend/);

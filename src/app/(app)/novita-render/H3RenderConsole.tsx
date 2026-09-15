@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useOperationsAccess, useRequestOperationsAccess, type OperationsAccessState } from "@/components/OperationsAccess";
 import styles from "./h3-render-console.module.css";
 
@@ -263,7 +263,7 @@ export function H3RenderConsole() {
     setError("");
   }
 
-  async function checkCapacity() {
+  const checkCapacity = useCallback(async () => {
     if (mode !== "weekly" || !parsedPreview.valid) return;
     setCapacityBusy(true);
     setCapacity(null);
@@ -281,7 +281,16 @@ export function H3RenderConsole() {
     } finally {
       setCapacityBusy(false);
     }
-  }
+  }, [mode, parsedPreview.count, parsedPreview.valid]);
+
+  // A valid weekly slate should immediately reveal the cheapest admitted tier.
+  // This is read-only admission: it never queues a paid request, and the
+  // explicit dispatch confirmation remains the spend boundary.
+  useEffect(() => {
+    if (access !== "owner" || mode !== "weekly" || !parsedPreview.valid) return;
+    const timer = window.setTimeout(() => { void checkCapacity(); }, 0);
+    return () => window.clearTimeout(timer);
+  }, [access, checkCapacity, mode, parsedPreview.valid]);
 
   async function dispatch() {
     if (access !== "owner") {
