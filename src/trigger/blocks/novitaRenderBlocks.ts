@@ -1053,15 +1053,30 @@ function assertExactStillCandidates(shots: ShotPlan[], manifest: StillRenderMani
 async function assertPreparedImagesForShots(
   shots: ShotPlan[],
   prepared: PlanWeekPreparedImages,
+  scope: { ownerId: string; channelId: string; keyPrefix: string },
 ): Promise<StillRenderManifest> {
   const manifest = StillRenderManifestSchema.parse(prepared.stillRenderManifest);
+  if (
+    prepared.ownerId !== scope.ownerId ||
+    prepared.channelId !== scope.channelId ||
+    !/^[a-f0-9]{64}$/.test(prepared.manifestSha256) ||
+    prepared.stillRenderManifestSha256 !== sha256Hex(canonicalJson(manifest))
+  ) {
+    throw new Error("prepared image sidecar scope or manifest digest does not match this run");
+  }
   assertExactStillCandidates(shots, manifest);
   if (prepared.items.length !== manifest.items.length) {
     throw new Error("prepared image byte receipts do not match the still manifest");
   }
   for (const [index, item] of prepared.items.entries()) {
     const manifestItem = manifest.items[index];
-    if (!manifestItem || item.shotId !== manifestItem.shotId || item.candidateIndex !== manifestItem.candidateIndex || item.stillKey !== manifestItem.stillKey) {
+    if (
+      !manifestItem ||
+      item.shotId !== manifestItem.shotId ||
+      item.candidateIndex !== manifestItem.candidateIndex ||
+      item.stillKey !== manifestItem.stillKey ||
+      !item.stillKey.startsWith(`${scope.keyPrefix.replace(/\/$/, "")}/plan-batches/`)
+    ) {
       throw new Error("prepared image byte receipt order does not match the still manifest");
     }
     const bytes = await getObjectBytes(item.stillKey);
@@ -1177,7 +1192,11 @@ export const novitaRenderImages: Block = {
     const profile = profileForShots(shots, ctx.params["generationProfile"]);
     const preparedImages = ctx.store["preparedImages"] as PlanWeekPreparedImages | undefined;
     if (preparedImages) {
-      const manifest = await assertPreparedImagesForShots(shots, preparedImages);
+      const manifest = await assertPreparedImagesForShots(shots, preparedImages, {
+        ownerId: ctx.ownerId,
+        channelId: ctx.channelId,
+        keyPrefix: ctx.keyPrefix,
+      });
       if (manifest.generation.profileId !== profile.id) {
         throw new Error("prepared image generation profile does not match the scheduled image stage");
       }

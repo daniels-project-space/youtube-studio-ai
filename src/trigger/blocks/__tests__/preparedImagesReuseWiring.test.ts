@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 
 const source = readFileSync(new URL("../novitaRenderBlocks.ts", import.meta.url), "utf8");
 const branch = source.indexOf('const preparedImages = ctx.store["preparedImages"]');
-const verify = source.indexOf("assertPreparedImagesForShots(shots, preparedImages)");
+const verify = source.indexOf("assertPreparedImagesForShots(shots, preparedImages,");
 const reread = source.indexOf("getObjectBytes(item.stillKey)");
 const noSpend = source.indexOf("[COST_PATCH_KEY]: 0", branch);
 const provider = source.indexOf("const result = await renderImages(cfg)", branch);
