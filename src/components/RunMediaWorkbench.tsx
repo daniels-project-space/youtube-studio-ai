@@ -1,6 +1,6 @@
 "use client";
 
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore, type SyntheticEvent } from "react";
 import { useAssetUrlState } from "@/lib/asset-url";
 import { MediaPreview as CurrentMediaPreview } from "@/components/MediaPreview";
 import { SignedVideoPlayer } from "./SignedVideoPlayer";
@@ -355,18 +355,14 @@ function MediaPreview({
   }
 
   if (type === "video") {
-    return (
-      <SignedVideoPlayer
-        assetKey={asset.r2Key}
-        className={styles.video}
-        aria-label={`${label}: ${fileName(asset.r2Key)}`}
-        controls
-        playsInline
-        preload="metadata"
-        src={url}
-        onLoadedMetadata={event => onPlaybackSource(event.currentTarget.currentSrc)}
-      />
-    );
+    return <SafeRunVideoPreview
+      assetKey={asset.r2Key}
+      src={url}
+      label={`${label}: ${fileName(asset.r2Key)}`}
+      className={styles.video}
+      onError={onMediaError}
+      onLoadedMetadata={event => onPlaybackSource(event.currentTarget.currentSrc)}
+    />;
   }
 
   if (type === "audio") {
@@ -380,4 +376,76 @@ function MediaPreview({
   }
 
   return <div className={styles.previewState}>Saved {assetLabel(asset.kind).toLowerCase()} file</div>;
+}
+
+/**
+ * Run-media panels can contain old video keys. Probe the same-origin delivery
+ * boundary before handing a URL to the native player; `about:blank` keeps the
+ * SSR/hydration shape stable without issuing a request while the probe runs.
+ */
+function SafeRunVideoPreview({
+  assetKey,
+  src,
+  label,
+  className,
+  onError,
+  onLoadedMetadata,
+}: {
+  assetKey: string;
+  src: string;
+  label: string;
+  className?: string;
+  onError: () => void;
+  onLoadedMetadata: (event: SyntheticEvent<HTMLVideoElement>) => void;
+}) {
+  const [probe, setProbe] = useState<{ src: string; ready: boolean } | null>(null);
+  const hydrated = useSyncExternalStore(() => () => {}, () => true, () => false);
+  const errorRef = useRef(onError);
+  const isAssetVideoProxy = (() => {
+    try { return new URL(src, "https://asset.invalid").pathname === "/api/asset-video"; }
+    catch { return false; }
+  })();
+
+  useEffect(() => {
+    errorRef.current = onError;
+  }, [onError]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isAssetVideoProxy) return () => { cancelled = true; };
+    const parsed = new URL(src, window.location.origin);
+    parsed.searchParams.set("probe", "1");
+    fetch(parsed.toString(), {
+      cache: "no-store",
+      headers: { Range: "bytes=0-0" },
+    })
+      .then(async (response) => {
+        const result = await response.json() as { available?: unknown };
+        if (!response.ok || result.available !== true) throw new Error("video preview unavailable");
+        if (!cancelled) setProbe({ src, ready: true });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProbe({ src, ready: false });
+          errorRef.current();
+        }
+      });
+    return () => { cancelled = true; };
+  }, [isAssetVideoProxy, src]);
+
+  const sourceReady = hydrated && (!isAssetVideoProxy || (probe?.src === src && probe.ready));
+
+  return (
+    <SignedVideoPlayer
+      assetKey={assetKey}
+      className={className}
+      aria-label={label}
+      controls
+      playsInline
+      preload="metadata"
+      src={sourceReady ? src : "about:blank"}
+      onError={onError}
+      onLoadedMetadata={onLoadedMetadata}
+    />
+  );
 }

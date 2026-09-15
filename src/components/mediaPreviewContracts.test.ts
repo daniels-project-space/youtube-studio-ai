@@ -12,6 +12,7 @@ const latestVideo = read("src/components/LatestVideoWidget.tsx");
 const recentVideos = read("src/components/RecentVideos.tsx");
 const videoCard = read("src/components/VideoCard.tsx");
 const rail = read("src/components/ArtifactWorkRail.tsx");
+const runWorkbench = read("src/components/RunMediaWorkbench.tsx");
 const daySchedule = read("src/app/(app)/schedule/DayByDaySchedule.tsx");
 
 // One component owns the signed URL lifecycle, visual source state and the
@@ -45,6 +46,10 @@ for (const source of [assetImg, videoCard, rail, daySchedule]) {
 assert.match(latestVideo, /videoStillKey=\{v\?\.thumbnailPresentation === "lofi_frame_pending"/);
 assert.match(latestVideo, /priority\s*\/?>/);
 assert.doesNotMatch(latestVideo, /i\.ytimg\.com|fallbackSource="youtube"/);
+assert.match(runWorkbench, /SafeRunVideoPreview/);
+assert.match(runWorkbench, /searchParams\.set\("probe", "1"\)/);
+assert.match(runWorkbench, /Range: "bytes=0-0"/);
+assert.match(runWorkbench, /"about:blank"/);
 
 // The Studio's R2-only carousel filters to saved masters, so a missing
 // thumbnail can always use that exact master as its preview source.
