@@ -107,13 +107,11 @@ export function MediaPreview({
   // video element below to seek the 15-second frame.
   useEffect(() => {
     if (!showingVideoStill || !selection.src || !videoStillKey) {
-      setVideoProbe(null);
       return;
     }
     const src = selection.src;
     const controller = new AbortController();
     let cancelled = false;
-    setVideoProbe({ src, state: "checking" });
     fetch(src, {
       headers: { Range: "bytes=0-0" },
       signal: controller.signal,
