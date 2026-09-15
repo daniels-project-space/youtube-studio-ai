@@ -25,7 +25,9 @@ import {
 import { planStorySpine } from "@/engine/storySpine";
 import { sourceBoundStorySpineBlocks } from "@/trigger/blocks/sourceBoundStorySpineBlocks";
 
-const NOW = new Date("2026-08-16T12:00:00.000Z");
+// The admission contract rejects reviews older than 30 days. Anchor the
+// fixture to the test clock so CI does not expire a valid synthetic review.
+const NOW = new Date();
 
 const sourcePacket: CasefileSourcePacket = {
   version: CASEFILE_SOURCE_PACKET_VERSION,

@@ -18,7 +18,10 @@ import {
 } from "@/engine/sourceFirstAdmission";
 import { casefileEvidenceShotMapBlocks } from "@/trigger/blocks/casefileEvidenceShotMapBlocks";
 
-const NOW = new Date("2026-08-17T12:00:00.000Z");
+// Keep the fixture inside the production 30-day editorial-review window even
+// as the calendar advances; all relative-age assertions remain deterministic
+// within this test run.
+const NOW = new Date();
 
 const sourcePacket: CasefileSourcePacket = {
   version: CASEFILE_SOURCE_PACKET_VERSION,
