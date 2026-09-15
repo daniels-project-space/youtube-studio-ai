@@ -2361,6 +2361,16 @@ function IdentityTab({
   return (
     <div className={styles.identityWorkspace}>
       <section className={styles.identitySection}>
+        <div className={styles.sectionRail}><span>Profile image</span><i /></div>
+        <AvatarRefreshControl
+          slug={slug}
+          imageKey={id.imageKey ?? null}
+          provenance={id.artProvenance}
+          artworkIdentity={artworkIdentity}
+          locked={locked}
+        />
+      </section>
+      <section className={styles.identitySection}>
         <div className={styles.sectionRail}><span>Banner</span><i /></div>
         <BannerRefreshControl
           slug={slug}
@@ -2452,6 +2462,101 @@ function IdentityTab({
           <ChipRow items={id.bannedWords} tone="muted" />
         </section>
       )}
+    </div>
+  );
+}
+
+function AvatarRefreshControl({
+  slug,
+  imageKey,
+  provenance,
+  artworkIdentity,
+  locked,
+}: {
+  slug: string;
+  imageKey: string | null;
+  provenance: ChannelIdentity["artProvenance"];
+  artworkIdentity: ArtIdentity;
+  locked: boolean;
+}) {
+  const router = useRouter();
+  const access = useOperationsAccess();
+  const requestOwnerAccess = useRequestOperationsAccess();
+  const [state, setState] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+  const freshness = assessChannelArtFreshness({
+    kind: "avatar",
+    identity: artworkIdentity,
+    assetKey: imageKey,
+    provenance,
+  });
+
+  const refresh = async () => {
+    if (state === "running" || locked) return;
+    setState("running");
+    setMessage(null);
+    try {
+      const response = await fetch("/api/channel-art/refresh", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, kind: "avatar", expectedAssetKey: imageKey }),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !payload.ok) throw new Error(payload.error ?? "Could not refresh the profile image");
+      setState("done");
+      setMessage("Reviewed profile image accepted. Updating this channel now.");
+      router.refresh();
+    } catch (error) {
+      setState("error");
+      setMessage(error instanceof Error ? error.message : "Could not refresh the profile image");
+    }
+  };
+
+  return (
+    <div className={styles.bannerRefresh} data-fresh={freshness.current ? "true" : "false"}>
+      <div>
+        <strong>
+          Profile identity mark
+          <i>{freshness.current ? "Current" : imageKey ? "Needs refresh" : "Missing"}</i>
+        </strong>
+        <span>
+          {freshness.current
+            ? "Identity-matched · reviewed · receipt saved"
+            : "Saved art does not prove the current channel identity · ≤$0.12"}
+        </span>
+        {access !== "owner" && (
+          <small>Owner verification is required because this spends money and replaces saved art.</small>
+        )}
+      </div>
+      <div>
+        <button
+          type="button"
+          className={styles.bannerRefreshButton}
+          onClick={() => {
+            if (access !== "owner") {
+              requestOwnerAccess();
+              return;
+            }
+            void refresh();
+          }}
+          disabled={locked || state === "running" || access === "checking"}
+        >
+          {locked
+            ? "Channel locked"
+            : state === "running"
+              ? "Rendering + reviewing…"
+              : access !== "owner"
+                ? "Verify owner"
+                : freshness.current
+                  ? "Render replacement"
+                  : "Create profile image"}
+        </button>
+        {message && (
+          <p role={state === "error" ? "alert" : "status"} data-tone={state}>
+            {message}
+          </p>
+        )}
+      </div>
     </div>
   );
 }

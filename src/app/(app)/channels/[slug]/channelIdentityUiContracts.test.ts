@@ -10,6 +10,10 @@ async function main(): Promise<void> {
   assert.match(page, /<IdentityTab[\s\S]{0,400}?artworkIdentity=\{artworkIdentity\}/);
   assert.match(page, /const avatarArtFreshness = assessChannelArtFreshness\(\{/);
   assert.match(page, /const bannerArtFreshness = assessChannelArtFreshness\(\{/);
+  assert.match(page, /<AvatarRefreshControl[\s\S]{0,260}?imageKey=\{id\.imageKey/,
+    "identity view must expose the reviewed profile-image refresh action");
+  assert.match(page, /body: JSON\.stringify\(\{ slug, kind: "avatar", expectedAssetKey: imageKey \}\)/,
+    "profile-image refresh must send a typed compare-and-swap request");
   assert.match(page, /<Field label="Vibe" value=\{artworkIdentity\.vibe \?\? bible\.vibe\}/);
   assert.match(page, /<Field label="Signature" value=\{artworkIdentity\.iconicMotif \?\? bible\.iconicMotif\}/);
   assert.match(page, /<details className=\{styles\.identityDetails\}>/);

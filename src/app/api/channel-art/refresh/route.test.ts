@@ -15,8 +15,12 @@ async function main(): Promise<void> {
     "the UI action must expose a bounded provider envelope");
   assert.match(source, /api\.channels\.applyChannelArtAsset/,
     "the accepted art must merge into the latest channel row instead of replaying a pre-render identity snapshot");
-  assert.match(source, /expectedAssetKey: requested\.expectedBannerKey/,
-    "the final banner write must compare-and-swap the artwork revision");
+  assert.match(source, /expectedAssetKey: requested\.expectedAssetKey/,
+    "the final art write must compare-and-swap the artwork revision");
+  assert.match(source, /requested\.kind/,
+    "the refresh route must support both the profile avatar and banner without separate unsafe paths");
+  assert.match(source, /hasOwnProperty\.call\(input, "expectedAssetKey"\)/,
+    "an explicit null asset revision must remain a valid compare-and-swap value");
   assert.match(source, /channel\.locked/,
     "locked channels must not spend on a banner refresh");
   console.log("channel-art refresh route contracts passed");

@@ -21,21 +21,38 @@ function client(): StudioConvexHttpClient {
   return new StudioConvexHttpClient(url);
 }
 
-function body(value: unknown): { slug: string; expectedBannerKey: string | null } {
+function body(value: unknown): {
+  slug: string;
+  kind: "avatar" | "banner";
+  expectedAssetKey: string | null;
+} {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("Channel-art refresh request must be an object");
   }
   const input = value as Record<string, unknown>;
-  const allowed = ["slug", "expectedBannerKey"];
+  const allowed = ["slug", "kind", "expectedAssetKey", "expectedBannerKey"];
   const unexpected = Object.keys(input).filter((key) => !allowed.includes(key));
   if (unexpected.length) throw new Error(`Unrecognized channel-art refresh fields: ${unexpected.join(", ")}`);
   if (typeof input.slug !== "string" || !/^[a-z0-9][a-z0-9-]{1,120}$/u.test(input.slug)) {
     throw new Error("Channel-art refresh slug is invalid");
   }
-  if (input.expectedBannerKey !== null && typeof input.expectedBannerKey !== "string") {
-    throw new Error("Channel-art refresh banner revision is invalid");
+  const kind = input.kind === undefined ? "banner" : input.kind;
+  if (kind !== "avatar" && kind !== "banner") throw new Error("Channel-art refresh kind is invalid");
+  // Keep the original banner field accepted for existing clients while using
+  // one typed asset revision for the new avatar action.
+  if (Object.prototype.hasOwnProperty.call(input, "expectedAssetKey") &&
+      Object.prototype.hasOwnProperty.call(input, "expectedBannerKey") &&
+      input.expectedAssetKey !== input.expectedBannerKey) {
+    throw new Error("Channel-art refresh asset revisions disagree");
   }
-  return { slug: input.slug, expectedBannerKey: input.expectedBannerKey as string | null };
+  const rawExpected = Object.prototype.hasOwnProperty.call(input, "expectedAssetKey")
+    ? input.expectedAssetKey
+    : input.expectedBannerKey;
+  if (rawExpected !== null && typeof rawExpected !== "string") {
+    throw new Error(`Channel-art refresh ${kind} revision is invalid`);
+  }
+  if (rawExpected === undefined) throw new Error(`Channel-art refresh ${kind} revision is required`);
+  return { slug: input.slug, kind, expectedAssetKey: rawExpected as string | null };
 }
 
 export async function POST(request: Request) {
@@ -51,13 +68,15 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: false, error: "Channel not found" }, { status: 404 });
     }
     if (channel.locked) {
-      return NextResponse.json({ ok: false, error: "This channel is locked; unlock it before changing its banner" }, { status: 409 });
+      return NextResponse.json({ ok: false, error: `This channel is locked; unlock it before changing its ${requested.kind}` }, { status: 409 });
     }
-    const currentBannerKey = channel.identity?.bannerKey ?? null;
-    if (currentBannerKey !== requested.expectedBannerKey) {
+    const currentAssetKey = requested.kind === "avatar"
+      ? channel.identity?.imageKey ?? null
+      : channel.identity?.bannerKey ?? null;
+    if (currentAssetKey !== requested.expectedAssetKey) {
       return NextResponse.json({
         ok: false,
-        error: "The banner changed before refresh started. The current image is still intact; reload and try again.",
+        error: `The ${requested.kind} changed before refresh started. The current image is still intact; reload and try again.`,
       }, { status: 409 });
     }
 
@@ -69,11 +88,13 @@ export async function POST(request: Request) {
     const generated = await generateChannelArtAssetWithProvenance(
       actor.ownerId,
       channel.slug,
-      "banner",
+      requested.kind,
       artIdentity,
       () => {},
       {
-        version: { banner: `operator-refresh-${Date.now()}-v1` },
+        version: requested.kind === "avatar"
+          ? { avatar: `operator-refresh-${Date.now()}-v1` }
+          : { banner: `operator-refresh-${Date.now()}-v1` },
         maxAttempts: MAX_ATTEMPTS,
         maxProviderSpendUsd: MAX_PROVIDER_SPEND_USD,
       },
@@ -82,8 +103,8 @@ export async function POST(request: Request) {
     const result = await convex.mutation(api.channels.applyChannelArtAsset, {
       ownerId: actor.ownerId,
       channelId: channel._id as Id<"channels">,
-      kind: "banner",
-      expectedAssetKey: requested.expectedBannerKey,
+      kind: requested.kind,
+      expectedAssetKey: requested.expectedAssetKey,
       assetKey: generated.key,
       provenance: generated.provenance,
     });
@@ -92,7 +113,7 @@ export async function POST(request: Request) {
     }
     return NextResponse.json({
       ok: true,
-      bannerKey: generated.key,
+      ...(requested.kind === "avatar" ? { imageKey: generated.key } : { bannerKey: generated.key }),
       directionFingerprint: generated.provenance.directionFingerprint,
       approvalKey: generated.provenance.approvalKey,
       maximumAttempts: MAX_ATTEMPTS,
