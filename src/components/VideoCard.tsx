@@ -53,10 +53,10 @@ export function VideoCard({
         emptyClassName="video-card-placeholder"
         assetKey={video.thumbnailKey}
         reviewedSrc={video.reviewedThumbnailUrl}
-        // List cards use only a persisted exact frame. Pending legacy masters
-        // are shown as pending instead of forcing a large video seek just to
-        // synthesize a thumbnail in the browser.
-        videoStillKey={undefined}
+        // Lo-Fi is the one intentional source-frame exception: until its
+        // verified 15-second frame is persisted, use the retained master as a
+        // paused visual fallback. Every other list card stays persisted-only.
+        videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
         // A retained key is authoritative. If its signed preview fails, show
         // an honest unavailable state rather than silently swapping in an old
         // public YouTube image and making the Library look unrefreshed.
