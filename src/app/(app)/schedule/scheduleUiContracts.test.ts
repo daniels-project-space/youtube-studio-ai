@@ -7,6 +7,7 @@ const page = readFileSync(`${here}/page.tsx`, "utf8");
 const board = readFileSync(`${here}/DayByDaySchedule.tsx`, "utf8");
 const styles = readFileSync(`${here}/schedule.module.css`, "utf8");
 const bulkPlanner = readFileSync(`${here}/WeekBulkPlanner.tsx`, "utf8");
+const publishedCalendar = readFileSync(`${process.cwd()}/convex/publishIntents.ts`, "utf8");
 
 assert.match(page, /Array\.from\(\{ length: 14 \}/,
   "the release signal must be derived from fourteen real calendar days");
@@ -65,5 +66,9 @@ assert.match(bulkPlanner, /href="\/novita-render\?mode=weekly"/,
   "weekly planning must expose the dedicated Salad H3 batch desk");
 assert.match(styles, /\.bulkControls \{[^}]*auto auto/,
   "the compact weekly controls must reserve a slot for the H3 batch desk link");
+assert.match(publishedCalendar, /currentLibraryThumbnail\(ctx/,
+  "published calendar rows must use the shared current-thumbnail projection");
+assert.match(publishedCalendar, /thumbnailKey: current\.key/,
+  "calendar cards must expose the accepted candidate key rather than the upload-time legacy key");
 
 console.log("schedule UI contracts passed");
