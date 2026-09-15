@@ -51,7 +51,10 @@ assert.match(runWorkbench, /SafeRunVideoPreview/);
 assert.match(runWorkbench, /SafeRunImagePreview/);
 assert.match(runWorkbench, /searchParams\.set\("probe", "1"\)/);
 assert.match(runWorkbench, /fetch\(parsed\.toString\(\), \{ cache: "no-store" \}\)/);
-assert.match(runWorkbench, /"about:blank"/);
+assert.match(runWorkbench, /if \(!sourceReady\)/,
+  "run video players must wait for a successful availability probe before mounting");
+assert.doesNotMatch(runWorkbench, /src=\{sourceReady \? src : "about:blank"\}/,
+  "missing legacy video keys must not emit an invalid about:blank media request");
 
 // The Studio's R2-only carousel filters to saved masters. A pending Lo-Fi
 // thumbnail can use that exact master as its temporary preview source.

@@ -375,8 +375,9 @@ function MediaPreview({
 
 /**
  * Run-media panels can contain old video keys. Probe the same-origin delivery
- * boundary before handing a URL to the native player; `about:blank` keeps the
- * SSR/hydration shape stable without issuing a request while the probe runs.
+ * boundary before handing a URL to the native player; do not mount a native
+ * element until that probe succeeds, so an absent legacy object never emits
+ * an invalid-scheme request while the availability check is in flight.
  */
 function SafeRunVideoPreview({
   assetKey,
@@ -427,6 +428,12 @@ function SafeRunVideoPreview({
 
   const sourceReady = hydrated && (!isAssetVideoProxy || (probe?.src === src && probe.ready));
 
+  if (!sourceReady) {
+    return <div className={styles.previewState} role="status">
+      {probe?.src === src && !probe.ready ? "Preview source unavailable" : "Checking retained preview…"}
+    </div>;
+  }
+
   return (
     <SignedVideoPlayer
       assetKey={assetKey}
@@ -435,7 +442,7 @@ function SafeRunVideoPreview({
       controls
       playsInline
       preload="metadata"
-      src={sourceReady ? src : "about:blank"}
+      src={src}
       onError={onError}
       onLoadedMetadata={onLoadedMetadata}
     />
