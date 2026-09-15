@@ -1145,7 +1145,7 @@ export const genFootage: Block = {
           preparedManifest.sequenceFingerprint !== plan.sequenceFingerprint ||
           preparedManifest.items.length !== scenes.length
         ) {
-          throw new Error("gen_footage: prepared H3 footage does not match the admitted scene timing or native 5.17s clip profile");
+          throw new Error("gen_footage: prepared H3 footage does not match the native 5.17s scene plan or its admitted authored timing");
         }
         const preparedTmp = await makeRunTempDir(`${ctx.runId}-prepared-h3-footage`);
         const footageClips = await pool(preparedFootage.clips, 4, async (clip, index) => {
