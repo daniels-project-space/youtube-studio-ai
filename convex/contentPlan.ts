@@ -273,6 +273,8 @@ function scheduledItemPayload(item: {
   preparationManifestKey?: string;
   preparationManifestSha256?: string;
 }): ScheduledPlanRunPayload {
+  const preparationFailure = scheduledPreparationFailure(item);
+  if (preparationFailure) throw new Error(preparationFailure);
   const hasPreparation = [
     item.preparationState,
     item.preparationVersion,
@@ -327,6 +329,43 @@ function scheduledRunPayload(run: {
       }),
     } : {}),
   });
+}
+
+/**
+ * New weekly batches are only schedulable after their immutable preparation
+ * pointer is complete.  Historical, non-batch rows intentionally remain
+ * readable without that pointer.  Keeping this check beside the payload
+ * normalizer prevents a partial pointer from becoming a late R2 failure after
+ * a queued run has already been inserted.
+ */
+function scheduledPreparationFailure(item: {
+  batchId?: unknown;
+  preparationState?: string;
+  preparationVersion?: string;
+  preparationManifestKey?: string;
+  preparationManifestSha256?: string;
+  preparationFrozenAt?: number;
+}): string | undefined {
+  const fields = [
+    item.preparationState,
+    item.preparationVersion,
+    item.preparationManifestKey,
+    item.preparationManifestSha256,
+    item.preparationFrozenAt,
+  ];
+  const hasPreparationMetadata = fields.some((value) => value !== undefined);
+  if (item.batchId === undefined && !hasPreparationMetadata) return undefined;
+  if (
+    item.preparationState !== "inputs_frozen" ||
+    item.preparationVersion !== PLAN_WEEK_PREPARATION_VERSION ||
+    !item.preparationManifestKey ||
+    !item.preparationManifestSha256 ||
+    !Number.isSafeInteger(item.preparationFrozenAt) ||
+    (item.preparationFrozenAt ?? 0) <= 0
+  ) {
+    return "ready plan item has incomplete weekly preparation inputs; finish the frozen preparation packet before scheduling";
+  }
+  return undefined;
 }
 
 async function proveReadyPlanBatches(
@@ -2133,8 +2172,11 @@ export const claimNextPlanRun = mutation({
       );
     const earliestDuePinned = duePinnedRows[0];
     if (earliestDuePinned) {
-      let reason: string | undefined;
-      if (!earliestDuePinned.topic.trim()) {
+      let reason: string | undefined = scheduledPreparationFailure(earliestDuePinned);
+      if (reason) {
+        // Keep the scheduler from inserting a run whose frozen input packet
+        // cannot be verified by the Trigger boundary.
+      } else if (!earliestDuePinned.topic.trim()) {
         reason = "ready plan item has no topic; repair or remove it before generation";
       } else if (!earliestDuePinned.title?.trim()) {
         reason = "ready plan item has no title; repair or remove it before generation";
@@ -2187,6 +2229,7 @@ export const claimNextPlanRun = mutation({
         .take(32);
       const ownedReadyRows = readyRows.filter((item) => item.ownerId === args.ownerId);
       const incomplete = ownedReadyRows.find((item) =>
+        scheduledPreparationFailure(item) ||
         !item.topic.trim() ||
         !item.title?.trim() ||
         !item.thumbnailKey?.trim() ||
@@ -2194,13 +2237,14 @@ export const claimNextPlanRun = mutation({
           (!Number.isFinite(item.scheduledAt) || item.scheduledAt <= 0)),
       );
       if (incomplete) {
-        const reason = !incomplete.topic.trim()
+        const reason = scheduledPreparationFailure(incomplete)
+          ?? (!incomplete.topic.trim()
           ? "ready plan item has no topic; repair or remove it before generation"
           : !incomplete.title?.trim()
             ? "ready plan item has no title; repair or remove it before generation"
             : !incomplete.thumbnailKey?.trim()
               ? "ready plan item has no admitted thumbnail; repair its planner artifact before generation"
-              : "ready plan item has an invalid pinned publish time; reschedule it before generation";
+              : "ready plan item has an invalid pinned publish time; reschedule it before generation");
         await ctx.db.patch(incomplete._id, { scheduledFailure: reason });
         return { state: "blocked" as const, planItemId: incomplete._id, reason };
       }

@@ -183,6 +183,7 @@ function seedReadyPlan(db: MemoryDb, channelId: string, args: {
   order: number;
   scheduledAt?: number;
   topic?: string;
+  batchId?: string;
 }) {
   db.seed("contentPlan", {
     ownerId: "owner-test",
@@ -194,6 +195,7 @@ function seedReadyPlan(db: MemoryDb, channelId: string, args: {
     status: "ready",
     generationState: "complete",
     createdAt: Date.now() - 1_000,
+    ...(args.batchId !== undefined ? { batchId: args.batchId } : {}),
     ...(args.scheduledAt !== undefined ? { scheduledAt: args.scheduledAt } : {}),
   }, args.id);
 }
@@ -439,6 +441,39 @@ async function main() {
   assert.match(incompleteClaim.reason, /no admitted thumbnail/);
   assert.match(String((await incompleteDb.get("contentPlan:incomplete"))?.scheduledFailure), /no admitted thumbnail/);
   assert.equal(incompleteDb.rows("runs").length, 0);
+
+  // A batch-managed row with a thumbnail but no complete frozen preparation
+  // packet must stop at scheduler admission. It must not create a queued run
+  // that will only fail later when Trigger tries to read R2 inputs.
+  const incompletePreparationDb = new MemoryDb();
+  const incompletePreparationChannel = seedChannel(incompletePreparationDb, {
+    enabled: true,
+    frequency: "daily",
+    timezone: "UTC",
+    localTime: "00:00",
+  });
+  seedReadyPlan(incompletePreparationDb, incompletePreparationChannel, {
+    id: "contentPlan:incomplete-preparation",
+    order: 0,
+    batchId: "planBatches:incomplete-preparation",
+  });
+  const incompletePreparationClaim = await invoke<{ state: string; planItemId: string; reason: string }>(
+    claimNextPlanRun,
+    testContext(incompletePreparationDb),
+    {
+      ownerId: "owner-test",
+      channelId: incompletePreparationChannel,
+      dueBefore: Date.now() + DEFAULT_PLAN_GENERATION_LEAD_MS,
+    },
+  );
+  assert.equal(incompletePreparationClaim.state, "blocked");
+  assert.equal(incompletePreparationClaim.planItemId, "contentPlan:incomplete-preparation");
+  assert.match(incompletePreparationClaim.reason, /incomplete weekly preparation inputs/);
+  assert.match(
+    String((await incompletePreparationDb.get("contentPlan:incomplete-preparation"))?.scheduledFailure),
+    /incomplete weekly preparation inputs/,
+  );
+  assert.equal(incompletePreparationDb.rows("runs").length, 0);
 
   // A stale or too-near pin fails before a run exists, so no pipeline or paid
   // provider can start; the plan row retains a visible repair instruction.
