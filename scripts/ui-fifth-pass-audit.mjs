@@ -12,6 +12,7 @@ import { chromium } from "playwright";
 const baseUrl = process.env.UI_AUDIT_BASE_URL ?? "https://youtube-studio-ai.vercel.app";
 const outputDir = process.env.UI_AUDIT_OUTPUT_DIR ?? "/tmp/ysa-ui-audit/pass5";
 const executablePath = process.env.UI_AUDIT_CHROMIUM ?? "/snap/bin/chromium";
+const MAX_FULL_PAGE_SCREENSHOT_HEIGHT = 16_000;
 
 const defaultRoutes = [
   "/",
@@ -163,6 +164,19 @@ async function pageInventory(page) {
 }
 
 async function captureScreenshot(page, path, { fullPage = true } = {}) {
+  if (fullPage) {
+    const pageHeight = await page.evaluate(() => Math.max(
+      document.documentElement.scrollHeight,
+      document.body?.scrollHeight ?? 0,
+    ));
+    if (pageHeight > MAX_FULL_PAGE_SCREENSHOT_HEIGHT) {
+      await page.screenshot({ path, fullPage: false });
+      return {
+        fallback: true,
+        reason: `page height ${pageHeight}px exceeds ${MAX_FULL_PAGE_SCREENSHOT_HEIGHT}px screenshot limit`,
+      };
+    }
+  }
   try {
     await page.screenshot({ path, fullPage });
     return { fallback: false };
