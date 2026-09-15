@@ -162,6 +162,24 @@ async function pageInventory(page) {
   });
 }
 
+async function captureScreenshot(page, path, { fullPage = true } = {}) {
+  try {
+    await page.screenshot({ path, fullPage });
+    return { fallback: false };
+  } catch (error) {
+    // Chromium can crash when a disclosure-heavy route grows beyond its
+    // maximum single-image height. Keep the visual sample useful and the
+    // route inventory trustworthy instead of turning that browser limit into
+    // a false application failure.
+    if (!fullPage) throw error;
+    await page.screenshot({ path, fullPage: false });
+    return {
+      fallback: true,
+      reason: error instanceof Error ? error.message.slice(0, 500) : String(error),
+    };
+  }
+}
+
 async function captureRoute(browser, viewport, route, discovered, records) {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
@@ -184,7 +202,9 @@ async function captureRoute(browser, viewport, route, discovered, records) {
     });
     await page.waitForTimeout(1_600);
     const inventory = await pageInventory(page);
-    await page.screenshot({ path: `${outputDir}/${id}--${viewport.id}.png`, fullPage: true });
+    const screenshotWarnings = [];
+    const primaryShot = await captureScreenshot(page, `${outputDir}/${id}--${viewport.id}.png`);
+    if (primaryShot.fallback) screenshotWarnings.push({ kind: "full-page-fallback", ...primaryShot });
 
     const disclosureCount = await page.locator("details").count();
     if (disclosureCount > 0) {
@@ -192,7 +212,8 @@ async function captureRoute(browser, viewport, route, discovered, records) {
         for (const element of elements) element.open = true;
       });
       await page.waitForTimeout(250);
-      await page.screenshot({ path: `${outputDir}/${id}--${viewport.id}--panels.png`, fullPage: true });
+      const panelShot = await captureScreenshot(page, `${outputDir}/${id}--${viewport.id}--panels.png`);
+      if (panelShot.fallback) screenshotWarnings.push({ kind: "panel-full-page-fallback", ...panelShot });
     }
 
     if (viewport.id === "mobile" && route === "/") {
@@ -224,6 +245,7 @@ async function captureRoute(browser, viewport, route, discovered, records) {
       status: response?.status(),
       finalUrl: page.url(),
       inventory,
+      screenshotWarnings,
       consoleErrors,
       pageErrors,
     });
