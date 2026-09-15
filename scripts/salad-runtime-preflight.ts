@@ -40,6 +40,15 @@ const specs = [
   },
 ];
 
+/** Keep the read-only preflight useful without echoing credentials or signed URLs. */
+function safeFailureContext(error: unknown): string {
+  const raw = error instanceof Error ? `${error.name}: ${error.message}` : String(error);
+  return raw
+    .replace(/https?:\/\/[^\s]+/gi, "[url]")
+    .replace(/(?:authorization|bearer|api[-_ ]?key|access[-_ ]?key|secret|token|password)\s*[:=]?\s*[^\s,;]+/gi, "$1=[redacted]")
+    .slice(0, 280);
+}
+
 async function main() {
   loadEnvConfig(process.cwd());
   const salad = await saladCloudClientFromVault();
@@ -163,7 +172,7 @@ async function main() {
     occupiedGpuSlots, providerQuota: quota, routes: reports }, null, 2));
 }
 
-void main().catch(() => {
-  console.error("Salad preflight could not complete; check vault access, provider access and the pinned R2 inventory. No GPU mutation was requested.");
+void main().catch((error: unknown) => {
+  console.error(`Salad preflight could not complete (${safeFailureContext(error)}); check vault access, provider access and the pinned R2 inventory. No GPU mutation was requested.`);
   process.exitCode = 1;
 });
