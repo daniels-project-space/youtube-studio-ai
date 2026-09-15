@@ -341,17 +341,12 @@ function MediaPreview({
   }
 
   if (type === "image") {
-    return (
-      // R2 signed URLs are short-lived and not part of the static image optimizer domain set.
-      // eslint-disable-next-line @next/next/no-img-element
-      <img
-        className={styles.image}
-        src={url}
-        alt={`${label} from the original run`}
-        loading="lazy"
-        onError={onMediaError}
-      />
-    );
+    return <SafeRunImagePreview
+      src={url}
+      label={`${label} from the original run`}
+      className={styles.image}
+      onError={onMediaError}
+    />;
   }
 
   if (type === "video") {
@@ -446,6 +441,64 @@ function SafeRunVideoPreview({
       src={sourceReady ? src : "about:blank"}
       onError={onError}
       onLoadedMetadata={onLoadedMetadata}
+    />
+  );
+}
+
+/** The same hydration-safe availability boundary for retained run images. */
+function SafeRunImagePreview({
+  src,
+  label,
+  className,
+  onError,
+}: {
+  src: string;
+  label: string;
+  className?: string;
+  onError: () => void;
+}) {
+  const [probe, setProbe] = useState<{ src: string; ready: boolean } | null>(null);
+  const hydrated = useSyncExternalStore(() => () => {}, () => true, () => false);
+  const errorRef = useRef(onError);
+  const isAssetImageProxy = (() => {
+    try { return new URL(src, "https://asset.invalid").pathname === "/api/asset-image"; }
+    catch { return false; }
+  })();
+
+  useEffect(() => {
+    errorRef.current = onError;
+  }, [onError]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!isAssetImageProxy) return () => { cancelled = true; };
+    const parsed = new URL(src, window.location.origin);
+    parsed.searchParams.set("probe", "1");
+    fetch(parsed.toString(), { cache: "no-store" })
+      .then(async (response) => {
+        const result = await response.json() as { available?: unknown };
+        if (!response.ok || result.available !== true) throw new Error("image preview unavailable");
+        if (!cancelled) setProbe({ src, ready: true });
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setProbe({ src, ready: false });
+          errorRef.current();
+        }
+      });
+    return () => { cancelled = true; };
+  }, [isAssetImageProxy, src]);
+
+  const sourceReady = hydrated && (!isAssetImageProxy || (probe?.src === src && probe.ready));
+  return (
+    // R2 signed URLs are short-lived and not part of the static image optimizer domain set.
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      className={className}
+      src={sourceReady ? src : undefined}
+      alt={label}
+      loading="lazy"
+      onError={onError}
     />
   );
 }

@@ -47,6 +47,7 @@ assert.match(latestVideo, /videoStillKey=\{v\?\.thumbnailPresentation === "lofi_
 assert.match(latestVideo, /priority\s*\/?>/);
 assert.doesNotMatch(latestVideo, /i\.ytimg\.com|fallbackSource="youtube"/);
 assert.match(runWorkbench, /SafeRunVideoPreview/);
+assert.match(runWorkbench, /SafeRunImagePreview/);
 assert.match(runWorkbench, /searchParams\.set\("probe", "1"\)/);
 assert.match(runWorkbench, /Range: "bytes=0-0"/);
 assert.match(runWorkbench, /"about:blank"/);
