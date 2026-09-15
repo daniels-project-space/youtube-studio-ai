@@ -6,6 +6,23 @@ export const runtime = "nodejs";
 
 const MAX_INLINE_IMAGE_BYTES = 25 * 1024 * 1024;
 
+async function readImageBytes(key: string): Promise<Uint8Array> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await getObjectBytes(key, undefined, { timeoutMs: 15_000 });
+    } catch (error) {
+      lastError = error;
+      if (attempt === 1) break;
+      // R2 can briefly miss a read at one edge immediately after a successful
+      // probe. Retry once server-side so the browser never sees that transient
+      // 503/404 and does not discard an otherwise valid thumbnail.
+      await new Promise((resolve) => setTimeout(resolve, 120));
+    }
+  }
+  throw lastError instanceof Error ? lastError : new Error("image unavailable");
+}
+
 function contentType(key: string): string | undefined {
   const extension = key.toLowerCase().split(".").pop();
   if (extension === "png") return "image/png";
@@ -44,7 +61,7 @@ export async function GET(request: Request) {
     // R2 deployments do not consistently expose a usable HEAD response. Read
     // the already owner-scoped image directly and enforce the hard byte cap
     // before returning it; this avoids turning valid artwork into a false 404.
-    const bytes = await getObjectBytes(key, undefined, { timeoutMs: 15_000 });
+    const bytes = await readImageBytes(key);
     if (probe) {
       return NextResponse.json({ available: true }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
     }
