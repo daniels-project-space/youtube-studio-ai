@@ -26,13 +26,13 @@ assert.match(assetUrl, /api\/asset-video\?key=/,
 const videoRoute = readFileSync(`${here}/../asset-video/route.ts`, "utf8");
 assert.match(videoRoute, /presignDownload/);
 assert.match(videoRoute, /Range/);
-assert.match(videoRoute, /attempt < 3/,
-  "video previews retry transient edge misses with fresh signatures");
-assert.match(videoRoute, /setTimeout\(resolve, 120\)/,
-  "video preview retries wait briefly for R2 edge convergence");
+assert.match(videoRoute, /maxAttempts = 5/,
+  "video previews retry transient edge misses with a bounded five-attempt window");
+assert.match(videoRoute, /Math\.min\(1_000, 120 \* 2 \*\* attempt\)/,
+  "video preview retries use staged backoff for repeated R2 edge misses");
 assert.match(videoRoute, /upstream\.status === 404 \|\| upstream\.status >= 500/);
-assert.match(videoRoute, /attempt > 0 && upstream\?\.status === 404 && range/,
-  "a false non-zero-range miss falls back to streamed full-source playback");
+assert.match(videoRoute, /attempt >= 2 && upstream\?\.status === 404 && range/,
+  "a false non-zero-range miss gets two exact-range retries before full-source playback");
 assert.match(videoRoute, /attemptHeaders\.delete\("Range"\)/);
 assert.match(videoRoute, /new NextResponse\(upstream\.body/);
 assert.match(videoRoute, /Cross-Origin-Resource-Policy.*same-origin/);
