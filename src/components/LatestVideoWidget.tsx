@@ -60,10 +60,9 @@ export function LatestVideoWidget({
         <div className="latest-video-thumb" style={{ position: "relative", aspectRatio: "16 / 9", borderRadius: 10, overflow: "hidden" }}>
           <MediaPreview
             assetKey={v?.thumbnailKey ?? undefined}
-            // The exact 15-second master frame is a Lo-Fi-only fallback;
-            // mounting arbitrary masters for other channels creates noisy
-            // requests when a legacy video object has expired.
-            videoStillKey={v?.thumbnailPresentation === "lofi_frame_pending" ? v.videoKey ?? undefined : undefined}
+            // Use a persisted thumbnail only. Source-frame extraction belongs
+            // to the explicit run workbench, not the overview hero.
+            videoStillKey={undefined}
             alt={v?.title ?? "latest video"}
             style={{ width: "100%", height: "100%" }}
             unavailableLabel="Retained preview unavailable"

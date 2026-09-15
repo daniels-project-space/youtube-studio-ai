@@ -43,7 +43,7 @@ for (const source of [assetImg, videoCard, rail, daySchedule]) {
 // The channel hero is an owner-side artifact view. A legacy upload without a
 // retained thumbnail must show a paused retained-master frame, never a stale
 // public YouTube hqdefault image.
-assert.match(latestVideo, /videoStillKey=\{v\?\.thumbnailPresentation === "lofi_frame_pending"/);
+assert.match(latestVideo, /videoStillKey=\{undefined\}/);
 assert.match(latestVideo, /priority\s*\/?>/);
 assert.doesNotMatch(latestVideo, /i\.ytimg\.com|fallbackSource="youtube"/);
 assert.match(runWorkbench, /SafeRunVideoPreview/);
@@ -54,7 +54,7 @@ assert.match(runWorkbench, /"about:blank"/);
 
 // The Studio's R2-only carousel filters to saved masters, so a missing
 // thumbnail can always use that exact master as its preview source.
-assert.match(recentVideos, /videoStillKey=\{video\.thumbnailPresentation === "lofi_frame_pending"/);
+assert.match(recentVideos, /videoStillKey=\{undefined\}/);
 assert.match(recentVideos, /priority=\{index < 3\}/);
 assert.doesNotMatch(recentVideos, /i\.ytimg\.com|fallbackSource="youtube"/);
 

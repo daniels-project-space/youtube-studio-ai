@@ -144,10 +144,9 @@ export function RecentVideos({
                 <div className={styles.media}>
                   <MediaPreview
                     assetKey={video.thumbnailKey ?? undefined}
-                    // Only Lo-Fi rows may derive a thumbnail from the exact
-                    // retained master. Other channels must not mount a large
-                    // video fallback when their thumbnail is missing.
-                    videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
+                    // Recent cards stay lightweight: persisted thumbnails only.
+                    // The run workbench owns the explicit source-frame path.
+                    videoStillKey={undefined}
                     alt=""
                     style={{ width: "100%", height: "100%" }}
                     unavailableLabel="Retained preview unavailable"

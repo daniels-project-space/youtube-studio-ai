@@ -53,7 +53,10 @@ export function VideoCard({
         emptyClassName="video-card-placeholder"
         assetKey={video.thumbnailKey}
         reviewedSrc={video.reviewedThumbnailUrl}
-        videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
+        // List cards use only a persisted exact frame. Pending legacy masters
+        // are shown as pending instead of forcing a large video seek just to
+        // synthesize a thumbnail in the browser.
+        videoStillKey={undefined}
         // A retained key is authoritative. If its signed preview fails, show
         // an honest unavailable state rather than silently swapping in an old
         // public YouTube image and making the Library look unrefreshed.
