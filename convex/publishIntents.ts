@@ -14,6 +14,7 @@ import {
 } from "../src/lib/publishTiming";
 import { publishedCalendarItem } from "../src/lib/publishedCalendar";
 import { bindExactPublishIntent } from "./publishContinuationState";
+import { currentLibraryThumbnail } from "./videos";
 
 const LEASE_MS = 8 * 60 * 60 * 1000;
 
@@ -436,9 +437,34 @@ export const listPublishedCalendarRange = query({
       immediate("public"),
       immediate("unlisted"),
     ]);
-    const items = [...scheduled, ...publicRows, ...unlistedRows]
-      .map(publishedCalendarItem)
-      .filter((item) => item !== null)
+    const ledgerRows = [...scheduled, ...publicRows, ...unlistedRows];
+    const items = (await Promise.all(ledgerRows.map(async (row) => {
+      const item = publishedCalendarItem(row);
+      if (!item || !row.runId || row.ownerId !== args.ownerId) return item;
+
+      // Published calendar rows used to expose the immutable upload-time
+      // thumbnail key forever. Resolve the same current-Golden projection as
+      // Library/run details so a completed candidate is visible on every
+      // calendar card too. Historical rows without a bound run retain their
+      // ledger key and remain truthful rather than guessing a candidate.
+      const [run, channel, assets] = await Promise.all([
+        ctx.db.get(row.runId),
+        ctx.db.get(row.channelId),
+        ctx.db.query("assets").withIndex("by_run", (q) => q.eq("runId", row.runId!)).collect(),
+      ]);
+      if (!run || run.ownerId !== args.ownerId || run.channelId !== row.channelId) return item;
+      const sourceThumbnail = assets.find((asset) => asset.kind === "thumbnail");
+      const current = await currentLibraryThumbnail(ctx, {
+        ownerId: args.ownerId,
+        runId: run._id,
+        channelId: row.channelId,
+        channel,
+        sourceThumbnail,
+        sourceVideoKey: row.videoArtifactKey?.trim() || null,
+      });
+      return { ...item, thumbnailKey: current.key };
+    })))
+      .filter((item): item is NonNullable<typeof item> => item !== null)
       .filter((item) => item.publishedAt >= args.startAt && item.publishedAt < args.endAt)
       .sort((a, b) => a.publishedAt - b.publishedAt);
 

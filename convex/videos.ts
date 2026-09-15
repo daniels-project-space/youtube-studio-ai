@@ -91,7 +91,7 @@ type LibraryChannelIdentity = { family?: unknown; contentLane?: unknown } | null
  * legacy source thumbnail in Studio immediately; no browser approval state is
  * part of this read path.
  */
-async function currentLibraryThumbnail(
+export async function currentLibraryThumbnail(
   ctx: QueryCtx,
   input: {
     ownerId: string;

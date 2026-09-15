@@ -20,6 +20,8 @@ export type PublishLedgerCalendarRow = {
   completedAt?: number;
   youtubeVideoId?: string;
   thumbnailArtifactKey?: string;
+  /** The exact retained final-master key, used to bind Lo-Fi frame selection. */
+  videoArtifactKey?: string;
 };
 
 /**
