@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { readSaladCapacitySnapshot } from "@/lib/saladCapacity";
 
+// Keep the fixture corpus deterministic even when a developer shell or CI
+// job intentionally disables a production tier. The explicit inheritance
+// case below temporarily overrides these defaults and restores them.
+const ambientMediumPolicy = process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY;
+const ambientHighPolicy = process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK;
+process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY = "1";
+process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK = "1";
+
 const classes = [
   {
     id: "11111111-1111-4111-8111-111111111111",
@@ -146,7 +154,38 @@ const waveHeldByQuota = await readSaladCapacitySnapshot({
 assert.ok(waveHeldByQuota.lanes.every((lane) => lane.recommendedPriority === null));
 assert.ok(waveHeldByQuota.lanes.every((lane) => lane.blockers.includes("salad_organization_replica_quota_insufficient_for_wave")));
 
+// Omitted helper options must use the same deployment policy as the paid
+// dispatcher; otherwise a direct fleet caller could advertise medium after
+// an operator disabled it for maintenance.
+const savedMediumPolicy = process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY;
+const savedHighPolicy = process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK;
+try {
+  process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY = "0";
+  process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK = "1";
+  const envDriven = await readSaladCapacitySnapshot({
+    listGpuClasses: async () => classes,
+    listContainerGroups: async () => [],
+    listContainerInstances: async () => [],
+    getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 10, container_replicas_used: 0 } }),
+    getGpuAvailability: async () => ({ available_gpu_medium: 3, available_gpu_high: 3 }),
+  });
+  assert.ok(envDriven.lanes.every((lane) => lane.recommendedPriority === "high"),
+    "direct fleet snapshots must inherit the disabled-medium/high-fallback policy");
+  assert.ok(envDriven.lanes.every((lane) => lane.fallbackUsed),
+    "policy-driven high recommendations must be marked as fallback");
+} finally {
+  if (savedMediumPolicy === undefined) delete process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY;
+  else process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY = savedMediumPolicy;
+  if (savedHighPolicy === undefined) delete process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK;
+  else process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK = savedHighPolicy;
+}
+
 console.log("Salad capacity snapshot contracts passed");
 }
 
-void main();
+void main().finally(() => {
+  if (ambientMediumPolicy === undefined) delete process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY;
+  else process.env.MINIMAX_H3_SALAD_MEDIUM_PRIORITY = ambientMediumPolicy;
+  if (ambientHighPolicy === undefined) delete process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK;
+  else process.env.MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK = ambientHighPolicy;
+});

@@ -8,6 +8,7 @@ import {
   saladCloudClientFromVault,
   saladOccupiedGpuSlots,
   selectSaladGpuAtPriority,
+  saladPriorityPolicyFromEnv,
 } from "@/lib/saladCloud";
 
 /**
@@ -90,12 +91,17 @@ export async function readSaladCapacitySnapshot(
   options: SaladCapacitySnapshotOptions = {},
 ): Promise<SaladCapacitySnapshot> {
   const requiredWorkers = options.requiredWorkers ?? 1;
-  const allowHighPriorityFallback = options.allowHighPriorityFallback ?? true;
+  // Keep direct callers aligned with the paid dispatcher as well as the API
+  // route. Explicit options remain useful for deterministic tests and
+  // maintenance previews, but omitted values must come from the one policy
+  // parser so a disabled tier cannot still be advertised by a helper caller.
+  const policy = saladPriorityPolicyFromEnv();
+  const allowHighPriorityFallback = options.allowHighPriorityFallback ?? policy.highFallbackEnabled;
   // The fleet panel is an admission preview, not an independent policy. Keep
   // its recommendation consistent with the paid H3 readiness fence: a
   // disabled medium tier must be treated as unavailable even if Salad reports
   // market slots for it.
-  const mediumPriorityEnabled = options.mediumPriorityEnabled ?? true;
+  const mediumPriorityEnabled = options.mediumPriorityEnabled ?? policy.mediumEnabled;
   if (!Number.isSafeInteger(requiredWorkers) || requiredWorkers < 1 || requiredWorkers > SALAD_BULK_MAX_GPUS) {
     throw new Error(`Salad capacity snapshot requires 1..${SALAD_BULK_MAX_GPUS} workers`);
   }
