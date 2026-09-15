@@ -44,7 +44,10 @@ try {
   })));
   assert.equal(presentations.length, 1);
   assert.equal(presentations[0].src, source, "footer receives the same resolved source as the artwork");
-  assert.match(markup, /<img[^>]+src="https:\/\/media\.example\.test\/current\.png"/);
+  assert.match(markup, /<img[^>]+alt="Current thumbnail"/,
+    "private image media is present without a network src during SSR");
+  assert.doesNotMatch(markup, /<img[^>]+src=/,
+    "private image URLs are not requested before hydration and availability probing");
   assert.match(markup, /loading="lazy"/, "non-priority previews remain lazy");
   assert.match(markup, /<\/div><footer><a href="https:\/\/media\.example\.test\/current\.png">Open source<\/a><\/footer>/,
     "source controls are a sibling after the artwork, never an overlay inside it");

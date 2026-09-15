@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useState, useSyncExternalStore, type CSSProperties, type ReactNode } from "react";
 import { useAssetUrlState } from "@/lib/asset-url";
 import {
   selectMediaPreview,
@@ -74,6 +74,9 @@ export function MediaPreview({
   const [imageProbe, setImageProbe] = useState<{ src: string; state: "ready" } | null>(null);
   const [fallbackFailedSrc, setFallbackFailedSrc] = useState<string | null>(null);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
+  // useSyncExternalStore gives the server a stable false snapshot and flips to
+  // true only after hydration, without a synchronous setState-in-effect.
+  const hydrated = useSyncExternalStore(() => () => {}, () => true, () => false);
   const showingReviewed = Boolean(reviewedSrc && reviewedFailedSrc !== reviewedSrc);
   // Resolve only the source we can actually display. Fallback hooks remain
   // mounted, but do not sign an unused master or an image hidden by a review.
@@ -135,9 +138,7 @@ export function MediaPreview({
     };
   }, [showingVideoStill, selection.src, videoStillKey]);
   const videoSourceReady = showingVideoStill && Boolean(selection.src)
-    // Server-rendered previews keep their semantic media element; the client
-    // probe gates the actual browser request after hydration.
-    && (typeof window === "undefined" || (videoProbe?.src === selection.src && videoProbe.state === "ready"));
+    && hydrated && videoProbe?.src === selection.src && videoProbe.state === "ready";
   const showingPrivateImage = !showingReviewed && Boolean(selection.src)
     && selection.source === "r2" && !showingVideoStill;
   useEffect(() => {
@@ -162,8 +163,8 @@ export function MediaPreview({
       controller.abort();
     };
   }, [showingPrivateImage, selection.src, assetKey]);
-  const imageSourceReady = !showingPrivateImage || typeof window === "undefined"
-    || imageProbe?.src === selection.src;
+  const imageSourceReady = !showingPrivateImage
+    || (hydrated && imageProbe?.src === selection.src);
   const state = selection.src && loadedSrc === selection.src
     ? "ready"
     : selection.state;
@@ -182,11 +183,11 @@ export function MediaPreview({
       data-tone={dataTone}
       aria-busy={state === "loading" || undefined}
     >
-      {selection.src && !showingVideoStill && imageSourceReady && (
+      {selection.src && !showingVideoStill && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           className={joinClassNames(styles.image, imageClassName)}
-          src={selection.src}
+          src={imageSourceReady ? selection.src : undefined}
           alt={alt}
           loading={priority ? "eager" : "lazy"}
           fetchPriority={priority ? "high" : "auto"}
@@ -207,10 +208,10 @@ export function MediaPreview({
           }}
         />
       )}
-      {selection.src && showingVideoStill && videoSourceReady && (
+      {selection.src && showingVideoStill && (
         <video
           className={joinClassNames(styles.image, imageClassName)}
-          src={selection.src}
+          src={videoSourceReady ? selection.src : undefined}
           muted
           playsInline
           preload="metadata"
