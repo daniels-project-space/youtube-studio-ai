@@ -38,21 +38,33 @@ export async function GET(request: Request) {
   }
 
   try {
-    const signedUrl = await presignDownload(key, {
-      expiresIn: 300,
-      responseContentType: mimeType,
-    });
     const forwardedHeaders = new Headers();
     const range = request.headers.get("range");
     if (range) forwardedHeaders.set("Range", range);
     const ifRange = request.headers.get("if-range");
     if (ifRange) forwardedHeaders.set("If-Range", ifRange);
-    const upstream = await fetch(signedUrl, {
-      method: "GET",
-      headers: forwardedHeaders,
-      redirect: "error",
-      signal: AbortSignal.timeout(30_000),
-    });
+    // R2 can briefly return a stale 404 while a just-uploaded master becomes
+    // visible across its edge. Refresh the signature and retry once for that
+    // narrow transient class (and provider 5xx); missing objects still return
+    // a truthful 404 after the bounded retry.
+    let upstream: Response | null = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const signedUrl = await presignDownload(key, {
+        expiresIn: 300,
+        responseContentType: mimeType,
+      });
+      upstream = await fetch(signedUrl, {
+        method: "GET",
+        headers: forwardedHeaders,
+        redirect: "error",
+        signal: AbortSignal.timeout(30_000),
+      });
+      if (upstream.ok || (upstream.status >= 200 && upstream.status < 300)) break;
+      const retryable = upstream.status === 404 || upstream.status >= 500;
+      await upstream.body?.cancel().catch(() => {});
+      if (!retryable || attempt === 1) break;
+    }
+    if (!upstream) throw new Error("video request did not produce a response");
     const responseHeaders = new Headers();
     for (const name of [
       "accept-ranges",
