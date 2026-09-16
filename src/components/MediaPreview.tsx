@@ -141,9 +141,27 @@ export function MediaPreview({
     // Require two independent successful probes. A stale edge can answer one
     // probe positively immediately before a native range request receives a
     // 404; the second read prevents mounting a source that is not stable yet.
-    probe()
-      .then(() => new Promise<void>((resolve) => setTimeout(resolve, 160)))
-      .then(() => probe())
+    // If an edge briefly reports the object as missing, repeat that pair once
+    // after a short backoff before giving up. The retry is bounded and read-only
+    // so a genuinely deleted legacy master still becomes unavailable promptly.
+    const stableProbe = async (): Promise<void> => {
+      let lastError: unknown;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          await probe();
+          await new Promise<void>((resolve) => setTimeout(resolve, 160));
+          await probe();
+          return;
+        } catch (error) {
+          lastError = error;
+          if (attempt === 0) {
+            await new Promise<void>((resolve) => setTimeout(resolve, 1_200));
+          }
+        }
+      }
+      throw lastError instanceof Error ? lastError : new Error("video source unavailable");
+    };
+    stableProbe()
       .then(() => {
         if (!cancelled) setVideoProbe({ src, state: "ready" });
       })
