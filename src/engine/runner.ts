@@ -31,6 +31,7 @@ import {
 } from "./executionErrors";
 import { configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
 import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
+import { createModuleScorecard } from "@/lib/moduleScorecard";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 import type { RunExecutionLeaseFence } from "@/lib/runLease";
 import { createCheckpointCostScope, incrementalObservedFailureCostUsd, type CheckpointCostReceipt } from "@/lib/checkpointCostAccounting";
@@ -1044,12 +1045,13 @@ export async function runPipeline(
       return { reservedMaxCostUsd, blockIds };
     };
 
+    const stageStartedAt = Date.now();
     await opts.sink.upsert({
       ownerId: opts.ownerId,
       runId: opts.runId,
       block: block.id,
       status: "running",
-      startedAt: Date.now(),
+      startedAt: stageStartedAt,
       costBeforeExecution: costBaseline.carriedCost,
       inputs,
     });
@@ -1264,6 +1266,27 @@ export async function runPipeline(
       const persistedStageOutputs = block.persistStageOutputs?.(patch) ?? patch;
       const executionReceipt = sealStageReuseReceipt(invocationHash, persistedStageOutputs, producedRefs, patch);
 
+      const scorecard = createModuleScorecard({
+        runId: opts.runId,
+        moduleId: block.id,
+        status: "passed",
+        outputValid: true,
+        oracleScore: null,
+        falsePasses: null,
+        falseRejects: null,
+        wallTimeMs: Date.now() - stageStartedAt,
+        providerCalls: modelUsage.calls + imageUsage.calls,
+        inputTokens: modelUsage.inputTokens,
+        outputTokens: modelUsage.outputTokens,
+        triggerRuns: null,
+        triggerWaits: null,
+        convexReads: null,
+        convexWrites: null,
+        estimatedCostUsd: cost,
+        capturedAt: Date.now(),
+      });
+      log(`module scorecard: ${block.id}`, { scorecard });
+
       await opts.sink.upsert({
         ownerId: opts.ownerId,
         runId: opts.runId,
@@ -1307,6 +1330,28 @@ export async function runPipeline(
         spentUsd += Math.max(0, costBaseline.carriedCost + checkpointAdjustedCost - costBaseline.priorCost);
         costAccounted = true;
       }
+      const failureModelUsage = reportUsage();
+      const failureImageUsage = reportImageUsage();
+      const failedScorecard = createModuleScorecard({
+        runId: opts.runId,
+        moduleId: block.id,
+        status: "failed",
+        outputValid: false,
+        oracleScore: null,
+        falsePasses: null,
+        falseRejects: null,
+        wallTimeMs: Date.now() - stageStartedAt,
+        providerCalls: failureModelUsage.calls + failureImageUsage.calls,
+        inputTokens: failureModelUsage.inputTokens,
+        outputTokens: failureModelUsage.outputTokens,
+        triggerRuns: null,
+        triggerWaits: null,
+        convexReads: null,
+        convexWrites: null,
+        estimatedCostUsd: observedCost,
+        capturedAt: Date.now(),
+      });
+      log(`module scorecard: ${block.id}`, { scorecard: failedScorecard });
       await opts.sink.upsert({
         ownerId: opts.ownerId,
         runId: opts.runId,

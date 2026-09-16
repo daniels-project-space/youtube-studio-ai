@@ -67,6 +67,7 @@ async function positive(): Promise<void> {
   preflight(resolved, { budgetUsd: 0 }); // no paid blocks → 0 budget is fine
 
   const { sink, rows } = memSink();
+  const logs: Array<{ message: string; extra?: Record<string, unknown> }> = [];
   const result = await runPipeline(resolved, {
     ownerId: "owner_test",
     runId: "run_test_pos",
@@ -75,6 +76,7 @@ async function positive(): Promise<void> {
     budgetUsd: 0,
     paramsByBlock: { echo_seed: { topic: "rainy night jazz" } },
     sink,
+    log: (message, extra) => logs.push({ message, extra }),
   });
 
   assert.equal(result.ok, true, "pipeline should succeed");
@@ -87,6 +89,12 @@ async function positive(): Promise<void> {
   // Stage transitions persisted: running+ok for each of the two blocks.
   const okStages = rows.filter((r) => r.status === "ok").map((r) => r.block);
   assert.deepEqual(okStages, ["echo_seed", "echo_sink"], "both blocks marked ok");
+  const scorecards = logs
+    .filter((entry) => entry.message.startsWith("module scorecard:"))
+    .map((entry) => entry.extra?.scorecard as { moduleId: string; status: string; fingerprint: string });
+  assert.deepEqual(scorecards.map((card) => card.moduleId), ["echo_seed", "echo_sink"]);
+  assert.deepEqual(scorecards.map((card) => card.status), ["passed", "passed"]);
+  assert(scorecards.every((card) => /^[0-9a-f]{64}$/.test(card.fingerprint)), "scorecards are fingerprinted");
   console.log("POSITIVE PASS: store =", JSON.stringify(result.store));
 }
 
