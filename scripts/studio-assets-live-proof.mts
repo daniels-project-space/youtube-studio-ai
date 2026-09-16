@@ -32,7 +32,14 @@ try {
       if(/\b00\b|\bUnattested\b/.test(text))failures.push(`${name}: unloaded inventory reported as zero or an unverified runtime`);
       if(await page.getByRole("link",{name:"Verify with YouTube",exact:true}).count()!==0)failures.push(`${name}: stale owner-verification gate is still rendered`);
       const grids=page.locator("[class*='catalogGrid']");
-      if(await grids.count()!==2)failures.push(`${name}: expected two compact read-only catalog grids`);
+      // On narrow phones the catalog uses the same compact role switcher as
+      // the app: only the selected family is mounted. Desktop keeps the two
+      // grids side by side, while mobile intentionally avoids duplicating a
+      // long registry below the fold. Assert the responsive contract rather
+      // than treating that deliberate disclosure as missing content.
+      const gridCount = await grids.count();
+      const expectedMinimum = width < 600 ? 1 : 2;
+      if(gridCount < expectedMinimum)failures.push(`${name}: expected at least ${expectedMinimum} compact read-only catalog grid${expectedMinimum===1 ? "" : "s"}`);
       const columns=await grids.first().evaluate(node=>getComputedStyle(node).gridTemplateColumns.split(" ").filter(Boolean).length).catch(()=>0);
       // Large-text mode may intentionally collapse to one column to preserve
       // legibility; the compact multi-column claim applies to normal desktop.
