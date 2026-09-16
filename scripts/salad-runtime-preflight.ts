@@ -5,6 +5,7 @@ import { GetObjectCommand, ListObjectsV2Command, S3Client } from "@aws-sdk/clien
 import { bootstrapSecrets } from "../src/lib/bootstrap";
 import {
   SALAD_HIGH_FALLBACK_PRIORITY,
+  SALAD_GLOBAL_CAPACITY_FALLBACK,
   saladCloudClientFromVault,
   saladOccupiedGpuSlots,
   selectSaladCapacityPriority,
@@ -119,11 +120,71 @@ async function main() {
     const imagePinned = !!image && /^[a-z0-9][a-z0-9./_-]+@sha256:[a-f0-9]{64}$/.test(image);
     if (!imagePinned) blockers.push("digest_pinned_worker_image_not_configured");
     else blockers.push("worker_registry_digest_and_runtime_receipt_not_verified");
-    const availability = gpu
-      ? await salad.getGpuAvailability({
-        cpu: spec.cpu, memory: spec.memoryMb, storage_amount: spec.storageGiB * 1024 ** 3, gpu_classes: [gpu.id],
-      }, spec.countryCodes)
-      : { available_gpu_medium: 0, available_gpu_high: 0 };
+    const resources = gpu
+      ? { cpu: spec.cpu, memory: spec.memoryMb, storage_amount: spec.storageGiB * 1024 ** 3, gpu_classes: [gpu.id] }
+      : undefined;
+    let availability = { available_gpu_medium: 0, available_gpu_high: 0 };
+    if (resources) {
+      // Keep the operational preflight aligned with the paid H3 admission
+      // path. A preferred locality can report zero while another Salad
+      // market has the exact class; make one bounded global read before
+      // declaring the route unavailable. This remains read-only and never
+      // changes the sealed GPU/resource contract.
+      let preferred: { available_gpu_medium?: number; available_gpu_high?: number } | undefined;
+      if (spec.countryCodes && SALAD_GLOBAL_CAPACITY_FALLBACK) {
+        try {
+          preferred = await salad.getGpuAvailability(resources, spec.countryCodes);
+          availability = {
+            available_gpu_medium: preferred.available_gpu_medium ?? 0,
+            available_gpu_high: preferred.available_gpu_high ?? 0,
+          };
+        } catch (preferredError) {
+          try {
+            const global = await salad.getGpuAvailability(resources);
+            availability = {
+              available_gpu_medium: global.available_gpu_medium ?? 0,
+              available_gpu_high: global.available_gpu_high ?? 0,
+            };
+          } catch (globalError) {
+            throw new Error(`preferred and global Salad availability reads failed: ${globalError instanceof Error ? globalError.message : String(globalError)}`, { cause: preferredError });
+          }
+        }
+        if (preferred) {
+          const preferredMedium = Number.isSafeInteger(preferred.available_gpu_medium) ? preferred.available_gpu_medium! : 0;
+          const preferredHigh = Number.isSafeInteger(preferred.available_gpu_high) ? preferred.available_gpu_high! : 0;
+          const preferredCanAdmit = selectSaladCapacityPriority({
+            requiredWorkers: 1,
+            mediumAvailable: preferredMedium,
+            highAvailable: preferredHigh,
+            mediumEligible: mediumGpu !== null,
+            highEligible: spec.route === "minimax-h3-turbo8-5090" && highGpu !== null,
+            allowHighPriorityFallback: spec.route === "minimax-h3-turbo8-5090",
+          }) !== null;
+          if (!preferredCanAdmit) {
+            try {
+              const global = await salad.getGpuAvailability(resources);
+              const globalMedium = Number.isSafeInteger(global.available_gpu_medium) ? global.available_gpu_medium! : 0;
+              const globalHigh = Number.isSafeInteger(global.available_gpu_high) ? global.available_gpu_high! : 0;
+              if (globalMedium > preferredMedium || globalHigh > preferredHigh) {
+                availability = { available_gpu_medium: globalMedium, available_gpu_high: globalHigh };
+              }
+            } catch {
+              // The preferred snapshot is still valid evidence for this
+              // read-only report. Do not discard it because the optional
+              // comparison read failed; production admission follows the
+              // same fail-closed rule.
+              blockers.push("global_availability_read_failed");
+            }
+          }
+        }
+      } else {
+        const direct = await salad.getGpuAvailability(resources);
+        availability = {
+          available_gpu_medium: direct.available_gpu_medium ?? 0,
+          available_gpu_high: direct.available_gpu_high ?? 0,
+        };
+      }
+    }
     const availableMediumGpus = availability.available_gpu_medium ?? 0;
     const availableHighGpus = availability.available_gpu_high ?? 0;
     const admittedPriority = selectSaladCapacityPriority({
