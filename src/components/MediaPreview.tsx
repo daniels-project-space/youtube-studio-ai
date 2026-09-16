@@ -138,7 +138,7 @@ export function MediaPreview({
       const result = await response.json() as { available?: unknown };
       if (result.available !== true) throw new Error("video source unavailable");
     };
-    const warmupRange = async (): Promise<void> => {
+    const warmupRange = async (range: string): Promise<void> => {
       // Chromium's first request is usually bytes=0-, which can succeed for
       // a stale/truncated object while the later seek range is already gone.
       // Exercise one representative non-zero byte before mounting the native
@@ -148,7 +148,7 @@ export function MediaPreview({
       const response = await fetch(probeUrl, {
         signal: controller.signal,
         cache: "no-store",
-        headers: { Range: "bytes=1048576-1048576" },
+        headers: { Range: range },
       });
       try {
         if (!response.ok || !(await response.json() as { available?: unknown }).available) {
@@ -171,7 +171,8 @@ export function MediaPreview({
           await probe();
           await new Promise<void>((resolve) => setTimeout(resolve, 160));
           await probe();
-          await warmupRange();
+          await warmupRange("bytes=0-0");
+          await warmupRange("bytes=1048576-1048576");
           return;
         } catch (error) {
           lastError = error;

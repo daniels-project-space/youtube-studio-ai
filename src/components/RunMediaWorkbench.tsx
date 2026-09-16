@@ -416,21 +416,25 @@ function SafeRunVideoPreview({
       .then(async (response) => {
         const result = await response.json() as { available?: unknown };
         if (!response.ok || result.available !== true) throw new Error("video preview unavailable");
-        const rangeUrl = new URL(src, window.location.origin);
-        rangeUrl.searchParams.set("probe", "1");
-        const rangeResponse = await fetch(rangeUrl.toString(), {
-          cache: "no-store",
-          signal: controller.signal,
-          headers: { Range: "bytes=1048576-1048576" },
-        });
-        try {
-          const rangeResult = await rangeResponse.json() as { available?: unknown };
-          if (!rangeResponse.ok || rangeResult.available !== true) {
-            throw new Error("video preview range unavailable");
+        const validateRange = async (range: string): Promise<void> => {
+          const rangeUrl = new URL(src, window.location.origin);
+          rangeUrl.searchParams.set("probe", "1");
+          const rangeResponse = await fetch(rangeUrl.toString(), {
+            cache: "no-store",
+            signal: controller.signal,
+            headers: { Range: range },
+          });
+          try {
+            const rangeResult = await rangeResponse.json() as { available?: unknown };
+            if (!rangeResponse.ok || rangeResult.available !== true) {
+              throw new Error("video preview range unavailable");
+            }
+          } finally {
+            await rangeResponse.body?.cancel().catch(() => {});
           }
-        } finally {
-          await rangeResponse.body?.cancel().catch(() => {});
-        }
+        };
+        await validateRange("bytes=0-0");
+        await validateRange("bytes=1048576-1048576");
         if (!cancelled) setProbe({ src, ready: true });
       })
       .catch(() => {
