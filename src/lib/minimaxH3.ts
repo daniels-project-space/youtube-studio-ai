@@ -6,6 +6,7 @@ import {
   SALAD_BULK_MAX_GPUS,
   SALAD_BULK_PRIORITY,
   SALAD_HIGH_FALLBACK_PRIORITY,
+  SALAD_GLOBAL_CAPACITY_FALLBACK,
   selectSaladGpu,
   selectSaladGpuAtPriority,
   selectSaladCapacityPriority,
@@ -59,8 +60,6 @@ const MINIMAX_H3_SALAD_COUNTRY_CODES = ["cn"] as const;
  * then make one bounded global read-only query before holding the order.
  * This never changes the worker's route or starts a provider request.
  */
-const MINIMAX_H3_SALAD_GLOBAL_CAPACITY_FALLBACK = true;
-
 const MINIMAX_H3_SALAD_RESOURCES: Omit<SaladResources, "gpu_classes"> = Object.freeze({
   cpu: 8,
   memory: 131_072,
@@ -194,7 +193,7 @@ export async function assertMiniMaxH3SaladCapacity(
       // read can still prove a complete high-priority fallback. This remains
       // one bounded, read-only retry; if it fails, preserve the original
       // failure context and never guess capacity.
-      if (!MINIMAX_H3_SALAD_GLOBAL_CAPACITY_FALLBACK) throw preferredError;
+      if (!SALAD_GLOBAL_CAPACITY_FALLBACK) throw preferredError;
       try {
         availability = await client.getGpuAvailability(resources);
       } catch (globalError) {
@@ -213,7 +212,7 @@ export async function assertMiniMaxH3SaladCapacity(
       const preferredCanAdmit = (mediumPriorityEnabled && mediumGpu !== undefined && preferredMedium >= requiredGpuCount) ||
         (allowHighPriorityFallback && preferredHigh >= requiredGpuCount);
       availability = preferred;
-      if (!preferredCanAdmit && MINIMAX_H3_SALAD_GLOBAL_CAPACITY_FALLBACK) {
+      if (!preferredCanAdmit && SALAD_GLOBAL_CAPACITY_FALLBACK) {
         // Omitting country_codes asks Salad for the global market. It is only a
         // fallback after the preferred locality cannot admit the complete wave;
         // medium/high selection below still applies to the returned snapshot.

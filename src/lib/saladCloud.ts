@@ -7,6 +7,13 @@ export const SALAD_BULK_PRIORITY = "medium" as const;
 /** Explicit, costlier fallback when the medium tier has no matching slots. */
 export const SALAD_HIGH_FALLBACK_PRIORITY = "high" as const;
 export const SALAD_BULK_MAX_GPUS = 3;
+/**
+ * A country-scoped market snapshot can be unavailable or stale. Both paid
+ * H3 admission and the read-only fleet preview may make one bounded global
+ * read-only retry before holding; keeping the switch here prevents policy
+ * drift between those callers.
+ */
+export const SALAD_GLOBAL_CAPACITY_FALLBACK = true;
 export type SaladGpuModel = "RTX 3090" | "RTX 5090";
 export type SaladBulkPriority = typeof SALAD_BULK_PRIORITY | typeof SALAD_HIGH_FALLBACK_PRIORITY;
 

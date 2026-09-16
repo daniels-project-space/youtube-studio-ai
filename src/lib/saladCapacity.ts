@@ -1,6 +1,7 @@
 import {
   SALAD_BULK_MAX_GPUS,
   SALAD_HIGH_FALLBACK_PRIORITY,
+  SALAD_GLOBAL_CAPACITY_FALLBACK,
   type SaladBulkPriority,
   type SaladCloudClient,
   type SaladGpuModel,
@@ -38,11 +39,6 @@ export const SALAD_CAPACITY_LANES = Object.freeze([
     countryCodes: ["cn"] as const,
   },
 ] as const);
-
-// The country-scoped market read is preferred, but it is not the only safe
-// read-only evidence source. A single global retry keeps the fleet preview in
-// lockstep with H3 paid admission when the locality endpoint is unavailable.
-const SALAD_GLOBAL_CAPACITY_FALLBACK = true;
 
 export type SaladCapacityLaneId = (typeof SALAD_CAPACITY_LANES)[number]["id"];
 
