@@ -518,6 +518,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // keep those reads explicit so the metadata block cannot silently infer
       // a format from ambient store state.
       "family", "contentLane",
+      // Automatic runs seal one whole-video plan before paid work. Metadata
+      // consumes it when present, while previews and legacy drafts retain the
+      // deterministic resolver fallback.
+      "automaticVideoPlan",
     ],
   }),
   package_to_opening_plan: contract(["package.opening_bound"], {
