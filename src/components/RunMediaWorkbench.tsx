@@ -434,6 +434,7 @@ function SafeRunVideoPreview({
           }
         };
         await validateRange("bytes=0-0");
+        await validateRange("bytes=0-0");
         await validateRange("bytes=1048576-1048576");
         if (!cancelled) setProbe({ src, ready: true });
       })

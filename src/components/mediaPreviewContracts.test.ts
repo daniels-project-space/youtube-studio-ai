@@ -29,6 +29,8 @@ assert.match(preview, /warmupRange\("bytes=1048576-1048576"\)/,
   "video previews test a representative non-zero range before mounting stale masters");
 assert.match(preview, /warmupRange\("bytes=0-0"\)/,
   "video previews test the native initial range before mounting stale masters");
+assert.match(preview, /warmupRange\("bytes=0-0"\)[\s\S]*warmupRange\("bytes=0-0"\)/,
+  "video previews require two consecutive initial-range admissions");
 assert.match(preview, /videoSourceReady/);
 assert.match(preview, /showingPrivateImage/,
   "private image previews probe availability before mounting stale keys");
@@ -63,6 +65,8 @@ assert.match(runWorkbench, /validateRange\("bytes=1048576-1048576"\)/,
   "run video players test a representative non-zero range before mounting stale masters");
 assert.match(runWorkbench, /validateRange\("bytes=0-0"\)/,
   "run video players test the native initial range before mounting stale masters");
+assert.match(runWorkbench, /validateRange\("bytes=0-0"\)[\s\S]*validateRange\("bytes=0-0"\)/,
+  "run video players require two consecutive initial-range admissions");
 assert.match(runWorkbench, /if \(!sourceReady\)/,
   "run video players must wait for a successful availability probe before mounting");
 assert.doesNotMatch(runWorkbench, /src=\{sourceReady \? src : "about:blank"\}/,

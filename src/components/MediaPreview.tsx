@@ -172,6 +172,7 @@ export function MediaPreview({
           await new Promise<void>((resolve) => setTimeout(resolve, 160));
           await probe();
           await warmupRange("bytes=0-0");
+          await warmupRange("bytes=0-0");
           await warmupRange("bytes=1048576-1048576");
           return;
         } catch (error) {
