@@ -520,7 +520,9 @@ async function main() {
     {
       ownerId: "owner-test",
       channelId: futureChannel,
-      dueBefore: Date.now() + DEFAULT_PLAN_GENERATION_LEAD_MS,
+      // Explicitly exercise a one-day operator window; the autopilot default
+      // is a full week so this future pin remains outside the chosen window.
+      dueBefore: Date.now() + 24 * 60 * 60 * 1_000,
     },
   );
   assert.equal(futureClaim.state, "not_due");

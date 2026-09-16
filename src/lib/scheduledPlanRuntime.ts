@@ -10,7 +10,13 @@ import {
 
 const HOUR_MS = 60 * 60 * 1_000;
 
-export const DEFAULT_PLAN_GENERATION_LEAD_MS = 24 * HOUR_MS;
+/**
+ * Autopilot prepares the full upcoming week by default. Operators can still
+ * narrow this window with STUDIO_PLAN_GENERATION_LEAD_HOURS (1..168), but a
+ * fresh deployment must not quietly fall back to a one-day/manual cadence
+ * when the weekly planner has already frozen the next slate.
+ */
+export const DEFAULT_PLAN_GENERATION_LEAD_MS = 168 * HOUR_MS;
 export const MIN_PLAN_RENDER_LEAD_MS = 2 * HOUR_MS;
 export const MIN_SCHEDULED_PUBLISH_LEAD_MS = SCHEDULED_UPLOAD_MIN_LEAD_MS;
 
