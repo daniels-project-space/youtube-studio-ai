@@ -5,7 +5,7 @@
  *   dumpCandidates(queries)              → metadata-scored candidates (yt-dlp json)
  *   sampleFramesSpanning(cand)           → frames spread across the whole video
  *   ocrCaptionCheck(frames)              → cheap tesseract burned-caption detector
- *   visionCheckRaw(frames)               → Gemini vision: captions / effects / watermark
+ *   visionCheckRaw(frames)               → routed vision: captions / effects / watermark
  *   findRawSource(opts)                  → orchestrates the above → ONE clean raw source
  *
  * "Raw" = a plain recording of a person speaking with NO baked-in captions, text
@@ -26,7 +26,8 @@ import { spawnSync } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { geminiJson, parseJsonLoose, hasGeminiKey } from "./gemini";
+import { creativeTextJson, hasCreativeTextKey } from "./creativeText";
+import { parseJsonLoose } from "./gemini";
 import { visionLocal, hasVisionKey, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
 export type SpeechTopic = {
@@ -150,7 +151,7 @@ export async function resolveSourceQueries(
     `${speaker} commencement address full`,
     `${speaker} keynote full ${theme}`,
   ];
-  if (!hasGeminiKey()) return fallback;
+  if (!hasCreativeTextKey()) return fallback;
   try {
     const prompt = `You source RAW, uncaptioned ORIGINAL video of a motivational speaker — NOT fan compilations (those have burned-in captions, watermarks, added music).
 Speaker: ${speaker}
@@ -159,7 +160,11 @@ This speaker's famous lines on this theme come from specific real events (commen
 Return ONLY JSON: {"queries":["..."]} with 4-6 strings.
 Each query SHOULD name the venue/host and year when known and include words like "full", "complete", "address", "interview", "keynote".
 Each query MUST NOT contain: motivation, motivational, compilation, "best of", "speech that will", "eye opening".`;
-    const res = await geminiJson<{ queries?: string[] }>({ prompt, maxTokens: 500 });
+    const res = await creativeTextJson<{ queries?: string[] }>({
+      prompt,
+      maxTokens: 500,
+      temperature: 0.4,
+    });
     const cleaned = (res.queries ?? [])
       .map((s) => String(s).trim())
       .filter(Boolean)
