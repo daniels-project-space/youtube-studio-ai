@@ -79,6 +79,7 @@ import {
   buildAutomaticProviderPlan,
   createAutomaticQualityGateContract,
   createAutomaticReleaseRollbackPlan,
+  type AutomaticProvider,
   type AutomaticProviderPlan,
 } from "@/lib/automaticOperations";
 import { bootstrapSecrets } from "@/lib/bootstrap";
@@ -1270,7 +1271,9 @@ export const runPipelineTask = task({
       }
     };
     const providerFromError = (message: string): string | undefined => {
-      const candidates = automaticProviderPlan?.modules.map((module) => module.primary) ?? [];
+      const candidates = automaticProviderPlan?.modules
+        .map((module) => module.primary)
+        .filter((provider): provider is AutomaticProvider => provider !== null) ?? [];
       return candidates.find((provider) => message.toLowerCase().includes(provider.replace("-", " ").toLowerCase()) || message.toLowerCase().includes(provider.toLowerCase()));
     };
 
@@ -2230,6 +2233,11 @@ export const runPipelineTask = task({
         moduleIds: resolved.manifests.map((manifest) => manifest.id),
         circuits: providerCircuits,
       });
+      if (automaticProviderPlan.blockedModules.length > 0) {
+        throw new Error(
+          `automatic preflight blocked: no healthy provider route for ${automaticProviderPlan.blockedModules.join(", ")}`,
+        );
+      }
       const automaticPreflight = createAutomaticPreflightReceipt({
         runId: payload.runId,
         channelId: payload.channelId,
@@ -2917,7 +2925,10 @@ export const runPipelineTask = task({
       if (budgetAlert?.shouldAlert) {
         await safeBudgetAlert(`budget alert (${channel.slug})`, budgetAlert.message);
       }
-      for (const provider of new Set(automaticProviderPlan?.modules.map((module) => module.primary) ?? [])) {
+      for (const provider of new Set(
+        (automaticProviderPlan?.modules.map((module) => module.primary) ?? [])
+          .filter((candidate): candidate is AutomaticProvider => candidate !== null),
+      )) {
         await recordProviderOutcome(provider, "success");
       }
       return {

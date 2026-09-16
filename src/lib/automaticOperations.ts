@@ -32,7 +32,8 @@ export type AutomaticProviderPlan = {
   mode: "automatic-primary-fallback";
   modules: readonly {
     moduleId: string;
-    primary: AutomaticProvider;
+    /** Null means every admitted route is circuit-open; no paid work is safe. */
+    primary: AutomaticProvider | null;
     fallbacks: readonly AutomaticProvider[];
     circuit: "closed" | "open" | "half_open";
   }[];
@@ -84,19 +85,19 @@ export function buildAutomaticProviderPlan(input: {
   const modules = [...new Set(input.moduleIds.map((id) => id.trim()).filter(Boolean))].sort().map((moduleId) => {
     const route = routeForModule(moduleId);
     const candidates = [route.provider, ...route.fallbacks].filter((provider) => circuitFor(provider, input.circuits ?? {}).status !== "open");
-    const primary = candidates[0];
+    const primary = candidates[0] ?? null;
     return {
       moduleId,
-      primary: primary ?? route.provider,
-      fallbacks: (primary ? candidates.slice(1) : route.fallbacks),
-      circuit: circuitFor(route.provider, input.circuits ?? {}).status,
+      primary,
+      fallbacks: (primary ? candidates.slice(1) : []),
+      circuit: primary ? circuitFor(primary, input.circuits ?? {}).status : circuitFor(route.provider, input.circuits ?? {}).status,
     };
   });
   const body = {
     version: AUTOMATIC_OPERATIONS_VERSION,
     mode: "automatic-primary-fallback" as const,
     modules,
-    blockedModules: modules.filter((module) => module.primary === undefined).map((module) => module.moduleId),
+    blockedModules: modules.filter((module) => module.primary === null).map((module) => module.moduleId),
   };
   return { ...body, fingerprint: sha256Hex(canonicalJson(body)) };
 }

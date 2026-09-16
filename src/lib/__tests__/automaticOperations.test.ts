@@ -17,6 +17,17 @@ assert.equal(plan.modules.find((module) => module.moduleId === "minimax_h3_video
 assert.equal(plan.modules.find((module) => module.moduleId === "thumbnail_gen")?.primary, "fal-nano-banana");
 assert.match(plan.fingerprint, /^[a-f0-9]{64}$/);
 
+const blockedImage = buildAutomaticProviderPlan({
+  moduleIds: ["image_gen"],
+  circuits: {
+    "salad-ernie": { status: "open", consecutiveFailures: 3 },
+    "novita-image": { status: "open", consecutiveFailures: 3 },
+  },
+});
+assert.equal(blockedImage.modules[0]?.primary, null, "all-open routes must be visibly blocked");
+assert.deepEqual(blockedImage.modules[0]?.fallbacks, []);
+assert.deepEqual(blockedImage.blockedModules, ["image_gen"]);
+
 const narration = buildAutomaticProviderPlan({ moduleIds: ["narration_tts", "script_gen", "metadata"] });
 assert.deepEqual(narration.modules.find((module) => module.moduleId === "narration_tts")?.fallbacks, []);
 assert.deepEqual(narration.modules.find((module) => module.moduleId === "script_gen")?.fallbacks, []);
