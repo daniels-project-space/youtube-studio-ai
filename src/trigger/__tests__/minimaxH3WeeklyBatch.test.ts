@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   assertMiniMaxH3WeeklyBatchArgs,
   createMiniMaxH3WeeklyRequestPacket,
+  miniMaxH3WeeklyJobReceiptKey,
 } from "@/trigger/minimaxH3WeeklyBatch";
 import { miniMaxH3WeeklyRequestPacketKey } from "@/lib/minimaxH3";
 import { readFileSync } from "node:fs";
@@ -25,6 +26,12 @@ assert.equal(
   "owner/a/plan-batches/week-20260913/h3/receipt.request.json",
   "the pre-spend packet must have a deterministic sibling key",
 );
+assert.equal(
+  miniMaxH3WeeklyJobReceiptKey(valid.receiptKey, "a".repeat(64)),
+  "owner/a/plan-batches/week-20260913/h3/receipt.job-" + "a".repeat(64) + ".json",
+  "each shot claim must have a deterministic sibling key",
+);
+assert.throws(() => miniMaxH3WeeklyJobReceiptKey(valid.receiptKey, "not-a-request"), /request key/);
 assert.deepEqual(
   createMiniMaxH3WeeklyRequestPacket({ ...valid, requestKeys: ["request-1"], createdAt: 1234 }),
   { schema: "minimax-h3-weekly-request/v1", orderKey: valid.orderKey, requestKeys: ["request-1"], jobs: valid.jobs, createdAt: 1234 },
@@ -70,6 +77,21 @@ assert.match(
   weeklySource,
   /providerReceipts: result\.map\(\(item\) => item\.receipt\)/,
   "weekly receipt must retain full per-shot H3 provenance for prepared-footage reconciliation",
+);
+assert.match(
+  weeklySource,
+  /persistWeeklyJobReceipt\([\s\S]*onJobComplete/,
+  "each verified shot must be persisted before the aggregate batch receipt",
+);
+assert.match(
+  weeklySource,
+  /createMiniMaxH3WeeklyJobReceipt\(args\)/,
+  "shot claims must use one canonical receipt constructor",
+);
+assert.match(
+  weeklySource,
+  /readPersistedJobReceipts\([\s\S]*pendingJobs/,
+  "replays must restore completed shot claims and render only missing jobs",
 );
 assert.match(
   weeklySource,

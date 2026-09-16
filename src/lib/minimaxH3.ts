@@ -409,6 +409,12 @@ export interface MiniMaxH3RenderedVideo {
   outputBytes: Uint8Array;
 }
 
+/** Optional completion hook used by durable batch controllers. */
+export type MiniMaxH3WeeklyBatchOptions = Parameters<typeof renderMiniMaxH3>[1] & {
+  /** Called after the output has been re-read and receipt-validated. */
+  onJobComplete?: (index: number, result: MiniMaxH3RenderedVideo) => void | Promise<void>;
+};
+
 export interface MiniMaxH3Readiness {
   configured: boolean;
   admitted: boolean;
@@ -746,20 +752,23 @@ export async function renderMiniMaxH3(
 /** One weekly owner/order may use up to three Salad H3 jobs in parallel. */
 export async function renderMiniMaxH3WeeklyBatch(
   jobs: readonly Omit<MiniMaxH3RenderRequest, "provider" | "execution">[],
-  options?: Parameters<typeof renderMiniMaxH3>[1],
+  options: MiniMaxH3WeeklyBatchOptions = {},
 ): Promise<MiniMaxH3RenderedVideo[]> {
   if (!Array.isArray(jobs) || jobs.length < 1 || jobs.length > MAX_H3_JOBS_PER_BATCH) {
     throw new MiniMaxH3Error(`weekly MiniMax H3 batch must contain 1..${MAX_H3_JOBS_PER_BATCH} jobs`);
   }
   const outputKeys = jobs.map((job) => r2Key(job.output?.r2Key, "output key"));
   if (new Set(outputKeys).size !== outputKeys.length) throw new MiniMaxH3Error("weekly MiniMax H3 batch has duplicate output keys");
+  const { onJobComplete, ...renderOptions } = options;
   const result: MiniMaxH3RenderedVideo[] = new Array(jobs.length);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(MAX_H3_PARALLEL_SALAD_JOBS, jobs.length) }, async () => {
     for (;;) {
       const index = next++;
       if (index >= jobs.length) return;
-      result[index] = await renderMiniMaxH3({ ...jobs[index]!, provider: "salad", execution: "weekly-batch" }, options);
+      const rendered = await renderMiniMaxH3({ ...jobs[index]!, provider: "salad", execution: "weekly-batch" }, renderOptions);
+      result[index] = rendered;
+      await onJobComplete?.(index, rendered);
     }
   }));
   return result;

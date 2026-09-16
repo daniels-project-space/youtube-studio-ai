@@ -372,11 +372,13 @@ async function test() {
   }));
   let active = 0;
   let peak = 0;
+  const completedIndices: number[] = [];
   const batched = await renderMiniMaxH3WeeklyBatch(jobs, {
     presignRead: async () => "https://r2.example/read",
     presignWrite: async () => "https://r2.example/write",
     readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
     assertModelManifest: async () => {},
+    onJobComplete: async (index) => { completedIndices.push(index); },
     fetch: async (_url, init) => {
       active += 1;
       peak = Math.max(peak, active);
@@ -393,5 +395,6 @@ async function test() {
   });
   assert.equal(batched.length, 4);
   assert.equal(peak, 3, "weekly Salad work must use the bounded three-GPU wave");
+  assert.deepEqual(completedIndices.sort((a, b) => a - b), [0, 1, 2, 3], "durable batch hooks must observe every verified shot");
 }
 void test().finally(() => { process.env = saved; }).then(() => console.log("minimax H3 contract tests passed"));
