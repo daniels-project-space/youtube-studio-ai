@@ -416,13 +416,16 @@ function SafeRunVideoPreview({
       .then(async (response) => {
         const result = await response.json() as { available?: unknown };
         if (!response.ok || result.available !== true) throw new Error("video preview unavailable");
-        const rangeResponse = await fetch(src, {
+        const rangeUrl = new URL(src, window.location.origin);
+        rangeUrl.searchParams.set("probe", "1");
+        const rangeResponse = await fetch(rangeUrl.toString(), {
           cache: "no-store",
           signal: controller.signal,
           headers: { Range: "bytes=1048576-1048576" },
         });
         try {
-          if (rangeResponse.status !== 206 || !rangeResponse.headers.get("content-range")) {
+          const rangeResult = await rangeResponse.json() as { available?: unknown };
+          if (!rangeResponse.ok || rangeResult.available !== true) {
             throw new Error("video preview range unavailable");
           }
         } finally {

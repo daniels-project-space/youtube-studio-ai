@@ -144,13 +144,14 @@ export function MediaPreview({
       // Exercise one representative non-zero byte before mounting the native
       // element. The route forwards this as a one-byte R2 range, so this is a
       // bounded availability check rather than a second media download.
-      const response = await fetch(src, {
+      const probeUrl = `${src}${src.includes("?") ? "&" : "?"}probe=1`;
+      const response = await fetch(probeUrl, {
         signal: controller.signal,
         cache: "no-store",
         headers: { Range: "bytes=1048576-1048576" },
       });
       try {
-        if (response.status !== 206 || !response.headers.get("content-range")) {
+        if (!response.ok || !(await response.json() as { available?: unknown }).available) {
           throw new Error("video source range unavailable");
         }
       } finally {

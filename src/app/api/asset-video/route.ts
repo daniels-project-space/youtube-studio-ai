@@ -68,7 +68,7 @@ export async function GET(request: Request) {
       // false 404 even though the same object and the initial range exist.
       // A streamed full response is a safe preview fallback: it preserves
       // the exact source frame and never buffers the master in this route.
-      if (attempt >= 2 && upstream?.status === 404 && range) {
+      if (attempt >= 2 && upstream?.status === 404 && range && !probe) {
         attemptHeaders.delete("Range");
         attemptHeaders.delete("If-Range");
       }
@@ -117,7 +117,10 @@ export async function GET(request: Request) {
     }
     if (probe) {
       await upstream.body?.cancel().catch(() => {});
-      return NextResponse.json({ available: true }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
+      // An explicit range probe must prove that the range path itself works;
+      // a 200 full-source response is not enough because native seeking can
+      // still fail later on a stale legacy object.
+      return NextResponse.json({ available: !range || upstream.status === 206 }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
     }
     return new NextResponse(upstream.body, {
       status: upstream.status,

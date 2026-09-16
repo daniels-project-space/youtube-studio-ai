@@ -25,7 +25,7 @@ assert.match(preview, /full-object[\s\S]*probe validates the same path/,
   "video probes validate the native full-object delivery path");
 assert.match(preview, /for \(let attempt = 0; attempt < 2; attempt\+\+\)/,
   "a transient video availability miss gets one bounded retry cycle");
-assert.match(preview, /Range: "bytes=1048576-1048576"/,
+assert.match(preview, /probeUrl[\s\S]*Range: "bytes=1048576-1048576"/,
   "video previews test a representative non-zero range before mounting stale masters");
 assert.match(preview, /videoSourceReady/);
 assert.match(preview, /showingPrivateImage/,
