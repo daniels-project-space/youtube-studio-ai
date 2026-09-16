@@ -113,11 +113,12 @@ export async function GET(request: Request) {
       if (probe) {
         return NextResponse.json({ available: false }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
       }
-      if (upstream.status === 404) {
-        // A native player can race a disappearing legacy master after all
+      if (upstream.status >= 400 && upstream.status < 500) {
+        // R2 private buckets can report a missing/expired legacy object as
+        // either 404 or 403. A native player can race that object after all
         // bounded probes have passed. Return a zero-length media sentinel so
         // the element emits its normal onError/unavailable state without
-        // turning a known missing preview into a browser-console 404.
+        // turning a known unavailable preview into a browser-console 4xx.
         return new NextResponse(null, {
           status: 200,
           headers: {
