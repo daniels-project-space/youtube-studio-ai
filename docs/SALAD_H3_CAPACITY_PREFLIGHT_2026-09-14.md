@@ -121,4 +121,8 @@ enough slots to unlock that wave. At this observation high had no slots, so no
 upgrade was attempted. The preflight also verified the R2 model manifests and
 byte lengths for ERNIE (4 files), Music3 (88 files), and H3 (5 files); worker
 image digests, runtime output quality, and durable worker recovery remain
-qualification blockers.
+qualification blockers remain.
+
+### Authenticated read-only recheck — 16 September 2026, 07:30 UTC
+
+The vault-backed preflight was repeated against Salad organization `bananajoeinc`, project `default`, using the immutable H3 resource profile. It observed `0/3` occupied shared GPU slots and `0/10` container replicas. The exact desktop RTX 5090 class remained discoverable and priced, but the live market returned `0 medium / 0 high` slots, so the admission selector returned `null` and the weekly lane stayed held before spend. ERNIE 3090 reported `89` medium / `113` high slots and Music3 3090 reported `11` medium / `16` high slots; those lanes remain blocked by their independent worker-image/runtime qualification requirements. R2 manifest byte inventories were rechecked. No Salad group was created, started, stopped, scaled, or deleted, and no inference request was submitted.
