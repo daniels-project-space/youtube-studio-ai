@@ -408,13 +408,26 @@ function SafeRunVideoPreview({
 
   useEffect(() => {
     let cancelled = false;
-    if (!isAssetVideoProxy) return () => { cancelled = true; };
+    const controller = new AbortController();
+    if (!isAssetVideoProxy) return () => { cancelled = true; controller.abort(); };
     const parsed = new URL(src, window.location.origin);
     parsed.searchParams.set("probe", "1");
-    fetch(parsed.toString(), { cache: "no-store" })
+    fetch(parsed.toString(), { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         const result = await response.json() as { available?: unknown };
         if (!response.ok || result.available !== true) throw new Error("video preview unavailable");
+        const rangeResponse = await fetch(src, {
+          cache: "no-store",
+          signal: controller.signal,
+          headers: { Range: "bytes=1048576-1048576" },
+        });
+        try {
+          if (rangeResponse.status !== 206 || !rangeResponse.headers.get("content-range")) {
+            throw new Error("video preview range unavailable");
+          }
+        } finally {
+          await rangeResponse.body?.cancel().catch(() => {});
+        }
         if (!cancelled) setProbe({ src, ready: true });
       })
       .catch(() => {
@@ -423,7 +436,7 @@ function SafeRunVideoPreview({
           errorRef.current();
         }
       });
-    return () => { cancelled = true; };
+    return () => { cancelled = true; controller.abort(); };
   }, [isAssetVideoProxy, src]);
 
   const sourceReady = hydrated && (!isAssetVideoProxy || (probe?.src === src && probe.ready));

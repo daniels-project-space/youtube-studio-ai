@@ -138,6 +138,25 @@ export function MediaPreview({
       const result = await response.json() as { available?: unknown };
       if (result.available !== true) throw new Error("video source unavailable");
     };
+    const warmupRange = async (): Promise<void> => {
+      // Chromium's first request is usually bytes=0-, which can succeed for
+      // a stale/truncated object while the later seek range is already gone.
+      // Exercise one representative non-zero byte before mounting the native
+      // element. The route forwards this as a one-byte R2 range, so this is a
+      // bounded availability check rather than a second media download.
+      const response = await fetch(src, {
+        signal: controller.signal,
+        cache: "no-store",
+        headers: { Range: "bytes=1048576-1048576" },
+      });
+      try {
+        if (response.status !== 206 || !response.headers.get("content-range")) {
+          throw new Error("video source range unavailable");
+        }
+      } finally {
+        await response.body?.cancel().catch(() => {});
+      }
+    };
     // Require two independent successful probes. A stale edge can answer one
     // probe positively immediately before a native range request receives a
     // 404; the second read prevents mounting a source that is not stable yet.
@@ -151,6 +170,7 @@ export function MediaPreview({
           await probe();
           await new Promise<void>((resolve) => setTimeout(resolve, 160));
           await probe();
+          await warmupRange();
           return;
         } catch (error) {
           lastError = error;

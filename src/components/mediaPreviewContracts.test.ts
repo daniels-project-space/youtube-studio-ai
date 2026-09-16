@@ -25,6 +25,8 @@ assert.match(preview, /full-object[\s\S]*probe validates the same path/,
   "video probes validate the native full-object delivery path");
 assert.match(preview, /for \(let attempt = 0; attempt < 2; attempt\+\+\)/,
   "a transient video availability miss gets one bounded retry cycle");
+assert.match(preview, /Range: "bytes=1048576-1048576"/,
+  "video previews test a representative non-zero range before mounting stale masters");
 assert.match(preview, /videoSourceReady/);
 assert.match(preview, /showingPrivateImage/,
   "private image previews probe availability before mounting stale keys");
@@ -54,7 +56,9 @@ assert.doesNotMatch(latestVideo, /i\.ytimg\.com|fallbackSource="youtube"/);
 assert.match(runWorkbench, /SafeRunVideoPreview/);
 assert.match(runWorkbench, /SafeRunImagePreview/);
 assert.match(runWorkbench, /searchParams\.set\("probe", "1"\)/);
-assert.match(runWorkbench, /fetch\(parsed\.toString\(\), \{ cache: "no-store" \}\)/);
+assert.match(runWorkbench, /fetch\(parsed\.toString\(\), \{ cache: "no-store", signal: controller\.signal \}\)/);
+assert.match(runWorkbench, /Range: "bytes=1048576-1048576"/,
+  "run video players test a representative non-zero range before mounting stale masters");
 assert.match(runWorkbench, /if \(!sourceReady\)/,
   "run video players must wait for a successful availability probe before mounting");
 assert.doesNotMatch(runWorkbench, /src=\{sourceReady \? src : "about:blank"\}/,
