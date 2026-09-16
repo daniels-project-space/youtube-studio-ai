@@ -102,6 +102,25 @@
   text-transform: uppercase;
   white-space: nowrap;
 }
+.runRecovery {
+  display: inline-flex;
+  width: max-content;
+  max-width: 100%;
+  align-items: center;
+  padding: 0.13rem 0.28rem;
+  border: 1px solid color-mix(in srgb, var(--color-blueprint) 38%, var(--color-border));
+  border-radius: 999px;
+  color: var(--color-blueprint);
+  background: color-mix(in srgb, var(--color-blueprint) 7%, transparent);
+  font: 700 0.56rem/1 var(--font-mono);
+  letter-spacing: 0.04em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.runRecovery[data-state="running"] { border-color: color-mix(in srgb, var(--color-lime) 46%, var(--color-border)); color: var(--color-lime); background: color-mix(in srgb, var(--color-lime) 7%, transparent); }
+.runRecovery[data-state="blocked"], .runRecovery[data-state="failed"] { border-color: color-mix(in srgb, var(--color-failed) 42%, var(--color-border)); color: var(--color-failed); background: color-mix(in srgb, var(--color-failed) 7%, transparent); }
 .runStatus { justify-self: start; }
 .runDatum { display: grid; gap: 0.2rem; }
 .runDatum small { color: var(--color-faint); font: 700 0.56rem/1 var(--font-mono); letter-spacing: 0.06em; text-transform: uppercase; }

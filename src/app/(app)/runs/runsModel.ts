@@ -20,6 +20,20 @@ export const RUN_FILTER_LABEL: Record<RunFilter, string> = {
 
 export const INITIAL_VISIBLE_RUNS = 12;
 
+export type AutomaticResumeState = "queued" | "running" | "complete" | "failed" | "blocked";
+
+/** Compact operator-facing state for the bounded automatic recovery path. */
+export function automaticResumeLabel(
+  state: AutomaticResumeState | undefined,
+  attempts = 0,
+): string | null {
+  if (state === "queued") return `Auto-retry queued · attempt ${Math.max(1, attempts)}/2`;
+  if (state === "running") return `Auto-retry running · attempt ${Math.max(1, attempts)}/2`;
+  if (state === "failed") return "Auto-retry dispatch delayed";
+  if (state === "blocked") return "Automatic retry stopped · review needed";
+  return null;
+}
+
 export type RunFailureDiagnostic = {
   faultDomain: string;
   cause: string;

@@ -18,6 +18,7 @@ import styles from "./runs.module.css";
 import {
   INITIAL_VISIBLE_RUNS,
   diagnoseRunFailure,
+  automaticResumeLabel,
   projectRunHistory,
   RUN_FILTER_LABEL,
   RUN_FILTERS,
@@ -127,6 +128,7 @@ function ProductionRunRow({ run, index }: { run: RunRow; index: number }) {
   const failure = run.status === "failed" && run.error
     ? diagnoseRunFailure(run.error)
     : null;
+  const automaticRecovery = automaticResumeLabel(run.automaticResumeState, run.automaticResumeAttempts);
   const destination = failure
     ? "Inspect"
     : run.youtubeVideoId
@@ -174,6 +176,15 @@ function ProductionRunRow({ run, index }: { run: RunRow; index: number }) {
             {failure.faultDomain}
           </span>
         )}
+        {automaticRecovery ? (
+          <span
+            className={styles.runRecovery}
+            data-state={run.automaticResumeState}
+            title={run.automaticResumeLastError ?? "The pipeline doctor will continue from the frozen run boundary."}
+          >
+            {automaticRecovery}
+          </span>
+        ) : null}
       </span>
       <span className={styles.runStatus}><StageBadge status={run.status} /></span>
       <span className={styles.runDatum}><small>Elapsed</small><strong className={live ? styles.liveValue : undefined}><Elapsed from={run.startedAt} to={live ? undefined : run.finishedAt} /></strong></span>

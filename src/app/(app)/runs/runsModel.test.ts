@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { diagnoseRunFailure, INITIAL_VISIBLE_RUNS, projectRunHistory } from "./runsModel";
+import { automaticResumeLabel, diagnoseRunFailure, INITIAL_VISIBLE_RUNS, projectRunHistory } from "./runsModel";
 
 const rows = Array.from({ length: 30 }, (_, index) => ({
   channelSlug: index < 20 ? "alpha" : "beta",
@@ -37,5 +37,10 @@ assert.equal(diagnoseRunFailure("topiccraft: off-niche; demand/freshness/fit fai
 assert.equal(diagnoseRunFailure("Unexpected non-whitespace character after JSON at position 5105").faultDomain, "Provider payload");
 assert.equal(diagnoseRunFailure("Novita Comfy worker timed out with 503").faultDomain, "Render runtime");
 assert.equal(diagnoseRunFailure("unknown terminal error").faultDomain, "Pipeline stop");
+
+assert.equal(automaticResumeLabel("queued", 1), "Auto-retry queued · attempt 1/2");
+assert.equal(automaticResumeLabel("running", 2), "Auto-retry running · attempt 2/2");
+assert.equal(automaticResumeLabel("blocked", 2), "Automatic retry stopped · review needed");
+assert.equal(automaticResumeLabel("complete", 1), null);
 
 console.log("run history projection tests passed");

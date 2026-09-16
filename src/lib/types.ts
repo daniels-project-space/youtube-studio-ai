@@ -19,6 +19,11 @@ export type RunRow = {
   releaseEvidenceCertificateFingerprint?: string;
   releaseEvidenceCertificateKey?: string;
   releaseEvidenceUpdatedAt?: number;
+  automaticResumeState?: "queued" | "running" | "complete" | "failed" | "blocked";
+  automaticResumeAttempts?: number;
+  automaticResumeNextAt?: number;
+  automaticResumeUpdatedAt?: number;
+  automaticResumeLastError?: string;
   channelName: string;
   channelSlug: string;
   stageProgress?: RunStageProgressSummary;
