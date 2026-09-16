@@ -3,8 +3,8 @@
 /* The vault is a browsing surface, not a second channel-detail page. Keep its
    compact treatment scoped to this route so richer channel cards are unchanged. */
 :global(.video-grid[data-density="library"]) {
-  grid-template-columns: repeat(auto-fill, minmax(min(178px, 100%), 1fr));
-  gap: .56rem;
+  grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
+  gap: .48rem;
 }
 :global(.video-card[data-density="library"] .video-card-body) { gap: .24rem; padding: .48rem .54rem .52rem; }
 :global(.video-card[data-density="library"] .video-card-body h3) { font-size: .82rem; line-height: 1.28; -webkit-line-clamp: 2; }
