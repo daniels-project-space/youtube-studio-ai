@@ -113,6 +113,21 @@ export async function GET(request: Request) {
       if (probe) {
         return NextResponse.json({ available: false }, { status: 200, headers: { "Cache-Control": "private, no-store" } });
       }
+      if (upstream.status === 404) {
+        // A native player can race a disappearing legacy master after all
+        // bounded probes have passed. Return a zero-length media sentinel so
+        // the element emits its normal onError/unavailable state without
+        // turning a known missing preview into a browser-console 404.
+        return new NextResponse(null, {
+          status: 200,
+          headers: {
+            "Content-Type": mimeType,
+            "Content-Length": "0",
+            "Cache-Control": "private, no-store",
+            "X-Asset-Unavailable": "true",
+          },
+        });
+      }
       return NextResponse.json({ error: "video unavailable" }, { status: upstream.status >= 500 ? 503 : 404 });
     }
     if (probe) {
