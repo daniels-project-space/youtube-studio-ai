@@ -7,11 +7,13 @@ for (const message of [
   "weekly MiniMax H3 Salad capacity check failed before dispatch",
   "weekly MiniMax H3 Salad account capacity check failed before dispatch",
   "weekly MiniMax H3 Salad account capacity is occupied (2/3 slots)",
+  "Salad fleet reservation capacity is occupied (3/3); requested 2 slots",
 ]) assert.equal(isMiniMaxH3CapacityHoldError(message), true, `capacity hold should match: ${message}`);
 for (const message of [
   "weekly MiniMax H3 Salad worker returned an ambiguous provider error",
   "MiniMax H3 Salad capacity is insufficient", // missing the weekly task prefix
   "weekly MiniMax H3 Salad provider request failed after dispatch",
+  "Salad fleet reservation lease token mismatch",
 ]) assert.equal(isMiniMaxH3CapacityHoldError(message), false, `non-admission error should not match: ${message}`);
 
 const output = (name: string, costUsd = 0.2) => ({

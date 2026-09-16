@@ -14,8 +14,13 @@ export type MiniMaxH3ReceiptSummary = {
  * failures may be shown as held; every other terminal run needs reconciliation.
  */
 export function isMiniMaxH3CapacityHoldError(value: unknown): boolean {
-  return typeof value === "string" &&
-    /weekly MiniMax H3 Salad (?:account )?capacity (?:check )?(?:could not admit|is insufficient|failed|is occupied)/i.test(value);
+  if (typeof value !== "string") return false;
+  // The organization-wide Convex fence runs before the provider admission
+  // wrapper.  A full logical fence therefore has its own stable error text;
+  // keep it in the same explicit, no-spend hold class so the status and
+  // retry routes do not mislabel it as an ambiguous provider failure.
+  return /weekly MiniMax H3 Salad (?:account )?capacity (?:check )?(?:could not admit|is insufficient|failed|is occupied)/i.test(value) ||
+    /^Salad fleet reservation capacity is occupied\b/i.test(value.trim());
 }
 
 function isOwnerScopedR2Key(value: unknown, ownerId: string): boolean {
