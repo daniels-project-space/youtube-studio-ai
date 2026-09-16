@@ -347,7 +347,7 @@ function main() {
   const args = { input, sourcePacket, sourceAdmission: admittedSource.receipt, evidenceShotMap: map.map, evidenceShotMapAdmission: map.receipt, sceneManifest, shotList };
 
   // ---- POSITIVE: the well-formed introduction beat is admitted -----------
-  const report = evaluateCinematicCaseSequence(args);
+  const report = evaluateCinematicCaseSequence(args, { now: NOW });
   assert.equal(report.safe, true, `well-formed introduction beat must be admitted: ${JSON.stringify(report.issues.slice(0, 5))}`);
 
   const admitted = assertCinematicCaseSequence(args, { now: NOW });
