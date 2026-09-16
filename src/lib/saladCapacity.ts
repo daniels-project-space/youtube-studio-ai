@@ -12,6 +12,7 @@ import {
   selectSaladGpuAtPriority,
   saladPriorityPolicyFromEnv,
 } from "@/lib/saladCloud";
+import { capacityEta } from "@/lib/automaticOperations";
 
 /**
  * Exact worker requirements used by the three Salad production lanes.  This
@@ -58,6 +59,10 @@ export interface SaladCapacityLaneSnapshot {
   fallbackUsed: boolean;
   gpuClassId?: string;
   blockers: string[];
+  /** Next automatic admission check; null means this lane is ready now. */
+  nextAutomaticCheckAt: number | null;
+  /** Bounded fallback deadline for a held weekly job. */
+  fallbackAt: number | null;
 }
 
 export interface SaladCapacitySnapshot {
@@ -195,6 +200,8 @@ export async function readSaladCapacitySnapshot(
         recommendedPriority: null,
         fallbackUsed: false,
         blockers,
+        nextAutomaticCheckAt: Date.now() + 15 * 60_000,
+        fallbackAt: Date.now() + 24 * 60 * 60_000,
       };
     }
     let availability: { available_gpu_medium?: number; available_gpu_high?: number };
@@ -285,6 +292,16 @@ export async function readSaladCapacitySnapshot(
       fallbackUsed: recommendedPriority === SALAD_HIGH_FALLBACK_PRIORITY,
       gpuClassId: selectedClass.id,
       blockers,
+      nextAutomaticCheckAt: recommendedPriority
+        ? null
+        : capacityEta({
+            now: Date.now(),
+            requiredWorkers,
+            availableWorkers: Math.max(mediumAvailable, highAvailable),
+            retryEveryMs: 15 * 60_000,
+            fallbackAfterMs: 24 * 60 * 60_000,
+          }).nextCheckAt,
+      fallbackAt: recommendedPriority ? null : Date.now() + 24 * 60 * 60_000,
     };
   }));
   const fleetBlockers = saladFleetCapacityBlockers({

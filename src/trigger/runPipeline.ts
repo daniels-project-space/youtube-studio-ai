@@ -74,6 +74,11 @@ import { channelPrefix, getObjectBytes } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { alertBudget, alertFailure } from "@/lib/telegram";
 import { evaluateBudgetAlert } from "@/lib/budgetAlert";
+import {
+  buildAutomaticProviderPlan,
+  createAutomaticQualityGateContract,
+  createAutomaticReleaseRollbackPlan,
+} from "@/lib/automaticOperations";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { rehydrateOutputs } from "@/lib/rehydrate";
 import type { PipelineEntry, ResumeRehydrationRequest } from "@/engine/types";
@@ -2189,6 +2194,11 @@ export const runPipelineTask = task({
         reservedMaxCostUsd: compilation.reservedMaxCostUsd,
         paidModules: resolved.manifests.filter((manifest) => manifest.costAndLatency.paid).map((manifest) => manifest.id),
         resumeBoundaryReady: true,
+        providerPlan: buildAutomaticProviderPlan({
+          moduleIds: resolved.manifests.map((manifest) => manifest.id),
+        }),
+        qualityGate: createAutomaticQualityGateContract(),
+        rollbackPlan: createAutomaticReleaseRollbackPlan({ runId: payload.runId }),
       });
       await convex.mutation(api.runs.recordAutomaticPreflight, {
         ownerId,

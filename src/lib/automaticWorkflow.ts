@@ -1,5 +1,10 @@
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
+import type {
+  AutomaticProviderPlan,
+  AutomaticQualityGateContract,
+  AutomaticReleaseRollbackPlan,
+} from "@/lib/automaticOperations";
 
 /**
  * Small, deterministic contracts shared by the automatic scheduler and UI.
@@ -21,6 +26,12 @@ export type AutomaticPreflightReceipt = {
     status: "pass";
     detail: string;
   }[];
+  /** The provider order is frozen before the first paid block. */
+  providerPlan?: AutomaticProviderPlan;
+  /** Threshold contract consumed by the real final-master QA stage. */
+  qualityGate?: AutomaticQualityGateContract;
+  /** Private-first release safety and retry behavior. */
+  rollbackPlan?: AutomaticReleaseRollbackPlan;
   fingerprint: string;
 };
 
@@ -31,6 +42,9 @@ export function createAutomaticPreflightReceipt(input: {
   reservedMaxCostUsd: number;
   paidModules: readonly string[];
   resumeBoundaryReady: boolean;
+  providerPlan?: AutomaticProviderPlan;
+  qualityGate?: AutomaticQualityGateContract;
+  rollbackPlan?: AutomaticReleaseRollbackPlan;
 }): AutomaticPreflightReceipt {
   if (!input.runId.trim() || !input.channelId.trim()) throw new Error("automatic preflight identity is required");
   if (!Number.isFinite(input.budgetUsd) || input.budgetUsd < 0) throw new Error("automatic preflight budget is invalid");
@@ -52,6 +66,9 @@ export function createAutomaticPreflightReceipt(input: {
       { id: "module_contracts" as const, status: "pass" as const, detail: "paid modules have bounded, idempotent contracts" },
       { id: "resume_boundary" as const, status: "pass" as const, detail: "stage receipts can resume without replaying accepted paid work" },
     ],
+    ...(input.providerPlan ? { providerPlan: input.providerPlan } : {}),
+    ...(input.qualityGate ? { qualityGate: input.qualityGate } : {}),
+    ...(input.rollbackPlan ? { rollbackPlan: input.rollbackPlan } : {}),
   };
   return { ...body, fingerprint: sha256Hex(canonicalJson(body)) };
 }
