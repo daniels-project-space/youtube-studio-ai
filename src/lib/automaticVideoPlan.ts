@@ -1,6 +1,6 @@
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
-import { resolveTitleProfile, type TitleProfileId } from "@/lib/metacraft";
+import { resolveTitleProfile, type TitleProfileId } from "@/lib/titleProfile";
 
 /**
  * The automatic video plan is the small, immutable control-plane receipt that
