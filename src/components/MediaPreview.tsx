@@ -182,9 +182,16 @@ export function MediaPreview({
   }, [showingPrivateImage, selection.src, assetKey]);
   const imageSourceReady = !showingPrivateImage
     || (hydrated && imageProbe?.src === selection.src);
-  const state = selection.src && loadedSrc === selection.src
-    ? "ready"
-    : selection.state;
+  // Do not mount an <img> until the private-object probe has completed. An
+  // image element with an undefined src causes Chromium to paint its alt text
+  // as if the thumbnail were broken, which is especially noisy in card grids.
+  // Keep the explicit loading state visible until the same source is safe to
+  // request, then let the native load event settle the ready state.
+  const state = showingPrivateImage && !imageSourceReady
+    ? "loading"
+    : selection.src && loadedSrc === selection.src
+      ? "ready"
+      : selection.state;
   const presentation = { source: selection.source, state, src: selection.src };
   const isDecorative = alt.length === 0;
   const visibleStateLabel = state === "loading" ? loadingLabel : unavailableLabel;
@@ -200,11 +207,11 @@ export function MediaPreview({
       data-tone={dataTone}
       aria-busy={state === "loading" || undefined}
     >
-      {selection.src && !showingVideoStill && (
+      {selection.src && !showingVideoStill && imageSourceReady && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
           className={joinClassNames(styles.image, imageClassName)}
-          src={imageSourceReady ? selection.src : undefined}
+          src={selection.src}
           alt={alt}
           loading={priority ? "eager" : "lazy"}
           fetchPriority={priority ? "high" : "auto"}
