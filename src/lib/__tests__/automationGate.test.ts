@@ -50,7 +50,7 @@ const scheduleContracts: ScheduleContract[] = [
   {
     file: "src/trigger/publishScheduler.ts",
     exportName: "publishIntentScheduler",
-    cron: null,
+    cron: "*/5 * * * *",
     gate: STUDIO_AUTOMATION_GATES.autopilot,
     hazardousCall: "await bootstrapSecrets",
   },
