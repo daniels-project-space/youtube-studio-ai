@@ -105,6 +105,26 @@ assert.equal(failedLocalityH3.fallbackUsed, true);
 assert.deepEqual(failedLocalityQueries, [["cn"], undefined],
   "fleet preview must bound preferred-read recovery to one global request");
 
+const unavailableMarketQueries: Array<string[] | undefined> = [];
+const unavailableMarketSnapshot = await readSaladCapacitySnapshot({
+  listGpuClasses: async () => classes,
+  listContainerGroups: async () => [],
+  listContainerInstances: async () => [],
+  getQuotas: async () => ({ container_groups_quotas: { container_replicas_quota: 10, container_replicas_used: 0 } }),
+  getGpuAvailability: async (_resources, countryCodes) => {
+    // The 3090 lanes are intentionally irrelevant to this H3 recovery case;
+    // only record the exact 5090 market reads while all lanes run in parallel.
+    if (_resources.gpu_classes[0] === classes[1]!.id) unavailableMarketQueries.push(countryCodes);
+    throw new Error("Salad market unavailable");
+  },
+}, { requiredWorkers: 2 });
+const unavailableMarketH3 = unavailableMarketSnapshot.lanes.find((lane) => lane.id === "h3")!;
+assert.equal(unavailableMarketH3.recommendedPriority, null,
+  "the fleet preview must not advertise a tier when both market reads fail");
+assert.ok(unavailableMarketH3.blockers.includes("availability_read_failed"));
+assert.ok(unavailableMarketH3.blockers.includes("global_availability_read_failed"));
+assert.deepEqual(unavailableMarketQueries, [["cn"], undefined], "fleet market failure recovery must remain bounded");
+
 const mediumDisabled = await readSaladCapacitySnapshot({
   listGpuClasses: async () => classes,
   listContainerGroups: async () => [],

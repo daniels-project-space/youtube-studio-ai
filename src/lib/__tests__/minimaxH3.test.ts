@@ -150,6 +150,22 @@ async function test() {
     "a failed preferred locality read may use one successful global read to unlock an admitted high-tier wave",
   );
   assert.deepEqual(failedLocalityQueries, [["cn"], undefined], "preferred-read recovery must remain one bounded global retry");
+  const unavailableMarketQueries: Array<string[] | undefined> = [];
+  await assert.rejects(
+    () => assertMiniMaxH3SaladCapacity(2, {
+      client: {
+        ...capacityClient,
+        getGpuAvailability: async (_resources, countryCodes) => {
+          unavailableMarketQueries.push(countryCodes);
+          throw new Error("Salad market unavailable");
+        },
+      },
+      allowHighPriorityFallback: true,
+    }),
+    /capacity check failed before dispatch/,
+    "if both preferred and global reads fail, H3 admission must hold without guessing capacity",
+  );
+  assert.deepEqual(unavailableMarketQueries, [["cn"], undefined], "market failure recovery must remain bounded");
   assert.deepEqual(
     await assertMiniMaxH3SaladCapacity(2, {
       client: {
