@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useOperationsAccess, useRequestOperationsAccess, type OperationsAccessState } from "@/components/OperationsAccess";
+import { h3ProgressPercent } from "@/lib/h3Progress";
 import styles from "./h3-render-console.module.css";
 
 type Mode = "weekly" | "on-demand";
@@ -390,7 +391,7 @@ export function H3RenderConsole() {
   const routeNote = mode === "weekly"
     ? "Weekly slate · medium first · high fallback · up to 3 RTX 5090 workers"
     : "One repair or preview clip · Novita spot GPU · no automatic retry";
-  const progressPercent = !status ? 0 : status.state === "complete" ? 100 : status.state === "held" ? 8 : status.state === "reconciliation_required" ? 92 : /EXECUTING|RUNNING|IN_PROGRESS/i.test(status.triggerStatus) ? 58 : 16;
+  const progressPercent = !status ? 0 : h3ProgressPercent(status);
 
   return (
     <main className={styles.page}>

@@ -17,6 +17,8 @@ assert.match(page, /api\/minimax-h3\/\$\{mode\}/);
 assert.match(page, /api\/minimax-h3\/status/);
 assert.match(page, /data-capacity-mode=\{status\.receipt\.capacityMode\}/,
   "the render desk surfaces the admitted Salad tier from the durable receipt");
+assert.match(page, /h3ProgressPercent\(status\)/,
+  "the render desk progress bar must use durable receipt completion counts when available");
 assert.match(page, /api\/minimax-h3\/capacity\?jobCount=/,
   "the render desk offers a read-only pre-dispatch Salad capacity check");
 assert.match(page, /const checkCapacity = useCallback\(async \(\) =>/,
@@ -26,7 +28,7 @@ assert.match(page, /if \(access !== "owner" \|\| mode !== "weekly" \|\| !parsedP
 assert.match(page, /void checkCapacity\(\);/,
   "a valid weekly slate must automatically discover medium or high fallback admission");
 assert.match(page, /Check Salad capacity/);
-assert.match(page, /status\.state === "held"/);
+assert.match(page, /status\??\.state === "held"/);
 assert.match(page, /Held before spend/);
 assert.match(page, /medium first, then high only if it unlocks this wave/,
   "a capacity hold explains the authorized medium-to-high retry policy");
