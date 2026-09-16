@@ -58,6 +58,13 @@
 .folderCreate label { color: var(--asset-muted); font-size: .75rem; font-weight: 600; }
 .folderCreate input,.folderCreate select,.folderSelect select { min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid #51455f; border-radius: 9px; color: var(--asset-ink); background: #171522; font: inherit; font-size: .8rem; }
 .folderCreate input::placeholder { color: #847991; }
+.folderActions { display: grid; gap: 10px; padding-top: 2px; border-top: 1px solid rgba(105,88,132,.35); }
+.folderActions summary { min-height: 44px; display: inline-flex; align-items: center; width: fit-content; color: #cdbce4; font-size: .78rem; font-weight: 650; cursor: pointer; }
+.folderActions form { display: grid; grid-template-columns: auto minmax(9rem,1fr) auto auto; align-items: center; gap: 8px; }
+.folderActions label { color: var(--asset-muted); font-size: .75rem; font-weight: 600; }
+.folderActions input { min-width: 0; min-height: 40px; padding: 8px 10px; border: 1px solid #51455f; border-radius: 9px; color: var(--asset-ink); background: #171522; font: inherit; font-size: .8rem; }
+.folderDanger { min-height: 44px; padding: 9px 12px; border: 1px solid #714854; border-radius: 9px; color: #f0bec4; background: rgba(74,35,44,.55); font: inherit; font-size: .78rem; font-weight: 650; cursor: pointer; }
+.folderDanger:hover { background: rgba(102,43,57,.72); }
 .folderSelect { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .folderSelect span { color: var(--asset-muted); font-size: .75rem; font-weight: 600; }
 .folderSelect select { flex: 1 1 12rem; }
@@ -127,5 +134,6 @@
   .previewBackdrop { padding: 8px; }
   .previewDialog { width: 100%; max-height: calc(100dvh - 16px); padding: 14px; }
   .folderCreate { grid-template-columns: 1fr; align-items: stretch; }
+  .folderActions form { grid-template-columns: 1fr; align-items: stretch; }
 }
 @media (prefers-reduced-motion: reduce) { .refresh,.roomTabs button { transition: none; } }

@@ -337,6 +337,31 @@ function AssetRoomIntro({ room }: { room: AssetRoom }) {
   return <header className={styles.roomHeader}><h2>{selected.title}</h2><p>{selected.detail}</p></header>;
 }
 
+function EpisodeAssetFolderActions({
+  folder,
+  busy,
+  onRename,
+  onRemove,
+}: {
+  folder: EpisodeAssetFolder;
+  busy: boolean;
+  onRename: (folderId: string, name: string) => void;
+  onRemove: (folderId: string) => void;
+}) {
+  const [renameDraft, setRenameDraft] = useState(folder.name);
+  return <details className={styles.folderActions}>
+    <summary>Manage {folder.name}</summary>
+    <form onSubmit={(event) => { event.preventDefault(); const name = renameDraft.trim(); if (name && name !== folder.name) onRename(folder._id, name); }}>
+      <label htmlFor="episode-folder-rename">Folder name</label>
+      <input id="episode-folder-rename" value={renameDraft} maxLength={40} onChange={(event) => setRenameDraft(event.target.value)} disabled={busy} />
+      <button type="submit" className={styles.previewButton} disabled={busy || !renameDraft.trim() || renameDraft.trim() === folder.name}>Rename</button>
+      <button type="button" className={styles.folderDanger} disabled={busy} onClick={() => {
+        if (window.confirm(`Remove “${folder.name}”? Its assets will become unfiled.`)) onRemove(folder._id);
+      }}>Remove folder</button>
+    </form>
+  </details>;
+}
+
 function EpisodeAssetFolderBar({
   folders,
   assignments,
@@ -348,6 +373,8 @@ function EpisodeAssetFolderBar({
   folderChannelId,
   onFolderChannel,
   onCreate,
+  onRename,
+  onRemove,
   busy,
   message,
   assetCount,
@@ -363,11 +390,14 @@ function EpisodeAssetFolderBar({
   folderChannelId: string;
   onFolderChannel: (value: string) => void;
   onCreate: () => void;
+  onRename: (folderId: string, name: string) => void;
+  onRemove: (folderId: string) => void;
   busy: boolean;
   message: string | null;
   assetCount: number;
   unfiledCount: number;
 }) {
+  const selected = folders.find((folder) => folder._id === selectedFolder) ?? null;
   const countByFolder = new Map<string, number>();
   for (const assignment of assignments) {
     countByFolder.set(assignment.folderId, (countByFolder.get(assignment.folderId) ?? 0) + 1);
@@ -402,6 +432,7 @@ function EpisodeAssetFolderBar({
         </select>
         <button type="submit" className={styles.previewButton} disabled={!folderDraft.trim() || !folderChannelId || busy}>{busy ? "Saving…" : "Create folder"}</button>
       </form>
+      {selected ? <EpisodeAssetFolderActions key={selected._id} folder={selected} busy={busy} onRename={onRename} onRemove={onRemove} /> : null}
       {message ? <p className={styles.folderMessage} role="status">{message}</p> : null}
     </section>
   );
@@ -561,6 +592,15 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
     if (created) setFolderDraft("");
   }, [folderChannelId, folderDraft, mutateEpisodeFolder]);
 
+  const renameEpisodeFolder = useCallback(async (folderId: string, name: string) => {
+    await mutateEpisodeFolder({ action: "rename-episode-folder", folderId, name }, "Episode folder renamed");
+  }, [mutateEpisodeFolder]);
+
+  const removeEpisodeFolder = useCallback(async (folderId: string) => {
+    const removed = await mutateEpisodeFolder({ action: "remove-episode-folder", folderId }, "Episode folder removed; its assets are unfiled");
+    if (removed) setEpisodeFolderFilter("all");
+  }, [mutateEpisodeFolder]);
+
   const moveEpisodeAsset = useCallback(async (asset: StudioReusableMedia, folderId: string) => {
     await mutateEpisodeFolder({
       action: "move-episode-asset",
@@ -714,6 +754,8 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
         folderChannelId={folderChannelId || studioChannels[0]?._id || ""}
         onFolderChannel={setFolderChannelId}
         onCreate={() => { void createEpisodeFolder(); }}
+        onRename={(folderId, name) => { void renameEpisodeFolder(folderId, name); }}
+        onRemove={(folderId) => { void removeEpisodeFolder(folderId); }}
         busy={folderBusy}
         message={folderMessage}
         assetCount={reusableMedia.length}

@@ -43,6 +43,10 @@ async function main(): Promise<void> {
   assert.match(source, /EpisodeAssetFolderBar/);
   assert.match(source, /Open episode asset folder/);
   assert.match(source, /move-episode-asset/);
+  assert.match(source, /rename-episode-folder/);
+  assert.match(source, /remove-episode-folder/);
+  assert.match(source, /Manage \{folder\.name\}/);
+  assert.match(source, /Its assets will become unfiled/);
   assert.match(source, /Persistent organization/);
   assert.match(source, /Same channel only/i);
   assert.match(source, /Reviewed candidates awaiting approval/i);
