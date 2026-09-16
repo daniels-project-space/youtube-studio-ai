@@ -2234,6 +2234,19 @@ export default defineSchema({
     .index("by_reservation_key", ["reservationKey"])
     .index("by_state_expires", ["state", "expiresAt"]),
 
+  /** Durable automatic provider circuit state; no provider work is started by these reads/writes. */
+  automaticProviderHealth: defineTable({
+    ownerId: v.string(),
+    provider: v.string(),
+    status: v.union(v.literal("closed"), v.literal("open"), v.literal("half_open")),
+    consecutiveFailures: v.number(),
+    openedAt: v.optional(v.number()),
+    nextProbeAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_provider", ["ownerId", "provider"])
+    .index("by_owner_updated", ["ownerId", "updatedAt"]),
+
   /** Immutable per-phase usage ledger; batch totals are recomputed from rows. */
   planBatchUsage: defineTable({
     ownerId: v.string(),

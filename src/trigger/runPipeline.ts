@@ -78,6 +78,7 @@ import {
   buildAutomaticProviderPlan,
   createAutomaticQualityGateContract,
   createAutomaticReleaseRollbackPlan,
+  type AutomaticProviderPlan,
 } from "@/lib/automaticOperations";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { rehydrateOutputs } from "@/lib/rehydrate";
@@ -235,6 +236,13 @@ const musicAuditionCheckpointsApi = (api as unknown as {
     readonly assertApprovedMusicAuditionResume: never;
   };
 }).musicAuditionCheckpoints;
+
+const automaticProviderHealthApi = (api as unknown as {
+  readonly automaticProviderHealth: {
+    readonly listForOwner: never;
+    readonly recordOutcome: never;
+  };
+}).automaticProviderHealth;
 
 // This read-only bridge intentionally does not add a writer, endpoint, or
 // automatic benchmark dispatch. The worker only reloads a current immutable
@@ -481,6 +489,19 @@ export const runPipelineTask = task({
     if (!channel) throwForTaskRetryPolicy(new Error(`channel not found: ${payload.channelId}`));
 
     const ownerId = channel.ownerId;
+    let providerCircuits: Record<string, { status: "closed" | "open" | "half_open"; consecutiveFailures: number; openedAt?: number; nextProbeAt?: number }> = {};
+    try {
+      const healthRows = await convex.query(automaticProviderHealthApi.listForOwner, { ownerId } as never) as Array<{
+        provider: string;
+        status: "closed" | "open" | "half_open";
+        consecutiveFailures: number;
+        openedAt?: number;
+        nextProbeAt?: number;
+      }>;
+      providerCircuits = Object.fromEntries(healthRows.map((row) => [row.provider, row]));
+    } catch (error) {
+      throwForTaskRetryPolicy(new Error(`automatic provider health read failed: ${error instanceof Error ? error.message : String(error)}`));
+    }
     try {
       assertRunPipelineAdmission({
         run: durableRun,
@@ -1234,6 +1255,23 @@ export const runPipelineTask = task({
     let weeklyPreparedMusic: PlanWeekPreparedMusic | undefined;
     let weeklyPreparedFootage: PlanWeekPreparedFootage | undefined;
     let weeklyPreparedImages: PlanWeekPreparedImages | undefined;
+    let automaticProviderPlan: AutomaticProviderPlan | undefined;
+    const recordProviderOutcome = async (provider: string, outcome: "success" | "failure") => {
+      try {
+        await convex.mutation(automaticProviderHealthApi.recordOutcome, {
+          ownerId,
+          provider,
+          outcome,
+          now: Date.now(),
+        } as never);
+      } catch (error) {
+        log(`provider circuit receipt unavailable for ${provider}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    };
+    const providerFromError = (message: string): string | undefined => {
+      const candidates = automaticProviderPlan?.modules.map((module) => module.primary) ?? [];
+      return candidates.find((provider) => message.toLowerCase().includes(provider.replace("-", " ").toLowerCase()) || message.toLowerCase().includes(provider.toLowerCase()));
+    };
 
     try {
       // A selected narrative horizon is a route-owned serial planner. It must
@@ -2187,6 +2225,10 @@ export const runPipelineTask = task({
       assertPipelineInvocationCompilation(invocation, compilation);
       entries = invocation.entries;
       seedStore = { ...invocation.seedStore };
+      automaticProviderPlan = buildAutomaticProviderPlan({
+        moduleIds: resolved.manifests.map((manifest) => manifest.id),
+        circuits: providerCircuits,
+      });
       const automaticPreflight = createAutomaticPreflightReceipt({
         runId: payload.runId,
         channelId: payload.channelId,
@@ -2194,9 +2236,7 @@ export const runPipelineTask = task({
         reservedMaxCostUsd: compilation.reservedMaxCostUsd,
         paidModules: resolved.manifests.filter((manifest) => manifest.costAndLatency.paid).map((manifest) => manifest.id),
         resumeBoundaryReady: true,
-        providerPlan: buildAutomaticProviderPlan({
-          moduleIds: resolved.manifests.map((manifest) => manifest.id),
-        }),
+        providerPlan: automaticProviderPlan,
         qualityGate: createAutomaticQualityGateContract(),
         rollbackPlan: createAutomaticReleaseRollbackPlan({ runId: payload.runId }),
       });
@@ -2740,6 +2780,8 @@ export const runPipelineTask = task({
           `run-pipeline failed (${channel.slug}/${result.failedBlock})`,
           result.error ?? "unknown error",
         );
+        const failedProvider = providerFromError(result.error ?? "");
+        if (failedProvider) await recordProviderOutcome(failedProvider, "failure");
         return { ok: false, failedBlock: result.failedBlock, error: result.error };
       }
 
@@ -2861,6 +2903,9 @@ export const runPipelineTask = task({
       if (budgetAlert?.shouldAlert) {
         await safeBudgetAlert(`budget alert (${channel.slug})`, budgetAlert.message);
       }
+      for (const provider of new Set(automaticProviderPlan?.modules.map((module) => module.primary) ?? [])) {
+        await recordProviderOutcome(provider, "success");
+      }
       return {
         ok: true,
         stages: result.stages,
@@ -2905,6 +2950,8 @@ export const runPipelineTask = task({
           error: message,
         });
       }
+      const failedProvider = providerFromError(message);
+      if (failedProvider) await recordProviderOutcome(failedProvider, "failure");
       await safeAlert(`run-pipeline aborted (${payload.runId})`, message);
       throwForTaskRetryPolicy(err);
     }
