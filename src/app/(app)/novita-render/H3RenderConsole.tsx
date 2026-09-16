@@ -358,6 +358,11 @@ export function H3RenderConsole() {
 
   async function retryHeld() {
     if (!tracking || !status || status.state !== "held" || tracking.provider !== "salad") return;
+    const admittedHighFallback = capacity?.state === "admitted" && capacity.capacity.fallbackUsed;
+    const retryLabel = admittedHighFallback
+      ? "Salad has no complete medium-priority wave right now. Retry at HIGH priority? This may cost more per GPU-hour."
+      : "Recheck Salad capacity and retry this weekly H3 wave? It will use medium first and high only if high priority is the admitted fallback.";
+    if (!window.confirm(retryLabel)) return;
     setRetryBusy(true);
     setError("");
     try {
