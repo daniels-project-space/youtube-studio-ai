@@ -65,11 +65,13 @@ const asset = (id: string, scope = "owned_studio", status = "approved") => ({
   approval: { qualityScore: 96, approvedBy: "Fixture reviewer", approvedAt: 1700000000000 },
   hasRecipe: false, recipePreview: [], resource: { contentType: "image/png", byteLength: 68, contentSha256: hash },
 });
-const empty = { ok: true, assets: [], reusableMedia: [], candidates: [], curatedLtxCatalog: [],
+const empty = { ok: true, assets: [], reusableMedia: [], episodeAssetFolders: { folders: [], assignments: [] }, channels: [], candidates: [], curatedLtxCatalog: [],
   visualTreatmentCatalog: [], releaseFeedback: [], acceptedCharacterLoRAs: [], musicVideoA2Vid: null, directLtxRuntime: null };
 const inventory = { ...empty,
   assets: [asset("portable"), asset("revoked", "owned_studio", "revoked"), asset("channel", "channel")],
   reusableMedia: [{ logicalId: "clip", fingerprint: hash, channelId: "channel_fixture", family: "cinematic", kind: "broll", title: "Fixture channel-only clip", status: "approved", editorialTags: [], evergreen: true, durationSec: 15, contentType: "video/mp4", qualityScore: 9.6, maximumLifetimeUses: 4, cooldownEpisodes: 2, sourceOrigin: "studio_generated" }],
+  episodeAssetFolders: { folders: [{ _id: "folder-history", channelId: "channel_fixture", name: "History", createdAt: 1700000000000 }], assignments: [{ _id: "assignment-clip", channelId: "channel_fixture", folderId: "folder-history", assetFingerprint: hash, updatedAt: 1700000000000 }] },
+  channels: [{ _id: "channel_fixture", name: "Fixture history", slug: "fixture-history" }],
   candidates: [{ candidateFingerprint: hash, title: "Fixture reviewed recipe", assetKind: "overlay_template", channelId: "channel_fixture", family: "cinematic", contentLane: "essay", visualQualityScore: 95, visualMinimumScore: 90, finalMasterSha256: hash, finalMasterReleaseCertificateFingerprint: hash }],
   directLtxRuntime: { status: "unattested", gpuSku: "RTX 5090", vramGb: 32, benchmarkedProfileCount: 0 },
   acceptedCharacterLoRAs: [{ registryIdentity: hash, characterId: "Fixture historian", characterSpecFingerprint: hash, datasetFingerprint: hash, provider: "self_hosted", adapterFlavor: "standard_lora", runtimeProfileFingerprint: hash, acceptedAt: 1700000000000 }],
@@ -85,13 +87,18 @@ async function layoutCheck(page: Page, name: string) {
     const box = root.getBoundingClientRect();
     return [...root.querySelectorAll<HTMLElement>("h1,h2,p,dt,dd,button,a,summary")].filter(node => {
       if (!node.checkVisibility()) return false;
+      const scope = node.closest<HTMLElement>("[class*='episodeFolders']") ?? root;
+      if (node.matches("[class*='folderChip']")) return false;
+      const scopeBox = scope.getBoundingClientRect();
       const rect = node.getBoundingClientRect(), style = getComputedStyle(node), range = document.createRange();
       range.selectNodeContents(node); const text = range.getBoundingClientRect();
-      return rect.left < box.left - 1 || rect.right > box.right + 1 || text.right > box.right + 1
+      return rect.left < (scope === root ? box.left : scopeBox.left) - 1 || rect.right > (scope === root ? box.right : scopeBox.right) + 1 || text.right > (scope === root ? box.right : scopeBox.right) + 1
         || (/hidden|clip/.test(style.overflowX) && node.scrollWidth > node.clientWidth + 1)
         || ((node.matches("button,a,summary")) && rect.height < 44);
     }).map(node => ({ text: node.textContent?.slice(0,100), class: node.className }));
   });
+  const chipOverflow = await page.locator("[class*='folderChips']").evaluateAll(nodes => nodes.some(node => node.scrollWidth > node.clientWidth + 1));
+  check(!chipOverflow, `${name}: episode folder chips overflow their responsive row`);
   check(issues.length === 0, `${name}: ${JSON.stringify(issues)}`);
   await page.screenshot({ path: join(outputDir, `${name}.png`), fullPage: true });
   results.push({ name, issues });
@@ -103,7 +110,7 @@ try {
       const page = await context.newPage(); page.on("pageerror", error => errors.push(error.message));
       const requests: { method: string; url: string; body: unknown }[] = [];
       const pending: Route[] = [];
-      let refreshError = false, previewFailure = false, approved = false, approvalRequests = 0;
+      let refreshError = false, previewFailure = false, approved = false, approvalRequests = 0, folderName = "History", folderRemoved = false;
       await page.route("**/*", async route => {
         const request = route.request(), url = new URL(request.url());
         if (url.origin !== base) { external.push(request.url()); await route.abort(); return; }
@@ -119,11 +126,24 @@ try {
             await route.fulfill({ json: { ok: true, preview: { url: base + "/fixture.png", contentType: "image/png", contentSha256: hash } } }); return;
           }
           if (request.method() === "POST") {
+            const body = request.postDataJSON() as { action?: string; name?: string } | null;
+            if (body?.action === "rename-episode-folder") {
+              folderName = body.name ?? folderName;
+              await route.fulfill({ json: { ok: true, folder: { _id: "folder-history", name: folderName } } }); return;
+            }
+            if (body?.action === "remove-episode-folder") {
+              folderRemoved = true;
+              await route.fulfill({ json: { ok: true, removed: true } }); return;
+            }
             approvalRequests++; approved = approvalRequests > 1;
             await route.fulfill({ status: approved ? 200 : 409, json: approved ? { ok: true } : { ok: false, error: "Fixture evidence no longer qualifies" } }); return;
           }
           if (state === "error" || refreshError) { await route.fulfill({ status: 503, json: { ok: false, error: "Fixture registry unavailable" } }); return; }
-          await route.fulfill({ json: state === "malformed" ? { ok: true } : state === "empty" ? empty : approved ? { ...inventory, candidates: [] } : inventory }); return;
+          const readyInventory = { ...inventory, episodeAssetFolders: {
+            folders: folderRemoved ? [] : [{ _id: "folder-history", channelId: "channel_fixture", name: folderName, createdAt: 1700000000000 }],
+            assignments: folderRemoved ? [] : inventory.episodeAssetFolders.assignments,
+          } };
+          await route.fulfill({ json: state === "malformed" ? { ok: true } : state === "empty" ? empty : approved ? { ...readyInventory, candidates: [] } : readyInventory }); return;
         }
         if (url.pathname === "/fixture.png") { await route.fulfill({ contentType: "image/png", body: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVQIHWP4z8DwHwAFgAI/ScLbtAAAAABJRU5ErkJggg==", "base64") }); return; }
         if (url.pathname.startsWith("/api/")) { failures.push(`unexpected request ${url.pathname}`); await route.abort(); return; }
@@ -160,6 +180,20 @@ try {
           check(/Studio-wide\s*1/.test(summaryText), `${name}: channel-only clips and revoked assets must not be portable`);
           check(await page.getByRole("article").filter({ hasText: "Fixture revoked image" }).getByRole("button").count() === 0, `${name}: revoked image offers no approved-image preview`);
           await layoutCheck(page, `${name}-inventory`);
+          if (name === "desktop") {
+            const folderChip = page.getByRole("button", { name: /^History\s+1$/ });
+            await folderChip.click();
+            await page.getByText("Manage History", { exact: true }).click();
+            await page.getByLabel("Folder name").fill("History archive");
+            await page.getByRole("button", { name: "Rename", exact: true }).click();
+            await page.getByRole("status").filter({ hasText: "Episode folder renamed" }).waitFor();
+            check(requests.some(req => req.method === "POST" && (req.body as { action?: string }).action === "rename-episode-folder"), `${name}: rename sends the folder action`);
+            page.once("dialog", dialog => dialog.accept());
+            await page.getByText("Manage History archive", { exact: true }).click();
+            await page.getByRole("button", { name: "Remove folder", exact: true }).click();
+            await page.getByRole("status").filter({ hasText: "Episode folder removed" }).waitFor();
+            check(folderRemoved, `${name}: remove sends the folder action`);
+          }
           const preview = page.getByRole("button", { name: "Preview approved image", exact: true }).first();
           previewFailure = true; await preview.click(); await page.getByText("Fixture preview unavailable", { exact: true }).waitFor();
           check(await page.getByRole("dialog").count() === 0, `${name}: failed preview must not open a broken dialog`);
@@ -177,7 +211,7 @@ try {
           }
           await page.getByRole("button", { name: /^Decisions/ }).or(page.getByRole("tab", { name: /Decisions/ })).click();
           await page.getByRole("button", { name: "Approve for this channel" }).click(); await page.getByRole("alert").waitFor();
-          check(JSON.stringify(requests.filter(req => req.method === "POST").map(req => req.body)) === JSON.stringify([{ action: "approve-candidate", candidateFingerprint: hash }]), `${name}: approval sends only the exact candidate fingerprint`);
+          check(JSON.stringify(requests.filter(req => req.method === "POST" && (req.body as { action?: string }).action === "approve-candidate").map(req => req.body)) === JSON.stringify([{ action: "approve-candidate", candidateFingerprint: hash }]), `${name}: approval sends only the exact candidate fingerprint`);
           check((await page.getByRole("alert").innerText()).includes("Fixture evidence no longer qualifies"), `${name}: failed approval must not claim success`);
           await layoutCheck(page, `${name}-decisions`);
           await page.getByRole("button", { name: "Approve for this channel" }).click();
