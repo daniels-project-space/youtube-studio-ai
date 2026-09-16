@@ -92,3 +92,13 @@ high only when high has a valid price and enough slots; otherwise the order is
 held for a later recheck. Salad's availability estimate is not treated as a
 provider reservation; a true supply increase still requires Salad capacity
 support or a later authenticated availability observation.
+
+## Latest repository preflight — 16 September 2026
+
+The read-only `salad-runtime-preflight` was run again from the production
+worktree. Vault hydration failed closed before any Salad or R2 request because
+`SALAD_API_KEY`, `SALAD_ORG`, and `SALAD_PROJECT` were not available. The
+command exited non-zero and explicitly reported zero GPU mutations and zero
+inference calls. This is a credential-state observation only; it does not
+replace the last authenticated capacity snapshot above. Once those named vault
+entries are restored, rerun the same preflight before enabling paid H3 work.
