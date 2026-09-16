@@ -12,6 +12,7 @@ import {
 } from "../src/lib/lofiLibraryThumbnail";
 import { selectLatestCurrentGoldenThumbnail } from "../src/lib/thumbnailRefreshInventory";
 import { summarizeLibraryStates } from "../src/lib/librarySummary";
+import { createBulkUndoReceipt } from "../src/lib/automaticWorkflow";
 
 /**
  * Finished-videos library (Tranche 4).
@@ -563,6 +564,73 @@ export const setLibraryState = mutation({
       libraryStateUpdatedAt: Date.now(),
     });
     return null;
+  },
+});
+
+/**
+ * Automatic-friendly bulk organization. The receipt stores the exact prior
+ * state for every run, so a lost browser response or a later Undo can never
+ * guess what the operator's library looked like before the action.
+ */
+export const applyBulkLibraryState = mutation({
+  args: {
+    ownerId: v.string(),
+    runIds: v.array(v.id("runs")),
+    state: v.union(v.literal("active"), v.literal("archived")),
+    actionKey: v.string(),
+  },
+  returns: v.object({
+    actionId: v.id("libraryActionReceipts"),
+    reused: v.boolean(),
+    state: v.union(v.literal("active"), v.literal("undone")),
+  }),
+  handler: async (ctx, args) => {
+    const ids = [...new Set(args.runIds.map(String))];
+    if (ids.length === 0 || ids.length > 100 || ids.length !== args.runIds.length) throw new Error("bulk library action must contain 1 to 100 unique runs");
+    const actionKey = args.actionKey.trim();
+    if (!actionKey || actionKey.length > 160) throw new Error("bulk library action key is invalid");
+    const existing = await ctx.db.query("libraryActionReceipts")
+      .withIndex("by_owner_action", (q) => q.eq("ownerId", args.ownerId).eq("actionKey", actionKey))
+      .unique();
+    if (existing) {
+      if (existing.nextState !== args.state || existing.runIds.map(String).sort().join(",") !== [...ids].sort().join(",")) {
+        throw new Error("bulk library action key was reused with different targets");
+      }
+      return { actionId: existing._id, reused: true, state: existing.status };
+    }
+    const runs = await Promise.all(args.runIds.map((id) => ctx.db.get(id)));
+    if (runs.some((run) => !run || run.ownerId !== args.ownerId)) throw new Error("bulk library action ownership mismatch");
+    const previousStates = runs.map((run) => ({ runId: run!._id, state: (run!.libraryState ?? "active") as "active" | "archived" }));
+    const receipt = createBulkUndoReceipt({ actionKey, runIds: ids, previousStates: previousStates.map((row) => ({ runId: String(row.runId), state: row.state })), nextState: args.state });
+    for (const run of runs) await ctx.db.patch(run!._id, { libraryState: args.state, libraryStateUpdatedAt: Date.now() });
+    const actionId = await ctx.db.insert("libraryActionReceipts", {
+      ownerId: args.ownerId,
+      actionKey,
+      fingerprint: receipt.fingerprint,
+      runIds: args.runIds,
+      previousStates,
+      nextState: args.state,
+      status: "active",
+      createdAt: Date.now(),
+    });
+    return { actionId, reused: false, state: "active" as const };
+  },
+});
+
+export const undoBulkLibraryState = mutation({
+  args: { ownerId: v.string(), actionId: v.id("libraryActionReceipts") },
+  returns: v.object({ reused: v.boolean(), state: v.union(v.literal("active"), v.literal("undone")) }),
+  handler: async (ctx, args) => {
+    const receipt = await ctx.db.get(args.actionId);
+    if (!receipt || receipt.ownerId !== args.ownerId) throw new Error("bulk library action not found");
+    if (receipt.status === "undone") return { reused: true, state: "undone" as const };
+    const runs = await Promise.all(receipt.previousStates.map((row) => ctx.db.get(row.runId)));
+    if (runs.some((run) => !run || run.ownerId !== args.ownerId)) throw new Error("bulk library undo ownership mismatch");
+    for (const row of receipt.previousStates) {
+      await ctx.db.patch(row.runId, { libraryState: row.state, libraryStateUpdatedAt: Date.now() });
+    }
+    await ctx.db.patch(receipt._id, { status: "undone", undoneAt: Date.now() });
+    return { reused: false, state: "undone" as const };
   },
 });
 

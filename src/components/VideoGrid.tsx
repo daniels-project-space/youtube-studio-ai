@@ -8,6 +8,7 @@ export function VideoGrid({
   videos,
   onOpen,
   libraryAction,
+  selection,
   density = "regular",
 }: {
   videos: VideoRow[];
@@ -18,6 +19,10 @@ export function VideoGrid({
     label: string;
     busyIds?: ReadonlySet<string>;
     onAction: (video: VideoRow) => void;
+  };
+  selection?: {
+    selectedIds: ReadonlySet<string>;
+    onToggle: (video: VideoRow) => void;
   };
 }) {
   return (
@@ -33,6 +38,10 @@ export function VideoGrid({
             label: libraryAction.label,
             busy: libraryAction.busyIds?.has(v._id) ?? false,
             onAction: () => libraryAction.onAction(v),
+            } : undefined}
+          selection={selection ? {
+            selected: selection.selectedIds.has(v._id),
+            onToggle: () => selection.onToggle(v),
           } : undefined}
         />
       ))}

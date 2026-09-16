@@ -2631,6 +2631,10 @@ export const completeClaimedPlanRun = mutation({
     }
     await ctx.db.patch(args.runId, {
       status: "ok",
+      automaticResumeState: "complete",
+      automaticResumeUpdatedAt: args.finishedAt,
+      automaticResumeNextAt: undefined,
+      automaticResumeLastError: undefined,
       finishedAt: args.finishedAt,
       costTotal,
       scheduledCompletionCallerCostTotal: args.costTotal,
@@ -2686,6 +2690,10 @@ export const failClaimedPlanRun = mutation({
     const costTotal = await runCostFloor(ctx, run, args.costTotal);
     await ctx.db.patch(args.runId, {
       status: "failed",
+      automaticResumeState: "failed",
+      automaticResumeUpdatedAt: args.failedAt,
+      automaticResumeNextAt: args.failedAt + 6 * 60 * 60 * 1_000,
+      automaticResumeLastError: error,
       finishedAt: args.failedAt,
       costTotal,
       error,

@@ -202,6 +202,7 @@ import type { ThirdPartyStockEvidenceReference } from "@/lib/thirdPartyStockEvid
 import { payloadSeedInputs } from "@/lib/payloadSeedInputs";
 import { createMusicAuditionCheckpoint } from "@/engine/musicAuditionCheckpoint";
 import { MusicProgramQualityReceiptSchema } from "@/engine/channelMusicProgram";
+import { createAutomaticPreflightReceipt } from "@/lib/automaticWorkflow";
 
 const MAX_SELF_HEALS = 2;
 const FACTUAL_REVIEW_FROZEN_BLOCK_IDS = new Set([
@@ -2181,6 +2182,22 @@ export const runPipelineTask = task({
       assertPipelineInvocationCompilation(invocation, compilation);
       entries = invocation.entries;
       seedStore = { ...invocation.seedStore };
+      const automaticPreflight = createAutomaticPreflightReceipt({
+        runId: payload.runId,
+        channelId: payload.channelId,
+        budgetUsd: invocation.budgetUsd,
+        reservedMaxCostUsd: compilation.reservedMaxCostUsd,
+        paidModules: resolved.manifests.filter((manifest) => manifest.costAndLatency.paid).map((manifest) => manifest.id),
+        resumeBoundaryReady: true,
+      });
+      await convex.mutation(api.runs.recordAutomaticPreflight, {
+        ownerId,
+        channelId: payload.channelId as Id<"channels">,
+        runId: payload.runId as Id<"runs">,
+        ...executionLease,
+        receipt: automaticPreflight,
+      });
+      log(`automatic preflight sealed ${automaticPreflight.fingerprint.slice(0, 12)} — budget, contracts, and resume boundary admitted`);
       // A newly generated MiniMax track stops for its owner audition. An
       // admitted week-ahead receipt has already bound that exact human review
       // (or identifies a non-MiniMax provider) and must continue from its

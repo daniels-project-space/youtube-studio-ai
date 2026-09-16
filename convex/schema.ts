@@ -802,6 +802,20 @@ export default defineSchema({
     pipelineCapabilities: v.optional(v.array(v.string())),
     reservedMaxCostUsd: v.optional(v.number()),
     pipelineCompiledAt: v.optional(v.number()),
+    // Automatic orchestration receipt. This is written before the first
+    // provider-capable block and makes the unified budget/contract/resume
+    // preflight queryable without shipping the full invocation to the UI.
+    automaticPreflight: v.optional(v.any()),
+    // Bounded automatic recovery for a frozen failed run. Manual review
+    // states never use this path; terminal publishing/review fences remain
+    // authoritative.
+    automaticResumeState: v.optional(v.union(
+      v.literal("queued"), v.literal("running"), v.literal("complete"), v.literal("failed"), v.literal("blocked"),
+    )),
+    automaticResumeAttempts: v.optional(v.number()),
+    automaticResumeNextAt: v.optional(v.number()),
+    automaticResumeUpdatedAt: v.optional(v.number()),
+    automaticResumeLastError: v.optional(v.string()),
     // Write-once, pre-provider execution contract. Retries and post-upload
     // recovery use this exact pipeline/seed/budget/key namespace instead of
     // silently recompiling mutable channel settings.
@@ -2181,6 +2195,25 @@ export default defineSchema({
     .index("by_request", ["ownerId", "requestKey"])
     .index("by_fingerprint", ["ownerId", "fingerprint"])
     .index("by_owner", ["ownerId", "createdAt"]),
+
+  // Reversible Library organization receipt. Bulk archive/restore only changes
+  // presentation state; the exact prior state is retained for a bounded undo.
+  libraryActionReceipts: defineTable({
+    ownerId: v.string(),
+    actionKey: v.string(),
+    fingerprint: v.string(),
+    runIds: v.array(v.id("runs")),
+    previousStates: v.array(v.object({
+      runId: v.id("runs"),
+      state: v.union(v.literal("active"), v.literal("archived")),
+    })),
+    nextState: v.union(v.literal("active"), v.literal("archived")),
+    status: v.union(v.literal("active"), v.literal("undone")),
+    createdAt: v.number(),
+    undoneAt: v.optional(v.number()),
+  })
+    .index("by_owner_action", ["ownerId", "actionKey"])
+    .index("by_owner_created", ["ownerId", "createdAt"]),
 
   /** Organization-wide logical Salad slot fence for weekly provider dispatch. */
   saladFleetReservations: defineTable({

@@ -12,6 +12,7 @@ import {
   buildPlanWeekBulkOrder,
   type PlanWeekBulkRequest,
 } from "@/lib/planWeekBulk";
+import { resolveBatchConflicts } from "@/lib/automaticWorkflow";
 
 export type PlanWeekBulkArgs = PlanWeekBulkRequest;
 
@@ -46,25 +47,44 @@ export const planWeekBulkTask = task({
       triggerRunId: ctx.run.id,
     });
 
-    // Dispatches are independent by channel. Stable global idempotency seeds
-    // make a lost parent response safe to retry without buying another child.
-    const children = await Promise.all(order.channels.map(async (channel) => {
-      const idempotencyKey = await idempotencyKeys.create(channel.idempotencySeed, {
-        scope: "global",
-      });
-      const handle = await tasks.trigger("plan-week-ahead", {
-        ownerId: order.ownerId,
-        channelId: channel.channelId,
-        count: channel.count,
-        requestKey: channel.requestKey,
-        budgetCapUsd: channel.reservation.totalUsd,
-        bulkOrderFingerprint: order.fingerprint,
-      }, {
-        concurrencyKey: channel.channelId,
-        idempotencyKey,
-      });
-      return { channelId: channel.channelId, triggerRunId: handle.id };
-    }));
+    const channelRows = new Map(channels.map((channel) => [String(channel._id), channel]));
+    const waves = resolveBatchConflicts(
+      order.channels.map((channel, index) => {
+        const row = channelRows.get(channel.channelId) as { pipeline?: unknown[] } | undefined;
+        const blocks = Array.isArray(row?.pipeline) ? row.pipeline : [];
+        const resourceKey = blocks.some((entry) => typeof entry === "object" && entry && String((entry as { block?: unknown }).block ?? "").includes("minimax"))
+          ? "salad-h3"
+          : blocks.some((entry) => typeof entry === "object" && entry && String((entry as { block?: unknown }).block ?? "").includes("novita"))
+            ? "novita"
+            : "planner-llm";
+        return { id: channel.channelId, resourceKey, priority: order.channels.length - index };
+      }),
+      3,
+      { "salad-h3": 3, novita: 3, "planner-llm": 3 },
+    );
+    console.log(`[plan-week-bulk] conflict resolver admitted ${waves.length} wave(s): ${waves.map((wave) => `${wave.items.length} item(s)`).join(", ")}`);
+    const children: Array<{ channelId: string; triggerRunId: string }> = [];
+    // Stable waves keep provider/GPU contention bounded while preserving up to
+    // three concurrent admissions for routes that advertise that capacity.
+    for (const wave of waves) {
+      const waveChildren = await Promise.all(wave.items.map(async (item) => {
+        const channel = order.channels.find((candidate) => candidate.channelId === item.id)!;
+        const idempotencyKey = await idempotencyKeys.create(channel.idempotencySeed, { scope: "global" });
+        const handle = await tasks.trigger("plan-week-ahead", {
+          ownerId: order.ownerId,
+          channelId: channel.channelId,
+          count: channel.count,
+          requestKey: channel.requestKey,
+          budgetCapUsd: channel.reservation.totalUsd,
+          bulkOrderFingerprint: order.fingerprint,
+        }, {
+          concurrencyKey: channel.channelId,
+          idempotencyKey,
+        });
+        return { channelId: channel.channelId, triggerRunId: handle.id };
+      }));
+      children.push(...waveChildren);
+    }
     const receipt = await convex.mutation(api.planWeekBulkOrders.markDispatched, {
       ownerId: order.ownerId,
       orderId: admission.orderId,

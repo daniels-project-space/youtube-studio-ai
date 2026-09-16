@@ -57,6 +57,7 @@ import type * as serializedProgramEpisodes from "../serializedProgramEpisodes.js
 import type * as seriesStoryState from "../seriesStoryState.js";
 import type * as studioAssetLibrary from "../studioAssetLibrary.js";
 import type * as studioAssetPromotions from "../studioAssetPromotions.js";
+import type * as studioEpisodeAssetFolders from "../studioEpisodeAssetFolders.js";
 import type * as studioFunctions from "../studioFunctions.js";
 import type * as studioReusableMedia from "../studioReusableMedia.js";
 import type * as thumbnailRefresh from "../thumbnailRefresh.js";
@@ -127,6 +128,7 @@ declare const fullApi: ApiFromModules<{
   seriesStoryState: typeof seriesStoryState;
   studioAssetLibrary: typeof studioAssetLibrary;
   studioAssetPromotions: typeof studioAssetPromotions;
+  studioEpisodeAssetFolders: typeof studioEpisodeAssetFolders;
   studioFunctions: typeof studioFunctions;
   studioReusableMedia: typeof studioReusableMedia;
   thumbnailRefresh: typeof thumbnailRefresh;

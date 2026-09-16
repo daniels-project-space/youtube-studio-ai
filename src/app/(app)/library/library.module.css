@@ -105,6 +105,8 @@
 .vaultHeader h2, .vaultHeader p { margin: 0; }
 .vaultHeader h2 { font: 560 1.08rem/1 var(--font-display); letter-spacing: -.025em; }
 .vaultHeader p { color: var(--color-faint); font: .68rem/1 var(--font-mono); white-space: nowrap; }
+.bulkBar { display: flex; align-items: center; gap: .55rem; flex-wrap: wrap; padding: .52rem .6rem; border: 1px solid var(--color-border); border-radius: 10px; background: rgba(255,255,255,.025); color: var(--color-faint); font-size: .68rem; }
+.bulkBar > span { flex: 1 1 auto; }
 
 .paging { min-height: 44px; display: flex; align-items: center; justify-content: space-between; gap: .7rem; padding-top: .7rem; }
 .paging p { margin: 0; color: var(--color-muted); font-size: .76rem; }

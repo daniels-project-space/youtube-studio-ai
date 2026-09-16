@@ -64,6 +64,7 @@ import {
 import { normalizeReleaseEvidenceStatus } from "../src/lib/releaseEvidenceStatus";
 import { MAX_PUBLISH_CONTINUATION_ENQUEUE_ATTEMPTS } from "../src/lib/publishRetrySchedule";
 import { runCostFloor } from "./runCostAccounting";
+import { createAutomaticPreflightReceipt } from "../src/lib/automaticWorkflow";
 import {
   assertApprovedFactualReviewResume,
   requeueExpiredFactualReviewResumeForLease,
@@ -261,6 +262,53 @@ export const createRun = mutation({
       leaseExpiresAt:
         now + (status === "queued" ? RUN_QUEUE_LEASE_MS : RUN_EXECUTION_LEASE_MS),
     });
+  },
+});
+
+/** Write-once-ish unified automation preflight receipt before provider work. */
+export const recordAutomaticPreflight = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    leaseOwner: v.string(),
+    executionLeaseToken: v.number(),
+    receipt: v.any(),
+  },
+  returns: v.object({ reused: v.boolean(), fingerprint: v.string() }),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "automatic pipeline preflight");
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerId !== args.ownerId || run.channelId !== args.channelId) {
+      throw new Error("automatic preflight run ownership mismatch");
+    }
+    assertRunExecutionWriteFence(run, {
+      leaseOwner: args.leaseOwner,
+      executionLeaseToken: args.executionLeaseToken,
+    }, Date.now());
+    if (!args.receipt || typeof args.receipt !== "object" || Array.isArray(args.receipt)) {
+      throw new Error("automatic preflight receipt is invalid");
+    }
+    const raw = args.receipt as Record<string, unknown>;
+    const paidModules = Array.isArray(raw.paidModules) ? raw.paidModules.filter((value): value is string => typeof value === "string") : [];
+    const rebuilt = createAutomaticPreflightReceipt({
+      runId: String(raw.runId ?? ""),
+      channelId: String(raw.channelId ?? ""),
+      budgetUsd: Number(raw.budgetUsd),
+      reservedMaxCostUsd: Number(raw.reservedMaxCostUsd),
+      paidModules,
+      resumeBoundaryReady: true,
+    });
+    if (rebuilt.runId !== String(args.runId) || rebuilt.channelId !== String(args.channelId) || rebuilt.fingerprint !== raw.fingerprint) {
+      throw new Error("automatic preflight receipt fingerprint or identity mismatch");
+    }
+    const prior = run.automaticPreflight as { fingerprint?: unknown } | undefined;
+    if (prior?.fingerprint !== undefined) {
+      if (prior.fingerprint !== rebuilt.fingerprint) throw new Error("automatic preflight receipt is immutable");
+      return { reused: true, fingerprint: rebuilt.fingerprint };
+    }
+    await ctx.db.patch(run._id, { automaticPreflight: rebuilt });
+    return { reused: false, fingerprint: rebuilt.fingerprint };
   },
 });
 
@@ -1382,6 +1430,9 @@ export const claimExecutionLease = mutation({
       leaseExpiresAt,
       leaseOwner: args.leaseOwner,
       executionAttempts,
+      ...(run.automaticResumeState === "queued"
+        ? { automaticResumeState: "running" as const, automaticResumeUpdatedAt: args.now }
+        : {}),
       leaseRecoveryPending: undefined,
       serializedProgramEpisodeRetryAt: undefined,
       serializedProgramEpisodeRetryLastError: undefined,
@@ -2937,6 +2988,97 @@ export const listPendingPublishContinuations = query({
   },
 });
 
+/** Failed, frozen runs that the automatic Doctor may safely re-enter. */
+export const listAutomaticResumeCandidates = query({
+  args: { ownerId: v.string(), now: v.number(), limit: v.optional(v.number()) },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "automatic resume listing");
+    const limit = Math.min(25, Math.max(1, Math.floor(args.limit ?? 10)));
+    const rows = await ctx.db.query("runs")
+      .withIndex("by_owner_status", (q) => q.eq("ownerId", args.ownerId).eq("status", "failed"))
+      .order("asc")
+      .take(limit * 3);
+    return rows
+      .filter((run) =>
+        run.pipelineInvocationSnapshot !== undefined &&
+        typeof run.pipelineInvocationSha256 === "string" &&
+        (run.automaticResumeAttempts ?? 0) < 2 &&
+        run.automaticResumeState !== "queued" &&
+        run.automaticResumeState !== "running" &&
+        (run.automaticResumeNextAt ?? 0) <= args.now &&
+        run.publishContinuationState === undefined &&
+        run.factualReviewState !== "awaiting" &&
+        run.musicAuditionState !== "awaiting" &&
+        run.status === "failed",
+      )
+      .slice(0, limit)
+      .map((run) => ({
+        _id: run._id,
+        ownerId: run.ownerId,
+        channelId: run.channelId,
+        planItemId: run.planItemId,
+        plannedTopic: run.plannedTopic,
+        plannedTitle: run.plannedTitle,
+        plannedThumbnailKey: run.plannedThumbnailKey,
+        plannedThumbnailSource: run.plannedThumbnailSource,
+        plannedPublishAt: run.plannedPublishAt,
+        plannedPreparationVersion: run.plannedPreparationVersion,
+        plannedPreparationManifestKey: run.plannedPreparationManifestKey,
+        plannedPreparationManifestSha256: run.plannedPreparationManifestSha256,
+        automaticResumeAttempts: run.automaticResumeAttempts ?? 0,
+      }));
+  },
+});
+
+/** Claim one exact frozen run before the Doctor enqueues it. */
+export const claimAutomaticResume = mutation({
+  args: { ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"), now: v.number() },
+  returns: v.object({ state: v.union(v.literal("queued"), v.literal("blocked")), attempts: v.number(), reused: v.boolean() }),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "automatic resume claim");
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerId !== args.ownerId || run.channelId !== args.channelId) throw new Error("automatic resume ownership mismatch");
+    if (run.automaticResumeState === "queued" || run.automaticResumeState === "running") {
+      return { state: run.automaticResumeState === "queued" ? "queued" as const : "blocked" as const, attempts: run.automaticResumeAttempts ?? 0, reused: true };
+    }
+    if (run.status !== "failed" || run.pipelineInvocationSnapshot === undefined || typeof run.pipelineInvocationSha256 !== "string") {
+      return { state: "blocked" as const, attempts: run.automaticResumeAttempts ?? 0, reused: false };
+    }
+    const attempts = run.automaticResumeAttempts ?? 0;
+    if (attempts >= 2 || (run.automaticResumeNextAt ?? 0) > args.now) {
+      await ctx.db.patch(run._id, { automaticResumeState: "blocked", automaticResumeUpdatedAt: args.now, automaticResumeLastError: "automatic resume bound reached or not yet due" });
+      return { state: "blocked" as const, attempts, reused: false };
+    }
+    await ctx.db.patch(run._id, {
+      automaticResumeState: "queued",
+      automaticResumeAttempts: attempts + 1,
+      automaticResumeNextAt: args.now + 6 * 60 * 60 * 1_000,
+      automaticResumeUpdatedAt: args.now,
+      automaticResumeLastError: undefined,
+    });
+    return { state: "queued" as const, attempts: attempts + 1, reused: false };
+  },
+});
+
+export const recordAutomaticResumeDispatchFailure = mutation({
+  args: { ownerId: v.string(), channelId: v.id("channels"), runId: v.id("runs"), error: v.string(), now: v.number() },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "automatic resume dispatch failure");
+    const run = await ctx.db.get(args.runId);
+    if (!run || run.ownerId !== args.ownerId || run.channelId !== args.channelId) throw new Error("automatic resume dispatch ownership mismatch");
+    if (run.automaticResumeState !== "queued") return null;
+    await ctx.db.patch(run._id, {
+      automaticResumeState: "failed",
+      automaticResumeNextAt: args.now + 15 * 60 * 1_000,
+      automaticResumeUpdatedAt: args.now,
+      automaticResumeLastError: args.error.trim().slice(0, 1_000),
+    });
+    return null;
+  },
+});
+
 /** Complete a non-scheduled run and its exact publish fence atomically. */
 export const completeRun = mutation({
   args: {
@@ -2975,6 +3117,10 @@ export const completeRun = mutation({
     const costTotal = await runCostFloor(ctx, run, args.costTotal);
     await ctx.db.patch(args.runId, {
       status: "ok",
+      automaticResumeState: "complete",
+      automaticResumeUpdatedAt: args.finishedAt,
+      automaticResumeNextAt: undefined,
+      automaticResumeLastError: undefined,
       finishedAt: args.finishedAt,
       costTotal,
       error: undefined,
@@ -3037,6 +3183,9 @@ export const updateRun = mutation({
       patch.leaseExpiresAt = undefined;
       patch.leaseOwner = undefined;
       patch.leaseRecoveryPending = undefined;
+      patch.automaticResumeState = rest.status === "ok" ? "complete" : "failed";
+      patch.automaticResumeUpdatedAt = rest.finishedAt ?? Date.now();
+      if (rest.status === "failed") patch.automaticResumeLastError = rest.error;
       Object.assign(patch, clearRemoteChildWaitPatch());
     }
     await ctx.db.patch(runId, patch);

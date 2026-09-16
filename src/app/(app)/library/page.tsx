@@ -44,6 +44,8 @@ export default function LibraryPage() {
     | ChannelRow[]
     | undefined;
   const setLibraryState = useMutation(api.videos.setLibraryState);
+  const applyBulkLibraryState = useMutation(api.videos.applyBulkLibraryState);
+  const undoBulkLibraryState = useMutation(api.videos.undoBulkLibraryState);
 
   const [filters, setFilters] = useState<LibraryFilterState>({
     channelSlug: null,
@@ -59,6 +61,9 @@ export default function LibraryPage() {
   const [busyIds, setBusyIds] = useState<Set<string>>(() => new Set());
   const [recentChange, setRecentChange] = useState<{ video: VideoRow; state: CollectionMode } | null>(null);
   const [changeError, setChangeError] = useState<string | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set());
+  const [bulkReceiptId, setBulkReceiptId] = useState<Id<"libraryActionReceipts"> | null>(null);
+  const [bulkBusy, setBulkBusy] = useState(false);
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
   // ERNIE was kept only as sealed comparison evidence. The Library always
   // projects the retained source or a run-bound current candidate; it must
@@ -160,6 +165,50 @@ export default function LibraryPage() {
     setLightbox(null);
     setRecentChange(null);
     setChangeError(null);
+    setSelectedIds(new Set());
+    setBulkReceiptId(null);
+  };
+
+  const toggleSelected = (video: VideoRow) => {
+    setSelectedIds((current) => {
+      const next = new Set(current);
+      if (next.has(video._id)) next.delete(video._id); else next.add(video._id);
+      return next;
+    });
+  };
+
+  const applyBulk = async () => {
+    const runIds = [...selectedIds];
+    if (!runIds.length || bulkBusy) return;
+    setBulkBusy(true);
+    setChangeError(null);
+    try {
+      const result = await applyBulkLibraryState({
+        ownerId,
+        runIds: runIds as Id<"runs">[],
+        state: collection === "active" ? "archived" : "active",
+        actionKey: `library-bulk:${collection}:${runIds.slice().sort().join(",")}:${Date.now()}`,
+      });
+      setBulkReceiptId(result.actionId);
+      setSelectedIds(new Set());
+    } catch (error) {
+      setChangeError(error instanceof Error ? error.message : "The bulk library action failed.");
+    } finally {
+      setBulkBusy(false);
+    }
+  };
+
+  const undoBulk = async () => {
+    if (!bulkReceiptId || bulkBusy) return;
+    setBulkBusy(true);
+    try {
+      await undoBulkLibraryState({ ownerId, actionId: bulkReceiptId });
+      setBulkReceiptId(null);
+    } catch (error) {
+      setChangeError(error instanceof Error ? error.message : "Undo failed.");
+    } finally {
+      setBulkBusy(false);
+    }
   };
 
   return (
@@ -248,10 +297,22 @@ export default function LibraryPage() {
             </div>
             <p aria-live="polite">Showing {page.visible.length} of {page.total}</p>
           </header>
+          {operationsAccess === "owner" ? (
+            <div className={styles.bulkBar} role="toolbar" aria-label="Bulk library actions">
+              <button type="button" className="btn-secondary" onClick={() => setSelectedIds(new Set(page.visible.map((video) => video._id)))}>
+                Select visible
+              </button>
+              {selectedIds.size ? <span>{selectedIds.size} selected</span> : <span>Select masters to organize together</span>}
+              <button type="button" className="btn-primary" disabled={!selectedIds.size || bulkBusy} onClick={() => void applyBulk()}>
+                {bulkBusy ? "Saving…" : collection === "active" ? "Archive selected" : "Restore selected"}
+              </button>
+            </div>
+          ) : null}
           <VideoGrid
             videos={page.visible}
             density="library"
             onOpen={openLightbox}
+            selection={operationsAccess === "owner" ? { selectedIds, onToggle: toggleSelected } : undefined}
             libraryAction={operationsAccess === "owner" ? {
               label: collection === "active" ? "Archive" : "Restore",
               busyIds,
@@ -295,6 +356,13 @@ export default function LibraryPage() {
             Undo
           </button>
           <button type="button" aria-label="Dismiss" onClick={() => setRecentChange(null)}>×</button>
+        </aside>
+      ) : null}
+      {bulkReceiptId ? (
+        <aside className={styles.changeToast} role="status">
+          <span><strong>{collection === "active" ? "Selected masters archived" : "Selected masters restored"}</strong><small>The exact prior states are saved.</small></span>
+          <button type="button" onClick={() => void undoBulk()} disabled={bulkBusy}>Undo</button>
+          <button type="button" aria-label="Dismiss" onClick={() => setBulkReceiptId(null)}>×</button>
         </aside>
       ) : null}
       {changeError ? (

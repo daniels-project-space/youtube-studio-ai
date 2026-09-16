@@ -11,7 +11,7 @@
  * persisted to R2 and summarized to Telegram. The Doctor PROPOSES — risky
  * changes stay operator decisions; the only thing it auto-fires is analysis.
  */
-import { task, schedules, tasks } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, schedules, tasks } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -200,6 +200,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
   const defectTrends = new Map<string, number>(); // defect class → occurrences across ok runs
   const groundingGapChannels: { channel: string; niche?: string; gaps: string[] }[] = [];
   let researchTriggered = 0;
+  let automaticResumesQueued = 0;
 
   for (const ch of channels) {
     const report = (ch as { architectReport?: { missingCapabilities?: { name: string; description: string }[] } }).architectReport;
@@ -338,6 +339,79 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     }
   }
 
+  // Automatic recovery is limited to runs with a frozen invocation and no
+  // human/publish continuation fence. The exact run id and invocation remain
+  // unchanged, so the normal runner restores completed paid stages instead of
+  // recompiling mutable channel settings or buying them twice.
+  try {
+    const candidates = await convex.query(api.runs.listAutomaticResumeCandidates, {
+      ownerId,
+      now: Date.now(),
+      limit: 10,
+    }) as Array<{
+      _id: Id<"runs">;
+      channelId: Id<"channels">;
+      planItemId?: Id<"contentPlan">;
+      plannedTopic?: string;
+      plannedTitle?: string;
+      plannedThumbnailKey?: string;
+      plannedThumbnailSource?: "planner_artwork" | "rendered_video_frame";
+      plannedPublishAt?: number;
+      plannedPreparationVersion?: string;
+      plannedPreparationManifestKey?: string;
+      plannedPreparationManifestSha256?: string;
+    }>;
+    for (const candidate of candidates) {
+      const claim = await convex.mutation(api.runs.claimAutomaticResume, {
+        ownerId,
+        channelId: candidate.channelId,
+        runId: candidate._id,
+        now: Date.now(),
+      });
+      if (claim.state !== "queued") continue;
+      try {
+        const idempotencyKey = await idempotencyKeys.create(
+          `automatic-resume:${ownerId}:${String(candidate._id)}:attempt:${claim.attempts}`,
+          { scope: "global" },
+        );
+        const scheduledPlan = candidate.planItemId && candidate.plannedTopic && candidate.plannedTitle && candidate.plannedThumbnailKey
+          ? {
+              planItemId: String(candidate.planItemId),
+              topic: candidate.plannedTopic,
+              title: candidate.plannedTitle,
+              thumbnailKey: candidate.plannedThumbnailKey,
+              thumbnailSource: candidate.plannedThumbnailSource ?? "planner_artwork",
+              ...(candidate.plannedPublishAt !== undefined ? { scheduledAt: candidate.plannedPublishAt } : {}),
+              ...(candidate.plannedPreparationVersion && candidate.plannedPreparationManifestKey && candidate.plannedPreparationManifestSha256
+                ? { preparation: { version: candidate.plannedPreparationVersion, manifestKey: candidate.plannedPreparationManifestKey, manifestSha256: candidate.plannedPreparationManifestSha256 } }
+                : {}),
+            }
+          : undefined;
+        await tasks.trigger("run-pipeline", {
+          channelId: candidate.channelId,
+          runId: candidate._id,
+          ...(scheduledPlan ? { scheduledPlan } : {}),
+        }, {
+          concurrencyKey: String(candidate.channelId),
+          idempotencyKey,
+        });
+        automaticResumesQueued++;
+        log(`automatic resume queued ${candidate._id} (attempt ${claim.attempts})`);
+      } catch (error) {
+        await convex.mutation(api.runs.recordAutomaticResumeDispatchFailure, {
+          ownerId,
+          channelId: candidate.channelId,
+          runId: candidate._id,
+          error: error instanceof Error ? error.message : String(error),
+          now: Date.now(),
+        });
+        log(`automatic resume dispatch failed for ${candidate._id}: ${error instanceof Error ? error.message : error}`);
+      }
+    }
+  } catch (error) {
+    log(`automatic resume sweep failed closed: ${error instanceof Error ? error.message : error}`);
+  }
+
   // Low-frequency durable outbox recovery. This only re-enqueues the exact
   // failed run; it never calls YouTube and reuses the same global idempotency
   // key as the immediate handoff.
@@ -385,7 +459,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     );
   }
 
-  log(`sweep: ${failures.length} failure(s), ${healed.length} healed run(s), ${retentionQueued.length} retention job(s), ${publishContinuationsQueued} publish continuation(s), ${factualReviewContinuationsQueued} factual-review continuation(s), ${musicAuditionContinuationsQueued} music-audition continuation(s), ${missingCaps.size} missing capability(ies)`);
+  log(`sweep: ${failures.length} failure(s), ${healed.length} healed run(s), ${automaticResumesQueued} automatic resume(s), ${retentionQueued.length} retention job(s), ${publishContinuationsQueued} publish continuation(s), ${factualReviewContinuationsQueued} factual-review continuation(s), ${musicAuditionContinuationsQueued} music-audition continuation(s), ${missingCaps.size} missing capability(ies)`);
 
   // ENGAGEMENT: post the owner HOOK-QUESTION comment on freshly PUBLIC videos
   // (an engagement signal the algorithm rewards). Dedupe = the channel already
@@ -480,6 +554,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     groundingGapChannels,
     researchTriggered,
     publishContinuationsQueued,
+    automaticResumesQueued,
     factualReviewContinuationsQueued,
     musicAuditionContinuationsQueued,
     channelPipelineSync,

@@ -31,6 +31,7 @@ export function VideoCard({
   video,
   onOpen,
   libraryAction,
+  selection,
   priority = false,
   compact = false,
 }: {
@@ -41,6 +42,7 @@ export function VideoCard({
     busy: boolean;
     onAction: () => void;
   };
+  selection?: { selected: boolean; onToggle: () => void };
   priority?: boolean;
   /** A concise vault card keeps the video identity and controls without a second metadata rail. */
   compact?: boolean;
@@ -114,6 +116,12 @@ export function VideoCard({
       {libraryAction ? (
         <footer className="video-card-footer">
           <span>{video.libraryState === "archived" ? "Out of the active library" : "Active collection"}</span>
+          {selection ? (
+            <label className="video-card-select">
+              <input type="checkbox" checked={selection.selected} onChange={selection.onToggle} aria-label={`Select ${video.title}`} />
+              <span>Select</span>
+            </label>
+          ) : null}
           <button
             type="button"
             className="video-card-library-action"
@@ -122,6 +130,13 @@ export function VideoCard({
           >
             {libraryAction.busy ? "Updating…" : libraryAction.label}
           </button>
+        </footer>
+      ) : selection ? (
+        <footer className="video-card-footer">
+          <label className="video-card-select">
+            <input type="checkbox" checked={selection.selected} onChange={selection.onToggle} aria-label={`Select ${video.title}`} />
+            <span>Select</span>
+          </label>
         </footer>
       ) : null}
     </article>
