@@ -70,6 +70,9 @@ async function main() {
     // a cost/priority policy change.
     let mediumGpu: ReturnType<typeof selectSaladGpu> | null = null;
     let highGpu: ReturnType<typeof selectSaladGpuAtPriority> | null = null;
+    // Discovery of a priced class is not admission. Keep the tier unset until
+    // the complete requested wave has enough live slots; otherwise a zero-
+    // capacity report can falsely look like a medium route is ready.
     let selectedPriority: SaladBulkPriority | null = null;
     try {
       mediumGpu = selectSaladGpu(gpuClasses, spec.gpu);
@@ -86,7 +89,6 @@ async function main() {
         else blockers.push("exact_high_priority_gpu_class_or_price_unavailable");
       }
     }
-    selectedPriority = mediumGpu ? "medium" : highGpu ? "high" : null;
     // Use the medium class for the first availability read when it exists;
     // medium and high prices are tiers on the same exact desktop class. If
     // medium is absent, the H3 lane can still observe its priced high class.

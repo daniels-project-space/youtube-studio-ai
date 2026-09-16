@@ -102,3 +102,23 @@ command exited non-zero and explicitly reported zero GPU mutations and zero
 inference calls. This is a credential-state observation only; it does not
 replace the last authenticated capacity snapshot above. Once those named vault
 entries are restored, rerun the same preflight before enabling paid H3 work.
+
+## Latest authenticated preflight — 16 September 2026 (06:23 UTC)
+
+The named-key `ai-vault` bridge successfully hydrated Salad and Cloudflare
+credentials for a read-only run. Salad reported organization `bananajoeinc`,
+project `default`, `0/3` occupied GPU slots, and `0/10` replicas used. The
+exact desktop RTX 5090 class remained present and priced at `$0.417/hr`
+medium; the H3 market returned `0 medium / 0 high` slots. The preflight now
+reports `selectedPriority: null` for that lane (class discovery alone is not
+admission), so the route remains held with zero GPU mutations and zero
+inference calls. The 3090 comparison lanes had supply, but their separate
+runtime qualification blockers remain and they are not substitutes for H3.
+
+This confirms the requested policy in both directions: medium is selected when
+it can admit the complete wave; a priced high tier is eligible only when it has
+enough slots to unlock that wave. At this observation high had no slots, so no
+upgrade was attempted. The preflight also verified the R2 model manifests and
+byte lengths for ERNIE (4 files), Music3 (88 files), and H3 (5 files); worker
+image digests, runtime output quality, and durable worker recovery remain
+qualification blockers.
