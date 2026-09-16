@@ -10,7 +10,12 @@
 # A pass line in this codebase is not standardised — some tests print "... PASS",
 # some "... tests passed", some "ok". Rather than guess, a test counts as passing
 # only when tsx exits 0; the last line is kept purely to make a failure readable.
-cd /home/ubuntu/youtube-studio-ai || exit 1
+# Run from the checkout that invoked the script.  The old absolute path pointed
+# at the migration source and made this supposedly complete suite silently test
+# a different repository (or fail before running anything) in the self-contained
+# production worktree.
+ROOT_DIR=$(git rev-parse --show-toplevel 2>/dev/null) || exit 1
+cd "$ROOT_DIR" || exit 1
 total=0
 failed=0
 : > /tmp/suite-failures.log

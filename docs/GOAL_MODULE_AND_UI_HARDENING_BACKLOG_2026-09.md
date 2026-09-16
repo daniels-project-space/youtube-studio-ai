@@ -309,6 +309,7 @@ Primary sources:
   **Partial (12 September):** the production browser inventory now fails closed on unlabeled buttons, destination-less links, and disabled buttons without an actionable reason. Current carousel, setup navigation, run-stage inspection, and channel-setting controls expose concise state-specific titles; the live 52-state audit is the remaining recurring gate, while mutation-caller coverage and every disabled input/select reason remain open.
 - [ ] **108 — Run visual regression and performance gates.** Compare screenshots, layout overflow, keyboard focus, reduced motion, console/network errors, Core Web Vitals, and bundle impact before production release.
   **Full-route check (14 September):** the production fifth-pass browser audit captured all 52 configured desktop/mobile and channel-subpanel states at `youtube-studio-ai.vercel.app`; every state returned HTTP 200 with no horizontal overflow, console errors, or inert-control failures. This is a clean regression baseline, not proof that provider-backed rendering or legacy thumbnail backfill is complete.
+  **Repository-suite harness repair (16 September):** `scripts/run-test-suite.sh` no longer hard-codes the migration-source checkout; it resolves the invoking repository root before running all 723 scoped TypeScript tests. The corrected run completed `TOTAL=723 FAILED=0` in the current self-contained worktree.
 
 ### G. Weekly Salad fleet and cost-aware recovery
 
