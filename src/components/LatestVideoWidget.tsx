@@ -60,13 +60,10 @@ export function LatestVideoWidget({
         <div className="latest-video-thumb" style={{ position: "relative", aspectRatio: "16 / 9", borderRadius: 10, overflow: "hidden" }}>
           <MediaPreview
             assetKey={v?.thumbnailKey ?? undefined}
-            // Keep overview cards image-only: a pending Lo-Fi frame is shown as
-            // pending until its exact candidate is persisted, rather than
-            // streaming a large retained master into every overview card.
+            // A pending Lo-Fi row is the one overview exception: use its exact
+            // retained-master frame while the candidate is being qualified.
             videoStillKey={v?.thumbnailPresentation === "lofi_frame_pending" ? v.videoKey : undefined}
-            // Overview surfaces never stream a retained master; the exact
-            // frame is reserved for the detailed run workbench.
-            allowVideoStill={false}
+            allowVideoStill={v?.thumbnailPresentation === "lofi_frame_pending"}
             alt={v?.title ?? "latest video"}
             style={{ width: "100%", height: "100%" }}
             unavailableLabel="Retained preview unavailable"

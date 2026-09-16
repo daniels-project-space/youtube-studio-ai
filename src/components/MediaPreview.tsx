@@ -69,8 +69,9 @@ export function MediaPreview({
   priority?: boolean;
   /**
    * Card grids should not stream multi-hundred-megabyte masters just to paint
-   * a tile. Detailed workbench views keep this enabled for the exact frame;
-   * overview cards defer until a persisted thumbnail exists.
+   * a tile. Surfaces enable this only for a pending Lo-Fi row, whose exact
+   * 15-second frame is the required thumbnail; detailed workbench views may
+   * also enable it for source review.
    */
   allowVideoStill?: boolean;
 }) {

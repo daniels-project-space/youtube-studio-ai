@@ -17,6 +17,8 @@ assert.match(videos, /selectLatestCurrentGoldenThumbnail/,
 for (const source of [card, rail]) {
   assert.match(source, /videoStillKey=\{video\.thumbnailPresentation === "lofi_frame_pending" \? video\.videoKey : undefined\}/,
     "pending Lo-Fi rows use their retained master as the visual fallback");
+  assert.match(source, /allowVideoStill=\{video\.thumbnailPresentation === "lofi_frame_pending"\}/,
+    "pending Lo-Fi rows actually enable the retained-master fallback");
   assert.match(source, /video\.thumbnailPresentation === "lofi_frame_pending"\s*\? undefined/,
     "pending Lo-Fi rows do not fall back to generic YouTube imagery");
 }

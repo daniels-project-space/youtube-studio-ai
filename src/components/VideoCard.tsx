@@ -53,11 +53,11 @@ export function VideoCard({
         emptyClassName="video-card-placeholder"
         assetKey={video.thumbnailKey}
         reviewedSrc={video.reviewedThumbnailUrl}
-        // Keep library tiles image-only. A pending Lo-Fi frame is shown as
-        // pending until its exact candidate is persisted; detailed workbench
-        // views retain the source-video frame affordance.
+        // Lo-Fi rows without a persisted candidate still use the exact
+        // retained-master frame; every other card remains image-only so a
+        // large video master is never streamed just to paint a tile.
         videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
-        allowVideoStill={false}
+        allowVideoStill={video.thumbnailPresentation === "lofi_frame_pending"}
         // A retained key is authoritative. If its signed preview fails, show
         // an honest unavailable state rather than silently swapping in an old
         // public YouTube image and making the Library look unrefreshed.

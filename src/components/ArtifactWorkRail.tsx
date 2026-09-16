@@ -92,10 +92,11 @@ function ArtifactCard({
         emptyClassName={styles.mediaFallback}
         assetKey={video.thumbnailKey}
         reviewedSrc={video.reviewedThumbnailUrl}
-        // Artifact rails stay image-only so they never stream large retained
-        // masters just to paint a tile; the workbench owns source-frame review.
+        // Only a pending Lo-Fi row may stream its retained master, because
+        // that is the authoritative 15-second thumbnail source. Other rows
+        // stay image-only and never stream a large master into a rail tile.
         videoStillKey={video.thumbnailPresentation === "lofi_frame_pending" ? video.videoKey : undefined}
-        allowVideoStill={false}
+        allowVideoStill={video.thumbnailPresentation === "lofi_frame_pending"}
         // Never mask a retained/current candidate with stale public artwork.
         // YouTube is a fallback only for rows that have no retained key.
         fallbackSrc={video.thumbnailKey || video.thumbnailPresentation === "lofi_frame_pending"

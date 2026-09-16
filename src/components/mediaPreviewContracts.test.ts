@@ -44,6 +44,8 @@ for (const source of [assetImg, videoCard, rail, daySchedule]) {
 // without its persisted 15-second frame uses a paused retained-master frame;
 // every other channel stays persisted-thumbnail-only.
 assert.match(latestVideo, /videoStillKey=\{v\?\.thumbnailPresentation === "lofi_frame_pending" \? v\.videoKey : undefined\}/);
+assert.match(latestVideo, /allowVideoStill=\{v\?\.thumbnailPresentation === "lofi_frame_pending"\}/,
+  "the latest-video hero enables the exact pending Lo-Fi frame");
 assert.match(latestVideo, /video-card-lofi-quality/, "the latest-video hero preserves the Lo-Fi 4K marker");
 assert.match(latestVideo, /priority\s*\/?>/);
 assert.doesNotMatch(latestVideo, /i\.ytimg\.com|fallbackSource="youtube"/);
@@ -59,6 +61,8 @@ assert.doesNotMatch(runWorkbench, /src=\{sourceReady \? src : "about:blank"\}/,
 // The Studio's R2-only carousel filters to saved masters. A pending Lo-Fi
 // thumbnail can use that exact master as its temporary preview source.
 assert.match(recentVideos, /videoStillKey=\{video\.thumbnailPresentation === "lofi_frame_pending" \? video\.videoKey : undefined\}/);
+assert.match(recentVideos, /allowVideoStill=\{video\.thumbnailPresentation === "lofi_frame_pending"\}/,
+  "the recent-render carousel enables the exact pending Lo-Fi frame");
 assert.match(recentVideos, /video-card-lofi-quality/, "the recent-render carousel preserves the Lo-Fi 4K marker");
 assert.match(recentVideos, /priority=\{index < 3\}/);
 assert.doesNotMatch(recentVideos, /i\.ytimg\.com|fallbackSource="youtube"/);
