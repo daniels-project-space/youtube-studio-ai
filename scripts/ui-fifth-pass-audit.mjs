@@ -243,6 +243,7 @@ async function captureRoute(browser, viewport, route, discovered, records) {
         for (const element of elements) element.open = true;
       });
       await page.waitForTimeout(250);
+      await waitForMediaSettled(page);
       const panelShot = await captureScreenshot(page, `${outputDir}/${id}--${viewport.id}--panels.png`);
       if (panelShot.fallback) screenshotWarnings.push({ kind: "panel-full-page-fallback", ...panelShot });
     }
