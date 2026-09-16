@@ -1502,6 +1502,31 @@ export default defineSchema({
     .index("by_owner_fingerprint", ["ownerId", "fingerprint"])
     .index("by_owner_channel_logical_id", ["ownerId", "channelId", "logicalId"]),
 
+  // Mutable operator organization for immutable episode media. Keeping the
+  // folder assignment separate means a move never changes the retained
+  // media entry, its provenance, or the release-selection contract.
+  studioEpisodeAssetFolders: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    name: v.string(),
+    createdAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_owner_channel", ["ownerId", "channelId"]),
+
+  studioEpisodeAssetFolderAssignments: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    folderId: v.id("studioEpisodeAssetFolders"),
+    assetFingerprint: v.string(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_owner_channel", ["ownerId", "channelId"])
+    .index("by_owner_asset", ["ownerId", "assetFingerprint"])
+    .index("by_folder", ["folderId"]),
+
   // One serializable episode ordinal per channel/run. The frozen claim binds
   // both the 40% calculation and every-third-video originality decision, so a
   // retry cannot change its asset set or cadence position.

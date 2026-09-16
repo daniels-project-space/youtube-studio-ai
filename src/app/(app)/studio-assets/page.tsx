@@ -60,6 +60,28 @@ type StudioReusableMedia = {
   sourceOrigin: "third_party_stock" | "studio_generated";
 };
 
+type EpisodeAssetFolder = {
+  _id: string;
+  channelId: string;
+  name: string;
+  createdAt: number;
+};
+
+type EpisodeAssetFolderAssignment = {
+  _id: string;
+  channelId: string;
+  folderId: string;
+  assetFingerprint: string;
+  updatedAt: number;
+};
+
+type EpisodeAssetFolderInventory = {
+  folders: EpisodeAssetFolder[];
+  assignments: EpisodeAssetFolderAssignment[];
+};
+
+type StudioChannelOption = { _id: string; name: string; slug: string };
+
 type CuratedLtxCatalogItem = {
   id: string;
   label: string;
@@ -315,6 +337,76 @@ function AssetRoomIntro({ room }: { room: AssetRoom }) {
   return <header className={styles.roomHeader}><h2>{selected.title}</h2><p>{selected.detail}</p></header>;
 }
 
+function EpisodeAssetFolderBar({
+  folders,
+  assignments,
+  channels,
+  selectedFolder,
+  onSelectFolder,
+  folderDraft,
+  onFolderDraft,
+  folderChannelId,
+  onFolderChannel,
+  onCreate,
+  busy,
+  message,
+  assetCount,
+  unfiledCount,
+}: {
+  folders: EpisodeAssetFolder[];
+  assignments: EpisodeAssetFolderAssignment[];
+  channels: StudioChannelOption[];
+  selectedFolder: string;
+  onSelectFolder: (folderId: string) => void;
+  folderDraft: string;
+  onFolderDraft: (value: string) => void;
+  folderChannelId: string;
+  onFolderChannel: (value: string) => void;
+  onCreate: () => void;
+  busy: boolean;
+  message: string | null;
+  assetCount: number;
+  unfiledCount: number;
+}) {
+  const countByFolder = new Map<string, number>();
+  for (const assignment of assignments) {
+    countByFolder.set(assignment.folderId, (countByFolder.get(assignment.folderId) ?? 0) + 1);
+  }
+  return (
+    <section className={styles.episodeFolders} aria-labelledby="episode-asset-folders-title">
+      <div className={styles.episodeFoldersHead}>
+        <div>
+          <span className={styles.kind}>Persistent organization</span>
+          <h2 id="episode-asset-folders-title">Episode folders</h2>
+        </div>
+        <span className={styles.folderHint}>Moves keep release evidence unchanged</span>
+      </div>
+      <div className={styles.folderChips} role="toolbar" aria-label="Open episode asset folder">
+        <button type="button" className={selectedFolder === "all" ? styles.folderChipActive : styles.folderChip} aria-pressed={selectedFolder === "all"} onClick={() => onSelectFolder("all")}>
+          All assets <b>{assetCount}</b>
+        </button>
+        <button type="button" className={selectedFolder === "unfiled" ? styles.folderChipActive : styles.folderChip} aria-pressed={selectedFolder === "unfiled"} onClick={() => onSelectFolder("unfiled")}>
+          Unfiled <b>{unfiledCount}</b>
+        </button>
+        {folders.map((folder) => (
+          <button key={folder._id} type="button" className={selectedFolder === folder._id ? styles.folderChipActive : styles.folderChip} aria-pressed={selectedFolder === folder._id} onClick={() => onSelectFolder(folder._id)}>
+            <span>{folder.name}</span><b>{countByFolder.get(folder._id) ?? 0}</b>
+          </button>
+        ))}
+      </div>
+      <form className={styles.folderCreate} onSubmit={(event) => { event.preventDefault(); onCreate(); }}>
+        <label htmlFor="episode-folder-name">New folder</label>
+        <input id="episode-folder-name" value={folderDraft} onChange={(event) => onFolderDraft(event.target.value)} maxLength={40} placeholder="e.g. Roman ruins" />
+        <select aria-label="Channel for new episode folder" value={folderChannelId} onChange={(event) => onFolderChannel(event.target.value)} disabled={!channels.length || busy}>
+          {channels.length ? channels.map((channel) => <option key={channel._id} value={channel._id}>{channel.name}</option>) : <option value="">No channels</option>}
+        </select>
+        <button type="submit" className={styles.previewButton} disabled={!folderDraft.trim() || !folderChannelId || busy}>{busy ? "Saving…" : "Create folder"}</button>
+      </form>
+      {message ? <p className={styles.folderMessage} role="status">{message}</p> : null}
+    </section>
+  );
+}
+
 export default function StudioAssetsPage() {
   const operationsAccess = useOperationsAccess();
   // Remount when the session crosses the elevation boundary so the initial
@@ -327,6 +419,8 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
   const [room, setRoom] = useState<AssetRoom>(() => publicMode ? "catalog" : "approved");
   const [assets, setAssets] = useState<StudioAsset[]>([]);
   const [reusableMedia, setReusableMedia] = useState<StudioReusableMedia[]>([]);
+  const [episodeAssetFolders, setEpisodeAssetFolders] = useState<EpisodeAssetFolderInventory>({ folders: [], assignments: [] });
+  const [studioChannels, setStudioChannels] = useState<StudioChannelOption[]>([]);
   const [candidates, setCandidates] = useState<StudioAssetPromotionCandidate[]>([]);
   const [curatedLtxCatalog, setCuratedLtxCatalog] = useState<CuratedLtxCatalogItem[]>([]);
   const [visualTreatmentCatalog, setVisualTreatmentCatalog] = useState<VisualTreatmentCatalogItem[]>([]);
@@ -342,6 +436,11 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
   const [previewLoading, setPreviewLoading] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [approvingCandidate, setApprovingCandidate] = useState<string | null>(null);
+  const [episodeFolderFilter, setEpisodeFolderFilter] = useState<string>("all");
+  const [folderDraft, setFolderDraft] = useState("");
+  const [folderChannelId, setFolderChannelId] = useState("");
+  const [folderBusy, setFolderBusy] = useState(false);
+  const [folderMessage, setFolderMessage] = useState<string | null>(null);
   const previewOriginRef = useRef<HTMLElement | null>(null);
   const previewCloseRef = useRef<HTMLButtonElement | null>(null);
   const registryRequestRef = useRef<AbortController | null>(null);
@@ -359,6 +458,8 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
         ok?: boolean;
         assets?: StudioAsset[];
         reusableMedia?: StudioReusableMedia[];
+        episodeAssetFolders?: EpisodeAssetFolderInventory;
+        channels?: StudioChannelOption[];
         candidates?: StudioAssetPromotionCandidate[];
         curatedLtxCatalog?: CuratedLtxCatalogItem[];
         visualTreatmentCatalog?: VisualTreatmentCatalogItem[];
@@ -372,12 +473,18 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
       // All inventory collections are required by the real API. A partial or
       // malformed response is unavailable data, not a successfully empty room.
       if (![payload.assets, payload.reusableMedia, payload.candidates, payload.curatedLtxCatalog,
-        payload.visualTreatmentCatalog, payload.releaseFeedback, payload.acceptedCharacterLoRAs].every(Array.isArray)) {
+        payload.visualTreatmentCatalog, payload.releaseFeedback, payload.acceptedCharacterLoRAs].every(Array.isArray)
+        || !payload.episodeAssetFolders
+        || !Array.isArray(payload.episodeAssetFolders.folders)
+        || !Array.isArray(payload.episodeAssetFolders.assignments)
+        || !Array.isArray(payload.channels)) {
         throw new Error("The registry response is incomplete. Refresh to try again.");
       }
       if (controller.signal.aborted) return;
       setAssets(payload.assets ?? []);
       setReusableMedia(payload.reusableMedia ?? []);
+      setEpisodeAssetFolders(payload.episodeAssetFolders);
+      setStudioChannels(payload.channels);
       setCandidates(payload.candidates ?? []);
       setCuratedLtxCatalog(payload.curatedLtxCatalog ?? []);
       setVisualTreatmentCatalog(payload.visualTreatmentCatalog ?? []);
@@ -419,6 +526,49 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
       setApprovingCandidate(null);
     }
   }, [approvingCandidate, refresh]);
+
+  const mutateEpisodeFolder = useCallback(async (body: Record<string, unknown>, successMessage: string) => {
+    if (folderBusy) return false;
+    setFolderBusy(true);
+    setFolderMessage(null);
+    try {
+      const response = await fetch("/api/studio-assets", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const payload = await response.json() as { ok?: boolean; error?: string };
+      if (!response.ok || !payload.ok) throw new Error(payload.error ?? "Episode folder action failed");
+      await refresh();
+      setFolderMessage(successMessage);
+      return true;
+    } catch (error) {
+      setFolderMessage(error instanceof Error ? error.message : "Episode folder action failed");
+      return false;
+    } finally {
+      setFolderBusy(false);
+    }
+  }, [folderBusy, refresh]);
+
+  const createEpisodeFolder = useCallback(async () => {
+    const name = folderDraft.trim();
+    if (!name || !folderChannelId) return;
+    const created = await mutateEpisodeFolder({
+      action: "create-episode-folder",
+      channelId: folderChannelId,
+      name,
+    }, "Episode folder created");
+    if (created) setFolderDraft("");
+  }, [folderChannelId, folderDraft, mutateEpisodeFolder]);
+
+  const moveEpisodeAsset = useCallback(async (asset: StudioReusableMedia, folderId: string) => {
+    await mutateEpisodeFolder({
+      action: "move-episode-asset",
+      channelId: asset.channelId,
+      assetFingerprint: asset.fingerprint,
+      ...(folderId ? { folderId } : {}),
+    }, folderId ? "Episode asset filed" : "Episode asset unfiled");
+  }, [mutateEpisodeFolder]);
 
   const openImagePreview = useCallback(async (asset: StudioAsset, origin: HTMLElement) => {
     if (asset.status !== "approved" || !asset.resource?.contentType.startsWith("image/") || previewLoading) return;
@@ -490,6 +640,26 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
     () => new Map(releaseFeedback.map((feedback) => [feedback.assetEntryFingerprint, feedback])),
     [releaseFeedback],
   );
+  const episodeFolderByAsset = useMemo(
+    () => new Map(episodeAssetFolders.assignments.map((assignment) => [assignment.assetFingerprint, assignment.folderId])),
+    [episodeAssetFolders.assignments],
+  );
+  const currentEpisodeAssignments = useMemo(() => {
+    const fingerprints = new Set(reusableMedia.map((asset) => asset.fingerprint));
+    return episodeAssetFolders.assignments.filter((assignment) => fingerprints.has(assignment.assetFingerprint));
+  }, [episodeAssetFolders.assignments, reusableMedia]);
+  const visibleReusableMedia = useMemo(
+    () => reusableMedia.filter((asset) => {
+      if (episodeFolderFilter === "all") return true;
+      if (episodeFolderFilter === "unfiled") return !episodeFolderByAsset.has(asset.fingerprint);
+      return episodeFolderByAsset.get(asset.fingerprint) === episodeFolderFilter;
+    }),
+    [episodeFolderByAsset, episodeFolderFilter, reusableMedia],
+  );
+  const unfiledEpisodeAssetCount = useMemo(
+    () => reusableMedia.filter((asset) => !episodeFolderByAsset.has(asset.fingerprint)).length,
+    [episodeFolderByAsset, reusableMedia],
+  );
   const roomCounts: Record<AssetRoom, number> = {
     approved: assets.length + reusableMedia.length,
     decisions: candidates.length,
@@ -533,16 +703,33 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
         </div>
       ) : null}
 
-      {!loading && room === "approved" && reusableMedia.length ? <section className={styles.catalog} aria-labelledby="studio-reusable-media-bank">
+      {!loading && room === "approved" && !publicMode ? <EpisodeAssetFolderBar
+        folders={episodeAssetFolders.folders}
+        assignments={currentEpisodeAssignments}
+        channels={studioChannels}
+        selectedFolder={episodeFolderFilter}
+        onSelectFolder={setEpisodeFolderFilter}
+        folderDraft={folderDraft}
+        onFolderDraft={setFolderDraft}
+        folderChannelId={folderChannelId || studioChannels[0]?._id || ""}
+        onFolderChannel={setFolderChannelId}
+        onCreate={() => { void createEpisodeFolder(); }}
+        busy={folderBusy}
+        message={folderMessage}
+        assetCount={reusableMedia.length}
+        unfiledCount={unfiledEpisodeAssetCount}
+      /> : null}
+
+      {!loading && room === "approved" && visibleReusableMedia.length ? <section className={styles.catalog} aria-labelledby="studio-reusable-media-bank">
         <div className={styles.catalogHead}>
           <div>
             <span className={styles.kind}>Channel media bank</span>
             <h2 id="studio-reusable-media-bank">Release-proven clips</h2>
           </div>
-          <p>40% maximum · every third episode original</p>
+          <p>{visibleReusableMedia.length} shown · 40% maximum · every third episode original</p>
         </div>
         <div className={styles.grid}>
-          {reusableMedia.map((asset) => <article className={styles.card} key={asset.fingerprint}>
+          {visibleReusableMedia.map((asset) => <article className={styles.card} key={asset.fingerprint}>
             <div className={styles.cardHead}>
               <div>
                 <span className={styles.kind}>{kindLabel(asset.kind)}</span>
@@ -563,6 +750,19 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
               {asset.evergreen ? <span>evergreen</span> : null}
               {asset.editorialTags.slice(0, 4).map((tag) => <span key={tag}>{kindLabel(tag)}</span>)}
             </div>
+            <label className={styles.folderSelect}>
+              <span>Folder</span>
+              <select
+                value={episodeFolderByAsset.get(asset.fingerprint) ?? ""}
+                disabled={folderBusy}
+                onChange={(event) => { void moveEpisodeAsset(asset, event.target.value); }}
+              >
+                <option value="">Unfiled</option>
+                {episodeAssetFolders.folders
+                  .filter((folder) => folder.channelId === asset.channelId)
+                  .map((folder) => <option key={folder._id} value={folder._id}>{folder.name}</option>)}
+              </select>
+            </label>
             <p className={styles.feedback}>Same channel only · selected clips stay below the sealed timeline ceiling.</p>
           </article>)}
         </div>

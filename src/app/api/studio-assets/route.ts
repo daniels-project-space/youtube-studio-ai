@@ -28,6 +28,14 @@ import {
 import { getObjectBytes, getObjectIntegrity, presignDownload } from "@/lib/storage";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { listStudioReusableMediaInventory } from "@/lib/studioReusableMediaRuntime";
+import {
+  createStudioEpisodeAssetFolder,
+  listStudioChannelFolderOptions,
+  listStudioEpisodeAssetFolders,
+  moveStudioEpisodeAsset,
+  removeStudioEpisodeAssetFolder,
+  renameStudioEpisodeAssetFolder,
+} from "@/lib/studioEpisodeAssetFoldersRuntime";
 
 export const runtime = "nodejs";
 
@@ -134,6 +142,8 @@ export async function GET(request: Request) {
         // runtime boundary are still useful without disclosing private state.
         assets: [],
         reusableMedia: [],
+        episodeAssetFolders: { folders: [], assignments: [] },
+        channels: [],
         candidates: [],
         releaseFeedback: [],
         acceptedCharacterLoRAs: [],
@@ -148,9 +158,11 @@ export async function GET(request: Request) {
       });
     }
     const client = convexClient();
-    const [assets, reusableMedia, candidates, releaseFeedback, acceptedCharacterLoRAs, directLtxRuntime, activeMusicVideoA2VidAdmissions] = await Promise.all([
+    const [assets, reusableMedia, episodeAssetFolders, channels, candidates, releaseFeedback, acceptedCharacterLoRAs, directLtxRuntime, activeMusicVideoA2VidAdmissions] = await Promise.all([
       listStudioAssetLibraryInventory({ client, ownerId: actor.ownerId }),
       listStudioReusableMediaInventory({ client, ownerId: actor.ownerId }),
+      listStudioEpisodeAssetFolders({ client, ownerId: actor.ownerId }),
+      listStudioChannelFolderOptions({ client, ownerId: actor.ownerId }),
       listStudioAssetPromotionCandidates({ client, ownerId: actor.ownerId }),
       listStudioAssetReleaseFeedback({ client, ownerId: actor.ownerId }),
       listAcceptedCharacterLoRAInventory({ client, ownerId: actor.ownerId }),
@@ -165,6 +177,8 @@ export async function GET(request: Request) {
       ownerAccess: true,
       assets,
       reusableMedia,
+      episodeAssetFolders,
+      channels,
       candidates,
       releaseFeedback,
       acceptedCharacterLoRAs,
@@ -206,14 +220,74 @@ export async function POST(request: Request) {
     const action = typeof body === "object" && body !== null
       ? (body as { action?: unknown }).action
       : undefined;
+    const channelId = typeof body === "object" && body !== null
+      ? (body as { channelId?: unknown }).channelId
+      : undefined;
+    const name = typeof body === "object" && body !== null
+      ? (body as { name?: unknown }).name
+      : undefined;
+    const folderId = typeof body === "object" && body !== null
+      ? (body as { folderId?: unknown }).folderId
+      : undefined;
     const candidateFingerprint = typeof body === "object" && body !== null
       ? (body as { candidateFingerprint?: unknown }).candidateFingerprint
       : undefined;
+
+    const client = convexClient();
+    if (action === "create-episode-folder") {
+      if (typeof channelId !== "string" || !channelId || typeof name !== "string") {
+        throw new StudioAssetPromotionRequestError("invalid episode asset folder creation request", 400);
+      }
+      const createdId = await createStudioEpisodeAssetFolder({
+        client,
+        ownerId: actor.ownerId,
+        channelId,
+        name,
+      });
+      return NextResponse.json({ ok: true, folderId: createdId });
+    }
+    if (action === "rename-episode-folder") {
+      if (typeof folderId !== "string" || !folderId || typeof name !== "string") {
+        throw new StudioAssetPromotionRequestError("invalid episode asset folder rename request", 400);
+      }
+      const renamed = await renameStudioEpisodeAssetFolder({
+        client,
+        ownerId: actor.ownerId,
+        folderId,
+        name,
+      });
+      return NextResponse.json({ ok: true, folder: renamed });
+    }
+    if (action === "remove-episode-folder") {
+      if (typeof folderId !== "string" || !folderId) {
+        throw new StudioAssetPromotionRequestError("invalid episode asset folder removal request", 400);
+      }
+      const removed = await removeStudioEpisodeAssetFolder({ client, ownerId: actor.ownerId, folderId });
+      return NextResponse.json({ ok: true, ...removed });
+    }
+    if (action === "move-episode-asset") {
+      const assetFingerprint = typeof body === "object" && body !== null
+        ? (body as { assetFingerprint?: unknown }).assetFingerprint
+        : undefined;
+      if (typeof channelId !== "string" || !channelId || typeof assetFingerprint !== "string" || !FINGERPRINT.test(assetFingerprint)) {
+        throw new StudioAssetPromotionRequestError("invalid episode asset move request", 400);
+      }
+      if (folderId !== undefined && folderId !== null && (typeof folderId !== "string" || !folderId)) {
+        throw new StudioAssetPromotionRequestError("invalid episode asset folder", 400);
+      }
+      const moved = await moveStudioEpisodeAsset({
+        client,
+        ownerId: actor.ownerId,
+        channelId,
+        assetFingerprint,
+        ...(typeof folderId === "string" ? { folderId } : {}),
+      });
+      return NextResponse.json({ ok: true, ...moved });
+    }
     if (action !== "approve-candidate" || typeof candidateFingerprint !== "string" || !FINGERPRINT.test(candidateFingerprint)) {
       throw new StudioAssetPromotionRequestError("invalid Studio asset approval request", 400);
     }
 
-    const client = convexClient();
     const candidate = await getStudioAssetPromotionCandidateForApproval({
       client,
       ownerId: actor.ownerId,

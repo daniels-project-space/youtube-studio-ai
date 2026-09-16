@@ -14,6 +14,7 @@ import {
   type StudioReusableMediaEntry,
 } from "../src/engine/studioReusableMedia";
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
+import { ensureEpisodeAssetFolderAssignment } from "./studioEpisodeAssetFolders";
 
 type MediaRow = {
   readonly fingerprint: string;
@@ -154,6 +155,11 @@ export const recordEntry = mutation({
       .unique();
     if (existing) {
       assertStudioReusableMediaEntry(existing.entry);
+      await ensureEpisodeAssetFolderAssignment(ctx, {
+        ownerId: args.ownerId,
+        channelId: String(channelId),
+        assetFingerprint: entry.fingerprint,
+      });
       return existing._id;
     }
     const logicalRows = await ctx.db
@@ -182,10 +188,15 @@ export const recordEntry = mutation({
         .first();
       if (sameBytes) {
         assertStudioReusableMediaEntry(sameBytes.entry);
+        await ensureEpisodeAssetFolderAssignment(ctx, {
+          ownerId: args.ownerId,
+          channelId: String(channelId),
+          assetFingerprint: sameBytes.fingerprint,
+        });
         return sameBytes._id;
       }
     }
-    return await ctx.db.insert("studioReusableMediaAssets", {
+    const assetId = await ctx.db.insert("studioReusableMediaAssets", {
       ownerId: args.ownerId,
       channelId,
       sourceRunId,
@@ -198,6 +209,12 @@ export const recordEntry = mutation({
       entry,
       createdAt: Date.now(),
     });
+    await ensureEpisodeAssetFolderAssignment(ctx, {
+      ownerId: args.ownerId,
+      channelId: String(channelId),
+      assetFingerprint: entry.fingerprint,
+    });
+    return assetId;
   },
 });
 

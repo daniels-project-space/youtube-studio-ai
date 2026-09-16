@@ -264,6 +264,8 @@ async function main() {
   assert.equal(inventory.length, 1);
   assert.equal("r2Key" in inventory[0]!, false);
   assert.equal("source" in inventory[0]!, false);
+  assert.equal(state.rows("studioEpisodeAssetFolders").length, 1, "automated promotion creates one persisted default episode folder");
+  assert.equal(state.rows("studioEpisodeAssetFolderAssignments").length, 1, "automated promotion files the asset idempotently");
   assert.equal(state.rows("studioReusableMediaEpisodeClaims").length, 3);
   assert.equal(state.rows("studioReusableMediaUsageObservations").length, 1);
 

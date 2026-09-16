@@ -40,6 +40,10 @@ async function main(): Promise<void> {
   assert.match(source, /Channel media bank/i);
   assert.match(source, /Release-proven clips/i);
   assert.match(source, /40% maximum · every third episode original/i);
+  assert.match(source, /EpisodeAssetFolderBar/);
+  assert.match(source, /Open episode asset folder/);
+  assert.match(source, /move-episode-asset/);
+  assert.match(source, /Persistent organization/);
   assert.match(source, /Same channel only/i);
   assert.match(source, /Reviewed candidates awaiting approval/i);
   assert.match(source, /Approve for this channel/i);
@@ -105,6 +109,9 @@ async function main(): Promise<void> {
   assert.doesNotMatch(api, /r2Key:\s*preview/);
   assert.match(api, /listStudioAssetLibraryInventory/);
   assert.match(api, /listStudioReusableMediaInventory/);
+  assert.match(api, /listStudioEpisodeAssetFolders/);
+  assert.match(api, /create-episode-folder/);
+  assert.match(api, /move-episode-asset/);
   assert.match(api, /reusableMedia/);
   assert.match(api, /listStudioAssetPromotionCandidates/);
   assert.match(api, /getStudioAssetPromotionCandidateForApproval/);
