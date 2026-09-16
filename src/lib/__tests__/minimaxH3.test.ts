@@ -117,6 +117,24 @@ async function test() {
     { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, selectedPriceUsdPerHour: 0.58, capacityMode: "high", fallbackUsed: true },
     "high fallback must also unlock a wave when medium exists but has too few exact-class slots",
   );
+  const shortLocalityQueries: Array<string[] | undefined> = [];
+  assert.deepEqual(
+    await assertMiniMaxH3SaladCapacity(2, {
+      client: {
+        ...capacityClient,
+        getGpuAvailability: async (_resources, countryCodes) => {
+          shortLocalityQueries.push(countryCodes);
+          return countryCodes
+            ? { available_gpu_medium: 1, available_gpu_high: 1 }
+            : { available_gpu_medium: 1, available_gpu_high: 2 };
+        },
+      },
+      allowHighPriorityFallback: true,
+    }),
+    { requiredGpuCount: 2, availableGpuCount: 2, gpuClassId: classes[0]!.id, selectedPriceUsdPerHour: 0.58, capacityMode: "high", fallbackUsed: true },
+    "a preferred locality that is short for the whole wave must be able to upgrade to a globally available high tier",
+  );
+  assert.deepEqual(shortLocalityQueries, [["cn"], undefined], "a short preferred locality must make one bounded global retry");
   const countryQueries: Array<string[] | undefined> = [];
   assert.deepEqual(
     await assertMiniMaxH3SaladCapacity(2, {
