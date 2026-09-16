@@ -53,8 +53,16 @@ const MODULE_ROUTES: readonly {
   { match: (id) => /ernie|image|channel_art|keyframe/i.test(id), route: { provider: "salad-ernie", fallbacks: ["novita-image"] } },
   { match: (id) => /h3|minimax.*video|video.*minimax/i.test(id), route: { provider: "salad-h3", fallbacks: ["novita-h3"] } },
   { match: (id) => /music|audio/i.test(id), route: { provider: "salad-music3", fallbacks: ["novita-music3"] } },
-  { match: (id) => /narration|tts|voice/i.test(id), route: { provider: "qwen-cloud", fallbacks: ["openrouter"] } },
-  { match: (id) => /script|title|metadata|seo|topic/i.test(id), route: { provider: "openrouter", fallbacks: ["local-deterministic"] } },
+  // OpenRouter produces text, not audio. Do not advertise a text model as a
+  // TTS fallback: the narration block must either reuse a byte-bound Qwen
+  // receipt or stop before presenting an unrenderable package as automatic.
+  { match: (id) => /narration|tts|voice/i.test(id), route: { provider: "qwen-cloud", fallbacks: [] } },
+  // Script generation has the same fail-closed rule. Metadata/title callers
+  // retain their separately implemented deterministic path, so keep that
+  // fallback scoped to those modules rather than silently applying it to
+  // script_gen.
+  { match: (id) => /script|hook/i.test(id), route: { provider: "openrouter", fallbacks: [] } },
+  { match: (id) => /title|metadata|seo|topic/i.test(id), route: { provider: "openrouter", fallbacks: ["local-deterministic"] } },
 ];
 
 function routeForModule(moduleId: string): ProviderCandidate {

@@ -17,6 +17,11 @@ assert.equal(plan.modules.find((module) => module.moduleId === "minimax_h3_video
 assert.equal(plan.modules.find((module) => module.moduleId === "thumbnail_gen")?.primary, "fal-nano-banana");
 assert.match(plan.fingerprint, /^[a-f0-9]{64}$/);
 
+const narration = buildAutomaticProviderPlan({ moduleIds: ["narration_tts", "script_gen", "metadata"] });
+assert.deepEqual(narration.modules.find((module) => module.moduleId === "narration_tts")?.fallbacks, []);
+assert.deepEqual(narration.modules.find((module) => module.moduleId === "script_gen")?.fallbacks, []);
+assert.deepEqual(narration.modules.find((module) => module.moduleId === "metadata")?.fallbacks, ["local-deterministic"]);
+
 assert.deepEqual(capacityEta({ now: 100, requiredWorkers: 3, availableWorkers: 1, retryEveryMs: 900_000 }), {
   state: "waiting", nextCheckAt: 900_100,
 });
