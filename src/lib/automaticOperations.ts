@@ -202,6 +202,17 @@ export type WeeklyOperationsDigest = {
   fingerprint: string;
 };
 
+/** Return the immediately completed UTC week for the scheduled digest. */
+export function previousUtcWeekWindow(now: number): { weekStart: number; weekEnd: number } {
+  if (!Number.isSafeInteger(now) || now < 0) throw new Error("weekly digest timestamp is invalid");
+  const date = new Date(now);
+  const day = date.getUTCDay();
+  const daysSinceMonday = (day + 6) % 7;
+  const thisMonday = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() - daysSinceMonday);
+  const weekStart = thisMonday - 7 * 24 * 60 * 60_000;
+  return { weekStart, weekEnd: thisMonday - 1 };
+}
+
 export function buildWeeklyOperationsDigest(input: {
   weekStart: number;
   weekEnd: number;

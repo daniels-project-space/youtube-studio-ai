@@ -6,6 +6,7 @@ import {
   createAutomaticQualityGateContract,
   createAutomaticReleaseRollbackPlan,
   nextProviderCircuitState,
+  previousUtcWeekWindow,
 } from "@/lib/automaticOperations";
 
 const plan = buildAutomaticProviderPlan({
@@ -44,5 +45,9 @@ const digest = buildWeeklyOperationsDigest({
 });
 assert.deepEqual(digest.runs, { total: 3, succeeded: 1, failed: 1, active: 1, spentUsd: 1.75 });
 assert.deepEqual(digest.actionItems, ["Review 1 failed run", "Provider/capacity failures: 1", "1 run is still active"]);
+
+const window = previousUtcWeekWindow(Date.UTC(2026, 8, 16, 12)); // Wednesday
+assert.equal(new Date(window.weekStart).toISOString(), "2026-09-07T00:00:00.000Z");
+assert.equal(new Date(window.weekEnd).toISOString(), "2026-09-13T23:59:59.999Z");
 
 console.log("automatic operations contracts passed");

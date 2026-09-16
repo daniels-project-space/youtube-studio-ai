@@ -2247,6 +2247,18 @@ export default defineSchema({
     .index("by_owner_provider", ["ownerId", "provider"])
     .index("by_owner_updated", ["ownerId", "updatedAt"]),
 
+  /** Idempotent weekly snapshot produced by the automatic operations schedule. */
+  automaticOperationsDigests: defineTable({
+    ownerId: v.string(),
+    weekStart: v.number(),
+    weekEnd: v.number(),
+    fingerprint: v.string(),
+    digest: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_owner_week", ["ownerId", "weekStart"])
+    .index("by_owner_created", ["ownerId", "createdAt"]),
+
   /** Immutable per-phase usage ledger; batch totals are recomputed from rows. */
   planBatchUsage: defineTable({
     ownerId: v.string(),

@@ -6,6 +6,7 @@ const source = readFileSync(resolve(process.cwd(), "src/app/api/operations/diges
 assert.match(source, /requireStudioActor/);
 assert.match(source, /api\.runs\.listRecent/);
 assert.match(source, /buildWeeklyOperationsDigest/);
+assert.match(source, /previousUtcWeekWindow/);
 assert.match(source, /Cache-Control.*private, no-store/);
 assert.doesNotMatch(source, /tasks\.trigger|mutation\(/, "the digest is read-only and must never dispatch work");
 console.log("automatic operations digest route contracts passed");
