@@ -59,6 +59,10 @@ assert.match(page, /URLSearchParams\(window\.location\.search\)/,
 assert.match(page, /requestedMode === "weekly"/);
 assert.match(page, /requestedMode === "on-demand"/);
 assert.match(page, /validationIssues/, "invalid sealed jobs must expose actionable feedback before dispatch");
+assert.match(page, /dispatchDisabledReason/, "the paid queue action must explain missing dispatch inputs before a click");
+assert.match(page, /owner-scoped receipt key before queueing/, "the render desk must explain the receipt-key boundary");
+assert.match(page, /aria-label=\{dispatchDisabledReason \? `\$\{provider\} render unavailable:/, "disabled paid controls must expose an actionable accessible reason");
+assert.match(page, /Read current medium-first\/high-fallback capacity without starting a paid job/, "capacity checks must disclose that they are read-only");
 assert.match(page, /Request packet invalid/, "a corrupt frozen weekly packet must be visible in progress");
 assert.match(page, /window\.confirm/);
 assert.match(route, /provider:\s*"salad"/);

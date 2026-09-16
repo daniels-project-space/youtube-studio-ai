@@ -183,6 +183,15 @@ export function H3RenderConsole() {
     }
   }, [jobsJson, mode]);
 
+  const dispatchDisabledReason = useMemo(() => {
+    if (busy) return "A render is already being queued.";
+    if (!parsedPreview.valid) return parsedPreview.issues[0] ?? "Complete the sealed job contract.";
+    if (!orderKey.trim()) return "Add an order key before queueing.";
+    if (!receiptKey.trim()) return "Add an owner-scoped receipt key before queueing.";
+    return "";
+  }, [busy, orderKey, parsedPreview.issues, parsedPreview.valid, receiptKey]);
+  const dispatchReady = dispatchDisabledReason === "";
+
   useEffect(() => {
     if (!tracking) return;
     const controller = new AbortController();
@@ -416,11 +425,17 @@ export function H3RenderConsole() {
         </div>
         <label className={styles.jobsField}><span>{mode === "weekly" ? "Approved jobs JSON array" : "Approved job JSON"}</span><textarea value={jobsJson} onChange={(event) => setJobsJson(event.target.value)} rows={12} spellCheck={false} /></label>
         <div className={styles.formFooter}>
-          <span data-valid={parsedPreview.valid}>{parsedPreview.valid ? `${parsedPreview.count} sealed job${parsedPreview.count === 1 ? "" : "s"} ready` : (parsedPreview.issues[0] ?? "Complete the sealed job contract")}</span>
-          <button type="button" onClick={() => void dispatch()} disabled={busy || !parsedPreview.valid}>{busy ? "Queuing…" : `Queue ${provider} render`}</button>
+          <span data-valid={parsedPreview.valid} role="status">{dispatchReady ? `${parsedPreview.count} sealed job${parsedPreview.count === 1 ? "" : "s"} ready` : dispatchDisabledReason}</span>
+          <button
+            type="button"
+            onClick={() => void dispatch()}
+            disabled={!dispatchReady}
+            title={dispatchDisabledReason || `Queue ${provider} render`}
+            aria-label={dispatchDisabledReason ? `${provider} render unavailable: ${dispatchDisabledReason}` : `Queue ${provider} render`}
+          >{busy ? "Queuing…" : `Queue ${provider} render`}</button>
         </div>
         {mode === "weekly" && <div className={styles.capacityTools}>
-          <button type="button" className={styles.secondaryButton} onClick={() => void checkCapacity()} disabled={capacityBusy || !parsedPreview.valid}>{capacityBusy ? "Checking Salad…" : "Check Salad capacity"}</button>
+          <button type="button" className={styles.secondaryButton} onClick={() => void checkCapacity()} disabled={capacityBusy || !parsedPreview.valid} title={!parsedPreview.valid ? "Complete the sealed weekly job contract before checking capacity." : "Read current medium-first/high-fallback capacity without starting a paid job."}>{capacityBusy ? "Checking Salad…" : "Check Salad capacity"}</button>
           <button type="button" className={styles.secondaryButton} onClick={() => void inspectFleet()} disabled={fleetBusy}>{fleetBusy ? "Reading fleet…" : "Fleet snapshot"}</button>
           {capacity && <span className={styles.capacityNotice} data-state={capacity.state} role="status">
             {capacity.state === "admitted"
