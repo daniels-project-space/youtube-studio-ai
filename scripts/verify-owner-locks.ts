@@ -10,7 +10,7 @@
  * channels.lockChannel and the mutations that respect it, so they never reach
  * this machine.
  */
-import { spawnSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,7 +20,9 @@ import { listLocks, lockEntity, unlockEntity } from "@/lib/moduleLocks";
 import { reconcileImmutableModuleFiles } from "@/lib/workstationModuleLock";
 
 const GUARD = "/root/.claude/hooks/owner-lock-guard.sh";
-const REPO = "/home/ubuntu/youtube-studio-ai";
+// Resolve the checkout under test instead of targeting the retired migration
+// source. The lock proof must exercise the exact files the caller will edit.
+const REPO = execFileSync("git", ["rev-parse", "--show-toplevel"], { encoding: "utf8" }).trim();
 
 function guard(payload: unknown): number {
   return spawnSync("bash", [GUARD], { input: JSON.stringify(payload), encoding: "utf8" }).status ?? -1;
