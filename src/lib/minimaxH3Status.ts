@@ -19,7 +19,7 @@ export function isMiniMaxH3CapacityHoldError(value: unknown): boolean {
   // wrapper.  A full logical fence therefore has its own stable error text;
   // keep it in the same explicit, no-spend hold class so the status and
   // retry routes do not mislabel it as an ambiguous provider failure.
-  return /weekly MiniMax H3 Salad (?:account )?capacity (?:check )?(?:could not admit|is insufficient|failed|is occupied)/i.test(value) ||
+  return /weekly MiniMax H3 Salad (?:account )?capacity (?:check )?(?:could not admit|is insufficient|failed|admission failed|is occupied)/i.test(value) ||
     /^Salad fleet reservation capacity is occupied\b/i.test(value.trim());
 }
 
@@ -39,7 +39,7 @@ function weeklyCapacityMode(receipt: Record<string, unknown>, outputCount: numbe
     const runtime = (providerReceipt as Record<string, unknown>).runtime;
     if (!runtime || typeof runtime !== "object" || Array.isArray(runtime)) return null;
     const mode = (runtime as Record<string, unknown>).capacityMode;
-    return mode === "medium" || mode === "high" ? mode : null;
+    return mode === "medium" || mode === "high" || mode === "spot" ? mode : null;
   });
   if (modes.some((mode) => mode === null)) {
     throw new Error("H3 weekly receipt provider capacity provenance is malformed");
@@ -52,7 +52,7 @@ export function summarizeMiniMaxH3Receipt(value: unknown, ownerId: string): Mini
     throw new Error("H3 receipt is malformed");
   }
   const receipt = value as Record<string, unknown>;
-  if (receipt.schema === "minimax-h3-weekly-batch/v1") {
+  if (receipt.schema === "minimax-h3-weekly-batch/v1" || receipt.schema === "minimax-h3-weekly-batch/v2") {
     const outputs = receipt.outputs;
     const requestKeys = receipt.requestKeys;
     const totalCostUsd = receipt.totalCostUsd;

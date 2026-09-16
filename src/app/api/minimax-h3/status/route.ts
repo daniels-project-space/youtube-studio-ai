@@ -83,8 +83,11 @@ export async function GET(request: Request) {
           const packet = JSON.parse(new TextDecoder().decode(await getObjectBytes(miniMaxH3WeeklyRequestPacketKey(receiptKey))));
           const rawReceipt = receiptBody as Record<string, unknown>;
           const expectedOrderKey = typeof rawReceipt.orderKey === "string" ? rawReceipt.orderKey : "";
-          const expectedRequestKeys = Array.isArray(rawReceipt.requestKeys)
-            ? rawReceipt.requestKeys.filter((key): key is string => typeof key === "string")
+          const rawPacketRequestKeys = Array.isArray(rawReceipt.sourceRequestKeys)
+            ? rawReceipt.sourceRequestKeys
+            : rawReceipt.requestKeys;
+          const expectedRequestKeys = Array.isArray(rawPacketRequestKeys)
+            ? rawPacketRequestKeys.filter((key): key is string => typeof key === "string")
             : [];
           requestPacketState = validWeeklyRequestPacket(packet, {
             orderKey: expectedOrderKey,

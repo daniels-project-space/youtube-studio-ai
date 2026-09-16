@@ -45,7 +45,15 @@ export const MINIMAX_H3_PROFILE = Object.freeze({
 });
 
 export type MiniMaxH3Provider = "salad" | "novita";
-export type MiniMaxH3Execution = "weekly-batch" | "on-demand";
+/**
+ * A weekly order that waited out Salad capacity and was deliberately moved
+ * to the qualified Novita worker. It is distinct from interactive on-demand
+ * work so request keys and receipts expose the provider switch.
+ */
+export type MiniMaxH3Execution = "weekly-batch" | "weekly-fallback" | "on-demand";
+
+export const MINIMAX_H3_WEEKLY_CAPACITY_RECHECK_MS = 15 * 60 * 1_000;
+export const MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS = 24 * 60 * 60 * 1_000;
 
 const SHA256 = /^[a-f0-9]{64}$/u;
 const MAX_H3_JOBS_PER_BATCH = 60;
@@ -411,6 +419,9 @@ export interface MiniMaxH3RenderedVideo {
 
 /** Optional completion hook used by durable batch controllers. */
 export type MiniMaxH3WeeklyBatchOptions = Parameters<typeof renderMiniMaxH3>[1] & {
+  /** Defaults to Salad's weekly lane; only the explicit fallback task changes it. */
+  provider?: MiniMaxH3Provider;
+  execution?: MiniMaxH3Execution;
   /** Called after the output has been re-read and receipt-validated. */
   onJobComplete?: (index: number, result: MiniMaxH3RenderedVideo) => void | Promise<void>;
 };
@@ -547,9 +558,12 @@ export function minimaxH3Readiness(
 
 function normaliseRequest(input: MiniMaxH3RenderRequest): MiniMaxH3RenderRequest {
   if (input.provider !== "salad" && input.provider !== "novita") throw new MiniMaxH3Error("MiniMax H3 provider is invalid");
-  if (input.execution !== "weekly-batch" && input.execution !== "on-demand") throw new MiniMaxH3Error("MiniMax H3 execution mode is invalid");
+  if (input.execution !== "weekly-batch" && input.execution !== "weekly-fallback" && input.execution !== "on-demand") throw new MiniMaxH3Error("MiniMax H3 execution mode is invalid");
   if (input.execution === "weekly-batch" && input.provider !== "salad") {
     throw new MiniMaxH3Error("weekly MiniMax H3 preparation must use the Salad route");
+  }
+  if (input.execution === "weekly-fallback" && input.provider !== "novita") {
+    throw new MiniMaxH3Error("weekly MiniMax H3 fallback must use the Novita route");
   }
   if (input.execution === "on-demand" && input.provider !== "novita") {
     throw new MiniMaxH3Error("on-demand MiniMax H3 rendering must use the Novita route");
@@ -759,14 +773,19 @@ export async function renderMiniMaxH3WeeklyBatch(
   }
   const outputKeys = jobs.map((job) => r2Key(job.output?.r2Key, "output key"));
   if (new Set(outputKeys).size !== outputKeys.length) throw new MiniMaxH3Error("weekly MiniMax H3 batch has duplicate output keys");
-  const { onJobComplete, ...renderOptions } = options;
+  const {
+    onJobComplete,
+    provider = "salad",
+    execution = provider === "salad" ? "weekly-batch" : "weekly-fallback",
+    ...renderOptions
+  } = options;
   const result: MiniMaxH3RenderedVideo[] = new Array(jobs.length);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(MAX_H3_PARALLEL_SALAD_JOBS, jobs.length) }, async () => {
     for (;;) {
       const index = next++;
       if (index >= jobs.length) return;
-      const rendered = await renderMiniMaxH3({ ...jobs[index]!, provider: "salad", execution: "weekly-batch" }, renderOptions);
+      const rendered = await renderMiniMaxH3({ ...jobs[index]!, provider, execution }, renderOptions);
       result[index] = rendered;
       await onJobComplete?.(index, rendered);
     }

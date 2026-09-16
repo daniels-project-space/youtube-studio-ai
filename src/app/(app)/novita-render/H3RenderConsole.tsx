@@ -398,7 +398,7 @@ export function H3RenderConsole() {
 
   const provider = mode === "weekly" ? "Salad" : "Novita";
   const routeNote = mode === "weekly"
-    ? "Weekly slate · medium first · high fallback · up to 3 RTX 5090 workers"
+    ? "Weekly slate · medium first · high fallback · rechecks every 15m · Novita after 24h · up to 3 RTX 5090 workers"
     : "One repair or preview clip · Novita spot GPU · no automatic retry";
   const progressPercent = !status ? 0 : h3ProgressPercent(status);
 
@@ -470,7 +470,7 @@ export function H3RenderConsole() {
           <div className={styles.progressHeader}><div><span className={styles.eyebrow}>Live progress · {tracking?.provider ?? provider}</span><strong>{status?.triggerStatus ?? "Queued"}</strong></div><b>{progressPercent}%</b></div>
           <div className={styles.progressTrack}><i style={{ width: `${progressPercent}%` }} /></div>
           <div className={styles.progressMeta}><span>{tracking?.runId ?? ""}</span>{status?.receipt ? <span>{status.receipt.completedCount}/{status.receipt.requestCount} outputs · ${status.receipt.totalCostUsd.toFixed(4)}</span> : <span>Waiting for Trigger and R2 receipt</span>}{status?.receipt?.capacityMode && <span data-capacity-mode={status.receipt.capacityMode}>Tier {status.receipt.capacityMode === "high" ? "high fallback" : status.receipt.capacityMode}</span>}{status?.requestPacketState === "frozen" && <span>Inputs frozen</span>}{status?.requestPacketState === "missing" && <span className={styles.warn}>Request packet missing</span>}{status?.requestPacketState === "invalid" && <span className={styles.warn}>Request packet invalid</span>}<button type="button" className={styles.clearButton} onClick={clearTracking}>Clear tracking</button></div>
-          {status?.state === "held" && <div className={styles.holdAction}><span className={styles.holdCopy}><strong className={styles.warn}>Held before spend: Salad capacity was unavailable.</strong><small>Next check uses medium first, then high only if it unlocks this wave.</small></span><button type="button" className={styles.secondaryButton} onClick={() => void retryHeld()} disabled={retryBusy}>{retryBusy ? "Rechecking capacity…" : capacity?.state === "admitted" ? capacity.capacity.fallbackUsed ? "Retry with high priority" : "Retry at medium priority" : "Check again"}</button></div>}
+          {status?.state === "held" && <div className={styles.holdAction}><span className={styles.holdCopy}><strong className={styles.warn}>Held before spend: Salad capacity was unavailable.</strong><small>Auto-rechecks every 15m: medium first, then high only if it unlocks this wave. Novita takes over after 24h.</small></span><button type="button" className={styles.secondaryButton} onClick={() => void retryHeld()} disabled={retryBusy}>{retryBusy ? "Rechecking capacity…" : capacity?.state === "admitted" ? capacity.capacity.fallbackUsed ? "Retry with high priority" : "Retry at medium priority" : "Check again"}</button></div>}
           {status?.state === "reconciliation_required" && <strong className={styles.warn}>Provider run ended without a durable receipt. Reconcile before retrying.</strong>}
           {error && <strong className={styles.error}>{error}</strong>}
         </section>
@@ -480,5 +480,5 @@ export function H3RenderConsole() {
 }
 
 function LockedConsole({ access, onRequestOwner }: { access: OperationsAccessState; onRequestOwner: () => void }) {
-  return <main className={styles.page}><section className={styles.locked}><span className={styles.eyebrow}>{access === "checking" ? "Checking access" : "Paid compute"}</span><h1>MiniMax H3 render lanes</h1><p>{access === "checking" ? "Reading this browser session." : "Owner access is required to submit a paid Salad or Novita job."}</p><div className={styles.lockedRoutes} aria-label="Render route policy"><div><strong>Weekly batch</strong><span>Salad · medium first → high fallback</span></div><div><strong>On demand</strong><span>Novita · spot · one shot</span></div></div>{access !== "checking" && <button type="button" onClick={onRequestOwner}>Verify owner</button>}</section></main>;
+  return <main className={styles.page}><section className={styles.locked}><span className={styles.eyebrow}>{access === "checking" ? "Checking access" : "Paid compute"}</span><h1>MiniMax H3 render lanes</h1><p>{access === "checking" ? "Reading this browser session." : "Owner access is required to submit a paid Salad or Novita job."}</p><div className={styles.lockedRoutes} aria-label="Render route policy"><div><strong>Weekly batch</strong><span>Salad · medium first → high fallback · recheck 15m · Novita after 24h</span></div><div><strong>On demand</strong><span>Novita · spot · one shot</span></div></div>{access !== "checking" && <button type="button" onClick={onRequestOwner}>Verify owner</button>}</section></main>;
 }

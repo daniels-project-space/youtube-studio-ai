@@ -4,6 +4,8 @@ import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import {
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
+  MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS,
+  MINIMAX_H3_WEEKLY_CAPACITY_RECHECK_MS,
   miniMaxH3RequestKey,
 } from "@/lib/minimaxH3";
 import { assertMiniMaxH3WeeklyBatchArgs } from "@/trigger/minimaxH3WeeklyBatch";
@@ -29,7 +31,12 @@ export async function POST(request: Request) {
     // The browser cannot choose a fleet identity. Bind the task to the
     // authenticated owner before Trigger receives it, enabling the durable
     // organization-wide Salad slot fence.
-    const payload = { ...parsedPayload, ownerId: actor.ownerId };
+    // This clock is server-owned so the one-day fallback cannot be delayed or
+    // accelerated by a browser-provided timestamp. Automatic successors carry
+    // this value in the frozen packet; a fresh API order always starts now.
+    const now = Date.now();
+    const capacityHoldStartedAt = now;
+    const payload = { ...parsedPayload, ownerId: actor.ownerId, capacityHoldStartedAt };
     if (!ownedBy(actor.ownerId, payload.receiptKey) || payload.jobs.some((job) =>
       !ownedBy(actor.ownerId, job.firstFrame.r2Key) || !ownedBy(actor.ownerId, job.output.r2Key)) ||
       (payload.preparedFootage !== undefined && (
@@ -59,6 +66,12 @@ export async function POST(request: Request) {
       state: "queued",
       provider: "salad",
       execution: "weekly-batch",
+      capacityPolicy: {
+        mediumFirst: true,
+        highOnlyWhenMediumCannotAdmitWave: true,
+        recheckEveryMs: MINIMAX_H3_WEEKLY_CAPACITY_RECHECK_MS,
+        novitaFallbackAfterMs: MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS,
+      },
       runtimeId: MINIMAX_H3_RUNTIME_ID,
       profile: MINIMAX_H3_PROFILE,
       jobCount: payload.jobs.length,

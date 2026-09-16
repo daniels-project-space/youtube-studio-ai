@@ -98,7 +98,7 @@ assert.match(
   /assertMiniMaxH3SaladCapacity\(payload\.jobs\.length,\s*\{/,
   "weekly paid dispatch must be gated by a current Salad capacity admission",
 );
-const admissionIndex = weeklySource.indexOf("const capacity = await assertMiniMaxH3SaladCapacity");
+const admissionIndex = weeklySource.indexOf("assertMiniMaxH3SaladCapacity(payload.jobs.length");
 const upgradeIndex = weeklySource.indexOf("api.saladFleetReservations.upgradePriority");
 const providerStartIndex = weeklySource.indexOf("providerStarted = true;");
 assert(admissionIndex >= 0 && upgradeIndex > admissionIndex && providerStartIndex > upgradeIndex,

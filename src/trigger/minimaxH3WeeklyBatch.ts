@@ -3,13 +3,15 @@
  * provider-free `plan-week-bulk` planner: this task accepts only already
  * approved keyframes/prompts and records actual R2-backed render receipts.
  */
-import { task } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
   MINIMAX_H3_MANIFEST_SHA256,
   MINIMAX_H3_RUNTIME_ID,
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_WORKER_CONTRACT,
+  MINIMAX_H3_WEEKLY_CAPACITY_RECHECK_MS,
+  MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS,
   assertMiniMaxH3SaladCapacity,
   miniMaxH3WeeklyRequestPacketKey,
   miniMaxH3RequestKey,
@@ -25,6 +27,7 @@ import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import { saladFleetReservationIdentity } from "@/lib/saladFleetReservation";
 import { saladPriorityPolicyFromEnv, SALAD_BULK_MAX_GPUS } from "@/lib/saladCloud";
+import { isMiniMaxH3CapacityHoldError } from "@/lib/minimaxH3Status";
 import {
   assertPlanWeekPreparedFootageBinding,
   normalizePlanWeekPreparationManifest,
@@ -45,6 +48,8 @@ export interface MiniMaxH3WeeklyBatchArgs {
   /** A scoped receipt path, outside the individual video output paths. */
   receiptKey: string;
   jobs: Array<Omit<MiniMaxH3RenderRequest, "provider" | "execution">>;
+  /** Server-set epoch for the automatic Salad wait window. */
+  capacityHoldStartedAt?: number;
   /** Optional reviewed weekly packet to materialize as a reusable footage sidecar. */
   preparedFootage?: {
     ownerId: string;
@@ -122,6 +127,10 @@ export function assertMiniMaxH3WeeklyBatchArgs(value: unknown): MiniMaxH3WeeklyB
   if (payload.ownerId !== undefined && (typeof payload.ownerId !== "string" || !payload.ownerId.trim() || payload.ownerId.length > 160)) {
     throw new Error("weekly MiniMax H3 owner id is invalid");
   }
+  if (payload.capacityHoldStartedAt !== undefined &&
+      (!Number.isSafeInteger(payload.capacityHoldStartedAt) || Number(payload.capacityHoldStartedAt) <= 0)) {
+    throw new Error("weekly MiniMax H3 capacity hold start is invalid");
+  }
   if (!Array.isArray(payload.jobs) || payload.jobs.length < 1 || payload.jobs.length > 60) {
     throw new Error("weekly MiniMax H3 payload must contain 1..60 jobs");
   }
@@ -183,6 +192,7 @@ export function assertMiniMaxH3WeeklyBatchArgs(value: unknown): MiniMaxH3WeeklyB
     orderKey: safeIdentifier(payload.orderKey, "order key"),
     receiptKey: scopedReceiptKey(payload.receiptKey),
     jobs,
+    ...(payload.capacityHoldStartedAt === undefined ? {} : { capacityHoldStartedAt: Number(payload.capacityHoldStartedAt) }),
     ...(preparedFootage ? { preparedFootage } : {}),
   };
 }
@@ -193,10 +203,13 @@ function objectNotFound(error: unknown): boolean {
     candidate?.$metadata?.httpStatusCode === 404;
 }
 
-type PersistedWeeklyReceipt = {
-  schema: "minimax-h3-weekly-batch/v1";
+export type PersistedWeeklyReceipt = {
+  schema: "minimax-h3-weekly-batch/v1" | "minimax-h3-weekly-batch/v2";
   orderKey: string;
   requestKeys: string[];
+  /** Original Salad request identities when the weekly order falls back to Novita. */
+  sourceRequestKeys?: string[];
+  fallback?: { provider: "novita"; reason: "salad-capacity-timeout"; waitedMs: number };
   outputs: Array<{ r2Key: string; contentSha256: string; byteLength: number; costUsd: number }>;
   /** Full validated worker receipts; optional for backward-compatible v1 summaries. */
   providerReceipts?: MiniMaxH3Receipt[];
@@ -252,6 +265,7 @@ export type PersistedWeeklyRequestPacket = {
   orderKey: string;
   requestKeys: string[];
   jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
+  capacityHoldStartedAt?: number;
   createdAt: number;
 };
 
@@ -259,6 +273,7 @@ export function createMiniMaxH3WeeklyRequestPacket(args: {
   orderKey: string;
   requestKeys: readonly string[];
   jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
+  capacityHoldStartedAt?: number;
   createdAt?: number;
 }): PersistedWeeklyRequestPacket {
   const createdAt = args.createdAt ?? Date.now();
@@ -268,18 +283,20 @@ export function createMiniMaxH3WeeklyRequestPacket(args: {
     orderKey: args.orderKey,
     requestKeys: [...args.requestKeys],
     jobs: structuredClone(args.jobs),
+    ...(args.capacityHoldStartedAt === undefined ? {} : { capacityHoldStartedAt: args.capacityHoldStartedAt }),
     createdAt,
   };
 }
 
 function sameWeeklyRequestPacket(
   packet: PersistedWeeklyRequestPacket,
-  expected: { orderKey: string; requestKeys: readonly string[]; jobs: MiniMaxH3WeeklyBatchArgs["jobs"] },
+  expected: { orderKey: string; requestKeys: readonly string[]; jobs: MiniMaxH3WeeklyBatchArgs["jobs"]; capacityHoldStartedAt?: number },
 ): boolean {
   return packet.schema === "minimax-h3-weekly-request/v1" &&
     packet.orderKey === expected.orderKey &&
     canonicalJson(packet.requestKeys) === canonicalJson(expected.requestKeys) &&
     canonicalJson(packet.jobs) === canonicalJson(expected.jobs) &&
+    (expected.capacityHoldStartedAt === undefined || packet.capacityHoldStartedAt === undefined || packet.capacityHoldStartedAt === expected.capacityHoldStartedAt) &&
     Number.isSafeInteger(packet.createdAt) && packet.createdAt > 0;
 }
 
@@ -289,12 +306,14 @@ async function persistWeeklyRequestPacket(args: {
   orderKey: string;
   requestKeys: readonly string[];
   jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
+  capacityHoldStartedAt?: number;
 }): Promise<string> {
   const key = miniMaxH3WeeklyRequestPacketKey(args.receiptKey);
   const body = canonicalJson(createMiniMaxH3WeeklyRequestPacket({
     orderKey: args.orderKey,
     requestKeys: args.requestKeys,
     jobs: args.jobs,
+    capacityHoldStartedAt: args.capacityHoldStartedAt,
   }));
   try {
     await putObject(key, body, {
@@ -318,6 +337,43 @@ async function persistWeeklyRequestPacket(args: {
   return key;
 }
 
+/**
+ * Schedule a read-only Salad capacity recheck.  The idempotency seed is tied
+ * to the order and time bucket so a lost controller response cannot create a
+ * fan-out of duplicate waiters for the same weekly order.
+ */
+export async function queueMiniMaxH3WeeklyCapacityRetry(args: {
+  payload: MiniMaxH3WeeklyBatchArgs;
+  now?: number;
+}): Promise<{ triggerRunId: string; nextCheckAt: number; capacityHoldStartedAt: number }> {
+  const payload = assertMiniMaxH3WeeklyBatchArgs(args.payload);
+  if (!payload.ownerId) throw new Error("weekly MiniMax H3 capacity retry requires an owner id");
+  const now = args.now ?? Date.now();
+  if (!Number.isSafeInteger(now) || now <= 0) throw new Error("weekly MiniMax H3 capacity retry clock is invalid");
+  const capacityHoldStartedAt = payload.capacityHoldStartedAt ?? now;
+  const deadline = capacityHoldStartedAt + MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS;
+  // If an old controller wakes after the deadline, still enqueue one
+  // immediate successor. That successor owns the explicit Novita fallback;
+  // this avoids silently leaving an order held forever after a lost timer.
+  const nextBoundary = Math.ceil((now + 1) / MINIMAX_H3_WEEKLY_CAPACITY_RECHECK_MS) * MINIMAX_H3_WEEKLY_CAPACITY_RECHECK_MS;
+  const nextCheckAt = deadline <= now
+    ? now + 1_000
+    : Math.min(nextBoundary, deadline);
+  const idempotencyKey = await idempotencyKeys.create(
+    `minimax-h3-weekly-capacity-wait:${payload.ownerId}:${payload.orderKey}:${nextCheckAt}`,
+    { scope: "global" },
+  );
+  const handle = await tasks.trigger("minimax-h3-weekly-capacity-retry", {
+    ...payload,
+    capacityHoldStartedAt,
+  }, {
+    delay: new Date(nextCheckAt),
+    concurrencyKey: `minimax-h3-weekly:${payload.ownerId}`,
+    idempotencyKey,
+  });
+  return { triggerRunId: handle.id, nextCheckAt, capacityHoldStartedAt };
+}
+
 /** Build the immutable weekly receipt without dropping per-shot provenance. */
 export function createMiniMaxH3WeeklyReceipt(
   orderKey: string,
@@ -337,6 +393,39 @@ export function createMiniMaxH3WeeklyReceipt(
     providerReceipts: result.map((item) => item.receipt),
     totalCostUsd: Number(outputs.reduce((sum, item) => sum + item.costUsd, 0).toFixed(6)),
     createdAt: Date.now(),
+  };
+}
+
+export function createMiniMaxH3WeeklyFallbackReceipt(args: {
+  orderKey: string;
+  sourceRequestKeys: readonly string[];
+  result: readonly MiniMaxH3RenderedVideo[];
+  waitedMs: number;
+  createdAt?: number;
+}): PersistedWeeklyReceipt {
+  if (args.sourceRequestKeys.length !== args.result.length || args.result.length < 1) {
+    throw new Error("weekly MiniMax H3 fallback receipt has mismatched request provenance");
+  }
+  const outputs = args.result.map((item) => ({
+    r2Key: item.receipt.output.r2Key,
+    contentSha256: item.receipt.output.contentSha256,
+    byteLength: item.receipt.output.byteLength,
+    costUsd: item.receipt.runtime.costUsd,
+  }));
+  const createdAt = args.createdAt ?? Date.now();
+  if (!Number.isSafeInteger(createdAt) || createdAt <= 0 || !Number.isFinite(args.waitedMs) || args.waitedMs < 0) {
+    throw new Error("weekly MiniMax H3 fallback receipt timing is invalid");
+  }
+  return {
+    schema: "minimax-h3-weekly-batch/v2",
+    orderKey: args.orderKey,
+    sourceRequestKeys: [...args.sourceRequestKeys],
+    fallback: { provider: "novita", reason: "salad-capacity-timeout", waitedMs: args.waitedMs },
+    requestKeys: args.result.map((item) => item.requestKey),
+    outputs,
+    providerReceipts: args.result.map((item) => item.receipt),
+    totalCostUsd: Number(outputs.reduce((sum, item) => sum + item.costUsd, 0).toFixed(6)),
+    createdAt,
   };
 }
 
@@ -515,7 +604,7 @@ type PreparedFootageScope = NonNullable<MiniMaxH3WeeklyBatchArgs["preparedFootag
  * submitted. This all-or-nothing preflight prevents a late bad frame from
  * leaving a partially paid weekly order.
  */
-async function readPreparedFootageManifest(
+export async function readPreparedFootageManifest(
   binding: PreparedFootageScope,
 ): Promise<PlanWeekPreparationManifest> {
   const bytes = await getObjectBytes(binding.manifestKey);
@@ -572,7 +661,11 @@ export function buildPreparedFootageSidecar(args: {
   binding: PreparedFootageScope;
   jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
   result: readonly MiniMaxH3RenderedVideo[];
+  provider?: "salad" | "novita";
+  execution?: "weekly-batch" | "weekly-fallback";
 }): PlanWeekPreparedFootage {
+  const provider = args.provider ?? "salad";
+  const execution = args.execution ?? (provider === "salad" ? "weekly-batch" : "weekly-fallback");
   const nativeDurationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
   const clips = args.result.map((item, index) => ({
     r2Key: planWeekPreparedFootageClipKey({ ...args.binding, index }),
@@ -605,8 +698,8 @@ export function buildPreparedFootageSidecar(args: {
     clips,
     renderer: {
       kind: "minimax-h3",
-      provider: "salad",
-      execution: "weekly-batch",
+      provider,
+      execution,
       runtimeId: MINIMAX_H3_RUNTIME_ID,
       profileId: MINIMAX_H3_PROFILE.id,
       modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
@@ -618,7 +711,7 @@ export function buildPreparedFootageSidecar(args: {
       firstFrame: job.firstFrame,
       output: { r2Key: clips[index]!.r2Key },
       maxCostUsd: job.maxCostUsd,
-      requestKey: miniMaxH3RequestKey({ ...job, provider: "salad", execution: "weekly-batch" }),
+      requestKey: miniMaxH3RequestKey({ ...job, provider, execution }),
     })),
     h3Receipts: args.result.map((item) => item.receipt),
     createdAt: Date.now(),
@@ -647,7 +740,7 @@ async function persistPreparedFootageSidecar(
   }
 }
 
-function renderedResultsFromPersistedReceipt(
+export function renderedResultsFromPersistedReceipt(
   receipt: PersistedWeeklyReceipt,
 ): MiniMaxH3RenderedVideo[] {
   if (!receipt.providerReceipts || receipt.providerReceipts.length !== receipt.requestKeys.length) {
@@ -662,13 +755,14 @@ function renderedResultsFromPersistedReceipt(
   }));
 }
 
-async function materializePreparedFootage(
+export async function materializePreparedFootage(
   binding: PreparedFootageScope,
   manifest: PlanWeekPreparationManifest,
   jobs: MiniMaxH3WeeklyBatchArgs["jobs"],
   result: readonly MiniMaxH3RenderedVideo[],
+  options: { provider?: "salad" | "novita"; execution?: "weekly-batch" | "weekly-fallback" } = {},
 ): Promise<string> {
-  const prepared = buildPreparedFootageSidecar({ manifest, binding, jobs, result });
+  const prepared = buildPreparedFootageSidecar({ ...options, manifest, binding, jobs, result });
   const sidecarKey = planWeekPreparedFootageKey(binding);
   await persistPreparedFootageSidecar(sidecarKey, prepared);
   return sidecarKey;
@@ -678,8 +772,9 @@ export const minimaxH3WeeklyBatchTask = task({
   id: "minimax-h3-weekly-batch",
   // H3 workers hydrate and can run up to sixty five-second clips over three
   // 5090 replicas. Medium is preferred, with a bounded high-priority fallback
-  // selected during admission. Trigger retries are disabled: a transport failure after a
-  // provider submission is explicitly reconciled by request key, never replayed.
+  // selected during admission. Trigger retries are disabled: provider
+  // submissions are reconciled by request key, while pre-provider Salad holds
+  // enqueue a separate read-only capacity waiter.
   maxDuration: 3_600,
   retry: { maxAttempts: 1 },
   queue: { concurrencyLimit: 1 },
@@ -730,6 +825,7 @@ export const minimaxH3WeeklyBatchTask = task({
       orderKey: payload.orderKey,
       requestKeys,
       jobs: payload.jobs,
+      capacityHoldStartedAt: payload.capacityHoldStartedAt,
     });
     // Restore any per-shot claims before acquiring capacity. A partially
     // completed prior wave must never pay again for outputs already proven in
@@ -803,17 +899,31 @@ export const minimaxH3WeeklyBatchTask = task({
         })()
       : undefined;
     const fleetLeaseToken = payload.ownerId && fleetReservationEnabled ? crypto.randomUUID() : undefined;
-    const fleetReservation = reservationIdentity && fleetConvex && fleetLeaseToken
-      ? await fleetConvex.mutation(api.saladFleetReservations.acquire, {
-          reservationKey: reservationIdentity.reservationKey,
-          reservationOwnerId: reservationIdentity.ownerId,
-          orderKey: reservationIdentity.orderKey,
-          requestedGpuCount: reservationIdentity.requestedGpuCount,
-          priority: reservationIdentity.priority,
-          leaseToken: fleetLeaseToken,
-          now: Date.now(),
-        })
-      : undefined;
+    let fleetReservation: { leaseToken: string; priority?: string } | undefined;
+    try {
+      fleetReservation = reservationIdentity && fleetConvex && fleetLeaseToken
+        ? await fleetConvex.mutation(api.saladFleetReservations.acquire, {
+            reservationKey: reservationIdentity.reservationKey,
+            reservationOwnerId: reservationIdentity.ownerId,
+            orderKey: reservationIdentity.orderKey,
+            requestedGpuCount: reservationIdentity.requestedGpuCount,
+            priority: reservationIdentity.priority,
+            leaseToken: fleetLeaseToken,
+            now: Date.now(),
+          })
+        : undefined;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (payload.ownerId && isMiniMaxH3CapacityHoldError(message)) {
+        const heldPayload = { ...payload, capacityHoldStartedAt: payload.capacityHoldStartedAt ?? Date.now() };
+        try {
+          await queueMiniMaxH3WeeklyCapacityRetry({ payload: heldPayload });
+        } catch (scheduleError) {
+          throw new Error(`${message}; automatic weekly capacity retry could not be scheduled: ${scheduleError instanceof Error ? scheduleError.message : String(scheduleError)}`);
+        }
+      }
+      throw error;
+    }
     const heldFleetPriority = fleetReservation && typeof fleetReservation.priority === "string"
       ? fleetReservation.priority
       : undefined;
@@ -835,16 +945,33 @@ export const minimaxH3WeeklyBatchTask = task({
     };
     try {
       const policy = saladPriorityPolicyFromEnv();
-      const capacity = await assertMiniMaxH3SaladCapacity(payload.jobs.length, {
-        // Medium remains the first choice. High is the explicit, costlier
-        // capacity escape hatch Daniel authorized: set the variable to "0" to
-        // disable it for a deployment, but never let request JSON select it.
-        allowHighPriorityFallback: policy.highFallbackEnabled,
-        // Medium is the safe default; set to "0" only for an intentional
-        // maintenance window. High remains a separate fallback gate.
-        mediumPriorityEnabled: policy.mediumEnabled,
-        ...(heldFleetPriority === "high" ? { preferHighPriority: true } : {}),
-      });
+      let capacity: Awaited<ReturnType<typeof assertMiniMaxH3SaladCapacity>>;
+      try {
+        capacity = await assertMiniMaxH3SaladCapacity(payload.jobs.length, {
+          // Medium remains the first choice. High is the explicit, costlier
+          // capacity escape hatch Daniel authorized: set the variable to "0" to
+          // disable it for a deployment, but never let request JSON select it.
+          allowHighPriorityFallback: policy.highFallbackEnabled,
+          // Medium is the safe default; set to "0" only for an intentional
+          // maintenance window. High remains a separate fallback gate.
+          mediumPriorityEnabled: policy.mediumEnabled,
+          ...(heldFleetPriority === "high" ? { preferHighPriority: true } : {}),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!providerStarted && payload.ownerId && isMiniMaxH3CapacityHoldError(message)) {
+          const heldPayload = {
+            ...payload,
+            capacityHoldStartedAt: payload.capacityHoldStartedAt ?? Date.now(),
+          };
+          try {
+            await queueMiniMaxH3WeeklyCapacityRetry({ payload: heldPayload });
+          } catch (scheduleError) {
+            throw new Error(`${message}; automatic weekly capacity retry could not be scheduled: ${scheduleError instanceof Error ? scheduleError.message : String(scheduleError)}`);
+          }
+        }
+        throw error;
+      }
       if (capacity.fallbackUsed && fleetConvex && reservationIdentity && fleetReservation) {
         // The fence is acquired before the market snapshot to prevent two
         // weekly orders from both passing eventually-consistent capacity
