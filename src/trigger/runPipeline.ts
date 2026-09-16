@@ -211,6 +211,7 @@ import { payloadSeedInputs } from "@/lib/payloadSeedInputs";
 import { createMusicAuditionCheckpoint } from "@/engine/musicAuditionCheckpoint";
 import { MusicProgramQualityReceiptSchema } from "@/engine/channelMusicProgram";
 import { createAutomaticPreflightReceipt } from "@/lib/automaticWorkflow";
+import { createAutomaticVideoPlan } from "@/lib/automaticVideoPlan";
 
 const MAX_SELF_HEALS = 2;
 const FACTUAL_REVIEW_FROZEN_BLOCK_IDS = new Set([
@@ -2238,6 +2239,19 @@ export const runPipelineTask = task({
           `automatic preflight blocked: no healthy provider route for ${automaticProviderPlan.blockedModules.join(", ")}`,
         );
       }
+      const automaticVideoPlan = createAutomaticVideoPlan({
+        moduleIds: resolved.manifests.map((manifest) => manifest.id),
+        family: typeof channel.family === "string" ? channel.family : undefined,
+        contentLane: typeof contentLane?.key === "string" ? contentLane.key : undefined,
+        niche: typeof channel.identity?.niche === "string" ? channel.identity.niche : undefined,
+        titleProfile:
+          typeof entries.find((entry) => entry.block === "metadata")?.params?.titleProfile === "string"
+            ? String(entries.find((entry) => entry.block === "metadata")?.params?.titleProfile)
+            : undefined,
+      });
+      // Modules may use the same sealed decision for channel-aware framing
+      // without each caller inventing a competing "smart" heuristic.
+      seedStore.automaticVideoPlan = automaticVideoPlan;
       const automaticPreflight = createAutomaticPreflightReceipt({
         runId: payload.runId,
         channelId: payload.channelId,
@@ -2261,6 +2275,7 @@ export const runPipelineTask = task({
         providerPlan: automaticProviderPlan,
         qualityGate: createAutomaticQualityGateContract(),
         rollbackPlan: createAutomaticReleaseRollbackPlan({ runId: payload.runId }),
+        automaticVideoPlan,
       });
       await convex.mutation(api.runs.recordAutomaticPreflight, {
         ownerId,
@@ -2269,7 +2284,7 @@ export const runPipelineTask = task({
         ...executionLease,
         receipt: automaticPreflight,
       });
-      log(`automatic preflight sealed ${automaticPreflight.fingerprint.slice(0, 12)} — budget, contracts, and resume boundary admitted`);
+      log(`automatic preflight sealed ${automaticPreflight.fingerprint.slice(0, 12)} — full-video plan ${automaticVideoPlan.fingerprint.slice(0, 12)} (${automaticVideoPlan.titleProfile}/${automaticVideoPlan.frameStrategy.discoverySurface})`);
       // A newly generated MiniMax track stops for its owner audition. An
       // admitted week-ahead receipt has already bound that exact human review
       // (or identifies a non-MiniMax provider) and must continue from its

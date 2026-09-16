@@ -5,6 +5,8 @@ import type {
   AutomaticQualityGateContract,
   AutomaticReleaseRollbackPlan,
 } from "@/lib/automaticOperations";
+import type { AutomaticVideoPlan } from "@/lib/automaticVideoPlan";
+import { assertAutomaticVideoPlan } from "@/lib/automaticVideoPlan";
 
 /**
  * Small, deterministic contracts shared by the automatic scheduler and UI.
@@ -37,6 +39,8 @@ export type AutomaticPreflightReceipt = {
   qualityGate?: AutomaticQualityGateContract;
   /** Private-first release safety and retry behavior. */
   rollbackPlan?: AutomaticReleaseRollbackPlan;
+  /** One automatic decision for the entire compiled video, not per-block hints. */
+  automaticVideoPlan?: AutomaticVideoPlan;
   fingerprint: string;
 };
 
@@ -54,6 +58,7 @@ export function createAutomaticPreflightReceipt(input: {
   providerPlan?: AutomaticProviderPlan;
   qualityGate?: AutomaticQualityGateContract;
   rollbackPlan?: AutomaticReleaseRollbackPlan;
+  automaticVideoPlan?: AutomaticVideoPlan;
 }): AutomaticPreflightReceipt {
   if (!input.runId.trim() || !input.channelId.trim()) throw new Error("automatic preflight identity is required");
   if (!Number.isFinite(input.budgetUsd) || input.budgetUsd < 0) throw new Error("automatic preflight budget is invalid");
@@ -63,6 +68,7 @@ export function createAutomaticPreflightReceipt(input: {
     throw new Error("automatic preflight reservation exceeds the frozen budget");
   }
   if (!input.resumeBoundaryReady) throw new Error("automatic preflight resume boundary is not ready");
+  if (input.automaticVideoPlan !== undefined) assertAutomaticVideoPlan(input.automaticVideoPlan);
   const body = {
     version: AUTOMATIC_WORKFLOW_VERSION,
     runId: input.runId,
@@ -85,6 +91,7 @@ export function createAutomaticPreflightReceipt(input: {
     ...(input.providerPlan ? { providerPlan: input.providerPlan } : {}),
     ...(input.qualityGate ? { qualityGate: input.qualityGate } : {}),
     ...(input.rollbackPlan ? { rollbackPlan: input.rollbackPlan } : {}),
+    ...(input.automaticVideoPlan ? { automaticVideoPlan: input.automaticVideoPlan } : {}),
   };
   return { ...body, fingerprint: sha256Hex(canonicalJson(body)) };
 }

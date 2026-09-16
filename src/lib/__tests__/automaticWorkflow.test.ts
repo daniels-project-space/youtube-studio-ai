@@ -5,6 +5,13 @@ import {
   createBulkUndoReceipt,
   resolveBatchConflicts,
 } from "@/lib/automaticWorkflow";
+import { createAutomaticVideoPlan } from "@/lib/automaticVideoPlan";
+
+const automaticVideoPlan = createAutomaticVideoPlan({
+  moduleIds: ["metadata", "thumbnail_gen", "qa_visual", "upload_draft"],
+  family: "narrated_stock",
+  niche: "history",
+});
 
 const preflight = createAutomaticPreflightReceipt({
   runId: "run-1",
@@ -17,10 +24,12 @@ const preflight = createAutomaticPreflightReceipt({
     { kind: "music", key: "r2/music.mp3" },
     { kind: "footage", key: "r2/a.mp4" },
   ],
+  automaticVideoPlan,
 });
 assert.equal(preflight.checks.length, 3);
 assert.deepEqual(preflight.paidModules, ["render", "script"]);
 assert.deepEqual(preflight.reusedDependencies?.map((entry) => entry.kind), ["footage", "music"]);
+assert.equal(preflight.automaticVideoPlan?.fingerprint, automaticVideoPlan.fingerprint);
 assert.throws(() => createAutomaticPreflightReceipt({
   runId: "run-1", channelId: "channel-a", budgetUsd: 1, reservedMaxCostUsd: 2,
   paidModules: [], resumeBoundaryReady: true,

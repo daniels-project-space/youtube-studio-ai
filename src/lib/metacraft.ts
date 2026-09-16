@@ -38,6 +38,7 @@ import { createPublicEvidenceCache, normalizeEvidenceKey } from "@/lib/publicEvi
 import { titleDecisionFingerprint } from "@/lib/titleDecisionFingerprint";
 import { unmatchedTitleNumbers } from "@/lib/numericClaims";
 import { normalizeTitleForPublication } from "@/lib/titlePublicationNormalization";
+import type { AutomaticFrameStrategy } from "@/lib/automaticVideoPlan";
 
 export function hasMetacraft(): boolean {
   return hasCreativeTextKey();
@@ -825,6 +826,8 @@ export interface MetaCraftArgs {
   clickbaitLevel?: number;
   /** Format-aware title envelope; omitted callers resolve to browse_long. */
   titleProfile?: TitleProfileId;
+  /** Sealed whole-video frame decision; prevents per-caller smart drift. */
+  frameStrategy?: AutomaticFrameStrategy;
   /** Optional family/lane context used when a standalone caller omits titleProfile. */
   family?: string;
   contentLane?: string;
@@ -1057,6 +1060,12 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             `${titleProfile.guidance} Target ${titleProfile.targetMinChars}-${titleProfile.targetMaxChars} characters ` +
             `and ${titleProfile.targetMinWords}-${titleProfile.targetMaxWords} words (hard limits ` +
             `${titleProfile.hardMinChars}-${titleProfile.hardMaxChars}; YouTube's absolute ceiling is 100).`,
+          a.frameStrategy
+            ? `SEALED FRAME STRATEGY — discovery=${a.frameStrategy.discoverySurface}; intent=${a.frameStrategy.audienceIntent}; ` +
+              `tone=${a.frameStrategy.tone}; format=${a.frameStrategy.format}; ` +
+              `the first ${a.frameStrategy.openingWindowSec}s must visibly/spokenly support the promise; ` +
+              `script evidence is required. Do not substitute a niche stereotype.`
+            : "",
           `TITLE RULES — SHORT and DIRECT: the title is the POINT ITSELF, never a setup for ` +
             `the point — no scene-setting fragments, no atmospheric prefixes, no two-part colon constructions ` +
             `(a short established format prefix like "Mission log:" is fine). Front-load the primary keyword and ` +

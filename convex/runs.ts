@@ -308,6 +308,7 @@ export const recordAutomaticPreflight = mutation({
       ...(raw.providerPlan !== undefined ? { providerPlan: raw.providerPlan as never } : {}),
       ...(raw.qualityGate !== undefined ? { qualityGate: raw.qualityGate as never } : {}),
       ...(raw.rollbackPlan !== undefined ? { rollbackPlan: raw.rollbackPlan as never } : {}),
+      ...(raw.automaticVideoPlan !== undefined ? { automaticVideoPlan: raw.automaticVideoPlan as never } : {}),
     });
     if (rebuilt.runId !== String(args.runId) || rebuilt.channelId !== String(args.channelId) || rebuilt.fingerprint !== raw.fingerprint) {
       throw new Error("automatic preflight receipt fingerprint or identity mismatch");

@@ -72,6 +72,7 @@ import { normalizeTitleForPublication } from "@/lib/titlePublicationNormalizatio
 import { hasCreativeTextKey } from "@/lib/creativeText";
 import { OpenRouterGenerationOutcomeUnknownError } from "@/lib/openRouter";
 import { hasVisionKey } from "@/lib/vision";
+import type { AutomaticFrameStrategy } from "@/lib/automaticVideoPlan";
 import {
   renderCandidate,
   resolveGoldenThumbnailPlaybook,
@@ -409,8 +410,16 @@ export const metadataOptimized: Block = {
     const channelName = (ctx.store["channelName"] as string | undefined) ?? "this channel";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
     const persona = (ctx.store["persona"] as string | undefined) ?? "";
+    const automaticVideoPlan = ctx.store["automaticVideoPlan"] as
+      | { titleProfile?: unknown; frameStrategy?: unknown }
+      | undefined;
+    const sealedTitleProfile = typeof automaticVideoPlan?.titleProfile === "string"
+      ? automaticVideoPlan.titleProfile
+      : undefined;
     const titleProfile = resolveTitleProfile(
-      typeof ctx.params["titleProfile"] === "string" ? String(ctx.params["titleProfile"]) : undefined,
+      typeof ctx.params["titleProfile"] === "string"
+        ? String(ctx.params["titleProfile"])
+        : sealedTitleProfile,
       {
         family: typeof ctx.store["family"] === "string" ? String(ctx.store["family"]) : undefined,
         contentLane: typeof ctx.store["contentLane"] === "string"
@@ -586,6 +595,7 @@ export const metadataOptimized: Block = {
             ? (ctx.store["clickbaitLevel"] as number)
             : undefined,
         titleProfile,
+        frameStrategy: automaticVideoPlan?.frameStrategy as AutomaticFrameStrategy | undefined,
         recentChannelTitles,
         log: ctx.log,
       });
