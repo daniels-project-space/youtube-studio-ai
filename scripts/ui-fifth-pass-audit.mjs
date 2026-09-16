@@ -194,6 +194,22 @@ async function captureScreenshot(page, path, { fullPage = true } = {}) {
   }
 }
 
+/**
+ * Private R2 previews resolve in two bounded hops (signing, then the same-
+ * origin media probe). Capture evidence after that work settles instead of
+ * freezing every card at the initial spinner state. The timeout is deliberate:
+ * a deleted or unavailable object must remain visible as an unavailable card,
+ * never hold the audit open indefinitely.
+ */
+async function waitForMediaSettled(page, timeoutMs = 5_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const loading = await page.locator('[data-preview-state="loading"]').count();
+    if (loading === 0) return;
+    await page.waitForTimeout(200);
+  }
+}
+
 async function captureRoute(browser, viewport, route, discovered, records) {
   const context = await browser.newContext({
     viewport: { width: viewport.width, height: viewport.height },
@@ -215,6 +231,7 @@ async function captureRoute(browser, viewport, route, discovered, records) {
       timeout: 30_000,
     });
     await page.waitForTimeout(1_600);
+    await waitForMediaSettled(page);
     const inventory = await pageInventory(page);
     const screenshotWarnings = [];
     const primaryShot = await captureScreenshot(page, `${outputDir}/${id}--${viewport.id}.png`);
