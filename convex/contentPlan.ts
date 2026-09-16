@@ -544,6 +544,20 @@ export const listPlan = query({
   },
 });
 
+/** Cheap owner-wide topic projection for automatic cross-channel dedup. */
+export const listOwnerReadyTopics = query({
+  args: { ownerId: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const limit = Math.min(500, Math.max(1, Math.floor(args.limit ?? 250)));
+    return (await ctx.db
+      .query("contentPlan")
+      .withIndex("by_owner_status", (q) => q.eq("ownerId", args.ownerId).eq("status", "ready"))
+      .order("asc")
+      .take(limit))
+      .map((row) => ({ channelId: String(row.channelId), topic: row.topic }));
+  },
+});
+
 /**
  * Service-only readiness projection for paid channel-inception consumers.
  * A visible `status: ready` string is deliberately insufficient: every row

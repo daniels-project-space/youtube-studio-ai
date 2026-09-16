@@ -100,8 +100,11 @@ function channelLaneKey(ch: ChannelRow): string {
 }
 export const generationScheduler = schedules.task({
   id: "generation-scheduler",
-  // Every 6h; the per-channel cadence + due-check decides what actually fires.
-  cron: "0 */6 * * *",
+  // Hourly dispatch keeps pinned releases and cadence runs inside their lead
+  // window without making the scheduler itself a spend path. The Convex claim
+  // is idempotent per channel/run, so an extra tick only observes busy/not-due
+  // state and never duplicates a video.
+  cron: "0 * * * *",
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.autopilot);
     if (!gate.enabled) return gate;

@@ -465,6 +465,23 @@ async function runPlanWeekAhead(
     log(`thumbnail playbook source: ${resolvedThumbnailPlaybook.strategy}`);
 
     let existing = await convex.query(api.contentPlan.listPlan, { ownerId, channelId });
+    // The channel-local list prevents repeats within one channel. Add the
+    // bounded owner projection before any topic-provider call so concurrent
+    // weekly children also avoid recently used/planned topics on sibling
+    // channels. This is an avoidance hint, not a provider bypass; the normal
+    // route and topic gates still decide the final candidates.
+    const [ownerTopicMemory, ownerReadyTopics] = await Promise.all([
+      convex.query(api.topicMemory.listForOwner, { ownerId, limit: 500 }),
+      convex.query(api.contentPlan.listOwnerReadyTopics, { ownerId, limit: 500 }),
+    ]);
+    const crossChannelAvoid = [
+      ...(ownerTopicMemory as Array<{ channelId?: string; key?: string }>)
+        .filter((row) => row.channelId !== String(channelId) && typeof row.key === "string")
+        .map((row) => row.key as string),
+      ...(ownerReadyTopics as Array<{ channelId: string; topic: string }>)
+        .filter((row) => row.channelId !== String(channelId))
+        .map((row) => row.topic),
+    ];
     const keyPrefix = channelPrefix(ownerId, channel.slug);
     const usesDocumentarySourceSeason =
       routeAdmission.programRoute.routeKey === DOCUMENTARY_SOURCE_PROGRAM_ROUTE_KEY;
@@ -571,7 +588,11 @@ async function runPlanWeekAhead(
                     requiredCallbacks: channel.identity?.requiredCallbacks,
                   },
                   channelName,
-                  alsoAvoid: [...existing.map((row) => row.topic), ...uniqueFollowups.map((bet) => bet.topic)],
+                  alsoAvoid: [
+                    ...existing.map((row) => row.topic),
+                    ...uniqueFollowups.map((bet) => bet.topic),
+                    ...crossChannelAvoid,
+                  ],
                   providerSemanticDedupe: false,
                   programDirective: routeAdmission.programDirective,
                   beforeProviderSpend: async () => {

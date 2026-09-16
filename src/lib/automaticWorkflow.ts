@@ -21,6 +21,11 @@ export type AutomaticPreflightReceipt = {
   budgetUsd: number;
   reservedMaxCostUsd: number;
   paidModules: readonly string[];
+  /** Exact already-admitted dependencies reused by this run. */
+  reusedDependencies?: readonly {
+    kind: "topic" | "script" | "footage" | "music" | "weekly_sidecar";
+    key: string;
+  }[];
   checks: readonly {
     id: "budget" | "module_contracts" | "resume_boundary";
     status: "pass";
@@ -41,6 +46,10 @@ export function createAutomaticPreflightReceipt(input: {
   budgetUsd: number;
   reservedMaxCostUsd: number;
   paidModules: readonly string[];
+  reusedDependencies?: readonly {
+    kind: "topic" | "script" | "footage" | "music" | "weekly_sidecar";
+    key: string;
+  }[];
   resumeBoundaryReady: boolean;
   providerPlan?: AutomaticProviderPlan;
   qualityGate?: AutomaticQualityGateContract;
@@ -61,6 +70,13 @@ export function createAutomaticPreflightReceipt(input: {
     budgetUsd: Number(input.budgetUsd.toFixed(6)),
     reservedMaxCostUsd: Number(input.reservedMaxCostUsd.toFixed(6)),
     paidModules: [...new Set(input.paidModules)].sort(),
+    ...(input.reusedDependencies?.length
+      ? {
+          reusedDependencies: [...input.reusedDependencies]
+            .filter((entry) => entry.key.trim())
+            .sort((a, b) => a.kind.localeCompare(b.kind) || a.key.localeCompare(b.key)),
+        }
+      : {}),
     checks: [
       { id: "budget" as const, status: "pass" as const, detail: "reserved envelope is inside the frozen per-video budget" },
       { id: "module_contracts" as const, status: "pass" as const, detail: "paid modules have bounded, idempotent contracts" },

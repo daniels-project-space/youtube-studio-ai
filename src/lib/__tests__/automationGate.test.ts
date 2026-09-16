@@ -43,7 +43,7 @@ const scheduleContracts: ScheduleContract[] = [
   {
     file: "src/trigger/scheduler.ts",
     exportName: "generationScheduler",
-    cron: "0 */6 * * *",
+    cron: "0 * * * *",
     gate: STUDIO_AUTOMATION_GATES.autopilot,
     hazardousCall: "await bootstrapSecrets",
   },

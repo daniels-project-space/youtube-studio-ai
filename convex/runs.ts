@@ -291,12 +291,19 @@ export const recordAutomaticPreflight = mutation({
     }
     const raw = args.receipt as Record<string, unknown>;
     const paidModules = Array.isArray(raw.paidModules) ? raw.paidModules.filter((value): value is string => typeof value === "string") : [];
+    const reusedDependencies = Array.isArray(raw.reusedDependencies)
+      ? raw.reusedDependencies.filter((value): value is { kind: "topic" | "script" | "footage" | "music" | "weekly_sidecar"; key: string } =>
+          Boolean(value) && typeof value === "object" &&
+          ["topic", "script", "footage", "music", "weekly_sidecar"].includes(String((value as { kind?: unknown }).kind)) &&
+          typeof (value as { key?: unknown }).key === "string")
+      : undefined;
     const rebuilt = createAutomaticPreflightReceipt({
       runId: String(raw.runId ?? ""),
       channelId: String(raw.channelId ?? ""),
       budgetUsd: Number(raw.budgetUsd),
       reservedMaxCostUsd: Number(raw.reservedMaxCostUsd),
       paidModules,
+      ...(reusedDependencies ? { reusedDependencies } : {}),
       resumeBoundaryReady: true,
       ...(raw.providerPlan !== undefined ? { providerPlan: raw.providerPlan as never } : {}),
       ...(raw.qualityGate !== undefined ? { qualityGate: raw.qualityGate as never } : {}),

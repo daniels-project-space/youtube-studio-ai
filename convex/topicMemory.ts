@@ -15,6 +15,24 @@ export const listForChannel = query({
   },
 });
 
+/**
+ * Bounded owner-wide memory used by the automatic weekly planner. Channel
+ * memory still owns the per-channel no-repeat rule; this projection adds a
+ * lightweight cross-channel guard so the same topic is not bought twice in a
+ * weekly wave just because two channels planned concurrently.
+ */
+export const listForOwner = query({
+  args: { ownerId: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const limit = Math.min(500, Math.max(1, Math.floor(args.limit ?? 250)));
+    return await ctx.db
+      .query("topicMemory")
+      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+      .order("desc")
+      .take(limit);
+  },
+});
+
 export const recordTopic = mutation({
   args: {
     ownerId: v.string(),

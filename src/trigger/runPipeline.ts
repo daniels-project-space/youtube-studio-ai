@@ -72,6 +72,7 @@ import { makeConvexSink } from "@/engine/convexSink";
 import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
 import { channelPrefix, getObjectBytes } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256BytesHex } from "@/lib/sha256";
 import { alertBudget, alertFailure } from "@/lib/telegram";
 import { evaluateBudgetAlert } from "@/lib/budgetAlert";
 import {
@@ -2235,6 +2236,19 @@ export const runPipelineTask = task({
         budgetUsd: invocation.budgetUsd,
         reservedMaxCostUsd: compilation.reservedMaxCostUsd,
         paidModules: resolved.manifests.filter((manifest) => manifest.costAndLatency.paid).map((manifest) => manifest.id),
+        reusedDependencies: [
+          ...(typeof seedStore["reuseTopic"] === "string" ? [{ kind: "topic" as const, key: seedStore["reuseTopic"] as string }] : []),
+          ...(typeof seedStore["reuseScript"] === "object" && seedStore["reuseScript"] !== null
+            ? [{ kind: "script" as const, key: sha256BytesHex(Buffer.from(JSON.stringify(seedStore["reuseScript"]))) }]
+            : []),
+          ...(Array.isArray(seedStore["reuseFootageKeys"])
+            ? (seedStore["reuseFootageKeys"] as unknown[]).filter((key): key is string => typeof key === "string").map((key) => ({ kind: "footage" as const, key }))
+            : []),
+          ...(typeof seedStore["reuseMusicKey"] === "string" ? [{ kind: "music" as const, key: seedStore["reuseMusicKey"] as string }] : []),
+          ...(weeklyPreparation
+            ? [{ kind: "weekly_sidecar" as const, key: scheduledPlan?.preparation?.manifestKey ?? "weekly-preparation" }]
+            : []),
+        ],
         resumeBoundaryReady: true,
         providerPlan: automaticProviderPlan,
         qualityGate: createAutomaticQualityGateContract(),
