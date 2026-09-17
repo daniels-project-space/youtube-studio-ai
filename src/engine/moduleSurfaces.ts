@@ -312,10 +312,10 @@ const SCENARIO_DISCLOSURE_GATE_MODULE: ModuleCard = {
 /** Core pipeline surfaces — registered into MODULE_REGISTRY. */
 /**
  * The title/metadata module had NO surface at all, which is not a cosmetic gap:
- * validateModuleConfigMap skips unregistered blocks, so any per-channel title
- * configuration was silently dropped on write. The clickbait dial in particular
- * was unreachable from onboarding even though the engine reads it — a
- * capability nobody could switch on.
+ * prior versions omitted it from the registry, so title settings could never
+ * survive channel creation. The clickbait dial in particular was unreachable
+ * from onboarding even though the engine reads it — a capability nobody could
+ * switch on.
  */
 const METADATA_MODULE: ModuleCard = {
   key: "metadata",
@@ -350,9 +350,9 @@ const METADATA_MODULE: ModuleCard = {
 
 /**
  * Three surfaces that did not exist, so eight parameters the onboarding UI
- * offered were validated against nothing and silently dropped on write —
- * exactly the failure this file was created to fix, still live for the blocks
- * it never reached.
+ * offered were validated against nothing and could not survive channel
+ * creation — exactly the failure this file was created to fix, still live for
+ * the blocks it never reached.
  *
  * lore_short and quiz_year had NO surface at all. The header note said
  * free-text knobs were blocked on the Knob type gaining a "text" variant; that

@@ -720,7 +720,15 @@ function validateModuleConfig(
   return cleaned;
 }
 
-/** Validate a whole `moduleConfig` map; drops blocks that aren't configurable. */
+/**
+ * Validate a whole onboarding `moduleConfig` map.
+ *
+ * Creation is a persistence boundary, not a stale-config garbage collector:
+ * silently omitting an unknown/non-configurable key makes a visible operator
+ * setting look accepted while execution falls back to defaults. Route changes
+ * prune valid stale controls before this mutation; every key that reaches here
+ * must therefore be selected, configurable, and structurally valid.
+ */
 function validateModuleConfigMap(
   map: Record<string, unknown> | undefined,
   activeBlockIds?: readonly string[],
@@ -730,13 +738,16 @@ function validateModuleConfigMap(
   const active = activeBlockIds ? new Set(activeBlockIds) : undefined;
   const out: Record<string, unknown> = {};
   for (const [blockId, cfg] of Object.entries(map)) {
-    if (!configurable.has(blockId)) continue; // ignore stale/unknown blocks silently
+    if (!configurable.has(blockId)) {
+      throw new Error(`moduleConfig: '${blockId}' is unknown or non-configurable`);
+    }
     if (active && !active.has(blockId)) {
       throw new Error(`moduleConfig: '${blockId}' is not selected in this channel pipeline`);
     }
-    if (cfg && typeof cfg === "object") {
-      out[blockId] = validateModuleConfig(blockId, cfg as Record<string, unknown>);
+    if (!cfg || typeof cfg !== "object" || Array.isArray(cfg)) {
+      throw new Error(`moduleConfig: '${blockId}' must be an object`);
     }
+    out[blockId] = validateModuleConfig(blockId, cfg as Record<string, unknown>);
   }
   return Object.keys(out).length ? out : undefined;
 }

@@ -68,12 +68,11 @@ function main(): void {
     `these knobs are offered in onboarding but no block reads them, so setting them changes nothing:\n  ${dead.join("\n  ")}`,
   );
 
-  // The surface must also stay reachable: an unregistered block has its config
-  // silently dropped by validateModuleConfigMap, which is how the whole title
-  // module went unconfigurable.
+  // The surface must also stay reachable: creation rejects an unregistered
+  // block, and a missing card would make a real operator control unusable.
   const keys = new Set(CORE_MODULE_SURFACES.map((card) => card.key));
   for (const required of ["metadata", "script_gen", "narration_tts", "visual_matter"]) {
-    assert.ok(keys.has(required), `${required} must expose a surface or its channel config is dropped on write`);
+    assert.ok(keys.has(required), `${required} must expose a surface or its channel config cannot be persisted`);
   }
 
   // ONBOARDING AND VALIDATION MUST AGREE.
@@ -82,8 +81,8 @@ function main(): void {
   // what the channel-creation UI renders, and MODULE_REGISTRY is what
   // channels.setModuleConfig validates against. A parameter present in the
   // first and absent from the second renders as a working control, accepts a
-  // value, and is DROPPED on write — validateModuleConfigMap skips what it does
-  // not recognise. Nothing connected the two, and eight parameters across three
+  // value, and channel creation rejects it. Nothing connected the two, and eight
+  // parameters across three
   // blocks were being discarded that way: lore_short's art look and narrator,
   // quiz_year's three pacing controls, and the assemble block's fades and
   // caption burn-in.
@@ -98,7 +97,7 @@ function main(): void {
     assert.deepEqual(
       orphaned,
       [],
-      "onboarding offers these parameters but nothing validates them, so setting them is discarded on write:\n  " +
+      "onboarding offers these parameters but nothing validates them, so setting them cannot be persisted:\n  " +
         orphaned.join("\n  "),
     );
   }
