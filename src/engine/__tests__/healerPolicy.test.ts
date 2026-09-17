@@ -135,6 +135,28 @@ function healClassDeclarationTests(): void {
     ])?.healClasses.stock_footage,
     ["body_rebuild"],
   );
+
+  const rejectedLogs: string[] = [];
+  assert.equal(
+    planHeal("qa_visual FAILED: visual review", timelineBlocks, (message) => rejectedLogs.push(message), [
+      { ...overlaySignal, owner: "stock_footage", action: "recompose_overlay" },
+    ]),
+    null,
+    "an inconsistent reviewer signal must not supersede paid footage",
+  );
+  assert.ok(rejectedLogs.some((message) => message.includes("does not belong to stock_footage")));
+
+  const introBlocks: HealableBlock[] = [
+    { id: "intro_card", produces: ["introCardKey"], consumes: ["title"], paid: true },
+    { id: "qa_visual", produces: ["qaReport"], consumes: ["introCardKey"] },
+  ];
+  assert.deepEqual(
+    planHeal("qa_visual FAILED: visual review", introBlocks, () => {}, [
+      { ...overlaySignal, owner: "intro_card", action: "rerender_card" },
+    ])?.rerunBlocks,
+    ["intro_card", "qa_visual"],
+    "the valid intro-card repair still runs its owner and downstream QA",
+  );
 }
 
 main();

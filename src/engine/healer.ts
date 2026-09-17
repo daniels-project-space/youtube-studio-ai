@@ -150,6 +150,19 @@ const VISUAL_REPAIR_HEAL_CLASS: Readonly<Record<VisualRepairAction, HealClass>> 
 };
 
 /**
+ * The reviewer emits these exact owner/action pairs. A typed signal can still
+ * arrive from persisted data or a future caller with an inconsistent pair;
+ * accepting it would supersede the named owner (possibly paid) even though
+ * that block cannot execute the requested repair.
+ */
+const VISUAL_REPAIR_ACTIONS_BY_OWNER: Readonly<Record<VisualRepairOwner, readonly VisualRepairAction[]>> = {
+  motion_comic: ["reflow_bubble"],
+  timeline_assemble: ["recompose_overlay", "rebuild_timeline"],
+  stock_footage: ["resample_footage"],
+  intro_card: ["rerender_card"],
+};
+
+/**
  * Defect catalog — built from REAL observed failures, not speculation. Order
  * matters only for labeling; all matching rules contribute owners.
  */
@@ -355,6 +368,10 @@ export function planHeal(
   const acceptedVisualRepair: VisualRepairSignal[] = [];
   for (const signal of visualRepair) {
     if (signal.severity === "minor") continue;
+    if (!VISUAL_REPAIR_ACTIONS_BY_OWNER[signal.owner]?.includes(signal.action)) {
+      log(`healer: visual repair action ${signal.action} does not belong to ${signal.owner}; refusing an ineffective rerun`);
+      continue;
+    }
     if (!blocks.some((block) => block.id === signal.owner)) {
       log(`healer: visual repair owner ${signal.owner} is not in this pipeline; leaving it for human review`);
       continue;
