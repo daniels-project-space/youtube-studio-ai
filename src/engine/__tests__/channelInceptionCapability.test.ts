@@ -103,7 +103,12 @@ if (documentary.mode === "registered_non_gemini") {
 const children = familySupervisedChannelInceptionCapability("children_learning");
 assert.equal(children?.mode, "registered_supervised_non_gemini");
 assert.equal(children?.reviewScope, "private_human_child_editor_review_only");
-assert.equal(children?.reviewHref, undefined, "the creator must not invent a children review desk that does not exist");
+assert.equal(children?.reviewHref, "/children-review", "the selectable supervised route must open its real private intake desk");
+assert.equal(
+  familyChannelInceptionCapability("children_learning").mode,
+  "unregistered",
+  "a private intake desk must not grant automatic channel creation",
+);
 assert.ok(
   children?.requiredArtifacts.some((artifact) => artifact.includes("Show Bible")),
   "the selectable children route must name its real private-review intake material",
