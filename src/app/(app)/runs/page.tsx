@@ -151,7 +151,12 @@ function ProductionRunRow({ run, index }: { run: RunRow; index: number }) {
         ? "Waiting for runner"
         : "Starting pipeline";
   return (
-    <Link href={`/runs/${run._id}`} className={styles.runRow} data-status={run.status}>
+    <Link
+      href={`/runs/${run._id}`}
+      className={styles.runRow}
+      data-status={run.status}
+      data-live={live ? "true" : "false"}
+    >
       <span className={styles.runIndex}>{String(index + 1).padStart(2, "0")}</span>
       <span className={styles.runSignal} aria-hidden="true"><i /></span>
       <span className={styles.runIdentity}>

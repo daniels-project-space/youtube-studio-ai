@@ -26,10 +26,12 @@ assert.doesNotMatch(detailPage, /<div className=\{`glass \$\{styles\.errorPanel\
 assert.match(detailStyles, /\.errorTechnical code[^{]*\{[^}]*overflow-wrap: anywhere/);
 assert.match(page, /run\.stageProgress/);
 assert.match(page, /blockLabel\(progress\.currentBlock\)/);
+assert.match(page, /data-live=\{live \? "true" : "false"\}/);
 assert.match(page, /automaticResumeLabel\(run\.automaticResumeState/);
 assert.match(page, /className=\{styles\.runRecovery\}/);
 assert.match(styles, /\.runProgress \{/);
 assert.match(styles, /\.runRecovery \{/);
+assert.match(styles, /\.runRow\[data-live="true"\] \{ min-height: 68px/);
 assert.match(runsQuery, /summarizeRunStageProgress/);
 assert.match(runsQuery, /\.query\("runStages"\)/);
 assert.match(runsQuery, /automaticResumeState: run\.automaticResumeState/);
