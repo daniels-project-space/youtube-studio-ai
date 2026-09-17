@@ -7,6 +7,11 @@ import { SkeletonList } from "@/components/Skeleton";
 import { useOperationsAccess } from "@/components/OperationsAccess";
 import { useSelectedChannel } from "@/lib/channel-context";
 import { useOwnerId } from "@/lib/owner-context";
+import {
+  youtubeConnectionLabel,
+  youtubeConnectorPublishingReady,
+  youtubeLastVerifiedLabel,
+} from "@/lib/youtubeConnectionPresentation";
 import type { ChannelRow } from "@/lib/types";
 import styles from "./settings.module.css";
 
@@ -44,6 +49,7 @@ type YoutubeConnector = {
   ytChannelId: string | null;
   status: "active" | "revoked" | "error";
   scopeHealth: "healthy" | "partial" | "unknown";
+  validatedAt: number | null;
   updatedAt: number;
 };
 
@@ -485,15 +491,7 @@ function SettingsHero({
 }) {
   const schedule = channel?.schedule;
   const frequency = schedule?.frequency ?? channel?.identity?.cadence ?? "not set";
-  const connectorLabel = connectorsLoading
-    ? "Checking"
-    : !connector
-      ? "Not linked"
-      : connector.status !== "active"
-        ? "Reconnect"
-        : connector.scopeHealth === "healthy"
-          ? "Healthy"
-          : "Partial scopes";
+  const connectorLabel = youtubeConnectionLabel(connector, connectorsLoading);
   const releaseMode = channel ? currentPublishMode(channel) : "draft";
 
   return (
@@ -684,8 +682,7 @@ function ChannelSettingsPanel({
   );
   const publishingOperational =
     channel.status === "active" &&
-    connector?.status === "active" &&
-    connector.scopeHealth !== "partial";
+    youtubeConnectorPublishingReady(connector);
 
   const updateShowBibleRearmDraft = (
     claimId: string,
@@ -739,8 +736,7 @@ function ChannelSettingsPanel({
 
   const setStatus = async () => {
     const next = channel.status === "active" ? "paused" : "active";
-    const publishingUnavailable =
-      connector?.status !== "active" || connector.scopeHealth === "partial";
+    const publishingUnavailable = !youtubeConnectorPublishingReady(connector);
     if (
       next === "active" &&
       !window.confirm(
@@ -972,7 +968,7 @@ function ChannelSettingsPanel({
               </div>
               <div>
                 <dt>Last verified</dt>
-                <dd>{fmtDate(connector?.updatedAt)}</dd>
+                <dd>{youtubeLastVerifiedLabel(connector, fmtDate)}</dd>
               </div>
             </dl>
             <div className={styles.actions}>

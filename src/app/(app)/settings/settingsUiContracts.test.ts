@@ -22,6 +22,11 @@ assert.match(page, /fetch\("\/api\/channel-settings"/,
   "governance edits must remain connected to the real settings route");
 assert.match(page, /\/api\/youtube-connect/);
 assert.match(page, /\/api\/youtube-revoke/);
+assert.match(page, /youtubeConnectorPublishingReady\(connector\)/,
+  "settings readiness must require a genuinely healthy connector");
+assert.match(page, /youtubeLastVerifiedLabel\(connector, fmtDate\)/,
+  "last verified must use connector validation evidence, not a generic update time");
+assert.doesNotMatch(page, /fmtDate\(connector\?\.updatedAt\)/);
 assert.match(page, /window\.confirm/,
   "consequential governance mutations must preserve explicit confirmation");
 assert.match(page, /if \(operationsAccess !== "owner"\) return;/,
