@@ -1,0 +1,327 @@
+/**
+ * Paid weekly image producer.
+ *
+ * The planner freezes editorial inputs; this task is the explicit visual data
+ * plane that turns an approved shot packet into receipt-backed, canonical R2
+ * stills.  It is deliberately create-only and replayable: a retry reuses a
+ * fully verified sidecar and never submits the same image wave twice.
+ */
+import { task } from "@trigger.dev/sdk";
+import { generationProfile, isProductionQualityGenerationProfile, type GenerationProfile } from "@/engine/generationProfiles";
+import { StillRenderManifestSchema, type StillRenderManifest } from "@/engine/renderArtifacts";
+import {
+  assertPlanWeekPreparedImagesBinding,
+  assertPlanWeekPreparationManifestBinding,
+  normalizePlanWeekPreparationManifest,
+  planWeekPreparedImageKey,
+  planWeekPreparedImagesKey,
+  planWeekPreparationKey,
+  planWeekPreparationManifestSha256,
+  PLAN_WEEK_PREPARATION_VERSION,
+  type PlanWeekPreparedImages,
+  type PlanWeekPreparationManifest,
+} from "@/lib/planWeekPreparation";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
+import { getObjectBytes, putObject } from "@/lib/storage";
+import { bootstrapSecrets } from "@/lib/bootstrap";
+import { renderImages, toNovitaPhaseProfile, type Shot } from "@/lib/novitaRenderFarm";
+
+export interface PlanWeekPreparedImageShot {
+  id: string;
+  prompt: string;
+  negative?: string;
+  seed?: number;
+  candidateCount?: number;
+  cameraMove?: Shot["cameraMove"];
+  shotScale?: Shot["shotScale"];
+  lens?: string;
+  seconds?: number;
+  motion?: string;
+}
+
+export interface PlanWeekPreparedImagesArgs {
+  ownerId: string;
+  channelId: string;
+  channelSlug: string;
+  batchId: string;
+  itemId: string;
+  manifestKey: string;
+  manifestSha256: string;
+  shots: PlanWeekPreparedImageShot[];
+  generationProfile?: "production" | "hero";
+  style?: string;
+  negative?: string;
+  director?: string;
+  maxCostUsd: number;
+}
+
+function safePart(value: unknown, label: string): string {
+  if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u.test(value)) {
+    throw new Error(`weekly prepared images ${label} is invalid`);
+  }
+  return value;
+}
+
+function digest(value: unknown, label: string): string {
+  if (typeof value !== "string" || !/^[a-f0-9]{64}$/u.test(value.trim().toLowerCase())) {
+    throw new Error(`weekly prepared images ${label} is invalid`);
+  }
+  return value.trim().toLowerCase();
+}
+
+const CAMERA_MOVES = new Set<Shot["cameraMove"]>([
+  "static", "dolly_push", "dolly_pull", "crane_up", "crane_down", "orbit_left", "orbit_right",
+  "truck_left", "truck_right", "handheld_drift",
+]);
+const SHOT_SCALES = new Set<Shot["shotScale"]>(["wide", "medium", "close", "extreme_close", "establishing"]);
+
+function objectNotFound(error: unknown): boolean {
+  const candidate = error as { name?: unknown; $metadata?: { httpStatusCode?: unknown } } | null;
+  return candidate?.name === "NoSuchKey" || candidate?.name === "NotFound" || candidate?.$metadata?.httpStatusCode === 404;
+}
+
+function generationIdentity(profile: GenerationProfile): StillRenderManifest["generation"] {
+  return {
+    contractVersion: profile.contractVersion,
+    profileId: profile.id,
+    model: profile.image.model,
+    revision: profile.image.revision,
+    checkpoint: profile.image.checkpoint,
+    precision: profile.image.precision,
+    width: profile.image.width,
+    height: profile.image.height,
+    steps: profile.image.steps,
+    allowFallback: false,
+  };
+}
+
+function canonicalScope(payload: PlanWeekPreparedImagesArgs) {
+  return {
+    ownerId: payload.ownerId,
+    channelSlug: payload.channelSlug,
+    batchId: payload.batchId,
+    itemId: payload.itemId,
+  };
+}
+
+export function assertPlanWeekPreparedImagesArgs(value: unknown): PlanWeekPreparedImagesArgs {
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("weekly prepared images payload is invalid");
+  const raw = value as Record<string, unknown>;
+  const ownerId = safePart(raw.ownerId, "owner id");
+  const channelId = safePart(raw.channelId, "channel id");
+  const channelSlug = safePart(raw.channelSlug, "channel slug");
+  const batchId = safePart(raw.batchId, "batch id");
+  const itemId = safePart(raw.itemId, "item id");
+  const manifestSha256 = digest(raw.manifestSha256, "manifest digest");
+  const manifestKey = typeof raw.manifestKey === "string" ? raw.manifestKey : "";
+  const expectedManifestKey = planWeekPreparationKey({ ownerId, channelSlug, batchId, itemId });
+  if (manifestKey !== expectedManifestKey) throw new Error("weekly prepared images manifest key is not canonical");
+  if (!Array.isArray(raw.shots) || raw.shots.length < 1 || raw.shots.length > 240) {
+    throw new Error("weekly prepared images requires 1..240 approved shots");
+  }
+  const shots = raw.shots.map((candidate, index): PlanWeekPreparedImageShot => {
+    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) throw new Error(`weekly prepared image shot ${index + 1} is invalid`);
+    const shot = candidate as Record<string, unknown>;
+    const id = safePart(shot.id, `shot ${index + 1} id`);
+    const prompt = typeof shot.prompt === "string" ? shot.prompt.trim() : "";
+    if (!prompt || prompt.length > 12_000) throw new Error(`weekly prepared image shot ${id} prompt is invalid`);
+    const candidateCount = shot.candidateCount === undefined ? undefined : shot.candidateCount;
+    if (candidateCount !== undefined && (!Number.isInteger(candidateCount) || Number(candidateCount) < 1 || Number(candidateCount) > 4)) {
+      throw new Error(`weekly prepared image shot ${id} candidate count is invalid`);
+    }
+    const seed = shot.seed === undefined ? undefined : shot.seed;
+    if (seed !== undefined && (!Number.isSafeInteger(seed) || Number(seed) < 0)) throw new Error(`weekly prepared image shot ${id} seed is invalid`);
+    if (shot.cameraMove !== undefined && (typeof shot.cameraMove !== "string" || !CAMERA_MOVES.has(shot.cameraMove as Shot["cameraMove"]))) {
+      throw new Error(`weekly prepared image shot ${id} camera move is invalid`);
+    }
+    if (shot.shotScale !== undefined && (typeof shot.shotScale !== "string" || !SHOT_SCALES.has(shot.shotScale as Shot["shotScale"]))) {
+      throw new Error(`weekly prepared image shot ${id} shot scale is invalid`);
+    }
+    if (shot.seconds !== undefined && (typeof shot.seconds !== "number" || !Number.isFinite(shot.seconds) || shot.seconds <= 0 || shot.seconds > 300)) {
+      throw new Error(`weekly prepared image shot ${id} seconds is invalid`);
+    }
+    return {
+      id,
+      prompt,
+      ...(typeof shot.negative === "string" && shot.negative.trim() ? { negative: shot.negative.trim() } : {}),
+      ...(seed === undefined ? {} : { seed: Number(seed) }),
+      ...(candidateCount === undefined ? {} : { candidateCount: Number(candidateCount) }),
+      ...(typeof shot.cameraMove === "string" ? { cameraMove: shot.cameraMove as Shot["cameraMove"] } : {}),
+      ...(typeof shot.shotScale === "string" ? { shotScale: shot.shotScale as Shot["shotScale"] } : {}),
+      ...(typeof shot.lens === "string" && shot.lens.trim() ? { lens: shot.lens.trim() } : {}),
+      ...(shot.seconds === undefined ? {} : { seconds: Number(shot.seconds) }),
+      ...(typeof shot.motion === "string" ? { motion: shot.motion } : {}),
+    };
+  });
+  if (new Set(shots.map((shot) => shot.id)).size !== shots.length) throw new Error("weekly prepared image shot ids must be unique");
+  const profileId = raw.generationProfile === undefined ? "production" : raw.generationProfile;
+  if (profileId !== "production" && profileId !== "hero") throw new Error("weekly prepared images require a production or hero profile");
+  const maxCostUsd = raw.maxCostUsd;
+  if (typeof maxCostUsd !== "number" || !Number.isFinite(maxCostUsd) || maxCostUsd <= 0 || maxCostUsd > 1_000) {
+    throw new Error("weekly prepared images maxCostUsd must be greater than zero and no more than 1000");
+  }
+  const profile = generationProfile(profileId);
+  const expanded = shots.reduce((sum, shot) => sum + (shot.candidateCount ?? profile.image.candidates), 0);
+  if (expanded > 240) throw new Error("weekly prepared images expanded candidate count exceeds 240");
+  return {
+    ownerId, channelId, channelSlug, batchId, itemId, manifestKey, manifestSha256, shots,
+    generationProfile: profileId,
+    ...(typeof raw.style === "string" && raw.style.trim() ? { style: raw.style.trim() } : {}),
+    ...(typeof raw.negative === "string" && raw.negative.trim() ? { negative: raw.negative.trim() } : {}),
+    ...(typeof raw.director === "string" && raw.director.trim() ? { director: raw.director.trim() } : {}),
+    maxCostUsd,
+  };
+}
+
+async function readPreparationManifest(payload: PlanWeekPreparedImagesArgs): Promise<PlanWeekPreparationManifest> {
+  const manifestBytes = await getObjectBytes(payload.manifestKey);
+  if (sha256BytesHex(manifestBytes) !== payload.manifestSha256) throw new Error("weekly prepared images manifest digest mismatch");
+  const parsed = JSON.parse(new TextDecoder().decode(manifestBytes)) as unknown;
+  const normalized = normalizePlanWeekPreparationManifest(parsed);
+  return assertPlanWeekPreparationManifestBinding({
+    manifest: normalized,
+    pointer: { version: PLAN_WEEK_PREPARATION_VERSION, manifestKey: payload.manifestKey, manifestSha256: payload.manifestSha256 },
+    ownerId: payload.ownerId,
+    channelId: payload.channelId,
+    batchId: payload.batchId,
+    itemId: payload.itemId,
+    itemKey: normalized.itemKey,
+    requestKey: normalized.requestKey,
+    channelSlug: payload.channelSlug,
+    topic: normalized.plan.topic,
+    title: normalized.plan.title,
+    thumbnailKey: normalized.plan.thumbnailKey,
+    thumbnailSource: normalized.plan.thumbnailSource,
+  });
+}
+
+async function verifyStoredSidecar(key: string, manifest: PlanWeekPreparationManifest): Promise<PlanWeekPreparedImages | null> {
+  let bytes: Uint8Array;
+  try { bytes = await getObjectBytes(key); } catch (error) { if (objectNotFound(error)) return null; throw error; }
+  const prepared = assertPlanWeekPreparedImagesBinding({ prepared: JSON.parse(new TextDecoder().decode(bytes)), manifest });
+  await Promise.all(prepared.items.map(async (item) => {
+    const media = await getObjectBytes(item.stillKey);
+    if (media.byteLength !== item.byteLength || sha256BytesHex(media) !== item.sha256) {
+      throw new Error(`weekly prepared image ${item.stillKey} failed its retained-byte integrity check`);
+    }
+  }));
+  return prepared;
+}
+
+async function persistCreateOnly(key: string, body: Uint8Array): Promise<boolean> {
+  try {
+    await putObject(key, body, { contentType: "application/json", metadata: { "plan-week-prepared-images": "v1", sha256: sha256BytesHex(body) }, ifNoneMatch: "*" });
+    return true;
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    if (status !== 409 && status !== 412) throw error;
+    return false;
+  }
+}
+
+async function persistMediaCreateOnly(key: string, bytes: Uint8Array): Promise<void> {
+  try {
+    await putObject(key, bytes, { contentType: "image/png", metadata: { sha256: sha256BytesHex(bytes) }, ifNoneMatch: "*" });
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    if (status !== 409 && status !== 412) throw error;
+    const existing = await getObjectBytes(key);
+    if (existing.byteLength !== bytes.byteLength || sha256BytesHex(existing) !== sha256BytesHex(bytes)) {
+      throw new Error(`weekly prepared image create-only collision at ${key}`);
+    }
+  }
+}
+
+export const planWeekPreparedImagesTask = task({
+  id: "plan-week-prepared-images",
+  maxDuration: 3_600,
+  retry: { maxAttempts: 1 },
+  queue: { concurrencyLimit: 1 },
+  run: async (rawPayload: PlanWeekPreparedImagesArgs) => {
+    const payload = assertPlanWeekPreparedImagesArgs(rawPayload);
+    await bootstrapSecrets(() => undefined, {
+      services: ["cloudflare", "novita"],
+      required: ["R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
+    });
+    const manifest = await readPreparationManifest(payload);
+    const sidecarKey = planWeekPreparedImagesKey(canonicalScope(payload));
+    const prior = await verifyStoredSidecar(sidecarKey, manifest);
+    if (prior) {
+      return { ok: true, reused: true, sidecarKey, outputs: prior.items.length, costUsd: 0, manifestSha256: prior.manifestSha256 };
+    }
+    const profile = generationProfile(payload.generationProfile);
+    if (!isProductionQualityGenerationProfile(profile.id)) throw new Error("weekly prepared images rejected a non-production profile");
+    const shots: Shot[] = payload.shots.map((shot) => ({
+      id: shot.id,
+      prompt: shot.prompt,
+      cameraMove: shot.cameraMove ?? "static",
+      shotScale: shot.shotScale ?? "medium",
+      lens: shot.lens ?? "50mm",
+      seconds: shot.seconds ?? 1,
+      motion: shot.motion ?? "",
+      ...(shot.negative ? { negative: shot.negative } : {}),
+      ...(shot.seed === undefined ? {} : { seed: shot.seed }),
+      ...(shot.candidateCount === undefined ? {} : { candidateCount: shot.candidateCount }),
+    }));
+    const result = await renderImages({
+      prefix: `${sidecarKey.slice(0, -".json".length)}/render`,
+      shots,
+      profile: toNovitaPhaseProfile(profile, "image"),
+      ...(payload.style ? { style: payload.style } : {}),
+      ...(payload.negative ? { negative: payload.negative } : {}),
+      ...(payload.director ? { director: payload.director } : {}),
+      maxCostUsd: payload.maxCostUsd,
+      lifecycle: { ownerId: payload.ownerId, channelId: payload.channelId, runId: `plan-week-images-${payload.batchId}-${payload.itemId}`, blockId: "plan_week_prepared_images" },
+    });
+    const candidates = result.candidates ?? [];
+    const expected = payload.shots.reduce((sum, shot) => sum + (shot.candidateCount ?? profile.image.candidates), 0);
+    if (candidates.length !== expected) throw new Error(`weekly prepared images returned ${candidates.length} candidates; expected ${expected}`);
+    const shotOrder = new Map(payload.shots.map((shot, index) => [shot.id, index]));
+    const ordered = [...candidates].sort((a, b) => (shotOrder.get(a.shotId)! - shotOrder.get(b.shotId)!) || (a.candidateIndex - b.candidateIndex));
+    const seen = new Set<string>();
+    const items = [] as PlanWeekPreparedImages["items"];
+    const stillItems = [] as StillRenderManifest["items"];
+    for (const [index, candidate] of ordered.entries()) {
+      const identity = `${candidate.shotId}:${candidate.candidateIndex}`;
+      if (seen.has(identity)) throw new Error(`weekly prepared images returned duplicate candidate ${identity}`);
+      seen.add(identity);
+      const source = await getObjectBytes(candidate.key);
+      const stillKey = planWeekPreparedImageKey({ ...canonicalScope(payload), index });
+      await persistMediaCreateOnly(stillKey, source);
+      const sha256 = sha256BytesHex(source);
+      items.push({ shotId: candidate.shotId, candidateIndex: candidate.candidateIndex, stillKey, sha256, byteLength: source.byteLength });
+      stillItems.push({ shotId: candidate.shotId, candidateIndex: candidate.candidateIndex, outputId: candidate.outputId, stillKey });
+    }
+    const expectedIdentities = new Set(
+      payload.shots.flatMap((shot) => Array.from({ length: shot.candidateCount ?? profile.image.candidates }, (_, candidateIndex) => `${shot.id}:${candidateIndex}`)),
+    );
+    if (seen.size !== expectedIdentities.size || [...expectedIdentities].some((identity) => !seen.has(identity))) {
+      throw new Error("weekly prepared images returned an incomplete shot/candidate mapping");
+    }
+    const stillRenderManifest = StillRenderManifestSchema.parse({ version: "1.0.0", generation: generationIdentity(profile), items: stillItems });
+    const prepared: PlanWeekPreparedImages = {
+      version: "plan-week-prepared-images/v1",
+      manifestSha256: planWeekPreparationManifestSha256(manifest),
+      ownerId: manifest.ownerId,
+      channelId: manifest.channelId,
+      batchId: manifest.batchId,
+      itemId: manifest.itemId,
+      requestKey: manifest.requestKey,
+      topic: manifest.plan.topic,
+      stillRenderManifest,
+      stillRenderManifestSha256: sha256Hex(canonicalJson(stillRenderManifest)),
+      items,
+      createdAt: Date.now(),
+    };
+    assertPlanWeekPreparedImagesBinding({ prepared, manifest });
+    const body = new TextEncoder().encode(canonicalJson(prepared));
+    const created = await persistCreateOnly(sidecarKey, body);
+    if (!created) {
+      const winner = await verifyStoredSidecar(sidecarKey, manifest);
+      if (!winner) throw new Error("weekly prepared images sidecar was lost after create-only collision");
+      return { ok: true, reused: true, sidecarKey, outputs: winner.items.length, costUsd: 0, manifestSha256: winner.manifestSha256 };
+    }
+    return { ok: true, reused: false, sidecarKey, outputs: items.length, costUsd: result.costUsd, manifestSha256: prepared.manifestSha256 };
+  },
+});
