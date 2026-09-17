@@ -19,5 +19,6 @@ assert.match(page, /"children_learning"/u, "the quick territory list must expose
 assert.match(page, /supervisedCreatorSelectionForFamily/u, "supervised territory selection needs its own private-review conversion");
 assert.match(page, /"\/children-review"/u, "a children-review recovery handoff must be a supported destination");
 assert.match(page, /review ready/u, "a supervised learning route must not be mislabeled as held");
+assert.match(page, /!supervisedAdmission && !automaticFamilyCreatorReadiness\(fam\.key\)\.ready/u, "a supervised route must not present its intentional manual-review state as an automatic-route warning");
 
 console.log("children learning creator entry tests passed");
