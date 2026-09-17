@@ -2,6 +2,7 @@
 
 import {
   Suspense,
+  useEffect,
   useMemo,
   useState,
   type KeyboardEvent,
@@ -47,6 +48,8 @@ const SEO_SECTIONS: { id: SeoSection; label: string; description: string }[] = [
     description: "Gaps, hooks, and competitors",
   },
 ];
+
+const SEO_ESTIMATE_DEBOUNCE_MS = 300;
 
 function validSection(value: string | null): SeoSection {
   return value === "signals" || value === "strategy" ? value : "brief";
@@ -876,17 +879,34 @@ function ViewEstimateWidget({
   niche: string;
 }) {
   const [input, setInput] = useState("");
+  const [committedInput, setCommittedInput] = useState("");
+
+  // Keep the text field responsive while waiting to ask Convex for a new
+  // benchmark. A candidate tag set is only committed after the user pauses,
+  // so typing a phrase does not create one reactive query per keystroke.
+  useEffect(() => {
+    if (input === committedInput) return;
+    const timer = window.setTimeout(() => {
+      setCommittedInput(input);
+    }, SEO_ESTIMATE_DEBOUNCE_MS);
+    return () => window.clearTimeout(timer);
+  }, [committedInput, input]);
+
   const tags = useMemo(
     () =>
-      input
+      committedInput
         .split(",")
         .map((t) => t.trim())
         .filter(Boolean),
-    [input],
+    [committedInput],
   );
 
-  // Reactive estimate — re-runs as tags change (debounced by user typing).
-  const estimate = useQuery(api.seo.viewEstimate, { ownerId, niche, tags });
+  // Empty drafts never produce a visible estimate, so avoid the otherwise
+  // unnecessary fallback query until there is a committed candidate set.
+  const estimate = useQuery(
+    api.seo.viewEstimate,
+    tags.length > 0 ? { ownerId, niche, tags } : "skip",
+  );
 
   return (
     <section className={styles.estimateRoom}>

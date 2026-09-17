@@ -18,6 +18,12 @@ assert.match(page, /benchmark midpoint/,
   "comparable views must be presented as a benchmark rather than a promised audience outcome");
 assert.match(page, /Comparable public videos/,
   "the benchmark must name the evidence population instead of exposing an implementation label");
+assert.match(page, /committedInput/,
+  "the estimate input must commit after a pause instead of querying on every keystroke");
+assert.match(page, /SEO_ESTIMATE_DEBOUNCE_MS = 300/,
+  "the estimate debounce must remain explicit and bounded");
+assert.match(page, /tags\.length > 0 \? \{ ownerId, niche, tags \} : \"skip\"/,
+  "an empty candidate set must not create a hidden fallback query");
 assert.doesNotMatch(page, /tag overlap \(\$\{estimate\.matches\} matches\)/,
   "implementation terminology should not be the user-facing result label");
 assert.match(page, /fetch\("\/api\/research"/,
