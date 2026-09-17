@@ -447,13 +447,16 @@ export const listPublishedCalendarRange = query({
       // Library/run details so a completed candidate is visible on every
       // calendar card too. Historical rows without a bound run retain their
       // ledger key and remain truthful rather than guessing a candidate.
-      const [run, channel, assets] = await Promise.all([
+      const [run, channel, sourceThumbnail] = await Promise.all([
         ctx.db.get(row.runId),
         ctx.db.get(row.channelId),
-        ctx.db.query("assets").withIndex("by_run", (q) => q.eq("runId", row.runId!)).collect(),
+        ctx.db
+          .query("assets")
+          .withIndex("by_run_kind", (q) => q.eq("runId", row.runId!).eq("kind", "thumbnail"))
+          .first()
+          .then((asset) => asset ?? undefined),
       ]);
       if (!run || run.ownerId !== args.ownerId || run.channelId !== row.channelId) return item;
-      const sourceThumbnail = assets.find((asset) => asset.kind === "thumbnail");
       const current = await currentLibraryThumbnail(ctx, {
         ownerId: args.ownerId,
         runId: run._id,

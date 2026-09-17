@@ -72,6 +72,8 @@ assert.match(styles, /\.bulkControls \{[^}]*auto auto/,
   "the compact weekly controls must reserve a slot for the H3 batch desk link");
 assert.match(publishedCalendar, /currentLibraryThumbnail\(ctx/,
   "published calendar rows must use the shared current-thumbnail projection");
+assert.match(publishedCalendar, /withIndex\("by_run_kind", \(q\) => q\.eq\("runId", row\.runId!\)\.eq\("kind", "thumbnail"\)\)/,
+  "published calendar rows should read only the source thumbnail asset");
 assert.match(publishedCalendar, /thumbnailKey: current\.key/,
   "calendar cards must expose the accepted candidate key rather than the upload-time legacy key");
 
