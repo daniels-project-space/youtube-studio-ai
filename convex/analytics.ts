@@ -31,16 +31,24 @@ export const channelTrend = query({
     days: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
+    // Verify ownership before taking the bounded window. This keeps the
+    // optimization tenant-safe even if a caller supplies a channel id from
+    // another owner, and avoids scanning that channel's history at all.
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel || channel.ownerId !== args.ownerId) return [];
+
+    const window = args.days && args.days > 0 ? Math.min(Math.floor(args.days), 365) : 365;
     const rows = await ctx.db
       .query("channelAnalytics")
       .withIndex("by_channel_date", (q) => q.eq("channelId", args.channelId))
-      .collect();
-    // Tenancy guard + chronological order.
-    const owned = rows
+      .order("desc")
+      .take(window);
+    // The channel ownership check above protects the bounded read. Keep the
+    // row-level filter for historical data written before owner binding was
+    // enforced, then restore the public chronological ordering.
+    return rows
       .filter((r) => r.ownerId === args.ownerId)
-      .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-    if (args.days && args.days > 0) return owned.slice(-args.days);
-    return owned;
+      .reverse();
   },
 });
 
