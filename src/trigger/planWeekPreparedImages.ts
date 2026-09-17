@@ -379,7 +379,10 @@ async function dispatchPreparedFootage(
 export const planWeekPreparedImagesTask = task({
   id: "plan-week-prepared-images",
   maxDuration: 3_600,
-  retry: { maxAttempts: 1 },
+  // Retained stills and the H3 handoff are create-only and digest-checked, so
+  // one bounded retry can recover a transient Novita/R2/Trigger interruption
+  // without duplicating a completed image wave.
+  retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },
   queue: { concurrencyLimit: 1 },
   run: async (rawPayload: PlanWeekPreparedImagesArgs) => {
     const payload = assertPlanWeekPreparedImagesArgs(rawPayload);

@@ -206,7 +206,11 @@ async function dispatchPreparedNarration(manifest: PlanWeekPreparationManifest, 
 export const planWeekPreparedScriptTask = task({
   id: "plan-week-prepared-script",
   maxDuration: 1_800,
-  retry: { maxAttempts: 1 },
+  // A transient model/R2 failure must not strand the weekly slate. The
+  // producer is create-only and the sidecar is content-addressed, so a retry
+  // after a completed write reuses the exact script without another model
+  // call; the bounded two-attempt policy keeps failures and spend visible.
+  retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },
   queue: { concurrencyLimit: 2 },
   run: async (rawPayload: PlanWeekPreparedScriptArgs) => {
     const payload = assertPlanWeekPreparedScriptArgs(rawPayload);

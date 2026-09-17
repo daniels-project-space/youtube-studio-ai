@@ -360,7 +360,10 @@ async function persistCreateOnly(key: string, body: Uint8Array, contentType: str
 export const planWeekPreparedNarrationTask = task({
   id: "plan-week-prepared-narration",
   maxDuration: 3_600,
-  retry: { maxAttempts: 1 },
+  // Sentence audio and its receipt are immutable. A short provider or R2
+  // interruption can therefore be retried safely; a replay validates the
+  // retained bytes and dispatches the next prepared stages without respend.
+  retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },
   queue: { concurrencyLimit: 2 },
   run: async (rawPayload: PlanWeekPreparedNarrationArgs) => {
     const payload = assertPlanWeekPreparedNarrationArgs(rawPayload);

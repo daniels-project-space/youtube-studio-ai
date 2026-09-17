@@ -215,7 +215,9 @@ async function persistCreateOnly(key: string, body: Uint8Array, contentType: str
 export const planWeekPreparedMusicTask = task({
   id: "plan-week-prepared-music",
   maxDuration: 3_600,
-  retry: { maxAttempts: 1 },
+  // The create-only audio/sidecar pair makes a bounded retry safe after a
+  // transport failure, while avoiding an unbounded paid retry loop.
+  retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },
   queue: { concurrencyLimit: 2 },
   run: async (rawPayload: PlanWeekPreparedMusicArgs) => {
     const payload = assertArgs(rawPayload);
