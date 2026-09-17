@@ -179,13 +179,23 @@ export function buildPreparedImageShots(
     ? seed.styleDNA as Record<string, unknown>
     : undefined;
   const imageConfig = manifest.execution.moduleConfig.novita_render_images;
+  const storySpineEntry = manifest.execution.pipeline.find((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    const block = (entry as Record<string, unknown>).block ?? (entry as Record<string, unknown>).id;
+    return block === "story_spine";
+  });
+  const storySpineParams = storySpineEntry && typeof storySpineEntry === "object" && !Array.isArray(storySpineEntry)
+    ? ((storySpineEntry as Record<string, unknown>).params as Record<string, unknown> | undefined)
+    : undefined;
   const spine = planStorySpine({
     topic: manifest.plan.topic,
     narrationDurationSec: narration.narrationDurationSec,
     sentenceTimings: narration.sentenceTimings,
     styleDNA,
-    generationProfile: imageConfig?.generationProfile ?? "production",
-    targetShotSec: typeof imageConfig?.targetShotSec === "number" ? imageConfig.targetShotSec : 6,
+    generationProfile: imageConfig?.generationProfile ?? storySpineParams?.generationProfile ?? "production",
+    targetShotSec: typeof storySpineParams?.targetShotSec === "number"
+      ? storySpineParams.targetShotSec
+      : typeof imageConfig?.targetShotSec === "number" ? imageConfig.targetShotSec : 6,
   });
   const specs = new Map(spine.dpVisualSpecs.map((spec) => [spec.shotId, spec]));
   const profiles = new Set(spine.shotList.map((shot) => shot.generationProfile));
