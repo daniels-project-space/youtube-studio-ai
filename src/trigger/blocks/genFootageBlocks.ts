@@ -85,20 +85,10 @@ import {
   type MiniMaxH3Execution,
   type MiniMaxH3Provider,
 } from "@/lib/minimaxH3";
-import { measureMiniMaxH3OpeningMotionQa } from "@/lib/minimaxH3OpeningMotionQa";
-
-class MiniMaxH3OpeningMotionDefect extends Error {
-  constructor(
-    readonly evidence: Exclude<ReturnType<typeof measureMiniMaxH3OpeningMotionQa>, MiniMaxH3OpeningMotionQaEvidence>,
-    label: string,
-  ) {
-    super(
-      `${label} opening froze for ${evidence.openingFrozenHoldSec.toFixed(2)}s ` +
-      `(limit ${evidence.maxOpeningFrozenHoldSec.toFixed(2)}s)`,
-    );
-    this.name = "MiniMaxH3OpeningMotionDefect";
-  }
-}
+import {
+  assertMiniMaxH3OpeningMotionQa,
+  MiniMaxH3OpeningMotionRejectedError,
+} from "@/lib/minimaxH3OpeningMotionQa";
 
 /**
  * Generic and signature H3 clips do not run the source-bound Casefile visual
@@ -125,21 +115,13 @@ async function materializeVerifiedMiniMaxH3Take(args: {
   ) {
     throw new Error(`${args.label} failed native video/duration verification`);
   }
-  const openingMotion = measureMiniMaxH3OpeningMotionQa({
+  const openingMotionQa = assertMiniMaxH3OpeningMotionQa({
     videoPath: localPath,
     durationSec: measured.durationSec,
     fps: MINIMAX_H3_PROFILE.fps,
+    label: args.label,
   });
-  if (openingMotion.verdict !== "pass") {
-    if (openingMotion.verdict === "unavailable") {
-      throw new Error(
-        `${args.label} cannot verify opening motion with ffmpeg/freezedetect` +
-        (openingMotion.detail ? ` (${openingMotion.detail})` : ""),
-      );
-    }
-    throw new MiniMaxH3OpeningMotionDefect(openingMotion, args.label);
-  }
-  return { localPath, openingMotionQa: openingMotion };
+  return { localPath, openingMotionQa };
 }
 
 function stableVisualAttemptToken(value: string): string {
@@ -714,7 +696,7 @@ async function renderGeneratedScenePlanWithH3(args: {
           nativeDurationSec,
         });
       } catch (error) {
-        if (!(error instanceof MiniMaxH3OpeningMotionDefect)) throw error;
+        if (!(error instanceof MiniMaxH3OpeningMotionRejectedError)) throw error;
         const retryRemaining = args.maxCostUsd - observedCostUsd;
         if (!Number.isFinite(retryRemaining) || retryRemaining <= 0) {
           throw new Error(`gen_footage: H3 opening-motion repair has no remaining budget for ${scene.id}`);
@@ -1125,7 +1107,7 @@ export async function generateSignatureClips(
           nativeDurationSec,
         });
       } catch (error) {
-        if (!(error instanceof MiniMaxH3OpeningMotionDefect)) throw error;
+        if (!(error instanceof MiniMaxH3OpeningMotionRejectedError)) throw error;
         const retryRemaining = stageBudgetUsd - observedCostUsd;
         if (!Number.isFinite(retryRemaining) || retryRemaining <= 0) {
           throw new Error(`signature_clips: H3 opening-motion repair has no remaining budget for scene ${index + 1}`);

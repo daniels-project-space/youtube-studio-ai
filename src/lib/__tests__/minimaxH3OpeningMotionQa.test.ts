@@ -7,8 +7,10 @@ import { join } from "node:path";
 import { MiniMaxH3OpeningMotionQaEvidenceSchema } from "@/engine/cinematicClipReview";
 import { CinematicClipRejectedError, reviewCinematicClip } from "@/lib/cinematicClipGate";
 import {
+  assertMiniMaxH3OpeningMotionQa,
   measureMiniMaxH3OpeningMotionQa,
   MINIMAX_H3_IMMEDIATE_MOTION_MAX_FROZEN_HOLD_SEC,
+  MiniMaxH3OpeningMotionRejectedError,
 } from "@/lib/minimaxH3OpeningMotionQa";
 
 const FFMPEG = process.env.FFMPEG_BIN ?? "ffmpeg";
@@ -60,6 +62,16 @@ async function main(): Promise<void> {
       () => MiniMaxH3OpeningMotionQaEvidenceSchema.parse(frozen),
       /Invalid literal value|expected.*pass|Array must contain exactly 0 element/i,
       "a failed H3 opening-motion receipt cannot authorize a cinematic clip",
+    );
+    assert.throws(
+      () => assertMiniMaxH3OpeningMotionQa({
+        videoPath: frozenOpening,
+        durationSec: 5,
+        fps: 24,
+        label: "generic H3 fixture",
+      }),
+      (error: unknown) => error instanceof MiniMaxH3OpeningMotionRejectedError,
+      "non-cinematic H3 callers receive a typed, repairable opening-motion rejection",
     );
     await assert.rejects(
       () => reviewCinematicClip({

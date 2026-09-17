@@ -28,13 +28,15 @@
 import { fallbackVoiceKey } from "@/lib/tts";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { createHash } from "node:crypto";
+import { join } from "node:path";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
-import { makeRunTempDir, readBytes } from "@/lib/files";
+import { makeRunTempDir, readBytes, writeBytes } from "@/lib/files";
 import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
+import { probe } from "@/lib/ffmpeg";
 import {
   craftLoreShort,
   hasLoreShort,
@@ -61,7 +63,16 @@ import {
   selfContainedStoryReceiptRequiredForRoute,
 } from "@/engine/selfContainedStoryReceipt";
 import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
-import { buildMiniMaxH3SceneRequest, minimaxH3Readiness, renderMiniMaxH3 } from "@/lib/minimaxH3";
+import {
+  buildMiniMaxH3SceneRequest,
+  MINIMAX_H3_PROFILE,
+  minimaxH3Readiness,
+  renderMiniMaxH3,
+} from "@/lib/minimaxH3";
+import {
+  assertMiniMaxH3OpeningMotionQa,
+  MiniMaxH3OpeningMotionRejectedError,
+} from "@/lib/minimaxH3OpeningMotionQa";
 import { sha256BytesHex } from "@/lib/sha256";
 import { PRICE } from "@/engine/pricing";
 import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
@@ -481,6 +492,12 @@ export const loreShort: Block = {
     let ttsCharacters = 0;
     let clipCalls = 0;
     let visionCalls = 0;
+    const h3OpeningMotion = new Map<string, {
+      clipKey: string;
+      contract: string;
+      openingFrozenHoldSec: number;
+      maxOpeningFrozenHoldSec: number;
+    }>();
     const generateImage = createAttestedNovitaImageGenerator<LoreArtRequest & { prompt: string }>({
       prefix: `${prefix}/art`,
       id: (request) => request.id,
@@ -527,12 +544,43 @@ export const loreShort: Block = {
         // ATTESTED MiniMax H3 on-demand render. The still is staged in R2 first
         // so the Novita worker reads it by key (no public URL, no nginx), and
         // every clip's signed cost lands in clipCostUsd with `+=` — a Trigger
-        // retry accumulates, never overwrites.
+        // retry accumulates, never overwrites. The actual bytes must also move
+        // at their opening: the Lore visual director's frame analysis cannot
+        // detect an H3 conditioning-image hold before the first motion beat.
         generateClip: async (request: LoreClipRequest) => {
           const imageKey = `${prefix}/stills/${request.id}.jpg`;
           await putObjectFromFile(imageKey, request.imagePath, { contentType: "image/jpeg" });
           const frameBytes = await readBytes(request.imagePath);
           const seed = Number.parseInt(createHash("sha256").update(`${request.id}\0${request.prompt}`).digest("hex").slice(0, 8), 16) % 2_147_483_647;
+          const inspectTake = async (input: {
+            label: string;
+            outputBytes: Uint8Array;
+            fileName: string;
+          }) => {
+            if (input.outputBytes.byteLength < 1_024) {
+              throw new Error(`${input.label} returned an undersized native clip`);
+            }
+            const localPath = await writeBytes(join(runDir, input.fileName), input.outputBytes);
+            const measured = await probe(localPath);
+            const nativeDurationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+            if (
+              !measured.hasVideo ||
+              !Number.isFinite(measured.durationSec) ||
+              Math.abs(measured.durationSec - nativeDurationSec) > 0.08
+            ) {
+              throw new Error(`${input.label} failed native video/duration verification`);
+            }
+            return assertMiniMaxH3OpeningMotionQa({
+              videoPath: localPath,
+              durationSec: measured.durationSec,
+              fps: MINIMAX_H3_PROFILE.fps,
+              label: input.label,
+            });
+          };
+          const remainingBeforeMotion = stageBudgetUsd - imageCostUsd - clipCostUsd;
+          if (!Number.isFinite(remainingBeforeMotion) || remainingBeforeMotion <= 0) {
+            throw new Error(`lore-h3: stage budget exhausted before ${request.id}`);
+          }
           const clip = await renderMiniMaxH3(buildMiniMaxH3SceneRequest({
             provider: "novita",
             execution: "on-demand",
@@ -543,12 +591,60 @@ export const loreShort: Block = {
             seed,
             firstFrame: { r2Key: imageKey, sha256: sha256BytesHex(frameBytes) },
             output: { r2Key: `${prefix}/h3/${request.id}.mp4` },
-            maxCostUsd: PRICE.novitaVideoMaxUsd,
+            maxCostUsd: Math.min(PRICE.novitaVideoMaxUsd, remainingBeforeMotion),
           }));
           clipCostUsd += clip.receipt.runtime.costUsd;
           clipCalls += 1;
-          ctx.log(`lore-h3: ${request.id} accepted (${clip.receipt.runtime.costUsd.toFixed(4)} USD)`);
-          return Buffer.from(clip.outputBytes);
+          let acceptedClip = clip;
+          let openingMotion: Awaited<ReturnType<typeof inspectTake>>;
+          try {
+            openingMotion = await inspectTake({
+              label: `lore-h3: ${request.id}`,
+              outputBytes: clip.outputBytes,
+              fileName: `${request.id}-h3-opening-qa.mp4`,
+            });
+          } catch (error) {
+            if (!(error instanceof MiniMaxH3OpeningMotionRejectedError)) throw error;
+            const retryRemaining = stageBudgetUsd - imageCostUsd - clipCostUsd;
+            if (!Number.isFinite(retryRemaining) || retryRemaining <= 0) {
+              throw new Error(`lore-h3: opening-motion repair has no remaining budget for ${request.id}`);
+            }
+            const retry = await renderMiniMaxH3(buildMiniMaxH3SceneRequest({
+              provider: "novita",
+              execution: "on-demand",
+              prompt:
+                `${request.prompt} Preserve the same accepted image, world, subject, and art style. ` +
+                "Do not hold the conditioning image: begin the authored action in the first decoded frame.",
+              motionPrompt:
+                `${request.motionPrompt} Start visible subject or camera motion immediately; no static opening hold.`,
+              cameraInstruction:
+                `${request.cameraInstruction} Begin the authored camera move immediately and preserve the same scene.`,
+              negativePrompt: request.negativePrompt,
+              seed,
+              firstFrame: { r2Key: imageKey, sha256: sha256BytesHex(frameBytes) },
+              output: { r2Key: `${prefix}/h3/${request.id}-retry-2.mp4` },
+              maxCostUsd: Math.min(PRICE.novitaVideoMaxUsd, retryRemaining),
+            }));
+            clipCostUsd += retry.receipt.runtime.costUsd;
+            clipCalls += 1;
+            acceptedClip = retry;
+            openingMotion = await inspectTake({
+              label: `lore-h3: ${request.id} repair take`,
+              outputBytes: retry.outputBytes,
+              fileName: `${request.id}-h3-opening-qa-retry-2.mp4`,
+            });
+          }
+          h3OpeningMotion.set(request.id, {
+            clipKey: acceptedClip.receipt.output.r2Key,
+            contract: openingMotion.contract,
+            openingFrozenHoldSec: openingMotion.openingFrozenHoldSec,
+            maxOpeningFrozenHoldSec: openingMotion.maxOpeningFrozenHoldSec,
+          });
+          ctx.log(
+            `lore-h3: ${request.id} accepted (${acceptedClip.receipt.runtime.costUsd.toFixed(4)} USD; ` +
+            `opening hold ${openingMotion.openingFrozenHoldSec.toFixed(2)}s)`,
+          );
+          return Buffer.from(acceptedClip.outputBytes);
         },
         synthLine: async (request) =>
           Buffer.from(
@@ -595,6 +691,7 @@ export const loreShort: Block = {
       height: result.height,
       imageProvider: "novita-z-image-turbo-local",
       videoProvider: "minimax-h3-novita-on-demand",
+      h3OpeningMotion: [...h3OpeningMotion.entries()].map(([sceneId, evidence]) => ({ sceneId, ...evidence })),
     });
     ctx.log(`lore_short ✓ → ${videoKey} (${videoDurationSec}s, ${result.scenes.length} beats, ${result.width}x${result.height})`);
 

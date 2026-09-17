@@ -22,6 +22,20 @@ export type MiniMaxH3OpeningMotionQaResult =
       verdict: "fail" | "unavailable";
     };
 
+/** A deterministic H3 defect: a repair caller may retry only this verdict. */
+export class MiniMaxH3OpeningMotionRejectedError extends Error {
+  constructor(
+    readonly evidence: Exclude<MiniMaxH3OpeningMotionQaResult, MiniMaxH3OpeningMotionQaEvidence>,
+    label: string,
+  ) {
+    super(
+      `${label} opening froze for ${evidence.openingFrozenHoldSec.toFixed(2)}s ` +
+      `(limit ${evidence.maxOpeningFrozenHoldSec.toFixed(2)}s)`,
+    );
+    this.name = "MiniMaxH3OpeningMotionRejectedError";
+  }
+}
+
 function openingFrozenHoldSec(evidence: TemporalDynamismEvidence, fps: number): number {
   const firstFrameToleranceSec = 1 / fps + 0.05;
   return evidence.evaluatedIntervals
@@ -99,4 +113,25 @@ export function measureMiniMaxH3OpeningMotionQa(args: {
     violatingIntervals,
     ...(measured.detail ? { detail: measured.detail } : {}),
   };
+}
+
+/**
+ * Make the policy boundary reusable without letting callers accidentally treat
+ * an unavailable detector or a failing measurement as a passing receipt.
+ */
+export function assertMiniMaxH3OpeningMotionQa(args: {
+  videoPath: string;
+  durationSec: number;
+  fps: number;
+  label: string;
+}): MiniMaxH3OpeningMotionQaEvidence {
+  const result = measureMiniMaxH3OpeningMotionQa(args);
+  if (result.verdict === "pass") return result;
+  if (result.verdict === "unavailable") {
+    throw new Error(
+      `${args.label} cannot verify opening motion with ffmpeg/freezedetect` +
+      (result.detail ? ` (${result.detail})` : ""),
+    );
+  }
+  throw new MiniMaxH3OpeningMotionRejectedError(result, args.label);
 }

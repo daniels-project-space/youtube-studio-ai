@@ -153,6 +153,16 @@ async function blockUsesAttestedProvidersAndR2(): Promise<void> {
   assert.doesNotMatch(code, /gemini|google/i,
     "the executable LoreCraft wrapper must never call a Google model");
   assert.match(block, /minimaxH3Readiness/, "the block must fail closed without the attested H3 route");
+  assert.match(block, /assertMiniMaxH3OpeningMotionQa/,
+    "Lore H3 bytes must pass deterministic opening-motion QA before entering the local assembler");
+  assert.match(block, /MiniMaxH3OpeningMotionRejectedError/,
+    "only a measured frozen opening, never an unavailable detector, may enter the bounded repair path");
+  assert.match(block, /opening-motion repair has no remaining budget/,
+    "the Lore H3 repair must refuse a second take when the approved stage budget is exhausted");
+  assert.match(block, /-retry-2\.mp4/,
+    "a Lore H3 repair must preserve the failed take and use a distinct immutable R2 output key");
+  assert.match(block, /h3OpeningMotion: \[\.\.\.h3OpeningMotion\.entries\(\)\]/,
+    "the final Lore asset must retain each accepted native take's compact opening-motion proof");
 
   // Cost must ACCUMULATE. A bare `=` would let a Trigger retry erase prior spend.
   assert.match(block, /imageCostUsd \+= receipt\.costUsd/, "image receipts must accumulate with +=");
