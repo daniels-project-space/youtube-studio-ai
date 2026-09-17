@@ -51,7 +51,7 @@ import {
   type QwenTtsSpeaker,
   type QwenTtsReceipt,
 } from "@/lib/qwenTts";
-import type { PlanWeekPreparedImageShot } from "@/trigger/planWeekPreparedImages";
+import { hasGeneratedFootageStage, type PlanWeekPreparedImageShot } from "@/trigger/planWeekPreparedImages";
 
 export interface PlanWeekPreparedNarrationArgs {
   ownerId: string;
@@ -141,6 +141,7 @@ function hasMusicStage(manifest: PlanWeekPreparationManifest): boolean {
 }
 
 function hasImageStage(manifest: PlanWeekPreparationManifest): boolean {
+  if (hasGeneratedFootageStage(manifest)) return true;
   return manifest.execution.pipeline.some((entry) => {
     if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
     const block = (entry as Record<string, unknown>).block ?? (entry as Record<string, unknown>).id;

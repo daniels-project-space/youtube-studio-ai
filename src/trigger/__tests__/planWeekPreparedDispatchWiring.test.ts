@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 const planner = readFileSync(resolve(process.cwd(), "src/trigger/planWeekAhead.ts"), "utf8");
 const script = readFileSync(resolve(process.cwd(), "src/trigger/planWeekPreparedScript.ts"), "utf8");
 const narration = readFileSync(resolve(process.cwd(), "src/trigger/planWeekPreparedNarration.ts"), "utf8");
+const images = readFileSync(resolve(process.cwd(), "src/trigger/planWeekPreparedImages.ts"), "utf8");
 
 assert.match(planner, /tasks\.trigger\("plan-week-prepared-script"/);
 assert.match(planner, /idempotencyKeys\.create/);
@@ -20,4 +21,9 @@ assert.match(narration, /planStorySpine/);
 assert.match(narration, /tasks\.trigger\("plan-week-prepared-images"/);
 assert.match(narration, /idempotencyKeys\.create/);
 assert.match(narration, /PLAN_WEEK_PREPARED_IMAGES_MAX_COST_USD/);
+assert.match(images, /tasks\.trigger\("minimax-h3-weekly-batch"/);
+assert.match(images, /planWeekPreparedH3FirstFrameKey/);
+assert.match(images, /planWeekPreparedFootageClipKey/);
+assert.match(images, /preparedFootage:/);
+assert.match(images, /PLAN_WEEK_PREPARED_H3_MAX_COST_USD/);
 console.log("automatic weekly prepared-media dispatch wiring passed");

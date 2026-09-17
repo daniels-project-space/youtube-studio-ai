@@ -6,7 +6,7 @@
  * stills.  It is deliberately create-only and replayable: a retry reuses a
  * fully verified sidecar and never submits the same image wave twice.
  */
-import { task } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { generationProfile, isProductionQualityGenerationProfile, type GenerationProfile } from "@/engine/generationProfiles";
 import { StillRenderManifestSchema, type StillRenderManifest } from "@/engine/renderArtifacts";
 import {
@@ -15,12 +15,18 @@ import {
   normalizePlanWeekPreparationManifest,
   planWeekPreparedImageKey,
   planWeekPreparedImagesKey,
+  planWeekPreparedFootageClipKey,
+  planWeekPreparedH3FirstFrameKey,
   planWeekPreparationKey,
   planWeekPreparationManifestSha256,
   PLAN_WEEK_PREPARATION_VERSION,
   type PlanWeekPreparedImages,
   type PlanWeekPreparationManifest,
 } from "@/lib/planWeekPreparation";
+import {
+  buildMiniMaxH3SceneRequest,
+  type MiniMaxH3RenderRequest,
+} from "@/lib/minimaxH3";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import { getObjectBytes, putObject } from "@/lib/storage";
@@ -55,6 +61,14 @@ export interface PlanWeekPreparedImagesArgs {
   director?: string;
   maxCostUsd: number;
 }
+
+type PreparedH3Batch = {
+  orderKey: string;
+  receiptKey: string;
+  jobs: Array<Omit<MiniMaxH3RenderRequest, "provider" | "execution">>;
+  sceneIds: string[];
+  firstFrames: Array<{ sourceKey: string; destinationKey: string; sha256: string }>;
+};
 
 function safePart(value: unknown, label: string): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u.test(value)) {
@@ -102,6 +116,85 @@ function canonicalScope(payload: PlanWeekPreparedImagesArgs) {
     channelSlug: payload.channelSlug,
     batchId: payload.batchId,
     itemId: payload.itemId,
+  };
+}
+
+export function hasGeneratedFootageStage(manifest: PlanWeekPreparationManifest): boolean {
+  return manifest.execution.pipeline.some((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    const record = entry as Record<string, unknown>;
+    const block = record.block ?? record.id;
+    return block === "gen_footage" || block === "minimax_h3_video" || block === "signature_clips";
+  });
+}
+
+/**
+ * Translate the exact still packet into the existing weekly H3 request
+ * contract. Candidate zero is the approved conditioning frame for each shot;
+ * alternative image candidates remain available to the scheduled QA path but
+ * are never accidentally rendered as duplicate video scenes.
+ */
+export function buildPreparedH3Batch(args: {
+  payload: PlanWeekPreparedImagesArgs;
+  prepared: PlanWeekPreparedImages;
+  manifestSha256: string;
+  maxCostUsd: number;
+}): PreparedH3Batch {
+  if (!Number.isFinite(args.maxCostUsd) || args.maxCostUsd <= 0 || args.maxCostUsd > 100) {
+    throw new Error("weekly prepared H3 maxCostUsd must be greater than zero and no more than 100");
+  }
+  if (args.payload.shots.length < 1 || args.payload.shots.length > 60) {
+    throw new Error("weekly prepared H3 requires 1..60 shot jobs");
+  }
+  const candidateZeroByShot = new Map(
+    args.prepared.items
+      .filter((item) => item.candidateIndex === 0)
+      .map((item) => [item.shotId, item]),
+  );
+  if (candidateZeroByShot.size !== args.payload.shots.length) {
+    throw new Error("weekly prepared H3 requires exactly one candidate-zero still for every shot");
+  }
+  const scope = canonicalScope(args.payload);
+  const jobs: PreparedH3Batch["jobs"] = [];
+  const firstFrames: PreparedH3Batch["firstFrames"] = [];
+  const sceneIds: string[] = [];
+  for (const [index, shot] of args.payload.shots.entries()) {
+    const still = candidateZeroByShot.get(shot.id);
+    if (!still) throw new Error(`weekly prepared H3 is missing candidate-zero still for ${shot.id}`);
+    const firstFrame = {
+      r2Key: planWeekPreparedH3FirstFrameKey({ ...scope, index }),
+      sha256: still.sha256,
+    };
+    const output = {
+      r2Key: planWeekPreparedFootageClipKey({ ...scope, index }),
+    };
+    const request = buildMiniMaxH3SceneRequest({
+      provider: "salad",
+      execution: "weekly-batch",
+      prompt: shot.prompt,
+      motionPrompt: shot.motion,
+      negativePrompt: shot.negative,
+      seed: shot.seed ?? 100_000 + index,
+      firstFrame,
+      output,
+      maxCostUsd: args.maxCostUsd,
+    });
+    jobs.push({
+      prompt: request.prompt,
+      seed: request.seed,
+      firstFrame: request.firstFrame,
+      output: request.output,
+      maxCostUsd: request.maxCostUsd,
+    });
+    sceneIds.push(shot.id);
+    firstFrames.push({ sourceKey: still.stillKey, destinationKey: firstFrame.r2Key, sha256: still.sha256 });
+  }
+  return {
+    orderKey: `plan-week-h3-${args.manifestSha256.slice(0, 48)}`,
+    receiptKey: `owner/${args.payload.ownerId}/weekly-h3/${args.payload.channelSlug}/${args.payload.batchId}/${args.payload.itemId}.json`,
+    jobs,
+    sceneIds,
+    firstFrames,
   };
 }
 
@@ -233,6 +326,56 @@ async function persistMediaCreateOnly(key: string, bytes: Uint8Array): Promise<v
   }
 }
 
+async function dispatchPreparedFootage(
+  manifest: PlanWeekPreparationManifest,
+  payload: PlanWeekPreparedImagesArgs,
+  prepared: PlanWeekPreparedImages,
+): Promise<string | undefined> {
+  if (!hasGeneratedFootageStage(manifest)) return undefined;
+  const maxCostUsd = Number(process.env.PLAN_WEEK_PREPARED_H3_MAX_COST_USD ?? "0.4");
+  const batch = buildPreparedH3Batch({
+    payload,
+    prepared,
+    manifestSha256: payload.manifestSha256,
+    maxCostUsd,
+  });
+  // H3's weekly worker only admits canonical first-frame keys. Copying the
+  // verified still bytes into that namespace is create-only and idempotent;
+  // a changed winner fails before Salad capacity admission.
+  await Promise.all(batch.firstFrames.map(async (frame) => {
+    const bytes = await getObjectBytes(frame.sourceKey);
+    if (sha256BytesHex(bytes) !== frame.sha256) {
+      throw new Error(`weekly prepared H3 source frame ${frame.sourceKey} failed its image receipt check`);
+    }
+    await persistMediaCreateOnly(frame.destinationKey, bytes);
+  }));
+  const h3Payload = {
+    ownerId: payload.ownerId,
+    orderKey: batch.orderKey,
+    receiptKey: batch.receiptKey,
+    jobs: batch.jobs,
+    capacityHoldStartedAt: Date.now(),
+    preparedFootage: {
+      ownerId: payload.ownerId,
+      channelSlug: payload.channelSlug,
+      batchId: payload.batchId,
+      itemId: payload.itemId,
+      manifestKey: payload.manifestKey,
+      manifestSha256: payload.manifestSha256,
+      sceneIds: batch.sceneIds,
+    },
+  };
+  const idempotencyKey = await idempotencyKeys.create(
+    `plan-week-h3:${payload.ownerId}:${payload.manifestSha256}`,
+    { scope: "global" },
+  );
+  const handle = await tasks.trigger("minimax-h3-weekly-batch", h3Payload, {
+    concurrencyKey: `plan-week-h3:${manifest.ownerId}:${manifest.channelId}`,
+    idempotencyKey,
+  });
+  return handle.id;
+}
+
 export const planWeekPreparedImagesTask = task({
   id: "plan-week-prepared-images",
   maxDuration: 3_600,
@@ -248,7 +391,8 @@ export const planWeekPreparedImagesTask = task({
     const sidecarKey = planWeekPreparedImagesKey(canonicalScope(payload));
     const prior = await verifyStoredSidecar(sidecarKey, manifest);
     if (prior) {
-      return { ok: true, reused: true, sidecarKey, outputs: prior.items.length, costUsd: 0, manifestSha256: prior.manifestSha256 };
+      const h3TriggerRunId = await dispatchPreparedFootage(manifest, payload, prior);
+      return { ok: true, reused: true, sidecarKey, outputs: prior.items.length, h3TriggerRunId, costUsd: 0, manifestSha256: prior.manifestSha256 };
     }
     const profile = generationProfile(payload.generationProfile);
     if (!isProductionQualityGenerationProfile(profile.id)) throw new Error("weekly prepared images rejected a non-production profile");
@@ -320,8 +464,10 @@ export const planWeekPreparedImagesTask = task({
     if (!created) {
       const winner = await verifyStoredSidecar(sidecarKey, manifest);
       if (!winner) throw new Error("weekly prepared images sidecar was lost after create-only collision");
-      return { ok: true, reused: true, sidecarKey, outputs: winner.items.length, costUsd: 0, manifestSha256: winner.manifestSha256 };
+      const h3TriggerRunId = await dispatchPreparedFootage(manifest, payload, winner);
+      return { ok: true, reused: true, sidecarKey, outputs: winner.items.length, h3TriggerRunId, costUsd: 0, manifestSha256: winner.manifestSha256 };
     }
-    return { ok: true, reused: false, sidecarKey, outputs: items.length, costUsd: result.costUsd, manifestSha256: prepared.manifestSha256 };
+    const h3TriggerRunId = await dispatchPreparedFootage(manifest, payload, prepared);
+    return { ok: true, reused: false, sidecarKey, outputs: items.length, h3TriggerRunId, costUsd: result.costUsd, manifestSha256: prepared.manifestSha256 };
   },
 });
