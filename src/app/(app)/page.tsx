@@ -105,12 +105,11 @@ export default function OverviewPage() {
   const channels = useQuery(api.channels.listChannels, { ownerId }) as
     | (ChannelRow & { folder?: string })[]
     | undefined;
-  const recent = useQuery(api.runs.listRecent, { ownerId, limit: 50 }) as
-    | RunRow[]
+  const overviewRuns = useQuery(api.runs.listOverviewRuns, { ownerId }) as
+    | { recent: RunRow[]; active: RunRow[] }
     | undefined;
-  const active = useQuery(api.runs.listActive, { ownerId }) as
-    | RunRow[]
-    | undefined;
+  const recent = overviewRuns?.recent;
+  const active = overviewRuns?.active;
   const plan = useQuery(api.contentPlan.listPlanByOwner, { ownerId }) as
     | PlanRow[]
     | undefined;

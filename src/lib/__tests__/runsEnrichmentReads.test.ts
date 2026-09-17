@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 
-import { listActive, listRecent } from "../../../convex/runs";
+import { listActive, listOverviewRuns, listRecent } from "../../../convex/runs";
 
 const OWNER = "owner-run-enrichment";
 const CHANNEL_A = "channels:run-enrichment-a";
@@ -25,6 +25,7 @@ function context() {
     runStages: [],
   };
   let channelGets = 0;
+  let runIndexReads = 0;
   const db = {
     async get(id: string) {
       if (id.startsWith("channels:")) channelGets += 1;
@@ -50,6 +51,7 @@ function context() {
           return query;
         },
         async take(limit: number) {
+          if (table === "runs") runIndexReads += 1;
           return rows[table]!
             .filter((row) => filters.every(([field, value]) => row[field] === value))
             .sort((left, right) => (left._creationTime - right._creationTime) * (direction === "desc" ? -1 : 1))
@@ -76,12 +78,15 @@ function context() {
   };
   return {
     handlerContext,
+    addRun(row: Row) { rows.runs.push(row); },
     resetReads() {
       channelGets = 0;
+      runIndexReads = 0;
     },
     channelGets() {
       return channelGets;
     },
+    runIndexReads() { return runIndexReads; },
   };
 }
 
@@ -117,6 +122,38 @@ async function main(): Promise<void> {
     ["runs:active-b-1", "Beta"],
   ]);
   assert.equal(fixture.channelGets(), 2, "active enrichment should read each channel once, even when runs repeat it");
+
+  fixture.resetReads();
+  const overview = await invoke<{
+    recent: Array<{ _id: string; channelName: string }>;
+    active: Array<{ _id: string; channelName: string }>;
+  }>(listOverviewRuns, fixture.handlerContext, { ownerId: OWNER });
+  assert.deepEqual(overview.recent.map((run) => run._id), recent.map((run) => run._id));
+  assert.deepEqual(overview.active.map((run) => run._id), active.map((run) => run._id));
+  assert.equal(fixture.runIndexReads(), 1, "overview must read the owner run window once");
+  assert.equal(fixture.channelGets(), 2, "recent and active share channel point reads");
+
+  // The first 50 may be all terminal while a live run still lies inside the
+  // active board's 200-row window. It must remain visible after consolidation.
+  const olderActive = context();
+  olderActive.addRun({
+    _id: "runs:older-active", _creationTime: 0, ownerId: OWNER,
+    channelId: CHANNEL_A, status: "running", startedAt: 1,
+    leaseExpiresAt: Date.now() + 60_000,
+  });
+  for (let index = 0; index < 55; index++) {
+    olderActive.addRun({
+      _id: `runs:filler-${index}`, _creationTime: 100 + index, ownerId: OWNER,
+      channelId: CHANNEL_A, status: "ok", startedAt: 100 + index,
+    });
+  }
+  const mixed = await invoke<{ recent: Array<{ _id: string }>; active: Array<{ _id: string }> }>(
+    listOverviewRuns, olderActive.handlerContext, { ownerId: OWNER },
+  );
+  assert.equal(mixed.recent.length, 50);
+  assert.equal(mixed.recent.some((run) => run._id === "runs:older-active"), false);
+  assert.equal(mixed.active.some((run) => run._id === "runs:older-active"), true);
+  assert.equal(olderActive.runIndexReads(), 1);
 
   console.log("run enrichment read-cache tests passed");
 }

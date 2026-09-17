@@ -21,7 +21,7 @@ const ready = {
   topic: "An actual planned topic", status: "ready", order: 1,
 };
 const data: Record<string, unknown> = {
-  "channels:listChannels": channels, "runs:listRecent": runs, "runs:listActive": [],
+  "channels:listChannels": channels, "runs:listOverviewRuns": { recent: runs, active: [] },
   "contentPlan:listPlanByOwner": [ready], "analytics:channelSummary": summaries,
   "youtubeAuth:linkStatus": [], "videos:listVideos": [],
 };
@@ -61,6 +61,8 @@ try {
   assert.doesNotMatch(html, /data-channel-slug="beta"/, "room members are not duplicated");
   assert.equal((html.match(/data-channel-slug=/g) ?? []).length, 3, "no animation clones");
   assert.equal(calls.filter(key => key.startsWith("analytics:")).length, 1, "one analytics subscription");
+  assert.deepEqual(calls.filter(key => key.startsWith("runs:")), ["runs:listOverviewRuns"],
+    "Studio should subscribe to the shared recent/active run projection only once");
 
   selectedSlug = "beta"; html = render();
   assert.match(html, /data-channel-slug="beta"/, "selected family members remain accessible");
@@ -73,21 +75,19 @@ try {
 
   selectedSlug = null;
   const live = { ...runs[0], _id: "live", status: "running" };
-  data["runs:listActive"] = [live];
-  data["runs:listRecent"] = [{ ...live, stageProgress: { completed: 2, total: 5, totalKnown: true, currentBlock: "tts", currentStatus: "running" } }];
+  data["runs:listOverviewRuns"] = { active: [live], recent: [{ ...live, stageProgress: { completed: 2, total: 5, totalKnown: true, currentBlock: "tts", currentStatus: "running" } }] };
   html = render();
   assert.match(html, /<progress max="5" value="2"/);
   assert.match(html, /2\/5 stages/);
-  data["runs:listRecent"] = [{ ...live, stageProgress: { completed: 2, total: 3, totalKnown: false } }];
+  data["runs:listOverviewRuns"] = { active: [live], recent: [{ ...live, stageProgress: { completed: 2, total: 3, totalKnown: false } }] };
   html = render();
   assert.doesNotMatch(html, /<progress/);
   assert.match(html, /2 stages completed · total unavailable/);
-  data["runs:listRecent"] = [{ ...live, _id: "another-run", stageProgress: { completed: 2, total: 5, totalKnown: true } }];
+  data["runs:listOverviewRuns"] = { active: [live], recent: [{ ...live, _id: "another-run", stageProgress: { completed: 2, total: 5, totalKnown: true } }] };
   html = render();
   assert.doesNotMatch(html, /<progress/);
   assert.match(html, /Running · open for stage details/);
-  data["runs:listActive"] = [];
-  data["runs:listRecent"] = runs;
+  data["runs:listOverviewRuns"] = { active: [], recent: runs };
 
   selectedSlug = null; data["analytics:channelSummary"] = undefined; html = render();
   assert.ok(html.includes('Recorded views</small><strong>—</strong>'), "loading is not zero");
@@ -95,6 +95,7 @@ try {
   assert.match(html, /Reading studio state/);
   assert.ok(html.includes('Plans ready</small><strong>—</strong>'));
   for (const key of Object.keys(data)) data[key] = [];
+  data["runs:listOverviewRuns"] = { recent: [], active: [] };
   html = render();
   assert.match(html, /Create a channel/);
   assert.doesNotMatch(html, /data-issue-key=/);

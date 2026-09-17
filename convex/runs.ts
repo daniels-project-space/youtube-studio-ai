@@ -3353,6 +3353,83 @@ export const listActive = query({
 });
 
 /**
+ * Studio's recent and active boards share one bounded owner window. An active
+ * run can be older than the first 50 rows, so deriving active from listRecent
+ * would silently hide it; this reads the same 200-row window listActive used
+ * while enriching overlapping rows and channels only once.
+ */
+export const listOverviewRuns = query({
+  args: { ownerId: v.string() },
+  handler: async (ctx, args) => {
+    const window = await ctx.db
+      .query("runs")
+      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+      .order("desc")
+      .take(200);
+    const recentRows = window.slice(0, 50).sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+    const now = Date.now();
+    const activeRows = window
+      .filter((run) => (run.status === "queued" || run.status === "running") && !isRunLeaseExpired(run, now))
+      .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+    const recentIds = new Set(recentRows.map((run) => String(run._id)));
+    const uniqueRows = new Map([...recentRows, ...activeRows].map((run) => [String(run._id), run] as const));
+    const channelCache = new Map<string, Promise<Doc<"channels"> | null>>();
+    const getChannel = (channelId: (typeof window)[number]["channelId"]) => {
+      const key = String(channelId);
+      const cached = channelCache.get(key);
+      if (cached) return cached;
+      const pending = ctx.db.get(channelId);
+      channelCache.set(key, pending);
+      return pending;
+    };
+    const projected = await Promise.all([...uniqueRows.values()].map(async (run) => {
+      const channel = await getChannel(run.channelId);
+      const live = run.status === "queued" || run.status === "running";
+      const recentLive = recentIds.has(String(run._id)) && live;
+      const pipeline = recentLive
+        ? frozenRunPipelinePresentation({
+            snapshot: run.pipelineInvocationSnapshot,
+            sha256: run.pipelineInvocationSha256,
+          })
+        : undefined;
+      const stages = recentLive
+        ? await ctx.db.query("runStages").withIndex("by_run", (q) => q.eq("runId", run._id)).collect()
+        : [];
+      return {
+        _id: run._id,
+        status: run.status,
+        startedAt: run.startedAt,
+        finishedAt: run.finishedAt,
+        costTotal: run.costTotal,
+        youtubeVideoId: run.youtubeVideoId,
+        error: run.error,
+        releaseEvidenceStatus: normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus),
+        releaseEvidenceCertificateFingerprint: run.releaseEvidenceCertificateFingerprint,
+        releaseEvidenceCertificateKey: run.releaseEvidenceCertificateKey,
+        releaseEvidenceUpdatedAt: run.releaseEvidenceUpdatedAt,
+        automaticResumeState: run.automaticResumeState,
+        automaticResumeAttempts: run.automaticResumeAttempts,
+        automaticResumeNextAt: run.automaticResumeNextAt,
+        automaticResumeUpdatedAt: run.automaticResumeUpdatedAt,
+        automaticResumeLastError: run.automaticResumeLastError,
+        heartbeatAt: run.heartbeatAt,
+        leaseExpiresAt: run.leaseExpiresAt,
+        channelName: channel?.name ?? "(unknown)",
+        channelSlug: channel?.slug ?? "",
+        ...(recentLive
+          ? { stageProgress: summarizeRunStageProgress({ pipeline: pipeline?.entries, stages }) }
+          : {}),
+      };
+    }));
+    const byId = new Map(projected.map((run) => [String(run._id), run] as const));
+    return {
+      recent: recentRows.map((run) => byId.get(String(run._id))!),
+      active: activeRows.map((run) => byId.get(String(run._id))!),
+    };
+  },
+});
+
+/**
  * Repoint all runs of one channel onto another. Used by the dedupe-channels
  * maintenance script to migrate runs off duplicate channel docs before they
  * are deleted. Idempotent: re-running with no matching runs is a no-op.
