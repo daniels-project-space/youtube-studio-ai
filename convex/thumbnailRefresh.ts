@@ -985,6 +985,11 @@ export const listAutomaticReplacementCandidates = query({
       candidateRunId: Id<"runs">;
       youtubeVideoId: string;
     }> = [];
+    const connectorByChannelId = new Map<string, {
+      readonly ytChannelId?: string;
+      readonly refreshTokenCiphertext?: string;
+      readonly refreshToken?: string;
+    } | null>();
     for (const candidate of latestCandidates) {
       if (due.length >= limit || !candidate.thumbnailRefreshSourceRunId) continue;
       const source = await ctx.db.get(candidate.thumbnailRefreshSourceRunId);
@@ -994,16 +999,21 @@ export const listAutomaticReplacementCandidates = query({
         source.channelId !== candidate.channelId ||
         !source.youtubeVideoId
       ) continue;
-      const connector = (await ctx.db
-        .query("youtubeAuth")
-        .withIndex("by_channel", (q) => q.eq("channelId", source.channelId))
-        .collect())
-        .filter((row) =>
-          row.ownerId === args.ownerId &&
-          (row.status ?? "active") === "active" &&
-          Boolean(row.ytChannelId),
-        )
-        .sort((left, right) => right._creationTime - left._creationTime)[0];
+      const channelKey = String(source.channelId);
+      let connector = connectorByChannelId.get(channelKey);
+      if (!connectorByChannelId.has(channelKey)) {
+        connector = (await ctx.db
+          .query("youtubeAuth")
+          .withIndex("by_channel", (q) => q.eq("channelId", source.channelId))
+          .collect())
+          .filter((row) =>
+            row.ownerId === args.ownerId &&
+            (row.status ?? "active") === "active" &&
+            Boolean(row.ytChannelId),
+          )
+          .sort((left, right) => right._creationTime - left._creationTime)[0] ?? null;
+        connectorByChannelId.set(channelKey, connector);
+      }
       if (!connector?.ytChannelId) continue;
       const replacement = await ctx.db
         .query("youtubeThumbnailReplacements")

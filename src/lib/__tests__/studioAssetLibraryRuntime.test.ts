@@ -4,6 +4,7 @@ import {
   recordStudioAssetReleaseUsage,
   resolveStudioAssetApprovedImagePreview,
   resolveStudioAssetsForPipeline,
+  resolveStudioAssetsForPipelineBatch,
 } from "@/lib/studioAssetLibraryRuntime";
 import { listAcceptedCharacterLoRAInventory } from "@/lib/narrativeSeriesStateRuntime";
 import { sha256Hex } from "@/lib/sha256";
@@ -35,6 +36,69 @@ async function main() {
   });
   assert.equal(called, 1);
   assert.equal(result.status, "no_approved_match");
+  const batch = await resolveStudioAssetsForPipelineBatch({
+    client: {
+      query: async (_reference, args) => {
+        called += 1;
+        const request = args as { ownerId: string; requests: Array<{ ownerId: string; requiredKinds: string[] }> };
+        assert.equal(request.ownerId, "owner-1");
+        assert.equal(request.requests.length, 2);
+        assert(request.requests.every((item) => item.ownerId === "owner-1"));
+        return [
+          { status: "no_approved_match", missingKinds: ["camera_recipe"], blockers: ["promote one"] },
+          { status: "no_approved_match", missingKinds: ["audio_recipe"], blockers: ["promote one"] },
+        ];
+      },
+    },
+    requests: [
+      {
+        ownerId: "owner-1",
+        channelId: "channel-1",
+        family: "comic",
+        contentLane: "cinematic_ai",
+        moduleId: "visual_matter",
+        runtimeFingerprint: digest("runtime"),
+        requiredKinds: ["camera_recipe"],
+      },
+      {
+        ownerId: "owner-1",
+        channelId: "channel-1",
+        family: "comic",
+        contentLane: "cinematic_ai",
+        moduleId: "music",
+        runtimeFingerprint: digest("runtime"),
+        requiredKinds: ["audio_recipe"],
+      },
+    ],
+  });
+  assert.equal(called, 2, "a batch must use one client query for all module requests");
+  assert.deepEqual(batch.map((item) => item.status), ["no_approved_match", "no_approved_match"]);
+  await assert.rejects(
+    () => resolveStudioAssetsForPipelineBatch({
+      client: { query: async () => [] },
+      requests: [
+        {
+          ownerId: "owner-1",
+          channelId: "channel-1",
+          family: "comic",
+          contentLane: "cinematic_ai",
+          moduleId: "visual_matter",
+          runtimeFingerprint: digest("runtime"),
+          requiredKinds: ["camera_recipe"],
+        },
+        {
+          ownerId: "owner-2",
+          channelId: "channel-2",
+          family: "comic",
+          contentLane: "cinematic_ai",
+          moduleId: "music",
+          runtimeFingerprint: digest("runtime"),
+          requiredKinds: ["audio_recipe"],
+        },
+      ],
+    }),
+    /cannot mix owners/i,
+  );
   const preview = await resolveStudioAssetApprovedImagePreview({
     client: {
       query: async (_reference, args) => {

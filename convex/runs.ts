@@ -1,5 +1,6 @@
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { internalMutation, query as publicQuery } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { evaluateConvexAuthProbeIdentity } from "../src/lib/convexAuthProbe";
@@ -3306,9 +3307,21 @@ export const listActive = query({
         !isRunLeaseExpired(r, now),
     );
     active.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+    // A single overview can contain many runs for the same channel. Cache the
+    // in-flight lookup (rather than only the resolved row) so Promise.all does
+    // not issue duplicate point reads when those rows resolve concurrently.
+    const channelCache = new Map<string, Promise<Doc<"channels"> | null>>();
+    const getChannel = (channelId: (typeof active)[number]["channelId"]) => {
+      const key = String(channelId);
+      const cached = channelCache.get(key);
+      if (cached) return cached;
+      const pending = ctx.db.get(channelId);
+      channelCache.set(key, pending);
+      return pending;
+    };
     return await Promise.all(
       active.map(async (run) => {
-        const channel = await ctx.db.get(run.channelId);
+        const channel = await getChannel(run.channelId);
         return {
           _id: run._id,
           status: run.status,
@@ -3375,9 +3388,20 @@ export const listRecent = query({
       .order("desc")
       .take(limit);
     limited.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+    // Keep channel enrichment bounded to one in-flight read per channel. The
+    // returned rows and their ordering remain unchanged for legacy callers.
+    const channelCache = new Map<string, Promise<Doc<"channels"> | null>>();
+    const getChannel = (channelId: (typeof limited)[number]["channelId"]) => {
+      const key = String(channelId);
+      const cached = channelCache.get(key);
+      if (cached) return cached;
+      const pending = ctx.db.get(channelId);
+      channelCache.set(key, pending);
+      return pending;
+    };
     return await Promise.all(
       limited.map(async (run) => {
-        const channel = await ctx.db.get(run.channelId);
+        const channel = await getChannel(run.channelId);
         const live = run.status === "queued" || run.status === "running";
         const pipeline = live
           ? frozenRunPipelinePresentation({

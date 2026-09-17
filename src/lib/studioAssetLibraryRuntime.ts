@@ -23,6 +23,7 @@ type MutationClient = {
 const studioAssetLibraryApi = (api as unknown as {
   readonly studioAssetLibrary: {
     readonly resolveForPipeline: never;
+    readonly resolveManyForPipeline: never;
     readonly listInventory: never;
     readonly resolveApprovedImagePreview: never;
     readonly listReleaseFeedback: never;
@@ -55,6 +56,24 @@ export async function resolveStudioAssetsForPipeline(input: {
     ownerId: input.request.ownerId,
     request: input.request,
   } as never) as StudioAssetResolution;
+}
+
+/** Resolve several independent module requests while loading the immutable
+ * catalog once. Results preserve input order and each request remains fully
+ * isolated by channel, family, module, and required kind. */
+export async function resolveStudioAssetsForPipelineBatch(input: {
+  readonly client: QueryClient;
+  readonly requests: readonly StudioAssetResolveRequest[];
+}): Promise<readonly StudioAssetResolution[]> {
+  const [first, ...rest] = input.requests;
+  if (!first) throw new Error("Studio Asset Library batch resolution requires at least one request");
+  if (rest.some((request) => request.ownerId !== first.ownerId)) {
+    throw new Error("Studio Asset Library batch resolution cannot mix owners");
+  }
+  return await input.client.query(studioAssetLibraryApi.resolveManyForPipeline, {
+    ownerId: first.ownerId,
+    requests: input.requests,
+  } as never) as readonly StudioAssetResolution[];
 }
 
 /** Server-side owner inventory used by the Studio UI. This is a safe metadata

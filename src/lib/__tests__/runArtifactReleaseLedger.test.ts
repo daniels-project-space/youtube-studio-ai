@@ -41,6 +41,7 @@ class MemoryQuery {
 
 class MemoryDb {
   counter = 0;
+  getCalls = new Map<string, number>();
   tables = new Map<string, Map<string, Row>>();
   rows(table: string): Row[] { return [...(this.tables.get(table)?.values() ?? [])]; }
   seed(table: string, id: string, data: Record<string, unknown>): Row {
@@ -52,6 +53,7 @@ class MemoryDb {
     return this.seed(table, `${table}-${this.counter + 1}`, data)._id;
   }
   async get(id: string): Promise<Row | null> {
+    this.getCalls.set(id, (this.getCalls.get(id) ?? 0) + 1);
     for (const rows of this.tables.values()) if (rows.has(id)) return rows.get(id)!;
     return null;
   }
@@ -185,6 +187,33 @@ test("changed video identity, token version, owner or channel cannot authorize c
   await assert.rejects((recordReleaseObservations as unknown as {
     _handler: (ctx: unknown, args: unknown) => Promise<unknown>;
   })._handler(ownerContext, { ownerId, observedAt: due, observations: [] }), /service identity/);
+});
+
+test("claimDue reuses the channel read across candidates in one bounded claim", async () => {
+  const f = fixture();
+  const secondCertificateKey = `${keyPrefix}runs/run-b/release.json`;
+  f.db.seed("runs", "run-b", {
+    ownerId, channelId: "channel-a", youtubeVideoId: videoId,
+    releaseEvidenceStatus: "release_evidence_recorded",
+    releaseEvidenceCertificateKey: secondCertificateKey,
+  });
+  const first = await f.invoke<Row>(schedule, f.scheduleArgs);
+  const second = await f.invoke<Row>(schedule, {
+    ...f.scheduleArgs, runId: "run-b", certificateKey: secondCertificateKey,
+  });
+  const due = uploadedAt + 86_400_000 + RUN_ARTIFACT_RETENTION_MS;
+  await f.observe(first._id, due);
+  await f.observe(second._id, due);
+  // Force the first same-channel candidate through the identity rejection
+  // path so claimDue has to inspect the next candidate as well.
+  await f.db.patch(first._id, { releaseVideoId: "wrong-video" });
+  f.db.getCalls.clear();
+
+  const claimed = await f.claim(due);
+  assert.equal(claimed?._id, second._id);
+  assert.equal(f.db.getCalls.get("channel-a"), 1);
+  assert.equal(f.db.getCalls.get("run-a"), 1);
+  assert.equal(f.db.getCalls.get("run-b"), 1);
 });
 
 test("expired or failed cleanup leases require a new provider observation", async () => {

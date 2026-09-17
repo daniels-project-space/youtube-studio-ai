@@ -7,6 +7,7 @@ import {
   recordEntry,
   recordReleaseUsage,
   resolveForPipeline,
+  resolveManyForPipeline,
 } from "../../../convex/studioAssetLibrary";
 import {
   createStudioAssetLibraryEntry,
@@ -18,6 +19,7 @@ import { sha256Hex } from "@/lib/sha256";
 type Stored = Record<string, unknown> & { readonly _id: string };
 const OWNER = "owner-library";
 const CHANNEL = "channel-library";
+const CHANNEL_B = "channel-library-b";
 const RUN = "run-library";
 const digest = (value: string) => sha256Hex(value);
 
@@ -35,6 +37,7 @@ function createMemoryState() {
   const tables = new Map<string, Stored[]>();
   const documents = new Map<string, Stored>([
     [CHANNEL, { _id: CHANNEL, ownerId: OWNER }],
+    [CHANNEL_B, { _id: CHANNEL_B, ownerId: OWNER }],
     [RUN, { _id: RUN, ownerId: OWNER, channelId: CHANNEL }],
   ]);
   let next = 0;
@@ -111,7 +114,7 @@ function core(overrides: Partial<StudioAssetLibraryEntryCore> = {}): StudioAsset
   };
 }
 
-function request() {
+function request(overrides: Record<string, unknown> = {}) {
   return {
     channelId: CHANNEL,
     family: "comic",
@@ -119,6 +122,7 @@ function request() {
     moduleId: "visual_matter",
     runtimeFingerprint: digest("runtime"),
     requiredKinds: ["camera_recipe"],
+    ...overrides,
   };
 }
 
@@ -155,6 +159,43 @@ async function main() {
 
   const result = await invoke<{ status: string }>(resolveForPipeline, service, { ownerId: OWNER, request: request() });
   assert.equal(result.status, "resolved");
+
+  const channelEntry = createStudioAssetLibraryEntry(core({
+    logicalId: "channel-audio-recipe",
+    title: "Channel-bound audio recipe",
+    scope: "channel",
+    channelId: CHANNEL_B,
+    identitySensitivity: "channel",
+    assetKind: "audio_recipe",
+  }));
+  await invoke(recordEntry, service, { ownerId: OWNER, entry: channelEntry });
+  const channelResult = await invoke<{ status: string }>(resolveForPipeline, service, {
+    ownerId: OWNER,
+    request: request({ channelId: CHANNEL_B, requiredKinds: ["audio_recipe"] }),
+  });
+  assert.equal(channelResult.status, "resolved", "the indexed channel scope remains resolvable");
+  const isolatedResult = await invoke<{ status: string }>(resolveForPipeline, service, {
+    ownerId: OWNER,
+    request: request({ requiredKinds: ["audio_recipe"] }),
+  });
+  assert.equal(isolatedResult.status, "no_approved_match", "a channel asset cannot leak into another channel");
+  const batched = await invoke<Array<{ status: string }>>(resolveManyForPipeline, service, {
+    ownerId: OWNER,
+    requests: [
+      request(),
+      request({ channelId: CHANNEL_B, requiredKinds: ["audio_recipe"] }),
+    ],
+  });
+  assert.deepEqual(
+    batched.map((item) => item.status),
+    ["resolved", "resolved"],
+    "batch resolution preserves each request’s independent channel result",
+  );
+  const batchedNoLeak = await invoke<Array<{ status: string }>>(resolveManyForPipeline, service, {
+    ownerId: OWNER,
+    requests: [request({ requiredKinds: ["audio_recipe"] })],
+  });
+  assert.deepEqual(batchedNoLeak.map((item) => item.status), ["no_approved_match"]);
 
   const usage = createStudioAssetReleaseUsageReceipt({
     finalMaster: { sha256: digest("studio-library-release-master"), durationSec: 12 },

@@ -15,7 +15,10 @@ import {
   parseNarrativeSeriesAcceptedCharacterAdapters,
   parseNarrativeSeriesRunSelector,
 } from "@/lib/narrativeSeriesRunAdmission";
-import { resolveStudioAssetsForPipeline } from "@/lib/studioAssetLibraryRuntime";
+import {
+  resolveStudioAssetsForPipeline,
+  resolveStudioAssetsForPipelineBatch,
+} from "@/lib/studioAssetLibraryRuntime";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 
 // These are prompt/plan-only assets consumed by Visual Matter. A treatment
@@ -225,33 +228,34 @@ const studioPostproductionAssetResolve: Block = {
     const enabled = ctx.params["enabled"] !== false;
     const family = nonEmptyText(ctx.params["family"], "family");
     const contentLane = nonEmptyText(ctx.params["contentLane"], "contentLane");
-    const resolved = await Promise.all(POSTPRODUCTION_TARGETS.map(async (target) => {
-      if (!enabled) {
-        return [target.key, {
+    const disabledPairs = POSTPRODUCTION_TARGETS.map((target) => [target.key, {
           status: "no_approved_match" as const,
           missingKinds: [target.assetKind],
           blockers: ["Studio post-production asset resolution is disabled for this pipeline"],
-        }] as const;
-      }
-      return [target.key, await resolveStudioAssetsForPipeline({
-        client: convex(),
-        request: {
-          ownerId: ctx.ownerId,
-          channelId: ctx.channelId,
-          family,
-          contentLane,
-          moduleId: target.moduleId,
-          requiredKinds: [target.assetKind],
-          selectionMode: "best_effort",
-        },
-      })] as const;
-    }));
-    const resolutions = Object.fromEntries(resolved);
+        }] as const);
+    const batchResolutions = enabled
+      ? await resolveStudioAssetsForPipelineBatch({
+          client: convex(),
+          requests: POSTPRODUCTION_TARGETS.map((target) => ({
+            ownerId: ctx.ownerId,
+            channelId: ctx.channelId,
+            family,
+            contentLane,
+            moduleId: target.moduleId,
+            requiredKinds: [target.assetKind],
+            selectionMode: "best_effort" as const,
+          })),
+        })
+      : [];
+    const resolvedPairs = enabled
+      ? POSTPRODUCTION_TARGETS.map((target, index) => [target.key, batchResolutions[index]!] as const)
+      : disabledPairs;
+    const resolutions = Object.fromEntries(resolvedPairs);
     const audio = resolutions["audio"];
     const overlay = resolutions["overlay"];
     const motionGraphics = resolutions["motionGraphics"];
     const transition = resolutions["transition"];
-    const reused = resolved.filter(([, resolution]) => resolution.status === "resolved").length;
+    const reused = resolvedPairs.filter(([, resolution]) => resolution.status === "resolved").length;
     ctx.log(
       `studio_postproduction_asset_resolve: ${reused}/4 compatible approved template(s) reused; ` +
         "missing templates remain an explicit new-candidate signal",

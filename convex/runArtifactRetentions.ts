@@ -1,4 +1,5 @@
 import { v } from "convex/values";
+import type { Doc } from "./_generated/dataModel";
 
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { assertChannelWritable, isChannelLocked } from "./channelLock";
@@ -273,12 +274,23 @@ export const claimDue = mutation({
         .eq("status", "pending")
         .lte("nextReleaseCheckAt", args.now))
       .take(50);
+    // A bounded claim can contain many runs for the same channel. Reuse the
+    // channel read within this mutation while keeping each run lookup
+    // independent, so retention checks remain isolated without repeating the
+    // same channel read for every candidate.
+    const channelCache = new Map<string, Promise<Doc<"channels"> | null>>();
     let row: (typeof pending)[number] | null = null;
     for (const candidate of pending) {
       // Historical schedules and stale/failed provider reads never authorize
       // deletion, even when the old calculated retainUntil is in the past.
       if (!hasFreshRunArtifactRelease({ ...candidate, now: args.now })) continue;
-      const [run, channel] = await Promise.all([ctx.db.get(candidate.runId), ctx.db.get(candidate.channelId)]);
+      const channelKey = String(candidate.channelId);
+      let channelPromise = channelCache.get(channelKey);
+      if (!channelPromise) {
+        channelPromise = ctx.db.get(candidate.channelId);
+        channelCache.set(channelKey, channelPromise);
+      }
+      const [run, channel] = await Promise.all([ctx.db.get(candidate.runId), channelPromise]);
       if (!channel || channel.ownerId !== args.ownerId || isChannelLocked(channel)) continue;
       if (!candidate.releaseVideoId || !candidate.releaseYouTubeChannelId ||
           !run || run.ownerId !== args.ownerId || run.channelId !== candidate.channelId ||

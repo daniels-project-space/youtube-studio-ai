@@ -51,6 +51,10 @@ assert.match(convex, /thumbnailRefreshDispatchState: "consumed"/);
 assert.match(convex, /pipelineInvocationSha256: run\.pipelineInvocationSha256/);
 assert.match(convex, /latestBySource/,
   "automatic recovery must never queue an older candidate after a newer candidate for the same video");
+assert.match(convex, /const connectorByChannelId = new Map/,
+  "automatic recovery should memoize connector selection across candidates from one channel");
+assert.match(convex, /connectorByChannelId\.has\(channelKey\)/,
+  "automatic recovery connector memoization must avoid repeated youtubeAuth scans");
 assert.match(convex, /export const consumeCandidateDispatch = mutation/);
 assert.doesNotMatch(
   convex.match(/export const createCandidateShell = mutation\(\{([\s\S]*?)\n\}\);/)?.[1] ?? "",

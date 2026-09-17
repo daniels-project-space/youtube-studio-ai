@@ -316,24 +316,95 @@ export const resolveForPipeline = query({
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "Studio Asset Library pipeline resolution");
     const request = StudioAssetResolveRequestSchema.parse({ ...args.request, ownerId: args.ownerId });
-    const rows = await ctx.db
-      .query("studioAssetLibraryEntries")
-      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
-      .collect();
-    const observations = await ctx.db
-      .query("studioAssetReleaseUsageObservations")
-      .withIndex("by_owner_context", (q) =>
-        q
-          .eq("ownerId", args.ownerId)
-          .eq("family", request.family)
-          .eq("contentLane", request.contentLane)
-          .eq("moduleId", request.moduleId),
-      )
-      .collect();
+    const [ownedRows, channelRows, observations] = await Promise.all([
+      ctx.db
+        .query("studioAssetLibraryEntries")
+        .withIndex("by_owner_scope", (q) => q.eq("ownerId", args.ownerId).eq("scope", "owned_studio"))
+        .collect(),
+      ctx.db
+        .query("studioAssetLibraryEntries")
+        .withIndex("by_channel", (q) => q.eq("channelId", request.channelId as Id<"channels">))
+        .collect(),
+      ctx.db
+        .query("studioAssetReleaseUsageObservations")
+        .withIndex("by_owner_context", (q) =>
+          q
+            .eq("ownerId", args.ownerId)
+            .eq("family", request.family)
+            .eq("contentLane", request.contentLane)
+            .eq("moduleId", request.moduleId),
+        )
+        .collect(),
+    ]);
+    const rowsById = new Map<string, (typeof ownedRows)[number]>();
+    for (const row of [...ownedRows, ...channelRows.filter((row) => row.ownerId === args.ownerId)]) {
+      rowsById.set(String(row._id), row);
+    }
     return resolveStudioAssetLibrary({
       request,
-      entries: currentEntries(rows as AssetRow[]),
+      entries: currentEntries([...rowsById.values()] as AssetRow[]),
       releaseUsageReceipts: observations.map((observation) => observation.usage),
     });
+  },
+});
+
+/**
+ * Batch resolver for pipeline stages that need several independent asset
+ * kinds at once.  The requests keep their own compatibility and ranking
+ * rules, while the immutable catalog is loaded once for the whole batch.
+ * This removes repeated owner/channel scans without allowing one request's
+ * channel or module to influence another request's result.
+ */
+export const resolveManyForPipeline = query({
+  args: {
+    ownerId: v.string(),
+    requests: v.array(v.any()),
+  },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "Studio Asset Library batch pipeline resolution");
+    if (args.requests.length === 0 || args.requests.length > 12) {
+      throw new Error("Studio Asset Library batch resolution requires 1–12 requests");
+    }
+    const requests = args.requests.map((request) =>
+      StudioAssetResolveRequestSchema.parse({ ...request, ownerId: args.ownerId }),
+    );
+    const channelIds = [...new Set(requests.map((request) => request.channelId))];
+    const [ownedRows, channelRows, observations] = await Promise.all([
+      ctx.db
+        .query("studioAssetLibraryEntries")
+        .withIndex("by_owner_scope", (q) => q.eq("ownerId", args.ownerId).eq("scope", "owned_studio"))
+        .collect(),
+      Promise.all(channelIds.map((channelId) =>
+        ctx.db
+          .query("studioAssetLibraryEntries")
+          .withIndex("by_channel", (q) => q.eq("channelId", channelId as Id<"channels">))
+          .collect(),
+      )),
+      Promise.all(requests.map((request) =>
+        ctx.db
+          .query("studioAssetReleaseUsageObservations")
+          .withIndex("by_owner_context", (q) =>
+            q
+              .eq("ownerId", args.ownerId)
+              .eq("family", request.family)
+              .eq("contentLane", request.contentLane)
+              .eq("moduleId", request.moduleId),
+          )
+          .collect(),
+      )),
+    ]);
+    const rowsById = new Map<string, (typeof ownedRows)[number]>();
+    for (const row of [
+      ...ownedRows,
+      ...channelRows.flat().filter((row) => row.ownerId === args.ownerId),
+    ]) {
+      rowsById.set(String(row._id), row);
+    }
+    const entries = currentEntries([...rowsById.values()] as AssetRow[]);
+    return requests.map((request, index) => resolveStudioAssetLibrary({
+      request,
+      entries,
+      releaseUsageReceipts: observations[index]?.map((observation) => observation.usage) ?? [],
+    }));
   },
 });

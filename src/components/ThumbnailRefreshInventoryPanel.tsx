@@ -280,10 +280,61 @@ export function ThumbnailRefreshInventoryPanel({
 
   useEffect(() => {
     if (!hasActiveCandidate && !hasActiveRetirement && !hasActiveReplacement) return;
-    const timer = window.setInterval(() => {
-      void loadInventory().catch(() => undefined);
-    }, 4_000);
-    return () => window.clearInterval(timer);
+    let timer: number | undefined;
+    let requestController: AbortController | undefined;
+    let requestInFlight = false;
+
+    const stopPolling = () => {
+      if (timer !== undefined) {
+        window.clearInterval(timer);
+        timer = undefined;
+      }
+      // A hidden tab does not need to finish a review refresh that nobody can
+      // see. Aborting it also avoids spending a response on a stale snapshot;
+      // the visibility handler immediately refreshes again when the tab comes
+      // back into view.
+      requestController?.abort();
+      requestController = undefined;
+      requestInFlight = false;
+    };
+
+    const refresh = () => {
+      if (document.hidden || requestInFlight) return;
+      requestInFlight = true;
+      const controller = new AbortController();
+      requestController = controller;
+      void loadInventory(controller.signal)
+        .catch(() => undefined)
+        .finally(() => {
+          if (requestController === controller) {
+            requestController = undefined;
+            requestInFlight = false;
+          }
+        });
+    };
+
+    const startPolling = () => {
+      if (document.hidden || timer !== undefined) return;
+      timer = window.setInterval(refresh, 4_000);
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        stopPolling();
+        return;
+      }
+      // Revalidate immediately instead of waiting for the next four-second
+      // tick after a background tab becomes visible again.
+      refresh();
+      startPolling();
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    startPolling();
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      stopPolling();
+    };
   }, [hasActiveCandidate, hasActiveReplacement, hasActiveRetirement, loadInventory]);
 
   const createCandidate = async (row: ThumbnailInventoryRow) => {
