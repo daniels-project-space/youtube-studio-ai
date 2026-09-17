@@ -79,6 +79,35 @@ assert.doesNotMatch(
   "topic insertion must not scan the whole channel plan history",
 );
 
+const runStagesSource = readFileSync(
+  new URL("../../../convex/runStages.ts", import.meta.url),
+  "utf8",
+);
+const qaProjection = runStagesSource.slice(
+  runStagesSource.indexOf('if (args.block === "qa_visual")'),
+  runStagesSource.indexOf("return stageId;"),
+);
+assert.match(qaProjection, /RELEASE_EVIDENCE_ARTIFACT_KEYS\.map\(\(key\)/);
+assert.match(qaProjection, /Promise\.all\(/);
+assert.match(
+  qaProjection,
+  /withIndex\("by_run_key", \(q\) => q\.eq\("runId", args\.runId\)\.eq\("key", key\)\)/,
+);
+assert.match(qaProjection, /\.sort\(\(left, right\) => left\._creationTime - right\._creationTime\)/);
+assert.doesNotMatch(
+  qaProjection,
+  /query\("runArtifacts"\)[\s\S]*?withIndex\("by_run",/,
+  "qa_visual release projection must not scan unrelated run artifacts",
+);
+for (const key of [
+  "finalMasterReleaseCertificate",
+  "finalMasterReleaseCertificateReference",
+  "finalMasterReleaseCertificateKey",
+  "videoKey",
+] as const) {
+  assert.match(runStagesSource, new RegExp(`"${key}"`), `release artifact key ${key} stays explicit`);
+}
+
 const doctorSource = readFileSync(
   new URL("../../trigger/pipelineDoctor.ts", import.meta.url),
   "utf8",

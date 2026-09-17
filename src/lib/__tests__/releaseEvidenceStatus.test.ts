@@ -116,6 +116,68 @@ const completeArtifacts: ReleaseEvidenceArtifact[] = [
   },
 ];
 
+// The Convex qa_visual projection now loads only these exact artifact keys.
+// Compare that bounded subset with the historical full-run ledger across the
+// states that matter: a complete release, an incomplete lineage, a legacy
+// qaPassed-only run, and unrelated artifacts. This guards the read optimization
+// without weakening the fail-closed projection itself.
+const releaseArtifactKeys = new Set([
+  "finalMasterReleaseCertificate",
+  "finalMasterReleaseCertificateReference",
+  "finalMasterReleaseCertificateKey",
+  "videoKey",
+]);
+const boundedArtifacts = (artifacts: readonly ReleaseEvidenceArtifact[]) =>
+  artifacts.filter((artifact) => releaseArtifactKeys.has(String(artifact.key)));
+const unrelatedArtifact: ReleaseEvidenceArtifact = {
+  key: "narrationText",
+  type: "NarrationText",
+  producerModule: "narration_tts",
+  persistence: "inline",
+  payload: "unrelated immutable handoff",
+};
+
+assert.deepEqual(
+  deriveReleaseEvidenceProjection({
+    runId,
+    qaStage,
+    artifacts: [...completeArtifacts, unrelatedArtifact],
+  }),
+  deriveReleaseEvidenceProjection({
+    runId,
+    qaStage,
+    artifacts: boundedArtifacts([...completeArtifacts, unrelatedArtifact]),
+  }),
+  "bounded release reads preserve the complete projection while ignoring unrelated artifacts",
+);
+const incompleteArtifacts = completeArtifacts.filter((artifact) => artifact.key !== "videoKey");
+assert.deepEqual(
+  deriveReleaseEvidenceProjection({
+    runId,
+    qaStage,
+    artifacts: [...incompleteArtifacts, unrelatedArtifact],
+  }),
+  deriveReleaseEvidenceProjection({
+    runId,
+    qaStage,
+    artifacts: boundedArtifacts([...incompleteArtifacts, unrelatedArtifact]),
+  }),
+  "bounded release reads preserve an incomplete lineage failure",
+);
+assert.deepEqual(
+  deriveReleaseEvidenceProjection({
+    runId,
+    qaStage: { status: "ok", outputs: { qaPassed: true } },
+    artifacts: [unrelatedArtifact],
+  }),
+  deriveReleaseEvidenceProjection({
+    runId,
+    qaStage: { status: "ok", outputs: { qaPassed: true } },
+    artifacts: boundedArtifacts([unrelatedArtifact]),
+  }),
+  "bounded release reads preserve legacy-unverified status",
+);
+
 assert.deepEqual(
   deriveReleaseEvidenceProjection({ runId, qaStage, artifacts: completeArtifacts }),
   {

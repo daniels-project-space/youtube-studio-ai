@@ -6,6 +6,18 @@ import { assertRunExecutionWriteFence, requiresRunExecutionWriteFence } from "..
 import { StageReuseReceiptSchema } from "../src/engine/stageReuseContract";
 
 /**
+ * Release evidence is the only artifact subset needed for the qa_visual run
+ * projection. Keep these four keys explicit: fetching the complete immutable
+ * artifact ledger turns a tiny status update into an ever-growing run scan.
+ */
+const RELEASE_EVIDENCE_ARTIFACT_KEYS = [
+  "finalMasterReleaseCertificate",
+  "finalMasterReleaseCertificateReference",
+  "finalMasterReleaseCertificateKey",
+  "videoKey",
+] as const;
+
+/**
  * Upsert a per-block stage row for a run. Keyed by (runId, block) so the
  * runner can transition a stage queued -> running -> ok|failed idempotently.
  */
@@ -134,10 +146,22 @@ export const upsertRunStage = mutation({
     // conservative status onto the run. This does not gate or alter upload /
     // publish behavior; it makes the provenance state visible for audit.
     if (args.block === "qa_visual") {
-      const artifacts = await ctx.db
-        .query("runArtifacts")
-        .withIndex("by_run", (q) => q.eq("runId", args.runId))
-        .collect();
+      // Preserve every duplicate row (including repaired/older certificate
+      // references), but avoid loading unrelated immutable stage handoffs. A
+      // reference lookup only depends on rows with these exact keys; ordering
+      // the merged result by creation time retains the old by_run traversal
+      // semantics for duplicate/reference precedence.
+      const artifactRows = await Promise.all(
+        RELEASE_EVIDENCE_ARTIFACT_KEYS.map((key) =>
+          ctx.db
+            .query("runArtifacts")
+            .withIndex("by_run_key", (q) => q.eq("runId", args.runId).eq("key", key))
+            .collect(),
+        ),
+      );
+      const artifacts = artifactRows
+        .flat()
+        .sort((left, right) => left._creationTime - right._creationTime);
       const releaseEvidence = deriveReleaseEvidenceProjection({
         runId: args.runId,
         qaStage: { status: args.status, outputs: stageOutputs },
