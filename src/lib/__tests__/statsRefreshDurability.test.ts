@@ -85,10 +85,15 @@ class MemoryQuery {
   async take(limit: number): Promise<Row[]> {
     return this.rows().slice(0, limit);
   }
+
+  async collect(): Promise<Row[]> {
+    return this.rows();
+  }
 }
 
 class MemoryDb {
   private readonly tables = new Map<string, Map<string, Row>>();
+  private readonly queryCounts = new Map<string, number>();
   private counter = 0;
 
   rows(table: string): Row[] {
@@ -128,7 +133,12 @@ class MemoryDb {
   }
 
   query(table: string): MemoryQuery {
+    this.queryCounts.set(table, (this.queryCounts.get(table) ?? 0) + 1);
     return new MemoryQuery(this, table);
+  }
+
+  queryCount(table: string): number {
+    return this.queryCounts.get(table) ?? 0;
   }
 }
 
@@ -605,6 +615,117 @@ async function run(): Promise<void> {
     }
     assert.equal(seeded.db.rows("analyticsRefreshCursors")[0]?.activeState, "manual_reconciliation_required");
     assert.equal(seeded.db.rows("analyticsIngestions")[0]?.status, "failed");
+  }
+
+  /* A multi-video page loads its existing snapshots once, while duplicate
+   * sink rows still stop the commit instead of silently choosing one. */
+  {
+    const seeded = seededDb();
+    historyProgress({ ...seeded, now });
+    const admitted = await invoke<{ action: string; batch?: { batchKey: string; generation: number } }>(admit, {
+      ...binding(seeded),
+      cadenceKey,
+      windowDate: "2026-08-21",
+      mode: "history" as const,
+      scanStartedAfter: 0,
+      scanCursorAfter: "history:after-batched-video-reads",
+      scanIsDone: false,
+      videoIds: ["video-batch-1", "video-batch-2"],
+      now,
+    }, seeded.db);
+    assert.equal(admitted.action, "started");
+    const workerResult = await claim(seeded, admitted.batch!, now + 1);
+    assert.equal(workerResult.action, "claimed");
+    const worker = workerResult.worker!;
+    const videoStart = await invoke<{ action: string; token?: string }>(beginRequest, {
+      ...binding(seeded), ...workerFence(worker), stage: "video", now: now + 2,
+    }, seeded.db);
+    await invoke(saveVideoStats, {
+      ...binding(seeded),
+      ...workerFence(worker),
+      requestToken: videoStart.token,
+      stats: [
+        { youtubeVideoId: "video-batch-1", channelId: "youtube-channel-1", views: 12, likes: 3, comments: 2 },
+        { youtubeVideoId: "video-batch-2", channelId: "youtube-channel-1", views: 30, likes: 4, comments: 1 },
+      ],
+      now: now + 3,
+    }, seeded.db);
+    const channelStart = await invoke<{ action: string; token?: string }>(beginRequest, {
+      ...binding(seeded), ...workerFence(worker), stage: "channel", now: now + 4,
+    }, seeded.db);
+    await invoke(saveChannelRollup, {
+      ...binding(seeded),
+      ...workerFence(worker),
+      requestToken: channelStart.token,
+      rollup: { found: true, subscriberCount: 100, viewCount: 500, videoCount: 2 },
+      now: now + 5,
+    }, seeded.db);
+    const committed = await invoke<{ action: string; recordsWritten: number }>(commit, {
+      ...binding(seeded), ...workerFence(worker), now: now + 6,
+    }, seeded.db);
+    assert.deepEqual(committed, { action: "committed", recordsWritten: 3 });
+    assert.equal(seeded.db.queryCount("videoAnalytics"), 1);
+    assert.deepEqual(
+      seeded.db.rows("videoAnalytics").map((row) => [row.youtubeVideoId, row.views]),
+      [["video-batch-1", 12], ["video-batch-2", 30]],
+    );
+  }
+
+  {
+    const seeded = seededDb();
+    historyProgress({ ...seeded, now });
+    const admitted = await invoke<{ action: string; batch?: { batchKey: string; generation: number; ingestionId: string } }>(admit, {
+      ...binding(seeded),
+      cadenceKey,
+      windowDate: "2026-08-21",
+      mode: "history" as const,
+      scanStartedAfter: 0,
+      scanCursorAfter: "history:after-duplicate-video-read",
+      scanIsDone: false,
+      videoIds: ["video-duplicate"],
+      now,
+    }, seeded.db);
+    assert.equal(admitted.action, "started");
+    const workerResult = await claim(seeded, admitted.batch!, now + 1);
+    assert.equal(workerResult.action, "claimed");
+    const worker = workerResult.worker!;
+    const videoStart = await invoke<{ action: string; token?: string }>(beginRequest, {
+      ...binding(seeded), ...workerFence(worker), stage: "video", now: now + 2,
+    }, seeded.db);
+    await invoke(saveVideoStats, {
+      ...binding(seeded),
+      ...workerFence(worker),
+      requestToken: videoStart.token,
+      stats: [{ youtubeVideoId: "video-duplicate", channelId: "youtube-channel-1", views: 1, likes: 1, comments: 1 }],
+      now: now + 3,
+    }, seeded.db);
+    const channelStart = await invoke<{ action: string; token?: string }>(beginRequest, {
+      ...binding(seeded), ...workerFence(worker), stage: "channel", now: now + 4,
+    }, seeded.db);
+    await invoke(saveChannelRollup, {
+      ...binding(seeded),
+      ...workerFence(worker),
+      requestToken: channelStart.token,
+      rollup: { found: true, subscriberCount: 100, viewCount: 500, videoCount: 1 },
+      now: now + 5,
+    }, seeded.db);
+    for (const id of ["videoAnalytics:duplicate-1", "videoAnalytics:duplicate-2"]) {
+      seeded.db.seed("videoAnalytics", {
+        ownerId: seeded.ownerId,
+        channelId: seeded.channelId,
+        ingestionId: admitted.batch!.ingestionId,
+        youtubeVideoId: "video-duplicate",
+        views: 1,
+        likes: 1,
+        comments: 1,
+        snapshotAt: now,
+      }, id);
+    }
+    await assert.rejects(
+      invoke(commit, { ...binding(seeded), ...workerFence(worker), now: now + 6 }, seeded.db),
+      /video snapshot is not unique for ingestion/,
+    );
+    assert.equal(seeded.db.queryCount("videoAnalytics"), 1);
   }
 
   /* A non-advancing unfinished page is rejected instead of becoming an endless loop. */

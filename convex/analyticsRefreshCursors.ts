@@ -996,13 +996,27 @@ export const commit = mutation({
       throw new Error("analytics refresh ingestion is not in a committable state");
     }
 
+    // One ingestion owns the whole bounded video page. Load its existing
+    // snapshots once, then retain the per-video duplicate check that the
+    // keyed `.unique()` reads provided before. Replays therefore keep the
+    // same upsert semantics without paying one indexed read per video.
+    const existingByVideoId = new Map<string, Doc<"videoAnalytics">[]>();
+    const existingSnapshots = await ctx.db
+      .query("videoAnalytics")
+      .withIndex("by_ingestion_video", (q) => q.eq("ingestionId", batch.ingestionId))
+      .collect();
+    for (const existingSnapshot of existingSnapshots) {
+      const rows = existingByVideoId.get(existingSnapshot.youtubeVideoId) ?? [];
+      rows.push(existingSnapshot);
+      existingByVideoId.set(existingSnapshot.youtubeVideoId, rows);
+    }
+
     for (const stat of batch.videoStats) {
-      const existing = await ctx.db
-        .query("videoAnalytics")
-        .withIndex("by_ingestion_video", (q) =>
-          q.eq("ingestionId", batch.ingestionId).eq("youtubeVideoId", stat.youtubeVideoId),
-        )
-        .unique();
+      const existingRows = existingByVideoId.get(stat.youtubeVideoId) ?? [];
+      if (existingRows.length > 1) {
+        throw new Error("analytics refresh video snapshot is not unique for ingestion");
+      }
+      const existing = existingRows[0];
       const releaseProvenance = await ctx.db
         .query("videoReleaseProvenance")
         .withIndex("by_owner_youtube_video", (q) =>
