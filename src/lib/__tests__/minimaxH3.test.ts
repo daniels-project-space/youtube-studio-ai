@@ -14,6 +14,7 @@ import {
   renderMiniMaxH3,
   renderMiniMaxH3WeeklyBatch,
 } from "@/lib/minimaxH3";
+import { MINIMAX_H3_IMMEDIATE_MOTION_PROMPT } from "@/lib/minimaxH3OpeningMotionQa";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 
 const saved = { ...process.env };
@@ -46,7 +47,7 @@ const builtSceneRequest = buildMiniMaxH3SceneRequest({
 });
 assert.equal(
   builtSceneRequest.prompt,
-  "A rainy station at night.\n\nMotion: A figure turns toward the platform lights.\n\nCamera: slow lateral track\n\nAvoid: text, logos",
+  `A rainy station at night.\n\nMotion: A figure turns toward the platform lights.\n\nCamera: slow lateral track\n\n${MINIMAX_H3_IMMEDIATE_MOTION_PROMPT}\n\nAvoid: text, logos`,
   "scene request builder must preserve canonical prompt section order",
 );
 assert.deepEqual(builtSceneRequest.firstFrame, { r2Key: "owner/test/scene/frame.png", sha256: "a".repeat(64) });

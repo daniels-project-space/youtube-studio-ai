@@ -10,6 +10,7 @@ import {
   assertMiniMaxH3OpeningMotionQa,
   measureMiniMaxH3OpeningMotionQa,
   MINIMAX_H3_IMMEDIATE_MOTION_MAX_FROZEN_HOLD_SEC,
+  MINIMAX_H3_MIN_OPENING_FRAME_DELTA,
   MiniMaxH3OpeningMotionRejectedError,
 } from "@/lib/minimaxH3OpeningMotionQa";
 
@@ -29,6 +30,7 @@ async function main(): Promise<void> {
   try {
     const frozenOpening = join(work, "frozen-opening.mp4");
     const briefFrozenOpening = join(work, "brief-frozen-opening.mp4");
+    const shortFrozenOpening = join(work, "short-frozen-opening.mp4");
     const continuousMotion = join(work, "continuous-motion.mp4");
     render(frozenOpening, [
       "-f", "lavfi", "-i", "color=c=0x5b2533:s=320x192:r=24:d=2",
@@ -39,6 +41,12 @@ async function main(): Promise<void> {
     render(briefFrozenOpening, [
       "-f", "lavfi", "-i", "color=c=0x5b2533:s=320x192:r=24:d=0.5",
       "-f", "lavfi", "-i", "testsrc2=s=320x192:r=24:d=4.5",
+      "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0",
+      "-c:v", "libx264", "-pix_fmt", "yuv420p",
+    ]);
+    render(shortFrozenOpening, [
+      "-f", "lavfi", "-i", "color=c=0x5b2533:s=320x192:r=24:d=0.25",
+      "-f", "lavfi", "-i", "testsrc2=s=320x192:r=24:d=4.75",
       "-filter_complex", "[0:v][1:v]concat=n=2:v=1:a=0",
       "-c:v", "libx264", "-pix_fmt", "yuv420p",
     ]);
@@ -109,6 +117,18 @@ async function main(): Promise<void> {
       briefOpening.openingFrozenHoldSec >= 0.45,
       "the independent immediate-motion rule must catch a half-second H3 opening hold",
     );
+
+    const shortOpening = measureMiniMaxH3OpeningMotionQa({
+      videoPath: shortFrozenOpening,
+      durationSec: 5,
+      fps: 24,
+    });
+    assert.equal(shortOpening.verdict, "fail", "native-rate QA must reject a quarter-second conditioning-image hold");
+    assert(
+      shortOpening.openingFrozenHoldSec > MINIMAX_H3_IMMEDIATE_MOTION_MAX_FROZEN_HOLD_SEC,
+      "the tightened opening threshold must preserve the measured short hold",
+    );
+    assert.match(shortOpening.detail ?? "", new RegExp(`delta=.*minimum ${MINIMAX_H3_MIN_OPENING_FRAME_DELTA.toFixed(6)}`));
 
     const moving = measureMiniMaxH3OpeningMotionQa({
       videoPath: continuousMotion,

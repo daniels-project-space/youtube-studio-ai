@@ -18,7 +18,7 @@ const temporalInterval = z.object({
  */
 export const MiniMaxH3OpeningMotionQaEvidenceSchema = z.object({
   contract: z.literal(MINIMAX_H3_OPENING_MOTION_QA_CONTRACT),
-  source: z.literal("ffmpeg/freezedetect"),
+  source: z.enum(["ffmpeg/freezedetect", "ffmpeg/freezedetect+ssim"]),
   verdict: z.literal("pass"),
   durationSec: z.number().finite().positive(),
   maxFreezeFraction: z.number().finite().positive().max(0.2),

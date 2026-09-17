@@ -8,6 +8,8 @@ import { spawnSync } from "node:child_process";
 const FFMPEG = process.env.FFMPEG_BIN ?? "ffmpeg";
 const DETECTION_MIN_SEC = 0.5;
 const DEFAULT_NOISE_TOLERANCE = 0.003;
+const DEFAULT_SAMPLE_FPS = 4;
+const MAX_SAMPLE_FPS = 60;
 
 export interface TemporalDynamismInterval {
   startSec: number;
@@ -39,6 +41,22 @@ export interface TemporalDynamismEvidence {
   detail?: string;
 }
 
+/**
+ * A tiny early-frame SSIM check supplements freeze detection where a rendered
+ * clip preserves the conditioning image with codec-level shimmer. FFmpeg's
+ * `freezedetect` correctly finds long exact holds, while this comparison
+ * catches a short opening that has no meaningful visual displacement.
+ */
+export type OpeningFrameDeltaEvidence = {
+  source: "ffmpeg/ssim";
+  sampleFps: number;
+  comparisonOffsetSec: number;
+  delta: number;
+  minDelta: number;
+  verdict: "pass" | "fail" | "unavailable";
+  detail?: string;
+};
+
 export interface MeasureTemporalDynamismOptions {
   videoPath: string;
   durationSec: number;
@@ -47,6 +65,12 @@ export interface MeasureTemporalDynamismOptions {
   /** Only explicitly planned cards may be excluded from continuity measurement. */
   excludedWindows?: readonly Pick<TemporalDynamismExclusion, "startSec" | "endSec" | "reason">[];
   noiseTolerance?: number;
+  /**
+   * Decoded analysis rate. Four fps is enough for ordinary long-form holds;
+   * H3's first-frame gate opts into native-rate analysis to catch a brief
+   * conditioning-image hold before the action visibly begins.
+   */
+  sampleFps?: number;
 }
 
 function finite(value: unknown, fallback = 0): number {
@@ -156,6 +180,79 @@ function emptyEvidence(
   };
 }
 
+/**
+ * Compare the opening frame to a frame shortly after it at the requested
+ * decoded sampling rate. `delta` is `1 - SSIM`, so zero means the two sampled
+ * frames are visually identical. This stays synchronous and file-free: both
+ * frames are selected and compared inside one bounded FFmpeg invocation.
+ */
+export function measureOpeningFrameDelta(args: {
+  videoPath: string;
+  durationSec: number;
+  sampleFps: number;
+  minDelta: number;
+}): OpeningFrameDeltaEvidence {
+  if (!Number.isInteger(args.sampleFps) || args.sampleFps < 1 || args.sampleFps > MAX_SAMPLE_FPS) {
+    throw new Error(`opening frame sampleFps must be an integer from 1 to ${MAX_SAMPLE_FPS}`);
+  }
+  if (!Number.isFinite(args.minDelta) || args.minDelta <= 0 || args.minDelta >= 1) {
+    throw new Error("opening frame minimum delta must be within (0, 1)");
+  }
+  const comparisonFrame = Math.max(2, Math.round(args.sampleFps / 6));
+  const comparisonOffsetSec = comparisonFrame / args.sampleFps;
+  if (!Number.isFinite(args.durationSec) || args.durationSec <= comparisonOffsetSec) {
+    return {
+      source: "ffmpeg/ssim",
+      sampleFps: args.sampleFps,
+      comparisonOffsetSec,
+      delta: 0,
+      minDelta: args.minDelta,
+      verdict: "unavailable",
+      detail: "video is too short for an opening-frame motion comparison",
+    };
+  }
+  const result = spawnSync(
+    /* turbopackIgnore: true */
+    FFMPEG,
+    [
+      "-hide_banner",
+      "-i", args.videoPath,
+      "-filter_complex",
+      `[0:v]fps=${args.sampleFps},scale=320:-2:flags=area,split=2[first][later];` +
+      `[first]trim=start_frame=0:end_frame=1,setpts=PTS-STARTPTS[a];` +
+      `[later]trim=start_frame=${comparisonFrame}:end_frame=${comparisonFrame + 1},setpts=PTS-STARTPTS[b];` +
+      "[a][b]ssim",
+      "-an",
+      "-f", "null", "-",
+    ],
+    { encoding: "utf8", maxBuffer: 1 << 27 },
+  );
+  const failure = result.error?.message
+    ?? (result.status === 0 ? undefined : `ffmpeg exited ${String(result.status)}`);
+  const match = /All:([0-9.]+)/.exec(result.stderr || "");
+  const similarity = match ? Number(match[1]) : Number.NaN;
+  if (failure || !Number.isFinite(similarity)) {
+    return {
+      source: "ffmpeg/ssim",
+      sampleFps: args.sampleFps,
+      comparisonOffsetSec,
+      delta: 0,
+      minDelta: args.minDelta,
+      verdict: "unavailable",
+      detail: failure ?? "FFmpeg did not emit an opening-frame SSIM score",
+    };
+  }
+  const delta = Number(Math.max(0, Math.min(1, 1 - similarity)).toFixed(6));
+  return {
+    source: "ffmpeg/ssim",
+    sampleFps: args.sampleFps,
+    comparisonOffsetSec,
+    delta,
+    minDelta: args.minDelta,
+    verdict: delta >= args.minDelta ? "pass" : "fail",
+  };
+}
+
 export function measureTemporalDynamism(opts: MeasureTemporalDynamismOptions): TemporalDynamismEvidence {
   const threshold = finite(opts.maxStaticHoldSec, Number.NaN);
   if (!Number.isFinite(threshold) || threshold <= 0) {
@@ -163,16 +260,21 @@ export function measureTemporalDynamism(opts: MeasureTemporalDynamismOptions): T
   }
   const durationSec = Math.max(0, finite(opts.durationSec));
   const noise = finite(opts.noiseTolerance, DEFAULT_NOISE_TOLERANCE);
+  const sampleFps = opts.sampleFps ?? DEFAULT_SAMPLE_FPS;
+  if (!Number.isInteger(sampleFps) || sampleFps < 1 || sampleFps > MAX_SAMPLE_FPS) {
+    throw new Error(`temporal dynamism sampleFps must be an integer from 1 to ${MAX_SAMPLE_FPS}`);
+  }
   // Honour stricter short-form/LTX shot budgets below the generic 0.5s
   // detector floor. Decoding at 4fps gives a practical 0.25s resolution; the
   // existing threshold grace still absorbs one-frame boundary noise.
   const detectionMinSec = Math.min(DETECTION_MIN_SEC, threshold);
   const result = spawnSync(
+    /* turbopackIgnore: true */
     FFMPEG,
     [
       "-hide_banner",
       "-i", opts.videoPath,
-      "-vf", `fps=4,freezedetect=n=${Math.max(0, Math.min(1, noise))}:d=${detectionMinSec}`,
+      "-vf", `fps=${sampleFps},freezedetect=n=${Math.max(0, Math.min(1, noise))}:d=${detectionMinSec}`,
       "-an",
       "-f", "null", "-",
     ],

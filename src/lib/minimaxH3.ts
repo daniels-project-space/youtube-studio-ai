@@ -27,6 +27,7 @@ import {
   type MiniMaxH3Execution,
   type MiniMaxH3Provider,
 } from "@/lib/minimaxH3Admission";
+import { MINIMAX_H3_IMMEDIATE_MOTION_PROMPT } from "@/lib/minimaxH3OpeningMotionQa";
 
 export {
   MINIMAX_H3_MANIFEST_SHA256,
@@ -365,6 +366,7 @@ export function buildMiniMaxH3SceneRequest(input: {
     input.prompt,
     input.motionPrompt ? `Motion: ${input.motionPrompt}` : undefined,
     input.cameraInstruction ? `Camera: ${input.cameraInstruction}` : undefined,
+    MINIMAX_H3_IMMEDIATE_MOTION_PROMPT,
     input.negativePrompt ? `Avoid: ${input.negativePrompt}` : undefined,
   ]
     .filter((part): part is string => typeof part === "string" && part.trim().length > 0)

@@ -3,6 +3,7 @@ import {
   type MiniMaxH3OpeningMotionQaEvidence,
 } from "@/engine/cinematicClipReview";
 import {
+  measureOpeningFrameDelta,
   measureTemporalDynamism,
   type TemporalDynamismEvidence,
   type TemporalDynamismInterval,
@@ -13,8 +14,26 @@ import {
  * holding the conditioning image for the first beat, so the cinematic gate
  * independently requires visible motion within one decoded 4fps interval.
  */
-export const MINIMAX_H3_IMMEDIATE_MOTION_MAX_FROZEN_HOLD_SEC = 0.25;
+/**
+ * At H3's native 24 fps this permits only the source frame plus one adjacent
+ * decoded frame before visible displacement is required. It is deliberately
+ * shorter than the general static-hold budget: an opening conditioning-image
+ * pause is a transport/model defect, not a creative beat.
+ */
+export const MINIMAX_H3_IMMEDIATE_MOTION_MAX_FROZEN_HOLD_SEC = 0.125;
 export const MINIMAX_H3_MAX_STATIC_FRACTION = 0.1;
+export const MINIMAX_H3_OPENING_MOTION_SAMPLE_FPS = 24;
+export const MINIMAX_H3_MIN_OPENING_FRAME_DELTA = 0.002;
+
+/**
+ * H3 accepts the supplied image as its opening frame. Make the first moving
+ * beat explicit and identical across every H3 caller so one legacy pathway
+ * cannot quietly reintroduce a static conditioning-image hold.
+ */
+export const MINIMAX_H3_IMMEDIATE_MOTION_PROMPT =
+  "MANDATORY MOTION TIMING: at 0.00 seconds, begin the authored subject action and camera displacement. " +
+  "By 0.125 seconds the image must visibly advance beyond the conditioning frame. " +
+  "Do not hold the input image, use a static establishing beat, freeze, or delay movement.";
 
 export type MiniMaxH3OpeningMotionQaResult =
   | MiniMaxH3OpeningMotionQaEvidence
@@ -77,11 +96,13 @@ export function measureMiniMaxH3OpeningMotionQa(args: {
   if (!Number.isInteger(args.fps) || args.fps <= 0) {
     throw new Error("MiniMax H3 opening-motion QA requires a positive integer frame rate");
   }
+  const sampleFps = Math.min(args.fps, MINIMAX_H3_OPENING_MOTION_SAMPLE_FPS);
   const maxStaticHoldSec = args.durationSec * MINIMAX_H3_MAX_STATIC_FRACTION;
   const measured = measureTemporalDynamism({
     videoPath: args.videoPath,
     durationSec: args.durationSec,
     maxStaticHoldSec,
+    sampleFps,
   });
   if (measured.verdict === "not_required") {
     throw new Error("MiniMax H3 opening-motion QA cannot disable motion evidence");
@@ -90,28 +111,53 @@ export function measureMiniMaxH3OpeningMotionQa(args: {
     maxStaticHoldSec,
     MINIMAX_H3_IMMEDIATE_MOTION_MAX_FROZEN_HOLD_SEC,
   );
-  const observedOpeningFrozenHoldSec = openingFrozenHoldSec(measured, args.fps);
-  const violatingIntervals = withOpeningViolation({
+  const frameDelta = measureOpeningFrameDelta({
+    videoPath: args.videoPath,
+    durationSec: args.durationSec,
+    sampleFps,
+    minDelta: MINIMAX_H3_MIN_OPENING_FRAME_DELTA,
+  });
+  const observedOpeningFrozenHoldSec = Math.max(
+    openingFrozenHoldSec(measured, sampleFps),
+    frameDelta.verdict === "fail" ? frameDelta.comparisonOffsetSec : 0,
+  );
+  const freezeViolations = withOpeningViolation({
     measured,
     openingFrozenHoldSec: observedOpeningFrozenHoldSec,
     maxOpeningFrozenHoldSec,
-    fps: args.fps,
+    fps: sampleFps,
   });
+  const frameDeltaInterval = frameDelta.verdict === "fail"
+    ? {
+        startSec: 0,
+        endSec: frameDelta.comparisonOffsetSec,
+        durationSec: frameDelta.comparisonOffsetSec,
+      }
+    : undefined;
+  const violatingIntervals = frameDeltaInterval && !freezeViolations.some((interval) => interval.startSec < 0.001)
+    ? [...freezeViolations, frameDeltaInterval]
+    : freezeViolations;
+  const detail = [
+    measured.detail,
+    frameDelta.verdict === "unavailable"
+      ? `opening-frame SSIM unavailable: ${frameDelta.detail ?? "unknown FFmpeg failure"}`
+      : `opening-frame SSIM delta=${frameDelta.delta.toFixed(6)} (minimum ${frameDelta.minDelta.toFixed(6)}) at ${frameDelta.comparisonOffsetSec.toFixed(3)}s`,
+  ].filter((part): part is string => Boolean(part)).join("; ");
   return {
     contract: MINIMAX_H3_OPENING_MOTION_QA_CONTRACT,
-    source: measured.source,
-    verdict: measured.verdict === "unavailable"
+    source: "ffmpeg/freezedetect+ssim",
+    verdict: measured.verdict === "unavailable" || frameDelta.verdict === "unavailable"
       ? "unavailable"
       : violatingIntervals.length ? "fail" : "pass",
     durationSec: args.durationSec,
     maxFreezeFraction: MINIMAX_H3_MAX_STATIC_FRACTION,
     maxStaticHoldSec,
     maxOpeningFrozenHoldSec,
-    maxFrozenHoldSec: measured.maxFrozenHoldSec,
+    maxFrozenHoldSec: Math.max(measured.maxFrozenHoldSec, frameDeltaInterval?.durationSec ?? 0),
     openingFrozenHoldSec: observedOpeningFrozenHoldSec,
     frozenIntervals: measured.frozenIntervals,
     violatingIntervals,
-    ...(measured.detail ? { detail: measured.detail } : {}),
+    ...(detail ? { detail } : {}),
   };
 }
 
