@@ -62,6 +62,7 @@ const PENDING_BUILD_STORAGE_KEY = "youtube-studio:pending-channel-build:v1";
 const FEATURED_NICHE_KEYS = new Set([
   "lofi",
   "educational",
+  "children_learning",
   "finance",
   "technology",
   "psychology",
@@ -248,7 +249,7 @@ function certifiedExecutableFormatAlternatives(value: unknown): ExecutableFormat
  * allowlist of registered desks and make the operator choose whether to open
  * one.
  */
-const REVIEW_HREFS = new Set(["/casefile", "/editorial-evidence"]);
+const REVIEW_HREFS = new Set(["/casefile", "/editorial-evidence", "/children-review"]);
 
 function safeReviewHrefs(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -263,7 +264,26 @@ function safeReviewHrefs(value: unknown): string[] {
 function reviewHrefLabel(href: string): string {
   if (href === "/casefile") return "Open Casefile desk";
   if (href === "/editorial-evidence") return "Open factual evidence desk";
+  if (href === "/children-review") return "Open children review desk";
   return "Open private review desk";
+}
+
+/**
+ * A supervised route is selectable as a review-intake destination only. Keep
+ * the conversion in one place so a new territory cannot accidentally expose
+ * its private workflow as automatic channel creation.
+ */
+function supervisedCreatorSelectionForFamily(family: FamilyKey): SupervisedCreatorSelection | undefined {
+  const capability = familySupervisedChannelInceptionCapability(family);
+  return capability
+    ? {
+        capabilityId: capability.id,
+        provenance: capability.provenance,
+        reviewOnlyStages: [...capability.coveredStages],
+        requiredArtifacts: [...capability.requiredArtifacts],
+        ...(capability.reviewHref ? { reviewHref: capability.reviewHref } : {}),
+      }
+    : undefined;
 }
 const DEFAULT_TOGGLES: Toggles = {
   quotes: true,
@@ -624,8 +644,15 @@ export default function NewChannelWizard() {
     const preset = nichePreset(k);
     if (n) {
       setSubcategory(n.subcategories[0]?.name ?? "");
+      const supervised = supervisedCreatorSelectionForFamily(n.defaultFamily);
       if (automaticFamilyCreatorReadiness(n.defaultFamily).ready) {
         selectFamily(n.defaultFamily, preset?.targetSeconds);
+      } else if (supervised) {
+        // A private-review family is a real creator destination. Selecting it
+        // opens its $0 intake rather than pretending the normal automatic
+        // pipeline is merely unavailable.
+        selectFamily(n.defaultFamily, preset?.targetSeconds, supervised);
+        setClipNote(`${FAMILIES[n.defaultFamily].label} starts with a private lesson-and-show review packet. It cannot render, create a YouTube channel, or publish until its child-editor evidence is complete.`);
       } else {
         // A blocked renderer is not permission to turn a lofi, lore, or
         // cinematic channel into an unrelated format. Leave the format
@@ -1429,6 +1456,7 @@ export default function NewChannelWizard() {
             const index = NICHES.indexOf(n);
             const on = n.key === nicheKey;
             const defaultFamilyReadiness = automaticFamilyCreatorReadiness(n.defaultFamily);
+            const supervisedDefault = supervisedCreatorSelectionForFamily(n.defaultFamily);
             return (
               <button
                 key={n.key}
@@ -1436,14 +1464,14 @@ export default function NewChannelWizard() {
                 className={styles.nicheCard}
                 data-active={on ? "true" : undefined}
                 aria-pressed={on}
-                title={`${n.blurb}${!defaultFamilyReadiness.ready && defaultFamilyReadiness.blockers[0] ? ` Held: ${defaultFamilyReadiness.blockers[0]}` : ""}`}
+                title={`${n.blurb}${!defaultFamilyReadiness.ready && !supervisedDefault && defaultFamilyReadiness.blockers[0] ? ` Held: ${defaultFamilyReadiness.blockers[0]}` : supervisedDefault ? " Review-ready private intake" : ""}`}
               >
                 <span className={styles.nicheMark}><NicheMotionGlyph niche={n.key} /></span>
                 <span className={styles.nicheCopy}>
                   <span className={styles.nicheTop}><strong>{n.label}</strong><small>{String(index + 1).padStart(2, "0")}</small></span>
-                  <span className={styles.nicheMeta}><span>{n.difficulty}</span><span data-ready={defaultFamilyReadiness.ready ? "true" : "false"}>{defaultFamilyReadiness.ready ? "route ready" : "start held"}</span></span>
+                  <span className={styles.nicheMeta}><span>{n.difficulty}</span><span data-ready={defaultFamilyReadiness.ready || Boolean(supervisedDefault) ? "true" : "false"}>{defaultFamilyReadiness.ready ? "route ready" : supervisedDefault ? "review ready" : "start held"}</span></span>
                   <span className={styles.nicheBlurb}>{n.blurb}</span>
-                {!defaultFamilyReadiness.ready && defaultFamilyReadiness.blockers[0] ? (
+                {!defaultFamilyReadiness.ready && !supervisedDefault && defaultFamilyReadiness.blockers[0] ? (
                     <span className={styles.nicheBlocker}>Held: {defaultFamilyReadiness.blockers[0]}</span>
                 ) : null}
                 </span>
@@ -1515,16 +1543,7 @@ export default function NewChannelWizard() {
               const productionReady = automaticReadiness.ready;
               const liveRuntime = automaticFamilyRuntime[k];
               const runtimeUnavailable = liveRuntime?.ready === false;
-              const supervisedCapability = familySupervisedChannelInceptionCapability(k);
-              const supervised = supervisedCapability
-                ? {
-                    capabilityId: supervisedCapability.id,
-                    provenance: supervisedCapability.provenance,
-                    reviewOnlyStages: [...supervisedCapability.coveredStages],
-                    requiredArtifacts: [...supervisedCapability.requiredArtifacts],
-                    ...(supervisedCapability.reviewHref ? { reviewHref: supervisedCapability.reviewHref } : {}),
-                  }
-                : undefined;
+              const supervised = supervisedCreatorSelectionForFamily(k);
               const selectable = f.available && !runtimeUnavailable && (productionReady || Boolean(supervised));
               const routeReason = supervised
                 ? "Registered private-review intake; no automatic render or publishing."

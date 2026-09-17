@@ -75,6 +75,18 @@ export const NICHES: Niche[] = [
     ],
   },
   {
+    // This is a curated creator entry point, not a claim about child-directed
+    // demand or revenue. Its dedicated family keeps curriculum and child
+    // safety separate from the general educational route.
+    key: "children_learning", label: "Children’s Learning", icon: "📖", rpm: 4.1, difficulty: "Medium",
+    blurb: "Original lessons and gentle learning stories", defaultFamily: "children_learning",
+    subcategories: [
+      { id: "early-literacy", name: "Early literacy", searchVolume: 0, rpm: 4.1, tags: ["early literacy", "letter sounds", "phonics", "reading readiness", "vocabulary", "learning story"] },
+      { id: "early-numeracy", name: "Early numeracy", searchVolume: 0, rpm: 4.1, tags: ["early maths", "counting", "number sense", "shapes", "patterns", "learning story"] },
+      { id: "social-emotional-learning", name: "Social & emotional learning", searchVolume: 0, rpm: 4.1, tags: ["social emotional learning", "kindness", "feelings", "friendship", "problem solving", "learning story"] },
+    ],
+  },
+  {
     key: "finance", label: "Finance", icon: "💲", rpm: 9.5, difficulty: "Hard",
     blurb: "Investment and money education", defaultFamily: "whiteboard",
     subcategories: [

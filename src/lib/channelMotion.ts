@@ -21,6 +21,7 @@ export type ChannelMotionMotif =
 const NICHE_MOTIFS: Record<string, ChannelMotionMotif> = {
   lofi: "lofi",
   educational: "lesson",
+  children_learning: "storybook",
   finance: "ledger",
   technology: "circuit",
   lifestyle: "heart",

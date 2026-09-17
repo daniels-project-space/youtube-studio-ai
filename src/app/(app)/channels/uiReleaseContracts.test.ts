@@ -98,7 +98,8 @@ assert.match(wizard, /Episode ideas · optional, one per line/);
 // A selectable private-review intake is not an inactive automatic family
 // pipeline in disguise. The creator must show only the registered review
 // stages and withhold all production-module controls.
-assert.match(wizard, /reviewOnlyStages: \[\.\.\.supervisedCapability\.coveredStages\]/);
+assert.match(wizard, /function supervisedCreatorSelectionForFamily/);
+assert.match(wizard, /reviewOnlyStages: \[\.\.\.capability\.coveredStages\]/);
 assert.match(wizard, /reviewOnlyStages: \[\.\.\.\(preflight\.creatorAdmission\.coveredStages \?\? \[\]\)\]/);
 assert.match(wizard, /supervisedAdmission \? activeReviewOnlyStages : preview/);
 assert.match(wizard, /Only these private-review stages are active\. The family production pipeline is not enabled/);
@@ -147,8 +148,8 @@ assert.match(wizard, /const matchedNichePreset = niche\?\.defaultFamily === sugg
 assert.match(wizard, /selectFamily\(suggestedFamily, matchedNichePreset\?\.targetSeconds\)/);
 assert.match(wizard, /typeof d\.family !== "string" \|\| !\(d\.family in FAMILIES\)/);
 assert.match(wizard, /const defaultFamilyReadiness = automaticFamilyCreatorReadiness\(n\.defaultFamily\)/);
-assert.match(wizard, /"route ready" : "start held"/);
-assert.match(wizard, />Held: \{defaultFamilyReadiness\.blockers\[0\]\}/);
+assert.match(wizard, /"route ready" : supervisedDefault \? "review ready" : "start held"/);
+assert.match(wizard, /!defaultFamilyReadiness\.ready && !supervisedDefault && defaultFamilyReadiness\.blockers\[0\]/);
 assert.match(wizard, /defaultFamilyReadiness\.blockers\[0\]/);
 
 // Channel creation is a staged operating workflow rather than a card wall.
@@ -213,7 +214,7 @@ assert.match(designer, /before notify\/cleanup/);
 // internal path-only destinations and require an explicit operator click;
 // never redirect or replay the rejected request.
 assert.match(wizard, /function safeReviewHrefs\(value: unknown\): string\[\]/);
-assert.match(wizard, /const REVIEW_HREFS = new Set\(\["\/casefile", "\/editorial-evidence"\]\)/);
+assert.match(wizard, /const REVIEW_HREFS = new Set\(\["\/casefile", "\/editorial-evidence", "\/children-review"\]\)/);
 assert.match(wizard, /!REVIEW_HREFS\.has\(entry\)/);
 assert.match(wizard, /setReviewHrefs\(res\.status === 409 \? safeReviewHrefs\(data\.reviewHrefs\) : \[\]\)/);
 assert.match(wizard, /reviewHrefs\.map\(\(href\) => \(/);

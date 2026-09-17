@@ -1565,6 +1565,9 @@ export const NICHE_PRESETS: Record<string, NichePreset> = {
   // any non-title_card engine unlocks it, so the banana default is right.
   lofi: { targetSeconds: 3600, scriptStyle: "meditation" },
   educational: { targetSeconds: 480, scriptStyle: "generic", insertTypes: ["big_stat", "bar_compare"] },
+  // This is intentionally short: a supervised child-learning episode has one
+  // observable objective and a complete participation/recall loop.
+  children_learning: { targetSeconds: 180, scriptStyle: "children_learning" },
   finance: { targetSeconds: 600, scriptStyle: "generic", insertTypes: ["big_stat", "line_chart", "bar_compare", "annotated_line", "lower_third"] },
   technology: { targetSeconds: 420, scriptStyle: "generic", insertTypes: ["big_stat", "bar_compare"] },
   lifestyle: { targetSeconds: 360, scriptStyle: "generic" },
