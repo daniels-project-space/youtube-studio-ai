@@ -338,23 +338,31 @@ export const listInventory = query({
           channel?.identity.programBrief?.family,
         releaseEvidenceStatus: run.releaseEvidenceStatus,
       });
-      const retirement = cleanup.action === "retire" && run.youtubeVideoId
-        ? await ctx.db
-            .query("youtubeVideoRetirements")
-            .withIndex("by_owner_video", (q) => q
-              .eq("ownerId", args.ownerId)
-              .eq("youtubeVideoId", run.youtubeVideoId!))
-            .unique()
-        : null;
       const candidate = candidates.get(String(run._id));
-      const candidateAssets = candidate
-        ? await ctx.db
-            .query("assets")
-            .withIndex("by_run_kind", (q) => q.eq("runId", candidate._id as Id<"runs">).eq("kind", "thumbnail"))
-            .first()
-            .then((thumbnail) => thumbnail ? [thumbnail] : [])
-        : [];
-      const candidateThumbnail = candidateAssets.find((asset) => asset.kind === "thumbnail");
+      const [retirement, candidateThumbnail, replacement] = await Promise.all([
+        cleanup.action === "retire" && run.youtubeVideoId
+          ? ctx.db
+              .query("youtubeVideoRetirements")
+              .withIndex("by_owner_video", (q) => q
+                .eq("ownerId", args.ownerId)
+                .eq("youtubeVideoId", run.youtubeVideoId!))
+              .unique()
+          : Promise.resolve(null),
+        candidate
+          ? ctx.db
+              .query("assets")
+              .withIndex("by_run_kind", (q) => q.eq("runId", candidate._id as Id<"runs">).eq("kind", "thumbnail"))
+              .first()
+          : Promise.resolve(null),
+        candidate
+          ? ctx.db
+              .query("youtubeThumbnailReplacements")
+              .withIndex("by_owner_candidate", (q) => q
+                .eq("ownerId", args.ownerId)
+                .eq("candidateRunId", candidate._id as Id<"runs">))
+              .unique()
+          : Promise.resolve(null),
+      ]);
       const candidateAssessment = candidate?.status === "ok" && candidateThumbnail
         ? assessThumbnailRefreshEvidence({
             ownerId: candidateThumbnail.ownerId,
@@ -368,15 +376,6 @@ export const listInventory = query({
       const presentedAssessment = candidateAssessment?.status === "current_golden_candidate"
         ? candidateAssessment
         : assessment;
-      const replacement = candidate
-        ? await ctx.db
-            .query("youtubeThumbnailReplacements")
-            .withIndex("by_owner_candidate", (q) => q
-              .eq("ownerId", args.ownerId)
-              .eq("candidateRunId", candidate._id as Id<"runs">))
-            .unique()
-        : null;
-
       rows.push({
         runId: run._id,
         channelId: run.channelId,

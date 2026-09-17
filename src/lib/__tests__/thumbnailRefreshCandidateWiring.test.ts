@@ -20,6 +20,11 @@ assert.match(schema, /by_owner_thumbnail_refresh_dispatch/);
 assert.match(schema, /by_channel_thumbnail_refresh_source/);
 assert.match(schema, /by_channel_status_thumbnail_refresh_source/);
 assert.match(convex, /export const createCandidateShell = mutation/);
+assert.match(
+  convex,
+  /const \[retirement, candidateThumbnail, replacement\] = await Promise\.all\(/,
+  "thumbnail inventory should resolve independent retirement/candidate/replacement evidence concurrently",
+);
 assert.match(convex, /async function retainedMediaAssets/);
 assert.match(
   convex,
