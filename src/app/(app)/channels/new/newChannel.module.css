@@ -279,8 +279,8 @@
   .stepIndex { grid-row: auto; }
   .stepNode small { display: none; }
   .sectionIntro { align-items: start; grid-template-columns: 1fr; }
-  .nicheGrid { grid-template-columns: repeat(15,minmax(224px,78vw)); margin-inline: -.9rem; padding: .15rem .9rem .6rem; overflow-x: auto; scroll-padding-inline: .9rem; scroll-snap-type: x proximity; }
-  .nicheCard { min-height: 82px; scroll-snap-align: start; }
+  .nicheGrid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .nicheCard { min-height: 64px; }
   .routeGrid { grid-template-columns: 1fr; }
   .subcategoryBar, .selectedRoute { grid-template-columns: 1fr; }
   .routeFacts { grid-template-columns: repeat(2,minmax(0,1fr)); }
@@ -306,6 +306,10 @@
   .routeFacts { grid-template-columns: 1fr; }
   .stageRow { grid-template-columns: 28px minmax(0,1fr); }
   .stageState { grid-column: 2; justify-items: start; }
+}
+
+@media (max-width: 350px) {
+  .nicheGrid { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {
