@@ -40,6 +40,16 @@ assert.match(styles, /\.moduleSummary:focus-visible/);
 assert.match(styles, /\.moduleFacts/);
 assert.match(styles, /\.modulePowerPoints li::before/);
 assert.match(styles, /\.modulePromise/);
+assert.match(styles, /\.moduleBody[^}]*max-height:\s*124px/,
+  "expanded cards keep their full evidence in a compact, independently scrollable power-card body");
+assert.match(styles, /scrollbar-gutter:\s*stable/,
+  "compact card scrolling must not shift the lock or evidence controls while opening");
+assert.match(styles, /\.truthBody[^}]*max-height:\s*360px/);
+assert.match(styles, /\.foundationBody[^}]*max-height:\s*240px/);
+assert.match(styles, /\.modulePromise[^}]*-webkit-line-clamp:\s*1/,
+  "phone cards keep one decisive promise line while expanded details remain available below");
+assert.match(styles, /\.proofMedia[^}]*height:\s*clamp\(104px,\s*11vw,\s*150px\)/,
+  "media evidence stays inspectable without turning every expanded card into a full-width filmstrip");
 assert.doesNotMatch(styles, /@keyframes assayTurn/);
 assert.match(styles, /prefers-reduced-motion: reduce/);
 
