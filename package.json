@@ -27,6 +27,7 @@
     "export:channel-flow": "tsx scripts/export-channel-module-flow.ts",
     "test:live": "tsx scripts/test-live-convex.ts",
     "test:golden-proof-media": "node scripts/golden-proof-media-check.mjs",
+    "proof:chess-replay": "tsx scripts/validate-chess-replay-proof.ts",
     "review:image-benchmark": "tsx scripts/review-image-provider-benchmark.mts",
     "audit:ui": "node scripts/ui-fifth-pass-audit.mjs",
     "trigger:dev": "npx --yes trigger.dev@4.5.9 dev",
