@@ -2012,9 +2012,9 @@
 
 .channel-card-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(min(100%, 190px), 198px));
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 174px), 184px));
   justify-content: start;
-  gap: 0.55rem;
+  gap: 0.6rem;
 }
 
 .channel-card {
@@ -2022,8 +2022,8 @@
   container-type: inline-size;
   display: grid;
   align-content: start;
-  gap: 0.5rem;
-  padding: 0.52rem;
+  gap: 0.42rem;
+  padding: 0.46rem;
   overflow: hidden;
   background:
     linear-gradient(145deg, rgba(255,255,255,.055), transparent 34%),
@@ -2076,14 +2076,13 @@
   pointer-events: none;
 }
 .channel-card-banner-tools > * { pointer-events: auto; }
-.channel-card-banner-tools > .owner-lock-control { margin-left: auto; border-color: rgba(255,255,255,.22); color: rgba(255,255,255,.9); background: linear-gradient(180deg,rgba(5,8,14,.78),rgba(5,8,14,.58)); box-shadow: 0 6px 18px rgba(0,0,0,.24); backdrop-filter: blur(12px); }
-.channel-card-banner-tools > .owner-lock-control[data-state="locked"] { border-color: rgba(107,220,154,.5); color: #9bf0bd; background: rgba(6,23,17,.7); }
 
 .channel-card-identity {
   min-width: 0;
-  display: flex;
+  display: grid;
+  grid-template-columns: 40px 24px minmax(0,1fr);
   align-items: center;
-  gap: 0.5rem;
+  gap: 0.38rem;
 }
 
 .channel-card-motif,
@@ -2100,8 +2099,9 @@
   box-shadow: inset 0 1px rgba(255,255,255,.08), 0 7px 18px rgba(0,0,0,.14);
 }
 
+.channel-card-motif { width: 24px; height: 24px; border-radius: 8px; }
 .channel-card-motif svg,
-.channel-fleet-inspector-motif svg { width: 22px; height: 22px; }
+.channel-fleet-inspector-motif svg { width: 18px; height: 18px; }
 
 .channel-card-title {
   min-width: 0;
@@ -2110,7 +2110,7 @@
 
 .channel-card-title > a {
   display: inline-flex;
-  min-height: 36px;
+  min-height: 32px;
   align-items: center;
 }
 
@@ -2118,7 +2118,7 @@
   display: -webkit-box;
   overflow: hidden;
   font-family: var(--font-sans);
-  font-size: 0.96rem;
+  font-size: 0.88rem;
   font-weight: 680;
   line-height: 1.25;
   -webkit-box-orient: vertical;
@@ -2132,92 +2132,53 @@
   margin: 0.1rem 0 0;
   overflow: hidden;
   color: var(--color-muted);
-  font-size: 0.7rem;
+  font-size: 0.66rem;
   line-height: 1.35;
   -webkit-box-orient: vertical;
   -webkit-line-clamp: 2;
 }
 
 .channel-live-state {
-  min-width: 58px;
-  display: grid;
-  grid-template-columns: auto 1fr;
+  display: inline-flex;
   align-items: center;
-  column-gap: 0.28rem;
-  flex: 0 0 auto;
-  padding: 0.3rem 0.4rem;
-  border: 1px solid var(--color-border);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.018);
+  gap: 0.28rem;
+  margin-left: auto;
+  padding: 0.22rem 0.36rem;
+  border: 1px solid rgba(255,255,255,.16);
+  border-radius: 999px;
+  color: rgba(255,255,255,.86);
+  background: rgba(6, 9, 16, .64);
+  box-shadow: 0 5px 14px rgba(0,0,0,.2);
+  backdrop-filter: blur(10px);
 }
 
-.channel-live-state > span {
+.channel-live-state > i {
   width: 6px;
   height: 6px;
-  grid-row: 1 / 3;
+  flex: 0 0 auto;
   border-radius: 999px;
   background: var(--color-faint);
   box-shadow: 0 0 0 3px rgba(148, 148, 148, 0.08);
 }
 
 .channel-live-state strong {
-  font-size: 0.66rem;
+  font-size: 0.58rem;
   font-weight: 760;
   line-height: 1.1;
 }
 
-.channel-live-state small {
-  display: none;
-  overflow: hidden;
-  color: var(--color-faint);
-  font-size: 0.52rem;
-  line-height: 1.2;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.channel-live-state-online > span {
+.channel-live-state-online > i {
   background: var(--color-ok);
   box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.1);
 }
 .channel-live-state-online strong { color: var(--color-ok); }
-.channel-live-state-queued > span {
+.channel-live-state-queued > i {
   background: var(--color-amber);
   box-shadow: 0 0 0 3px rgba(245, 158, 11, 0.11);
 }
 .channel-live-state-queued strong { color: var(--color-amber); }
-.channel-live-state-inactive { background: rgba(137, 146, 161, 0.055); }
-.channel-live-state-inactive strong { color: var(--color-muted); }
-
-/* Compact fleet tiles keep identity, title, and live state legible instead of
- * squeezing four horizontal controls into a narrow card. The container query
- * applies to the desktop fleet's 198px tiles while leaving the roomy and
- * mobile layouts unchanged. */
-@container (max-width: 205px) {
-  .channel-card-identity {
-    display: grid;
-    grid-template-columns: 48px 24px minmax(0, 1fr);
-    grid-template-rows: auto auto;
-    align-items: center;
-    column-gap: .38rem;
-    row-gap: .24rem;
-  }
-  .channel-card-identity > [aria-label$=" avatar"] { grid-row: 1 / span 2; }
-  .channel-card-motif { grid-column: 2; grid-row: 1 / span 2; width: 24px; height: 24px; }
-  .channel-card-title { grid-column: 3; grid-row: 1; align-self: end; }
-  .channel-live-state { grid-column: 3; grid-row: 2; width: 100%; min-width: 0; padding: .22rem .3rem; }
-  .channel-live-state strong { font-size: .58rem; }
-  /* Keep the two real card actions side-by-side. At 198px the old auto-fit
-   * minimum forced Controls and Open into two full rows, making fleet cards
-   * taller than their operating information. Readiness stays visible as the
-   * compact bar rather than becoming another label or a hidden disclosure. */
-  .channel-card-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: .28rem; }
-  .channel-card-actions a,
-  .channel-card-manage { min-height: 36px; padding: .28rem .3rem; font-size: .66rem; }
-  .channel-card-manage { gap: .24rem; justify-content: flex-start; }
-  .channel-card-manage .channel-card-readiness { min-width: 36px; gap: .18rem; }
-  .channel-card-readiness small { font-size: .48rem; }
-}
+.channel-live-state-inactive { color: rgba(228,232,241,.82); }
+.channel-live-state-inactive strong { color: inherit; }
 
 .channel-card-operating-row {
   display: grid;
@@ -2262,43 +2223,6 @@
   white-space: nowrap;
 }
 
-.channel-card-readiness {
-  min-width: 76px;
-  grid-template-columns: minmax(32px, 1fr) auto;
-  gap: 0.3rem;
-  margin-left: auto;
-}
-
-.channel-card-readiness progress {
-  width: 100%;
-  height: 3px;
-  overflow: hidden;
-  border: 0;
-  border-radius: 999px;
-  appearance: none;
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.channel-card-readiness progress::-webkit-progress-bar {
-  border-radius: inherit;
-  background: rgba(255, 255, 255, 0.07);
-}
-
-.channel-card-readiness progress::-webkit-progress-value {
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--color-accent), var(--color-ok));
-}
-
-.channel-card-readiness progress::-moz-progress-bar {
-  border-radius: inherit;
-  background: linear-gradient(90deg, var(--color-accent), var(--color-ok));
-}
-
-.channel-card-readiness small {
-  color: var(--color-faint);
-  font: 0.52rem var(--font-mono);
-  white-space: nowrap;
-}
 .channel-room-select {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(140px, auto);
@@ -2358,7 +2282,7 @@
 
 .channel-card-actions {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(108px, 1fr));
+  grid-template-columns: 36px minmax(0, 1fr);
   gap: 0.32rem;
   margin-top: auto;
 }
@@ -2395,7 +2319,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 38px;
+  min-height: 36px;
   padding: 0.32rem 0.24rem;
   overflow: hidden;
   border: 1px solid var(--color-border);
@@ -2415,15 +2339,11 @@
 }
 
 .channel-card-manage {
-  gap: 0.42rem;
   cursor: pointer;
 }
 
-.channel-card-manage .channel-card-readiness {
-  min-width: 58px;
-}
-
 .channel-card-actions .channel-card-open {
+  gap: .38rem;
   border-color: rgba(212, 165, 116, 0.24);
   color: var(--color-accent);
   background: var(--color-accent-soft);
@@ -3343,13 +3263,13 @@ button.video-card-open { cursor: pointer; }
   .channel-card { gap: 0.42rem; padding: 0.52rem; scroll-snap-align: start; }
   .channel-card-banner { aspect-ratio: 16 / 5 !important; border-radius: 12px !important; }
   .channel-card:hover { transform: none; }
-  .channel-card-identity { display: grid; grid-template-columns: 44px minmax(0, 1fr); }
+  .channel-card-identity { grid-template-columns: 44px 24px minmax(0, 1fr); }
   .channel-card-title > a { min-height: 44px; }
-  .channel-live-state { min-height: 32px; padding: .34rem .42rem; }
+  .channel-live-state { padding: .34rem .42rem; }
   .channel-page-pagination { align-items: stretch; flex-direction: column; }
   .channel-page-pagination > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .channel-page-pagination button:only-child { grid-column: 1 / -1; }
-  .channel-card-actions { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .channel-card-actions { grid-template-columns: 44px minmax(0, 1fr); }
   .channel-card-actions > :only-child { grid-column: 1 / -1; }
   .channel-card-actions a,
   .channel-card-manage { min-height: 44px; }

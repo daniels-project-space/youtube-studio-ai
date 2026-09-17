@@ -242,18 +242,14 @@ assert.doesNotMatch(sidebar, /Novita Render/);
 assert.match(sidebar, /MOBILE_PRIMARY_COUNT/);
 assert.match(channels, /channel-live-state/);
 assert.match(channels, /title=\{operatingState\.detail\}/);
-assert.match(channels, /channel-card-readiness/);
-assert.match(channels, /<progress[\s\S]*setup readiness/);
 assert.match(
   globalCss,
-  /@container \(max-width: 205px\)[\s\S]*?\.channel-card-actions \{ grid-template-columns: minmax\(0, 1fr\) minmax\(0, 1fr\); gap: \.28rem; \}/,
-  "198px fleet tiles must keep Controls and Open on one compact action row rather than adding a second tall row",
+  /\.channel-card-actions \{[\s\S]*?grid-template-columns: 36px minmax\(0, 1fr\)/,
+  "fleet cards must reserve one compact control icon and one clear workspace action",
 );
-assert.match(
-  globalCss,
-  /\.channel-card-manage \.channel-card-readiness \{ min-width: 36px; gap: \.18rem; \}/,
-  "the compact action row must retain the live setup-readiness signal",
-);
+assert.match(channels, /<IconSettings[^>]*aria-hidden="true"/);
+assert.match(channels, /aria-label=\{`Open controls for \$\{c\.name\}`\}/);
+assert.match(channels, /Open workspace/);
 assert.match(channels, /const identityArtwork = c\.identity\?\.bannerKey/);
 assert.match(channels, /const previewArtwork = identityArtwork \?\? latestArtwork \?\? planArtwork/);
 assert.match(channels, /const previewLabel = identityArtwork\s*\? null/);
@@ -362,14 +358,14 @@ assert.match(settings, /\/api\/youtube-revoke/);
 
 // High-frequency navigation and channel-management actions must remain usable
 // touch targets on both desktop and the mobile bottom-navigation layout.
-assert.match(globalCss, /\.channel-card-title > a\s*\{[\s\S]*?min-height: 36px/);
-assert.match(globalCss, /\.channel-card-grid\s*\{[\s\S]*?minmax\(min\(100%, 190px\), 198px\)/);
+assert.match(globalCss, /\.channel-card-title > a\s*\{[\s\S]*?min-height: 32px/);
+assert.match(globalCss, /\.channel-card-grid\s*\{[\s\S]*?minmax\(min\(100%, 174px\), 184px\)/);
 assert.match(globalCss, /\.channel-card-grid\s*\{[\s\S]*?justify-content: start/);
 assert.match(globalCss, /\.channel-fleet-inspector-nav a\s*\{[\s\S]*?min-height: 40px/);
 assert.match(globalCss, /\.channel-account-action\s*\{[\s\S]*?min-height: 38px/);
-assert.match(globalCss, /\.channel-card-actions a,\s*\n\.channel-card-manage\s*\{[\s\S]*?min-height: 40px/);
+assert.match(globalCss, /\.channel-card-actions a,\s*\n\.channel-card-manage\s*\{[\s\S]*?min-height: 36px/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*?\.channel-card-banner \{ aspect-ratio: 16 \/ 5 !important/);
-assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*?\.channel-card-actions \{ grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*?\.channel-card-actions \{ grid-template-columns: 44px minmax\(0, 1fr\)/);
 assert.match(scheduleCss, /\.itemLinks a\s*\{[\s\S]*?min-height: 36px/);
 // Links now live inside the heading's controls group. Check the actual rule
 // and its larger target, not the retired direct-child selector or exact 36px.

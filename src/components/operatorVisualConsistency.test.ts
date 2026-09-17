@@ -73,16 +73,16 @@ for (const id of ["library-search", "library-channel", "library-status", "librar
 }
 assert.match(globalCss, /--color-failed: #fb7185/);
 assert.doesNotMatch(globalCss, /\.channel-live-state-inactive\s*\{\s*opacity:/);
-assert.match(globalCss, /\.channel-live-state small[\s\S]*display: none/);
-// The compact fleet card keeps its deliberate 198px operating width. The
-// narrow identity row reflows its live state below the title so the smaller
-// tile remains readable while preserving the two-column metrics and actions.
-assert.match(globalCss, /\.channel-card-grid[\s\S]*minmax\(min\(100%, 190px\), 198px\)/);
-assert.match(globalCss, /@container \(max-width: 205px\)[\s\S]*\.channel-live-state \{[\s\S]*min-width: 0/);
-assert.match(globalCss, /\.channel-card-readiness progress/);
+assert.doesNotMatch(globalCss, /\.channel-live-state small/,
+  "the artwork status chip must remain a compact state signal rather than another text block");
+// The fleet card is a compact operating tile: its status sits on the artwork,
+// its identity gets the available title width, and settings stay a single
+// icon beside the primary workspace action.
+assert.match(globalCss, /\.channel-card-grid[\s\S]*minmax\(min\(100%, 174px\), 184px\)/);
+assert.match(globalCss, /\.channel-card-banner-tools[\s\S]*\.channel-live-state/);
+assert.match(globalCss, /\.channel-card-actions[\s\S]*grid-template-columns: 36px minmax\(0, 1fr\)/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-card-grid \{[\s\S]*grid-auto-flow: column/);
 assert.match(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-card-grid \{[\s\S]*scroll-snap-type: x proximity/);
-assert.doesNotMatch(globalCss, /@media \(max-width: 520px\)[\s\S]*\.channel-live-state small \{ display: block/);
 
 // Visual review always uses a persisted R2 thumbnail first. The shared media
 // boundary holds a stable space while R2 resolves and only falls back to a

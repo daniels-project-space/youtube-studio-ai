@@ -12,7 +12,7 @@ import { PageHeader } from "@/components/PageHeader";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
 import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
-import { IconChannels } from "@/components/icons";
+import { IconChannels, IconSettings } from "@/components/icons";
 import { OwnerLockBadge } from "@/components/OwnerLockBadge";
 import { ChannelFolderWorkspace } from "@/components/ChannelFolderWorkspace";
 import { NicheMotionGlyph } from "@/components/NicheMotionGlyph";
@@ -279,14 +279,6 @@ export default function ChannelsPage() {
                 : planArtwork
                   ? "Planned thumbnail"
                   : "Channel artwork";
-            const setupChecks = [
-              linked,
-              Boolean(c.identity?.imageKey && c.identity?.niche),
-              Boolean(c.identity?.voiceId),
-              Boolean(c.identity?.thumbnailTemplate),
-              Boolean(c.pipeline?.length),
-            ];
-            const setupDone = setupChecks.filter(Boolean).length;
             const autopilotEnabled = c.status === "active" && c.schedule?.enabled !== false;
             const inactive = !autopilotEnabled || !linked;
             const operatingState = inactive
@@ -318,13 +310,14 @@ export default function ChannelsPage() {
                 >
                   <div className="channel-card-banner-tools">
                     {previewLabel ? <span className="channel-card-preview-label">{previewLabel}</span> : <span />}
-                    <OwnerLockBadge
-                      kind="channel"
-                      channelId={c._id}
-                      channelName={c.name}
-                      locked={c.locked === true}
-                      size="sm"
-                    />
+                    <span
+                      className={`channel-live-state channel-live-state-${operatingState.tone}`}
+                      aria-label={`${operatingState.label}: ${operatingState.detail}`}
+                      title={operatingState.detail}
+                    >
+                      <i aria-hidden="true" />
+                      <strong>{operatingState.label}</strong>
+                    </span>
                   </div>
                 </ChannelBanner>
                 <div className="channel-card-identity">
@@ -348,15 +341,6 @@ export default function ChannelsPage() {
                       <h2>{c.name}</h2>
                     </Link>
                     <p>{c.identity?.niche ?? channelCategoryLabelFor(c)}</p>
-                  </div>
-                  <div
-                    className={`channel-live-state channel-live-state-${operatingState.tone}`}
-                    aria-label={`${operatingState.label}: ${operatingState.detail}`}
-                    title={operatingState.detail}
-                  >
-                    <span aria-hidden="true" />
-                    <strong>{operatingState.label}</strong>
-                    <small>{operatingState.detail}</small>
                   </div>
                 </div>
 
@@ -383,22 +367,16 @@ export default function ChannelsPage() {
                     aria-haspopup="dialog"
                     aria-expanded={managedChannelId === c._id}
                     aria-controls="channel-fleet-inspector"
+                    aria-label={`Open controls for ${c.name}`}
+                    title={`Open controls for ${c.name}`}
                     onClick={(event) => {
                       inspectorTriggerRef.current = event.currentTarget;
                       setManagedChannelId(c._id);
                     }}
                   >
-                    <span>Controls</span>
-                    <span className="channel-card-readiness">
-                      <progress
-                        aria-label={`${c.name} setup readiness`}
-                        max={setupChecks.length}
-                        value={setupDone}
-                      />
-                      <small>{setupDone}/{setupChecks.length}</small>
-                    </span>
+                    <IconSettings width={15} height={15} aria-hidden="true" />
                   </button>
-                  <Link href={`/channels/${c.slug}`} className="channel-card-open">Open</Link>
+                  <Link href={`/channels/${c.slug}`} className="channel-card-open">Open workspace <span aria-hidden="true">↗</span></Link>
                 </nav>
               </article>
             );
