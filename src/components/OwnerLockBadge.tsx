@@ -28,6 +28,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
 import { CHANNEL_UNLOCK_CONFIRMATION } from "@/lib/channelLockContract";
 import { LOCKABLE_MODULE_IDS, lockCoverage } from "@/lib/ownerLockRegistry";
+import { ownerModuleUnlockConfirmation } from "@/lib/ownerModuleLockContract";
 import {
   useOptionalOperationsAccess,
 } from "@/components/OperationsAccess";
@@ -67,9 +68,14 @@ export function OwnerLockBadge(props: Props) {
       requestOperationsAccess();
       return;
     }
-    if (locked && !window.confirm(
-      `Unlock “${label}”?\n\nAI workers will be able to change it again until you lock it back.`,
-    )) return;
+    if (locked) {
+      const confirmation = props.kind === "channel"
+        ? CHANNEL_UNLOCK_CONFIRMATION
+        : ownerModuleUnlockConfirmation(props.moduleId);
+      if (window.prompt(
+        `Unlock “${label}”? AI workers can change it again.\n\nType ${confirmation} to continue:`,
+      ) !== confirmation) return;
+    }
     setBusy(true);
     try {
       if (props.kind === "channel") {
@@ -80,7 +86,12 @@ export function OwnerLockBadge(props: Props) {
           await lockChannel({ ownerId, channelId });
         }
       } else {
-        await setModuleLock({ ownerId, moduleKey: props.moduleId, locked: !locked });
+        await setModuleLock({
+          ownerId,
+          moduleKey: props.moduleId,
+          locked: !locked,
+          confirmation: locked ? ownerModuleUnlockConfirmation(props.moduleId) : undefined,
+        });
       }
     } catch (error) {
       window.alert(

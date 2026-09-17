@@ -21,6 +21,8 @@ import { v } from "convex/values";
 
 import { internalMutation, internalQuery } from "./_generated/server";
 import { mutation, query } from "./studioFunctions";
+import { LOCKABLE_MODULE_IDS } from "../src/lib/ownerLockRegistry";
+import { ownerModuleUnlockConfirmation } from "../src/lib/ownerModuleLockContract";
 
 async function requireOwnerActor(
   ctx: { auth: { getUserIdentity: () => Promise<unknown> } },
@@ -123,16 +125,31 @@ export const setLock = mutation({
     ownerId: v.string(),
     moduleKey: v.string(),
     locked: v.boolean(),
+    confirmation: v.optional(v.string()),
   },
   returns: v.object({ moduleKey: v.string(), locked: v.boolean(), lockedBy: v.string() }),
   handler: async (ctx, args) => {
     const actor = await requireOwnerActor(ctx, "ownerModuleLocks.setLock");
+    if (args.locked && !LOCKABLE_MODULE_IDS.has(args.moduleKey)) {
+      throw new Error(`ownerModuleLocks.setLock: '${args.moduleKey}' is not a lockable module`);
+    }
+    if (!args.locked && args.confirmation !== ownerModuleUnlockConfirmation(args.moduleKey)) {
+      throw new Error(
+        `ownerModuleLocks.setLock requires confirmation '${ownerModuleUnlockConfirmation(args.moduleKey)}'`,
+      );
+    }
     const existing = await ctx.db
       .query("ownerModuleLocks")
       .withIndex("by_owner_module", (q) =>
         q.eq("ownerId", args.ownerId).eq("moduleKey", args.moduleKey),
       )
       .first();
+
+    if (!existing && !args.locked) {
+      // An absent row is already unlocked. Do not mint a misleading unlocked
+      // record, particularly for keys from an older catalog checkout.
+      return { moduleKey: args.moduleKey, locked: false as const, lockedBy: actor };
+    }
 
     if (existing) {
       // Re-locking keeps the original provenance, so an accidental second click
