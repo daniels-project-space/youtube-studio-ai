@@ -69,4 +69,35 @@ const nonWhiteboard = visualRepairSignals(reviewed, { title: "Other renderer" })
 assert.equal(nonWhiteboard[0]?.owner, "stock_footage");
 assert.equal(nonWhiteboard[0]?.action, "resample_footage");
 
+assert.deepEqual(
+  visualRepairSignals(reviewed, { title: "Illustrated explainer", primaryRenderer: "scene_compiler" }),
+  [],
+  "a self-contained scene compiler must not be sent to forbidden stock-footage repair",
+);
+
+const wrongGeneratedClip: VisualReviewResult = {
+  ...reviewed,
+  defects: [{ ...reviewed.defects[0]!, category: "wrong_footage" }],
+};
+assert.deepEqual(
+  visualRepairSignals(wrongGeneratedClip, { title: "Cinematic route", primaryRenderer: "novita_render_video" }),
+  [],
+  "a generated-video route must not be sent to stock footage it does not own",
+);
+
+const blackFrame: VisualReviewResult = {
+  ...reviewed,
+  defects: [{ ...reviewed.defects[0]!, category: "black_frame" }],
+};
+assert.equal(
+  visualRepairSignals(blackFrame, { title: "Cinematic route", primaryRenderer: "novita_render_video" })[0]?.owner,
+  "timeline_assemble",
+  "cinematic routes retain their real assembly repair surface for a broken master",
+);
+assert.deepEqual(
+  visualRepairSignals(blackFrame, { title: "Quiz route", primaryRenderer: "quiz_year" }),
+  [],
+  "a self-contained final renderer must not be sent to a forbidden timeline assembler",
+);
+
 console.log("whiteboard visual repair routing tests passed");

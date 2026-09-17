@@ -2024,6 +2024,16 @@ export async function reviewRender(
   };
 }
 
+const SELF_CONTAINED_RENDERERS_WITHOUT_TIMELINE = new Set<string>([
+  "whiteboard_scribe",
+  "motion_comic",
+  "lore_short",
+  "quiz_year",
+  "scene_compiler",
+  "documotion_short",
+  "loop_clips",
+]);
+
 function routeForDefect(
   defect: VisualReviewDefect,
   intent: VisualReviewIntent,
@@ -2038,24 +2048,34 @@ function routeForDefect(
   ) {
     return { owner: "whiteboard_scribe", action: "strengthen_draw_trace" };
   }
+  // The final reviewer runs against several self-contained renderers whose
+  // lane contracts explicitly forbid stock footage and/or timeline assembly.
+  // Sending their defects to a generic owner used to be harmless only because
+  // planHeal rejected the absent block afterwards. That still created a false
+  // repair instruction and a useless healing decision attempt. Preserve the
+  // legacy default when renderer identity is unavailable, but never advertise
+  // a repair surface a known renderer cannot own.
+  const renderer = intent.primaryRenderer;
+  const stockRepairAvailable = !renderer || renderer === "stock_footage";
+  const timelineRepairAvailable = !renderer || renderer === "stock_footage" || renderer === "novita_render_video";
   const overlays = intent.overlays ?? [];
   const activeComic = overlays.find((overlay) =>
     overlay.kind === "comic_bubble" && overlay.startSec <= defect.endSec && overlay.endSec >= defect.startSec,
   );
   if (["overlay_off_canvas", "overlay_occlusion", "overlay_collision", "caption_cutoff", "caption_unreadable"].includes(defect.category)) {
     if (activeComic) return { owner: "motion_comic", action: "reflow_bubble", target: activeComic };
+    if (renderer && SELF_CONTAINED_RENDERERS_WITHOUT_TIMELINE.has(renderer)) return null;
     return { owner: "timeline_assemble", action: "recompose_overlay" };
   }
-  if (["wrong_footage", "repeated_clip"].includes(defect.category)) return { owner: "stock_footage", action: "resample_footage" };
+  if (["wrong_footage", "repeated_clip"].includes(defect.category)) {
+    return stockRepairAvailable ? { owner: "stock_footage", action: "resample_footage" } : null;
+  }
   if (["narration_mismatch", "continuity_break", "reveal_failure"].includes(defect.category)) {
-    // This signal is only executable when the active pipeline actually owns a
-    // stock_footage block. planHeal rejects the absent owner in generated,
-    // cinematic, and comic lanes, so those lanes continue to fail honestly.
-    return { owner: "stock_footage", action: "resample_footage" };
+    return stockRepairAvailable ? { owner: "stock_footage", action: "resample_footage" } : null;
   }
   if (defect.category === "intro_card") return { owner: "intro_card", action: "rerender_card" };
   if (["black_frame", "frozen_frame", "transition_break", "outro_card"].includes(defect.category)) {
-    return { owner: "timeline_assemble", action: "rebuild_timeline" };
+    return timelineRepairAvailable ? { owner: "timeline_assemble", action: "rebuild_timeline" } : null;
   }
   return null;
 }
