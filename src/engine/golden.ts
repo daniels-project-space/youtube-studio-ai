@@ -700,6 +700,27 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "reference",
   },
   {
+    key: "children-learning-studio",
+    stage: "brief",
+    title: "Children’s Learning Studio — Safe Lesson Pipeline",
+    engine:
+      "Private curriculum intake + Learning Contract + Children’s Show Bible + deterministic Scene Compiler + child-editor safety review",
+    how:
+      "The owner-facing module for children’s channels with learning content. It composes the existing supervised blocks into one " +
+      "clear handoff: age band and measurable objective first, original guide/world next, then source-linked participation and recall, " +
+      "deterministic illustration, and a fresh human child-editor review. It opens the private review desk for the operator’s draft and " +
+      "never turns a child-directed channel into an automatic public or scheduled release.",
+    gates: [
+      "bounded toddler / preschool / early-primary audience and one observable learning objective",
+      "curriculum evidence, original recurring guide/world, and five-stage participation pattern",
+      "Learning Contract and Show Bible fingerprints agree with the Episode Graph",
+      "deterministic Scene Compiler is the only admitted visual renderer",
+      "fresh human child-editor approval is required before even a private review candidate",
+      "public and scheduled publishing remain unavailable on this supervised path",
+    ],
+    status: "reference",
+  },
+  {
     key: "children-show-bible",
     stage: "brief",
     title: "Children’s Show Bible — Curriculum, Identity, and Participation",

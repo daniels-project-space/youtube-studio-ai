@@ -139,6 +139,11 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
     note: "A bounded non-Google native-story planner followed by a provider-free renderer-handoff seal. It is required by the certified automatic whiteboard and motion-comic routes and Lore's benchmark-pending registered route; this binding owns the plan/seal ABI only and cannot independently select/admit a route, render media, or publish.",
   },
   "learning-contract": { kind: "pipeline-module", executableIds: ["learning_contract"] },
+  "children-learning-studio": {
+    kind: "catalog-only",
+    executableIds: [],
+    note: "Composite children-learning studio presentation. It reuses the individually owned supervised child-editor contracts and deterministic renderer; it does not create a second executable owner, automatic channel, render, spend, or publication path.",
+  },
   "children-show-bible": {
     kind: "pipeline-module",
     executableIds: ["curriculum_episode_seed", "children_show_bible"],

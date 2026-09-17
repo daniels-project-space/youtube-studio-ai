@@ -29,6 +29,16 @@ const SKIP_DIRS = new Set(["node_modules", ".next", ".git", "dist", "build", ".l
 
 /** Hand-worked blast radii that no automatic rule would reproduce. */
 const CURATED: Record<string, readonly string[]> = {
+  "children-learning-studio": [
+    "src/app/(app)/children-review/page.tsx",
+    "src/lib/childrenReviewIntake.ts",
+    "src/engine/childrenShowBible.ts",
+    "src/engine/learningContract.ts",
+    "src/trigger/blocks/curriculumEpisodeSeedBlocks.ts",
+    "src/trigger/blocks/childrenShowBibleBlocks.ts",
+    "src/trigger/blocks/childrenSafetyBlocks.ts",
+    "src/trigger/blocks/sceneCompilerBlocks.ts",
+  ],
   thumbnail: [
     "src/lib/thumbnailLab.ts",
     "src/lib/banana.ts",
