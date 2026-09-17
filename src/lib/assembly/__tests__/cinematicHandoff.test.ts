@@ -1,7 +1,10 @@
 import assert from "node:assert/strict";
 
 import { CINEMATIC_CASE_SEQUENCE_VERSION } from "@/engine/cinematicCaseSequence";
-import { CINEMATIC_CLIP_REVIEW_VERSION } from "@/engine/cinematicClipReview";
+import {
+  CINEMATIC_CLIP_REVIEW_VERSION,
+  MINIMAX_H3_OPENING_MOTION_QA_CONTRACT,
+} from "@/engine/cinematicClipReview";
 import { CINEMATIC_KEYFRAME_REVIEW_VERSION } from "@/engine/cinematicKeyframeReview";
 import { CINEMATIC_TRANSITION_REVIEW_VERSION } from "@/engine/cinematicTransitionReview";
 import { GENERATED_FOOTAGE_SCENE_MANIFEST_VERSION } from "@/engine/generatedFootageManifest";
@@ -129,6 +132,19 @@ function validArgs() {
           expectedCastIds: scene.castIds,
           forbidAdditionalPeople: true as const,
           onlyExpectedCastVisible: true as const,
+          openingMotion: {
+            contract: MINIMAX_H3_OPENING_MOTION_QA_CONTRACT,
+            source: "ffmpeg/freezedetect" as const,
+            verdict: "pass" as const,
+            durationSec: 5,
+            maxFreezeFraction: 0.1,
+            maxStaticHoldSec: 0.5,
+            maxOpeningFrozenHoldSec: 0.25,
+            maxFrozenHoldSec: 0,
+            openingFrozenHoldSec: 0,
+            frozenIntervals: [],
+            violatingIntervals: [],
+          },
           semanticAlignment: 0.9,
           motionIntegrity: 0.9,
           continuity: 0.9,
@@ -136,7 +152,7 @@ function validArgs() {
           artifactFree: 0.9,
           textWatermarkFree: true as const,
           pass: true as const,
-          notes: ["Independent clip gate accepted the actual LTX take."],
+          notes: ["Independent clip gate accepted the actual MiniMax H3 take."],
         },
         ...(index < scenes.length - 1 ? {
           transitionToNextReview: {

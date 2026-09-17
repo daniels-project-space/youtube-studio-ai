@@ -42,14 +42,14 @@ export const GeneratedFootageSceneManifestSchema = z
       t1: z.number().finite().positive().optional(),
       /** Exact deterministic still-generation prior for a reviewed cinematic shot. */
       continuitySeed: z.number().int().min(1).max(2_147_483_647).optional(),
-      /** Exact approved evidence asset used instead of any LTX output for this scene. */
+      /** Exact approved evidence asset used instead of any generated H3 output for this scene. */
       sourceProofMediaReceipt: SourceProofMediaReceiptSchema.optional(),
-      /** Required before LTX for every source-bound cinematic shot. */
+      /** Required before H3 for every source-bound cinematic shot. */
       keyframeReview: CinematicKeyframeReviewSchema.optional(),
-      /** Reviewed endpoint image that conditioned LTX's final frame, when used. */
+      /** Reviewed endpoint image used to judge an H3 take's promised ending, when supplied. */
       terminalStillKey: z.string().trim().min(1).optional(),
       terminalKeyframeReview: CinematicKeyframeReviewSchema.optional(),
-      /** Required after LTX before a source-bound cinematic clip can be cut. */
+      /** Required after H3 before a source-bound cinematic clip can be cut. */
       clipReview: CinematicClipReviewSchema.optional(),
       /** Required for each outgoing source-bound cinematic cut before assembly. */
       transitionToNextReview: CinematicTransitionReviewSchema.optional(),
@@ -111,12 +111,12 @@ export const GeneratedFootageSceneManifestSchema = z
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
               path: ["items", index],
-              message: "source-proof media must bypass LTX completely and cannot carry generated-keyframe or clip-review evidence",
+              message: "source-proof media must bypass generated H3 footage completely and cannot carry generated-keyframe or clip-review evidence",
             });
           }
         }
         if (!item.sourceProofMediaReceipt && !item.keyframeReview) {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index], message: "cinematic manifest requires an independent keyframe review before LTX" });
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index], message: "cinematic manifest requires an independent keyframe review before H3" });
         } else if (!item.sourceProofMediaReceipt && item.keyframeReview!.sceneId !== item.sceneId) {
           ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index, "keyframeReview"], message: "keyframe review must bind this exact cinematic scene" });
         } else if (!item.sourceProofMediaReceipt) {
@@ -140,7 +140,7 @@ export const GeneratedFootageSceneManifestSchema = z
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["items", index],
-            message: "terminal LTX conditioning requires both its reviewed still and review receipt",
+            message: "terminal H3 endpoint evidence requires both its reviewed still and review receipt",
           });
         } else if (item.terminalKeyframeReview) {
           const terminalSceneId = `${item.sceneId}-terminal`;

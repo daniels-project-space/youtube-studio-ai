@@ -11,6 +11,10 @@ import {
   VisualArtifactReviewRejectedError,
 } from "@/engine/visualArtifactReviewOutcome";
 import { ffprobeDuration, grabFrame } from "@/lib/ffmpeg";
+import {
+  measureMiniMaxH3OpeningMotionQa,
+  MINIMAX_H3_IMMEDIATE_MOTION_MAX_FROZEN_HOLD_SEC,
+} from "@/lib/minimaxH3OpeningMotionQa";
 import { VISION_GATE_MAX_TOKENS, visionLocal } from "@/lib/vision";
 
 const ReviewerVerdictSchema = z.object({
@@ -128,7 +132,7 @@ function sealedPeopleContract(scene: CinematicClipGateScene): {
 }
 
 /**
- * Inspect the actual start, middle, and end frames of one LTX take. The
+ * Inspect the actual start, middle, and end frames of one H3 take. The
  * source still is evidence for continuity only; the moving frames determine
  * whether the take may enter the editor.
  */
@@ -144,6 +148,23 @@ export async function reviewCinematicClip(args: {
     throw new Error(`cinematic clip gate terminal reference is incomplete for ${args.scene.id}`);
   }
   const actualDurationSec = await ffprobeDuration(args.clipPath);
+  const openingMotion = measureMiniMaxH3OpeningMotionQa({
+    videoPath: args.clipPath,
+    durationSec: actualDurationSec,
+    fps: 24,
+  });
+  if (openingMotion.verdict === "unavailable") {
+    throw new Error(
+      `cinematic clip gate: deterministic MiniMax H3 opening-motion evidence is unavailable for ${args.scene.id}` +
+      `${openingMotion.detail ? ` (${openingMotion.detail})` : ""}`,
+    );
+  }
+  if (openingMotion.verdict === "fail") {
+    throw new CinematicClipRejectedError(args.scene.id, [
+      `MiniMax H3 opening froze for ${openingMotion.openingFrozenHoldSec.toFixed(2)}s; ` +
+      `motion must begin within ${MINIMAX_H3_IMMEDIATE_MOTION_MAX_FROZEN_HOLD_SEC.toFixed(2)}s.`,
+    ]);
+  }
   const offsets = sampleOffsets(actualDurationSec);
   const peopleContract = sealedPeopleContract(args.scene);
   const framePaths = await Promise.all(offsets.map((offset, index) =>
@@ -153,8 +174,8 @@ export async function reviewCinematicClip(args: {
     prompt: [
       "You are the independent final motion gate for a source-bound cinematic documentary. Inspect pixels, never assume a prompt was followed.",
       args.terminalStillPath
-        ? "The first supplied image is the accepted LTX source still; the second is the independently reviewed terminal still that conditioned LTX's final frame. The next three are the actual LTX clip at start, middle, and end. Score the moving take against both anchors and the requirements."
-        : "The first supplied image is the accepted LTX source still. The next three are the actual LTX clip at start, middle, and end. Score only the moving take against that still and the requirements.",
+        ? "The first supplied image is the accepted MiniMax H3 source still; the second is the independently reviewed terminal still. The next three are the actual H3 clip at start, middle, and end. Score the moving take against both anchors and the requirements."
+        : "The first supplied image is the accepted MiniMax H3 source still. The next three are the actual H3 clip at start, middle, and end. Score only the moving take against that still and the requirements.",
       `Required source image: ${args.scene.imagePrompt}`,
       `Required action and camera: ${args.scene.motionPrompt}`,
       args.scene.continuityIds?.length
@@ -196,6 +217,7 @@ export async function reviewCinematicClip(args: {
     expectedCastIds: peopleContract.expectedCastIds,
     forbidAdditionalPeople: peopleContract.forbidAdditionalPeople,
     onlyExpectedCastVisible: verdict.onlyExpectedCastVisible,
+    openingMotion,
     semanticAlignment: verdict.semanticAlignment,
     motionIntegrity: verdict.motionIntegrity,
     continuity: verdict.continuity,

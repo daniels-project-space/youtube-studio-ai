@@ -10,6 +10,7 @@ import {
 } from "@/engine/visualArtifactReviewOutcome";
 import {
   CINEMATIC_CLIP_REVIEW_VERSION,
+  MINIMAX_H3_OPENING_MOTION_QA_CONTRACT,
   type CinematicClipReview,
 } from "@/engine/cinematicClipReview";
 import type { NovitaBillingReceipt } from "@/lib/novitaRenderFarm";
@@ -29,6 +30,19 @@ const review: CinematicClipReview = {
   expectedCastIds: ["mannequin-investigator"],
   forbidAdditionalPeople: true,
   onlyExpectedCastVisible: true,
+  openingMotion: {
+    contract: MINIMAX_H3_OPENING_MOTION_QA_CONTRACT,
+    source: "ffmpeg/freezedetect",
+    verdict: "pass",
+    durationSec: 5,
+    maxFreezeFraction: 0.1,
+    maxStaticHoldSec: 0.5,
+    maxOpeningFrozenHoldSec: 0.25,
+    maxFrozenHoldSec: 0,
+    openingFrozenHoldSec: 0,
+    frozenIntervals: [],
+    violatingIntervals: [],
+  },
   semanticAlignment: 0.9,
   motionIntegrity: 0.9,
   continuity: 0.9,

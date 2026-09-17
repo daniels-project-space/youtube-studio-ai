@@ -1,13 +1,58 @@
 import { z } from "zod";
 
-export const CINEMATIC_CLIP_REVIEW_VERSION = "cinematic-clip-review/v2" as const;
+export const CINEMATIC_CLIP_REVIEW_VERSION = "cinematic-clip-review/v3" as const;
 export const CINEMATIC_CLIP_MIN_SCORE = 0.84;
+export const MINIMAX_H3_OPENING_MOTION_QA_CONTRACT = "minimax-h3-opening-motion-qa/v1" as const;
 
 const score = z.number().finite().min(0).max(1);
 const mannequinId = z.string().regex(/^mannequin-[a-z0-9-]+$/);
+const temporalInterval = z.object({
+  startSec: z.number().finite().nonnegative(),
+  endSec: z.number().finite().positive(),
+  durationSec: z.number().finite().positive(),
+}).refine((interval) => interval.endSec > interval.startSec, "opening-motion interval must be ordered");
 
 /**
- * Independent evidence that the three sampled frames of the actual LTX clip
+ * The independent pixel-level receipt that rejects an H3 take before a
+ * subjective reviewer can mistake a frozen opening for deliberate stillness.
+ */
+export const MiniMaxH3OpeningMotionQaEvidenceSchema = z.object({
+  contract: z.literal(MINIMAX_H3_OPENING_MOTION_QA_CONTRACT),
+  source: z.literal("ffmpeg/freezedetect"),
+  verdict: z.literal("pass"),
+  durationSec: z.number().finite().positive(),
+  maxFreezeFraction: z.number().finite().positive().max(0.2),
+  maxStaticHoldSec: z.number().finite().positive(),
+  maxOpeningFrozenHoldSec: z.number().finite().positive(),
+  maxFrozenHoldSec: z.number().finite().nonnegative(),
+  openingFrozenHoldSec: z.number().finite().nonnegative(),
+  frozenIntervals: z.array(temporalInterval),
+  violatingIntervals: z.array(temporalInterval).length(0),
+  detail: z.string().trim().min(1).optional(),
+}).superRefine((evidence, ctx) => {
+  const graceSec = 0.05;
+  const expectedStaticHoldSec = evidence.durationSec * evidence.maxFreezeFraction;
+  if (Math.abs(evidence.maxStaticHoldSec - expectedStaticHoldSec) > 0.01) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["maxStaticHoldSec"], message: "opening-motion static limit does not bind the measured H3 duration" });
+  }
+  if (evidence.maxOpeningFrozenHoldSec > evidence.maxStaticHoldSec + graceSec) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["maxOpeningFrozenHoldSec"], message: "opening-motion limit cannot exceed the full-take static limit" });
+  }
+  if (evidence.openingFrozenHoldSec > evidence.maxOpeningFrozenHoldSec + graceSec) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["openingFrozenHoldSec"], message: "H3 opening remained static beyond the immediate-motion limit" });
+  }
+  if (evidence.openingFrozenHoldSec > evidence.maxFrozenHoldSec + 0.01) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["openingFrozenHoldSec"], message: "opening frozen hold cannot exceed the measured maximum hold" });
+  }
+  if (evidence.maxFrozenHoldSec > evidence.maxStaticHoldSec + graceSec) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["maxFrozenHoldSec"], message: "measured H3 static hold exceeds its quality limit" });
+  }
+});
+
+export type MiniMaxH3OpeningMotionQaEvidence = z.infer<typeof MiniMaxH3OpeningMotionQaEvidenceSchema>;
+
+/**
+ * Independent evidence that the three sampled frames of the actual H3 clip
  * preserve its admitted first frame and deliver the planned action. A strong
  * keyframe is not enough: this receipt gates the moving take that is edited.
  */
@@ -22,12 +67,14 @@ export const CinematicClipReviewSchema = z.object({
   forbidAdditionalPeople: z.literal(true),
   /** Independent reviewer explicitly confirmed every sample contains only the sealed cast. */
   onlyExpectedCastVisible: z.literal(true),
+  /** Deterministic evidence that the H3 take moved at its first visible beat. */
+  openingMotion: MiniMaxH3OpeningMotionQaEvidenceSchema,
   semanticAlignment: score,
   motionIntegrity: score,
   continuity: score,
   endBeat: score,
   artifactFree: score,
-  /** Present only when LTX was conditioned against a reviewed terminal still. */
+  /** Present only when a reviewed endpoint still anchors the H3 take's ending. */
   terminalStillKey: z.string().trim().min(1).optional(),
   terminalFrameAlignment: score.optional(),
   textWatermarkFree: z.literal(true),

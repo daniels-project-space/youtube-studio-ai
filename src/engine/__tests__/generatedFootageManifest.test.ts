@@ -5,7 +5,10 @@ import {
   GeneratedFootageSceneManifestSchema,
 } from "@/engine/generatedFootageManifest";
 import { CINEMATIC_KEYFRAME_REVIEW_VERSION } from "@/engine/cinematicKeyframeReview";
-import { CINEMATIC_CLIP_REVIEW_VERSION } from "@/engine/cinematicClipReview";
+import {
+  CINEMATIC_CLIP_REVIEW_VERSION,
+  MINIMAX_H3_OPENING_MOTION_QA_CONTRACT,
+} from "@/engine/cinematicClipReview";
 import { CINEMATIC_TRANSITION_REVIEW_VERSION } from "@/engine/cinematicTransitionReview";
 
 const review = (sceneId: string) => ({
@@ -33,6 +36,19 @@ const clipReview = (sceneId: string) => ({
   expectedCastIds: [],
   forbidAdditionalPeople: true as const,
   onlyExpectedCastVisible: true as const,
+  openingMotion: {
+    contract: MINIMAX_H3_OPENING_MOTION_QA_CONTRACT,
+    source: "ffmpeg/freezedetect" as const,
+    verdict: "pass" as const,
+    durationSec: 5,
+    maxFreezeFraction: 0.1,
+    maxStaticHoldSec: 0.5,
+    maxOpeningFrozenHoldSec: 0.25,
+    maxFrozenHoldSec: 0,
+    openingFrozenHoldSec: 0,
+    frozenIntervals: [],
+    violatingIntervals: [],
+  },
   semanticAlignment: 0.9,
   motionIntegrity: 0.9,
   continuity: 0.9,
@@ -99,7 +115,7 @@ lowMotionReview.items[0].clipReview.motionIntegrity = 0.3;
 assert.throws(
   () => GeneratedFootageSceneManifestSchema.parse(lowMotionReview),
   /motion integrity/,
-  "a claimed pass with a below-floor LTX motion score cannot reach assembly",
+  "a claimed pass with a below-floor H3 motion score cannot reach assembly",
 );
 
 const brokenTiming = structuredClone(cinematic);
@@ -120,7 +136,7 @@ const missingReview = structuredClone(cinematic);
 delete (missingReview.items[0] as { keyframeReview?: unknown }).keyframeReview;
 assert.throws(
   () => GeneratedFootageSceneManifestSchema.parse(missingReview),
-  /requires an independent keyframe review before LTX/,
+  /requires an independent keyframe review before H3/,
 );
 
 console.log("Generated footage scene manifest tests passed");
