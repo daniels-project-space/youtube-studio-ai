@@ -11,10 +11,13 @@ const library = read("src/app/(app)/library/page.tsx");
 const card = read("src/components/VideoCard.tsx");
 const folders = read("src/components/ChannelFolderWorkspace.tsx");
 const channels = read("src/app/(app)/channels/page.tsx");
+const projection = read("src/lib/libraryProjection.ts");
 
 assert.match(schema, /libraryState: v\.optional\(v\.union\(v\.literal\("active"\), v\.literal\("archived"\)\)\)/);
-assert.match(videos, /const libraryState = run\.libraryState \?\? "active"/);
-assert.match(videos, /if \(!args\.includeArchived && libraryState === "archived"\) continue/);
+assert.match(projection, /export function matchesLibraryRunScope\(/,
+  "all Library projections must share the archive/state scope helper");
+assert.match(videos, /matchesLibraryRunScope\(run, filters\)/,
+  "the compatibility and cursor Library paths must apply the same archive/state rules");
 assert.match(videos, /export const setLibraryState = mutation/);
 assert.match(videos, /run\.ownerId !== args\.ownerId/);
 const archiveMutation = videos.match(/export const setLibraryState = mutation\(\{([\s\S]*?)\n\}\);/)?.[1] ?? "";

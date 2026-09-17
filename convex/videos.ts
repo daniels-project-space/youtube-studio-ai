@@ -1,4 +1,5 @@
 import { mutation, query } from "./studioFunctions";
+import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
@@ -13,6 +14,16 @@ import {
 import { selectLatestCurrentGoldenThumbnail } from "../src/lib/thumbnailRefreshInventory";
 import { summarizeLibraryStates } from "../src/lib/librarySummary";
 import { createBulkUndoReceipt } from "../src/lib/automaticWorkflow";
+import {
+  LIBRARY_PAGE_LIMIT,
+  validatedReadLimit,
+} from "../src/lib/boundedConvexReads";
+import {
+  libraryRunCreatedAt,
+  matchesLibraryRunScope,
+  matchesLibraryTitle,
+  type LibraryRunScope,
+} from "../src/lib/libraryProjection";
 
 /**
  * Finished-videos library (Tranche 4).
@@ -309,6 +320,153 @@ export const listRecentChannelTitles = query({
   },
 });
 
+type LibraryVideoFilters = LibraryRunScope & {
+  search?: string;
+};
+
+type LibraryChannel = {
+  name: string;
+  slug: string;
+  family?: string;
+  contentLane?: unknown;
+};
+
+/**
+ * One evidence-preserving card projection for the cursor page (kept separate
+ * from the legacy list until its startedAt ordering is retired). Run-level
+ * filters happen before media joins;
+ * title search happens only after the canonical metadata title is known.
+ */
+async function projectLibraryVideo(
+  ctx: QueryCtx,
+  run: Doc<"runs">,
+  filters: LibraryVideoFilters,
+  channelCache: Map<string, Promise<LibraryChannel | null>>,
+): Promise<Record<string, unknown> | null> {
+  if (!matchesLibraryRunScope(run, filters)) return null;
+
+  const getChannel = async (channelId: Id<"channels">) => {
+    const key = channelId as string;
+    const cached = channelCache.get(key);
+    if (cached) return cached;
+    const pending = ctx.db.get(channelId).then((ch) => ch
+      ? { name: ch.name, slug: ch.slug, family: ch.family, contentLane: ch.contentLane }
+      : null);
+    channelCache.set(key, pending);
+    return pending;
+  };
+
+  const [videoAssets, thumbAsset] = await Promise.all([
+    ctx.db
+      .query("assets")
+      .withIndex("by_run_kind", (q) => q.eq("runId", run._id).eq("kind", "video"))
+      .collect(),
+    ctx.db
+      .query("assets")
+      .withIndex("by_run_kind", (q) => q.eq("runId", run._id).eq("kind", "thumbnail"))
+      .first()
+      .then((asset) => asset ?? undefined),
+  ]);
+
+  const fallbackVideoAsset = videoAssets[0];
+  const storedReleaseEvidenceStatus = normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus);
+  const sealedMasterKey = storedReleaseEvidenceStatus === "release_evidence_recorded"
+    ? await recordedMasterKey(ctx, run._id)
+    : undefined;
+  const releaseEvidenceStatus =
+    storedReleaseEvidenceStatus === "release_evidence_recorded" && !sealedMasterKey
+      ? "evidence_incomplete"
+      : storedReleaseEvidenceStatus;
+  const videoAsset = sealedMasterKey
+    ? videoAssets.find((asset) => asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
+    : fallbackVideoAsset;
+  const videoKey = sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
+
+  const isFinished =
+    Boolean(run.youtubeVideoId) || (Boolean(videoKey) && run.status !== "failed");
+  if (!isFinished) return null;
+
+  const [channel, mOut] = await Promise.all([
+    getChannel(run.channelId),
+    metadataOutputs(ctx, run._id),
+  ]);
+  const vMeta = (videoAsset?.meta ?? {}) as Record<string, unknown>;
+  const tMeta = (thumbAsset?.meta ?? {}) as Record<string, unknown>;
+  const title =
+    (typeof mOut.title === "string" && mOut.title) ||
+    (typeof vMeta.title === "string" && vMeta.title) ||
+    (typeof tMeta.thumbnailTitle === "string" && tMeta.thumbnailTitle) ||
+    (typeof tMeta.title === "string" && tMeta.title) ||
+    (channel?.name ?? "Untitled video");
+  if (!matchesLibraryTitle(String(title), filters.search)) return null;
+
+  const description = typeof mOut.description === "string"
+    ? mOut.description.slice(0, 400)
+    : undefined;
+  const tags = Array.isArray(mOut.tags)
+    ? (mOut.tags.filter((tag) => typeof tag === "string") as string[]).slice(0, 20)
+    : undefined;
+  const durationSec =
+    typeof vMeta.durationSec === "number"
+      ? vMeta.durationSec
+      : typeof vMeta.duration === "number"
+        ? vMeta.duration
+        : undefined;
+  const runAny = run as unknown as Record<string, unknown>;
+  const estimatedViews =
+    typeof mOut.estimatedViews === "number"
+      ? mOut.estimatedViews
+      : typeof runAny.estimatedViews === "number"
+        ? runAny.estimatedViews
+        : undefined;
+  const estimatedViewsSource =
+    typeof mOut.estimatedViewsSource === "string"
+      ? mOut.estimatedViewsSource
+      : typeof runAny.estimatedViewsSource === "string"
+        ? runAny.estimatedViewsSource
+        : undefined;
+
+  const thumbnail = await currentLibraryThumbnail(ctx, {
+    ownerId: filters.ownerId,
+    runId: run._id,
+    channelId: run.channelId,
+    channel,
+    sourceThumbnail: thumbAsset,
+    sourceVideoKey: videoKey,
+  });
+
+  return {
+    _id: run._id,
+    status: run.status,
+    releaseEvidenceStatus,
+    createdAt: libraryRunCreatedAt(run),
+    startedAt: run.startedAt,
+    finishedAt: run.finishedAt,
+    youtubeVideoId: run.youtubeVideoId,
+    libraryState: run.libraryState ?? "active",
+    libraryStateUpdatedAt: run.libraryStateUpdatedAt,
+    watchUrl: run.youtubeVideoId
+      ? `https://www.youtube.com/watch?v=${run.youtubeVideoId}`
+      : undefined,
+    channelId: run.channelId,
+    channelName: channel?.name ?? "(unknown)",
+    channelSlug: channel?.slug ?? "",
+    title: title as string,
+    description,
+    tags,
+    thumbnailKey: thumbnail.key,
+    ...(thumbnail.presentation ? { thumbnailPresentation: thumbnail.presentation } : {}),
+    videoKey,
+    thumbnailTitle:
+      typeof tMeta.thumbnailTitle === "string" ? tMeta.thumbnailTitle : undefined,
+    visualRationale:
+      typeof tMeta.visualRationale === "string" ? tMeta.visualRationale : undefined,
+    estimatedViews,
+    estimatedViewsSource,
+    durationSec,
+  };
+}
+
 export const listVideos = query({
   args: {
     ownerId: v.string(),
@@ -322,8 +480,6 @@ export const listVideos = query({
     // Bound the scan even when the caller passes no limit (all current
     // callers do); early termination below keeps the common case cheap.
     const limit = args.limit ?? 200;
-    const needle = args.search?.trim().toLowerCase() ?? "";
-
     // Narrowest index first: by_channel when filtered, else by_owner. desc =
     // newest _creationTime first (≈ startedAt order; runs stamp startedAt at
     // insert), so we can stop as soon as `limit` finished rows are collected.
@@ -337,193 +493,97 @@ export const listVideos = query({
           .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
           .order("desc");
 
-    // Channel-name cache so we join each channel at most once.
-    const channelCache = new Map<
-      string,
-      { name: string; slug: string; family?: string; contentLane?: unknown } | null
-    >();
-    const getChannel = async (channelId: Id<"channels">) => {
-      const key = channelId as string;
-      if (channelCache.has(key)) return channelCache.get(key)!;
-      const ch = await ctx.db.get(channelId);
-      const val = ch
-        ? {
-            name: ch.name,
-            slug: ch.slug,
-            family: ch.family,
-            contentLane: ch.contentLane,
-          }
-        : null;
-      channelCache.set(key, val);
-      return val;
+    // Reuse the same evidence-preserving projection as the cursor endpoint so
+    // the compatibility list cannot drift from the future paginated surface.
+    const filters: LibraryVideoFilters = {
+      ownerId: args.ownerId,
+      status: args.status,
+      search: args.search,
+      includeArchived: args.includeArchived,
     };
-
+    const channelCache = new Map<string, Promise<LibraryChannel | null>>();
     const rows: Array<Record<string, unknown>> = [];
 
     for await (const run of source) {
       if (rows.length >= limit) break;
-      // Tenancy guard when reading the channel index.
-      if (run.ownerId !== args.ownerId) continue;
-      const libraryState = run.libraryState ?? "active";
-      if (!args.includeArchived && libraryState === "archived") continue;
-      // Server-side status filter.
-      if (args.status && run.status !== args.status) continue;
-
-      // Pull only the card's retained media kinds. A final master with
-      // recorded release evidence is selected below from the sealed
-      // certificate reference, rather than by whichever video asset happened
-      // to be inserted first.
-      // Card projections never need intermediate keyframes, clips, music, or
-      // captions. Keep all video rows because release evidence may seal a
-      // non-first master; the source thumbnail is the first thumbnail row,
-      // matching the previous by_run collection order.
-      const [videoAssets, thumbAsset] = await Promise.all([
-        ctx.db
-          .query("assets")
-          .withIndex("by_run_kind", (q) => q.eq("runId", run._id).eq("kind", "video"))
-          .collect(),
-        ctx.db
-          .query("assets")
-          .withIndex("by_run_kind", (q) => q.eq("runId", run._id).eq("kind", "thumbnail"))
-          .first()
-          .then((asset) => asset ?? undefined),
-      ]);
-
-      const fallbackVideoAsset = videoAssets[0];
-      const storedReleaseEvidenceStatus = normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus);
-      const sealedMasterKey = storedReleaseEvidenceStatus === "release_evidence_recorded"
-        ? await recordedMasterKey(ctx, run._id)
-        : undefined;
-      // A stored status is a cached projection. If the artifacts no longer
-      // reproduce it, downgrade the presentation and retain the legacy asset
-      // fallback without pretending that it is the approved master.
-      const releaseEvidenceStatus =
-        storedReleaseEvidenceStatus === "release_evidence_recorded" && !sealedMasterKey
-          ? "evidence_incomplete"
-          : storedReleaseEvidenceStatus;
-      const videoAsset = sealedMasterKey
-        ? videoAssets.find((asset) => asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
-        : fallbackVideoAsset;
-      const videoKey = sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
-
-      // A shippable video = published (youtubeVideoId) OR a rendered video from
-      // a run that did NOT fail. A FAILED run that only left an intermediate
-      // video asset (e.g. died at qa_visual after the engine uploaded a draft
-      // key) is a stranded orphan, not a video — it used to clutter the Library
-      // with duplicate rows (3 rows for 1 usable video). Published runs always
-      // show regardless of status.
-      const isFinished =
-        Boolean(run.youtubeVideoId) || (Boolean(videoKey) && run.status !== "failed");
-      if (!isFinished) continue;
-
-      // These two compact projections are independent once the finished-row
-      // gate above has passed. Keep their reads in one round-trip so Library
-      // cards do not serialize a channel join before loading the title/SEO
-      // stage. (Do not move this before `isFinished`: unfinished rows should
-      // retain the old cheap rejection path without a metadata read.)
-      const [channel, mOut] = await Promise.all([
-        getChannel(run.channelId),
-        // The REAL title/SEO live in the `metadata` stage outputs (they were
-        // previously stranded there — asset meta rarely carries a title).
-        metadataOutputs(ctx, run._id),
-      ]);
-      const vMeta = (videoAsset?.meta ?? {}) as Record<string, unknown>;
-      const tMeta = (thumbAsset?.meta ?? {}) as Record<string, unknown>;
-      const title =
-        (typeof mOut.title === "string" && mOut.title) ||
-        (typeof vMeta.title === "string" && vMeta.title) ||
-        (typeof tMeta.thumbnailTitle === "string" && tMeta.thumbnailTitle) ||
-        (typeof tMeta.title === "string" && tMeta.title) ||
-        (channel?.name ?? "Untitled video");
-
-      // Optional title search — must run BEFORE the row counts toward `limit`.
-      if (needle && !String(title).toLowerCase().includes(needle)) continue;
-
-      const description =
-        typeof mOut.description === "string"
-          ? mOut.description.slice(0, 400)
-          : undefined;
-      const tags = Array.isArray(mOut.tags)
-        ? (mOut.tags.filter((t) => typeof t === "string") as string[]).slice(0, 20)
-        : undefined;
-
-      // Optional duration from either asset's meta.
-      const durationSec =
-        typeof vMeta.durationSec === "number"
-          ? (vMeta.durationSec as number)
-          : typeof vMeta.duration === "number"
-            ? (vMeta.duration as number)
-            : undefined;
-
-      // Estimated views: metadata stage first, legacy run fields as fallback.
-      const runAny = run as unknown as Record<string, unknown>;
-      const estimatedViews =
-        typeof mOut.estimatedViews === "number"
-          ? (mOut.estimatedViews as number)
-          : typeof runAny.estimatedViews === "number"
-            ? (runAny.estimatedViews as number)
-            : undefined;
-      const estimatedViewsSource =
-        typeof mOut.estimatedViewsSource === "string"
-          ? (mOut.estimatedViewsSource as string)
-          : typeof runAny.estimatedViewsSource === "string"
-            ? (runAny.estimatedViewsSource as string)
-            : undefined;
-
-      const thumbnail = await currentLibraryThumbnail(ctx, {
-        ownerId: args.ownerId,
-        runId: run._id,
-        channelId: run.channelId,
-        channel,
-        sourceThumbnail: thumbAsset,
-        sourceVideoKey: videoKey,
-      });
-
-      rows.push({
-        _id: run._id,
-        status: run.status,
-        // Execution completion and master provenance are deliberately distinct.
-        // Historical rows without a retained certificate remain visible, but
-        // must never inherit an implicit quality claim from their `ok` status.
-        releaseEvidenceStatus,
-        createdAt: run.startedAt ?? run._creationTime,
-        startedAt: run.startedAt,
-        finishedAt: run.finishedAt,
-        youtubeVideoId: run.youtubeVideoId,
-        libraryState,
-        libraryStateUpdatedAt: run.libraryStateUpdatedAt,
-        // Fold the private-draft watch URL into the row so the Library can link
-        // straight to the uploaded draft (it used to be stranded in the
-        // upload_draft stage outputs, never surfaced to the UI).
-        watchUrl: run.youtubeVideoId
-          ? `https://www.youtube.com/watch?v=${run.youtubeVideoId}`
-          : undefined,
-        channelId: run.channelId,
-        channelName: channel?.name ?? "(unknown)",
-        channelSlug: channel?.slug ?? "",
-        title: title as string,
-        description,
-        tags,
-        thumbnailKey: thumbnail.key,
-        ...(thumbnail.presentation ? { thumbnailPresentation: thumbnail.presentation } : {}),
-        videoKey,
-        thumbnailTitle:
-          typeof tMeta.thumbnailTitle === "string"
-            ? (tMeta.thumbnailTitle as string)
-            : undefined,
-        visualRationale:
-          typeof tMeta.visualRationale === "string"
-            ? (tMeta.visualRationale as string)
-            : undefined,
-        estimatedViews,
-        estimatedViewsSource,
-        durationSec,
-      });
+      const projected = await projectLibraryVideo(ctx, run, filters, channelCache);
+      if (projected) rows.push(projected);
     }
 
     // Newest first (startedAt can drift a hair from _creationTime).
     rows.sort((a, b) => (b.createdAt as number) - (a.createdAt as number));
     return rows;
+  },
+});
+
+/**
+ * Cursor-backed Library projection.
+ *
+ * The cursor is over the owner/channel run index, before expensive asset,
+ * release-certificate, metadata, and thumbnail-candidate joins. Filters are
+ * applied in the same order as the legacy projection, so an invalid/failed
+ * run consumes cursor space but cannot crowd a finished card out of the
+ * returned page forever. `_creationTime` is the stable cursor order; the
+ * displayed `createdAt` remains the historical `startedAt` fallback.
+ *
+ * The UI can adopt this endpoint once the owner-wide canonical ordering
+ * migration is complete. Until then the existing list remains the exact
+ * compatibility path for the older startedAt-sorted surface.
+ */
+export const listVideosPage = query({
+  args: {
+    ownerId: v.string(),
+    channelId: v.optional(v.id("channels")),
+    status: v.optional(v.string()),
+    search: v.optional(v.string()),
+    includeArchived: v.optional(v.boolean()),
+    libraryState: v.optional(v.union(v.literal("active"), v.literal("archived"))),
+    from: v.optional(v.number()),
+    to: v.optional(v.number()),
+    order: v.optional(v.union(v.literal("date"), v.literal("oldest"))),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    validatedReadLimit(args.paginationOpts.numItems, LIBRARY_PAGE_LIMIT);
+    for (const [label, value] of [["from", args.from], ["to", args.to]] as const) {
+      if (value !== undefined && (!Number.isFinite(value) || value < 0)) {
+        throw new Error(`library ${label} timestamp is invalid`);
+      }
+    }
+    if (args.from !== undefined && args.to !== undefined && args.from > args.to) {
+      throw new Error("library date range is invalid");
+    }
+
+    const source = args.channelId
+      ? ctx.db
+          .query("runs")
+          .withIndex("by_channel", (q) => q.eq("channelId", args.channelId!))
+          .order(args.order === "oldest" ? "asc" : "desc")
+      : ctx.db
+          .query("runs")
+          .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+          .order(args.order === "oldest" ? "asc" : "desc");
+    const runPage = await source.paginate(args.paginationOpts);
+    const filters: LibraryVideoFilters = {
+      ownerId: args.ownerId,
+      status: args.status,
+      search: args.search,
+      includeArchived: args.includeArchived,
+      libraryState: args.libraryState,
+      from: args.from,
+      to: args.to,
+    };
+    const channelCache = new Map<string, Promise<LibraryChannel | null>>();
+    const projected = await Promise.all(
+      runPage.page.map((run) => projectLibraryVideo(ctx, run, filters, channelCache)),
+    );
+    // Index order is the cursor contract. Do not globally sort by startedAt:
+    // doing so would make page 2 capable of preceding page 1 when a legacy
+    // run has a delayed/missing startedAt value.
+    return {
+      ...runPage,
+      page: projected.filter((row): row is Record<string, unknown> => row !== null),
+    };
   },
 });
 

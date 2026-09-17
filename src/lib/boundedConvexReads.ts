@@ -57,3 +57,9 @@ export const PLAN_HISTORY_PAGE_LIMIT = {
   maxLimit: 100,
   label: "plan history page size",
 } as const;
+
+export const LIBRARY_PAGE_LIMIT = {
+  defaultLimit: 8,
+  maxLimit: 24,
+  label: "library page size",
+} as const;
