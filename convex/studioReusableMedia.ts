@@ -94,11 +94,14 @@ export const claimEpisodeAndResolve = mutation({
       return plan;
     }
 
-    const [priorClaims, mediaRows, priorUsageRows] = await Promise.all([
+    const [latestClaim, mediaRows, priorUsageRows] = await Promise.all([
       ctx.db
         .query("studioReusableMediaEpisodeClaims")
-        .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
-        .collect(),
+        .withIndex("by_owner_channel_ordinal", (q) =>
+          q.eq("ownerId", args.ownerId).eq("channelId", args.channelId),
+        )
+        .order("desc")
+        .first(),
       ctx.db
         .query("studioReusableMediaAssets")
         .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
@@ -108,7 +111,7 @@ export const claimEpisodeAndResolve = mutation({
         .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
         .collect(),
     ]);
-    const episodeOrdinal = priorClaims.reduce((maximum, claim) => Math.max(maximum, claim.episodeOrdinal), 0) + 1;
+    const episodeOrdinal = (latestClaim?.episodeOrdinal ?? 0) + 1;
     const plan = resolveStudioReusableMedia({
       request: { ...request, episodeOrdinal },
       entries: currentEntries(mediaRows as MediaRow[]),

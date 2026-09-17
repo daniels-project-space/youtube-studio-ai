@@ -85,6 +85,28 @@ const PROVEN_READY_BATCH_PAGE_LIMIT = {
 } as const;
 
 /**
+ * Planner admission only cares about still-live reservations. The historical
+ * batch ledger can be large, so use the status-qualified index rather than
+ * scanning every completed/failed batch for the channel.
+ */
+async function activePlanBatches(
+  ctx: Pick<QueryCtx, "db">,
+  channelId: Id<"channels">,
+) {
+  const [reserved, running] = await Promise.all([
+    ctx.db
+      .query("planBatches")
+      .withIndex("by_channel_status", (q) => q.eq("channelId", channelId).eq("status", "reserved"))
+      .collect(),
+    ctx.db
+      .query("planBatches")
+      .withIndex("by_channel_status", (q) => q.eq("channelId", channelId).eq("status", "running"))
+      .collect(),
+  ]);
+  return [...reserved, ...running];
+}
+
+/**
  * A scheduled run can outlive the plan-time thumbnail.  Resolve only those
  * rows through the shared current-thumbnail projection; unscheduled editorial
  * rows remain a cheap, immutable plan read.  The small cache avoids repeating
@@ -886,10 +908,7 @@ export const reservePlanBatch = mutation({
             `exceeds channel ceiling $${channel.budget.toFixed(2)}`,
           );
         }
-        const channelBatches = await ctx.db
-          .query("planBatches")
-          .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
-          .collect();
+        const channelBatches = await activePlanBatches(ctx, args.channelId);
         for (const batch of channelBatches) {
           if (batch._id === existing._id || batch.ownerId !== args.ownerId ||
               !["reserved", "running"].includes(batch.status)) continue;
@@ -937,10 +956,7 @@ export const reservePlanBatch = mutation({
       );
     }
 
-    const channelBatches = await ctx.db
-      .query("planBatches")
-      .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
-      .collect();
+    const channelBatches = await activePlanBatches(ctx, args.channelId);
     for (const batch of channelBatches) {
       if (batch.ownerId !== args.ownerId || !["reserved", "running"].includes(batch.status)) continue;
       if (batch.leaseExpiresAt > now) {

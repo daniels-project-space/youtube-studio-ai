@@ -56,6 +56,17 @@ for (const [start, end] of [
 }
 assert.match(planSource, /export const listPlanHistoryPage/);
 assert.match(planSource, /\.paginate\(args\.paginationOpts\)/);
+assert.match(planSource, /async function activePlanBatches/);
+assert.match(
+  planSource,
+  /activePlanBatches[\s\S]*?withIndex\("by_channel_status"[\s\S]*?eq\("status", "reserved"\)[\s\S]*?withIndex\("by_channel_status"[\s\S]*?eq\("status", "running"\)/,
+  "planner admission should query only live batch states",
+);
+assert.doesNotMatch(
+  planSource.slice(planSource.indexOf("export const reservePlanBatch"), planSource.indexOf("export const recordPlanBatchUsage")),
+  /withIndex\("by_channel", \(q\) => q\.eq\("channelId", args\.channelId\)\)\n\s*\.collect\(\)/,
+  "planner admission must not rescan the full historical batch ledger",
+);
 
 const doctorSource = readFileSync(
   new URL("../../trigger/pipelineDoctor.ts", import.meta.url),

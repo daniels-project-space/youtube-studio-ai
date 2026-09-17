@@ -82,6 +82,15 @@ function createMemoryState() {
           },
           first: async () => matches()[0] ?? null,
           collect: async () => matches(),
+          order: (direction: "asc" | "desc") => ({
+            first: async () => {
+              const found = matches().slice().sort((left, right) =>
+                Number(left.episodeOrdinal ?? 0) - Number(right.episodeOrdinal ?? 0),
+              );
+              if (direction === "desc") found.reverse();
+              return found[0] ?? null;
+            },
+          }),
         };
       },
     }),

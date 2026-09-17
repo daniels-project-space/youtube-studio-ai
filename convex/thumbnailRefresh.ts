@@ -73,6 +73,27 @@ async function replayForRun(
 
 type RefreshMaterial = ThumbnailRefreshReplayMaterial | ThumbnailRefreshSuccessorMaterial;
 
+/**
+ * Thumbnail refresh decisions only need the retained video and thumbnail
+ * artifacts. Reading the whole run asset ledger pulls intermediate keyframes,
+ * clips, music, captions, and other large histories into every inventory row.
+ * Keep the two reads kind-scoped and bounded while preserving the existing
+ * "oldest artifact wins" ordering of the by_run index.
+ */
+async function retainedMediaAssets(ctx: DbCtx, runId: Id<"runs">): Promise<Doc<"assets">[]> {
+  const [video, thumbnail] = await Promise.all([
+    ctx.db
+      .query("assets")
+      .withIndex("by_run_kind", (q) => q.eq("runId", runId).eq("kind", "video"))
+      .first(),
+    ctx.db
+      .query("assets")
+      .withIndex("by_run_kind", (q) => q.eq("runId", runId).eq("kind", "thumbnail"))
+      .first(),
+  ]);
+  return [video, thumbnail].filter((asset): asset is Doc<"assets"> => Boolean(asset));
+}
+
 function assertThumbnailRefreshKeepSource(
   run: { status: string; youtubeVideoId?: string; releaseEvidenceStatus?: string },
   channel: Doc<"channels">,
@@ -130,7 +151,7 @@ async function refreshMaterialForRun(
     prefetched?.channel !== undefined ? prefetched.channel : ctx.db.get(run.channelId),
     prefetched?.assets !== undefined
       ? prefetched.assets
-      : ctx.db.query("assets").withIndex("by_run", (q) => q.eq("runId", run._id)).collect(),
+      : retainedMediaAssets(ctx, run._id),
   ]);
   const metadataTitle = stageOutputText(stages, ["metadata", "quiz_metadata"], "title");
   const thumbnail = assets.find((asset) => asset.kind === "thumbnail");
@@ -195,8 +216,9 @@ async function assertFinishedSource(
 ) {
   const assets = await ctx.db
     .query("assets")
-    .withIndex("by_run", (q) => q.eq("runId", run._id))
-    .collect();
+    .withIndex("by_run_kind", (q) => q.eq("runId", run._id).eq("kind", "video"))
+    .first()
+    .then((video) => video ? [video] : []);
   const video = assets.find((asset) => asset.kind === "video");
   if (!run.youtubeVideoId && (!video || run.status === "failed")) {
     throw new Error("thumbnail refresh source is not a retained finished video");
@@ -277,10 +299,7 @@ export const listInventory = query({
         continue;
       }
 
-      const assets = await ctx.db
-        .query("assets")
-        .withIndex("by_run", (q) => q.eq("runId", run._id))
-        .collect();
+      const assets = await retainedMediaAssets(ctx, run._id);
       const videoAsset = assets.find((asset) => asset.kind === "video");
       const isFinished = Boolean(run.youtubeVideoId) ||
         (Boolean(videoAsset) && run.status !== "failed");
@@ -331,8 +350,9 @@ export const listInventory = query({
       const candidateAssets = candidate
         ? await ctx.db
             .query("assets")
-            .withIndex("by_run", (q) => q.eq("runId", candidate._id as Id<"runs">))
-            .collect()
+            .withIndex("by_run_kind", (q) => q.eq("runId", candidate._id as Id<"runs">).eq("kind", "thumbnail"))
+            .first()
+            .then((thumbnail) => thumbnail ? [thumbnail] : [])
         : [];
       const candidateThumbnail = candidateAssets.find((asset) => asset.kind === "thumbnail");
       const candidateAssessment = candidate?.status === "ok" && candidateThumbnail
@@ -615,12 +635,11 @@ export const importErnieBatchCandidate = mutation({
         })
       )
     ) throw new Error("ERNIE thumbnail batch import owner approval is invalid or changed");
-    const existing = (await ctx.db
+    const existing = await ctx.db
       .query("assets")
-      .withIndex("by_run", (q) => q.eq("runId", candidate._id))
-      .collect())
-      .filter((asset) => asset.kind === "thumbnail");
-    if (existing.length) throw new Error("ERNIE thumbnail batch candidate already has a thumbnail artifact");
+      .withIndex("by_run_kind", (q) => q.eq("runId", candidate._id).eq("kind", "thumbnail"))
+      .first();
+    if (existing) throw new Error("ERNIE thumbnail batch candidate already has a thumbnail artifact");
     const assetId = await ctx.db.insert("assets", {
       ownerId: args.ownerId,
       channelId: channel._id,

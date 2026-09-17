@@ -20,6 +20,17 @@ assert.match(schema, /by_owner_thumbnail_refresh_dispatch/);
 assert.match(schema, /by_channel_thumbnail_refresh_source/);
 assert.match(schema, /by_channel_status_thumbnail_refresh_source/);
 assert.match(convex, /export const createCandidateShell = mutation/);
+assert.match(convex, /async function retainedMediaAssets/);
+assert.match(
+  convex,
+  /retainedMediaAssets[\s\S]*?withIndex\("by_run_kind", \(q\) => q\.eq\("runId", runId\)\.eq\("kind", "video"\)\)[\s\S]*?withIndex\("by_run_kind", \(q\) => q\.eq\("runId", runId\)\.eq\("kind", "thumbnail"\)\)/,
+  "thumbnail refresh inventory must read only retained media kinds",
+);
+assert.match(
+  convex,
+  /importErnieBatchCandidate[\s\S]*?withIndex\("by_run_kind", \(q\) => q\.eq\("runId", candidate\._id\)\.eq\("kind", "thumbnail"\)\)[\s\S]*?\.first\(\)/,
+  "candidate import must probe one thumbnail instead of collecting the whole asset ledger",
+);
 assert.match(convex, /await requireStudioServiceIdentity\(ctx, args\.ownerId, "thumbnail refresh candidate shell"\)/);
 assert.match(convex, /thumbnailRefreshSourceRunId: source\._id/);
 assert.match(convex, /thumbnailRefreshDispatchState: "awaiting_approval"/);
