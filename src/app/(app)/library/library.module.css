@@ -3,7 +3,7 @@
 /* The vault is a browsing surface, not a second channel-detail page. Keep its
    compact treatment scoped to this route so richer channel cards are unchanged. */
 :global(.video-grid[data-density="library"]) {
-  grid-template-columns: repeat(auto-fill, minmax(min(160px, 100%), 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: .48rem;
 }
 :global(.video-card[data-density="library"] .video-card-body) { gap: .24rem; padding: .48rem .54rem .52rem; }
@@ -122,6 +122,10 @@
 .changeToast[data-tone="error"] { border-color: color-mix(in srgb, var(--color-failed) 55%, var(--color-border)); }
 .changeToast[data-tone="error"] strong { color: var(--color-failed); }
 
+@media (max-width: 1050px) {
+  :global(.video-grid[data-density="library"]) { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
 @media (max-width: 900px) {
   .libraryDashboard { grid-template-columns: minmax(0, 1fr); }
   .libraryMetrics { grid-template-columns: repeat(auto-fit, minmax(min(5rem, 100%), 1fr)); }
@@ -130,6 +134,7 @@
 }
 
 @media (max-width: 620px) {
+  :global(.video-grid[data-density="library"]) { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .collectionBar { align-items: stretch; flex-direction: column; }
   .collectionTabs { width: 100%; }
   .collectionTabs button { flex: 1 1 6rem; justify-content: space-between; }

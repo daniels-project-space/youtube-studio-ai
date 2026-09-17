@@ -12,6 +12,14 @@ const card = read("src/components/VideoCard.tsx");
 const folders = read("src/components/ChannelFolderWorkspace.tsx");
 const channels = read("src/app/(app)/channels/page.tsx");
 const projection = read("src/lib/libraryProjection.ts");
+const layout = read("src/app/(app)/library/library.module.css");
+const paging = read("src/app/(app)/library/libraryPaging.ts");
+
+assert.match(paging, /LIBRARY_PAGE_SIZE = 8/);
+assert.match(layout, /grid-template-columns: repeat\(4, minmax\(0, 1fr\)\)/,
+  "eight Library cards should fill two balanced desktop rows, not six-plus-two");
+assert.match(layout, /max-width: 1050px[\s\S]*?repeat\(3, minmax\(0, 1fr\)\)/);
+assert.match(layout, /max-width: 620px[\s\S]*?repeat\(2, minmax\(0, 1fr\)\)/);
 
 assert.match(schema, /libraryState: v\.optional\(v\.union\(v\.literal\("active"\), v\.literal\("archived"\)\)\)/);
 assert.match(projection, /export function matchesLibraryRunScope\(/,
