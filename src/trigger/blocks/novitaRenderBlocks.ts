@@ -16,13 +16,8 @@ import {
   parseContentLane,
   VISUAL_MATTER_REFERENCE_CONTENT_LANE,
 } from "@/engine/contentLane";
-import {
-  studioLtxCreativeAdapterSelectionFromUnknown,
-  studioLtxShotAdapterSelectionsFromUnknown,
-} from "@/engine/studioAssetLibrary";
 import { channelCritiqueBrief, type ChannelCritiqueContext } from "@/engine/critiqueLoop";
 import { generationProfile, type GenerationProfile } from "@/engine/generationProfiles";
-import { NarrativeShotControlContractSchema } from "@/engine/narrativeSeriesIntelligence";
 import { NOVITA_CINEMATIC_QA_REPAIR_CAP, PRICE } from "@/engine/pricing";
 import {
   NOVITA_VISUAL_QA_MAX_IMAGES_PER_GRADER_CALL,
@@ -39,6 +34,7 @@ import {
   type ShotRenderManifest,
   type StillRenderManifest,
 } from "@/engine/renderArtifacts";
+import type { MiniMaxH3OpeningMotionQaEvidence } from "@/engine/cinematicClipReview";
 import { DPVisualSpecSchema, ShotPlanSchema, type ShotPlan } from "@/engine/storySpine";
 import type { Block, StageContext } from "@/engine/types";
 import { COST_PATCH_KEY } from "@/engine/types";
@@ -71,8 +67,22 @@ import {
 import { makeRunTempDir, writeBytes } from "@/lib/files";
 import { grabFrame, probe } from "@/lib/ffmpeg";
 import { parseJsonLoose } from "@/lib/gemini";
+import {
+  MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_MODEL,
+  MINIMAX_H3_MODEL_REVISION,
+  MINIMAX_H3_PROFILE,
+  MINIMAX_H3_RUNTIME_ID,
+  assertMiniMaxH3R2ModelManifest,
+  buildMiniMaxH3SceneRequest,
+  minimaxH3Readiness,
+  renderMiniMaxH3,
+} from "@/lib/minimaxH3";
+import {
+  assertMiniMaxH3OpeningMotionQa,
+  MiniMaxH3OpeningMotionRejectedError,
+} from "@/lib/minimaxH3OpeningMotionQa";
 import { LtxCreativeAdapterInputSchema } from "@/lib/ltxCreativeAdapter";
-import { parseNarrativeSeriesAcceptedCharacterAdapters } from "@/lib/narrativeSeriesRunAdmission";
 import { assertLtxVideoOutputProofSet } from "@/lib/ltxVideoProof";
 import {
   measureLtxShotTemporalQa,
@@ -308,6 +318,129 @@ async function localVisualSequenceArtifactIntegrity(
   return { sha256, byteLength: details.size };
 }
 
+const H3_NATIVE_DURATION_SEC = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+
+function isMiniMaxH3ShotManifest(manifest: ShotRenderManifest): boolean {
+  return "renderer" in manifest.generation && manifest.generation.renderer === "minimax-h3";
+}
+
+function requireH3StageBudget(ctx: StageContext, label: string): number {
+  const budget = ctx.stageBudgetUsd;
+  if (!Number.isFinite(budget) || !budget || budget <= 0) {
+    throw new Error(`${label} requires an authenticated per-stage budget reservation; refusing to use the aggregate run budget`);
+  }
+  return budget;
+}
+
+/**
+ * Do not give the first clip permission to consume a whole stage reservation.
+ * Each exact H3 request gets an equal remaining share, capped by the worker's
+ * own hard request ceiling. A repair receives the one remaining take share.
+ */
+function h3TakeBudget(remainingUsd: number, remainingTakeCount: number, label: string): number {
+  if (!Number.isFinite(remainingUsd) || remainingUsd <= 0 || !Number.isInteger(remainingTakeCount) || remainingTakeCount < 1) {
+    throw new Error(`${label} has no remaining H3 budget`);
+  }
+  const ceiling = Math.min(100, remainingUsd / remainingTakeCount);
+  if (!Number.isFinite(ceiling) || ceiling <= 0) throw new Error(`${label} has an invalid H3 request budget`);
+  return ceiling;
+}
+
+function h3ShotGenerationIdentity(profile: GenerationProfile) {
+  return {
+    contractVersion: profile.contractVersion,
+    profileId: profile.id,
+    model: MINIMAX_H3_MODEL,
+    revision: MINIMAX_H3_MODEL_REVISION,
+    checkpoint: MINIMAX_H3_RUNTIME_ID,
+    precision: "bf16" as const,
+    width: MINIMAX_H3_PROFILE.width,
+    height: MINIMAX_H3_PROFILE.height,
+    steps: MINIMAX_H3_PROFILE.steps,
+    allowFallback: false as const,
+    renderer: "minimax-h3" as const,
+    provider: "novita" as const,
+    execution: "on-demand" as const,
+    runtimeId: MINIMAX_H3_RUNTIME_ID,
+    modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
+    fps: MINIMAX_H3_PROFILE.fps,
+    frames: MINIMAX_H3_PROFILE.frames,
+    nativeDurationSec: H3_NATIVE_DURATION_SEC,
+  };
+}
+
+async function renderStandardH3Take(args: {
+  ctx: StageContext;
+  shot: Shot;
+  spec: DpVisualSpec;
+  visualDirective?: { motionPrompt?: string };
+  firstFrameKey: string;
+  outputKey: string;
+  maxCostUsd: number;
+  tmpDir: string;
+  localName: string;
+  label: string;
+}): Promise<{
+  clipKey: string;
+  localPath: string;
+  costUsd: number;
+  openingMotionQa: MiniMaxH3OpeningMotionQaEvidence;
+  renderedDurationSec: number;
+}> {
+  if (args.shot.seconds > H3_NATIVE_DURATION_SEC + 0.02) {
+    throw new Error(
+      `${args.label} authored ${args.shot.id} for ${args.shot.seconds.toFixed(3)}s, exceeding the ${H3_NATIVE_DURATION_SEC.toFixed(3)}s native H3 source take; rerun story_spine before render`,
+    );
+  }
+  const firstFrameBytes = await getObjectBytes(args.firstFrameKey);
+  const prompt = [
+    args.shot.prompt,
+    `Locked channel visual identity: ${args.spec.styleLock}.`,
+    `First-frame constraint: ${args.spec.firstFrameConstraint}.`,
+    `Last-frame intent: ${args.spec.lastFrameConstraint}.`,
+    "Preserve the approved first-frame subject, setting, wardrobe, props, lighting, and channel identity. Do not introduce a scene change, lettering, logo, watermark, or an extra subject.",
+  ].join("\n\n");
+  const clip = await renderMiniMaxH3(buildMiniMaxH3SceneRequest({
+    provider: "novita",
+    execution: "on-demand",
+    prompt,
+    motionPrompt: [args.shot.motion, args.spec.motionPrompt, args.visualDirective?.motionPrompt].filter(Boolean).join(" "),
+    cameraInstruction: `Use the authored ${args.shot.cameraMove.replaceAll("_", " ")} move, ${args.shot.shotScale} framing, and ${args.shot.lens} lens. Motion begins immediately and stays physically coherent.`,
+    negativePrompt: [args.shot.negative, args.spec.negativePrompt].filter(Boolean).join(", "),
+    seed: args.shot.seed ?? Number.parseInt(sha256Hex(`${args.ctx.runId}:standard-h3:${args.shot.id}`).slice(0, 8), 16) % 2_147_483_647,
+    firstFrame: { r2Key: args.firstFrameKey, sha256: sha256BytesHex(firstFrameBytes) },
+    output: { r2Key: args.outputKey },
+    maxCostUsd: args.maxCostUsd,
+  }), {
+    beforeProviderSpend: () => args.ctx.assertRemoteChildExecutionLease?.({ reason: "paid_wave" }),
+  });
+  if (clip.outputBytes.byteLength < 1_024) throw new Error(`${args.label} returned an undersized H3 clip`);
+  const localPath = await writeBytes(join(args.tmpDir, args.localName), clip.outputBytes);
+  const media = await probe(localPath);
+  if (
+    !media.hasVideo ||
+    media.width !== MINIMAX_H3_PROFILE.width ||
+    media.height !== MINIMAX_H3_PROFILE.height ||
+    !Number.isFinite(media.durationSec) ||
+    Math.abs(media.durationSec - H3_NATIVE_DURATION_SEC) > 0.08
+  ) {
+    throw new Error(`${args.label} failed native H3 video, geometry, or duration verification`);
+  }
+  const openingMotionQa = assertMiniMaxH3OpeningMotionQa({
+    videoPath: localPath,
+    durationSec: media.durationSec,
+    fps: MINIMAX_H3_PROFILE.fps,
+    label: args.label,
+  });
+  return {
+    clipKey: clip.receipt.output.r2Key,
+    localPath,
+    costUsd: clip.receipt.runtime.costUsd,
+    openingMotionQa,
+    renderedDurationSec: media.durationSec,
+  };
+}
+
 type DpVisualSpec = z.infer<typeof DPVisualSpecSchema>;
 
 export interface TerminalStillAnchor {
@@ -319,20 +452,6 @@ function sameStrings(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((value, index) => value === b[index]);
 }
 
-
-function exactNarrativeCharacterRegistryIdentitiesForShot(input: {
-  readonly continuityCharacterIds: readonly string[];
-  readonly registryIdentityByCharacterId: ReadonlyMap<string, string>;
-}): readonly string[] {
-  if (input.continuityCharacterIds.length === 0) return [];
-  const identities = input.continuityCharacterIds.map((characterId) => input.registryIdentityByCharacterId.get(characterId));
-  if (identities.some((identity) => !identity)) return [];
-  const exact = [...new Set(identities as string[])].sort();
-  if (exact.length !== input.continuityCharacterIds.length) {
-    throw new Error("novita_render_video cannot map multiple visible characters to one accepted registry identity");
-  }
-  return exact;
-}
 
 /**
  * Reuse the next shot's independently selected keyframe as an LTX endpoint
@@ -1619,184 +1738,68 @@ export const novitaRenderVideo: Block = {
     }
     const selectedByShot = new Map(selected.items.map((item) => [item.shotId, item]));
     const terminalAnchors = deriveTerminalStillAnchors(shots, selected);
-    // Same sealed, benchmark-gated adapter contract used by the Casefile and
-    // loop routes. The worker resolves the exact pinned file and injects its
-    // required trigger tokens; an unbenchmarked adapter cannot reach spend.
-    const explicitCreativeAdapter = LtxCreativeAdapterInputSchema.optional().parse(ctx.params["creativeAdapter"]);
-    const studioAdapter = studioLtxCreativeAdapterSelectionFromUnknown(
-      ctx.store["studioLtxCreativeAdapterSelection"],
-    );
-    const scopedStudioAdapters = studioLtxShotAdapterSelectionsFromUnknown(
-      ctx.store["studioLtxCreativeAdapterSelectionsByShot"],
-    );
-    let scopedStudioAdapterByShot: ReadonlyMap<string, ReturnType<typeof studioLtxCreativeAdapterSelectionFromUnknown> | null> | undefined;
-    if (scopedStudioAdapters) {
-      const shotControl = NarrativeShotControlContractSchema.parse(ctx.store["narrativeShotControl"]);
-      if (shotControl.fingerprint !== scopedStudioAdapters.narrativeShotControlFingerprint) {
-        throw new Error("novita_render_video refuses a per-shot Studio adapter map from another narrative shot-control receipt");
-      }
-      const controlsByShot = new Map(shotControl.shots.map((control) => [control.shotId, control]));
-      const registryIdentityByCharacterId = new Map(
-        parseNarrativeSeriesAcceptedCharacterAdapters(ctx.store["narrativeAcceptedCharacterAdapters"] ?? [])
-          .map((adapter) => [adapter.characterId, adapter.registryIdentity]),
-      );
-      if (controlsByShot.size !== shots.length || !shots.every((shot) => controlsByShot.has(shot.id))) {
-        throw new Error("novita_render_video requires the narrative shot-control receipt to cover every rendered shot");
-      }
-      if (
-        scopedStudioAdapters.shots.length !== shots.length
-        || new Set(scopedStudioAdapters.shots.map((selection) => selection.shotId)).size !== shots.length
-      ) {
-        throw new Error("novita_render_video requires one exact Studio adapter decision per rendered shot");
-      }
-      for (const selection of scopedStudioAdapters.shots) {
-        const control = controlsByShot.get(selection.shotId);
-        if (!control) throw new Error("novita_render_video received an adapter decision for an unknown narrative shot");
-        const expectedCharacters = exactNarrativeCharacterRegistryIdentitiesForShot({
-          continuityCharacterIds: control.continuityCharacterIds,
-          registryIdentityByCharacterId,
-        });
-        if (!sameStrings(selection.continuityCharacterRegistryIdentities, expectedCharacters)) {
-          throw new Error("novita_render_video refuses a Studio adapter decision whose visible-cast binding does not match the shot plan");
-        }
-      }
-      scopedStudioAdapterByShot = new Map(
-        scopedStudioAdapters.shots.map((selection) => [selection.shotId, selection.selection]),
-      );
+    const readiness = minimaxH3Readiness("novita");
+    if (!readiness.admitted) {
+      throw new Error(`novita_render_video: MiniMax H3 Novita route is not admitted: ${readiness.blockers.join("; ")}`);
     }
-    const studioSelections = scopedStudioAdapters
-      ? scopedStudioAdapters.shots.flatMap((selection) => selection.selection ? [selection.selection] : [])
-      : studioAdapter ? [studioAdapter] : [];
-    const explicitConflictsWithStudio = explicitCreativeAdapter && studioSelections.some((candidate) =>
-      canonicalJson(explicitCreativeAdapter) !== canonicalJson(candidate.selection),
-    );
-    if (explicitConflictsWithStudio) {
-      throw new Error("novita_render_video refuses conflicting explicit and Studio-approved LTX adapter selections");
-    }
-    // The Studio entry carries the expected model-manifest digest; the direct
-    // renderer independently compares it against its sealed worker manifest
-    // before a GPU worker can be created.
-    const creativeAdapter = studioAdapter?.selection ?? explicitCreativeAdapter;
-    const globalNegative = ctx.params["negative"] as string | undefined;
-    const shotsWithStills: Shot[] = shots.map((shot) => {
+    // This pre-spend check proves both providers would use the same immutable
+    // R2 model pack; a missing H3 pack must never leave accepted keyframes
+    // stranded behind a paid legacy LTX fallback.
+    await assertMiniMaxH3R2ModelManifest();
+    const stageBudgetUsd = requireH3StageBudget(ctx, "novita_render_video");
+    const tmp = await makeRunTempDir(`${ctx.runId}-standard-h3`);
+    let observedCostUsd = 0;
+    const rendered: Array<{
+      shot: ShotPlan;
+      clipKey: string;
+      renderedDurationSec: number;
+    }> = [];
+    for (const [index, shot] of shots.entries()) {
       const selectedStill = selectedByShot.get(shot.id);
       if (!selectedStill) throw new Error(`selected still missing for ${shot.id}`);
-      const spec = specsByShot.get(shot.id)!;
-      const directive = visualMatterDirectiveForShot(visualMatter, shot.id);
-      const terminalAnchor = terminalAnchors.get(shot.id);
-      const scopedStudioAdapter = scopedStudioAdapterByShot?.get(shot.id);
-      const creativeAdapterForShot = scopedStudioAdapterByShot
-        ? scopedStudioAdapter?.selection
-        : creativeAdapter;
-      return ltxDistilledShot({
-        ...shot,
-        stillKey: selectedStill.stillKey,
-        ...(creativeAdapterForShot ? { creativeAdapter: creativeAdapterForShot } : {}),
-        ...(terminalAnchor ? { endStillKey: terminalAnchor.terminalStillKey } : {}),
-        diegeticSoundscape: [
-          `Only location tone and physical sounds motivated by the visible shot action: ${spec.motionPrompt}`,
-          directive?.motionPrompt,
-          "No dialogue, narration, score, lyrics, or invented off-screen event.",
-        ].filter(Boolean).join(" ").slice(0, 900),
-        prompt: [spec.motionPrompt, directive?.motionPrompt].filter(Boolean).join("\n\n"),
-        motion: [
-          spec.motionPrompt,
-          directive?.motionPrompt,
-          `First frame: ${spec.firstFrameConstraint}. Last frame: ${spec.lastFrameConstraint}.`,
-          terminalAnchor
-            ? `Terminal handoff: arrive exactly at the approved opening composition of ${terminalAnchor.terminalAnchorShotId}; preserve the shared continuity state through the cut.`
-            : undefined,
-        ].filter(Boolean).join(" "),
-        negative: spec.negativePrompt,
-      }, [spec.negativePrompt, globalNegative]);
-    });
-    // Preserve the exact adapter actually sent for each initial shot in the
-    // durable manifest. qa_shots uses this—not a mutable block parameter—when
-    // producing a paid replacement take after a failed review.
-    const renderedAdapterByShot = new Map(
-      shotsWithStills.map((shot) => [shot.id, shot.creativeAdapter] as const),
-    );
-    const envelope = cinematicProviderEnvelope(ctx, "novita_render_video", profile, shotsWithStills);
-    const cfg: NovitaRenderCfg = {
-      prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/novita`,
-      shots: shotsWithStills,
-      profile: toNovitaPhaseProfile(profile, "video"),
-      nshard: ctx.params["nshard"] as number | undefined,
-      jobs: ctx.params["jobs"] as "val" | "full" | undefined,
-      maxConcurrent: ctx.params["maxConcurrent"] as number | undefined,
-      // Exact one-worker-per-shot envelope, not the aggregate channel budget.
-      maxCostUsd: envelope.videoMaxCostUsd,
-      lifecycle: {
-        ownerId: ctx.ownerId,
-        channelId: ctx.channelId,
-        runId: ctx.runId,
-        blockId: "novita_render_video",
-      },
-      ...(ctx.remoteChildFence ? { remoteChildFence: ctx.remoteChildFence } : {}),
-      beforeProviderSpend: ctx.assertRemoteChildExecutionLease,
-    };
-    const result = await renderVideo(cfg);
-    if (!result.candidates?.length) throw new Error("novita_render_video returned no exact shot mapping");
-    const candidateByShot = new Map(result.candidates.map((candidate) => [candidate.shotId, candidate]));
-    if (candidateByShot.size !== shots.length) throw new Error("novita_render_video returned duplicate or missing shot mappings");
-    const durationSec = shots.at(-1)!.t1;
-    let outputProofs;
-    try {
-      outputProofs = assertNovitaRenderVideoOutputProofs({
-        profile: cfg.profile,
-        shotIds: shots.map((shot) => shot.id),
-        result,
+      const remaining = stageBudgetUsd - observedCostUsd;
+      const take = await renderStandardH3Take({
+        ctx,
+        shot,
+        spec: specsByShot.get(shot.id)!,
+        visualDirective: visualMatterDirectiveForShot(visualMatter, shot.id),
+        firstFrameKey: selectedStill.stillKey,
+        outputKey: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/minimax-h3/clip-${String(index + 1).padStart(4, "0")}.mp4`,
+        maxCostUsd: h3TakeBudget(remaining, shots.length - index, `novita_render_video ${shot.id}`),
+        tmpDir: tmp,
+        localName: `clip-${String(index + 1).padStart(4, "0")}.mp4`,
+        label: `novita_render_video: H3 ${shot.id}`,
       });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "returned invalid LTX x2 output evidence";
-      throw new Error(`novita_render_video ${message}`);
+      observedCostUsd += take.costUsd;
+      rendered.push({ shot, clipKey: take.clipKey, renderedDurationSec: take.renderedDurationSec });
     }
-    const firstProof = outputProofs[shots[0]!.id]!;
+    const durationSec = shots.at(-1)!.t1;
     const shotRenderManifest = ShotRenderManifestSchema.parse({
       version: "1.0.0",
       generation: {
-        ...generationIdentity(profile, "video"),
-        fps: profile.video.fps,
-        guidanceScale: profile.video.guidanceScale,
-        pipeline: profile.video.pipeline,
-        twoStageRefine: profile.video.twoStageRefine,
-        textEncoderCheckpoint: profile.video.textEncoderCheckpoint,
-        videoVaeCheckpoint: profile.video.videoVaeCheckpoint,
-        audioVaeCheckpoint: profile.video.audioVaeCheckpoint,
-        spatialUpscalerCheckpoint: profile.video.spatialUpscalerCheckpoint,
-        quantization: profile.video.quantization,
-        offload: profile.video.offload,
-        spatialUpscaleFactor: profile.video.spatialUpscaleFactor,
-        stageOneWidth: firstProof.stageOneWidth,
-        stageOneHeight: firstProof.stageOneHeight,
-        outputWidth: firstProof.outputWidth,
-        outputHeight: firstProof.outputHeight,
+        ...h3ShotGenerationIdentity(profile),
       },
       durationSec,
-      items: shots.map((shot) => {
-        const candidate = candidateByShot.get(shot.id);
-        if (!candidate) throw new Error(`novita_render_video omitted ${shot.id}`);
+      items: rendered.map(({ shot, clipKey, renderedDurationSec }) => {
         const terminalAnchor = terminalAnchors.get(shot.id);
         return {
           shotId: shot.id,
-          clipKey: candidate.key,
+          clipKey,
           t0: shot.t0,
           t1: shot.t1,
           sourceSentenceIds: shot.sourceSentenceIds,
           continuityState: shot.continuityState,
-          ...(renderedAdapterByShot.get(shot.id)
-            ? { creativeAdapter: renderedAdapterByShot.get(shot.id) }
-            : {}),
+          renderedDurationSec,
           ...(terminalAnchor ? terminalAnchor : {}),
         };
       }),
     });
     assertExactShotManifest(shots, shotRenderManifest);
     assertTerminalAnchorManifest(shots, selected, shotRenderManifest);
-    ctx.log(`novita_render_video: ${result.outputs} pinned story clip(s) in ${result.durationSec}s`);
+    ctx.log(`novita_render_video: ${rendered.length} MiniMax H3 native story clip(s) accepted with opening-motion evidence`);
     return {
       shotRenderManifest,
-      [COST_PATCH_KEY]: result.costUsd,
+      [COST_PATCH_KEY]: observedCostUsd,
     };
   },
 };
@@ -1818,6 +1821,7 @@ export const qaShots: Block = {
     const channelQuality = resolveChannelVisualQualityPolicy(ctx.store);
     const manifest = ShotRenderManifestSchema.parse(ctx.store["shotRenderManifest"]);
     assertExactShotManifest(shots, manifest);
+    const h3Manifest = isMiniMaxH3ShotManifest(manifest);
     const profile = profileForShots(shots, manifest.generation.profileId);
     const visualAttemptScopeFingerprint = standardNovitaVisualSequenceFingerprint(manifest);
     const rejectedAttemptByShot = new Map<string, RejectedVisualAttemptParent>();
@@ -1842,7 +1846,7 @@ export const qaShots: Block = {
       shotId: string;
       score: number;
       threshold: number;
-      temporalDynamism: LtxShotTemporalQaEvidence & { verdict: "pass" };
+      temporalDynamism: (LtxShotTemporalQaEvidence | MiniMaxH3OpeningMotionQaEvidence) & { verdict: "pass" };
     }> = [];
     let repairRenderCostUsd = 0;
     let graderCalls = 0;
@@ -1880,7 +1884,7 @@ export const qaShots: Block = {
           await writeBytes(local, await getObjectBytes(clipKey));
           const media = await probe(local);
           let grade: z.infer<typeof ShotGradeSchema> | undefined;
-          let temporalDynamism: LtxShotTemporalQaEvidence | undefined;
+          let temporalDynamism: LtxShotTemporalQaEvidence | MiniMaxH3OpeningMotionQaEvidence | undefined;
           let score = 0;
           let failure: string | undefined;
           let repairNotes: string[] = [];
@@ -1888,42 +1892,63 @@ export const qaShots: Block = {
           if (!media.hasVideo) {
             failure = `qa_shots FAILED ${shot.id}: rendered asset has no video stream`;
             repairNotes = ["The rendered output has no usable video stream."];
-          } else if (media.width !== profile.video.width || media.height !== profile.video.height) {
-            failure = `qa_shots FAILED ${shot.id}: ${media.width}x${media.height} != pinned ${profile.video.width}x${profile.video.height}`;
+          } else if (
+            media.width !== (h3Manifest ? MINIMAX_H3_PROFILE.width : profile.video.width)
+            || media.height !== (h3Manifest ? MINIMAX_H3_PROFILE.height : profile.video.height)
+          ) {
+            failure = `qa_shots FAILED ${shot.id}: ${media.width}x${media.height} != pinned ${(h3Manifest ? MINIMAX_H3_PROFILE.width : profile.video.width)}x${(h3Manifest ? MINIMAX_H3_PROFILE.height : profile.video.height)}`;
             repairNotes = ["The clip dimensions do not match the pinned production profile."];
           } else {
-            const expectedMediaSec = secondsToFrames(shot.seconds, profile.video.fps) / profile.video.fps;
-            if (!Number.isFinite(media.durationSec) || Math.abs(media.durationSec - expectedMediaSec) > Math.max(0.2, 3 / profile.video.fps)) {
+            const expectedMediaSec = h3Manifest ? item.renderedDurationSec : secondsToFrames(shot.seconds, profile.video.fps) / profile.video.fps;
+            const durationToleranceSec = h3Manifest ? 0.08 : Math.max(0.2, 3 / profile.video.fps);
+            if (expectedMediaSec === undefined || !Number.isFinite(media.durationSec) || Math.abs(media.durationSec - expectedMediaSec) > durationToleranceSec) {
               failure =
-                `qa_shots FAILED ${shot.id}: media duration ${media.durationSec.toFixed(3)}s != expected ${expectedMediaSec.toFixed(3)}s`;
-              repairNotes = ["The clip duration does not match the authored shot duration."];
+                `qa_shots FAILED ${shot.id}: media duration ${media.durationSec.toFixed(3)}s != expected ${(expectedMediaSec ?? Number.NaN).toFixed(3)}s`;
+              repairNotes = ["The clip duration does not match the pinned source-take duration."];
             } else {
-              temporalDynamism = measureLtxShotTemporalQa({
-                videoPath: local,
-                durationSec: media.durationSec,
-                fps: profile.video.fps,
-                maxFreezeFraction: profile.qa.maxFreezeFraction,
-              });
-              if (temporalDynamism.verdict === "unavailable") {
-                throw qualityRecoveryFailure(
-                  `qa_shots FAILED ${shot.id}: deterministic temporal evidence is unavailable (${temporalDynamism.detail ?? "unknown FFmpeg failure"})`,
-                  { repairRenderCostUsd, graderCalls },
-                );
-              }
-              if (temporalDynamism.verdict === "fail") {
-                const openingFreezeExceeded = temporalDynamism.openingFrozenHoldSec >
-                  temporalDynamism.maxOpeningFrozenHoldSec + 0.05;
-                failure = openingFreezeExceeded
-                  ? `qa_shots FAILED ${shot.id}: opening frozen hold ${temporalDynamism.openingFrozenHoldSec.toFixed(3)}s ` +
-                    `exceeds immediate-motion limit ${temporalDynamism.maxOpeningFrozenHoldSec.toFixed(3)}s`
-                  : `qa_shots FAILED ${shot.id}: frozen visual hold ${temporalDynamism.maxFrozenHoldSec.toFixed(3)}s ` +
-                    `exceeds ${temporalDynamism.maxStaticHoldSec.toFixed(3)}s ` +
-                    `(opening hold ${temporalDynamism.openingFrozenHoldSec.toFixed(3)}s)`;
-                repairNotes = [
-                  temporalDynamism.openingFrozenHoldSec > 0
-                    ? `The take is frozen for ${temporalDynamism.openingFrozenHoldSec.toFixed(2)} seconds from its opening frame. Motion and camera action must begin immediately.`
-                    : `The take contains a ${temporalDynamism.maxFrozenHoldSec.toFixed(2)} second frozen interval. Preserve continuous authored motion throughout.`,
-                ];
+              if (h3Manifest) {
+                try {
+                  temporalDynamism = assertMiniMaxH3OpeningMotionQa({
+                    videoPath: local,
+                    durationSec: media.durationSec,
+                    fps: MINIMAX_H3_PROFILE.fps,
+                    label: `qa_shots: H3 ${shot.id}`,
+                  });
+                } catch (error) {
+                  if (!(error instanceof MiniMaxH3OpeningMotionRejectedError)) throw error;
+                  failure = `qa_shots FAILED ${shot.id}: ${error.message}`;
+                  repairNotes = [
+                    `The H3 take is frozen for ${error.evidence.openingFrozenHoldSec.toFixed(2)} seconds from its opening frame. Motion and camera action must begin immediately.`,
+                  ];
+                }
+              } else {
+                temporalDynamism = measureLtxShotTemporalQa({
+                  videoPath: local,
+                  durationSec: media.durationSec,
+                  fps: profile.video.fps,
+                  maxFreezeFraction: profile.qa.maxFreezeFraction,
+                });
+                if (temporalDynamism.verdict === "unavailable") {
+                  throw qualityRecoveryFailure(
+                    `qa_shots FAILED ${shot.id}: deterministic temporal evidence is unavailable (${temporalDynamism.detail ?? "unknown FFmpeg failure"})`,
+                    { repairRenderCostUsd, graderCalls },
+                  );
+                }
+                if (temporalDynamism.verdict === "fail") {
+                  const openingFreezeExceeded = temporalDynamism.openingFrozenHoldSec >
+                    temporalDynamism.maxOpeningFrozenHoldSec + 0.05;
+                  failure = openingFreezeExceeded
+                    ? `qa_shots FAILED ${shot.id}: opening frozen hold ${temporalDynamism.openingFrozenHoldSec.toFixed(3)}s ` +
+                      `exceeds immediate-motion limit ${temporalDynamism.maxOpeningFrozenHoldSec.toFixed(3)}s`
+                    : `qa_shots FAILED ${shot.id}: frozen visual hold ${temporalDynamism.maxFrozenHoldSec.toFixed(3)}s ` +
+                      `exceeds ${temporalDynamism.maxStaticHoldSec.toFixed(3)}s ` +
+                      `(opening hold ${temporalDynamism.openingFrozenHoldSec.toFixed(3)}s)`;
+                  repairNotes = [
+                    temporalDynamism.openingFrozenHoldSec > 0
+                      ? `The take is frozen for ${temporalDynamism.openingFrozenHoldSec.toFixed(2)} seconds from its opening frame. Motion and camera action must begin immediately.`
+                      : `The take contains a ${temporalDynamism.maxFrozenHoldSec.toFixed(2)} second frozen interval. Preserve continuous authored motion throughout.`,
+                  ];
+                }
               }
               if (!failure) {
                 const sampleTimes = [
@@ -1986,7 +2011,7 @@ export const qaShots: Block = {
                   graderCalls++;
                   const rawTerminal = await visionLocal({
                     prompt:
-                      "You are the REQUIRED endpoint-continuity grader. The first image is the actual LAST frame of a rendered LTX clip. " +
+                      "You are the REQUIRED endpoint-continuity grader. The first image is the actual LAST frame of a rendered clip. " +
                       "The second image is the independently quality-selected opening frame of its next continuous shot. " +
                       "Score whether the rendered last frame has actually arrived at the approved subject identity, wardrobe, props, location, lighting, composition, and camera handoff. " +
                       "Do not give credit for a merely similar mood. Return STRICT JSON only: {\"terminalFrameAlignment\":0.0,\"notes\":[\"concrete observations\"]}.",
@@ -2129,30 +2154,57 @@ export const qaShots: Block = {
             creativeAdapter: item.creativeAdapter,
           });
           ctx.log(`qa_shots: ${shot.id} failed QA; regenerating deterministic repair ${attempt}/${MAX_CINEMATIC_QUALITY_REPAIR_ATTEMPTS}`);
-          let rendered;
-          try {
-            rendered = await renderVideo(qualityRecoveryRenderCfg(ctx, "video", profile, repair.shot));
-          } catch (error) {
-            throw qualityRecoveryFailure(`${failure ?? `qa_shots FAILED ${shot.id}`}; automatic video repair dispatch failed`, {
-              repairRenderCostUsd,
-              graderCalls,
-              cause: error,
-            });
+          if (h3Manifest) {
+            try {
+              const stageBudgetUsd = requireH3StageBudget(ctx, "qa_shots");
+              const remaining = stageBudgetUsd - repairRenderCostUsd;
+              const repaired = await renderStandardH3Take({
+                ctx,
+                shot: repair.shot,
+                spec,
+                visualDirective,
+                firstFrameKey: selectedStill.stillKey,
+                outputKey: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/minimax-h3/qa-recovery/${shot.id}-attempt-${attempt}.mp4`,
+                maxCostUsd: h3TakeBudget(remaining, 1, `qa_shots ${shot.id} repair`),
+                tmpDir: tmp,
+                localName: `${shot.id}_h3_repair_${attempt}.mp4`,
+                label: `qa_shots: H3 ${shot.id} repair ${attempt}`,
+              });
+              repairRenderCostUsd += repaired.costUsd;
+              clipKey = repaired.clipKey;
+            } catch (error) {
+              throw qualityRecoveryFailure(`${failure ?? `qa_shots FAILED ${shot.id}`}; automatic H3 video repair dispatch failed`, {
+                repairRenderCostUsd,
+                graderCalls,
+                cause: error,
+              });
+            }
+          } else {
+            let rendered;
+            try {
+              rendered = await renderVideo(qualityRecoveryRenderCfg(ctx, "video", profile, repair.shot));
+            } catch (error) {
+              throw qualityRecoveryFailure(`${failure ?? `qa_shots FAILED ${shot.id}`}; automatic video repair dispatch failed`, {
+                repairRenderCostUsd,
+                graderCalls,
+                cause: error,
+              });
+            }
+            repairRenderCostUsd += rendered.costUsd;
+            const renderedCandidate = rendered.candidates?.[0];
+            if (
+              rendered.candidates?.length !== 1 ||
+              !renderedCandidate ||
+              renderedCandidate.shotId !== repair.repairId ||
+              renderedCandidate.candidateIndex !== 0
+            ) {
+              throw qualityRecoveryFailure(`${failure ?? `qa_shots FAILED ${shot.id}`}; automatic video repair returned an invalid shot mapping`, {
+                repairRenderCostUsd,
+                graderCalls,
+              });
+            }
+            clipKey = renderedCandidate.key;
           }
-          repairRenderCostUsd += rendered.costUsd;
-          const renderedCandidate = rendered.candidates?.[0];
-          if (
-            rendered.candidates?.length !== 1 ||
-            !renderedCandidate ||
-            renderedCandidate.shotId !== repair.repairId ||
-            renderedCandidate.candidateIndex !== 0
-          ) {
-            throw qualityRecoveryFailure(`${failure ?? `qa_shots FAILED ${shot.id}`}; automatic video repair returned an invalid shot mapping`, {
-              repairRenderCostUsd,
-              graderCalls,
-            });
-          }
-          clipKey = renderedCandidate.key;
           repairAttempts = attempt;
         }
       }

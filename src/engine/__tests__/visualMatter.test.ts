@@ -216,7 +216,6 @@ const spine = cinematic.pipeline.findIndex((entry) => entry.block === "story_spi
 const studioAssets = cinematic.pipeline.findIndex((entry) => entry.block === "studio_asset_resolve");
 const visualMatter = cinematic.pipeline.findIndex((entry) => entry.block === "visual_matter");
 const assetQa = cinematic.pipeline.findIndex((entry) => entry.block === "qa_assets");
-const studioLtxAdapter = cinematic.pipeline.findIndex((entry) => entry.block === "studio_ltx_adapter_resolve");
 const keyframes = cinematic.pipeline.findIndex((entry) => entry.block === "novita_render_images");
 assert(
   studioAssets > spine && visualMatter > studioAssets && visualMatter < keyframes,
@@ -228,13 +227,13 @@ assert.deepEqual(
   "cinematic defaults must opt into owner-scoped Studio recipe resolution without requesting a LoRA or raw guide",
 );
 assert(
-  studioLtxAdapter > assetQa && studioLtxAdapter < cinematic.pipeline.findIndex((entry) => entry.block === "novita_render_video"),
-  "the one supported standard LTX adapter selection must wait for keyframe QA and precede video-worker admission",
+  assetQa < cinematic.pipeline.findIndex((entry) => entry.block === "novita_render_video"),
+  "the reviewed still must reach H3 directly after asset QA without an obsolete LTX adapter stage",
 );
-assert.deepEqual(
-  cinematic.pipeline[studioLtxAdapter]?.params,
-  { enabled: true, family: "cinematic", contentLane: "cinematic_ai" },
-  "the direct LTX resolver must be lane-pinned and leave runtime identity to its sealed contract",
+assert.equal(
+  cinematic.pipeline.some((entry) => entry.block === "studio_ltx_adapter_resolve"),
+  false,
+  "fresh cinematic H3 programs must not carry an LTX adapter selection",
 );
 
 const cinematicClay = designPipeline({
@@ -253,9 +252,9 @@ assert.equal(
   "treatment-scoped Studio recipes must be resolved against the same sealed treatment as Visual Matter",
 );
 assert.equal(
-  cinematicClay.pipeline.find((entry) => entry.block === "studio_ltx_adapter_resolve")?.params?.treatment,
-  "clay_stop_motion",
-  "a treatment-specific direct-LTX adapter must resolve against the same sealed treatment as Visual Matter and final QA",
+  cinematicClay.pipeline.some((entry) => entry.block === "studio_ltx_adapter_resolve"),
+  false,
+  "H3 must use the reviewed first-frame identity rather than a treatment-specific LTX adapter",
 );
 assert.throws(
   () => designPipeline({ family: "whiteboard", lengthMinutes: 1, toggles: { visualTreatment: "clay_stop_motion" } }),
@@ -301,8 +300,11 @@ const cinematicWithoutStudioReuse = designPipeline({
 });
 const disabledStudioAssets = cinematicWithoutStudioReuse.pipeline.find((entry) => entry.block === "studio_asset_resolve");
 assert.equal(disabledStudioAssets?.params?.enabled, false, "disabling reuse must emit a typed no-op rather than leave a downstream artifact undefined");
-const disabledStudioLtx = cinematicWithoutStudioReuse.pipeline.find((entry) => entry.block === "studio_ltx_adapter_resolve");
-assert.equal(disabledStudioLtx?.params?.enabled, false, "disabling Studio reuse must also leave the direct-LTX path as a typed no-op");
+assert.equal(
+  cinematicWithoutStudioReuse.pipeline.some((entry) => entry.block === "studio_ltx_adapter_resolve"),
+  false,
+  "disabling Studio reuse must not reintroduce the retired LTX adapter stage",
+);
 const disabledStudioPostproduction = cinematicWithoutStudioReuse.pipeline.find(
   (entry) => entry.block === "studio_postproduction_asset_resolve",
 );

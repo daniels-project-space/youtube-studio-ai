@@ -1,6 +1,5 @@
 import {
   assessPipelineVideoRuntimeReadiness,
-  NOVITA_VIDEO_RUNTIME_REMEDIATION,
   type NovitaVideoRuntimeTarget,
   type PipelineRuntimeBlockInput,
 } from "./runtimeCapability";
@@ -255,22 +254,20 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     key: "cinematic",
     label: "Cinematic AI scenes",
     description:
-      "Fully produced multi-scene AI-rendered video with a locked Z-Image-to-LTX shot chain, automatic identity QA, edits, score, and structure. Requires a preflighted per-video spend plan; insufficient caps fail closed.",
+      "Fully produced multi-scene AI-rendered video with a locked Z-Image-to-MiniMax H3 shot chain, automatic identity QA, edits, score, and structure. Requires a preflighted per-video spend plan; insufficient caps fail closed.",
     visualEngine: "ai_scenes",
     archetypeKey: "crime-narrative",
     available: true,
     narrated: true,
     requiresKeys: ["fish-audio", "mureka", "novita"],
     defaultThumbnailStyle: "banana",
-    // The production compiler reserves $123.86 for the current locked
-    // Z-Image → QA → LTX chain. Keep a visible buffer so the creator never
+    // The production compiler reserves $154.86 for the current locked
+    // Z-Image → QA → H3 chain. Keep a visible buffer so the creator never
     // advertises a cinematic channel that its own runtime must reject.
-    defaultRunBudgetUsd: 130,
-    // Matches DEFAULT_LTX_STYLE_ID in src/engine/ltxStylePresets.ts — the
-    // exact look this family has always rendered through. Baked in literally
-    // (rather than left unset to fall back implicitly) so the family catalog
-    // stays the single discoverable source of truth for which visual world
-    // a cinematic channel renders in today.
+    defaultRunBudgetUsd: 160,
+    // The channel's visual identity remains explicit in the family catalog.
+    // It is used by the visual-control planner; active standard rendering is
+    // pinned to H3 rather than a style-adapter runtime.
     styleId: "cinematic_heist_noir",
   },
 };
@@ -396,7 +393,7 @@ export const FAMILY_DURATION_CONTRACTS: Readonly<Record<FamilyKey, FamilyDuratio
     defaultSeconds: 300,
     stepSeconds: 60,
     inputUnit: "minutes",
-    rationale: "The current 50-shot production envelope is deliberately bounded to a five-minute cinematic episode.",
+    rationale: "The current 60-shot production envelope is deliberately bounded to a five-minute H3 cinematic episode.",
   },
 };
 
@@ -530,10 +527,9 @@ export function clampFamilyEpisodeLengthMinutes(family: FamilyKey, value: unknow
 
 /**
  * Template availability is intentionally separate from production readiness.
- * The cinematic graph is built and audited, but LTX-2.5's exact 640×352 →
- * 1280×704 FP8/CPU-offloaded x2 profile is not admitted on the locked 24 GB
- * RTX 4090 fleet until its digest-pinned worker and benchmark proof exist.
- * Keeping this explicit prevents paid retries/OOMs.
+ * The cinematic graph is built and audited, but it remains unavailable until
+ * the sealed H3 route has a qualified worker and immutable R2 model manifest.
+ * Keeping this explicit prevents paid retries or a silent renderer downgrade.
  */
 export interface FamilyProductionReadiness {
   productionReady: boolean;
@@ -725,7 +721,7 @@ function registeredDocumentarySourceSeasonCapability(): Extract<AutonomousPlanni
  * essay. It seals the causal Story Spine, reusable studio assets, Visual
  * Matter controls, exact Novita image/video chain, and final-master QA before
  * release. The separate runtime admission still keeps it blocked until the
- * exact LTX profile has an immutable reviewed RTX 4090 benchmark.
+ * exact H3 route has a qualified worker and immutable model proof.
  */
 function registeredCinematicPlanningCapability(): Extract<AutonomousPlanningCapability, { mode: "registered_non_gemini" }> {
   return {
@@ -753,7 +749,6 @@ function registeredCinematicPlanningCapability(): Extract<AutonomousPlanningCapa
       { block: "visual_matter" },
       { block: "novita_render_images", params: { generationProfile: "production" } },
       { block: "qa_assets" },
-      { block: "studio_ltx_adapter_resolve" },
       { block: "novita_render_video", params: { generationProfile: "production" } },
       { block: "qa_shots" },
       { block: "studio_postproduction_asset_resolve" },
@@ -970,7 +965,7 @@ export function familyProductionReadiness(
         ? ["Register a route-owned deterministic or non-Gemini planner/seal and its matching composition before admitting this family."]
         : []),
       ...(inception.remediation ? [inception.remediation] : []),
-      ...(!runtime.ready ? [NOVITA_VIDEO_RUNTIME_REMEDIATION] : []),
+      ...(!runtime.ready ? [runtime.remediation] : []),
     ].join(" "),
   };
 }

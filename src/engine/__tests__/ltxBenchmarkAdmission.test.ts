@@ -583,8 +583,8 @@ function emptyReleaseRegistryCannotUnlockVideoRuntime(): void {
   );
   assert.equal(
     familyProductionReadiness("cinematic", attested.runtime).productionReady,
-    true,
-    "only the exact owner-reviewed runtime target may complete cinematic's final static readiness gap",
+    false,
+    "a reviewed LTX runtime must not unlock the migrated MiniMax H3 cinematic route",
   );
   assert.equal(
     certifiedFamilyAdmission("cinematic").automatic,
@@ -593,8 +593,8 @@ function emptyReleaseRegistryCannotUnlockVideoRuntime(): void {
   );
   assert.equal(
     certifiedFamilyAdmission("cinematic", attested.runtime).automatic,
-    true,
-    "a server caller that explicitly carries the reviewed target can evaluate the otherwise-complete cinematic binding",
+    false,
+    "an LTX attestation must not automatically admit the migrated MiniMax H3 cinematic binding",
   );
   assert.equal(
     formatPreflight("cinematic", {
@@ -613,8 +613,8 @@ function emptyReleaseRegistryCannotUnlockVideoRuntime(): void {
       },
       { runtimeTarget: attested.runtime },
     ).productionReady,
-    true,
-    "an explicit reviewed target enables only the fully registered cinematic route preflight",
+    false,
+    "an explicit LTX target cannot enable the MiniMax H3 cinematic route preflight",
   );
 }
 

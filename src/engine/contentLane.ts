@@ -46,7 +46,6 @@ export const VISUAL_MATTER_REFERENCE_COMPOSITION = [
   "visual_matter_references",
   "novita_render_images",
   "qa_assets",
-  "studio_ltx_adapter_resolve",
   "novita_render_video",
   "qa_shots",
 ] as const;
@@ -121,9 +120,9 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "timeline_assemble",
       "qa_visual",
     ],
-    // Standard cinematic channels use the direct image → I2V chain. A
+    // Standard cinematic channels use the direct image → H3 chain. A
     // source-admitted Casefile may instead use gen_footage, which is not
-    // generic stock footage: it runs the same Novita Z-Image/LTX route with
+    // generic stock footage: it runs the same Novita Z-Image/H3 route with
     // mandatory keyframe, clip, and transition review against the approved
     // cinematic sequence. Requiring the whole chain prevents partial mixing.
     requiredRendererChains: [
@@ -780,6 +779,9 @@ export function assertPipelineMatchesContentLane(
     (block) =>
       block === "visual_matter" ||
       block === "visual_matter_references" ||
+      // Retained imports may still carry the retired adapter receipt. New
+      // H3 compositions never insert it, but legacy data remains subject to
+      // the same cinematic-only treatment boundary while it is readable.
       block === "studio_ltx_adapter_resolve",
   );
   // Do this before the legacy escape hatch. A legacy snapshot may retain its
@@ -975,12 +977,11 @@ function optionalPipelineTreatment(entry: PipelineEntry, parameter: string): str
 }
 
 /**
- * Visual Matter, recipe resolution, and direct-LTX adapter resolution must
- * share one sealed treatment key. This prevents an imported composition from
- * planning clay/brick/anime/drawn locks while looking up a LoRA benchmarked
- * for another treatment. The check is intentionally scoped to pipelines that
- * actually contain a Visual Matter plan; historical direct-LTX routes without
- * that planner remain readable.
+ * Visual Matter and approved Studio recipes must share one sealed treatment
+ * key. This prevents an imported composition from planning clay/brick/anime/
+ * drawn locks while a reusable Studio recipe targets another treatment. H3 is
+ * conditioned by the reviewed first frame; the adapter branch is validation
+ * only for retained pre-H3 manifests.
  */
 function assertCinematicStudioTreatmentBindings(pipeline: readonly PipelineEntry[]): void {
   const visualMatter = pipeline.find((entry) => entry.block === "visual_matter");

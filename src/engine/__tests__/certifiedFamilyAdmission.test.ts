@@ -87,8 +87,8 @@ assert.ok(
   "missing automatic-admission registration must not be misreported as missing release quality policy",
 );
 assert.ok(
-  cinematic.blockers.every((blocker) => blocker.includes("ltx_2_5_revision_not_benchmarked_on_rtx_4090")),
-  "the cinematic route, composition, planning, inception, and quality contracts are now registered; only the independently measured LTX runtime may block it",
+  cinematic.blockers.every((blocker) => blocker.includes("MINIMAX_H3_NOVITA_")),
+  "the cinematic route, composition, planning, inception, and quality contracts are now registered; only the qualified MiniMax H3 runtime may block it",
 );
 assert.ok(
   !cinematic.blockers.some((blocker) => blocker.includes("no explicit CertifiedFamilyAdmission definition")),
@@ -105,7 +105,7 @@ assert.deepEqual(
     referenceQuality: true,
     runtime: false,
   },
-  "cinematic remains fail-closed only at the exact unmeasured Novita runtime boundary",
+  "cinematic remains fail-closed only at the exact unqualified Novita H3 runtime boundary",
 );
 assert.equal(
   certifiedFamilyAdmissionCanAwaitRuntimeEvidence(cinematic),

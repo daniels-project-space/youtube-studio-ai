@@ -53,6 +53,7 @@ export const storySpine: Block = {
       });
     }
     const duration = Number(ctx.store["narrationDurationSec"]);
+    const configuredMaxShotSec = ctx.params["maxShotSec"];
     const serializedEpisodeContext = serializedProgramEpisodeContextForStage(ctx, "story_spine");
     const spine = planStorySpine({
       topic: String(ctx.store["topic"]),
@@ -74,6 +75,7 @@ export const storySpine: Block = {
         : undefined,
       generationProfile: ctx.params["generationProfile"] ?? "production",
       targetShotSec: Number(ctx.params["targetShotSec"] ?? 6),
+      maxShotSec: configuredMaxShotSec === undefined ? undefined : Number(configuredMaxShotSec),
     });
     if (ctx.store["editorialEvidencePacket"] !== undefined) {
       const editorialNarrationBinding = assertEditorialEvidencePacketNarrationAlignment({

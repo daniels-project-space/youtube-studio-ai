@@ -3,6 +3,11 @@ import {
   LTX_25_RTX_4090_VIDEO,
   type GenerationProfile,
 } from "@/engine/generationProfiles";
+import {
+  MINIMAX_H3_PROFILE,
+  MINIMAX_H3_RUNTIME_ID,
+  minimaxH3Readiness,
+} from "@/lib/minimaxH3Admission";
 
 /**
  * Static, provider-free admission facts for the video side of the Novita
@@ -111,6 +116,9 @@ export const NOVITA_VIDEO_MODEL_RUNTIME_REQUIREMENTS: Readonly<
 
 export const NOVITA_VIDEO_RUNTIME_REMEDIATION =
   "Deploy a digest-pinned, benchmarked video runtime on a GPU contract that meets the model VRAM floor before enabling paid video renders.";
+
+export const MINIMAX_H3_NOVITA_RUNTIME_REMEDIATION =
+  "Configure the qualified Novita MiniMax H3 worker and its qualification receipt, then retain the immutable H3 model manifest in R2 before enabling paid cinematic renders.";
 
 export interface NovitaVideoRuntimeAssessment {
   readonly profileId: GenerationProfileId;
@@ -281,6 +289,7 @@ export interface PipelineVideoRuntimeReadiness {
   readonly ready: boolean;
   readonly blockAssessments: readonly PipelineVideoBlockRuntimeAssessment[];
   readonly blockers: readonly string[];
+  readonly remediation: string;
 }
 
 const DEFAULT_VIDEO_PROFILE_BY_BLOCK: Readonly<Record<NovitaVideoRequiredBlock, GenerationProfileId>> = {
@@ -324,10 +333,42 @@ export function assessPipelineVideoRuntimeReadiness(
   runtime: NovitaVideoRuntimeTarget = NOVITA_LOCKED_VIDEO_RUNTIME,
 ): PipelineVideoRuntimeReadiness {
   const blockAssessments: PipelineVideoBlockRuntimeAssessment[] = [];
+  const normalizedEntries = entries.map(runtimeBlock);
+  // The standard direct cinematic route and its bounded repair stage share
+  // one H3 runtime. Other historical/specialist lanes retain their own LTX
+  // admission until their own renderer migration lands.
+  const standardH3RoutePresent = normalizedEntries.some((entry) => entry.block === "novita_render_video");
+  let needsMiniMaxH3Remediation = false;
 
-  for (const input of entries) {
-    const entry = runtimeBlock(input);
+  for (const entry of normalizedEntries) {
     if (!isNovitaVideoRequiredBlock(entry.block)) continue;
+
+    const usesStandardH3 = entry.block === "novita_render_video" ||
+      (entry.block === "qa_shots" && standardH3RoutePresent);
+    if (usesStandardH3) {
+      const profileId = entry.block === "novita_render_video"
+        ? configuredProfileId(entry)
+        : MINIMAX_H3_PROFILE.id;
+      if (entry.block === "novita_render_video" && !GENERATION_PROFILES[profileId as GenerationProfileId]) {
+        blockAssessments.push({
+          blockId: entry.block,
+          profileId,
+          ready: false,
+          blockers: [`unknown_novita_generation_profile:${profileId}`],
+        });
+        needsMiniMaxH3Remediation = true;
+        continue;
+      }
+      const h3 = minimaxH3Readiness("novita");
+      blockAssessments.push({
+        blockId: entry.block,
+        profileId: MINIMAX_H3_RUNTIME_ID,
+        ready: h3.admitted,
+        blockers: h3.blockers,
+      });
+      needsMiniMaxH3Remediation = needsMiniMaxH3Remediation || !h3.admitted;
+      continue;
+    }
 
     const profileId = configuredProfileId(entry);
     const profile = GENERATION_PROFILES[profileId as GenerationProfileId];
@@ -359,6 +400,9 @@ export function assessPipelineVideoRuntimeReadiness(
     ready: blockers.length === 0,
     blockAssessments,
     blockers,
+    remediation: needsMiniMaxH3Remediation
+      ? MINIMAX_H3_NOVITA_RUNTIME_REMEDIATION
+      : NOVITA_VIDEO_RUNTIME_REMEDIATION,
   };
 }
 
@@ -370,6 +414,6 @@ export function assertPipelineVideoRuntimeReady(
   const readiness = assessPipelineVideoRuntimeReadiness(entries, runtime);
   if (readiness.ready) return;
   throw new Error(
-    `pipeline video runtime is not admissible: ${readiness.blockers.join("; ")}. ${NOVITA_VIDEO_RUNTIME_REMEDIATION}`,
+    `pipeline video runtime is not admissible: ${readiness.blockers.join("; ")}. ${readiness.remediation}`,
   );
 }

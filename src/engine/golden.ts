@@ -50,7 +50,7 @@ export const GOLDEN_SPINE: GoldenStage[] = [
   { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check", "quiz_topic_safety", "quiz_critic_spec", "scenario_disclosure_gate", "chess_script_integrity"], note: "Quality + originality + compliance floor; QuizYear contributes deterministic topic-safety and game-format critic receipts; synthetic scenarios must disclose their illustrative assumptions before narration. The registered chess gate verifies an exact source transcript only; it is not a creative-critique substitute." },
   { stage: "voice", blocks: ["narration_tts", "chess_narration_timing"], note: "Voice = #1 retention factor; tiered provider per niche. The registered chess cue adapter binds the existing TTS timing receipt to each legal move and remains private-review-only." },
   { stage: "sound", blocks: ["music_program_plan", "music"], note: "A route-sealed original-music program locks one episode’s instrumental and loop-visual intent before the channel-scoped score or long-form music product is generated." },
-  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "studio_reusable_media_resolve", "studio_asset_resolve", "visual_matter", "visual_matter_references", "novita_render_images", "studio_ltx_adapter_resolve", "novita_render_video", "scene_compiler", "chess_episode_graph", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs. Before any visual source, Studio claims an immutable channel episode ordinal: eligible channel-scoped media can cover at most 40% of a timeline, every third episode is fully original, and history/crime/heist/lore or unknown programs remain original by default. Cinematic separately resolves only its owner-scoped, approved Studio camera/motion/prompt recipes, then plans any genuinely new Visual Matter. After accepted keyframe QA it may select one approved, runtime-pinned standard LTX LoRA; the direct worker independently verifies the exact model-manifest digest before spend. It never exposes raw LoRA weights or IC-LoRA guides to generic prompting, and IC-LoRAs stay gated to their future dedicated Comfy control worker. Cinematic can optionally add a bounded, direct-Novita text-to-image Visual Matter QA-reference pack after its mood/cast/setting/storyboard plan. The pack is not primary-keyframe image conditioning. The deterministic Scene Compiler turns a reviewed scene manifest into a local 16:9 master, while the registered private chess graph creates only a source-bound native board manifest; neither chess discovery nor production qualification is implied. Documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
+  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "studio_reusable_media_resolve", "studio_asset_resolve", "visual_matter", "visual_matter_references", "novita_render_images", "studio_ltx_adapter_resolve", "novita_render_video", "scene_compiler", "chess_episode_graph", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs. Before any visual source, Studio claims an immutable channel episode ordinal: eligible channel-scoped media can cover at most 40% of a timeline, every third episode is fully original, and history/crime/heist/lore or unknown programs remain original by default. Cinematic resolves only its owner-scoped camera/motion/prompt recipes, then plans new Visual Matter. After keyframe QA, MiniMax H3 receives the exact accepted first frame, while the direct worker independently verifies the immutable model-manifest digest, native bytes, geometry, duration, and immediate opening motion before assembly. `studio_ltx_adapter_resolve` is retained only to inspect historical LTX manifests and is never compiled into a new H3 route. Cinematic can optionally add a bounded, direct-Novita text-to-image Visual Matter QA-reference pack after its mood/cast/setting/storyboard plan; it is not primary-keyframe image conditioning. The deterministic Scene Compiler turns a reviewed scene manifest into a local 16:9 master, while the registered private chess graph creates only a source-bound native board manifest; neither chess discovery nor production qualification is implied. Documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
   { stage: "layer", blocks: ["studio_postproduction_asset_resolve", "captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz. The Studio resolver can reuse only approved, module-specific audio direction, quote-card grammar, motion-graphics treatment, and a closed title-to-body transition choice; it cannot override story, sources, timing, cuts, or accessibility." },
   { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both. Narrated assembly accepts only the Studio's closed hard-cut, crossfade, or dip-to-black title transition and each path has real render-parity coverage. NOTE (P2-10): this spine block id \"assemble\" is lofi's loop-assembly step — it has no dedicated GOLDEN_MODULES row and is folded into the `lofi` catalog entry's executableIds (see goldenExecution.ts CATALOG_EXECUTION_BINDINGS.lofi). Do not confuse it with the unrelated catalog key `assemble` below (also stage \"build\"), which documents the separate build-stage EDL/Timeline engine used by narrated content." },
   { stage: "package", blocks: ["package_to_opening_plan", "thumbnail_gen", "metadata", "quiz_metadata"], note: "SEO metadata plus a required thumbnail description first seal a package-to-opening plan. Non-Lo-Fi channels then use the sealed Nano Banana scene route with deterministic Style-DNA typography. Lo-Fi alone takes an isolated Nano Banana reference-edit lane using the exact 15-second frame from its rendered 4K scene, the normal playbook as read-only style input, a minimal mood label, and a truthful 4K badge. Both routes pass the same independent mobile publishing gate. Production QA rebinds the package to exact cover bytes, a retained reviewed opening frame, and the final master; that is structural evidence, not a fabricated semantic-equality claim." },
@@ -818,23 +818,19 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     stage: "visual",
     title: "Novita Render Farm",
     engine:
-      "Direct Trigger-controlled Novita RTX 4090 spot workers — Z-Image keyframes followed by sealed LTX-2.5 image-to-video, one exact shot job per worker, durable R2 manifests, and verified worker teardown",
+      "Direct Trigger-controlled Novita route — Z-Image keyframes followed by sealed MiniMax H3 image-to-video, immutable R2 model evidence, native-byte QA, and bounded repairs",
     how:
-      "Only after an approved script, timed shot plan, and keyframe review, the Trigger controller creates a sealed direct worker " +
-      "for each admitted image or LTX take. Z-Image Turbo supplies the reference still; LTX-2.5 then receives that exact R2 still " +
-      "and its locked camera/motion prompt. The cinematic profile is Lightricks/LTX-2.5 distilled with FP8-cast plus CPU offload, " +
-      "640×352 stage one → native latent x2 1280×704 at 25fps. Every worker writes a content-addressed R2 receipt, settles before " +
-      "the stage returns, and is deleted/verified by the lifecycle controller. The retired VPS/HTTP bridge cannot launch work. " +
-      "Video remains fail-closed until the exact LTX-2.5 RTX 4090 profile is present in the local benchmark allow-list.",
+      "Only after an approved script, timed shot plan, and keyframe review, the controller submits one exact MiniMax H3 take. " +
+      "Z-Image supplies the reviewed first frame; H3 receives it with the sealed camera and motion prompt at 1344×768 / 24fps / 124 frames. " +
+      "The controller verifies the immutable R2 model manifest before spend, re-reads output bytes, probes native geometry and duration, " +
+      "and rejects a held opening frame before the take can reach assembly. Video remains fail-closed until the qualified Novita H3 route is configured.",
     gates: [
-      "keyframe text/logo/wardrobe/continuity review completes before any LTX spend",
-      "LTX accepts only the exact LTX-2.5 640×352 → 1280×704 x2 RTX 4090 profile and a local benchmark admission",
-      "video frames always 8n+1 — rounded, never truncated silently",
+      "keyframe text/logo/wardrobe/continuity review completes before any H3 spend",
+      "H3 accepts only the immutable MiniMax H3 R2 model manifest and its fixed 1344×768 / 24fps / 124-frame profile",
+      "the authored edit interval never exceeds the native H3 source take",
       "every shot needs a motion cue — cameraMove !== 'static' or a non-empty motion field",
-      "width/height must be a multiple of 32 (VAE tiling requirement)",
-      "an explicit signed cost envelope and live RTX 4090 capacity admission precede every worker start",
+      "an explicit signed cost envelope and qualified Novita admission precede every provider request",
       "no cross-engine or legacy-bridge fallback — a failed take is repaired or fails loud",
-      "all started workers settle and verify deletion before the parent stage returns",
       "R2-backed idempotent receipts prevent a recovery from double-rendering",
     ],
     status: "active",
@@ -849,10 +845,10 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "The director's exact prompt, lens, scale, seed, continuity locks, and signed budget enter the direct Trigger controller. " +
       "It starts a single-purpose worker only after capacity and cost admission, persists the reference image and receipt to R2, " +
       "runs quality/keyframe review, then deletes the worker. Those accepted stills are the only permitted reference inputs for " +
-      "the LTX-2.5 image-to-video branch; there is no live nginx/VPS bridge or retired Imagecraft implementation in this route.",
+      "the MiniMax H3 image-to-video branch; there is no live nginx/VPS bridge or retired Imagecraft implementation in this route.",
     gates: [
       "the exact Z-Image Turbo revision, profile geometry, signed cost envelope, and live RTX 4090 capacity are admitted before start",
-      "keyframe review rejects text, logos, wardrobe, continuity, and composition defects before any LTX take can be purchased",
+      "keyframe review rejects text, logos, wardrobe, continuity, and composition defects before any H3 take can be purchased",
       "no cross-engine or legacy-bridge fallback — a failed still is repaired or fails loud",
       "R2 receipt fingerprints make recovery idempotent rather than double-rendering",
       "every started worker is reaped and deletion-verified before its parent wave settles",
@@ -1260,7 +1256,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "(ShotSpec, src/lib/crew/cinematographer.ts:16). The hero-anchor consistency LAW described above IS nevertheless enforced in " +
       "production, by an equivalent renderer-neutral module rather than by cinecraft: the `visual_matter` block " +
       "(src/engine/visualMatter.ts + src/trigger/blocks/visualMatterBlocks.ts) emits per-character `identityLock`, per-setting " +
-      "`continuityLock`, and storyboard review criteria which the Z-Image -> qa_assets -> LTX -> qa_shots chain HARD-REQUIRES " +
+      "`continuityLock`, and storyboard review criteria which the Z-Image -> qa_assets -> MiniMax H3 -> qa_shots chain HARD-REQUIRES " +
       "(requireVisualMatter throws, src/trigger/blocks/novitaRenderBlocks.ts:452-456; consumed at :550, :610, :808, :888). " +
       "When explicitly enabled for a cinematic run, the separate `visual_matter_references` block uses the admitted direct-Novita " +
       "Z-Image text-to-image path to create a bounded R2 pack with exact byte/request/worker-receipt binding. `qa_assets` and " +

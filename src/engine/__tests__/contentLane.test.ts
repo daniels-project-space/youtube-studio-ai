@@ -85,7 +85,7 @@ assert.throws(
 );
 
 // A Casefile sequence uses the same pinned Novita visual stack as the direct
-// cinematic renderer, but its reviewed LTX handoff is encapsulated by
+// cinematic renderer, but its reviewed H3 handoff is encapsulated by
 // gen_footage. It must be a complete alternative chain, never a way to add
 // stock footage or skip final assembly/QA.
 const cinematic = contentLaneForFamily("cinematic");
@@ -93,7 +93,6 @@ assert(cinematic, "cinematic must have a canonical content lane");
 assert.doesNotThrow(() => assertPipelineMatchesContentLane(cinematic, [
   { block: "novita_render_images" },
   { block: "qa_assets" },
-  { block: "studio_ltx_adapter_resolve" },
   { block: "novita_render_video" },
   { block: "qa_shots" },
   { block: "timeline_assemble" },
@@ -121,7 +120,6 @@ assert.throws(
     { block: "gen_footage" },
     { block: "novita_render_images" },
     { block: "qa_assets" },
-    { block: "studio_ltx_adapter_resolve" },
     { block: "novita_render_video" },
     { block: "qa_shots" },
     { block: "timeline_assemble" },
@@ -137,7 +135,7 @@ assert.throws(
     { block: "qa_visual" },
   ]),
   /gen_footage requires cinematic_case_sequence/,
-  "the shared LTX renderer must not bypass the source-admitted cinematic sequence",
+  "the shared H3 renderer must not bypass the source-admitted cinematic sequence",
 );
 assert.throws(
   () => assertPipelineMatchesContentLane(cinematic, [
@@ -172,7 +170,6 @@ const cinematicReferencePipeline: PipelineEntry[] = [
   { block: "visual_matter_references" },
   { block: "novita_render_images" },
   { block: "qa_assets" },
-  { block: "studio_ltx_adapter_resolve" },
   { block: "novita_render_video" },
   { block: "qa_shots" },
   { block: "timeline_assemble" },
@@ -182,21 +179,10 @@ assert.doesNotThrow(
   () => assertPipelineMatchesContentLane(cinematic, cinematicReferencePipeline),
   "the exact Visual Matter QA-reference composition must remain valid",
 );
-assert.throws(
-  () => assertPipelineMatchesContentLane(cinematic, cinematicReferencePipeline.map((entry) => {
-    if (entry.block === "visual_matter") {
-      return { ...entry, params: { visualTreatment: "clay_stop_motion" } };
-    }
-    if (entry.block === "studio_asset_resolve") {
-      return { ...entry, params: { treatment: "clay_stop_motion" } };
-    }
-    if (entry.block === "studio_ltx_adapter_resolve") {
-      return { ...entry, params: { treatment: "anime_inspired_2d" } };
-    }
-    return entry;
-  })),
-  /studio_ltx_adapter_resolve treatment must match visual_matter visualTreatment exactly/,
-  "a direct-LTX adapter lookup must not use a LoRA benchmarked for a different visual treatment",
+assert.equal(
+  cinematicReferencePipeline.some((entry) => entry.block === "studio_ltx_adapter_resolve"),
+  false,
+  "fresh Visual Matter reference compositions must pass their reviewed still directly to H3",
 );
 
 const visualMatterReferenceNegativeCases: ReadonlyArray<{

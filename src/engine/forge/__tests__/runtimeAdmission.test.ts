@@ -64,7 +64,7 @@ async function assertions(): Promise<void> {
   // the intentionally minimal context is therefore enough to exercise it.
   await assert.rejects(
     makeForgedBlock(nestedI2vSpec).run({ stageBudgetUsd: 1 } as StageContext),
-    /pipeline video runtime is not admissible[\s\S]*ltx_2_5_revision_not_benchmarked_on_rtx_4090/,
+    /pipeline video runtime is not admissible[\s\S]*MINIMAX_H3_NOVITA_/,
   );
 
   // A non-video forged spec cannot fall back to the broader run budget either.

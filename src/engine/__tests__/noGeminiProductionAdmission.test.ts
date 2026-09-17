@@ -115,10 +115,9 @@ assert.equal(familyChannelInceptionCapability("music_loop").mode, "registered_no
 
 const cinematicReadiness = familyProductionReadiness("cinematic");
 assert.equal(cinematicReadiness.productionReady, false);
-assert.deepEqual(
-  cinematicReadiness.blockers,
-  ["Cinematic AI scenes: novita_render_video:ltx_2_5_revision_not_benchmarked_on_rtx_4090"],
-  "Cinematic must expose its real remaining immutable runtime benchmark gate after its non-Gemini planning, route, composition, and inception foundation are registered",
+assert.ok(
+  cinematicReadiness.blockers.some((blocker) => blocker.includes("novita_render_video:MINIMAX_H3_NOVITA_")),
+  "Cinematic must expose the qualified MiniMax H3 runtime gate after its non-Gemini planning, route, composition, and inception foundation are registered",
 );
 assert.equal(familyChannelInceptionCapability("cinematic").mode, "registered_non_gemini");
 

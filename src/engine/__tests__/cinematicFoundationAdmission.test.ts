@@ -60,7 +60,10 @@ const admission = certifiedFamilyAdmission("cinematic");
 assert.equal(admission.automatic, false);
 assert.deepEqual(admission.routeKeys, ["cinematic/foundation/v1"]);
 assert.equal(admission.compositionKey, "cinematic_visual_control_story");
-assert.equal(admission.checks.runtime, false, "the real immutable LTX benchmark remains the final promotion gate");
-assert.ok(admission.blockers.every((blocker) => blocker.includes("revision_not_benchmarked")));
+assert.equal(admission.checks.runtime, false, "the qualified immutable MiniMax H3 runtime remains the final promotion gate");
+assert.ok(
+  admission.blockers.every((blocker) => blocker.includes("MINIMAX_H3_NOVITA_")),
+  "the fresh cinematic lane must fail closed on the H3 worker admission fence, never on a retired LTX profile",
+);
 
 console.log("cinematic foundation route, planner, composition, and runtime gate tests passed");

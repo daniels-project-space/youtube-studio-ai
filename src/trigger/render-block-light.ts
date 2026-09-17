@@ -3,8 +3,8 @@
  *
  * Sibling of ./render-block.ts. Same body (./renderBlockRunner.ts), different
  * machine tier — because `novita_render_images` and `novita_render_video` do
- * NOT composite media on this worker. They submit to the Novita RTX 4090 fleet
- * and then checkpoint-wait via `wait.for()` (src/lib/novitaPollWait.ts), which
+ * NOT composite media on this worker. They submit to the qualified Novita H3
+ * route and then checkpoint-wait via `wait.for()` (src/lib/novitaPollWait.ts), which
  * suspends the task unbilled while the GPU renders off-machine. The billed
  * local work is job submission, manifest/schema validation, and QA sampling —
  * one ffprobe plus three single-frame grabs per shot.

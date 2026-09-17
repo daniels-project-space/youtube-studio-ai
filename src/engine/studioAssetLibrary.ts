@@ -1183,11 +1183,17 @@ export function createStudioLtxReleaseAdapterBinding(input: {
   readonly globalSelection?: unknown;
   readonly perShotSelections?: unknown;
 }): StudioLtxReleaseAdapterBinding | undefined {
+  const manifest = ShotRenderManifestSchema.parse(input.shotRenderManifest);
+  // LTX adapters are an executable worker dependency, not a generic style
+  // label. A fresh H3 take is conditioned by its accepted first frame and
+  // must not falsely claim that an old LTX LoRA influenced its pixels.
+  if ("renderer" in manifest.generation && manifest.generation.renderer === "minimax-h3") {
+    return undefined;
+  }
   const global = studioLtxCreativeAdapterSelectionFromUnknown(input.globalSelection);
   const perShot = studioLtxShotAdapterSelectionsFromUnknown(input.perShotSelections);
   if (!global && !perShot) return undefined;
 
-  const manifest = ShotRenderManifestSchema.parse(input.shotRenderManifest);
   const expectedByShot = new Map(perShot?.shots.map((entry) => [entry.shotId, entry]) ?? []);
   if (perShot && (expectedByShot.size !== manifest.items.length || manifest.items.some((item) => !expectedByShot.has(item.shotId)))) {
     throw new Error("studioAssetLibrary: per-shot LTX selection does not cover the persisted render manifest");

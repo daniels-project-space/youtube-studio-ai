@@ -18,6 +18,7 @@ import {
 } from "./families";
 import { resolveChannelFamilyManifest } from "./channelFamilyManifest";
 import { certifiedFamilyAdmission } from "./certifiedFamilyAdmission";
+import { MAX_H3_EDIT_INTERVAL_SEC } from "./storySpine";
 import type { NovitaVideoRuntimeTarget } from "./runtimeCapability";
 import { subcategoryTags } from "@/lib/nicheCatalog";
 import { nichePreset } from "./golden";
@@ -943,7 +944,11 @@ export function designPipelineCore(
     const narrationIndex = pipeline.findIndex((entry) => entry.block === "narration_tts");
     pipeline.splice(narrationIndex + 1, 0, {
       block: "story_spine",
-      params: { generationProfile: generationProfileId, targetShotSec: opts.family === "shorts" ? 4 : 6 },
+      params: {
+        generationProfile: generationProfileId,
+        targetShotSec: opts.family === "shorts" ? 4 : opts.family === "cinematic" ? MAX_H3_EDIT_INTERVAL_SEC : 6,
+        ...(opts.family === "cinematic" ? { maxShotSec: MAX_H3_EDIT_INTERVAL_SEC } : {}),
+      },
     });
   }
 
@@ -1028,30 +1033,6 @@ export function designPipelineCore(
       },
     });
   }
-  // Resolve at most one approved direct-LTX standard LoRA after selected stills
-  // have passed visual QA, but before the paid video worker is admitted. A
-  // no-match is typed and preserves the sealed base runtime. IC-LoRAs stay out
-  // of this path because the current worker cannot consume Comfy guide inputs.
-  if (opts.family === "cinematic" && !pipeline.some((entry) => entry.block === "studio_ltx_adapter_resolve")) {
-    const assetQaIndex = pipeline.findIndex((entry) => entry.block === "qa_assets");
-    const videoIndex = pipeline.findIndex((entry) => entry.block === "novita_render_video");
-    if (assetQaIndex < 0 || videoIndex <= assetQaIndex) {
-      throw new Error("cinematic Studio LTX adapter resolution requires keyframe QA before direct video rendering");
-    }
-    pipeline.splice(assetQaIndex + 1, 0, {
-      block: "studio_ltx_adapter_resolve",
-      params: {
-        enabled: t.studioAssetLibrary !== false,
-        family: "cinematic",
-        contentLane: "cinematic_ai",
-        // The adapter resolver must see the same sealed treatment as Visual
-        // Matter. Otherwise an approved clay/brick/anime/drawn LoRA could
-        // never match the exact run it was benchmarked for.
-        ...(selectedVisualTreatment ? { treatment: selectedVisualTreatment } : {}),
-      },
-    });
-  }
-
   // Claim the channel's immutable media-reuse episode ordinal immediately
   // before its first visual source can be selected or rendered. Every route
   // receives the same provider-free decision point: sensitive and unknown

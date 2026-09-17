@@ -11,6 +11,7 @@ import {
   novitaVideoProfileIdentity,
 } from "@/engine/runtimeCapability";
 import { generationProfile } from "@/engine/generationProfiles";
+import { MINIMAX_H3_RUNTIME_ID } from "@/lib/minimaxH3";
 
 function configuredProfilesFailClosedOnTheLockedFleet(): void {
   const assessments = assessConfiguredNovitaVideoProfiles();
@@ -80,7 +81,7 @@ function onlyTheExactLtx25X2ProfileCanUseABenchmark(): void {
 }
 
 function pipelineChecksOnlyRealVideoProducers(): void {
-  // Motion QA can launch a bounded LTX repair, so it is a real video producer
+  // Motion QA can launch a bounded repair, so it is a real video producer
   // for runtime admission rather than a harmless analysis-only consumer.
   assert.equal(isNovitaVideoRequiredBlock("qa_shots"), true);
   assert.equal(isNovitaVideoRequiredBlock("novita_render_video"), true);
@@ -103,10 +104,10 @@ function pipelineChecksOnlyRealVideoProducers(): void {
     video.blockAssessments.map((assessment) => assessment.blockId),
     [...NOVITA_VIDEO_REQUIRED_BLOCKS, "novita_render_video"],
   );
-  assert.equal(video.blockAssessments.at(-1)?.profileId, "hero");
+  assert.equal(video.blockAssessments.at(-1)?.profileId, MINIMAX_H3_RUNTIME_ID);
   assert.throws(
     () => assertPipelineVideoRuntimeReady([{ block: "novita_render_video", params: { generationProfile: "production" } }]),
-    /pipeline video runtime is not admissible[\s\S]*novita_render_video:ltx_2_5_revision_not_benchmarked_on_rtx_4090/,
+    /pipeline video runtime is not admissible[\s\S]*novita_render_video:MINIMAX_H3_NOVITA_/,
   );
   assert.throws(
     () => assertPipelineVideoRuntimeReady(["qa_shots"]),

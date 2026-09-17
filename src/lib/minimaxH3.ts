@@ -4,7 +4,6 @@ import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 import {
   saladCloudClientFromVault,
   SALAD_BULK_MAX_GPUS,
-  SALAD_BULK_PRIORITY,
   SALAD_HIGH_FALLBACK_PRIORITY,
   SALAD_GLOBAL_CAPACITY_FALLBACK,
   selectSaladGpu,
@@ -14,6 +13,33 @@ import {
   type SaladGpuClass,
   type SaladResources,
 } from "@/lib/saladCloud";
+import {
+  MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_MODEL,
+  MINIMAX_H3_MODEL_REVISION,
+  MINIMAX_H3_NOVITA_CAPACITY_MODE,
+  MINIMAX_H3_PROFILE,
+  MINIMAX_H3_RUNTIME_ID,
+  MINIMAX_H3_SALAD_CAPACITY_MODE,
+  MINIMAX_H3_WORKER_CONTRACT,
+  miniMaxH3RouteEnvironment,
+  minimaxH3Readiness,
+  type MiniMaxH3Execution,
+  type MiniMaxH3Provider,
+} from "@/lib/minimaxH3Admission";
+
+export {
+  MINIMAX_H3_MANIFEST_SHA256,
+  MINIMAX_H3_MODEL,
+  MINIMAX_H3_MODEL_REVISION,
+  MINIMAX_H3_NOVITA_CAPACITY_MODE,
+  MINIMAX_H3_PROFILE,
+  MINIMAX_H3_RUNTIME_ID,
+  MINIMAX_H3_SALAD_CAPACITY_MODE,
+  MINIMAX_H3_WORKER_CONTRACT,
+  minimaxH3Readiness,
+};
+export type { MiniMaxH3Execution, MiniMaxH3Provider, MiniMaxH3Readiness } from "@/lib/minimaxH3Admission";
 
 /**
  * The shared, R2-native contract for the actual MiniMax H3 worker packs.
@@ -23,35 +49,6 @@ import {
  * the worker short-lived object capabilities rather than R2 credentials, and
  * every accepted result is re-read from R2 before it can reach an editor.
  */
-export const MINIMAX_H3_WORKER_CONTRACT = "minimax-h3-worker/v1" as const;
-export const MINIMAX_H3_MODEL = "Comfy-Org/MiniMax-H3" as const;
-export const MINIMAX_H3_MODEL_REVISION = "4cc1d817b6184899b41293954329f576cb5ae86b" as const;
-export const MINIMAX_H3_RUNTIME_ID = "minimax-h3-turbo8-5090-v1" as const;
-export const MINIMAX_H3_MANIFEST_SHA256 = "eca7ade81afd2edd4b912275a8657b9504cab71ca7e538aed7ce12f27acc90c9" as const;
-/**
- * Salad has no hard reservation API.  Medium is therefore part of the H3
- * wire contract, not just a scheduler hint: admission checks this tier,
- * dispatch declares it, and the worker receipt must attest it.
- */
-export const MINIMAX_H3_SALAD_CAPACITY_MODE = SALAD_BULK_PRIORITY;
-export const MINIMAX_H3_NOVITA_CAPACITY_MODE = "spot" as const;
-export const MINIMAX_H3_PROFILE = Object.freeze({
-  id: "official-turbo8-native-768p",
-  width: 1344,
-  height: 768,
-  fps: 24,
-  frames: 124,
-  steps: 8,
-});
-
-export type MiniMaxH3Provider = "salad" | "novita";
-/**
- * A weekly order that waited out Salad capacity and was deliberately moved
- * to the qualified Novita worker. It is distinct from interactive on-demand
- * work so request keys and receipts expose the provider switch.
- */
-export type MiniMaxH3Execution = "weekly-batch" | "weekly-fallback" | "on-demand";
-
 export const MINIMAX_H3_WEEKLY_CAPACITY_RECHECK_MS = 15 * 60 * 1_000;
 export const MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS = 24 * 60 * 60 * 1_000;
 
@@ -426,12 +423,6 @@ export type MiniMaxH3WeeklyBatchOptions = Parameters<typeof renderMiniMaxH3>[1] 
   onJobComplete?: (index: number, result: MiniMaxH3RenderedVideo) => void | Promise<void>;
 };
 
-export interface MiniMaxH3Readiness {
-  configured: boolean;
-  admitted: boolean;
-  blockers: string[];
-}
-
 export class MiniMaxH3Error extends Error {
   readonly retryable = false;
   constructor(
@@ -510,50 +501,11 @@ function boundedCost(value: unknown, label: string): number {
 }
 
 function routeEnvironment(provider: MiniMaxH3Provider): { url: string; token: string } {
-  const prefix = provider === "salad" ? "MINIMAX_H3_SALAD" : "MINIMAX_H3_NOVITA";
-  const rawUrl = process.env[`${prefix}_WORKER_URL`]?.trim() ?? "";
-  const token = process.env[`${prefix}_WORKER_TOKEN`]?.trim() ?? "";
-  let url: URL;
   try {
-    url = new URL(rawUrl);
-  } catch {
-    throw new MiniMaxH3Error(`${prefix}_WORKER_URL is missing or invalid`);
+    return miniMaxH3RouteEnvironment(provider);
+  } catch (error) {
+    throw new MiniMaxH3Error(error instanceof Error ? error.message : String(error));
   }
-  const loopback = url.protocol === "http:" && ["127.0.0.1", "localhost"].includes(url.hostname);
-  if ((url.protocol !== "https:" && !loopback) || url.username || url.password || url.hash) {
-    throw new MiniMaxH3Error(`${prefix}_WORKER_URL must be a credential-free HTTPS URL outside local qualification`);
-  }
-  if (token.length < 32) throw new MiniMaxH3Error(`${prefix}_WORKER_TOKEN is missing or too short`);
-  return { url: url.toString(), token };
-}
-
-export function minimaxH3Readiness(
-  provider: MiniMaxH3Provider,
-  options: { saladCapacityMode?: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY } = {},
-): MiniMaxH3Readiness {
-  const blockers: string[] = [];
-  try { routeEnvironment(provider); } catch (error) {
-    blockers.push(error instanceof Error ? error.message : String(error));
-  }
-  const prefix = provider === "salad" ? "MINIMAX_H3_SALAD" : "MINIMAX_H3_NOVITA";
-  if (process.env[`${prefix}_QUALIFIED`] !== "1") blockers.push(`${prefix}_QUALIFIED is not enabled`);
-  const receipt = process.env[`${prefix}_QUALIFICATION_RECEIPT_SHA256`]?.trim().toLowerCase() ?? "";
-  if (!SHA256.test(receipt)) blockers.push(`${prefix}_QUALIFICATION_RECEIPT_SHA256 is missing or invalid`);
-  // Weekly dispatch is intentionally Salad-only. Medium is the default tier;
-  // a separately admitted high-priority escape hatch is selected by the
-  // weekly controller only when medium cannot fit the current wave. Once the
-  // controller has admitted that explicit high fallback, do not re-block the
-  // paid request merely because the medium feature flag is off.
-  if (provider === "salad") {
-    const capacityMode = options.saladCapacityMode ?? MINIMAX_H3_SALAD_CAPACITY_MODE;
-    const policy = saladPriorityPolicyFromEnv();
-    if (capacityMode === SALAD_HIGH_FALLBACK_PRIORITY) {
-      if (!policy.highFallbackEnabled) blockers.push("MINIMAX_H3_SALAD_HIGH_PRIORITY_FALLBACK is disabled");
-    } else if (!policy.mediumEnabled) {
-      blockers.push("MINIMAX_H3_SALAD_MEDIUM_PRIORITY is disabled");
-    }
-  }
-  return { configured: blockers.every((item) => !item.includes("WORKER_")), admitted: blockers.length === 0, blockers };
 }
 
 function normaliseRequest(input: MiniMaxH3RenderRequest): MiniMaxH3RenderRequest {
@@ -666,6 +618,12 @@ export async function renderMiniMaxH3(
     readModelManifest?: (key: string, bucket?: string) => Promise<Uint8Array>;
     /** Test seam; production callers never supply this and always verify R2. */
     assertModelManifest?: () => Promise<void>;
+    /**
+     * Durable render children invoke this immediately before the paid request.
+     * A worker that lost its execution lease while preparing object URLs must
+     * not spend against a run it no longer owns.
+     */
+    beforeProviderSpend?: () => void | Promise<void>;
     /** Selected by read-only Salad admission; medium is always the default. */
     saladCapacityMode?: typeof MINIMAX_H3_SALAD_CAPACITY_MODE | typeof SALAD_HIGH_FALLBACK_PRIORITY;
   } = {},
@@ -709,6 +667,7 @@ export async function renderMiniMaxH3(
   ]);
   let response: Response;
   try {
+    await options.beforeProviderSpend?.();
     response = await (options.fetch ?? fetch)(route.url, {
       method: "POST",
       headers: { Authorization: `Bearer ${route.token}`, "Content-Type": "application/json", "Idempotency-Key": requestKey },

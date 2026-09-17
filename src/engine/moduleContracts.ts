@@ -213,6 +213,12 @@ const minimaxMusic3: ProviderProfile = {
   quality: "production",
   allowFallback: false,
 };
+const minimaxH3: ProviderProfile = {
+  id: "novita-minimax-h3-qualified-production",
+  provider: "novita",
+  quality: "production",
+  allowFallback: false,
+};
 
 const contract = (
   capabilities: string[],
@@ -1204,10 +1210,13 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     requiredConsumes: ["shotList", "dpVisualSpecs", "visualMatterManifest"],
     optionalConsumes: ["visualBrief", "preparedImages"],
     providerProfiles: [{ id: "novita-zimage-production", provider: "novita", quality: "production", allowFallback: false }],
-    // 50 hero shots × two candidates × the single-4090 two-hour hard bound.
+    // A default 300-second H3 cinematic plan has 60 five-second edits. Every
+    // shot may be identity-critical, so reserve two still candidates per shot
+    // rather than failing a legitimate continuity-heavy episode before it
+    // starts. Runtime only spends the exact candidate set in its sealed plan.
     // This is a reservation ceiling, not an instruction to spend it; runtime
     // still requires a stricter configured direct-fleet admission.
-    maxCostUsd: 35,
+    maxCostUsd: 42,
     // The first shot and every named-entity shot are high risk and therefore
     // receive at least two candidates. Respect higher future profile fanout.
     maxCostUsdFor: (params, context) =>
@@ -1241,29 +1250,22 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // Reserve every required Visual Matter reference batch, plus the bounded
     // one-candidate repairs. A five-image vision request cannot carry more
     // than one four-candidate initial set or four anchors with a repair.
-    // A default 300-second / 6-second-shot cinematic run has 50 shots; its
-    // full-evidence image-QA ceiling is $37.40 at the configured rates.
-    maxCostUsd: 38,
+    // A default 300-second H3 cinematic run has 60 five-second source-bound
+    // edits; its full-evidence image-QA ceiling is $44.88 at configured rates.
+    maxCostUsd: 45,
     maxCostUsdFor: (params, context) => shotCount(params, context) * (
       NOVITA_CINEMATIC_QA_REPAIR_CAP * PRICE.novitaImageMaxUsd +
       novitaCinematicQaMaxGraderCallsPerShot("image") * PRICE.visionGraderUsd
     ),
     qualityRequired: true,
   }),
-  novita_render_video: contract(["visuals.shots_rendered", "render.profile_pinned", "render.spot_only"], {
+  novita_render_video: contract(["visuals.shots_rendered", "render.profile_pinned", "render.h3_r2_pinned"], {
     requiredConsumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "assetQaReport", "visualMatterManifest"],
-    optionalConsumes: [
-      "visualBrief",
-      "studioLtxCreativeAdapterSelection",
-      "studioLtxCreativeAdapterSelectionsByShot",
-      "narrativeShotControl",
-      "narrativeAcceptedCharacterAdapters",
-    ],
-    providerProfiles: [{ id: "novita-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
+    optionalConsumes: ["visualBrief"],
+    providerProfiles: [minimaxH3],
     maxCostUsd: 35,
     maxCostUsdFor: (params, context) =>
       shotCount(params, context) *
-      generationProfile(generationProfileId(params, context)).video.candidates *
       PRICE.novitaVideoMaxUsd,
   }),
   qa_shots: contract(["visuals.generated", "visuals.story_aligned", "qa.shots_required"], {
@@ -1284,12 +1286,12 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       ...VISUAL_MATTER_REFERENCE_QA_CONSUMERS.qa_shots,
     ],
     providerProfiles: [managed, local],
-    // One selected still is held fixed while LTX may receive small,
-    // deterministic motion repairs. Reserve all five reference batches and
+    // One selected still is held fixed while H3 may receive one bounded,
+    // deterministic motion repair. Reserve all five reference batches and
     // the possible endpoint-continuity grade for every take.
-    // The same default 50-shot run needs $37.70 when every take also receives
-    // its possible endpoint-continuity grade.
-    maxCostUsd: 38,
+    // The same 60-shot H3 plan needs $45.24 when every take also receives its
+    // possible endpoint-continuity grade.
+    maxCostUsd: 46,
     maxCostUsdFor: (params, context) => shotCount(params, context) * (
       NOVITA_CINEMATIC_QA_REPAIR_CAP * PRICE.novitaVideoMaxUsd +
       novitaCinematicQaMaxGraderCallsPerShot("video") * PRICE.visionGraderUsd

@@ -289,12 +289,15 @@ async function test() {
   configure("salad"); configure("novita");
   const salad = request("salad", "weekly-batch");
   let seen: Record<string, unknown> | undefined;
+  let spendFenceCalls = 0;
   const rendered = await renderMiniMaxH3(salad, {
     presignRead: async () => "https://r2.example/read",
     presignWrite: async () => "https://r2.example/write",
     readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
     assertModelManifest: async () => {},
+    beforeProviderSpend: async () => { spendFenceCalls += 1; },
     fetch: async (_url, init) => {
+      assert.equal(spendFenceCalls, 1, "the durable ownership fence must run immediately before H3 provider submission");
       seen = JSON.parse(String(init?.body));
       const reply = responseFor(salad);
       const body = await reply.json() as { receipt: Record<string, unknown> };
@@ -310,6 +313,7 @@ async function test() {
   assert.equal(seen?.output_put_url, "https://r2.example/write");
   assert.equal(seen?.execution, "weekly-batch");
   assert.equal(seen?.capacity_mode, MINIMAX_H3_SALAD_CAPACITY_MODE);
+  assert.equal(spendFenceCalls, 1, "one H3 submission must make exactly one final ownership assertion");
 
   // The selected high fallback must still dispatch when the medium flag is
   // absent; this exercises the actual paid-route readiness seam, not only

@@ -308,8 +308,9 @@ async function main(): Promise<void> {
   assert.match(i2v, /creativeAdapter: req\.creativeAdapter/);
   assert.match(lofi, /minimaxH3Readiness\("novita"\)/);
   assert.doesNotMatch(lofi, /renderNovitaI2V/);
-  assert.match(storySpineRenderer, /LtxCreativeAdapterInputSchema\.optional\(\)\.parse\(ctx\.params\["creativeAdapter"\]\)/);
-  assert.match(storySpineRenderer, /\.\.\.\(creativeAdapter \? \{ creativeAdapter \} : \{\}\)/);
+  assert.match(storySpineRenderer, /renderMiniMaxH3/);
+  assert.doesNotMatch(storySpineRenderer, /LtxCreativeAdapterInputSchema\.optional\(\)\.parse\(ctx\.params\["creativeAdapter"\]\)/);
+  assert.doesNotMatch(storySpineRenderer, /creativeAdapterStack:/);
   assert.match(directRenderer, /creativeAdapterStack:/);
   assert.match(directRenderer, /LTX_CREATIVE_ADAPTER_STACK_VERSION/);
   console.log("LTX creative adapter tests passed");

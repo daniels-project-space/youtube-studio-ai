@@ -42,7 +42,10 @@ function ytDlpBin(): string {
 }
 
 export function referenceOpeningCapability(): ReferenceOpeningCapability {
-  const result = spawnSync(ytDlpBin(), ["--version"], {
+  // yt-dlp is an operator-provisioned executable, never a project asset.
+  // Keep Turbopack from tracing an arbitrary PATH/env command as a deploy
+  // input while preserving the runtime availability check.
+  const result = spawnSync(/* turbopackIgnore: true */ ytDlpBin(), ["--version"], {
     encoding: "utf8",
     timeout: 5_000,
     windowsHide: true,

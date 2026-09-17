@@ -168,7 +168,7 @@ assert.deepEqual(
 
 const cinematic = formatPreflight("cinematic", { concept: "A historical cinematic reconstruction" });
 assert.equal(cinematic.templateAvailable, true, "the Novita cinematic lane must be registered");
-assert.equal(cinematic.productionReady, false, "the creator must not advertise the known-impossible LTX renderer as ready");
+assert.equal(cinematic.productionReady, false, "the creator must not advertise an unqualified H3 renderer as ready");
 assert.equal(
   cinematic.fallbackFamily,
   undefined,
@@ -179,10 +179,10 @@ assert.equal(
   true,
   "the advisor must recognize the registered non-Gemini cinematic planner while keeping runtime qualification separate",
 );
-assert.equal(cinematic.runtime.ready, false, "the advisor must expose the unattested LTX runtime rather than hiding it behind a generic label");
+assert.equal(cinematic.runtime.ready, false, "the advisor must expose the unqualified H3 runtime rather than hiding it behind a generic label");
 assert(
-  cinematic.runtime.blockers.some((blocker) => blocker.includes("ltx_2_5_revision_not_benchmarked_on_rtx_4090")),
-  "the current Novita/LTX preflight must be reported from the real runtime assessment",
+  cinematic.runtime.blockers.some((blocker) => blocker.includes("MINIMAX_H3_NOVITA_")),
+  "the current Novita/H3 preflight must be reported from the real runtime assessment",
 );
 assert.equal(cinematic.contentLane, "cinematic_ai");
 assert.deepEqual(

@@ -128,9 +128,9 @@ export function registerAllBlocks(): void {
   // Generated b-roll (gen_footage): DNA-locked flux stills → i2v, producer-
   // compatible with stock_footage (whiteboard/painted/signature-scene worlds).
   for (const b of genFootageBlocks) register(b);
-  // Novita RTX 4090-only render chain (novita_render_images /
-  // novita_render_video): cloud Trigger child tasks own the short-lived spot
-  // worker lifecycle; drop-in producer-compatible with gen_footage.
+  // Direct Novita cinematic chain (novita_render_images /
+  // novita_render_video): reviewed Z-Image stills feed the sealed MiniMax H3
+  // route; Trigger child tasks own orchestration and byte-level QA.
   for (const b of novitaRenderBlocks) register(b);
   // Bounded native-story planner → provider-free route/lane/topic seal. This
   // pair is latent until a future admitted route explicitly places it before a

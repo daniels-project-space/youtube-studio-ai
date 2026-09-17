@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import { MiniMaxH3OpeningMotionQaEvidenceSchema } from "@/engine/cinematicClipReview";
 import { LtxCreativeAdapterInputSchema } from "@/lib/ltxCreativeAdapter";
 
 export const GenerationIdentitySchema = z.object({
@@ -75,50 +76,91 @@ export const AssetQaReportSchema = z.object({
   })).min(1),
 });
 
+/** Retained records created before the H3 cutover remain inspectable. */
+const LegacyLtxShotGenerationSchema = GenerationIdentitySchema.extend({
+  fps: z.number().int().positive(),
+  guidanceScale: z.number().positive(),
+  pipeline: z.literal("distilled"),
+  twoStageRefine: z.literal(true),
+  textEncoderCheckpoint: z.string().min(1),
+  videoVaeCheckpoint: z.string().min(1),
+  audioVaeCheckpoint: z.string().min(1),
+  spatialUpscalerCheckpoint: z.string().min(1),
+  quantization: z.literal("fp8-cast"),
+  offload: z.literal("cpu"),
+  spatialUpscaleFactor: z.literal(2),
+  stageOneWidth: z.number().int().positive(),
+  stageOneHeight: z.number().int().positive(),
+  /** Worker-observed encoded dimensions after the historical latent x2 stage. */
+  outputWidth: z.number().int().positive(),
+  outputHeight: z.number().int().positive(),
+});
+
+/**
+ * The active standard cinematic route uses the sealed native H3 runtime.
+ * Keep the model/runtime proof in the persisted manifest so final assembly
+ * can distinguish a retained LTX run from a new H3 take without inference.
+ */
+const MiniMaxH3ShotGenerationSchema = GenerationIdentitySchema.extend({
+  renderer: z.literal("minimax-h3"),
+  provider: z.literal("novita"),
+  execution: z.literal("on-demand"),
+  runtimeId: z.literal("minimax-h3-turbo8-5090-v1"),
+  modelManifestSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  fps: z.literal(24),
+  frames: z.literal(124),
+  /** Native source duration is distinct from the authored edit interval. */
+  nativeDurationSec: z.number().finite().positive(),
+});
+
+const ShotRenderManifestItemSchema = z.object({
+  shotId: z.string().min(1),
+  clipKey: z.string().min(1),
+  t0: z.number().finite().nonnegative(),
+  t1: z.number().finite().positive(),
+  sourceSentenceIds: z.array(z.string()).min(1),
+  continuityState: z.string().min(1),
+  /**
+   * Exact standard-LoRA selection used only by retained direct-LTX clips. A
+   * fresh H3 route is conditioned by the selected first frame instead.
+   */
+  creativeAdapter: LtxCreativeAdapterInputSchema.optional(),
+  /**
+   * Present only when a next-shot keyframe remains an explicit endpoint QA
+   * anchor. H3 receives it as a textual/QA handoff, never as a hidden LTX
+   * second-frame conditioning input.
+   */
+  terminalAnchorShotId: z.string().min(1).optional(),
+  terminalStillKey: z.string().min(1).optional(),
+  /** Actual encoded H3 source duration; assembly may trim it to t0..t1. */
+  renderedDurationSec: z.number().finite().positive().optional(),
+}).refine((item) => item.t1 > item.t0, "rendered shot t1 must follow t0").refine(
+  (item) => Boolean(item.terminalAnchorShotId) === Boolean(item.terminalStillKey),
+  "rendered terminal anchor id and still key must be supplied together",
+);
+
 export const ShotRenderManifestSchema = z.object({
   version: z.literal("1.0.0"),
-  generation: GenerationIdentitySchema.extend({
-    fps: z.number().int().positive(),
-    guidanceScale: z.number().positive(),
-    pipeline: z.literal("distilled"),
-    twoStageRefine: z.literal(true),
-    textEncoderCheckpoint: z.string().min(1),
-    videoVaeCheckpoint: z.string().min(1),
-    audioVaeCheckpoint: z.string().min(1),
-    spatialUpscalerCheckpoint: z.string().min(1),
-    quantization: z.literal("fp8-cast"),
-    offload: z.literal("cpu"),
-    spatialUpscaleFactor: z.literal(2),
-    stageOneWidth: z.number().int().positive(),
-    stageOneHeight: z.number().int().positive(),
-    /** Worker-observed encoded dimensions after the LTX latent x2 stage. */
-    outputWidth: z.number().int().positive(),
-    outputHeight: z.number().int().positive(),
-  }),
+  generation: z.union([LegacyLtxShotGenerationSchema, MiniMaxH3ShotGenerationSchema]),
   durationSec: z.number().finite().positive(),
-  items: z.array(z.object({
-    shotId: z.string().min(1),
-    clipKey: z.string().min(1),
-    t0: z.number().finite().nonnegative(),
-    t1: z.number().finite().positive(),
-    sourceSentenceIds: z.array(z.string()).min(1),
-    continuityState: z.string().min(1),
-    /**
-     * Exact standard-LoRA selection that created this clip. A QA replacement
-     * must replay this sealed adapter rather than consult a mutable/global
-     * render parameter and accidentally change the channel's visual identity.
-     */
-    creativeAdapter: LtxCreativeAdapterInputSchema.optional(),
-    /**
-     * Present only when this clip is LTX-conditioned to arrive at the
-     * already-selected first frame of the following continuous shot.
-     */
-    terminalAnchorShotId: z.string().min(1).optional(),
-    terminalStillKey: z.string().min(1).optional(),
-  }).refine((item) => item.t1 > item.t0, "rendered shot t1 must follow t0").refine(
-    (item) => Boolean(item.terminalAnchorShotId) === Boolean(item.terminalStillKey),
-    "rendered terminal anchor id and still key must be supplied together",
-  )).min(1),
+  items: z.array(ShotRenderManifestItemSchema).min(1),
+}).superRefine((manifest, ctx) => {
+  if (!("renderer" in manifest.generation) || manifest.generation.renderer !== "minimax-h3") return;
+  const nativeDuration = manifest.generation.frames / manifest.generation.fps;
+  if (Math.abs(manifest.generation.nativeDurationSec - nativeDuration) > 0.08) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["generation", "nativeDurationSec"], message: "H3 native duration must bind its sealed frame/fps profile" });
+  }
+  for (const [index, item] of manifest.items.entries()) {
+    if (item.creativeAdapter !== undefined) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index, "creativeAdapter"], message: "fresh H3 takes cannot claim a retired LTX adapter" });
+    }
+    if (item.renderedDurationSec === undefined || Math.abs(item.renderedDurationSec - nativeDuration) > 0.08) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index, "renderedDurationSec"], message: "H3 take must retain its observed native duration" });
+    }
+    if (item.t1 - item.t0 > nativeDuration + 0.02) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index], message: "authored H3 interval exceeds its native source take" });
+    }
+  }
 });
 
 const ShotQaGradeSchema = z.object({
@@ -212,14 +254,14 @@ const CurrentShotQaReportSchema = z.object({
   graderRan: z.literal(true),
   passed: z.literal(true),
   shots: z.array(ShotQaGradeSchema.extend({
-    temporalDynamism: LtxShotTemporalQaEvidenceSchema,
+    temporalDynamism: z.union([LtxShotTemporalQaEvidenceSchema, MiniMaxH3OpeningMotionQaEvidenceSchema]),
   })).min(1),
 });
 
 /**
  * v1 remains parseable so retained evidence can still be inspected. It cannot
  * authorize a new assembly: validateQualifiedShotRender requires the v1.1
- * deterministic motion receipt for every accepted LTX take.
+ * deterministic motion receipt for every accepted take.
  */
 export const ShotQaReportSchema = z.discriminatedUnion("version", [
   LegacyShotQaReportSchema,
@@ -290,9 +332,18 @@ export function validateQualifiedShotRender(args: {
     if (grade.score < grade.threshold) {
       throw new Error(`qualified shot render QA score is below threshold for ${grade.shotId}`);
     }
-    const measuredDurationSec = grade.temporalDynamism.maxStaticHoldSec /
-      grade.temporalDynamism.maxFreezeFraction;
-    if (Math.abs(measuredDurationSec - (item.t1 - item.t0)) > 0.25) {
+    const isH3 = "renderer" in manifest.generation && manifest.generation.renderer === "minimax-h3";
+    if (isH3 && grade.temporalDynamism.contract !== "minimax-h3-opening-motion-qa/v1") {
+      throw new Error(`qualified shot render requires H3 opening-motion evidence for ${grade.shotId}`);
+    }
+    if (!isH3 && grade.temporalDynamism.contract !== "ltx-shot-temporal-qa/v1") {
+      throw new Error(`qualified shot render requires retained LTX temporal evidence for ${grade.shotId}`);
+    }
+    const expectedDurationSec = isH3 ? item.renderedDurationSec : item.t1 - item.t0;
+    const measuredDurationSec = grade.temporalDynamism.contract === "minimax-h3-opening-motion-qa/v1"
+      ? grade.temporalDynamism.durationSec
+      : grade.temporalDynamism.maxStaticHoldSec / grade.temporalDynamism.maxFreezeFraction;
+    if (expectedDurationSec === undefined || Math.abs(measuredDurationSec - expectedDurationSec) > 0.25) {
       throw new Error(
         `qualified shot render temporal evidence duration does not bind ${grade.shotId}`,
       );

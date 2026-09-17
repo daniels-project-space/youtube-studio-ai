@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { CHANNEL_INCEPTION_MODULE_CONTRACTS } from "./channelInceptionContracts";
-import { LTX_25_RTX_4090_VIDEO } from "./generationProfiles";
+import {
+  MINIMAX_H3_MODEL,
+  MINIMAX_H3_MODEL_REVISION,
+  MINIMAX_H3_PROFILE,
+} from "@/lib/minimaxH3";
 import { GOLDEN_MODULES, type GoldenModule } from "./golden";
 import type { ModuleManifest } from "./moduleManifest";
 
@@ -80,7 +84,7 @@ export interface CatalogExecutionStep {
  * motion does. Infrastructure must satisfy this contract before strict rollout.
  */
 export const NOVITA_GPU_VIDEO_RENDER_BINDING = {
-  id: "novita-gpu-zimage-ltx25-v2",
+  id: "novita-gpu-zimage-minimax-h3-v3",
   catalogKey: "novita-render-farm",
   providerExecutableIds: ["novita_render_images", "novita_render_video"] as const,
   requiredChain: ["novita_render_images", "qa_assets", "novita_render_video", "qa_shots"] as const,
@@ -91,10 +95,9 @@ export const NOVITA_GPU_VIDEO_RENDER_BINDING = {
   ] as const,
   legacyProviderExecutableIds: [] as const,
   imageModel: "Tongyi-MAI/Z-Image-Turbo",
-  imageStorage: "local-persistent-disk",
-  videoModel: `${LTX_25_RTX_4090_VIDEO.model}@${LTX_25_RTX_4090_VIDEO.revision}`,
-  productionPipeline: "distilled-two-stage-x2-fp8-cpu-offload",
-  elasticGpuCeiling: 8,
+  imageStorage: "r2-content-addressed",
+  videoModel: `${MINIMAX_H3_MODEL}@${MINIMAX_H3_MODEL_REVISION}`,
+  productionPipeline: `official-turbo8-${MINIMAX_H3_PROFILE.width}x${MINIMAX_H3_PROFILE.height}-${MINIMAX_H3_PROFILE.fps}fps-${MINIMAX_H3_PROFILE.frames}frames`,
 } as const;
 
 export interface NovitaVideoRenderAssessment {
@@ -214,7 +217,7 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   },
   "novita-render-farm": { kind: "pipeline-module", executableIds: ["novita_render_images", "novita_render_video"] },
   "imagecraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/imagecraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production image rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_images block) instead — same Z-Image family, different implementation and gate set." },
-  "videocraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/videocraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production video rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_video block) instead — same LTX family, different implementation and gate set." },
+  "videocraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/videocraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). Retained LTX evidence remains inspectable, but new standard cinematic rendering is owned by the H3 route in src/lib/minimaxH3.ts through novita_render_video." },
   lofi: { kind: "pipeline-module", executableIds: ["scene_planner", "keyframes", "loop_clips", "upscale", "assemble"] },
   quiz: { kind: "catalog-only", executableIds: [], note: "Proof engine is not registered in the production runner." },
   thumbnail: {
@@ -264,8 +267,9 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
       // adapters and IC-LoRA guide bytes never enter a generic prompt path.
       "studio_asset_resolve",
       "studio_reusable_media_resolve",
-      // Post-keyframe-QA selection proof for the one direct LTX standard-LoRA
-      // path. The worker re-verifies its pinned manifest before spending.
+      // Kept catalog-owned solely so retained LTX manifests can be inspected
+      // and replayed for evidence. The current cinematic compiler never adds
+      // this block to a fresh H3 program.
       "studio_ltx_adapter_resolve",
       "visual_matter",
       // Server-only, cinematic-only direct Z-Image text-to-image pack. Its
@@ -287,7 +291,7 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   cinematic: {
     kind: "catalog-only",
     executableIds: [],
-    note: "Cinematic channels execute the enforced Z-Image → QA → LTX → QA chain owned by novita-render-farm (src/lib/novitaRenderFarm.ts). cinecraft.ts's OWN code is not applied and never will be: its render path is hard-disabled at the source (hasCinecraft() returns a literal false, src/lib/cinecraft.ts:47-52) because it drives the retired paid Higgsfield CLI, so the file survives only as a type-only ShotSpec import (src/lib/crew/cinematographer.ts:16). This is NOT a capability gap (P1-10 superseded): the equivalent hero-anchor identity-lock is supplied by the wired `visual_matter` module — see the `visuals` binding above — whose manifest this chain HARD-REQUIRES (requireVisualMatter throws; src/trigger/blocks/novitaRenderBlocks.ts:452-456, consumed at :550/:610/:808/:888) and whose character/setting reference sheets feed the qa_assets identity floor (:635/:927). A frozen spend ceiling and Golden proof receipt are both required before promotion.",
+    note: "Cinematic channels execute the enforced Z-Image → QA → MiniMax H3 → QA chain. The H3 renderer reads the accepted still, sealed R2 model manifest, native output bytes, geometry, duration, and immediate-opening-motion evidence before assembly. cinecraft's retired paid CLI remains unavailable; Visual Matter supplies the channel identity and continuity locks. A frozen spend ceiling and Golden proof receipt are required before promotion.",
   },
   documotion: {
     kind: "pipeline-module",
@@ -348,8 +352,8 @@ export const REFERENCE_EXECUTABLE_PROVENANCE: Readonly<
     catalogKey: "novita-render-farm",
     callerFile: "src/trigger/blocks/novitaRenderBlocks.ts",
     callerSymbol: "novitaRenderVideo.run",
-    referenceFile: "src/lib/novitaRenderFarm.ts",
-    referenceSymbol: "renderVideo",
+    referenceFile: "src/lib/minimaxH3.ts",
+    referenceSymbol: "renderMiniMaxH3",
   },
   thumbnail_gen: {
     catalogKey: "thumbnail",

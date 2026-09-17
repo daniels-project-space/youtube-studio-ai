@@ -157,40 +157,36 @@ const video = getManifest("novita_render_video");
 assert(video, "novita_render_video must be registered");
 assert(
   "assetQaReport" in video.consumes,
-  "novita_render_video must hard-consume the accepted keyframe QA receipt before it can create an LTX worker",
+  "novita_render_video must hard-consume the accepted keyframe QA receipt before it can create an H3 worker",
 );
 assert(
   !("assetQaReport" in (video.optionalConsumes ?? {})),
   "the accepted keyframe QA receipt must never become optional",
 );
-assert(
-  "studioLtxCreativeAdapterSelectionsByShot" in (video.optionalConsumes ?? {}),
-  "novita_render_video must declare the immutable per-shot Studio adapter map when a serialized route emits one",
-);
-assert(
-  "narrativeShotControl" in (video.optionalConsumes ?? {}),
-  "a per-shot Studio adapter map must be cross-checked against the sealed narrative shot-control receipt",
-);
 const source = readFileSync(new URL("../novitaRenderBlocks.ts", import.meta.url), "utf8");
+const videoStart = source.indexOf("export const novitaRenderVideo");
+const videoEnd = source.indexOf("export const qaShots");
+assert(videoStart >= 0 && videoEnd > videoStart, "standard video route boundaries must remain discoverable");
+const videoSource = source.slice(videoStart, videoEnd);
 assert.match(
-  source,
-  /studioLtxShotAdapterSelectionsFromUnknown\(\s*ctx\.store\["studioLtxCreativeAdapterSelectionsByShot"\]/,
-  "the renderer must parse the immutable per-shot adapter map before direct LTX work",
+  videoSource,
+  /minimaxH3Readiness\("novita"\)[\s\S]*assertMiniMaxH3R2ModelManifest\(\)/,
+  "the standard renderer must prove the admitted Novita H3 runtime and immutable R2 model pack before spend",
 );
 assert.match(
-  source,
-  /creativeAdapterForShot = scopedStudioAdapterByShot[\s\S]*scopedStudioAdapter\?\.selection[\s\S]*creativeAdapter/,
-  "the renderer must choose the exact per-shot selection rather than reapplying a character LoRA globally",
+  videoSource,
+  /renderStandardH3Take\(\{[\s\S]*firstFrameKey: selectedStill\.stillKey[\s\S]*maxCostUsd: h3TakeBudget/,
+  "every H3 take must be bound to the accepted still and a bounded per-take budget",
 );
 assert.match(
-  source,
-  /const renderedAdapterByShot = new Map\([\s\S]*shotsWithStills\.map\(\(shot\) => \[shot\.id, shot\.creativeAdapter\][\s\S]*?creativeAdapter: renderedAdapterByShot\.get\(shot\.id\)/,
-  "the durable render manifest must retain the exact adapter used for each initial LTX shot",
+  videoSource,
+  /generation: \{[\s\S]*h3ShotGenerationIdentity\(profile\)[\s\S]*renderedDurationSec/,
+  "the durable render manifest must retain H3 identity and observed native source duration",
 );
-assert.match(
-  source,
-  /phase: "video",[\s\S]*?creativeAdapter: item\.creativeAdapter,[\s\S]*?renderVideo\(qualityRecoveryRenderCfg\(ctx, "video", profile, repair\.shot\)\)/,
-  "a video QA repair must replay the rejected clip's manifest-bound Studio adapter, not a mutable global parameter",
+assert.doesNotMatch(
+  videoSource,
+  /renderVideo\(|LtxCreativeAdapter|studioLtx/i,
+  "the active standard video route must not dispatch or claim an LTX adapter",
 );
 
-console.log("Novita video keyframe-admission binding tests passed");
+console.log("Novita H3 video keyframe-admission binding tests passed");

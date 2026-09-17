@@ -15,6 +15,13 @@ import {
 } from "./shotBoundaryTiming";
 import type { VisualReviewCreativeLock } from "@/lib/visualReview";
 
+/**
+ * H3 emits a fixed 124-frame native take at 24fps.  Keep authored edit
+ * intervals below the native source duration so assembly always trims a real
+ * moving take rather than extending or looping a generated frame.
+ */
+export const MAX_H3_EDIT_INTERVAL_SEC = 5;
+
 const EPSILON = 0.02;
 
 export const TimedSentenceSchema = z.object({
@@ -245,6 +252,8 @@ export interface PlanStorySpineInput {
   };
   generationProfile?: unknown;
   targetShotSec?: number;
+  /** Renderer-specific source-take cap; unset preserves ordinary lane pacing. */
+  maxShotSec?: number;
 }
 
 function strings(value: unknown): string[] {
@@ -589,7 +598,14 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
   };
 
   const profile = generationProfile(input.generationProfile);
-  const targetShotSec = Math.max(3, Math.min(10, Number(input.targetShotSec ?? 6)));
+  const requestedTargetShotSec = Math.max(3, Math.min(10, Number(input.targetShotSec ?? 6)));
+  const configuredMaxShotSec = Number(input.maxShotSec);
+  const maxShotSec = Number.isFinite(configuredMaxShotSec)
+    ? Math.max(3, Math.min(10, configuredMaxShotSec))
+    : undefined;
+  const targetShotSec = maxShotSec === undefined
+    ? requestedTargetShotSec
+    : Math.min(requestedTargetShotSec, maxShotSec);
   const shotList: StorySpine["shotList"] = [];
   const dpVisualSpecs: StorySpine["dpVisualSpecs"] = [];
   let shotNo = 0;
@@ -600,11 +616,24 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
    * same weighted, purpose-appropriate coverage split the Casefile
    * cinematic draft uses instead of a blind equal division: this saves
    * render time by putting duration where a cut earns it, while every
-   * shot still respects the locked LTX minimum. A beat too short to
+   * shot still respects the renderer's authored-duration floor. A beat too short to
    * safely support that split (most single narrated sentences) keeps
    * the original bounded equal division unchanged.
    */
   function boundariesForBeat(beat: { t0: number; t1: number }): number[][] {
+    const rendererSafeBoundaries = (boundaries: readonly number[]): number[] => {
+      if (maxShotSec === undefined) return [...boundaries];
+      const output = [boundaries[0]!];
+      for (let index = 1; index < boundaries.length; index++) {
+        const start = boundaries[index - 1]!;
+        const end = boundaries[index]!;
+        const parts = Math.max(1, Math.ceil((end - start) / maxShotSec));
+        for (let part = 1; part <= parts; part++) {
+          output.push(part === parts ? end : Number((start + ((end - start) * part) / parts).toFixed(3)));
+        }
+      }
+      return output;
+    };
     const beatDuration = beat.t1 - beat.t0;
     if (beatDuration < MIN_CINEMATIC_BEAT_SEC) {
       const chunks = Math.max(1, Math.ceil(beatDuration / targetShotSec));
@@ -613,7 +642,7 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
         boundaries.push(beat.t0 + (beatDuration * chunk) / chunks);
       }
       boundaries.push(beat.t1);
-      return [boundaries];
+      return [rendererSafeBoundaries(boundaries)];
     }
     // Seed causalBeatWindows with the same bounded-length candidate
     // pieces the equal split would have used, then let it regroup them
@@ -635,7 +664,7 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
       const windowT0 = window[0]!.t0;
       const windowT1 = window.at(-1)!.t1;
       const coverageCount = pickCoverageCount(windowT1 - windowT0);
-      return coverageBoundaries(windowT0, windowT1, coverageCount);
+      return rendererSafeBoundaries(coverageBoundaries(windowT0, windowT1, coverageCount));
     });
   }
 
