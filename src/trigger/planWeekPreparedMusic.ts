@@ -49,6 +49,34 @@ export interface PlanWeekPreparedMusicArgs {
   preferWav?: boolean;
 }
 
+type PreparedMusicDownloader = (
+  url: string,
+  destination: string,
+  options: { timeoutMs: number },
+) => Promise<string>;
+
+/**
+ * Download accepted provider clips concurrently, while retaining provider
+ * order for the deterministic crossfade/mix that follows. The URLs are
+ * already paid/accepted and each transfer has the same bounded timeout; this
+ * changes wall time only, never generation count, bytes, or track ordering.
+ */
+export async function downloadPreparedMusicTracks(
+  tracks: readonly MusicTrack[],
+  workDir: string,
+  downloader: PreparedMusicDownloader = downloadTo,
+): Promise<string[]> {
+  return Promise.all(
+    tracks.map((track, index) =>
+      downloader(
+        track.url,
+        join(workDir, `track-${index}.${track.wavUrl ? "wav" : "mp3"}`),
+        { timeoutMs: 300_000 },
+      ),
+    ),
+  );
+}
+
 function safePart(value: unknown, label: string): string {
   if (typeof value !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,159}$/u.test(value)) {
     throw new Error(`weekly prepared music ${label} is invalid`);
@@ -259,11 +287,7 @@ export const planWeekPreparedMusicTask = task({
         tracks.push(...result.tracks.slice(0, trackCount));
       }
       if (!tracks.length) throw new Error("weekly prepared music provider returned no tracks");
-      const localTracks: string[] = [];
-      for (let index = 0; index < tracks.length; index += 1) {
-        const track = tracks[index]!;
-        localTracks.push(await downloadTo(track.url, join(workDir, `track-${index}.${track.wavUrl ? "wav" : "mp3"}`), { timeoutMs: 300_000 }));
-      }
+      const localTracks = await downloadPreparedMusicTracks(tracks, workDir);
       const mixedPath = localTracks.length > 1 ? await crossfadeConcatAudio(localTracks, join(workDir, "mix.mp3"), 3) : localTracks[0]!;
       const masteredPath = await masterAudioTransparentGain(mixedPath, join(workDir, "master.mp3"), {
         lufs: program.mix.targetLufs,
