@@ -52,6 +52,31 @@ function main(): void {
   assert.deepEqual(visualPlan?.visualRepair, [reviewSignal]);
   assert.match(visualPlan?.hints.motion_comic?.[0] ?? "", /overlay_occlusion/);
 
+  const whiteboardBlocks: HealableBlock[] = [
+    { id: "whiteboard_scribe", produces: ["videoLocalPath", "whiteboardRenderSchedule"], consumes: ["topic"], paid: true },
+    { id: "qa_visual", produces: ["qaReport"], consumes: ["videoLocalPath", "whiteboardRenderSchedule"] },
+  ];
+  const whiteboardSignal: VisualRepairSignal = {
+    schemaVersion: 1,
+    owner: "whiteboard_scribe",
+    action: "strengthen_draw_trace",
+    category: "reveal_failure",
+    severity: "major",
+    startSec: 18,
+    endSec: 23,
+    observed: "The final evidence sketch appears without a visible hand trace.",
+    expected: "The sketch is visibly drawn in time with the spoken claim.",
+    confidence: 0.94,
+  };
+  const whiteboardPlan = planHeal("qa_visual FAILED: visual review", whiteboardBlocks, () => {}, [whiteboardSignal]);
+  assert.deepEqual(
+    whiteboardPlan?.rerunBlocks,
+    ["whiteboard_scribe", "qa_visual"],
+    "whiteboard repair must retain sealed art/audio and rerender only the deterministic draw schedule plus QA",
+  );
+  assert.deepEqual(whiteboardPlan?.healClasses.whiteboard_scribe, ["body_rebuild"]);
+  assert.deepEqual(whiteboardPlan?.visualRepair, [whiteboardSignal]);
+
   healClassDeclarationTests();
 
   console.log("healer policy tests passed");

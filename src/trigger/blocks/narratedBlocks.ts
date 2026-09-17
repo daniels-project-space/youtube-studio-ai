@@ -5029,6 +5029,7 @@ export const qaVisual: Block = {
     }
     const reviewIntent = {
       title,
+      primaryRenderer: contentLane.primaryRenderer,
       topic,
       niche: niche ?? undefined,
       expectTitleCard: ctx.store["introApplied"] === true,

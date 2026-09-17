@@ -170,6 +170,12 @@ export interface VisualReviewReferenceCriterionReceipt {
 
 export interface VisualReviewIntent {
   title: string;
+  /**
+   * The actual final-master renderer. This is diagnostic routing metadata, not
+   * reviewer prompt prose: it lets a typed defect choose only a renderer that
+   * can perform the bounded repair.
+   */
+  primaryRenderer?: string;
   topic?: string;
   niche?: string;
   channelWorld?: string;
@@ -2020,8 +2026,19 @@ export async function reviewRender(
 
 function routeForDefect(
   defect: VisualReviewDefect,
-  overlays: readonly VisualReviewOverlay[],
+  intent: VisualReviewIntent,
 ): { owner: VisualRepairOwner; action: VisualRepairAction; target?: VisualReviewOverlay } | null {
+  // A drawn board cannot be repaired by stock-footage resampling. Its plan,
+  // art, and narration remain sealed; the only automatic repair is a stronger
+  // deterministic hand-trace schedule over those cached artifacts. Keep this
+  // deliberately narrow: factual/story defects still require human review.
+  if (
+    intent.primaryRenderer === "whiteboard_scribe" &&
+    ["narration_mismatch", "continuity_break", "reveal_failure"].includes(defect.category)
+  ) {
+    return { owner: "whiteboard_scribe", action: "strengthen_draw_trace" };
+  }
+  const overlays = intent.overlays ?? [];
   const activeComic = overlays.find((overlay) =>
     overlay.kind === "comic_bubble" && overlay.startSec <= defect.endSec && overlay.endSec >= defect.startSec,
   );
@@ -2047,7 +2064,7 @@ function routeForDefect(
 export function visualRepairSignals(result: VisualReviewResult, intent: VisualReviewIntent): VisualRepairSignal[] {
   return result.defects.flatMap((defect) => {
     if (defect.severity === "minor") return [];
-    const route = routeForDefect(defect, intent.overlays ?? []);
+    const route = routeForDefect(defect, intent);
     if (!route) return [];
     return [{
       schemaVersion: 1,

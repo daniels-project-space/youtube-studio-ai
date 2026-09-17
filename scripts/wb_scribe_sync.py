@@ -16,6 +16,23 @@ DIR = TL["dir"]; FPS = int(TL.get("fps", 25))
 W = int(os.environ.get("WB_W", TL.get("width", 1920))); H = int(os.environ.get("WB_H", TL.get("height", 1080)))
 PRE = float(TL.get("prerollSec", 2.6))
 FRAME_PRE = min(1.2, PRE * 0.5)                          # frame draws first, then the header
+TIMING_REPAIR = TL.get("timingRepair") if isinstance(TL.get("timingRepair"), dict) else None
+
+def timing_repair_applies(panel):
+    """A repair changes only the evidence-backed panel interval, never art/TTS."""
+    if not TIMING_REPAIR or TIMING_REPAIR.get("mode") != "strengthen_draw_trace":
+        return False
+    return panel["startMs"] <= float(TIMING_REPAIR.get("targetEndMs", -1)) and \
+        panel["endMs"] >= float(TIMING_REPAIR.get("targetStartMs", float("inf")))
+
+def timing_multiplier(key):
+    if not TIMING_REPAIR:
+        return 1.0
+    try:
+        value = float(TIMING_REPAIR.get(key, 1.0))
+        return min(1.5, max(1.0, value))
+    except (TypeError, ValueError):
+        return 1.0
 
 def _hex(s, fallback):
     try:
@@ -200,6 +217,10 @@ def fit_panel_boxes(layers, grow=1.22, x0=0.045, y0=0.175, x1=0.955, y1=0.96, ma
 
 def build_panel(p):
     fit_panel_boxes(p["layers"])
+    strengthen_trace = timing_repair_applies(p)
+    draw_multiplier = timing_multiplier("drawMultiplier") if strengthen_trace else 1.0
+    linger_multiplier = timing_multiplier("handLingerMultiplier") if strengthen_trace else 1.0
+    panel_hold_multiplier = timing_multiplier("panelHoldMultiplier") if strengthen_trace else 1.0
     layers = []
     for layer_idx, l in enumerate(p["layers"]):
         # The typed storyboard contract calls handwritten layers `label`, while
@@ -235,21 +256,23 @@ def build_panel(p):
         # normal playback. Keep a completed hold, but give the hand enough time
         # to trace the actual letters.
         if L["kind"] == "label":
-            L["draw"] = min(2.60, max(0.90, L["ink"] / (SPEED * 0.65))) * 1000
+            base_draw = min(2.60, max(0.90, L["ink"] / (SPEED * 0.65)))
+            L["draw"] = min(3.25, base_draw * draw_multiplier) * 1000
         else:
             # Trace image strokes deliberately enough that an actual hand is
             # visible on every art beat, including the later evidence/reaction
             # drawings.  A slower measured ink rate avoids treating a complex
             # composed image like a one-frame icon.
-            L["draw"] = min(MAX_DRAW, max(MIN_DRAW, L["ink"] / (SPEED * 0.55))) * 1000
+            base_draw = min(MAX_DRAW, max(MIN_DRAW, L["ink"] / (SPEED * 0.55)))
+            L["draw"] = min(MAX_DRAW * 1.25, base_draw * draw_multiplier) * 1000
     # Reserve a visible finishing hold for the last art layer. This prevents
     # the common "last insert at 30 seconds has no hand" regression while
     # keeping the one-hand-at-a-time schedule honest.
     for L in layers:
-        L["hand_linger"] = ART_HAND_LINGER * 1000 if L["kind"] == "art" else 0
+        L["hand_linger"] = ART_HAND_LINGER * linger_multiplier * 1000 if L["kind"] == "art" else 0
     final_art = next((L for L in reversed(layers) if L["kind"] == "art"), None)
     if final_art is not None:
-        final_art["hand_linger"] = FINAL_ART_HAND_LINGER * 1000
+        final_art["hand_linger"] = FINAL_ART_HAND_LINGER * linger_multiplier * 1000
 
     # Cue timing is part of the explainer's meaning: a literal drawing must
     # arrive with the claim it explains.  The previous "pack tight" fallback
@@ -261,11 +284,13 @@ def build_panel(p):
     for L in layers:
         L["start"] = max(prev, L["cue"])
         prev = L["start"] + L["draw"] + L["hand_linger"]
-    if prev + FINAL_PANEL_HOLD * 1000 > p["endMs"]:
+    panel_hold_ms = FINAL_PANEL_HOLD * panel_hold_multiplier * 1000
+    if prev + panel_hold_ms > p["endMs"]:
         raise RuntimeError(
             f"whiteboard panel {p['idx']} cannot fit {len(layers)} cue-aligned visible hand-drawing events "
             f"plus a completed hold inside its narration window; extend/split the beat rather than advancing a drawing before its cue"
         )
+    p["final_panel_hold_ms"] = panel_hold_ms
     return layers
 
 PCACHE = {}
@@ -292,7 +317,7 @@ for p in panels:
         "idx": p["idx"],
         "startMs": p["startMs"],
         "endMs": p["endMs"],
-        "completionSampleMs": last_visible_end + FINAL_PANEL_HOLD * 500,
+        "completionSampleMs": last_visible_end + p.get("final_panel_hold_ms", FINAL_PANEL_HOLD * 1000) * 0.5,
         "layers": [{
             "layerIdx": L["layer_idx"],
             "kind": L["kind"],
@@ -308,6 +333,7 @@ with open(OUT + ".draw-receipt.json", "w", encoding="utf-8") as schedule_file:
         "version": "whiteboard-render-schedule/v1",
         "narrationStartSec": PRE,
         **({"storyReceiptFingerprint": TL["storyReceiptFingerprint"]} if TL.get("storyReceiptFingerprint") else {}),
+        **({"timingRepair": TIMING_REPAIR} if TIMING_REPAIR else {}),
         "panels": scheduled_panels,
     }, schedule_file, separators=(",", ":"))
 total = PRE + (audio_end + tail) / 1000.0; nframes = int(total * FPS)

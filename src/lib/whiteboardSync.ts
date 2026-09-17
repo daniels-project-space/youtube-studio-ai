@@ -122,11 +122,80 @@ export interface SyncLayer {
   cueStartMs: number;
 }
 export interface SyncPanel { idx: number; startMs: number; endMs: number; layers: SyncLayer[] }
+/**
+ * A bounded, render-only correction for an evidence-backed failed hand trace.
+ * It never changes the sealed storyboard, art prompts, source bytes, or TTS
+ * text; it only instructs the deterministic scribe to make the affected draw
+ * interval more visible while reusing those cached artifacts.
+ */
+export const WHITEBOARD_TIMING_REPAIR_VERSION = "whiteboard-timing-repair/v1" as const;
+export interface WhiteboardTimingRepair {
+  version: typeof WHITEBOARD_TIMING_REPAIR_VERSION;
+  mode: "strengthen_draw_trace";
+  targetStartMs: number;
+  targetEndMs: number;
+  drawMultiplier: number;
+  handLingerMultiplier: number;
+  panelHoldMultiplier: number;
+}
+
+const WhiteboardTimingRepairSchema = z.object({
+  version: z.literal(WHITEBOARD_TIMING_REPAIR_VERSION),
+  mode: z.literal("strengthen_draw_trace"),
+  targetStartMs: z.number().finite().min(0).max(7_200_000),
+  targetEndMs: z.number().finite().positive().max(7_200_000),
+  drawMultiplier: z.number().finite().min(1.1).max(1.5),
+  handLingerMultiplier: z.number().finite().min(1.1).max(1.5),
+  panelHoldMultiplier: z.number().finite().min(1.1).max(1.5),
+}).superRefine((repair, context) => {
+  if (repair.targetEndMs <= repair.targetStartMs) {
+    context.addIssue({ code: z.ZodIssueCode.custom, message: "targetEndMs must follow targetStartMs" });
+  }
+});
+
+/**
+ * Convert only a healer-issued whiteboard signal into renderer input. Bad
+ * persisted shapes are rejected by the caller rather than turning a repair
+ * generation into an identical rerun with no observable change.
+ */
+export function whiteboardTimingRepairFromVisualRepair(
+  raw: unknown,
+  narrationStartSec = 2.6,
+): WhiteboardTimingRepair | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const matching = raw.flatMap((value) => {
+    if (!value || typeof value !== "object") return [];
+    const signal = value as Record<string, unknown>;
+    if (signal.owner !== "whiteboard_scribe" || signal.action !== "strengthen_draw_trace") return [];
+    const startSec = Number(signal.startSec);
+    const endSec = Number(signal.endSec ?? signal.startSec);
+    if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec < startSec) return [];
+    return [{ startSec: Math.max(0, startSec), endSec: Math.max(startSec, endSec) }];
+  });
+  if (!matching.length) return undefined;
+  const offsetMs = narrationStartSec * 1_000;
+  const targetStartMs = Math.max(0, Math.round(Math.min(...matching.map((signal) => signal.startSec * 1_000 - offsetMs))));
+  const targetEndMs = Math.max(
+    targetStartMs + 1,
+    Math.round(Math.max(...matching.map((signal) => signal.endSec * 1_000 - offsetMs))),
+  );
+  return WhiteboardTimingRepairSchema.parse({
+    version: WHITEBOARD_TIMING_REPAIR_VERSION,
+    mode: "strengthen_draw_trace",
+    targetStartMs,
+    targetEndMs,
+    drawMultiplier: 1.25,
+    handLingerMultiplier: 1.25,
+    panelHoldMultiplier: 1.25,
+  });
+}
+
 export const WHITEBOARD_RENDER_SCHEDULE_VERSION = "whiteboard-render-schedule/v1" as const;
 export const WhiteboardRenderScheduleSchema = z.object({
   version: z.literal(WHITEBOARD_RENDER_SCHEDULE_VERSION),
   narrationStartSec: z.number().finite().nonnegative(),
   storyReceiptFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  timingRepair: WhiteboardTimingRepairSchema.optional(),
   panels: z.array(z.object({
     idx: z.number().int().min(0).max(15),
     startMs: z.number().finite().nonnegative(),
@@ -1027,6 +1096,8 @@ export async function castWhiteboardSync(args: {
    */
   approvedStoryReceipt?: unknown;
   storyReceiptBinding?: SelfContainedStoryReceiptBinding;
+  /** An evidence-backed, render-only correction applied after cached art/TTS. */
+  timingRepair?: WhiteboardTimingRepair;
 }): Promise<WhiteboardSyncResult> {
   const log = args.log ?? (() => {});
   const brief = args.brief;
@@ -1287,6 +1358,7 @@ export async function castWhiteboardSync(args: {
     prerollSec: 2.6, fps: 25, audioEndMs: audioEnd, tailMs: 1800, panels: tlPanels,
     boardMode: chalk ? "chalk" : "white", board, ink, accent,
     ...(approved.receipt ? { storyReceiptFingerprint: approved.receipt.fingerprint } : {}),
+    ...(args.timingRepair ? { timingRepair: WhiteboardTimingRepairSchema.parse(args.timingRepair) } : {}),
   };
   const timelinePath = join(args.runDir, "timeline.json");
   await writeFile(timelinePath, JSON.stringify(timeline, null, 2), "utf8");
@@ -1304,6 +1376,9 @@ export async function castWhiteboardSync(args: {
   }
   if (renderSchedule.storyReceiptFingerprint !== approved.receipt?.fingerprint) {
     throw new Error("whiteboardSync: renderer schedule does not bind the approved story receipt");
+  }
+  if (JSON.stringify(renderSchedule.timingRepair) !== JSON.stringify(timeline.timingRepair)) {
+    throw new Error("whiteboardSync: renderer schedule does not bind the requested timing repair");
   }
   if (renderSchedule.panels.length !== tlPanels.length) {
     throw new Error("whiteboardSync: renderer schedule omitted an authored panel");

@@ -1331,13 +1331,16 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   whiteboard_scribe: contract(
     ["script.generated", "script.qa_passed", "narration.timed", "visuals.generated", "visuals.story_aligned", "master.assembled"],
     {
+      resumeInputProjections: { visualRepair: "own_block_entry" },
       // channelName seeds the creative defaults for a channel that declared no
       // art style; without it every undeclared drawn channel renders in one
       // identical hand.
       optionalConsumes: [
-      // Read at run time and never declared: the runner's Proxy refuses an
-      // undeclared read, so this threw the moment its branch ran.
-      "contentLane","researchNotes", "factSheet", "visualBrief", "voiceId", "ttsProvider", "palette", "musicKey", "musicUrl", "selfContainedStoryReceipt", "channelProgramRoute", "channelName"],
+        // Read at run time and never declared: the runner's Proxy refuses an
+        // undeclared read, so this threw the moment its branch ran.
+        "contentLane", "researchNotes", "factSheet", "visualBrief", "voiceId", "ttsProvider", "palette",
+        "musicKey", "musicUrl", "selfContainedStoryReceipt", "channelProgramRoute", "channelName", "visualRepair",
+      ],
       providerProfiles: [managed, local],
       // 16 panels × five sealed one-worker image envelopes, plus
       // the full premium TTS ceiling. Upstream music is charged by its own

@@ -37,6 +37,7 @@ import {
   planWhiteboardStoryboard,
   whiteboardPanelCount,
   whiteboardPanelsForTargetSeconds,
+  whiteboardTimingRepairFromVisualRepair,
   type WhiteboardArtRequest,
   type WhiteboardStoryboard,
   type WhiteboardSyncBrief,
@@ -542,6 +543,16 @@ export const whiteboardScribe: Block = {
     const ttsProvider = requestedTtsProvider;
     const elevenVoiceId = requestedElevenVoiceId || undefined;
     const boardMode = (ctx.params["boardMode"] as "white" | "chalk" | undefined) ?? undefined;
+    const rawVisualRepair = ctx.store["visualRepair"];
+    const timingRepair = whiteboardTimingRepairFromVisualRepair(rawVisualRepair);
+    const requestedTimingRepair = Array.isArray(rawVisualRepair) && rawVisualRepair.some((value) =>
+      value && typeof value === "object" &&
+      (value as Record<string, unknown>).owner === "whiteboard_scribe" &&
+      (value as Record<string, unknown>).action === "strengthen_draw_trace",
+    );
+    if (requestedTimingRepair && !timingRepair) {
+      throw new Error("whiteboard_scribe: invalid visual repair contract; refusing an identical renderer replay");
+    }
     const palette =
       (ctx.params["palette"] as string[] | undefined) ??
       (ctx.store["palette"] as string[] | undefined) ??
@@ -637,6 +648,7 @@ export const whiteboardScribe: Block = {
       runDir,
       outPath,
       generateImage,
+      ...(timingRepair ? { timingRepair } : {}),
       log: (m) => ctx.log(`wb: ${m}`),
     });
     const narrationPerformanceEvidence = await preflightNarrationPerformance({

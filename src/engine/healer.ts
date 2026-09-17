@@ -95,12 +95,14 @@ export interface HealDecision {
  */
 export type VisualRepairOwner =
   | "motion_comic"
+  | "whiteboard_scribe"
   | "timeline_assemble"
   | "stock_footage"
   | "intro_card";
 
 export type VisualRepairAction =
   | "reflow_bubble"
+  | "strengthen_draw_trace"
   | "recompose_overlay"
   | "resample_footage"
   | "rerender_card"
@@ -141,6 +143,9 @@ interface HealRule {
 const VISUAL_REPAIR_HEAL_CLASS: Readonly<Record<VisualRepairAction, HealClass>> = {
   // A speech bubble / overlay is composited in the finishing pass.
   reflow_bubble: "overlay_finish",
+  // Whiteboard timing repairs re-render the deterministic draw schedule from
+  // cached art/audio; no upstream story, image, or narration is replaced.
+  strengthen_draw_trace: "body_rebuild",
   recompose_overlay: "overlay_finish",
   // New clips mean a new body.
   resample_footage: "body_rebuild",
@@ -157,6 +162,7 @@ const VISUAL_REPAIR_HEAL_CLASS: Readonly<Record<VisualRepairAction, HealClass>> 
  */
 const VISUAL_REPAIR_ACTIONS_BY_OWNER: Readonly<Record<VisualRepairOwner, readonly VisualRepairAction[]>> = {
   motion_comic: ["reflow_bubble"],
+  whiteboard_scribe: ["strengthen_draw_trace"],
   timeline_assemble: ["recompose_overlay", "rebuild_timeline"],
   stock_footage: ["resample_footage"],
   intro_card: ["rerender_card"],
