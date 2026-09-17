@@ -1436,6 +1436,7 @@ export default defineSchema({
     createdAt: v.number(),
   })
     .index("by_owner", ["ownerId"])
+    .index("by_owner_scope", ["ownerId", "scope"])
     .index("by_owner_fingerprint", ["ownerId", "fingerprint"])
     .index("by_owner_logical_id", ["ownerId", "logicalId"])
     .index("by_channel", ["channelId"]),

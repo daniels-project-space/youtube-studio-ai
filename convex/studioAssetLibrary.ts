@@ -100,13 +100,21 @@ export const listForChannel = query({
   },
   handler: async (ctx, args) => {
     await requireStudioServiceIdentity(ctx, args.ownerId, "Studio Asset Library channel inventory");
-    const rows = await ctx.db
-      .query("studioAssetLibraryEntries")
-      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
-      .collect();
-    return currentEntries((rows.filter((row) =>
-      row.scope === "owned_studio" || row.channelId === args.channelId,
-    ) as AssetRow[]));
+    const [ownedRows, channelRows] = await Promise.all([
+      ctx.db
+        .query("studioAssetLibraryEntries")
+        .withIndex("by_owner_scope", (q) => q.eq("ownerId", args.ownerId).eq("scope", "owned_studio"))
+        .collect(),
+      ctx.db
+        .query("studioAssetLibraryEntries")
+        .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
+        .collect(),
+    ]);
+    const rowsById = new Map<string, (typeof ownedRows)[number]>();
+    for (const row of [...ownedRows, ...channelRows.filter((row) => row.ownerId === args.ownerId)]) {
+      rowsById.set(String(row._id), row);
+    }
+    return currentEntries([...rowsById.values()] as AssetRow[]);
   },
 });
 
