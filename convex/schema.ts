@@ -1355,6 +1355,9 @@ export default defineSchema({
     .index("by_owner_kind", ["ownerId", "kind"])
     .index("by_channel", ["channelId"])
     .index("by_channel_kind", ["channelId", "kind"])
+    // Library projections only need the retained video/thumbnail rows. Keep
+    // intermediate keyframes, clips, music, and captions out of card reads.
+    .index("by_run_kind", ["runId", "kind"])
     .index("by_run", ["runId"]),
 
   // Release-aware deletion ledger for per-run media. A successful upload

@@ -108,16 +108,16 @@ export async function currentLibraryThumbnail(
 }> {
   const refreshRuns = await ctx.db
     .query("runs")
-    .withIndex("by_channel_thumbnail_refresh_source", (q) => q
+    .withIndex("by_channel_status_thumbnail_refresh_source", (q) => q
       .eq("channelId", input.channelId)
+      .eq("status", "ok")
       .eq("thumbnailRefreshSourceRunId", input.runId))
     .collect();
   const refreshCandidates = await Promise.all(refreshRuns.map(async (candidate) => {
     const candidateThumbnail = (await ctx.db
       .query("assets")
-      .withIndex("by_run", (q) => q.eq("runId", candidate._id))
-      .collect())
-      .find((asset) => asset.kind === "thumbnail");
+      .withIndex("by_run_kind", (q) => q.eq("runId", candidate._id).eq("kind", "thumbnail"))
+      .first());
     return {
       status: candidate.status,
       finishedAt: candidate.finishedAt,
@@ -369,16 +369,27 @@ export const listVideos = query({
       // Server-side status filter.
       if (args.status && run.status !== args.status) continue;
 
-      // Pull this run's assets once. A final master with recorded release
-      // evidence is selected below from the sealed certificate reference,
-      // rather than by whichever `video` asset happened to be inserted first.
-      const assets = await ctx.db
-        .query("assets")
-        .withIndex("by_run", (q) => q.eq("runId", run._id))
-        .collect();
+      // Pull only the card's retained media kinds. A final master with
+      // recorded release evidence is selected below from the sealed
+      // certificate reference, rather than by whichever video asset happened
+      // to be inserted first.
+      // Card projections never need intermediate keyframes, clips, music, or
+      // captions. Keep all video rows because release evidence may seal a
+      // non-first master; the source thumbnail is the first thumbnail row,
+      // matching the previous by_run collection order.
+      const [videoAssets, thumbAsset] = await Promise.all([
+        ctx.db
+          .query("assets")
+          .withIndex("by_run_kind", (q) => q.eq("runId", run._id).eq("kind", "video"))
+          .collect(),
+        ctx.db
+          .query("assets")
+          .withIndex("by_run_kind", (q) => q.eq("runId", run._id).eq("kind", "thumbnail"))
+          .first()
+          .then((asset) => asset ?? undefined),
+      ]);
 
-      const fallbackVideoAsset = assets.find((a) => a.kind === "video");
-      const thumbAsset = assets.find((a) => a.kind === "thumbnail");
+      const fallbackVideoAsset = videoAssets[0];
       const storedReleaseEvidenceStatus = normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus);
       const sealedMasterKey = storedReleaseEvidenceStatus === "release_evidence_recorded"
         ? await recordedMasterKey(ctx, run._id)
@@ -391,7 +402,7 @@ export const listVideos = query({
           ? "evidence_incomplete"
           : storedReleaseEvidenceStatus;
       const videoAsset = sealedMasterKey
-        ? assets.find((asset) => asset.kind === "video" && asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
+        ? videoAssets.find((asset) => asset.r2Key === sealedMasterKey) ?? fallbackVideoAsset
         : fallbackVideoAsset;
       const videoKey = sealedMasterKey ?? fallbackVideoAsset?.r2Key ?? null;
 

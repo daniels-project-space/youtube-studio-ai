@@ -27,6 +27,12 @@ assert.doesNotMatch(library, /libraryVideos\?\.filter\(\(video\).*libraryState/,
   "collection badges must not silently stop at the 500-card presentation window");
 assert.match(videos, /export const librarySummary = query/);
 assert.match(videos, /withIndex\("by_owner_kind"/);
+assert.match(schema, /\.index\("by_run_kind", \["runId", "kind"\]\)/,
+  "Library card projections need a kind-scoped asset index");
+assert.match(videos, /withIndex\("by_run_kind", \(q\) => q\.eq\("runId", run\._id\)\.eq\("kind", "video"\)\)/,
+  "Library cards should not collect unrelated intermediate assets");
+assert.match(videos, /withIndex\("by_run_kind", \(q\) => q\.eq\("runId", run\._id\)\.eq\("kind", "thumbnail"\)\)/,
+  "Library cards should read thumbnails through the kind-scoped index");
 assert.match(library, /type CollectionMode = "active" \| "archived"/);
 assert.match(library, /Moved to archive/);
 assert.match(library, />\s*Undo\s*</);
