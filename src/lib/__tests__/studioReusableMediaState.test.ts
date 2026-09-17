@@ -22,6 +22,7 @@ const RUN_SOURCE = "run-source";
 const RUN_ONE = "run-one";
 const RUN_TWO = "run-two";
 const RUN_THREE = "run-three";
+const RUN_FOUR = "run-four";
 const digest = (value: string) => sha256Hex(value);
 
 function identity(role: "owner" | "service", ownerId = OWNER) {
@@ -43,7 +44,7 @@ function createMemoryState() {
       family: "narrated_stock",
       identity: { programBrief: { nicheKey: "psychology", subcategory: "stoicism" } },
     }],
-    ...[RUN_SOURCE, RUN_ONE, RUN_TWO, RUN_THREE].map((runId) => [runId, {
+    ...[RUN_SOURCE, RUN_ONE, RUN_TWO, RUN_THREE, RUN_FOUR].map((runId) => [runId, {
       _id: runId,
       ownerId: OWNER,
       channelId: CHANNEL,
@@ -277,6 +278,23 @@ async function main() {
   assert.equal(state.rows("studioEpisodeAssetFolderAssignments").length, 1, "automated promotion files the asset idempotently");
   assert.equal(state.rows("studioReusableMediaEpisodeClaims").length, 3);
   assert.equal(state.rows("studioReusableMediaUsageObservations").length, 1);
+
+  // The ordinal lookup is intentionally index-backed; an out-of-order high
+  // historical claim must still advance from the maximum, not insertion order.
+  state.rows("studioReusableMediaEpisodeClaims").push({
+    _id: "claim-high",
+    ownerId: OWNER,
+    channelId: CHANNEL,
+    runId: "run-historical-high",
+    episodeOrdinal: 100,
+  });
+  const fourth = await invoke<StudioReusableMediaPlan>(claimEpisodeAndResolve, service, {
+    ownerId: OWNER,
+    channelId: CHANNEL,
+    runId: RUN_FOUR,
+    request: claimRequest(RUN_FOUR),
+  });
+  assert.equal(fourth.episodeOrdinal, 101);
 
   const { fingerprint: _entryFingerprint, ...entryCore } = entry;
   void _entryFingerprint;
