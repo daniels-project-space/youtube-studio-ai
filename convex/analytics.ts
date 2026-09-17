@@ -111,27 +111,45 @@ export const overview = query({
 export const channelSummary = query({
   args: { ownerId: v.string() },
   handler: async (ctx, args) => {
-    const channels = await ctx.db
-      .query("channels")
-      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
-      .collect();
+    const [channels, runs, planBatches] = await Promise.all([
+      ctx.db
+        .query("channels")
+        .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+        .collect(),
+      // Fetch each owner-scoped history once. The previous implementation
+      // repeated two unbounded historical scans for every channel.
+      ctx.db
+        .query("runs")
+        .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+        .collect(),
+      ctx.db
+        .query("planBatches")
+        .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+        .collect(),
+    ]);
+
+    const runsByChannel = new Map<string, typeof runs>();
+    for (const run of runs) {
+      const rows = runsByChannel.get(String(run.channelId)) ?? [];
+      rows.push(run);
+      runsByChannel.set(String(run.channelId), rows);
+    }
+    const batchesByChannel = new Map<string, typeof planBatches>();
+    for (const batch of planBatches) {
+      const rows = batchesByChannel.get(String(batch.channelId)) ?? [];
+      rows.push(batch);
+      batchesByChannel.set(String(batch.channelId), rows);
+    }
 
     return await Promise.all(
       channels.map(async (ch) => {
         const latest = await latestChannelDay(ctx, ch._id);
-        const runs = await ctx.db
-          .query("runs")
-          .withIndex("by_channel", (q) => q.eq("channelId", ch._id))
-          .collect();
-        const planBatches = await ctx.db
-          .query("planBatches")
-          .withIndex("by_channel", (q) => q.eq("channelId", ch._id))
-          .collect();
-        const planningCost = planBatches
-          .filter((batch) => batch.ownerId === args.ownerId)
+        const channelRuns = runsByChannel.get(String(ch._id)) ?? [];
+        const channelBatches = batchesByChannel.get(String(ch._id)) ?? [];
+        const planningCost = channelBatches
           .reduce((sum, batch) => sum + batch.actualCostUsd, 0);
-        const costTotal = runs.reduce((s, r) => s + (r.costTotal ?? 0), 0) + planningCost;
-        const videoCount = runs.filter((r) => Boolean(r.youtubeVideoId)).length;
+        const costTotal = channelRuns.reduce((s, r) => s + (r.costTotal ?? 0), 0) + planningCost;
+        const videoCount = channelRuns.filter((r) => Boolean(r.youtubeVideoId)).length;
         return {
           channelId: ch._id,
           name: ch.name,
@@ -335,7 +353,9 @@ export const ownerTrends = query({
     // Per-channel window: newest `days` rows straight off the (channelId, date)
     // index instead of collecting each channel's full history. 365-day cap
     // bounds the unwindowed call.
-    const window = args.days && args.days > 0 ? args.days : 365;
+    const window = args.days && args.days > 0
+      ? Math.min(Math.floor(args.days), 365)
+      : 365;
     for (const ch of channels) {
       const sliced = (
         await ctx.db

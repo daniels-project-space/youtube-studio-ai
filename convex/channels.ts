@@ -442,12 +442,21 @@ async function projectChannelCard(ctx: QueryCtx, channel: Doc<"channels">) {
   const latestAcceptedRun = recentRuns.find((run) => acceptedRunIds.has(String(run._id)));
   let latestThumbnailKey: string | null = null;
   if (latestAcceptedRun) {
-    const assets = await ctx.db
-      .query("assets")
-      .withIndex("by_run", (q) => q.eq("runId", latestAcceptedRun._id))
-      .collect();
-    const sourceThumbnail = assets.find((asset) => asset.kind === "thumbnail");
-    const sourceVideoKey = assets.find((asset) => asset.kind === "video")?.r2Key ?? null;
+    // Channel tiles need only the retained media kinds. Intermediate
+    // keyframes, clips, music, and captions stay out of this fleet projection.
+    const [sourceThumbnail, sourceVideo] = await Promise.all([
+      ctx.db
+        .query("assets")
+        .withIndex("by_run_kind", (q) => q.eq("runId", latestAcceptedRun._id).eq("kind", "thumbnail"))
+        .first()
+        .then((asset) => asset ?? undefined),
+      ctx.db
+        .query("assets")
+        .withIndex("by_run_kind", (q) => q.eq("runId", latestAcceptedRun._id).eq("kind", "video"))
+        .first()
+        .then((asset) => asset ?? undefined),
+    ]);
+    const sourceVideoKey = sourceVideo?.r2Key ?? null;
     const current = await currentLibraryThumbnail(ctx, {
       ownerId: channel.ownerId,
       runId: latestAcceptedRun._id,

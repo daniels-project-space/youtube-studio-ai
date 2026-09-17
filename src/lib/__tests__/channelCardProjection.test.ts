@@ -44,6 +44,16 @@ assert.match(
   /const current = await currentLibraryThumbnail\(ctx, \{/,
   "channel-card projection must resolve refreshed candidates and Lo-Fi frames",
 );
+assert.match(
+  channelsSource,
+  /withIndex\("by_run_kind", \(q\) => q\.eq\("runId", latestAcceptedRun\._id\)\.eq\("kind", "thumbnail"\)\)/,
+  "channel-card projection must read only retained thumbnail media",
+);
+assert.match(
+  channelsSource,
+  /withIndex\("by_run_kind", \(q\) => q\.eq\("runId", latestAcceptedRun\._id\)\.eq\("kind", "video"\)\)/,
+  "channel-card projection must read only retained video media",
+);
 assert.doesNotMatch(
   channelsSource,
   /withIndex\("by_channel_kind"[^\n]+kind", \(q\) => q\.eq\("channelId", channel\._id\)/,
