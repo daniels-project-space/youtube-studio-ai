@@ -16,6 +16,10 @@ assert.doesNotMatch(css, /\.observationState/,
   "connection status belongs to the dedicated health panel, not a duplicate hero treatment");
 assert.match(page, /analyticsRefreshHealth\(row\)/);
 assert.match(page, /analyticsRefreshFleetHealth\(rows\)/);
+assert.match(page, /analyticsDataFreshness\(analyticsScope\)/,
+  "stored statistics must receive an explicit freshness classification before presentation");
+assert.match(page, /Recorded views/,
+  "stale or disconnected fleet values must be labeled as records, not live observations");
 assert.match(page, /Fleet refresh ledger/);
 assert.match(page, /Review connections/);
 assert.match(page, /\/channels\/\$\{row\.slug\}\?tab=settings/);

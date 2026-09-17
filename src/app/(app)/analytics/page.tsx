@@ -23,6 +23,10 @@ import {
   type AnalyticsRefreshHealthInput,
 } from "@/lib/analyticsRefreshPresentation";
 import {
+  analyticsDataFreshness,
+  type AnalyticsDataFreshness,
+} from "@/lib/analyticsDataFreshness";
+import {
   ANALYTICS_FLEET_PAGE_SIZE,
   nextAnalyticsFleetLimit,
 } from "@/lib/analyticsFleetPresentation";
@@ -157,6 +161,16 @@ export default function AnalyticsPage() {
   const hasTrend = (trend?.length ?? 0) > 0;
   const anyChannelData =
     (summary?.some((s) => s.subscriberCount > 0 || s.totalViews > 0) ?? false);
+  const analyticsScope = useMemo(() => {
+    if (!refreshStatus) return [];
+    return selected
+      ? refreshStatus.filter((row) => row.channelId === selected.channelId)
+      : refreshStatus;
+  }, [refreshStatus, selected]);
+  const dataFreshness = useMemo(
+    () => analyticsDataFreshness(analyticsScope),
+    [analyticsScope],
+  );
 
   return (
     <div className={styles.dashboard}>
@@ -169,6 +183,7 @@ export default function AnalyticsPage() {
         totalCost={overview?.totalCost ?? 0}
         videoCount={overview?.videoCount ?? 0}
         channelCount={overview?.channelCount ?? 0}
+        freshness={dataFreshness}
       />
 
       {loading ? (
@@ -188,9 +203,9 @@ export default function AnalyticsPage() {
               icon={<IconAnalytics width={24} height={24} />}
             />
           ) : selected ? (
-            <PerChannelCharts row={selected} trend={trend ?? []} />
+            <PerChannelCharts row={selected} trend={trend ?? []} freshness={dataFreshness} />
           ) : (
-            <FleetComparison rows={summary ?? []} />
+            <FleetComparison rows={summary ?? []} freshness={dataFreshness} />
           )}
 
           <QualityLearningPanel
@@ -217,6 +232,7 @@ function AnalyticsHero({
   totalCost,
   videoCount,
   channelCount,
+  freshness,
 }: {
   loading: boolean;
   selected: SummaryRow | null;
@@ -226,6 +242,7 @@ function AnalyticsHero({
   totalCost: number;
   videoCount: number;
   channelCount: number;
+  freshness: AnalyticsDataFreshness;
 }) {
   const scoped = selected ?? {
     subscriberCount: totalSubscribers,
@@ -238,23 +255,29 @@ function AnalyticsHero({
       <div className={styles.heroLead}>
         <span className={styles.eyebrow}>YouTube analytics</span>
         <h1>{selected ? selected.name : "Portfolio analytics"}</h1>
-        <p>Observed reach, committed spend, and released inventory.</p>
+        <p>{freshness.state === "current"
+          ? "Observed reach, committed spend, and released inventory."
+          : `${freshness.detail} Spend and released inventory remain current records.`}</p>
       </div>
 
-      <FleetEfficiencyField rows={rows} selectedChannelId={selected?.channelId ?? null} />
+      <FleetEfficiencyField rows={rows} selectedChannelId={selected?.channelId ?? null} freshness={freshness} />
 
       <div className={styles.metricRail}>
         <HeroMetric
           index="01"
-          label="Observed views"
+          label={freshness.state === "current" ? "Observed views" : "Recorded views"}
           value={loading ? "—" : compact(scoped.totalViews)}
-          hint={selected ? "Latest channel snapshot" : "Latest fleet snapshots"}
+          hint={freshness.state === "current"
+            ? (selected ? "Latest channel snapshot" : "Latest fleet snapshots")
+            : freshness.detail}
         />
         <HeroMetric
           index="02"
-          label="Subscribers"
+          label={freshness.state === "current" ? "Subscribers" : "Recorded subscribers"}
           value={loading ? "—" : compact(scoped.subscriberCount)}
-          hint={selected ? "Current observed audience" : `${channelCount} channels in scope`}
+          hint={freshness.state === "current"
+            ? (selected ? "Current observed audience" : `${channelCount} channels in scope`)
+            : freshness.detail}
           tone="live"
         />
         <HeroMetric
@@ -303,20 +326,22 @@ function HeroMetric({
 function FleetEfficiencyField({
   rows,
   selectedChannelId,
+  freshness,
 }: {
   rows: SummaryRow[];
   selectedChannelId: string | null;
+  freshness: AnalyticsDataFreshness;
 }) {
   const nodes = layoutAnalyticsEfficiencyField(rows, selectedChannelId);
 
   return (
     <figure className={styles.efficiencyField}>
       <figcaption>
-        <span>Reach / spend field</span>
+        <span>{freshness.state === "current" ? "Reach / spend field" : "Recorded reach / spend"}</span>
         <small>Node size = published inventory</small>
       </figcaption>
       <div className={styles.fieldPlot}>
-        <svg viewBox="0 0 720 255" role="img" aria-label="Channel reach compared with production spend">
+        <svg viewBox="0 0 720 255" role="img" aria-label={`${freshness.label}: channel reach compared with production spend`}>
           <defs>
             <pattern id="analytics-field-grid" width="48" height="42" patternUnits="userSpaceOnUse">
               <path d="M 48 0 L 0 0 0 42" fill="none" stroke="currentColor" strokeWidth="1" opacity=".08" />
@@ -342,7 +367,7 @@ function FleetEfficiencyField({
               ) : null}
               <circle cx={node.x} cy={node.y} r={node.radius + (node.selected ? 5 : 2)} className={styles.fieldNodeHalo} />
               <circle cx={node.x} cy={node.y} r={node.radius} fill="url(#analytics-node)">
-                <title>{`${node.name}: ${compact(node.totalViews)} views · ${fmtUsd(node.costTotal)} spend · ${node.videoCount} videos.`}</title>
+                <title>{`${node.name}: ${compact(node.totalViews)} ${freshness.state === "current" ? "observed" : "recorded"} views · ${fmtUsd(node.costTotal)} spend · ${node.videoCount} videos.`}</title>
               </circle>
               {node.label ? (
                 <text x={node.label.x} y={node.label.y} textAnchor={node.label.anchor} className={styles.fieldNodeLabel}>
@@ -372,13 +397,13 @@ function FleetEfficiencyField({
           {nodes.map((node) => (
             <Link key={node.channelId} href={`/channels/${node.slug}?tab=analytics`}>
               <span>{node.name}</span>
-              <small>{compact(node.totalViews)} views · {fmtUsd(node.costTotal)}</small>
+              <small>{compact(node.totalViews)} {freshness.state === "current" ? "views" : "recorded views"} · {fmtUsd(node.costTotal)}</small>
             </Link>
           ))}
         </div>
       </details>
       <div className={styles.fieldLegend}>
-        <span><i /> Observed channel</span>
+        <span><i /> {freshness.state === "current" ? "Observed channel" : "Stored channel snapshot"}</span>
         <span>Open a node for channel analytics. Tied values fan out from their exact anchor.</span>
       </div>
     </figure>
@@ -462,9 +487,11 @@ function AnalyticsRefreshHealth({ rows, selectedSlug }: { rows: RefreshStatusRow
 function PerChannelCharts({
   row,
   trend,
+  freshness,
 }: {
   row: SummaryRow;
   trend: TrendRow[];
+  freshness: AnalyticsDataFreshness;
 }) {
   const label = (d: string) => d.slice(5); // MM-DD
   const subs: ChartSeries = {
@@ -504,8 +531,8 @@ function PerChannelCharts({
     <section className={styles.trendRoom}>
       <AnalyticsSectionHeading
         eyebrow="90 days"
-        title={`${row.name} trend`}
-        detail="Daily and cumulative signals."
+        title={`${row.name}${freshness.state === "current" ? " trend" : " recorded trend"}`}
+        detail={freshness.state === "current" ? "Daily and cumulative signals." : freshness.detail}
       />
       <div className={styles.trendSummary}>
         <span><small>Observed view change</small><strong>{viewChange >= 0 ? "+" : ""}{compact(viewChange)}</strong><em>first to latest snapshot</em></span>
@@ -539,7 +566,7 @@ const FLEET_METRICS: readonly { key: FleetMetric; label: string }[] = [
 
 /** A categorical fleet comparison must use ranked bars, not a line that falsely
  * suggests the channels form a time sequence. */
-function FleetComparison({ rows }: { rows: SummaryRow[] }) {
+function FleetComparison({ rows, freshness }: { rows: SummaryRow[]; freshness: AnalyticsDataFreshness }) {
   const [metric, setMetric] = useState<FleetMetric>("totalViews");
   const [visibleLimit, setVisibleLimit] = useState(ANALYTICS_FLEET_PAGE_SIZE);
   const ranked = [...rows].sort((left, right) => right[metric] - left[metric]);
@@ -551,9 +578,9 @@ function FleetComparison({ rows }: { rows: SummaryRow[] }) {
   return (
     <section className={styles.comparisonRoom}>
       <AnalyticsSectionHeading
-        eyebrow="Channels"
-        title="Performance comparison"
-        detail="Select a channel for its daily trend."
+        eyebrow={freshness.state === "current" ? "Channels" : "Stored snapshots"}
+        title={freshness.state === "current" ? "Performance comparison" : "Recorded comparison"}
+        detail={freshness.state === "current" ? "Select a channel for its daily trend." : freshness.detail}
       />
       <div className={styles.metricTabs} role="tablist" aria-label="Fleet comparison metric">
         {FLEET_METRICS.map((item) => (
