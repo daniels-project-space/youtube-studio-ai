@@ -10,6 +10,7 @@ export type ChannelMotionMotif =
   | "mind"
   | "casefile"
   | "book"
+  | "storybook"
   | "pen"
   | "summit"
   | "health"
@@ -55,6 +56,10 @@ export function channelMotionMotifFor({
   // book, Drawn Past is the pen-drawn format, and Chalk & Compound is finance
   // ledger work rather than a generic sketch icon.
   if (/drawn\s*past|drawn/.test(name)) return "pen";
+  // Children’s learning is a distinct production lane with an age-fit show
+  // bible and safety review. Give it a dedicated, gently animated storybook
+  // mark rather than quietly inheriting the generic classroom glyph.
+  if (/children|\bkids?\b|toddler|preschool|early\s*primary|little\s*learn/.test(`${name} ${nicheKey}`)) return "storybook";
   if (/inked\s*histories|history|historical/.test(name)) return "book";
   if (/chalk/.test(name)) return nicheKey === "finance" ? "ledger" : "lesson";
   if (/whiteboard/.test(name)) return "lesson";

@@ -277,7 +277,7 @@ const MODULE_MOTIFS: Readonly<Record<string, ChannelMotionMotif>> = {
   verify: "health",
   "editorial-evidence-packet": "casefile",
   "source-bound-story-spine": "book",
-  "children-learning-studio": "book",
+  "children-learning-studio": "storybook",
   metadata: "ledger",
   narration: "mind",
   lofi: "lofi",

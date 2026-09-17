@@ -36,6 +36,7 @@ export function NicheMotionGlyph({
       {motif === "mind" && <Mind />}
       {motif === "casefile" && <Casefile />}
       {motif === "book" && <Book />}
+      {motif === "storybook" && <Storybook />}
       {motif === "pen" && <Pen />}
       {motif === "summit" && <Summit />}
       {motif === "health" && <Health />}
@@ -78,6 +79,9 @@ function Casefile() {
 }
 function Book() {
   return <><circle cx="16" cy="16" r="11.5" stroke="currentColor" strokeWidth="1" opacity=".38" /><path className={styles.bookLeft} d="M16 12.2c-2.2-1.6-4.5-1.4-6.4-.2v8.4c1.9-1.2 4.2-1.3 6.4.2" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" /><path className={styles.bookRight} d="M16 12.2c2.2-1.6 4.5-1.4 6.4-.2v8.4c-1.9-1.2-4.2-1.3-6.4.2" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" /><path className={styles.bookLine} d="M12 15.3h2.4m3.2 0H20m-8 2.4h2.4m3.2 0H20" stroke="currentColor" strokeWidth=".95" strokeLinecap="round" /></>;
+}
+function Storybook() {
+  return <><circle cx="16" cy="16" r="11.5" stroke="currentColor" strokeWidth="1" opacity=".38" /><path className={styles.storybookLeft} d="M16 13c-2.15-1.55-4.4-1.32-6.35-.12v7.65c1.9-1.18 4.15-1.3 6.35.18" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" /><path className={styles.storybookRight} d="M16 13c2.15-1.55 4.4-1.32 6.35-.12v7.65c-1.9-1.18-4.15-1.3-6.35.18" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" /><path className={styles.storybookTrail} d="M11.8 16.3h2.25m4.05 0h2.25" stroke="currentColor" strokeWidth=".95" strokeLinecap="round" /><path className={styles.storybookStar} d="m16 8.1.8 1.75 1.9.28-1.38 1.34.32 1.9L16 12.48l-1.64.89.32-1.9-1.38-1.34 1.9-.28z" fill="currentColor" /></>;
 }
 function Pen() {
   return <><circle cx="16" cy="16" r="11.5" stroke="currentColor" strokeWidth="1" opacity=".38" /><path d="m11 20.8 1-3 7.4-7.4 2 2-7.4 7.4zM18.8 11.2l2 2" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /><path className={styles.penLine} d="M10 23c2.7-1.4 5.6-.4 7.7-1.6 1.8-1.1 2.5-3.3 4.3-4" stroke="currentColor" strokeWidth="1.15" strokeLinecap="round" /></>;

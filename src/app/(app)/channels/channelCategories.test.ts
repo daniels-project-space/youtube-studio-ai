@@ -12,6 +12,7 @@ const channels = [
   { id: "chalk", name: "Chalk & Compound", identity: { niche: "Finance" } },
   { id: "investory", name: "Investory", identity: { niche: "Finance" } },
   { id: "quiz", name: "QuizYear", identity: { niche: "Educational" } },
+  { id: "children", name: "Little Lantern", identity: { niche: "Children's Learning" } },
   { id: "odd", name: "Small Wonders", identity: { niche: "Curiosities" } },
 ];
 
@@ -21,13 +22,14 @@ assert.equal(channelCategoryFor(channels[2]), "stories");
 assert.equal(channelCategoryFor(channels[3]), "money");
 assert.equal(channelCategoryFor(channels[4]), "money", "investory must not match the incidental `story` suffix");
 assert.equal(channelCategoryFor(channels[5]), "learning");
-assert.equal(channelCategoryFor(channels[6]), "other");
+assert.equal(channelCategoryFor(channels[6]), "learning", "children's channels belong with learning, not the generic catch-all");
+assert.equal(channelCategoryFor(channels[7]), "other");
 assert.equal(channelCategoryLabelFor(channels[0]), "Sound & atmosphere");
 assert.equal(channelCategoryLabelFor(channels[3]), "Money & systems");
-assert.equal(channelCategoryLabelFor(channels[6]), "Independent channels");
+assert.equal(channelCategoryLabelFor(channels[7]), "Independent channels");
 assert.deepEqual(
   groupChannelsByCategory(channels).map((group) => [group.key, group.channels.map((channel) => channel.id)]),
-  [["sound", ["seaside"]], ["mindset", ["stoic"]], ["stories", ["inked"]], ["learning", ["quiz"]], ["money", ["chalk", "investory"]], ["other", ["odd"]]],
+  [["sound", ["seaside"]], ["mindset", ["stoic"]], ["stories", ["inked"]], ["learning", ["quiz", "children"]], ["money", ["chalk", "investory"]], ["other", ["odd"]]],
 );
 
 console.log("channel category grouping tests passed");

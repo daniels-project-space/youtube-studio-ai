@@ -57,7 +57,7 @@ export function channelCategoryFor(channel: CategoryAwareChannel): ChannelCatego
   // story itself word-bounded so new finance names cannot leak into history.
   if (/finance|invest|tax|money|compound|business|economy/.test(terms)) return "money";
   if (/history|lore|crime|mystery|heist|comic|drawn past|inked|\bstory\b|stories/.test(terms)) return "stories";
-  if (/education|learning|whiteboard|explainer|science|quiz|tutorial/.test(terms)) return "learning";
+  if (/education|learning|children|\bkids?\b|toddler|preschool|early\s*primary|curriculum|whiteboard|explainer|science|quiz|tutorial/.test(terms)) return "learning";
   return "other";
 }
 

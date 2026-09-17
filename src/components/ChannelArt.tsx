@@ -22,6 +22,7 @@ const MOTIF_FALLBACK_PALETTES: Readonly<Record<ChannelMotionMotif, readonly [str
   mind: ["#1a1937", "#463b79", "#9d9be8"],
   casefile: ["#17191f", "#41424b", "#be8e50"],
   book: ["#2a1d1b", "#654034", "#d0a46b"],
+  storybook: ["#182843", "#49699a", "#ffd38a"],
   pen: ["#29201e", "#68433d", "#d58a6d"],
   summit: ["#16232f", "#3d5860", "#dd9a5c"],
   health: ["#102b31", "#28706f", "#a4d6bd"],

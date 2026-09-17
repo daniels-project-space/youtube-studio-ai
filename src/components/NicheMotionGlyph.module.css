@@ -12,6 +12,9 @@
 .glyph[data-motif="book"] .bookLeft { transform-origin: 16px 16px; animation: bookTurnLeft 3.7s ease-in-out infinite; }
 .glyph[data-motif="book"] .bookRight { transform-origin: 16px 16px; animation: bookTurnRight 3.7s ease-in-out infinite; }
 .glyph[data-motif="book"] .bookLine { animation: bookInk 3.7s ease-in-out infinite; }
+.glyph[data-motif="storybook"] .storybookLeft { transform-origin: 16px 17px; animation: storybookTurnLeft 4.1s ease-in-out infinite; }
+.glyph[data-motif="storybook"] .storybookRight { transform-origin: 16px 17px; animation: storybookTurnRight 4.1s ease-in-out infinite; }
+.glyph[data-motif="storybook"] .storybookStar { transform-origin: 16px 10.8px; animation: storybookSpark 4.1s ease-in-out infinite; }
 .glyph[data-motif="pen"] .penLine { stroke-dasharray: 18; stroke-dashoffset: 18; animation: penDraw 3.1s ease-in-out infinite; }
 .glyph[data-motif="summit"] .summitArrow { transform-origin: 16px 11px; animation: summitRise 2.8s ease-in-out infinite; }
 .glyph[data-motif="health"] .healthRing { transform-origin: 16px 16px; animation: healthPulse 2.8s ease-in-out infinite; }
@@ -34,6 +37,9 @@
 @keyframes bookTurnLeft { 0%,68%,100% { transform: skewY(0); } 77% { transform: skewY(-11deg) scaleX(.9); } 86% { transform: skewY(0); } }
 @keyframes bookTurnRight { 0%,68%,100% { transform: skewY(0); } 77% { transform: skewY(11deg) scaleX(.9); } 86% { transform: skewY(0); } }
 @keyframes bookInk { 0%,74%,100% { opacity:.5; } 84% { opacity:1; } }
+@keyframes storybookTurnLeft { 0%,64%,100% { transform: skewY(0); } 74% { transform: skewY(-9deg) scaleX(.91); } 84% { transform: skewY(0); } }
+@keyframes storybookTurnRight { 0%,64%,100% { transform: skewY(0); } 74% { transform: skewY(9deg) scaleX(.91); } 84% { transform: skewY(0); } }
+@keyframes storybookSpark { 0%,26%,100% { transform: scale(.72) rotate(-10deg); opacity:.42; } 42%,74% { transform: scale(1.08) rotate(10deg); opacity:1; } }
 @keyframes penDraw { 0%,18% { stroke-dashoffset:18; opacity:.38; } 58%,100% { stroke-dashoffset:0; opacity:1; } }
 @keyframes summitRise { 0%,100% { transform: translateY(1px); opacity:.52; } 45% { transform: translateY(-2px); opacity:1; } }
 @keyframes healthPulse { 0%,100% { transform: scale(.88); opacity:.42; } 50% { transform: scale(1.05); opacity:.9; } }
