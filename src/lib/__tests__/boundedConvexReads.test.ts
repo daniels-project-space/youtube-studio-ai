@@ -67,6 +67,17 @@ assert.doesNotMatch(
   /withIndex\("by_channel", \(q\) => q\.eq\("channelId", args\.channelId\)\)\n\s*\.collect\(\)/,
   "planner admission must not rescan the full historical batch ledger",
 );
+const saveTopics = planSource.slice(planSource.indexOf("export const savePlanTopics"), planSource.indexOf("export const claimPlanItem"));
+assert.match(
+  saveTopics,
+  /withIndex\("by_channel_order", \(q\) => q\.eq\("channelId", args\.channelId\)\)[\s\S]*?\.order\("desc"\)[\s\S]*?\.first\(\)/,
+  "topic insertion should derive the next order from one indexed latest row",
+);
+assert.doesNotMatch(
+  saveTopics,
+  /withIndex\("by_channel_order", \(q\) => q\.eq\("channelId", args\.channelId\)\)\n\s*\.collect\(\)/,
+  "topic insertion must not scan the whole channel plan history",
+);
 
 const doctorSource = readFileSync(
   new URL("../../trigger/pipelineDoctor.ts", import.meta.url),

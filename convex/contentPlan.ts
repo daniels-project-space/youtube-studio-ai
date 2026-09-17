@@ -1334,16 +1334,19 @@ export const savePlanTopics = mutation({
       return { state: "blocked" as const, error };
     }
 
-    const existingItems = await ctx.db
-      .query("contentPlan")
-      .withIndex("by_batch", (q) => q.eq("batchId", args.batchId))
-      .collect();
+    const [existingItems, latestChannelItem] = await Promise.all([
+      ctx.db
+        .query("contentPlan")
+        .withIndex("by_batch", (q) => q.eq("batchId", args.batchId))
+        .collect(),
+      ctx.db
+        .query("contentPlan")
+        .withIndex("by_channel_order", (q) => q.eq("channelId", args.channelId))
+        .order("desc")
+        .first(),
+    ]);
     if (existingItems.length) throw new Error("plan batch has partial unexpected topic rows");
-    const channelItems = await ctx.db
-      .query("contentPlan")
-      .withIndex("by_channel_order", (q) => q.eq("channelId", args.channelId))
-      .collect();
-    let order = channelItems.length ? Math.max(...channelItems.map((row) => row.order)) + 1 : 0;
+    let order = (latestChannelItem?.order ?? -1) + 1;
     const itemIds = [];
     const now = Date.now();
     for (let index = 0; index < args.items.length; index++) {
