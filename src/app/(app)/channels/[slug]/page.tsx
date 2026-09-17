@@ -13,12 +13,11 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
-import type { ChannelIdentity, RunRow, VideoRow } from "@/lib/types";
+import type { ChannelIdentity, VideoRow } from "@/lib/types";
 import type { ReleaseEvidenceStatus } from "@/lib/releaseEvidenceStatus";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
 import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
 import type { ChannelModuleLock } from "@/lib/channelModuleLock";
-import { RunCard } from "@/components/RunCard";
 import { StatCard } from "@/components/StatCard";
 import { Chart, compact, type ChartSeries } from "@/components/Chart";
 import { VideoGrid } from "@/components/VideoGrid";
@@ -31,7 +30,7 @@ import {
 import { SkeletonList } from "@/components/Skeleton";
 import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
 import { NicheMotionGlyph } from "@/components/NicheMotionGlyph";
-import { LatestVideoWidget } from "@/components/LatestVideoWidget";
+import { RecentVideos } from "@/components/RecentVideos";
 import { StatsCharts } from "@/components/StatsCharts";
 import {
   IconAnalytics,
@@ -663,15 +662,6 @@ function OverviewTab({
     costPerVideo: number | null;
   };
 }) {
-  const visibleRuns = (runs ?? []).filter((run) => run.libraryState !== "archived");
-  const recentFailures = visibleRuns
-    .filter((run) => run.status === "failed")
-    .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
-    .slice(0, 1);
-  const recent: RunRow[] = [...visibleRuns.filter((run) => run.status !== "failed").slice(0, 7), ...recentFailures]
-    .map((r) => ({ ...r, channelName: channel.name, channelSlug: channel.slug }))
-    .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
-    .slice(0, 8);
   const overBudget =
     kpis.costPerVideo !== null && kpis.costPerVideo > channel.budget;
 
@@ -699,7 +689,6 @@ function OverviewTab({
   return (
     <>
       <section className={styles.overviewMetrics} aria-label="Channel operating metrics">
-        <StatCard label="Recent runs" value={kpis.runs} hint="latest 500 maximum" />
         <StatCard label="Recent published" value={kpis.videos} accent="var(--color-secondary)" />
         <StatCard label="Recent completed" value={kpis.completed} accent="var(--color-ok)" />
         <StatCard
@@ -719,48 +708,28 @@ function OverviewTab({
                 : `within ${fmtUsd(channel.budget)} budget`
           }
         />
-        <StatCard label="Budget / run" value={fmtUsd(channel.budget)} />
       </section>
 
-      <LatestVideoWidget ownerId={channel.ownerId} channelId={channel._id as Id<"channels">} />
+      <RecentVideos ownerId={channel.ownerId} channelId={channel._id as Id<"channels">} limit={8} />
 
       <StatsCharts runs={(runs ?? []) as { status: string; startedAt?: number; finishedAt?: number; costTotal?: number }[]} />
 
-      {channel.identity?.persona && (
-        <section className={styles.overviewSection}>
-          <div className={styles.sectionRail}><span>Channel voice</span><i /></div>
-          <blockquote className={styles.personaStatement}>{channel.identity.persona}</blockquote>
-        </section>
-      )}
-
       <section className={styles.overviewSection}>
-        <div className={styles.sectionRail}><span>Production grammar</span><i /></div>
-        <div className={styles.configurationGrid}>
-          {settings.map((s) => (
-            <div key={s.label} className={styles.configurationItem}>
-              <span>{s.label}</span>
-              <strong>{s.value}</strong>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      <section className={styles.overviewSection}>
-        <header className={styles.recentHeader}>
-          <div className={styles.sectionRail}><span>Recent production</span><i /></div>
-          <Link href="/runs">Open full production history →</Link>
-        </header>
-        {runs === undefined ? (
-          <SkeletonList rows={3} />
-        ) : recent.length > 0 ? (
-          <div className={styles.recentList}>
-            {recent.map((r) => (
-              <RunCard key={r._id} run={r} />
+        <details className={styles.channelBrief}>
+          <summary>
+            <span>Voice &amp; production rules</span>
+            <small>{settings.length} active controls</small>
+          </summary>
+          {channel.identity?.persona ? <blockquote className={styles.personaStatement}>{channel.identity.persona}</blockquote> : null}
+          <div className={styles.configurationGrid}>
+            {settings.map((s) => (
+              <div key={s.label} className={styles.configurationItem}>
+                <span>{s.label}</span>
+                <strong>{s.value}</strong>
+              </div>
             ))}
           </div>
-        ) : (
-          <EmptyState title="No runs for this channel yet" />
-        )}
+        </details>
       </section>
     </>
   );

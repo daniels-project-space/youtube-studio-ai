@@ -568,6 +568,30 @@
 
 .personaStatement::before { content: "“"; position: absolute; top: 0.42rem; left: 0.55rem; color: var(--color-blueprint); font-family: var(--font-display); font-size: 1.5rem; }
 
+.channelBrief {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.channelBrief > summary {
+  display: flex;
+  min-height: 44px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.72rem 0.78rem;
+  color: var(--color-muted);
+  cursor: pointer;
+  list-style: none;
+}
+
+.channelBrief > summary::-webkit-details-marker { display: none; }
+.channelBrief > summary::before { content: "+"; color: var(--color-blueprint); font: 700 0.9rem/1 var(--font-mono); }
+.channelBrief[open] > summary::before { content: "−"; }
+.channelBrief > summary > span { margin-right: auto; color: var(--color-fg); font-size: 0.82rem; font-weight: 650; }
+.channelBrief > summary > small { color: var(--color-faint); font: 700 0.54rem/1 var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.channelBrief > .personaStatement { margin-bottom: 0.72rem; }
+
 .configurationGrid {
   display: grid;
   grid-template-columns: repeat(6, minmax(0,1fr));
