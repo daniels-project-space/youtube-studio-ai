@@ -16,6 +16,11 @@ decision for each real `run-pipeline` execution.
 - The plan is embedded in the existing automatic preflight receipt and passed
   into the engine seed store, so it survives Trigger retries and is visible in
   the run's durable evidence.
+- The receipt also carries one fingerprinted `AutomaticControlPolicy` for the
+  six selected quality-of-life behaviors: exact-run resume, content-addressed
+  reuse, unified preflight, owner-wide deduplication, deterministic conflict
+  waves, and undoable bulk actions. New automatic callers cannot quietly fall
+  back to independent “smart” heuristics.
 
 ## Release boundary
 
@@ -39,4 +44,3 @@ existing explicit public-publish policy. Those are correctness boundaries, not
   so automatic runs cannot drift back to one universal title band.
 - **15:** frame selection is typed as discovery surface, audience intent,
   tone, format, and script evidence instead of a niche-specific string rule.
-

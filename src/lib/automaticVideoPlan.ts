@@ -1,5 +1,6 @@
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
+import { createAutomaticControlPolicy, assertAutomaticControlPolicy, type AutomaticControlPolicy } from "@/lib/automaticControlPolicy";
 import { resolveTitleProfile, type TitleProfileId } from "@/lib/titleProfile";
 
 /**
@@ -39,6 +40,8 @@ export type AutomaticVideoPlan = {
     retryAcceptedPaidWork: false;
     maxOrchestratorAttempts: 2;
   };
+  /** One immutable automatic policy for resume/reuse/preflight/dedup/batch/undo. */
+  controlPolicy: AutomaticControlPolicy;
   fingerprint: string;
 };
 
@@ -92,6 +95,7 @@ export function createAutomaticVideoPlan(input: {
     niche: input.niche,
   });
   const frameStrategy = frameStrategyFor({ titleProfile, family: input.family, niche: input.niche });
+  const controlPolicy = createAutomaticControlPolicy();
   const inputContract = {
     version: AUTOMATIC_VIDEO_PLAN_VERSION,
     moduleIds,
@@ -118,6 +122,7 @@ export function createAutomaticVideoPlan(input: {
       retryAcceptedPaidWork: false as const,
       maxOrchestratorAttempts: 2 as const,
     },
+    controlPolicy,
   };
   return { ...body, fingerprint: sha256Hex(canonicalJson(body)) };
 }
@@ -138,6 +143,7 @@ export function assertAutomaticVideoPlan(value: unknown): AutomaticVideoPlan {
   if (plan.retryPolicy?.resumeCompletedStages !== true || plan.retryPolicy?.retryAcceptedPaidWork !== false) {
     throw new Error("automatic video plan retry policy is invalid");
   }
+  assertAutomaticControlPolicy(plan.controlPolicy);
   const { fingerprint, ...body } = plan;
   if (typeof fingerprint !== "string" || fingerprint !== sha256Hex(canonicalJson(body))) {
     throw new Error("automatic video plan fingerprint mismatch");

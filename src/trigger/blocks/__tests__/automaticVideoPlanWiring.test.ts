@@ -8,6 +8,7 @@ const runner = readFileSync(resolve(process.cwd(), "src/trigger/runPipeline.ts")
 
 assert.match(runner, /createAutomaticVideoPlan\(/);
 assert.match(runner, /seedStore\.automaticVideoPlan = automaticVideoPlan/);
+assert.match(runner, /automaticControlPolicy: automaticVideoPlan\.controlPolicy/);
 assert.match(metadata, /ctx\.store\["automaticVideoPlan"\]/);
 assert.match(metadata, /frameStrategy: automaticVideoPlan\?\.frameStrategy/);
 assert.match(metacraft, /SEALED FRAME STRATEGY/);

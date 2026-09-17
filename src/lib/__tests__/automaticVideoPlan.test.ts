@@ -16,6 +16,13 @@ assert.equal(plan.titleProfile, "searchable_long");
 assert.equal(plan.frameStrategy.discoverySurface, "search");
 assert.equal(plan.frameStrategy.scriptEvidenceRequired, true);
 assert.equal(plan.artifactPolicy.ownership, "content_addressed_no_overwrite");
+assert.equal(plan.controlPolicy.mode, "fully_automatic");
+assert.equal(plan.controlPolicy.resume.exactRun, true);
+assert.equal(plan.controlPolicy.reuse.strategy, "content_addressed");
+assert.equal(plan.controlPolicy.preflight.unified, true);
+assert.equal(plan.controlPolicy.deduplication.crossChannel, true);
+assert.equal(plan.controlPolicy.batching.maxConcurrent, 3);
+assert.equal(plan.controlPolicy.bulkActions.undoable, true);
 assert.deepEqual(assertAutomaticVideoPlan(plan), plan);
 assert.throws(() => assertAutomaticVideoPlan({ ...plan, fingerprint: "bad" }), /fingerprint mismatch/);
 assert.throws(

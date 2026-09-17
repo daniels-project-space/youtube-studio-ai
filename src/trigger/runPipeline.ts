@@ -2276,6 +2276,7 @@ export const runPipelineTask = task({
         qualityGate: createAutomaticQualityGateContract(),
         rollbackPlan: createAutomaticReleaseRollbackPlan({ runId: payload.runId }),
         automaticVideoPlan,
+        automaticControlPolicy: automaticVideoPlan.controlPolicy,
       });
       await convex.mutation(api.runs.recordAutomaticPreflight, {
         ownerId,

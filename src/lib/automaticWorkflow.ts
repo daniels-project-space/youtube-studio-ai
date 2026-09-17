@@ -1,5 +1,12 @@
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
+import {
+  assertAutomaticControlPolicy,
+  createAutomaticControlPolicy,
+  type AutomaticControlPolicy,
+  AUTOMATIC_RESUME_MAX_ATTEMPTS,
+  AUTOMATIC_WORKFLOW_VERSION,
+} from "@/lib/automaticControlPolicy";
 import type {
   AutomaticProviderPlan,
   AutomaticQualityGateContract,
@@ -13,8 +20,8 @@ import { assertAutomaticVideoPlan } from "@/lib/automaticVideoPlan";
  * These are deliberately provider-neutral: provider adapters still own live
  * capacity admission, while this layer prevents avoidable duplicate work.
  */
-export const AUTOMATIC_WORKFLOW_VERSION = "automatic-workflow/v1" as const;
-export const AUTOMATIC_RESUME_MAX_ATTEMPTS = 2 as const;
+export { assertAutomaticControlPolicy, createAutomaticControlPolicy, AUTOMATIC_RESUME_MAX_ATTEMPTS, AUTOMATIC_WORKFLOW_VERSION };
+export type { AutomaticControlPolicy } from "@/lib/automaticControlPolicy";
 
 export type AutomaticPreflightReceipt = {
   version: typeof AUTOMATIC_WORKFLOW_VERSION;
@@ -41,6 +48,8 @@ export type AutomaticPreflightReceipt = {
   rollbackPlan?: AutomaticReleaseRollbackPlan;
   /** One automatic decision for the entire compiled video, not per-block hints. */
   automaticVideoPlan?: AutomaticVideoPlan;
+  /** The six selected workflow improvements, sealed as one automatic policy. */
+  automaticControlPolicy: AutomaticControlPolicy;
   fingerprint: string;
 };
 
@@ -59,6 +68,7 @@ export function createAutomaticPreflightReceipt(input: {
   qualityGate?: AutomaticQualityGateContract;
   rollbackPlan?: AutomaticReleaseRollbackPlan;
   automaticVideoPlan?: AutomaticVideoPlan;
+  automaticControlPolicy?: AutomaticControlPolicy;
 }): AutomaticPreflightReceipt {
   if (!input.runId.trim() || !input.channelId.trim()) throw new Error("automatic preflight identity is required");
   if (!Number.isFinite(input.budgetUsd) || input.budgetUsd < 0) throw new Error("automatic preflight budget is invalid");
@@ -69,6 +79,9 @@ export function createAutomaticPreflightReceipt(input: {
   }
   if (!input.resumeBoundaryReady) throw new Error("automatic preflight resume boundary is not ready");
   if (input.automaticVideoPlan !== undefined) assertAutomaticVideoPlan(input.automaticVideoPlan);
+  const automaticControlPolicy = input.automaticControlPolicy
+    ? assertAutomaticControlPolicy(input.automaticControlPolicy)
+    : createAutomaticControlPolicy();
   const body = {
     version: AUTOMATIC_WORKFLOW_VERSION,
     runId: input.runId,
@@ -92,6 +105,7 @@ export function createAutomaticPreflightReceipt(input: {
     ...(input.qualityGate ? { qualityGate: input.qualityGate } : {}),
     ...(input.rollbackPlan ? { rollbackPlan: input.rollbackPlan } : {}),
     ...(input.automaticVideoPlan ? { automaticVideoPlan: input.automaticVideoPlan } : {}),
+    automaticControlPolicy,
   };
   return { ...body, fingerprint: sha256Hex(canonicalJson(body)) };
 }

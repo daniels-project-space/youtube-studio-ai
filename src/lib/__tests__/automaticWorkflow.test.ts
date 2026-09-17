@@ -30,6 +30,8 @@ assert.equal(preflight.checks.length, 3);
 assert.deepEqual(preflight.paidModules, ["render", "script"]);
 assert.deepEqual(preflight.reusedDependencies?.map((entry) => entry.kind), ["footage", "music"]);
 assert.equal(preflight.automaticVideoPlan?.fingerprint, automaticVideoPlan.fingerprint);
+assert.equal(preflight.automaticControlPolicy.preflight.beforePaidWork, true);
+assert.equal(preflight.automaticControlPolicy.bulkActions.undoable, true);
 assert.throws(() => createAutomaticPreflightReceipt({
   runId: "run-1", channelId: "channel-a", budgetUsd: 1, reservedMaxCostUsd: 2,
   paidModules: [], resumeBoundaryReady: true,
