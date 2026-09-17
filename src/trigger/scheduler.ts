@@ -105,6 +105,10 @@ export const generationScheduler = schedules.task({
   // is idempotent per channel/run, so an extra tick only observes busy/not-due
   // state and never duplicates a video.
   cron: "0 * * * *",
+  // If the control-plane enqueue is briefly unavailable, replay the same
+  // claimed run instead of waiting for the next hourly tick. Convex run
+  // fences and Trigger idempotency keys prevent duplicate video work.
+  retry: { maxAttempts: 2, minTimeoutInMs: 10_000, maxTimeoutInMs: 120_000, factor: 2 },
   run: async () => {
     const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.autopilot);
     if (!gate.enabled) return gate;
