@@ -747,6 +747,9 @@ export default defineSchema({
     channelId: v.id("channels"),
     status: v.string(), // queued|running|ok|failed|canceled
     startedAt: v.optional(v.number()),
+    // Stable Library sort key. Historical rows are filled by the bounded,
+    // service-only backfill; do not mutate startedAt to migrate presentation.
+    libraryOrderAt: v.optional(v.number()),
     finishedAt: v.optional(v.number()),
     costTotal: v.number(),
     // Original worker amount for idempotent scheduled completion. The stored
@@ -1076,8 +1079,10 @@ export default defineSchema({
     leaseRecoveryPending: v.optional(v.boolean()),
   })
     .index("by_owner", ["ownerId"])
+    .index("by_owner_library_order", ["ownerId", "libraryOrderAt"])
     .index("by_owner_status", ["ownerId", "status"])
     .index("by_channel", ["channelId"])
+    .index("by_channel_library_order", ["channelId", "libraryOrderAt"])
     // Packaging-only thumbnail candidates share the durable run/stage lease
     // infrastructure, but are not ordinary video runs. These indexes let
     // cadence and channel-card projections select source productions without

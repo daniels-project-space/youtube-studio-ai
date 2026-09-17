@@ -173,6 +173,7 @@ export const createShell = mutation({
       channelId: args.channelId,
       status: "awaiting_route_qualification_benchmark_dispatch",
       startedAt: now,
+      libraryOrderAt: now,
       heartbeatAt: now,
       costTotal: 0,
       releaseEvidenceStatus: "not_ready",

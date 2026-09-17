@@ -489,6 +489,7 @@ export const createCandidateShell = mutation({
       channelId: source.channelId,
       status: "queued",
       startedAt: args.now,
+      libraryOrderAt: args.now,
       costTotal: 0,
       releaseEvidenceStatus: "not_ready",
       releaseEvidenceUpdatedAt: args.now,

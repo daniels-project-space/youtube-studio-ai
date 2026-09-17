@@ -13,6 +13,7 @@ const base = {
 
 assert.equal(libraryRunCreatedAt(base), 100);
 assert.equal(libraryRunCreatedAt({ ...base, startedAt: 125 }), 125);
+assert.equal(libraryRunCreatedAt({ ...base, startedAt: 0 }), 0);
 
 assert.equal(matchesLibraryRunScope(base, { ownerId: "owner-a" }), true);
 assert.equal(matchesLibraryRunScope({ ...base, ownerId: "owner-b" }, { ownerId: "owner-a" }), false);
@@ -27,4 +28,3 @@ assert.equal(matchesLibraryTitle("Taxation Isn't Complex", "lofi"), false);
 assert.equal(matchesLibraryTitle("Taxation Isn't Complex", ""), true);
 
 console.log("Library projection scope and filter tests passed");
-

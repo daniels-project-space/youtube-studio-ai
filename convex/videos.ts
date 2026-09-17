@@ -1,4 +1,4 @@
-import { mutation, query } from "./studioFunctions";
+import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import type { Doc, Id } from "./_generated/dataModel";
@@ -519,16 +519,16 @@ export const listVideos = query({
 /**
  * Cursor-backed Library projection.
  *
- * The cursor is over the owner/channel run index, before expensive asset,
+ * The cursor is over the owner/channel Library-order index, before expensive asset,
  * release-certificate, metadata, and thumbnail-candidate joins. Filters are
  * applied in the same order as the legacy projection, so an invalid/failed
  * run consumes cursor space but cannot crowd a finished card out of the
- * returned page forever. `_creationTime` is the stable cursor order; the
- * displayed `createdAt` remains the historical `startedAt` fallback.
+ * returned page forever. The indexed key is the historical displayed
+ * `startedAt ?? _creationTime` value, filled on older rows by the bounded
+ * service-only migration below.
  *
- * The UI can adopt this endpoint once the owner-wide canonical ordering
- * migration is complete. Until then the existing list remains the exact
- * compatibility path for the older startedAt-sorted surface.
+ * The UI can adopt this endpoint only after the migration-readiness check and
+ * live tie-order comparison pass. Until then the existing list is retained.
  */
 export const listVideosPage = query({
   args: {
@@ -554,14 +554,24 @@ export const listVideosPage = query({
       throw new Error("library date range is invalid");
     }
 
+    // A partially migrated owner would interleave undefined keys with real
+    // timestamps. Fail closed rather than returning a plausible wrong page.
+    const missingOrder = await ctx.db
+      .query("runs")
+      .withIndex("by_owner_library_order", (q) => q
+        .eq("ownerId", args.ownerId)
+        .eq("libraryOrderAt", undefined))
+      .first();
+    if (missingOrder) throw new Error("Library ordering migration is incomplete");
+
     const source = args.channelId
       ? ctx.db
           .query("runs")
-          .withIndex("by_channel", (q) => q.eq("channelId", args.channelId!))
+          .withIndex("by_channel_library_order", (q) => q.eq("channelId", args.channelId!))
           .order(args.order === "oldest" ? "asc" : "desc")
       : ctx.db
           .query("runs")
-          .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+          .withIndex("by_owner_library_order", (q) => q.eq("ownerId", args.ownerId))
           .order(args.order === "oldest" ? "asc" : "desc");
     const runPage = await source.paginate(args.paginationOpts);
     const filters: LibraryVideoFilters = {
@@ -577,13 +587,50 @@ export const listVideosPage = query({
     const projected = await Promise.all(
       runPage.page.map((run) => projectLibraryVideo(ctx, run, filters, channelCache)),
     );
-    // Index order is the cursor contract. Do not globally sort by startedAt:
-    // doing so would make page 2 capable of preceding page 1 when a legacy
-    // run has a delayed/missing startedAt value.
+    // Index order is the cursor contract; sorting an individual page again
+    // would let an item cross an unobserved page boundary.
     return {
       ...runPage,
       page: projected.filter((row): row is Record<string, unknown> => row !== null),
     };
+  },
+});
+
+/**
+ * Fill only missing Library presentation keys in bounded, idempotent waves.
+ * The predicate index shrinks after each wave, so no long-lived migration
+ * cursor can skip a row while concurrent inserts arrive with their own key.
+ * This operation never touches execution timing or release evidence.
+ */
+export const backfillLibraryOrderPage = mutation({
+  args: { ownerId: v.string() },
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "Library order backfill");
+    const batch = await ctx.db
+      .query("runs")
+      .withIndex("by_owner_library_order", (q) => q
+        .eq("ownerId", args.ownerId)
+        .eq("libraryOrderAt", undefined))
+      .take(65);
+    const target = batch.slice(0, 64);
+    await Promise.all(target.map((run) => ctx.db.patch(run._id, {
+      libraryOrderAt: libraryRunCreatedAt(run),
+    })));
+    return { patched: target.length, hasMore: batch.length > target.length };
+  },
+});
+
+/** Owner-scoped, indexed readiness check; no full-run collection. */
+export const libraryOrderReady = query({
+  args: { ownerId: v.string() },
+  handler: async (ctx, args) => {
+    const missing = await ctx.db
+      .query("runs")
+      .withIndex("by_owner_library_order", (q) => q
+        .eq("ownerId", args.ownerId)
+        .eq("libraryOrderAt", undefined))
+      .first();
+    return { ready: missing === null };
   },
 });
 

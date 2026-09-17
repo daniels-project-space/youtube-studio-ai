@@ -190,6 +190,7 @@ export const admit = mutation({
       channelId: args.channelId,
       status: "awaiting_reviewed_evidence_dispatch",
       startedAt: now,
+      libraryOrderAt: now,
       heartbeatAt: now,
       costTotal: 0,
       releaseEvidenceStatus: "not_ready",
