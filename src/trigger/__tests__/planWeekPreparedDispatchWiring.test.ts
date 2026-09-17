@@ -16,4 +16,8 @@ assert.match(script, /PLAN_WEEK_PREPARED_NARRATION_MAX_COST_USD/);
 assert.match(narration, /tasks\.trigger\("plan-week-prepared-music"/);
 assert.match(narration, /idempotencyKeys\.create/);
 assert.match(narration, /PLAN_WEEK_PREPARED_MUSIC_MAX_COST_USD/);
+assert.match(narration, /planStorySpine/);
+assert.match(narration, /tasks\.trigger\("plan-week-prepared-images"/);
+assert.match(narration, /idempotencyKeys\.create/);
+assert.match(narration, /PLAN_WEEK_PREPARED_IMAGES_MAX_COST_USD/);
 console.log("automatic weekly prepared-media dispatch wiring passed");

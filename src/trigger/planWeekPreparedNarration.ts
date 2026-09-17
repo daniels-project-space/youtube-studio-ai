@@ -39,6 +39,7 @@ import {
   type NarrationPerformanceEvidence,
 } from "@/lib/narrationPerformance";
 import { narrationTtsCost } from "@/engine/pricing";
+import { planStorySpine } from "@/engine/storySpine";
 import { synthNarration, normalizeTtsProvider, stripAudioTags } from "@/lib/tts";
 import {
   createQwenNarrationSourceEvidence,
@@ -50,6 +51,7 @@ import {
   type QwenTtsSpeaker,
   type QwenTtsReceipt,
 } from "@/lib/qwenTts";
+import type { PlanWeekPreparedImageShot } from "@/trigger/planWeekPreparedImages";
 
 export interface PlanWeekPreparedNarrationArgs {
   ownerId: string;
@@ -136,6 +138,111 @@ function hasMusicStage(manifest: PlanWeekPreparationManifest): boolean {
     const block = (entry as Record<string, unknown>).block ?? (entry as Record<string, unknown>).id;
     return block === "music";
   });
+}
+
+function hasImageStage(manifest: PlanWeekPreparationManifest): boolean {
+  return manifest.execution.pipeline.some((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    const block = (entry as Record<string, unknown>).block ?? (entry as Record<string, unknown>).id;
+    return block === "novita_render_images";
+  });
+}
+
+/**
+ * Build the exact still packet from the frozen narration clock.  Story Spine
+ * is deterministic and provider-free, so the weekly worker can prepare the
+ * same shot identities the scheduled runner will later validate without
+ * inventing a second creative plan or making an unpriced model call.
+ */
+export function buildPreparedImageShots(
+  manifest: PlanWeekPreparationManifest,
+  narration: PlanWeekPreparedNarration,
+): {
+  shots: Array<{
+    id: string;
+    prompt: string;
+    negative: string;
+    seed: number;
+    candidateCount: number;
+    cameraMove: PlanWeekPreparedImageShot["cameraMove"];
+    shotScale: PlanWeekPreparedImageShot["shotScale"];
+    lens: string;
+    seconds: number;
+    motion: string;
+  }>;
+  generationProfile: "production" | "hero";
+  style?: string;
+  director: string;
+} {
+  const seed = seedRecord(manifest);
+  const styleDNA = seed.styleDNA && typeof seed.styleDNA === "object" && !Array.isArray(seed.styleDNA)
+    ? seed.styleDNA as Record<string, unknown>
+    : undefined;
+  const imageConfig = manifest.execution.moduleConfig.novita_render_images;
+  const spine = planStorySpine({
+    topic: manifest.plan.topic,
+    narrationDurationSec: narration.narrationDurationSec,
+    sentenceTimings: narration.sentenceTimings,
+    styleDNA,
+    generationProfile: imageConfig?.generationProfile ?? "production",
+    targetShotSec: typeof imageConfig?.targetShotSec === "number" ? imageConfig.targetShotSec : 6,
+  });
+  const specs = new Map(spine.dpVisualSpecs.map((spec) => [spec.shotId, spec]));
+  const profiles = new Set(spine.shotList.map((shot) => shot.generationProfile));
+  const generationProfile = profiles.has("hero") ? "hero" : "production";
+  const shots = spine.shotList.map((shot) => {
+    const spec = specs.get(shot.id);
+    if (!spec) throw new Error(`weekly prepared images lost DP visual spec for ${shot.id}`);
+    return {
+      id: shot.id,
+      prompt: [manifest.prompts.visual, spec.keyframePrompt, shot.prompt].filter(Boolean).join("\n\n"),
+      negative: [shot.negative, spec.negativePrompt].filter(Boolean).join(", "),
+      seed: shot.seed,
+      candidateCount: shot.candidateCount,
+      cameraMove: shot.cameraMove,
+      shotScale: shot.shotScale,
+      lens: shot.lens,
+      seconds: shot.seconds,
+      motion: shot.motion,
+    };
+  });
+  const style = typeof seed.styleGrammar === "string" && seed.styleGrammar.trim()
+    ? seed.styleGrammar.trim()
+    : undefined;
+  return { shots, generationProfile, ...(style ? { style } : {}), director: manifest.prompts.visual };
+}
+
+async function dispatchPreparedImages(
+  manifest: PlanWeekPreparationManifest,
+  payload: PlanWeekPreparedNarrationArgs,
+  narration: PlanWeekPreparedNarration,
+): Promise<string | undefined> {
+  if (!hasImageStage(manifest)) return undefined;
+  const maxCostUsd = Number(process.env.PLAN_WEEK_PREPARED_IMAGES_MAX_COST_USD ?? "8");
+  if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0 || maxCostUsd > 1_000) {
+    throw new Error("weekly prepared images dispatch has an invalid cost ceiling");
+  }
+  const packet = buildPreparedImageShots(manifest, narration);
+  const imagesPayload = {
+    ownerId: payload.ownerId,
+    channelId: payload.channelId,
+    channelSlug: payload.channelSlug,
+    batchId: payload.batchId,
+    itemId: payload.itemId,
+    manifestKey: payload.manifestKey,
+    manifestSha256: payload.manifestSha256,
+    ...packet,
+    maxCostUsd,
+  };
+  const idempotencyKey = await idempotencyKeys.create(
+    `plan-week-images:${payload.ownerId}:${payload.manifestSha256}`,
+    { scope: "global" },
+  );
+  const handle = await tasks.trigger("plan-week-prepared-images", imagesPayload, {
+    concurrencyKey: `plan-week-images:${manifest.ownerId}:${manifest.channelId}`,
+    idempotencyKey,
+  });
+  return handle.id;
 }
 
 async function dispatchPreparedMusic(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedNarrationArgs): Promise<string | undefined> {
@@ -254,7 +361,8 @@ export const planWeekPreparedNarrationTask = task({
     const prior = await readSidecar(sidecarKey, audioKey, manifest);
     if (prior) {
       const musicTriggerRunId = await dispatchPreparedMusic(manifest, payload);
-      return { ok: true, reused: true, sidecarKey, audioKey, musicTriggerRunId, costUsd: 0, audioSha256: prior.audioSha256 };
+      const imagesTriggerRunId = await dispatchPreparedImages(manifest, payload, prior);
+      return { ok: true, reused: true, sidecarKey, audioKey, musicTriggerRunId, imagesTriggerRunId, costUsd: 0, audioSha256: prior.audioSha256 };
     }
 
     const scriptKey = planWeekPreparedScriptKey(scope);
@@ -405,10 +513,12 @@ export const planWeekPreparedNarrationTask = task({
         const winner = await readSidecar(sidecarKey, audioKey, manifest);
         if (!winner) throw new Error("weekly prepared narration sidecar was lost after create-only collision");
         const musicTriggerRunId = await dispatchPreparedMusic(manifest, payload);
-        return { ok: true, reused: true, sidecarKey, audioKey, musicTriggerRunId, costUsd: 0, audioSha256: winner.audioSha256 };
+        const imagesTriggerRunId = await dispatchPreparedImages(manifest, payload, winner);
+        return { ok: true, reused: true, sidecarKey, audioKey, musicTriggerRunId, imagesTriggerRunId, costUsd: 0, audioSha256: winner.audioSha256 };
       }
       const musicTriggerRunId = await dispatchPreparedMusic(manifest, payload);
-      return { ok: true, reused: false, sidecarKey, audioKey, musicTriggerRunId, costUsd, audioSha256 };
+      const imagesTriggerRunId = await dispatchPreparedImages(manifest, payload, prepared);
+      return { ok: true, reused: false, sidecarKey, audioKey, musicTriggerRunId, imagesTriggerRunId, costUsd, audioSha256 };
     } finally {
       await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
     }
