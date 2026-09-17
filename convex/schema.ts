@@ -3173,6 +3173,21 @@ export default defineSchema({
     .index("by_owner_day", ["ownerId", "day"])
     .index("by_channel_day", ["channelId", "day"]),
 
+  // Owner-authored children-learning concept drafts. These are review handoffs,
+  // not approved CurriculumEpisodeSeeds, Show Bibles, channel records, or
+  // publishing authority. No render or scheduler reads this table.
+  childrenReviewIntakes: defineTable({
+    ownerId: v.string(),
+    channelName: v.string(),
+    ageBand: v.union(v.literal("toddler"), v.literal("preschool"), v.literal("early_primary")),
+    learningObjective: v.string(),
+    curriculumDraft: v.string(),
+    showBibleDraft: v.string(),
+    readyForReview: v.boolean(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  }).index("by_owner_updated", ["ownerId", "updatedAt"]),
+
   // Single project-wide "what are we working toward right now" record, so
   // both automation and Daniel can query current intent/priorities. Not
   // per-owner scoped (one project, one active goal) — history is simply the

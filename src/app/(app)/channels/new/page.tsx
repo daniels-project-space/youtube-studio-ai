@@ -1348,6 +1348,9 @@ export default function NewChannelWizard() {
     || !exactAutomaticPreviewReady
     || ((publishMode !== "draft" || toggles.crosspost) && !approvedForPublish)
   );
+  const reviewHandoffHref = supervisedAdmission?.reviewHref === "/children-review"
+    ? `/children-review?channelName=${encodeURIComponent(name)}`
+    : supervisedAdmission?.reviewHref;
   const selectedNicheOutsideFeatured = Boolean(nicheKey && !FEATURED_NICHE_KEYS.has(nicheKey));
   const visibleNiches = showAllNiches || selectedNicheOutsideFeatured
     ? NICHES
@@ -1964,7 +1967,7 @@ export default function NewChannelWizard() {
               <span>This registered route is not automatic production and cannot render, spend, create a YouTube channel, or publish.</span>
               {supervisedAdmission.requiredArtifacts.length > 0 && <span>Required before a separately authorized next stage: {supervisedAdmission.requiredArtifacts.join(" · ")}.</span>}
               {supervisedAdmission.provenance && <span style={{ color: "var(--color-muted)", fontSize: "0.76rem" }}>{supervisedAdmission.provenance}</span>}
-              {supervisedAdmission.reviewHref && <Link href={supervisedAdmission.reviewHref} style={{ ...btnGhost, justifySelf: "start" }}>Open private review desk</Link>}
+              {reviewHandoffHref && <Link href={reviewHandoffHref} style={{ ...btnGhost, justifySelf: "start" }}>Open private review desk</Link>}
             </div>
           )}
           <div className={styles.summaryLedger}>
@@ -2062,8 +2065,8 @@ export default function NewChannelWizard() {
               ? <button disabled title="Checking owner access before saving" style={{ ...btnPrimary, opacity: 0.5 }}>Checking owner…</button>
               : <a href="/api/operations/authorize" style={btnPrimary}>Verify owner to save</a>
             : supervisedAdmission
-              ? supervisedAdmission.reviewHref
-                ? <Link href={supervisedAdmission.reviewHref} style={btnPrimary}>Open private review desk</Link>
+              ? reviewHandoffHref
+                ? <Link href={reviewHandoffHref} style={btnPrimary}>Open private review desk</Link>
               : <button disabled title="A private review package is required before this action" style={{ ...btnPrimary, opacity: 0.5 }}>Private review package required</button>
             : <button
                 onClick={() => void create(Date.now())}

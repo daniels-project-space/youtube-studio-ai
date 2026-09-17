@@ -216,6 +216,7 @@ const CHILDREN_SUPERVISED_CHANNEL_ADMISSION: RegisteredSupervisedNonGeminiChanne
     "one observable learning objective and assessment",
     "fresh child-editor approval bound to the Show Bible, Episode Graph, and lesson contract",
   ]),
+  reviewHref: "/children-review",
 });
 
 const CASEFILE_SUPERVISED_CHANNEL_ADMISSION: RegisteredSupervisedNonGeminiChannelAdmission = Object.freeze({
