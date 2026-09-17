@@ -2577,6 +2577,13 @@ export default defineSchema({
     .index("by_status_lease", ["status", "leaseExpiresAt"])
     .index("by_channel_status", ["channelId", "status"])
     .index("by_channel_quota_day", ["channelId", "quotaDay"])
+    // Claim admission only needs live leases for one channel. Keep expired
+    // and historical dispatch rows out of that hot-path read.
+    .index("by_channel_status_lease", ["channelId", "status", "leaseExpiresAt"])
+    // Daily quota admission counts uploaded rows for one channel/day. The
+    // status component makes retry and approval history invisible to the
+    // quota read while preserving legacy rows that have no quotaDay.
+    .index("by_channel_quota_status", ["channelId", "quotaDay", "status"])
     .index("by_owner_created", ["ownerId", "createdAt"])
     .index("by_owner_status_publish_at", ["ownerId", "status", "publishAt"])
     .index("by_channel_status_publish_at", ["channelId", "status", "publishAt"])

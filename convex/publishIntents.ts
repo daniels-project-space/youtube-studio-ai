@@ -553,21 +553,25 @@ export const claim = mutation({
     const quotaDay = localDateKey(args.now, timezone);
     const active = await ctx.db
       .query("publishIntents")
-      .withIndex("by_channel_status", (q) =>
-        q.eq("channelId", intent.channelId).eq("status", "dispatching"),
+      .withIndex("by_channel_status_lease", (q) =>
+        q
+          .eq("channelId", intent.channelId)
+          .eq("status", "dispatching")
+          .gt("leaseExpiresAt", args.now),
       )
       .collect();
-    const activeDispatches = active.filter(
-      (row) => row._id !== intent._id && (row.leaseExpiresAt ?? 0) > args.now,
-    ).length;
+    const activeDispatches = active.filter((row) => row._id !== intent._id).length;
     const uploadsToday = (
       await ctx.db
         .query("publishIntents")
-        .withIndex("by_channel_quota_day", (q) =>
-          q.eq("channelId", intent.channelId).eq("quotaDay", quotaDay),
+        .withIndex("by_channel_quota_status", (q) =>
+          q
+            .eq("channelId", intent.channelId)
+            .eq("quotaDay", quotaDay)
+            .eq("status", "uploaded"),
         )
         .collect()
-    ).filter((row) => row.status === "uploaded").length;
+    ).length;
     const repairedTiming = reconcileLegacyDispatchTiming({
       status: intent.status,
       attempts: intent.attempts,
