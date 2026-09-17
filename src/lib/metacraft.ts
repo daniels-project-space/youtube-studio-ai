@@ -1232,7 +1232,6 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       }
 
       const w = survivors[best];
-      const pinnedPromise = makePinnedComment();
       // ONE description+tags, written FOR the winner (parallel work already done).
       // Mechanical structured output — flash, no thinking.
       let description = "";
@@ -1280,7 +1279,11 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           `preserving the judged title with deterministic package fallback`,
         );
       }
-      const pinnedComment = await pinnedPromise;
+      // The pinned comment is optional. Start it only after the required
+      // description/tags package has been admitted: if that request fails or
+      // has an ambiguous post-dispatch outcome, there is no metadata package
+      // to ship and an in-flight comment would be avoidable provider spend.
+      const pinnedComment = packageFallback ? "" : await makePinnedComment();
       if (!titleDecision) throw new Error("metacraft: title decision receipt missing after judge admission");
       a.log?.(
         `metacraft: [${w.frame}] wins (${judged ? `click ${score}/10` : "UNJUDGED — lint only"}) ` +
