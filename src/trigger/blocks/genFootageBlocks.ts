@@ -57,6 +57,7 @@ import {
 } from "@/engine/cinematicKeyframeReview";
 import {
   CINEMATIC_CLIP_REVIEW_VERSION,
+  type MiniMaxH3OpeningMotionQaEvidence,
 } from "@/engine/cinematicClipReview";
 import {
   GENERATED_FOOTAGE_SCENE_MANIFEST_VERSION,
@@ -84,6 +85,62 @@ import {
   type MiniMaxH3Execution,
   type MiniMaxH3Provider,
 } from "@/lib/minimaxH3";
+import { measureMiniMaxH3OpeningMotionQa } from "@/lib/minimaxH3OpeningMotionQa";
+
+class MiniMaxH3OpeningMotionDefect extends Error {
+  constructor(
+    readonly evidence: Exclude<ReturnType<typeof measureMiniMaxH3OpeningMotionQa>, MiniMaxH3OpeningMotionQaEvidence>,
+    label: string,
+  ) {
+    super(
+      `${label} opening froze for ${evidence.openingFrozenHoldSec.toFixed(2)}s ` +
+      `(limit ${evidence.maxOpeningFrozenHoldSec.toFixed(2)}s)`,
+    );
+    this.name = "MiniMaxH3OpeningMotionDefect";
+  }
+}
+
+/**
+ * Generic and signature H3 clips do not run the source-bound Casefile visual
+ * reviewer. They still need an independent check of the actual moving bytes:
+ * a valid container and duration can conceal an initial conditioning-image
+ * hold. The caller owns the one bounded repair take; this helper only proves
+ * whether a specific delivered take is fit to enter an edit.
+ */
+async function materializeVerifiedMiniMaxH3Take(args: {
+  label: string;
+  outputBytes: Uint8Array;
+  localPath: string;
+  nativeDurationSec: number;
+}): Promise<{ localPath: string; openingMotionQa: MiniMaxH3OpeningMotionQaEvidence }> {
+  if (args.outputBytes.byteLength < 1_024) {
+    throw new Error(`${args.label} returned an undersized native clip`);
+  }
+  const localPath = await writeBytes(args.localPath, args.outputBytes);
+  const measured = await probe(localPath);
+  if (
+    !measured.hasVideo ||
+    !Number.isFinite(measured.durationSec) ||
+    Math.abs(measured.durationSec - args.nativeDurationSec) > 0.08
+  ) {
+    throw new Error(`${args.label} failed native video/duration verification`);
+  }
+  const openingMotion = measureMiniMaxH3OpeningMotionQa({
+    videoPath: localPath,
+    durationSec: measured.durationSec,
+    fps: MINIMAX_H3_PROFILE.fps,
+  });
+  if (openingMotion.verdict !== "pass") {
+    if (openingMotion.verdict === "unavailable") {
+      throw new Error(
+        `${args.label} cannot verify opening motion with ffmpeg/freezedetect` +
+        (openingMotion.detail ? ` (${openingMotion.detail})` : ""),
+      );
+    }
+    throw new MiniMaxH3OpeningMotionDefect(openingMotion, args.label);
+  }
+  return { localPath, openingMotionQa: openingMotion };
+}
 
 function stableVisualAttemptToken(value: string): string {
   const token = value
@@ -647,15 +704,48 @@ async function renderGeneratedScenePlanWithH3(args: {
         maxCostUsd: remainingBeforeMotion,
       }));
       observedCostUsd += clip.receipt.runtime.costUsd;
-      if (clip.outputBytes.byteLength < 1_024) {
-        throw new Error(`gen_footage: H3 scene ${index + 1} returned an undersized clip`);
+      let acceptedClip = clip;
+      let acceptedTake: Awaited<ReturnType<typeof materializeVerifiedMiniMaxH3Take>>;
+      try {
+        acceptedTake = await materializeVerifiedMiniMaxH3Take({
+          label: `gen_footage: H3 scene ${index + 1}`,
+          outputBytes: clip.outputBytes,
+          localPath: join(tmp, `clip_${index + 1}.mp4`),
+          nativeDurationSec,
+        });
+      } catch (error) {
+        if (!(error instanceof MiniMaxH3OpeningMotionDefect)) throw error;
+        const retryRemaining = args.maxCostUsd - observedCostUsd;
+        if (!Number.isFinite(retryRemaining) || retryRemaining <= 0) {
+          throw new Error(`gen_footage: H3 opening-motion repair has no remaining budget for ${scene.id}`);
+        }
+        const retry = await renderMiniMaxH3(buildMiniMaxH3SceneRequest({
+          provider: "novita",
+          execution: "on-demand",
+          prompt:
+            `${scene.still}. Preserve the exact accepted first frame, recurring subject, setting, wardrobe, props, lighting, and channel identity. ` +
+            "Do not hold the conditioning image: begin the authored action in the first decoded frame.",
+          motionPrompt:
+            `${scene.motion} Start visible subject or camera motion immediately; no static opening hold.`,
+          cameraInstruction:
+            `Use the authored ${scene.cameraMove} move with ${scene.shotScale} framing and ${scene.lens} lens; ` +
+            "begin movement immediately, keep the action physically coherent, and avoid a scene change.",
+          ...(scene.negative ? { negativePrompt: scene.negative } : {}),
+          seed,
+          firstFrame: { r2Key: still.key, sha256: firstFrameSha256 },
+          output: { r2Key: `${args.prefix}/h3/clip-${String(index + 1).padStart(4, "0")}-retry-2.mp4` },
+          maxCostUsd: retryRemaining,
+        }));
+        observedCostUsd += retry.receipt.runtime.costUsd;
+        acceptedClip = retry;
+        acceptedTake = await materializeVerifiedMiniMaxH3Take({
+          label: `gen_footage: H3 scene ${index + 1} repair take`,
+          outputBytes: retry.outputBytes,
+          localPath: join(tmp, `clip_${index + 1}-retry-2.mp4`),
+          nativeDurationSec,
+        });
       }
-      const localPath = await writeBytes(join(tmp, `clip_${index + 1}.mp4`), clip.outputBytes);
-      const measured = await probe(localPath);
-      if (!measured.hasVideo || !Number.isFinite(measured.durationSec) || Math.abs(measured.durationSec - nativeDurationSec) > 0.08) {
-        throw new Error(`gen_footage: H3 scene ${index + 1} failed native video/duration verification`);
-      }
-      localClipPaths.set(scene.id, localPath);
+      localClipPaths.set(scene.id, acceptedTake.localPath);
       scenes.push({
         id: scene.id,
         imagePrompt: scene.still,
@@ -671,8 +761,9 @@ async function renderGeneratedScenePlanWithH3(args: {
         ...(scene.continuitySeed !== undefined ? { seed: scene.continuitySeed } : { seed }),
         stillKey: still.key,
         stillUrl: still.url,
-        clipKey: clip.receipt.output.r2Key,
-        clipUrl: localPath,
+        clipKey: acceptedClip.receipt.output.r2Key,
+        clipUrl: acceptedTake.localPath,
+        openingMotionQa: acceptedTake.openingMotionQa,
       });
     }
   } catch (error) {
@@ -1025,15 +1116,46 @@ export async function generateSignatureClips(
         maxCostUsd: remainingBeforeMotion,
       }));
       observedCostUsd += clip.receipt.runtime.costUsd;
-      if (nativeDurationSec <= 0 || clip.outputBytes.byteLength < 1_024) {
-        throw new Error(`signature_clips: MiniMax H3 scene ${index + 1} returned an invalid native clip`);
+      let acceptedTake: Awaited<ReturnType<typeof materializeVerifiedMiniMaxH3Take>>;
+      try {
+        acceptedTake = await materializeVerifiedMiniMaxH3Take({
+          label: `signature_clips: MiniMax H3 scene ${index + 1}`,
+          outputBytes: clip.outputBytes,
+          localPath: join(tmp, `sig_${index}.mp4`),
+          nativeDurationSec,
+        });
+      } catch (error) {
+        if (!(error instanceof MiniMaxH3OpeningMotionDefect)) throw error;
+        const retryRemaining = stageBudgetUsd - observedCostUsd;
+        if (!Number.isFinite(retryRemaining) || retryRemaining <= 0) {
+          throw new Error(`signature_clips: H3 opening-motion repair has no remaining budget for scene ${index + 1}`);
+        }
+        const retry = await renderMiniMaxH3(buildMiniMaxH3SceneRequest({
+          provider: "novita",
+          execution: "on-demand",
+          prompt:
+            `${scene.still}. Preserve the exact accepted signature still, recurring subject, setting, wardrobe, props, lighting, and channel identity. ` +
+            "Do not hold the conditioning image: begin the authored action in the first decoded frame.",
+          motionPrompt:
+            `${scene.motion} Start visible subject or camera motion immediately; no static opening hold.`,
+          cameraInstruction:
+            `Use the authored ${scene.cameraMove} move with ${scene.shotScale} framing and ${scene.lens} lens; ` +
+            "begin movement immediately, keep the motion physically coherent, and avoid scene changes.",
+          ...(scene.negative ? { negativePrompt: scene.negative } : {}),
+          seed,
+          firstFrame: { r2Key: still.key, sha256: firstFrameSha256 },
+          output: { r2Key: `${prefix}/h3/clip-${String(index + 1).padStart(3, "0")}-retry-2.mp4` },
+          maxCostUsd: retryRemaining,
+        }));
+        observedCostUsd += retry.receipt.runtime.costUsd;
+        acceptedTake = await materializeVerifiedMiniMaxH3Take({
+          label: `signature_clips: MiniMax H3 scene ${index + 1} repair take`,
+          outputBytes: retry.outputBytes,
+          localPath: join(tmp, `sig_${index}-retry-2.mp4`),
+          nativeDurationSec,
+        });
       }
-      const localClip = await writeBytes(join(tmp, `sig_${index}.mp4`), clip.outputBytes);
-      const measured = await probe(localClip);
-      if (!measured.hasVideo || !Number.isFinite(measured.durationSec) || Math.abs(measured.durationSec - nativeDurationSec) > 0.08) {
-        throw new Error(`signature_clips: MiniMax H3 scene ${index + 1} failed native duration/video verification`);
-      }
-      clips.push(localClip);
+      clips.push(acceptedTake.localPath);
       ctx.log(`signature_clips: scene ${index + 1}/${scenes.length} H3 take accepted`);
     }
     return { clips, cost: observedCostUsd };
@@ -1845,6 +1967,7 @@ export const genFootage: Block = {
               ? { terminalKeyframeReview: renderedScene.terminalKeyframeReview }
               : {}),
             ...(renderedScene?.clipReview ? { clipReview: renderedScene.clipReview } : {}),
+            ...(renderedScene?.openingMotionQa ? { openingMotionQa: renderedScene.openingMotionQa } : {}),
             ...(transitionToNextReviewByIndex.has(index)
               ? { transitionToNextReview: transitionToNextReviewByIndex.get(index)! }
               : {}),

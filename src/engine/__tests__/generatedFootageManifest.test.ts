@@ -89,6 +89,32 @@ const cinematic = {
 
 assert.equal(GeneratedFootageSceneManifestSchema.parse(cinematic).items.length, 2);
 
+// Generic H3 footage has no Casefile-only visual review, but it must retain
+// the deterministic proof that the actual native take did not begin frozen.
+const genericH3 = {
+  version: GENERATED_FOOTAGE_SCENE_MANIFEST_VERSION,
+  source: "story_spine" as const,
+  exactOrder: true as const,
+  durationSec: 5,
+  items: [{
+    sceneId: "story-shot-one",
+    clipKey: "runs/story/one.mp4",
+    openingMotionQa: clipReview("cinematic-shot-generic").openingMotion,
+  }],
+};
+assert.equal(
+  GeneratedFootageSceneManifestSchema.parse(genericH3).items[0]?.openingMotionQa?.verdict,
+  "pass",
+  "a generic H3 take must retain its deterministic immediate-motion proof",
+);
+const genericFrozenOpening = structuredClone(genericH3);
+genericFrozenOpening.items[0].openingMotionQa.openingFrozenHoldSec = 0.5;
+assert.throws(
+  () => GeneratedFootageSceneManifestSchema.parse(genericFrozenOpening),
+  /H3 opening remained static beyond the immediate-motion limit/,
+  "a generic H3 manifest cannot retain a passing receipt for a frozen opening",
+);
+
 const missingFingerprint = structuredClone(cinematic);
 delete (missingFingerprint as { sequenceFingerprint?: string }).sequenceFingerprint;
 assert.throws(

@@ -6,6 +6,7 @@ import {
 import {
   assertCinematicClipReview,
   CinematicClipReviewSchema,
+  MiniMaxH3OpeningMotionQaEvidenceSchema,
 } from "@/engine/cinematicClipReview";
 import {
   assertCinematicTransitionReview,
@@ -51,6 +52,11 @@ export const GeneratedFootageSceneManifestSchema = z
       terminalKeyframeReview: CinematicKeyframeReviewSchema.optional(),
       /** Required after H3 before a source-bound cinematic clip can be cut. */
       clipReview: CinematicClipReviewSchema.optional(),
+      /**
+       * Generic native H3 paths retain their deterministic temporal proof even
+       * when the source-bound cinematic visual reviewer is not applicable.
+       */
+      openingMotionQa: MiniMaxH3OpeningMotionQaEvidenceSchema.optional(),
       /** Required for each outgoing source-bound cinematic cut before assembly. */
       transitionToNextReview: CinematicTransitionReviewSchema.optional(),
     }).strict()).min(1).max(2_000),
@@ -106,12 +112,13 @@ export const GeneratedFootageSceneManifestSchema = z
             item.keyframeReview ||
             item.terminalStillKey ||
             item.terminalKeyframeReview ||
-            item.clipReview
+            item.clipReview ||
+            item.openingMotionQa
           ) {
             ctx.addIssue({
               code: z.ZodIssueCode.custom,
               path: ["items", index],
-              message: "source-proof media must bypass generated H3 footage completely and cannot carry generated-keyframe or clip-review evidence",
+              message: "source-proof media must bypass generated H3 footage completely and cannot carry generated-keyframe, clip-review, or opening-motion evidence",
             });
           }
         }

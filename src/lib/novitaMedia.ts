@@ -23,6 +23,7 @@ import {
 } from "@/engine/cinematicKeyframeReview";
 import {
   CINEMATIC_CLIP_REVIEW_VERSION,
+  type MiniMaxH3OpeningMotionQaEvidence,
   type CinematicClipReview,
 } from "@/engine/cinematicClipReview";
 import {
@@ -81,6 +82,11 @@ export interface NovitaRenderedScene extends NovitaGeneratedScene {
   terminalKeyframeReview?: CinematicKeyframeReview;
   /** Independent review of the actual LTX moving take before assembly. */
   clipReview?: CinematicClipReview;
+  /**
+   * Deterministic H3 temporal receipt for generic footage paths that do not
+   * use the full source-bound cinematic reviewer.
+   */
+  openingMotionQa?: MiniMaxH3OpeningMotionQaEvidence;
 }
 
 export interface NovitaKeyframeGate {

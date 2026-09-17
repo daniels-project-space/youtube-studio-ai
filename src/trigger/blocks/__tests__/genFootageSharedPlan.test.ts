@@ -210,6 +210,44 @@ assert.match(
   /output: \{ r2Key: `\$\{prefix\}\/h3\/clip-/,
   "signature H3 clips must persist outputs under the run-scoped R2 namespace",
 );
+const genericH3Source = source.slice(
+  source.indexOf("async function renderGeneratedScenePlanWithH3("),
+  source.indexOf("async function renderCinematicScenePlanWithH3("),
+);
+assert.match(
+  genericH3Source,
+  /materializeVerifiedMiniMaxH3Take/,
+  "generic H3 footage must inspect the actual native bytes, not just its transport receipt",
+);
+assert.match(
+  genericH3Source,
+  /opening-motion repair has no remaining budget/,
+  "a frozen generic H3 opening may take only one budget-aware repair path",
+);
+assert.match(
+  genericH3Source,
+  /-retry-2\.mp4/,
+  "the generic H3 repair must use a distinct immutable R2 output key",
+);
+assert.match(
+  genericH3Source,
+  /openingMotionQa: acceptedTake\.openingMotionQa/,
+  "the accepted generic H3 take must pass its temporal proof into the durable manifest projection",
+);
+const signatureH3Source = source.slice(
+  source.indexOf("export async function generateSignatureClips("),
+  source.indexOf("export const genFootage: Block ="),
+);
+assert.match(
+  signatureH3Source,
+  /materializeVerifiedMiniMaxH3Take/,
+  "signature H3 clips must reject a static conditioning-image hold before editing",
+);
+assert.match(
+  signatureH3Source,
+  /H3 opening-motion repair has no remaining budget/,
+  "signature H3 recovery must stay bounded by the approved stage budget",
+);
 assert.match(
   source,
   /async function renderCinematicScenePlanWithH3\(/,
