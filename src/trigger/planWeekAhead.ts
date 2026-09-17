@@ -9,7 +9,7 @@
  * video exists, so the plan freezes an exact rendered-frame requirement and
  * never launches generic pre-render artwork.
  */
-import { task } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { AbortTaskRunError } from "@trigger.dev/sdk/v3";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
@@ -722,7 +722,14 @@ async function runPlanWeekAhead(
         ...pointer,
       });
       thumbnailSourceByItemId.set(String(item._id), manifest.plan.thumbnailSource);
-      log(`inputs frozen ${recorded.reused ? "(reused) " : ""}${String(item._id).slice(-6)}`);
+      const preparedScriptRunId = await dispatchPreparedScript(
+        manifest,
+        Number(process.env.PLAN_WEEK_PREPARED_SCRIPT_MAX_COST_USD ?? "1"),
+      );
+      log(
+        `inputs frozen ${recorded.reused ? "(reused) " : ""}${String(item._id).slice(-6)} ` +
+        `(script ${preparedScriptRunId})`,
+      );
     }
     const dir = join(tmpdir(), `plan_${channelId}_${batchId}`);
     mkdirSync(dir, { recursive: true });
@@ -1250,6 +1257,30 @@ async function persistPlanWeekPreparationManifest(manifest: PlanWeekPreparationM
     throw new Error("plan-week preparation R2 manifest digest mismatch");
   }
   return { manifestKey, manifestSha256 };
+}
+
+async function dispatchPreparedScript(manifest: PlanWeekPreparationManifest, maxCostUsd = 1): Promise<string> {
+  if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0 || maxCostUsd > 100) {
+    throw new Error("weekly prepared script dispatch has an invalid cost ceiling");
+  }
+  const idempotencyKey = await idempotencyKeys.create(
+    `plan-week-script:${manifest.ownerId}:${planWeekPreparationManifestSha256(manifest)}`,
+    { scope: "global" },
+  );
+  const handle = await tasks.trigger("plan-week-prepared-script", {
+    ownerId: manifest.ownerId,
+    channelId: manifest.channelId,
+    channelSlug: manifest.channelSlug,
+    batchId: manifest.batchId,
+    itemId: manifest.itemId,
+    manifestKey: planWeekPreparationKey(manifest),
+    manifestSha256: planWeekPreparationManifestSha256(manifest),
+    maxCostUsd,
+  }, {
+    concurrencyKey: `plan-week-script:${manifest.ownerId}:${manifest.channelId}`,
+    idempotencyKey,
+  });
+  return handle.id;
 }
 
 function planTopicCheckpointKey(ownerId: string, slug: string, batchId: string, attempt: number): string {

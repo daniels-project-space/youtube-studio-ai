@@ -7,7 +7,7 @@
  * The sidecar is immutable and replay-safe, and unpriced OpenRouter usage is
  * never presented as a successful automatic preparation.
  */
-import { task } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import {
   assertPlanWeekPreparedScriptBinding,
   assertPlanWeekPreparationManifestBinding,
@@ -177,6 +177,32 @@ async function persistCreateOnly(key: string, body: Uint8Array): Promise<boolean
   }
 }
 
+async function dispatchPreparedNarration(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedScriptArgs): Promise<string> {
+  const maxCostUsd = Number(process.env.PLAN_WEEK_PREPARED_NARRATION_MAX_COST_USD ?? "3");
+  if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0 || maxCostUsd > 100) {
+    throw new Error("weekly prepared narration dispatch has an invalid cost ceiling");
+  }
+  const narrationPayload = {
+    ownerId: payload.ownerId,
+    channelId: payload.channelId,
+    channelSlug: payload.channelSlug,
+    batchId: payload.batchId,
+    itemId: payload.itemId,
+    manifestKey: payload.manifestKey,
+    manifestSha256: payload.manifestSha256,
+    maxCostUsd,
+  };
+  const idempotencyKey = await idempotencyKeys.create(
+    `plan-week-narration:${payload.ownerId}:${payload.manifestSha256}`,
+    { scope: "global" },
+  );
+  const handle = await tasks.trigger("plan-week-prepared-narration", narrationPayload, {
+    concurrencyKey: `plan-week-narration:${manifest.ownerId}:${manifest.channelId}`,
+    idempotencyKey,
+  });
+  return handle.id;
+}
+
 export const planWeekPreparedScriptTask = task({
   id: "plan-week-prepared-script",
   maxDuration: 1_800,
@@ -196,7 +222,10 @@ export const planWeekPreparedScriptTask = task({
       itemId: payload.itemId,
     });
     const prior = await readSidecar(sidecarKey, manifest);
-    if (prior) return { ok: true, reused: true, sidecarKey, costUsd: 0, scriptSha256: prior.scriptSha256 };
+    if (prior) {
+      const narrationTriggerRunId = await dispatchPreparedNarration(manifest, payload);
+      return { ok: true, reused: true, sidecarKey, narrationTriggerRunId, costUsd: 0, scriptSha256: prior.scriptSha256 };
+    }
 
     const usage = createModelUsageScope();
     let script: Script;
@@ -229,8 +258,10 @@ export const planWeekPreparedScriptTask = task({
     if (!created) {
       const winner = await readSidecar(sidecarKey, manifest);
       if (!winner) throw new Error("weekly prepared script sidecar was lost after create-only collision");
-      return { ok: true, reused: true, sidecarKey, costUsd: 0, scriptSha256: winner.scriptSha256 };
+      const narrationTriggerRunId = await dispatchPreparedNarration(manifest, payload);
+      return { ok: true, reused: true, sidecarKey, narrationTriggerRunId, costUsd: 0, scriptSha256: winner.scriptSha256 };
     }
-    return { ok: true, reused: false, sidecarKey, costUsd: modelUsage.costUsd, scriptSha256: prepared.scriptSha256 };
+    const narrationTriggerRunId = await dispatchPreparedNarration(manifest, payload);
+    return { ok: true, reused: false, sidecarKey, narrationTriggerRunId, costUsd: modelUsage.costUsd, scriptSha256: prepared.scriptSha256 };
   },
 });
