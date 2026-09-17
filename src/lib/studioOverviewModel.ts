@@ -1,6 +1,14 @@
 import { failureReason } from "@/lib/failureReason";
 import { projectPlanSchedule } from "@/lib/scheduleCalendar";
 
+/**
+ * A failed run remains inspectable forever, but it stops being a live incident
+ * after a day. This keeps an old configuration error from masking a current
+ * reconnect, overdue release, or live-run problem in the overview's one
+ * primary decision. Unknown timestamps remain conservative and stay live.
+ */
+const CURRENT_FAILURE_WINDOW_MS = 24 * 60 * 60 * 1_000;
+
 export type StudioOverviewRun = {
   _id: string;
   status: string;
@@ -118,6 +126,17 @@ function runFailureDetail(run: Pick<StudioOverviewRun, "error">): string {
   return `${info.reason}${info.block ? ` · ${info.block}` : ""}`;
 }
 
+function isHistoricalFailure(run: Pick<StudioOverviewRun, "startedAt">, now: number): boolean {
+  return typeof run.startedAt === "number" &&
+    Number.isFinite(run.startedAt) &&
+    now - run.startedAt > CURRENT_FAILURE_WINDOW_MS;
+}
+
+function overviewFailureDetail(run: StudioOverviewRun, now: number): string {
+  const detail = runFailureDetail(run);
+  return isHistoricalFailure(run, now) ? `Earlier failure · ${detail}` : detail;
+}
+
 /**
  * Unpinned weekly plans are already consumed by the cadence scheduler. The
  * overview used to call them "Needs a date", which made fully automatic
@@ -228,6 +247,16 @@ export function buildStudioOverview(args: {
   );
   const successfulRuns = terminalRuns.filter((run) => run.status === "ok").length;
 
+  const currentFailedRuns = failedRuns.filter((run) => !isHistoricalFailure(run, args.now));
+  const historicalFailedRuns = failedRuns.filter((run) => isHistoricalFailure(run, args.now));
+  const failedRunIssues = (runs: StudioOverviewRun[]): StudioIssue[] => runs.map((run) => ({
+    key: `failed:${run._id}`,
+    kind: "failed_run" as const,
+    title: run.channelName,
+    detail: overviewFailureDetail(run, args.now),
+    href: runHref(run),
+  }));
+
   const issues: StudioIssue[] = [
     ...stalledRuns.map((run) => ({
       key: `stalled:${run._id}`,
@@ -236,13 +265,7 @@ export function buildStudioOverview(args: {
       detail: `${run.status} run lost its live lease`,
       href: runHref(run),
     })),
-    ...failedRuns.map((run) => ({
-      key: `failed:${run._id}`,
-      kind: "failed_run" as const,
-      title: run.channelName,
-      detail: runFailureDetail(run),
-      href: runHref(run),
-    })),
+    ...failedRunIssues(currentFailedRuns),
     ...failedPlans.map((item) => ({
       key: `plan:${item._id}`,
       kind: "failed_plan" as const,
@@ -264,6 +287,10 @@ export function buildStudioOverview(args: {
       detail: "YouTube connection needs attention",
       href: channelSettingsHref(channel),
     })),
+    // Keep prior failures visible in the inbox, but after current work. A
+    // historical receipt cannot establish that the provider is unavailable
+    // now, so it must not outrank an active connection or release problem.
+    ...failedRunIssues(historicalFailedRuns),
   ];
 
   const firstIssue = issues[0];

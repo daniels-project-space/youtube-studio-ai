@@ -154,6 +154,28 @@ test("configuration failures name the missing QA dependency", () => {
   assert.equal(snapshot.issues[0]?.detail, "Production QA provider not configured");
 });
 
+test("historical failures remain inspectable without masking current connection work", () => {
+  const now = 1_000_000_000;
+  const snapshot = buildStudioOverview({
+    channels: channels.slice(0, 1),
+    recentRuns: [{
+      ...failedRun,
+      _id: "runs:historic-qa-provider",
+      startedAt: now - (2 * 24 * 60 * 60 * 1_000),
+      error: "no configured production QA provider: thumbnail_gen",
+    }],
+    activeRuns: [],
+    plan: [],
+    youtubeLinks: [],
+    now,
+  });
+
+  assert.equal(snapshot.failedRuns.length, 1, "history remains visible for audit");
+  assert.equal(snapshot.issues[0]?.kind, "youtube_link", "current connector work takes priority");
+  assert.equal(snapshot.issues[1]?.detail, "Earlier failure · Production QA provider not configured");
+  assert.equal(snapshot.decision.detail, "YouTube connection needs attention");
+});
+
 test("active unpinned work is described as automatic cadence, not blocked", () => {
   const unscheduled = {
     ...readyPlan,
