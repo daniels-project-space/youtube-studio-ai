@@ -6,6 +6,7 @@
 import type { ReleaseEvidenceStatus } from "@/lib/releaseEvidenceStatus";
 import type { ChannelArtProvenance } from "@/lib/channelArtIdentity";
 import type { RunStageProgressSummary } from "@/lib/runStageProgress";
+import type { ChannelSchedulePolicy } from "@/lib/publishingPolicy";
 
 export type RunRow = {
   _id: string;
@@ -70,6 +71,8 @@ export type ChannelRow = {
   template: string;
   budget: number;
   identity?: ChannelIdentity;
+  /** Persisted cadence policy used by the automatic scheduler and calendar. */
+  schedule?: ChannelSchedulePolicy;
   pipeline?: { block: string; params?: unknown }[];
   /** A multilingual family is operated through its room/group surface rather
    * than being duplicated among standalone fleet cards. */

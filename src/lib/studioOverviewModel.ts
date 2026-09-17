@@ -1,4 +1,5 @@
 import { failureReason } from "@/lib/failureReason";
+import { projectPlanSchedule } from "@/lib/scheduleCalendar";
 
 export type StudioOverviewRun = {
   _id: string;
@@ -21,12 +22,25 @@ export type StudioOverviewChannel = {
 
 export type StudioOverviewPlan = {
   _id: string;
+  channelId?: string;
   channelName: string;
   channelSlug: string;
   topic: string;
   title?: string;
   status: string;
+  order?: number;
   scheduledAt?: number;
+  /** Channel policy copied from the live channel row for queue projection. */
+  channelStatus?: string;
+  cadence?: string;
+  frequency?: string;
+  days?: number[];
+  timezone?: string;
+  localTime?: string;
+  scheduleEnabled?: boolean;
+  /** Presentation-only cadence projection; never used as a publish claim. */
+  projectedAt?: number;
+  automaticSchedule?: boolean;
 };
 
 export type StudioOverviewYoutubeLink = {
@@ -61,6 +75,8 @@ export type StudioOverviewSnapshot = {
   readyPlanCount: number;
   scheduledPlanCount: number;
   unscheduledPlanCount: number;
+  automaticPlanCount: number;
+  manualSchedulingPlanCount: number;
   planBuildingCount: number;
   recentRunCount: number;
   terminalRunCount: number;
@@ -102,6 +118,65 @@ function runFailureDetail(run: Pick<StudioOverviewRun, "error">): string {
   return `${info.reason}${info.block ? ` · ${info.block}` : ""}`;
 }
 
+/**
+ * Unpinned weekly plans are already consumed by the cadence scheduler. The
+ * overview used to call them "Needs a date", which made fully automatic
+ * channels look blocked even though the calendar already projected the same
+ * next dates. Keep this projection presentation-only: durable publish claims
+ * still require the scheduler/Convex fence and never trust this value.
+ */
+function applyAutomaticScheduleProjection(
+  plans: StudioOverviewPlan[],
+  now: number,
+): StudioOverviewPlan[] {
+  const grouped = new Map<string, StudioOverviewPlan[]>();
+  for (const plan of plans) {
+    if (plan.status !== "ready" || !plan.channelId || plan.channelStatus !== "active") continue;
+    const rows = grouped.get(plan.channelId) ?? [];
+    rows.push(plan);
+    grouped.set(plan.channelId, rows);
+  }
+
+  const projections = new Map<string, { timestamp?: number; automatic: boolean }>();
+  for (const rows of grouped.values()) {
+    const first = rows[0];
+    if (!first || first.scheduleEnabled === false) continue;
+    const projected = projectPlanSchedule({
+      items: rows.map((row, index) => ({
+        id: row._id,
+        order: row.order ?? index,
+        scheduledAt: row.scheduledAt,
+      })),
+      schedule: {
+        frequency: first.frequency,
+        days: first.days,
+        timezone: first.timezone,
+        localTime: first.localTime,
+      },
+      cadence: first.cadence,
+      fromTimestamp: now,
+    });
+    for (const projection of projected) {
+      if (projection.item.scheduledAt !== undefined) continue;
+      projections.set(projection.item.id, {
+        timestamp: projection.timestamp,
+        automatic: true,
+      });
+    }
+  }
+
+  return plans.map((plan) => {
+    const projection = projections.get(plan._id);
+    return projection
+      ? { ...plan, projectedAt: projection.timestamp, automaticSchedule: projection.automatic }
+      : plan;
+  });
+}
+
+function planTimestamp(plan: Pick<StudioOverviewPlan, "scheduledAt" | "projectedAt">): number | undefined {
+  return plan.scheduledAt ?? plan.projectedAt;
+}
+
 export function buildStudioOverview(args: {
   channels: StudioOverviewChannel[];
   recentRuns: StudioOverviewRun[];
@@ -129,16 +204,21 @@ export function buildStudioOverview(args: {
       !activeRunIds.has(run._id),
   );
   const failedPlans = args.plan.filter((item) => item.status === "failed");
-  const readyPlans = args.plan.filter((item) => item.status === "ready");
+  const projectedPlans = applyAutomaticScheduleProjection(args.plan, args.now);
+  const readyPlans = projectedPlans.filter((item) => item.status === "ready");
   const overduePlans = readyPlans
     .filter((item) => item.scheduledAt !== undefined && item.scheduledAt < args.now)
-    .sort((left, right) => (left.scheduledAt ?? 0) - (right.scheduledAt ?? 0));
+    .sort((left, right) => (planTimestamp(left) ?? 0) - (planTimestamp(right) ?? 0));
   const upcomingPlans = readyPlans
-    .filter((item) => item.scheduledAt === undefined || item.scheduledAt >= args.now)
+    .filter((item) => {
+      const timestamp = planTimestamp(item);
+      return timestamp === undefined || timestamp >= args.now;
+    })
     .sort(
       (left, right) =>
-        (left.scheduledAt ?? Number.MAX_SAFE_INTEGER) -
-        (right.scheduledAt ?? Number.MAX_SAFE_INTEGER),
+        (planTimestamp(left) ?? Number.MAX_SAFE_INTEGER) -
+        (planTimestamp(right) ?? Number.MAX_SAFE_INTEGER) ||
+        (left.order ?? 0) - (right.order ?? 0),
     );
   const disconnectedChannels = activeChannels.filter(
     (channel) => !readyYoutubeChannelIds.has(channel._id),
@@ -213,7 +293,9 @@ export function buildStudioOverview(args: {
             eyebrow: "Next release",
             title: planName(firstReadyPlan),
             detail: firstReadyPlan.scheduledAt === undefined
-              ? `${firstReadyPlan.channelName} is ready for a date`
+              ? firstReadyPlan.automaticSchedule
+                ? `${firstReadyPlan.channelName} follows its active cadence`
+                : `${firstReadyPlan.channelName} is ready for a date`
               : `${firstReadyPlan.channelName} is scheduled`,
             action: "Open plan",
             href: planWorkspaceHref(firstReadyPlan),
@@ -245,6 +327,10 @@ export function buildStudioOverview(args: {
     readyPlanCount: readyPlans.length,
     scheduledPlanCount: readyPlans.filter((item) => item.scheduledAt !== undefined).length,
     unscheduledPlanCount: readyPlans.filter((item) => item.scheduledAt === undefined).length,
+    automaticPlanCount: readyPlans.filter((item) => item.automaticSchedule === true).length,
+    manualSchedulingPlanCount: readyPlans.filter((item) =>
+      item.scheduledAt === undefined && item.automaticSchedule !== true,
+    ).length,
     planBuildingCount: args.plan.filter((item) => item.status === "generating").length,
     recentRunCount: args.recentRuns.length,
     terminalRunCount: terminalRuns.length,

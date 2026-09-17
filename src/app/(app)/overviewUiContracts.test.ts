@@ -16,7 +16,10 @@ const runs = [0,1,2,3,4,5].map(i => ({ _id: `run${i}`, status: "failed", costTot
 const summaries = channels.map((c,i) => ({ channelId: c._id, slug: c.slug, name: c.name,
   subscriberCount: i+1, totalViews: i === 2 ? 9000 : i === 0 ? 0 : 20,
   costTotal: i+1, videoCount: i+1 }));
-const ready = { _id: "plan1", channelId: "alpha", channelName: "Alpha", channelSlug: "alpha", topic: "An actual planned topic", status: "ready" };
+const ready = {
+  _id: "plan1", channelId: "alpha", channelName: "Alpha", channelSlug: "alpha",
+  topic: "An actual planned topic", status: "ready", order: 1,
+};
 const data: Record<string, unknown> = {
   "channels:listChannels": channels, "runs:listRecent": runs, "runs:listActive": [],
   "contentPlan:listPlanByOwner": [ready], "analytics:channelSummary": summaries,
@@ -52,7 +55,7 @@ try {
   assert.ok(html.includes('6 recent · $1.50'));
   assert.ok(html.includes('0% success · 6 completed'));
   assert.ok(html.includes('href="/channels/alpha?tab=week-ahead&amp;plan=plan1#plan-plan1"'));
-  assert.match(html, /Needs a date/);
+  assert.match(html, /auto cadence/);
   assert.match(html, /data-channel-slug="alpha"/);
   assert.match(html, /data-channel-slug="orphan"/, "incomplete family assignment stays reachable");
   assert.doesNotMatch(html, /data-channel-slug="beta"/, "room members are not duplicated");

@@ -24,10 +24,12 @@ const failedRun: StudioOverviewRun = {
 
 const readyPlan: StudioOverviewPlan = {
   _id: "plans:ready",
+  channelId: "channels:one",
   channelName: "Quiet Signal",
   channelSlug: "quiet-signal",
   topic: "A real plan",
   status: "ready",
+  order: 1,
   scheduledAt: 2_000,
 };
 
@@ -152,8 +154,17 @@ test("configuration failures name the missing QA dependency", () => {
   assert.equal(snapshot.issues[0]?.detail, "Production QA provider not configured");
 });
 
-test("ready work without a date is described as editorially ready, not scheduled", () => {
-  const unscheduled = { ...readyPlan, scheduledAt: undefined };
+test("active unpinned work is described as automatic cadence, not blocked", () => {
+  const unscheduled = {
+    ...readyPlan,
+    scheduledAt: undefined,
+    channelStatus: "active",
+    cadence: "weekly",
+    frequency: "weekly",
+    days: [1],
+    timezone: "UTC",
+    localTime: "09:00",
+  };
   const snapshot = buildStudioOverview({
     channels: channels.slice(0, 1),
     recentRuns: [],
@@ -171,5 +182,8 @@ test("ready work without a date is described as editorially ready, not scheduled
   assert.equal(snapshot.readyPlanCount, 1);
   assert.equal(snapshot.scheduledPlanCount, 0);
   assert.equal(snapshot.unscheduledPlanCount, 1);
-  assert.match(snapshot.decision.detail, /ready for a date/);
+  assert.equal(snapshot.automaticPlanCount, 1);
+  assert.equal(snapshot.manualSchedulingPlanCount, 0);
+  assert.match(snapshot.decision.detail, /follows its active cadence/);
+  assert.ok(snapshot.upcomingPlans[0]?.projectedAt, "automatic plan has a visible cadence projection");
 });

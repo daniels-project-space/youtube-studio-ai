@@ -37,7 +37,16 @@ type PlanRow = {
   topic: string;
   title?: string;
   status: string;
+  order?: number;
   scheduledAt?: number;
+  cadence?: string;
+  frequency?: string;
+  days?: number[];
+  timezone?: string;
+  localTime?: string;
+  scheduleEnabled?: boolean;
+  projectedAt?: number;
+  automaticSchedule?: boolean;
 };
 
 type YoutubeLinkRow = {
@@ -78,7 +87,7 @@ const scheduleDate = new Intl.DateTimeFormat("en-GB", {
 });
 
 function nextLabel(value?: number) {
-  return value !== undefined ? scheduleDate.format(new Date(value)) : "Needs a date";
+  return value !== undefined ? scheduleDate.format(new Date(value)) : "Needs setup";
 }
 
 export default function OverviewPage() {
@@ -132,6 +141,23 @@ export default function OverviewPage() {
     ? channelsFiltered
     : channels?.filter((channel) => channel.status === "active");
 
+  // `contentPlan.listPlanByOwner` intentionally returns compact rows. Join
+  // the live channel policy here so the overview can show the same automatic
+  // cadence date that the calendar projects, without adding another query.
+  const overviewPlans = planFiltered?.map((item) => {
+    const channel = channels?.find((candidate) => candidate._id === item.channelId);
+    return {
+      ...item,
+      channelStatus: channel?.status,
+      cadence: channel?.identity?.cadence,
+      frequency: channel?.schedule?.frequency,
+      days: channel?.schedule?.days,
+      timezone: channel?.schedule?.timezone,
+      localTime: channel?.schedule?.localTime,
+      scheduleEnabled: channel?.schedule?.enabled,
+    };
+  });
+
   const loading =
     channels === undefined ||
     recent === undefined ||
@@ -151,7 +177,7 @@ export default function OverviewPage() {
     channels: operatingChannels ?? [],
     recentRuns: recentFiltered ?? [],
     activeRuns: activeFiltered ?? [],
-    plan: planFiltered ?? [],
+    plan: overviewPlans ?? [],
     youtubeLinks: youtubeLinks ?? [],
     now: overviewAt,
   });
@@ -220,7 +246,10 @@ export default function OverviewPage() {
               {overview.upcomingPlans.slice(0, 4).map((item, index) => (
                 <Link key={item._id} href={planWorkspaceHref(item)} className={styles.queueRow}>
                   <span className={styles.rowIndex}>{String(index + 1).padStart(2, "0")}</span>
-                  <time>{nextLabel(item.scheduledAt)}</time>
+                  <time>
+                    {item.automaticSchedule && item.scheduledAt === undefined ? "Auto · " : ""}
+                    {nextLabel(item.scheduledAt ?? item.projectedAt)}
+                  </time>
                   <span className={styles.rowCopy}>
                     <strong>{item.title || item.topic}</strong>
                     <small>{item.channelName}</small>
@@ -345,7 +374,10 @@ function CommandCenter({
           </header>
           <div className={styles.planSplit}>
             <span><strong>{loading ? "—" : overview.scheduledPlanCount}</strong> dated</span>
-            <span><strong>{loading ? "—" : overview.unscheduledPlanCount}</strong> need a date</span>
+            <span><strong>{loading ? "—" : overview.automaticPlanCount}</strong> auto cadence</span>
+            {overview.manualSchedulingPlanCount > 0 && (
+              <span><strong>{overview.manualSchedulingPlanCount}</strong> need setup</span>
+            )}
             {overview.planBuildingCount > 0 && <span>{overview.planBuildingCount} being prepared</span>}
           </div>
         </section>

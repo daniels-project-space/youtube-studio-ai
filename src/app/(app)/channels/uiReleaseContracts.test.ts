@@ -346,7 +346,9 @@ assert.match(detail, /Open script, visuals, narration and master/,
   "a scheduled plan with a run must expose its persisted production record");
 assert.match(overview, /buildStudioOverview\(\{/,
   "the Studio page must consume the centralized, tested readiness model");
-assert.match(overviewModel, /const readyPlans = args\.plan\.filter\(\(item\) => item\.status === "ready"\)/,
+assert.match(overviewModel, /const projectedPlans = applyAutomaticScheduleProjection\(args\.plan, args\.now\)/,
+  "the overview model must project active cadence plans before presentation");
+assert.match(overviewModel, /const readyPlans = projectedPlans\.filter\(\(item\) => item\.status === "ready"\)/,
   "the overview model must count only genuinely ready plan rows");
 assert.doesNotMatch(overview, /need review/);
 assert.match(overview, /<details className=\{`\$\{styles\.runsWidget\}/);
