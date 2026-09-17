@@ -177,7 +177,6 @@ export default function AnalyticsPage() {
       <AnalyticsHero
         loading={loading}
         selected={selected}
-        rows={summary ?? []}
         totalSubscribers={overview?.totalSubscribers ?? 0}
         totalViews={overview?.totalViews ?? 0}
         totalCost={overview?.totalCost ?? 0}
@@ -194,6 +193,13 @@ export default function AnalyticsPage() {
       ) : (
         <>
           <AnalyticsRefreshHealth rows={refreshStatus ?? []} selectedSlug={selected?.slug ?? null} />
+
+          {!selected && (
+            <AnalyticsSnapshotMap
+              rows={summary ?? []}
+              freshness={dataFreshness}
+            />
+          )}
 
           {/* Charts gate: nothing populated until stats-refresh has run. */}
           {!anyChannelData && !hasTrend ? (
@@ -226,7 +232,6 @@ export default function AnalyticsPage() {
 function AnalyticsHero({
   loading,
   selected,
-  rows,
   totalSubscribers,
   totalViews,
   totalCost,
@@ -236,7 +241,6 @@ function AnalyticsHero({
 }: {
   loading: boolean;
   selected: SummaryRow | null;
-  rows: SummaryRow[];
   totalSubscribers: number;
   totalViews: number;
   totalCost: number;
@@ -259,8 +263,6 @@ function AnalyticsHero({
           ? "Observed reach, committed spend, and released inventory."
           : `${freshness.detail} Spend and released inventory remain current records.`}</p>
       </div>
-
-      <FleetEfficiencyField rows={rows} selectedChannelId={selected?.channelId ?? null} freshness={freshness} />
 
       <div className={styles.metricRail}>
         <HeroMetric
@@ -295,6 +297,24 @@ function AnalyticsHero({
         />
       </div>
     </section>
+  );
+}
+
+/**
+ * Persisted snapshots remain useful, but they must never outrank the operator's
+ * connection health. Current observations open the map by default; a recorded
+ * fleet keeps the same precise map available without presenting it as live.
+ */
+function AnalyticsSnapshotMap({ rows, freshness }: { rows: SummaryRow[]; freshness: AnalyticsDataFreshness }) {
+  const open = freshness.state === "current";
+  return (
+    <details className={styles.snapshotMap} open={open}>
+      <summary>
+        <span>{open ? "Reach / spend map" : "Recorded snapshot map"}</span>
+        <small>{open ? "Current channel observations" : "Open stored channel snapshots"}</small>
+      </summary>
+      <FleetEfficiencyField rows={rows} selectedChannelId={null} freshness={freshness} />
+    </details>
   );
 }
 
@@ -426,7 +446,8 @@ function AnalyticsRefreshHealth({ rows, selectedSlug }: { rows: RefreshStatusRow
   const healthRows = rows.map((row) => ({ row, health: analyticsRefreshHealth(row) }));
   const current = healthRows.filter(({ health }) => health.state === "current").length;
   const connected = healthRows.filter(({ health }) => health.state !== "not_connected").length;
-  const attention = healthRows.filter(({ health }) => [
+  const actionableRows = healthRows.filter(({ health }) => health.state !== "current");
+  const attention = actionableRows.filter(({ health }) => [
     "manual_reconciliation_required",
     "reconnect_required",
     "stale",
@@ -471,7 +492,7 @@ function AnalyticsRefreshHealth({ rows, selectedSlug }: { rows: RefreshStatusRow
                 <p>{fleet!.detail}</p>
                 <em>Connected channels refresh every six hours; ambiguous provider responses stop replay.</em>
               </div>
-              {fleet!.needsAttention && <Link href="/channels">Review connections →</Link>}
+              {fleet!.needsAttention && <span className={styles.healthActionHint}>Choose a channel below</span>}
             </article>
             <div className={styles.healthMeasures}>
               <span><small>Current</small><strong>{current}</strong><em>trusted now</em></span>
@@ -481,6 +502,16 @@ function AnalyticsRefreshHealth({ rows, selectedSlug }: { rows: RefreshStatusRow
           </>
         )}
       </div>
+      {!selectedRow && actionableRows.length > 0 && (
+        <nav className={styles.healthRepairLinks} aria-label="Repair channel connections">
+          <span>Repair</span>
+          {actionableRows.map(({ row, health }) => (
+            <Link key={row.channelId} href={`/channels/${row.slug}?tab=settings`} title={health.detail}>
+              {row.name}
+            </Link>
+          ))}
+        </nav>
+      )}
     </section>
   );
 }

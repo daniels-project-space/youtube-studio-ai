@@ -15,6 +15,12 @@ assert.match(page, /Portfolio analytics/,
 assert.match(page, /Observed reach, committed spend, and released inventory/);
 assert.doesNotMatch(page, /observationState/,
   "the hero must not repeat the separate, actionable connection-health panel");
+const analyticsHeroStart = page.indexOf("function AnalyticsHero");
+const analyticsSnapshotMapStart = page.indexOf("function AnalyticsSnapshotMap");
+assert.ok(analyticsHeroStart >= 0 && analyticsSnapshotMapStart > analyticsHeroStart,
+  "the retained snapshot map stays outside the compact hero");
+assert.doesNotMatch(page.slice(analyticsHeroStart, analyticsSnapshotMapStart), /<FleetEfficiencyField/,
+  "the hero should lead with metrics, while the map remains a secondary detail surface");
 assert.match(page, /<QualityLearningPanel/);
 assert.match(page, /<CompetitorsSection ownerId=\{ownerId\} selected=\{selected\}/);
 assert.match(page, /ANALYTICS_FLEET_PAGE_SIZE/);

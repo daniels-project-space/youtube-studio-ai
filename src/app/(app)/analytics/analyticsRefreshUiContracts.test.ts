@@ -23,8 +23,11 @@ assert.match(page, /Recorded views/,
 assert.match(page, /MORE \{freshness\.state === "current" \? "OBSERVED" : "RECORDED"\} REACH/,
   "the reach axis must not call stored snapshots observed reach");
 assert.match(page, /Fleet refresh ledger/);
-assert.match(page, /Review connections/);
 assert.match(page, /\/channels\/\$\{row\.slug\}\?tab=settings/);
+assert.match(page, /const actionableRows = healthRows\.filter\(\(\{ health \}\) => health\.state !== "current"\)/,
+  "every non-current channel needs a direct repair target rather than a generic fleet detour");
+assert.match(page, /actionableRows\.map\(\(\{ row, health \}\) => \(/,
+  "the data-health panel must surface each actionable channel as its own repair control");
 assert.doesNotMatch(page, /YouTube Data API key/);
 
 // Portfolio comparison is categorical, so it must use ranked bars rather than
@@ -35,6 +38,11 @@ assert.doesNotMatch(page, /function GlobalCharts/);
 assert.doesNotMatch(page, /Subscribers by channel/);
 assert.match(page, /Reach \/ spend field/);
 assert.match(page, /layoutAnalyticsEfficiencyField/);
+assert.match(page, /function AnalyticsSnapshotMap/);
+assert.match(page, /Recorded snapshot map/,
+  "stored reach/spend values must be visually distinct from current observations");
+assert.match(page, /open=\{open\}/,
+  "the map may open by default only when its data is current");
 assert.match(page, /href=\{`\/channels\/\$\{node\.slug\}\?tab=analytics`\}/,
   "each reach/spend node must open the channel analytics workspace");
 assert.match(page, /fieldTruthLine/,

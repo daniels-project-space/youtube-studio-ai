@@ -7,7 +7,6 @@
 .learningHero {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(250px, 0.58fr) minmax(500px, 1.42fr);
   overflow: hidden;
   border: 1px solid var(--color-border);
   border-radius: 18px;
@@ -41,7 +40,6 @@
   align-content: center;
   min-width: 0;
   padding: clamp(1.1rem, 2.2vw, 1.65rem);
-  padding-right: 0.9rem;
 }
 
 .eyebrow,
@@ -100,9 +98,7 @@
 
 .efficiencyField {
   min-width: 0;
-  align-self: center;
-  margin: clamp(0.8rem, 1.6vw, 1.2rem);
-  margin-left: 0;
+  margin: 0;
   border: 1px solid var(--color-border);
   border-radius: 15px;
   background: linear-gradient(145deg,rgba(255,255,255,.05),transparent 35%),rgba(6,11,20,.68);
@@ -156,7 +152,6 @@
 .fieldLegend i { width: 6px; height: 6px; border-radius: 50%; background: var(--color-secondary); box-shadow: 0 0 8px rgba(125, 211, 192, 0.5); }
 
 .metricRail {
-  grid-column: 1 / -1;
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   border-top: 1px solid var(--color-border);
@@ -239,6 +234,12 @@
   font-weight: 650;
   white-space: nowrap;
 }
+.healthActionHint {
+  color: var(--color-accent);
+  font-size: 0.65rem;
+  font-weight: 650;
+  white-space: nowrap;
+}
 .healthCopy[data-tone="danger"] .healthGlyph,
 .healthCopy[data-tone="warning"] .healthGlyph { border-color: rgba(245, 158, 11, 0.36); color: var(--color-amber); }
 .healthCopy[data-tone="danger"] .healthGlyph i,
@@ -262,6 +263,78 @@
 .healthMeasures strong { font-family: var(--font-display); font-size: 1.45rem; font-weight: 560; }
 .healthMeasures em { color: var(--color-faint); font-size: 0.55rem; font-style: normal; }
 .healthMeasures span[data-tone="warn"] strong { color: var(--color-amber); }
+
+.healthRepairLinks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.38rem;
+  margin-top: 0.5rem;
+  color: var(--color-faint);
+}
+.healthRepairLinks > span {
+  margin-right: 0.14rem;
+  font: 700 0.53rem var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+.healthRepairLinks > a {
+  min-height: 29px;
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  border-radius: 999px;
+  padding: 0.2rem 0.6rem;
+  color: var(--color-muted);
+  font-size: 0.62rem;
+  transition: border-color 160ms ease, color 160ms ease, background 160ms ease;
+}
+.healthRepairLinks > a:hover,
+.healthRepairLinks > a:focus-visible {
+  border-color: var(--color-accent);
+  outline: none;
+  background: rgba(255, 94, 42, 0.08);
+  color: var(--color-fg);
+}
+
+.snapshotMap {
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 14px;
+  background: rgba(8, 13, 24, 0.55);
+}
+.snapshotMap > summary {
+  display: flex;
+  min-height: 52px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  cursor: pointer;
+  list-style: none;
+  padding: 0.8rem 1rem;
+}
+.snapshotMap > summary::-webkit-details-marker { display: none; }
+.snapshotMap > summary::after {
+  content: "+";
+  color: var(--color-secondary);
+  font: 1rem/1 var(--font-mono);
+}
+.snapshotMap[open] > summary::after { content: "−"; }
+.snapshotMap > summary > span {
+  color: var(--color-fg);
+  font-family: var(--font-display);
+  font-size: 1rem;
+  font-weight: 560;
+}
+.snapshotMap > summary > small {
+  margin-left: auto;
+  color: var(--color-faint);
+  font-size: 0.63rem;
+}
+.snapshotMap > .efficiencyField {
+  margin: 0 0.75rem 0.75rem;
+}
 
 .metricTabs {
   display: inline-flex;
