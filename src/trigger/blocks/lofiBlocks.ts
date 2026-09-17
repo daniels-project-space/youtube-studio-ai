@@ -1794,6 +1794,7 @@ export const music: Block = {
   paid: true,
   run: async (ctx) => {
     const topic = str(ctx, "topic");
+    const preparedMusic = ctx.store["preparedMusic"] as PlanWeekPreparedMusic | undefined;
     // Bind before a reuse shortcut as well: otherwise a newly admitted music
     // route could attach a sibling's track without proving it belongs to this
     // episode program.
@@ -1896,7 +1897,7 @@ export const music: Block = {
       styleDNA: dna,
       musicBrief: getMusicBrief(ctx.store) ?? null,
     }));
-    const channelMusicProgram: ChannelMusicProgram = createChannelMusicProgram({
+    const channelMusicProgram: ChannelMusicProgram = preparedMusic?.musicProgram ?? createChannelMusicProgram({
       channelId: String(ctx.channelId),
       channelIdentityFingerprint,
       family: route?.family ?? "music_loop",
@@ -1937,7 +1938,6 @@ export const music: Block = {
     // program before any provider credential is consulted or generation can
     // begin. A stale program, altered byte, or absent MiniMax audit record is
     // terminal rather than permission to replace the planned track.
-    const preparedMusic = ctx.store["preparedMusic"] as PlanWeekPreparedMusic | undefined;
     if (preparedMusic !== undefined) {
       if (!preparedMusic || typeof preparedMusic !== "object") {
         throw new Error("music: prepared weekly music is invalid");

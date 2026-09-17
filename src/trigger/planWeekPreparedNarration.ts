@@ -7,7 +7,7 @@
  * FFmpeg, and writes an immutable narration receipt. A replay first verifies
  * the retained audio and returns without another provider call.
  */
-import { task } from "@trigger.dev/sdk";
+import { idempotencyKeys, task, tasks } from "@trigger.dev/sdk";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -130,6 +130,41 @@ export function assertPlanWeekPreparedNarrationArgs(value: unknown): PlanWeekPre
   };
 }
 
+function hasMusicStage(manifest: PlanWeekPreparationManifest): boolean {
+  return manifest.execution.pipeline.some((entry) => {
+    if (!entry || typeof entry !== "object" || Array.isArray(entry)) return false;
+    const block = (entry as Record<string, unknown>).block ?? (entry as Record<string, unknown>).id;
+    return block === "music";
+  });
+}
+
+async function dispatchPreparedMusic(manifest: PlanWeekPreparationManifest, payload: PlanWeekPreparedNarrationArgs): Promise<string | undefined> {
+  if (!hasMusicStage(manifest)) return undefined;
+  const maxCostUsd = Number(process.env.PLAN_WEEK_PREPARED_MUSIC_MAX_COST_USD ?? "1");
+  if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0 || maxCostUsd > 100) {
+    throw new Error("weekly prepared music dispatch has an invalid cost ceiling");
+  }
+  const musicPayload = {
+    ownerId: payload.ownerId,
+    channelId: payload.channelId,
+    channelSlug: payload.channelSlug,
+    batchId: payload.batchId,
+    itemId: payload.itemId,
+    manifestKey: payload.manifestKey,
+    manifestSha256: payload.manifestSha256,
+    maxCostUsd,
+  };
+  const idempotencyKey = await idempotencyKeys.create(
+    `plan-week-music:${payload.ownerId}:${payload.manifestSha256}`,
+    { scope: "global" },
+  );
+  const handle = await tasks.trigger("plan-week-prepared-music", musicPayload, {
+    concurrencyKey: `plan-week-music:${manifest.ownerId}:${manifest.channelId}`,
+    idempotencyKey,
+  });
+  return handle.id;
+}
+
 async function readPreparationManifest(payload: PlanWeekPreparedNarrationArgs): Promise<PlanWeekPreparationManifest> {
   const bytes = await getObjectBytes(payload.manifestKey);
   if (sha256BytesHex(bytes) !== payload.manifestSha256) throw new Error("weekly prepared narration manifest digest mismatch");
@@ -217,7 +252,10 @@ export const planWeekPreparedNarrationTask = task({
     const sidecarKey = planWeekPreparedNarrationKey(scope);
     const audioKey = planWeekPreparedNarrationAudioKey(scope);
     const prior = await readSidecar(sidecarKey, audioKey, manifest);
-    if (prior) return { ok: true, reused: true, sidecarKey, audioKey, costUsd: 0, audioSha256: prior.audioSha256 };
+    if (prior) {
+      const musicTriggerRunId = await dispatchPreparedMusic(manifest, payload);
+      return { ok: true, reused: true, sidecarKey, audioKey, musicTriggerRunId, costUsd: 0, audioSha256: prior.audioSha256 };
+    }
 
     const scriptKey = planWeekPreparedScriptKey(scope);
     const preparedScript = await readScript(scriptKey, manifest);
@@ -366,9 +404,11 @@ export const planWeekPreparedNarrationTask = task({
       if (!created) {
         const winner = await readSidecar(sidecarKey, audioKey, manifest);
         if (!winner) throw new Error("weekly prepared narration sidecar was lost after create-only collision");
-        return { ok: true, reused: true, sidecarKey, audioKey, costUsd: 0, audioSha256: winner.audioSha256 };
+        const musicTriggerRunId = await dispatchPreparedMusic(manifest, payload);
+        return { ok: true, reused: true, sidecarKey, audioKey, musicTriggerRunId, costUsd: 0, audioSha256: winner.audioSha256 };
       }
-      return { ok: true, reused: false, sidecarKey, audioKey, costUsd, audioSha256 };
+      const musicTriggerRunId = await dispatchPreparedMusic(manifest, payload);
+      return { ok: true, reused: false, sidecarKey, audioKey, musicTriggerRunId, costUsd, audioSha256 };
     } finally {
       await rm(workDir, { recursive: true, force: true }).catch(() => undefined);
     }
