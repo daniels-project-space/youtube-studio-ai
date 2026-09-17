@@ -779,13 +779,31 @@ export async function renderMiniMaxH3WeeklyBatch(
     execution = provider === "salad" ? "weekly-batch" : "weekly-fallback",
     ...renderOptions
   } = options;
+  // The model manifest is immutable for the whole sealed batch. Concurrent
+  // jobs used to perform the same R2 digest/read independently, multiplying
+  // storage calls without adding admission evidence. Keep the first check's
+  // promise so concurrent callers share both its success and its failure;
+  // readiness remains per-job and still runs before this callback.
+  let modelManifestVerification: Promise<void> | undefined;
+  const assertModelManifestOnce = async (): Promise<void> => {
+    const verifyModelManifest = renderOptions.assertModelManifest
+      ?? (() => assertMiniMaxH3R2ModelManifest(renderOptions.readModelManifest));
+    // Start in a microtask so a synchronous injected verifier failure is also
+    // captured by the shared rejected promise instead of being retried.
+    modelManifestVerification ??= Promise.resolve().then(verifyModelManifest);
+    await modelManifestVerification;
+  };
+  const batchRenderOptions = {
+    ...renderOptions,
+    assertModelManifest: assertModelManifestOnce,
+  };
   const result: MiniMaxH3RenderedVideo[] = new Array(jobs.length);
   let next = 0;
   await Promise.all(Array.from({ length: Math.min(MAX_H3_PARALLEL_SALAD_JOBS, jobs.length) }, async () => {
     for (;;) {
       const index = next++;
       if (index >= jobs.length) return;
-      const rendered = await renderMiniMaxH3({ ...jobs[index]!, provider, execution }, renderOptions);
+      const rendered = await renderMiniMaxH3({ ...jobs[index]!, provider, execution }, batchRenderOptions);
       result[index] = rendered;
       await onJobComplete?.(index, rendered);
     }

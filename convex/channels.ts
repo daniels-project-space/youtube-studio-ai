@@ -1,7 +1,7 @@
 import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { v } from "convex/values";
 import type { MutationCtx, QueryCtx } from "./_generated/server";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import { qwenTtsReceiptValidator, voiceCastingProviderValidator } from "./voiceCastingValidators";
 import { moduleSurface, configurableModules } from "@/engine/moduleRegistry";
 import { validateKnobs, type KnobValues, type KnobValue } from "@/engine/customization";
@@ -969,12 +969,31 @@ export const listChannels = query({
  * run, avoiding the Library's heavier metadata joins and failed-run artwork.
  */
 export const listChannelCards = query({
-  args: { ownerId: v.string() },
+  args: {
+    ownerId: v.string(),
+    /**
+     * The Channels page only renders the current card window. Keeping this
+     * optional preserves the fleet projection for internal callers while
+     * letting the UI avoid projecting every historical/secondary channel.
+     */
+    channelIds: v.optional(v.array(v.id("channels"))),
+  },
   handler: async (ctx, args) => {
-    const channels = await ctx.db
-      .query("channels")
-      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
-      .collect();
+    // A card projection joins the newest accepted run and its retained media,
+    // so never let a caller turn the optional selector into an unbounded
+    // fan-out. The browser sends at most the eight cards in its current page.
+    const requestedIds = args.channelIds
+      ? [...new Set(args.channelIds.map(String))].slice(0, 24)
+      : undefined;
+    const channels = requestedIds
+      ? (await Promise.all(requestedIds.map(async (id) =>
+          (await ctx.db.get(id as Id<"channels">)) as Doc<"channels"> | null,
+        )))
+        .filter((channel): channel is Doc<"channels"> => Boolean(channel && channel.ownerId === args.ownerId))
+      : await ctx.db
+        .query("channels")
+        .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+        .collect();
 
     return await Promise.all(channels.map((channel) => projectChannelCard(ctx, channel)));
   },

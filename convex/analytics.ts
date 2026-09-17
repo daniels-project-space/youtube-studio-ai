@@ -232,15 +232,32 @@ export const dashboardSnapshot = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
       .collect();
 
-    const [latestRows, runs, planBatches, authRows, cursorRows] = await Promise.all([
-      Promise.all(channels.map(async (channel) => [channel._id, await latestChannelDay(ctx, channel._id)] as const)),
+    const [channelStates, runs, planBatches] = await Promise.all([
+      // Connector and refresh-cursor tables are one-row-per-channel ledgers.
+      // Read the current channels directly instead of collecting every
+      // historical owner row and reducing it client-side. This keeps the
+      // dashboard read bounded by the active channel count and preserves the
+      // same unique-row invariant used by refreshStatus/getForChannel.
+      Promise.all(channels.map(async (channel) => {
+        const [latest, connector, progress] = await Promise.all([
+          latestChannelDay(ctx, channel._id),
+          ctx.db.query("youtubeAuth").withIndex("by_channel", (q) => q.eq("channelId", channel._id)).unique(),
+          ctx.db.query("analyticsRefreshCursors").withIndex("by_owner_channel", (q) =>
+            q.eq("ownerId", args.ownerId).eq("channelId", channel._id),
+          ).unique(),
+        ]);
+        return {
+          channelId: channel._id,
+          latest,
+          connector: connector?.ownerId === args.ownerId ? connector : null,
+          progress: progress?.ownerId === args.ownerId ? progress : null,
+        };
+      })),
       ctx.db.query("runs").withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId)).collect(),
       ctx.db.query("planBatches").withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId)).collect(),
-      ctx.db.query("youtubeAuth").withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId)).collect(),
-      ctx.db.query("analyticsRefreshCursors").withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId)).collect(),
     ]);
 
-    const latestByChannel = new Map(latestRows);
+    const latestByChannel = new Map(channelStates.map((row) => [row.channelId, row.latest] as const));
     const runsByChannel = new Map<string, typeof runs>();
     for (const run of runs) {
       const rows = runsByChannel.get(String(run.channelId)) ?? [];
@@ -253,12 +270,8 @@ export const dashboardSnapshot = query({
       rows.push(batch);
       batchesByChannel.set(String(batch.channelId), rows);
     }
-    const authByChannel = new Map<string, (typeof authRows)[number]>();
-    for (const auth of authRows) {
-      const previous = authByChannel.get(String(auth.channelId));
-      if (!previous || auth.updatedAt > previous.updatedAt) authByChannel.set(String(auth.channelId), auth);
-    }
-    const cursorByChannel = new Map(cursorRows.map((row) => [String(row.channelId), row]));
+    const authByChannel = new Map(channelStates.map((row) => [String(row.channelId), row.connector] as const));
+    const cursorByChannel = new Map(channelStates.map((row) => [String(row.channelId), row.progress] as const));
 
     let totalSubscribers = 0;
     let totalViews = 0;

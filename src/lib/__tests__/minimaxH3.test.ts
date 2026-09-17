@@ -372,12 +372,13 @@ async function test() {
   }));
   let active = 0;
   let peak = 0;
+  let batchModelManifestChecks = 0;
   const completedIndices: number[] = [];
   const batched = await renderMiniMaxH3WeeklyBatch(jobs, {
     presignRead: async () => "https://r2.example/read",
     presignWrite: async () => "https://r2.example/write",
     readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
-    assertModelManifest: async () => {},
+    assertModelManifest: async () => { batchModelManifestChecks += 1; },
     onJobComplete: async (index) => { completedIndices.push(index); },
     fetch: async (_url, init) => {
       active += 1;
@@ -395,6 +396,20 @@ async function test() {
   });
   assert.equal(batched.length, 4);
   assert.equal(peak, 3, "weekly Salad work must use the bounded three-GPU wave");
+  assert.equal(batchModelManifestChecks, 1, "weekly H3 jobs must share one immutable model-manifest verification");
   assert.deepEqual(completedIndices.sort((a, b) => a - b), [0, 1, 2, 3], "durable batch hooks must observe every verified shot");
+
+  let failedBatchModelManifestChecks = 0;
+  await assert.rejects(
+    () => renderMiniMaxH3WeeklyBatch(jobs.slice(0, 2), {
+      assertModelManifest: () => {
+        failedBatchModelManifestChecks += 1;
+        throw new Error("manifest verifier failed");
+      },
+      fetch: async () => { throw new Error("provider must not be contacted"); },
+    }),
+    /manifest verifier failed/,
+  );
+  assert.equal(failedBatchModelManifestChecks, 1, "weekly H3 manifest failures must be shared, not retried per job");
 }
 void test().finally(() => { process.env = saved; }).then(() => console.log("minimax H3 contract tests passed"));

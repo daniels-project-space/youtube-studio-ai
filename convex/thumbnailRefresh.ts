@@ -923,12 +923,19 @@ export const getCandidateExecution = query({
     await requireStudioServiceIdentity(ctx, args.ownerId, "thumbnail refresh execution reload");
     const candidate = await ctx.db.get(args.candidateRunId);
     if (!candidate || candidate.ownerId !== args.ownerId || !candidate.thumbnailRefreshSourceRunId) return null;
-    const source = await ctx.db.get(candidate.thumbnailRefreshSourceRunId);
+    // The source and channel are both keyed by the candidate identity and do
+    // not depend on each other. Resolve them together so a recovery or
+    // replacement worker does not pay a serial Convex read round-trip before
+    // replay-material validation. Keep the candidate read first because its
+    // source/channel bindings are the tenancy fence for both reads.
+    const [source, channel] = await Promise.all([
+      ctx.db.get(candidate.thumbnailRefreshSourceRunId),
+      ctx.db.get(candidate.channelId),
+    ]);
     if (!source || source.ownerId !== args.ownerId || source.channelId !== candidate.channelId) {
       throw new Error("thumbnail refresh source/candidate binding is invalid");
     }
     await assertFinishedSource(ctx, source);
-    const channel = await ctx.db.get(candidate.channelId);
     if (!channel || channel.ownerId !== args.ownerId) {
       throw new Error("thumbnail refresh channel is unavailable");
     }

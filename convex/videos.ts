@@ -416,11 +416,17 @@ export const listVideos = query({
         Boolean(run.youtubeVideoId) || (Boolean(videoKey) && run.status !== "failed");
       if (!isFinished) continue;
 
-      const channel = await getChannel(run.channelId);
-
-      // The REAL title/SEO live in the `metadata` stage outputs (they were
-      // previously stranded there — asset meta rarely carries a title).
-      const mOut = await metadataOutputs(ctx, run._id);
+      // These two compact projections are independent once the finished-row
+      // gate above has passed. Keep their reads in one round-trip so Library
+      // cards do not serialize a channel join before loading the title/SEO
+      // stage. (Do not move this before `isFinished`: unfinished rows should
+      // retain the old cheap rejection path without a metadata read.)
+      const [channel, mOut] = await Promise.all([
+        getChannel(run.channelId),
+        // The REAL title/SEO live in the `metadata` stage outputs (they were
+        // previously stranded there — asset meta rarely carries a title).
+        metadataOutputs(ctx, run._id),
+      ]);
       const vMeta = (videoAsset?.meta ?? {}) as Record<string, unknown>;
       const tMeta = (thumbAsset?.meta ?? {}) as Record<string, unknown>;
       const title =

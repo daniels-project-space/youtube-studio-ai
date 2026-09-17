@@ -103,23 +103,36 @@ export default function ChannelsPage() {
   const channels = useQuery(api.channels.listChannels, { ownerId }) as
     | ChannelCardRow[]
     | undefined;
-  const folders = useQuery(api.folders.list, { ownerId }) as
-    | { _id: string; name: string }[]
-    | undefined;
-  const plan = useQuery(api.contentPlan.listPlanByOwner, { ownerId }) as
-    | PlanCardRow[]
-    | undefined;
-  const channelArtwork = useQuery(api.channels.listChannelCards, { ownerId }) as
-    | ChannelCardArtwork[]
-    | undefined;
-  const links = useQuery(api.youtubeAuth.linkStatus, { ownerId }) as
-    | YoutubeLinkStatus[]
-    | undefined;
   const [openFolder, setOpenFolder] = useState<string | null>(null);
   const [visibleLimit, setVisibleLimit] = useState(CHANNEL_PAGE_SIZE);
   const [managedChannelId, setManagedChannelId] = useState<string | null>(null);
   const inspectorTriggerRef = useRef<HTMLButtonElement | null>(null);
   const [viewStartedAt] = useState(() => Date.now());
+  const folders = useQuery(api.folders.list, { ownerId }) as
+    | { _id: string; name: string }[]
+    | undefined;
+  const artworkChannelIds = channels
+    ? Array.from(new Set([
+        ...pageChannels(channelsVisibleForFolder(channels, openFolder), visibleLimit).visible.map(
+          (channel) => channel._id as Id<"channels">,
+        ),
+        // Keep an open inspector supplied if the operator changes the page
+        // window while it is open; this adds at most one card projection.
+        ...(managedChannelId ? [managedChannelId as Id<"channels">] : []),
+      ]))
+    : [];
+  const channelArtwork = useQuery(
+    api.channels.listChannelCards,
+    channels ? { ownerId, channelIds: artworkChannelIds } : "skip",
+  ) as
+    | ChannelCardArtwork[]
+    | undefined;
+  const plan = useQuery(api.contentPlan.listPlanByOwner, { ownerId }) as
+    | PlanCardRow[]
+    | undefined;
+  const links = useQuery(api.youtubeAuth.linkStatus, { ownerId }) as
+    | YoutubeLinkStatus[]
+    | undefined;
   const closeInspector = useCallback(() => setManagedChannelId(null), []);
   const loading =
     channels === undefined ||
