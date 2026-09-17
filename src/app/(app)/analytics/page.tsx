@@ -67,6 +67,19 @@ type RefreshStatusRow = AnalyticsRefreshHealthInput & {
   });
 };
 
+type AnalyticsDashboardSnapshot = {
+  overview: {
+    totalSubscribers: number;
+    totalViews: number;
+    totalCost: number;
+    planningCost: number;
+    videoCount: number;
+    channelCount: number;
+  };
+  summary: SummaryRow[];
+  refreshStatus: RefreshStatusRow[];
+};
+
 const C_ACCENT = "var(--color-accent)";
 const C_SECONDARY = "var(--color-secondary)";
 const C_OK = "var(--color-ok)";
@@ -76,13 +89,12 @@ export default function AnalyticsPage() {
   const ownerId = useOwnerId();
   const { selectedSlug } = useSelectedChannel();
 
-  const overview = useQuery(api.analytics.overview, { ownerId });
-  const summary = useQuery(api.analytics.channelSummary, { ownerId }) as
-    | SummaryRow[]
+  const dashboard = useQuery(api.analytics.dashboardSnapshot, { ownerId }) as
+    | AnalyticsDashboardSnapshot
     | undefined;
-  const refreshStatus = useQuery(api.analytics.refreshStatus, { ownerId }) as
-    | RefreshStatusRow[]
-    | undefined;
+  const overview = dashboard?.overview;
+  const summary = dashboard?.summary;
+  const refreshStatus = dashboard?.refreshStatus;
 
   // Resolve the selected channel (if any) → drives the per-channel trend query.
   const selected = useMemo(

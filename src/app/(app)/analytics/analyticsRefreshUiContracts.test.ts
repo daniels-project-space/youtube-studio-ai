@@ -9,7 +9,7 @@ const query = readFileSync(join(root, "convex/analytics.ts"), "utf8");
 
 // Analytics health must be driven by the owner-scoped connector/cursor
 // projection, not by browser guesses or the obsolete global API-key message.
-assert.match(page, /useQuery\(api\.analytics\.refreshStatus, \{ ownerId \}\)/);
+assert.match(page, /useQuery\(api\.analytics\.dashboardSnapshot, \{ ownerId \}\)/);
 assert.match(page, /Data health/);
 assert.match(page, /Refresh status and access scope/);
 assert.doesNotMatch(css, /\.observationState/,
@@ -53,6 +53,7 @@ assert.match(page, /state: "locked"/);
 // rows by owner, and returns an explicit token-free/error-free projection.
 assert.match(query, /import \{ mutation, query \} from "\.\/studioFunctions"/);
 assert.match(query, /export const refreshStatus = query\(/);
+assert.match(query, /export const dashboardSnapshot = query\(/);
 assert.match(query, /\.withIndex\("by_owner", \(q\) => q\.eq\("ownerId", args\.ownerId\)\)/);
 assert.match(query, /progressRow\?\.ownerId === args\.ownerId/);
 

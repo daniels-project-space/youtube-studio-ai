@@ -199,6 +199,123 @@ export const refreshStatus = query({
 });
 
 /**
+ * Single reactive dashboard projection for the Analytics page. The page used
+ * to subscribe independently to overview, channelSummary, and refreshStatus;
+ * that caused three overlapping fleet reads and three invalidation paths. This
+ * projection shares the owner channel/latest-day/run/batch reads once, keeps
+ * credentials server-side, and returns the same three public shapes together.
+ * The legacy queries above remain available to narrower callers.
+ */
+export const dashboardSnapshot = query({
+  args: { ownerId: v.string() },
+  handler: async (ctx, args) => {
+    const channels = await ctx.db
+      .query("channels")
+      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+      .collect();
+
+    const [latestRows, runs, planBatches, authRows, cursorRows] = await Promise.all([
+      Promise.all(channels.map(async (channel) => [channel._id, await latestChannelDay(ctx, channel._id)] as const)),
+      ctx.db.query("runs").withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId)).collect(),
+      ctx.db.query("planBatches").withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId)).collect(),
+      ctx.db.query("youtubeAuth").withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId)).collect(),
+      ctx.db.query("analyticsRefreshCursors").withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId)).collect(),
+    ]);
+
+    const latestByChannel = new Map(latestRows);
+    const runsByChannel = new Map<string, typeof runs>();
+    for (const run of runs) {
+      const rows = runsByChannel.get(String(run.channelId)) ?? [];
+      rows.push(run);
+      runsByChannel.set(String(run.channelId), rows);
+    }
+    const batchesByChannel = new Map<string, typeof planBatches>();
+    for (const batch of planBatches) {
+      const rows = batchesByChannel.get(String(batch.channelId)) ?? [];
+      rows.push(batch);
+      batchesByChannel.set(String(batch.channelId), rows);
+    }
+    const authByChannel = new Map<string, (typeof authRows)[number]>();
+    for (const auth of authRows) {
+      const previous = authByChannel.get(String(auth.channelId));
+      if (!previous || auth.updatedAt > previous.updatedAt) authByChannel.set(String(auth.channelId), auth);
+    }
+    const cursorByChannel = new Map(cursorRows.map((row) => [String(row.channelId), row]));
+
+    let totalSubscribers = 0;
+    let totalViews = 0;
+    for (const channel of channels) {
+      const latest = latestByChannel.get(channel._id);
+      if (latest) {
+        totalSubscribers += latest.subscriberCount;
+        totalViews += latest.totalViews;
+      }
+    }
+    const planningCost = planBatches.reduce((sum, batch) => sum + batch.actualCostUsd, 0);
+    const totalCost = runs.reduce((sum, run) => sum + (run.costTotal ?? 0), 0) + planningCost;
+
+    const summary = channels.map((channel) => {
+      const channelRuns = runsByChannel.get(String(channel._id)) ?? [];
+      const channelBatches = batchesByChannel.get(String(channel._id)) ?? [];
+      const channelPlanningCost = channelBatches.reduce((sum, batch) => sum + batch.actualCostUsd, 0);
+      const latest = latestByChannel.get(channel._id);
+      return {
+        channelId: channel._id,
+        name: channel.name,
+        slug: channel.slug,
+        niche: channel.identity?.niche ?? null,
+        subscriberCount: latest?.subscriberCount ?? 0,
+        totalViews: latest?.totalViews ?? 0,
+        videoCount: channelRuns.filter((run) => Boolean(run.youtubeVideoId)).length,
+        costTotal: channelRuns.reduce((sum, run) => sum + (run.costTotal ?? 0), 0) + channelPlanningCost,
+        planningCost: channelPlanningCost,
+      };
+    });
+
+    const refreshStatus = channels.map((channel) => {
+      const connector = authByChannel.get(String(channel._id));
+      const progress = cursorByChannel.get(String(channel._id));
+      const latest = latestByChannel.get(channel._id);
+      return {
+        channelId: channel._id,
+        name: channel.name,
+        slug: channel.slug,
+        connection: connector ? {
+          status: connector.status ?? "active",
+          scopeHealth: connector.scopeHealth ?? "unknown",
+          validatedAt: connector.validatedAt ?? null,
+          updatedAt: connector.updatedAt,
+        } : null,
+        refresh: progress ? {
+          activeState: progress.activeState ?? null,
+          activeMode: progress.activeBatch?.mode ?? null,
+          videoRequestStatus: progress.activeBatch?.videoRequestStatus ?? null,
+          channelRequestStatus: progress.activeBatch?.channelRequestStatus ?? null,
+          lastCompletedAt: progress.lastCompletedAt ?? null,
+          historyCompletedAt: progress.historyCompletedAt ?? null,
+          freshnessNextAt: progress.freshnessNextAt ?? null,
+          updatedAt: progress.updatedAt,
+        } : null,
+        latestSnapshotDate: latest?.date ?? null,
+      };
+    });
+
+    return {
+      overview: {
+        totalSubscribers,
+        totalViews,
+        totalCost,
+        planningCost,
+        videoCount: runs.filter((run) => Boolean(run.youtubeVideoId)).length,
+        channelCount: channels.length,
+      },
+      summary,
+      refreshStatus,
+    };
+  },
+});
+
+/**
  * Owner-wide daily analytics rows across ALL channels, joined with channel name.
  * Drives the main-overview growth charts (subscriber growth, monetization
  * progress, estimated revenue). Sorted by date asc.

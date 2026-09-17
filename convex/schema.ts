@@ -2698,6 +2698,7 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
+    .index("by_owner", ["ownerId"])
     .index("by_owner_channel", ["ownerId", "channelId"])
     .index("by_owner_active_updated", ["ownerId", "activeState", "updatedAt"])
     .index("by_channel", ["channelId"]),

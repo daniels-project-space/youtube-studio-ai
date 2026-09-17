@@ -12,6 +12,8 @@ import type * as analytics from "../analytics.js";
 import type * as analyticsIngestions from "../analyticsIngestions.js";
 import type * as analyticsRefreshCursors from "../analyticsRefreshCursors.js";
 import type * as assets from "../assets.js";
+import type * as automaticOperationsDigests from "../automaticOperationsDigests.js";
+import type * as automaticProviderHealth from "../automaticProviderHealth.js";
 import type * as casefileEpisodes from "../casefileEpisodes.js";
 import type * as casefileResearchAttempts from "../casefileResearchAttempts.js";
 import type * as channelArchives from "../channelArchives.js";
@@ -83,6 +85,8 @@ declare const fullApi: ApiFromModules<{
   analyticsIngestions: typeof analyticsIngestions;
   analyticsRefreshCursors: typeof analyticsRefreshCursors;
   assets: typeof assets;
+  automaticOperationsDigests: typeof automaticOperationsDigests;
+  automaticProviderHealth: typeof automaticProviderHealth;
   casefileEpisodes: typeof casefileEpisodes;
   casefileResearchAttempts: typeof casefileResearchAttempts;
   channelArchives: typeof channelArchives;
