@@ -2250,60 +2250,63 @@ function PipelineTab({
       <ol className={styles.pipelineBands}>
         {bands.map((band, bandIndex) => (
           <li className={styles.pipelineBand} data-phase={band.phase} key={`${band.phase}-${band.startIndex}`}>
-            <header className={styles.pipelineBandHeader}>
-              <span>{String(bandIndex + 1).padStart(2, "0")}</span>
-              <div>
-                <strong>{band.label}</strong>
-                <small>
-                  {band.modules.length} module{band.modules.length === 1 ? "" : "s"} · steps {String(band.startIndex).padStart(2, "0")}
-                  {band.endIndex === band.startIndex ? "" : `–${String(band.endIndex).padStart(2, "0")}`}
-                </small>
-              </div>
-              <i aria-hidden="true" />
-            </header>
-            <div className={styles.pipelineModuleGrid}>
-              {band.modules.map((module) => {
-                const params = module.params as Record<string, unknown> | undefined;
-                const summary = (
-                  <span className={styles.pipelineModuleSummary}>
-                    <span className={styles.pipelineIndex}>{String(module.index).padStart(2, "0")}</span>
-                    <span className={styles.pipelineNode} aria-hidden="true"><i /></span>
-                    <span className={styles.pipelineIdentity}>
-                      <strong>{blockLabel(module.block)}</strong>
-                      <small>{module.block}</small>
+            <details className={styles.pipelineBandDisclosure} open={bandIndex === 0}>
+              <summary aria-label={`Inspect ${band.label} pipeline group`} className={styles.pipelineBandHeader}>
+                <span>{String(bandIndex + 1).padStart(2, "0")}</span>
+                <div>
+                  <strong>{band.label}</strong>
+                  <small>
+                    {band.modules.length} module{band.modules.length === 1 ? "" : "s"} · steps {String(band.startIndex).padStart(2, "0")}
+                    {band.endIndex === band.startIndex ? "" : `–${String(band.endIndex).padStart(2, "0")}`}
+                  </small>
+                </div>
+                <em>{band.modules.length}</em>
+                <i aria-hidden="true" />
+              </summary>
+              <div className={styles.pipelineModuleGrid}>
+                {band.modules.map((module) => {
+                  const params = module.params as Record<string, unknown> | undefined;
+                  const summary = (
+                    <span className={styles.pipelineModuleSummary}>
+                      <span className={styles.pipelineIndex}>{String(module.index).padStart(2, "0")}</span>
+                      <span className={styles.pipelineNode} aria-hidden="true"><i /></span>
+                      <span className={styles.pipelineIdentity}>
+                        <strong>{blockLabel(module.block)}</strong>
+                        <small>{module.block}</small>
+                      </span>
+                      <span className={styles.pipelineControlCount}>
+                        {module.controlCount > 0 ? `${module.controlCount} ctrl` : "default"}
+                      </span>
                     </span>
-                    <span className={styles.pipelineControlCount}>
-                      {module.controlCount > 0 ? `${module.controlCount} ctrl` : "default"}
-                    </span>
-                  </span>
-                );
-                if (module.controlCount === 0 || !params) {
+                  );
+                  if (module.controlCount === 0 || !params) {
+                    return (
+                      <article
+                        className={styles.pipelineModule}
+                        data-tuned="false"
+                        key={`${module.block}-${module.index}`}
+                      >
+                        {summary}
+                      </article>
+                    );
+                  }
                   return (
-                    <article
+                    <details
                       className={styles.pipelineModule}
-                      data-tuned="false"
+                      data-tuned="true"
                       key={`${module.block}-${module.index}`}
                     >
-                      {summary}
-                    </article>
+                      <summary aria-label={`Inspect ${blockLabel(module.block)} controls`}>{summary}</summary>
+                      <dl className={styles.pipelineParams}>
+                        {Object.entries(params).map(([key, value]) => (
+                          <div key={key}><dt>{key}</dt><dd>{JSON.stringify(value)}</dd></div>
+                        ))}
+                      </dl>
+                    </details>
                   );
-                }
-                return (
-                  <details
-                    className={styles.pipelineModule}
-                    data-tuned="true"
-                    key={`${module.block}-${module.index}`}
-                  >
-                    <summary aria-label={`Inspect ${blockLabel(module.block)} controls`}>{summary}</summary>
-                    <dl className={styles.pipelineParams}>
-                      {Object.entries(params).map(([key, value]) => (
-                        <div key={key}><dt>{key}</dt><dd>{JSON.stringify(value)}</dd></div>
-                      ))}
-                    </dl>
-                  </details>
-                );
-              })}
-            </div>
+                })}
+              </div>
+            </details>
           </li>
         ))}
       </ol>

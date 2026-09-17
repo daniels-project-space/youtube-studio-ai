@@ -12,6 +12,10 @@ async function main(): Promise<void> {
   assert.match(pipelineTab, /const bands = buildPipelineTopology\(pipeline\)/);
   assert.match(pipelineTab, /<ol className=\{styles\.pipelineBands\}>/);
   assert.match(pipelineTab, /data-phase=\{band\.phase\}/);
+  assert.match(pipelineTab, /<details className=\{styles\.pipelineBandDisclosure\} open=\{bandIndex === 0\}>/,
+    "the exact route stays compact by default while keeping the first group visible");
+  assert.match(pipelineTab, /Inspect \$\{band\.label\} pipeline group/,
+    "every collapsed stage must remain a named native disclosure");
   assert.match(pipelineTab, /if \(module\.controlCount === 0 \|\| !params\)[\s\S]{0,500}?<article/,
     "default modules must be informative, not empty interactive disclosures");
   assert.match(pipelineTab, /<details[\s\S]{0,250}?data-tuned="true"[\s\S]{0,500}?<dl className=\{styles\.pipelineParams\}>/,
@@ -19,10 +23,12 @@ async function main(): Promise<void> {
   assert.doesNotMatch(pipelineTab, /pipeline\.map\(/,
     "the UI should consume the order-preserving compact topology rather than rebuilding it inline");
 
+  assert.match(styles, /\.pipelineBandHeader \{[^}]*min-height: 52px/,
+    "collapsed pipeline stages retain a usable keyboard and pointer target");
   assert.match(styles, /\.pipelineModuleGrid \{[^}]*repeat\(auto-fit,minmax\(190px,1fr\)\)/);
   assert.match(styles, /\.pipelineModuleSummary \{[^}]*min-height: 48px/,
     "interactive module summaries retain a usable pointer target");
-  assert.match(styles, /@media \(max-width: 440px\)[\s\S]*\.pipelineModuleGrid \{ grid-template-columns: repeat\(2,minmax\(0,1fr\)\); \}/);
+  assert.match(styles, /@media \(max-width: 440px\)[\s\S]*\.pipelineModuleGrid \{ grid-template-columns: repeat\(2,minmax\(0,1fr\)\); padding: 0 0\.5rem 0\.5rem; \}/);
   assert.match(styles, /@media \(max-width: 440px\)[\s\S]*\.pipelineModule\[open\] \{ grid-column: 1 \/ -1; \}/,
     "expanded controls use the full phone width while default modules remain compact");
 

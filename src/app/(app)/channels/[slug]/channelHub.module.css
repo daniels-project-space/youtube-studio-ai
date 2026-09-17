@@ -637,7 +637,7 @@
 .pipelineStats dd { margin: 0; color: var(--color-fg); font: 560 1.04rem/1 var(--font-display); }
 
 .pipelineBands { display: grid; gap: 0.62rem; margin: 0; padding: 0; list-style: none; }
-.pipelineBand { --pipeline-band-color: var(--color-blueprint); display: grid; grid-template-columns: minmax(126px,0.22fr) minmax(0,1fr); gap: 0.62rem; padding: 0.62rem; border: 1px solid var(--color-border); border-radius: 12px; background: linear-gradient(135deg,color-mix(in srgb,var(--pipeline-band-color) 4%,transparent),rgba(243,240,232,0.018)); box-shadow: inset 0 1px rgba(255,255,255,0.025); }
+.pipelineBand { --pipeline-band-color: var(--color-blueprint); overflow: clip; border: 1px solid var(--color-border); border-radius: 12px; background: linear-gradient(135deg,color-mix(in srgb,var(--pipeline-band-color) 4%,transparent),rgba(243,240,232,0.018)); box-shadow: inset 0 1px rgba(255,255,255,0.025); }
 .pipelineBand[data-phase="foundation"] { --pipeline-band-color: var(--color-secondary); }
 .pipelineBand[data-phase="direction"] { --pipeline-band-color: var(--color-accent); }
 .pipelineBand[data-phase="narrative"] { --pipeline-band-color: var(--color-accent); }
@@ -645,14 +645,20 @@
 .pipelineBand[data-phase="metadata"] { --pipeline-band-color: var(--color-secondary); }
 .pipelineBand[data-phase="assembly"] { --pipeline-band-color: var(--color-amber); }
 .pipelineBand[data-phase="release"] { --pipeline-band-color: var(--color-ok); }
-.pipelineBandHeader { display: grid; grid-template-columns: 1.25rem minmax(0,1fr); align-content: start; gap: 0.32rem 0.5rem; min-width: 0; padding: 0.42rem 0.48rem; border-right: 1px solid var(--color-border); }
+.pipelineBandDisclosure { display: grid; gap: 0.54rem; }
+.pipelineBandDisclosure > summary { cursor: pointer; list-style: none; }
+.pipelineBandDisclosure > summary::-webkit-details-marker { display: none; }
+.pipelineBandHeader { display: grid; grid-template-columns: 1.25rem minmax(0,1fr) auto 0.8rem; min-height: 52px; align-items: center; gap: 0.32rem 0.5rem; min-width: 0; padding: 0.5rem 0.66rem; }
 .pipelineBandHeader > span { color: var(--pipeline-band-color); font: 700 0.6rem/1 var(--font-mono); }
 .pipelineBandHeader > div { display: grid; min-width: 0; gap: 0.22rem; }
 .pipelineBandHeader strong { color: var(--color-fg); font-size: 0.84rem; font-weight: 660; }
 .pipelineBandHeader small { color: var(--color-faint); font: 0.6rem/1.4 var(--font-mono); }
-.pipelineBandHeader i { grid-column: 1 / -1; width: 32px; height: 1px; margin-top: 0.3rem; background: linear-gradient(90deg,var(--pipeline-band-color),transparent); }
+.pipelineBandHeader em { min-width: 1.2rem; color: var(--pipeline-band-color); font: 700 0.58rem/1 var(--font-mono); font-style: normal; text-align: right; }
+.pipelineBandHeader i { width: 8px; height: 8px; border-right: 1px solid var(--pipeline-band-color); border-bottom: 1px solid var(--pipeline-band-color); transform: rotate(45deg) translateY(-2px); transition: transform 160ms ease; }
+.pipelineBandDisclosure[open] .pipelineBandHeader { border-bottom: 1px solid var(--color-border); background: color-mix(in srgb,var(--pipeline-band-color) 5%,transparent); }
+.pipelineBandDisclosure[open] .pipelineBandHeader i { transform: rotate(225deg) translateY(-2px); }
 
-.pipelineModuleGrid { display: grid; grid-template-columns: repeat(auto-fit,minmax(190px,1fr)); gap: 0.36rem; min-width: 0; }
+.pipelineModuleGrid { display: grid; grid-template-columns: repeat(auto-fit,minmax(190px,1fr)); gap: 0.36rem; min-width: 0; padding: 0 0.62rem 0.62rem; }
 .pipelineModule { min-width: 0; border: 1px solid var(--color-border); border-radius: 9px; background: rgba(4,8,17,0.42); transition: border-color 150ms ease, background 150ms ease, transform 150ms ease; }
 .pipelineModule:hover { border-color: var(--color-border-strong); background: rgba(243,240,232,0.035); }
 .pipelineModule[open] { grid-column: span 2; border-color: color-mix(in srgb,var(--color-blueprint) 38%,var(--color-border)); background: rgba(8,14,25,0.92); }
@@ -741,7 +747,6 @@
   .configurationGrid { grid-template-columns: repeat(3,minmax(0,1fr)); }
   .configurationItem:nth-child(3) { border-right: 0; }
   .configurationItem:nth-child(-n + 3) { border-bottom: 1px solid var(--color-border); }
-  .pipelineBand { grid-template-columns: 112px minmax(0,1fr); }
   .pipelineModuleGrid { grid-template-columns: repeat(auto-fit,minmax(175px,1fr)); }
   .analyticsLedger { grid-template-columns: 1fr; }
   .settingsMap { grid-template-columns: repeat(2,minmax(0,1fr)); }
@@ -799,10 +804,8 @@
   .recentHeader { align-items: flex-start; flex-direction: column; gap: 0; }
   .pipelineHeader { align-items: flex-start; flex-direction: column; }
   .pipelineStats { width: 100%; grid-auto-flow: initial; grid-template-columns: 1fr 1fr; }
-  .pipelineBand { grid-template-columns: 1fr; padding: 0.5rem; }
-  .pipelineBandHeader { grid-template-columns: 1.15rem minmax(0,1fr); padding: 0.34rem 0.4rem 0.48rem; border-right: 0; border-bottom: 1px solid var(--color-border); }
-  .pipelineBandHeader i { display: none; }
-  .pipelineModuleGrid { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .pipelineBandHeader { grid-template-columns: 1.15rem minmax(0,1fr) auto 0.7rem; min-height: 52px; padding: 0.42rem 0.48rem; }
+  .pipelineModuleGrid { grid-template-columns: repeat(2,minmax(0,1fr)); padding: 0 0.5rem 0.5rem; }
   .pipelineModule[open] { grid-column: 1 / -1; }
   .pipelineModuleSummary { grid-template-columns: 1.2rem minmax(0,1fr) auto; gap: 0.32rem; padding-right: 0.42rem; padding-left: 0.42rem; }
   .pipelineNode, .pipelineIdentity small, .pipelineModule[data-tuned="false"] .pipelineControlCount { display: none; }
