@@ -20,6 +20,8 @@ assert.match(page, /analyticsDataFreshness\(analyticsScope\)/,
   "stored statistics must receive an explicit freshness classification before presentation");
 assert.match(page, /Recorded views/,
   "stale or disconnected fleet values must be labeled as records, not live observations");
+assert.match(page, /MORE \{freshness\.state === "current" \? "OBSERVED" : "RECORDED"\} REACH/,
+  "the reach axis must not call stored snapshots observed reach");
 assert.match(page, /Fleet refresh ledger/);
 assert.match(page, /Review connections/);
 assert.match(page, /\/channels\/\$\{row\.slug\}\?tab=settings/);

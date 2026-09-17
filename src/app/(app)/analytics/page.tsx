@@ -356,7 +356,9 @@ function FleetEfficiencyField({
           <line x1="42" y1="18" x2="42" y2="208" className={styles.fieldAxis} />
           <text x="43" y="232" className={styles.fieldLabel}>LOWER SPEND</text>
           <text x="694" y="232" textAnchor="end" className={styles.fieldLabel}>HIGHER SPEND</text>
-          <text x="28" y="110" textAnchor="middle" transform="rotate(-90 28 110)" className={styles.fieldLabel}>MORE OBSERVED REACH</text>
+          <text x="28" y="110" textAnchor="middle" transform="rotate(-90 28 110)" className={styles.fieldLabel}>
+            MORE {freshness.state === "current" ? "OBSERVED" : "RECORDED"} REACH
+          </text>
           {nodes.map((node) => (
             <g key={node.channelId} data-selected={node.selected || undefined} className={styles.fieldNode}>
               {node.displaced ? (
@@ -558,7 +560,7 @@ function PerChannelCharts({
 type FleetMetric = "totalViews" | "subscriberCount" | "videoCount" | "costTotal";
 
 const FLEET_METRICS: readonly { key: FleetMetric; label: string }[] = [
-  { key: "totalViews", label: "Observed views" },
+  { key: "totalViews", label: "Views" },
   { key: "subscriberCount", label: "Subscribers" },
   { key: "videoCount", label: "Published" },
   { key: "costTotal", label: "Spend" },
@@ -595,7 +597,7 @@ function FleetComparison({ rows, freshness }: { rows: SummaryRow[]; freshness: A
               setVisibleLimit(ANALYTICS_FLEET_PAGE_SIZE);
             }}
           >
-            {item.label}
+            {item.key === "totalViews" && freshness.state !== "current" ? "Recorded views" : item.label}
           </button>
         ))}
       </div>
