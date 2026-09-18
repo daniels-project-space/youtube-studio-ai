@@ -130,6 +130,10 @@ function ThumbnailRefreshPreview({
   const [storedPreviewIdentity, setStoredPreviewIdentity] = useState<string | null>(null);
   const [storedPreviewReady, setStoredPreviewReady] = useState(false);
   const [storedPreviewFailed, setStoredPreviewFailed] = useState<string | null>(null);
+  // A signed URL being available is not the same thing as the artwork being
+  // visible. Keep the completion identity separate so the browser proof and
+  // the rendered review surface agree about what "ready" means.
+  const [loadedPreviewUrl, setLoadedPreviewUrl] = useState<string | null>(null);
   const previewPresent = candidate ? Boolean(row.candidate?.thumbnailPresent) : row.thumbnailPresent;
   const previewRunId = candidate ? row.candidate?.runId : row.runId;
   const previewIdentity = `${candidate ? "candidate" : "source"}:${previewRunId ?? ""}:${previewPresent ? "present" : "missing"}`;
@@ -196,6 +200,10 @@ function ThumbnailRefreshPreview({
   const src = hasBatchedPreview
     ? previewUrl!
     : storedUrl && storedPreviewReady && previewReadyForRow && !previewFailedForRow ? storedUrl : null;
+  const imageReady = Boolean(src) && loadedPreviewUrl === src;
+  const previewState = src
+    ? imageReady ? "ready" : "loading"
+    : previewPresent && !previewFailedForRow ? "loading" : "unavailable";
   const source = hasBatchedPreview || (storedUrl && storedPreviewReady && previewReadyForRow && !previewFailedForRow)
       ? candidate ? "new Library thumbnail" : "previous thumbnail"
     : previewPresent && !previewFailedForRow
@@ -206,6 +214,7 @@ function ThumbnailRefreshPreview({
     <div
       className={styles.preview}
       data-preview-source={source === "new Library thumbnail" ? "candidate" : source === "previous thumbnail" ? "retained" : "unavailable"}
+      data-preview-state={previewState}
     >
       {src ? (
         // eslint-disable-next-line @next/next/no-img-element
@@ -215,6 +224,7 @@ function ThumbnailRefreshPreview({
           loading={priority ? "eager" : "lazy"}
           fetchPriority={priority ? "high" : "auto"}
           decoding="async"
+          onLoad={() => setLoadedPreviewUrl(src)}
           onError={() => setStoredPreviewFailed(previewIdentity)}
         />
       ) : (
