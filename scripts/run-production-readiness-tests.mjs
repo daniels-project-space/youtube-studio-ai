@@ -1,4 +1,4 @@
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readdirSync } from "node:fs";
 import { dirname, join, relative } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -24,7 +24,7 @@ function directTests(directory) {
 // Extra tests that live outside src/ (so the src/**/*.test.* auto-discovery above
 // can't see them) but are still cheap, deterministic, no-ffmpeg/no-Convex checks
 // that belong in the standard gate. Kept as an explicit allowlist, appended after
-// the discovered tests, and run through the same tsx/spawnSync path as everything
+// the discovered tests, and run through the same tsx subprocess path as everything
 // else. The slower `test:assembly-render-parity` (needs ffmpeg + Remotion) is
 // intentionally NOT included here — run it separately/opt-in when touching the
 // render path, since it would change this suite's runtime requirements.
@@ -45,33 +45,86 @@ if (tests.length === 0) {
 // test and the rest of the readiness surface still runs.
 const DIRECT_TEST_TIMEOUT_MS = 180_000;
 
+// Tests run in their own Node processes and already use isolated temporary
+// directories. A small pool removes hundreds of needless process waits while
+// keeping enough CPU/RAM headroom for the occasional ffmpeg/Remotion fixture.
+// The env override remains useful for diagnosing a suspected test interaction,
+// but the default production gate always executes the complete same set.
+const requestedConcurrency = Number(process.env.DIRECT_TEST_CONCURRENCY ?? 4);
+const DIRECT_TEST_CONCURRENCY = Number.isSafeInteger(requestedConcurrency)
+  ? Math.max(1, Math.min(8, requestedConcurrency))
+  : 4;
+
+function executeTest(test) {
+  return new Promise((resolve) => {
+    const label = relative(root, test);
+    const child = spawn(tsx, [test], {
+      cwd: root,
+      env: process.env,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    let stdout = "";
+    let stderr = "";
+    let spawnError = null;
+    let timedOut = false;
+    let forceKill;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGTERM");
+      forceKill = setTimeout(() => child.kill("SIGKILL"), 10_000);
+      forceKill.unref();
+    }, DIRECT_TEST_TIMEOUT_MS);
+    child.stdout?.setEncoding("utf8");
+    child.stderr?.setEncoding("utf8");
+    child.stdout?.on("data", (chunk) => { stdout += chunk; });
+    child.stderr?.on("data", (chunk) => { stderr += chunk; });
+    child.on("error", (error) => { spawnError = error; });
+    child.on("close", (status, signal) => {
+      clearTimeout(timer);
+      if (forceKill) clearTimeout(forceKill);
+      resolve({ label, status, signal, stdout, stderr, spawnError, timedOut });
+    });
+  });
+}
+
+async function executeAllTests() {
+  const results = new Array(tests.length);
+  let nextIndex = 0;
+  const worker = async () => {
+    while (nextIndex < tests.length) {
+      const index = nextIndex++;
+      results[index] = await executeTest(tests[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(DIRECT_TEST_CONCURRENCY, tests.length) }, worker));
+  return results;
+}
+
 // Run EVERY test, then report. This used to exit on the first failure, which
 // hides the size of a breakage: when the owner lock moved to Convex it broke
 // two golden surface tests, and because one of them sorts third out of 579 the
 // suite died there and the remaining 576 never ran. A green-looking partial
 // sweep is worse than a red one, because it is quoted as evidence.
+console.log(`Running ${tests.length} direct readiness tests with ${DIRECT_TEST_CONCURRENCY} workers.`);
+const results = await executeAllTests();
 const failures = [];
-for (const test of tests) {
-  const label = relative(root, test);
-  console.log(`\n=== ${label} ===`);
-  const result = spawnSync(tsx, [test], {
-    cwd: root,
-    env: process.env,
-    stdio: "inherit",
-    timeout: DIRECT_TEST_TIMEOUT_MS,
-    killSignal: "SIGTERM",
-  });
-  if (result.error) {
-    const timeout = result.error.code === "ETIMEDOUT"
-      ? `Timed out after ${DIRECT_TEST_TIMEOUT_MS / 1_000}s`
-      : `Unable to execute ${label}: ${result.error.message}`;
-    console.error(`${timeout}: ${label}`);
-    failures.push(label);
+for (const result of results) {
+  console.log(`\n=== ${result.label} ===`);
+  if (result.stdout) process.stdout.write(result.stdout);
+  if (result.stderr) process.stderr.write(result.stderr);
+  if (result.timedOut) {
+    console.error(`Timed out after ${DIRECT_TEST_TIMEOUT_MS / 1_000}s: ${result.label}`);
+    failures.push(result.label);
+    continue;
+  }
+  if (result.spawnError) {
+    console.error(`Unable to execute ${result.label}: ${result.spawnError.message}`);
+    failures.push(result.label);
     continue;
   }
   if (result.status !== 0) {
-    console.error(`${label} failed with exit code ${result.status ?? "unknown"}`);
-    failures.push(label);
+    console.error(`${result.label} failed with exit code ${result.status ?? result.signal ?? "unknown"}`);
+    failures.push(result.label);
   }
 }
 
