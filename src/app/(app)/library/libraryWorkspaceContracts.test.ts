@@ -6,6 +6,8 @@ const root = process.cwd();
 const page = readFileSync(join(root, "src/app/(app)/library/page.tsx"), "utf8");
 const css = readFileSync(join(root, "src/app/(app)/library/library.module.css"), "utf8");
 const paging = readFileSync(join(root, "src/app/(app)/library/libraryPaging.ts"), "utf8");
+const thumbnailPanel = readFileSync(join(root, "src/components/ThumbnailRefreshInventoryPanel.tsx"), "utf8");
+const thumbnailPanelCss = readFileSync(join(root, "src/components/ThumbnailRefreshInventoryPanel.module.css"), "utf8");
 
 assert.match(page, /const page = pageLibraryGroup\(filtered, visibleLimit\)/);
 assert.match(page, /<section className=\{styles\.vault\}/);
@@ -39,6 +41,9 @@ assert.match(page, /<section className=\{styles\.emptyVault\}/,
   "an empty collection must remain a compact collection handoff, not consume the full workspace");
 assert.match(page, /Review legacy \{legacyCount\}/,
   "an empty current collection must preserve the real legacy-review handoff");
+assert.match(page, /defaultThumbnailReviewOpen/,
+  "when verified masters are empty, the saved thumbnail work must be surfaced once instead of leaving the Library looking blank");
+assert.match(page, /currentCount === 0\s*&&\s*legacyCount > 0/);
 assert.match(css, /\.libraryDashboard/);
 assert.match(css, /\.libraryMetrics/);
 assert.match(css, /\.vault \{/);
@@ -47,6 +52,14 @@ assert.doesNotMatch(css, /\.latestRail\s*\{/);
 assert.match(css, /\.changeToast\[data-tone="error"\]/);
 assert.match(css, /\.emptyVault \{/);
 assert.doesNotMatch(css, /\.channelHeader \{/);
+assert.match(thumbnailPanel, /const featured = rows\.filter/,
+  "the Library must lead with real retained candidate art, not duplicated evidence prose");
+assert.match(thumbnailPanel, /className=\{styles\.evidenceList\}/,
+  "full evidence and cost-bearing actions must remain available behind an explicit disclosure");
+assert.match(thumbnailPanelCss, /\.featuredRail \{/);
+assert.match(thumbnailPanelCss, /\.evidenceList \{/);
+assert.doesNotMatch(thumbnailPanelCss, /\.ernieGallery \{/,
+  "retired gallery CSS must not remain as visual dead code");
 assert.match(paging, /export const LIBRARY_PAGE_SIZE = 8/);
 
 console.log("Library vault workspace contracts passed");

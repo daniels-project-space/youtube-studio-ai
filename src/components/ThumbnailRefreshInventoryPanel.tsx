@@ -231,6 +231,7 @@ export function ThumbnailRefreshInventoryPanel({
   const [inventory, setInventory] = useState<readonly ThumbnailInventoryRow[] | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showAll, setShowAll] = useState(false);
+  const [showEvidenceRows, setShowEvidenceRows] = useState(false);
   const [busyRunIds, setBusyRunIds] = useState<Set<string>>(() => new Set());
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [retirementRunId, setRetirementRunId] = useState<string | null>(null);
@@ -418,6 +419,11 @@ export function ThumbnailRefreshInventoryPanel({
   const reviewCount = counts.legacy_unverified + counts.evidence_invalid + counts.missing_thumbnail;
   const retirementCount = rows.filter((row) => row.legacyCleanupAction === "retire" && row.retirement?.status !== "deleted").length;
   const visible = showAll ? rows : rows.slice(0, 6);
+  // The gallery is deliberately candidate-only: it lets the Library lead with
+  // actual new artwork instead of stale YouTube stills or an empty vault.
+  const featured = rows.filter((row) =>
+    row.candidate?.thumbnailPresent && row.candidate.status !== "failed",
+  ).slice(0, 6);
   const lofiFrameCandidates = rows.filter((row) =>
     isLofiChannel(row) &&
     row.legacyCleanupAction !== "retire" &&
@@ -486,6 +492,47 @@ export function ThumbnailRefreshInventoryPanel({
         </div>
       </header>
 
+      {inventory === null && !error ? <p className={styles.state}>Loading retained thumbnail evidence…</p> : null}
+      {error ? <p className={styles.state} role="status">{error}</p> : null}
+      {actionMessage ? <p className={styles.actionMessage} role="status">{actionMessage}</p> : null}
+      {inventory !== null && rows.length === 0 ? (
+        <p className={styles.state}>No finished videos match this channel selection yet.</p>
+      ) : null}
+
+      {featured.length ? (
+        <section className={styles.featured} aria-label="New thumbnail candidates">
+          <div className={styles.featuredHeading}>
+            <strong>New thumbnails</strong>
+            <span>{featured.length} ready to inspect</span>
+          </div>
+          <div className={styles.featuredRail}>
+            {featured.map((row, index) => (
+              <article className={styles.featuredCard} key={`featured-${row.runId}`}>
+                <Link href={`/runs/${row.candidate?.runId ?? row.runId}`} className={styles.featuredPreview}>
+                  <ThumbnailRefreshPreview row={row} candidate priority={index < 4} />
+                </Link>
+                <div>
+                  <span data-tone={STATUS_COPY[row.thumbnailEvidenceStatus].tone}>New candidate</span>
+                  <strong title={row.title}>{row.title}</strong>
+                  <small>{row.channelName}</small>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ) : null}
+
+      {rows.length ? (
+        <details
+          className={styles.evidenceList}
+          open={showEvidenceRows}
+          onToggle={(event) => setShowEvidenceRows(event.currentTarget.open)}
+        >
+          <summary>
+            <span>Evidence &amp; actions</span>
+            <small>{rows.length} saved video{rows.length === 1 ? "" : "s"}</small>
+          </summary>
+          <div className={styles.evidenceListBody}>
       {canQueueCandidates && lofiFrameCandidates.length ? (
         <div className={styles.lofiFrameBatch}>
           <div>
@@ -504,14 +551,7 @@ export function ThumbnailRefreshInventoryPanel({
         </div>
       ) : null}
 
-      {inventory === null && !error ? <p className={styles.state}>Loading retained thumbnail evidence…</p> : null}
-      {error ? <p className={styles.state} role="status">{error}</p> : null}
-      {actionMessage ? <p className={styles.actionMessage} role="status">{actionMessage}</p> : null}
-      {inventory !== null && rows.length === 0 ? (
-        <p className={styles.state}>No finished videos match this channel selection yet.</p>
-      ) : null}
-
-      {visible.length ? (
+      {showEvidenceRows && visible.length ? (
         <div className={styles.list}>
           {visible.map((row, index) => {
             const display = STATUS_COPY[row.thumbnailEvidenceStatus];
@@ -726,15 +766,18 @@ export function ThumbnailRefreshInventoryPanel({
         </div>
       ) : null}
 
-      {rows.length > visible.length ? (
+      {showEvidenceRows && rows.length > visible.length ? (
         <button type="button" className={styles.more} onClick={() => setShowAll(true)}>
           Show {rows.length - visible.length} more records
         </button>
       ) : null}
-      {showAll && rows.length > 6 ? (
+      {showEvidenceRows && showAll && rows.length > 6 ? (
         <button type="button" className={styles.more} onClick={() => setShowAll(false)}>
           Show fewer records
         </button>
+      ) : null}
+          </div>
+        </details>
       ) : null}
     </section>
   );

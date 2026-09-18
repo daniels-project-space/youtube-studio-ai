@@ -79,6 +79,8 @@ export default function LibraryPage() {
   const [bulkReceiptId, setBulkReceiptId] = useState<Id<"libraryActionReceipts"> | null>(null);
   const [bulkBusy, setBulkBusy] = useState(false);
   const [loadingTimedOut, setLoadingTimedOut] = useState(false);
+  const [thumbnailReviewOpen, setThumbnailReviewOpen] = useState(false);
+  const [thumbnailReviewTouched, setThumbnailReviewTouched] = useState(false);
   // ERNIE was kept only as sealed comparison evidence. The Library always
   // projects the retained source or a run-bound current candidate; it must
   // never promote a frozen experimental batch as the visible replacement.
@@ -140,6 +142,15 @@ export default function LibraryPage() {
   const currentCount = summary?.currentCount ?? 0;
   const legacyCount = summary?.legacyCount ?? summary?.activeCount ?? 0;
   const archivedCount = summary?.archivedCount ?? 0;
+
+  // A closed review queue followed by an empty vault made the Library look as
+  // if it had no work, even when it held retained thumbnail candidates. Make
+  // that real work the first thing an operator sees; after their first toggle,
+  // the disclosure remains entirely under their control.
+  const defaultThumbnailReviewOpen = !thumbnailReviewTouched
+    && !loading
+    && currentCount === 0
+    && legacyCount > 0;
 
   const changeLibraryState = async (video: VideoRow, state: LibraryState) => {
     if (busyIds.has(video._id)) return;
@@ -265,7 +276,15 @@ export default function LibraryPage() {
       </div>
 
       {collection !== "archived" ? (
-        <details id="thumbnail-refresh" className={`${styles.packagingWorkshop} glass`}>
+        <details
+          id="thumbnail-refresh"
+          className={`${styles.packagingWorkshop} glass`}
+          open={thumbnailReviewOpen || defaultThumbnailReviewOpen}
+          onToggle={(event) => {
+            setThumbnailReviewTouched(true);
+            setThumbnailReviewOpen(event.currentTarget.open);
+          }}
+        >
           <summary>
             <span className={styles.workshopIcon} aria-hidden="true"><IconSpark width={18} height={18} /></span>
             <span><small>Thumbnail review</small><strong>Exact saved runs</strong></span>
