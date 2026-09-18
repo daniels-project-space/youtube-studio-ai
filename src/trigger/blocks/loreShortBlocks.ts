@@ -71,6 +71,7 @@ import {
 } from "@/lib/minimaxH3";
 import {
   assertMiniMaxH3OpeningMotionQa,
+  miniMaxH3OpeningMotionRepairSeed,
   MiniMaxH3OpeningMotionRejectedError,
 } from "@/lib/minimaxH3OpeningMotionQa";
 import { sha256BytesHex } from "@/lib/sha256";
@@ -620,7 +621,7 @@ export const loreShort: Block = {
               cameraInstruction:
                 `${request.cameraInstruction} Begin the authored camera move immediately and preserve the same scene.`,
               negativePrompt: request.negativePrompt,
-              seed,
+              seed: miniMaxH3OpeningMotionRepairSeed(seed),
               firstFrame: { r2Key: imageKey, sha256: sha256BytesHex(frameBytes) },
               output: { r2Key: `${prefix}/h3/${request.id}-retry-2.mp4` },
               maxCostUsd: Math.min(PRICE.novitaVideoMaxUsd, retryRemaining),

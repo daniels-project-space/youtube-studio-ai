@@ -231,6 +231,11 @@ assert.match(
 );
 assert.match(
   genericH3Source,
+  /seed: miniMaxH3OpeningMotionRepairSeed\(seed\)/,
+  "the generic H3 repair must use new deterministic entropy instead of reusing its rejected seed",
+);
+assert.match(
+  genericH3Source,
   /openingMotionQa: acceptedTake\.openingMotionQa/,
   "the accepted generic H3 take must pass its temporal proof into the durable manifest projection",
 );
@@ -247,6 +252,11 @@ assert.match(
   signatureH3Source,
   /H3 opening-motion repair has no remaining budget/,
   "signature H3 recovery must stay bounded by the approved stage budget",
+);
+assert.match(
+  signatureH3Source,
+  /seed: miniMaxH3OpeningMotionRepairSeed\(seed\)/,
+  "signature H3 recovery must not repeat a deterministically static first take",
 );
 assert.match(
   source,

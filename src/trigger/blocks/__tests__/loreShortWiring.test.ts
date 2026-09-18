@@ -159,6 +159,8 @@ async function blockUsesAttestedProvidersAndR2(): Promise<void> {
     "only a measured frozen opening, never an unavailable detector, may enter the bounded repair path");
   assert.match(block, /opening-motion repair has no remaining budget/,
     "the Lore H3 repair must refuse a second take when the approved stage budget is exhausted");
+  assert.match(block, /seed: miniMaxH3OpeningMotionRepairSeed\(seed\)/,
+    "the Lore H3 recovery must vary only deterministic retry entropy after a static first take");
   assert.match(block, /-retry-2\.mp4/,
     "a Lore H3 repair must preserve the failed take and use a distinct immutable R2 output key");
   assert.match(block, /h3OpeningMotion: \[\.\.\.h3OpeningMotion\.entries\(\)\]/,

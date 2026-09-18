@@ -87,6 +87,7 @@ import {
 } from "@/lib/minimaxH3";
 import {
   assertMiniMaxH3OpeningMotionQa,
+  miniMaxH3OpeningMotionRepairSeed,
   MiniMaxH3OpeningMotionRejectedError,
 } from "@/lib/minimaxH3OpeningMotionQa";
 
@@ -713,7 +714,7 @@ async function renderGeneratedScenePlanWithH3(args: {
             `Use the authored ${scene.cameraMove} move with ${scene.shotScale} framing and ${scene.lens} lens; ` +
             "begin movement immediately, keep the action physically coherent, and avoid a scene change.",
           ...(scene.negative ? { negativePrompt: scene.negative } : {}),
-          seed,
+          seed: miniMaxH3OpeningMotionRepairSeed(seed),
           firstFrame: { r2Key: still.key, sha256: firstFrameSha256 },
           output: { r2Key: `${args.prefix}/h3/clip-${String(index + 1).padStart(4, "0")}-retry-2.mp4` },
           maxCostUsd: retryRemaining,
@@ -1124,7 +1125,7 @@ export async function generateSignatureClips(
             `Use the authored ${scene.cameraMove} move with ${scene.shotScale} framing and ${scene.lens} lens; ` +
             "begin movement immediately, keep the motion physically coherent, and avoid scene changes.",
           ...(scene.negative ? { negativePrompt: scene.negative } : {}),
-          seed,
+          seed: miniMaxH3OpeningMotionRepairSeed(seed),
           firstFrame: { r2Key: still.key, sha256: firstFrameSha256 },
           output: { r2Key: `${prefix}/h3/clip-${String(index + 1).padStart(3, "0")}-retry-2.mp4` },
           maxCostUsd: retryRemaining,

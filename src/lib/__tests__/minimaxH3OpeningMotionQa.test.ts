@@ -11,6 +11,7 @@ import {
   measureMiniMaxH3OpeningMotionQa,
   MINIMAX_H3_IMMEDIATE_MOTION_MAX_FROZEN_HOLD_SEC,
   MINIMAX_H3_MIN_OPENING_FRAME_DELTA,
+  miniMaxH3OpeningMotionRepairSeed,
   MiniMaxH3OpeningMotionRejectedError,
 } from "@/lib/minimaxH3OpeningMotionQa";
 
@@ -26,6 +27,21 @@ function render(output: string, args: string[]): void {
 }
 
 async function main(): Promise<void> {
+  assert.equal(
+    miniMaxH3OpeningMotionRepairSeed(42),
+    miniMaxH3OpeningMotionRepairSeed(42),
+    "opening-motion repair entropy must remain stable across a replay",
+  );
+  assert.notEqual(
+    miniMaxH3OpeningMotionRepairSeed(42),
+    42,
+    "a static-opening repair must not reuse the rejected worker seed",
+  );
+  assert.equal(
+    miniMaxH3OpeningMotionRepairSeed(2_147_483_647),
+    104_728,
+    "repair entropy must wrap safely inside the provider's 32-bit seed contract",
+  );
   const work = await mkdtemp(join(tmpdir(), "ysa-h3-opening-motion-"));
   try {
     const frozenOpening = join(work, "frozen-opening.mp4");

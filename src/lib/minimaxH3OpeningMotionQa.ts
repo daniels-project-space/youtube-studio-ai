@@ -24,6 +24,8 @@ export const MINIMAX_H3_IMMEDIATE_MOTION_MAX_FROZEN_HOLD_SEC = 0.125;
 export const MINIMAX_H3_MAX_STATIC_FRACTION = 0.1;
 export const MINIMAX_H3_OPENING_MOTION_SAMPLE_FPS = 24;
 export const MINIMAX_H3_MIN_OPENING_FRAME_DELTA = 0.002;
+const MINIMAX_H3_SEED_MODULUS = 2_147_483_648;
+const MINIMAX_H3_OPENING_MOTION_REPAIR_SEED_OFFSET = 104_729;
 
 /**
  * H3 accepts the supplied image as its opening frame. Make the first moving
@@ -34,6 +36,23 @@ export const MINIMAX_H3_IMMEDIATE_MOTION_PROMPT =
   "MANDATORY MOTION TIMING: at 0.00 seconds, begin the authored subject action and camera displacement. " +
   "By 0.125 seconds the image must visibly advance beyond the conditioning frame. " +
   "Do not hold the input image, use a static establishing beat, freeze, or delay movement.";
+
+/**
+ * A static opening is a deterministic defect, not a reason to perturb an
+ * approved conditioning image.  A bounded repair therefore keeps that exact
+ * R2 frame and all creative locks, but must not reuse the rejected sample's
+ * seed: an otherwise deterministic worker can simply emit the same hold.
+ *
+ * This offset is stable across replay and stays inside the 32-bit H3 seed
+ * contract. It intentionally changes only retry entropy, never the original
+ * request identity or the channel's continuity seed.
+ */
+export function miniMaxH3OpeningMotionRepairSeed(seed: number): number {
+  if (!Number.isInteger(seed) || seed < 0 || seed >= MINIMAX_H3_SEED_MODULUS) {
+    throw new Error("MiniMax H3 opening-motion repair requires a non-negative 32-bit seed");
+  }
+  return (seed + MINIMAX_H3_OPENING_MOTION_REPAIR_SEED_OFFSET) % MINIMAX_H3_SEED_MODULUS;
+}
 
 export type MiniMaxH3OpeningMotionQaResult =
   | MiniMaxH3OpeningMotionQaEvidence
