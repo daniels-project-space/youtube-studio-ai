@@ -259,14 +259,15 @@ function structuredCaption(input: {
  */
 export function instrumentalLyricsControl(role: ChannelMusicRole): string {
   const tags: Record<ChannelMusicRole, readonly string[]> = {
-    // Music3 recognises standard song-section tags as structural controls.
-    // The caption owns the actual musical direction; deliberately no prose is
-    // supplied here, so an instrumental program cannot turn instructions into
-    // accidental vocals.
-    primary_music: ["[Intro]", "[Verse]", "[Chorus]", "[Bridge]", "[Chorus]", "[Outro]"],
-    meditation_bed: ["[Intro]", "[Verse]", "[Bridge]", "[Outro]"],
-    short_form_bed: ["[Intro]", "[Verse]", "[Chorus]", "[Outro]"],
-    narration_bed: ["[Intro]", "[Verse]", "[Bridge]", "[Chorus]", "[Outro]"],
+    // Music3 recognises both song-section tags and its native [Instrumental]
+    // tag. Keep familiar form cues for coherent progression, but state the
+    // no-vocal intent in the control stream as well as in the caption. The
+    // latter is prose for arrangement; this must remain tag-only so it can
+    // never become accidental sung/spoken text.
+    primary_music: ["[Intro]", "[Instrumental]", "[Verse]", "[Chorus]", "[Instrumental]", "[Bridge]", "[Chorus]", "[Outro]"],
+    meditation_bed: ["[Intro]", "[Instrumental]", "[Verse]", "[Bridge]", "[Outro]"],
+    short_form_bed: ["[Intro]", "[Instrumental]", "[Verse]", "[Chorus]", "[Outro]"],
+    narration_bed: ["[Intro]", "[Instrumental]", "[Verse]", "[Bridge]", "[Chorus]", "[Outro]"],
   };
   return tags[role].join("\n");
 }

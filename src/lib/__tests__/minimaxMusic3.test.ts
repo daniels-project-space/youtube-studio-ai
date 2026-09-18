@@ -95,8 +95,8 @@ async function main(): Promise<void> {
       assert.match(String(request.caption), /^### Global Metadata/mu);
       assert.equal(
         request.lyricsControl,
-        "[Intro]\n[Verse]\n[Chorus]\n[Bridge]\n[Chorus]\n[Outro]",
-        "the worker must receive standard structural tags, never caption prose in its lyrics control",
+        "[Intro]\n[Instrumental]\n[Verse]\n[Chorus]\n[Instrumental]\n[Bridge]\n[Chorus]\n[Outro]",
+        "the worker must receive Music3's instrumental control with structural tags, never caption prose in its lyrics control",
       );
       assert.doesNotMatch(String(request.lyricsControl), /Establish|Keep the|vocals|spoken/u);
       assert.deepEqual(request.renderProfile, MINIMAX_MUSIC3_RENDER_PROFILE);

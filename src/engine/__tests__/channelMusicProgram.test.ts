@@ -43,11 +43,17 @@ assert.match(history.generation.structuredCaption, /### Arrangement/mu);
 assert.match(history.generation.structuredCaption, /Never sentimentalize the loss/u);
 assert.equal(
   history.generation.lyricsControl,
-  "[Intro]\n[Verse]\n[Bridge]\n[Chorus]\n[Outro]",
-  "Music3 lyrics control must use standard structural tags; arrangement prose belongs in the structured caption",
+  "[Intro]\n[Instrumental]\n[Verse]\n[Bridge]\n[Chorus]\n[Outro]",
+  "Music3 lyrics control must state its native instrumental mode while keeping structural tags; arrangement prose belongs in the structured caption",
 );
 assert.doesNotMatch(history.generation.lyricsControl, /Establish|Keep the|vocals|spoken/u);
-assert.equal(instrumentalLyricsControl("meditation_bed").split("\n").length, 4);
+for (const role of ["primary_music", "narration_bed", "meditation_bed", "short_form_bed"] as const) {
+  assert.match(
+    instrumentalLyricsControl(role),
+    /\[Instrumental\]/u,
+    `${role} must send Music3's native instrumental control as well as the prose-free caption constraint`,
+  );
+}
 assert.equal(history.minimaxLicense.uiAttribution, "MiniMax-Music3");
 assert.equal(history.minimaxLicense.generatedContentDisclosureRequired, true);
 
@@ -72,8 +78,8 @@ assert.equal(lofi.generation.sections[0]?.startFraction, 0);
 assert.equal(lofi.generation.sections.at(-1)?.endFraction, 1);
 assert.equal(
   lofi.generation.lyricsControl,
-  "[Intro]\n[Verse]\n[Chorus]\n[Bridge]\n[Chorus]\n[Outro]",
-  "music-first programs must expose a complete form instead of repeating generic instrumental placeholders",
+  "[Intro]\n[Instrumental]\n[Verse]\n[Chorus]\n[Instrumental]\n[Bridge]\n[Chorus]\n[Outro]",
+  "music-first programs must expose a complete form while explicitly preserving Music3 instrumental generation",
 );
 assert.match(
   lofi.generation.structuredCaption,
