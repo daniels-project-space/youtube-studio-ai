@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 
 import { fmtDateTime } from "@/lib/format";
@@ -238,6 +238,8 @@ export function ThumbnailRefreshInventoryPanel({
   const [retirementRunId, setRetirementRunId] = useState<string | null>(null);
   const [retirementConfirmation, setRetirementConfirmation] = useState("");
   const [lofiFrameBatchBusy, setLofiFrameBatchBusy] = useState(false);
+  const featuredRailRef = useRef<HTMLDivElement>(null);
+  const [featuredRailCanScroll, setFeaturedRailCanScroll] = useState({ previous: false, next: false });
 
   const loadInventory = useCallback(async (signal?: AbortSignal) => {
     const response = await fetch("/api/thumbnail-refresh", { cache: "no-store", signal });
@@ -433,6 +435,41 @@ export function ThumbnailRefreshInventoryPanel({
     !row.candidate,
   );
 
+  // A cropped final card is not a useful affordance. Measure the actual
+  // scroll box rather than guessing from the viewport, so the navigation is
+  // shown only when a candidate is genuinely off-screen.
+  useEffect(() => {
+    const rail = featuredRailRef.current;
+    if (!rail) return;
+    const measure = () => {
+      const previous = rail.scrollLeft > 2;
+      const next = rail.scrollLeft + rail.clientWidth < rail.scrollWidth - 2;
+      setFeaturedRailCanScroll((current) => (
+        current.previous === previous && current.next === next
+          ? current
+          : { previous, next }
+      ));
+    };
+    const frame = window.requestAnimationFrame(measure);
+    const observer = new ResizeObserver(measure);
+    observer.observe(rail);
+    rail.addEventListener("scroll", measure, { passive: true });
+    return () => {
+      window.cancelAnimationFrame(frame);
+      observer.disconnect();
+      rail.removeEventListener("scroll", measure);
+    };
+  }, [featured.length]);
+
+  const moveFeaturedRail = (direction: -1 | 1) => {
+    const rail = featuredRailRef.current;
+    if (!rail) return;
+    rail.scrollBy({
+      left: direction * Math.max(rail.clientWidth * 0.72, 220),
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth",
+    });
+  };
+
   const queueLofiFrameCandidates = async () => {
     if (lofiFrameBatchBusy || !lofiFrameCandidates.length) return;
     const candidateIds = new Set(lofiFrameCandidates.map((row) => row.runId));
@@ -503,10 +540,28 @@ export function ThumbnailRefreshInventoryPanel({
       {featured.length ? (
         <section className={styles.featured} aria-label="New thumbnail candidates">
           <div className={styles.featuredHeading}>
-            <strong>New thumbnails</strong>
-            <span>{featured.length} ready to inspect</span>
+            <div>
+              <strong>New thumbnails</strong>
+              <span>{featured.length} ready to inspect</span>
+            </div>
+            <div className={styles.featuredControls} aria-label="New thumbnail controls">
+              <button
+                type="button"
+                onClick={() => moveFeaturedRail(-1)}
+                aria-label="Previous new thumbnails"
+                title={featuredRailCanScroll.previous ? "Show previous thumbnails" : "At the first thumbnail"}
+                disabled={!featuredRailCanScroll.previous}
+              >‹</button>
+              <button
+                type="button"
+                onClick={() => moveFeaturedRail(1)}
+                aria-label="Next new thumbnails"
+                title={featuredRailCanScroll.next ? "Show more thumbnails" : "At the last thumbnail"}
+                disabled={!featuredRailCanScroll.next}
+              >›</button>
+            </div>
           </div>
-          <div className={styles.featuredRail}>
+          <div ref={featuredRailRef} className={styles.featuredRail} data-thumbnail-candidate-rail>
             {featured.map((row, index) => (
               <article className={styles.featuredCard} key={`featured-${row.runId}`}>
                 <Link href={`/runs/${row.candidate?.runId ?? row.runId}`} className={styles.featuredPreview}>
