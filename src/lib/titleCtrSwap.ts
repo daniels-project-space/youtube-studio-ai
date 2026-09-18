@@ -90,6 +90,12 @@ export function admitTitleObservation(
 export interface TitleCandidateStats {
   videoId: string;
   title: string;
+  /**
+   * YouTube Studio does not offer native title/thumbnail tests for made-for-
+   * kids videos. Keep this in the proposal input so automated operations never
+   * recommend a workflow the channel is ineligible to start.
+   */
+  madeForKids?: boolean | null;
   /** The runner-up metacraft already produced. No alternate, no test. */
   titleAlternate?: string | null;
   /** Additional receipt-derived title-only candidates, ordered after the runner-up. */
@@ -186,6 +192,13 @@ export function planNativeTitleTestProposals(
   const median = channelMedianCtr(videos);
   return videos.map((video): NativeTitleTestProposal => {
     const base = { videoId: video.videoId, channelMedianCtr: median ?? undefined };
+    if (video.madeForKids === true) {
+      return {
+        ...base,
+        action: "hold",
+        reason: "YouTube native title tests are unavailable for made-for-kids videos",
+      };
+    }
     if (video.swappedAt) {
       return { ...base, action: "hold", reason: "already swapped once; a second swap would confound the test" };
     }

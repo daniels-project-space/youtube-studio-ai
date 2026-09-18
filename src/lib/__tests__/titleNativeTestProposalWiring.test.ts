@@ -11,9 +11,11 @@ assert.match(proposal, /admitNativeTitleTestOutcome/);
 assert.match(proposal, /NativeTitleTestVariantObservation/);
 assert.match(proposal, /exact 2–3 title slate/);
 assert.match(proposal, /watch-time-share evidence/);
+assert.match(proposal, /made-for-kids videos/);
 assert.doesNotMatch(proposal, /function judgeSwapOutcome/);
 assert.match(worker, /planNativeTitleTestProposals/);
 assert.match(worker, /action === "propose_native_test"/);
+assert.match(worker, /channel\.schedule\?\.madeForKids === true/);
 assert.doesNotMatch(worker, /updateVideoMetadata/);
 assert.doesNotMatch(worker, /action === "swap"/);
 

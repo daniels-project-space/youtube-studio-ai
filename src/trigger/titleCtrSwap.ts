@@ -41,10 +41,11 @@ type Logger = (m: string) => void;
 /** Bound owner-facing native-test proposals per channel in one run. */
 const MAX_PROPOSALS_PER_CHANNEL = 2;
 
-function candidate(entry: PerfEntry): TitleCandidateStats {
+function candidate(entry: PerfEntry, madeForKids: boolean): TitleCandidateStats {
   return {
     videoId: entry.videoId,
     title: entry.title,
+    madeForKids,
     titleAlternate: entry.titleAlternate,
     titleAlternates: entry.titleAlternates,
     thumbnailImpressions: entry.thumbnailImpressions,
@@ -92,6 +93,7 @@ export async function runTitleCtrSwap(
   const convex = new ConvexHttpClient(url);
   const channels = (await convex.query(api.channels.listChannels, { ownerId })) as Array<{
     _id: Id<"channels">; slug: string; name: string;
+    schedule?: { madeForKids?: boolean };
   }>;
 
   const proposed: NativeTitleTestProposal[] = [];
@@ -107,7 +109,10 @@ export async function runTitleCtrSwap(
     const dirty = judgePriorSwaps(ledger, log) > 0;
     judged += dirty ? 1 : 0;
 
-    const decisions = planNativeTitleTestProposals(ledger.map(candidate), now);
+    const decisions = planNativeTitleTestProposals(
+      ledger.map((entry) => candidate(entry, channel.schedule?.madeForKids === true)),
+      now,
+    );
     const proposals = decisions
       .filter((decision) => decision.action === "propose_native_test")
       .slice(0, MAX_PROPOSALS_PER_CHANNEL);

@@ -56,6 +56,16 @@ function main(): void {
   assert.deepEqual(d.titleVariants, ["The Original Title That Went Out", "The Runner Up Nobody Ever Used"]);
   assert.equal(d.baselineCtr, 2.0, "the number the alternate must beat is recorded");
 
+  // YouTube Studio does not allow native title/thumbnail tests on made-for-
+  // kids videos. A strong enough CTR signal must still never create an
+  // impossible owner workflow for the supervised children-learning lane.
+  const madeForKids = decision(
+    [...healthyChannel(), video({ videoId: "kids", ctr: 2.0, madeForKids: true })],
+    "kids",
+  );
+  assert.equal(madeForKids.action, "hold");
+  assert.match(madeForKids.reason, /made-for-kids/i);
+
   // Noise floor: the same weak CTR on a handful of impressions is not evidence.
   assert.equal(
     decision([...healthyChannel(), video({ videoId: "slow", ctr: 2.0, thumbnailImpressions: 300 })], "slow").action,
