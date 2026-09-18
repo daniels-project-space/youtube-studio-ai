@@ -43,8 +43,8 @@ assert.match(history.generation.structuredCaption, /### Arrangement/mu);
 assert.match(history.generation.structuredCaption, /Never sentimentalize the loss/u);
 assert.equal(
   history.generation.lyricsControl,
-  "[Intro]\n[Instrumental]\n[Instrumental]\n[Instrumental]\n[Outro]",
-  "Music3 lyrics control must be canonical instrumental tags; arrangement prose belongs in the structured caption",
+  "[Intro]\n[Verse]\n[Bridge]\n[Chorus]\n[Outro]",
+  "Music3 lyrics control must use standard structural tags; arrangement prose belongs in the structured caption",
 );
 assert.doesNotMatch(history.generation.lyricsControl, /Establish|Keep the|vocals|spoken/u);
 assert.equal(instrumentalLyricsControl("meditation_bed").split("\n").length, 4);
@@ -70,6 +70,21 @@ assert.equal(lofi.mix.bodyMusicVol, 1, "music-first channels cannot be accidenta
 assert.equal(lofi.generation.sections.length, 6);
 assert.equal(lofi.generation.sections[0]?.startFraction, 0);
 assert.equal(lofi.generation.sections.at(-1)?.endFraction, 1);
+assert.equal(
+  lofi.generation.lyricsControl,
+  "[Intro]\n[Verse]\n[Chorus]\n[Bridge]\n[Chorus]\n[Outro]",
+  "music-first programs must expose a complete form instead of repeating generic instrumental placeholders",
+);
+assert.match(
+  lofi.generation.structuredCaption,
+  /two-bar lead motif[\s\S]*call-and-response[\s\S]*counterline[\s\S]*different rhythmic placement[\s\S]*opening harmony/u,
+  "the primary-music prompt must describe a real arrangement progression, not a stack of generic depth adjectives",
+);
+assert.match(
+  history.generation.structuredCaption,
+  /two-note pulse[\s\S]*low answer[\s\S]*withdraw one layer[\s\S]*opening texture/u,
+  "a narration bed must retain narrative musical causality while protecting speech",
+);
 
 const receiptInput = {
   output: {

@@ -179,36 +179,36 @@ function roleSections(role: ChannelMusicRole, identity: {
   const shared = `Keep the ${identity.genre} identity and the same acoustic space; use ${instruments}; no vocals or spoken words.`;
   if (role === "primary_music") {
     return [
-      { id: "intro", label: "Intro", startFraction: 0, endFraction: 0.1, energy: 0.3, instruction: `Establish the motif with restraint. ${shared}` },
-      { id: "theme", label: "Theme", startFraction: 0.1, endFraction: 0.3, energy: 0.5, instruction: `State a memorable lead motif and grounded groove. ${shared}` },
-      { id: "deepen", label: "Deepen", startFraction: 0.3, endFraction: 0.52, energy: 0.64, instruction: `Add harmonic depth and one secondary texture without crowding the mix. ${shared}` },
-      { id: "variation", label: "Variation", startFraction: 0.52, endFraction: 0.72, energy: 0.72, instruction: `Develop the motif through a real melodic or rhythmic variation; avoid merely adding volume. ${shared}` },
-      { id: "return", label: "Return", startFraction: 0.72, endFraction: 0.9, energy: 0.58, instruction: `Return to the recognizable theme with warmer resolution and preserved dynamics. ${shared}` },
-      { id: "outro", label: "Outro", startFraction: 0.9, endFraction: 1, energy: 0.3, instruction: `Resolve naturally toward the opening harmony so the later deterministic loop fold remains musical. ${shared}` },
+      { id: "intro", label: "Intro", startFraction: 0, endFraction: 0.1, energy: 0.3, instruction: `Introduce one two-bar lead motif, then leave a breath before the groove enters; make the opening harmony identifiable enough to return to. ${shared}` },
+      { id: "theme", label: "Theme", startFraction: 0.1, endFraction: 0.3, energy: 0.5, instruction: `Restate that motif with a grounded groove and a low-register answer; use call-and-response rather than stacking every instrument at once. ${shared}` },
+      { id: "deepen", label: "Deepen", startFraction: 0.3, endFraction: 0.52, energy: 0.64, instruction: `Keep the lead motif legible, change one chord colour, and introduce one quiet counterline only after the second phrase; create depth through interplay, not louder mastering. ${shared}` },
+      { id: "variation", label: "Variation", startFraction: 0.52, endFraction: 0.72, energy: 0.72, instruction: `Turn the motif through a different rhythmic placement or answering phrase, then briefly remove one layer so the return has contrast; never substitute a generic riser. ${shared}` },
+      { id: "return", label: "Return", startFraction: 0.72, endFraction: 0.9, energy: 0.58, instruction: `Bring back the original motif in a warmer voicing with the same groove; the listener should recognize the return without a density spike. ${shared}` },
+      { id: "outro", label: "Outro", startFraction: 0.9, endFraction: 1, energy: 0.3, instruction: `Strip back to the opening harmony and one final motif fragment, leaving a natural handoff so the later deterministic loop fold is musical. ${shared}` },
     ];
   }
   if (role === "meditation_bed") {
     return [
-      { id: "arrival", label: "Arrival", startFraction: 0, endFraction: 0.16, energy: 0.18, instruction: `Enter without a transient shock; establish safety and space. ${shared}` },
-      { id: "settle", label: "Settle", startFraction: 0.16, endFraction: 0.48, energy: 0.22, instruction: `Hold a slow stable pulse with organic micro-variation and no attention-grabbing lead. ${shared}` },
-      { id: "breathe", label: "Breathe", startFraction: 0.48, endFraction: 0.78, energy: 0.26, instruction: `Open the harmony slightly while keeping the texture soft and physically spacious. ${shared}` },
-      { id: "release", label: "Release", startFraction: 0.78, endFraction: 1, energy: 0.16, instruction: `Reduce density gradually; end gently without a hard cadence or abrupt fade. ${shared}` },
+      { id: "arrival", label: "Arrival", startFraction: 0, endFraction: 0.16, energy: 0.18, instruction: `Enter with one soft sustained dyad and no transient shock; establish a slow, safe breathing space before any pulse. ${shared}` },
+      { id: "settle", label: "Settle", startFraction: 0.16, endFraction: 0.48, energy: 0.22, instruction: `Hold a slow stable pulse with tiny timing and timbre changes every few phrases; keep the lead below attention threshold rather than static. ${shared}` },
+      { id: "breathe", label: "Breathe", startFraction: 0.48, endFraction: 0.78, energy: 0.26, instruction: `Open one harmonic interval and let a distant upper-register response appear, then recede; preserve physical space and avoid a climactic swell. ${shared}` },
+      { id: "release", label: "Release", startFraction: 0.78, endFraction: 1, energy: 0.16, instruction: `Remove one layer at a time and return to the arrival harmony; end gently without a hard cadence, abrupt fade, or new event. ${shared}` },
     ];
   }
   if (role === "short_form_bed") {
     return [
-      { id: "hook", label: "Hook", startFraction: 0, endFraction: 0.18, energy: 0.62, instruction: `Open immediately with a clean recognizable motif, never a generic impact hit. ${shared}` },
-      { id: "drive", label: "Drive", startFraction: 0.18, endFraction: 0.5, energy: 0.68, instruction: `Support fast information rhythm while leaving the speech band clear. ${shared}` },
-      { id: "turn", label: "Turn", startFraction: 0.5, endFraction: 0.78, energy: 0.76, instruction: `Mark the reveal with harmonic motion rather than a hollow riser. ${shared}` },
-      { id: "button", label: "Button", startFraction: 0.78, endFraction: 1, energy: 0.58, instruction: `Land a concise musical resolution that does not mask the final spoken line. ${shared}` },
+      { id: "hook", label: "Hook", startFraction: 0, endFraction: 0.18, energy: 0.62, instruction: `Open on the first beat with a compact two-note motif and pulse, never a generic impact hit; leave the spoken-frequency range open. ${shared}` },
+      { id: "drive", label: "Drive", startFraction: 0.18, endFraction: 0.5, energy: 0.68, instruction: `Keep a clear rhythmic engine under fast information, using one answering figure between phrases rather than adding a competing melody. ${shared}` },
+      { id: "turn", label: "Turn", startFraction: 0.5, endFraction: 0.78, energy: 0.76, instruction: `Mark the reveal by changing harmony or removing the pulse for one beat before its return; never use a hollow riser. ${shared}` },
+      { id: "button", label: "Button", startFraction: 0.78, endFraction: 1, energy: 0.58, instruction: `Return the opening motif in a concise final button, resolving before the final spoken line without masking it. ${shared}` },
     ];
   }
   return [
-    { id: "cold-open", label: "Cold open", startFraction: 0, endFraction: 0.12, energy: 0.28, instruction: `Create quiet intrigue under the hook; keep the speech band open. ${shared}` },
-    { id: "exposition", label: "Exposition", startFraction: 0.12, endFraction: 0.42, energy: 0.22, instruction: `Stay calm and sparse while the story establishes context. ${shared}` },
-    { id: "complication", label: "Complication", startFraction: 0.42, endFraction: 0.65, energy: 0.36, instruction: `Increase harmonic tension and pulse subtly without becoming trailer music. ${shared}` },
-    { id: "resolution", label: "Resolution", startFraction: 0.65, endFraction: 0.88, energy: 0.3, instruction: `Release tension with warmer harmony while maintaining continuity under narration. ${shared}` },
-    { id: "tail", label: "Tail", startFraction: 0.88, endFraction: 1, energy: 0.18, instruction: `Thin the arrangement and resolve gently beneath the closing thought. ${shared}` },
+    { id: "cold-open", label: "Cold open", startFraction: 0, endFraction: 0.12, energy: 0.28, instruction: `Place a quiet two-note pulse under the hook, then leave room after it; create intrigue without filling the speech band. ${shared}` },
+    { id: "exposition", label: "Exposition", startFraction: 0.12, endFraction: 0.42, energy: 0.22, instruction: `Keep one sparse harmonic bed and a delayed low answer while the story establishes context; use rests between phrases. ${shared}` },
+    { id: "complication", label: "Complication", startFraction: 0.42, endFraction: 0.65, energy: 0.36, instruction: `Introduce subtle harmonic tension or a restrained pulse underneath the narration, then withdraw one layer; do not become trailer music. ${shared}` },
+    { id: "resolution", label: "Resolution", startFraction: 0.65, endFraction: 0.88, energy: 0.3, instruction: `Release tension by returning a warmer version of the opening harmony, with one short answer figure rather than a sentimental swell. ${shared}` },
+    { id: "tail", label: "Tail", startFraction: 0.88, endFraction: 1, energy: 0.18, instruction: `Thin to the opening texture and resolve beneath the closing thought; no new motif, hard cadence, or abrupt fade. ${shared}` },
   ];
 }
 
@@ -258,13 +258,17 @@ function structuredCaption(input: {
  * as “add harmonic depth” as performable text.
  */
 export function instrumentalLyricsControl(role: ChannelMusicRole): string {
-  const interiorCount: Record<ChannelMusicRole, number> = {
-    primary_music: 4,
-    meditation_bed: 2,
-    short_form_bed: 2,
-    narration_bed: 3,
+  const tags: Record<ChannelMusicRole, readonly string[]> = {
+    // Music3 recognises standard song-section tags as structural controls.
+    // The caption owns the actual musical direction; deliberately no prose is
+    // supplied here, so an instrumental program cannot turn instructions into
+    // accidental vocals.
+    primary_music: ["[Intro]", "[Verse]", "[Chorus]", "[Bridge]", "[Chorus]", "[Outro]"],
+    meditation_bed: ["[Intro]", "[Verse]", "[Bridge]", "[Outro]"],
+    short_form_bed: ["[Intro]", "[Verse]", "[Chorus]", "[Outro]"],
+    narration_bed: ["[Intro]", "[Verse]", "[Bridge]", "[Chorus]", "[Outro]"],
   };
-  return ["[Intro]", ...Array.from({ length: interiorCount[role] }, () => "[Instrumental]"), "[Outro]"].join("\n");
+  return tags[role].join("\n");
 }
 
 export function createChannelMusicProgram(input: CreateChannelMusicProgramInput): ChannelMusicProgram {
