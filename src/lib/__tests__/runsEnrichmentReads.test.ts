@@ -15,7 +15,10 @@ function context() {
       { _id: CHANNEL_B, _creationTime: 2, ownerId: OWNER, name: "Beta", slug: "beta" },
     ],
     runs: [
-      { _id: "runs:recent-a-1", _creationTime: 1, ownerId: OWNER, channelId: CHANNEL_A, status: "completed", startedAt: 30 },
+      {
+        _id: "runs:recent-a-1", _creationTime: 1, ownerId: OWNER, channelId: CHANNEL_A, status: "completed", startedAt: 30,
+        pipelineInvocationSnapshot: { entries: [] }, pipelineInvocationSha256: "frozen-route-hash",
+      },
       { _id: "runs:recent-a-2", _creationTime: 2, ownerId: OWNER, channelId: CHANNEL_A, status: "completed", startedAt: 20 },
       { _id: "runs:recent-b-1", _creationTime: 3, ownerId: OWNER, channelId: CHANNEL_B, status: "completed", startedAt: 10 },
       { _id: "runs:active-a-1", _creationTime: 4, ownerId: OWNER, channelId: CHANNEL_A, status: "running", startedAt: 40, leaseExpiresAt: Date.now() + 60_000 },
@@ -125,11 +128,21 @@ async function main(): Promise<void> {
 
   fixture.resetReads();
   const overview = await invoke<{
-    recent: Array<{ _id: string; channelName: string }>;
-    active: Array<{ _id: string; channelName: string }>;
+    recent: Array<{ _id: string; channelName: string; pipelineSource: "frozen" | "legacy_inferred" }>;
+    active: Array<{ _id: string; channelName: string; pipelineSource: "frozen" | "legacy_inferred" }>;
   }>(listOverviewRuns, fixture.handlerContext, { ownerId: OWNER });
   assert.deepEqual(overview.recent.map((run) => run._id), recent.map((run) => run._id));
   assert.deepEqual(overview.active.map((run) => run._id), active.map((run) => run._id));
+  assert.equal(
+    overview.recent.find((run) => run._id === "runs:recent-a-1")?.pipelineSource,
+    "frozen",
+    "a complete invocation record is returned as a recoverable, frozen route",
+  );
+  assert.equal(
+    overview.recent.find((run) => run._id === "runs:recent-a-2")?.pipelineSource,
+    "legacy_inferred",
+    "a route-less historical record is explicitly identified for the dashboard",
+  );
   assert.equal(fixture.runIndexReads(), 1, "overview must read the owner run window once");
   assert.equal(fixture.channelGets(), 2, "recent and active share channel point reads");
 
