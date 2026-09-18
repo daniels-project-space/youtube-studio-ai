@@ -67,22 +67,14 @@ export function LatestVideoWidget({
             alt={v?.title ?? "latest video"}
             style={{ width: "100%", height: "100%" }}
             unavailableLabel="Retained preview unavailable"
-            overlay={() => v?.thumbnailPresentation === "lofi_rendered_frame" || v?.thumbnailPresentation === "lofi_frame_pending"
-              ? <span className="video-card-lofi-quality" aria-label="4K source-frame thumbnail">4K</span>
-              : null}
             priority
           />
-          {v?.durationSec ? (
-            <span
-              style={{
-                position: "absolute", right: 6, bottom: 6,
-                background: "rgba(0,0,0,0.78)", color: "#fff",
-                fontSize: "0.72rem", padding: "1px 6px", borderRadius: 5,
-              }}
-            >
-              {fmtDur(v.durationSec)}
-            </span>
-          ) : null}
+          <span className="latest-video-runtime-badges">
+            {v?.thumbnailPresentation === "lofi_rendered_frame" || v?.thumbnailPresentation === "lofi_frame_pending" ? (
+              <span className="video-card-lofi-quality" aria-label="4K source-frame thumbnail">4K</span>
+            ) : null}
+            {v?.durationSec ? <span className="latest-video-duration">{fmtDur(v.durationSec)}</span> : null}
+          </span>
         </div>
         <div style={{ minWidth: 0, display: "grid", gap: "0.5rem" }}>
           <div style={{ fontSize: "1.05rem", fontWeight: 600, lineHeight: 1.25 }}>

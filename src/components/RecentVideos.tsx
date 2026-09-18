@@ -152,14 +152,16 @@ export function RecentVideos({
                     style={{ width: "100%", height: "100%" }}
                     unavailableLabel="Retained preview unavailable"
                     priority={index < 3}
-                    overlay={() => video.thumbnailPresentation === "lofi_rendered_frame" || video.thumbnailPresentation === "lofi_frame_pending"
-                      ? <span className="video-card-lofi-quality" aria-label="4K source-frame thumbnail">4K</span>
-                      : null}
                   />
                   <span className={styles.play} aria-hidden="true">▶</span>
-                  {fmtDur(video.durationSec) ? (
-                    <span className={styles.duration}>{fmtDur(video.durationSec)}</span>
-                  ) : null}
+                  <span className={styles.runtimeBadges}>
+                    {video.thumbnailPresentation === "lofi_rendered_frame" || video.thumbnailPresentation === "lofi_frame_pending" ? (
+                      <span className="video-card-lofi-quality" aria-label="4K source-frame thumbnail">4K</span>
+                    ) : null}
+                    {fmtDur(video.durationSec) ? (
+                      <span className={styles.duration}>{fmtDur(video.durationSec)}</span>
+                    ) : null}
+                  </span>
                 </div>
                 <span className={styles.copy}>
                   <strong title={video.title}>{video.title}</strong>

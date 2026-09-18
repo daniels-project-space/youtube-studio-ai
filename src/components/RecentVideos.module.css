@@ -132,15 +132,27 @@
 }
 
 .duration {
-  position: absolute;
-  right: 0.56rem;
-  bottom: 0.56rem;
   border-radius: 6px;
   background: rgba(5, 5, 7, 0.78);
   color: #fff;
   font: 500 0.8125rem/1.4 var(--font-sans);
   font-variant-numeric: tabular-nums;
   padding: 0.18rem 0.36rem;
+}
+
+.runtimeBadges {
+  position: absolute;
+  z-index: 2;
+  right: 0.56rem;
+  bottom: 0.56rem;
+  display: grid;
+  justify-items: end;
+  gap: 0.28rem;
+  pointer-events: none;
+}
+
+.runtimeBadges :global(.video-card-lofi-quality) {
+  position: static;
 }
 
 .copy {

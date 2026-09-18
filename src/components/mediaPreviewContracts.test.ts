@@ -55,6 +55,7 @@ assert.match(latestVideo, /videoStillKey=\{v\?\.thumbnailPresentation === "lofi_
 assert.match(latestVideo, /allowVideoStill=\{v\?\.thumbnailPresentation === "lofi_frame_pending"\}/,
   "the latest-video hero enables the exact pending Lo-Fi frame");
 assert.match(latestVideo, /video-card-lofi-quality/, "the latest-video hero preserves the Lo-Fi 4K marker");
+assert.match(latestVideo, /latest-video-runtime-badges/, "the latest-video hero stacks runtime badges instead of overlapping them");
 assert.match(latestVideo, /priority\s*\/?>/);
 assert.doesNotMatch(latestVideo, /i\.ytimg\.com|fallbackSource="youtube"/);
 assert.match(runWorkbench, /SafeRunVideoPreview/);
@@ -78,6 +79,7 @@ assert.match(recentVideos, /videoStillKey=\{video\.thumbnailPresentation === "lo
 assert.match(recentVideos, /allowVideoStill=\{video\.thumbnailPresentation === "lofi_frame_pending"\}/,
   "the recent-render carousel enables the exact pending Lo-Fi frame");
 assert.match(recentVideos, /video-card-lofi-quality/, "the recent-render carousel preserves the Lo-Fi 4K marker");
+assert.match(recentVideos, /runtimeBadges/, "the recent-render carousel stacks the 4K source-frame emblem above runtime");
 assert.match(recentVideos, /priority=\{index < 3\}/);
 assert.doesNotMatch(recentVideos, /i\.ytimg\.com|fallbackSource="youtube"/);
 
