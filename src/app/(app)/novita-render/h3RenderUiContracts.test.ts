@@ -38,6 +38,10 @@ assert.match(page, /window\.setTimeout\(poll, 60_000\)/,
   "held capacity polling must be deliberately bounded rather than a busy loop");
 assert.match(page, /if \(body\.state === "admitted"\) return/,
   "an admitted capacity result stops the no-spend observer until explicit retry");
+assert.match(page, /Could not refresh Salad capacity\. Retrying automatically in one minute\./,
+  "a transient held-lane capacity refresh failure must remain visible without changing the held spend state");
+assert.match(page, /capacityRefreshNotice/,
+  "the capacity desk must retain its bounded polling failure as operator-visible state");
 assert.match(page, /Retry with high priority/,
   "an admitted high-tier fallback must make the explicit paid action unambiguous");
 assert.match(page, /Retry at HIGH priority\? This may cost more per GPU-hour/,

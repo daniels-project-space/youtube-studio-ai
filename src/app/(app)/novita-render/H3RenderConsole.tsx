@@ -145,6 +145,7 @@ export function H3RenderConsole() {
   const [status, setStatus] = useState<H3Status | null>(null);
   const [capacity, setCapacity] = useState<H3Capacity | null>(null);
   const [capacityBusy, setCapacityBusy] = useState(false);
+  const [capacityRefreshNotice, setCapacityRefreshNotice] = useState("");
   const [fleet, setFleet] = useState<FleetSnapshot | null>(null);
   const [fleetBusy, setFleetBusy] = useState(false);
 
@@ -243,13 +244,16 @@ export function H3RenderConsole() {
         const body = await response.json().catch(() => null) as H3Capacity | null;
         if (!cancelled && response.ok && body && "state" in body) {
           setCapacity(body);
+          setCapacityRefreshNotice("");
           // Once admission is visible, stop polling. The next paid attempt
           // remains a deliberate click so a high-tier charge is never hidden.
           if (body.state === "admitted") return;
         }
       } catch {
         // The existing held state remains authoritative; a transient read
-        // failure must not turn into a retry or overwrite its explanation.
+        // failure must not turn into a retry or overwrite its explanation,
+        // but the operator must still know that this refresh did not land.
+        if (!cancelled) setCapacityRefreshNotice("Could not refresh Salad capacity. Retrying automatically in one minute.");
       }
       if (!cancelled) timer = window.setTimeout(poll, 60_000);
     };
@@ -265,6 +269,7 @@ export function H3RenderConsole() {
     setJobsJson(next === "weekly" ? weeklyExample : onDemandExample);
     setStatus(null);
     setError("");
+    setCapacityRefreshNotice("");
   }
 
   function clearTracking() {
@@ -277,6 +282,7 @@ export function H3RenderConsole() {
     if (mode !== "weekly" || !parsedPreview.valid) return;
     setCapacityBusy(true);
     setCapacity(null);
+    setCapacityRefreshNotice("");
     try {
       const response = await fetch(`/api/minimax-h3/capacity?jobCount=${parsedPreview.count}`, {
         cache: "no-store",
@@ -446,6 +452,7 @@ export function H3RenderConsole() {
                 ? `Held before spend · ${capacity.reason}`
               : `Capacity check unavailable · ${capacity.reason}`}
           </span>}
+          {capacityRefreshNotice && <span className={styles.capacityNotice} data-state="unavailable" role="status">{capacityRefreshNotice}</span>}
         </div>}
         {fleet && <div className={styles.fleetSummary} role="status" aria-label="Salad fleet snapshot">
           <div className={styles.fleetHeader}><strong>Salad fleet{fleet.jobCount ? ` · ${fleet.jobCount}-job wave` : ""}</strong><span>Lease {fleet.occupiedGpuSlots}/{fleet.globalGpuLimit} · quota {fleet.quota.used}/{fleet.quota.limit}</span></div>

@@ -43,6 +43,8 @@ assert.match(videoRoute, /PREVIEW_PROBE_RANGES/,
   "one video preview probe must prove both initial and later native-player ranges");
 assert.match(videoRoute, /Promise\.all\(PREVIEW_PROBE_RANGES\.map/,
   "the retained-preview proof must run its byte checks concurrently behind one browser request");
+assert.match(videoRoute, /temporary private-preview proof could not reach storage/,
+  "a failed bounded preview proof must return an observable, safe unavailable reason");
 assert.match(videoRoute, /PREVIEW_PROBE_MAX_ATTEMPTS = 5/,
   "a transient R2 edge miss remains boundedly retried server-side");
 assert.match(videoRoute, /probe && !request\.headers\.get\("range"\)/,

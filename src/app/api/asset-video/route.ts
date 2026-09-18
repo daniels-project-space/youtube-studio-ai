@@ -32,7 +32,8 @@ function isOwnedVideoKey(key: string): boolean {
  * boundary while avoiding the old five sequential client → Next requests for
  * every Lo-Fi card (and their duplicated signing work).
  */
-async function verifyPreviewRanges(key: string, mimeType: string): Promise<boolean> {
+async function verifyPreviewRanges(key: string, mimeType: string): Promise<{ available: boolean; reason?: string }> {
+  let unavailableReason = "The private preview did not admit every required seek range.";
   for (let attempt = 0; attempt < PREVIEW_PROBE_MAX_ATTEMPTS; attempt++) {
     try {
       // One fresh signature per proof wave gives a just-written R2 object a
@@ -60,9 +61,12 @@ async function verifyPreviewRanges(key: string, mimeType: string): Promise<boole
           await response?.body?.cancel().catch(() => {});
         }
       }));
-      if (admitted.every(Boolean)) return true;
+      if (admitted.every(Boolean)) return { available: true };
     } catch {
-      // The bounded retry below handles transient signing or edge failures.
+      // The bounded retry below handles a transient signing or edge failure;
+      // retain a safe reason so an unavailable preview is observable rather
+      // than indistinguishable from a clean range miss.
+      unavailableReason = "The temporary private-preview proof could not reach storage.";
     }
     if (attempt < PREVIEW_PROBE_MAX_ATTEMPTS - 1) {
       // Cross the AWS signing-second boundary before asking a different R2
@@ -70,7 +74,7 @@ async function verifyPreviewRanges(key: string, mimeType: string): Promise<boole
       await new Promise((resolve) => setTimeout(resolve, Math.min(2_000, 1_100 + 300 * attempt)));
     }
   }
-  return false;
+  return { available: false, reason: unavailableReason };
 }
 
 /**
@@ -92,9 +96,9 @@ export async function GET(request: Request) {
 
   try {
     if (probe && !request.headers.get("range")) {
-      const available = await verifyPreviewRanges(key, mimeType);
+      const preview = await verifyPreviewRanges(key, mimeType);
       return NextResponse.json(
-        { available },
+        preview,
         { headers: { "Cache-Control": "private, no-store" } },
       );
     }
