@@ -8,8 +8,12 @@ const grounding = {
 };
 
 function Scores({ option }: { option: TitleReviewOption }) {
+  const scores: [string, number][] = [
+    ["Pull", option.pull], ["Clarity", option.clarity], ["Identity", option.identity],
+  ];
+  if (option.motivation !== null) scores.splice(2, 0, ["Why watch", option.motivation]);
   return <dl className={styles.scores} aria-label="Model ratings out of ten">
-    {[["Pull", option.pull], ["Clarity", option.clarity], ["Identity", option.identity]].map(([label, value]) =>
+    {scores.map(([label, value]) =>
       <div className={styles.score} key={label}>
         <div className={styles.scoreMeta}><dt>{label}</dt><dd>{value}<small>/10</small></dd></div>
         <span className={styles.scoreTrack} aria-hidden="true"><span style={{ width: `${Number(value) * 10}%` }} /></span>

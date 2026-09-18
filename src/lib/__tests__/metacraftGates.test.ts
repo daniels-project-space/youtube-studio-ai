@@ -7,7 +7,7 @@ import { lintTitle, validateTitleJudgeResponse } from "@/lib/metacraft";
 // (clickScore >=7, payoff-in-50-chars, claims-grounding lint) and no dedicated
 // test exists." This file exercises the two gates that are deterministic and
 // callable in isolation (lintTitle's payoff-window + claims-grounding checks),
-// then pins the clickScore/direct/identity >=7 + supported-grounding judge gate — which lives inside
+// then pins the clickScore/direct/identity/viewer-motivation >=7 + supported-grounding judge gate — which lives inside
 // craftMetadata's live permitted-model/YouTube-Data round trip and cannot run without
 // network + ANTHROPIC_API_KEY — via a source-anchored assertion so a silent
 // weakening of the threshold breaks this test instead of shipping quietly.
@@ -223,8 +223,8 @@ console.log("metacraftGates.test.ts: lintTitle payoff-window + claims-grounding 
 {
   const valid = validateTitleJudgeResponse({
     rankings: [
-      { idx: 0, clickScore: 8, direct: 9, identityFit: 8, grounding: "supported", reason: "fits the source and channel" },
-      { idx: 1, clickScore: 7, direct: 7, identityFit: 7, grounding: "supported", reason: "fits the source and channel" },
+      { idx: 0, clickScore: 8, direct: 9, identityFit: 8, viewerMotivation: 9, grounding: "supported", reason: "fits the source and channel" },
+      { idx: 1, clickScore: 7, direct: 7, identityFit: 7, viewerMotivation: 7, grounding: "supported", reason: "fits the source and channel" },
     ],
   }, 2);
   assert.equal(valid.pass, true, "a complete finite ranking should be admitted");
@@ -235,6 +235,7 @@ console.log("metacraftGates.test.ts: lintTitle payoff-window + claims-grounding 
   for (const [name, value] of [
     ["missing direct", { rankings: [{ idx: 0, clickScore: 9 }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
     ["missing identity fit", { rankings: [{ idx: 0, clickScore: 9, direct: 9, grounding: "supported", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
+    ["missing viewer motivation", { rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, grounding: "supported", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, viewerMotivation: 8, grounding: "supported", reason: "ok" }] }],
     ["invalid grounding", { rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, grounding: "maybe", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
     ["empty reason", { rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, grounding: "supported", reason: "" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
     ["out-of-range identity fit", { rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 11, grounding: "supported", reason: "ok" }, { idx: 1, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "ok" }] }],
@@ -262,11 +263,11 @@ console.log("metacraftGates.test.ts: malformed, incomplete and missing-direct ju
 // unnoticed, per P2-1's own effort note ("Read + add one unit test").
 {
   const source = readFileSync(join(process.cwd(), "src/lib/metacraft.ts"), "utf8");
-  const gateExpr = "r.clickScore >= 7 && r.direct >= 7";
+  const gateExpr = "r.clickScore >= 7 && r.direct >= 7 && r.identityFit >= 7 && r.viewerMotivation >= 7";
   assert.ok(
     source.includes(gateExpr),
-    "metacraft.ts: craftMetadata's judge gate must still require clickScore >=7 AND direct >=7 " +
-      "(catalog claim: 'clickScore >=7') — literal expression not found, gate may have moved or weakened",
+    "metacraft.ts: craftMetadata's judge gate must require click, directness, identity fit and viewer motivation >=7 " +
+      "— literal expression not found, gate may have moved or weakened",
   );
   assert.ok(
     source.includes("validateTitleJudgeResponse(j, survivors.length)"),
@@ -275,6 +276,10 @@ console.log("metacraftGates.test.ts: malformed, incomplete and missing-direct ju
   assert.ok(
     !source.includes("(r.direct ?? 10) >= 7"),
     "metacraft.ts: omitted directness must never default to a passing score",
+  );
+  assert.ok(
+    !source.includes("(r.viewerMotivation ?? 10) >= 7"),
+    "metacraft.ts: omitted viewer motivation must never default to a passing score",
   );
   assert.ok(
     !source.includes("shipping on lint alone"),
@@ -291,9 +296,9 @@ console.log("metacraftGates.test.ts: malformed, incomplete and missing-direct ju
   // The gate's own rejection message, surfaced in the retry-fix-loop, is the
   // second half of the wiring proof: a rejected slate must say so and retry.
   assert.ok(
-    source.includes('lastIssues.push("no candidate gated clickScore+direct ≥7")'),
+    source.includes('lastIssues.push("no candidate gated clickScore+direct+identity+viewer motivation ≥7")'),
     "metacraft.ts: the judge-rejection retry path must still exist so a failed gate causes a real retry, not a silent pass",
   );
 }
 
-console.log("metacraftGates.test.ts: craftMetadata clickScore+direct >=7 judge gate pinned against live source");
+console.log("metacraftGates.test.ts: craftMetadata title-quality judge gate pinned against live source");

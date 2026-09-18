@@ -14,6 +14,8 @@ export type TitleReviewOption = {
   pull: number;
   clarity: number;
   identity: number;
+  /** v3 separates a reason to watch from raw clickability; legacy receipts predate it. */
+  motivation: number | null;
   selected: boolean;
   alternate: boolean;
 };
@@ -49,17 +51,18 @@ export function readTitleReview(outputs: unknown): TitleReviewPresentation | nul
   if (!out || out["titleDecision"] === undefined) return null;
   const unavailable: TitleReviewPresentation = { state: "unavailable" };
   const receipt = record(out["titleDecision"]);
-  if (!receipt || (receipt.version !== "title-decision/v1" && receipt.version !== "title-decision/v2") || receipt.judged !== true ||
+  if (!receipt || (receipt.version !== "title-decision/v1" && receipt.version !== "title-decision/v2" && receipt.version !== "title-decision/v3") || receipt.judged !== true ||
       !text(receipt.title, 100) || !Array.isArray(receipt.candidates) ||
       receipt.candidates.length < 1 || receipt.candidates.length > 16 ||
       !Array.isArray(receipt.rankings) || receipt.rankings.length !== receipt.candidates.length ||
       !index(receipt.winnerIndex, receipt.candidates.length) ||
       !(receipt.alternateIndex === null || index(receipt.alternateIndex, receipt.candidates.length)) ||
       receipt.alternateIndex === receipt.winnerIndex ||
+      (receipt.version === "title-decision/v3" && !score(receipt.viewerMotivation)) ||
       ![1, 2].includes(receipt.attempts as number)) return unavailable;
   // v1 was emitted before sealing existed. Keep its already-persisted reviews
-  // readable, but require and verify the digest on every new v2 receipt.
-  if (receipt.version === "title-decision/v2" &&
+  // readable, but require and verify the digest on every sealed v2/v3 receipt.
+  if ((receipt.version === "title-decision/v2" || receipt.version === "title-decision/v3") &&
       (!isTitleDecisionFingerprint(receipt.fingerprint) ||
        receipt.fingerprint !== titleDecisionFingerprint(receipt))) return unavailable;
   const coverage = record(receipt.sourceCoverage);
@@ -76,6 +79,7 @@ export function readTitleReview(outputs: unknown): TitleReviewPresentation | nul
     const row = record(raw);
     if (!row || !index(row.idx, receipt.candidates.length) || rankings.has(row.idx) ||
         !score(row.clickScore) || !score(row.direct) || !score(row.identityFit) ||
+        (receipt.version === "title-decision/v3" && !score(row.viewerMotivation)) ||
         !["supported", "contradicted", "insufficient"].includes(String(row.grounding)) ||
         !text(row.reason, 2100)) return unavailable;
     rankings.set(row.idx, row);
@@ -87,11 +91,13 @@ export function readTitleReview(outputs: unknown): TitleReviewPresentation | nul
     options.push({ title: candidate.title, reason: ranking.reason as string,
       grounding: ranking.grounding as TitleReviewOption["grounding"],
       pull: ranking.clickScore as number, clarity: ranking.direct as number, identity: ranking.identityFit as number,
+      motivation: receipt.version === "title-decision/v3" ? ranking.viewerMotivation as number : null,
       selected: idx === receipt.winnerIndex, alternate: idx === receipt.alternateIndex });
   }
   const selected = options[receipt.winnerIndex];
   if (selected.title !== receipt.title || selected.pull !== receipt.clickScore ||
       selected.clarity !== receipt.directness ||
+      (receipt.version === "title-decision/v3" && selected.motivation !== receipt.viewerMotivation) ||
       (options.find((option) => option.alternate)?.title ?? "") !== receipt.titleAlternate) return unavailable;
   return { state: out.title === selected.title ? "recorded" : "title_changed",
     selected, options, source, attempts: receipt.attempts as number };
@@ -108,7 +114,7 @@ export function nativeTitleTestAlternates(outputs: unknown): string[] {
   const receipt = out ? record(out["titleDecision"]) : null;
   // v1 predates content fingerprints. Keep its existing browser presentation
   // readable, but never promote it into a new native-test slate.
-  if (receipt?.version !== "title-decision/v2") return [];
+  if (receipt?.version !== "title-decision/v2" && receipt?.version !== "title-decision/v3") return [];
   const review = readTitleReview(outputs);
   if (!review || review.state !== "recorded") return [];
 
@@ -117,16 +123,17 @@ export function nativeTitleTestAlternates(outputs: unknown): string[] {
   const qualified = review.options.filter((option) =>
     !option.selected && option.grounding === "supported" &&
     option.pull >= 7 && option.clarity >= 7 && option.identity >= 7 &&
+    (receipt.version === "title-decision/v2" || (option.motivation !== null && option.motivation >= 7)) &&
     key(option.title) !== live,
   );
   const alternate = qualified.filter((option) => option.alternate);
   const remaining = qualified
     .filter((option) => !option.alternate)
     .sort((left, right) => {
-      const leftFloor = Math.min(left.pull, left.clarity, left.identity);
-      const rightFloor = Math.min(right.pull, right.clarity, right.identity);
-      const leftTotal = left.pull + left.clarity + left.identity;
-      const rightTotal = right.pull + right.clarity + right.identity;
+      const leftFloor = Math.min(left.pull, left.clarity, left.identity, left.motivation ?? 10);
+      const rightFloor = Math.min(right.pull, right.clarity, right.identity, right.motivation ?? 10);
+      const leftTotal = left.pull + left.clarity + left.identity + (left.motivation ?? 0);
+      const rightTotal = right.pull + right.clarity + right.identity + (right.motivation ?? 0);
       return rightFloor - leftFloor || rightTotal - leftTotal || left.title.localeCompare(right.title);
     });
   const seen = new Set([live]);

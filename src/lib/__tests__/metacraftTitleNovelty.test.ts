@@ -15,7 +15,7 @@ loader._load = function (request, ...rest) {
       if (prompt.startsWith("You are a YouTube CTR strategist")) {
         assert.doesNotMatch(prompt, /Why Roman Aqueducts Changed City Life/, "history collision must never reach the paid judge");
         return {
-          rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, grounding: "supported", reason: "Specific, source-bound alternative." }],
+          rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, viewerMotivation: 9, grounding: "supported", reason: "Specific, source-bound alternative." }],
           winner: 0,
           runnerUp: 0,
         };

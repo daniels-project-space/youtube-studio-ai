@@ -24,6 +24,7 @@ loader._load = function patchedLoad(request, ...rest) {
             clickScore: 9,
             direct: 9,
             identityFit: 9,
+            viewerMotivation: 9,
             grounding: "supported",
             reason: "The title precisely names the demonstrated engineering result.",
           }],

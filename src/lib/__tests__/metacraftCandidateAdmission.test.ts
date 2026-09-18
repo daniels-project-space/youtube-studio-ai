@@ -25,7 +25,7 @@ loader._load = function (request, ...rest) {
     if (prompt.startsWith('You are a YouTube CTR strategist')) {
       judgeCalls++;
       const rows = prompt.split('CANDIDATES:\n')[1].split('\n\n')[0].split('\n');
-      return { rankings: rows.map((row, idx) => ({ idx, clickScore: preferredTitle && row.endsWith(preferredTitle) ? 10 : 9, direct: 9, identityFit: 9,
+      return { rankings: rows.map((row, idx) => ({ idx, clickScore: preferredTitle && row.endsWith(preferredTitle) ? 10 : 9, direct: 9, identityFit: 9, viewerMotivation: 9,
         grounding: row.endsWith(rejectedTitle) && rejectedTitle ? 'insufficient' : 'supported',
         reason: 'Controlled admission response, not model-quality evidence.' })) };
     }

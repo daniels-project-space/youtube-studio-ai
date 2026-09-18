@@ -83,6 +83,7 @@ function install(
             clickScore: line.includes(preferredTitle) ? 10 : 7,
             direct: 9,
             identityFit: 9,
+            viewerMotivation: 9,
             grounding: "supported" as const,
             reason: "The fixture title is grounded and matches the channel identity.",
           }));

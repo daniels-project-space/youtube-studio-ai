@@ -22,7 +22,7 @@ loader._load = function(request, ...rest) {
     if ((failAt === 'judge' && prompt.startsWith('You are a YouTube CTR strategist')) ||
       (failAt === 'generator' && prompt.startsWith('Write SEVEN'))) throw transportError;
     if (prompt.startsWith('You are a YouTube CTR strategist')) return {
-      rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, grounding: 'supported', reason: 'Fixture response, not quality evidence.' }], winner: 0, runnerUp: 0,
+      rankings: [{ idx: 0, clickScore: 9, direct: 9, identityFit: 9, viewerMotivation: 9, grounding: 'supported', reason: 'Fixture response, not quality evidence.' }], winner: 0, runnerUp: 0,
     };
     return { candidates: [{ frame: 'mechanism', title: candidate }] };
   } };

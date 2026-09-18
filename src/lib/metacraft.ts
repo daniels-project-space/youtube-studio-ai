@@ -9,7 +9,7 @@
  *   └ REAL competitor titles (YT API)    ┘
  *        → 7 source- and identity-aware title candidates
  *        → deterministic lint (claims grounding, truncation, setup-prefix ban)
- *        → feed judge (supported, clickScore + directness + identityFit ≥7)
+ *        → feed judge (supported, clickScore + directness + identityFit + viewer motivation ≥7)
  *        → ONE description+tags and optional pinned comment in parallel
  *
  * Title doctrine: SHORT and DIRECT (format-aware bounds) — the point itself, never a
@@ -575,6 +575,8 @@ export interface TitleJudgeRanking {
   clickScore: number;
   direct: number;
   identityFit: number;
+  /** Is there a clear, format-appropriate reason for a new viewer to watch? */
+  viewerMotivation: number;
   grounding: "supported" | "contradicted" | "insufficient";
   reason: string;
 }
@@ -582,7 +584,7 @@ export interface TitleJudgeRanking {
 /** Immutable, browser-readable record of the title selection that was judged.
  * The presentation layer validates this shape but never reruns the judge. */
 export interface TitleDecisionReceipt {
-  version: "title-decision/v2";
+  version: "title-decision/v3";
   /** Content address of every field below, excluding this field itself. */
   fingerprint: string;
   judged: true;
@@ -590,6 +592,8 @@ export interface TitleDecisionReceipt {
   titleAlternate: string;
   clickScore: number;
   directness: number;
+  /** Saved separately so a clear but merely descriptive title cannot look qualified. */
+  viewerMotivation: number;
   winnerIndex: number;
   alternateIndex: number | null;
   attempts: number;
@@ -637,6 +641,7 @@ export function validateTitleJudgeResponse(
       clickScore?: unknown;
       direct?: unknown;
       identityFit?: unknown;
+      viewerMotivation?: unknown;
       grounding?: unknown;
       reason?: unknown;
     } | null;
@@ -644,6 +649,7 @@ export function validateTitleJudgeResponse(
     const clickScore = row?.clickScore;
     const direct = row?.direct;
     const identityFit = row?.identityFit;
+    const viewerMotivation = row?.viewerMotivation;
     const grounding = row?.grounding;
     const reason = row?.reason;
     if (
@@ -674,6 +680,12 @@ export function validateTitleJudgeResponse(
       issues.push(`judge ranking ${position + 1} has an invalid identity-fit score`);
       return;
     }
+    if (
+      typeof viewerMotivation !== "number" || !Number.isFinite(viewerMotivation) || viewerMotivation < 1 || viewerMotivation > 10
+    ) {
+      issues.push(`judge ranking ${position + 1} has an invalid viewer-motivation score`);
+      return;
+    }
     if (grounding !== "supported" && grounding !== "contradicted" && grounding !== "insufficient") {
       issues.push(`judge ranking ${position + 1} has an invalid grounding verdict`);
       return;
@@ -683,7 +695,7 @@ export function validateTitleJudgeResponse(
       return;
     }
     seen.add(idx);
-    admitted.push({ idx, clickScore, direct, identityFit, grounding, reason: reason.trim() });
+    admitted.push({ idx, clickScore, direct, identityFit, viewerMotivation, grounding, reason: reason.trim() });
   });
   if (seen.size !== candidateCount) issues.push("judge ranking omitted at least one candidate");
   return { pass: issues.length === 0, rankings: issues.length === 0 ? admitted : [], issues };
@@ -1129,11 +1141,14 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             `Then score 1-10 on clickScore (would it win the click in this feed ` +
             `while staying honest, on-register, and promise-matched), direct (is the viewing promise immediately clear ` +
             `without filler or a setup the scroller must decode), and ` +
-            `identityFit (does it match this channel's audience, voice, and format). ` +
+            `identityFit (does it match this channel's audience, voice, and format), and viewerMotivation ` +
+            `(does the wording give a new viewer one concrete, format-appropriate reason to watch). A direct ` +
+            `topic label by itself is not enough: require a supported searchable answer, useful shift, specific stake ` +
+            `or outcome, genuine open question, calm experience, or clear learning outcome as fits this profile. ` +
             `Accuracy alone does not earn a high clickScore: weigh a specific viewer reason to watch against ` +
             `a merely competent summary. Calm experiential titles can be compelling without tension; narrative ` +
             `titles may preserve a real unanswered question. Do not reward unsupported drama or generic superlatives. ` +
-            `Return STRICT JSON {"rankings":[{"idx":n,"clickScore":n,"direct":n,"identityFit":n,"grounding":"supported|contradicted|insufficient","reason":"source-aware explanation"}],"winner":n,"runnerUp":n}.`,
+            `Return STRICT JSON {"rankings":[{"idx":n,"clickScore":n,"direct":n,"identityFit":n,"viewerMotivation":n,"grounding":"supported|contradicted|insufficient","reason":"source-aware explanation"}],"winner":n,"runnerUp":n}.`,
             `Use each zero-based candidate index exactly once; do not use one-based positions.`,
           ].filter(Boolean).join("\n\n"),
           // Reasoning route: the ceiling must cover the thinking AND the list.
@@ -1151,12 +1166,12 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           continue;
         }
         const ranked = admission.rankings.filter(
-          (r) => r.clickScore >= 7 && r.direct >= 7 && r.identityFit >= 7 && r.grounding === "supported",
+          (r) => r.clickScore >= 7 && r.direct >= 7 && r.identityFit >= 7 && r.viewerMotivation >= 7 && r.grounding === "supported",
         );
         ranked.sort((x, y) => {
           const judgeDelta =
-            (y.clickScore ?? 0) + (y.direct ?? 0) + (y.identityFit ?? 0) -
-            ((x.clickScore ?? 0) + (x.direct ?? 0) + (x.identityFit ?? 0));
+            (y.clickScore ?? 0) + (y.direct ?? 0) + (y.identityFit ?? 0) + (y.viewerMotivation ?? 0) -
+            ((x.clickScore ?? 0) + (x.direct ?? 0) + (x.identityFit ?? 0) + (x.viewerMotivation ?? 0));
           if (judgeDelta) return judgeDelta;
           return (survivors[y.idx!]?.quality.score ?? 0) - (survivors[x.idx!]?.quality.score ?? 0);
         });
@@ -1183,12 +1198,13 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           const selectedRanking = admission.rankings.find((r) => r.idx === best);
           if (!selectedRanking) throw new Error("winner ranking disappeared after admission");
           const decisionBody: Omit<TitleDecisionReceipt, "fingerprint"> = {
-            version: "title-decision/v2",
+            version: "title-decision/v3",
             judged: true,
             title: survivors[best].title,
             titleAlternate: runner >= 0 ? survivors[runner]?.title ?? "" : "",
             clickScore: selectedRanking.clickScore,
             directness: selectedRanking.direct,
+            viewerMotivation: selectedRanking.viewerMotivation,
             winnerIndex: best,
             alternateIndex: runner >= 0 ? runner : null,
             attempts: attempt + 1,
@@ -1209,7 +1225,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             `${runner >= 0 ? ` vs ${survivors[runner]?.quality.score ?? 0}/100` : ""}`,
           );
         } else {
-          lastIssues.push("no candidate gated clickScore+direct ≥7");
+          lastIssues.push("no candidate gated clickScore+direct+identity+viewer motivation ≥7");
           fixNote = `THE PREVIOUS ATTEMPT WAS REJECTED. Fix every one of these: ${[...new Set(lastIssues)].slice(0, 6).join("; ")}.`;
           a.log?.(`metacraft: attempt ${attempt + 1} rejected by judge -> ${attempt === 0 ? "retrying with fix" : "FAILING LOUD"}`);
           continue;

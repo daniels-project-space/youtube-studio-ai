@@ -1381,10 +1381,10 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "actually type) and the niche's real top titles. A deterministic lint then enforces what the old " +
       "rules only asked for: every number and name in the title must exist in the fact-checked script " +
       "(grounded = verified, transitively), the payoff lands inside the first ~50 chars (mobile " +
-      "truncation), no filler starts, register-aware hype rules. A feed judge gates clickScore ≥7 under " +
-      "the title-promise contract; the runner-up is stored for CTR-swap learning. THE QUOTE opens the " +
+      "truncation), no filler starts, register-aware hype rules. A feed judge gates click, directness, identity " +
+      "fit and a format-aware reason to watch at ≥7 under the title-promise contract; the runner-up is stored for CTR-swap learning. THE QUOTE opens the " +
       "description, auto-chapters land at upload, and a comment-seeding pinned comment is emitted.",
-    gates: ["claims grounded in fact-checked script", "direct ≥ 7 (no setup prefixes, 40-70 chars)", "clickScore ≥ 7 vs the real feed", "payoff in first ~50 chars", "title-promise contract", "banned words / register"],
+    gates: ["claims grounded in fact-checked script", "direct ≥ 7 (no setup prefixes, 40-70 chars)", "clickScore ≥ 7 vs the real feed", "viewer reason ≥ 7 (format-aware)", "payoff in first ~50 chars", "title-promise contract", "banned words / register"],
     status: "reference",
   },
   {

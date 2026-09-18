@@ -5,18 +5,18 @@ import { titleDecisionFingerprint } from "../titleDecisionFingerprint";
 const title = "47 Engineers Died in the Bridge Collapse";
 function outputs() {
   const titleDecision = {
-    version: "title-decision/v2", judged: true, title, titleAlternate: "The Design Error Behind the Bridge Collapse",
-    clickScore: 9, directness: 8, winnerIndex: 1, alternateIndex: 2, attempts: 1,
+    version: "title-decision/v3", judged: true, title, titleAlternate: "The Design Error Behind the Bridge Collapse",
+    clickScore: 9, directness: 8, viewerMotivation: 9, winnerIndex: 1, alternateIndex: 2, attempts: 1,
     sourceCoverage: { kind: "full_narration", providedChars: 8400, totalChars: 8400 },
     candidates: [{ title: "47 Engineers Survived the Bridge Collapse" }, { title },
       { title: "The Design Error Behind the Bridge Collapse" },
       { title: "Why the Bridge Failed Before It Opened" }],
     // Deliberately not in candidate order: pairing by array position is wrong.
     rankings: [
-      { idx: 2, clickScore: 8, direct: 8, identityFit: 8, grounding: "supported", reason: "The script explains the design failure." },
-      { idx: 0, clickScore: 10, direct: 10, identityFit: 9, grounding: "contradicted", reason: "The narration says no engineers survived." },
-      { idx: 1, clickScore: 9, direct: 8, identityFit: 9, grounding: "supported", reason: "The source states that 47 engineers died." },
-      { idx: 3, clickScore: 8, direct: 9, identityFit: 9, grounding: "supported", reason: "The narration identifies a pre-opening design failure." },
+      { idx: 2, clickScore: 8, direct: 8, identityFit: 8, viewerMotivation: 8, grounding: "supported", reason: "The script explains the design failure." },
+      { idx: 0, clickScore: 10, direct: 10, identityFit: 9, viewerMotivation: 10, grounding: "contradicted", reason: "The narration says no engineers survived." },
+      { idx: 1, clickScore: 9, direct: 8, identityFit: 9, viewerMotivation: 9, grounding: "supported", reason: "The source states that 47 engineers died." },
+      { idx: 3, clickScore: 8, direct: 9, identityFit: 9, viewerMotivation: 8, grounding: "supported", reason: "The narration identifies a pre-opening design failure." },
     ],
   };
   return { title, titleDecision: { ...titleDecision, fingerprint: titleDecisionFingerprint(titleDecision) } };
@@ -34,6 +34,7 @@ assert.ok(review && review.state === "recorded");
 assert.equal(review.source, "Full narration");
 assert.equal(review.selected.title, title);
 assert.equal(review.selected.pull, 9);
+assert.equal(review.selected.motivation, 9);
 assert.equal(review.selected.reason, input.titleDecision.rankings[2].reason);
 assert.equal(review.options[0].grounding, "contradicted");
 assert.equal(review.options[0].selected, false, "the highest click score is not necessarily the selected title");
@@ -72,6 +73,10 @@ const weakCandidate = outputs();
 weakCandidate.titleDecision.rankings[3].clickScore = 6;
 resign(weakCandidate);
 assert.deepEqual(nativeTitleTestAlternates(weakCandidate), ["The Design Error Behind the Bridge Collapse"]);
+const weakMotivation = outputs();
+weakMotivation.titleDecision.rankings[3].viewerMotivation = 6;
+resign(weakMotivation);
+assert.deepEqual(nativeTitleTestAlternates(weakMotivation), ["The Design Error Behind the Bridge Collapse"], "a v3 alternate without a compelling reason to watch must not enter a native test");
 const duplicateCandidate = outputs();
 duplicateCandidate.titleDecision.candidates[3].title = "  THE DESIGN ERROR BEHIND THE BRIDGE COLLAPSE ";
 resign(duplicateCandidate);
@@ -86,9 +91,11 @@ const mutations: Array<(out: ReturnType<typeof outputs>) => void> = [
   (o) => { o.titleDecision.titleAlternate = "Not the saved alternate"; },
   (o) => { o.titleDecision.title = "Not the selected candidate"; },
   (o) => { o.titleDecision.directness = 0; },
+  (o) => { o.titleDecision.viewerMotivation = 6; },
   (o) => { o.titleDecision.rankings[0].idx = 1; },
   (o) => { o.titleDecision.rankings[0].clickScore = NaN; },
   (o) => { o.titleDecision.rankings[0].identityFit = Infinity; },
+  (o) => { delete (o.titleDecision.rankings[0] as { viewerMotivation?: number }).viewerMotivation; },
   (o) => { o.titleDecision.rankings[0].direct = -1; },
   (o) => { o.titleDecision.rankings[0].grounding = "verified"; },
   (o) => { o.titleDecision.rankings[0].reason = ""; },
