@@ -50,9 +50,7 @@ export default function RunsPage() {
     <div className={styles.page}>
       <header className={styles.hero}>
         <div>
-          <span>Production</span>
           <h1>Runs</h1>
-          <p>Watch progress, inspect failures, and open saved output.</p>
         </div>
         <dl className={styles.heroFacts} aria-label="Production totals">
           <div><dt>On YouTube</dt><dd>{runs === undefined ? "—" : outputCount}</dd></div>

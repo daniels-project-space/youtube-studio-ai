@@ -10,6 +10,8 @@ const detailStyles = readFileSync(resolve(root, "src/app/(app)/runs/[runId]/runD
 const runsQuery = readFileSync(resolve(root, "convex/runs.ts"), "utf8");
 
 assert.match(page, /const destination = failure[\s\S]*?\? "Inspect"/);
+assert.doesNotMatch(page, /Watch progress, inspect failures, and open saved output\./,
+  "the compact run workspace must not repeat the shell's route description above its actionable controls");
 assert.match(page, /className=\{styles\.runDiagnosis\}/);
 assert.match(page, /Failure domain: \$\{failure\.faultDomain\}/);
 assert.match(page, /ReleaseEvidenceBadge status=\{run\.releaseEvidenceStatus\} compact/);
@@ -32,6 +34,10 @@ assert.match(page, /className=\{styles\.runRecovery\}/);
 assert.match(styles, /\.runProgress \{/);
 assert.match(styles, /\.runRecovery \{/);
 assert.match(styles, /\.runRow\[data-live="true"\] \{ min-height: 68px/);
+assert.match(styles, /\.hero \{[\s\S]*?min-height: 60px/,
+  "the run header stays compact because the shell already identifies the route");
+assert.match(styles, /\.metric \{[\s\S]*?min-height: 50px/,
+  "status filters should remain dense controls rather than a second dashboard");
 assert.match(runsQuery, /summarizeRunStageProgress/);
 assert.match(runsQuery, /\.query\("runStages"\)/);
 assert.match(runsQuery, /automaticResumeState: run\.automaticResumeState/);
