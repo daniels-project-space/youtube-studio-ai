@@ -47,7 +47,12 @@ def cache_model() -> None:
             raise RuntimeError("Qwen model cache exists without a verified marker; refusing an unsafe overwrite")
         snapshot_download(repo_id=MODEL, revision=REVISION, cache_dir=str(cache))
         write_marker(marker)
-    os.environ["HF_HOME"] = str(cache)
+    # `snapshot_download(cache_dir=...)` receives the hub cache directory,
+    # while `HF_HOME` is its parent. Keeping those distinct lets the serving
+    # library locate the exact snapshot while offline rather than looking for
+    # a nested `hf/hub` cache that was never populated.
+    os.environ["HF_HOME"] = str(volume)
+    os.environ["HF_HUB_CACHE"] = str(cache)
     os.environ["HF_HUB_OFFLINE"] = "1"
 
 

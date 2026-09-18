@@ -40,7 +40,11 @@ from contract import (
 
 VOLUME = Path(os.environ.get("QWEN3_TTS_VOLUME", "/workspace/qwen3-tts"))
 VOLUME.mkdir(parents=True, exist_ok=True)
-os.environ.setdefault("HF_HOME", str(VOLUME / "hf"))
+# The entrypoint preloads `VOLUME / hf` as the Hub cache. These defaults keep
+# manual launches coherent with that same layout without masking entrypoint
+# values in the production container.
+os.environ.setdefault("HF_HOME", str(VOLUME))
+os.environ.setdefault("HF_HUB_CACHE", str(VOLUME / "hf"))
 
 app = FastAPI()
 _lock = threading.Lock()
