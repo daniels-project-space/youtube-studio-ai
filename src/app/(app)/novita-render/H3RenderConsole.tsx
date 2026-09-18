@@ -242,7 +242,10 @@ export function H3RenderConsole() {
           headers: { Accept: "application/json" },
         });
         const body = await response.json().catch(() => null) as H3Capacity | null;
-        if (!cancelled && response.ok && body && "state" in body) {
+        if (cancelled) return;
+        if (!response.ok || !body || !("state" in body)) {
+          setCapacityRefreshNotice("Could not refresh Salad capacity. Retrying automatically in one minute.");
+        } else {
           setCapacity(body);
           setCapacityRefreshNotice("");
           // Once admission is visible, stop polling. The next paid attempt

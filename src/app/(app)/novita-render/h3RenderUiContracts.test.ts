@@ -42,6 +42,8 @@ assert.match(page, /Could not refresh Salad capacity\. Retrying automatically in
   "a transient held-lane capacity refresh failure must remain visible without changing the held spend state");
 assert.match(page, /capacityRefreshNotice/,
   "the capacity desk must retain its bounded polling failure as operator-visible state");
+assert.match(page, /if \(!response\.ok \|\| !body \|\| !\("state" in body\)\)/,
+  "malformed or non-OK held-lane capacity responses must be visible instead of silently retrying");
 assert.match(page, /Retry with high priority/,
   "an admitted high-tier fallback must make the explicit paid action unambiguous");
 assert.match(page, /Retry at HIGH priority\? This may cost more per GPU-hour/,
