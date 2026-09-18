@@ -1262,14 +1262,18 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
             a.quote ? `THE QUOTE (open the description with it): "${a.quote}"` : "",
             suggests.length ? `REAL SEARCH QUERIES (lean keyword phrasing on these):\n- ${suggests.join("\n- ")}` : "",
             `DESCRIPTION: ${a.descriptionStructure ? `follow the channel structure: ${a.descriptionStructure}. ` : ""}` +
-              `(1) THE QUOTE${a.quote ? "" : " (or the strongest hook line)"} + 1-2 punchy lines, primary keyword in the ` +
-              `VERY FIRST sentence; (2) ONE ≤60-word value paragraph; (3) a "Subscribe for more:" CTA line WITHOUT ` +
-              `inventing any URL; (4) "Keywords: " line with 14-20 comma-separated phrases; (5) one line of 8-12 ` +
-              `#hashtags. Never paste the script.`,
-            `TAGS: 25-30 comma-separated, the real search queries + entities THIS video mentions.${lang}`,
+              `Open with THE QUOTE${a.quote ? "" : " (or the strongest hook line)"}, then give one concise, useful paragraph ` +
+              `that makes the viewing value clear. Put a primary search phrase naturally in the first sentence. Add one ` +
+              `"Subscribe for more:" line without inventing a URL. Do not add a keyword dump, hashtag block, filler CTA, or ` +
+              `a pasted script.`,
+            `TAGS: exactly 5-8 comma-separated, only genuine spelling variants, proper names, or unambiguous search phrases ` +
+              `that this video actually uses. Tags are not a keyword-stuffing surface.${lang}`,
             `Return STRICT JSON {"description":string,"tagsCsv":string}.`,
           ].filter(Boolean).join("\n\n"),
-          maxTokens: 2500,
+          // This is a small two-field, non-reasoning package contract. The
+          // JSON-ceiling audit's measured multi-field floor is 1200; 1400
+          // leaves headroom without paying for the former keyword dump.
+          maxTokens: 1400,
           temperature: 0.8,
         });
         description = String(pkg.description ?? "").trim();
