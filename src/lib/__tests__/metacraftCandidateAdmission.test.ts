@@ -14,6 +14,8 @@ let judgeCalls = 0;
 let rejectedTitle = '';
 let generatedTitles: string[] | undefined;
 let preferredTitle = '';
+let forceCollapsedFirstSlate = false;
+let collapsedSlateAttempts = 0;
 const loader = Module as unknown as { _load: (request: string, ...rest: unknown[]) => unknown };
 const originalLoad = loader._load;
 loader._load = function (request, ...rest) {
@@ -30,7 +32,17 @@ loader._load = function (request, ...rest) {
         reason: 'Controlled admission response, not model-quality evidence.' })) };
     }
     generatorCalls++;
-    return { candidates: (generatedTitles ?? [title]).map((value) => ({ frame: 'retained-generation', title: value })) };
+    const collapseThisSlate = forceCollapsedFirstSlate && collapsedSlateAttempts++ === 0;
+    return {
+      candidates: (generatedTitles ?? [title]).map((value, index) => ({
+        frame: collapseThisSlate
+          ? "direct"
+          : generatedTitles?.length && generatedTitles.length >= 3
+          ? ["mechanism", "direct outcome", "viewer question"][index] ?? `angle ${index + 1}`
+          : "retained-generation",
+        title: value,
+      })),
+    };
   } };
 };
 const originalFetch = globalThis.fetch;
@@ -89,6 +101,28 @@ async function main() {
   if (presentation?.state === 'recorded') {
     assert.equal(presentation.options.find((option) => option.alternate)?.title, variants.titleAlternate);
   }
+
+  // The full slate is generated twice only when its declared angles collapse.
+  // It must repair before the paid semantic judge, not pay to rank synonyms.
+  generatedTitles = [
+    'Chernobyl Failed One Safety Test',
+    'The Warning Chernobyl Ignored',
+    'Why Chernobyl’s Test Failed',
+  ];
+  preferredTitle = generatedTitles[0];
+  forceCollapsedFirstSlate = true;
+  collapsedSlateAttempts = 0;
+  generatorCalls = judgeCalls = 0;
+  const repaired = await craftMetadata({
+    topic: 'Chernobyl safety test',
+    narrationText: 'Chernobyl failed one safety test and the ignored warning changed the outcome.',
+    competitorTitles: [{ title: 'Frozen evidence', views: 100 }],
+  });
+  assert.equal(repaired.title, generatedTitles[0]);
+  assert.equal(generatorCalls, 2, 'one bounded repair replaces a collapsed full slate');
+  assert.equal(judgeCalls, 1, 'the collapsed slate never reaches the paid semantic judge');
+  forceCollapsedFirstSlate = false;
+  collapsedSlateAttempts = 0;
 
   for (const [left, right] of [
     ['The Bridge Failed After 4 Years', 'The Bridge Failed After 40 Years'],

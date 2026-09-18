@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { areNearDuplicateTitles, dedupeTitleCandidates, deterministicTitleFallback, lintTitle, resolveTitleProfile, titleOpeningSignal, titleQualitySignal } from "@/lib/metacraft";
+import { areNearDuplicateTitles, dedupeTitleCandidates, deterministicTitleFallback, lintTitle, resolveTitleProfile, titleFrameDiversity, titleOpeningSignal, titleQualitySignal } from "@/lib/metacraft";
 
 const grounding = "Chernobyl failed one safety test and the ignored warning changed the outcome.";
 const concrete = titleQualitySignal("Chernobyl Failed One Safety Test", grounding);
@@ -142,6 +142,24 @@ const slate = dedupeTitleCandidates([
 ]);
 assert.deepEqual(slate.map((candidate) => candidate.frame), ["direct", "curiosity"]);
 
+const collapsedFrames = titleFrameDiversity([
+  { frame: "direct", title: "Chernobyl Failed One Safety Test" },
+  { frame: "Direct", title: "Chernobyl's Safety Test Failed" },
+  { frame: "direct!", title: "The Chernobyl Safety Test That Failed" },
+]);
+assert.equal(collapsedFrames.pass, false, "a full slate with relabelled synonyms must regenerate before judging");
+assert.deepEqual(collapsedFrames, {
+  count: 1,
+  required: 3,
+  pass: false,
+  labels: ["direct"],
+});
+assert.equal(titleFrameDiversity([
+  { frame: "mechanism", title: "Chernobyl Failed One Safety Test" },
+  { frame: "consequence", title: "The Warning Chernobyl Ignored" },
+  { frame: "question", title: "Why Did Chernobyl's Test Fail?" },
+]).pass, true, "a full slate retains independent viewer reasons to click");
+
 const source = readFileSync(join(process.cwd(), "src/lib/metacraft.ts"), "utf8");
 assert.match(
   source,
@@ -151,5 +169,6 @@ assert.match(
 assert.match(source, /FORMAT PROFILE/, "the generator must receive the resolved format profile");
 assert.match(source, /titleProfile\.targetMinChars/, "the judge must see the same profile envelope as the generator");
 assert.match(source, /opening: \[a\.coldOpen, a\.hookLoop\]/, "metacraft must apply the independent opening promise floor before judging");
+assert.match(source, /titleFrameDiversity\(generatedCandidates\)/, "a collapsed full slate must be repaired before the paid judge");
 
 console.log("METACRAFT TITLE QUALITY PASS");

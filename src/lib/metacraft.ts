@@ -343,6 +343,39 @@ export function dedupeTitleCandidates<T extends { title: string }>(candidates: T
   return kept;
 }
 
+export interface TitleFrameDiversity {
+  /** Distinct generator-supplied viewer angles after harmless label cleanup. */
+  count: number;
+  /** A full slate needs three angles; a deliberately small slate needs one. */
+  required: number;
+  pass: boolean;
+  labels: string[];
+}
+
+/**
+ * Seven synonyms are not seven options. The generator labels each title with
+ * its viewer-facing frame, so verify that a normal full slate really gives the
+ * semantic judge competing reasons to click. This is intentionally narrower
+ * than title wording: only the model knows whether two grounded hypotheses are
+ * actually different, and the downstream source-aware judge still decides the
+ * winner. A retry happens before the judge call, so a collapsed slate does not
+ * spend a second model call on a bad comparison.
+ */
+export function titleFrameDiversity(
+  candidates: readonly { frame?: string; title?: string }[],
+): TitleFrameDiversity {
+  const labels = [...new Set(candidates
+    .filter((candidate) => candidate.title?.trim())
+    .map((candidate) => (candidate.frame ?? "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim() || "unlabeled"))];
+  const count = labels.length;
+  const meaningfulCandidateCount = candidates.filter((candidate) => candidate.title?.trim()).length;
+  const required = meaningfulCandidateCount >= 3 ? 3 : 1;
+  return { count, required, pass: count >= required, labels };
+}
+
 /**
  * The history gate is deliberately narrow. A recurring subject, format, or
  * series name is not a duplicate; only a title that normalizes to the same
@@ -1046,12 +1079,30 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       continue;
     }
 
+    const generatedCandidates = (gen.candidates ?? [])
+      .map((candidate) => ({
+        frame: String(candidate.frame ?? "unknown"),
+        title: String(candidate.title ?? "").trim(),
+      }))
+      .filter((candidate) => candidate.title);
+    const frameDiversity = titleFrameDiversity(generatedCandidates);
+    if (!frameDiversity.pass) {
+      const issue = `title slate has ${frameDiversity.count}/${frameDiversity.required} distinct viewer frames`;
+      lastIssues = [issue];
+      fixNote = `THE PREVIOUS TITLE SLATE COLLAPSED INTO TOO FEW VIEWER ANGLES (${frameDiversity.labels.join(", ") || "none"}). ` +
+        `Write at least ${frameDiversity.required} genuinely different, source-supported frames — for example a mechanism, ` +
+        `a consequence, a useful answer, an unresolved question, or a format-appropriate experience. Do not relabel synonyms.`;
+      a.log?.(`metacraft: ${issue} -> ${attempt === 0 ? "regenerating before judge" : "FAILING LOUD"}`);
+      if (attempt === 0) continue;
+      throw new Error(`metacraft: ${issue} after bounded regeneration`);
+    }
+
     const rawCandidates = [
       // The scheduled plan's title competes on the same terms as the rest. If
       // it is the strongest option it still wins; it simply no longer wins by
       // being written first.
       ...warmStartCandidates(a.warmStartTitle, a.betTitle),
-      ...(gen.candidates ?? []).map((c) => ({ frame: String(c.frame ?? "unknown"), title: String(c.title ?? "").trim() })),
+      ...generatedCandidates,
     ]
       .map((candidate) => ({
         ...candidate,
