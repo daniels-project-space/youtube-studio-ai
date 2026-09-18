@@ -1,12 +1,5 @@
 import { NextResponse } from "next/server";
 
-import {
-  COMFY_IC_LORA_MINIMUM_VRAM_GB,
-  COMFY_IC_LORA_REQUIRED_GPU_SKU,
-  COMFY_IC_LORA_REQUIRED_PROVIDER,
-  OFFICIAL_LTX_COMFY_IC_LORA_WORKFLOW_PROFILES,
-} from "@/engine/comfyIcloraWorkerContract";
-import { studioCuratedLtxCatalog } from "@/engine/curatedLoraRegistry";
 import { VISUAL_TREATMENT_CATALOG } from "@/engine/visualTreatmentCatalog";
 import {
   approveStudioAssetPromotionCandidateForOwner,
@@ -16,10 +9,7 @@ import {
   listStudioAssetReleaseFeedback,
   resolveStudioAssetApprovedImagePreview,
 } from "@/lib/studioAssetLibraryRuntime";
-import { resolveOwnerReviewedLtxRuntime } from "@/lib/reviewedLtxRuntimeStateRuntime";
-import { listActiveMusicVideoA2VidRuntimeAdmissions } from "@/lib/musicVideoA2VidStateRuntime";
 import { listAcceptedCharacterLoRAInventory } from "@/lib/narrativeSeriesStateRuntime";
-import { selfHostedMusicVideoA2VidStudioReadiness } from "@/engine/selfHostedLtxMusicVideoA2Vid";
 import { getStudioActor, requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import {
   parseFinalMasterReleaseCertificateBytes,
@@ -62,26 +52,6 @@ function convexClient(): StudioConvexHttpClient {
  */
 function publicCatalog() {
   return {
-    curatedLtxCatalog: studioCuratedLtxCatalog().map((candidate) => ({
-      ...candidate,
-      recommendedWorkflowProfiles: candidate.adapterClass === "ic_lora"
-        ? OFFICIAL_LTX_COMFY_IC_LORA_WORKFLOW_PROFILES
-          .filter((profile) => profile.guideKinds.some((kind) => candidate.controls.includes(kind)))
-          .map((profile) => ({
-            workflowId: profile.workflowId,
-            qualityRole: profile.qualityRole,
-            guideKinds: [...profile.guideKinds],
-          }))
-        : [],
-      executionTarget: candidate.adapterClass === "ic_lora"
-        ? {
-            provider: COMFY_IC_LORA_REQUIRED_PROVIDER,
-            gpuSku: COMFY_IC_LORA_REQUIRED_GPU_SKU,
-            minimumVramGb: COMFY_IC_LORA_MINIMUM_VRAM_GB,
-            executor: "dedicated_comfyui_ltx" as const,
-          }
-        : null,
-    })),
     visualTreatmentCatalog: VISUAL_TREATMENT_CATALOG.map((treatment) => ({
       key: treatment.key,
       label: treatment.label,
@@ -138,8 +108,8 @@ export async function GET(request: Request) {
       return NextResponse.json({
         ok: true,
         ownerAccess: false,
-        // Viewer mode intentionally has no owner inventory. The catalog and
-        // runtime boundary are still useful without disclosing private state.
+        // Viewer mode intentionally has no owner inventory. The public
+        // treatment catalog remains useful without disclosing private state.
         assets: [],
         reusableMedia: [],
         episodeAssetFolders: { folders: [], assignments: [] },
@@ -147,18 +117,11 @@ export async function GET(request: Request) {
         candidates: [],
         releaseFeedback: [],
         acceptedCharacterLoRAs: [],
-        directLtxRuntime: {
-          status: "unattested" as const,
-          gpuSku: "RTX 5090",
-          vramGb: 0,
-          benchmarkedProfileCount: 0,
-        },
         ...catalog,
-        musicVideoA2Vid: selfHostedMusicVideoA2VidStudioReadiness({ activeRuntimeAdmissions: [] }),
       });
     }
     const client = convexClient();
-    const [assets, reusableMedia, episodeAssetFolders, channels, candidates, releaseFeedback, acceptedCharacterLoRAs, directLtxRuntime, activeMusicVideoA2VidAdmissions] = await Promise.all([
+    const [assets, reusableMedia, episodeAssetFolders, channels, candidates, releaseFeedback, acceptedCharacterLoRAs] = await Promise.all([
       listStudioAssetLibraryInventory({ client, ownerId: actor.ownerId }),
       listStudioReusableMediaInventory({ client, ownerId: actor.ownerId }),
       listStudioEpisodeAssetFolders({ client, ownerId: actor.ownerId }),
@@ -166,8 +129,6 @@ export async function GET(request: Request) {
       listStudioAssetPromotionCandidates({ client, ownerId: actor.ownerId }),
       listStudioAssetReleaseFeedback({ client, ownerId: actor.ownerId }),
       listAcceptedCharacterLoRAInventory({ client, ownerId: actor.ownerId }),
-      resolveOwnerReviewedLtxRuntime({ client, ownerId: actor.ownerId }),
-      listActiveMusicVideoA2VidRuntimeAdmissions({ client, ownerId: actor.ownerId }),
     ]);
     // These official descriptors are intentionally separate from installed,
     // approved assets. A descriptor is not a downloaded model or permission
@@ -182,18 +143,7 @@ export async function GET(request: Request) {
       candidates,
       releaseFeedback,
       acceptedCharacterLoRAs,
-      // Browser-safe readiness only. The sealed benchmark admissions and their
-      // artifacts remain service-only; a catalog card is never a render grant.
-      directLtxRuntime: {
-        status: directLtxRuntime.status,
-        gpuSku: directLtxRuntime.runtime.gpuSku,
-        vramGb: directLtxRuntime.runtime.vramGb,
-        benchmarkedProfileCount: directLtxRuntime.runtime.benchmarkedVideoProfileRevisions.length,
-      },
       ...catalog,
-      musicVideoA2Vid: selfHostedMusicVideoA2VidStudioReadiness({
-        activeRuntimeAdmissions: activeMusicVideoA2VidAdmissions,
-      }),
       // Planning/QA profiles are deliberately separate from stored approved
       // assets and model descriptors. They describe what the existing Visual
       // Matter path can lock and review—not a renderer permission.

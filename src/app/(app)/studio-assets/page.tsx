@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useOperationsAccess } from "@/components/OperationsAccess";
 import styles from "./studio-assets.module.css";
 
-type AssetRoom = "approved" | "decisions" | "identity" | "runtime" | "catalog";
+type AssetRoom = "approved" | "decisions" | "identity" | "catalog";
 
 type StudioAsset = {
   logicalId: string;
@@ -82,38 +82,6 @@ type EpisodeAssetFolderInventory = {
 
 type StudioChannelOption = { _id: string; name: string; slug: string };
 
-type CuratedLtxCatalogItem = {
-  id: string;
-  label: string;
-  adapterClass: "standard_lora" | "ic_lora";
-  purpose: "style" | "subject" | "distillation" | null;
-  controls: string[];
-  qualityMetric: string;
-  qualityPhase: "base_generation" | "shot_control" | "targeted_postprocess";
-  sourceUrl: string;
-  baseModelVersions: string[];
-  loaders: string[];
-  supportedFamilies: string[];
-  status: "descriptor_only_pending_integrity_pin" | "curation_ready";
-  activationGate:
-    | "exact_runtime_and_benchmark"
-    | "pinned_asset_license_and_direct_benchmark"
-    | "pinned_asset_license_workflow_and_benchmark"
-    | "pinned_asset_license_workflow_guide_and_benchmark";
-  recommendedWorkflowProfiles: {
-    workflowId: string;
-    qualityRole: string;
-    guideKinds: string[];
-  }[];
-  executionTarget: null | {
-    provider: "novita";
-    gpuSku: "RTX 5090";
-    minimumVramGb: number;
-    executor: "dedicated_comfyui_ltx";
-  };
-  notes: string[];
-};
-
 type VisualTreatmentCatalogItem = {
   key: string;
   label: string;
@@ -160,30 +128,6 @@ type AcceptedCharacterLoRA = {
   acceptedAt: number;
 };
 
-type MusicVideoA2VidReadiness = {
-  id: string;
-  status: "not_installed" | "benchmark_admitted";
-  label: string;
-  executionTarget: string;
-  currentWorkerBoundary: { workerPath: string; loader: string; reason: string };
-  activeBenchmark?: {
-    runtimeFingerprint: string;
-    benchmarkFingerprint: string;
-    gpuSku: string;
-    minimumVramGb: number;
-    admittedAt: string;
-  };
-  requirements: string[];
-};
-
-/** Browser-safe, owner-scoped state for the direct open-weight LTX worker. */
-type DirectLtxRuntimeStatus = {
-  status: "attested" | "unattested";
-  gpuSku: string;
-  vramGb: number;
-  benchmarkedProfileCount: number;
-};
-
 type StudioAssetImagePreview = {
   title: string;
   url: string;
@@ -208,62 +152,21 @@ function executionLabel(asset: StudioAsset): string {
   if (asset.assetKind === "motion_graphics_template") return "Approved for compatible data-graphic presentation";
   if (asset.assetKind === "audio_recipe") return "Approved as bounded direction beneath the locked channel sound";
   if (asset.assetKind === "standard_lora_stack") {
-    return "Benchmarked self-hosted LTX pair · one primary adapter plus one complementary detail adapter";
+    return "Benchmarked adapter pair · one primary identity plus one complementary detail adapter";
   }
   if (asset.assetKind !== "standard_lora_adapter" && asset.assetKind !== "ic_lora_adapter") {
     return asset.status === "approved" ? "Approved for compatible planning" : asset.status;
   }
   if (asset.assetKind === "ic_lora_adapter") {
     return asset.lora?.requiresComfyWorkflow
-      ? "Dedicated self-hosted ComfyUI/LTX control · sealed workflow and exact guide required · direct LTX blocked"
-      : "Dedicated self-hosted ComfyUI/LTX control · workflow proof required · direct LTX blocked";
+      ? "Dedicated control workflow · sealed workflow and exact guide required"
+      : "Dedicated control workflow · workflow proof required";
   }
-  return "Self-hosted open-weight LTX 2.5 candidate · Novita worker hash verified at render";
+  return "Candidate adapter · a matching qualified render route is required";
 }
 
 function kindLabel(value: string): string {
   return value.replaceAll("_", " ");
-}
-
-function curatedExecutionLabel(candidate: CuratedLtxCatalogItem): string {
-  if (candidate.activationGate === "exact_runtime_and_benchmark") {
-    return "Base-quality component · requires an exact pinned runtime and output-quality benchmark";
-  }
-  if (candidate.adapterClass === "ic_lora") {
-    return "Comfy control candidate · requires a guide, exact workflow pin, and shot benchmark";
-  }
-  if (candidate.activationGate === "pinned_asset_license_and_direct_benchmark") {
-    return "Self-hosted open-weight LTX candidate · requires pinned adapter bytes and an exact Novita-worker quality benchmark";
-  }
-  return "Dedicated Comfy LoRA candidate · requires a sealed workflow and benchmark";
-}
-
-function curatedGateLabel(candidate: CuratedLtxCatalogItem): string {
-  switch (candidate.activationGate) {
-    case "exact_runtime_and_benchmark":
-      return "runtime pin · benchmark";
-    case "pinned_asset_license_and_direct_benchmark":
-      return "adapter pin · licence · direct benchmark";
-    case "pinned_asset_license_workflow_and_benchmark":
-      return "adapter pin · licence · workflow · benchmark";
-    case "pinned_asset_license_workflow_guide_and_benchmark":
-      return "adapter pin · licence · workflow · guide · benchmark";
-  }
-}
-
-function curatedQualityPhaseLabel(phase: CuratedLtxCatalogItem["qualityPhase"]): string {
-  switch (phase) {
-    case "base_generation":
-      return "base generation";
-    case "shot_control":
-      return "shot control";
-    case "targeted_postprocess":
-      return "targeted post-process";
-  }
-}
-
-function curatedExecutionTargetLabel(target: NonNullable<CuratedLtxCatalogItem["executionTarget"]>): string {
-  return `Dedicated ComfyUI/LTX · ${target.provider} ${target.gpuSku} · ${target.minimumVramGb} GB minimum`;
 }
 
 function AssetHero({
@@ -310,12 +213,10 @@ function ViewerBoundary() {
 function AssetRoomTabs({ room, setRoom, counts, publicMode }: { room: AssetRoom; setRoom: (room: AssetRoom) => void; counts: Record<AssetRoom, number>; publicMode: boolean }) {
   const rooms: { id: AssetRoom; label: string }[] = (publicMode ? [
     { id: "catalog" as const, label: "Catalog" },
-    { id: "runtime" as const, label: "Workers" },
   ] : [
     { id: "approved", label: "Inventory" },
     { id: "decisions", label: "Decisions" },
     { id: "identity", label: "Characters" },
-    { id: "runtime", label: "Workers" },
     { id: "catalog", label: "Catalog" },
   ]);
   return (
@@ -330,8 +231,7 @@ function AssetRoomIntro({ room }: { room: AssetRoom }) {
     approved: { title: "Media & recipes", detail: "Only approved entries can be reused within their recorded scope." },
     decisions: { title: "Review candidates", detail: "Approve proven recipes for the same channel. Approval rechecks final-master evidence." },
     identity: { title: "Character identity", detail: "Accepted adapters stay bound to their original character, dataset, and runtime." },
-    runtime: { title: "Worker readiness", detail: "Benchmarks qualify a specific path, not permission to spend or publish." },
-    catalog: { title: "Quality catalog", detail: "Model and treatment references—not installed weights or render permission." },
+    catalog: { title: "Visual treatments", detail: "Storyboard and review profiles—not installed weights or render permission." },
   };
   const selected = copy[room];
   return <header className={styles.roomHeader}><h2>{selected.title}</h2><p>{selected.detail}</p></header>;
@@ -453,12 +353,9 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
   const [episodeAssetFolders, setEpisodeAssetFolders] = useState<EpisodeAssetFolderInventory>({ folders: [], assignments: [] });
   const [studioChannels, setStudioChannels] = useState<StudioChannelOption[]>([]);
   const [candidates, setCandidates] = useState<StudioAssetPromotionCandidate[]>([]);
-  const [curatedLtxCatalog, setCuratedLtxCatalog] = useState<CuratedLtxCatalogItem[]>([]);
   const [visualTreatmentCatalog, setVisualTreatmentCatalog] = useState<VisualTreatmentCatalogItem[]>([]);
   const [releaseFeedback, setReleaseFeedback] = useState<StudioAssetReleaseFeedback[]>([]);
   const [acceptedCharacterLoRAs, setAcceptedCharacterLoRAs] = useState<AcceptedCharacterLoRA[]>([]);
-  const [musicVideoA2Vid, setMusicVideoA2Vid] = useState<MusicVideoA2VidReadiness | null>(null);
-  const [directLtxRuntime, setDirectLtxRuntime] = useState<DirectLtxRuntimeStatus | null>(null);
   const [loading, setLoading] = useState(true);
   const [loaded, setLoaded] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -492,19 +389,16 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
         episodeAssetFolders?: EpisodeAssetFolderInventory;
         channels?: StudioChannelOption[];
         candidates?: StudioAssetPromotionCandidate[];
-        curatedLtxCatalog?: CuratedLtxCatalogItem[];
         visualTreatmentCatalog?: VisualTreatmentCatalogItem[];
         releaseFeedback?: StudioAssetReleaseFeedback[];
         acceptedCharacterLoRAs?: AcceptedCharacterLoRA[];
-        musicVideoA2Vid?: MusicVideoA2VidReadiness;
-        directLtxRuntime?: DirectLtxRuntimeStatus;
         error?: string;
       };
       if (!response.ok || !payload.ok) throw new Error(payload.error ?? "Could not load Studio assets");
       // All inventory collections are required by the real API. A partial or
       // malformed response is unavailable data, not a successfully empty room.
-      if (![payload.assets, payload.reusableMedia, payload.candidates, payload.curatedLtxCatalog,
-        payload.visualTreatmentCatalog, payload.releaseFeedback, payload.acceptedCharacterLoRAs].every(Array.isArray)
+      if (![payload.assets, payload.reusableMedia, payload.candidates, payload.visualTreatmentCatalog,
+        payload.releaseFeedback, payload.acceptedCharacterLoRAs].every(Array.isArray)
         || !payload.episodeAssetFolders
         || !Array.isArray(payload.episodeAssetFolders.folders)
         || !Array.isArray(payload.episodeAssetFolders.assignments)
@@ -517,12 +411,9 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
       setEpisodeAssetFolders(payload.episodeAssetFolders);
       setStudioChannels(payload.channels);
       setCandidates(payload.candidates ?? []);
-      setCuratedLtxCatalog(payload.curatedLtxCatalog ?? []);
       setVisualTreatmentCatalog(payload.visualTreatmentCatalog ?? []);
       setReleaseFeedback(payload.releaseFeedback ?? []);
       setAcceptedCharacterLoRAs(payload.acceptedCharacterLoRAs ?? []);
-      setMusicVideoA2Vid(payload.musicVideoA2Vid ?? null);
-      setDirectLtxRuntime(payload.directLtxRuntime ?? null);
       setLoaded(true);
     } catch (error) {
       if (!controller.signal.aborted) setLoadError(error instanceof Error ? error.message : "Could not load Studio assets");
@@ -704,8 +595,7 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
     approved: assets.length + reusableMedia.length,
     decisions: candidates.length,
     identity: acceptedCharacterLoRAs.length,
-    runtime: (directLtxRuntime ? 1 : 0) + (musicVideoA2Vid ? 1 : 0),
-    catalog: curatedLtxCatalog.length + visualTreatmentCatalog.length,
+    catalog: visualTreatmentCatalog.length,
   };
   const registryReady = loaded && !loading && !loadError;
 
@@ -726,15 +616,6 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
       {registryReady ? <>
       <AssetRoomTabs room={room} setRoom={setRoom} counts={roomCounts} publicMode={publicMode} />
       <AssetRoomIntro room={room} />
-
-      {!loading && room === "runtime" && directLtxRuntime ? <section className={styles.runtimeBanner} aria-label="Direct LTX runtime readiness">
-        <strong>Direct LTX runtime · {directLtxRuntime.status === "attested" ? "benchmark admitted" : "benchmark not admitted"}</strong>
-        <p>
-          {directLtxRuntime.status === "attested"
-            ? `This owner has ${directLtxRuntime.benchmarkedProfileCount} sealed direct open-weight LTX 2.5 Novita profile${directLtxRuntime.benchmarkedProfileCount === 1 ? "" : "s"} on ${directLtxRuntime.gpuSku} (${directLtxRuntime.vramGb} GB). Every render still rechecks the exact pinned worker and release evidence.`
-            : `No owner-scoped benchmark admission exists for the direct open-weight LTX 2.5 Novita worker (${directLtxRuntime.gpuSku}, ${directLtxRuntime.vramGb} GB). Catalog entries and standard LoRA candidates remain unavailable to render until an exact benchmark is reviewed and admitted.`}
-        </p>
-      </section> : null}
 
       {!loading && room === "approved" && !message && assets.length === 0 && reusableMedia.length === 0 ? (
         <div className={styles.empty}>
@@ -910,85 +791,6 @@ function OwnedStudioAssetsPage({ access }: { access: ReturnType<typeof useOperat
               <p className={styles.adapter}>Character specification · {shortHash(adapter.characterSpecFingerprint)} · dataset binding · {shortHash(adapter.datasetFingerprint)}</p>
               <p className={styles.feedback}>Reusable registry evidence only · rendering still requires the matching pinned worker, guide/control contract where applicable, budget reservation, and final review.</p>
             </article>
-          ))}
-        </div>
-      </section> : null}
-
-      {!loading && room === "runtime" && musicVideoA2Vid ? <section className={styles.catalog} aria-labelledby="music-video-engine">
-        <div className={styles.catalogHead}>
-          <div>
-            <span className={styles.kind}>Future render engine</span>
-            <h2 id="music-video-engine">{musicVideoA2Vid.label}</h2>
-          </div>
-          <p>Build music segments from approved audio and stills.</p>
-        </div>
-        <article className={styles.card}>
-          <div className={styles.cardHead}>
-            <div>
-              <span className={styles.kind}>open-weight · Novita</span>
-              <h2>{musicVideoA2Vid.executionTarget}</h2>
-            </div>
-            <span className={musicVideoA2Vid.status === "benchmark_admitted" ? styles.approved : styles.muted}>
-              {musicVideoA2Vid.status === "benchmark_admitted" ? "benchmark admitted" : "not installed"}
-            </span>
-          </div>
-          <p className={styles.execution}>{musicVideoA2Vid.currentWorkerBoundary.reason}</p>
-          <dl className={styles.meta}>
-            <div><dt>Current boundary</dt><dd>{musicVideoA2Vid.currentWorkerBoundary.loader}</dd></div>
-            <div><dt>Worker scope</dt><dd>Self-hosted only · no external LTX service</dd></div>
-            {musicVideoA2Vid.activeBenchmark ? <>
-              <div><dt>Benchmarked runtime</dt><dd title={musicVideoA2Vid.activeBenchmark.runtimeFingerprint}>{shortHash(musicVideoA2Vid.activeBenchmark.runtimeFingerprint)}</dd></div>
-              <div><dt>Benchmark</dt><dd>{musicVideoA2Vid.activeBenchmark.gpuSku} · {musicVideoA2Vid.activeBenchmark.minimumVramGb} GB minimum</dd></div>
-            </> : null}
-          </dl>
-          <div className={styles.tags} aria-label="Music-to-video admission requirements">
-            {musicVideoA2Vid.requirements.map((requirement) => <span key={requirement}>{requirement}</span>)}
-          </div>
-          <p className={styles.feedback}>{musicVideoA2Vid.status === "benchmark_admitted"
-            ? "A pinned runtime and matched benchmark are stored for reuse. Dispatch remains disabled until a clip supplies its exact mastered-music window, approved reference evidence, held budget, and final-master review."
-            : "No render permission yet. Once benchmarked, every clip still binds its exact mastered-music window, approved reference evidence, held budget, and final-master review."}</p>
-        </article>
-      </section> : null}
-
-      {!loading && room === "catalog" && curatedLtxCatalog.length ? <section className={styles.catalog} aria-labelledby="official-ltx-quality-catalog">
-        <div className={styles.catalogHead}>
-          <div>
-            <span className={styles.kind}>Official LTX catalog</span>
-            <h2 id="official-ltx-quality-catalog">Quality and control candidates</h2>
-          </div>
-          <p>Unavailable assets show their missing requirements.</p>
-        </div>
-        <div className={`${styles.grid} ${styles.catalogGrid}`}>
-          {curatedLtxCatalog.map((candidate) => (
-            <details className={styles.card} key={candidate.id}>
-              <summary className={styles.cardSummary}>
-              <div className={styles.cardHead}>
-                <div>
-                  <span className={styles.kind}>{candidate.adapterClass === "ic_lora" ? "IC-LoRA control" : "standard LoRA"}</span>
-                  <h2>{candidate.label}</h2>
-                </div>
-                <span className={styles.muted}>not installed</span>
-              </div>
-              <span className={styles.cardToggle}>View details</span>
-              </summary>
-              <p className={styles.execution}>{curatedExecutionLabel(candidate)}</p>
-              <dl className={styles.meta}>
-                <div><dt>Base model</dt><dd>LTX {candidate.baseModelVersions.join(", ")}</dd></div>
-                <div><dt>Use</dt><dd>{curatedQualityPhaseLabel(candidate.qualityPhase)}</dd></div>
-                <div><dt>Must improve</dt><dd>{kindLabel(candidate.qualityMetric)}</dd></div>
-                <div><dt>Gate</dt><dd>{curatedGateLabel(candidate)}</dd></div>
-                {candidate.executionTarget ? <div><dt>Executor</dt><dd title={curatedExecutionTargetLabel(candidate.executionTarget)}>{curatedExecutionTargetLabel(candidate.executionTarget)}</dd></div> : null}
-              </dl>
-              <div className={styles.tags} aria-label="Candidate compatibility">
-                {candidate.controls.map((value) => <span key={`control-${value}`}>{kindLabel(value)}</span>)}
-                {candidate.supportedFamilies.map((value) => <span key={`family-${value}`}>{kindLabel(value)}</span>)}
-              </div>
-              {candidate.recommendedWorkflowProfiles.length ? <p className={styles.adapter}>
-                Official workflow family: {candidate.recommendedWorkflowProfiles.map((profile) => `${profile.qualityRole} (${profile.workflowId})`).join(" · ")} · still requires a pinned local graph and benchmark
-              </p> : null}
-              <p className={styles.recipe}>{candidate.notes.join(" ")}</p>
-              <a className={styles.source} href={candidate.sourceUrl} target="_blank" rel="noreferrer">Official model card</a>
-            </details>
           ))}
         </div>
       </section> : null}

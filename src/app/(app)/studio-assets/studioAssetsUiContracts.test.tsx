@@ -10,7 +10,7 @@ async function main(): Promise<void> {
   assert.match(source, /function AssetHero/);
   assert.match(source, /<h1>Studio assets<\/h1>/);
   assert.match(source, /function AssetRoomTabs/);
-  for (const room of ["approved", "decisions", "identity", "runtime", "catalog"]) {
+  for (const room of ["approved", "decisions", "identity", "catalog"]) {
     assert.match(source, new RegExp(`room === "${room}"`), `missing isolated ${room} room`);
   }
   assert.match(source, /function ViewerBoundary/);
@@ -55,15 +55,9 @@ async function main(): Promise<void> {
   assert.match(source, /action: "approve-candidate"/);
   assert.match(source, /persistent signed URLs/);
   assert.match(source, /short-lived preview for an approved image/);
-  assert.match(source, /Official LTX catalog/i);
   assert.match(source, /Visual treatment catalog/i);
   assert.match(source, /no renderer admitted/i);
   assert.match(source, /Future supervised route seeds/i);
-  assert.match(source, /not installed/i);
-  assert.match(source, /Official workflow family/i);
-  assert.match(source, /still requires a pinned local graph and benchmark/i);
-  assert.match(source, /adapter pin · licence · direct benchmark/i);
-  assert.match(source, /adapter pin · licence · workflow · guide · benchmark/i);
   assert.match(source, /assembly consumer is not admitted until render-parity is proven/i);
   assert.match(source, /fetch\("\/api\/studio-assets"/);
   assert.match(source, /Preview approved image/);
@@ -74,30 +68,15 @@ async function main(): Promise<void> {
   assert.match(source, /previewOriginRef\.current\?\.focus\(\)/);
   assert.match(source, /event\.key === "Tab"/);
   assert.doesNotMatch(source, /r2Key/);
-  assert.match(source, /direct LTX blocked/i);
-  assert.match(source, /Dedicated ComfyUI\/LTX/i);
-  assert.match(source, /RTX 5090/i);
-  assert.match(source, /Self-hosted open-weight LTX 2\.5 candidate/);
+  assert.doesNotMatch(source, /LTX|musicVideoA2Vid|directLtxRuntime|curatedLtxCatalog/i);
   assert.match(source, /Browse approved Studio assets/i);
   assert.match(source, /Persistent character adapters/i);
   assert.match(source, /acceptedCharacterLoRAs/);
   assert.match(source, /accepted for reuse/i);
   assert.doesNotMatch(source, /adapterReference/);
-  assert.match(source, /musicVideoA2Vid\.label/);
-  assert.match(source, /benchmark admitted/i);
-  assert.match(source, /Dispatch remains disabled/i);
-  assert.match(source, /no external LTX service/i);
-  assert.match(source, /No render permission yet/i);
-  assert.match(source, /Direct LTX runtime/i);
-  assert.match(source, /benchmark not admitted/i);
-  assert.match(source, /owner-scoped benchmark admission/i);
-  assert.match(source, /minimumVramGb/);
-  assert.match(source, /executionTarget/);
   assert.match(source, /Final-master signal/i);
   assert.match(source, /demonstrated tie-break evidence/i);
   assert.match(source, /approval and benchmark remain the only selection evidence/i);
-  assert.match(source, /qualityMetric/);
-  assert.match(source, /qualityPhase/);
   assert.doesNotMatch(source, /asset\.resource\.r2Key/);
   assert.match(api, /getStudioActor/);
   assert.match(api, /ownerAccess: false/);
@@ -129,22 +108,10 @@ async function main(): Promise<void> {
   assert.match(api, /listStudioAssetReleaseFeedback/);
   assert.match(api, /listAcceptedCharacterLoRAInventory/);
   assert.match(api, /acceptedCharacterLoRAs/);
-  assert.match(api, /selfHostedMusicVideoA2VidStudioReadiness/);
-  assert.match(api, /listActiveMusicVideoA2VidRuntimeAdmissions/);
-  assert.match(api, /musicVideoA2Vid/);
-  assert.match(api, /resolveOwnerReviewedLtxRuntime/);
-  assert.match(api, /directLtxRuntime/);
-  assert.match(api, /benchmarkedProfileCount/);
-  assert.doesNotMatch(api, /admissionFingerprints/);
   assert.match(api, /releaseFeedback/);
-  assert.match(api, /studioCuratedLtxCatalog/);
-  assert.match(api, /OFFICIAL_LTX_COMFY_IC_LORA_WORKFLOW_PROFILES/);
-  assert.match(api, /COMFY_IC_LORA_REQUIRED_GPU_SKU/);
-  assert.match(api, /COMFY_IC_LORA_MINIMUM_VRAM_GB/);
-  assert.match(api, /executionTarget/);
-  assert.match(api, /recommendedWorkflowProfiles/);
   assert.match(api, /VISUAL_TREATMENT_CATALOG/);
   assert.match(api, /activePlanningFamilies/);
+  assert.doesNotMatch(api, /LTX|musicVideoA2Vid|directLtxRuntime|curatedLtxCatalog|resolveOwnerReviewedLtxRuntime/i);
   assert.doesNotMatch(styles, /\.orbitField/);
   assert.match(styles, /\.metricRail/);
   assert.match(styles, /\.catalogGrid/,
