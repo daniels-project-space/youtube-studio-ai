@@ -9,6 +9,7 @@ import {
   assertOriginalMusicProgramPlanBinding,
   createOriginalMusicProgramPlan,
   ORIGINAL_MUSIC_PROGRAM_PLAN_VERSION,
+  selectOriginalMusicProvider,
 } from "@/engine/originalMusicProgram";
 
 const brief = createChannelProgramBrief({
@@ -35,6 +36,21 @@ assert.equal(plan.version, ORIGINAL_MUSIC_PROGRAM_PLAN_VERSION);
 assert.equal(plan.routeKey, "music-loop/foundation/v1");
 assert.equal(plan.audio.loopable, true);
 assert.equal(plan.visual.setting, "rainy city windows after midnight");
+assert.equal(
+  selectOriginalMusicProvider({ minimaxQualified: true }),
+  "minimax_music3",
+  "automatic programs prefer the qualified MiniMax route",
+);
+assert.equal(
+  selectOriginalMusicProvider({ minimaxQualified: false }),
+  "suno",
+  "automatic programs retain the available qualified fallback",
+);
+assert.equal(
+  selectOriginalMusicProvider({ requestedProvider: "mureka", minimaxQualified: true }),
+  "mureka",
+  "an explicit provider selection remains authoritative",
+);
 assert.equal(assertOriginalMusicProgramPlanBinding({
   plan,
   route: seed,

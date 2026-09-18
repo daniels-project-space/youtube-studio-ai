@@ -73,6 +73,22 @@ export interface CreateOriginalMusicProgramPlanInput {
   readonly providerPreference?: "minimax_music3" | "suno" | "mureka";
 }
 
+export type OriginalMusicProvider = "minimax_music3" | "suno" | "mureka";
+
+/**
+ * Select a route before spending on either branch. A requested provider is
+ * immutable; automatic programs may prefer MiniMax only after its independent
+ * quality/runtime qualification succeeds. This prevents a missing worker from
+ * turning a normally automatic music program into a late paid-stage failure.
+ */
+export function selectOriginalMusicProvider(input: {
+  readonly requestedProvider?: OriginalMusicProvider;
+  readonly minimaxQualified: boolean;
+}): OriginalMusicProvider {
+  if (input.requestedProvider) return input.requestedProvider;
+  return input.minimaxQualified ? "minimax_music3" : "suno";
+}
+
 function normalizedText(value: string | undefined, fallback: string, maximum: number): string {
   const normalized = value?.replace(/\s+/gu, " ").trim() ?? "";
   return (normalized || fallback).slice(0, maximum).trim();
@@ -141,7 +157,10 @@ export function createOriginalMusicProgramPlan(
     visual: { setting, visualStyle, motionIntent },
     audio: {
       direction: audioDirection,
-      providerPreference: input.providerPreference ?? "suno",
+      providerPreference: selectOriginalMusicProvider({
+        requestedProvider: input.providerPreference,
+        minimaxQualified: false,
+      }),
       instrumentalOnly: true as const,
       noVocals: true as const,
       loopable: true as const,

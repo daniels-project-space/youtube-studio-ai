@@ -53,6 +53,7 @@ import {
 import {
   assertOriginalMusicProgramPlanBinding,
   createOriginalMusicProgramPlan,
+  selectOriginalMusicProvider,
   type OriginalMusicProgramPlan,
 } from "@/engine/originalMusicProgram";
 import {
@@ -118,6 +119,7 @@ import {
 import {
   assertPinnedMiniMaxMusic3Receipt,
   generateMiniMaxMusic3,
+  hasQualifiedMiniMaxMusic3,
   type MiniMaxMusic3Receipt,
 } from "@/lib/minimaxMusic3";
 import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtubeConnector";
@@ -1256,9 +1258,12 @@ export const musicProgramPlan: Block = {
       motionIntent: "one calm, seamless camera movement with no abrupt cuts, flashes, or subject drift",
       audioDirection,
       // Select a provider once, before either paid branch is allowed to run.
-      // MiniMax stays opt-in and its worker will reject an unqualified runtime
-      // at the later paid boundary; this plan never silently falls back to it.
-      providerPreference: requestedProvider ?? "suno",
+      // Automatic programs use MiniMax only when its independently qualified
+      // worker is ready; an explicit route selection always remains immutable.
+      providerPreference: selectOriginalMusicProvider({
+        requestedProvider,
+        minimaxQualified: hasQualifiedMiniMaxMusic3(),
+      }),
     });
     ctx.log(`music_program_plan: sealed ${plan.fingerprint.slice(0, 12)} for ${plan.routeKey}`);
     return {
