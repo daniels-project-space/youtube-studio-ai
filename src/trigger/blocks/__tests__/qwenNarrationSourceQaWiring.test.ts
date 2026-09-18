@@ -40,7 +40,7 @@ assert.match(
 );
 assert.match(
   narration,
-  /\[weeklyNarrationBrief, dnaPacing\?\.delivery, dnaPacing\?\.pacing, physics\.archetype\]/u,
-  "the frozen weekly brief must be a Qwen delivery input ahead of mutable style fallbacks",
+  /composeQwenNarrationInstruction\(\{\s*explicit: ctx\.params\["qwenInstruction"\],\s*editorialBrief: weeklyNarrationBrief,\s*delivery: dnaPacing\?\.delivery,\s*pacing: dnaPacing\?\.pacing,\s*archetype: physics\.archetype,/u,
+  "the shared Qwen instruction composer must receive the frozen weekly brief and the complete channel delivery context",
 );
 console.log("Qwen narration final-source QA wiring PASS");
