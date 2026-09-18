@@ -22,10 +22,12 @@ for (const source of [card, rail]) {
   assert.match(source, /video\.thumbnailPresentation === "lofi_frame_pending"\s*\? undefined/,
     "pending Lo-Fi rows do not fall back to generic YouTube imagery");
 }
-assert.match(preview, /<video[\s\S]*preload="metadata"[\s\S]*onLoadedMetadata/,
-  "the final-master fallback stays paused instead of autoplaying in the Library");
+assert.match(preview, /<video[\s\S]*preload=\{shouldBufferVideoFrame \? "auto" : "metadata"\}[\s\S]*onLoadedMetadata/,
+  "the fallback buffers only after its card is admitted, then seeks a native frame");
 assert.doesNotMatch(preview, /<video[\s\S]*autoPlay/,
   "a retained-master fallback never declares video autoplay");
+assert.match(preview, /onSeeked=\{[\s\S]*?\.pause\(\)/,
+  "the fallback explicitly pauses once its intended source frame is decoded");
 assert.match(preview, /Math\.min\(15, Math\.max\(0, duration - 0\.05\)\)/,
   "the fallback seeks to the 15-second source frame whenever the master is long enough");
 
