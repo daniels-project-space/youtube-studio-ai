@@ -3386,6 +3386,11 @@ export const listOverviewRuns = query({
       const channel = await getChannel(run.channelId);
       const live = run.status === "queued" || run.status === "running";
       const recentLive = recentIds.has(String(run._id)) && live;
+      // A route-less historical run can be retained and inspected, but it
+      // cannot truthfully be offered as the next recoverable production task.
+      const pipelineSource = run.pipelineInvocationSnapshot && run.pipelineInvocationSha256
+        ? "frozen" as const
+        : "legacy_inferred" as const;
       const pipeline = recentLive
         ? frozenRunPipelinePresentation({
             snapshot: run.pipelineInvocationSnapshot,
@@ -3416,6 +3421,7 @@ export const listOverviewRuns = query({
         leaseExpiresAt: run.leaseExpiresAt,
         channelName: channel?.name ?? "(unknown)",
         channelSlug: channel?.slug ?? "",
+        pipelineSource,
         ...(recentLive
           ? { stageProgress: summarizeRunStageProgress({ pipeline: pipeline?.entries, stages }) }
           : {}),

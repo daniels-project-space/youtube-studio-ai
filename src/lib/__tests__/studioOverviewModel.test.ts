@@ -176,6 +176,34 @@ test("historical failures remain inspectable without masking current connection 
   assert.equal(snapshot.decision.detail, "YouTube connection needs attention");
 });
 
+test("legacy inferred failures remain in history but never become a false recovery decision", () => {
+  const snapshot = buildStudioOverview({
+    channels: channels.slice(0, 1),
+    recentRuns: [{
+      ...failedRun,
+      _id: "runs:legacy-thumbnail",
+      pipelineSource: "legacy_inferred",
+      error: "YouTube upload rejected · thumbnail_gen",
+    }],
+    activeRuns: [],
+    plan: [{ ...readyPlan, scheduledAt: 4_000 }],
+    youtubeLinks: [{
+      channelId: "channels:one",
+      status: "active",
+      scopeHealth: "healthy",
+      ytChannelId: "UC-real",
+    }],
+    now: 3_000,
+  });
+
+  assert.equal(snapshot.failedRuns.length, 1, "legacy evidence remains in the run record");
+  assert.equal(snapshot.legacyFailedRuns.length, 1);
+  assert.equal(snapshot.actionableFailedRuns.length, 0);
+  assert.equal(snapshot.issues.length, 0, "a route-less failure is not a recoverable Studio incident");
+  assert.equal(snapshot.decision.href, "/channels/quiet-signal?tab=week-ahead&plan=plans%3Aready#plan-plans%3Aready");
+  assert.equal(snapshot.successRate, null, "uncomparable legacy failure cannot manufacture a quality rate");
+});
+
 test("active unpinned work is described as automatic cadence, not blocked", () => {
   const unscheduled = {
     ...readyPlan,

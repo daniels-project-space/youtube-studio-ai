@@ -124,7 +124,8 @@ assert.match(wizard, /\.\.\.automaticCapabilitySelections[\s\S]*source_attribute
 // a route the server will subsequently refuse.
 assert.match(wizard, /automaticFamilyCreatorReadiness/);
 assert.doesNotMatch(wizard, /isFamilyProductionReady\(/);
-assert.match(wizard, /Automatic creator admission is held/);
+assert.match(wizard, /creatorReadinessSummary/);
+assert.match(wizard, /H3 visual worker needs activation/);
 assert.match(wizard, /const liveRuntime = automaticFamilyRuntime\[next\]/);
 assert.match(wizard, /is held by its creator contract/);
 assert.match(wizard, /const \[automaticFamilyRuntimeCheck, setAutomaticFamilyRuntimeCheck\]/);

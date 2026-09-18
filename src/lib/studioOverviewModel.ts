@@ -19,6 +19,8 @@ export type StudioOverviewRun = {
   error?: string;
   channelName: string;
   channelSlug: string;
+  /** Legacy rows have no immutable execution plan and are history-only. */
+  pipelineSource?: "frozen" | "legacy_inferred";
 };
 
 export type StudioOverviewChannel = {
@@ -91,6 +93,8 @@ export type StudioOverviewSnapshot = {
   recordedSpend: number;
   successRate: number | null;
   failedRuns: StudioOverviewRun[];
+  actionableFailedRuns: StudioOverviewRun[];
+  legacyFailedRuns: StudioOverviewRun[];
   stalledRuns: StudioOverviewRun[];
   failedPlans: StudioOverviewPlan[];
   overduePlans: StudioOverviewPlan[];
@@ -130,6 +134,10 @@ function isHistoricalFailure(run: Pick<StudioOverviewRun, "startedAt">, now: num
   return typeof run.startedAt === "number" &&
     Number.isFinite(run.startedAt) &&
     now - run.startedAt > CURRENT_FAILURE_WINDOW_MS;
+}
+
+function isLegacyInferredFailure(run: Pick<StudioOverviewRun, "pipelineSource">): boolean {
+  return run.pipelineSource === "legacy_inferred";
 }
 
 function overviewFailureDetail(run: StudioOverviewRun, now: number): string {
@@ -217,6 +225,11 @@ export function buildStudioOverview(args: {
   );
 
   const failedRuns = args.recentRuns.filter((run) => run.status === "failed");
+  // The run detail retains every failed row. The command centre only surfaces
+  // a run with a sealed route, so it never suggests recovery by guessing at
+  // historic inputs or providers.
+  const actionableFailedRuns = failedRuns.filter((run) => !isLegacyInferredFailure(run));
+  const legacyFailedRuns = failedRuns.filter(isLegacyInferredFailure);
   const stalledRuns = args.recentRuns.filter(
     (run) =>
       (run.status === "queued" || run.status === "running") &&
@@ -244,11 +257,11 @@ export function buildStudioOverview(args: {
   );
   const terminalRuns = args.recentRuns.filter(
     (run) => run.status === "ok" || run.status === "failed",
-  );
+  ).filter((run) => !isLegacyInferredFailure(run));
   const successfulRuns = terminalRuns.filter((run) => run.status === "ok").length;
 
-  const currentFailedRuns = failedRuns.filter((run) => !isHistoricalFailure(run, args.now));
-  const historicalFailedRuns = failedRuns.filter((run) => isHistoricalFailure(run, args.now));
+  const currentFailedRuns = actionableFailedRuns.filter((run) => !isHistoricalFailure(run, args.now));
+  const historicalFailedRuns = actionableFailedRuns.filter((run) => isHistoricalFailure(run, args.now));
   const failedRunIssues = (runs: StudioOverviewRun[]): StudioIssue[] => runs.map((run) => ({
     key: `failed:${run._id}`,
     kind: "failed_run" as const,
@@ -369,6 +382,8 @@ export function buildStudioOverview(args: {
       ? Math.round((successfulRuns / terminalRuns.length) * 100)
       : null,
     failedRuns,
+    actionableFailedRuns,
+    legacyFailedRuns,
     stalledRuns,
     failedPlans,
     overduePlans,

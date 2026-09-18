@@ -283,7 +283,7 @@ export default function OverviewPage() {
             <strong>Recent runs</strong>
           </span>
           <span className={styles.runSummaryMeta}>
-            {overview.failedRuns.length > 0 && <em>{overview.failedRuns.length} require inspection</em>}
+            {overview.actionableFailedRuns.length > 0 && <em>{overview.actionableFailedRuns.length} require inspection</em>}
             <small>{loading ? "Loading…" : `${overview.recentRunCount} recent · ${usd.format(overview.recordedSpend)}`}</small>
           </span>
           <i aria-hidden="true" />
