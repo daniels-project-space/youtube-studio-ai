@@ -23,4 +23,17 @@ assert.ok(
   "the legacy catalog must retain historic settings for existing channel receipts",
 );
 
+const whiteboard = MODULE_CATALOG.find((module) => module.block === "whiteboard_scribe");
+assert.ok(whiteboard, "the catalog must describe the Whiteboard renderer");
+assert.match(
+  whiteboard.description,
+  /sealed storyboard.*channel-selected narration.*attested Novita line art.*deterministic hand/i,
+  "the Whiteboard presentation must describe the production-owned planner, voice, art, and draw paths",
+);
+assert.doesNotMatch(
+  whiteboard.description,
+  /Gemini storyboards|Fish narrates/i,
+  "the Whiteboard presentation must not advertise retired fixed-provider defaults",
+);
+
 console.log("New-channel narration catalog policy tests passed");

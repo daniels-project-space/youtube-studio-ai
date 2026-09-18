@@ -248,7 +248,7 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     block: "whiteboard_scribe",
     label: "Whiteboard scribe (drawn cinema)",
     description:
-      "Self-contained narration-synced whiteboard explainer: Gemini storyboards layered scenes, Fish narrates, a deterministic hand draws each beat in time. Replaces footage + assembly for the Whiteboard family.",
+      "Self-contained narration-synced whiteboard explainer: a sealed storyboard, channel-selected narration, attested Novita line art, and a deterministic hand drawing every beat in time. Replaces footage + assembly for the Whiteboard family.",
     optional: false,
     params: [
       { key: "width", label: "Resolution", type: "select", options: [{ value: "1920", label: "1080p" }, { value: "2560", label: "2K (1440p)" }] },
