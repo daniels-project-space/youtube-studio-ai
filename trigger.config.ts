@@ -200,6 +200,15 @@ const FORWARDED_ENV = [
   "NOVITA_MODEL_MANIFEST_SHA256",
   "NOVITA_RENDER_MAX_JOB_USD",
   "NOVITA_RENDER_MAX_FLEET_USD",
+  // Dedicated private OpenRelay Qwen lane. These are injected only into the
+  // Trigger worker, never a browser/Vercel environment. Keeping the lifecycle
+  // identity alongside its credential lets the scheduled idle reaper stop the
+  // exact persistent 3090 after it has atomically drained.
+  "OPENRELAY_API_KEY",
+  "OPENRELAY_QWEN_VM_ID",
+  "QWEN3_TTS_WORKER_URL",
+  "QWEN3_TTS_WORKER_TOKEN",
+  "QWEN3_TTS_RUNTIME_PROFILE",
   "GEMINI_API_KEY",
   "FAL_KEY",
   "IMAGE_DISABLE_GEMINI",
@@ -221,6 +230,11 @@ const SECRET_FORWARDED_ENV = new Set([
   "NOVITA_API_KEY",
   "NOVITA_RENDER_WORKER_IMAGE",
   "NOVITA_RENDER_IMAGE_AUTH_ID",
+  "OPENRELAY_API_KEY",
+  "OPENRELAY_QWEN_VM_ID",
+  "QWEN3_TTS_WORKER_URL",
+  "QWEN3_TTS_WORKER_TOKEN",
+  "QWEN3_TTS_RUNTIME_PROFILE",
   "GEMINI_API_KEY",
   "FAL_KEY",
   "GROQ_API_KEY",
