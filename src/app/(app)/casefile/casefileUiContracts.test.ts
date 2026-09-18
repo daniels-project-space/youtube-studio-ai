@@ -21,6 +21,10 @@ assert.match(page, /fetch\("\/api\/casefile-episodes"/,
   "intake and review actions must remain connected to the real route");
 assert.match(page, /parseSourceProofAttachments/,
   "source-proof media must retain its bounded client contract");
+assert.match(page, /MiniMax H3-ready multi-shot plan/,
+  "the admitted package must name the current H3 renderer, not a retired route");
+assert.doesNotMatch(page, /LTX-ready/,
+  "the live Casefile surface must not present the retired LTX renderer as current");
 assert.doesNotMatch(page, /style=\{\{/,
   "the Casefile room should use its own reusable visual system, not one-off inline cards");
 assert.doesNotMatch(page, /<OwnerOnlyNotice/,

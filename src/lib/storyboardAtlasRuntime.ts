@@ -2,7 +2,7 @@
  * Executable storyboard-atlas runtime for the direct Novita image route.
  *
  * One atlas worker output is cropped into exact, provenance-bound stills that
- * the existing asset QA and LTX I2V stages can consume. The production block
+ * the existing asset QA and MiniMax H3 stages can consume. The production block
  * may call this only for a route whose human-reviewed qualification receipt is
  * present in QUALIFIED_STORYBOARD_ATLAS_ROUTES below. An empty registry means
  * the feature is built and testable but cannot spend or alter production.

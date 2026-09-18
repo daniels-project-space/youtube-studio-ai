@@ -435,7 +435,7 @@ export default function CasefilePage() {
           </>}
 
           {selected?.status === "render_admitted" && <>
-            <OperatorHeading index="05" title="Render package admitted" detail={`This episode now has a fingerprint-bound LTX-ready multi-shot plan with ${selected.workflow?.cinematicAdmission?.generatedSceneCount ?? 0} generated scenes.`} />
+            <OperatorHeading index="05" title="Render package admitted" detail={`This episode now has a fingerprint-bound MiniMax H3-ready multi-shot plan with ${selected.workflow?.cinematicAdmission?.generatedSceneCount ?? 0} generated scenes.`} />
             <p className={styles.admittedNote}>It remains private review only. Rendering still needs a separately approved, budgeted Novita action and final independent footage review.</p>
           </>}
         </section>
