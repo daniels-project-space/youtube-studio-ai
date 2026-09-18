@@ -1,5 +1,5 @@
 .page { display: grid; gap: 1rem; max-width: 980px; margin: 0 auto; padding: 1.5rem 1rem 4rem; color: var(--color-fg); }
-.hero, .formCard, .progressCard, .locked { border: 1px solid var(--color-border); border-radius: 18px; background: linear-gradient(135deg, rgba(24, 29, 44, .86), rgba(8, 11, 20, .9)); box-shadow: 0 18px 60px rgba(0,0,0,.2); }
+.hero, .formCard, .progressCard, .locked, .runtimeCard { border: 1px solid var(--color-border); border-radius: 18px; background: linear-gradient(135deg, rgba(24, 29, 44, .86), rgba(8, 11, 20, .9)); box-shadow: 0 18px 60px rgba(0,0,0,.2); }
 .hero { display: flex; justify-content: space-between; gap: 1rem; align-items: end; padding: 1.25rem 1.35rem; }
 .hero h1, .locked h1 { margin: .2rem 0; font-size: clamp(1.65rem, 4vw, 2.5rem); letter-spacing: -.03em; }
 .hero p, .locked p { margin: 0; color: var(--color-muted); }
@@ -12,6 +12,16 @@
 .modeTabs button[data-active="true"] { border-color: #ff7d65; background: rgba(86, 42, 43, .36); color: var(--color-fg); }
 .modeTabs strong { font-size: .85rem; }
 .modeTabs span { font-size: .68rem; color: var(--color-faint); }
+.runtimeCard { display: grid; gap: .65rem; padding: .85rem 1rem; }
+.runtimeHeader { display: flex; align-items: center; justify-content: space-between; gap: .7rem; }
+.runtimeHeader > div { display: grid; gap: .18rem; }
+.runtimeHeader strong { font-size: .82rem; }
+.runtimeGrid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: .45rem; }
+.runtimeGrid > div { display: grid; gap: .22rem; min-width: 0; padding: .55rem .6rem; border: 1px solid var(--color-border); border-radius: 9px; background: rgba(4,8,15,.46); }
+.runtimeGrid b { color: #9fe8b8; font-size: .66rem; }
+.runtimeGrid span, .runtimePending { color: var(--color-faint); font-size: .64rem; line-height: 1.35; }
+.runtimeGrid > div[data-state="hold"], .runtimeGrid > div[data-state="integrity_hold"], .runtimeGrid > div[data-state="unavailable"] { border-color: rgba(255,193,110,.32); }
+.runtimeGrid > div[data-state="hold"] b, .runtimeGrid > div[data-state="integrity_hold"] b, .runtimeGrid > div[data-state="unavailable"] b { color: #ffc16e; }
 .formCard, .progressCard, .locked { display: grid; gap: .9rem; padding: 1rem; }
 .fieldGrid { display: grid; grid-template-columns: 1fr 1fr; gap: .7rem; }
 .formCard label { display: grid; gap: .3rem; color: var(--color-faint); font-size: .68rem; }
@@ -59,6 +69,6 @@
 .lockedRoutes > div { display: grid; gap: .18rem; padding: .65rem .72rem; border: 1px solid var(--color-border); border-radius: 10px; background: rgba(5, 8, 15, .42); }
 .lockedRoutes strong { color: var(--color-fg); font-size: .72rem; }
 .lockedRoutes span { color: var(--color-faint); font: .6rem/1.35 var(--font-mono); }
-@media (max-width: 640px) { .hero { display: grid; align-items: start; } .routeBadge { min-width: 0; } .fieldGrid, .modeTabs, .fleetLanes { grid-template-columns: 1fr; } .formFooter, .progressHeader { align-items: start; flex-direction: column; } }
+@media (max-width: 640px) { .hero { display: grid; align-items: start; } .routeBadge { min-width: 0; } .fieldGrid, .modeTabs, .fleetLanes, .runtimeGrid { grid-template-columns: 1fr; } .formFooter, .progressHeader { align-items: start; flex-direction: column; } }
 @media (max-width: 640px) { .lockedRoutes { grid-template-columns: 1fr; } }
 @media (prefers-reduced-motion: reduce) { .progressTrack i { transition: none; } }

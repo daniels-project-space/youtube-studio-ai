@@ -21,6 +21,12 @@ assert.match(page, /h3ProgressPercent\(status\)/,
   "the render desk progress bar must use durable receipt completion counts when available");
 assert.match(page, /api\/minimax-h3\/capacity\?jobCount=/,
   "the render desk offers a read-only pre-dispatch Salad capacity check");
+assert.match(page, /api\/minimax-h3\/readiness/,
+  "the render desk distinguishes runtime admission from market capacity before a paid request");
+assert.match(page, /Runtime admission/);
+assert.match(page, /Refresh runtime/);
+assert.match(page, /repeated vault\/R2 reads would add cost without changing work/,
+  "runtime readiness must be an explicit, bounded read rather than another busy poll");
 assert.match(page, /const checkCapacity = useCallback\(async \(\) =>/,
   "capacity probing must be stable so the auto-probe cannot loop on every render");
 assert.match(page, /if \(access !== "owner" \|\| mode !== "weekly" \|\| !parsedPreview\.valid\) return;/,

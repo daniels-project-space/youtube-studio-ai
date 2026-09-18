@@ -27,6 +27,14 @@ type H3Capacity =
   | { state: "held"; reason: string; paidRequestStarted: false }
   | { state: "unavailable"; reason: string };
 
+type H3RuntimeReadiness = {
+  ok: true;
+  checkedAt: number;
+  paidRequestStarted: false;
+  lanes: Array<{ provider: "salad" | "novita"; state: "ready" | "hold"; reasons: string[] }>;
+  modelPack: { state: "verified" | "integrity_hold" | "unavailable"; reason?: string };
+};
+
 type FleetSnapshot = {
   ok: true;
   jobCount?: number;
@@ -148,6 +156,9 @@ export function H3RenderConsole() {
   const [capacityRefreshNotice, setCapacityRefreshNotice] = useState("");
   const [fleet, setFleet] = useState<FleetSnapshot | null>(null);
   const [fleetBusy, setFleetBusy] = useState(false);
+  const [runtimeReadiness, setRuntimeReadiness] = useState<H3RuntimeReadiness | null>(null);
+  const [runtimeBusy, setRuntimeBusy] = useState(false);
+  const [runtimeError, setRuntimeError] = useState("");
 
   useEffect(() => {
     const requestedMode = new URLSearchParams(window.location.search).get("mode");
@@ -183,6 +194,34 @@ export function H3RenderConsole() {
       return { valid: false, count: 0, issues: ["Job JSON is not valid."] };
     }
   }, [jobsJson, mode]);
+
+  const checkRuntimeReadiness = useCallback(async () => {
+    setRuntimeBusy(true);
+    setRuntimeError("");
+    try {
+      const response = await fetch("/api/minimax-h3/readiness", {
+        cache: "no-store",
+        credentials: "same-origin",
+        headers: { Accept: "application/json" },
+      });
+      const body = await response.json().catch(() => null) as H3RuntimeReadiness | { error?: string } | null;
+      if (!response.ok || !body || !("ok" in body) || body.ok !== true) throw new Error(errorMessage(body, "H3 runtime readiness check failed."));
+      setRuntimeReadiness(body as H3RuntimeReadiness);
+    } catch (reason) {
+      setRuntimeError(reason instanceof Error ? reason.message : "H3 runtime readiness check failed.");
+    } finally {
+      setRuntimeBusy(false);
+    }
+  }, []);
+
+  // One owner-scoped, read-only inspection per desk visit makes a missing
+  // worker or changed model pack visible before a sealed job is assembled.
+  // It intentionally never polls: runtime integrity is not a live-progress
+  // signal and repeated vault/R2 reads would add cost without changing work.
+  useEffect(() => {
+    if (access !== "owner") return;
+    void checkRuntimeReadiness();
+  }, [access, checkRuntimeReadiness]);
 
   const dispatchDisabledReason = useMemo(() => {
     if (busy) return "A render is already being queued.";
@@ -425,6 +464,21 @@ export function H3RenderConsole() {
       <section className={styles.modeTabs} aria-label="H3 render lane">
         <button type="button" data-active={mode === "weekly"} onClick={() => changeMode("weekly")}><strong>Weekly batch</strong><span>Salad · 1–60 approved shots</span></button>
         <button type="button" data-active={mode === "on-demand"} onClick={() => changeMode("on-demand")}><strong>On demand</strong><span>Novita · one approved shot</span></button>
+      </section>
+
+      <section className={styles.runtimeCard} aria-label="H3 runtime admission">
+        <div className={styles.runtimeHeader}>
+          <div><span className={styles.eyebrow}>Runtime admission</span><strong>Model + worker gate</strong></div>
+          <button type="button" className={styles.secondaryButton} onClick={() => void checkRuntimeReadiness()} disabled={runtimeBusy}>{runtimeBusy ? "Checking runtime…" : "Refresh runtime"}</button>
+        </div>
+        {runtimeReadiness ? <div className={styles.runtimeGrid} role="status">
+          <div data-state={runtimeReadiness.modelPack.state}><b>R2 model pack</b><span>{runtimeReadiness.modelPack.state === "verified" ? "Sealed manifest verified" : runtimeReadiness.modelPack.reason}</span></div>
+          {runtimeReadiness.lanes.map((lane) => <div key={lane.provider} data-state={lane.state}>
+            <b>{lane.provider === "salad" ? "Weekly · Salad" : "On demand · Novita"}</b>
+            <span>{lane.state === "ready" ? "Route admitted" : lane.reasons.join(" ")}</span>
+          </div>)}
+        </div> : <span className={styles.runtimePending}>{runtimeBusy ? "Checking sealed runtime…" : "Runtime check has not returned."}</span>}
+        {runtimeError && <strong className={styles.error}>{runtimeError}</strong>}
       </section>
 
       <section className={styles.formCard} aria-label={`${provider} H3 dispatch form`}>
