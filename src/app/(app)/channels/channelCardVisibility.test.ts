@@ -18,8 +18,8 @@ const channels = [
 
 assert.deepEqual(
   channelsVisibleForFolder(channels, null).map((channel) => channel.id),
-  ["unfiled", "legacy-group", "stale"],
-  "the default fleet view must omit multi-language members already in a room while retaining reachable standalone, legacy, and stale-folder rows",
+  ["unfiled", "legacy-group"],
+  "the default fleet view must omit every room member even when legacy group metadata is missing or stale",
 );
 assert.deepEqual(
   channelsVisibleForFolder(channels, "Stoic Truths Multi").map((channel) => channel.id),
@@ -29,6 +29,8 @@ assert.deepEqual(
 assert.deepEqual(channelsVisibleForFolder(channels, "Empty"), []);
 assert.equal(isMainFleetChannel(channels[3]), true,
   "an incomplete legacy grouping must remain reachable from the main fleet");
+assert.equal(isMainFleetChannel(channels[4]), false,
+  "an assigned room, not a legacy group id, is the authoritative main-fleet boundary");
 
 const fleet = Array.from({ length: 13 }, (_, index) => ({ id: `channel-${index + 1}` }));
 const firstPage = pageChannels(fleet);
