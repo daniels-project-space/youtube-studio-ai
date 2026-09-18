@@ -28,7 +28,7 @@ def write_marker(path: Path) -> None:
     os.replace(temporary, path)
 
 
-def cache_model() -> None:
+def cache_model() -> Path:
     volume = Path(os.environ.get("QWEN3_TTS_VOLUME", "/workspace/qwen3-tts")).resolve()
     cache = volume / "hf"
     marker = volume / ".qwen3-tts-model-ready.json"
@@ -41,11 +41,13 @@ def cache_model() -> None:
             raise RuntimeError("Qwen model cache marker is unreadable") from error
         if actual != expected:
             raise RuntimeError("Qwen persistent model cache belongs to a different pinned revision")
-        snapshot_download(repo_id=MODEL, revision=REVISION, cache_dir=str(cache), local_files_only=True)
+        snapshot = snapshot_download(
+            repo_id=MODEL, revision=REVISION, cache_dir=str(cache), local_files_only=True
+        )
     else:
         if cache.exists() and any(cache.iterdir()):
             raise RuntimeError("Qwen model cache exists without a verified marker; refusing an unsafe overwrite")
-        snapshot_download(repo_id=MODEL, revision=REVISION, cache_dir=str(cache))
+        snapshot = snapshot_download(repo_id=MODEL, revision=REVISION, cache_dir=str(cache))
         write_marker(marker)
     # `snapshot_download(cache_dir=...)` receives the hub cache directory,
     # while `HF_HOME` is its parent. Keeping those distinct lets the serving
@@ -54,10 +56,11 @@ def cache_model() -> None:
     os.environ["HF_HOME"] = str(volume)
     os.environ["HF_HUB_CACHE"] = str(cache)
     os.environ["HF_HUB_OFFLINE"] = "1"
+    return Path(snapshot)
 
 
 def main() -> None:
-    cache_model()
+    os.environ["QWEN3_TTS_MODEL_PATH"] = str(cache_model())
     os.execvp(
         "uvicorn",
         ["uvicorn", "worker:app", "--host", "0.0.0.0", "--port", "8790", "--workers", "1"],
