@@ -6,6 +6,7 @@ import {
   createChannelMusicProgram,
   createMusicProgramQualityReceipt,
   instrumentalLyricsControl,
+  MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS,
   musicRoleForRoute,
 } from "@/engine/channelMusicProgram";
 
@@ -95,6 +96,10 @@ assert.match(
   lofi.generation.structuredCaption,
   /two-bar lead motif[\s\S]*call-and-response[\s\S]*counterline[\s\S]*different rhythmic placement[\s\S]*genuine contrast passage[\s\S]*Reintroduce the groove[\s\S]*opening harmony/u,
   "the long primary-music prompt must attach its extra Music3 form to distinct arrangement functions, not a stack of generic depth adjectives",
+);
+assert.ok(
+  lofi.generation.structuredCaption.trim().split(/\s+/u).length <= MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS,
+  "a long Music3 program must stay within the official concise structured-caption guidance instead of repeating channel identity in every section",
 );
 assert.match(
   history.generation.structuredCaption,

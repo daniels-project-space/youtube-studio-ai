@@ -6,6 +6,13 @@ import { sha256Hex } from "@/lib/sha256";
 export const CHANNEL_MUSIC_PROGRAM_VERSION = "channel-music-program/v1" as const;
 /** Exact maximum tolerated early high-band collapse in a retained Music3 WAV. */
 export const MUSIC_PROGRAM_MAX_OPENING_HIGH_BAND_DROP_DB = 18;
+/**
+ * MiniMax's official Music3 prompting guidance recommends a concise structured
+ * caption (roughly 250–450 words). The arrangement must be detailed enough to
+ * create a real arc, but repeating the full channel identity in every section
+ * turns a long form into a generic adjective stack instead of musical control.
+ */
+export const MUSIC3_STRUCTURED_CAPTION_RECOMMENDED_MAX_WORDS = 450;
 
 export const ChannelMusicRoleSchema = z.enum([
   "primary_music",
@@ -176,7 +183,11 @@ function roleSections(role: ChannelMusicRole, identity: {
   moodArc: string;
 }, durationSec: number): Array<z.infer<typeof MusicSectionSchema>> {
   const instruments = identity.instrumentation.join(", ");
-  const shared = `Keep the ${identity.genre} identity and the same acoustic space; use ${instruments}; no vocals or spoken words.`;
+  // Global Metadata and Vocal Details already establish genre, instruments,
+  // space and the instrumental constraint. Repeating all of that inside every
+  // Arrangement entry pushed long-form captions beyond Music3's useful prompt
+  // range and diluted each section's distinct musical job.
+  const shared = "Maintain identity.";
   if (role === "primary_music") {
     // Music3's longer tag map needs a matching arrangement map. Otherwise a
     // five-minute request repeats the short form as generic texture even while
