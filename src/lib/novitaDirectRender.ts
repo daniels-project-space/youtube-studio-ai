@@ -57,7 +57,6 @@ import {
   LTX_CREATIVE_ADAPTER_STACK_VERSION,
   type ResolvedLtxCreativeAdapterStack,
 } from "@/lib/ltxCreativeAdapter";
-import { applyLtxI2vPromptContract } from "@/lib/ltxI2vPrompt";
 import type {
   NovitaBillingReceipt,
   NovitaBridgeStatus,
@@ -1944,20 +1943,25 @@ function directStatus(args: {
 }
 
 /**
- * Execute either Z-Image keyframes or LTX video directly from a Trigger cloud
- * task. It is deliberately not exported from a route/UI surface.
+ * Execute Z-Image keyframes directly from a Trigger cloud task. Direct LTX
+ * video execution has been retired in favor of the separately attested H3
+ * adapter and is rejected before any secret, worker, or provider boundary.
  */
 export async function renderDirectNovita(inputCfg: NovitaRenderCfg, phase: Phase): Promise<NovitaRenderResult> {
+  const legacyVideoRequested = phase === "video";
+  if (legacyVideoRequested) {
+    throw new NovitaAdmissionError(
+      "Direct LTX video execution is retired; use the attested MiniMax H3 renderer instead.",
+    );
+  }
   // The direct worker controller is itself a provider boundary. Normal
   // callers have already applied this contract, but re-applying it here makes
   // a raw/direct caller just as unable to bypass continuity or style locks.
-  const cfg = phase === "video"
-    ? { ...inputCfg, shots: inputCfg.shots.map((shot) => applyLtxI2vPromptContract(shot, inputCfg.styleId)) }
-    : inputCfg;
+  const cfg = inputCfg;
   // Keep the unproven native-720p x2 promotion path outside all provider work:
   // not merely before POST, but before secret bootstrap, fleet discovery, or
   // any worker-manifest/reservation side effect.
-  if (phase === "video") {
+  if (legacyVideoRequested) {
     try {
       assertCinematicProofAdmission({ profile: cfg.profile });
     } catch (error) {
@@ -1967,7 +1971,7 @@ export async function renderDirectNovita(inputCfg: NovitaRenderCfg, phase: Phase
     }
   }
   const lifecycle = ensureLifecycle(cfg);
-  if (phase === "video") assertRtx4090VideoRuntime(cfg.profile);
+  if (legacyVideoRequested) assertRtx4090VideoRuntime(cfg.profile);
   // A provider-facing caller must carry its own conservative worker envelope.
   // Falling back to the fleet-wide account cap converts a missing module
   // reservation into permission to consume unrelated stages' budget.
@@ -1981,7 +1985,7 @@ export async function renderDirectNovita(inputCfg: NovitaRenderCfg, phase: Phase
   if (control.activeInstanceCount >= control.config.verifiedGpuQuota) {
     throw new NovitaAdmissionError("all verified RTX 4090 capacity is currently in use");
   }
-  const adapters = phase === "video"
+  const adapters = legacyVideoRequested
     ? resolveLtxCreativeAdapters({
         selections: new Map(cfg.shots.map((shot) => [shot.id, shot.creativeAdapter] as const)),
         modelSpecs: control.models,
@@ -2047,7 +2051,7 @@ export async function renderDirectNovita(inputCfg: NovitaRenderCfg, phase: Phase
       prepared.push(worker);
       if (!await artifactIsComplete(worker)) {
         wave.push(worker);
-      } else if (phase === "video") {
+      } else if (legacyVideoRequested) {
         // A pre-existing R2 artifact is not enough to reuse a video result:
         // restore the worker's immutable ffprobe proof before it can bypass
         // a paid execution.
@@ -2085,12 +2089,12 @@ export async function renderDirectNovita(inputCfg: NovitaRenderCfg, phase: Phase
     receiptByOutputId.set(worker.job.id, receipt);
     return receipt;
   });
-  if (phase === "video") {
+  if (legacyVideoRequested) {
     await Promise.all(prepared.map(async (worker) => {
       if (!worker.videoOutputProof) await restoreWorkerVideoCompletionEvidence(worker);
     }));
   }
-  const nativeInputGeometrySources = phase === "video" && requiresNative720X2CinematicProof(cfg.profile)
+  const nativeInputGeometrySources = legacyVideoRequested && requiresNative720X2CinematicProof(cfg.profile)
     ? nativeInputGeometrySourcesByShot(prepared)
     : undefined;
   const status = directStatus({ phase, cfg, workers: prepared, receipt: aggregateReceipt(allReceipts, hash(canonicalJson(plan))) });
@@ -2105,7 +2109,7 @@ export async function renderDirectNovita(inputCfg: NovitaRenderCfg, phase: Phase
     phase,
     ...(phase === "image" ? { stillKeys: candidates.map((candidate) => candidate.key) } : { footageKeys: candidates.map((candidate) => candidate.key), footageClips: [] }),
     candidates,
-    ...(phase === "video" ? {
+    ...(legacyVideoRequested ? {
       videoOutputProofs: Object.fromEntries(prepared.map((worker) => [worker.job.shotId, worker.videoOutputProof!])),
       ...(nativeInputGeometrySources ? { nativeInputGeometrySources } : {}),
     } : {}),

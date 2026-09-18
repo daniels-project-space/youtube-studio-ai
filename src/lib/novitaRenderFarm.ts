@@ -12,8 +12,6 @@ import {
 } from "@/engine/generationProfiles";
 import { NovitaAdmissionError, requireNovitaFleetReadiness } from "@/lib/novitaFleet";
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
-import { applyLtxI2vPromptContract } from "@/lib/ltxI2vPrompt";
-import { assertCinematicProofAdmission } from "@/lib/cinematicProofAdmission";
 import type { LtxCreativeAdapterInput } from "@/lib/ltxCreativeAdapter";
 import {
   waitForNovitaRenderPoll,
@@ -252,11 +250,8 @@ export interface NovitaRenderCfg {
   /** Global style string appended to every shot prompt. */
   style?: string;
   /**
-   * Optional LTX 2.5 visual-style preset id (src/engine/ltxStylePresets.ts),
-   * merged into the video phase's I2V prompt contract via
-   * applyLtxI2vPromptContract. Distinct from `style` above, which is raw
-   * prose appended to every shot prompt in both phases. Omitted/unknown ids
-   * fall back to DEFAULT_LTX_STYLE_ID through getLtxStyle's own fallback.
+   * Historical direct-video compatibility field. Current H3 footage blocks
+   * use their sealed visual treatment and do not read this value.
    */
   styleId?: string;
   /** Global negative prompt, prepended to every shot's negative. */
@@ -996,16 +991,6 @@ function normalizedCfg(userCfg: NovitaRenderCfg): NovitaRenderCfg {
  * can bootstrap credentials or reach a provider. The resolver has no
  * caller-provided receipt input, so a task payload cannot self-authorize.
  */
-function assertCinematicVideoAdmission(profile: NovitaPhaseProfile): void {
-  try {
-    assertCinematicProofAdmission({ profile });
-  } catch (error) {
-    throw new NovitaAdmissionError(
-      error instanceof Error ? error.message : "cinematic proof admission rejected the requested profile",
-    );
-  }
-}
-
 export function imageJobs(cfg: NovitaRenderCfg) {
   return cfg.shots
     .filter((shot) => shot.prompt && shot.prompt.trim())
@@ -1026,26 +1011,6 @@ export function imageJobs(cfg: NovitaRenderCfg) {
     ));
 }
 
-export function videoJobs(cfg: NovitaRenderCfg) {
-  const fps = cfg.profile.fps;
-  if (!fps) throw new Error("novitaRenderFarm: video profile is missing fps");
-  return cfg.shots
-    .filter((shot) => shot.prompt && shot.prompt.trim() && shot.stillKey)
-    .map((shot) => ({
-      id: shot.id,
-      prompt: shotPrompt(cfg, shot),
-      stillKey: shot.stillKey,
-      cameraMove: shot.cameraMove,
-      shotScale: shot.shotScale,
-      lens: shot.lens,
-      motion: shot.motion,
-      frames: secondsToFrames(shot.seconds, fps),
-      fps,
-      negative: shotNegative(cfg, shot),
-      seed: shot.seed,
-    }));
-}
-
 async function startImageRender(userCfg: NovitaRenderCfg) {
   const cfg = normalizedCfg(userCfg);
   validate(cfg, "image");
@@ -1062,31 +1027,24 @@ async function startImageRender(userCfg: NovitaRenderCfg) {
   return { jobs, launch };
 }
 
-async function startVideoRender(userCfg: NovitaRenderCfg) {
-  const cfg = normalizedCfg({ ...userCfg, shots: userCfg.shots.map((shot) => applyLtxI2vPromptContract(shot, userCfg.styleId)) });
-  assertCinematicVideoAdmission(cfg.profile);
-  validate(cfg, "video");
-  await bootstrapSecrets(() => {}, { required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
-  const jobs = videoJobs(cfg);
-  const launch = await launchBridgeRender("video", {
-    prefix: cfg.prefix,
-    jobs,
-    nshard: cfg.nshard ?? DEFAULTS.nshard,
-    jobsSel: cfg.jobs ?? DEFAULTS.jobs,
-    maxConcurrent: cfg.maxConcurrent ?? DEFAULTS.maxConcurrent,
-    profile: cfg.profile,
-  }, jobs.map((job) => job.id), cfg.beforeProviderSpend, cfg.maxCostUsd);
-  return { jobs, launch };
-}
-
 /** Launch the image phase and return immediately with a bridge job receipt. */
 export async function launchImages(userCfg: NovitaRenderCfg): Promise<NovitaRenderLaunch> {
   return (await startImageRender(userCfg)).launch;
 }
 
-/** Launch the video phase and return immediately with a bridge job receipt. */
-export async function launchVideo(userCfg: NovitaRenderCfg): Promise<NovitaRenderLaunch> {
-  return (await startVideoRender(userCfg)).launch;
+function retiredDirectVideoRoute(): never {
+  throw new NovitaAdmissionError(
+    "Direct LTX video execution is retired; use the attested MiniMax H3 renderer instead.",
+  );
+}
+
+/**
+ * Kept only as a fail-closed compatibility boundary for obsolete callers.
+ * New footage blocks call the MiniMax H3 adapter and never enter this farm.
+ */
+export async function launchVideo(_userCfg: NovitaRenderCfg): Promise<NovitaRenderLaunch> {
+  void _userCfg;
+  return retiredDirectVideoRoute();
 }
 
 /**
@@ -1117,23 +1075,11 @@ export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRend
 }
 
 /**
- * Render the VIDEO phase (image-to-video camera moves) for every shot that
- * already has a stillKey. Same VPS bridge, `video` launch. Returns clips +
- * R2 footageKeys — the SAME shape as `gen_footage`'s output, so
- * `timeline_assemble` (and any other downstream block) consumes it unmodified.
+ * Retired compatibility boundary. The current route is the attested MiniMax H3
+ * adapter, which carries an immutable R2 first-frame hash and opening-motion
+ * quality evidence rather than dispatching the old direct video worker.
  */
-export async function renderVideo(userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
-  const cfg = normalizedCfg({ ...userCfg, shots: userCfg.shots.map((shot) => applyLtxI2vPromptContract(shot, userCfg.styleId)) });
-  assertCinematicVideoAdmission(cfg.profile);
-  validate(cfg, "video");
-  if (cfg.maxCostUsd === undefined) {
-    throw new NovitaAdmissionError("novita video render requires an explicit signed worker cost ceiling");
-  }
-  const envelope = novitaCostEnvelope({
-    label: "novita video render",
-    videoJobs: videoJobs(cfg).length,
-    maxCostUsd: cfg.maxCostUsd,
-  });
-  const { renderDirectNovita } = await import("./novitaDirectRender");
-  return await renderDirectNovita({ ...cfg, maxCostUsd: envelope.videoMaxCostUsd }, "video");
+export async function renderVideo(_userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
+  void _userCfg;
+  return retiredDirectVideoRoute();
 }

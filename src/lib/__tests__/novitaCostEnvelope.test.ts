@@ -56,8 +56,8 @@ async function rawProviderBoundaryRefusesMissingSignedCeilings(): Promise<void> 
       shots: [{ ...base.shots[0], stillKey: "owners/o/channels/c/still.png" }],
       profile: toNovitaPhaseProfile(profile, "video"),
     }),
-    /requires an explicit signed worker cost ceiling/,
-    "the raw video wrapper must fail before importing a provider controller",
+    /Direct LTX video execution is retired; use the attested MiniMax H3 renderer instead/,
+    "the retired raw video wrapper must fail before importing a provider controller",
   );
 }
 
