@@ -58,7 +58,7 @@ assert.equal(
 );
 
 const admission = certifiedFamilyAdmission("music_loop");
-assert.equal(admission.automatic, false, "planning readiness must not bypass the independent LTX benchmark gate");
+assert.equal(admission.automatic, false, "planning readiness must not bypass the independent H3 qualification gate");
 assert.deepEqual(admission.checks, {
   productionReadiness: false,
   route: true,
@@ -68,10 +68,11 @@ assert.deepEqual(admission.checks, {
   referenceQuality: true,
   runtime: false,
 });
-assert.deepEqual(
-  familyProductionReadiness("music_loop").blockers,
-  ["Music + looping visual: loop_clips:ltx_2_5_revision_not_benchmarked_on_rtx_4090"],
-  "once the program path is registered, only the real pinned LTX benchmark may unlock Music Loop",
+assert.ok(
+  familyProductionReadiness("music_loop").blockers.every((blocker) =>
+    blocker.startsWith("Music + looping visual: loop_clips:MINIMAX_H3_NOVITA_"),
+  ),
+  "once the program path is registered, only a qualified H3 route may unlock Music Loop",
 );
 
 console.log("music-loop automatic admission path tests passed");

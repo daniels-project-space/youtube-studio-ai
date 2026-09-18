@@ -99,7 +99,7 @@ assert.ok(
   "Lore must use the shared sealed planner before its renderer once a benchmark admits the runtime",
 );
 const loreAdmission = certifiedFamilyAdmission("loreshort");
-assert.equal(loreAdmission.automatic, false, "the shared planner must not erase the independent LTX benchmark gate");
+assert.equal(loreAdmission.automatic, false, "the shared planner must not erase the independent H3 qualification gate");
 assert.deepEqual(loreAdmission.checks, {
   productionReadiness: false,
   route: true,
@@ -109,10 +109,11 @@ assert.deepEqual(loreAdmission.checks, {
   referenceQuality: true,
   runtime: false,
 });
-assert.deepEqual(
-  familyProductionReadiness("loreshort").blockers,
-  ["Lore micro-documentary: lore_short:ltx_2_5_revision_not_benchmarked_on_rtx_4090"],
-  "after its common planner path is complete, only a real pinned LTX benchmark may unlock Lore",
+assert.ok(
+  familyProductionReadiness("loreshort").blockers.every((blocker) =>
+    blocker.startsWith("Lore micro-documentary: lore_short:MINIMAX_H3_NOVITA_"),
+  ),
+  "after its common planner path is complete, only a qualified H3 route may unlock Lore",
 );
 
 console.log("self-contained automatic channel admission tests passed");

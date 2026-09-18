@@ -97,19 +97,21 @@ for (const family of FAMILY_KEYS.filter(
 
 const loreReadiness = familyProductionReadiness("loreshort");
 assert.equal(loreReadiness.productionReady, false);
-assert.deepEqual(
-  loreReadiness.blockers,
-  ["Lore micro-documentary: lore_short:ltx_2_5_revision_not_benchmarked_on_rtx_4090"],
-  "Lore must expose its actual remaining runtime gate after its non-Gemini planner, route, composition, and inception are registered",
+assert.ok(
+  loreReadiness.blockers.length > 0 && loreReadiness.blockers.every((blocker) =>
+    blocker.startsWith("Lore micro-documentary: lore_short:MINIMAX_H3_NOVITA_"),
+  ),
+  "Lore must expose its actual H3 qualification gate after its non-Gemini planner, route, composition, and inception are registered",
 );
 assert.equal(familyChannelInceptionCapability("loreshort").mode, "registered_non_gemini");
 
 const musicLoopReadiness = familyProductionReadiness("music_loop");
 assert.equal(musicLoopReadiness.productionReady, false);
-assert.deepEqual(
-  musicLoopReadiness.blockers,
-  ["Music + looping visual: loop_clips:ltx_2_5_revision_not_benchmarked_on_rtx_4090"],
-  "Music Loop must expose its exact remaining runtime gate after its original-program route, composition, and inception are registered",
+assert.ok(
+  musicLoopReadiness.blockers.length > 0 && musicLoopReadiness.blockers.every((blocker) =>
+    blocker.startsWith("Music + looping visual: loop_clips:MINIMAX_H3_NOVITA_"),
+  ),
+  "Music Loop must expose its actual H3 qualification gate after its original-program route, composition, and inception are registered",
 );
 assert.equal(familyChannelInceptionCapability("music_loop").mode, "registered_non_gemini");
 

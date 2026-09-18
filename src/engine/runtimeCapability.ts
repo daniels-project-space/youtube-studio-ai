@@ -255,8 +255,8 @@ export function assertNovitaVideoPhaseProfileRuntime(
 /**
  * These are the actual executable pipeline blocks that buy or produce
  * image-to-video footage. `qa_shots` is included because a failed motion
- * grade may deliberately launch a bounded LTX repair; treating it as a pure
- * consumer would leave custom or legacy pipelines an expensive bypass.
+ * grade may deliberately launch a bounded MiniMax H3 repair; treating it as
+ * a pure consumer would leave custom pipelines an expensive bypass.
  */
 export const NOVITA_VIDEO_REQUIRED_BLOCKS = [
   "loop_clips",
@@ -268,6 +268,18 @@ export const NOVITA_VIDEO_REQUIRED_BLOCKS = [
 ] as const;
 
 export type NovitaVideoRequiredBlock = (typeof NOVITA_VIDEO_REQUIRED_BLOCKS)[number];
+
+/**
+ * Every currently executable Studio video producer dispatches MiniMax H3.
+ *
+ * The LTX profile helpers below are retained only to inspect historical
+ * receipts and prove that an old worker cannot be silently reintroduced. They
+ * must not control new-pipeline admission: doing so would incorrectly hold an
+ * H3 producer behind an obsolete LTX benchmark requirement.
+ */
+const CURRENT_MINIMAX_H3_VIDEO_PRODUCERS = new Set<NovitaVideoRequiredBlock>(
+  NOVITA_VIDEO_REQUIRED_BLOCKS,
+);
 
 export interface PipelineRuntimeBlock {
   readonly block: string;
@@ -334,18 +346,15 @@ export function assessPipelineVideoRuntimeReadiness(
 ): PipelineVideoRuntimeReadiness {
   const blockAssessments: PipelineVideoBlockRuntimeAssessment[] = [];
   const normalizedEntries = entries.map(runtimeBlock);
-  // The standard direct cinematic route and its bounded repair stage share
-  // one H3 runtime. Other historical/specialist lanes retain their own LTX
-  // admission until their own renderer migration lands.
-  const standardH3RoutePresent = normalizedEntries.some((entry) => entry.block === "novita_render_video");
+  // All new video producers share the H3 admission. Historical LTX receipts
+  // stay readable through their own proof helpers, but never reopen an LTX
+  // execution route or make fresh H3 work depend on a legacy benchmark.
   let needsMiniMaxH3Remediation = false;
 
   for (const entry of normalizedEntries) {
     if (!isNovitaVideoRequiredBlock(entry.block)) continue;
 
-    const usesStandardH3 = entry.block === "novita_render_video" ||
-      (entry.block === "qa_shots" && standardH3RoutePresent);
-    if (usesStandardH3) {
+    if (CURRENT_MINIMAX_H3_VIDEO_PRODUCERS.has(entry.block)) {
       const profileId = entry.block === "novita_render_video"
         ? configuredProfileId(entry)
         : MINIMAX_H3_PROFILE.id;

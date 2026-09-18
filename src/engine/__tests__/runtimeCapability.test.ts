@@ -85,6 +85,7 @@ function pipelineChecksOnlyRealVideoProducers(): void {
   // for runtime admission rather than a harmless analysis-only consumer.
   assert.equal(isNovitaVideoRequiredBlock("qa_shots"), true);
   assert.equal(isNovitaVideoRequiredBlock("novita_render_video"), true);
+  assert.equal(isNovitaVideoRequiredBlock("gen_footage"), true);
 
   const noVideo = assessPipelineVideoRuntimeReadiness([
     "topic_select",
@@ -104,14 +105,21 @@ function pipelineChecksOnlyRealVideoProducers(): void {
     video.blockAssessments.map((assessment) => assessment.blockId),
     [...NOVITA_VIDEO_REQUIRED_BLOCKS, "novita_render_video"],
   );
-  assert.equal(video.blockAssessments.at(-1)?.profileId, MINIMAX_H3_RUNTIME_ID);
+  assert(
+    video.blockAssessments.every((assessment) => assessment.profileId === MINIMAX_H3_RUNTIME_ID),
+    "every current video-producing block must use the shared H3 admission rather than reopening an LTX route",
+  );
   assert.throws(
     () => assertPipelineVideoRuntimeReady([{ block: "novita_render_video", params: { generationProfile: "production" } }]),
     /pipeline video runtime is not admissible[\s\S]*novita_render_video:MINIMAX_H3_NOVITA_/,
   );
   assert.throws(
     () => assertPipelineVideoRuntimeReady(["qa_shots"]),
-    /pipeline video runtime is not admissible[\s\S]*qa_shots:ltx_2_5_revision_not_benchmarked_on_rtx_4090/,
+    /pipeline video runtime is not admissible[\s\S]*qa_shots:MINIMAX_H3_NOVITA_/,
+  );
+  assert.throws(
+    () => assertPipelineVideoRuntimeReady(["gen_footage"]),
+    /pipeline video runtime is not admissible[\s\S]*gen_footage:MINIMAX_H3_NOVITA_/,
   );
 }
 
