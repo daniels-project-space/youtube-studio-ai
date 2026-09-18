@@ -18,6 +18,7 @@ const defaultRoutes = [
   "/",
   "/channels",
   "/channels/new",
+  "/children-review",
   "/runs",
   "/schedule",
   "/library",
