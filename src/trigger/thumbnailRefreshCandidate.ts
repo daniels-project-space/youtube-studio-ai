@@ -155,9 +155,19 @@ export async function executeThumbnailRefreshCandidate(
   };
   let observedCost = Number(execution.candidate.costTotal ?? 0);
   try {
+    // A candidate has exactly three secret domains: retained-object storage,
+    // the sealed thumbnail renderer, and the independent production reviewer.
+    // Do not hydrate unrelated providers (music, TTS, YouTube, etc.) for every
+    // refresh. More importantly, the reviewer is a hard admission dependency:
+    // stop before the renderer can buy an image if its OpenRouter credential is
+    // unavailable, rather than returning the misleading downstream
+    // "no configured production QA provider" error after a broad bootstrap.
     await bootstrapSecrets(
       (message, extra) => console.log(`[thumbnail-refresh-candidate] ${message}`, extra ?? ""),
-      { required: [] },
+      {
+        services: ["cloudflare", "fal", "openrouter"],
+        required: ["OPENROUTER_API_KEY"],
+      },
     );
     const sink = makeConvexSink(convex, payload.ownerId, executionLease);
     const result = await runEngine(resolved, {

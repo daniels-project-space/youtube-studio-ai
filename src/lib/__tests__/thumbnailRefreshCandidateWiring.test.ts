@@ -89,6 +89,11 @@ assert.match(task, /validatePipeline\(entries, Object\.keys\(seedStore\)\)/);
 assert.match(task, /preflight\(resolved, \{ budgetUsd: sealed\.maximumCostUsd \}\)/);
 assert.match(task, /runPipeline as runEngine/);
 assert.match(task, /makeConvexSink\(convex, payload\.ownerId, executionLease\)/);
+assert.match(
+  task,
+  /bootstrapSecrets\([\s\S]*?services: \["cloudflare", "fal", "openrouter"\],[\s\S]*?required: \["OPENROUTER_API_KEY"\]/,
+  "thumbnail refresh must load only its storage, renderer, and independent QA services and refuse to spend without vision QA",
+);
 assert.match(task, /id: "thumbnail-refresh-dispatcher"/);
 assert.match(task, /scope: "global"/);
 assert.match(task, /queueAutomaticThumbnailReplacement/);
