@@ -148,16 +148,19 @@ export const minimaxH3WeeklyOpenRelayFallbackTask = task({
     const sourceRequestKeys = await readFrozenPacket(payload);
     const prior = await readAggregate(payload.receiptKey, payload.ownerId);
     if (prior) {
-      const priorIsOpenRelayFallback = prior.schema === "minimax-h3-weekly-batch/v2";
+      const priorProvider = prior.schema === "minimax-h3-weekly-batch/v2" ? prior.fallback?.provider : "salad";
+      if (priorProvider !== "salad" && priorProvider !== "novita" && priorProvider !== "openrelay") {
+        throw new Error("weekly H3 fallback receipt has no usable provider provenance");
+      }
       const preparedFootageKey = payload.preparedFootage
         ? await materializePreparedFootage(
             payload.preparedFootage,
             await readPreparedFootageManifest(payload.preparedFootage),
             payload.jobs,
             renderedResultsFromPersistedReceipt(prior),
-            priorIsOpenRelayFallback
-              ? { provider: "openrelay", execution: "weekly-fallback" }
-              : { provider: "salad", execution: "weekly-batch" },
+            priorProvider === "salad"
+              ? { provider: "salad", execution: "weekly-batch" }
+              : { provider: priorProvider, execution: "weekly-fallback" },
           )
         : undefined;
       return { state: "reconciled" as const, provider: "openrelay" as const, receiptKey: payload.receiptKey, ...(preparedFootageKey ? { preparedFootageKey } : {}) };

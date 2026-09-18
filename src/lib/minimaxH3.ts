@@ -680,8 +680,8 @@ function normaliseRequest(input: MiniMaxH3RenderRequest): MiniMaxH3RenderRequest
   if (input.execution === "weekly-batch" && input.provider !== "salad") {
     throw new MiniMaxH3Error("weekly MiniMax H3 preparation must use the Salad route");
   }
-  if (input.execution === "weekly-fallback" && input.provider !== "openrelay") {
-    throw new MiniMaxH3Error("weekly MiniMax H3 fallback must use the OpenRelay persistent-disk route");
+  if (input.execution === "weekly-fallback" && input.provider !== "novita" && input.provider !== "openrelay") {
+    throw new MiniMaxH3Error("weekly MiniMax H3 fallback must use the Novita or OpenRelay route");
   }
   if (input.execution === "on-demand" && input.provider !== "novita") {
     throw new MiniMaxH3Error("on-demand MiniMax H3 rendering must use the Novita route");

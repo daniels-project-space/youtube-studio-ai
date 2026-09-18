@@ -5,23 +5,22 @@ import {
   createMiniMaxH3WeeklyFallbackReceipt,
 } from "../minimaxH3WeeklyBatch";
 import { MINIMAX_H3_MANIFEST_SHA256 } from "@/lib/minimaxH3";
-import { MINIMAX_H3_OPENRELAY_RUNTIME_ID } from "@/lib/minimaxH3";
+import { MINIMAX_H3_RUNTIME_ID } from "@/lib/minimaxH3";
 
 const root = join(process.cwd(), "src/trigger");
 const retrySource = readFileSync(join(root, "minimaxH3WeeklyCapacityRetry.ts"), "utf8");
-const fallbackSource = readFileSync(join(root, "minimaxH3WeeklyOpenRelayFallback.ts"), "utf8");
+const fallbackSource = readFileSync(join(root, "minimaxH3WeeklyNovitaFallback.ts"), "utf8");
 const weeklySource = readFileSync(join(root, "minimaxH3WeeklyBatch.ts"), "utf8");
 
 assert.match(retrySource, /assertMiniMaxH3SaladCapacity\(payload\.jobs\.length/);
 assert.match(retrySource, /MINIMAX_H3_WEEKLY_CAPACITY_FALLBACK_MS/);
 assert.match(retrySource, /queueMiniMaxH3WeeklyCapacityRetry\(\{ payload, now \}\)/);
-assert.match(retrySource, /minimax-h3-weekly-openrelay-fallback/);
+assert.match(retrySource, /minimax-h3-weekly-novita-fallback/);
 assert.match(retrySource, /state: "fallback_queued"/);
-assert.match(fallbackSource, /ensureOpenRelayH3Ready\(\)/);
-assert.match(fallbackSource, /provider: "openrelay"/);
+assert.match(fallbackSource, /provider: "novita"/);
 assert.match(fallbackSource, /execution: "weekly-fallback"/);
 assert.match(fallbackSource, /ifNoneMatch: "\*"/);
-assert.match(fallbackSource, /h3-fallback-provider.*openrelay/);
+assert.match(fallbackSource, /h3-fallback-provider.*novita/);
 assert.match(weeklySource, /automatic weekly capacity retry could not be scheduled/);
 assert.match(weeklySource, /capacityHoldStartedAt: payload\.capacityHoldStartedAt/);
 
@@ -43,11 +42,11 @@ const fakeReceipt = {
   firstFrame: { r2Key: "owner/test/frame.png", sha256: "c".repeat(64) },
   output: { r2Key: "owner/test/out.mp4", contentSha256: "d".repeat(64), byteLength: 1024, contentType: "video/mp4" as const },
   runtime: {
-    provider: "openrelay" as const,
-    gpuModel: "A100" as const,
-    runtimeId: MINIMAX_H3_OPENRELAY_RUNTIME_ID,
+    provider: "novita" as const,
+    gpuModel: "RTX 5090" as const,
+    runtimeId: MINIMAX_H3_RUNTIME_ID,
     modelManifestSha256: MINIMAX_H3_MANIFEST_SHA256,
-    capacityMode: "persistent-disk-auto-stop" as const,
+    capacityMode: "spot" as const,
     costUsd: 0.1,
   },
 };
@@ -61,6 +60,6 @@ const receipt = createMiniMaxH3WeeklyFallbackReceipt({
 });
 assert.equal(receipt.schema, "minimax-h3-weekly-batch/v2");
 assert.deepEqual(receipt.sourceRequestKeys, ["f".repeat(64)]);
-assert.deepEqual(receipt.fallback, { provider: "openrelay", reason: "salad-capacity-timeout", waitedMs: 86_400_000 });
-assert.equal(receipt.providerReceipts?.[0]?.runtime.capacityMode, "persistent-disk-auto-stop");
+assert.deepEqual(receipt.fallback, { provider: "novita", reason: "salad-capacity-timeout", waitedMs: 86_400_000 });
+assert.equal(receipt.providerReceipts?.[0]?.runtime.capacityMode, "spot");
 console.log("MiniMax H3 weekly capacity retry/fallback contracts passed");

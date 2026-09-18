@@ -208,9 +208,9 @@ export type PersistedWeeklyReceipt = {
   schema: "minimax-h3-weekly-batch/v1" | "minimax-h3-weekly-batch/v2";
   orderKey: string;
   requestKeys: string[];
-  /** Original Salad request identities when the weekly order falls back to OpenRelay. */
+  /** Original Salad request identities when the weekly order uses an audited fallback. */
   sourceRequestKeys?: string[];
-  /** Historical Novita receipts remain readable; new fallbacks are OpenRelay only. */
+  /** The terminal provider is preserved in the sealed receipt; historical receipts remain readable. */
   fallback?: { provider: "novita" | "openrelay"; reason: "salad-capacity-timeout"; waitedMs: number };
   outputs: Array<{ r2Key: string; contentSha256: string; byteLength: number; costUsd: number }>;
   /** Full validated worker receipts; optional for backward-compatible v1 summaries. */
@@ -408,6 +408,11 @@ export function createMiniMaxH3WeeklyFallbackReceipt(args: {
   if (args.sourceRequestKeys.length !== args.result.length || args.result.length < 1) {
     throw new Error("weekly MiniMax H3 fallback receipt has mismatched request provenance");
   }
+  const providers = new Set(args.result.map((item) => item.receipt.runtime.provider));
+  if (providers.size !== 1 || (!providers.has("novita") && !providers.has("openrelay"))) {
+    throw new Error("weekly MiniMax H3 fallback receipt must contain one supported terminal provider");
+  }
+  const provider = providers.has("novita") ? "novita" : "openrelay";
   const outputs = args.result.map((item) => ({
     r2Key: item.receipt.output.r2Key,
     contentSha256: item.receipt.output.contentSha256,
@@ -422,7 +427,7 @@ export function createMiniMaxH3WeeklyFallbackReceipt(args: {
     schema: "minimax-h3-weekly-batch/v2",
     orderKey: args.orderKey,
     sourceRequestKeys: [...args.sourceRequestKeys],
-    fallback: { provider: "openrelay", reason: "salad-capacity-timeout", waitedMs: args.waitedMs },
+    fallback: { provider, reason: "salad-capacity-timeout", waitedMs: args.waitedMs },
     requestKeys: args.result.map((item) => item.requestKey),
     outputs,
     providerReceipts: args.result.map((item) => item.receipt),
@@ -663,7 +668,7 @@ export function buildPreparedFootageSidecar(args: {
   binding: PreparedFootageScope;
   jobs: MiniMaxH3WeeklyBatchArgs["jobs"];
   result: readonly MiniMaxH3RenderedVideo[];
-  provider?: "salad" | "openrelay";
+  provider?: "salad" | "novita" | "openrelay";
   execution?: "weekly-batch" | "weekly-fallback";
 }): PlanWeekPreparedFootage {
   const provider = args.provider ?? "salad";
@@ -762,7 +767,7 @@ export async function materializePreparedFootage(
   manifest: PlanWeekPreparationManifest,
   jobs: MiniMaxH3WeeklyBatchArgs["jobs"],
   result: readonly MiniMaxH3RenderedVideo[],
-  options: { provider?: "salad" | "openrelay"; execution?: "weekly-batch" | "weekly-fallback" } = {},
+  options: { provider?: "salad" | "novita" | "openrelay"; execution?: "weekly-batch" | "weekly-fallback" } = {},
 ): Promise<string> {
   const prepared = buildPreparedFootageSidecar({ ...options, manifest, binding, jobs, result });
   const sidecarKey = planWeekPreparedFootageKey(binding);
