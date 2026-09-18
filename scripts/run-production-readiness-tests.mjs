@@ -39,6 +39,12 @@ if (tests.length === 0) {
   process.exit(1);
 }
 
+// A single stuck renderer subprocess used to consume the whole CI timeout and
+// conceal the tests that followed it. Every direct test remains mandatory, but
+// each gets a bounded wall-clock budget so the report names the exact stalled
+// test and the rest of the readiness surface still runs.
+const DIRECT_TEST_TIMEOUT_MS = 180_000;
+
 // Run EVERY test, then report. This used to exit on the first failure, which
 // hides the size of a breakage: when the owner lock moved to Convex it broke
 // two golden surface tests, and because one of them sorts third out of 579 the
@@ -52,9 +58,14 @@ for (const test of tests) {
     cwd: root,
     env: process.env,
     stdio: "inherit",
+    timeout: DIRECT_TEST_TIMEOUT_MS,
+    killSignal: "SIGTERM",
   });
   if (result.error) {
-    console.error(`Unable to execute ${label}: ${result.error.message}`);
+    const timeout = result.error.code === "ETIMEDOUT"
+      ? `Timed out after ${DIRECT_TEST_TIMEOUT_MS / 1_000}s`
+      : `Unable to execute ${label}: ${result.error.message}`;
+    console.error(`${timeout}: ${label}`);
     failures.push(label);
     continue;
   }
