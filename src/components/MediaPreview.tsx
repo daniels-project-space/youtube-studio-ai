@@ -114,10 +114,10 @@ export function MediaPreview({
     ? { source: "reviewed" as const, src: reviewedSrc, state: "loading" as const }
     : fallbackSelection;
   const showingVideoStill = !showingReviewed && !assetKey && Boolean(sourceVideoStillKey) && selection.source === "r2";
-  // Probe the retained master through the quiet delivery endpoint before
-  // mounting a media element. A missing legacy object then becomes an honest
-  // unavailable state instead of a browser-console 404; valid sources still
-  // use the exact video element below to seek the 15-second frame.
+  // The same-origin delivery route verifies both the initial native-player
+  // range and a later seek in one server-side proof wave. Keep the browser
+  // to one request per card: the old client cascade was five sequential
+  // requests and made a valid Lo-Fi source-frame visibly stall.
   useEffect(() => {
     if (!showingVideoStill || !selection.src || !sourceVideoStillKey) {
       return;
@@ -125,11 +125,7 @@ export function MediaPreview({
     const src = selection.src;
     const controller = new AbortController();
     let cancelled = false;
-    // The proxy cancels the response body in probe mode, so a full-object
-    // probe validates the same path the native player will use without
-    // transferring the master. A range-only probe can be a false positive
-    // when an R2 edge serves the first byte but rejects the later seek.
-    const probe = async (): Promise<void> => {
+    const verifyRetainedPreview = async (): Promise<void> => {
       const response = await fetch(`${src}${src.includes("?") ? "&" : "?"}probe=1`, {
         signal: controller.signal,
         cache: "no-store",
@@ -138,53 +134,7 @@ export function MediaPreview({
       const result = await response.json() as { available?: unknown };
       if (result.available !== true) throw new Error("video source unavailable");
     };
-    const warmupRange = async (range: string): Promise<void> => {
-      // Chromium's first request is usually bytes=0-, which can succeed for
-      // a stale/truncated object while the later seek range is already gone.
-      // Exercise one representative non-zero byte before mounting the native
-      // element. The route forwards this as a one-byte R2 range, so this is a
-      // bounded availability check rather than a second media download.
-      const probeUrl = `${src}${src.includes("?") ? "&" : "?"}probe=1`;
-      const response = await fetch(probeUrl, {
-        signal: controller.signal,
-        cache: "no-store",
-        headers: { Range: range },
-      });
-      try {
-        if (!response.ok || !(await response.json() as { available?: unknown }).available) {
-          throw new Error("video source range unavailable");
-        }
-      } finally {
-        await response.body?.cancel().catch(() => {});
-      }
-    };
-    // Require two independent successful probes. A stale edge can answer one
-    // probe positively immediately before a native range request receives a
-    // 404; the second read prevents mounting a source that is not stable yet.
-    // If an edge briefly reports the object as missing, repeat that pair once
-    // after a short backoff before giving up. The retry is bounded and read-only
-    // so a genuinely deleted legacy master still becomes unavailable promptly.
-    const stableProbe = async (): Promise<void> => {
-      let lastError: unknown;
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          await probe();
-          await new Promise<void>((resolve) => setTimeout(resolve, 160));
-          await probe();
-          await warmupRange("bytes=0-0");
-          await warmupRange("bytes=0-0");
-          await warmupRange("bytes=1048576-1048576");
-          return;
-        } catch (error) {
-          lastError = error;
-          if (attempt === 0) {
-            await new Promise<void>((resolve) => setTimeout(resolve, 1_200));
-          }
-        }
-      }
-      throw lastError instanceof Error ? lastError : new Error("video source unavailable");
-    };
-    stableProbe()
+    verifyRetainedPreview()
       .then(() => {
         if (!cancelled) setVideoProbe({ src, state: "ready" });
       })

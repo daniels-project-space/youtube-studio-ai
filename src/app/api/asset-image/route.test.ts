@@ -39,9 +39,17 @@ assert.match(videoRoute, /Cross-Origin-Resource-Policy.*same-origin/);
 assert.match(videoRoute, /owner\/\$\{OWNER_ID\}/);
 assert.match(videoRoute, /status: upstream\.status/);
 assert.match(videoRoute, /probe[\s\S]*available: false/);
+assert.match(videoRoute, /PREVIEW_PROBE_RANGES/,
+  "one video preview probe must prove both initial and later native-player ranges");
+assert.match(videoRoute, /Promise\.all\(PREVIEW_PROBE_RANGES\.map/,
+  "the retained-preview proof must run its byte checks concurrently behind one browser request");
+assert.match(videoRoute, /PREVIEW_PROBE_MAX_ATTEMPTS = 5/,
+  "a transient R2 edge miss remains boundedly retried server-side");
+assert.match(videoRoute, /probe && !request\.headers\.get\("range"\)/,
+  "one no-range browser probe must invoke the aggregate retained-preview proof");
 assert.match(videoRoute, /upstream\.status >= 400 && upstream\.status < 500/,
   "private video previews must quiet both R2 404 and 403 legacy-object misses");
-assert.match(videoRoute, /probe && !range\) forwardedHeaders\.set\("Range", "bytes=0-1048575"\)/,
-  "video probes must exercise the same bounded range path as native playback");
+assert.doesNotMatch(videoRoute, /probe && !range\) forwardedHeaders\.set/,
+  "the browser must not trigger a second server probe after aggregate range admission");
 
 console.log("same-origin private image/video proxy contracts passed");

@@ -416,26 +416,9 @@ function SafeRunVideoPreview({
       .then(async (response) => {
         const result = await response.json() as { available?: unknown };
         if (!response.ok || result.available !== true) throw new Error("video preview unavailable");
-        const validateRange = async (range: string): Promise<void> => {
-          const rangeUrl = new URL(src, window.location.origin);
-          rangeUrl.searchParams.set("probe", "1");
-          const rangeResponse = await fetch(rangeUrl.toString(), {
-            cache: "no-store",
-            signal: controller.signal,
-            headers: { Range: range },
-          });
-          try {
-            const rangeResult = await rangeResponse.json() as { available?: unknown };
-            if (!rangeResponse.ok || rangeResult.available !== true) {
-              throw new Error("video preview range unavailable");
-            }
-          } finally {
-            await rangeResponse.body?.cancel().catch(() => {});
-          }
-        };
-        await validateRange("bytes=0-0");
-        await validateRange("bytes=0-0");
-        await validateRange("bytes=1048576-1048576");
+        // /api/asset-video carries the complete initial + later-seek proof
+        // server-side, so the detailed workbench shares the one-request
+        // preview path used by all compact media surfaces.
         if (!cancelled) setProbe({ src, ready: true });
       })
       .catch(() => {

@@ -8,6 +8,11 @@ const VIDEO_TYPES: Record<string, string> = {
   mp4: "video/mp4",
   webm: "video/webm",
 };
+// A preview must prove both the initial native-player range and a later seek.
+// Keep the duplicate initial byte: it catches a transient edge answer before
+// the browser mounts a source that will immediately fail on its own request.
+const PREVIEW_PROBE_RANGES = ["bytes=0-0", "bytes=0-0", "bytes=1048576-1048576"] as const;
+const PREVIEW_PROBE_MAX_ATTEMPTS = 5;
 
 function contentType(key: string): string | undefined {
   const extension = key.toLowerCase().split(".").pop() ?? "";
@@ -19,6 +24,53 @@ function isOwnedVideoKey(key: string): boolean {
     && key.length <= 1_024
     && !key.includes("..")
     && !key.includes("\\");
+}
+
+/**
+ * Verifies the same three small ranges a native retained-master preview needs,
+ * but does it behind one browser request. This keeps an honest deleted-object
+ * boundary while avoiding the old five sequential client → Next requests for
+ * every Lo-Fi card (and their duplicated signing work).
+ */
+async function verifyPreviewRanges(key: string, mimeType: string): Promise<boolean> {
+  for (let attempt = 0; attempt < PREVIEW_PROBE_MAX_ATTEMPTS; attempt++) {
+    try {
+      // One fresh signature per proof wave gives a just-written R2 object a
+      // genuine new edge/cache key on each retry while the three range checks
+      // execute concurrently rather than serially in the browser.
+      const signedUrl = await presignDownload(key, {
+        expiresIn: 300,
+        responseContentType: mimeType,
+      });
+      const admitted = await Promise.all(PREVIEW_PROBE_RANGES.map(async (range) => {
+        let response: Response | undefined;
+        try {
+          response = await fetch(signedUrl, {
+            method: "GET",
+            headers: { Range: range },
+            redirect: "error",
+            signal: AbortSignal.timeout(30_000),
+          });
+          // The stream must answer each exact byte range. A successful 200
+          // full-object response is not an adequate proof for native seeking.
+          return response.status === 206;
+        } catch {
+          return false;
+        } finally {
+          await response?.body?.cancel().catch(() => {});
+        }
+      }));
+      if (admitted.every(Boolean)) return true;
+    } catch {
+      // The bounded retry below handles transient signing or edge failures.
+    }
+    if (attempt < PREVIEW_PROBE_MAX_ATTEMPTS - 1) {
+      // Cross the AWS signing-second boundary before asking a different R2
+      // edge/cache key. This is the same bounded window as normal playback.
+      await new Promise((resolve) => setTimeout(resolve, Math.min(2_000, 1_100 + 300 * attempt)));
+    }
+  }
+  return false;
 }
 
 /**
@@ -39,16 +91,18 @@ export async function GET(request: Request) {
   }
 
   try {
+    if (probe && !request.headers.get("range")) {
+      const available = await verifyPreviewRanges(key, mimeType);
+      return NextResponse.json(
+        { available },
+        { headers: { "Cache-Control": "private, no-store" } },
+      );
+    }
     const forwardedHeaders = new Headers();
     const range = request.headers.get("range");
     if (range) forwardedHeaders.set("Range", range);
     const ifRange = request.headers.get("if-range");
     if (ifRange) forwardedHeaders.set("If-Range", ifRange);
-    // A probe must validate the same byte-range delivery used by a native
-    // player. A full 200 response can look healthy even when the edge rejects
-    // the first media range, which would otherwise mount a doomed <video> and
-    // emit a browser-console 404. Keep the probe tiny and side-effect free.
-    if (probe && !range) forwardedHeaders.set("Range", "bytes=0-1048575");
     // R2 can briefly return a stale 404 while a just-uploaded master becomes
     // visible across its edge. Refresh the signature and use a short bounded
     // retry window for that narrow transient class (and provider 5xx); missing
