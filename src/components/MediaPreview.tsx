@@ -83,6 +83,8 @@ export function MediaPreview({
   const [fallbackFailedSrc, setFallbackFailedSrc] = useState<string | null>(null);
   const [loadedSrc, setLoadedSrc] = useState<string | null>(null);
   const previewRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const decodedVideoSourceRef = useRef<string | null>(null);
   // A retained Lo-Fi master is potentially hours long.  Metadata-only loading
   // is cheap, but it may never fetch the frame at 15 seconds; decode only
   // when the card is near view (or explicitly above the fold) instead of
@@ -171,6 +173,20 @@ export function MediaPreview({
   }, [showingVideoStill, selection.src, sourceVideoStillKey]);
   const videoSourceReady = showingVideoStill && Boolean(selection.src)
     && hydrated && videoProbe?.src === selection.src && videoProbe.state === "ready";
+  useEffect(() => {
+    // Native media does not consistently upgrade a metadata request when a
+    // non-zero seek is issued through the same-origin range proxy. Once this
+    // card is admitted and the source proof has passed, restart that one video
+    // with auto buffering exactly once. This is deliberately after viewport
+    // admission, never a carousel-wide eager download.
+    if (!showingVideoStill || !shouldBufferVideoFrame || !videoSourceReady || !selection.src) return;
+    if (decodedVideoSourceRef.current === selection.src) return;
+    const video = videoRef.current;
+    if (!video) return;
+    decodedVideoSourceRef.current = selection.src;
+    video.preload = "auto";
+    video.load();
+  }, [selection.src, shouldBufferVideoFrame, showingVideoStill, videoSourceReady]);
   const showingPrivateImage = !showingReviewed && Boolean(selection.src)
     && selection.source === "r2" && !showingVideoStill;
   useEffect(() => {
@@ -250,6 +266,7 @@ export function MediaPreview({
       )}
       {selection.src && showingVideoStill && (
         <video
+          ref={videoRef}
           className={joinClassNames(styles.image, imageClassName)}
           src={videoSourceReady ? selection.src : undefined}
           muted

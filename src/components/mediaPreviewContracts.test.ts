@@ -30,6 +30,8 @@ assert.match(preview, /IntersectionObserver/,
   "a Lo-Fi card must request a decode only when it is near view");
 assert.match(preview, /preload=\{shouldBufferVideoFrame \? "auto" : "metadata"\}/,
   "the exact Lo-Fi source frame may buffer near view without preloading every retained master");
+assert.match(preview, /decodedVideoSourceRef/,
+  "a proxied non-zero source-frame seek is restarted once after the retained-source proof");
 assert.match(preview, /showingPrivateImage/,
   "private image previews probe availability before mounting stale keys");
 assert.match(preview, /reviewedSrc/);
