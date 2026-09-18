@@ -160,6 +160,9 @@ export function thumbnailRefreshTriggerRequest(
       replayFingerprint: sealed.replayFingerprint,
     },
     concurrencyKey: sealed.channelId,
-    idempotencySeed: sealed.dispatchKey,
+    // Delivery retries use a fresh Trigger identity while retaining the same
+    // sealed candidate/approval. The worker consumes that approval before a
+    // paid provider call, so an attempt can never re-buy an accepted render.
+    idempotencySeed: `${sealed.dispatchKey}:attempt-${sealed.dispatchAttempt + 1}`,
   };
 }

@@ -57,6 +57,7 @@ const thumbnailRefreshApi = (api as unknown as {
   readonly thumbnailRefresh: {
     readonly listInventory: never;
     readonly createCandidateShell: never;
+    readonly requeuePreflightFailedCandidate: never;
     readonly importErnieBatchCandidate: never;
     readonly claimCandidateApproval: never;
     readonly getCandidateDispatch: never;

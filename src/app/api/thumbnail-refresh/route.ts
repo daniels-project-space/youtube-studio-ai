@@ -264,7 +264,6 @@ export async function POST(request: Request) {
     };
     if (
       shell.dispatchState === "queued" ||
-      shell.dispatchState === "consumed" ||
       shell.dispatchState === "blocked"
     ) {
       const status = shell.dispatchState === "queued" ? 202 : 200;
@@ -278,6 +277,36 @@ export async function POST(request: Request) {
         youtubeChanged: false,
         maximumCostUsd: THUMBNAIL_REFRESH_MAXIMUM_COST_USD,
       }, { status, headers: { "Cache-Control": "private, no-store" } });
+    }
+    if (shell.dispatchState === "consumed" && shell.candidateStatus === "failed") {
+      const recovery = await convex.mutation(thumbnailRefreshRuntimeApi.requeuePreflightFailedCandidate, {
+        ownerId: actor.ownerId,
+        candidateRunId: shell.candidateRunId,
+        now: Date.now(),
+      } as never) as { requeued?: boolean };
+      if (!recovery.requeued) {
+        return NextResponse.json({
+          ok: true,
+          state: "consumed",
+          candidateStatus: shell.candidateStatus,
+          candidateRunId: String(shell.candidateRunId),
+          sourceRunId: String(shell.sourceRunId),
+          sourceChanged: false,
+          youtubeChanged: false,
+          maximumCostUsd: THUMBNAIL_REFRESH_MAXIMUM_COST_USD,
+        }, { headers: { "Cache-Control": "private, no-store" } });
+      }
+    } else if (shell.dispatchState === "consumed") {
+      return NextResponse.json({
+        ok: true,
+        state: "consumed",
+        candidateStatus: shell.candidateStatus,
+        candidateRunId: String(shell.candidateRunId),
+        sourceRunId: String(shell.sourceRunId),
+        sourceChanged: false,
+        youtubeChanged: false,
+        maximumCostUsd: THUMBNAIL_REFRESH_MAXIMUM_COST_USD,
+      }, { headers: { "Cache-Control": "private, no-store" } });
     }
     let dispatch = await convex.query(thumbnailRefreshRuntimeApi.getCandidateDispatch, {
       ownerId: actor.ownerId,

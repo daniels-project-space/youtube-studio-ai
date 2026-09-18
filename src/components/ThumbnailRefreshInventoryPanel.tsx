@@ -7,6 +7,7 @@ import { fmtDateTime } from "@/lib/format";
 import { IconExternal } from "@/components/icons";
 import styles from "./ThumbnailRefreshInventoryPanel.module.css";
 import { THUMBNAIL_REFRESH_MAXIMUM_COST_USD } from "@/lib/thumbnailRefreshCandidate";
+import { canRetryThumbnailPreflight } from "@/lib/thumbnailRefreshPreflightRecovery";
 import type { LegacyVideoRetirementReason } from "@/lib/legacyVideoCleanup";
 
 type InventoryStatus =
@@ -613,6 +614,7 @@ export function ThumbnailRefreshInventoryPanel({
             const display = STATUS_COPY[row.thumbnailEvidenceStatus];
             const dispatchCanResume = row.candidate &&
               ["awaiting_approval", "pending"].includes(row.candidate.dispatchState ?? "");
+            const canRetryQaPreflight = canRetryThumbnailPreflight(row.candidate);
             const candidateProgressCopy = row.candidate?.status === "running"
               ? "Generating + quality checking"
               : row.candidate?.dispatchState === "awaiting_approval"
@@ -695,6 +697,16 @@ export function ThumbnailRefreshInventoryPanel({
                       onClick={() => void createCandidate(row)}
                     >
                       {busyRunIds.has(row.runId) ? "Resuming delivery…" : "Resume candidate delivery"}
+                    </button>
+                  ) : null}
+                  {canQueueCandidates && canRetryQaPreflight ? (
+                    <button
+                      type="button"
+                      className={styles.generateAction}
+                      disabled={busyRunIds.has(row.runId)}
+                      onClick={() => void createCandidate(row)}
+                    >
+                      {busyRunIds.has(row.runId) ? "Restoring QA…" : "Retry QA preflight · $0"}
                     </button>
                   ) : null}
                   {row.candidate &&

@@ -30,6 +30,7 @@ import {
   type ThumbnailRefreshSuccessorMaterial,
 } from "../src/lib/thumbnailRefreshSuccessor";
 import type { ThumbnailRefreshReplayMaterial } from "../src/lib/thumbnailRefreshReplay";
+import { canRetryThumbnailPreflight } from "../src/lib/thumbnailRefreshPreflightRecovery";
 
 const MAX_DISPATCH_ATTEMPTS = 3;
 type DbCtx = Pick<QueryCtx | MutationCtx, "db">;
@@ -943,6 +944,52 @@ export const consumeCandidateDispatch = mutation({
       thumbnailRefreshDispatchLastError: undefined,
     });
     return await ctx.db.get(run._id);
+  },
+});
+
+/**
+ * Re-open a candidate only when its immutable first attempt failed before the
+ * renderer boundary. This is deliberately not a generic "retry failed run":
+ * a non-zero cost or unknown provider outcome must remain stopped so it cannot
+ * buy a duplicate thumbnail after an ambiguous external request.
+ */
+export const requeuePreflightFailedCandidate = mutation({
+  args: { ownerId: v.string(), candidateRunId: v.id("runs"), now: v.number() },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "thumbnail refresh QA-preflight recovery");
+    assertNow(args.now);
+    const candidate = await ctx.db.get(args.candidateRunId);
+    if (!candidate || candidate.ownerId !== args.ownerId || !candidate.thumbnailRefreshSourceRunId) {
+      throw new Error("thumbnail refresh candidate not found");
+    }
+    const eligible = canRetryThumbnailPreflight({
+      status: candidate.status,
+      costTotal: candidate.costTotal,
+      error: candidate.error,
+    });
+    if (!eligible) return { requeued: false, candidateRunId: candidate._id, status: candidate.status };
+    if (
+      !candidate.thumbnailRefreshApproval ||
+      !candidate.thumbnailRefreshMaximumCostUsd ||
+      !candidate.thumbnailRefreshReplayFingerprint ||
+      !candidate.thumbnailRefreshDispatchKey
+    ) throw new Error("thumbnail refresh candidate lacks its original immutable approval");
+
+    await ctx.db.patch(candidate._id, {
+      status: "queued",
+      startedAt: args.now,
+      finishedAt: undefined,
+      heartbeatAt: args.now,
+      leaseExpiresAt: args.now + RUN_QUEUE_LEASE_MS,
+      error: undefined,
+      thumbnailRefreshDispatchState: "pending",
+      thumbnailRefreshDispatchUpdatedAt: args.now,
+      thumbnailRefreshDispatchQueuedAt: undefined,
+      thumbnailRefreshDispatchQueueDeadlineAt: undefined,
+      thumbnailRefreshDispatchLastError: undefined,
+    });
+    return { requeued: true, candidateRunId: candidate._id, status: "queued" };
   },
 });
 

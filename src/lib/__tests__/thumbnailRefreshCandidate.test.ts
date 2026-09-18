@@ -51,7 +51,12 @@ const dispatch = assertThumbnailRefreshCandidateDispatch({
 });
 
 assert.equal(dispatch.dispatchKey, dispatchKey);
-assert.equal(thumbnailRefreshTriggerRequest(dispatch).idempotencySeed, dispatchKey);
+assert.equal(thumbnailRefreshTriggerRequest(dispatch).idempotencySeed, `${dispatchKey}:attempt-1`);
+assert.equal(
+  thumbnailRefreshTriggerRequest({ ...dispatch, dispatchAttempt: 2 }).idempotencySeed,
+  `${dispatchKey}:attempt-3`,
+  "each bounded delivery attempt receives a fresh Trigger identity while retaining the same sealed candidate",
+);
 assert.equal(thumbnailRefreshTriggerRequest(dispatch).payload.candidateRunId, identity.candidateRunId);
 assert.equal(verifyStudioActionApproval(approval, {
   action: "thumbnail-refresh-candidate",

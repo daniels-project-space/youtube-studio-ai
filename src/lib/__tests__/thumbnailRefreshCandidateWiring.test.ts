@@ -97,6 +97,7 @@ assert.match(
 assert.match(task, /id: "thumbnail-refresh-dispatcher"/);
 assert.match(task, /scope: "global"/);
 assert.match(task, /queueAutomaticThumbnailReplacement/);
+assert.match(route, /requeuePreflightFailedCandidate/, "zero-cost QA preflight failures can be recovered without allocating a second candidate");
 assert.doesNotMatch(task, /upload_draft/i);
 assert.match(automaticTask, /id: "automatic-thumbnail-replacement-dispatcher"/);
 assert.match(automaticTask, /cron: "\* \* \* \* \*"/);
@@ -124,5 +125,8 @@ assert.match(replay, /hashPipelineInvocation\(normalized\) === input\.pipelineIn
 assert.match(successor, /one current thumbnail module/);
 assert.match(successor, /createPackageToOpeningPlan/);
 assert.match(successor, /replayFingerprint: sha256Hex\(canonicalJson\(materialWithoutFingerprint\)\)/);
+const preflightRecovery = read("src/lib/thumbnailRefreshPreflightRecovery.ts");
+assert.match(preflightRecovery, /candidate\.costTotal !== 0/, "recovery must never replay any attempt with recorded spend");
+assert.match(preflightRecovery, /OPENROUTER_API_KEY/, "only known pre-render QA availability failures are recoverable");
 
 console.log("thumbnail refresh candidate wiring: PASS");
