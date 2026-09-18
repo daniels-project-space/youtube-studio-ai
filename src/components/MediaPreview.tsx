@@ -271,7 +271,11 @@ export function MediaPreview({
           src={videoSourceReady ? selection.src : undefined}
           muted
           playsInline
-          preload={shouldBufferVideoFrame ? "auto" : "metadata"}
+          // The element itself never opts into autoplay-like eager buffering.
+          // Once the card is admitted, the guarded effect above upgrades this
+          // single source to `auto` and explicitly loads it so the 15-second
+          // still can decode while remaining paused.
+          preload="metadata"
           aria-label={alt}
           onLoadedMetadata={(event) => {
             const video = event.currentTarget;
