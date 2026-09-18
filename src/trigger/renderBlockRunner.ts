@@ -39,11 +39,6 @@ import {
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { assertPipelineVideoRuntimeReady } from "@/engine/runtimeCapability";
-import {
-  assertReviewedLtxRuntimeSeedStillActive,
-  REVIEWED_LTX_RUNTIME_SEED_KEY,
-} from "@/engine/reviewedLtxRuntimeTarget";
-import { resolveOwnerReviewedLtxRuntime } from "@/lib/reviewedLtxRuntimeStateRuntime";
 import { RENDER_CHILD_HEARTBEAT_RENEW_INTERVAL_MS } from "@/lib/renderChildLease";
 import { executeRemoteCostTrackedBlock } from "@/trigger/remoteChildCostTransport";
 import {
@@ -251,14 +246,10 @@ export async function executeRenderBlock(
       `${taskLabel}: block "${frozenEntry.block}" is a "${actualClass}" render block and must not run on the "${machineClass}" task`,
     );
   }
-  const frozenReviewedLtxRuntime = frozenInvocation.seedStore[REVIEWED_LTX_RUNTIME_SEED_KEY];
-  const reviewedLtxRuntime = frozenReviewedLtxRuntime === undefined
-    ? undefined
-    : assertReviewedLtxRuntimeSeedStillActive({
-        seed: frozenReviewedLtxRuntime,
-        current: await resolveOwnerReviewedLtxRuntime({ client: convex, ownerId: payload.ownerId }),
-      });
-  assertPipelineVideoRuntimeReady(frozenPipeline.resolved.entries, reviewedLtxRuntime?.runtime);
+  // Remote children re-run the same H3 pre-spend admission as their parent.
+  // A frozen historical receipt may remain in an old invocation snapshot, but
+  // it is never an executable capability for a new or resumed H3 block.
+  assertPipelineVideoRuntimeReady(frozenPipeline.resolved.entries);
 
   // Rehydration needs its storage credentials, but provider-facing execution
   // remains behind the frozen route and remaining-budget gates below.

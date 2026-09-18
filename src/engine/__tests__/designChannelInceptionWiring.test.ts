@@ -27,13 +27,12 @@ const canonicalProgramRouteGate = coordinator.indexOf("resolvedProgramRoute = re
 const creatorIntentDiagnosisGate = coordinator.indexOf("deriveCreatorIntentDiagnosis({ programBrief, programRoute: resolvedProgramRoute })");
 const staticCertifiedGate = coordinator.indexOf("const certifiedAdmission = certifiedFamilyAdmission(payload.family);");
 const ownerAdmissionGate = coordinator.indexOf("const ownerId = admitProviderTaskOwner({");
-const reviewedRuntimeGate = coordinator.indexOf("resolveOwnerReviewedLtxRuntime({ client: convex, ownerId })");
 const directPreflightGate = coordinator.indexOf("formatPreflight(");
 const directCreatorAdmissionGate = coordinator.indexOf("!creatorPreflight.creatorAdmission.autonomous");
 const directCapabilityIntentGate = coordinator.indexOf("const programCapabilityIntent");
-const directReadinessGate = coordinator.indexOf("familyProductionReadiness(payload.family, reviewedLtxRuntime.runtime)");
+const directReadinessGate = coordinator.indexOf("familyProductionReadiness(payload.family);");
 const runtimeCertifiedGate = coordinator.indexOf(
-  "const runtimeCertifiedAdmission = certifiedFamilyAdmission(payload.family, reviewedLtxRuntime.runtime);",
+  "const runtimeCertifiedAdmission = certifiedFamilyAdmission(payload.family);",
 );
 const directConvexGate = coordinator.indexOf("new ConvexHttpClient(url)");
 assert(
@@ -43,15 +42,14 @@ assert(
     staticCertifiedGate > creatorIntentDiagnosisGate &&
     staticCertifiedGate < ownerAdmissionGate &&
     ownerAdmissionGate < directConvexGate &&
-    directConvexGate < reviewedRuntimeGate &&
-    reviewedRuntimeGate < directPreflightGate &&
+    directConvexGate < directPreflightGate &&
     directCreatorAdmissionGate > directPreflightGate &&
     directCreatorAdmissionGate < directCapabilityIntentGate &&
     directCapabilityIntentGate > directPreflightGate &&
     directCapabilityIntentGate < directReadinessGate &&
     directReadinessGate < runtimeCertifiedGate &&
     runtimeCertifiedGate > directPreflightGate,
-  "a direct Trigger execution must reject incomplete static admission before owner/Convex work, then use only reviewed runtime evidence for the final dynamic admission",
+  "a direct Trigger execution must reject incomplete static admission before owner/Convex work, then use the sealed H3 admission for its final production check",
 );
 assert.match(coordinator, /assertChannelProgramRouteBinding\(\{\s*route: resolvedProgramRoute,\s*programBrief,/,
   "a direct Trigger execution must bind its route to the canonical brief before compiler or persistence work");
@@ -441,7 +439,7 @@ assert.match(coordinator, /a route-less historical channel may only resume its e
   "legacy retries must prove their old snapshot rather than synthesizing a current route");
 
 const pipelineProfileGate = pipelineRunner.indexOf("assertChannelShowProfilePipelineCompatibility({");
-const pipelineRuntimeGate = pipelineRunner.indexOf("assertPipelineVideoRuntimeReady(entries, reviewedLtxRuntime?.runtime)");
+const pipelineRuntimeGate = pipelineRunner.indexOf("assertPipelineVideoRuntimeReady(entries);");
 assert(
   pipelineProfileGate >= 0 && pipelineProfileGate < pipelineRuntimeGate,
   "frozen pipeline execution must validate the sealed composition before runtime/provider preflight",

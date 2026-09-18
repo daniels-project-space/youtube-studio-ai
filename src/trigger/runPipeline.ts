@@ -158,11 +158,6 @@ import {
 } from "@/lib/routeQualificationBenchmark";
 import { CHANNEL_INCEPTION_STANDARD_PROBE_COST_CEILING_USD } from "@/engine/channelInceptionContracts";
 import { assertPipelineVideoRuntimeReady } from "@/engine/runtimeCapability";
-import {
-  assertReviewedLtxRuntimeSeedStillActive,
-  reviewedLtxRuntimeSeed,
-  REVIEWED_LTX_RUNTIME_SEED_KEY,
-} from "@/engine/reviewedLtxRuntimeTarget";
 import { assertPersistedProgramBriefIdentity } from "@/engine/channelProgramBrief";
 import {
   assertChannelProgramRouteBinding,
@@ -205,7 +200,6 @@ import {
   getAcceptedCharacterLoRARecord,
   getNarrativeSeriesPlanRecord,
 } from "@/lib/narrativeSeriesStateRuntime";
-import { resolveOwnerReviewedLtxRuntime } from "@/lib/reviewedLtxRuntimeStateRuntime";
 import type { ThirdPartyStockEvidenceReference } from "@/lib/thirdPartyStockEvidence";
 import { payloadSeedInputs } from "@/lib/payloadSeedInputs";
 import { createMusicAuditionCheckpoint } from "@/engine/musicAuditionCheckpoint";
@@ -1813,20 +1807,10 @@ export const runPipelineTask = task({
 
       // The provider/hardware contract is a pre-spend gate, not a diagnostic
       // emitted after an image, TTS pass, or child worker has already billed.
-      // A reviewed LTX target is reloaded from the service-only, owner-scoped
-      // registry before every parent attempt. Retries retain their original
-      // benchmark set, but an added benchmark is harmless while a revocation
-      // fails closed before any provider work. Historical snapshots with no
-      // target keep the old static fail-closed behavior.
-      const currentReviewedLtxRuntime = await resolveOwnerReviewedLtxRuntime({ client: convex, ownerId });
-      const frozenReviewedLtxRuntime = durableInvocation?.seedStore[REVIEWED_LTX_RUNTIME_SEED_KEY];
-      const reviewedLtxRuntime = frozenReviewedLtxRuntime === undefined
-        ? reviewedLtxRuntimeSeed(currentReviewedLtxRuntime)
-        : assertReviewedLtxRuntimeSeedStillActive({
-            seed: frozenReviewedLtxRuntime,
-            current: currentReviewedLtxRuntime,
-          });
-      assertPipelineVideoRuntimeReady(entries, reviewedLtxRuntime?.runtime);
+      // Every executable video producer is now MiniMax H3, whose immutable
+      // provider/manifest admission is assessed here. Retained legacy receipts
+      // remain historical evidence only and cannot influence a fresh run.
+      assertPipelineVideoRuntimeReady(entries);
 
       const privateInvocationContext =
         payload.probeInvocationContext ?? payload.routeQualificationBenchmark?.invocationContext;
@@ -2606,12 +2590,6 @@ export const runPipelineTask = task({
           invocationSha256,
         };
       }
-      if (reviewedLtxRuntime) {
-        seedStore[REVIEWED_LTX_RUNTIME_SEED_KEY] = reviewedLtxRuntime;
-      } else {
-        delete seedStore[REVIEWED_LTX_RUNTIME_SEED_KEY];
-      }
-
       // SELF-HEALER (Pipeline Doctor, run-level): a QA failure over a defect a
       // cheap block owns must not discard the run's paid artifacts. Diagnose →
       // supersede exactly the owning block + its downstream consumers → resume
@@ -2850,7 +2828,6 @@ export const runPipelineTask = task({
           binding,
           planner: preflightEvidence.planner,
           pipeline: channel.pipeline,
-          runtimeTarget: reviewedLtxRuntime?.runtime,
         });
         if (
           currentRuntime.evidenceFingerprint !== preflightEvidence.runtime.evidenceFingerprint ||

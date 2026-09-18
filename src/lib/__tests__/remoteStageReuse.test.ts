@@ -193,8 +193,6 @@ function harness(mutation?: Mutation) {
     },
     "../../convex/_generated/api": { api: fakeApi },
     "@/engine/runtimeCapability": { assertPipelineVideoRuntimeReady() {} },
-    "@/engine/reviewedLtxRuntimeTarget": { REVIEWED_LTX_RUNTIME_SEED_KEY: "reviewedLtxRuntime" },
-    "@/lib/reviewedLtxRuntimeStateRuntime": {},
     "@/lib/renderChildLease": { RENDER_CHILD_HEARTBEAT_RENEW_INTERVAL_MS: 60_000 },
     "@/trigger/remoteChildCostTransport": costTransport,
   };

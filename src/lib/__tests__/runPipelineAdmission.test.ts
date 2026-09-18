@@ -100,7 +100,7 @@ const pipelineSource = readFileSync(
 const freshRouteAdmission = pipelineSource.indexOf("assertFreshPipelineInvocationRouteAdmission({");
 assert.ok(freshRouteAdmission >= 0, "run-pipeline must invoke the fresh route admission guard");
 assert.ok(
-  freshRouteAdmission < pipelineSource.indexOf("assertPipelineVideoRuntimeReady(entries, reviewedLtxRuntime?.runtime)"),
+  freshRouteAdmission < pipelineSource.indexOf("assertPipelineVideoRuntimeReady(entries);"),
   "the fresh route admission guard must run before runtime/provider preflight",
 );
 

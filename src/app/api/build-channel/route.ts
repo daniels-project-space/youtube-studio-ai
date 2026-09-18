@@ -1,8 +1,6 @@
 import { NextResponse } from "next/server";
 import { OWNER_ID } from "@/lib/config";
 import { authorizeStudioRoute } from "@/lib/operatorSession";
-import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
-import { resolveOwnerReviewedLtxRuntime } from "@/lib/reviewedLtxRuntimeStateRuntime";
 import {
   channelDesignApprovalSubject,
   issueStudioActionApproval,
@@ -11,12 +9,10 @@ import {
 import { validateChannelBuildRequestKey } from "@/lib/channelBuildRequestKey";
 import {
   FAMILIES,
-  FAMILY_RUNTIME_PIPELINE,
   familyEpisodeLengthError,
   familyProductionReadiness,
   productionReadyFamilyFallback,
 } from "@/engine/families";
-import { assessPipelineVideoRuntimeReadiness } from "@/engine/runtimeCapability";
 import { getNiche } from "@/lib/nicheCatalog";
 import {
   assertCanonicalChannelProgramBrief,
@@ -291,36 +287,6 @@ export async function POST(request: Request) {
       }
       const requestedLengthMinutes = Number(design.lengthMinutes);
       const requestedBudgetUsd = Number(design.budget);
-      // Only an owner-reviewed runtime record may supply the dynamic target.
-      // Keep the lookup narrowly limited to families whose locked profile is
-      // actually LTX-blocked; all other creator paths retain their existing
-      // fully local/static preflight behavior.
-      const staticVideoReadiness = assessPipelineVideoRuntimeReadiness(
-        FAMILY_RUNTIME_PIPELINE[family.key],
-      );
-      const requiresReviewedLtxRuntime = staticVideoReadiness.blockers.some((blocker) =>
-        blocker.includes("ltx_2_5_revision_not_benchmarked_on_rtx_4090"),
-      );
-      let runtimeTarget: Awaited<ReturnType<typeof resolveOwnerReviewedLtxRuntime>>["runtime"] | undefined;
-      if (requiresReviewedLtxRuntime) {
-        const convexUrl = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
-        if (!convexUrl) {
-          return NextResponse.json({
-            error: "reviewed LTX runtime registry is unavailable because NEXT_PUBLIC_CONVEX_URL is not configured",
-          }, { status: 503 });
-        }
-        try {
-          runtimeTarget = (await resolveOwnerReviewedLtxRuntime({
-            client: new StudioConvexHttpClient(convexUrl),
-            ownerId: OWNER_ID,
-          })).runtime;
-        } catch (error) {
-          return NextResponse.json({
-            error: "reviewed LTX runtime registry could not be read; channel creation remains fail-closed",
-            remediation: error instanceof Error ? error.message : "retry after restoring Studio registry access",
-          }, { status: 503 });
-        }
-      }
       const creatorPreflight = formatPreflight(family.key, briefToFormatSelectionInput(programBrief, {
         ...(Number.isFinite(requestedLengthMinutes) && requestedLengthMinutes > 0
           ? { targetDurationSeconds: Math.round(requestedLengthMinutes * 60) }
@@ -328,7 +294,7 @@ export async function POST(request: Request) {
         ...(Number.isFinite(requestedBudgetUsd) && requestedBudgetUsd > 0
           ? { maxPerVideoBudgetUsd: requestedBudgetUsd }
           : {}),
-      }), { runtimeTarget });
+      }));
       const capabilityIntent = briefToCreativeCapabilityIntent(programBrief);
       const unhostedSupervisedIntents = resolveUnhostedSupervisedCreativeCapabilityIntents(
         capabilityIntent,
@@ -452,7 +418,7 @@ export async function POST(request: Request) {
           remediation: creatorPreflight.missingRequirements,
         }, { status: 409 });
       }
-      const runtimeReadiness = familyProductionReadiness(family.key, runtimeTarget);
+      const runtimeReadiness = familyProductionReadiness(family.key);
       const certifiedAdmission = creatorPreflight.certifiedFamilyAdmission;
       if (!reviewedDataStoryIntake && !certifiedAdmission.automatic) {
         return NextResponse.json({

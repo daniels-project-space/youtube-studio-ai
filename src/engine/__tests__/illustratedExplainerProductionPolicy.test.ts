@@ -105,7 +105,7 @@ function main(): void {
   const inceptionSource = readFileSync(new URL("../../trigger/designChannelInception.ts", import.meta.url), "utf8");
   const staticAdmissionGate = inceptionSource.indexOf("const certifiedAdmission = certifiedFamilyAdmission(payload.family);");
   const runtimeAdmissionGate = inceptionSource.indexOf(
-    "const runtimeReadiness = familyProductionReadiness(payload.family, reviewedLtxRuntime.runtime);",
+    "const runtimeReadiness = familyProductionReadiness(payload.family);",
   );
   const secretBootstrap = inceptionSource.indexOf("await bootstrapSecrets(log);");
   assert.ok(
@@ -114,7 +114,7 @@ function main(): void {
       && secretBootstrap >= 0
       && staticAdmissionGate < runtimeAdmissionGate
       && runtimeAdmissionGate < secretBootstrap,
-    "static family admission and the owner-scoped runtime admission must both reject before credential bootstrap",
+    "static family admission and the H3 runtime admission must both reject before credential bootstrap",
   );
   assert.match(inceptionSource, /buildAndPersistIllustratedFoundation/);
 

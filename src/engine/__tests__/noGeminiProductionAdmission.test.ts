@@ -163,7 +163,7 @@ assert.equal(
 const inceptionSource = readFileSync(new URL("../../trigger/designChannelInception.ts", import.meta.url), "utf8");
 const staticAdmissionGate = inceptionSource.indexOf("const certifiedAdmission = certifiedFamilyAdmission(payload.family);");
 const runtimeAdmissionGate = inceptionSource.indexOf(
-  "const runtimeReadiness = familyProductionReadiness(payload.family, reviewedLtxRuntime.runtime);",
+  "const runtimeReadiness = familyProductionReadiness(payload.family);",
 );
 const bootstrap = inceptionSource.indexOf("await bootstrapSecrets(log);");
 assert.ok(
@@ -172,7 +172,7 @@ assert.ok(
     && bootstrap >= 0
     && staticAdmissionGate < runtimeAdmissionGate
     && runtimeAdmissionGate < bootstrap,
-  "static and owner-scoped runtime family gates must both run before credential bootstrap",
+  "static and H3 runtime family gates must both run before credential bootstrap",
 );
 const quizyearBranch = inceptionSource.indexOf('if (payload.family === "quizyear")');
 assert.ok(quizyearBranch >= 0 && quizyearBranch < bootstrap);

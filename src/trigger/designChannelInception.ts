@@ -2,7 +2,6 @@ import { createHash } from "node:crypto";
 
 import { admitProviderTaskOwner } from "@/lib/providerTaskOwnerAdmission";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
-import { resolveOwnerReviewedLtxRuntime } from "@/lib/reviewedLtxRuntimeStateRuntime";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
@@ -1573,10 +1572,6 @@ export async function executeDesignChannel(
       (certifiedAdmission.remediation ? ` ${certifiedAdmission.remediation}` : ""),
     );
   }
-  // A reviewed runtime registry lookup is the one data dependency that must
-  // precede dynamic LTX admission. It is owner-scoped, read-only, and happens
-  // before secret bootstrap, budgeting, a lease, or any provider call. An
-  // absent/revoked record yields the locked static target and remains blocked.
   const ownerId = admitProviderTaskOwner({
     requestedOwnerId: payload.ownerId,
     configuredOwnerId: process.env.STUDIO_OWNER_ID,
@@ -1586,10 +1581,11 @@ export async function executeDesignChannel(
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const convex = new ConvexHttpClient(url);
-  const reviewedLtxRuntime = await resolveOwnerReviewedLtxRuntime({ client: convex, ownerId });
   // A Trigger payload may bypass the browser route. Re-run the same canonical
-  // creator admission from the bound brief with only the server-derived runtime
-  // target before provider setup or any cost authority is considered.
+  // creator admission from the bound brief before provider setup or any cost
+  // authority is considered. Executable video blocks now admit against the
+  // sealed MiniMax H3 route directly; historical video benchmarks are not a
+  // dependency of a new channel.
   const requestedLengthMinutes = Number(payload.lengthMinutes);
   const requestedBudgetUsd = Number(payload.budget);
   const creatorPreflight = formatPreflight(
@@ -1602,7 +1598,6 @@ export async function executeDesignChannel(
         ? { maxPerVideoBudgetUsd: requestedBudgetUsd }
         : {}),
     }),
-    { runtimeTarget: reviewedLtxRuntime.runtime },
   );
   if (!reviewedDataStoryIntake && (
     !creatorPreflight.creatorAdmission.autonomous || creatorPreflight.creatorAdmission.privateReviewOnly
@@ -1688,8 +1683,8 @@ export async function executeDesignChannel(
         .join("; "),
     );
   }
-  const runtimeReadiness = familyProductionReadiness(payload.family, reviewedLtxRuntime.runtime);
-  const runtimeCertifiedAdmission = certifiedFamilyAdmission(payload.family, reviewedLtxRuntime.runtime);
+  const runtimeReadiness = familyProductionReadiness(payload.family);
+  const runtimeCertifiedAdmission = certifiedFamilyAdmission(payload.family);
   if (!reviewedDataStoryIntake && !runtimeCertifiedAdmission.automatic) {
     throw new Error(
       `${family.label} cannot start automatic channel inception: ${runtimeCertifiedAdmission.blockers.join(" ")}` +
@@ -1814,7 +1809,6 @@ export async function executeDesignChannel(
     nicheKey: programBrief.nicheKey,
     subcategory: programBrief.subcategory,
     programBrief,
-    runtimeTarget: reviewedLtxRuntime.runtime,
     lengthMinutes: payload.lengthMinutes,
     locale: programBrief.locale,
     footageTheme: payload.footageTheme,
@@ -2413,7 +2407,6 @@ export async function executeDesignChannel(
       binding: qualificationBinding,
       planner: qualificationPlanner,
       pipeline: design.pipeline,
-      runtimeTarget: reviewedLtxRuntime.runtime,
     });
     const qualificationVisualMatter = readProductionRouteVisualMatterEvidence({
       binding: qualificationBinding,
