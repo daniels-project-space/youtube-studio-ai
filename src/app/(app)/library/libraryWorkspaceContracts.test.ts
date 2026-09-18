@@ -56,8 +56,15 @@ assert.match(thumbnailPanel, /const featured = rows\.filter/,
   "the Library must lead with real retained candidate art, not duplicated evidence prose");
 assert.match(thumbnailPanel, /className=\{styles\.evidenceList\}/,
   "full evidence and cost-bearing actions must remain available behind an explicit disclosure");
+assert.match(thumbnailPanel, /const visiblePreviewIsCandidate = Boolean\(row\.candidate\)/,
+  "candidate artwork must be the compact evidence-row default when it exists");
+assert.match(thumbnailPanel, /className=\{styles\.priorArtwork\}/,
+  "the prior cover must remain available on demand for a real before/after comparison");
+assert.doesNotMatch(thumbnailPanel, /previewStack/,
+  "expanded evidence rows must not render old and new thumbnail plates by default");
 assert.match(thumbnailPanelCss, /\.featuredRail \{/);
 assert.match(thumbnailPanelCss, /\.evidenceList \{/);
+assert.match(thumbnailPanelCss, /\.priorArtwork \{/);
 assert.doesNotMatch(thumbnailPanelCss, /\.ernieGallery \{/,
   "retired gallery CSS must not remain as visual dead code");
 assert.match(paging, /export const LIBRARY_PAGE_SIZE = 8/);

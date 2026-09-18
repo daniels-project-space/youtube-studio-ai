@@ -695,11 +695,29 @@ export function ThumbnailRefreshInventoryPanel({
                   ? "Delivery recovery pending"
                   : "Worker queued";
             const lofiSourceFrame = isLofiChannel(row);
+            // The active candidate is the operationally relevant visual. Keep
+            // it front-and-centre and retain the old cover as an explicit
+            // comparison, rather than forcing every evidence row to render
+            // two 16:9 plates and turning the Library into a vertical audit
+            // transcript.
+            const visiblePreviewIsCandidate = Boolean(row.candidate);
             return (
               <article className={styles.row} key={row.runId}>
-                <div className={styles.previewStack} data-has-candidate={row.candidate ? "true" : undefined}>
-                  <ThumbnailRefreshPreview row={row} priority={index < 4} />
-                  {row.candidate ? <ThumbnailRefreshPreview row={row} candidate priority={index < 4} /> : null}
+                <div className={styles.rowVisual}>
+                  <ThumbnailRefreshPreview
+                    row={row}
+                    candidate={visiblePreviewIsCandidate}
+                    priority={index < 4}
+                  />
+                  <span className={styles.visiblePreviewLabel}>
+                    {visiblePreviewIsCandidate ? "Candidate" : "Saved thumbnail"}
+                  </span>
+                  {visiblePreviewIsCandidate ? (
+                    <details className={styles.priorArtwork}>
+                      <summary>Compare previous</summary>
+                      <ThumbnailRefreshPreview row={row} />
+                    </details>
+                  ) : null}
                 </div>
                 <div className={styles.rowCopy}>
                   <div className={styles.titleLine}>
