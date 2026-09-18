@@ -573,7 +573,11 @@ export function ThumbnailRefreshInventoryPanel({
   };
 
   return (
-    <section className={`${styles.section} glass`} aria-labelledby="thumbnail-review-title">
+    <section
+      className={`${styles.section} glass`}
+      aria-labelledby="thumbnail-review-title"
+      data-thumbnail-review-inventory-state={inventory === null ? error ? "error" : "loading" : "ready"}
+    >
       <header className={styles.header}>
         <div>
           <p className={styles.eyebrow}>Saved uploads</p>

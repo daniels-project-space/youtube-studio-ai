@@ -205,7 +205,12 @@ async function captureScreenshot(page, path, { fullPage = true } = {}) {
 async function waitForMediaSettled(page, timeoutMs = 5_000) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const loading = await page.locator('[data-preview-state="loading"]').count();
+    // A candidate rail cannot have image state until the owner-scoped
+    // inventory has hydrated. Waiting only for image markers used to race the
+    // client render and capture a false, empty Library loading shell.
+    const loading = await page.locator(
+      '[data-preview-state="loading"], [data-thumbnail-review-inventory-state="loading"]',
+    ).count();
     if (loading === 0) return;
     await page.waitForTimeout(200);
   }
