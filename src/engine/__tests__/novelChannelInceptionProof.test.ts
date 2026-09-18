@@ -90,6 +90,98 @@ for (const stage of plan.stages) {
   assert(stage.idempotencyKey.endsWith(stage.inputFingerprint));
 }
 
+// The science-explainer proof above intentionally uses the deterministic
+// scene compiler. Exercise a materially different route as well: whiteboard
+// production has a native, narration-synchronised hand-draw renderer and must
+// not accidentally inherit a generic image/video route while a new channel is
+// being assembled.
+const whiteboardBrief = createChannelProgramBrief({
+  family: "whiteboard",
+  nicheKey: "educational",
+  subcategory: "science-explainers",
+  locale: "en",
+  concept:
+    "Doodle Orbit explains the mechanics hidden in ordinary science through one hand-drawn visual story at a time.",
+  audience: "Curious adults who want clear science explanations without jargon.",
+  sampleTopics: [
+    "Why a bicycle stays upright",
+    "How a paper airplane turns",
+    "Why the moon has phases",
+  ],
+});
+const whiteboardRoute = resolveChannelProgramRoute(whiteboardBrief);
+const whiteboardDiagnosis = deriveCreatorIntentDiagnosis({
+  programBrief: whiteboardBrief,
+  programRoute: whiteboardRoute,
+});
+const whiteboardDesign = designPipeline({
+  family: whiteboardBrief.family,
+  nicheKey: whiteboardBrief.nicheKey,
+  subcategory: whiteboardBrief.subcategory,
+  programBrief: whiteboardBrief,
+  programRoute: whiteboardRoute,
+  creatorIntentDiagnosis: whiteboardDiagnosis,
+});
+const whiteboardCompiled = completePipelineForPolicy(whiteboardDesign.pipeline);
+const whiteboardProfile = createChannelShowProfile({
+  programBrief: whiteboardBrief,
+  programRoute: whiteboardRoute,
+  pipeline: whiteboardDesign.pipeline,
+});
+const whiteboardRequest = {
+  ownerId: "owner-proof",
+  channelRef: "channel:doodle-orbit",
+  name: "Doodle Orbit",
+  slug: "doodle-orbit",
+  family: whiteboardBrief.family,
+  nicheKey: whiteboardBrief.nicheKey,
+  locale: whiteboardBrief.locale,
+  sourceRevision: "doodle-orbit@proof-v1",
+  pipelineSourceFingerprint: "whiteboard-proof".padEnd(64, "0"),
+  programBrief: whiteboardBrief,
+  programRoute: whiteboardRoute,
+  creatorIntentDiagnosis: whiteboardDiagnosis,
+  showProfile: whiteboardProfile,
+  includeProbe: false,
+} as const;
+const whiteboardPlan = buildChannelInceptionPlan(whiteboardRequest);
+
+assert.equal(whiteboardRoute.routeKey, "whiteboard/foundation/v1");
+assert.equal(whiteboardDesign.contentLane.key, "whiteboard_explainer");
+assert.equal(
+  whiteboardDesign.episodeLengthSeconds,
+  480,
+  "the educational niche's explicit four-minute preset is legal inside the whiteboard 60–600 second envelope",
+);
+assert.equal(whiteboardCompiled.entries.length, whiteboardDesign.pipeline.length);
+assert.equal(whiteboardPlan.mode, "plan-only");
+assert.equal(whiteboardPlan.providerCallsAuthorized, false);
+for (const requiredBlock of [
+  "self_contained_story_plan",
+  "self_contained_story",
+  "whiteboard_scribe",
+  "originality_gate",
+] as const) {
+  assert(
+    whiteboardDesign.pipeline.some((entry) => entry.block === requiredBlock),
+    `the whiteboard route must retain ${requiredBlock}`,
+  );
+}
+assert(
+  !whiteboardDesign.pipeline.some((entry) => entry.block === "scene_compiler"),
+  "the whiteboard route must not silently become a generic illustrated explainer",
+);
+assert(
+  !whiteboardDesign.pipeline.some((entry) => entry.block.toLowerCase().includes("ltx")),
+  "the whiteboard route must not inherit a retired LTX motion block",
+);
+for (const stage of whiteboardPlan.stages) {
+  assert.equal(stage.providerCallsAuthorized, false);
+  assert.match(stage.inputFingerprint, /^[a-f0-9]{64}$/);
+  assert(stage.idempotencyKey.endsWith(stage.inputFingerprint));
+}
+
 console.log(
-  `novel channel inception proof passed: ${plan.stages.length} sealed stages, ${compiled.entries.length} compiled blocks, no provider calls`,
+  `novel channel inception proof passed: illustrated ${plan.stages.length} sealed stages / ${compiled.entries.length} compiled blocks; ` +
+  `whiteboard ${whiteboardPlan.stages.length} sealed stages / ${whiteboardCompiled.entries.length} compiled blocks; no provider calls`,
 );
