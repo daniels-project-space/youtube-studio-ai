@@ -27,8 +27,9 @@ export interface NativeMusicMeasurements {
   silenceFraction: number;
   mechanicalArtifactScore: number;
   /**
-   * Loss of 5 kHz+ energy from an early, non-silent window to the first
-   * post-opening window. A dramatic loss is the reported Music3 defect.
+   * Loss of 5 kHz+ energy from an early, non-silent window to the weakest
+   * bounded early-interior window. A dramatic loss is the reported Music3
+   * defect. Deliberate end fades are excluded from this measurement.
    */
   openingHighBandDropDb: number;
 }
@@ -106,6 +107,24 @@ async function highBandWindow(inputPath: string, startSec: number, durationSec: 
 }
 
 /**
+ * The reported degradation does not always begin in the first post-opening
+ * phrase. Probe a small, deterministic set of early interior windows rather
+ * than accepting a take because its 3.75-second snapshot happens to be clean.
+ * The 20-second cap deliberately leaves later arrangement changes and an
+ * intended outro/fade to the human section review instead of treating either
+ * as a codec defect.
+ */
+function postOpeningProbeStarts(durationSec: number, windowDurationSec: number): number[] {
+  const firstStart = 3.75;
+  const lastStart = Math.min(20, durationSec - windowDurationSec);
+  if (lastStart <= firstStart) return [Math.max(0, lastStart)];
+  const probes = 4;
+  return Array.from({ length: probes }, (_, index) =>
+    firstStart + ((lastStart - firstStart) * index) / (probes - 1),
+  );
+}
+
+/**
  * Measures an already-retained WAV. It intentionally runs again at approval
  * time, after the R2 byte-identity check, so no stale browser result can
  * certify a replacement object.
@@ -132,14 +151,17 @@ export async function measureNativeMusicQuality(input: {
     ]);
     const windowDurationSec = Math.min(1.5, Math.max(0.75, durationSec * 0.1));
     const openingStartSec = Math.min(0.75, Math.max(0, durationSec - (windowDurationSec * 2)));
-    const postOpeningStartSec = Math.min(
-      Math.max(3.75, openingStartSec + windowDurationSec),
-      durationSec - windowDurationSec,
-    );
-    const [openingHighBandDbfs, postOpeningHighBandDbfs] = await Promise.all([
+    const postOpeningStarts = postOpeningProbeStarts(durationSec, windowDurationSec);
+    const [openingHighBandDbfs, ...postOpeningLevels] = await Promise.all([
       highBandWindow(inputPath, openingStartSec, windowDurationSec),
-      highBandWindow(inputPath, postOpeningStartSec, windowDurationSec),
+      ...postOpeningStarts.map((startSec) => highBandWindow(inputPath, startSec, windowDurationSec)),
     ]);
+    const weakestPostOpeningIndex = postOpeningLevels.reduce(
+      (weakest, level, index) => level < postOpeningLevels[weakest]! ? index : weakest,
+      0,
+    );
+    const postOpeningStartSec = postOpeningStarts[weakestPostOpeningIndex]!;
+    const postOpeningHighBandDbfs = postOpeningLevels[weakestPostOpeningIndex]!;
     const integratedLufs = lastNumber(loudness, /^\s*I:\s*(-?[0-9.]+)\s+LUFS/mgu, "integrated loudness");
     const lraLu = lastNumber(loudness, /^\s*LRA:\s*(-?[0-9.]+)\s+LU/mgu, "loudness range");
     const truePeakDbtp = lastNumber(loudness, /^\s*Peak:\s*(-?[0-9.]+)\s+dBFS/mgu, "true peak");

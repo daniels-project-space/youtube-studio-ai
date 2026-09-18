@@ -539,7 +539,7 @@ export function createMusicProgramQualityReceipt(input: {
     measurements.silenceFraction > 0.08 ? "the master contains too much digital silence" : "",
     measurements.mechanicalArtifactScore > 0.15 ? "mechanical/broadband artifact score is too high" : "",
     measurements.openingHighBandDropDb > MUSIC_PROGRAM_MAX_OPENING_HIGH_BAND_DROP_DB
-      ? "opening-to-post-opening high-band energy collapsed (known Music3 degradation signature)"
+      ? "opening-to-early-interior high-band energy collapsed (known Music3 degradation signature)"
       : "",
     sectionReviews.some((section) => section.score < 0.75) ? "at least one musical section failed review" : "",
     audition.emotionalDepthScore < program.quality.minimumEmotionalDepthScore
