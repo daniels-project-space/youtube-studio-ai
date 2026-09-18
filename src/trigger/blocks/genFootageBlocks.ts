@@ -684,7 +684,7 @@ async function renderGeneratedScenePlanWithH3(args: {
         firstFrame: { r2Key: still.key, sha256: firstFrameSha256 },
         output: { r2Key: `${args.prefix}/h3/clip-${String(index + 1).padStart(4, "0")}.mp4` },
         maxCostUsd: remainingBeforeMotion,
-      }));
+      }), { openingMotionQa: "caller-managed" });
       observedCostUsd += clip.receipt.runtime.costUsd;
       let acceptedClip = clip;
       let acceptedTake: Awaited<ReturnType<typeof materializeVerifiedMiniMaxH3Take>>;
@@ -717,7 +717,7 @@ async function renderGeneratedScenePlanWithH3(args: {
           firstFrame: { r2Key: still.key, sha256: firstFrameSha256 },
           output: { r2Key: `${args.prefix}/h3/clip-${String(index + 1).padStart(4, "0")}-retry-2.mp4` },
           maxCostUsd: retryRemaining,
-        }));
+        }), { openingMotionQa: "caller-managed" });
         observedCostUsd += retry.receipt.runtime.costUsd;
         acceptedClip = retry;
         acceptedTake = await materializeVerifiedMiniMaxH3Take({
@@ -915,7 +915,7 @@ async function renderCinematicScenePlanWithH3(args: {
         firstFrame: { r2Key: reviewedOpening.result.key, sha256: sha256BytesHex(await getObjectBytes(reviewedOpening.result.key)) },
         output: { r2Key: `${args.prefix}/h3-cinematic/clip-${String(index + 1).padStart(4, "0")}.mp4` },
         maxCostUsd: remaining,
-      }));
+      }), { openingMotionQa: "caller-managed" });
       observedCostUsd += clip.receipt.runtime.costUsd;
       if (clip.outputBytes.byteLength < 1_024) throw new Error(`gen_footage: H3 Casefile scene ${scene.id} returned an undersized clip`);
       const localPath = await writeBytes(join(tmp, `clip_${index + 1}.mp4`), clip.outputBytes);
@@ -959,7 +959,7 @@ async function renderCinematicScenePlanWithH3(args: {
             firstFrame: { r2Key: reviewedOpening.result.key, sha256: sha256BytesHex(await getObjectBytes(reviewedOpening.result.key)) },
             output: { r2Key: `${args.prefix}/h3-cinematic/clip-${String(index + 1).padStart(4, "0")}-retry-2.mp4` },
             maxCostUsd: retryRemaining,
-          }));
+          }), { openingMotionQa: "caller-managed" });
           observedCostUsd += retry.receipt.runtime.costUsd;
           acceptedClipKey = retry.receipt.output.r2Key;
           clipReview = await args.clipGate.review({
@@ -1096,7 +1096,7 @@ export async function generateSignatureClips(
         firstFrame: { r2Key: still.key, sha256: firstFrameSha256 },
         output: { r2Key: `${prefix}/h3/clip-${String(index + 1).padStart(3, "0")}.mp4` },
         maxCostUsd: remainingBeforeMotion,
-      }));
+      }), { openingMotionQa: "caller-managed" });
       observedCostUsd += clip.receipt.runtime.costUsd;
       let acceptedTake: Awaited<ReturnType<typeof materializeVerifiedMiniMaxH3Take>>;
       try {
@@ -1128,7 +1128,7 @@ export async function generateSignatureClips(
           firstFrame: { r2Key: still.key, sha256: firstFrameSha256 },
           output: { r2Key: `${prefix}/h3/clip-${String(index + 1).padStart(3, "0")}-retry-2.mp4` },
           maxCostUsd: retryRemaining,
-        }));
+        }), { openingMotionQa: "caller-managed" });
         observedCostUsd += retry.receipt.runtime.costUsd;
         acceptedTake = await materializeVerifiedMiniMaxH3Take({
           label: `signature_clips: MiniMax H3 scene ${index + 1} repair take`,

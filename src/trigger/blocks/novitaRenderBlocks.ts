@@ -412,6 +412,7 @@ async function renderStandardH3Take(args: {
     output: { r2Key: args.outputKey },
     maxCostUsd: args.maxCostUsd,
   }), {
+    openingMotionQa: "caller-managed",
     beforeProviderSpend: () => args.ctx.assertRemoteChildExecutionLease?.({ reason: "paid_wave" }),
   });
   if (clip.outputBytes.byteLength < 1_024) throw new Error(`${args.label} returned an undersized H3 clip`);

@@ -1,3 +1,7 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
 import { canonicalJson } from "@/lib/canonicalJson";
 import { getObjectBytes, presignDownload, presignUpload } from "@/lib/storage";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
@@ -27,7 +31,13 @@ import {
   type MiniMaxH3Execution,
   type MiniMaxH3Provider,
 } from "@/lib/minimaxH3Admission";
-import { MINIMAX_H3_IMMEDIATE_MOTION_PROMPT } from "@/lib/minimaxH3OpeningMotionQa";
+import {
+  assertMiniMaxH3OpeningMotionQa,
+  MINIMAX_H3_IMMEDIATE_MOTION_PROMPT,
+  MiniMaxH3OpeningMotionRejectedError,
+  type MiniMaxH3OpeningMotionQaResult,
+} from "@/lib/minimaxH3OpeningMotionQa";
+import type { MiniMaxH3OpeningMotionQaEvidence } from "@/engine/cinematicClipReview";
 
 export {
   MINIMAX_H3_MANIFEST_SHA256,
@@ -414,6 +424,12 @@ export interface MiniMaxH3RenderedVideo {
   requestKey: string;
   receipt: MiniMaxH3Receipt;
   outputBytes: Uint8Array;
+  /**
+   * Present when the shared renderer performed its default native-rate
+   * opening-motion admission. Routes with a richer local reviewer may opt
+   * into caller-managed verification, but may not return an unreviewed take.
+   */
+  openingMotionQa?: MiniMaxH3OpeningMotionQaEvidence;
 }
 
 /** Optional completion hook used by durable batch controllers. */
@@ -437,6 +453,73 @@ export class MiniMaxH3Error extends Error {
   ) {
     super(message, options?.cause === undefined ? undefined : { cause: options.cause });
     this.name = "MiniMaxH3Error";
+  }
+}
+
+/**
+ * A default H3 dispatch has already incurred the attested provider charge
+ * when its bytes fail the deterministic opening-motion gate.  Retain the
+ * receipt and exact evidence so the owner/recovery controller can account for
+ * it without allowing the defective take into an edit.
+ */
+export class MiniMaxH3OpeningMotionRejectedRenderError extends MiniMaxH3Error {
+  constructor(args: {
+    requestKey: string;
+    status: number;
+    receipt: MiniMaxH3Receipt;
+    outputBytes: Uint8Array;
+    evidence: Exclude<MiniMaxH3OpeningMotionQaResult, MiniMaxH3OpeningMotionQaEvidence>;
+  }) {
+    super(
+      `MiniMax H3 output failed opening-motion admission: ${args.evidence.openingFrozenHoldSec.toFixed(2)}s ` +
+      `(limit ${args.evidence.maxOpeningFrozenHoldSec.toFixed(2)}s)`,
+      args.requestKey,
+      args.status,
+      false,
+      args.receipt.runtime.costUsd,
+    );
+    this.name = "MiniMaxH3OpeningMotionRejectedRenderError";
+    this.receipt = args.receipt;
+    this.outputBytes = args.outputBytes;
+    this.evidence = args.evidence;
+  }
+
+  readonly receipt: MiniMaxH3Receipt;
+  readonly outputBytes: Uint8Array;
+  readonly evidence: Exclude<MiniMaxH3OpeningMotionQaResult, MiniMaxH3OpeningMotionQaEvidence>;
+}
+
+export type MiniMaxH3OpeningMotionVerifier = (args: {
+  outputBytes: Uint8Array;
+  durationSec: number;
+  fps: number;
+  label: string;
+}) => Promise<MiniMaxH3OpeningMotionQaEvidence> | MiniMaxH3OpeningMotionQaEvidence;
+
+/**
+ * The common default is intentionally file-backed: FFmpeg's frozen-frame and
+ * SSIM analysis must inspect the exact immutable bytes received from R2, not
+ * a provider status flag or a sampled thumbnail.  The temporary copy is
+ * removed immediately after the gate completes.
+ */
+export async function assertRenderedMiniMaxH3OpeningMotion(args: {
+  outputBytes: Uint8Array;
+  durationSec: number;
+  fps: number;
+  label: string;
+}): Promise<MiniMaxH3OpeningMotionQaEvidence> {
+  const workDir = await mkdtemp(join(tmpdir(), "ysa-h3-shared-opening-motion-"));
+  try {
+    const videoPath = join(workDir, "take.mp4");
+    await writeFile(videoPath, args.outputBytes);
+    return assertMiniMaxH3OpeningMotionQa({
+      videoPath,
+      durationSec: args.durationSec,
+      fps: args.fps,
+      label: args.label,
+    });
+  } finally {
+    await rm(workDir, { recursive: true, force: true });
   }
 }
 
@@ -621,6 +704,16 @@ export async function renderMiniMaxH3(
     /** Test seam; production callers never supply this and always verify R2. */
     assertModelManifest?: () => Promise<void>;
     /**
+     * Caller-managed routes have a stricter local gate that also records a
+     * richer manifest/repair receipt. Every other route is admitted here by
+     * default, preventing a future block from omitting the first-frame check.
+     */
+    openingMotionQa?: "enforce" | "caller-managed";
+    /** Test seam for the exact post-R2 gate; production uses FFmpeg. */
+    verifyOpeningMotion?: MiniMaxH3OpeningMotionVerifier;
+    /** Stable context in the failure receipt; never sent to the provider. */
+    openingMotionLabel?: string;
+    /**
      * Durable render children invoke this immediately before the paid request.
      * A worker that lost its execution lease while preparing object URLs must
      * not spend against a run it no longer owns.
@@ -721,7 +814,38 @@ export async function renderMiniMaxH3(
   if (outputBytes.byteLength !== receipt.output.byteLength || sha256BytesHex(outputBytes) !== receipt.output.contentSha256) {
     throw new MiniMaxH3Error("MiniMax H3 R2 output does not match its receipt", requestKey, response.status, false, receipt.runtime.costUsd);
   }
-  return { requestKey, receipt, outputBytes };
+  if (options.openingMotionQa === "caller-managed") {
+    return { requestKey, receipt, outputBytes };
+  }
+  const durationSec = MINIMAX_H3_PROFILE.frames / MINIMAX_H3_PROFILE.fps;
+  const label = options.openingMotionLabel ?? `MiniMax H3 ${request.execution} ${request.output.r2Key}`;
+  try {
+    const openingMotionQa = await (options.verifyOpeningMotion ?? assertRenderedMiniMaxH3OpeningMotion)({
+      outputBytes,
+      durationSec,
+      fps: MINIMAX_H3_PROFILE.fps,
+      label,
+    });
+    return { requestKey, receipt, outputBytes, openingMotionQa };
+  } catch (error) {
+    if (error instanceof MiniMaxH3OpeningMotionRejectedError) {
+      throw new MiniMaxH3OpeningMotionRejectedRenderError({
+        requestKey,
+        status: response.status,
+        receipt,
+        outputBytes,
+        evidence: error.evidence,
+      });
+    }
+    throw new MiniMaxH3Error(
+      `MiniMax H3 output cannot prove opening motion: ${error instanceof Error ? error.message : String(error)}`,
+      requestKey,
+      response.status,
+      false,
+      receipt.runtime.costUsd,
+      { cause: error },
+    );
+  }
 }
 
 /** One weekly owner/order may use up to three Salad H3 jobs in parallel. */

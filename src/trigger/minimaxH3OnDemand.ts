@@ -10,6 +10,10 @@ import {
   renderMiniMaxH3,
   type MiniMaxH3RenderRequest,
 } from "@/lib/minimaxH3";
+import {
+  MiniMaxH3OpeningMotionQaEvidenceSchema,
+  type MiniMaxH3OpeningMotionQaEvidence,
+} from "@/engine/cinematicClipReview";
 import { getObjectBytes, putObject } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
@@ -104,6 +108,8 @@ type PersistedOnDemandReceipt = {
   requestKey: string;
   output: { r2Key: string; contentSha256: string; byteLength: number; costUsd: number };
   providerReceipt: unknown;
+  /** Local, post-R2 evidence; distinct from the provider's own receipt. */
+  openingMotionQa: MiniMaxH3OpeningMotionQaEvidence;
   createdAt: number;
 };
 
@@ -137,6 +143,13 @@ async function readPersistedReceipt(
     parsed.providerReceipt === undefined
   ) {
     throw new Error("on-demand MiniMax H3 receipt exists but is bound to a different request");
+  }
+  try {
+    MiniMaxH3OpeningMotionQaEvidenceSchema.parse(parsed.openingMotionQa);
+  } catch (error) {
+    throw new Error(
+      `on-demand MiniMax H3 receipt lacks valid opening-motion evidence: ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   const output = await getObjectBytes(parsed.output.r2Key);
   if (output.byteLength !== parsed.output.byteLength || sha256BytesHex(output) !== parsed.output.contentSha256) {
@@ -175,6 +188,9 @@ export const minimaxH3OnDemandTask = task({
     const result = await renderMiniMaxH3({
       ...request,
     });
+    if (!result.openingMotionQa) {
+      throw new Error("on-demand MiniMax H3 shared opening-motion admission did not return evidence");
+    }
     const receipt = {
       schema: "minimax-h3-on-demand/v1",
       orderKey: payload.orderKey,
@@ -186,6 +202,7 @@ export const minimaxH3OnDemandTask = task({
         costUsd: result.receipt.runtime.costUsd,
       },
       providerReceipt: result.receipt,
+      openingMotionQa: result.openingMotionQa,
       createdAt: Date.now(),
     };
     const body = canonicalJson(receipt);

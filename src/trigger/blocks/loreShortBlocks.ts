@@ -592,7 +592,7 @@ export const loreShort: Block = {
             firstFrame: { r2Key: imageKey, sha256: sha256BytesHex(frameBytes) },
             output: { r2Key: `${prefix}/h3/${request.id}.mp4` },
             maxCostUsd: Math.min(PRICE.novitaVideoMaxUsd, remainingBeforeMotion),
-          }));
+          }), { openingMotionQa: "caller-managed" });
           clipCostUsd += clip.receipt.runtime.costUsd;
           clipCalls += 1;
           let acceptedClip = clip;
@@ -624,7 +624,7 @@ export const loreShort: Block = {
               firstFrame: { r2Key: imageKey, sha256: sha256BytesHex(frameBytes) },
               output: { r2Key: `${prefix}/h3/${request.id}-retry-2.mp4` },
               maxCostUsd: Math.min(PRICE.novitaVideoMaxUsd, retryRemaining),
-            }));
+            }), { openingMotionQa: "caller-managed" });
             clipCostUsd += retry.receipt.runtime.costUsd;
             clipCalls += 1;
             acceptedClip = retry;

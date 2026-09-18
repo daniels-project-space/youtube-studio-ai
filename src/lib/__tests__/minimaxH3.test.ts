@@ -8,13 +8,17 @@ import {
   MINIMAX_H3_PROFILE,
   MINIMAX_H3_RUNTIME_ID,
   MiniMaxH3Error,
+  MiniMaxH3OpeningMotionRejectedRenderError,
   minimaxH3Readiness,
   type MiniMaxH3SaladCapacityClient,
   miniMaxH3RequestKey,
   renderMiniMaxH3,
   renderMiniMaxH3WeeklyBatch,
 } from "@/lib/minimaxH3";
-import { MINIMAX_H3_IMMEDIATE_MOTION_PROMPT } from "@/lib/minimaxH3OpeningMotionQa";
+import {
+  MINIMAX_H3_IMMEDIATE_MOTION_PROMPT,
+  MiniMaxH3OpeningMotionRejectedError,
+} from "@/lib/minimaxH3OpeningMotionQa";
 import { sha256BytesHex, sha256Hex } from "@/lib/sha256";
 
 const saved = { ...process.env };
@@ -28,6 +32,23 @@ function configure(provider: "salad" | "novita") {
 }
 const output = new Uint8Array(1_024).fill(7);
 const firstFrame = new Uint8Array(1_024).fill(8);
+let sharedOpeningMotionChecks = 0;
+const passingOpeningMotion = ({ durationSec }: { durationSec: number }) => {
+  sharedOpeningMotionChecks += 1;
+  return {
+    contract: "minimax-h3-opening-motion-qa/v1" as const,
+    source: "ffmpeg/freezedetect+ssim" as const,
+    verdict: "pass" as const,
+    durationSec,
+    maxFreezeFraction: 0.1,
+    maxStaticHoldSec: durationSec * 0.1,
+    maxOpeningFrozenHoldSec: 0.125,
+    maxFrozenHoldSec: 0,
+    openingFrozenHoldSec: 0,
+    frozenIntervals: [],
+    violatingIntervals: [],
+  };
+};
 function request(provider: "salad" | "novita", execution: "weekly-batch" | "on-demand", output = "owner/o/channel/c/clip.mp4") {
   return { provider, execution, prompt: "A precise continuous cinematic action with no text.", seed: 42,
     firstFrame: { r2Key: "owner/o/channel/c/frame.png", sha256: sha256BytesHex(firstFrame) }, output: { r2Key: output }, maxCostUsd: 0.4 } as const;
@@ -296,6 +317,7 @@ async function test() {
     presignWrite: async () => "https://r2.example/write",
     readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
     assertModelManifest: async () => {},
+    verifyOpeningMotion: passingOpeningMotion,
     beforeProviderSpend: async () => { spendFenceCalls += 1; },
     fetch: async (_url, init) => {
       assert.equal(spendFenceCalls, 1, "the durable ownership fence must run immediately before H3 provider submission");
@@ -315,6 +337,45 @@ async function test() {
   assert.equal(seen?.execution, "weekly-batch");
   assert.equal(seen?.capacity_mode, MINIMAX_H3_SALAD_CAPACITY_MODE);
   assert.equal(spendFenceCalls, 1, "one H3 submission must make exactly one final ownership assertion");
+  assert.equal(rendered.openingMotionQa?.verdict, "pass", "the default shared H3 path must attach opening-motion evidence");
+
+  await assert.rejects(
+    () => renderMiniMaxH3(salad, {
+      presignRead: async () => "https://r2.example/read",
+      presignWrite: async () => "https://r2.example/write",
+      readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
+      assertModelManifest: async () => {},
+      verifyOpeningMotion: ({ durationSec }) => {
+        throw new MiniMaxH3OpeningMotionRejectedError({
+          contract: "minimax-h3-opening-motion-qa/v1",
+          source: "ffmpeg/freezedetect+ssim",
+          verdict: "fail",
+          durationSec,
+          maxFreezeFraction: 0.1,
+          maxStaticHoldSec: durationSec * 0.1,
+          maxOpeningFrozenHoldSec: 0.125,
+          maxFrozenHoldSec: 0.25,
+          openingFrozenHoldSec: 0.25,
+          frozenIntervals: [{ startSec: 0, endSec: 0.25, durationSec: 0.25 }],
+          violatingIntervals: [{ startSec: 0, endSec: 0.25, durationSec: 0.25 }],
+          detail: "fixture holds its conditioning frame",
+        }, "shared H3 fixture");
+      },
+      fetch: async (_url, init) => {
+        const body = JSON.parse(String(init?.body)) as { request_key: string };
+        const reply = responseFor(salad);
+        const receipt = await reply.json() as { receipt: Record<string, unknown> };
+        receipt.receipt.requestKey = body.request_key;
+        receipt.receipt.promptSha256 = sha256Hex(salad.prompt);
+        return new Response(JSON.stringify(receipt), { status: 200, headers: { "content-type": "application/json" } });
+      },
+    }),
+    (error: unknown) =>
+      error instanceof MiniMaxH3OpeningMotionRejectedRenderError &&
+      error.observedCostUsd === 0.2 &&
+      error.evidence.openingFrozenHoldSec === 0.25,
+    "the shared H3 boundary must deny a frozen output while retaining exact paid-work evidence",
+  );
 
   // The selected high fallback must still dispatch when the medium flag is
   // absent; this exercises the actual paid-route readiness seam, not only
@@ -327,6 +388,7 @@ async function test() {
     presignWrite: async () => "https://r2.example/write",
     readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
     assertModelManifest: async () => {},
+    verifyOpeningMotion: passingOpeningMotion,
     fetch: async (_url, init) => {
       seen = JSON.parse(String(init?.body));
       const reply = responseFor(salad, "high");
@@ -384,6 +446,7 @@ async function test() {
     presignWrite: async () => "https://r2.example/write",
     readObject: async (key) => key.endsWith("frame.png") ? firstFrame : output,
     assertModelManifest: async () => { batchModelManifestChecks += 1; },
+    verifyOpeningMotion: passingOpeningMotion,
     onJobComplete: async (index) => { completedIndices.push(index); },
     fetch: async (_url, init) => {
       active += 1;
@@ -402,6 +465,7 @@ async function test() {
   assert.equal(batched.length, 4);
   assert.equal(peak, 3, "weekly Salad work must use the bounded three-GPU wave");
   assert.equal(batchModelManifestChecks, 1, "weekly H3 jobs must share one immutable model-manifest verification");
+  assert.equal(sharedOpeningMotionChecks, 6, "the shared gate must inspect every default H3 result, including each weekly batch child");
   assert.deepEqual(completedIndices.sort((a, b) => a - b), [0, 1, 2, 3], "durable batch hooks must observe every verified shot");
 
   let failedBatchModelManifestChecks = 0;
