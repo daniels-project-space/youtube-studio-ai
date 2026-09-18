@@ -224,6 +224,12 @@ function directGoogleRuntimeOwnersStaySealed(): void {
     /generateNanoBananaProWhiteboard|NanoBananaProWhiteboard|whiteboard-art-provider/,
     "the thumbnail-only Nano boundary must not retain a Whiteboard renderer adapter",
   );
+  const gemini = readFileSync(join(root, "src/lib/gemini.ts"), "utf8");
+  assert.doesNotMatch(
+    gemini,
+    /WHITEBOARD_ART|sealedNanoBananaWhiteboardArtPurpose/,
+    "the Gemini policy boundary must expose only the sealed thumbnail capability",
+  );
   assert.doesNotMatch(banana, /["']sealed_thumbnail["']/,
     "a string literal must never forge the sealed thumbnail capability");
 

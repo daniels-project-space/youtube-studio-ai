@@ -81,38 +81,30 @@ export function hasGeminiKey(): boolean {
 }
 
 /**
- * Opaque capabilities used by receipt-bound Nano Banana adapters. These are
- * runtime identities rather than exported string literals, so a future Google
- * caller cannot gain an image exception by spelling a purpose string correctly.
+ * Opaque capability used by the receipt-bound Nano Banana thumbnail adapter.
+ * It is a runtime identity rather than an exported string literal, so a future
+ * Google caller cannot gain an image exception by spelling a purpose correctly.
  */
 const SEALED_NANO_BANANA_THUMBNAIL_PURPOSE = Symbol("sealed-nano-banana-thumbnail");
-const SEALED_NANO_BANANA_WHITEBOARD_ART_PURPOSE = Symbol("sealed-nano-banana-whiteboard-art");
-export type GeminiRuntimePurpose =
-  | typeof SEALED_NANO_BANANA_THUMBNAIL_PURPOSE
-  | typeof SEALED_NANO_BANANA_WHITEBOARD_ART_PURPOSE;
+export type GeminiRuntimePurpose = typeof SEALED_NANO_BANANA_THUMBNAIL_PURPOSE;
 
 /**
- * Capability issuers. Keep raw symbols private: callers can obtain one only
- * by deliberately importing the matching sealed image contract.
+ * Keep the raw symbol private: callers can obtain it only by deliberately
+ * importing the sealed thumbnail contract.
  */
 export function sealedNanoBananaThumbnailPurpose(): GeminiRuntimePurpose {
   return SEALED_NANO_BANANA_THUMBNAIL_PURPOSE;
 }
 
-export function sealedNanoBananaWhiteboardArtPurpose(): GeminiRuntimePurpose {
-  return SEALED_NANO_BANANA_WHITEBOARD_ART_PURPOSE;
-}
-
 /**
  * Reject every Gemini provider boundary before it can read, upload, or send
- * data, except explicit receipt-bound Nano Banana asset routes. This purpose
- * is deliberately a closed union so a new Gemini caller must be consciously
+ * data, except the explicit receipt-bound Nano Banana thumbnail route. The
+ * purpose is deliberately closed so a new Gemini caller must be consciously
  * reviewed rather than inheriting an existing asset exception.
  */
 export function assertGeminiRuntimeAllowed(operation: string, purpose?: GeminiRuntimePurpose): void {
   if (
-    (purpose !== SEALED_NANO_BANANA_THUMBNAIL_PURPOSE &&
-      purpose !== SEALED_NANO_BANANA_WHITEBOARD_ART_PURPOSE) ||
+    purpose !== SEALED_NANO_BANANA_THUMBNAIL_PURPOSE ||
     !isGeminiRuntimeEnabled()
   ) {
     throw new GeminiRuntimeDisabledError(operation);
