@@ -113,6 +113,16 @@
 .actions { display: flex; flex-wrap: wrap; gap: .45rem; margin-left: auto; }
 .actions button { min-height: 34px; }
 
+/* An empty collection is a routing decision, not a full-page dead end. Keep
+   its actual explanation and next action in the same compact shelf space the
+   masters would occupy. */
+.emptyVault { display: flex; align-items: center; gap: .68rem; min-height: 72px; padding: .72rem .84rem; border: 1px solid var(--color-border); border-radius: 14px; background: linear-gradient(105deg, rgba(131,169,255,.06), transparent 38%), rgba(12,16,27,.52); }
+.emptyVaultIcon { width: 32px; height: 32px; display: grid; flex: 0 0 auto; place-items: center; border: 1px solid rgba(131,169,255,.22); border-radius: 9px; color: var(--color-blueprint); background: rgba(131,169,255,.06); }
+.emptyVault > div { display: grid; flex: 1 1 auto; min-width: 0; gap: .12rem; }
+.emptyVault strong { color: var(--color-fg); font: 560 .96rem/1.2 var(--font-display); }
+.emptyVault p { margin: 0; color: var(--color-muted); font-size: .74rem; line-height: 1.42; }
+.emptyVault button { flex: 0 0 auto; min-height: 34px; }
+
 .changeToast { position: fixed; z-index: 90; right: 1.2rem; bottom: 1.2rem; width: min(420px, calc(100vw - 2rem)); display: grid; grid-template-columns: minmax(0,1fr) auto auto; align-items: center; gap: .65rem; padding: .72rem .8rem; border: 1px solid var(--color-border-strong); border-radius: 14px; color: var(--color-fg); background: rgba(12,16,27,.9); box-shadow: 0 22px 70px rgba(0,0,0,.48); backdrop-filter: blur(20px); }
 .changeToast > span { min-width: 0; display: grid; gap: .12rem; }
 .changeToast strong { font-size: .8rem; }
@@ -143,6 +153,9 @@
   .packagingWorkshop > summary p { display: none; }
   .vault { padding: .62rem; }
   .vaultHeader { align-items: flex-start; flex-direction: column; gap: .32rem; }
+  .emptyVault { align-items: flex-start; flex-wrap: wrap; }
+  .emptyVault > div { flex-basis: calc(100% - 2.7rem); }
+  .emptyVault button { width: 100%; }
   .paging { align-items: flex-start; flex-direction: column; }
   .actions { width: 100%; margin-left: 0; }
   .actions button { flex: 1; }

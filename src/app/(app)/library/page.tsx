@@ -300,20 +300,22 @@ export default function LibraryPage() {
           icon={<IconLibrary width={24} height={24} />}
         />
       ) : filtered.length === 0 ? (
-        <EmptyState
-          title={collection === "current" ? "No verified masters" : collection === "legacy" ? "Legacy review is clear" : "Archive is empty"}
-          description={collection === "current"
-            ? "Saved videos without release proof are kept in Legacy review; no media was deleted."
-            : collection === "legacy"
-              ? "All retained videos have recorded release proof or are archived."
-              : "Hidden videos you can restore."}
-          action={collection === "current" && legacyCount > 0 ? (
+        <section className={styles.emptyVault} aria-label="Empty library collection">
+          <span className={styles.emptyVaultIcon} aria-hidden="true"><IconLibrary width={18} height={18} /></span>
+          <div>
+            <strong>{collection === "current" ? "No verified masters" : collection === "legacy" ? "Legacy review is clear" : "Archive is empty"}</strong>
+            <p>{collection === "current"
+              ? "Saved videos without release proof remain in Legacy review."
+              : collection === "legacy"
+                ? "All retained videos have release proof or are archived."
+                : "No hidden videos are available to restore."}</p>
+          </div>
+          {collection === "current" && legacyCount > 0 ? (
             <button type="button" className="btn-secondary" onClick={() => selectCollection("legacy")}>
-              Open legacy review
+              Review legacy {legacyCount}
             </button>
-          ) : undefined}
-          icon={<IconLibrary width={24} height={24} />}
-        />
+          ) : null}
+        </section>
       ) : (
         <section className={styles.vault} aria-labelledby="library-vault-title">
           <header className={styles.vaultHeader}>

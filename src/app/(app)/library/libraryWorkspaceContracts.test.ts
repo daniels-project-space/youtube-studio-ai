@@ -35,12 +35,17 @@ assert.match(page, /LIBRARY_LOADING_TIMEOUT_MS = 8_000/,
 assert.match(page, /loading && loadingTimedOut \? \(/,
   "the Library must have a bounded unavailable state instead of an indefinite skeleton");
 assert.match(page, /Refresh to reconnect to saved masters\./);
+assert.match(page, /<section className=\{styles\.emptyVault\}/,
+  "an empty collection must remain a compact collection handoff, not consume the full workspace");
+assert.match(page, /Review legacy \{legacyCount\}/,
+  "an empty current collection must preserve the real legacy-review handoff");
 assert.match(css, /\.libraryDashboard/);
 assert.match(css, /\.libraryMetrics/);
 assert.match(css, /\.vault \{/);
 assert.match(css, /\.video-grid\[data-density="library"\]/);
 assert.doesNotMatch(css, /\.latestRail\s*\{/);
 assert.match(css, /\.changeToast\[data-tone="error"\]/);
+assert.match(css, /\.emptyVault \{/);
 assert.doesNotMatch(css, /\.channelHeader \{/);
 assert.match(paging, /export const LIBRARY_PAGE_SIZE = 8/);
 
