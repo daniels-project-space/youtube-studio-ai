@@ -302,6 +302,8 @@ assert.match(detail, /className="channel-check-control"[\s\S]*Made for kids/);
 assert.match(detail, /className="channel-check-control"[\s\S]*Scheduler enabled/);
 assert.match(globalCss, /\.channel-check-control[\s\S]*min-height: 44px/);
 assert.match(auditScript, /const CHANNEL_DETAIL_TABS = \[[\s\S]*"week-ahead"[\s\S]*"library"[\s\S]*"analytics"[\s\S]*"seo"[\s\S]*"identity"[\s\S]*"pipeline"[\s\S]*"settings"/);
+assert.match(auditScript, /const defaultRoutes = \[[\s\S]*"\/channels\/new"[\s\S]*"\/children-review"/,
+  "the supervised children-learning intake is a production route and must remain in the full UI audit matrix");
 assert.match(auditScript, /studio-ui-seventh-pass-audit\/v4/);
 assert.match(auditScript, /const actionableIssues = controls\.flatMap/);
 assert.match(auditScript, /link-without-destination/);
