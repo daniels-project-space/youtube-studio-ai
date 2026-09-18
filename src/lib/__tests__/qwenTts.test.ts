@@ -80,9 +80,21 @@ async function main(): Promise<void> {
     composeQwenNarrationInstruction({
       explicit: "Use a close, intimate delivery.",
       editorialBrief: "This must not replace the channel's explicit direction.",
+      delivery: "warm and patient",
+      pacing: "measured",
+      archetype: "documentary",
     }),
-    "Use a close, intimate delivery.",
-    "an explicit module instruction must remain the authoritative direction",
+    "Use a close, intimate delivery. This must not replace the channel's explicit direction. warm and patient. measured. documentary.",
+    "an explicit instruction must stay first without deleting frozen editorial and channel delivery controls",
+  );
+  assert.equal(
+    composeQwenNarrationInstruction({
+      explicit: "Warm and patient",
+      delivery: "warm and patient",
+      pacing: "Warm And Patient",
+    }),
+    "Warm and patient.",
+    "duplicate delivery controls must not consume the bounded worker instruction",
   );
   assert.equal(
     composeQwenNarrationInstruction({
@@ -91,7 +103,7 @@ async function main(): Promise<void> {
       pacing: "measured documentary",
       archetype: "documentary",
     }),
-    "Open with quiet urgency. restrained but intimate. measured documentary. documentary",
+    "Open with quiet urgency. restrained but intimate. measured documentary. documentary.",
     "weekly narration must retain both its frozen brief and the channel Style DNA",
   );
 

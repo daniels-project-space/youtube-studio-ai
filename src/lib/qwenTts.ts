@@ -545,10 +545,13 @@ export function qwenTtsInstruction(instruction: string | undefined, speed: numbe
  * this function, so a prepared take cannot silently lose its channel voice
  * merely because it was rendered earlier in the week.
  *
- * A deliberately supplied module instruction wins.  Otherwise the frozen
- * editorial brief, Style DNA delivery/pacing, and route archetype form one
- * bounded provider instruction.  These are direction inputs, not a claim
- * that the model will comply; retained audio still has to clear the measured
+ * A deliberately supplied module instruction is the primary direction, but
+ * must not erase the frozen editorial brief or the channel's delivery/pacing
+ * DNA.  Earlier behavior returned `explicit` on its own, which meant the
+ * weekly batch and Style DNA controls silently disappeared whenever a channel
+ * set a custom instruction.  Keep all non-duplicate directions in a bounded
+ * provider instruction instead.  These are direction inputs, not a claim that
+ * the model will comply; retained audio still has to clear the measured
  * delivery-rate and loudness gates.
  */
 export function composeQwenNarrationInstruction(args: {
@@ -559,12 +562,19 @@ export function composeQwenNarrationInstruction(args: {
   archetype?: unknown;
 }): string {
   const text = (value: unknown): string => typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
-  const explicit = text(args.explicit);
-  if (explicit) return explicit.slice(0, 520);
-  return [args.editorialBrief, args.delivery, args.pacing, args.archetype]
+  const directions = [args.explicit, args.editorialBrief, args.delivery, args.pacing, args.archetype]
     .map(text)
-    .filter(Boolean)
-    .join(". ")
+    .filter(Boolean);
+  const seen = new Set<string>();
+  return directions
+    .filter((direction) => {
+      const identity = direction.toLocaleLowerCase();
+      if (seen.has(identity)) return false;
+      seen.add(identity);
+      return true;
+    })
+    .map((direction) => /[.!?]$/.test(direction) ? direction : `${direction}.`)
+    .join(" ")
     .slice(0, 520);
 }
 
