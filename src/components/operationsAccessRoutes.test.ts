@@ -2,9 +2,6 @@ import assert from "node:assert/strict";
 import { shouldShowOperationsTrigger } from "./operationsAccessRoutes";
 
 for (const pathname of [
-  "/channels",
-  "/channels/new",
-  "/channels/inked-histories",
   "/settings",
   "/novita-render",
   "/casefile",
@@ -26,6 +23,9 @@ for (const pathname of [
   "/analytics",
   "/seo",
   "/tools",
+  "/channels",
+  "/channels/new",
+  "/channels/inked-histories",
   "/channels-old",
 ]) {
   assert.equal(

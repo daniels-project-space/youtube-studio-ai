@@ -4,7 +4,6 @@
  * for elevation at the consequential control instead.
  */
 const OWNER_ACTION_ROUTE_PREFIXES = [
-  "/channels",
   "/settings",
   "/novita-render",
   "/casefile",
