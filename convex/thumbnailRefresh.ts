@@ -283,6 +283,31 @@ export const listInventory = query({
       channels.set(cacheKey, channel);
       return channel;
     };
+    // Report whether the exact destination can accept the automatic handoff.
+    // This is a read-only presentation hint; the replacement worker still
+    // independently verifies the account, video, bytes, and connector version.
+    const youtubeSyncByChannel = new Map<string, "not_connected" | "ready" | "reconnect_required">();
+    const youtubeSyncFor = async (channelId: Id<"channels">) => {
+      const cacheKey = String(channelId);
+      const cached = youtubeSyncByChannel.get(cacheKey);
+      if (cached) return cached;
+      const connectors = (await ctx.db
+        .query("youtubeAuth")
+        .withIndex("by_channel", (q) => q.eq("channelId", channelId))
+        .collect())
+        .filter((row) => row.ownerId === args.ownerId)
+        .sort((left, right) => right._creationTime - left._creationTime);
+      const activeConnector = connectors.find((row) =>
+        row.status === "active" && Boolean(row.ytChannelId),
+      );
+      const state = connectors.length === 0
+        ? "not_connected"
+        : activeConnector?.scopeHealth === "healthy"
+          ? "ready"
+          : "reconnect_required";
+      youtubeSyncByChannel.set(cacheKey, state);
+      return state;
+    };
 
     const rows: Array<Record<string, unknown>> = [];
     const candidates = new Map<string, Record<string, unknown>>();
@@ -323,6 +348,9 @@ export const listInventory = query({
       );
 
       const channel = await channelFor(run.channelId);
+      const youtubeSyncStatus = run.youtubeVideoId
+        ? await youtubeSyncFor(run.channelId)
+        : "not_connected";
       const refreshMaterial = await refreshMaterialForRun(ctx, args.ownerId, run, {
         channel,
         assets,
@@ -385,6 +413,7 @@ export const listInventory = query({
         createdAt: run.startedAt ?? run._creationTime,
         status: run.status,
         youtubeVideoId: run.youtubeVideoId,
+        youtubeSyncStatus,
         thumbnailKey: thumbnail?.r2Key ?? null,
         thumbnailEvidenceStatus: presentedAssessment.status,
         refreshAction: presentedAssessment.action,

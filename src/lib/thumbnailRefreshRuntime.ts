@@ -13,6 +13,8 @@ export type ThumbnailRefreshInventoryItem = Readonly<{
   createdAt: number;
   status: string;
   youtubeVideoId?: string;
+  /** Read-only destination readiness for the automatic thumbnail handoff. */
+  youtubeSyncStatus?: "not_connected" | "ready" | "reconnect_required";
   thumbnailKey?: string | null;
   thumbnailEvidenceStatus:
     | "current_golden_candidate"

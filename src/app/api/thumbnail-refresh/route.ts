@@ -163,6 +163,7 @@ export async function GET(request: Request) {
           createdAt: item.createdAt,
           status: item.status,
           youtubeVideoId: item.youtubeVideoId ?? null,
+          youtubeSyncStatus: item.youtubeSyncStatus ?? "not_connected",
           thumbnailPresent: Boolean(item.thumbnailKey),
           thumbnailEvidenceStatus: item.thumbnailEvidenceStatus,
           refreshAction: item.refreshAction,

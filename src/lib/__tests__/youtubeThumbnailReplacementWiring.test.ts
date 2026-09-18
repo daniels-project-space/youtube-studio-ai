@@ -12,6 +12,8 @@ const automaticCore = read("src/trigger/automaticThumbnailReplacementCore.ts");
 const candidateTask = read("src/trigger/thumbnailRefreshCandidate.ts");
 const migrationTask = read("src/trigger/migrateYoutubeConnectorStorage.ts");
 const youtubeAuth = read("convex/youtubeAuth.ts");
+const inventory = read("convex/thumbnailRefresh.ts");
+const inventoryRoute = read("src/app/api/thumbnail-refresh/route.ts");
 
 assert.match(schema, /youtubeThumbnailReplacements: defineTable/);
 assert.match(schema, /candidateArtifactSha256: v\.string\(\)/);
@@ -31,6 +33,16 @@ assert.match(task, /completeApplication/);
 assert.doesNotMatch(panel, />Use on YouTube</);
 assert.doesNotMatch(panel, /Confirm video/);
 assert.match(panel, /Automatic YouTube sync queued/);
+assert.match(inventory, /youtubeSyncStatus/,
+  "the read model must distinguish a viable automatic handoff from a missing destination grant");
+assert.match(inventory, /activeConnector\?\.scopeHealth === "healthy"/,
+  "thumbnail sync readiness must use the same healthy-scope standard as publishing");
+assert.match(inventoryRoute, /youtubeSyncStatus: item\.youtubeSyncStatus/,
+  "the public Library projection must receive the connector-aware handoff state");
+assert.match(panel, /Connect YouTube to sync/,
+  "a ready candidate without a destination grant must lead to the exact connection repair");
+assert.match(panel, /Repair YouTube connection/,
+  "a revoked or partial grant must not masquerade as a queued sync");
 assert.match(panel, /New Library thumbnail active/);
 assert.match(automaticCore, /AUTOMATIC_THUMBNAIL_POLICY_ACTOR_PREFIX/);
 assert.match(automaticCore, /youtubeThumbnailReplacementTriggerRequest/);

@@ -36,6 +36,7 @@ type ThumbnailInventoryRow = Readonly<{
   createdAt: number;
   status: string;
   youtubeVideoId: string | null;
+  youtubeSyncStatus: "not_connected" | "ready" | "reconnect_required";
   thumbnailPresent: boolean;
   thumbnailEvidenceStatus: InventoryStatus;
   refreshAction: "no_refresh_action" | "owner_review_required";
@@ -660,9 +661,17 @@ export function ThumbnailRefreshInventoryPanel({
                     </span>
                   ) : null}
                   {row.candidate?.status === "ok" && row.youtubeVideoId && !row.replacement ? (
-                    <span className={styles.candidateProgress} role="status">
-                      <i aria-hidden="true" />Automatic YouTube sync queued
-                    </span>
+                    row.youtubeSyncStatus === "ready" ? (
+                      <span className={styles.candidateProgress} role="status">
+                        <i aria-hidden="true" />Automatic YouTube sync queued
+                      </span>
+                    ) : row.channelSlug ? (
+                      <Link href={`/channels/${row.channelSlug}?tab=settings`} className={styles.action}>
+                        {row.youtubeSyncStatus === "not_connected" ? "Connect YouTube to sync" : "Repair YouTube connection"}
+                      </Link>
+                    ) : (
+                      <span className={styles.candidateFailed}>YouTube connection is required to sync this thumbnail.</span>
+                    )
                   ) : null}
                   {row.candidate?.status === "ok" && !row.youtubeVideoId ? (
                     <span className={styles.replacementDone}>Active in Library</span>
